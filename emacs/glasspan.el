@@ -57,7 +57,7 @@
 (cl-defun my/glasspane-notify (&key (id 1) title content ongoing chronometer base-time-ms button1-label button1-endpoint)
   "Construct and send a dynamic notification primitive to Android."
   (let* ((id-arg (format "--ei id %d " id))
-         (title-arg (if title (format "-e title '%s' " title) ""))
+         (title-arg (if title (format "-e title '%s' " (shell-quote-argument title)) ""))
          (content-arg (if content (format "-e content '%s' " content) ""))
          (ongoing-arg (if ongoing "--ez ongoing true " ""))
          (chrono-arg (if chronometer "--ez chronometer true " ""))
@@ -79,7 +79,7 @@
 (cl-defun my/glasspane-dialog (&key method title hint values endpoint)
   "Launch a native Android dialog and route the answer to an HTTP endpoint."
   (let* ((method-arg (if method (format "--es input_method '%s' " method) "--es input_method 'text' "))
-         (title-arg (if title (format "--es input_title '%s' " title) ""))
+         (title-arg (if title (format "--es input_title '%s' " (shell-quote-argument) title)) ""))
          (hint-arg (if hint (format "--es input_hint '%s' " hint) ""))
          (vals-arg (if values (format "--es input_values '%s' " values) ""))
          (end-arg (if endpoint (format "--es endpoint '%s' " endpoint) ""))
@@ -227,40 +227,10 @@
 (defalias 'httpd/glasspane-capture-templates/ 'httpd/glasspane-capture-templates)
 
 (defun httpd/glasspane-capture (proc path query request)
-  "Execute an org-capture template headlessly using Android data."
-  (let* ((id (my/extract-query-string "id" query))
-         (original-tpl (assoc id org-capture-templates)))
-    (if (not original-tpl)
-        (with-httpd-buffer proc "application/json"
-          (insert "{\"status\": \"error\", \"message\": \"Template not found\"}"))
-      (condition-case err
-          (let* ((type            (nth 2 original-tpl))
-                 (target          (nth 3 original-tpl))
-                 (template-string (nth 4 original-tpl))
-                 (props           (nthcdr 5 original-tpl))
-                 (modified-string template-string))
-            (mapc (lambda (param)
-                    (let* ((key (car param))
-                           (val (my/extract-query-string key query)))
-                      (when (and (stringp key) (stringp val) (not (equal key "id")))
-                        (setq modified-string
-                              (replace-regexp-in-string
-                               (format "%%^{\\(%s\\)\\([|][^}]*\\)?}"
-                                       (regexp-quote key))
-                               val modified-string t t)))))
-                  query)
-            (setq props (plist-put props :immediate-finish t))
-            (let* ((headless-tpl
-                    (append (list id (nth 1 original-tpl) type target modified-string)
-                            props))
-                   (org-capture-templates (list headless-tpl)))
-              (save-window-excursion (org-capture nil id)))
-            (with-httpd-buffer proc "application/json"
-              (insert "{\"status\": \"success\"}")))
-        (error
-         (with-httpd-buffer proc "application/json"
-           (insert (json-encode `((status . "error")
-                                  (message . ,(error-message-string err)))))))))))
+  "Accept capture data from Android, queue it, and release the HTTP connection immediately."
+  (push query glasspane-task-queue)
+  (with-httpd-buffer proc "application/json"
+    (insert "{\"status\": \"queued\"}")))
 (defalias 'httpd/glasspane-capture/ 'httpd/glasspane-capture)
 
 ;; --- 8. CLOCK ENDPOINTS ---
@@ -349,13 +319,13 @@
   (interactive "nDuration (ms): ")
   (let ((dur (or duration-ms 500)))
     (start-process-shell-command "glasspane-vibrate" nil
-     (format "am broadcast --user 0 -n 'com.example.glasspane/com.example.glasspane.GlasspaneApiReceiver' -a com.example.glasspane.api.VIBRATE --ei duration_ms %d" dur))))
+     (format "am broadcast --user 0 -n 'com.example.glasspane/com.example.glasspane.GlasspaneApiReceiver' -a com.example.glasspane.api.VIBRATE --ei duration_ms %d" (shell-quote-argument dur)))))
 
 (defun glasspane-api-toast (text)
   "Show a native Android toast notification."
   (interactive "sToast message: ")
   (start-process-shell-command "glasspane-toast" nil
-   (format "am broadcast --user 0 -n 'com.example.glasspane/com.example.glasspane.GlasspaneApiReceiver' -a com.example.glasspane.api.TOAST -e text '%s'" text)))
+   (format "am broadcast --user 0 -n 'com.example.glasspane/com.example.glasspane.GlasspaneApiReceiver' -a com.example.glasspane.api.TOAST -e text '%s'" (shell-quote-argument text))))
 
 ;; --- 10. CAPTURE TEMPLATE PARSER ---
 (defun my/glasspane-get-capture-templates ()
@@ -393,3 +363,60 @@
 
 ;; --- 11. START HTTP SERVER ---
 (httpd-start)
+
+;; =============================================================================
+;; --- 12. ASYNC TASK QUEUE ---
+;; =============================================================================
+
+(defvar glasspane-task-queue '()
+  "A list of pending tasks received from Android.")
+
+(defun my/glasspane-process-queue ()
+  "Process one item from `glasspane-task-queue' while Emacs is idle."
+  (when glasspane-task-queue
+    ;; Pop the oldest task off the queue (FIFO)
+    (let* ((task-query (car (last glasspane-task-queue)))
+           (id (my/extract-query-string "id" task-query))
+           (original-tpl (assoc id org-capture-templates)))
+
+      (setq glasspane-task-queue (butlast glasspane-task-queue))
+
+      (if (not original-tpl)
+          (message "Glasspane Async Error: Template '%s' not found" id)
+        (condition-case err
+            (let* ((type            (nth 2 original-tpl))
+                   (target          (nth 3 original-tpl))
+                   (template-string (nth 4 original-tpl))
+                   (props           (nthcdr 5 original-tpl))
+                   (modified-string template-string))
+
+              ;; Run the parameter mapping
+              (mapc (lambda (param)
+                      (let* ((key (car param))
+                             (val (my/extract-query-string key task-query)))
+                        (when (and (stringp key) (stringp val) (not (equal key "id")))
+                          (setq modified-string
+                                (replace-regexp-in-string
+                                 (format "%%^{\\(%s\\)\\([|][^}]*\\)?}"
+                                         (regexp-quote key))
+                                 val modified-string t t)))))
+                    task-query)
+
+              ;; Force immediate finish so it doesn't open a buffer
+              (setq props (plist-put props :immediate-finish t))
+              (let* ((headless-tpl
+                      (append (list id (nth 1 original-tpl) type target modified-string)
+                              props))
+                     (org-capture-templates (list headless-tpl)))
+
+                ;; Execute the capture
+                (save-window-excursion (org-capture nil id)))
+
+              (message "Glasspane: Successfully processed background capture for template '%s'" id))
+
+          ;; Handle any errors gracefully without crashing the timer loop
+          (error
+           (message "Glasspane Background Error: %s" (error-message-string err))))))))
+
+;; Run the queue processor whenever Emacs has been idle for 0.5 seconds
+(run-with-idle-timer 0.5 t #'my/glasspane-process-queue)

@@ -4,36 +4,37 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Code // Placeholder for logo
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.glasspane.ui.components.EmacsServerStatus
 import com.example.glasspane.ui.components.StatusAdmonition
 import com.example.glasspane.ui.components.TaskCard
-
-// A temporary mock data class for our UI
-data class OrgTask(val id: String, val title: String, val isDone: Boolean)
+import com.example.glasspane.ui.viewmodels.DashboardViewModel
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen() {
-    // UI State (You will eventually wire this up to a ViewModel reading from your Emacs backend)
-    var serverStatus by remember { mutableStateOf(EmacsServerStatus.CONNECTED) }
-    var tasks by remember {
-        mutableStateOf(
-            listOf(
-                OrgTask("1", "Review PR for Glasspane", false),
-                OrgTask("2", "Buy groceries", true),
-                OrgTask("3", "Write Emacs Lisp hook", false)
-            )
-        )
-    }
+fun DashboardScreen(
+    viewModel: DashboardViewModel = viewModel()
+) {
+    // Observe state from the ViewModel
+    val serverStatus by viewModel.serverStatus.collectAsState()
+    val tasks by viewModel.tasks.collectAsState()
+    val currentParentId by viewModel.currentParentId.collectAsState()
+
     var showCaptureDialog by remember { mutableStateOf(false) }
+
+    val haptics = LocalHapticFeedback.current
 
     Scaffold(
         floatingActionButton = {
@@ -50,31 +51,49 @@ fun DashboardScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp) // Standard safe padding
+                .padding(horizontal = 16.dp)
         ) {
             Spacer(Modifier.height(16.dp))
 
-            // --- 1. Dashboard Header (Inspired by HarpTitle.kt) ---
+            // --- Dashboard Header ---
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Replace with painterResource(R.drawable.your_logo) later
-                Icon(
-                    imageVector = Icons.Filled.Code,
-                    contentDescription = "Glasspane Logo",
-                    modifier = Modifier.size(32.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                if (currentParentId != null) {
+                    IconButton(onClick = { viewModel.goBack() }) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Go Back",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Code,
+                        contentDescription = "Glasspane Logo",
+                        modifier = Modifier.size(32.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 Text(
-                    text = "Glasspane",
-                    style = MaterialTheme.typography.displayMedium, // From our custom Typography
+                    text = if (currentParentId != null) "Navigating..." else "Glasspane",
+                    style = MaterialTheme.typography.displayMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 12.dp)
                 )
 
                 Spacer(Modifier.weight(1f))
+
+                // Refresh Button
+                IconButton(onClick = { viewModel.fetchTasks() }) {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = "Force Sync",
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                }
 
                 IconButton(onClick = { /* Navigate to Settings */ }) {
                     Icon(
@@ -87,26 +106,28 @@ fun DashboardScreen() {
 
             Spacer(Modifier.height(16.dp))
 
-            // --- 2. Server Status Notification ---
+            // --- Server Status ---
             StatusAdmonition(
                 status = serverStatus,
-                message = if (serverStatus == EmacsServerStatus.CONNECTED) "Connected to org-server" else "Server Offline"
+                message = when(serverStatus) {
+                    EmacsServerStatus.CONNECTED -> "Connected to org-server"
+                    EmacsServerStatus.SYNCING -> "Syncing data..."
+                    else -> "Server Offline"
+                }
             )
 
             Spacer(Modifier.height(16.dp))
 
-            // --- 3. Task List Header ---
             Text(
-                text = "Recent Tasks",
+                text = "Emacs Org Nodes",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.outline
             )
 
             Spacer(Modifier.height(8.dp))
 
-            // --- 4. The Data List or Empty State ---
-            if (tasks.isEmpty()) {
-                // Empty State
+            // --- The Dynamic List ---
+            if (tasks.isEmpty() && serverStatus == EmacsServerStatus.CONNECTED) {
                 Box(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center
@@ -125,12 +146,19 @@ fun DashboardScreen() {
                         TaskCard(
                             title = task.title,
                             isDone = task.isDone,
-                            onToggleStatus = {
-                                tasks = tasks.map { if (it.id == task.id) it.copy(isDone = !it.isDone) else it }
+                            hasChildren = task.hasChildren,
+                            onCardClick = {
+                                if (task.hasChildren) {
+                                    viewModel.fetchTasks(task.id)
+                                }
                             },
-                            onDelete = {
-                                tasks = tasks.filter { it.id != task.id }
-                            }
+                            onToggleStatus = {
+                                // Trigger a satisfying physical click!
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                // Tell Emacs to update the Org file
+                                viewModel.toggleTaskStatus(task.id, task.status)
+                            },
+                            onDelete = { /* Optional */ }
                         )
                     }
                 }
@@ -138,13 +166,17 @@ fun DashboardScreen() {
         }
     }
 
-    // --- 5. Quick Capture Dialog Trigger ---
+    // --- Quick Capture ---
     if (showCaptureDialog) {
         QuickCaptureDialog(
             onDismiss = { showCaptureDialog = false },
             onSave = { newTaskTitle ->
-                // Add the new task to our list (Wired to your Emacs backend later)
-                tasks = tasks + OrgTask(id = System.currentTimeMillis().toString(), title = newTaskTitle, isDone = false)
+                // Trigger a light click confirming the save
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+
+                // Send the capture to Emacs
+                viewModel.captureTask(newTaskTitle)
+
                 showCaptureDialog = false
             }
         )

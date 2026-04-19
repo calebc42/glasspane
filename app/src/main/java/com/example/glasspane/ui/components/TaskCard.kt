@@ -1,7 +1,9 @@
 package com.example.glasspane.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.Circle
@@ -16,6 +18,8 @@ import androidx.compose.ui.unit.dp
 fun TaskCard(
     title: String,
     isDone: Boolean,
+    hasChildren: Boolean, // NEW
+    onCardClick: () -> Unit, // NEW
     onToggleStatus: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
@@ -23,25 +27,31 @@ fun TaskCard(
     ElevatedCard(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        shape = MaterialTheme.shapes.small // Harp's standard shape
+            .padding(vertical = 6.dp)
+            .clickable { onCardClick() }, // Make the whole card tappable
+        shape = MaterialTheme.shapes.small
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp) // Internal padding
+                .padding(8.dp)
         ) {
-            // Left Status Icon (TODO vs DONE)
-            IconButton(onClick = onToggleStatus) {
-                Icon(
-                    imageVector = if (isDone) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
-                    contentDescription = "Toggle Status",
-                    tint = if (isDone) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                )
+            // Left Status Icon (Only show if it doesn't have children, meaning it's a leaf task)
+            if (!hasChildren) {
+                IconButton(onClick = onToggleStatus) {
+                    Icon(
+                        imageVector = if (isDone) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
+                        contentDescription = "Toggle Status",
+                        tint = if (isDone) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    )
+                }
+            } else {
+                // Spacer to keep text aligned if there is no checkbox
+                Spacer(Modifier.width(12.dp))
             }
 
-            // Task Title
+            // Task/File Title
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
@@ -50,16 +60,24 @@ fun TaskCard(
                 modifier = Modifier.padding(start = 4.dp)
             )
 
-            // The spacer weight pushes the delete button to the far right edge
             Spacer(Modifier.weight(1f))
 
-            // Right Action Icon (Delete)
-            IconButton(onClick = onDelete) {
+            // Right Action Icon: Show an arrow if we can drill down, otherwise show delete
+            if (hasChildren) {
                 Icon(
-                    imageVector = Icons.Filled.Delete,
-                    contentDescription = "Delete Task",
-                    tint = MaterialTheme.colorScheme.error // Semantic error color
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "Open",
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(end = 12.dp)
                 )
+            } else {
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Filled.Delete,
+                        contentDescription = "Delete Task",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
             }
         }
     }

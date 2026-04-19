@@ -29,6 +29,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 
 // ─── Data model for a Capture Template field ────────────────────────────────
 data class CaptureField(val key: String, val label: String, val hint: String = "")
@@ -66,6 +69,14 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+
+        // Force a background sync every time the app is opened
+        val syncRequest = OneTimeWorkRequestBuilder<SyncWorker>().build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            "glasspane_sync",
+            ExistingWorkPolicy.REPLACE,
+            syncRequest
+        )
 
         setContent {
             MaterialTheme {

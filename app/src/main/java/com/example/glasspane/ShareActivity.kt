@@ -16,6 +16,14 @@ import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.NetworkType
+import androidx.work.Constraints
+import androidx.work.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withContext
 
 class ShareActivity : ComponentActivity() {
 
@@ -71,25 +79,51 @@ class ShareActivity : ComponentActivity() {
     }
 
     private fun captureToEmacsAndFinish(task: String, details: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
+        // 1. Use an independent scope so the DB write survives the Activity being destroyed
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            val encTask = URLEncoder.encode(task, "UTF-8")
+            val encDetails = URLEncoder.encode(details, "UTF-8")
+            val urlString = "http://127.0.0.1:8080/glasspane-capture?id=t&Task=$encTask&Details=$encDetails"
+
             try {
-                // Encode the strings so they survive the HTTP URL translation
-                val encTask = URLEncoder.encode(task, "UTF-8")
-                val encDetails = URLEncoder.encode(details, "UTF-8")
-
-                // Map exactly to your init.el Quick Task template ("id=t")
-                // ("t" "Quick Task" entry (file "~/inbox.org") "* TODO %^{Task}\n%^{Details}\n%U")
-                val urlString = "http://127.0.0.1:8080/glasspane-capture?id=t&Task=$encTask&Details=$encDetails"
-
                 val url = URL(urlString)
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
-                conn.connectTimeout = 5000
-                conn.responseCode // Execute the request
+                conn.connectTimeout = 2000 // Fast fail (2 seconds)
+
+                if (conn.responseCode in 200..299) {
+                    Log.d("ShareActivity", "Sent straight to Emacs!")
+                } else {
+                    throw Exception("Server rejected payload")
+                }
             } catch (e: Exception) {
-                Log.e("ShareActivity", "Failed to capture to Emacs", e)
+                Log.w("ShareActivity", "Emacs offline. Caching payload locally.", e)
+
+                // Save to Room DB
+                val db = GlasspaneDatabase.getDatabase(applicationContext)
+                db.pendingRequestDao().insert(PendingRequest(urlString = urlString))
+
+                // 2. Build an aggressive retry policy (Try every 15 seconds instead of 10 minutes)
+                val syncRequest = OneTimeWorkRequestBuilder<SyncWorker>()
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .setBackoffCriteria(
+                        BackoffPolicy.LINEAR,
+                        15, // 15 seconds
+                        java.util.concurrent.TimeUnit.SECONDS
+                    )
+                    .build()
+
+                // 3. Enqueue Unique Work (prevents spamming the queue if you save 5 things while offline)
+                WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                    "glasspane_sync",
+                    ExistingWorkPolicy.REPLACE,
+                    syncRequest
+                )
             } finally {
-                finish() // Close the transparent dialog, returning control to Chrome
+                // Must switch to Main thread to safely finish UI components
+                withContext(Dispatchers.Main) {
+                    finish()
+                }
             }
         }
     }

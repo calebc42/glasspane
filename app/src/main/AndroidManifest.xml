@@ -35,8 +35,7 @@
             android:exported="true"
             android:taskAffinity=""
             android:excludeFromRecents="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
-        </activity>
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
             android:name=".MainActivity"
@@ -47,15 +46,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity> <receiver
-        android:name=".ClockReceiver"
-        android:exported="true">
-        <intent-filter>
-            <action android:name="com.example.glasspane.CLOCK_IN" />
-            <action android:name="com.example.glasspane.CLOCK_OUT" />
-            <action android:name="com.example.glasspane.HTTP_CLOCK_OUT" />
-        </intent-filter>
-    </receiver>
+        </activity>
+
         <receiver
             android:name=".GlasspaneApiReceiver"
             android:exported="true">

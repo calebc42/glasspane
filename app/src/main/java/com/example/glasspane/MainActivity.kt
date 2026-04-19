@@ -6,17 +6,27 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -25,13 +35,6 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import androidx.compose.ui.Alignment
-import androidx.compose.foundation.clickable
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.runtime.snapshots.SnapshotStateList
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 
 // ─── Data model for a Capture Template field ────────────────────────────────
 data class CaptureField(val key: String, val label: String, val hint: String = "")
@@ -80,12 +83,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    GlasspaneApp()
-                }
+                MainOutlineScreen()
             }
         }
     }
@@ -801,6 +799,186 @@ fun RenderElement(
                     }
                 ) {
                     DatePicker(state = datePickerState)
+                }
+            }
+        }
+    }
+}
+
+suspend fun fetchGlasspaneView(id: String? = null): List<JSONObject> = withContext(Dispatchers.IO) {
+    try {
+        val urlString = if (id == null) {
+            "http://127.0.0.1:8080/glasspane-view"
+        } else {
+            "http://127.0.0.1:8080/glasspane-view?id=${java.net.URLEncoder.encode(id, "UTF-8")}"
+        }
+
+        val url = URL(urlString)
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.connectTimeout = 3000
+
+        if (conn.responseCode in 200..299) {
+            val response = conn.inputStream.bufferedReader().readText()
+            val jsonResponse = JSONObject(response)
+            val elementsArray = jsonResponse.optJSONArray("elements") ?: JSONArray()
+
+            val resultList = mutableListOf<JSONObject>()
+            for (i in 0 until elementsArray.length()) {
+                resultList.add(elementsArray.getJSONObject(i))
+            }
+            return@withContext resultList
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("GlasspaneNetwork", "Failed to fetch view", e)
+    }
+    return@withContext emptyList()
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun OrgNode(node: JSONObject, depth: Int = 0) {
+    val nodeId = node.optString("id")
+    val hasChildren = node.optBoolean("has_children", false)
+    val elements = node.optJSONArray("elements") ?: JSONArray()
+
+    var isExpanded by remember { mutableStateOf(false) }
+    var children by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var isLoadingChildren by remember { mutableStateOf(false) }
+
+    // 1. The Orgzly Swipe-to-Dismiss Wrapper
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { dismissValue ->
+            if (dismissValue == SwipeToDismissBoxValue.StartToEnd) {
+                // TODO: Plunder the WorkManager to send a /glasspane-update POST here
+                // e.g., Update STATUS to "DONE"
+                android.util.Log.d("Swipe", "Swiped node $nodeId to the right!")
+                false // Return false to bounce the card back after the action triggers
+            } else {
+                false
+            }
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            // The green background that shows when swiping (Orgzly style)
+            val color = if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else MaterialTheme.colorScheme.surface
+
+            Box(Modifier.fillMaxSize().background(color).padding(16.dp), contentAlignment = Alignment.CenterStart) {
+                Text("MARK DONE", color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+            }
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                // Multiply padding by depth for the nested Outline feel!
+                .padding(start = (depth * 16).dp, top = 8.dp, bottom = 8.dp, end = 8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                // Expand/Collapse Chevron
+                if (hasChildren) {
+                    IconButton(
+                        onClick = {
+                            isExpanded = !isExpanded
+                            if (isExpanded && children.isEmpty()) {
+                                isLoadingChildren = true
+                            }
+                        },
+                        modifier = Modifier.size(24.dp).padding(end = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                            contentDescription = "Expand"
+                        )
+                    }
+                } else {
+                    Spacer(modifier = Modifier.width(24.dp)) // Maintain alignment if no children
+                }
+
+                // Render the SDUI Elements provided by Emacs
+                Column(modifier = Modifier.weight(1f)) {
+                    for (i in 0 until elements.length()) {
+                        val element = elements.optJSONObject(i) ?: continue
+                        when (element.optString("type")) {
+                            "Text" -> {
+                                val textVal = element.optString("value")
+                                val isTitle = element.optString("size") == "Title"
+                                Text(
+                                    text = textVal,
+                                    style = if (isTitle) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isTitle) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isTitle) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            "Button" -> {
+                                OutlinedButton(
+                                    onClick = { /* TODO: Execute HTTP Action endpoint */ },
+                                    modifier = Modifier.padding(top = 4.dp)
+                                ) {
+                                    Text(element.optString("label"))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. The Recursive Loading
+    // If the node is expanded, fetch the children from Emacs and draw them!
+    if (isExpanded) {
+        LaunchedEffect(nodeId) {
+            if (children.isEmpty()) {
+                children = fetchGlasspaneView(nodeId)
+                isLoadingChildren = false
+            }
+        }
+
+        if (isLoadingChildren) {
+            CircularProgressIndicator(modifier = Modifier.padding(start = ((depth + 1) * 16).dp, top = 4.dp).size(16.dp), strokeWidth = 2.dp)
+        } else {
+            // Recursion: The Node calls itself for every child
+            children.forEach { childNode ->
+                OrgNode(node = childNode, depth = depth + 1)
+            }
+        }
+    }
+}
+
+@Composable
+fun MainOutlineScreen() {
+    var rootNodes by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        // Fetch the root directory (no ID passed)
+        rootNodes = fetchGlasspaneView(null)
+        isLoading = false
+    }
+
+    Scaffold(
+        topBar = {
+            @OptIn(ExperimentalMaterial3Api::class)
+            TopAppBar(title = { Text("Glasspane Outline") })
+        }
+    ) { paddingValues ->
+        if (isLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            LazyColumn(modifier = Modifier.padding(paddingValues)) {
+                items(rootNodes) { node ->
+                    // Kick off the recursive drawing starting at depth 0
+                    OrgNode(node = node, depth = 0)
+                    Divider(color = MaterialTheme.colorScheme.surfaceVariant)
                 }
             }
         }

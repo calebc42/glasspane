@@ -43,6 +43,7 @@ import java.util.TimeZone
 import java.util.Date
 import java.text.SimpleDateFormat
 import com.example.glasspane.ui.theme.GlasspaneTheme
+import com.example.glasspane.ui.screens.DashboardScreen
 
 // ─── Data model for a Capture Template field ────────────────────────────────
 data class CaptureField(val key: String, val label: String, val hint: String = "")
@@ -104,7 +105,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    GlasspaneApp()
+                    DashboardScreen()
                 }
             }
         }

@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,9 +23,11 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +38,11 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
+import java.util.TimeZone
+import java.util.Date
+import java.text.SimpleDateFormat
+import com.example.glasspane.ui.theme.GlasspaneTheme
 
 // ─── Data model for a Capture Template field ────────────────────────────────
 data class CaptureField(val key: String, val label: String, val hint: String = "")
@@ -56,17 +64,18 @@ data class ClockState(val activeClockId: String?)
 typealias NodeId = String?
 
 class MainActivity : ComponentActivity() {
-
     // Android 13+ requires POST_NOTIFICATIONS to be requested at runtime.
     // We register the launcher unconditionally; it only fires on API 33+.
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-            // Permission granted or denied — either way we proceed. The
-            // notification will simply not appear if the user denies it.
+            // Permission granted or denied — either way we proceed.
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Phase 4.1: Edge-to-Edge support
+        enableEdgeToEdge()
 
         // Ask for notification permission on first launch (API 33+ only).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -74,7 +83,14 @@ class MainActivity : ComponentActivity() {
         }
 
         // Force a background sync every time the app is opened
-        val syncRequest = OneTimeWorkRequestBuilder<SyncWorker>().build()
+        val syncRequest = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setConstraints(
+                androidx.work.Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+
         WorkManager.getInstance(applicationContext).enqueueUniqueWork(
             "glasspane_sync",
             ExistingWorkPolicy.REPLACE,
@@ -82,8 +98,14 @@ class MainActivity : ComponentActivity() {
         )
 
         setContent {
-            MaterialTheme {
-                MainOutlineScreen()
+            GlasspaneTheme {
+                // A surface container using the 'background' color from the theme
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    GlasspaneApp()
+                }
             }
         }
     }
@@ -788,7 +810,8 @@ fun RenderElement(
                         TextButton(onClick = {
                             showDatePicker = false
                             datePickerState.selectedDateMillis?.let { millis ->
-                                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                                sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
                                 val formattedDate = sdf.format(java.util.Date(millis))
                                 executeNetworkAction("<$formattedDate>")
                             }

@@ -1,0 +1,84 @@
+#+TITLE: Projects
+#+STARTUP: overview
+
+* Glasspane                                                       :android:emacs:
+** TODO [#A] Phase 1 — Core Org features
+   DEADLINE: <2026-05-01 Thu>
+   :PROPERTIES:
+   :Effort:   20h
+   :END:
+
+*** DONE Enrich SDUI node parser with tags/priority/timestamps
+    CLOSED: [2026-04-19 Sat 16:45]
+    :PROPERTIES:
+    :DURATION_HISTORY: 2026-04-19=3600
+    :END:
+
+*** DONE Add 12 new HTTP endpoints to glasspan.el
+    CLOSED: [2026-04-19 Sat 16:44]
+
+*** DONE Build AgendaScreen with day/week/month views
+    CLOSED: [2026-04-19 Sat 16:50]
+
+*** DONE Build SearchScreen with org-ql integration
+    CLOSED: [2026-04-19 Sat 16:52]
+
+*** TODO Refile dialog with target picker
+
+*** TODO Schedule/Deadline date picker
+
+*** TODO Clock report visualization
+
+** TODO [#B] Phase 2 — Ecosystem packages
+   SCHEDULED: <2026-05-15 Fri>
+
+*** TODO org-roam node graph viewer
+*** TODO org-super-agenda grouping support
+*** TODO org-habit streak chart widget
+
+** TODO [#C] Phase 3 — Polish & distribution
+   SCHEDULED: <2026-06-01 Mon>
+
+*** TODO F-Droid packaging
+*** TODO Landing page & README
+*** TODO Demo video for r/emacs
+
+* Homelab                                                         :server:selfhost:
+** TODO [#B] Migrate Nextcloud to new VPS                         :migration:
+   DEADLINE: <2026-05-10 Sat>
+   :PROPERTIES:
+   :Effort:   4h
+   :END:
+
+** TODO Set up Wireguard tunnel to phone                          :networking:
+   SCHEDULED: <2026-04-25 Fri>
+   :PROPERTIES:
+   :Effort:   2h
+   :END:
+
+** DONE Install Gitea for self-hosted repos
+   CLOSED: [2026-04-01 Tue]
+   :PROPERTIES:
+   :DURATION_HISTORY: 2026-04-01=5400
+   :END:
+
+** TODO [#A] Fix failing backup cron job                          :urgent:
+   DEADLINE: <2026-04-21 Mon>
+   :PROPERTIES:
+   :Effort:   1h
+   :END:
+
+* Side Projects                                                   :fun:
+** TODO Build a CLI pomodoro timer in Rust                        :rust:
+   :PROPERTIES:
+   :Effort:   4h
+   :END:
+
+** TODO Contribute upstream patch to org-ql                       :emacs:opensource:
+   Found a bug where (deadline auto) doesn't account for timezone offsets.
+   :PROPERTIES:
+   :Effort:   2h
+   :END:
+
+** DONE ASCII art generator for terminal welcome screen           :fun:
+   CLOSED: [2026-03-20 Thu]

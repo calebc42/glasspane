@@ -17,6 +17,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -35,6 +37,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -43,7 +49,9 @@ import java.util.TimeZone
 import java.util.Date
 import java.text.SimpleDateFormat
 import com.example.glasspane.ui.theme.GlasspaneTheme
-import com.example.glasspane.ui.screens.DashboardScreen
+import com.example.glasspane.ui.screens.MainNavHost
+
+val okHttpClient = OkHttpClient()
 
 // ─── Data model for a Capture Template field ────────────────────────────────
 data class CaptureField(val key: String, val label: String, val hint: String = "")
@@ -100,12 +108,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             GlasspaneTheme {
-                // A surface container using the 'background' color from the theme
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    DashboardScreen()
+                    MainNavHost()
                 }
             }
         }
@@ -135,7 +142,10 @@ fun GlasspaneApp() {
     suspend fun fetchClockState() {
         withContext(Dispatchers.IO) {
             try {
-                val json = JSONObject(URL("http://127.0.0.1:8080/glasspane-clock-status").readText())
+                val request = Request.Builder().url("http://127.0.0.1:8080/glasspane-clock-status").build()
+                val response = okHttpClient.newCall(request).execute()
+                val jsonStr = response.body?.string() ?: "{}"
+                val json = JSONObject(jsonStr)
                 val id = json.optString("active_id").takeIf { it.isNotEmpty() }
                 clockState = ClockState(id)
             } catch (_: Exception) {
@@ -161,7 +171,9 @@ fun GlasspaneApp() {
         launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val json = URL("http://127.0.0.1:8080/glasspane-capture-templates").readText()
+                    val request = Request.Builder().url("http://127.0.0.1:8080/glasspane-capture-templates").build()
+                    val response = okHttpClient.newCall(request).execute()
+                    val json = response.body?.string() ?: "[]"
                     val arr = JSONArray(json)
                     captureTemplates = (0 until arr.length()).map { i ->
                         val obj = arr.getJSONObject(i)
@@ -291,14 +303,15 @@ fun GlasspaneApp() {
                 coroutineScope.launch {
                     val result = withContext(Dispatchers.IO) {
                         try {
-                            val params = fieldValues.entries.joinToString("&") { (k, v) ->
-                                "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
-                            }
-                            val urlString =
-                                "http://127.0.0.1:8080${template.endpoint}?id=${template.id}&$params"
-                            val conn = URL(urlString).openConnection() as HttpURLConnection
-                            conn.requestMethod = "POST"
-                            val code = conn.responseCode
+                            val formBuilder = FormBody.Builder()
+                            formBuilder.add("id", template.id)
+                            fieldValues.forEach { (k, v) -> formBuilder.add(k, v) }
+                            val request = Request.Builder()
+                                .url("http://127.0.0.1:8080${template.endpoint}")
+                                .post(formBuilder.build())
+                                .build()
+                            val response = okHttpClient.newCall(request).execute()
+                            val code = response.code
                             if (code in 200..299) "success" else "http_error:$code"
                         } catch (e: Exception) {
                             "error:${e.message}"
@@ -339,13 +352,13 @@ fun RenderView(
         errorMessage = null
         withContext(Dispatchers.IO) {
             try {
-                val url = if (nodeId.isNullOrEmpty()) {
-                    "http://127.0.0.1:8080/glasspane-view"
-                } else {
-                    val encoded = URLEncoder.encode(nodeId, "UTF-8")
-                    "http://127.0.0.1:8080/glasspane-view?id=$encoded"
+                val urlBuilder = "http://127.0.0.1:8080/glasspane-view".toHttpUrlOrNull()?.newBuilder()
+                if (!nodeId.isNullOrEmpty()) {
+                    urlBuilder?.addQueryParameter("id", nodeId)
                 }
-                viewJson = JSONObject(URL(url).readText())
+                val request = Request.Builder().url(urlBuilder?.build() ?: throw Exception("Invalid URL")).build()
+                val response = okHttpClient.newCall(request).execute()
+                viewJson = JSONObject(response.body?.string() ?: "{}")
             } catch (e: Exception) {
                 errorMessage = "Connection failed: ${e.message}"
             }
@@ -488,6 +501,30 @@ fun RenderNode(
     val childElements = element.optJSONArray("elements") ?: JSONArray()
     val isActiveClock = clockState.activeClockId == id
 
+    var showAddDialog by remember { mutableStateOf<String?>(null) }
+    var titleInput by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+    
+    val executeTreeAction: (String, String?) -> Unit = { action, title ->
+        coroutineScope.launch {
+            val formBuilder = FormBody.Builder()
+            formBuilder.add("id", id)
+            formBuilder.add("action", action)
+            if (title != null) formBuilder.add("title", title)
+            val request = Request.Builder()
+                .url("http://127.0.0.1:8080/glasspane-tree-edit")
+                .post(formBuilder.build())
+                .build()
+            withContext(Dispatchers.IO) {
+                try {
+                    okHttpClient.newCall(request).execute()
+                } catch (e: Exception) {}
+            }
+            onRefresh()
+            onSnackbar("Action: $action")
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -535,14 +572,56 @@ fun RenderNode(
                 }
             }
 
-            if (hasChildren) {
-                Icon(
-                    imageVector = Icons.Filled.ChevronRight,
-                    contentDescription = "Has children",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (hasChildren) {
+                    Icon(
+                        imageVector = Icons.Filled.ChevronRight,
+                        contentDescription = "Has children",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                var expanded by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { expanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Options")
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        DropdownMenuItem(text = { Text("Add Child") }, onClick = { expanded = false; showAddDialog = "insert-child" })
+                        DropdownMenuItem(text = { Text("Add Sibling") }, onClick = { expanded = false; showAddDialog = "insert-sibling" })
+                        DropdownMenuItem(text = { Text("Move Up") }, onClick = { expanded = false; executeTreeAction("move-up", null) })
+                        DropdownMenuItem(text = { Text("Move Down") }, onClick = { expanded = false; executeTreeAction("move-down", null) })
+                        DropdownMenuItem(text = { Text("Promote") }, onClick = { expanded = false; executeTreeAction("promote", null) })
+                        DropdownMenuItem(text = { Text("Demote") }, onClick = { expanded = false; executeTreeAction("demote", null) })
+                    }
+                }
             }
         }
+    }
+
+    if (showAddDialog != null) {
+        AlertDialog(
+            onDismissRequest = { showAddDialog = null },
+            title = { Text(if (showAddDialog == "insert-child") "Add Child Node" else "Add Sibling Node") },
+            text = {
+                OutlinedTextField(
+                    value = titleInput,
+                    onValueChange = { titleInput = it },
+                    label = { Text("Heading Title") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val action = showAddDialog!!
+                    showAddDialog = null
+                    executeTreeAction(action, titleInput)
+                    titleInput = ""
+                }) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = null }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -575,14 +654,17 @@ fun RenderElement(
             val result = withContext(Dispatchers.IO) {
                 try {
                     if (endpoint != null && id != null) {
-                        var urlString = "http://127.0.0.1:8080$endpoint?id=$id"
-                        if (!prop.isNullOrEmpty()) urlString += "&prop=$prop"
-                        if (!inputValue.isNullOrEmpty()) {
-                            urlString += "&val=${URLEncoder.encode(inputValue, "UTF-8")}"
-                        }
-                        val conn = URL(urlString).openConnection() as HttpURLConnection
-                        conn.requestMethod = "POST"
-                        val code = conn.responseCode
+                        val formBuilder = FormBody.Builder()
+                        formBuilder.add("id", id)
+                        if (!prop.isNullOrEmpty()) formBuilder.add("prop", prop)
+                        if (!inputValue.isNullOrEmpty()) formBuilder.add("val", inputValue)
+                        
+                        val request = Request.Builder()
+                            .url("http://127.0.0.1:8080$endpoint")
+                            .post(formBuilder.build())
+                            .build()
+                        val response = okHttpClient.newCall(request).execute()
+                        val code = response.code
                         if (code in 200..299) "success" else "http_error:$code"
                     } else {
                         "error:missing action params"
@@ -619,6 +701,125 @@ fun RenderElement(
                 Text(text = value, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             } else {
                 Text(text = value, fontSize = 16.sp)
+            }
+        }
+
+        "EditableText" -> {
+            val value = element.optString("value")
+            var isEditing by remember { mutableStateOf(false) }
+            var text by remember { mutableStateOf(value) }
+
+            if (isEditing) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            isEditing = false
+                            executeNetworkAction(text)
+                        }) {
+                            if (isLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.Check, contentDescription = "Save", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    },
+                    maxLines = 10,
+                    enabled = !isLoading
+                )
+            } else {
+                if (value.isEmpty()) {
+                    Text(
+                        text = "Tap to add notes...",
+                        fontSize = 16.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isEditing = true }
+                            .padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    val lines = value.split("\n")
+                    Column {
+                        for (line in lines) {
+                            val checkboxMatch = Regex("^(\\s*)- \\[( |X|\\-)\\] (.*)$").find(line)
+                            if (checkboxMatch != null) {
+                                val indent = checkboxMatch.groupValues[1]
+                                val state = checkboxMatch.groupValues[2]
+                                val content = checkboxMatch.groupValues[3]
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    modifier = Modifier.padding(start = (indent.length * 8).dp, top = 2.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = state == "X",
+                                        onCheckedChange = { isChecked ->
+                                            val newState = if (isChecked) "X" else " "
+                                            val newText = value.replaceFirst(line, "${indent}- [$newState] $content")
+                                            executeNetworkAction(newText)
+                                        },
+                                        modifier = Modifier.size(24.dp).padding(end = 8.dp, top = 2.dp)
+                                    )
+                                    Text(
+                                        text = content, 
+                                        fontSize = 16.sp, 
+                                        modifier = Modifier.padding(top = 2.dp).fillMaxWidth().clickable { isEditing = true }
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    line, 
+                                    fontSize = 16.sp, 
+                                    modifier = Modifier.fillMaxWidth().clickable { isEditing = true }.padding(vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        "PropertyDrawer" -> {
+            val props = element.optJSONArray("properties") ?: JSONArray()
+            val actionType = element.optJSONObject("action")
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), shape = MaterialTheme.shapes.small)
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = "PROPERTIES",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                for (i in 0 until props.length()) {
+                    val propObj = props.getJSONObject(i)
+                    val key = propObj.optString("key")
+                    val value = propObj.optString("value")
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                actionType?.put("prop", key)
+                                actionType?.put("input_prompt", "Edit $key")
+                                inputText = value
+                                showDialog = true
+                            }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Text(":$key:", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(value, fontSize = 14.sp)
+                    }
+                }
             }
         }
 
@@ -665,13 +866,14 @@ fun RenderElement(
                                 val result = withContext(Dispatchers.IO) {
                                     try {
                                         if (ep != null) {
-                                            val urlString = if (!id.isNullOrEmpty())
-                                                "http://127.0.0.1:8080$ep?id=$id"
-                                            else
-                                                "http://127.0.0.1:8080$ep"
-                                            val conn = URL(urlString).openConnection() as HttpURLConnection
-                                            conn.requestMethod = "POST"
-                                            val code = conn.responseCode
+                                            val formBuilder = FormBody.Builder()
+                                            if (!id.isNullOrEmpty()) formBuilder.add("id", id)
+                                            val request = Request.Builder()
+                                                .url("http://127.0.0.1:8080$ep")
+                                                .post(formBuilder.build())
+                                                .build()
+                                            val response = okHttpClient.newCall(request).execute()
+                                            val code = response.code
                                             if (code in 200..299) "success" else "http_error:$code"
                                         } else "error:missing endpoint"
                                     } catch (e: Exception) {
@@ -831,20 +1033,16 @@ fun RenderElement(
 
 suspend fun fetchGlasspaneView(id: String? = null): List<JSONObject> = withContext(Dispatchers.IO) {
     try {
-        val urlString = if (id == null) {
-            "http://127.0.0.1:8080/glasspane-view"
-        } else {
-            "http://127.0.0.1:8080/glasspane-view?id=${java.net.URLEncoder.encode(id, "UTF-8")}"
+        val urlBuilder = "http://127.0.0.1:8080/glasspane-view".toHttpUrlOrNull()?.newBuilder()
+        if (id != null) {
+            urlBuilder?.addQueryParameter("id", id)
         }
+        val request = Request.Builder().url(urlBuilder?.build() ?: throw Exception("Invalid URL")).build()
+        val response = okHttpClient.newCall(request).execute()
 
-        val url = URL(urlString)
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "GET"
-        conn.connectTimeout = 3000
-
-        if (conn.responseCode in 200..299) {
-            val response = conn.inputStream.bufferedReader().readText()
-            val jsonResponse = JSONObject(response)
+        if (response.isSuccessful) {
+            val responseText = response.body?.string() ?: ""
+            val jsonResponse = JSONObject(responseText)
             val elementsArray = jsonResponse.optJSONArray("elements") ?: JSONArray()
 
             val resultList = mutableListOf<JSONObject>()

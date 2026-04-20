@@ -1,0 +1,38 @@
+#+TITLE: Quotes
+#+STARTUP: overview
+
+* Marcus Aurelius
+#+BEGIN_QUOTE
+You have power over your mind — not outside events. Realize this, and you will find strength.
+#+END_QUOTE
+Captured: [2026-04-12 Sat 08:30]
+
+* Alan Kay
+#+BEGIN_QUOTE
+The best way to predict the future is to invent it.
+#+END_QUOTE
+Captured: [2026-04-05 Sat 14:22]
+
+* Richard Stallman
+#+BEGIN_QUOTE
+Free software is a matter of liberty, not price. To understand the concept, you should think of free as in free speech, not as in free beer.
+#+END_QUOTE
+Captured: [2026-03-28 Fri 19:45]
+
+* Linus Torvalds
+#+BEGIN_QUOTE
+Talk is cheap. Show me the code.
+#+END_QUOTE
+Captured: [2026-03-15 Sun 11:00]
+
+* Carl Sagan
+#+BEGIN_QUOTE
+Somewhere, something incredible is waiting to be known.
+#+END_QUOTE
+Captured: [2026-02-20 Thu 22:10]
+
+* Carver Mead
+#+BEGIN_QUOTE
+Listen to the technology; find out what it's telling you.
+#+END_QUOTE
+Captured: [2026-04-18 Fri 16:40]

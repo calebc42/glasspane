@@ -1,0 +1,63 @@
+#+TITLE: Task Tracker
+#+STARTUP: overview
+
+* TODO [#A] Finish Glasspane agenda view                          :android:emacs:
+  SCHEDULED: <2026-04-20 Mon>
+  :PROPERTIES:
+  :Effort:   2h
+  :END:
+
+** TODO Wire up the date picker component
+   DEADLINE: <2026-04-21 Tue>
+
+** DONE Parse agenda JSON on Android side
+   CLOSED: [2026-04-19 Sat 14:32]
+
+** TODO Add swipe-to-archive gesture
+
+* TODO [#B] Set up Syncthing between phone and server             :server:sync:
+  SCHEDULED: <2026-04-22 Wed>
+  :PROPERTIES:
+  :Effort:   1h
+  :END:
+
+* DONE [#A] Fix paren balancing in glasspan.el                    :emacs:bugfix:
+  CLOSED: [2026-04-19 Sat 17:10]
+  :PROPERTIES:
+  :Effort:   30min
+  :DURATION_HISTORY: 2026-04-19=1847
+  :END:
+
+* TODO [#C] Research org-roam integration for Glasspane           :research:
+  DEADLINE: <2026-04-30 Wed>
+  :PROPERTIES:
+  :Effort:   3h
+  :END:
+
+* TODO Weekly grocery run                                         :errand:
+  SCHEDULED: <2026-04-21 Mon +1w>
+
+* TODO [#A] Prepare demo for Monday standup                       :work:
+  DEADLINE: <2026-04-21 Mon>
+  SCHEDULED: <2026-04-20 Sun>
+  :PROPERTIES:
+  :Effort:   45min
+  :END:
+
+* TODO Call insurance about claim                                 :phone:errand:
+  SCHEDULED: <2026-04-21 Mon>
+
+* TODO [#B] Write blog post about SDUI architecture               :writing:
+  DEADLINE: <2026-04-25 Fri>
+  :PROPERTIES:
+  :Effort:   2h
+  :END:
+
+* DONE Clean up the kitchen                                       :home:
+  CLOSED: [2026-04-18 Fri 21:30]
+
+* DONE Send invoice to client                                     :work:finance:
+  CLOSED: [2026-04-17 Thu 09:15]
+  :PROPERTIES:
+  :Effort:   15min
+  :END:

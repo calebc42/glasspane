@@ -1,0 +1,59 @@
+#+TITLE: Health & Fitness
+#+STARTUP: overview
+
+* Habits
+** TODO Morning stretches                                         :health:habit:
+   SCHEDULED: <2026-04-20 Sun .+1d>
+   :PROPERTIES:
+   :STYLE:    habit
+   :LAST_REPEAT: [2026-04-19 Sat 07:15]
+   :DURATION_HISTORY: 2026-04-19=600 2026-04-18=720 2026-04-17=540 2026-04-16=600 2026-04-15=660
+   :Effort:   10min
+   :END:
+
+** TODO Evening meditation                                        :health:habit:
+   SCHEDULED: <2026-04-20 Sun .+1d>
+   :PROPERTIES:
+   :STYLE:    habit
+   :LAST_REPEAT: [2026-04-19 Sat 21:00]
+   :DURATION_HISTORY: 2026-04-19=900 2026-04-18=1200 2026-04-17=900 2026-04-16=600
+   :Effort:   15min
+   :END:
+
+** TODO Drink 8 glasses of water                                  :health:habit:
+   SCHEDULED: <2026-04-20 Sun .+1d>
+   :PROPERTIES:
+   :STYLE:    habit
+   :LAST_REPEAT: [2026-04-18 Fri 20:00]
+   :END:
+
+* Training Logs
+** Training Log: [2026-04-19 Sat 16:00]
+   - Pistol Squats: 12
+   - Muscle-Ups: 5
+   - Miles Hiked: 3.2
+
+** Training Log: [2026-04-17 Thu 07:30]
+   - Pistol Squats: 10
+   - Muscle-Ups: 4
+   - Miles Hiked: 2.5
+
+** Training Log: [2026-04-15 Tue 06:45]
+   - Pistol Squats: 8
+   - Muscle-Ups: 3
+   - Miles Hiked: 4.1
+
+* Goals
+** TODO [#A] Rim to Rim hike — Grand Canyon                       :fitness:goal:
+   DEADLINE: <2026-06-15 Mon>
+   :PROPERTIES:
+   :Effort:   8h
+   :END:
+   Need to build up to 20+ mile days. Current max: ~12 miles.
+
+** TODO Run a sub-25 minute 5K                                    :fitness:goal:
+   DEADLINE: <2026-08-01 Sat>
+   Current PR: 27:42
+
+** DONE Complete 30-day yoga challenge                             :fitness:goal:
+   CLOSED: [2026-04-10 Thu]

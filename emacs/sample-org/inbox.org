@@ -1,0 +1,32 @@
+#+TITLE: Inbox
+#+STARTUP: overview
+
+* TODO Read "Designing Data-Intensive Applications" Chapter 6
+  %U
+
+* TODO Look into Nix flakes for reproducible Termux setup         :server:
+  :PROPERTIES:
+  :Effort:   1h
+  :END:
+
+* TODO Fix the leaky faucet in guest bathroom                     :home:
+  SCHEDULED: <2026-04-26 Sat>
+
+* IDEA Build a self-hosted Kanban board with org-mode backend     :server:project:
+  Inspired by org-kanban but with a web UI powered by simple-httpd.
+  Could reuse the Glasspane SDUI pattern.
+
+* TODO [#B] Renew domain registration for calebsite.dev           :admin:
+  DEADLINE: <2026-05-01 Thu>
+  :PROPERTIES:
+  :Effort:   10min
+  :END:
+
+* TODO Order replacement HEPA filter                              :home:errand:
+  SCHEDULED: <2026-04-23 Wed>
+
+* TODO [#A] Back up phone photos to NAS                           :digital:
+  DEADLINE: <2026-04-22 Tue>
+  :PROPERTIES:
+  :Effort:   30min
+  :END:

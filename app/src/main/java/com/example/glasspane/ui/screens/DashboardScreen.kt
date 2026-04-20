@@ -1,6 +1,7 @@
 package com.example.glasspane.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
@@ -8,26 +9,30 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.glasspane.ui.components.CreateIoDialog
 import com.example.glasspane.ui.components.EmacsServerStatus
-import com.example.glasspane.ui.components.StatusAdmonition
+import com.example.glasspane.ui.components.NodeAction
 import com.example.glasspane.ui.components.TaskCard
+import com.example.glasspane.ui.components.TransientSheet
 import com.example.glasspane.ui.viewmodels.DashboardViewModel
 import com.example.glasspane.ui.viewmodels.OrgTask
 import com.example.glasspane.ui.viewmodels.SettingsViewModel
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.shape.RoundedCornerShape
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,8 +47,10 @@ fun DashboardScreen(
     val currentParentId by viewModel.currentParentId.collectAsState()
     val hoistedNode by viewModel.hoistedNode.collectAsState()
     val expandedStates by viewModel.expandedStates.collectAsState()
+    val isStructureMode by viewModel.isStructureMode.collectAsState()
 
     var showCaptureDialog by remember { mutableStateOf(false) }
+    var showIoDialog by remember { mutableStateOf(false) }
     var taskToRefile by remember { mutableStateOf<String?>(null) }
     var taskToSchedule by remember { mutableStateOf<String?>(null) }
     var taskDateInitial by remember { mutableStateOf<String?>(null) }
@@ -57,15 +64,70 @@ fun DashboardScreen(
     var taskToAddProperty by remember { mutableStateOf<OrgTask?>(null) }
     var taskToEditBody by remember { mutableStateOf<OrgTask?>(null) }
     
+    // Transient Action Sheet Target
+    var transientTarget by remember { mutableStateOf<OrgTask?>(null) }
+    var showStructureBanner by remember { mutableStateOf(false) }
+
     // For dialog states
     var dialogInputData by remember { mutableStateOf("") }
     var propKeyInput by remember { mutableStateOf("") }
     var propValInput by remember { mutableStateOf("") }
 
-    val availableTags by settingsViewModel.tags.collectAsState()
+    val configTags by settingsViewModel.tags.collectAsState()
+    val availableTags = remember(tasks, configTags) {
+        val tagsFromTasks = tasks.flatMap { it.tags }.map { it.trim(':') }.filter { it.isNotEmpty() }
+        (configTags + tagsFromTasks).toSet().sorted()
+    }
+
     val todoSequence by settingsViewModel.todos.collectAsState()
 
     val haptics = LocalHapticFeedback.current
+
+    // Action Dispatcher
+    val onNodeAction: (NodeAction) -> Unit = { action ->
+        when (action) {
+            // Structure
+            is NodeAction.MoveUp -> viewModel.treeEditTask(action.nodeId, "move-up", null)
+            is NodeAction.MoveDown -> viewModel.treeEditTask(action.nodeId, "move-down", null)
+            is NodeAction.Promote -> viewModel.treeEditTask(action.nodeId, "promote", null)
+            is NodeAction.Demote -> viewModel.treeEditTask(action.nodeId, "demote", null)
+            is NodeAction.InsertChild -> treeEditTarget = Pair(action.nodeId, "insert-child")
+            is NodeAction.InsertBelow -> treeEditTarget = Pair(action.nodeId, "insert-sibling")
+            is NodeAction.Refile -> taskToRefile = action.nodeId
+            is NodeAction.Focus -> viewModel.focusTask(action.task)
+            is NodeAction.Delete -> {
+                viewModel.deleteTask(action.nodeId)
+                if (hoistedNode?.id == action.nodeId) viewModel.goBack() 
+            }
+            
+            // Metadata
+            is NodeAction.EditTitle -> { dialogInputData = action.task.title; taskToEditTitle = action.task }
+            is NodeAction.CycleTodo -> viewModel.toggleTaskStatus(action.nodeId, action.currentState)
+            is NodeAction.PickTodo -> taskToPickTodo = action.task
+            is NodeAction.SetPriority -> { dialogInputData = action.task.priority; taskToSetPriority = action.task }
+            is NodeAction.SetTags -> taskToSetTags = action.task
+            is NodeAction.AddProperty -> { propKeyInput = ""; propValInput = ""; taskToAddProperty = action.task }
+            
+            // Planning
+            is NodeAction.Schedule -> { taskToSchedule = action.nodeId; taskDateInitial = action.initialDate }
+            is NodeAction.ClockIn -> viewModel.clockInTask(action.nodeId)
+            
+            // Body
+            is NodeAction.EditBodyFullScreen -> { dialogInputData = action.task.bodyText; taskToEditBody = action.task }
+            is NodeAction.InlineUpdateBody -> viewModel.updateTaskBody(action.nodeId, action.newBody)
+        }
+    }
+
+    LaunchedEffect(isStructureMode) {
+        if (isStructureMode) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            showStructureBanner = true
+            delay(3000)
+            showStructureBanner = false
+        } else {
+            showStructureBanner = false
+        }
+    }
 
     // Handle system back button when navigated into the tree
     BackHandler(enabled = currentParentId != null) {
@@ -74,13 +136,27 @@ fun DashboardScreen(
 
     Scaffold(
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showCaptureDialog = true },
-                icon = { Icon(Icons.Filled.Add, contentDescription = "Capture") },
-                text = { Text("Capture") },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+            if (!isStructureMode) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    SmallFloatingActionButton(
+                        onClick = { showIoDialog = true },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Icon(Icons.Filled.AccountTree, contentDescription = "Create IO")
+                    }
+                    ExtendedFloatingActionButton(
+                        onClick = { showCaptureDialog = true },
+                        icon = { Icon(Icons.Filled.Add, contentDescription = "Capture") },
+                        text = { Text("Capture") },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
         }
     ) { paddingValues ->
         Column(
@@ -134,6 +210,17 @@ fun DashboardScreen(
                     tint = statusColor
                 )
 
+                // Structure Mode Toggle
+                IconButton(onClick = { viewModel.toggleStructureMode() }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = if (isStructureMode) Icons.Filled.Close else Icons.Filled.AccountTree,
+                        contentDescription = "Structure Mode",
+                        tint = if (isStructureMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                Spacer(Modifier.width(8.dp))
+
                 // Refresh Button
                 IconButton(onClick = { viewModel.fetchTasks() }, modifier = Modifier.size(32.dp)) {
                     Icon(
@@ -151,6 +238,21 @@ fun DashboardScreen(
                         imageVector = Icons.Filled.Settings,
                         contentDescription = "Settings",
                         tint = MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = showStructureBanner) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                ) {
+                    Text(
+                        "Structure Mode — arrows to re-level or move up/down",
+                        modifier = Modifier.padding(12.dp),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.bodyMedium
                     )
                 }
             }
@@ -182,48 +284,13 @@ fun DashboardScreen(
                         shape = MaterialTheme.shapes.medium
                     ) {
                         TaskCard(
-                            title = hoisted.title,
-                            isDone = hoisted.isDone,
-                            hasChildren = hoisted.hasChildren,
-                            todoState = hoisted.status,
-                            priority = hoisted.priority,
-                            tags = hoisted.tags,
-                            scheduled = hoisted.scheduled,
-                            deadline = hoisted.deadline,
-                            effort = hoisted.effort,
-                            level = 1,
+                            task = hoisted.copy(level = 1),
                             isExpanded = true, // Hoisted parents are always expanded to show their body
-                            bodyText = hoisted.bodyText,
-                            onUpdateBody = { newBody -> viewModel.updateTaskBody(hoisted.id, newBody) },
+                            isDocument = hoisted.id.startsWith("file:"),
+                            isStructureMode = isStructureMode,
                             onCardClick = { viewModel.toggleExpand(hoisted) },
-                            onToggleStatus = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.toggleTaskStatus(hoisted.id, hoisted.status)
-                            },
-                            onCycleTodo = { viewModel.toggleTaskStatus(hoisted.id, hoisted.status) },
-                            onPickTodo = { taskToPickTodo = hoisted },
-                            onDelete = { viewModel.deleteTask(hoisted.id); viewModel.goBack() },
-                            onRefile = { taskToRefile = hoisted.id },
-                            onSchedule = {
-                                taskToSchedule = hoisted.id
-                                taskDateInitial = hoisted.scheduled.ifEmpty { hoisted.deadline }
-                            },
-                            onClockIn = { viewModel.clockInTask(hoisted.id) },
-                            onTreeEdit = { action ->
-                                if (action == "insert-child" || action == "insert-sibling") {
-                                    treeEditTarget = Pair(hoisted.id, action)
-                                } else {
-                                    viewModel.treeEditTask(hoisted.id, action, null)
-                                }
-                            },
-                            onFocus = {}, // Cannot focus an already focused node
-                            onEditTitle = { dialogInputData = hoisted.title; taskToEditTitle = hoisted },
-                            onSetPriority = { dialogInputData = hoisted.priority; taskToSetPriority = hoisted },
-                            onSetTags = {
-                                taskToSetTags = hoisted
-                            },
-                            onAddProperty = { propKeyInput = ""; propValInput = ""; taskToAddProperty = hoisted },
-                            onEditBodyFullScreen = { dialogInputData = hoisted.bodyText; taskToEditBody = hoisted }
+                            onLongPress = { transientTarget = hoisted },
+                            onAction = onNodeAction
                         )
                     }
                 }
@@ -235,50 +302,14 @@ fun DashboardScreen(
                 ) {
                     items(tasks, key = { it.id }) { task ->
                         TaskCard(
-                            title = task.title,
-                            isDone = task.isDone,
-                            hasChildren = task.hasChildren,
-                            todoState = task.status,
-                            priority = task.priority,
-                            tags = task.tags,
-                            scheduled = task.scheduled,
-                            deadline = task.deadline,
-                            effort = task.effort,
-                            level = task.level,
+                            task = task,
                             isExpanded = expandedStates.contains(task.id),
                             isDocument = task.id.startsWith("file:"),
-                            bodyText = task.bodyText,
-                            onUpdateBody = { newBody -> viewModel.updateTaskBody(task.id, newBody) },
+                            isDirectory = task.id.startsWith("dir:"),
+                            isStructureMode = isStructureMode,
                             onCardClick = { viewModel.toggleExpand(task) },
-                            onToggleStatus = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.toggleTaskStatus(task.id, task.status)
-                            },
-                            onCycleTodo = { viewModel.toggleTaskStatus(task.id, task.status) },
-                            onPickTodo = { taskToPickTodo = task },
-                            onDelete = { viewModel.deleteTask(task.id) },
-                            onRefile = { taskToRefile = task.id },
-                            onSchedule = {
-                                taskToSchedule = task.id
-                                // Prefer picking scheduled time if available, else try deadline
-                                taskDateInitial = task.scheduled.ifEmpty { task.deadline }
-                            },
-                            onClockIn = { viewModel.clockInTask(task.id) },
-                            onTreeEdit = { action ->
-                                if (action == "insert-child" || action == "insert-sibling") {
-                                    treeEditTarget = Pair(task.id, action)
-                                } else {
-                                    viewModel.treeEditTask(task.id, action, null)
-                                }
-                            },
-                            onFocus = { viewModel.focusTask(task) },
-                            onEditTitle = { dialogInputData = task.title; taskToEditTitle = task },
-                            onSetPriority = { dialogInputData = task.priority; taskToSetPriority = task },
-                            onSetTags = {
-                                taskToSetTags = task
-                            },
-                            onAddProperty = { propKeyInput = ""; propValInput = ""; taskToAddProperty = task },
-                            onEditBodyFullScreen = { dialogInputData = task.bodyText; taskToEditBody = task }
+                            onLongPress = { transientTarget = task },
+                            onAction = onNodeAction
                         )
                     }
                 }
@@ -286,7 +317,15 @@ fun DashboardScreen(
         }
     }
 
-    // --- Dialogs ---
+    // --- Bottom Sheets & Dialogs ---
+
+    transientTarget?.let { task ->
+        TransientSheet(
+            task = task,
+            onDismiss = { transientTarget = null },
+            onAction = onNodeAction
+        )
+    }
 
     if (showCaptureDialog) {
         QuickCaptureDialog(
@@ -295,6 +334,18 @@ fun DashboardScreen(
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 viewModel.captureTask(templateId, fields)
                 showCaptureDialog = false
+            }
+        )
+    }
+
+    if (showIoDialog) {
+        CreateIoDialog(
+            tasks = tasks,
+            focusedNodeId = currentParentId,
+            onDismiss = { showIoDialog = false },
+            onSubmit = { type, target, name ->
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                viewModel.createIO(type, target, name)
             }
         )
     }
@@ -324,7 +375,7 @@ fun DashboardScreen(
     treeEditTarget?.let { (taskId, action) ->
         AlertDialog(
             onDismissRequest = { treeEditTarget = null },
-            title = { Text(if (action == "insert-child") "Add Child Node" else "Add Sibling Node") },
+            title = { Text(if (action == "insert-child") "Add Child Node" else "Add Below") },
             text = {
                 OutlinedTextField(
                     value = treeEditTitle,
@@ -477,7 +528,7 @@ fun DashboardScreen(
                             .padding(vertical = 2.dp)
                     ) {
                         RadioButton(
-                            selected = task.status == "No State",
+                            selected = task.status == "No State" || task.status.isEmpty(),
                             onClick = {
                                 viewModel.setTaskToState(task.id, "")
                                 taskToPickTodo = null

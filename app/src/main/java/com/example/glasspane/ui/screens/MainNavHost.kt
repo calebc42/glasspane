@@ -6,7 +6,9 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.glasspane.ui.viewmodels.DashboardViewModel
 import com.example.glasspane.ui.viewmodels.SettingsViewModel
@@ -28,26 +30,24 @@ enum class GlasspaneTab(
 @Composable
 fun MainNavHost() {
     var selectedTab by remember { mutableStateOf(GlasspaneTab.AGENDA) }
-    var currentScreen by remember { mutableStateOf<String?>(null) } // null means show tab
+    var currentScreen by remember { mutableStateOf<String?>(null) }
     val dashboardViewModel: DashboardViewModel = viewModel()
     val settingsViewModel: SettingsViewModel = viewModel()
 
+    val showTopBar = currentScreen == "settings" || selectedTab == GlasspaneTab.AGENDA
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = if (currentScreen == "settings") "Settings" else when (selectedTab) {
-                            GlasspaneTab.AGENDA -> "Agenda"
-                            GlasspaneTab.TREE -> "Glasspane"
-                            GlasspaneTab.SEARCH -> "Search"
-                        }
+            if (showTopBar) {
+                TopAppBar(
+                    title = {
+                        Text(if (currentScreen == "settings") "Settings" else "Agenda")
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
                     )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
                 )
-            )
+            }
         },
         bottomBar = {
             if (currentScreen == null) {
@@ -69,7 +69,14 @@ fun MainNavHost() {
             }
         }
     ) { innerPadding ->
-        Box(modifier = Modifier.padding(innerPadding)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding()
+                )
+        ) {
             if (currentScreen == "settings") {
                 SettingsScreen(viewModel = settingsViewModel, onNavigateBack = { currentScreen = null })
             } else {

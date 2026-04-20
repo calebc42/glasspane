@@ -163,6 +163,7 @@ fun AgendaScreen(
                         ) { item ->
                             AgendaItemCard(
                                 item = item,
+                                todayStr = todayStr,
                                 onClick = { onNavigateToTask(item.id) },
                                 onToggleTodo = {
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -226,18 +227,21 @@ private fun AgendaDateHeader(date: String, isToday: Boolean) {
 @Composable
 private fun AgendaItemCard(
     item: AgendaItem,
+    todayStr: String,
     onClick: () -> Unit = {},
     onToggleTodo: () -> Unit
 ) {
     val isDone = item.todo.equals("DONE", ignoreCase = true) ||
                  item.todo.equals("CANCELLED", ignoreCase = true)
 
+    val isOverdue = !isDone && item.effectiveDate.isNotEmpty() && item.effectiveDate < todayStr
     val isDeadline = item.itemType == "deadline"
 
     val cardColor by animateColorAsState(
         targetValue = when {
             isDone -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-            isDeadline -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+            isOverdue -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+            isDeadline -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f)
             else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         },
         label = "cardColor"
@@ -265,9 +269,10 @@ private fun AgendaItemCard(
                     .height(40.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(
-                        when (item.itemType) {
-                            "deadline" -> MaterialTheme.colorScheme.error
-                            "scheduled" -> MaterialTheme.colorScheme.primary
+                        when {
+                            isOverdue -> MaterialTheme.colorScheme.error
+                            isDeadline -> MaterialTheme.colorScheme.tertiary
+                            item.itemType == "scheduled" -> MaterialTheme.colorScheme.primary
                             else -> MaterialTheme.colorScheme.outline
                         }
                     )
@@ -285,6 +290,7 @@ private fun AgendaItemCard(
                     contentDescription = "Toggle state",
                     tint = when {
                         isDone -> MaterialTheme.colorScheme.primary
+                        isOverdue -> MaterialTheme.colorScheme.error
                         item.todo == "NEXT" -> MaterialTheme.colorScheme.tertiary
                         item.todo == "WAITING" -> MaterialTheme.colorScheme.secondary
                         else -> MaterialTheme.colorScheme.outline
@@ -305,7 +311,7 @@ private fun AgendaItemCard(
                             text = item.todo,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = stateColor,
+                            color = if (isOverdue && !isDone) MaterialTheme.colorScheme.error else stateColor,
                             modifier = Modifier.padding(end = 6.dp)
                         )
                     }
@@ -329,10 +335,11 @@ private fun AgendaItemCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None,
-                        color = if (isDone)
-                            MaterialTheme.colorScheme.outline
-                        else
-                            MaterialTheme.colorScheme.onSurface
+                        color = when {
+                            isDone -> MaterialTheme.colorScheme.outline
+                            isOverdue -> MaterialTheme.colorScheme.onErrorContainer
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
                     )
                 }
 
@@ -358,10 +365,10 @@ private fun AgendaItemCard(
                             color = MaterialTheme.colorScheme.secondaryContainer
                         ) {
                             Text(
-                                text = ":$tag:",
+                                text = tag,
                                 fontSize = 9.sp,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                             )
                         }
                     }
@@ -378,11 +385,18 @@ private fun AgendaItemCard(
             }
 
             // Deadline/Scheduled indicator icon
-            if (isDeadline) {
+            if (isOverdue) {
                 Icon(
                     imageVector = Icons.Filled.Warning,
-                    contentDescription = "Deadline",
+                    contentDescription = "Overdue",
                     tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(16.dp)
+                )
+            } else if (isDeadline) {
+                Icon(
+                    imageVector = Icons.Filled.Event,
+                    contentDescription = "Deadline",
+                    tint = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.size(16.dp)
                 )
             }

@@ -212,6 +212,23 @@ class DashboardViewModel : ViewModel() {
         }
     }
 
+    fun createIO(type: String, target: String, name: String) {
+        viewModelScope.launch {
+            try {
+                val params = mapOf(
+                    "type" to type,
+                    "target" to target,
+                    "name" to name
+                )
+                val result = EmacsClient.post("/glasspane-create-io", params)
+                if (result != null) refreshCurrentView()
+            } catch (e: Exception) {
+                Log.e("GlasspaneNetwork", "Failed to create IO", e)
+            }
+        }
+    }
+
+
     fun refileTask(sourceId: String, targetId: String) {
         viewModelScope.launch {
             try {

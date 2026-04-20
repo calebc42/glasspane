@@ -42,6 +42,13 @@ class DashboardViewModel : ViewModel() {
     private val _hoistedNode = MutableStateFlow<OrgTask?>(null)
     val hoistedNode: StateFlow<OrgTask?> = _hoistedNode.asStateFlow()
 
+    // --- Structure Mode State ---
+    private val _isStructureMode = MutableStateFlow(false)
+    val isStructureMode: StateFlow<Boolean> = _isStructureMode.asStateFlow()
+
+    fun toggleStructureMode() { _isStructureMode.value = !_isStructureMode.value }
+    fun exitStructureMode() { _isStructureMode.value = false }
+
     // --- Navigation State ---
     private val _currentParentId = MutableStateFlow<String?>(null)
     val currentParentId: StateFlow<String?> = _currentParentId.asStateFlow()

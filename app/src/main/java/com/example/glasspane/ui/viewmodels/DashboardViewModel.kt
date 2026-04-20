@@ -177,6 +177,19 @@ class DashboardViewModel : ViewModel() {
         }
     }
 
+    fun setTaskToState(taskId: String, state: String) {
+        viewModelScope.launch {
+            try {
+                val result = EmacsClient.post("/glasspane-set-todo", mapOf("id" to taskId, "state" to state))
+                if (result != null) {
+                    refreshCurrentView()
+                }
+            } catch (e: Exception) {
+                Log.e("GlasspaneNetwork", "Failed to set TODO state", e)
+            }
+        }
+    }
+
     fun captureTask(templateId: String, fields: Map<String, String>) {
         viewModelScope.launch {
             try {
@@ -253,6 +266,63 @@ class DashboardViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("GlasspaneNetwork", "Failed tree edit", e)
             }
+        }
+    }
+
+    fun updateTaskTitle(id: String, newTitle: String) {
+        viewModelScope.launch {
+            try {
+                // Optimistically update the title locally
+                fun updateInList(list: MutableList<OrgTask>): Boolean {
+                    for (i in list.indices) {
+                        if (list[i].id == id) {
+                            list[i] = list[i].copy(title = newTitle)
+                            return true
+                        }
+                    }
+                    return false
+                }
+                if (!updateInList(rootTasks)) {
+                    for (entry in childrenMap) {
+                        val ml = entry.value.toMutableList()
+                        if (updateInList(ml)) {
+                            childrenMap[entry.key] = ml
+                            break
+                        }
+                    }
+                }
+                updateFlattened()
+                
+                EmacsClient.post("/glasspane-update-title", mapOf("id" to id, "val" to newTitle))
+                refreshCurrentView()
+            } catch (e: Exception) {}
+        }
+    }
+
+    fun setTaskPriority(id: String, priority: String) {
+        viewModelScope.launch {
+            try {
+                EmacsClient.post("/glasspane-set-priority", mapOf("id" to id, "priority" to priority))
+                refreshCurrentView()
+            } catch (e: Exception) {}
+        }
+    }
+
+    fun setTaskTags(id: String, tags: String) {
+        viewModelScope.launch {
+            try {
+                EmacsClient.post("/glasspane-set-tags", mapOf("id" to id, "tags" to tags))
+                refreshCurrentView()
+            } catch (e: Exception) {}
+        }
+    }
+
+    fun addTaskProperty(id: String, prop: String, value: String) {
+        viewModelScope.launch {
+            try {
+                EmacsClient.post("/glasspane-update", mapOf("id" to id, "prop" to prop, "val" to value))
+                refreshCurrentView()
+            } catch (e: Exception) {}
         }
     }
 

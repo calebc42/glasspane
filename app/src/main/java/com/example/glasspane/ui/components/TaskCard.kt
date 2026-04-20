@@ -1,6 +1,7 @@
 package com.example.glasspane.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,12 +31,19 @@ fun TaskCard(
     hasChildren: Boolean,
     onCardClick: () -> Unit,
     onToggleStatus: () -> Unit,
+    onCycleTodo: () -> Unit = {},
+    onPickTodo: () -> Unit = {},
     onDelete: () -> Unit,
     onRefile: () -> Unit = {},
     onSchedule: () -> Unit = {},
     onClockIn: () -> Unit = {},
     onTreeEdit: (String) -> Unit = {},
     onFocus: () -> Unit = {},
+    onEditTitle: () -> Unit = {},
+    onSetPriority: () -> Unit = {},
+    onSetTags: () -> Unit = {},
+    onAddProperty: () -> Unit = {},
+    onEditBodyFullScreen: () -> Unit = {},
     modifier: Modifier = Modifier,
     todoState: String = "",
     priority: String = "",
@@ -100,13 +108,24 @@ fun TaskCard(
                         modifier = Modifier.size(24.dp).padding(end = 6.dp)
                     )
                 } else if (!hasChildren) {
-                    IconButton(
-                        onClick = onToggleStatus,
-                        modifier = Modifier.size(36.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .combinedClickable(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onCycleTodo()
+                                },
+                                onLongClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onPickTodo()
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (isDone) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
-                            contentDescription = "Toggle Status",
+                            contentDescription = "Cycle TODO State (tap) / Pick State (hold)",
                             tint = if (isDone) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                         )
                     }
@@ -128,7 +147,18 @@ fun TaskCard(
                     Surface(
                         shape = RoundedCornerShape(4.dp),
                         color = stateColor.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(end = 8.dp)
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .combinedClickable(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onCycleTodo()
+                                },
+                                onLongClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onPickTodo()
+                                }
+                            )
                     ) {
                         Text(
                             text = todoState,
@@ -221,6 +251,11 @@ fun TaskCard(
                             }
                         )
                         HorizontalDivider()
+                        DropdownMenuItem(text = { Text("Edit Title") }, onClick = { showMenu = false; onEditTitle() })
+                        DropdownMenuItem(text = { Text("Set Priority") }, onClick = { showMenu = false; onSetPriority() })
+                        DropdownMenuItem(text = { Text("Set Tags") }, onClick = { showMenu = false; onSetTags() })
+                        DropdownMenuItem(text = { Text("Add Property") }, onClick = { showMenu = false; onAddProperty() })
+                        HorizontalDivider()
                         DropdownMenuItem(text = { Text("Move Up") }, onClick = { showMenu = false; onTreeEdit("move-up") })
                         DropdownMenuItem(text = { Text("Move Down") }, onClick = { showMenu = false; onTreeEdit("move-down") })
                         DropdownMenuItem(text = { Text("Promote") }, onClick = { showMenu = false; onTreeEdit("promote") })
@@ -257,7 +292,7 @@ fun TaskCard(
                             color = MaterialTheme.colorScheme.secondaryContainer
                         ) {
                             Text(
-                                text = ":$tag:",
+                                text = tag.trim(':'),
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
@@ -314,7 +349,7 @@ fun TaskCard(
                 val lines = bodyText.split("\n")
                 // Truncate to 10 lines if explicitly required by user logic, but they wanted drill-down. 
                 // We'll show all of it when expanded, but it's hidden normally!
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp).combinedClickable(onClick = { onEditBodyFullScreen() }, onLongClick = {showMenu = true})) {
                     for (line in lines) {
                         val checkboxMatch = Regex("^(\\s*)- \\[( |X|\\-)\\] (.*)$").find(line)
                         if (checkboxMatch != null) {

@@ -9,6 +9,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -501,8 +503,33 @@ fun RenderNode(
     val childElements = element.optJSONArray("elements") ?: JSONArray()
     val isActiveClock = clockState.activeClockId == id
 
+    val todo = element.optString("todo")
+    val priority = element.optString("priority")
+    val tags = element.optJSONArray("tags")
+    val currentTitle = remember(childElements) {
+        var t = ""
+        for (i in 0 until childElements.length()) {
+            val el = childElements.getJSONObject(i)
+            if (el.optString("type") == "Text" && el.optString("size") == "Title") {
+                t = el.optString("value")
+                break
+            }
+        }
+        t
+    }
+
     var showAddDialog by remember { mutableStateOf<String?>(null) }
+    var showEditTitleDialog by remember { mutableStateOf(false) }
+    var showSetPriorityDialog by remember { mutableStateOf(false) }
+    var showSetTagsDialog by remember { mutableStateOf(false) }
+    var showAddPropertyDialog by remember { mutableStateOf(false) }
+
     var titleInput by remember { mutableStateOf("") }
+    var priorityInput by remember { mutableStateOf("") }
+    var tagsInput by remember { mutableStateOf("") }
+    var propKeyInput by remember { mutableStateOf("") }
+    var propValInput by remember { mutableStateOf("") }
+
     val coroutineScope = rememberCoroutineScope()
     
     val executeTreeAction: (String, String?) -> Unit = { action, title ->
@@ -522,6 +549,24 @@ fun RenderNode(
             }
             onRefresh()
             onSnackbar("Action: $action")
+        }
+    }
+
+    val executeNetworkEdit: (String, Map<String, String>) -> Unit = { endpoint, params ->
+        coroutineScope.launch {
+            val formBuilder = FormBody.Builder().add("id", id)
+            params.forEach { (k, v) -> formBuilder.add(k, v) }
+            val request = Request.Builder()
+                .url("http://127.0.0.1:8080$endpoint")
+                .post(formBuilder.build())
+                .build()
+            withContext(Dispatchers.IO) {
+                try {
+                    okHttpClient.newCall(request).execute()
+                } catch (e: Exception) {}
+            }
+            onRefresh()
+            onSnackbar("Updated successfully")
         }
     }
 
@@ -555,6 +600,33 @@ fun RenderNode(
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
                 }
+
+                // Inline Chips
+                if (todo.isNotEmpty() || priority.isNotEmpty() || (tags != null && tags.length() > 0)) {
+                    Row(
+                        modifier = Modifier.padding(bottom = 6.dp).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (todo.isNotEmpty()) {
+                            Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
+                                Text(todo, color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                        if (priority.isNotEmpty()) {
+                            Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small) {
+                                Text("[$priority]", color = MaterialTheme.colorScheme.onTertiaryContainer, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                        if (tags != null && tags.length() > 0) {
+                            for (i in 0 until tags.length()) {
+                                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
+                                    Text(":${tags.getString(i)}:", color = MaterialTheme.colorScheme.onSecondaryContainer, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
                 for (i in 0 until childElements.length()) {
                     // Pass onClockAction down; stop click propagation inside RenderElement
                     // by wrapping buttons in a non-propagating container (handled in RenderElement).
@@ -586,8 +658,19 @@ fun RenderNode(
                         Icon(Icons.Default.MoreVert, contentDescription = "Options")
                     }
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        DropdownMenuItem(text = { Text("Add Child") }, onClick = { expanded = false; showAddDialog = "insert-child" })
-                        DropdownMenuItem(text = { Text("Add Sibling") }, onClick = { expanded = false; showAddDialog = "insert-sibling" })
+                        DropdownMenuItem(text = { Text("Edit Title") }, onClick = { expanded = false; titleInput = currentTitle; showEditTitleDialog = true })
+                        DropdownMenuItem(text = { Text("Set Priority") }, onClick = { expanded = false; priorityInput = priority; showSetPriorityDialog = true })
+                        DropdownMenuItem(text = { Text("Set Tags") }, onClick = { 
+                            expanded = false
+                            val tagsList = mutableListOf<String>()
+                            if (tags != null) for (i in 0 until tags.length()) tagsList.add(tags.getString(i))
+                            tagsInput = if(tagsList.isEmpty()) "" else ":" + tagsList.joinToString(":") + ":"
+                            showSetTagsDialog = true 
+                        })
+                        DropdownMenuItem(text = { Text("Add Property") }, onClick = { expanded = false; propKeyInput = ""; propValInput = ""; showAddPropertyDialog = true })
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text("Add Child") }, onClick = { expanded = false; titleInput = ""; showAddDialog = "insert-child" })
+                        DropdownMenuItem(text = { Text("Add Sibling") }, onClick = { expanded = false; titleInput = ""; showAddDialog = "insert-sibling" })
                         DropdownMenuItem(text = { Text("Move Up") }, onClick = { expanded = false; executeTreeAction("move-up", null) })
                         DropdownMenuItem(text = { Text("Move Down") }, onClick = { expanded = false; executeTreeAction("move-down", null) })
                         DropdownMenuItem(text = { Text("Promote") }, onClick = { expanded = false; executeTreeAction("promote", null) })
@@ -621,6 +704,72 @@ fun RenderNode(
             dismissButton = {
                 TextButton(onClick = { showAddDialog = null }) { Text("Cancel") }
             }
+        )
+    }
+
+    if (showEditTitleDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditTitleDialog = false },
+            title = { Text("Edit Title") },
+            text = { OutlinedTextField(value = titleInput, onValueChange = { titleInput = it }, singleLine = true) },
+            confirmButton = {
+                Button(onClick = {
+                    showEditTitleDialog = false
+                    executeNetworkEdit("/glasspane-update-title", mapOf("val" to titleInput))
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showEditTitleDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showSetPriorityDialog) {
+        AlertDialog(
+            onDismissRequest = { showSetPriorityDialog = false },
+            title = { Text("Set Priority") },
+            text = { OutlinedTextField(value = priorityInput, onValueChange = { priorityInput = it }, label = { Text("A, B, C, or Space") }, singleLine = true) },
+            confirmButton = {
+                Button(onClick = {
+                    showSetPriorityDialog = false
+                    executeNetworkEdit("/glasspane-set-priority", mapOf("priority" to priorityInput))
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showSetPriorityDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showSetTagsDialog) {
+        AlertDialog(
+            onDismissRequest = { showSetTagsDialog = false },
+            title = { Text("Set Tags") },
+            text = { OutlinedTextField(value = tagsInput, onValueChange = { tagsInput = it }, label = { Text(":tag1:tag2:") }, singleLine = true) },
+            confirmButton = {
+                Button(onClick = {
+                    showSetTagsDialog = false
+                    executeNetworkEdit("/glasspane-set-tags", mapOf("tags" to tagsInput))
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showSetTagsDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showAddPropertyDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddPropertyDialog = false },
+            title = { Text("Add Property") },
+            text = {
+                Column {
+                    OutlinedTextField(value = propKeyInput, onValueChange = { propKeyInput = it }, label = { Text("Property Key") }, singleLine = true)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = propValInput, onValueChange = { propValInput = it }, label = { Text("Value") }, singleLine = true)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showAddPropertyDialog = false
+                    executeNetworkEdit("/glasspane-update", mapOf("prop" to propKeyInput, "val" to propValInput))
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { showAddPropertyDialog = false }) { Text("Cancel") } }
         )
     }
 }
@@ -710,25 +859,47 @@ fun RenderElement(
             var text by remember { mutableStateOf(value) }
 
             if (isEditing) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            isEditing = false
-                            executeNetworkAction(text)
-                        }) {
-                            if (isLoading) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Filled.Check, contentDescription = "Save", tint = MaterialTheme.colorScheme.primary)
-                            }
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { if (!isLoading) isEditing = false },
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Scaffold(
+                        topBar = {
+                            @OptIn(ExperimentalMaterial3Api::class)
+                            TopAppBar(
+                                title = { Text("Edit Body") },
+                                navigationIcon = {
+                                    IconButton(onClick = { if (!isLoading) isEditing = false }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
+                                    }
+                                },
+                                actions = {
+                                    if (isLoading) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(end = 16.dp))
+                                    } else {
+                                        Button(
+                                            onClick = {
+                                                executeNetworkAction(text)
+                                                isEditing = false
+                                            },
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        ) {
+                                            Text("Save")
+                                        }
+                                    }
+                                }
+                            )
                         }
-                    },
-                    maxLines = 10,
-                    enabled = !isLoading
-                )
+                    ) { padding ->
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { text = it },
+                            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+                            enabled = !isLoading,
+                            placeholder = { Text("Enter notes here...") }
+                        )
+                    }
+                }
             } else {
                 if (value.isEmpty()) {
                     Text(

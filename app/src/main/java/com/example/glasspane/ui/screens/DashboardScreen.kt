@@ -2,6 +2,7 @@ package com.example.glasspane.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -21,13 +22,19 @@ import com.example.glasspane.ui.components.EmacsServerStatus
 import com.example.glasspane.ui.components.StatusAdmonition
 import com.example.glasspane.ui.components.TaskCard
 import com.example.glasspane.ui.viewmodels.DashboardViewModel
+import com.example.glasspane.ui.viewmodels.OrgTask
+import com.example.glasspane.ui.viewmodels.SettingsViewModel
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
-    viewModel: DashboardViewModel = viewModel()
+    viewModel: DashboardViewModel = viewModel(),
+    settingsViewModel: SettingsViewModel = viewModel(),
+    onOpenSettings: () -> Unit = {}
 ) {
     // Observe state from the ViewModel
     val serverStatus by viewModel.serverStatus.collectAsState()
@@ -42,6 +49,21 @@ fun DashboardScreen(
     var taskDateInitial by remember { mutableStateOf<String?>(null) }
     var treeEditTarget by remember { mutableStateOf<Pair<String, String>?>(null) } // Pair(nodeId, action)
     var treeEditTitle by remember { mutableStateOf("") }
+
+    var taskToEditTitle by remember { mutableStateOf<OrgTask?>(null) }
+    var taskToSetPriority by remember { mutableStateOf<OrgTask?>(null) }
+    var taskToSetTags by remember { mutableStateOf<OrgTask?>(null) }
+    var taskToPickTodo by remember { mutableStateOf<OrgTask?>(null) }
+    var taskToAddProperty by remember { mutableStateOf<OrgTask?>(null) }
+    var taskToEditBody by remember { mutableStateOf<OrgTask?>(null) }
+    
+    // For dialog states
+    var dialogInputData by remember { mutableStateOf("") }
+    var propKeyInput by remember { mutableStateOf("") }
+    var propValInput by remember { mutableStateOf("") }
+
+    val availableTags by settingsViewModel.tags.collectAsState()
+    val todoSequence by settingsViewModel.todos.collectAsState()
 
     val haptics = LocalHapticFeedback.current
 
@@ -120,6 +142,17 @@ fun DashboardScreen(
                         tint = MaterialTheme.colorScheme.outline
                     )
                 }
+
+                Spacer(Modifier.width(8.dp))
+                
+                // Settings Button
+                IconButton(onClick = onOpenSettings, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                }
             }
 
             // --- The Dynamic List ---
@@ -167,6 +200,8 @@ fun DashboardScreen(
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 viewModel.toggleTaskStatus(hoisted.id, hoisted.status)
                             },
+                            onCycleTodo = { viewModel.toggleTaskStatus(hoisted.id, hoisted.status) },
+                            onPickTodo = { taskToPickTodo = hoisted },
                             onDelete = { viewModel.deleteTask(hoisted.id); viewModel.goBack() },
                             onRefile = { taskToRefile = hoisted.id },
                             onSchedule = {
@@ -181,7 +216,14 @@ fun DashboardScreen(
                                     viewModel.treeEditTask(hoisted.id, action, null)
                                 }
                             },
-                            onFocus = {} // Cannot focus an already focused node
+                            onFocus = {}, // Cannot focus an already focused node
+                            onEditTitle = { dialogInputData = hoisted.title; taskToEditTitle = hoisted },
+                            onSetPriority = { dialogInputData = hoisted.priority; taskToSetPriority = hoisted },
+                            onSetTags = {
+                                taskToSetTags = hoisted
+                            },
+                            onAddProperty = { propKeyInput = ""; propValInput = ""; taskToAddProperty = hoisted },
+                            onEditBodyFullScreen = { dialogInputData = hoisted.bodyText; taskToEditBody = hoisted }
                         )
                     }
                 }
@@ -212,6 +254,8 @@ fun DashboardScreen(
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 viewModel.toggleTaskStatus(task.id, task.status)
                             },
+                            onCycleTodo = { viewModel.toggleTaskStatus(task.id, task.status) },
+                            onPickTodo = { taskToPickTodo = task },
                             onDelete = { viewModel.deleteTask(task.id) },
                             onRefile = { taskToRefile = task.id },
                             onSchedule = {
@@ -227,7 +271,14 @@ fun DashboardScreen(
                                     viewModel.treeEditTask(task.id, action, null)
                                 }
                             },
-                            onFocus = { viewModel.focusTask(task) }
+                            onFocus = { viewModel.focusTask(task) },
+                            onEditTitle = { dialogInputData = task.title; taskToEditTitle = task },
+                            onSetPriority = { dialogInputData = task.priority; taskToSetPriority = task },
+                            onSetTags = {
+                                taskToSetTags = task
+                            },
+                            onAddProperty = { propKeyInput = ""; propValInput = ""; taskToAddProperty = task },
+                            onEditBodyFullScreen = { dialogInputData = task.bodyText; taskToEditBody = task }
                         )
                     }
                 }
@@ -294,5 +345,212 @@ fun DashboardScreen(
                 TextButton(onClick = { treeEditTarget = null }) { Text("Cancel") }
             }
         )
+    }
+
+    taskToEditTitle?.let { task ->
+        AlertDialog(
+            onDismissRequest = { taskToEditTitle = null },
+            title = { Text("Edit Title") },
+            text = { OutlinedTextField(value = dialogInputData, onValueChange = { dialogInputData = it }, singleLine = true) },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.updateTaskTitle(task.id, dialogInputData)
+                    taskToEditTitle = null
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { taskToEditTitle = null }) { Text("Cancel") } }
+        )
+    }
+
+    taskToSetPriority?.let { task ->
+        AlertDialog(
+            onDismissRequest = { taskToSetPriority = null },
+            title = { Text("Set Priority") },
+            text = { OutlinedTextField(value = dialogInputData, onValueChange = { dialogInputData = it }, label = { Text("A, B, C, or Space") }, singleLine = true) },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.setTaskPriority(task.id, dialogInputData)
+                    taskToSetPriority = null
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { taskToSetPriority = null }) { Text("Cancel") } }
+        )
+    }
+
+    taskToSetTags?.let { task ->
+        // Track selected tags as a mutable set, seeded from task's current tags
+        var selectedTags by remember(task.id) {
+            mutableStateOf(task.tags.map { it.trim(':') }.toSet())
+        }
+        var customTag by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { taskToSetTags = null },
+            title = { Text("Set Tags") },
+            text = {
+                Column {
+                    if (availableTags.isNotEmpty()) {
+                        Text("Tap to toggle:", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.outline)
+                        Spacer(Modifier.height(8.dp))
+                        @OptIn(ExperimentalLayoutApi::class)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            availableTags.forEach { tag ->
+                                val isSelected = selectedTags.contains(tag)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        selectedTags = if (isSelected) selectedTags - tag else selectedTags + tag
+                                    },
+                                    label = { Text(tag) }
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    OutlinedTextField(
+                        value = customTag,
+                        onValueChange = { customTag = it },
+                        label = { Text("Add custom tag") },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (customTag.isNotBlank()) {
+                                IconButton(onClick = {
+                                    selectedTags = selectedTags + customTag.trim()
+                                    customTag = ""
+                                }) { Icon(Icons.Filled.Add, "Add") }
+                            }
+                        }
+                    )
+                    if (selectedTags.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Selected: ${selectedTags.joinToString(", ")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val tagStr = if (selectedTags.isEmpty()) "" else ":${selectedTags.joinToString(":")}:"
+                    viewModel.setTaskTags(task.id, tagStr)
+                    taskToSetTags = null
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { taskToSetTags = null }) { Text("Cancel") } }
+        )
+    }
+
+    taskToPickTodo?.let { task ->
+        val activeStates = todoSequence.filter { it != "|" }
+        AlertDialog(
+            onDismissRequest = { taskToPickTodo = null },
+            title = { Text("Set TODO State") },
+            text = {
+                Column {
+                    activeStates.forEach { state ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                        ) {
+                            RadioButton(
+                                selected = task.status == state,
+                                onClick = {
+                                    viewModel.setTaskToState(task.id, state)
+                                    taskToPickTodo = null
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(state, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                    ) {
+                        RadioButton(
+                            selected = task.status == "No State",
+                            onClick = {
+                                viewModel.setTaskToState(task.id, "")
+                                taskToPickTodo = null
+                            }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("(No State)", style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.outline)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { taskToPickTodo = null }) { Text("Close") } }
+        )
+    }
+
+    taskToAddProperty?.let { task ->
+        AlertDialog(
+            onDismissRequest = { taskToAddProperty = null },
+            title = { Text("Add Property") },
+            text = {
+                Column {
+                    OutlinedTextField(value = propKeyInput, onValueChange = { propKeyInput = it }, label = { Text("Property Key") }, singleLine = true)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = propValInput, onValueChange = { propValInput = it }, label = { Text("Value") }, singleLine = true)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.addTaskProperty(task.id, propKeyInput, propValInput)
+                    taskToAddProperty = null
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { taskToAddProperty = null }) { Text("Cancel") } }
+        )
+    }
+
+    taskToEditBody?.let { task ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { taskToEditBody = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Scaffold(
+                topBar = {
+                    @OptIn(ExperimentalMaterial3Api::class)
+                    TopAppBar(
+                        title = { Text("Edit Body") },
+                        navigationIcon = {
+                            IconButton(onClick = { taskToEditBody = null }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
+                            }
+                        },
+                        actions = {
+                            Button(
+                                onClick = {
+                                    viewModel.updateTaskBody(task.id, dialogInputData)
+                                    taskToEditBody = null
+                                },
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Text("Save")
+                            }
+                        }
+                    )
+                }
+            ) { padding ->
+                OutlinedTextField(
+                    value = dialogInputData,
+                    onValueChange = { dialogInputData = it },
+                    modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+                    placeholder = { Text("Enter notes here...") }
+                )
+            }
+        }
     }
 }

@@ -97,6 +97,42 @@
   "Return a list of all .org files in `glasspane-org-dir'."
   (directory-files-recursively (expand-file-name glasspane-org-dir) "\\.org$"))
 
+(defvar glasspane-config-file (expand-file-name "glasspane-config.json" user-emacs-directory)
+  "Path to the Glasspane JSON configuration file.")
+
+(defun glasspane--load-config ()
+  "Load glasspane config from JSON and apply to org variables."
+  (when (file-exists-p glasspane-config-file)
+    (condition-case err
+        (let* ((json-object-type 'alist)
+               (json-array-type 'list)
+               (json-key-type 'string)
+               (config (json-read-file glasspane-config-file))
+               (templates (cdr (assoc "capture_templates" config)))
+               (tags (cdr (assoc "tags" config)))
+               (todos (cdr (assoc "todo_keywords" config))))
+               
+          (when (and templates (listp templates))
+            (setq org-capture-templates
+                  (mapcar (lambda (tmpl)
+                            (list (cdr (assoc "id" tmpl))
+                                  (cdr (assoc "title" tmpl))
+                                  'entry
+                                  (list 'file (cdr (assoc "file" tmpl)))
+                                  (cdr (assoc "content" tmpl))
+                                  :empty-lines 1))
+                          templates)))
+                          
+          (when (and tags (vectorp tags))
+            (setq org-tag-alist (mapcar (lambda (t-str) (cons t-str nil)) (append tags nil))))
+            
+          (when (and todos (vectorp todos))
+            (setq org-todo-keywords `((sequence ,@(append todos nil))))))
+      (error (message "Glasspane: Error loading config JSON: %s" (error-message-string err))))))
+
+;; Load it at boot
+(glasspane--load-config)
+
 ;; Build the ID location database once at load time, not per-request.
 (org-id-update-id-locations (glasspane-get-org-files))
 
@@ -336,6 +372,18 @@ If the node is not found, sends a JSON error to PROC."
       (glasspane--json-error proc "Missing id"))))
 (defalias 'httpd/glasspane-update-body/ 'httpd/glasspane-update-body)
 
+(defun httpd/glasspane-update-title (proc path query request)
+  "Update the title/headline of a node."
+  (let ((id (glasspane--extract-query "id" query))
+        (val (glasspane--extract-query "val" query)))
+    (if (or (null id) (null val))
+        (glasspane--json-error proc "Missing id or val")
+      (with-glasspane-node proc id
+        (org-back-to-heading t)
+        (org-edit-headline val)
+        (glasspane--json-success proc)))))
+(defalias 'httpd/glasspane-update-title/ 'httpd/glasspane-update-title)
+
 (defun httpd/glasspane-capture-templates (proc path query request)
   "Serve parsed org-capture templates to Android."
   (with-httpd-buffer proc "application/json"
@@ -347,6 +395,70 @@ If the node is not found, sends a JSON error to PROC."
   (push query glasspane-task-queue)
   (glasspane--json-success proc '((status . "queued"))))
 (defalias 'httpd/glasspane-capture/ 'httpd/glasspane-capture)
+
+(defun glasspane--seed-capture-templates ()
+  "Convert the global org-capture-templates into the JSON format."
+  (let ((items '()))
+    (dolist (tpl org-capture-templates)
+      (let* ((key (nth 0 tpl))
+             (desc (nth 1 tpl))
+             (file-expr (nth 3 tpl))
+             (file (if (and (listp file-expr) (eq (car file-expr) 'file))
+                       (cadr file-expr)
+                     ""))
+             (content (nth 4 tpl)))
+        (when (stringp content)
+          (push `((id . ,key)
+                  (title . ,desc)
+                  (file . ,file)
+                  (content . ,content))
+                items))))
+    (vconcat (reverse items))))
+
+(defun glasspane--seed-tags ()
+  "Convert the global org-tag-alist into an array of strings."
+  (let ((tags '()))
+    (dolist (item org-tag-alist)
+      (when (and (consp item) (stringp (car item)))
+        (push (car item) tags)))
+    (if tags (vconcat (reverse tags)) [])))
+
+(defun glasspane--seed-todos ()
+  "Extract the first todo sequence into an array of strings."
+  (if org-todo-keywords
+      (let* ((seq (car org-todo-keywords))
+             (items (cdr seq)))
+        (vconcat items))
+    ["TODO" "|" "DONE"]))
+
+(defun httpd/glasspane-config-get (proc path query request)
+  "Return the current configuration JSON.
+  If glasspane-config.json does not exist, seeds it dynamically from org-capture-templates."
+  (let ((config (if (file-exists-p glasspane-config-file)
+                    (let* ((json-object-type 'alist)
+                           (json-array-type 'vector)
+                           (json-key-type 'string))
+                      (json-read-file glasspane-config-file))
+                  `((capture_templates . ,(glasspane--seed-capture-templates))
+                    (tags . ,(glasspane--seed-tags))
+                    (todo_keywords . ,(glasspane--seed-todos))))))
+    (with-httpd-buffer proc "application/json"
+      (insert (json-encode config)))))
+(defalias 'httpd/glasspane-config-get/ 'httpd/glasspane-config-get)
+
+(defun httpd/glasspane-config-set (proc path query request)
+  "Save the configuration JSON payload and reload it into Emacs."
+  (let ((payload (glasspane--extract-query "payload" query)))
+    (if payload
+        (unwind-protect
+            (progn
+              (with-temp-file glasspane-config-file
+                (insert payload))
+              (glasspane--load-config)
+              (glasspane--json-success proc))
+          (error (glasspane--json-error proc "Could not save config")))
+      (glasspane--json-error proc "Missing payload"))))
+(defalias 'httpd/glasspane-config-set/ 'httpd/glasspane-config-set)
 
 ;; --- 7b. TODO STATE DISCOVERY ---
 (defun glasspane-get-todo-keywords ()

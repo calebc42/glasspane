@@ -32,7 +32,9 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgendaScreen(
-    viewModel: AgendaViewModel = viewModel()
+    viewModel: AgendaViewModel = viewModel(),
+    onNavigateToTask: (String) -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val haptics = LocalHapticFeedback.current
@@ -66,6 +68,14 @@ fun AgendaScreen(
                 Icon(
                     imageVector = Icons.Filled.Refresh,
                     contentDescription = "Refresh Agenda",
+                    tint = MaterialTheme.colorScheme.outline
+                )
+            }
+
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Agenda Settings",
                     tint = MaterialTheme.colorScheme.outline
                 )
             }
@@ -153,6 +163,7 @@ fun AgendaScreen(
                         ) { item ->
                             AgendaItemCard(
                                 item = item,
+                                onClick = { onNavigateToTask(item.id) },
                                 onToggleTodo = {
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                     viewModel.cycleTodoState(item.id)
@@ -215,6 +226,7 @@ private fun AgendaDateHeader(date: String, isToday: Boolean) {
 @Composable
 private fun AgendaItemCard(
     item: AgendaItem,
+    onClick: () -> Unit = {},
     onToggleTodo: () -> Unit
 ) {
     val isDone = item.todo.equals("DONE", ignoreCase = true) ||
@@ -234,7 +246,8 @@ private fun AgendaItemCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = 3.dp)
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = cardColor),
         shape = RoundedCornerShape(8.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)

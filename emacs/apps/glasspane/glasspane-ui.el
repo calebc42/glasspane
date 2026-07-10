@@ -363,15 +363,14 @@ Reads the memoised day extraction, so a push recomputes nothing; nil
         (jetpacs-fab "add" :label "Capture"
                   :on-tap (jetpacs-action "org.capture.show"))))
 
-;; Search from every tab's top bar; Settings from the drawer.  (There
-;; used to be a second filter_list icon here doing the same switch —
-;; one affordance per destination.)
+;; Search from every tab's top bar.  (There used to be a second
+;; filter_list icon here doing the same switch — one affordance per
+;; destination.)  Settings needs no registration: the core's stock
+;; drawer entry targets the view NAME, so it reaches the richer
+;; "settings" view this app defines in place of the stock one.
 (jetpacs-shell-add-top-action
  10 (lambda () (jetpacs-icon-button "search" (jetpacs-shell-switch-view "search")
                                  :content-description "Search")))
-(jetpacs-shell-add-drawer-item
- 60 (lambda () (jetpacs-drawer-item "settings" "Settings"
-                                 (jetpacs-shell-switch-view "settings"))))
 
 ;; The org extractions are memoised; an explicit refresh (pull-to-refresh,
 ;; the drawer item, a queue drain) must drop them.

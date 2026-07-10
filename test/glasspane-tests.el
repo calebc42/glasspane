@@ -23,7 +23,6 @@
 (require 'jetpacs-triggers)
 (require 'jetpacs-device)
 (require 'jetpacs-apps)
-(require 'jetpacs-automations)
 (require 'jetpacs-widgets)
 (require 'jetpacs-lint)
 (require 'jetpacs-shell)
@@ -1213,26 +1212,6 @@ Only run this after an INTENTIONAL wire-format change; review the diff."
   (with-temp-file jetpacs-tests--golden-file
     (insert (string-join (jetpacs-tests--widget-lines) "\n") "\n"))
   (message "Wrote %s" jetpacs-tests--golden-file))
-
-;; ─── Triggers & device capabilities (SPEC §10–§11) ──────────────────────────
-
-(ert-deftest jetpacs-automations-view-renders ()
-  "The Automations view builds for both the empty and populated registry."
-  (let ((jetpacs-triggers--table (make-hash-table :test 'equal))
-        (jetpacs-triggers--last-fired (make-hash-table :test 'equal))
-        (jetpacs-triggers-disabled nil))
-    (should (jetpacs-automations--view nil))   ; empty state
-    (jetpacs-deftrigger test/view
-      :type "battery.level" :params '((below . 20))
-      :policy "drop" :throttle-s 300 :handler #'ignore)
-    (let ((json (json-serialize
-                 (jetpacs-tests--canon (jetpacs-automations--view "snack"))
-                 :null-object :null :false-object :false)))
-      (should (string-search "test/view" json))
-      (should (string-search "trigger.toggle" json))
-      (should (string-search "trigger.test" json))
-      (should (string-search "Never fired" json))
-      (should (string-search "below=20" json)))))
 
 ;; ─── Spec linter (Phase B / Task 4) ──────────────────────────────────────────
 

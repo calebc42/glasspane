@@ -7,9 +7,10 @@
 ;;
 ;; Output:
 ;;   glasspane.el  — the Glasspane Tier-1 app (emacs/apps/): the org app, the
-;;                   magit pie, the tools hub, the automations skin, the demo
-;;                   tour.  (The package/customize browsers moved into the
-;;                   jetpacs core 2026-07-10 — the core bundle ships them.)
+;;                   magit pie, the demo tour.  (The package/customize
+;;                   browsers, tools hub, and automations view moved into
+;;                   the jetpacs core 2026-07-10 — the core bundle ships
+;;                   them.)
 ;;
 ;; Unlike the old monorepo bundle, this does NOT inline the Jetpacs core. The
 ;; bundle opens with `(require 'jetpacs-core)`, so the jetpacs foundation bundle
@@ -28,9 +29,7 @@
 (let* ((here (file-name-directory (or load-file-name buffer-file-name)))
        ;; Dependency order. Do not reorder without re-checking the require
        ;; graph.
-       (app-files '("apps/jetpacs-tools.el"
-                    "apps/jetpacs-automations.el"
-                    "apps/jetpacs-magit.el"
+       (app-files '("apps/jetpacs-magit.el"
                     "apps/glasspane/glasspane-org.el"
                     "apps/glasspane/glasspane-org-rich.el"
                     "apps/glasspane/glasspane-org-reader.el"

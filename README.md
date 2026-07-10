@@ -11,8 +11,8 @@ drives the Android companion over the Jetpacs wire. **All Kotlin lives in the
 - `emacs/apps/glasspane/` — the org app (reader, rich org, tables, journal,
   saved views, SRS, notes/backlinks, clock, gallery, demo tour…)
 - `emacs/apps/jetpacs-*.el` — reference Tier-1 apps bundled with Glasspane
-  (tools hub, automations skin, magit pie; the package/customize browsers
-  ship in the jetpacs core itself)
+  (the magit pie; the package/customize browsers, tools hub, and
+  automations view ship in the jetpacs core itself)
 - `emacs/build-bundle.el` — regenerates `glasspane.el` (app-only; the bundle
   opens with `(require 'jetpacs-core)`)
 - `jetpacs/` — the Jetpacs core (foundation + companion), a git submodule

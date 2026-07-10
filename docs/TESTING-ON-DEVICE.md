@@ -336,3 +336,21 @@ disappears on update — re-add the new ones.
       the `agenda.set-month` round-trip; a month with nothing scheduled
       shows a bare grid. Away from the current month, a "Today" chip
       appears above the grid and jumps back.
+
+## 15. Tabs adoption (agenda + SRS pager — 2026-07-10, fresh APK + bundle)
+
+- [ ] **Agenda tabs:** the Day/Week/Month chips are gone; a real tab
+      row (scrollable when custom agendas exist) sits above the agenda
+      and horizontal swipes move between modes instantly — including
+      offline (all pages ship in the push). Tapping a tab animates the
+      pager; after a swipe, the ‹ › date navigation still works in the
+      landed mode (Emacs's mode state follows via `agenda.set-mode`).
+      A background refresh while reading Week must not yank you to Day.
+- [ ] **SRS review pager:** start a review → the card shows its
+      question with "Swipe for the answer ›"; swiping left reveals the
+      answer page with the four rating buttons and predicted intervals
+      (no "Show answer" round-trip). Swiping back to the question and
+      forth again is instant. Rating advances — the next card lands on
+      its **question** page (the id-keyed reset). Undo from the top bar
+      restores the previous card **answer-shown**. Long answers scroll
+      within the page without fighting the horizontal swipe.

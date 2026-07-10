@@ -462,12 +462,16 @@ its log row and a `rating' column, the simulator runs."
 
 (defun glasspane-srs--session-body ()
   "The active-session screen: the card, then reveal or rating controls."
-  (if (null glasspane-srs--current)
-      (jetpacs-empty-state
-       :icon "school" :title "All caught up"
-       :caption "Review complete."
-       :action-label "Done"
-       :on-tap (jetpacs-action "srs.quit" :when-offline "drop"))
+  (cond
+   ((null glasspane-srs--current)
+    (jetpacs-empty-state
+     :icon "school" :title "All caught up"
+     :caption "Review complete."
+     :action-label "Done"
+     :on-tap (jetpacs-action "srs.quit" :when-offline "drop")))
+   ((jetpacs-node-supported-p "tabs")
+    (glasspane-srs--session-pager))
+   (t
     (apply #'jetpacs-lazy-column
            (append
             (glasspane-srs--item-nodes glasspane-srs--current
@@ -478,7 +482,35 @@ its log row and a `rating' column, the simulator runs."
               (list (jetpacs-button "Show answer"
                                  (jetpacs-action "srs.answer.show"
                                               :when-offline "drop")
-                                 :variant "filled" :icon "visibility")))))))
+                                 :variant "filled" :icon "visibility"))))))))
+
+(defun glasspane-srs--session-pager ()
+  "Swipe-through review: the question page ‹ the answer page.
+Both pages ship in one push — `glasspane-srs--item-nodes' is a pure
+renderer over the item, so the answer costs no extra round-trip — and
+the pager is id-keyed per item: rating pushes the next card, whose new
+id lands the pager back on its question page; undo restores a card
+answer-shown, so INITIAL follows the reveal flag. on_change mirrors the
+settled page into `glasspane-srs--revealed' without a re-push."
+  (jetpacs-tabs
+   (list (jetpacs-tab-item "Question") (jetpacs-tab-item "Answer"))
+   (list
+    (apply #'jetpacs-lazy-column
+           (append
+            (glasspane-srs--item-nodes glasspane-srs--current nil)
+            (list (jetpacs-spacer :height 8)
+                  (jetpacs-box
+                   (list (jetpacs-text "Swipe for the answer ›" 'caption))
+                   :alignment "center"))))
+    (apply #'jetpacs-lazy-column
+           (append
+            (glasspane-srs--item-nodes glasspane-srs--current t)
+            (list (jetpacs-spacer :height 8) (jetpacs-divider))
+            (glasspane-srs--rating-controls))))
+   :pager-only t
+   :initial (if glasspane-srs--revealed 1 0)
+   :id (format "srs-%x" (sxhash-equal glasspane-srs--current))
+   :on-change (jetpacs-action "srs.answer.page" :when-offline "drop")))
 
 (defun glasspane-srs--idle-body ()
   "The between-sessions screen: due summary and the start button."
@@ -560,6 +592,15 @@ labelled menu rather than cluttering the bar."
   (lambda (_args _)
     (when glasspane-srs--current (setq glasspane-srs--revealed t))
     (jetpacs-shell-push)))
+
+(jetpacs-defaction "srs.answer.page"
+  ;; The review pager settled on a page; mirror it into the reveal flag —
+  ;; no re-push (both pages already shipped), just state coherence for
+  ;; undo and the button-era code path.
+  (lambda (args _)
+    (let ((idx (alist-get 'value args)))
+      (when (and glasspane-srs--current (integerp idx))
+        (setq glasspane-srs--revealed (= idx 1))))))
 
 (defun glasspane-srs--push-undo (item-args)
   "Snapshot ITEM-ARGS's log drawer onto the undo stack (capped).

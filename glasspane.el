@@ -3427,66 +3427,114 @@ companion gets `glasspane-ui--agenda-month-fallback' — the composed
      (jetpacs-spacer :height 8)
      (apply #'jetpacs-column (nreverse grid-rows)))))
 
+(defun glasspane-ui--agenda-modes ()
+  "The agenda's mode names in display order: the spans, then customs."
+  (append '("day" "week" "month") (mapcar #'car glasspane-org-custom-agendas)))
+
+(defun glasspane-ui--agenda-items-for (mode anchor)
+  "Extract MODE's items anchored at ANCHOR (span extraction or search).
+Every branch is memoised, so building several mode pages per push (the
+tabs body) re-extracts nothing after each page's first build."
+  ;; The month span always starts on the 1st so the grid and the
+  ;; extraction agree on the visible range.
+  (let ((start-day (cond ((equal mode "month")
+                          (concat (substring anchor 0 7) "-01"))
+                         ((member mode '("day" "week")) anchor))))
+    (condition-case nil
+        (pcase mode
+          ("day" (glasspane-org--agenda-items 'day start-day))
+          ("week" (glasspane-org--agenda-items 'week start-day))
+          ("month" (glasspane-org--agenda-items 'month start-day))
+          (_ (glasspane-org--search
+              (cdr (assoc mode glasspane-org-custom-agendas)))))
+      (error nil))))
+
+(defun glasspane-ui--agenda-nav-affordance (mode anchor)
+  "MODE's date-navigation row, or nil when the view navigates itself.
+The curated month grid carries its own header, chevrons, and swipe —
+only the jump-home chip remains ours there; custom agendas have no
+anchor to navigate."
+  (cond
+   ((and (equal mode "month") (jetpacs-node-supported-p "month_grid"))
+    (unless (equal (substring anchor 0 7) (format-time-string "%Y-%m"))
+      (jetpacs-row
+       (jetpacs-spacer :weight 1)
+       (jetpacs-assist-chip "Today" :icon "today"
+                         :on-tap (jetpacs-action "agenda.today")))))
+   ((member mode '("day" "week" "month"))
+    (glasspane-ui--agenda-nav-row mode anchor))))
+
+(defun glasspane-ui--agenda-mode-view (mode items anchor)
+  "MODE's item rendering, chrome-free."
+  (pcase mode
+    ("day" (glasspane-ui--agenda-day-view items))
+    ("week" (glasspane-ui--agenda-week-view items))
+    ("month" (glasspane-ui--agenda-month-view items anchor))
+    (_ (if items
+           (apply #'jetpacs-lazy-column (mapcar #'glasspane-ui--agenda-card items))
+         (jetpacs-empty-state :icon "event_busy"
+                           :title "No results"
+                           :caption "This custom agenda found no items.")))))
+
+(defun glasspane-ui--agenda-page (mode anchor)
+  "One agenda page: MODE's nav affordance above its body."
+  (apply #'jetpacs-column
+         (delq nil
+               (list (glasspane-ui--agenda-nav-affordance mode anchor)
+                     (jetpacs-spacer :height 4)
+                     (glasspane-ui--agenda-mode-view
+                      mode (glasspane-ui--agenda-items-for mode anchor)
+                      anchor)))))
+
 (defun glasspane-ui--agenda-body ()
-  (let* ((mode (or (jetpacs-ui-state "agenda-mode") "day"))
-         (is-span (member mode '("day" "week" "month")))
-         (anchor (glasspane-ui--agenda-anchor))
-         ;; The month span always starts on the 1st so the grid and the
-         ;; extraction agree on the visible range.
-         (start-day (cond ((equal mode "month") (concat (substring anchor 0 7) "-01"))
-                          (is-span anchor)))
-         (items (cond
-                 ((equal mode "day") (condition-case nil (glasspane-org--agenda-items 'day start-day) (error nil)))
-                 ((equal mode "week") (condition-case nil (glasspane-org--agenda-items 'week start-day) (error nil)))
-                 ((equal mode "month") (condition-case nil (glasspane-org--agenda-items 'month start-day) (error nil)))
-                 (t (condition-case nil (glasspane-org--search (cdr (assoc mode glasspane-org-custom-agendas))) (error nil)))))
-         (custom-chips (mapcar (lambda (ca)
-                                 (let ((name (car ca)))
-                                   (jetpacs-chip name
-                                              :selected (equal mode name)
-                                              :on-tap (jetpacs-action "agenda.set-mode" :args `((mode . ,name))))))
-                               glasspane-org-custom-agendas)))
-    (apply #'jetpacs-column
-           (delq nil
-                 (list
-                  (apply #'jetpacs-flow-row
-                         (jetpacs-chip "Day"
-                                    :selected (equal mode "day")
-                                    :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "day"))))
-                         (jetpacs-chip "Week"
-                                    :selected (equal mode "week")
-                                    :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "week"))))
-                         (jetpacs-chip "Month"
-                                    :selected (equal mode "month")
-                                    :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "month"))))
-                         custom-chips)
-                  (when is-span
-                    (if (and (equal mode "month")
-                             (jetpacs-node-supported-p "month_grid"))
-                        ;; The curated grid carries its own month header,
-                        ;; chevrons, and swipe — only the jump-home
-                        ;; affordance remains ours.
-                        (unless (equal (substring anchor 0 7)
-                                       (format-time-string "%Y-%m"))
-                          (jetpacs-row
-                           (jetpacs-spacer :weight 1)
-                           (jetpacs-assist-chip "Today" :icon "today"
-                                             :on-tap (jetpacs-action "agenda.today"))))
-                      (glasspane-ui--agenda-nav-row mode anchor)))
-                  (jetpacs-spacer :height 4)
-                  (cond
-                   ((equal mode "day")
-                    (glasspane-ui--agenda-day-view items))
-                   ((equal mode "week")
-                    (glasspane-ui--agenda-week-view items))
-                   ((equal mode "month")
-                    (glasspane-ui--agenda-month-view items anchor))
-                   (t
-                    (if items
-                        (apply #'jetpacs-lazy-column (mapcar #'glasspane-ui--agenda-card items))
-                      (jetpacs-empty-state :icon "event_busy"
-                                        :title "No results"
-                                        :caption "This custom agenda found no items.")))))))))
+  (let ((mode (or (jetpacs-ui-state "agenda-mode") "day"))
+        (anchor (glasspane-ui--agenda-anchor)))
+    (if (jetpacs-node-supported-p "tabs")
+        (glasspane-ui--agenda-body-tabs mode anchor)
+      (glasspane-ui--agenda-body-chips mode anchor))))
+
+(defun glasspane-ui--agenda-body-tabs (mode anchor)
+  "The agenda as native tabs: swipe between the spans and custom agendas.
+Switching is companion-local — every page ships in the push, which the
+memoised extractions keep cheap — and works offline; on_change keeps
+Emacs's mode state in step so the anchor and nav logic follow on the
+next push. No :id — a background re-push must not yank the user's tab."
+  (let* ((modes (glasspane-ui--agenda-modes))
+         (initial (or (seq-position modes mode) 0)))
+    (jetpacs-tabs
+     (mapcar (lambda (m)
+               (jetpacs-tab-item (pcase m
+                                   ("day" "Day") ("week" "Week")
+                                   ("month" "Month") (_ m))))
+             modes)
+     (mapcar (lambda (m) (glasspane-ui--agenda-page m anchor)) modes)
+     :initial initial
+     :scrollable (> (length modes) 3)
+     :on-change (jetpacs-action "agenda.set-mode" :when-offline "drop"))))
+
+(defun glasspane-ui--agenda-body-chips (mode anchor)
+  "The chip-row agenda for companions predating the `tabs' node."
+  (let ((custom-chips
+         (mapcar (lambda (ca)
+                   (let ((name (car ca)))
+                     (jetpacs-chip name
+                                :selected (equal mode name)
+                                :on-tap (jetpacs-action "agenda.set-mode"
+                                                     :args `((mode . ,name))))))
+                 glasspane-org-custom-agendas)))
+    (jetpacs-column
+     (apply #'jetpacs-flow-row
+            (jetpacs-chip "Day"
+                       :selected (equal mode "day")
+                       :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "day"))))
+            (jetpacs-chip "Week"
+                       :selected (equal mode "week")
+                       :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "week"))))
+            (jetpacs-chip "Month"
+                       :selected (equal mode "month")
+                       :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "month"))))
+            custom-chips)
+     (glasspane-ui--agenda-page mode anchor))))
 
 (defun glasspane-ui--tasks-body ()
   (let* ((items (condition-case nil
@@ -5088,10 +5136,17 @@ with the new states.  Returns non-nil when persisting succeeded."
         (jetpacs-shell-push)))))
 
 (jetpacs-defaction "agenda.set-mode"
+  ;; `mode' names come from the fallback chips; `value' (a page index)
+  ;; from the tabs body's on_change. Either way the result must name a
+  ;; mode we actually offer.
   (lambda (args _)
-    (let ((mode (alist-get 'mode args)))
-      (jetpacs-ui-state-put "agenda-mode" mode)
-      (jetpacs-shell-push))))
+    (let* ((modes (glasspane-ui--agenda-modes))
+           (idx (alist-get 'value args))
+           (mode (or (alist-get 'mode args)
+                     (and (integerp idx) (nth idx modes)))))
+      (when (member mode modes)
+        (jetpacs-ui-state-put "agenda-mode" mode)
+        (jetpacs-shell-push)))))
 
 (jetpacs-defaction "agenda.nav"
   ;; Shift the agenda anchor by DIR (±1) in units of the active span.
@@ -7405,12 +7460,16 @@ its log row and a `rating' column, the simulator runs."
 
 (defun glasspane-srs--session-body ()
   "The active-session screen: the card, then reveal or rating controls."
-  (if (null glasspane-srs--current)
-      (jetpacs-empty-state
-       :icon "school" :title "All caught up"
-       :caption "Review complete."
-       :action-label "Done"
-       :on-tap (jetpacs-action "srs.quit" :when-offline "drop"))
+  (cond
+   ((null glasspane-srs--current)
+    (jetpacs-empty-state
+     :icon "school" :title "All caught up"
+     :caption "Review complete."
+     :action-label "Done"
+     :on-tap (jetpacs-action "srs.quit" :when-offline "drop")))
+   ((jetpacs-node-supported-p "tabs")
+    (glasspane-srs--session-pager))
+   (t
     (apply #'jetpacs-lazy-column
            (append
             (glasspane-srs--item-nodes glasspane-srs--current
@@ -7421,7 +7480,35 @@ its log row and a `rating' column, the simulator runs."
               (list (jetpacs-button "Show answer"
                                  (jetpacs-action "srs.answer.show"
                                               :when-offline "drop")
-                                 :variant "filled" :icon "visibility")))))))
+                                 :variant "filled" :icon "visibility"))))))))
+
+(defun glasspane-srs--session-pager ()
+  "Swipe-through review: the question page ‹ the answer page.
+Both pages ship in one push — `glasspane-srs--item-nodes' is a pure
+renderer over the item, so the answer costs no extra round-trip — and
+the pager is id-keyed per item: rating pushes the next card, whose new
+id lands the pager back on its question page; undo restores a card
+answer-shown, so INITIAL follows the reveal flag. on_change mirrors the
+settled page into `glasspane-srs--revealed' without a re-push."
+  (jetpacs-tabs
+   (list (jetpacs-tab-item "Question") (jetpacs-tab-item "Answer"))
+   (list
+    (apply #'jetpacs-lazy-column
+           (append
+            (glasspane-srs--item-nodes glasspane-srs--current nil)
+            (list (jetpacs-spacer :height 8)
+                  (jetpacs-box
+                   (list (jetpacs-text "Swipe for the answer ›" 'caption))
+                   :alignment "center"))))
+    (apply #'jetpacs-lazy-column
+           (append
+            (glasspane-srs--item-nodes glasspane-srs--current t)
+            (list (jetpacs-spacer :height 8) (jetpacs-divider))
+            (glasspane-srs--rating-controls))))
+   :pager-only t
+   :initial (if glasspane-srs--revealed 1 0)
+   :id (format "srs-%x" (sxhash-equal glasspane-srs--current))
+   :on-change (jetpacs-action "srs.answer.page" :when-offline "drop")))
 
 (defun glasspane-srs--idle-body ()
   "The between-sessions screen: due summary and the start button."
@@ -7503,6 +7590,15 @@ labelled menu rather than cluttering the bar."
   (lambda (_args _)
     (when glasspane-srs--current (setq glasspane-srs--revealed t))
     (jetpacs-shell-push)))
+
+(jetpacs-defaction "srs.answer.page"
+  ;; The review pager settled on a page; mirror it into the reveal flag —
+  ;; no re-push (both pages already shipped), just state coherence for
+  ;; undo and the button-era code path.
+  (lambda (args _)
+    (let ((idx (alist-get 'value args)))
+      (when (and glasspane-srs--current (integerp idx))
+        (setq glasspane-srs--revealed (= idx 1))))))
 
 (defun glasspane-srs--push-undo (item-args)
   "Snapshot ITEM-ARGS's log drawer onto the undo stack (capped).

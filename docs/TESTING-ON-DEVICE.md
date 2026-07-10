@@ -9,7 +9,7 @@ Setup for all of it: install the freshly built debug APK
 (`gradlew :app:assembleDebug`, artifact in
 `app/build/outputs/apk/debug/`), load the regenerated `glasspane.el`
 bundle in the on-device Emacs, reconnect. `adb logcat -s
-EabpTriggerHost EabpBootReceiver EabpConnection EabpDeviceCaps` is the
+JetpacsTriggerHost JetpacsBootReceiver JetpacsConnection JetpacsDeviceCaps` is the
 observation window for most of this.
 
 ## 1. H1 — handshake & device report
@@ -17,40 +17,40 @@ observation window for most of this.
 - [x] Welcome shows `capabilities` granted (verified 2026-07-05,
       pre-trigger-host build; `triggers` correctly absent then).
 - [ ] Current build: welcome grants **both** `capabilities` and
-      `triggers`; `M-:` `(eabp-device-caps)` lists 12 capability
-      names; `(eabp-device-can-p "write_settings")` matches reality.
+      `triggers`; `M-:` `(jetpacs-device-caps)` lists 12 capability
+      names; `(jetpacs-device-can-p "write_settings")` matches reality.
 
 ## 2. H1 — effectors from the eval REPL (AUTO 3–4)
 
 From the phone's Eval tab (or any REPL against the live bridge):
 
-- [ ] `(eabp-device-intent :action "android.intent.action.VIEW" :data "https://example.com")` — browser opens.
-- [ ] `(eabp-device-launch-app)` — picker lists apps; picking one launches it (needs the `<queries>` manifest merge — an empty list is a bug).
-- [ ] `(eabp-device-vibrate 300)` and `(eabp-device-vibrate nil '(0 100 50 100))`.
-- [ ] `(eabp-device-tts "hello from emacs")` — first call may pause ~1s for engine init; a second call is instant; engine releases after ~60 s idle (logcat).
-- [ ] `(eabp-device-flashlight t)` then `(eabp-device-flashlight nil)`.
-- [ ] `(eabp-device-volume-set "music" 5)`, `(eabp-device-media-key "play_pause")` with a player open.
-- [ ] `(eabp-device-ringer-mode "vibrate")`; then `"silent"` **without** DND access — expect a clean `cap-permission` message naming the deep-link, not a crash; grant via `(eabp-device-settings-open "android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS")`, retry, works without restart.
-- [ ] `(eabp-device-clipboard-read (lambda (text) (message "clip: %S" text)))` — real text with Glasspane foregrounded; nil (typed error in *Messages*) when invoked with the app backgrounded.
-- [ ] `(eabp-device-keep-screen-on t)` — screen stays awake on the dashboard; leaving the app releases it; `(eabp-device-keep-screen-on nil)` clears.
-- [ ] `(eabp-device-settings-open "wifi")` — floating panel (Android 10+).
+- [ ] `(jetpacs-device-intent :action "android.intent.action.VIEW" :data "https://example.com")` — browser opens.
+- [ ] `(jetpacs-device-launch-app)` — picker lists apps; picking one launches it (needs the `<queries>` manifest merge — an empty list is a bug).
+- [ ] `(jetpacs-device-vibrate 300)` and `(jetpacs-device-vibrate nil '(0 100 50 100))`.
+- [ ] `(jetpacs-device-tts "hello from emacs")` — first call may pause ~1s for engine init; a second call is instant; engine releases after ~60 s idle (logcat).
+- [ ] `(jetpacs-device-flashlight t)` then `(jetpacs-device-flashlight nil)`.
+- [ ] `(jetpacs-device-volume-set "music" 5)`, `(jetpacs-device-media-key "play_pause")` with a player open.
+- [ ] `(jetpacs-device-ringer-mode "vibrate")`; then `"silent"` **without** DND access — expect a clean `cap-permission` message naming the deep-link, not a crash; grant via `(jetpacs-device-settings-open "android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS")`, retry, works without restart.
+- [ ] `(jetpacs-device-clipboard-read (lambda (text) (message "clip: %S" text)))` — real text with Glasspane foregrounded; nil (typed error in *Messages*) when invoked with the app backgrounded.
+- [ ] `(jetpacs-device-keep-screen-on t)` — screen stays awake on the dashboard; leaving the app releases it; `(jetpacs-device-keep-screen-on nil)` clears.
+- [ ] `(jetpacs-device-settings-open "wifi")` — floating panel (Android 10+).
 
 ## 3. H1 — launcher (AUTO 14)
 
 - [ ] Baseline: with only Glasspane loaded, nothing looks different
       (no home view, no "Apps" drawer entry).
-- [ ] `(load ".../emacs/apps/eabp-hello.el")` on the live session →
+- [ ] `(load ".../emacs/apps/jetpacs-hello.el")` on the live session →
       drawer gains "Apps"; home shows two cards (Glasspane, Hello);
       opening Hello swaps the bottom bar to its tab (plus the core
       Files/Eval/Tools tabs — expected: unclaimed views show everywhere);
       opening Glasspane swaps back.
-- [ ] `(eabp-apps-remove "hello")` + `(eabp-shell-remove-view "hello")`
+- [ ] `(jetpacs-apps-remove "hello")` + `(jetpacs-shell-remove-view "hello")`
       → everything collapses back to the single-app look.
 
 ### 2026-07-06 results (scrcpy session, first pass)
 
 Verified: caps list (12), browser intent, vibrate, flashlight,
-`settings.open wifi`, eabp-hello two-card launcher, `ringer.mode`'s
+`settings.open wifi`, jetpacs-hello two-card launcher, `ringer.mode`'s
 typed cap-permission degrade. Fixed from findings: launch-app picker
 is now a companion dialog (desktop `completing-read` can't bridge from
 an async reply AND leaves Glasspane backgrounded, where Android drops
@@ -80,22 +80,22 @@ adb reboot                        # the reboot-rearm check, watch logcat
 Register the canary set from the REPL:
 
 ```elisp
-(eabp-deftrigger test/charge
+(jetpacs-deftrigger test/charge
   :type "power" :params '((state . "connected")) :policy "wake"
   :handler (lambda (data _) (message "power: %S" data)))
-(eabp-deftrigger test/screen-off
+(jetpacs-deftrigger test/screen-off
   :type "screen" :params '((state . "off")) :policy "queue"
   :handler (lambda (_ _) (message "screen went off")))
-(eabp-deftrigger test/tick
+(jetpacs-deftrigger test/tick
   :type "time" :params '((every_s . 120)) :policy "drop"
   :handler (lambda (_ _) (message "tick")))
 ```
 
 - [ ] Live fire: plug in power → `power: ((state . "connected") (plug . "usb"))` (or ac/wireless) in *Messages* within a second.
-- [ ] Queue + replay: `M-x eabp-disconnect`, kill Emacs entirely, toggle the screen off/on twice, restart Emacs → on reconnect the replay delivers the queued `screen-off` fires (two, unless dedupe/throttle say otherwise).
-- [ ] Replace-set: `(eabp-trigger-unregister "test/screen-off")`, toggle screen → nothing fires, nothing queued (logcat shows the shrunken set armed).
+- [ ] Queue + replay: `M-x jetpacs-disconnect`, kill Emacs entirely, toggle the screen off/on twice, restart Emacs → on reconnect the replay delivers the queued `screen-off` fires (two, unless dedupe/throttle say otherwise).
+- [ ] Replace-set: `(jetpacs-trigger-unregister "test/screen-off")`, toggle screen → nothing fires, nothing queued (logcat shows the shrunken set armed).
 - [ ] Repeating time: `test/tick` logs every ~2 min while connected (drop policy: silence while disconnected is correct).
-- [ ] Reboot: with the set registered, reboot the phone **without** opening the app → logcat shows `EabpBootReceiver` rearming; a `boot`-type trigger (add one) queues its fire; a reminder scheduled pre-reboot still notifies on time.
+- [ ] Reboot: with the set registered, reboot the phone **without** opening the app → logcat shows `JetpacsBootReceiver` rearming; a `boot`-type trigger (add one) queues its fire; a reminder scheduled pre-reboot still notifies on time.
 - [ ] Throttle: a `:throttle-s 60` screen trigger fires at most once a minute however fast you toggle.
 - [ ] Battery hysteresis (patience): a `battery.level {below N}` trigger set just under the current level fires exactly once as the level crosses down through N, and not again until it re-crosses.
 
@@ -105,14 +105,14 @@ Register the canary set from the REPL:
       summaries.
 - [ ] Toggling one off: switch flips, `triggers.set` re-pushes
       (logcat), the device event no longer fires; state survives an
-      Emacs restart (Customize wrote `eabp-triggers-disabled`).
+      Emacs restart (Customize wrote `jetpacs-triggers-disabled`).
 - [ ] "Fire now" runs the handler (message appears) and updates the
       last-fired line on the next render.
 
 ## 6. H2 — Emacs-dead `on_fire` (AUTO 10)
 
 ```elisp
-(eabp-deftrigger test/torch
+(jetpacs-deftrigger test/torch
   :type "power" :params '((state . "connected")) :policy "queue"
   :on-fire [((cap . "flashlight") (args . ((on . t))))
             ((notify . ((title . "Charging") (text . "torch on"))))])

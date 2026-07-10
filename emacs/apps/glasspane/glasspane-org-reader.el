@@ -1,7 +1,7 @@
-;;; glasspane-org-reader.el --- Foldable org outline renderer for EABP -*- lexical-binding: t; -*-
+;;; glasspane-org-reader.el --- Foldable org outline renderer for Jetpacs -*- lexical-binding: t; -*-
 
-;; Renders an org buffer (or a single subtree) into a tree of EABP widgets:
-;; each heading becomes an `eabp-collapsible' whose header is the org-highlighted
+;; Renders an org buffer (or a single subtree) into a tree of Jetpacs widgets:
+;; each heading becomes an `jetpacs-collapsible' whose header is the org-highlighted
 ;; heading line and whose children are an optional (collapsed) PROPERTIES drawer,
 ;; the heading's own body as highlighted org text, and its child headings —
 ;; recursively. Folding is resolved entirely on the device (see the `collapsible'
@@ -15,12 +15,12 @@
 
 (require 'org)
 (require 'cl-lib)
-(require 'eabp-widgets)
+(require 'jetpacs-widgets)
 (require 'glasspane-org-rich)
 
 (defcustom glasspane-org-reader-max-headings 400
   "Cap on headings rendered in one reader pass, to bound very large files."
-  :type 'integer :group 'eabp)
+  :type 'integer :group 'jetpacs)
 
 ;; ─── Parsing ───────────────────────────────────────────────────────────────────
 
@@ -93,9 +93,9 @@ INCLUDE-FIRST non-nil includes the heading at BEG (used for subtrees)."
   "A collapsed PROPERTIES drawer node for PROPS (an alist of KEY . VALUE)."
   (let ((text (mapconcat (lambda (kv) (format ":%s: %s" (car kv) (cdr kv)))
                          props "\n")))
-    (eabp-collapsible (format "fold-props/%s/%s" file pos)
-                      (eabp-text "PROPERTIES" 'label)
-                      (list (eabp-text text 'mono))
+    (jetpacs-collapsible (format "fold-props/%s/%s" file pos)
+                      (jetpacs-text "PROPERTIES" 'label)
+                      (list (jetpacs-text text 'mono))
                       :collapsed t)))
 
 (defun glasspane-org-reader--content-nodes (n file &optional skip-props)
@@ -124,18 +124,18 @@ detail view already shows properties in its own section)."
            (mapcar (lambda (c) (glasspane-org-reader--heading-node c file)) children)))))
 
 (defun glasspane-org-reader--heading-node (n file)
-  "Render tree node N (and its subtree) to a foldable `eabp-collapsible'.
+  "Render tree node N (and its subtree) to a foldable `jetpacs-collapsible'.
 Long-pressing the header opens the heading detail view when FILE is available."
   (let* ((pos (plist-get n :pos))
          (ref (when file
                 `((file . ,file) (pos . ,pos) (headline . "")))))
-    (eabp-collapsible (format "fold/%s/%s" file pos)
-                      (eabp-markup (plist-get n :line) :syntax "org")
+    (jetpacs-collapsible (format "fold/%s/%s" file pos)
+                      (jetpacs-markup (plist-get n :line) :syntax "org")
                       (glasspane-org-reader--content-nodes n file)
                       :on-long-tap (when ref
-                                     (eabp-action "heading.tap" :args ref))
+                                     (jetpacs-action "heading.tap" :args ref))
                       :on-swipe (when ref
-                                  (eabp-action "heading.todo-cycle" :args ref)))))
+                                  (jetpacs-action "heading.todo-cycle" :args ref)))))
 
 ;; ─── Entry points ───────────────────────────────────────────────────────────────
 
@@ -178,7 +178,7 @@ When SKIP-PROPS is non-nil, the top-level PROPERTIES drawer is omitted."
 
 (defun glasspane-org-reader-refile-list (file)
   "Render all headings in FILE as a flat reorderable item list.
-Returns a single `eabp-reorderable-list' node for refile mode."
+Returns a single `jetpacs-reorderable-list' node for refile mode."
   (when (and file (file-readable-p file))
     (with-current-buffer (find-file-noselect file)
       (org-with-wide-buffer
@@ -190,9 +190,9 @@ Returns a single `eabp-reorderable-list' node for refile mode."
                                  (pos   . ,(plist-get r :pos))
                                  (file  . ,file)))
                              records)))
-         (eabp-reorderable-list
+         (jetpacs-reorderable-list
           items
-          :on-reorder (eabp-action "heading.reorder"
+          :on-reorder (jetpacs-action "heading.reorder"
                                    :args `((file . ,file)))))))))
 
 (provide 'glasspane-org-reader)

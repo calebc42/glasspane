@@ -8,15 +8,15 @@
 ;; `M-x glasspane-demo-gallery' — the newest of the demo commands next to
 ;; `glasspane-demo-setup'.
 ;;
-;; Everything here is composed from core `eabp-*' constructors: it is also
+;; Everything here is composed from core `jetpacs-*' constructors: it is also
 ;; the worked example that a whole visual surface is Elisp, no Kotlin.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'eabp-widgets)
-(require 'eabp-shell)
-(require 'eabp-surfaces)
+(require 'jetpacs-widgets)
+(require 'jetpacs-shell)
+(require 'jetpacs-surfaces)
 
 (defvar glasspane-gallery--open nil
   "Non-nil while the gallery overlay is showing.")
@@ -42,103 +42,103 @@ Screen y grows downward, so a top semicircle spans 180°→0°."
          (na (degrees-to-radians end))
          (nx (+ cx (* r 0.9 (cos na))))
          (ny (- cy (* r 0.9 (sin na)))))
-    (eabp-canvas
+    (jetpacs-canvas
      w h
-     (list (eabp-draw-path (glasspane-gallery--arc-points cx cy r 180 0 44)
+     (list (jetpacs-draw-path (glasspane-gallery--arc-points cx cy r 180 0 44)
                            :color "#8888aa" :stroke 12)
-           (eabp-draw-path (glasspane-gallery--arc-points cx cy r 180 end 44)
+           (jetpacs-draw-path (glasspane-gallery--arc-points cx cy r 180 end 44)
                            :color "#00A676" :stroke 12)
-           (eabp-draw-line cx cy nx ny :color "#E64980" :stroke 3)
-           (eabp-draw-circle cx cy 7 :fill t :color "#E64980")
-           (eabp-draw-text cx 74 (format "%d%%" (round (* 100 level)))
+           (jetpacs-draw-line cx cy nx ny :color "#E64980" :stroke 3)
+           (jetpacs-draw-circle cx cy 7 :fill t :color "#E64980")
+           (jetpacs-draw-text cx 74 (format "%d%%" (round (* 100 level)))
                            :align "center" :size 28 :color "primary")))))
 
 ;; ─── Body ────────────────────────────────────────────────────────────────────
 
 (defun glasspane-gallery--kind-chips ()
   "A chip rail selecting `glasspane-gallery--kind'."
-  (apply #'eabp-flow-row
+  (apply #'jetpacs-flow-row
          (append
           (mapcar (lambda (k)
-                    (eabp-chip k
+                    (jetpacs-chip k
                                :selected (equal k glasspane-gallery--kind)
-                               :on-tap (eabp-action "demo.gallery.kind"
+                               :on-tap (jetpacs-action "demo.gallery.kind"
                                                     :args (list (cons 'kind k)))))
                   '("line" "bar" "area" "sparkline"))
           (list :spacing 8))))
 
 (defun glasspane-gallery--body ()
   "The scrollable gallery content (a `lazy_column', so it scrolls)."
-  (eabp-lazy-column
-   (eabp-section-header "Chart — tap a point, switch the kind")
+  (jetpacs-lazy-column
+   (jetpacs-section-header "Chart — tap a point, switch the kind")
    (glasspane-gallery--kind-chips)
-   (eabp-chart
-    (list (eabp-chart-series '(3 7 4 9 6 8 5) :label "alpha" :color "#4C6FFF")
-          (eabp-chart-series '(5 4 6 5 7 5 8) :label "beta"))
+   (jetpacs-chart
+    (list (jetpacs-chart-series '(3 7 4 9 6 8 5) :label "alpha" :color "#4C6FFF")
+          (jetpacs-chart-series '(5 4 6 5 7 5 8) :label "beta"))
     :kind glasspane-gallery--kind :height 150 :summary "two sample series"
-    :on-point-tap (eabp-action "demo.gallery.point"))
-   (eabp-divider)
-   (eabp-section-header "Slider → live canvas gauge")
-   (eabp-slider "gallery.level" (eabp-action "demo.gallery.level")
+    :on-point-tap (jetpacs-action "demo.gallery.point"))
+   (jetpacs-divider)
+   (jetpacs-section-header "Slider → live canvas gauge")
+   (jetpacs-slider "gallery.level" (jetpacs-action "demo.gallery.level")
                 :value glasspane-gallery--level :min 0.0 :max 1.0)
    (glasspane-gallery--gauge glasspane-gallery--level)
-   (eabp-divider)
-   (eabp-section-header "Sizing · border · spacing · align")
-   (eabp-row
-    (eabp-surface (list (eabp-text "100×64"))
+   (jetpacs-divider)
+   (jetpacs-section-header "Sizing · border · spacing · align")
+   (jetpacs-row
+    (jetpacs-surface (list (jetpacs-text "100×64"))
                   :width 100 :height 64
-                  :border (eabp-border :width 2 :color "primary"))
-    (eabp-surface (list (eabp-text "rounded, fills rest"))
+                  :border (jetpacs-border :width 2 :color "primary"))
+    (jetpacs-surface (list (jetpacs-text "rounded, fills rest"))
                   :height 64 :color "surface_container" :shape "rounded"
                   :fill-fraction 1.0)
     :spacing 12 :align "center")
-   (eabp-spacer :height 12)))
+   (jetpacs-spacer :height 12)))
 
 (defun glasspane-gallery--view (snackbar)
   "The gallery as a back-arrow nav view."
-  (eabp-shell-nav-view "Widget Gallery" (glasspane-gallery--body)
+  (jetpacs-shell-nav-view "Widget Gallery" (glasspane-gallery--body)
                        :snackbar snackbar))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "demo.gallery"
+(jetpacs-defaction "demo.gallery"
   (lambda (_args _payload)
     (setq glasspane-gallery--open t)
-    (eabp-shell-push nil :switch-to "gallery")))
+    (jetpacs-shell-push nil :switch-to "gallery")))
 
-(eabp-defaction "demo.gallery.kind"
+(jetpacs-defaction "demo.gallery.kind"
   (lambda (args _payload)
     (setq glasspane-gallery--kind (or (alist-get 'kind args) "line"))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "demo.gallery.level"
+(jetpacs-defaction "demo.gallery.level"
   (lambda (args _payload)
     (setq glasspane-gallery--level (or (alist-get 'value args) 0.5))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "demo.gallery.point"
+(jetpacs-defaction "demo.gallery.point"
   (lambda (args _payload)
     (let ((v (alist-get 'value args)))
-      (when (fboundp 'eabp-shell-notify)
-        (eabp-shell-notify (format "point %s = %s"
+      (when (fboundp 'jetpacs-shell-notify)
+        (jetpacs-shell-notify (format "point %s = %s"
                                    (alist-get 'index v) (alist-get 'y v)))))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
 ;; ─── Registration ────────────────────────────────────────────────────────────
 
-(eabp-shell-define-view "gallery"
+(jetpacs-shell-define-view "gallery"
   :builder #'glasspane-gallery--view
   :when (lambda () glasspane-gallery--open)
   :overlay (lambda () glasspane-gallery--open)
   :order 120)
 
 ;; Landing on any real view closes the overlay (mirrors the detail drill-in).
-(add-hook 'eabp-shell-view-switched-hook
+(add-hook 'jetpacs-shell-view-switched-hook
           (lambda (_view) (setq glasspane-gallery--open nil)))
 
-(eabp-shell-add-drawer-item
- 65 (lambda () (eabp-drawer-item "insights" "Widget Gallery"
-                                 (eabp-action "demo.gallery"))))
+(jetpacs-shell-add-drawer-item
+ 65 (lambda () (jetpacs-drawer-item "insights" "Widget Gallery"
+                                 (jetpacs-action "demo.gallery"))))
 
 ;;;###autoload
 (defun glasspane-demo-gallery ()
@@ -146,10 +146,10 @@ Screen y grows downward, so a top semicircle spans 180°→0°."
 The newest of the demo commands (see also `glasspane-demo-setup')."
   (interactive)
   (setq glasspane-gallery--open t)
-  (if (and (fboundp 'eabp-connected-p) (eabp-connected-p))
-      (progn (eabp-shell-push nil :switch-to "gallery")
+  (if (and (fboundp 'jetpacs-connected-p) (jetpacs-connected-p))
+      (progn (jetpacs-shell-push nil :switch-to "gallery")
              (message "Widget gallery opened on the phone"))
-    (message "EABP: not connected — connect a phone, then reopen")))
+    (message "Jetpacs: not connected — connect a phone, then reopen")))
 
 (provide 'glasspane-gallery)
 ;;; glasspane-gallery.el ends here

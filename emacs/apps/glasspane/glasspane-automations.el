@@ -35,16 +35,16 @@
 (require 'subr-x)
 (require 'org)
 (require 'org-element)
-(require 'eabp)
-(require 'eabp-triggers)
-(require 'eabp-shell)
+(require 'jetpacs)
+(require 'jetpacs-triggers)
+(require 'jetpacs-shell)
 (require 'glasspane-org)
 
 (defcustom glasspane-automations-file nil
   "The org file holding trigger rules.
 nil means automations.org inside `org-directory'."
   :type '(choice (const :tag "automations.org in org-directory" nil) file)
-  :group 'eabp)
+  :group 'jetpacs)
 
 (defvar glasspane-automations--ids nil
   "Trigger ids registered from the org file (replaced on each reload).")
@@ -55,10 +55,10 @@ nil means automations.org inside `org-directory'."
 
 ;; ─── Parsing ─────────────────────────────────────────────────────────────────
 
-(defconst glasspane-automations--types eabp-triggers-supported-types
+(defconst glasspane-automations--types jetpacs-triggers-supported-types
   "Trigger types rules may use — the shipped SPEC §11 catalog.
 An unknown type would make the companion reject the whole replace-set
-\(and `eabp-triggers--specs' skips it as a second line of defense), so
+\(and `jetpacs-triggers--specs' skips it as a second line of defense), so
 unknown rules are caught at parse time with a message naming the rule.
 Notably NOT here yet: wifi.ssid / bluetooth.device — hardware-gated,
 see the automation plan.")
@@ -105,7 +105,7 @@ trust as init.el — see the file header."
                ,(car (read-from-string (format "(progn %s)" src))))
             t)
     (error
-     (message "EABP automations: bad handler in %S: %s"
+     (message "Jetpacs automations: bad handler in %S: %s"
               headline (error-message-string err))
      nil)))
 
@@ -126,7 +126,7 @@ A rule = a headline with a `:TRIGGER:' property that is not DONE."
                  (cond
                   (done nil)            ; org semantics as the enable switch
                   ((null parsed)
-                   (message "EABP automations: skipping %S — unknown trigger %S"
+                   (message "Jetpacs automations: skipping %S — unknown trigger %S"
                             headline trigger))
                   (t
                    (let* ((src (car (org-element-map hl 'src-block
@@ -170,17 +170,17 @@ the file is the source of truth for the `org/' id namespace."
     ;; and replace-set makes the intermediate states harmless.
     (dolist (stale (cl-set-difference glasspane-automations--ids ids
                                       :test #'equal))
-      (eabp-trigger-unregister stale))
+      (jetpacs-trigger-unregister stale))
     (dolist (r rules)
-      (apply #'eabp-trigger-register (plist-get r :id)
+      (apply #'jetpacs-trigger-register (plist-get r :id)
              (cl-loop for (k v) on r by #'cddr
                       unless (eq k :id) append (list k v))))
     (setq glasspane-automations--ids ids)
     (when (called-interactively-p 'interactive)
-      (message "EABP automations: %d rule(s) active" (length ids)))
+      (message "Jetpacs automations: %d rule(s) active" (length ids)))
     ids))
 
-(defvar eabp-files-after-save-hook)
+(defvar jetpacs-files-after-save-hook)
 
 (defun glasspane-automations--after-save (file)
   "Reload when the phone saves the automations FILE."
@@ -188,8 +188,8 @@ the file is the source of truth for the `org/' id namespace."
                (expand-file-name (glasspane-automations--file)))
     (glasspane-automations-reload)))
 
-(with-eval-after-load 'eabp-files
-  (add-hook 'eabp-files-after-save-hook #'glasspane-automations--after-save))
+(with-eval-after-load 'jetpacs-files
+  (add-hook 'jetpacs-files-after-save-hook #'glasspane-automations--after-save))
 
 ;; Load rules when the file exists; a missing file is simply zero rules.
 (when (file-readable-p (glasspane-automations--file))

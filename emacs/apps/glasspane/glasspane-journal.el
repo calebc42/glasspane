@@ -22,11 +22,11 @@
 (require 'subr-x)
 (require 'org)
 (require 'org-datetree)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-shell)
-(require 'eabp-settings)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-settings)
 (require 'glasspane-org)
 (require 'glasspane-org-reader)
 (require 'glasspane-ui)                ; date helpers + the glasspane defapp
@@ -35,11 +35,11 @@
   "The journal file holding the datetree.
 nil means journal.org inside `org-directory'."
   :type '(choice (const :tag "journal.org in org-directory" nil) file)
-  :group 'eabp)
+  :group 'jetpacs)
 
 (defcustom glasspane-journal-landing nil
   "When non-nil the app opens on the Journal view instead of Agenda."
-  :type 'boolean :group 'eabp)
+  :type 'boolean :group 'jetpacs)
 
 (defvar glasspane-journal--date nil
   "The day being viewed (\"YYYY-MM-DD\"), or nil for today.")
@@ -106,38 +106,38 @@ Creates the datetree levels (and the file) on first use."
 
 (defun glasspane-journal--nav-row (date today-p)
   "‹ yesterday | the day (a native date picker) | tomorrow › chrome."
-  (apply #'eabp-row
+  (apply #'jetpacs-row
          (delq nil
                (list
-                (eabp-icon-button
+                (jetpacs-icon-button
                  "chevron_left"
-                 (eabp-action "journal.nav" :args '((delta . -1))
+                 (jetpacs-action "journal.nav" :args '((delta . -1))
                               :when-offline "drop")
                  :content-description "Previous day")
-                (eabp-box
-                 (list (eabp-date-button
+                (jetpacs-box
+                 (list (jetpacs-date-button
                         (glasspane-ui--format-date
                          date (if today-p "Today · %a, %b %e" "%a, %b %e, %Y"))
-                        (eabp-action "journal.goto" :when-offline "drop")
+                        (jetpacs-action "journal.goto" :when-offline "drop")
                         :value date))
                  :weight 1 :alignment "center")
                 (unless today-p
-                  (eabp-chip "Today"
-                             :on-tap (eabp-action "journal.today"
+                  (jetpacs-chip "Today"
+                             :on-tap (jetpacs-action "journal.today"
                                                   :when-offline "drop")))
-                (eabp-icon-button
+                (jetpacs-icon-button
                  "chevron_right"
-                 (eabp-action "journal.nav" :args '((delta . 1))
+                 (jetpacs-action "journal.nav" :args '((delta . 1))
                               :when-offline "drop")
                  :content-description "Next day")))))
 
 (defun glasspane-journal--capture-row (date)
   "The always-on-top quick-capture input for DATE."
-  (eabp-text-input
+  (jetpacs-text-input
    (format "journal-capture-%d" glasspane-journal--capture-gen)
    :hint "Add to this day…"
    :single-line t
-   :on-submit (eabp-action "journal.capture"
+   :on-submit (jetpacs-action "journal.capture"
                            :args `((date . ,date))
                            :when-offline "queue")))
 
@@ -145,7 +145,7 @@ Creates the datetree levels (and the file) on first use."
   "DATE's datetree content through the foldable reader, or a placeholder."
   (or (when-let ((pos (glasspane-journal--day-pos date)))
         (glasspane-org-reader-subtree (glasspane-journal--file) pos t))
-      (list (eabp-text "Nothing here yet — the row above starts the day."
+      (list (jetpacs-text "Nothing here yet — the row above starts the day."
                        'caption))))
 
 (defun glasspane-journal--carried-card (item)
@@ -153,23 +153,23 @@ Creates the datetree levels (and the file) on first use."
 The buttons ride the existing allowlisted `heading.schedule' — the
 orgro timestamp-tap-edit item folds in here."
   (let ((ref (alist-get 'ref item)))
-    (eabp-card
+    (jetpacs-card
      (list
-      (eabp-column
-       (eabp-text (or (alist-get 'headline item) "") 'body)
-       (eabp-text (format "%s · %s"
+      (jetpacs-column
+       (jetpacs-text (or (alist-get 'headline item) "") 'body)
+       (jetpacs-text (format "%s · %s"
                           (or (alist-get 'todo item) "TODO")
                           (or (alist-get 'scheduled item) ""))
                   'caption)
-       (eabp-row
-        (eabp-spacer :weight 1)
-        (eabp-button "Today"
-                     (eabp-action "heading.schedule"
+       (jetpacs-row
+        (jetpacs-spacer :weight 1)
+        (jetpacs-button "Today"
+                     (jetpacs-action "heading.schedule"
                                   :args (append ref '((when . "+0d")))
                                   :when-offline "queue")
                      :variant "text")
-        (eabp-date-button "Pick"
-                          (eabp-action "heading.schedule"
+        (jetpacs-date-button "Pick"
+                          (jetpacs-action "heading.schedule"
                                        :args ref
                                        :when-offline "queue"))))))))
 
@@ -182,29 +182,29 @@ orgro timestamp-tap-edit item folds in here."
                        (condition-case nil
                            (glasspane-journal--carried-over)
                          (error nil)))))
-    (eabp-shell-tab-view
+    (jetpacs-shell-tab-view
      "journal"
-     (apply #'eabp-lazy-column
+     (apply #'jetpacs-lazy-column
             (append
              (list (glasspane-journal--nav-row date today-p)
                    (glasspane-journal--capture-row date)
-                   (eabp-spacer :height 4))
+                   (jetpacs-spacer :height 4))
              (glasspane-journal--day-nodes date)
              (when carried
                (append
-                (list (eabp-divider)
-                      (eabp-section-header
+                (list (jetpacs-divider)
+                      (jetpacs-section-header
                        (format "Carried over (%d)" (length carried))))
                 (mapcar #'glasspane-journal--carried-card carried)))
              ;; The clock rides the journal (its own tab felt barren and
              ;; crowded the bottom bar) — today's time is journal matter.
              (when (and today-p (fboundp 'glasspane-ui--clock-body))
-               (list (eabp-divider)
-                     (eabp-section-header "Clock")
+               (list (jetpacs-divider)
+                     (jetpacs-section-header "Clock")
                      (glasspane-ui--clock-body)))))
      :snackbar snackbar)))
 
-(eabp-shell-define-view "journal"
+(jetpacs-shell-define-view "journal"
                         :builder #'glasspane-journal--view
                         :tab '(:icon "today" :label "Journal")
                         :order 15)
@@ -214,48 +214,48 @@ orgro timestamp-tap-edit item folds in here."
 (defun glasspane-journal--apply-landing (_welcome)
   "Land on the journal when configured and no tab was chosen this session.
 Depth 5: before the shell's on-connect push (10) builds the surface."
-  (when (and glasspane-journal-landing (null eabp-shell--current-tab))
-    (setq eabp-shell--current-tab "journal")))
+  (when (and glasspane-journal-landing (null jetpacs-shell--current-tab))
+    (setq jetpacs-shell--current-tab "journal")))
 
-(add-hook 'eabp-connected-hook #'glasspane-journal--apply-landing 5)
+(add-hook 'jetpacs-connected-hook #'glasspane-journal--apply-landing 5)
 
 (defun glasspane-journal--on-view-switched (view)
   "Leaving the journal resets it to today — returning starts fresh."
   (unless (equal view "journal")
     (setq glasspane-journal--date nil)))
 
-(add-hook 'eabp-shell-view-switched-hook #'glasspane-journal--on-view-switched)
+(add-hook 'jetpacs-shell-view-switched-hook #'glasspane-journal--on-view-switched)
 
-(eabp-settings-register-section
+(jetpacs-settings-register-section
  "Journal"
  '((glasspane-journal-landing :label "Open on the journal")))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "journal.nav"
+(jetpacs-defaction "journal.nav"
   (lambda (args _)
     (let ((delta (alist-get 'delta args)))
       (when (integerp delta)
         (setq glasspane-journal--date
               (glasspane-ui--shift-date (glasspane-journal--current)
                                         delta 'day))
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "journal.goto"
+(jetpacs-defaction "journal.goto"
   (lambda (args _)
     (let ((date (alist-get 'value args)))
       (when (and (stringp date)
                  (string-match-p
                   "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" date))
         (setq glasspane-journal--date date)
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "journal.today"
+(jetpacs-defaction "journal.today"
   (lambda (_args _)
     (setq glasspane-journal--date nil)
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "journal.capture"
+(jetpacs-defaction "journal.capture"
   (lambda (args _)
     (let ((text (string-trim (or (alist-get 'value args) "")))
           (date (alist-get 'date args)))
@@ -264,8 +264,8 @@ Depth 5: before the shell's on-connect push (10) builds the surface."
          text (and (stringp date) (not (string-empty-p date)) date))
         ;; Rotate the input id: the re-render clears the field.
         (cl-incf glasspane-journal--capture-gen)
-        (eabp-shell-notify "Added to journal")
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify "Added to journal")
+        (jetpacs-shell-push)))))
 
 (provide 'glasspane-journal)
 ;;; glasspane-journal.el ends here

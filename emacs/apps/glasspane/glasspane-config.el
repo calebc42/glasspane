@@ -22,14 +22,14 @@
 
 ;;; Code:
 
-(require 'eabp-surfaces)
+(require 'jetpacs-surfaces)
 
 (defcustom glasspane-config-directory
   (expand-file-name "elisp/glasspane/" user-emacs-directory)
   "Directory holding Glasspane's app-managed configuration files.
 Files here are rewritten wholesale by `glasspane-config-sync' — treat
 the directory as the app's, not yours."
-  :type 'directory :group 'eabp)
+  :type 'directory :group 'jetpacs)
 
 (defconst glasspane-config-version 1
   "Version of the managed defaults; stamped into every written file.")
@@ -134,18 +134,18 @@ rewritten."
       (glasspane-config-load)
     (glasspane-config-sync)))
 
-(eabp-defaction "config.sync"
+(jetpacs-defaction "config.sync"
   ;; Allowlisted and argument-free: rewrites the fixed file set into
   ;; `glasspane-config-directory' — nothing on the wire chooses paths
   ;; or content.
   (lambda (_ _)
     (let ((dir (glasspane-config-sync)))
-      (when (fboundp 'eabp-shell-notify)
-        (eabp-shell-notify
+      (when (fboundp 'jetpacs-shell-notify)
+        (jetpacs-shell-notify
          (format "App defaults refreshed in %s"
                  (abbreviate-file-name dir)))))
-    (when (fboundp 'eabp-shell-push)
-      (eabp-shell-push))))
+    (when (fboundp 'jetpacs-shell-push)
+      (jetpacs-shell-push))))
 
 (provide 'glasspane-config)
 ;;; glasspane-config.el ends here

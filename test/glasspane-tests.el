@@ -1,41 +1,41 @@
 ;;; glasspane-tests.el --- ERT suite for the Glasspane app -*- lexical-binding: t; -*-
 
-;; Run from the repo root (any Emacs 28+), with the eabp submodule checked out:
+;; Run from the repo root (any Emacs 28+), with the jetpacs submodule checked out:
 ;;   git submodule update --init
 ;;   emacs -Q --batch -l test/glasspane-tests.el -f ert-run-tests-batch-and-exit
 ;;
-;; The EABP core this app builds on comes from the `eabp' git submodule
+;; The Jetpacs core this app builds on comes from the `jetpacs' git submodule
 ;; (emacs/core there); this repo carries only the Glasspane Tier-1 sources.
 
 ;;; Code:
 
-(defvar eabp-tests--dir
+(defvar jetpacs-tests--dir
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory containing this test file.")
 
-;; Core from the eabp submodule; the app sources from this repo.
-(dolist (dir '("../eabp/emacs/core" "../emacs/apps" "../emacs/apps/glasspane"))
-  (add-to-list 'load-path (expand-file-name dir eabp-tests--dir)))
+;; Core from the jetpacs submodule; the app sources from this repo.
+(dolist (dir '("../jetpacs/emacs/core" "../emacs/apps" "../emacs/apps/glasspane"))
+  (add-to-list 'load-path (expand-file-name dir jetpacs-tests--dir)))
 
 (require 'ert)
 (require 'cl-lib)
-(require 'eabp)
-(require 'eabp-triggers)
-(require 'eabp-device)
-(require 'eabp-apps)
-(require 'eabp-automations)
-(require 'eabp-widgets)
-(require 'eabp-lint)
-(require 'eabp-shell)
+(require 'jetpacs)
+(require 'jetpacs-triggers)
+(require 'jetpacs-device)
+(require 'jetpacs-apps)
+(require 'jetpacs-automations)
+(require 'jetpacs-widgets)
+(require 'jetpacs-lint)
+(require 'jetpacs-shell)
 (require 'glasspane-org)
-(require 'eabp-keymap)
-(require 'eabp-magit)
-(require 'eabp-files)
-(require 'eabp-minibuffer)
+(require 'jetpacs-keymap)
+(require 'jetpacs-magit)
+(require 'jetpacs-files)
+(require 'jetpacs-minibuffer)
 (require 'glasspane-ui)
-(require 'eabp-emacs-ui)
-(require 'eabp-complete)
-(require 'eabp-sync)
+(require 'jetpacs-emacs-ui)
+(require 'jetpacs-complete)
+(require 'jetpacs-sync)
 (require 'glasspane-demo)
 (require 'glasspane-gallery)
 (require 'glasspane-config)
@@ -47,9 +47,9 @@
 
 ;; ─── Capture ────────────────────────────────────────────────────────────────
 
-(ert-deftest eabp-capture-fills-template ()
+(ert-deftest jetpacs-capture-fills-template ()
   "The filled capture template must be the one that actually runs."
-  (let* ((file (make-temp-file "eabp-capture-test" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-capture-test" nil ".org"))
          (org-capture-templates
           `(("t" "Task" entry (file ,file)
              "* TODO %^{Headline}\n%^{Notes|no notes}\n%?"))))
@@ -64,9 +64,9 @@
             (should-not (string-search "%^{" content))))
       (delete-file file))))
 
-(ert-deftest eabp-capture-shared-body ()
+(ert-deftest jetpacs-capture-shared-body ()
   "Text shared from another app is appended below the filled template."
-  (let* ((file (make-temp-file "eabp-share-test" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-share-test" nil ".org"))
          (org-capture-templates
           `(("t" "Task" entry (file ,file) "* TODO %^{Headline}\n%?"))))
     (unwind-protect
@@ -82,9 +82,9 @@
 
 ;; ─── Reminders ──────────────────────────────────────────────────────────────
 
-(ert-deftest eabp-upcoming-reminders ()
+(ert-deftest jetpacs-upcoming-reminders ()
   "Timed items within the horizon become reminder specs; untimed don't."
-  (let* ((file (make-temp-file "eabp-remind" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-remind" nil ".org"))
          (tomorrow (glasspane-ui--shift-date (format-time-string "%Y-%m-%d")
                                             1 'day)))
     (with-temp-file file
@@ -104,7 +104,7 @@
 
 ;; ─── Widget items ───────────────────────────────────────────────────────────
 
-(ert-deftest eabp-widget-items ()
+(ert-deftest jetpacs-widget-items ()
   "Widget items compose meta, flag overdue, omit nil fields, cap at 20."
   (let ((today (org-today)))
     (cl-letf (((symbol-function 'glasspane-org--agenda-items)
@@ -176,9 +176,9 @@
 
 ;; ─── Agenda extraction ──────────────────────────────────────────────────────
 
-(ert-deftest eabp-agenda-extraction ()
+(ert-deftest jetpacs-agenda-extraction ()
   "Items extract; the private buffer dies; the user's agenda survives."
-  (let* ((file (make-temp-file "eabp-agenda-test" nil ".org")))
+  (let* ((file (make-temp-file "jetpacs-agenda-test" nil ".org")))
     (with-temp-file file
       (insert (format "* TODO Water plants\nSCHEDULED: <%s>\n"
                       (format-time-string "%Y-%m-%d %a"))))
@@ -191,14 +191,14 @@
           (should (cl-some (lambda (it)
                              (equal (alist-get 'headline it) "Water plants"))
                            (glasspane-org--agenda-items 'day nil)))
-          (should-not (get-buffer "*EABP Agenda*"))
+          (should-not (get-buffer "*Jetpacs Agenda*"))
           (should (equal (with-current-buffer "*Org Agenda*" (buffer-string))
                          "user content")))
       (delete-file file))))
 
-(ert-deftest eabp-agenda-anchored-extraction ()
+(ert-deftest jetpacs-agenda-anchored-extraction ()
   "Navigation anchors actually change the extracted range."
-  (let* ((file (make-temp-file "eabp-agenda-nav" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-agenda-nav" nil ".org"))
          (tomorrow (glasspane-ui--shift-date
                     (format-time-string "%Y-%m-%d") 1 'day)))
     (with-temp-file file
@@ -216,7 +216,7 @@
 
 ;; ─── Search: query parsing, matching, builder ───────────────────────────────
 
-(ert-deftest eabp-search-parse-normalizes-sexp-queries ()
+(ert-deftest jetpacs-search-parse-normalizes-sexp-queries ()
   "Hand-typed elisp-isms — quoted or bare symbols — become org-ql strings."
   (should (equal (glasspane-org--parse-query "(tags 'server)") '(tags "server")))
   (should (equal (glasspane-org--parse-query "(tags \"server\")") '(tags "server")))
@@ -228,7 +228,7 @@
   (should (equal (glasspane-org--parse-query "(priority >= \"B\")")
                  '(priority >= "B"))))
 
-(ert-deftest eabp-search-parse-tokens-and-text ()
+(ert-deftest jetpacs-search-parse-tokens-and-text ()
   "Token queries AND together; quoted phrases stay whole; empty is nil."
   (should (equal (glasspane-org--parse-query
                   "todo:TODO,NEXT tags:work \"buy milk\" cheese")
@@ -237,14 +237,14 @@
   (should (equal (glasspane-org--parse-query "milk") '(regexp "milk")))
   (should (null (glasspane-org--parse-query "   "))))
 
-(ert-deftest eabp-search-parse-unbalanced-query-errors ()
+(ert-deftest jetpacs-search-parse-unbalanced-query-errors ()
   "A malformed sexp must error visibly, never silently match nothing."
   (should-error (glasspane-org--parse-query "(tags \"server\"")
                 :type 'user-error))
 
-(defmacro eabp-tests--with-search-fixture (&rest body)
+(defmacro jetpacs-tests--with-search-fixture (&rest body)
   "Run BODY with a temp org agenda file of known headings."
-  `(let ((file (make-temp-file "eabp-search" nil ".org")))
+  `(let ((file (make-temp-file "jetpacs-search" nil ".org")))
      (with-temp-file file
        (insert "* TODO [#A] Fix the server :server:urgent:\n"
                "DEADLINE: <" (format-time-string "%Y-%m-%d") ">\n"
@@ -258,77 +258,77 @@
            ,@body)
        (delete-file file))))
 
-(defun eabp-tests--search-headlines (query)
+(defun jetpacs-tests--search-headlines (query)
   "Headlines returned for QUERY, in file order."
   (mapcar (lambda (it) (alist-get 'headline it))
           (glasspane-org--search query)))
 
-(ert-deftest eabp-search-matches-quoted-tag-query ()
+(ert-deftest jetpacs-search-matches-quoted-tag-query ()
   "(tags 'server) — the tag-chip query a user retypes — finds the entry."
-  (eabp-tests--with-search-fixture
-   (should (equal (eabp-tests--search-headlines "(tags 'server)")
+  (jetpacs-tests--with-search-fixture
+   (should (equal (jetpacs-tests--search-headlines "(tags 'server)")
                   '("Fix the server")))
-   (should (equal (eabp-tests--search-headlines "(tags \"server\")")
+   (should (equal (jetpacs-tests--search-headlines "(tags \"server\")")
                   '("Fix the server")))))
 
-(ert-deftest eabp-search-tags-and-todo-case-sensitive ()
+(ert-deftest jetpacs-search-tags-and-todo-case-sensitive ()
   "Tags and TODO keywords are case-sensitive org data."
-  (eabp-tests--with-search-fixture
-   (should (equal (eabp-tests--search-headlines "tags:Server")
+  (jetpacs-tests--with-search-fixture
+   (should (equal (jetpacs-tests--search-headlines "tags:Server")
                   '("Deploy the Server")))
-   (should (equal (eabp-tests--search-headlines "tags:server")
+   (should (equal (jetpacs-tests--search-headlines "tags:server")
                   '("Fix the server")))
-   (should-not (eabp-tests--search-headlines "(todo \"todo\")"))))
+   (should-not (jetpacs-tests--search-headlines "(todo \"todo\")"))))
 
-(ert-deftest eabp-search-free-text-case-insensitive ()
+(ert-deftest jetpacs-search-free-text-case-insensitive ()
   "Free text folds case and reaches the entry body."
-  (eabp-tests--with-search-fixture
-   (should (equal (eabp-tests--search-headlines "MILK") '("Buy milk")))
-   (should (equal (eabp-tests--search-headlines "semi-skimmed")
+  (jetpacs-tests--with-search-fixture
+   (should (equal (jetpacs-tests--search-headlines "MILK") '("Buy milk")))
+   (should (equal (jetpacs-tests--search-headlines "semi-skimmed")
                   '("Buy milk")))))
 
-(ert-deftest eabp-search-query-predicates ()
+(ert-deftest jetpacs-search-query-predicates ()
   "The built-in interpreter covers the query-builder's vocabulary."
-  (eabp-tests--with-search-fixture
-   (should (equal (eabp-tests--search-headlines "(done)")
+  (jetpacs-tests--with-search-fixture
+   (should (equal (jetpacs-tests--search-headlines "(done)")
                   '("Deploy the Server")))
-   (should (equal (eabp-tests--search-headlines "(todo)")
+   (should (equal (jetpacs-tests--search-headlines "(todo)")
                   '("Fix the server" "Call plumber")))
-   (should (equal (eabp-tests--search-headlines "(priority \"A\")")
+   (should (equal (jetpacs-tests--search-headlines "(priority \"A\")")
                   '("Fix the server")))
-   (should (equal (eabp-tests--search-headlines "(and (todo \"TODO\") (tags 'home))")
+   (should (equal (jetpacs-tests--search-headlines "(and (todo \"TODO\") (tags 'home))")
                   '("Call plumber")))
-   (should (equal (eabp-tests--search-headlines "(or (tags 'urgent) (tags 'Server))")
+   (should (equal (jetpacs-tests--search-headlines "(or (tags 'urgent) (tags 'Server))")
                   '("Fix the server" "Deploy the Server")))
-   (should (equal (eabp-tests--search-headlines "(deadline :on today)")
+   (should (equal (jetpacs-tests--search-headlines "(deadline :on today)")
                   '("Fix the server")))
-   (should-not (eabp-tests--search-headlines "(deadline :to -1)"))))
+   (should-not (jetpacs-tests--search-headlines "(deadline :to -1)"))))
 
-(ert-deftest eabp-search-unknown-term-errors ()
+(ert-deftest jetpacs-search-unknown-term-errors ()
   "A term the engine can't run must error, not return nothing."
-  (eabp-tests--with-search-fixture
+  (jetpacs-tests--with-search-fixture
    (should-error (glasspane-org--search "(frobnicate \"x\")")
                  :type 'user-error)))
 
-(ert-deftest eabp-search-builder-generates-org-ql ()
+(ert-deftest jetpacs-search-builder-generates-org-ql ()
   "The builder writes a real org-ql sexp that round-trips through the parser."
-  (let ((eabp--ui-state (make-hash-table :test 'equal)))
+  (let ((jetpacs--ui-state (make-hash-table :test 'equal)))
     (should (equal (glasspane-ui--search-filter-query) ""))
-    (eabp-ui-state-put "search-filter-todo" "TODO")
-    (eabp-ui-state-put "search-filter-tags" ["server" "urgent"])
-    (eabp-ui-state-put "search-filter-due" "Today")
-    (eabp-ui-state-put "search-filter-text" "reboot")
+    (jetpacs-ui-state-put "search-filter-todo" "TODO")
+    (jetpacs-ui-state-put "search-filter-tags" ["server" "urgent"])
+    (jetpacs-ui-state-put "search-filter-due" "Today")
+    (jetpacs-ui-state-put "search-filter-text" "reboot")
     (should (equal (glasspane-org--parse-query (glasspane-ui--search-filter-query))
                    '(and (todo "TODO") (tags "server") (tags "urgent")
                          (deadline :on today) (regexp "reboot")))))
   ;; A lone filter emits a bare clause — the same shape a tag tap makes.
-  (let ((eabp--ui-state (make-hash-table :test 'equal)))
-    (eabp-ui-state-put "search-filter-tags" ["home"])
+  (let ((jetpacs--ui-state (make-hash-table :test 'equal)))
+    (jetpacs-ui-state-put "search-filter-tags" ["home"])
     (should (equal (glasspane-ui--search-filter-query) "(tags \"home\")"))))
 
 ;; ─── Agenda date arithmetic & widgets ───────────────────────────────────────
 
-(ert-deftest eabp-agenda-date-math ()
+(ert-deftest jetpacs-agenda-date-math ()
   (should (equal (glasspane-ui--shift-date "2026-07-01" 1 'day) "2026-07-02"))
   (should (equal (glasspane-ui--shift-date "2026-07-01" -1 'day) "2026-06-30"))
   (should (equal (glasspane-ui--shift-date "2026-07-01" -1 'week) "2026-06-24"))
@@ -337,7 +337,7 @@
   (should (equal (glasspane-ui--shift-date "2026-12-15" 1 'month) "2027-01-15"))
   (should (equal (glasspane-ui--shift-date "2026-01-15" -1 'month) "2025-12-15")))
 
-(ert-deftest eabp-agenda-widgets-serialize ()
+(ert-deftest jetpacs-agenda-widgets-serialize ()
   "Agenda cards, nav rows, and the month grid build and serialize."
   (let ((item `((headline . "Ship release")
                 (todo . "TODO")
@@ -363,11 +363,11 @@
 
 ;; ─── Tier 1 keymap menus ────────────────────────────────────────────────────
 
-(ert-deftest eabp-magit-tier1 ()
+(ert-deftest jetpacs-magit-tier1 ()
   "The curated magit pie registers, fits the pie, and serializes."
   (with-temp-buffer
     (setq major-mode 'magit-status-mode)
-    (let ((builder (eabp-keymap--tier1-builder (current-buffer))))
+    (let ((builder (jetpacs-keymap--tier1-builder (current-buffer))))
       (should (functionp builder))
       (let* ((spec (funcall builder (current-buffer)))
              (cats (append (alist-get 'categories spec) nil)))
@@ -383,20 +383,20 @@
         (should (stringp (json-serialize spec :null-object :null
                                          :false-object :false))))))
   (with-temp-buffer
-    (should-not (eabp-keymap--tier1-builder (current-buffer)))))
+    (should-not (jetpacs-keymap--tier1-builder (current-buffer)))))
 
 ;; ─── Buffer-view line numbers ───────────────────────────────────────────────
 
-(require 'eabp-buffer)
+(require 'jetpacs-buffer)
 
-(defun eabp-tests--first-span-text (node)
+(defun jetpacs-tests--first-span-text (node)
   (alist-get 'text (aref (alist-get 'spans node) 0)))
 
 ;; ─── Messages view ──────────────────────────────────────────────────────────
 
 ;; ─── Detail-view properties editor ──────────────────────────────────────────
 
-(ert-deftest eabp-detail-properties ()
+(ert-deftest jetpacs-detail-properties ()
   "Property rows: colon-free editable keys, read-only ID, empty-value adds.
 Also pins the org behavior the + Add flow depends on: a property set to
 the empty string must still be returned by `org-entry-properties'."
@@ -418,7 +418,7 @@ the empty string must still be returned by `org-entry-properties'."
            (node (aref (alist-get 'children val-box) 0)))
       (should (equal (alist-get 't node) "text"))))
   ;; Empty-valued properties survive extraction (the + Add contract).
-  (let ((file (make-temp-file "eabp-props" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-props" nil ".org")))
     (unwind-protect
         (with-current-buffer (find-file-noselect file)
           (insert "* Task\n")
@@ -464,7 +464,7 @@ the text it tells the user to type."
     (should (string-search "(demo-greet \"world\" 'oops)" content))
     (should (string-search "(defun demo-greet (name)" content))
     ;; The completion instruction actually completes.
-    (let ((result (eabp-complete-in-text "demo.el" "(buffer-sub" 11)))
+    (let ((result (jetpacs-complete-in-text "demo.el" "(buffer-sub" 11)))
       (should result)
       (should (equal (car result) "buffer-sub")))))
 
@@ -559,7 +559,7 @@ object's contents nor the next string, so the emitter must re-add it."
 
 (ert-deftest glasspane-ui-table-edit-recalculates ()
   "The org.table.edit handler writes the field and recalculates #+TBLFM."
-  (let ((file (make-temp-file "eabp-table-test" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-table-test" nil ".org")))
     (unwind-protect
         (progn
           (with-temp-file file
@@ -574,10 +574,10 @@ object's contents nor the next string, so the emitter must re-add it."
               (search-forward "| apples |")
               (setq pos (point)))     ; inside the Qty field
             (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "5"))
-                      ((symbol-function 'eabp-shell-push) (lambda (&rest _)))
-                      ((symbol-function 'eabp-shell-notify)
+                      ((symbol-function 'jetpacs-shell-push) (lambda (&rest _)))
+                      ((symbol-function 'jetpacs-shell-notify)
                        (lambda (text) (ert-fail text))))
-              (funcall (gethash "org.table.edit" eabp-action-handlers)
+              (funcall (gethash "org.table.edit" jetpacs-action-handlers)
                        `((file . ,file) (pos . ,pos)) nil)))
           (let ((content (with-temp-buffer
                            (insert-file-contents file) (buffer-string))))
@@ -588,7 +588,7 @@ object's contents nor the next string, so the emitter must re-add it."
 (ert-deftest glasspane-ui-table-edit-formula-cell-edits-formula ()
   "Tapping a #+TBLFM-computed cell edits the formula, not the value
 the next recalculation would overwrite."
-  (let ((file (make-temp-file "eabp-table-test" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-table-test" nil ".org")))
     (unwind-protect
         (progn
           (with-temp-file file
@@ -605,10 +605,10 @@ the next recalculation would overwrite."
             (cl-letf (((symbol-function 'read-string)
                        (lambda (p &optional initial &rest _)
                          (setq prompt p seed initial) "$2*3"))
-                      ((symbol-function 'eabp-shell-push) (lambda (&rest _)))
-                      ((symbol-function 'eabp-shell-notify)
+                      ((symbol-function 'jetpacs-shell-push) (lambda (&rest _)))
+                      ((symbol-function 'jetpacs-shell-notify)
                        (lambda (text) (ert-fail text))))
-              (funcall (gethash "org.table.edit" eabp-action-handlers)
+              (funcall (gethash "org.table.edit" jetpacs-action-handlers)
                        `((file . ,file) (pos . ,pos)) nil))
             ;; The dialog names the formula target and seeds its body.
             (should (string-match-p "\\$3" prompt))
@@ -621,21 +621,21 @@ the next recalculation would overwrite."
 
 (ert-deftest glasspane-ui-table-cell-menu-deletes-row-and-column ()
   "The long-press menu deletes the row and column at the tapped cell."
-  (let ((file (make-temp-file "eabp-table-test" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-table-test" nil ".org")))
     (unwind-protect
         (progn
           (with-temp-file file (insert "| a | b | c |\n| d | e | f |\n"))
           (let ((choice "Delete row"))
             (cl-letf (((symbol-function 'completing-read)
                        (lambda (&rest _) choice))
-                      ((symbol-function 'eabp-shell-push) (lambda (&rest _)))
-                      ((symbol-function 'eabp-shell-notify)
+                      ((symbol-function 'jetpacs-shell-push) (lambda (&rest _)))
+                      ((symbol-function 'jetpacs-shell-notify)
                        (lambda (text) (ert-fail text))))
               ;; Delete the first row, then the first remaining column.
-              (funcall (gethash "org.table.cell-menu" eabp-action-handlers)
+              (funcall (gethash "org.table.cell-menu" jetpacs-action-handlers)
                        `((file . ,file) (pos . 3)) nil)
               (setq choice "Delete column")
-              (funcall (gethash "org.table.cell-menu" eabp-action-handlers)
+              (funcall (gethash "org.table.cell-menu" jetpacs-action-handlers)
                        `((file . ,file) (pos . 3)) nil)))
           (let ((content (with-temp-buffer
                            (insert-file-contents file) (buffer-string))))
@@ -645,16 +645,16 @@ the next recalculation would overwrite."
 
 (ert-deftest glasspane-ui-table-add-row-and-column ()
   "add-row appends an empty row; add-col appends an empty column at the right."
-  (let ((file (make-temp-file "eabp-table-test" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-table-test" nil ".org")))
     (unwind-protect
         (progn
           (with-temp-file file (insert "| a | b |\n| c | d |\n"))
-          (cl-letf (((symbol-function 'eabp-shell-push) (lambda (&rest _)))
-                    ((symbol-function 'eabp-shell-notify)
+          (cl-letf (((symbol-function 'jetpacs-shell-push) (lambda (&rest _)))
+                    ((symbol-function 'jetpacs-shell-notify)
                      (lambda (text) (ert-fail text))))
-            (funcall (gethash "org.table.add-row" eabp-action-handlers)
+            (funcall (gethash "org.table.add-row" jetpacs-action-handlers)
                      `((file . ,file) (pos . 1)) nil)
-            (funcall (gethash "org.table.add-col" eabp-action-handlers)
+            (funcall (gethash "org.table.add-col" jetpacs-action-handlers)
                      `((file . ,file) (pos . 1)) nil))
           (let* ((content (with-temp-buffer
                             (insert-file-contents file) (buffer-string)))
@@ -697,7 +697,7 @@ the next recalculation would overwrite."
 (ert-deftest glasspane-ui-babel-execute-inserts-results ()
   "The org.babel.execute handler runs the block and saves its RESULTS."
   (require 'ob-emacs-lisp)
-  (let ((file (make-temp-file "eabp-babel-test" nil ".org"))
+  (let ((file (make-temp-file "jetpacs-babel-test" nil ".org"))
         (org-confirm-babel-evaluate nil)
         notified)
     (unwind-protect
@@ -710,10 +710,10 @@ the next recalculation would overwrite."
               (goto-char (point-min))
               (search-forward "#+begin_src")
               (setq pos (line-beginning-position)))
-            (cl-letf (((symbol-function 'eabp-shell-push) (lambda (&rest _)))
-                      ((symbol-function 'eabp-shell-notify)
+            (cl-letf (((symbol-function 'jetpacs-shell-push) (lambda (&rest _)))
+                      ((symbol-function 'jetpacs-shell-notify)
                        (lambda (text) (setq notified text))))
-              (funcall (gethash "org.babel.execute" eabp-action-handlers)
+              (funcall (gethash "org.babel.execute" jetpacs-action-handlers)
                        `((file . ,file) (pos . ,pos)) nil)))
           (should (equal notified "Block executed"))
           (let ((content (with-temp-buffer
@@ -729,7 +729,7 @@ Uses org's own non-interactive decline hook
 deterministically — no stdin, no mocked `yes-or-no-p' (batch Emacs would
 otherwise block on the real prompt)."
   (require 'ob-emacs-lisp)
-  (let ((file (make-temp-file "eabp-babel-test" nil ".org"))
+  (let ((file (make-temp-file "jetpacs-babel-test" nil ".org"))
         (org-confirm-babel-evaluate t)
         (org-babel-confirm-evaluate-answer-no t)
         notified)
@@ -737,10 +737,10 @@ otherwise block on the real prompt)."
         (progn
           (with-temp-file file
             (insert "#+begin_src emacs-lisp\n(+ 1 2)\n#+end_src\n"))
-          (cl-letf (((symbol-function 'eabp-shell-push) (lambda (&rest _)))
-                    ((symbol-function 'eabp-shell-notify)
+          (cl-letf (((symbol-function 'jetpacs-shell-push) (lambda (&rest _)))
+                    ((symbol-function 'jetpacs-shell-notify)
                      (lambda (text) (setq notified text))))
-            (funcall (gethash "org.babel.execute" eabp-action-handlers)
+            (funcall (gethash "org.babel.execute" jetpacs-action-handlers)
                      `((file . ,file) (pos . 1)) nil))
           (should (string-prefix-p "Run failed:" (or notified "")))
           (let ((content (with-temp-buffer
@@ -750,19 +750,19 @@ otherwise block on the real prompt)."
 
 ;; ─── Org drawers ─────────────────────────────────────────────────────────────
 
-(defun eabp-tests--find-node (tree pred)
+(defun jetpacs-tests--find-node (tree pred)
   "Depth-first search of widget TREE for a node satisfying PRED.
 TREE may be a node (alist), a list of nodes, or a vector of nodes."
   (cond
    ((vectorp tree)
-    (cl-some (lambda (x) (eabp-tests--find-node x pred)) tree))
+    (cl-some (lambda (x) (jetpacs-tests--find-node x pred)) tree))
    ((and (consp tree) (consp (car tree)) (symbolp (caar tree)))
     (if (funcall pred tree) tree
       (cl-some (lambda (kv) (and (consp kv)
-                                 (eabp-tests--find-node (cdr kv) pred)))
+                                 (jetpacs-tests--find-node (cdr kv) pred)))
                tree)))
    ((consp tree)
-    (cl-some (lambda (x) (eabp-tests--find-node x pred)) tree))))
+    (cl-some (lambda (x) (jetpacs-tests--find-node x pred)) tree))))
 
 (ert-deftest glasspane-org-rich-drawer-renders-folded ()
   "Drawers render as collapsed sections instead of disappearing."
@@ -778,7 +778,7 @@ TREE may be a node (alist), a list of nodes, or a vector of nodes."
 (ert-deftest glasspane-org-reader-drawer-visibility ()
   "The reader shows heading drawers folded; the detail view (skip-props
 path) suppresses the raw LOGBOOK drawer its structured section replaces."
-  (let ((file (make-temp-file "eabp-drawer-test" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-drawer-test" nil ".org")))
     (unwind-protect
         (progn
           (with-temp-file file
@@ -791,9 +791,9 @@ path) suppresses the raw LOGBOOK drawer its structured section replaces."
                              (and (equal (alist-get 't n) "collapsible")
                                   (equal (alist-get 'text (alist-get 'header n))
                                          "LOGBOOK")))))
-            (should (eabp-tests--find-node
+            (should (jetpacs-tests--find-node
                      (glasspane-org-reader-file file) logbook-p))
-            (should-not (eabp-tests--find-node
+            (should-not (jetpacs-tests--find-node
                          (glasspane-org-reader-subtree file 1 t) logbook-p))))
       (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
       (delete-file file))))
@@ -805,7 +805,7 @@ path) suppresses the raw LOGBOOK drawer its structured section replaces."
 
 (ert-deftest glasspane-ui-table-edit-recalculates-lowercase-tblfm ()
   "A lowercase #+tblfm: line is as valid as #+TBLFM: for recalculation."
-  (let ((file (make-temp-file "eabp-table-test" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-table-test" nil ".org")))
     (unwind-protect
         (progn
           (with-temp-file file
@@ -820,10 +820,10 @@ path) suppresses the raw LOGBOOK drawer its structured section replaces."
               (search-forward "| apples |")
               (setq pos (point)))
             (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "5"))
-                      ((symbol-function 'eabp-shell-push) (lambda (&rest _)))
-                      ((symbol-function 'eabp-shell-notify)
+                      ((symbol-function 'jetpacs-shell-push) (lambda (&rest _)))
+                      ((symbol-function 'jetpacs-shell-notify)
                        (lambda (text) (ert-fail text))))
-              (funcall (gethash "org.table.edit" eabp-action-handlers)
+              (funcall (gethash "org.table.edit" jetpacs-action-handlers)
                        `((file . ,file) (pos . ,pos)) nil)))
           (should (string-match-p
                    "| apples | +5 | +10 |"
@@ -843,7 +843,7 @@ path) suppresses the raw LOGBOOK drawer its structured section replaces."
       (should (= (length entries) 1))
       (should (eq (plist-get (car entries) :type) 'clock))))
   ;; Reader/detail rendering: folded in the reader, suppressed in detail.
-  (let ((file (make-temp-file "eabp-drawer-test" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-drawer-test" nil ".org")))
     (unwind-protect
         (progn
           (with-temp-file file
@@ -852,9 +852,9 @@ path) suppresses the raw LOGBOOK drawer its structured section replaces."
                              (and (equal (alist-get 't n) "collapsible")
                                   (equal (alist-get 'text (alist-get 'header n))
                                          "logbook")))))
-            (should (eabp-tests--find-node
+            (should (jetpacs-tests--find-node
                      (glasspane-org-reader-file file) logbook-p))
-            (should-not (eabp-tests--find-node
+            (should-not (jetpacs-tests--find-node
                          (glasspane-org-reader-subtree file 1 t) logbook-p))))
       (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
       (delete-file file))))
@@ -874,10 +874,10 @@ rich renderers (native table, babel run button)."
           (dolist (spec glasspane-demo--org-files)
             (should (glasspane-org-reader-file
                      (expand-file-name (car spec) dir))))
-          (should (eabp-tests--find-node
+          (should (jetpacs-tests--find-node
                    (glasspane-org-reader-file (expand-file-name "health.org" dir))
                    (lambda (n) (equal (alist-get 't n) "table"))))
-          (should (eabp-tests--find-node
+          (should (jetpacs-tests--find-node
                    (glasspane-org-reader-file (expand-file-name "notes.org" dir))
                    (lambda (n)
                      (equal (alist-get 'action (alist-get 'on_tap n))
@@ -934,144 +934,144 @@ rich renderers (native table, babel run button)."
 
 ;; ─── Widget wire format (golden snapshot) ───────────────────────────────────
 
-(defconst eabp-tests--golden-file
-  (expand-file-name "widgets.golden" eabp-tests--dir))
+(defconst jetpacs-tests--golden-file
+  (expand-file-name "widgets.golden" jetpacs-tests--dir))
 
-(defun eabp-tests--canon (x)
+(defun jetpacs-tests--canon (x)
   "Recursively sort alist keys in X so serialization order is stable."
   (cond
    ((and (consp x) (consp (car x)) (symbolp (caar x)))
-    (sort (mapcar (lambda (kv) (cons (car kv) (eabp-tests--canon (cdr kv))))
+    (sort (mapcar (lambda (kv) (cons (car kv) (jetpacs-tests--canon (cdr kv))))
                   (copy-sequence x))
           (lambda (a b) (string< (symbol-name (car a)) (symbol-name (car b))))))
-   ((vectorp x) (vconcat (mapcar #'eabp-tests--canon x)))
+   ((vectorp x) (vconcat (mapcar #'jetpacs-tests--canon x)))
    (t x)))
 
-(defun eabp-tests--widget-cases ()
+(defun jetpacs-tests--widget-cases ()
   "A battery exercising every widget constructor with all its options."
-  (let* ((act (eabp-action "x.y" :args '((k . "v"))
+  (let* ((act (jetpacs-action "x.y" :args '((k . "v"))
                            :when-offline "drop" :dedupe "d"))
-         (leaf (eabp-text "leaf")))
+         (leaf (jetpacs-text "leaf")))
     (list
-     (eabp-text "hi")
-     (eabp-text "hi" 'title 1 "#FF0000" t 2 4)
-     (eabp-markup "code" :syntax "elisp" :style 'body :padding 4)
-     (eabp-rich-text (list (eabp-span "a" :bold t)) :style 'body :padding 2)
-     (eabp-span "s" :bold t :italic t :underline t :strike t :code t
+     (jetpacs-text "hi")
+     (jetpacs-text "hi" 'title 1 "#FF0000" t 2 4)
+     (jetpacs-markup "code" :syntax "elisp" :style 'body :padding 4)
+     (jetpacs-rich-text (list (jetpacs-span "a" :bold t)) :style 'body :padding 2)
+     (jetpacs-span "s" :bold t :italic t :underline t :strike t :code t
                 :tag t :baseline "super" :color "#FFF" :on-tap act :mono t)
-     (eabp-row leaf leaf)
-     (eabp-flow-row leaf)
-     (eabp-column leaf)
-     (eabp-box (list leaf) :alignment "center" :padding 2 :weight 1 :on-tap act)
-     (eabp-surface (list leaf) :color "#111" :shape "rounded" :elevation 2 :padding 3)
-     (eabp-surface (list leaf) :color "surface_container" :shape "rounded_small" :fill t)
-     (eabp-lazy-column leaf leaf)
-     (eabp-spacer :height 4 :width 2 :weight 1)
-     (eabp-divider)
-     (eabp-card (list leaf) :on-tap act :padding 8 :weight 1)
-     (eabp-collapsible "cid" leaf (list leaf) :collapsed t :on-long-tap act)
-     (eabp-reorderable-list (list '((label . "h") (level . 1))) :on-reorder act)
-     (eabp-action "y.z")
+     (jetpacs-row leaf leaf)
+     (jetpacs-flow-row leaf)
+     (jetpacs-column leaf)
+     (jetpacs-box (list leaf) :alignment "center" :padding 2 :weight 1 :on-tap act)
+     (jetpacs-surface (list leaf) :color "#111" :shape "rounded" :elevation 2 :padding 3)
+     (jetpacs-surface (list leaf) :color "surface_container" :shape "rounded_small" :fill t)
+     (jetpacs-lazy-column leaf leaf)
+     (jetpacs-spacer :height 4 :width 2 :weight 1)
+     (jetpacs-divider)
+     (jetpacs-card (list leaf) :on-tap act :padding 8 :weight 1)
+     (jetpacs-collapsible "cid" leaf (list leaf) :collapsed t :on-long-tap act)
+     (jetpacs-reorderable-list (list '((label . "h") (level . 1))) :on-reorder act)
+     (jetpacs-action "y.z")
      act
-     (eabp-clipboard-action "copied text")
-     (eabp-button "L" act :icon "add" :variant "text" :weight 1 :padding 2)
-     (eabp-date-button "L" act :value "2026-01-01")
-     (eabp-time-button "L" act :value "10:00")
-     (eabp-image "http://x" :content-description "d" :padding 1)
-     (eabp-icon-button "add" act :content-description "c" :padding 1)
-     (eabp-menu (list (eabp-menu-item "L" act :icon "add")) :icon "more_vert" :padding 2)
-     (eabp-text-input "tid" :value "v" :hint "h" :label "l" :on-submit act
+     (jetpacs-clipboard-action "copied text")
+     (jetpacs-button "L" act :icon "add" :variant "text" :weight 1 :padding 2)
+     (jetpacs-date-button "L" act :value "2026-01-01")
+     (jetpacs-time-button "L" act :value "10:00")
+     (jetpacs-image "http://x" :content-description "d" :padding 1)
+     (jetpacs-icon-button "add" act :content-description "c" :padding 1)
+     (jetpacs-menu (list (jetpacs-menu-item "L" act :icon "add")) :icon "more_vert" :padding 2)
+     (jetpacs-text-input "tid" :value "v" :hint "h" :label "l" :on-submit act
                       :single-line t :min-lines 1 :max-lines 3
                       :monospace t :syntax "org" :padding 2)
-     (eabp-text-input "tid2" :multi-line t)
-     (eabp-enum-list "eid" '("a" "b") :value '("a") :multi-select t
+     (jetpacs-text-input "tid2" :multi-line t)
+     (jetpacs-enum-list "eid" '("a" "b") :value '("a") :multi-select t
                      :allow-add t :on-change act :padding 1)
-     (eabp-checkbox "kid" :checked t :label "l" :on-change act :padding 1)
-     (eabp-switch "sid" :checked t :label "l" :on-change act :padding 1)
-     (eabp-icon "add" :size 20 :color "#FFF" :padding 1)
-     (eabp-chip "l" :on-tap act :selected t :icon "add" :padding 1)
-     (eabp-progress :variant "linear" :value 0.5 :padding 1)
-     (eabp-assist-chip "l" :on-tap act :icon "add" :padding 1)
-     (eabp-section-header "t" :trailing leaf :padding 1)
-     (eabp-empty-state :icon "inbox" :title "t" :caption "c"
+     (jetpacs-checkbox "kid" :checked t :label "l" :on-change act :padding 1)
+     (jetpacs-switch "sid" :checked t :label "l" :on-change act :padding 1)
+     (jetpacs-icon "add" :size 20 :color "#FFF" :padding 1)
+     (jetpacs-chip "l" :on-tap act :selected t :icon "add" :padding 1)
+     (jetpacs-progress :variant "linear" :value 0.5 :padding 1)
+     (jetpacs-assist-chip "l" :on-tap act :icon "add" :padding 1)
+     (jetpacs-section-header "t" :trailing leaf :padding 1)
+     (jetpacs-empty-state :icon "inbox" :title "t" :caption "c"
                        :on-tap act :action-label "al" :padding 1)
-     (eabp-date-stamp :date "2026-07-02" :time "10:00" :padding 1)
-     (eabp-date-stamp :day 2 :month "Jul" :month-index 7 :year 2026)
-     (eabp-editor "f.org" "content" :on-save act :read-only t :syntax "org"
+     (jetpacs-date-stamp :date "2026-07-02" :time "10:00" :padding 1)
+     (jetpacs-date-stamp :day 2 :month "Jul" :month-index 7 :year 2026)
+     (jetpacs-editor "f.org" "content" :on-save act :read-only t :syntax "org"
                   :line-numbers "absolute" :complete t
                   :chromeless t :publish-state t)
-     (eabp-drawer (list (eabp-drawer-item "i" "l" act :selected t)) :header "h")
-     (eabp-top-bar "t" :nav-icon "menu" :nav-action act :actions (list leaf))
-     (eabp-fab "add" :label "l" :on-tap act :extended t)
-     (eabp-bottom-bar (list (eabp-nav-item "i" "l" act :selected t)))
-     (eabp-scaffold :top-bar (eabp-top-bar "t") :fab (eabp-fab "add")
-                    :body leaf :bottom-bar (eabp-bottom-bar nil)
-                    :snackbar "s" :drawer (eabp-drawer nil :header "h")
+     (jetpacs-drawer (list (jetpacs-drawer-item "i" "l" act :selected t)) :header "h")
+     (jetpacs-top-bar "t" :nav-icon "menu" :nav-action act :actions (list leaf))
+     (jetpacs-fab "add" :label "l" :on-tap act :extended t)
+     (jetpacs-bottom-bar (list (jetpacs-nav-item "i" "l" act :selected t)))
+     (jetpacs-scaffold :top-bar (jetpacs-top-bar "t") :fab (jetpacs-fab "add")
+                    :body leaf :bottom-bar (jetpacs-bottom-bar nil)
+                    :snackbar "s" :drawer (jetpacs-drawer nil :header "h")
                     :on-refresh act)
-     (eabp-table
-      (list (eabp-table-row
-             (list (eabp-table-cell (list (eabp-span "Item" :bold t)))
-                   (eabp-table-cell (list (eabp-span "Qty"))))
+     (jetpacs-table
+      (list (jetpacs-table-row
+             (list (jetpacs-table-cell (list (jetpacs-span "Item" :bold t)))
+                   (jetpacs-table-cell (list (jetpacs-span "Qty"))))
              :header t)
-            (eabp-table-rule)
-            (eabp-table-row
-             (list (eabp-table-cell (list (eabp-span "apples"))
+            (jetpacs-table-rule)
+            (jetpacs-table-row
+             (list (jetpacs-table-cell (list (jetpacs-span "apples"))
                                     :on-tap act :on-long-tap act)
-                   (eabp-table-cell (list (eabp-span "4"))))))
+                   (jetpacs-table-cell (list (jetpacs-span "4"))))))
       :aligns '("start" "end") :on-add-row act :on-add-col act :padding 2)
-     (eabp-table
-      (list (eabp-table-row (list (eabp-table-cell (list (eabp-span "a")))))))
-     (eabp-scroll-row leaf leaf)
+     (jetpacs-table
+      (list (jetpacs-table-row (list (jetpacs-table-cell (list (jetpacs-span "a")))))))
+     (jetpacs-scroll-row leaf leaf)
      ;; Phase C — composition knobs
-     (eabp-slider "vol" act :value 0.3 :min 0.0 :max 1.0 :steps 10)
-     (eabp-row leaf leaf :spacing 4 :align "top")
-     (eabp-column leaf leaf :spacing 6 :align "center")
-     (eabp-surface (list leaf) :width 120 :height 40 :fill-fraction 0.5
-                   :border (eabp-border :width 2 :color "#888"))
-     (eabp-image "http://x" :width 100 :height 80 :aspect-ratio 1.5
+     (jetpacs-slider "vol" act :value 0.3 :min 0.0 :max 1.0 :steps 10)
+     (jetpacs-row leaf leaf :spacing 4 :align "top")
+     (jetpacs-column leaf leaf :spacing 6 :align "center")
+     (jetpacs-surface (list leaf) :width 120 :height 40 :fill-fraction 0.5
+                   :border (jetpacs-border :width 2 :color "#888"))
+     (jetpacs-image "http://x" :width 100 :height 80 :aspect-ratio 1.5
                  :content-scale "crop")
      ;; Phase D — visualization ladder
-     (eabp-chart (list (eabp-chart-series '(1 3 2 5) :label "a" :color "#4C6FFF")
-                       (eabp-chart-series '(2 2 4 3)))
+     (jetpacs-chart (list (jetpacs-chart-series '(1 3 2 5) :label "a" :color "#4C6FFF")
+                       (jetpacs-chart-series '(2 2 4 3)))
                  :kind "line" :height 160 :y-range '(0 6) :summary "trend"
                  :on-point-tap act)
-     (eabp-canvas 100 60
-                  (list (eabp-draw-line 0 0 100 60 :color "#888" :stroke 2)
-                        (eabp-draw-rect 10 10 30 20 :fill t :color "primary" :radius 4)
-                        (eabp-draw-circle 70 30 15 :color "#E64980")
-                        (eabp-draw-path '((0 60) (50 0) (100 60)) :closed t :fill t)
-                        (eabp-draw-text 50 30 "hi" :align "center" :size 10))))))
+     (jetpacs-canvas 100 60
+                  (list (jetpacs-draw-line 0 0 100 60 :color "#888" :stroke 2)
+                        (jetpacs-draw-rect 10 10 30 20 :fill t :color "primary" :radius 4)
+                        (jetpacs-draw-circle 70 30 15 :color "#E64980")
+                        (jetpacs-draw-path '((0 60) (50 0) (100 60)) :closed t :fill t)
+                        (jetpacs-draw-text 50 30 "hi" :align "center" :size 10))))))
 
-(defun eabp-tests--widget-lines ()
+(defun jetpacs-tests--widget-lines ()
   (let ((i -1))
     (mapcar (lambda (c)
               (setq i (1+ i))
               (format "%02d %s" i
-                      (json-serialize (eabp-tests--canon c)
+                      (json-serialize (jetpacs-tests--canon c)
                                       :null-object :null
                                       :false-object :false)))
-            (eabp-tests--widget-cases))))
+            (jetpacs-tests--widget-cases))))
 
-(defun eabp-tests-regen-widget-golden ()
+(defun jetpacs-tests-regen-widget-golden ()
   "Rewrite the golden snapshot from the current constructors.
 Only run this after an INTENTIONAL wire-format change; review the diff."
-  (with-temp-file eabp-tests--golden-file
-    (insert (string-join (eabp-tests--widget-lines) "\n") "\n"))
-  (message "Wrote %s" eabp-tests--golden-file))
+  (with-temp-file jetpacs-tests--golden-file
+    (insert (string-join (jetpacs-tests--widget-lines) "\n") "\n"))
+  (message "Wrote %s" jetpacs-tests--golden-file))
 
 ;; ─── Triggers & device capabilities (SPEC §10–§11) ──────────────────────────
 
-(ert-deftest eabp-automations-view-renders ()
+(ert-deftest jetpacs-automations-view-renders ()
   "The Automations view builds for both the empty and populated registry."
-  (let ((eabp-triggers--table (make-hash-table :test 'equal))
-        (eabp-triggers--last-fired (make-hash-table :test 'equal))
-        (eabp-triggers-disabled nil))
-    (should (eabp-automations--view nil))   ; empty state
-    (eabp-deftrigger test/view
+  (let ((jetpacs-triggers--table (make-hash-table :test 'equal))
+        (jetpacs-triggers--last-fired (make-hash-table :test 'equal))
+        (jetpacs-triggers-disabled nil))
+    (should (jetpacs-automations--view nil))   ; empty state
+    (jetpacs-deftrigger test/view
       :type "battery.level" :params '((below . 20))
       :policy "drop" :throttle-s 300 :handler #'ignore)
     (let ((json (json-serialize
-                 (eabp-tests--canon (eabp-automations--view "snack"))
+                 (jetpacs-tests--canon (jetpacs-automations--view "snack"))
                  :null-object :null :false-object :false)))
       (should (string-search "test/view" json))
       (should (string-search "trigger.toggle" json))
@@ -1086,25 +1086,25 @@ Only run this after an INTENTIONAL wire-format change; review the diff."
 (ert-deftest glasspane-gallery-body-lints-clean ()
   "The interactive gallery composes to a wire-valid spec across chart kinds."
   (dolist (glasspane-gallery--kind '("line" "bar" "area" "sparkline"))
-    (should-not (eabp-lint-spec (glasspane-gallery--body))))
+    (should-not (jetpacs-lint-spec (glasspane-gallery--body))))
   (dolist (lvl '(0.0 0.5 1.0))
-    (should-not (eabp-lint-spec (glasspane-gallery--gauge lvl)))))
+    (should-not (jetpacs-lint-spec (glasspane-gallery--gauge lvl)))))
 
 ;; ─── Multi-tenant ownership (Phase E) ─────────────────────────────────────────
 
-;; ─── App identity (eabp-defapp, AUTO Task 14) ────────────────────────────────
+;; ─── App identity (jetpacs-defapp, AUTO Task 14) ────────────────────────────────
 
 ;; ─── Protocol frame shapes (golden snapshot, SPEC §10–§11) ──────────────────
 
-(defconst eabp-tests--frames-golden-file
-  (expand-file-name "frames.golden" eabp-tests--dir))
+(defconst jetpacs-tests--frames-golden-file
+  (expand-file-name "frames.golden" jetpacs-tests--dir))
 
-(defun eabp-tests--device-cases ()
-  "One `capability.invoke' payload per `eabp-device-*' wrapper.
+(defun jetpacs-tests--device-cases ()
+  "One `capability.invoke' payload per `jetpacs-device-*' wrapper.
 Captures what each thin defun hands the funnel — the SPEC §10 arg
 shapes — without touching the wire."
   (let (calls)
-    (cl-letf (((symbol-function 'eabp-device--invoke)
+    (cl-letf (((symbol-function 'jetpacs-device--invoke)
                (lambda (cap args &optional _callback)
                  (push `((kind . "capability.invoke")
                          (payload
@@ -1112,70 +1112,70 @@ shapes — without touching the wire."
                              (args . ,(or args (make-hash-table
                                                 :test 'equal))))))
                        calls))))
-      (eabp-device-intent :action "android.intent.action.VIEW"
+      (jetpacs-device-intent :action "android.intent.action.VIEW"
                           :data "https://example.com")
-      (eabp-device-intent :package "com.termux"
+      (jetpacs-device-intent :package "com.termux"
                           :class-name "com.termux.app.TermuxActivity"
                           :mode "activity"
                           :extras '((com.example.FLAG . t)
                                     (com.example.COUNT . 3)))
-      (eabp-device-app-launch "org.gnu.emacs")
-      (eabp-device-apps-list #'ignore)
-      (eabp-device-vibrate 300)
-      (eabp-device-vibrate nil '(0 100 50 100))
-      (eabp-device-tts "hello" :pitch 1.2 :rate 0.9)
-      (eabp-device-volume-set "music" 5)
-      (eabp-device-ringer-mode "vibrate")
-      (eabp-device-flashlight t)
-      (eabp-device-flashlight nil)
-      (eabp-device-media-key "play_pause")
-      (eabp-device-clipboard-read #'ignore)
-      (eabp-device-settings-open "wifi")
-      (eabp-device-keep-screen-on t)
-      (eabp-device-brightness 128)
-      (eabp-device-dnd "priority"))
+      (jetpacs-device-app-launch "org.gnu.emacs")
+      (jetpacs-device-apps-list #'ignore)
+      (jetpacs-device-vibrate 300)
+      (jetpacs-device-vibrate nil '(0 100 50 100))
+      (jetpacs-device-tts "hello" :pitch 1.2 :rate 0.9)
+      (jetpacs-device-volume-set "music" 5)
+      (jetpacs-device-ringer-mode "vibrate")
+      (jetpacs-device-flashlight t)
+      (jetpacs-device-flashlight nil)
+      (jetpacs-device-media-key "play_pause")
+      (jetpacs-device-clipboard-read #'ignore)
+      (jetpacs-device-settings-open "wifi")
+      (jetpacs-device-keep-screen-on t)
+      (jetpacs-device-brightness 128)
+      (jetpacs-device-dnd "priority"))
     (nreverse calls)))
 
-(defun eabp-tests--frame-cases ()
+(defun jetpacs-tests--frame-cases ()
   "Outbound protocol frame payloads pinned by test/frames.golden.
 Trigger and capability frames today; new wire frames add cases here."
-  (let ((eabp-triggers--table (make-hash-table :test 'equal)))
+  (let ((jetpacs-triggers--table (make-hash-table :test 'equal)))
     ;; Batch Emacs is disconnected, so these registers never send.
-    (eabp-trigger-register "power-sync" :type "power"
+    (jetpacs-trigger-register "power-sync" :type "power"
                            :params '((state . "connected"))
                            :policy "wake" :dedupe "power-sync" :throttle-s 60
                            :on-fire [((cap . "flashlight")
                                       (args . ((on . t))))])
-    (eabp-trigger-register "screen-off" :type "screen"
+    (jetpacs-trigger-register "screen-off" :type "screen"
                            :params '((state . "off")))
     (append
      (list
       `((kind . "triggers.set")
-        (payload . ((triggers . ,(eabp-triggers--specs))))))
-     (eabp-tests--device-cases))))
+        (payload . ((triggers . ,(jetpacs-triggers--specs))))))
+     (jetpacs-tests--device-cases))))
 
-(defun eabp-tests--frame-lines ()
+(defun jetpacs-tests--frame-lines ()
   (let ((i -1))
     (mapcar (lambda (c)
               (setq i (1+ i))
               (format "%02d %s" i
-                      (json-serialize (eabp-tests--canon c)
+                      (json-serialize (jetpacs-tests--canon c)
                                       :null-object :null
                                       :false-object :false)))
-            (eabp-tests--frame-cases))))
+            (jetpacs-tests--frame-cases))))
 
-(defun eabp-tests-regen-frame-golden ()
+(defun jetpacs-tests-regen-frame-golden ()
   "Rewrite the frame golden snapshot from the current senders.
 Only run this after an INTENTIONAL wire-format change; review the diff."
-  (with-temp-file eabp-tests--frames-golden-file
-    (insert (string-join (eabp-tests--frame-lines) "\n") "\n"))
-  (message "Wrote %s" eabp-tests--frames-golden-file))
+  (with-temp-file jetpacs-tests--frames-golden-file
+    (insert (string-join (jetpacs-tests--frame-lines) "\n") "\n"))
+  (message "Wrote %s" jetpacs-tests--frames-golden-file))
 
 ;; ─── Journal (PKM Task 5) ────────────────────────────────────────────────────
 
 (ert-deftest glasspane-journal-append-creates-datetree ()
   "First append creates the datetree levels; entries land as list items."
-  (let* ((file (make-temp-file "eabp-journal" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-journal" nil ".org"))
          (glasspane-journal-file file)
          (today (glasspane-journal--today)))
     (unwind-protect
@@ -1196,7 +1196,7 @@ Only run this after an INTENTIONAL wire-format change; review the diff."
 
 (ert-deftest glasspane-journal-carried-over ()
   "Unfinished TODOs scheduled before today carry over; done/future don't."
-  (let* ((file (make-temp-file "eabp-carried" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-carried" nil ".org"))
          (today (glasspane-journal--today))
          (yesterday (glasspane-ui--shift-date today -1 'day))
          (tomorrow (glasspane-ui--shift-date today 1 'day)))
@@ -1216,29 +1216,29 @@ Only run this after an INTENTIONAL wire-format change; review the diff."
 (ert-deftest glasspane-journal-actions-drive-state ()
   "nav/goto/today move the viewed date; capture appends and rotates the
 input id (the server-driven field clear)."
-  (let* ((file (make-temp-file "eabp-journal-act" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-journal-act" nil ".org"))
          (glasspane-journal-file file)
          (glasspane-journal--date nil)
          (glasspane-journal--capture-gen 0)
          (today (glasspane-journal--today))
          (yesterday (glasspane-ui--shift-date today -1 'day)))
     (unwind-protect
-        (cl-letf (((symbol-function 'eabp-shell-push)
+        (cl-letf (((symbol-function 'jetpacs-shell-push)
                    (cl-function (lambda (&optional _tab &key _switch-to)))))
-          (eabp--on-action '((action . "journal.nav")
+          (jetpacs--on-action '((action . "journal.nav")
                              (args . ((delta . -1)))) nil)
           (should (equal (glasspane-journal--current) yesterday))
-          (eabp--on-action '((action . "journal.today")) nil)
+          (jetpacs--on-action '((action . "journal.today")) nil)
           (should (equal (glasspane-journal--current) today))
-          (eabp--on-action '((action . "journal.goto")
+          (jetpacs--on-action '((action . "journal.goto")
                              (args . ((value . "2026-01-15")))) nil)
           (should (equal (glasspane-journal--current) "2026-01-15"))
           ;; Malformed picker values are ignored.
-          (eabp--on-action '((action . "journal.goto")
+          (jetpacs--on-action '((action . "journal.goto")
                              (args . ((value . "not-a-date")))) nil)
           (should (equal (glasspane-journal--current) "2026-01-15"))
           ;; Capture with an explicit date lands under that day, trimmed.
-          (eabp--on-action '((action . "journal.capture")
+          (jetpacs--on-action '((action . "journal.capture")
                              (args . ((value . "  typed on phone  ")
                                       (date . "2026-01-15")))) nil)
           (should (= glasspane-journal--capture-gen 1))
@@ -1253,8 +1253,8 @@ input id (the server-driven field clear)."
 
 (ert-deftest glasspane-journal-view-renders ()
   "The journal view builds with day content + the carried-over section."
-  (let* ((file (make-temp-file "eabp-journal-view" nil ".org"))
-         (agenda (make-temp-file "eabp-journal-agenda" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-journal-view" nil ".org"))
+         (agenda (make-temp-file "jetpacs-journal-agenda" nil ".org"))
          (glasspane-journal-file file)
          (glasspane-journal--date nil)
          (today (glasspane-journal--today))
@@ -1266,7 +1266,7 @@ input id (the server-driven field clear)."
           (glasspane-org-cache-invalidate)
           (glasspane-journal--append "a journal line")
           (let ((json (json-serialize
-                       (eabp-tests--canon (glasspane-journal--view nil))
+                       (jetpacs-tests--canon (glasspane-journal--view nil))
                        :null-object :null :false-object :false)))
             (should (string-search "journal-capture-" json))
             (should (string-search "a journal line" json))
@@ -1279,7 +1279,7 @@ input id (the server-driven field clear)."
 
 ;; ─── Saved views (PKM Task 11) ───────────────────────────────────────────────
 
-(defun eabp-tests--views-items ()
+(defun jetpacs-tests--views-items ()
   "Synthetic heading items exercising all three renderings."
   '(((headline . "Write spec") (todo . "TODO") (tags . ["work"])
      (scheduled . "<2026-07-04 Sat>")
@@ -1290,23 +1290,23 @@ input id (the server-driven field clear)."
 
 (ert-deftest glasspane-views-renderings-build ()
   "Table, board, and calendar renderings build from the same items."
-  (let ((items (eabp-tests--views-items))
+  (let ((items (jetpacs-tests--views-items))
         (org-todo-keywords-1 '("TODO" "NEXT" "DONE")))
-    (let ((json (json-serialize (eabp-tests--canon
+    (let ((json (json-serialize (jetpacs-tests--canon
                                  (glasspane-views--table-node items))
                                 :null-object :null :false-object :false)))
       (should (string-search "Write spec" json))
       (should (string-search "2026-07-04" json))
       (should (string-search "heading.tap" json)))
-    (let ((json (json-serialize (eabp-tests--canon
+    (let ((json (json-serialize (jetpacs-tests--canon
                                  (glasspane-views--board-node items))
                                 :null-object :null :false-object :false)))
       ;; Column per present state, keyword order; menu moves between them.
       (should (string-search "TODO (1)" json))
       (should (string-search "NEXT (1)" json))
       (should (string-search "heading.todo-set" json)))
-    (let ((json (json-serialize (eabp-tests--canon
-                                 (apply #'eabp-column
+    (let ((json (json-serialize (jetpacs-tests--canon
+                                 (apply #'jetpacs-column
                                         (glasspane-views--calendar-nodes items)))
                                 :null-object :null :false-object :false)))
       (should (string-search "Unscheduled" json))
@@ -1325,7 +1325,7 @@ vanish from the board."
                   (ref . ((file . "/tmp/b.org") (pos . 9)))))))
     (should (equal (glasspane-views--board-columns items)
                    '("TODO" "WAIT" "")))
-    (let ((json (json-serialize (eabp-tests--canon
+    (let ((json (json-serialize (jetpacs-tests--canon
                                  (glasspane-views--board-node items))
                                 :null-object :null :false-object :false)))
       (should (string-search "WAIT (1)" json))
@@ -1336,17 +1336,17 @@ vanish from the board."
   (let ((glasspane-saved-views nil)
         (glasspane-views--current nil)
         (glasspane-views--form-gen 0)
-        (eabp--ui-state (make-hash-table :test 'equal))
+        (jetpacs--ui-state (make-hash-table :test 'equal))
         (persisted 0))
-    (cl-letf (((symbol-function 'eabp-settings-save-variable)
+    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
                (lambda (_sym _val) (cl-incf persisted) t))
-              ((symbol-function 'eabp-shell-push)
+              ((symbol-function 'jetpacs-shell-push)
                (cl-function (lambda (&optional _tab &key _switch-to)))))
       ;; Save from the form fields.
-      (eabp-ui-state-put "views-new-name-0" "Work")
-      (eabp-ui-state-put "views-new-query-0" "todo:TODO tags:work")
-      (eabp-ui-state-put "views-new-rendering-0" "board")
-      (eabp--on-action '((action . "views.save")) nil)
+      (jetpacs-ui-state-put "views-new-name-0" "Work")
+      (jetpacs-ui-state-put "views-new-query-0" "todo:TODO tags:work")
+      (jetpacs-ui-state-put "views-new-rendering-0" "board")
+      (jetpacs--on-action '((action . "views.save")) nil)
       (should (= (length glasspane-saved-views) 1))
       (should (= glasspane-views--form-gen 1))   ; field-clearing id rotation
       (should (= persisted 1))
@@ -1354,18 +1354,18 @@ vanish from the board."
         (should (equal (alist-get 'query view) "todo:TODO tags:work"))
         (should (equal (alist-get 'rendering view) "board")))
       ;; A malformed query is refused at save time.
-      (eabp-ui-state-put "views-new-name-1" "Broken")
-      (eabp-ui-state-put "views-new-query-1" "(todo \"TODO\"")
-      (eabp--on-action '((action . "views.save")) nil)
+      (jetpacs-ui-state-put "views-new-name-1" "Broken")
+      (jetpacs-ui-state-put "views-new-query-1" "(todo \"TODO\"")
+      (jetpacs--on-action '((action . "views.save")) nil)
       (should (= (length glasspane-saved-views) 1))
       ;; Open / switch rendering / delete.
-      (eabp--on-action '((action . "views.open") (args . ((name . "Work")))) nil)
+      (jetpacs--on-action '((action . "views.open") (args . ((name . "Work")))) nil)
       (should (equal glasspane-views--current "Work"))
-      (eabp--on-action '((action . "views.rendering")
+      (jetpacs--on-action '((action . "views.rendering")
                          (args . ((name . "Work") (rendering . "calendar")))) nil)
       (should (equal (alist-get 'rendering (glasspane-views--get "Work"))
                      "calendar"))
-      (eabp--on-action '((action . "views.delete") (args . ((name . "Work")))) nil)
+      (jetpacs--on-action '((action . "views.delete") (args . ((name . "Work")))) nil)
       (should-not glasspane-saved-views)
       (should-not glasspane-views--current))))
 
@@ -1375,11 +1375,11 @@ vanish from the board."
 the list is rebuilt, never mutated in place."
   (let ((glasspane-saved-views '(((name . "Bare") (query . "todo:TODO"))))
         (persisted 0))
-    (cl-letf (((symbol-function 'eabp-settings-save-variable)
+    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
                (lambda (_sym _val) (cl-incf persisted) t))
-              ((symbol-function 'eabp-shell-push)
+              ((symbol-function 'jetpacs-shell-push)
                (cl-function (lambda (&optional _tab &key _switch-to)))))
-      (eabp--on-action '((action . "views.rendering")
+      (jetpacs--on-action '((action . "views.rendering")
                          (args . ((name . "Bare") (rendering . "board"))))
                        nil)
       (should (equal (alist-get 'rendering (glasspane-views--get "Bare"))
@@ -1390,7 +1390,7 @@ the list is rebuilt, never mutated in place."
 
 (ert-deftest glasspane-views-end-to-end-render ()
   "A saved view renders real query results from an agenda file."
-  (let* ((agenda (make-temp-file "eabp-views" nil ".org"))
+  (let* ((agenda (make-temp-file "jetpacs-views" nil ".org"))
          (glasspane-saved-views
           '(((name . "Work") (query . "todo:TODO") (rendering . "list"))))
          (glasspane-views--current "Work"))
@@ -1401,7 +1401,7 @@ the list is rebuilt, never mutated in place."
         (let ((org-agenda-files (list agenda)))
           (glasspane-org-cache-invalidate)
           (let ((json (json-serialize
-                       (eabp-tests--canon (glasspane-views--view nil))
+                       (jetpacs-tests--canon (glasspane-views--view nil))
                        :null-object :null :false-object :false)))
             (should (string-search "Alpha" json))
             (should-not (string-search "Omega" json))
@@ -1411,14 +1411,14 @@ the list is rebuilt, never mutated in place."
 
 ;; ─── Org-defined automations (AUTO Task 13) ──────────────────────────────────
 
-(defmacro eabp-tests--with-automations-file (content &rest body)
+(defmacro jetpacs-tests--with-automations-file (content &rest body)
   "Run BODY with a temp automations file holding CONTENT."
   (declare (indent 1))
-  `(let* ((file (make-temp-file "eabp-autom" nil ".org"))
+  `(let* ((file (make-temp-file "jetpacs-autom" nil ".org"))
           (glasspane-automations-file file)
           (glasspane-automations--ids nil)
-          (eabp-triggers--table (make-hash-table :test 'equal))
-          (eabp-triggers-changed-hook nil))
+          (jetpacs-triggers--table (make-hash-table :test 'equal))
+          (jetpacs-triggers-changed-hook nil))
      (unwind-protect
          (progn (with-temp-file file (insert ,content))
                 ,@body)
@@ -1428,11 +1428,11 @@ the list is rebuilt, never mutated in place."
 (ert-deftest glasspane-automations-parses-rules ()
   "Headings with :TRIGGER: become registrations; DONE disables; the
 lowercase drawer parses (org case conventions)."
-  (eabp-tests--with-automations-file
+  (jetpacs-tests--with-automations-file
       (concat "* Charge sync\n"
               ":PROPERTIES:\n:TRIGGER: power connected\n:POLICY: wake\n"
               ":THROTTLE: 300\n:END:\n"
-              "#+begin_src elisp\n(setq eabp-tests--autom-fired data)\n#+end_src\n"
+              "#+begin_src elisp\n(setq jetpacs-tests--autom-fired data)\n#+end_src\n"
               ;; Case conventions: lowercase drawer + property + block.
               "* Low battery\n"
               ":properties:\n:trigger: battery.level below 20\n:end:\n"
@@ -1449,51 +1449,51 @@ lowercase drawer parses (org case conventions)."
     (let ((ids (glasspane-automations-reload)))
       (should (equal (sort (copy-sequence ids) #'string<)
                      '("org/Charge sync" "org/Low battery")))
-      (let ((reg (gethash "org/Charge sync" eabp-triggers--table)))
+      (let ((reg (gethash "org/Charge sync" jetpacs-triggers--table)))
         (should (equal (plist-get reg :type) "power"))
         (should (equal (plist-get reg :params) '((state . "connected"))))
         (should (equal (plist-get reg :policy) "wake"))
         (should (= (plist-get reg :throttle-s) 300))
         (should (functionp (plist-get reg :handler))))
-      (let ((reg (gethash "org/Low battery" eabp-triggers--table)))
+      (let ((reg (gethash "org/Low battery" jetpacs-triggers--table)))
         (should (equal (plist-get reg :type) "battery.level"))
         (should (equal (plist-get reg :params) '((below . 20)))))
       ;; DONE and unknown/unshipped-type rules never registered.
-      (should-not (gethash "org/Old rule" eabp-triggers--table))
-      (should-not (gethash "org/Bad type" eabp-triggers--table))
-      (should-not (gethash "org/Home wifi" eabp-triggers--table)))))
+      (should-not (gethash "org/Old rule" jetpacs-triggers--table))
+      (should-not (gethash "org/Bad type" jetpacs-triggers--table))
+      (should-not (gethash "org/Home wifi" jetpacs-triggers--table)))))
 
 (ert-deftest glasspane-automations-handler-runs-and-reload-replaces ()
   "The src-block handler fires with `data' in scope; a reload drops
 rules that left the file."
-  (defvar eabp-tests--autom-fired nil)
-  (eabp-tests--with-automations-file
+  (defvar jetpacs-tests--autom-fired nil)
+  (jetpacs-tests--with-automations-file
       (concat "* Charge sync\n"
               ":PROPERTIES:\n:TRIGGER: power connected\n:END:\n"
-              "#+begin_src elisp\n(setq eabp-tests--autom-fired data)\n#+end_src\n")
+              "#+begin_src elisp\n(setq jetpacs-tests--autom-fired data)\n#+end_src\n")
     (glasspane-automations-reload)
-    (setq eabp-tests--autom-fired nil)
-    (eabp-trigger-test-fire "org/Charge sync")
+    (setq jetpacs-tests--autom-fired nil)
+    (jetpacs-trigger-test-fire "org/Charge sync")
     ;; Test fires carry no data payload; args reached the handler.
-    (should (gethash "org/Charge sync" eabp-triggers--last-fired))
+    (should (gethash "org/Charge sync" jetpacs-triggers--last-fired))
     ;; Simulate a real fire with data.
-    (eabp-triggers--on-fired
+    (jetpacs-triggers--on-fired
      '((id . "org/Charge sync") (type . "power")
        (data . ((state . "connected"))) (at_ms . 1))
      nil)
-    (should (equal (alist-get 'state eabp-tests--autom-fired) "connected"))
+    (should (equal (alist-get 'state jetpacs-tests--autom-fired) "connected"))
     ;; Rewrite the file without the rule: reload unregisters it.
     (with-temp-file file (insert "* Nothing here\n"))
     (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
     (should-not (glasspane-automations-reload))
-    (should-not (gethash "org/Charge sync" eabp-triggers--table))))
+    (should-not (gethash "org/Charge sync" jetpacs-triggers--table))))
 
 ;; ─── Sparse filter (orgro parity) ────────────────────────────────────────────
 
 (ert-deftest glasspane-sparse-filter-narrows-headings ()
   "The read-mode filter narrows by query; clearing restores; bad
 queries surface instead of blanking the file."
-  (let* ((file (make-temp-file "eabp-sparse" nil ".org"))
+  (let* ((file (make-temp-file "jetpacs-sparse" nil ".org"))
          (glasspane-ui--files-read-mode t)
          (glasspane-ui--files-refile-mode nil)
          (glasspane-ui--files-filter ""))
@@ -1505,7 +1505,7 @@ queries surface instead of blanking the file."
         (progn
           ;; Unfiltered: all three headings render.
           (let ((json (json-serialize
-                       (eabp-tests--canon (glasspane-ui--org-editor-body file))
+                       (jetpacs-tests--canon (glasspane-ui--org-editor-body file))
                        :null-object :null :false-object :false)))
             (should (string-search "Pay taxes" json))
             (should (string-search "Water plants" json))
@@ -1513,7 +1513,7 @@ queries surface instead of blanking the file."
           ;; Tag filter.
           (let* ((glasspane-ui--files-filter "tags:money")
                  (json (json-serialize
-                        (eabp-tests--canon (glasspane-ui--org-editor-body file))
+                        (jetpacs-tests--canon (glasspane-ui--org-editor-body file))
                         :null-object :null :false-object :false)))
             (should (string-search "Pay taxes" json))
             (should-not (string-search "Water plants" json))
@@ -1521,7 +1521,7 @@ queries surface instead of blanking the file."
           ;; Free text matches bodies too.
           (let* ((glasspane-ui--files-filter "taxes")
                  (json (json-serialize
-                        (eabp-tests--canon (glasspane-ui--org-editor-body file))
+                        (jetpacs-tests--canon (glasspane-ui--org-editor-body file))
                         :null-object :null :false-object :false)))
             (should (string-search "Pay taxes" json))
             (should (string-search "Reference notes" json))
@@ -1529,7 +1529,7 @@ queries surface instead of blanking the file."
           ;; A query with unbalanced parens degrades to a message.
           (let* ((glasspane-ui--files-filter "(todo \"TODO\"")
                  (json (json-serialize
-                        (eabp-tests--canon (glasspane-ui--org-editor-body file))
+                        (jetpacs-tests--canon (glasspane-ui--org-editor-body file))
                         :null-object :null :false-object :false)))
             (should (string-search "unbalanced" json))))
       (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
@@ -1538,17 +1538,17 @@ queries surface instead of blanking the file."
 (ert-deftest glasspane-sparse-filter-action-sets-state ()
   "files.filter stores the query; opening another file resets it."
   (let ((glasspane-ui--files-filter ""))
-    (cl-letf (((symbol-function 'eabp-shell-push)
+    (cl-letf (((symbol-function 'jetpacs-shell-push)
                (cl-function (lambda (&optional _tab &key _switch-to)))))
-      (eabp--on-action '((action . "files.filter")
+      (jetpacs--on-action '((action . "files.filter")
                          (args . ((value . "todo:TODO")))) nil)
       (should (equal glasspane-ui--files-filter "todo:TODO"))
-      (run-hook-with-args 'eabp-files-open-hook "/tmp/other.org")
+      (run-hook-with-args 'jetpacs-files-open-hook "/tmp/other.org")
       (should (equal glasspane-ui--files-filter "")))))
 
 ;; ─── Notes bridge: wikilinks + backlinks (PKM 3–4, vulpea mocked) ────────────
 
-(defmacro eabp-tests--with-fake-vulpea (notes &rest body)
+(defmacro jetpacs-tests--with-fake-vulpea (notes &rest body)
   "Run BODY with the vulpea seam answering from NOTES (plists)."
   (declare (indent 1))
   `(cl-letf (((symbol-function 'glasspane-notes-available-p) (lambda () t))
@@ -1578,10 +1578,10 @@ queries surface instead of blanking the file."
 (ert-deftest glasspane-notes-wikilink-completion ()
   "Typing [[pa in an org shadow buffer offers notes; accepting inserts
 a full id link via the candidate `insert' attr."
-  (eabp-tests--with-fake-vulpea
+  (jetpacs-tests--with-fake-vulpea
       '((:id "abc-1" :title "Paris trip" :path "/v/paris.org")
         (:id "abc-2" :title "Pasta recipes" :path "/v/pasta.org"))
-    (let ((result (eabp-complete-in-text "wiki-test.org" "see [[pa" 8)))
+    (let ((result (jetpacs-complete-in-text "wiki-test.org" "see [[pa" 8)))
       (should result)
       (should (equal (car result) "[[pa"))
       (let ((cand (cl-find "[[Paris trip" (cdr result)
@@ -1591,18 +1591,18 @@ a full id link via the candidate `insert' attr."
         (should (equal (alist-get 'insert cand) "[[id:abc-1][Paris trip]]"))
         (should (equal (alist-get 'annotation cand) "paris.org"))))
     ;; Outside brackets the org capf stays silent (word fallback rules).
-    (let ((result (eabp-complete-in-text "wiki-test.org" "plain pa" 8)))
+    (let ((result (jetpacs-complete-in-text "wiki-test.org" "plain pa" 8)))
       (should-not (cl-find-if (lambda (c)
                                 (string-prefix-p "[[" (alist-get 'label c)))
                               (cdr result))))))
 
 (ert-deftest glasspane-notes-backlink-section ()
   "The detail section lists linked references and the mentions button."
-  (eabp-tests--with-fake-vulpea
+  (jetpacs-tests--with-fake-vulpea
       '((:id "src-1" :title "Travel log" :path "/v/log.org"))
     (let* ((glasspane-notes--mentions (make-hash-table :test 'equal))
            (nodes (glasspane-notes-detail-nodes '((id . "abc-1"))))
-           (json (json-serialize (eabp-tests--canon (apply #'eabp-column nodes))
+           (json (json-serialize (jetpacs-tests--canon (apply #'jetpacs-column nodes))
                                  :null-object :null :false-object :false)))
       (should (string-search "Linked references (1)" json))
       (should (string-search "Travel log" json))
@@ -1616,7 +1616,7 @@ a full id link via the candidate `insert' attr."
 (ert-deftest glasspane-notes-ref-id-resolves-from-heading ()
   "A reader-built ref (file/pos, no id) still finds the heading's :ID:,
 so drilled-into child headings get their backlink section."
-  (let ((file (make-temp-file "eabp-refid" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-refid" nil ".org")))
     (with-temp-file file
       (insert "* Parent\n** Child heading\n:PROPERTIES:\n"
               ":ID: child-id-42\n:END:\nBody.\n"))
@@ -1639,9 +1639,9 @@ so drilled-into child headings get their backlink section."
 (ert-deftest glasspane-notes-mention-card-path-from-note ()
   "Mention cards take the path from the mentioning note — vulpea's
 resolve plists don't reliably carry :path."
-  (eabp-tests--with-fake-vulpea nil
+  (jetpacs-tests--with-fake-vulpea nil
     (let ((json (json-serialize
-                 (eabp-tests--canon
+                 (jetpacs-tests--canon
                   (glasspane-notes--mention-card
                    '(:note (:id "src" :title "Source note" :path "/v/src.org")
                      :line 7 :context "the mention line" :matched "Target")
@@ -1676,13 +1676,13 @@ as plain text — the on-device backlink checks depend on this graph."
 
 (ert-deftest glasspane-notes-materialize-links-mention ()
   "link.materialize rewrites the mention line into a real id link."
-  (let ((file (make-temp-file "eabp-mention" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-mention" nil ".org")))
     (with-temp-file file
       (insert "* Notes\nWe talked about paris trip plans today.\n"))
     (unwind-protect
-        (cl-letf (((symbol-function 'eabp-shell-push)
+        (cl-letf (((symbol-function 'jetpacs-shell-push)
                    (cl-function (lambda (&optional _tab &key _switch-to)))))
-          (eabp--on-action
+          (jetpacs--on-action
            `((action . "link.materialize")
              (args . ((id . "abc-1") (path . ,file) (line . 2)
                       (matched . "Paris trip"))))
@@ -1699,25 +1699,25 @@ as plain text — the on-device backlink checks depend on this graph."
 Current vulpea resolve plists carry no :matched, so the action falls
 back to the note's title and aliases; occurrences already inside a
 link are skipped (the double-link guard)."
-  (let ((file (make-temp-file "eabp-mention" nil ".org")))
+  (let ((file (make-temp-file "jetpacs-mention" nil ".org")))
     (with-temp-file file
       (insert "* Notes\n"
               "See [[id:abc-1][Paris trip]] and our paris trip plans.\n"
               "The city of light features often.\n"))
     (unwind-protect
-        (eabp-tests--with-fake-vulpea
+        (jetpacs-tests--with-fake-vulpea
             '((:id "abc-1" :title "Paris trip" :path "/v/paris.org"
                     :aliases ("City of Light")))
-          (cl-letf (((symbol-function 'eabp-shell-push)
+          (cl-letf (((symbol-function 'jetpacs-shell-push)
                      (cl-function (lambda (&optional _tab &key _switch-to)))))
             ;; Line 2: the already-linked occurrence must be skipped;
             ;; the plain one after it gets the link.
-            (eabp--on-action
+            (jetpacs--on-action
              `((action . "link.materialize")
                (args . ((id . "abc-1") (path . ,file) (line . 2))))
              nil)
             ;; Line 3: no title on the line — the alias matches.
-            (eabp--on-action
+            (jetpacs--on-action
              `((action . "link.materialize")
                (args . ((id . "abc-1") (path . ,file) (line . 3))))
              nil)
@@ -1734,13 +1734,13 @@ link are skipped (the double-link guard)."
 
 ;; ─── SRS skin: review over org-srs (org-srs mocked) ──────────────────────────
 
-(defvar eabp-tests--srs-items nil "The mocked pending queue (item-args).")
-(defvar eabp-tests--srs-rated nil "Ratings recorded by the mock engine.")
+(defvar jetpacs-tests--srs-items nil "The mocked pending queue (item-args).")
+(defvar jetpacs-tests--srs-rated nil "Ratings recorded by the mock engine.")
 
-(defmacro eabp-tests--with-fake-org-srs (&rest body)
+(defmacro jetpacs-tests--with-fake-org-srs (&rest body)
   "Run BODY with a minimal org-srs *engine* mock.
-`eabp-tests--srs-items' is the pending queue (a list of item-args);
-`eabp-tests--srs-rated' records ratings.  Session state is reset per
+`jetpacs-tests--srs-items' is the pending queue (a list of item-args);
+`jetpacs-tests--srs-rated' records ratings.  Session state is reset per
 invocation; per-item positions (markers, regions, clozes) are mocked
 in individual tests where needed."
   (declare (indent 0))
@@ -1749,15 +1749,15 @@ in individual tests where needed."
          (glasspane-srs--current nil)
          (glasspane-srs--revealed nil)
          (glasspane-srs--undo nil)
-         (eabp-tests--srs-items nil)
-         (eabp-tests--srs-rated nil)
-         (eabp-shell--snackbar nil))
+         (jetpacs-tests--srs-items nil)
+         (jetpacs-tests--srs-rated nil)
+         (jetpacs-shell--snackbar nil))
      (cl-letf (((symbol-function 'org-srs-review-pending-items)
-                (lambda (&optional _) eabp-tests--srs-items))
+                (lambda (&optional _) jetpacs-tests--srs-items))
                ((symbol-function 'org-srs-item-marker)
                 (lambda (&rest _) (copy-marker (point-min))))
                ((symbol-function 'org-srs-review-rate)
-                (lambda (rating &rest _) (push rating eabp-tests--srs-rated)))
+                (lambda (rating &rest _) (push rating jetpacs-tests--srs-rated)))
                ((symbol-function 'org-srs-item-call-with-current)
                 (lambda (thunk &rest _) (funcall thunk)))
                ((symbol-function 'org-srs-table-goto-column)
@@ -1766,25 +1766,25 @@ in individual tests where needed."
                 (lambda () '(:again 600 :hard 86400 :good 259200 :easy 604800)))
                ((symbol-function 'org-srs-time-seconds-desc)
                 (lambda (secs) (list (/ secs 60) :minute)))
-               ((symbol-function 'eabp-shell-push)
+               ((symbol-function 'jetpacs-shell-push)
                 (cl-function (lambda (&optional _tab &key _switch-to)))))
        ,@body)))
 
 (ert-deftest glasspane-srs-idle-view ()
   "Between sessions the view shows the due count and the start button;
 zero due shows the caught-up empty state."
-  (eabp-tests--with-fake-org-srs
+  (jetpacs-tests--with-fake-org-srs
     (glasspane-org-cache-invalidate)
-    (let* ((eabp-tests--srs-items '(a b c))
+    (let* ((jetpacs-tests--srs-items '(a b c))
            (json (json-serialize
-                  (eabp-tests--canon (glasspane-srs--view nil))
+                  (jetpacs-tests--canon (glasspane-srs--view nil))
                   :null-object :null :false-object :false)))
       (should (string-search "3 items due" json))
       (should (string-search "srs.review.start" json)))
     (glasspane-org-cache-invalidate)
-    (let* ((eabp-tests--srs-items nil)
+    (let* ((jetpacs-tests--srs-items nil)
            (json (json-serialize
-                  (eabp-tests--canon (glasspane-srs--view nil))
+                  (jetpacs-tests--canon (glasspane-srs--view nil))
                   :null-object :null :false-object :false)))
       (should (string-search "All caught up" json)))))
 
@@ -1793,7 +1793,7 @@ zero due shows the caught-up empty state."
 title (no stars) with the answer omitted until revealed — and NO stray
 ellipsis dots (the on-device bug where each wrapped answer line showed
 its own `...')."
-  (eabp-tests--with-fake-org-srs
+  (jetpacs-tests--with-fake-org-srs
     (with-temp-buffer
       (org-mode)
       ;; A real entry, including org-srs's own drawers, so plain-org meta
@@ -1806,8 +1806,8 @@ its own `...')."
         (cl-letf (((symbol-function 'org-srs-item-marker)
                    (lambda (&rest _) (copy-marker (point-min)))))
           (let ((q (json-serialize
-                    (eabp-tests--canon
-                     (apply #'eabp-column
+                    (jetpacs-tests--canon
+                     (apply #'jetpacs-column
                             (glasspane-srs--item-nodes '((card back) "gauss" buf) nil)))
                     :null-object :null :false-object :false)))
             (should (string-search "Gaussian integral" q))
@@ -1816,8 +1816,8 @@ its own `...')."
             (should-not (string-search "* What" q))     ; star dropped
             (should-not (string-search "SRSITEMS" q)))  ; drawer skipped
           (let ((a (json-serialize
-                    (eabp-tests--canon
-                     (apply #'eabp-column
+                    (jetpacs-tests--canon
+                     (apply #'jetpacs-column
                             (glasspane-srs--item-nodes '((card back) "gauss" buf) t)))
                     :null-object :null :false-object :false)))
             (should (string-search "answer body" a))
@@ -1830,7 +1830,7 @@ its own `...')."
 (ert-deftest glasspane-srs-card-frontback-excises-and-strips ()
   "A Front/Back card shows only the question until revealed; the
 revealed answer is the Back child's body, without its heading line."
-  (eabp-tests--with-fake-org-srs
+  (jetpacs-tests--with-fake-org-srs
     (with-temp-buffer
       (org-mode)
       (insert "* Term\n:PROPERTIES:\n:ID: t\n:END:\n"
@@ -1839,16 +1839,16 @@ revealed answer is the Back child's body, without its heading line."
         (cl-letf (((symbol-function 'org-srs-item-marker)
                    (lambda (&rest _) (copy-marker (point-min)))))
           (let ((q (json-serialize
-                    (eabp-tests--canon
-                     (apply #'eabp-column
+                    (jetpacs-tests--canon
+                     (apply #'jetpacs-column
                             (glasspane-srs--item-nodes '((card back) "t" buf) nil)))
                     :null-object :null :false-object :false)))
             (should (string-search "Question text" q))
             (should-not (string-search "answer text" q))
             (should-not (string-search "Back" q)))
           (let ((a (json-serialize
-                    (eabp-tests--canon
-                     (apply #'eabp-column
+                    (jetpacs-tests--canon
+                     (apply #'jetpacs-column
                             (glasspane-srs--item-nodes '((card back) "t" buf) t)))
                     :null-object :null :false-object :false)))
             (should (string-search "answer text" a))
@@ -1858,7 +1858,7 @@ revealed answer is the Back child's body, without its heading line."
   "A cloze renders the sentence with the reviewed span blanked and the
 other cloze's text as context; revealing shows the answer.  Only
 `org-srs-item-cloze-collect' is mocked — bounds come from plain org."
-  (eabp-tests--with-fake-org-srs
+  (jetpacs-tests--with-fake-org-srs
     (with-temp-buffer
       (org-mode)
       (insert "* The first computer bug\n:PROPERTIES:\n:ID: bug\n:END:\n"
@@ -1875,8 +1875,8 @@ other cloze's text as context; revealing shows the answer.  Only
                   ((symbol-function 'org-srs-item-cloze-collect)
                    (lambda (&rest _) (list c1 c2))))
           (let ((q (json-serialize
-                    (eabp-tests--canon
-                     (apply #'eabp-column
+                    (jetpacs-tests--canon
+                     (apply #'jetpacs-column
                             (glasspane-srs--item-nodes '((cloze h1) "bug" buf) nil)))
                     :null-object :null :false-object :false)))
             (should (string-search "operators taped" q))
@@ -1884,8 +1884,8 @@ other cloze's text as context; revealing shows the answer.  Only
             (should-not (string-search "a moth" q))    ; reviewed = blanked
             (should (string-search "[" q)))
           (let ((a (json-serialize
-                    (eabp-tests--canon
-                     (apply #'eabp-column
+                    (jetpacs-tests--canon
+                     (apply #'jetpacs-column
                             (glasspane-srs--item-nodes '((cloze h1) "bug" buf) t)))
                     :null-object :null :false-object :false)))
             (should (string-search "a moth" a))))))))
@@ -1895,37 +1895,37 @@ other cloze's text as context; revealing shows the answer.  Only
 answer is a pure flag (no confirm call); rating records and advances to
 the next pending item; an unknown rating is ignored; a drained queue
 lands on the done state; quit clears."
-  (eabp-tests--with-fake-org-srs
+  (jetpacs-tests--with-fake-org-srs
     (let ((confirm-touched nil))
       (cl-letf (((symbol-function 'org-srs-item-confirm-command)
                  (lambda (&rest _) (setq confirm-touched t)))
                 ((symbol-function 'org-srs-item-confirm-pending-p)
                  (lambda (&rest _) (setq confirm-touched t) nil)))
-        (setq eabp-tests--srs-items '(((card back) "a" nil) ((card back) "b" nil)))
-        (eabp--on-action '((action . "srs.review.start")) nil)
+        (setq jetpacs-tests--srs-items '(((card back) "a" nil) ((card back) "b" nil)))
+        (jetpacs--on-action '((action . "srs.review.start")) nil)
         (should glasspane-srs--active)
         (should (equal glasspane-srs--current '((card back) "a" nil)))
         (should-not glasspane-srs--revealed)
         ;; Show answer: pure UI flag, no org-srs confirm machinery touched.
-        (eabp--on-action '((action . "srs.answer.show")) nil)
+        (jetpacs--on-action '((action . "srs.answer.show")) nil)
         (should glasspane-srs--revealed)
         (should-not confirm-touched)
         ;; Rate: records, advances to the next pending item.
-        (setq eabp-tests--srs-items '(((card back) "b" nil)))
-        (eabp--on-action '((action . "srs.rate") (args . ((rating . "good")))) nil)
-        (should (equal eabp-tests--srs-rated '(:good)))
+        (setq jetpacs-tests--srs-items '(((card back) "b" nil)))
+        (jetpacs--on-action '((action . "srs.rate") (args . ((rating . "good")))) nil)
+        (should (equal jetpacs-tests--srs-rated '(:good)))
         (should (equal glasspane-srs--current '((card back) "b" nil)))
         (should-not glasspane-srs--revealed)
         ;; Unknown rating: ignored.
-        (eabp--on-action '((action . "srs.rate") (args . ((rating . "meh")))) nil)
-        (should (equal eabp-tests--srs-rated '(:good)))
+        (jetpacs--on-action '((action . "srs.rate") (args . ((rating . "meh")))) nil)
+        (should (equal jetpacs-tests--srs-rated '(:good)))
         ;; Queue drains → done state (active, no current); quit clears.
-        (setq eabp-tests--srs-items nil)
-        (eabp--on-action '((action . "srs.rate") (args . ((rating . "easy")))) nil)
-        (should (equal eabp-tests--srs-rated '(:easy :good)))
+        (setq jetpacs-tests--srs-items nil)
+        (jetpacs--on-action '((action . "srs.rate") (args . ((rating . "easy")))) nil)
+        (should (equal jetpacs-tests--srs-rated '(:easy :good)))
         (should-not glasspane-srs--current)
         (should glasspane-srs--active)
-        (eabp--on-action '((action . "srs.quit")) nil)
+        (jetpacs--on-action '((action . "srs.quit")) nil)
         (should-not glasspane-srs--active)))))
 
 (ert-deftest glasspane-srs-rate-in-item-buffer ()
@@ -1933,7 +1933,7 @@ lands on the done state; quit clears."
 `org-srs-review-rate'.  org-srs reads a session-local schedule offset
 from `(current-buffer)', so rating from the wrong buffer errors and the
 card never reschedules — the on-device loop."
-  (eabp-tests--with-fake-org-srs
+  (jetpacs-tests--with-fake-org-srs
     (with-temp-buffer
       (let ((item-buf (current-buffer))
             (seen-buf nil))
@@ -1943,15 +1943,15 @@ card never reschedules — the on-device loop."
                   ((symbol-function 'org-srs-review-rate)
                    (lambda (rating &rest _)
                      (setq seen-buf (current-buffer))
-                     (push rating eabp-tests--srs-rated))))
+                     (push rating jetpacs-tests--srs-rated))))
           ;; Drive the action from a DIFFERENT buffer than the item's.
           (with-temp-buffer
             (setq glasspane-srs--active t
                   glasspane-srs--current (list '(card back) "id" item-buf)
                   glasspane-srs--revealed t)
-            (eabp--on-action
+            (jetpacs--on-action
              '((action . "srs.rate") (args . ((rating . "good")))) nil))
-          (should (equal eabp-tests--srs-rated '(:good)))
+          (should (equal jetpacs-tests--srs-rated '(:good)))
           (should (eq seen-buf item-buf)))))))
 
 (ert-deftest glasspane-srs-rate-binds-review-item ()
@@ -1959,7 +1959,7 @@ card never reschedules — the on-device loop."
 `org-srs-review-rate' takes its explicit-args path instead of reading a
 void variable (the on-device loop: rating errored, so the card never
 rescheduled and kept reappearing)."
-  (eabp-tests--with-fake-org-srs
+  (jetpacs-tests--with-fake-org-srs
     (with-temp-buffer
       (let ((item-buf (current-buffer))
             (seen 'unset))
@@ -1973,27 +1973,27 @@ rescheduled and kept reappearing)."
           (setq glasspane-srs--active t
                 glasspane-srs--current (list '(card back) "a" item-buf)
                 glasspane-srs--revealed t)
-          (eabp--on-action
+          (jetpacs--on-action
            '((action . "srs.rate") (args . ((rating . "good")))) nil)
           (should (eq seen nil)))))))
 
 (ert-deftest glasspane-srs-item-create-at-ref ()
   "srs.item.create resolves the ref and runs org-srs-item-create with
 the heading current (its prompts bridge to phone dialogs upstream)."
-  (let ((file (make-temp-file "eabp-srs" nil ".org"))
+  (let ((file (make-temp-file "jetpacs-srs" nil ".org"))
         (created nil))
     (with-temp-file file (insert "* Alpha\nBody.\n* Beta\nMore.\n"))
     (unwind-protect
-        (eabp-tests--with-fake-org-srs
+        (jetpacs-tests--with-fake-org-srs
           (cl-letf (((symbol-function 'org-srs-item-create)
                      (lambda ()
                        (setq created (org-get-heading t t t t)))))
-            (eabp--on-action
+            (jetpacs--on-action
              `((action . "srs.item.create")
                (args . ((file . ,file) (pos . 18)))) ; inside Beta
              nil)
             (should (equal created "Beta"))
-            (should (string-search "created" (or eabp-shell--snackbar "")))))
+            (should (string-search "created" (or jetpacs-shell--snackbar "")))))
       (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
       (delete-file file))))
 
@@ -2002,7 +2002,7 @@ the heading current (its prompts bridge to phone dialogs upstream)."
 around: cards at the card headings, cloze targets wrapped in place,
 one items-update per cloze entry.  Without org-srs the file is still
 written as plain org."
-  (let ((dir (make-temp-file "eabp-demo-srs" t))
+  (let ((dir (make-temp-file "jetpacs-demo-srs" t))
         (created nil) (clozed nil) (updated 0))
     (unwind-protect
         (progn
@@ -2037,19 +2037,19 @@ written as plain org."
   "The detail splice hook carries both layers: the SRS section appears
 through `glasspane-ui-detail-nodes-functions', and an erroring
 contributor costs only itself."
-  (eabp-tests--with-fake-org-srs
+  (jetpacs-tests--with-fake-org-srs
     (cl-letf (((symbol-function 'glasspane-ui--detail-body)
-               (lambda (_ref) (eabp-lazy-column (eabp-text "The body" 'body)))))
+               (lambda (_ref) (jetpacs-lazy-column (jetpacs-text "The body" 'body)))))
       (let* ((glasspane-ui-detail-nodes-functions
               (list (lambda (_ref) (error "broken contributor"))
                     #'glasspane-srs-detail-nodes))
              (json (json-serialize
-                    (eabp-tests--canon
+                    (jetpacs-tests--canon
                      (glasspane-ui--detail-body-with-notes '((id . "x"))))
                     :null-object :null :false-object :false)))
         (should (string-search "The body" json))
         (should (string-search "Make flashcard" json))
         (should (string-search "srs.item.create" json))))))
 
-(provide 'eabp-tests)
-;;; eabp-tests.el ends here
+(provide 'jetpacs-tests)
+;;; jetpacs-tests.el ends here

@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The EABP core is the `eabp' submodule; the suite loads it.
+          # The Jetpacs core is the `jetpacs' submodule; the suite loads it.
           submodules: recursive
 
       - uses: purcell/setup-emacs@master

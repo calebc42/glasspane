@@ -1,13 +1,13 @@
 ;;; glasspane-org-rich.el --- Org → rich-text SDUI emitter -*- lexical-binding: t; -*-
 
-;; Turns org content into EABP `rich_text' nodes (styled span runs) instead of
-;; the syntax-highlighted monospace `eabp-markup' produces. Emacs does the
+;; Turns org content into Jetpacs `rich_text' nodes (styled span runs) instead of
+;; the syntax-highlighted monospace `jetpacs-markup' produces. Emacs does the
 ;; parsing via `org-element', so the device never re-parses org — it only paints
 ;; the spans. Inline emphasis (bold/italic/underline/strike/code/verbatim),
 ;; links (tappable), timestamps, and #hashtags all map to native styling.
 ;;
 ;; Block-level content that doesn't fit a single styled paragraph — source
-;; blocks, example blocks — falls back to `eabp-markup' so code keeps its
+;; blocks, example blocks — falls back to `jetpacs-markup' so code keeps its
 ;; highlighted, fixed-width look.  Org tables render as native `table' grids
 ;; (tap-to-edit, long-press row/column menu, and add-row/add-column when
 ;; file context is supplied); table.el tables keep the markup fallback.
@@ -22,7 +22,7 @@
 (require 'org-element)
 (require 'org-table)
 (require 'cl-lib)
-(require 'eabp-widgets)
+(require 'jetpacs-widgets)
 
 ;; ─── Dynamic context for interactive elements ───────────────────────────────
 
@@ -55,7 +55,7 @@ Prepended so `plist-get' sees the new value first; STYLE is never mutated."
 
 (defun glasspane-org-rich--leaf (text style)
   "Build a span for TEXT carrying the emphasis flags set in STYLE."
-  (apply #'eabp-span (or text "")
+  (apply #'jetpacs-span (or text "")
          (append (when (plist-get style :bold)      '(:bold t))
                  (when (plist-get style :italic)    '(:italic t))
                  (when (plist-get style :underline) '(:underline t))
@@ -154,7 +154,7 @@ words jam together after emphasis, links, and timestamps."
                   (child (if contents
                              (glasspane-org-rich--inline contents style)
                            (list (glasspane-org-rich--leaf (or raw "link") style))))
-                  (action (eabp-action "org.link.open"
+                  (action (jetpacs-action "org.link.open"
                                        :args (list (cons 'link raw)))))
              (setq spans (append spans (glasspane-org-rich--linkify child action)))))
           ('timestamp
@@ -191,17 +191,17 @@ words jam together after emphasis, links, and timestamps."
                               (org-element-interpret-data
                                (org-element-contents obj)))
                             "")))
-                  (action (eabp-action "org.footnote.show"
+                  (action (jetpacs-action "org.footnote.show"
                                        :args (list (cons 'label (or label ""))
                                                    (cons 'def def)))))
              (setq spans
                    (append spans
-                           (list (eabp-span marker
+                           (list (jetpacs-span marker
                                             :baseline "super"
                                             :tag t
                                             :on-tap action))))))
           ('line-break
-           (setq spans (append spans (list (eabp-span "\n")))))
+           (setq spans (append spans (list (jetpacs-span "\n")))))
           (_
            ;; Anything else (latex fragment, export snippet, …): fall back to
            ;; its interpreted source text.
@@ -242,29 +242,29 @@ toggles the checkbox via Emacs without entering edit mode."
                                 ('on  "check_box")
                                 ('off "check_box_outline_blank")
                                 (_    "indeterminate_check_box")))
-                     (cb (eabp-box
-                          (list (eabp-icon cb-icon :size 20))
-                          :on-tap (eabp-action
+                     (cb (jetpacs-box
+                          (list (jetpacs-icon cb-icon :size 20))
+                          :on-tap (jetpacs-action
                                    "checkbox.toggle"
                                    :args `((file . ,glasspane-org-rich--file)
                                            (pos  . ,item-pos))))))
-                (eabp-row cb
-                          (eabp-box
-                           (list (eabp-rich-text
-                                  (cons (eabp-span lead-text)
-                                        (or inline (list (eabp-span ""))))))
+                (jetpacs-row cb
+                          (jetpacs-box
+                           (list (jetpacs-rich-text
+                                  (cons (jetpacs-span lead-text)
+                                        (or inline (list (jetpacs-span ""))))))
                            :weight 1)))
             ;; No checkbox, or no file context — plain text as before.
             (let* ((mark (pcase checkbox
                            ('on "☑ ") ('off "☐ ") ('trans "◪ ") (_ "")))
-                   (lead (eabp-span (concat lead-text mark))))
-              (eabp-rich-text (cons lead (or inline (list (eabp-span ""))))))))
+                   (lead (jetpacs-span (concat lead-text mark))))
+              (jetpacs-rich-text (cons lead (or inline (list (jetpacs-span ""))))))))
          (rest-contents (delq para (copy-sequence contents)))
          (sub-nodes (delq nil (mapcar #'glasspane-org-rich--element rest-contents))))
     (if sub-nodes
-        (eabp-column head
-                     (eabp-row (eabp-spacer :width 16)
-                               (eabp-box (list (apply #'eabp-column sub-nodes)) :weight 1)))
+        (jetpacs-column head
+                     (jetpacs-row (jetpacs-spacer :width 16)
+                               (jetpacs-box (list (apply #'jetpacs-column sub-nodes)) :weight 1)))
       head)))
 
 (defun glasspane-org-rich--list (el)
@@ -274,7 +274,7 @@ toggles the checkbox via Emacs without entering edit mode."
                                (when (eq (org-element-type item) 'item)
                                  (glasspane-org-rich--item item)))
                              (org-element-contents el)))))
-    (when items (apply #'eabp-column items))))
+    (when items (apply #'jetpacs-column items))))
 
 ;; ─── Source blocks ───────────────────────────────────────────────────────────
 
@@ -287,7 +287,7 @@ so the button never promises more than `org-babel-load-languages'
 delivers.  The action carries the block's real-file position; the code
 itself never crosses the wire."
   (let* ((lang (org-element-property :language el))
-         (code (eabp-markup (or (org-element-property :value el) "")
+         (code (jetpacs-markup (or (org-element-property :value el) "")
                             :syntax (or lang "text")))
          (pos (and glasspane-org-rich--file glasspane-org-rich--body-offset
                    lang
@@ -296,12 +296,12 @@ itself never crosses the wire."
                       (org-element-property :post-affiliated el)))))
     (if (not pos)
         code
-      (eabp-column
-       (eabp-row
-        (eabp-text lang 'label)
-        (eabp-spacer :weight 1)
-        (eabp-icon-button "play_arrow"
-                          (eabp-action "org.babel.execute"
+      (jetpacs-column
+       (jetpacs-row
+        (jetpacs-text lang 'label)
+        (jetpacs-spacer :weight 1)
+        (jetpacs-icon-button "play_arrow"
+                          (jetpacs-action "org.babel.execute"
                                        :args `((file . ,glasspane-org-rich--file)
                                                (pos . ,pos)))
                           :content-description "Run block"))
@@ -368,7 +368,7 @@ edits it through `org.table.edit' and long-pressing opens the
 row/column menu (`org.table.cell-menu'), both at its real-file
 position.  Read-only renders (babel results) stay inert."
   (let* ((spans (or (glasspane-org-rich--inline (org-element-contents cell) nil)
-                    (list (eabp-span ""))))
+                    (list (jetpacs-span ""))))
          (pos (and glasspane-org-rich--file glasspane-org-rich--body-offset
                    (not glasspane-org-rich--read-only)
                    (+ glasspane-org-rich--body-offset
@@ -376,13 +376,13 @@ position.  Read-only renders (babel results) stay inert."
                           (org-element-property :begin cell)))))
          (args (when pos
                  `((file . ,glasspane-org-rich--file) (pos . ,pos)))))
-    (eabp-table-cell
+    (jetpacs-table-cell
      spans
-     :on-tap (when pos (eabp-action "org.table.edit" :args args))
-     :on-long-tap (when pos (eabp-action "org.table.cell-menu" :args args)))))
+     :on-tap (when pos (jetpacs-action "org.table.edit" :args args))
+     :on-long-tap (when pos (jetpacs-action "org.table.cell-menu" :args args)))))
 
 (defun glasspane-org-rich--table (el)
-  "Render an org table EL to a native `eabp-table' node, or nil when empty.
+  "Render an org table EL to a native `jetpacs-table' node, or nil when empty.
 Cookie-only rows configure column alignment and drop out of display;
 alignment otherwise follows org's numeric-majority rule.  Header rows
 are the first row group when a rule separates it from more groups
@@ -421,22 +421,22 @@ tap-edit and the client offers add-row/add-column affordances."
                               (not glasspane-org-rich--read-only)
                               (+ offset
                                  (org-element-property :post-affiliated el)))))
-          (eabp-table
+          (jetpacs-table
            (mapcar (lambda (shape)
                      (if (eq shape 'rule)
-                         (eabp-table-rule)
-                       (eabp-table-row
+                         (jetpacs-table-rule)
+                       (jetpacs-table-row
                         (mapcar #'glasspane-org-rich--table-cell shape)
                         :header (and (memq shape header-rows) t))))
                    shapes)
            :aligns (glasspane-org-rich--table-aligns
                     (nreverse cookie-rows) data-rows ncols)
            :on-add-row (when table-pos
-                         (eabp-action "org.table.add-row"
+                         (jetpacs-action "org.table.add-row"
                                       :args `((file . ,file)
                                               (pos . ,table-pos))))
            :on-add-col (when table-pos
-                         (eabp-action "org.table.add-col"
+                         (jetpacs-action "org.table.add-col"
                                       :args `((file . ,file)
                                               (pos . ,table-pos))))))))))
 
@@ -449,17 +449,17 @@ and for drawers whose content renders to nothing."
       (let ((inner (delq nil (mapcar #'glasspane-org-rich--element
                                      (org-element-contents el)))))
         (when inner
-          (eabp-collapsible
+          (jetpacs-collapsible
            (format "drawer/%s/%s"
                    (or glasspane-org-rich--file "")
                    (+ (or glasspane-org-rich--body-offset 0)
                       (org-element-property :begin el)))
-           (eabp-text name 'label)
+           (jetpacs-text name 'label)
            inner
            :collapsed t))))))
 
 (defun glasspane-org-rich--paragraph-image (el)
-  "If paragraph EL is just a single image link, return an `eabp-image' node."
+  "If paragraph EL is just a single image link, return an `jetpacs-image' node."
   (let* ((contents (org-element-contents el))
          (non-blank (cl-remove-if (lambda (c) (and (stringp c) (string-blank-p c)))
                                   contents)))
@@ -469,7 +469,7 @@ and for drawers whose content renders to nothing."
       (let* ((lnk (car non-blank))
              (url (glasspane-org-rich--image-url (org-element-property :type lnk)
                                             (org-element-property :path lnk))))
-        (when url (eabp-image url))))))
+        (when url (jetpacs-image url))))))
 
 (defun glasspane-org-rich--element (el)
   "Render one top-level org element EL to a node, or nil to skip it.
@@ -483,12 +483,12 @@ renders read-only inside a foldable RESULTS section, like desktop org."
           ;; RESULTS — don't nest a second collapsible around it.
           (if (equal (alist-get 't node) "collapsible")
               node
-            (eabp-collapsible
+            (jetpacs-collapsible
              (format "results/%s/%s"
                      (or glasspane-org-rich--file "")
                      (+ (or glasspane-org-rich--body-offset 0)
                         (org-element-property :begin el)))
-             (eabp-text "RESULTS" 'label)
+             (jetpacs-text "RESULTS" 'label)
              (list node)))))
     (glasspane-org-rich--element-1 el)))
 
@@ -498,22 +498,22 @@ renders read-only inside a foldable RESULTS section, like desktop org."
     ('paragraph
      (or (glasspane-org-rich--paragraph-image el)
          (let ((spans (glasspane-org-rich--inline (org-element-contents el) nil)))
-           (when spans (eabp-rich-text spans)))))
+           (when spans (jetpacs-rich-text spans)))))
     ('plain-list (glasspane-org-rich--list el))
     ('src-block (glasspane-org-rich--src-block el))
     ((or 'example-block 'fixed-width)
-     (eabp-markup (or (org-element-property :value el) "")))
+     (jetpacs-markup (or (org-element-property :value el) "")))
     ('quote-block
      (let ((inner (delq nil (mapcar #'glasspane-org-rich--element
                                     (org-element-contents el)))))
-       (when inner (apply #'eabp-column inner))))
+       (when inner (apply #'jetpacs-column inner))))
     ('table
      ;; table.el tables keep the monospace fallback; org tables go native.
      (if (eq (org-element-property :type el) 'table.el)
-         (eabp-markup (string-trim (org-element-interpret-data el)) :syntax "org")
+         (jetpacs-markup (string-trim (org-element-interpret-data el)) :syntax "org")
        (or (glasspane-org-rich--table el)
-           (eabp-markup (string-trim (org-element-interpret-data el)) :syntax "org"))))
-    ('horizontal-rule (eabp-divider))
+           (jetpacs-markup (string-trim (org-element-interpret-data el)) :syntax "org"))))
+    ('horizontal-rule (jetpacs-divider))
     ('drawer (glasspane-org-rich--drawer el))
     ;; Structural noise the reader handles elsewhere (properties drawer) or
     ;; that carries no display value on its own.
@@ -523,7 +523,7 @@ renders read-only inside a foldable RESULTS section, like desktop org."
     (_
      (let ((txt (ignore-errors (string-trim (org-element-interpret-data el)))))
        (when (and (stringp txt) (not (string-empty-p txt)))
-         (eabp-markup txt :syntax "org"))))))
+         (jetpacs-markup txt :syntax "org"))))))
 
 (defun glasspane-org-rich--top-elements (tree)
   "Return the top-level elements of parsed TREE, descending through a section."
@@ -536,9 +536,9 @@ renders read-only inside a foldable RESULTS section, like desktop org."
 
 ;;;###autoload
 (defun glasspane-org-rich-body (body &optional base-dir file offset)
-  "Parse org BODY string into a list of EABP rich/markup nodes.
+  "Parse org BODY string into a list of Jetpacs rich/markup nodes.
 Paragraphs and lists become native `rich_text'; code/tables/examples
-fall back to highlighted `eabp-markup'. BASE-DIR resolves relative image
+fall back to highlighted `jetpacs-markup'. BASE-DIR resolves relative image
 paths (pass the org file's directory).
 
 FILE and OFFSET enable interactive elements (checkboxes): OFFSET maps

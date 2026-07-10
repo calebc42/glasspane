@@ -1,7 +1,7 @@
-;;; glasspane.el --- Glasspane: the reference org app on EABP -*- lexical-binding: t; -*-
+;;; glasspane.el --- Glasspane: the reference org app on Jetpacs -*- lexical-binding: t; -*-
 
 ;; The one-require entry point for the full reference app.  Pulls in the
-;; EABP core (transport, shell, renderers, editor bridge) plus every
+;; Jetpacs core (transport, shell, renderers, editor bridge) plus every
 ;; Glasspane module (org views, clock notification, magit pie, package
 ;; browser, demo tour):
 ;;

@@ -17,14 +17,14 @@
 ;;; Code:
 
 (require 'org)
-(require 'eabp-surfaces)
+(require 'jetpacs-surfaces)
 (require 'glasspane-srs)               ; SRS registration for the flashcards
 
 (defcustom glasspane-demo-directory "~/glasspane-demo/"
   "Directory `glasspane-demo-setup' writes the tour files into.
-Must lie within `eabp-files-roots' to be reachable from the phone's
+Must lie within `jetpacs-files-roots' to be reachable from the phone's
 Files browser (the default is inside the Home root)."
-  :type 'directory :group 'eabp)
+  :type 'directory :group 'jetpacs)
 
 (defconst glasspane-demo--files
   `(("demo.el" . "\
@@ -175,7 +175,7 @@ to try the features below.
 
 * TODO Try tag completion                                    :server:
 If your init opts =my/org-tag-completion= into shadow buffers via
-=eabp-sync-shadow-setup-hook=, typing =:ser= at the end of a
+=jetpacs-sync-shadow-setup-hook=, typing =:ser= at the end of a
 headline completes your =:server:= tag from the phone.
 
 * Scratch space
@@ -821,31 +821,31 @@ Returns the directory the files were written to."
       (write-region (cdr spec) nil (expand-file-name (car spec) dir)
                     nil 'silent))
     (when (called-interactively-p 'interactive)
-      (message "EABP demo files written to %s" dir))
+      (message "Jetpacs demo files written to %s" dir))
     dir))
 
-(eabp-defaction "demo.setup"
+(jetpacs-defaction "demo.setup"
   ;; Allowlisted and argument-free: always writes the fixed file set into
   ;; `glasspane-demo-directory' — nothing on the wire chooses paths or content.
   (lambda (_ _)
     (glasspane-demo-setup)
-    (when (fboundp 'eabp-shell-notify)
-      (eabp-shell-notify
+    (when (fboundp 'jetpacs-shell-notify)
+      (jetpacs-shell-notify
        (format "Demo files in %s"
                (abbreviate-file-name
                 (expand-file-name glasspane-demo-directory)))))))
 
-(eabp-defaction "demo.setup-org"
+(jetpacs-defaction "demo.setup-org"
   ;; Same shape as demo.setup: argument-free, fixed file set, fixed target
   ;; (`org-directory').  Overwrites the six corpus files — reset-to-pristine
   ;; is the point — but never touches anything else in the directory.
   (lambda (_ _)
     (let ((dir (glasspane-demo-setup-org)))
-      (when (fboundp 'eabp-shell-notify)
-        (eabp-shell-notify
+      (when (fboundp 'jetpacs-shell-notify)
+        (jetpacs-shell-notify
          (format "Demo org corpus in %s" (abbreviate-file-name dir)))))
-    (when (fboundp 'eabp-shell-push)
-      (eabp-shell-push))))
+    (when (fboundp 'jetpacs-shell-push)
+      (jetpacs-shell-push))))
 
 (provide 'glasspane-demo)
 ;;; glasspane-demo.el ends here

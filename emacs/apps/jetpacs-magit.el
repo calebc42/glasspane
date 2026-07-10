@@ -1,21 +1,21 @@
-;;; eabp-magit.el --- Curated Tier 1 magit pie menu -*- lexical-binding: t; -*-
+;;; jetpacs-magit.el --- Curated Tier 1 magit pie menu -*- lexical-binding: t; -*-
 
 ;; The first curated Tier 1 radial menu: magit-status.  Four categories
 ;; fan out as a speed dial; each opens a pie of hand-labelled bindings.
 ;; Entries marked as prefixes (Commit, Push, Branch, …) are magit's
 ;; transient commands — running one activates the transient, and
-;; `eabp-keymap--sync-pie' then pushes the live transient's own pie, so
+;; `jetpacs-keymap--sync-pie' then pushes the live transient's own pie, so
 ;; the drill-in continues seamlessly into magit's real menus.
 ;;
 ;; This is pure data plus key dispatch: nothing here requires magit at
 ;; load time.  Keys are executed in the magit buffer through the same
-;; allowlisted `eabp.keymap.run' action as everything else.
+;; allowlisted `jetpacs.keymap.run' action as everything else.
 
 ;;; Code:
 
-(require 'eabp-keymap)
+(require 'jetpacs-keymap)
 
-(defconst eabp-magit--menu
+(defconst jetpacs-magit--menu
   '(("Stage" "add"
      ("s"   "Stage")
      ("u"   "Unstage")
@@ -44,19 +44,19 @@
 PREFIX-P marks a transient prefix — the pie shows a ▸ and running it
 drills into the live transient's own pie.")
 
-(defun eabp-magit--binding-spec (entry buffer-name)
+(defun jetpacs-magit--binding-spec (entry buffer-name)
   "Build one pie binding spec from ENTRY (KEY LABEL [PREFIX-P])."
   (pcase-let ((`(,key ,label ,prefix-p) entry))
     (append
      `((key . ,key)
        (label . ,label)
-       (action . ,(eabp-action "eabp.keymap.run"
+       (action . ,(jetpacs-action "jetpacs.keymap.run"
                                :args `((buffer . ,buffer-name)
                                        (key . ,key))
                                :when-offline "drop")))
      (when prefix-p '((is_prefix . t))))))
 
-(defun eabp-magit-pie-spec (buffer)
+(defun jetpacs-magit-pie-spec (buffer)
   "Curated Tier 1 pie-menu spec for magit BUFFER."
   (let ((buffer-name (buffer-name buffer)))
     `((center_label . "Magit")
@@ -70,11 +70,11 @@ drills into the live transient's own pie.")
                   (icon . ,icon)
                   (bindings . ,(vconcat
                                 (mapcar (lambda (e)
-                                          (eabp-magit--binding-spec e buffer-name))
+                                          (jetpacs-magit--binding-spec e buffer-name))
                                         entries))))))
-            eabp-magit--menu))))))
+            jetpacs-magit--menu))))))
 
-(eabp-keymap-register-tier1 'magit-status-mode #'eabp-magit-pie-spec)
+(jetpacs-keymap-register-tier1 'magit-status-mode #'jetpacs-magit-pie-spec)
 
-(provide 'eabp-magit)
-;;; eabp-magit.el ends here
+(provide 'jetpacs-magit)
+;;; jetpacs-magit.el ends here

@@ -21,11 +21,11 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'org)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-shell)
-(require 'eabp-sync)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-sync)
 (require 'glasspane-org)
 
 (declare-function vulpea-db-search-by-title "vulpea-db-query")
@@ -46,7 +46,7 @@
 
 (defcustom glasspane-notes-completion-limit 20
   "Notes offered per wikilink completion request."
-  :type 'integer :group 'eabp)
+  :type 'integer :group 'jetpacs)
 
 (defun glasspane-notes--matches (partial)
   "Vulpea notes whose title (or alias) matches PARTIAL, capped."
@@ -89,7 +89,7 @@ so the brackets must be part of it)."
                   (lambda (c)
                     (when-let ((n (cdr (assoc c table))))
                       (file-name-nondirectory (vulpea-note-path n))))
-                  :eabp-insert-function
+                  :jetpacs-insert-function
                   (lambda (c)
                     (when-let ((n (cdr (assoc c table))))
                       (format "[[id:%s][%s]]"
@@ -105,7 +105,7 @@ so the brackets must be part of it)."
     (add-hook 'completion-at-point-functions
               #'glasspane-notes--wikilink-capf -10 t)))
 
-(add-hook 'eabp-sync-shadow-setup-hook #'glasspane-notes--setup-shadow)
+(add-hook 'jetpacs-sync-shadow-setup-hook #'glasspane-notes--setup-shadow)
 
 ;; ─── PKM 4: backlinks + unlinked mentions ────────────────────────────────────
 
@@ -122,12 +122,12 @@ Dropped wholesale by the cache seam.")
                     (list (when (and id (stringp id) (not (string-empty-p id))) `(id . ,id))
                           (when path `(file . ,path))
                           (when title `(headline . ,title))))))
-    (eabp-card
-     (list (eabp-column
-            (eabp-text title 'body)
-            (eabp-text (file-name-nondirectory path) 'caption)))
+    (jetpacs-card
+     (list (jetpacs-column
+            (jetpacs-text title 'body)
+            (jetpacs-text (file-name-nondirectory path) 'caption)))
      :on-tap (when ref
-               (eabp-action "heading.tap" :args ref :when-offline "drop")))))
+               (jetpacs-action "heading.tap" :args ref :when-offline "drop")))))
 
 (defun glasspane-notes--mention-card (mention note-id)
   "A card for MENTION (a :note :path :line :context plist).
@@ -145,15 +145,15 @@ plist's own :path, with the mentioning note's file as backstop."
                     (list (when (and id (stringp id) (not (string-empty-p id))) `(id . ,id))
                           (when path `(file . ,path))
                           (when title `(headline . ,title))))))
-    (eabp-card
+    (jetpacs-card
      (list
-      (eabp-column
-       (eabp-text title 'body)
-       (eabp-text (or (plist-get mention :context) "") 'caption)
-       (eabp-row
-        (eabp-spacer :weight 1)
-        (eabp-button "Link it"
-                     (eabp-action "link.materialize"
+      (jetpacs-column
+       (jetpacs-text title 'body)
+       (jetpacs-text (or (plist-get mention :context) "") 'caption)
+       (jetpacs-row
+        (jetpacs-spacer :weight 1)
+        (jetpacs-button "Link it"
+                     (jetpacs-action "link.materialize"
                                   :args `((id . ,note-id)
                                           (path . ,path)
                                           (line . ,(plist-get mention :line))
@@ -161,7 +161,7 @@ plist's own :path, with the mentioning note's file as backstop."
                                   :when-offline "queue")
                      :variant "text" :icon "link"))))
      :on-tap (when ref
-               (eabp-action "heading.tap" :args ref :when-offline "drop")))))
+               (jetpacs-action "heading.tap" :args ref :when-offline "drop")))))
 
 (defun glasspane-notes--ref-id (ref)
   "REF's org ID: carried in the ref, or read from the heading itself.
@@ -185,17 +185,17 @@ with an :ID: still gets its backlink section."
                         (error nil)))
            (mentions (gethash id glasspane-notes--mentions 'unfetched)))
       (append
-       (list (eabp-divider)
-             (eabp-collapsible
+       (list (jetpacs-divider)
+             (jetpacs-collapsible
               (concat "backlinks/" id)
-              (eabp-section-header
+              (jetpacs-section-header
                (format "Linked references (%d)" (length backlinks)))
               (or (mapcar #'glasspane-notes--note-card backlinks)
-                  (list (eabp-text "Nothing links here yet." 'caption)))
+                  (list (jetpacs-text "Nothing links here yet." 'caption)))
               :collapsed (null backlinks)))
-       (list (eabp-collapsible
+       (list (jetpacs-collapsible
               (concat "mentions/" id)
-              (eabp-section-header
+              (jetpacs-section-header
                (pcase mentions
                  ('unfetched "Unlinked mentions")
                  ('pending "Unlinked mentions (searching…)")
@@ -203,15 +203,15 @@ with an :ID: still gets its backlink section."
                  (found (format "Unlinked mentions (%d)" (length found)))))
               (pcase mentions
                 ('unfetched
-                 (list (eabp-button
+                 (list (jetpacs-button
                         "Find mentions"
-                        (eabp-action "notes.mentions" :args `((id . ,id))
+                        (jetpacs-action "notes.mentions" :args `((id . ,id))
                                      :when-offline "drop")
                         :variant "text" :icon "manage_search")))
-                ('pending (list (eabp-progress :variant "linear")))
-                ('error (list (eabp-text "ripgrep unavailable or the search failed."
+                ('pending (list (jetpacs-progress :variant "linear")))
+                ('error (list (jetpacs-text "ripgrep unavailable or the search failed."
                                          'caption)))
-                ('nil (list (eabp-text "No unlinked mentions." 'caption)))
+                ('nil (list (jetpacs-text "No unlinked mentions." 'caption)))
                 (found (mapcar (lambda (m)
                                  (glasspane-notes--mention-card m id))
                                found)))
@@ -219,7 +219,7 @@ with an :ID: still gets its backlink section."
 
 ;; The mention grep is the battery-risk item: computed only on the
 ;; explicit button tap, cached per note, dropped by the standard seam.
-(eabp-defaction "notes.mentions"
+(jetpacs-defaction "notes.mentions"
   (lambda (args _)
     (let ((id (alist-get 'id args)))
       (when (and (stringp id) (glasspane-notes-available-p)
@@ -230,11 +230,11 @@ with an :ID: still gets its backlink section."
            note
            (lambda (mentions)
              (puthash id mentions glasspane-notes--mentions)
-             (eabp-shell-push))
+             (jetpacs-shell-push))
            (lambda (_err)
              (puthash id 'error glasspane-notes--mentions)
-             (eabp-shell-push)))
-          (eabp-shell-push))))))
+             (jetpacs-shell-push)))
+          (jetpacs-shell-push))))))
 
 (defun glasspane-notes--materialize-terms (id matched)
   "The strings to look for on the mention line, most specific first.
@@ -267,7 +267,7 @@ must not nest a link inside a link."
                                          (org-in-regexp org-link-any-re)))
                               return term))))
 
-(eabp-defaction "link.materialize"
+(jetpacs-defaction "link.materialize"
   ;; Replace the first un-linked occurrence of the mention on LINE in
   ;; PATH with a real id link.  Matching is case-insensitive (search
   ;; UX); the replacement keeps the text exactly as written in the
@@ -282,9 +282,9 @@ must not nest a link inside a link."
                         id (alist-get 'matched args)))))
       (cond
        ((not (and (stringp id) (stringp path) (integerp line) terms))
-        (eabp-shell-notify "Couldn't link — mention data incomplete"))
+        (jetpacs-shell-notify "Couldn't link — mention data incomplete"))
        ((not (file-writable-p path))
-        (eabp-shell-notify (format "Couldn't link — %s not writable"
+        (jetpacs-shell-notify (format "Couldn't link — %s not writable"
                                    (file-name-nondirectory path))))
        (t
         (with-current-buffer (find-file-noselect path)
@@ -293,17 +293,17 @@ must not nest a link inside a link."
            (forward-line (1- line))
            (if (not (glasspane-notes--find-unlinked
                      terms (line-end-position)))
-               (eabp-shell-notify
+               (jetpacs-shell-notify
                 "Couldn't find the mention — file changed? Refresh and retry")
              (replace-match (format "[[id:%s][%s]]" id (match-string 0))
                             t t)
              (let ((save-silently t)) (save-buffer))
              (remhash id glasspane-notes--mentions)
              (glasspane-org-cache-invalidate)
-             (eabp-shell-notify "Linked"))))))
-      (eabp-shell-push))))
+             (jetpacs-shell-notify "Linked"))))))
+      (jetpacs-shell-push))))
 
-(add-hook 'eabp-shell-refresh-hook
+(add-hook 'jetpacs-shell-refresh-hook
           (lambda () (clrhash glasspane-notes--mentions)))
 
 ;; The detail view splices this module's sections through the ui seam.

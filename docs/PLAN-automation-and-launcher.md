@@ -2,8 +2,8 @@
 
 **STATUS (2026-07-05): in progress — Phase P (Tasks 1–2) landed
 2026-07-05; everything else not started.** Note: Kotlin file paths below
-predate the `:eabp`/`:app` module split — protocol code now lives under
-`eabp/src/main/java/com/calebc42/eabp/` (rule: protocol → `:eabp`,
+predate the `:jetpacs`/`:app` module split — protocol code now lives under
+`jetpacs/src/main/java/com/calebc42/jetpacs/` (rule: protocol → `:jetpacs`,
 opinion → `:app`).
 
 Produced 2026-07-05 from an audit of the repo against two visions:
@@ -27,11 +27,11 @@ The happy surprise of this audit: **most of Tasker is already here**,
 because elisp is a better task language than Tasker's, and the surface
 system is a better scene system. The protocol even reserved the missing
 seams: `"triggers"` and `"capabilities"` are negotiated in the handshake
-on both sides (`emacs/core/eabp.el` `eabp-wants`,
-`EabpConnection.kt:45`) but explicitly stubbed — `Envelope.kt:29`:
+on both sides (`emacs/core/jetpacs.el` `jetpacs-wants`,
+`JetpacsConnection.kt:45`) but explicitly stubbed — `Envelope.kt:29`:
 "capability.\*, trigger.\*, … arrive later."
 
-| Tasker concept | eabp status |
+| Tasker concept | jetpacs status |
 |---|---|
 | Tasks (action sequences) | ✅ elisp functions — strictly superior |
 | Variables / state | ✅ elisp |
@@ -53,7 +53,7 @@ on both sides (`emacs/core/eabp.el` `eabp-wants`,
 
 For the launcher vision:
 
-| AppSheet concept | eabp status |
+| AppSheet concept | jetpacs status |
 |---|---|
 | Apps defined as data/config, not APKs | ✅ Tier 1 = elisp packages; live-reload dev loop |
 | Host renders any app | ✅ shell view registry + multi-view surfaces |
@@ -75,7 +75,7 @@ For the launcher vision:
   the *existing* event queue.
 - **A3. Emacs-dead execution** — companion-local responses attached to
   triggers, plus an honest wake story.
-- **A4. Authoring UX** — `eabp-deftrigger`, an Automations view,
+- **A4. Authoring UX** — `jetpacs-deftrigger`, an Automations view,
   org-file-defined rules.
 
 **Track L (launcher):**
@@ -130,10 +130,10 @@ For the launcher vision:
 
 ## Repo conventions (read first)
 
-- Sources live in `emacs/core/` and `emacs/apps/`; root `eabp-core.el`
+- Sources live in `emacs/core/` and `emacs/apps/`; root `jetpacs-core.el`
   and `glasspane.el` are **generated** — regenerate with
   `emacs --batch -l emacs/build-bundle.el` after edits.
-- Tests: `emacs -Q --batch -l test/eabp-tests.el -f
+- Tests: `emacs -Q --batch -l test/jetpacs-tests.el -f
   ert-run-tests-batch-and-exit`; regen `test/widgets.golden` only on
   intentional wire changes.
 - **Command-dispatch boundary (SPEC §5) still rules.** Triggers deliver
@@ -144,7 +144,7 @@ For the launcher vision:
   effectors are consistent with the existing trust model. New action
   namespaces to reserve in SPEC §5: `trigger.*`, `app.*`.
 - Core stays org-free (`test/core-load-test.el` enforces). The trigger
-  plumbing is core (`eabp-triggers.el`); org-rule parsing is Tier 1
+  plumbing is core (`jetpacs-triggers.el`); org-rule parsing is Tier 1
   (`glasspane-automations.el`).
 - New org-syntax parsing (Tasks 13, 19) follows the case conventions:
   keywords/drawers case-insensitive with explicit `case-fold-search t`,
@@ -158,7 +158,7 @@ For the launcher vision:
 
 ### Task 1: Specify `triggers.set` and trigger delivery ✅ (2026-07-05)
 
-**Landed:** SPEC §11; `emacs/core/eabp-triggers.el` (registry,
+**Landed:** SPEC §11; `emacs/core/jetpacs-triggers.el` (registry,
 replace-set push gated on the `triggers` grant, `trigger.fired`
 dispatch); `test/frames.golden` pins the frame shape; ERT covers
 push/gate/fire. The companion deliberately stopped claiming `triggers`
@@ -167,7 +167,7 @@ holds.
 
 **Goal:** a spec section (SPEC §11) both sides implement against.
 
-**Files:** `docs/SPEC.md`, `emacs/core/eabp.el` (kind constants only).
+**Files:** `docs/SPEC.md`, `emacs/core/jetpacs.el` (kind constants only).
 
 **Implementation:**
 - `triggers.set {triggers: [{id, type, params, policy, throttle_s?,
@@ -189,13 +189,13 @@ holds.
 is plain JSON (SSID string, battery pct) — never anything executable.
 
 **Acceptance:** SPEC §11 merged; golden-file test for the new frame
-shape; `eabp-triggers.el` can send a set and receive a fire against a
+shape; `jetpacs-triggers.el` can send a set and receive a fire against a
 fake server in ERT.
 
 ### Task 2: `capability.invoke` + device-permission report ✅ (2026-07-05)
 
-**Landed:** SPEC §10; `eabp-capability-invoke` / `eabp-device-can-p` /
-`eabp-device-cap-p` / `eabp-granted-p` in `emacs/core/eabp.el`;
+**Landed:** SPEC §10; `jetpacs-capability-invoke` / `jetpacs-device-can-p` /
+`jetpacs-device-cap-p` / `jetpacs-granted-p` in `emacs/core/jetpacs.el`;
 `DeviceCapabilities.kt` dispatch seam with `settings.open` as the first
 capability; welcome carries `device: {caps, perms}` (7-key perm map,
 gated on the `capabilities` grant), replacing the old ad-hoc
@@ -203,8 +203,8 @@ gated on the `capabilities` grant), replacing the old ad-hoc
 
 **Goal:** the Emacs → device effector channel, with graceful degrade.
 
-**Files:** `docs/SPEC.md`, `emacs/core/eabp.el`,
-`app/src/main/java/com/calebc42/eabp/EabpConnection.kt`.
+**Files:** `docs/SPEC.md`, `emacs/core/jetpacs.el`,
+`app/src/main/java/com/calebc42/jetpacs/JetpacsConnection.kt`.
 
 **Implementation:**
 - `capability.invoke {cap, args}` client → companion, replied with
@@ -214,7 +214,7 @@ gated on the `capabilities` grant), replacing the old ad-hoc
   {write_settings: bool, notification_policy: bool, notification_
   listener: bool, fine_location: bool, bluetooth_connect: bool, …}}`
   — the `canScheduleExactAlarms` precedent, generalized. Elisp helper
-  `eabp-device-can-p` reads it; a `cap-permission` error carries the
+  `jetpacs-device-can-p` reads it; a `cap-permission` error carries the
   settings deep-link the companion can open on request
   (`capability.invoke {cap: "settings.open", args: {panel}}` is itself
   the first capability).
@@ -226,20 +226,20 @@ clean error; welcome carries the perm map end-to-end.
 
 ## Phase A1 — effectors (small Kotlin, big Tasker coverage)
 
-New file `app/src/main/java/com/calebc42/eabp/DeviceCapabilities.kt`
-(dispatch table keyed by cap name), called from `EabpConnection`.
-Elisp counterpart `eabp-device.el`: one thin defun per cap
-(`eabp-device-intent`, `eabp-device-flashlight`, …), all funneling
-through one `eabp-device--invoke`.
+New file `app/src/main/java/com/calebc42/jetpacs/DeviceCapabilities.kt`
+(dispatch table keyed by cap name), called from `JetpacsConnection`.
+Elisp counterpart `jetpacs-device.el`: one thin defun per cap
+(`jetpacs-device-intent`, `jetpacs-device-flashlight`, …), all funneling
+through one `jetpacs-device--invoke`.
 
 ### Task 3: `intent.start` — the universal escape hatch ✅ (2026-07-05)
 
 **Landed:** `intent.start` (activity/broadcast/service, plain-data
 extras), `app.launch`, `apps.list` in `DeviceCapabilities.kt`; the
-`<queries>` element in the `:eabp` manifest; elisp
-`emacs/core/eabp-device.el` (`eabp-device-intent`,
-`eabp-device-app-launch`, `eabp-device-apps-list`, interactive
-`eabp-device-launch-app` picker); SPEC §10 catalog table; arg shapes
+`<queries>` element in the `:jetpacs` manifest; elisp
+`emacs/core/jetpacs-device.el` (`jetpacs-device-intent`,
+`jetpacs-device-app-launch`, `jetpacs-device-apps-list`, interactive
+`jetpacs-device-launch-app` picker); SPEC §10 catalog table; arg shapes
 pinned in `test/frames.golden`. On-device REPL check pending.
 
 **Goal:** launch apps, deep links, share targets, anything with an
@@ -261,7 +261,7 @@ activity-mode effectors are reliable from foreground/notification
 contexts, best-effort otherwise.
 
 **Acceptance:** from the eval REPL on the phone,
-`(eabp-device-intent :action "android.intent.action.VIEW" :data
+`(jetpacs-device-intent :action "android.intent.action.VIEW" :data
 "https://…")` opens the browser; `apps.list` feeds a picker.
 
 ### Task 4: permission-free effector batch ✅ (2026-07-05)
@@ -271,9 +271,9 @@ contexts, best-effort otherwise.
 deep-link), `flashlight`, `media.key`, `clipboard.read`
 (main-thread-hopped, foreground-only → typed error, never logged),
 `settings.open`, `screen.keep_on` (window flag via
-`EabpRuntime.keepScreenOn`, applied in `SduiScaffold` so it can't pin
+`JetpacsRuntime.keepScreenOn`, applied in `SduiScaffold` so it can't pin
 the device from the background). VIBRATE permission added to the
-`:eabp` manifest. Per-cap elisp wrappers in `eabp-device.el`; golden
+`:jetpacs` manifest. Per-cap elisp wrappers in `jetpacs-device.el`; golden
 covers every arg shape. On-device REPL pass pending.
 
 **Goal:** the everyday Tasker verbs that need no special access.
@@ -298,7 +298,7 @@ paths return typed errors, not crashes; golden test for arg shapes.
 DND wall on `ringer.mode`): `brightness.set` + `dnd.set` behind their
 grants with `cap-permission` deep-links, `settings.open {panel:
 "app"}` for the app-info page (runtime grants), and the "Device
-permissions" settings card → dialog in eabp-device.el listing every
+permissions" settings card → dialog in jetpacs-device.el listing every
 perm from the welcome map with a Grant button (map refreshes on
 reconnect). Same pass fixed the launch-app picker (companion dialog —
 a desktop `completing-read` both fails to bridge from an async reply
@@ -313,7 +313,7 @@ standard as the rest of the UX.
 `ACTION_MANAGE_WRITE_SETTINGS` deep link; `dnd.set {mode}` behind
 `isNotificationPolicyAccessGranted` → else deep link. Elisp side: a
 Settings section "Device permissions" (via the existing
-`eabp-settings-register-section`) listing each perm from the Task 2
+`jetpacs-settings-register-section`) listing each perm from the Task 2
 map with an "open settings" action.
 
 **Acceptance:** deny → invoke → typed error → open settings → grant →
@@ -334,17 +334,17 @@ edge-crossing hysteresis into the configured side only);
 `TriggerAlarmReceiver` reads the table at fire time so stale alarms
 die with the set; `BootReceiver` fires `boot` triggers, re-arms `time`
 alarms, reschedules the now-persisted reminder set (the reboot gap),
-and restarts the bridge. `EabpConnection` handles `triggers.set` and
+and restarts the bridge. `JetpacsConnection` handles `triggers.set` and
 grants `triggers` again. On-device acceptance (screen toggle, kill
 Emacs + replay, reboot rearm) pending.
 
 **Goal:** triggers persist, survive reboots, and fire into the
 existing event queue.
 
-**Files:** `EabpDatabase.kt` (new `triggers` table),
+**Files:** `JetpacsDatabase.kt` (new `triggers` table),
 new `TriggerHost.kt`, `BridgeService.kt` (host lifecycle),
 new `BootReceiver.kt` + manifest (`RECEIVE_BOOT_COMPLETED`),
-`EabpConnection.kt` (handle `triggers.set`).
+`JetpacsConnection.kt` (handle `triggers.set`).
 
 **Implementation:**
 - `triggers.set` → persist set (replace), then arm: for each distinct
@@ -430,7 +430,7 @@ error the Automations view can render.
 **Goal:** react to any app's notifications (Tasker's most-loved
 trigger) and act on them.
 
-**Files:** new `EabpNotificationListener.kt`
+**Files:** new `JetpacsNotificationListener.kt`
 (NotificationListenerService) + manifest; `TriggerHost.kt`;
 `DeviceCapabilities.kt` (`notification.dismiss {key}`,
 `notification.click {key}`, `notifications.active` query).
@@ -517,37 +517,37 @@ user can follow; spike results recorded either way.
 
 ## Phase A4 — authoring UX (pure Tier 1 polish)
 
-### Task 12: `eabp-deftrigger` + the Automations view ✅ (2026-07-05)
+### Task 12: `jetpacs-deftrigger` + the Automations view ✅ (2026-07-05)
 
-**Landed:** `eabp-deftrigger` macro + enable/disable
-(`eabp-triggers-disabled` defcustom; disabled = excluded from the
-pushed set, persisted via `eabp-settings-save-variable`), last-fired
-bookkeeping, `eabp-trigger-test-fire` (interactive + `trigger.test`
-action), `trigger.toggle` — all in core eabp-triggers.el (trigger.* is
+**Landed:** `jetpacs-deftrigger` macro + enable/disable
+(`jetpacs-triggers-disabled` defcustom; disabled = excluded from the
+pushed set, persisted via `jetpacs-settings-save-variable`), last-fired
+bookkeeping, `jetpacs-trigger-test-fire` (interactive + `trigger.test`
+action), `trigger.toggle` — all in core jetpacs-triggers.el (trigger.* is
 core's namespace; the view is pure rendering). View in
-`emacs/apps/eabp-automations.el`: per-trigger cards (switch, wire
+`emacs/apps/jetpacs-automations.el`: per-trigger cards (switch, wire
 summary, last fired, Fire now), settings-link entry (satellite screen
-per the drawer contract), re-render via `eabp-triggers-changed-hook`.
-Deviation: deliberately NOT an `eabp-defapp` — that would flip the
+per the drawer contract), re-render via `jetpacs-triggers-changed-hook`.
+Deviation: deliberately NOT an `jetpacs-defapp` — that would flip the
 launcher into multi-app mode for the sole user. On-device pass
 (define/disable/re-enable/test-fire from the phone) pending.
 
-**Goal:** registering an automation feels like `eabp-defaction`, and
+**Goal:** registering an automation feels like `jetpacs-defaction`, and
 the phone gets a management surface.
 
-**Files:** new `emacs/core/eabp-triggers.el` (registry, set-push on
+**Files:** new `emacs/core/jetpacs-triggers.el` (registry, set-push on
 connect/change, `trigger.fired` dispatch to per-id handlers), new
-`emacs/apps/eabp-automations.el` (view).
+`emacs/apps/jetpacs-automations.el` (view).
 
 **Implementation:**
 ```elisp
-(eabp-deftrigger my/charge-sync
+(jetpacs-deftrigger my/charge-sync
   :type "power" :params '((state . "connected")) :policy "wake"
   :handler (lambda (data) (my/org-sync)))
 ```
 Registry pushes the full `triggers.set` on any change and on connect
 (replace-set makes this idempotent). The Automations view (via
-`eabp-shell-define-view`) lists triggers with enable/disable switches
+`jetpacs-shell-define-view`) lists triggers with enable/disable switches
 (disabled = excluded from the pushed set, persisted via Customize per
 the settings seam), last-fired timestamps (from handler bookkeeping),
 and a "fire now" test button per trigger.
@@ -564,7 +564,7 @@ heading per rule, `:TRIGGER:` shorthand ("power connected",
 richer, `:POLICY:`/`:DEDUPE:`/`:THROTTLE:`, first elisp src block =
 handler with `data`/`args` in scope (init.el trust, never
 wire-sourced), DONE = removed from the set. Reloads on phone-side
-save (`eabp-files-after-save-hook`) and via
+save (`jetpacs-files-after-save-hook`) and via
 `M-x glasspane-automations-reload`; unknown trigger types are skipped
 with a message (the companion rejects whole sets). Case test pins a
 lowercase drawer. On-device pass pending.
@@ -596,18 +596,18 @@ from the pushed set. Case test: `:trigger:` lowercase drawer parses.
 
 ## Phase L0 — app identity (mostly elisp; do Task 14 early, it's cheap)
 
-### Task 14: `eabp-defapp` + launcher home + per-app chrome ✅ (2026-07-05)
+### Task 14: `jetpacs-defapp` + launcher home + per-app chrome ✅ (2026-07-05)
 
-**Landed:** new `emacs/core/eabp-apps.el` (registry, home grid view,
+**Landed:** new `emacs/core/jetpacs-apps.el` (registry, home grid view,
 `app.open` action, conditional "Apps" drawer entry) over a new shell
-seam `eabp-shell-view-filter-function` (also honored by the bottom
+seam `jetpacs-shell-view-filter-function` (also honored by the bottom
 bar, default tab, and overlay pick). Decisions taken: ungrouped views
-show in **every** app — an explicit `(eabp-defapp "system" …)` contains
+show in **every** app — an explicit `(jetpacs-defapp "system" …)` contains
 them, so it's user policy, not core policy; single-vs-multi app is
 decided by registry size, so Glasspane alone changes nothing;
 action-name collision warning implemented for *view* claims at defapp
 time (lambda identity makes handler-level warnings too noisy).
-Glasspane is the first `eabp-defapp` (glasspane-ui.el); eabp-hello.el
+Glasspane is the first `jetpacs-defapp` (glasspane-ui.el); jetpacs-hello.el
 now declares the second. Home switching is a drop-policy action —
 Task 15 upgrades it to a companion-local builtin for offline. Docs in
 BUILDING-TIER1.md §4½. On-device two-card check pending.
@@ -616,13 +616,13 @@ BUILDING-TIER1.md §4½. On-device two-card check pending.
 bottom bar shows one app at a time. This is the AppSheet feel and it
 is almost entirely shell logic.
 
-**Files:** `emacs/core/eabp-shell.el`, new `emacs/core/eabp-apps.el`
+**Files:** `emacs/core/jetpacs-shell.el`, new `emacs/core/jetpacs-apps.el`
 (or in-shell), `docs/BUILDING-TIER1.md`.
 
 **Implementation:**
-- `(eabp-defapp "glasspane" :label "Glasspane" :icon "calendar"
+- `(jetpacs-defapp "glasspane" :label "Glasspane" :icon "calendar"
   :views (…))` — sugar over the existing registry: each member view
-  gets an `:app` property; `eabp-shell-current-app` gates tabs the way
+  gets an `:app` property; `jetpacs-shell-current-app` gates tabs the way
   `:when` predicates already do. Ungrouped views (core tabs: Files,
   Emacs, Tools) belong to a built-in "system" app or show everywhere —
   decide and document.
@@ -634,13 +634,13 @@ is almost entirely shell logic.
 - One app's views per multi-view push keeps payloads small; switching
   apps is an action → set current app → push.
 
-**Pitfalls:** Glasspane itself must become the first `eabp-defapp` with
+**Pitfalls:** Glasspane itself must become the first `jetpacs-defapp` with
 zero behavior change when it's the only app installed (single-app ⇒
 skip home, boot straight in — AppSheet does the same). Action-name
 collisions between apps: the registry warns when two apps register the
 same action name.
 
-**Acceptance:** load `eabp-hello.el` next to Glasspane ⇒ home shows two
+**Acceptance:** load `jetpacs-hello.el` next to Glasspane ⇒ home shows two
 cards; switching swaps tab bars; with only Glasspane loaded nothing
 looks different from today.
 
@@ -695,7 +695,7 @@ Glasspane opens straight into Hello's cached view.
 assignable from a picker instead of ad-hoc elisp.
 
 **Implementation:** apps declare offered compositions
-(`:widgets ((id label builder))` on `eabp-defapp`); a settings section
+(`:widgets ((id label builder))` on `jetpacs-defapp`); a settings section
 (existing seam) maps `widget:customN` / `tile:customN` → offering;
 persisted via Customize; the shell's after-push hook renders assigned
 builders into their slots (the mechanism the slots already use).
@@ -713,7 +713,7 @@ settings; it renders; reassignment takes effect on next push.
 phone is explicit, inspectable, and reversible.
 
 **Files:** `emacs/build-bundle.el` (parameterize for third-party
-bundles), `emacs/core/eabp-files.el` or new `eabp-app-store.el`
+bundles), `emacs/core/jetpacs-files.el` or new `jetpacs-app-store.el`
 (import flow + installed registry), `MainActivity.kt` (accept `.el` /
 `text/x-emacs-lisp` via SEND/VIEW), `docs/BUILDING-TIER1.md`
 (“Shipping it” grows the phone-install path).
@@ -733,14 +733,14 @@ bundles), `emacs/core/eabp-files.el` or new `eabp-app-store.el`
   arrived over the wire, ever (this is the same trust line as
   Task 13).
 - Installed-apps registry view: version, enable/disable
-  (`eabp-defapp` gate), remove (delete file + `surface.remove` +
+  (`jetpacs-defapp` gate), remove (delete file + `surface.remove` +
   unpublish shortcut).
 
 **Pitfalls:** don't build a package manager — one file, one dir,
 package.el remains the recommendation for anything with dependencies
 (the package browser already exists for that).
 
-**Acceptance:** share `eabp-hello.el` to the phone from another app ⇒
+**Acceptance:** share `jetpacs-hello.el` to the phone from another app ⇒
 consent → install → home shows Hello → remove → gone, shortcut too.
 
 ---
@@ -768,7 +768,7 @@ spreadsheets are for AppSheet.
   Because there is no code, an org app is safe to share and install
   *without* the Task 18 code-trust warning (its own lighter consent).
 - Loading: an org file in a watched dir (or installed via the Task 18
-  flow with the lighter consent path) registers an `eabp-defapp` whose
+  flow with the lighter consent path) registers an `jetpacs-defapp` whose
   builders render org-element data through existing glasspane-org
   extractors, memoised behind the standard cache-invalidate seam.
 

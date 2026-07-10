@@ -34,12 +34,12 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'org)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-buffer)
-(require 'eabp-shell)
-(require 'eabp-settings)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-buffer)
+(require 'jetpacs-shell)
+(require 'jetpacs-settings)
 (require 'glasspane-org)
 
 (declare-function org-srs-review-pending-items "org-srs-review")
@@ -67,7 +67,7 @@
   "The review scope: a file or directory org-srs reviews over.
 nil means `org-directory' — review everything, the phone default."
   :type '(choice (const :tag "org-directory" nil) directory file)
-  :group 'eabp)
+  :group 'jetpacs)
 
 (defvar glasspane-srs--available 'unknown
   "Cached org-srs availability; `unknown' re-probes on next ask.")
@@ -81,7 +81,7 @@ org-srs mid-session only needs a refresh."
     (setq glasspane-srs--available (and (require 'org-srs nil t) t)))
   glasspane-srs--available)
 
-(add-hook 'eabp-shell-refresh-hook
+(add-hook 'jetpacs-shell-refresh-hook
           (lambda () (setq glasspane-srs--available 'unknown)))
 
 (defun glasspane-srs--source ()
@@ -116,7 +116,7 @@ crash — a review tap that silently dies is a bug class."
        (let ((inhibit-message t) (message-log-max nil))
          ,@body)
      (error
-      (eabp-shell-notify (format "Review: %s" (error-message-string err)))
+      (jetpacs-shell-notify (format "Review: %s" (error-message-string err)))
       nil)))
 
 (defmacro glasspane-srs--quietly (&rest body)
@@ -220,22 +220,22 @@ explicit `Front`/`Back` children, and Logseq-style nested block children."
   "Render a card PART: (title . STRING), (region BEG END), or (title-and-region ...)."
   (pcase part
     (`(title . ,s)
-     (and (stringp s) (not (string-empty-p s)) (list (eabp-text s 'title))))
+     (and (stringp s) (not (string-empty-p s)) (list (jetpacs-text s 'title))))
     (`(title-and-region ,title ,beg . ,rest)
      (let* ((end (if (consp rest) (car rest) rest))
             (title-nodes (and (stringp title) (not (string-empty-p title))
-                              (list (eabp-text title 'title))))
-            (eabp-line-numbers nil)
-            (eabp-buffer-monospace nil)
+                              (list (jetpacs-text title 'title))))
+            (jetpacs-line-numbers nil)
+            (jetpacs-buffer-monospace nil)
             (region-nodes (when (and (integerp beg) (integerp end) (< beg end))
-                            (eabp-buffer-render-region (current-buffer) beg end))))
+                            (jetpacs-buffer-render-region (current-buffer) beg end))))
        (append title-nodes region-nodes)))
     (`(region ,beg . ,rest)
      (let ((end (if (consp rest) (car rest) rest))
-           (eabp-line-numbers nil)
-           (eabp-buffer-monospace nil))
+           (jetpacs-line-numbers nil)
+           (jetpacs-buffer-monospace nil))
        (when (and (integerp beg) (integerp end) (< beg end))
-         (eabp-buffer-render-region (current-buffer) beg end))))
+         (jetpacs-buffer-render-region (current-buffer) beg end))))
     (_ nil)))
 
 (defun glasspane-srs--card-content (item revealed)
@@ -317,15 +317,15 @@ ITEM is `(card SIDE)'; SIDE (default `back') is the hidden answer."
               ;; Render parts
               (append
                (or (glasspane-srs--part-nodes (car parts))
-                   (list (eabp-text "(no question)" 'caption)))
+                   (list (jetpacs-text "(no question)" 'caption)))
                (when revealed
-                 (cons (eabp-divider)
+                 (cons (jetpacs-divider)
                        (or (glasspane-srs--part-nodes (cdr parts))
-                           (list (eabp-text "(no answer)" 'caption)))))))
+                           (list (jetpacs-text "(no answer)" 'caption)))))))
           ;; Restore original spec and clean up overlays.
           (setq buffer-invisibility-spec orig-invis-spec)
           (mapc #'delete-overlay overlays)))
-    (error (list (eabp-text "Couldn't lay out this card." 'caption)))))
+    (error (list (jetpacs-text "Couldn't lay out this card." 'caption)))))
 
 (defun glasspane-srs--cloze-content (item revealed)
   "Nodes for a `cloze' ITEM: the sentence with the reviewed blank.
@@ -349,13 +349,13 @@ come from plain org; only `org-srs-item-cloze-collect' is org-srs."
                   parts)
             (setq pos cend)))
         (push (buffer-substring-no-properties pos end) parts)
-        (list (eabp-text (string-trim (apply #'concat (nreverse parts))) 'body)))
-    (error (list (eabp-text "Couldn't lay out this cloze." 'caption)))))
+        (list (jetpacs-text (string-trim (apply #'concat (nreverse parts))) 'body)))
+    (error (list (jetpacs-text "Couldn't lay out this cloze." 'caption)))))
 
 (defun glasspane-srs--fallback-content ()
   "Render the narrowed entry cleanly for an unknown item type.
 Drawers and gutter line numbers stripped; transient overlays only."
-  (let ((eabp-line-numbers nil) (eabp-buffer-monospace nil) (overlays nil)
+  (let ((jetpacs-line-numbers nil) (jetpacs-buffer-monospace nil) (overlays nil)
         (open (format "^[ \t]*:%s:[ \t]*$"
                       (regexp-opt glasspane-srs--noise-drawers))))
     (unwind-protect
@@ -374,7 +374,7 @@ Drawers and gutter line numbers stripped; transient overlays only."
                     (overlay-put ov 'invisible 'glasspane-srs-hide)
                     (push ov overlays))
                   (goto-char dend)))))
-          (eabp-buffer-render (current-buffer)))
+          (jetpacs-buffer-render (current-buffer)))
       (mapc #'delete-overlay overlays)
       (remove-from-invisibility-spec 'glasspane-srs-hide))))
 
@@ -386,7 +386,7 @@ narrows to its entry, and dispatches on the item type."
          (type (car item))
          (marker (glasspane-srs--quietly (apply #'org-srs-item-marker item-args))))
     (if (not (and (markerp marker) (marker-buffer marker)))
-        (list (eabp-text "Couldn't load this card." 'caption))
+        (list (jetpacs-text "Couldn't load this card." 'caption))
       (with-current-buffer (marker-buffer marker)
         (save-excursion
           (save-restriction
@@ -436,10 +436,10 @@ its log row and a `rating' column, the simulator runs."
     (delq nil
           (list
            (when intervals
-             (apply #'eabp-row
+             (apply #'jetpacs-row
                     (mapcar (lambda (row)
-                              (eabp-box
-                               (list (eabp-text
+                              (jetpacs-box
+                               (list (jetpacs-text
                                       (if-let ((secs (plist-get intervals
                                                                 (cadr row))))
                                           (glasspane-srs--format-interval secs)
@@ -447,11 +447,11 @@ its log row and a `rating' column, the simulator runs."
                                       'caption))
                                :weight 1 :alignment "center"))
                             glasspane-srs--ratings)))
-           (apply #'eabp-row
+           (apply #'jetpacs-row
                   (mapcar (lambda (row)
                             (cl-destructuring-bind (name _kw label variant) row
-                              (eabp-button label
-                                           (eabp-action
+                              (jetpacs-button label
+                                           (jetpacs-action
                                             "srs.rate"
                                             :args `((rating . ,name))
                                             :when-offline "drop")
@@ -463,20 +463,20 @@ its log row and a `rating' column, the simulator runs."
 (defun glasspane-srs--session-body ()
   "The active-session screen: the card, then reveal or rating controls."
   (if (null glasspane-srs--current)
-      (eabp-empty-state
+      (jetpacs-empty-state
        :icon "school" :title "All caught up"
        :caption "Review complete."
        :action-label "Done"
-       :on-tap (eabp-action "srs.quit" :when-offline "drop"))
-    (apply #'eabp-lazy-column
+       :on-tap (jetpacs-action "srs.quit" :when-offline "drop"))
+    (apply #'jetpacs-lazy-column
            (append
             (glasspane-srs--item-nodes glasspane-srs--current
                                        glasspane-srs--revealed)
-            (list (eabp-spacer :height 8) (eabp-divider))
+            (list (jetpacs-spacer :height 8) (jetpacs-divider))
             (if glasspane-srs--revealed
                 (glasspane-srs--rating-controls)
-              (list (eabp-button "Show answer"
-                                 (eabp-action "srs.answer.show"
+              (list (jetpacs-button "Show answer"
+                                 (jetpacs-action "srs.answer.show"
                                               :when-offline "drop")
                                  :variant "filled" :icon "visibility")))))))
 
@@ -485,24 +485,24 @@ its log row and a `rating' column, the simulator runs."
   (let ((due (glasspane-srs--due-count)))
     (cond
      ((null due)
-      (eabp-column
-       (eabp-text "Couldn't count due items — check *Messages*." 'caption)
-       (eabp-button "Start review"
-                    (eabp-action "srs.review.start" :when-offline "drop")
+      (jetpacs-column
+       (jetpacs-text "Couldn't count due items — check *Messages*." 'caption)
+       (jetpacs-button "Start review"
+                    (jetpacs-action "srs.review.start" :when-offline "drop")
                     :variant "filled" :icon "play_arrow")))
      ((zerop due)
-      (eabp-empty-state :icon "school" :title "All caught up"
+      (jetpacs-empty-state :icon "school" :title "All caught up"
                         :caption "Nothing due right now."))
      (t
-      (eabp-column
-       (eabp-text (format "%d item%s due" due (if (= due 1) "" "s")) 'title)
-       (eabp-spacer :height 8)
-       (eabp-button "Start review"
-                    (eabp-action "srs.review.start" :when-offline "drop")
+      (jetpacs-column
+       (jetpacs-text (format "%d item%s due" due (if (= due 1) "" "s")) 'title)
+       (jetpacs-spacer :height 8)
+       (jetpacs-button "Start review"
+                    (jetpacs-action "srs.review.start" :when-offline "drop")
                     :variant "filled" :icon "play_arrow"))))))
 
 (defun glasspane-srs--install-body ()
-  (eabp-empty-state
+  (jetpacs-empty-state
    :icon "school" :title "org-srs not installed"
    :caption (concat "Install the org-srs package (MELPA) in the on-device "
                     "Emacs — the starter init does it on first launch — "
@@ -516,16 +516,16 @@ labelled menu rather than cluttering the bar."
   (delq nil
         (list
          (when glasspane-srs--undo
-           (eabp-icon-button "undo"
-                             (eabp-action "srs.undo" :when-offline "drop")
+           (jetpacs-icon-button "undo"
+                             (jetpacs-action "srs.undo" :when-offline "drop")
                              :content-description "Undo last rating"))
-         (eabp-icon-button "close"
-                           (eabp-action "srs.quit" :when-offline "drop")
+         (jetpacs-icon-button "close"
+                           (jetpacs-action "srs.quit" :when-offline "drop")
                            :content-description "End review"))))
 
 (defun glasspane-srs--view (snackbar)
   "The Review screen for the current session state."
-  (eabp-shell-nav-view
+  (jetpacs-shell-nav-view
    "Review"
    (cond
     ((not (glasspane-srs-available-p)) (glasspane-srs--install-body))
@@ -535,28 +535,28 @@ labelled menu rather than cluttering the bar."
               (glasspane-srs--top-actions))
    :snackbar snackbar))
 
-(eabp-shell-define-view "srs" :builder #'glasspane-srs--view :order 78)
+(jetpacs-shell-define-view "srs" :builder #'glasspane-srs--view :order 78)
 
 ;; Everyday nav (the drawer contract); no entry while org-srs is absent.
-(eabp-shell-add-drawer-item
+(jetpacs-shell-add-drawer-item
  45 (lambda ()
       (when (glasspane-srs-available-p)
-        (eabp-drawer-item "school" "Review" (eabp-shell-switch-view "srs")))))
+        (jetpacs-drawer-item "school" "Review" (jetpacs-shell-switch-view "srs")))))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "srs.review.start"
+(jetpacs-defaction "srs.review.start"
   (lambda (_args _)
     (if (not (glasspane-srs-available-p))
-        (eabp-shell-notify "org-srs is not installed")
+        (jetpacs-shell-notify "org-srs is not installed")
       (setq glasspane-srs--active t glasspane-srs--undo nil)
       (glasspane-srs--advance))
-    (eabp-shell-push nil :switch-to "srs")))
+    (jetpacs-shell-push nil :switch-to "srs")))
 
-(eabp-defaction "srs.answer.show"
+(jetpacs-defaction "srs.answer.show"
   (lambda (_args _)
     (when glasspane-srs--current (setq glasspane-srs--revealed t))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
 (defun glasspane-srs--push-undo (item-args)
   "Snapshot ITEM-ARGS's log drawer onto the undo stack (capped).
@@ -573,7 +573,7 @@ Best-effort: a snapshot failure must not block the rating."
            (when (nthcdr 20 glasspane-srs--undo)
              (setcdr (nthcdr 19 glasspane-srs--undo) nil))))))))
 
-(eabp-defaction "srs.rate"
+(jetpacs-defaction "srs.rate"
   (lambda (args _)
     (let ((kw (cadr (assoc (alist-get 'rating args) glasspane-srs--ratings))))
       (when (and kw glasspane-srs--current)
@@ -593,24 +593,24 @@ Best-effort: a snapshot failure must not block the rating."
               (apply #'org-srs-review-rate kw glasspane-srs--current))))
         (glasspane-org-cache-invalidate)
         (glasspane-srs--advance)))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "srs.quit"
+(jetpacs-defaction "srs.quit"
   (lambda (_args _)
     (setq glasspane-srs--active nil glasspane-srs--current nil
           glasspane-srs--revealed nil glasspane-srs--undo nil)
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "srs.postpone"
+(jetpacs-defaction "srs.postpone"
   (lambda (_args _)
     (when glasspane-srs--current
       (glasspane-srs--engine
         (apply #'org-srs-review-postpone '(1 :day) glasspane-srs--current))
       (glasspane-org-cache-invalidate)
       (glasspane-srs--advance))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "srs.suspend"
+(jetpacs-defaction "srs.suspend"
   (lambda (_args _)
     (when glasspane-srs--current
       (glasspane-srs--engine
@@ -625,9 +625,9 @@ Best-effort: a snapshot failure must not block the rating."
                 (let ((save-silently t)) (save-buffer)))))))
       (glasspane-org-cache-invalidate)
       (glasspane-srs--advance))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "srs.undo"
+(jetpacs-defaction "srs.undo"
   ;; org-srs's own undo history is set up only by the session we don't
   ;; run, so we restore the item's log drawer from our own snapshot and
   ;; re-present the card (answer shown) for a fresh rating.
@@ -648,17 +648,17 @@ Best-effort: a snapshot failure must not block the rating."
                  (let ((save-silently t)) (save-buffer))))))
           (glasspane-org-cache-invalidate)
           (setq glasspane-srs--current (car snap) glasspane-srs--revealed t))
-      (eabp-shell-notify "Nothing to undo"))
-    (eabp-shell-push)))
+      (jetpacs-shell-notify "Nothing to undo"))
+    (jetpacs-shell-push)))
 
 ;; ─── Authoring: Make flashcard on the heading detail view ───────────────────
 
-(eabp-defaction "srs.item.create"
+(jetpacs-defaction "srs.item.create"
   ;; The type picker and any follow-up prompts arrive as phone dialogs
   ;; through the minibuffer bridge — write it as if at the keyboard.
   (lambda (args _)
     (if (not (glasspane-srs-available-p))
-        (eabp-shell-notify "org-srs is not installed")
+        (jetpacs-shell-notify "org-srs is not installed")
       (condition-case err
           (let ((marker (glasspane-org--resolve-ref args)))
             (with-current-buffer (marker-buffer marker)
@@ -667,21 +667,21 @@ Best-effort: a snapshot failure must not block the rating."
                (org-srs-item-create))
               (let ((save-silently t)) (save-buffer)))
             (glasspane-org-cache-invalidate)
-            (eabp-shell-notify "Review item created"))
-        (quit (eabp-shell-notify "Cancelled"))
-        (error (eabp-shell-notify
+            (jetpacs-shell-notify "Review item created"))
+        (quit (jetpacs-shell-notify "Cancelled"))
+        (error (jetpacs-shell-notify
                 (format "Flashcard: %s" (error-message-string err))))))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
 (defun glasspane-srs-detail-nodes (ref)
   "The detail-view section for REF: make this heading reviewable."
   (when (glasspane-srs-available-p)
-    (list (eabp-divider)
-          (eabp-row
-           (eabp-box (list (eabp-text "Spaced repetition" 'caption))
+    (list (jetpacs-divider)
+          (jetpacs-row
+           (jetpacs-box (list (jetpacs-text "Spaced repetition" 'caption))
                      :weight 1)
-           (eabp-button "Make flashcard"
-                        (eabp-action "srs.item.create"
+           (jetpacs-button "Make flashcard"
+                        (jetpacs-action "srs.item.create"
                                      :args ref
                                      :when-offline "drop")
                         :variant "text" :icon "school")))))
@@ -691,7 +691,7 @@ Best-effort: a snapshot failure must not block the rating."
 ;; ─── Settings ────────────────────────────────────────────────────────────────
 
 (with-eval-after-load 'org-srs
-  (eabp-settings-register-section
+  (jetpacs-settings-register-section
    "Review"
    '((org-srs-review-new-items-per-day :label "New cards per day")
      (org-srs-review-max-reviews-per-day :label "Max reviews per day"))))

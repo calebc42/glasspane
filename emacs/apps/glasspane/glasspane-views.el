@@ -16,11 +16,11 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-shell)
-(require 'eabp-settings)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-settings)
 (require 'glasspane-org)
 (require 'glasspane-ui)
 
@@ -29,7 +29,7 @@
 `query' is anything `glasspane-org--parse-query' accepts (org-ql sexp,
 filter tokens, or free text); `rendering' is \"list\" | \"board\" |
 \"calendar\".  Managed from the phone; persisted through Customize."
-  :type '(repeat sexp) :group 'eabp)
+  :type '(repeat sexp) :group 'jetpacs)
 
 (defvar glasspane-views--current nil
   "Name of the saved view being shown, or nil for the hub.")
@@ -44,7 +44,7 @@ filter tokens, or free text); `rendering' is \"list\" | \"board\" |
            :key (lambda (v) (alist-get 'name v)) :test #'equal))
 
 (defun glasspane-views--persist ()
-  (eabp-settings-save-variable 'glasspane-saved-views glasspane-saved-views))
+  (jetpacs-settings-save-variable 'glasspane-saved-views glasspane-saved-views))
 
 (defun glasspane-views--set-rendering (name rendering)
   "Set view NAME's rendering to RENDERING, rebuilding the saved list.
@@ -68,34 +68,34 @@ mutates the value Customize handed out."
 
 (defun glasspane-views--tap (item)
   "The drill-in action for ITEM's heading."
-  (eabp-action "heading.tap" :args (alist-get 'ref item)
+  (jetpacs-action "heading.tap" :args (alist-get 'ref item)
                :when-offline "drop"))
 
 (defun glasspane-views--table-node (items)
   "The list rendering: one table row per item, tappable cells."
-  (eabp-table
+  (jetpacs-table
    (cons
-    (eabp-table-row
-     (list (eabp-table-cell (list (eabp-span "Heading" :bold t)))
-           (eabp-table-cell (list (eabp-span "State" :bold t)))
-           (eabp-table-cell (list (eabp-span "Scheduled" :bold t)))
-           (eabp-table-cell (list (eabp-span "Tags" :bold t))))
+    (jetpacs-table-row
+     (list (jetpacs-table-cell (list (jetpacs-span "Heading" :bold t)))
+           (jetpacs-table-cell (list (jetpacs-span "State" :bold t)))
+           (jetpacs-table-cell (list (jetpacs-span "Scheduled" :bold t)))
+           (jetpacs-table-cell (list (jetpacs-span "Tags" :bold t))))
      :header t)
     (mapcar
      (lambda (item)
        (let ((tap (glasspane-views--tap item)))
-         (eabp-table-row
-          (list (eabp-table-cell
-                 (list (eabp-span (or (alist-get 'headline item) "")))
+         (jetpacs-table-row
+          (list (jetpacs-table-cell
+                 (list (jetpacs-span (or (alist-get 'headline item) "")))
                  :on-tap tap)
-                (eabp-table-cell
-                 (list (eabp-span (or (alist-get 'todo item) ""))))
-                (eabp-table-cell
-                 (list (eabp-span (or (glasspane-ui--ts-date
+                (jetpacs-table-cell
+                 (list (jetpacs-span (or (alist-get 'todo item) ""))))
+                (jetpacs-table-cell
+                 (list (jetpacs-span (or (glasspane-ui--ts-date
                                        (alist-get 'scheduled item))
                                       ""))))
-                (eabp-table-cell
-                 (list (eabp-span (mapconcat #'identity
+                (jetpacs-table-cell
+                 (list (jetpacs-span (mapconcat #'identity
                                              (append (alist-get 'tags item) nil)
                                              " "))))))))
      items))
@@ -122,16 +122,16 @@ vanish from the board."
   "A board card: tap opens the heading; the menu moves it to a column."
   (let ((ref (alist-get 'ref item))
         (state (or (alist-get 'todo item) "")))
-    (eabp-card
+    (jetpacs-card
      (list
-      (eabp-row
-       (eabp-box (list (eabp-text (or (alist-get 'headline item) "") 'body))
+      (jetpacs-row
+       (jetpacs-box (list (jetpacs-text (or (alist-get 'headline item) "") 'body))
                  :weight 1)
-       (eabp-menu
+       (jetpacs-menu
         (mapcar (lambda (target)
-                  (eabp-menu-item
+                  (jetpacs-menu-item
                    (if (string-empty-p target) "No state" target)
-                   (eabp-action "heading.todo-set"
+                   (jetpacs-action "heading.todo-set"
                                 :args (append ref `((state . ,target)))
                                 :when-offline "queue")))
                 (remove state columns))
@@ -141,16 +141,16 @@ vanish from the board."
 (defun glasspane-views--board-node (items)
   "The kanban rendering: one column per TODO state, panning sideways."
   (let ((columns (glasspane-views--board-columns items)))
-    (apply #'eabp-scroll-row
+    (apply #'jetpacs-scroll-row
            (mapcar
             (lambda (col)
               (let ((in-col (cl-remove-if-not
                              (lambda (i) (equal (or (alist-get 'todo i) "")
                                                 col))
                              items)))
-                (eabp-box
-                 (list (apply #'eabp-column
-                              (cons (eabp-section-header
+                (jetpacs-box
+                 (list (apply #'jetpacs-column
+                              (cons (jetpacs-section-header
                                      (format "%s (%d)"
                                              (if (string-empty-p col)
                                                  "No state" col)
@@ -177,12 +177,12 @@ vanish from the board."
                                (t (string< a b)))))))
       (cl-loop for date in dates
                append
-               (cons (eabp-section-header
+               (cons (jetpacs-section-header
                       (if (string-empty-p date) "Unscheduled"
                         (glasspane-ui--format-date date "%a, %b %e")))
                      (mapcar (lambda (item)
-                               (eabp-card
-                                (list (eabp-text
+                               (jetpacs-card
+                                (list (jetpacs-text
                                        (format "%s%s"
                                                (if-let ((todo (alist-get 'todo item)))
                                                    (concat todo " ") "")
@@ -195,11 +195,11 @@ vanish from the board."
 
 (defun glasspane-views--rendering-chips (view)
   "The List | Board | Calendar switcher for VIEW."
-  (apply #'eabp-row
+  (apply #'jetpacs-row
          (mapcar (lambda (r)
-                   (eabp-chip (capitalize r)
+                   (jetpacs-chip (capitalize r)
                               :selected (equal r (alist-get 'rendering view))
-                              :on-tap (eabp-action
+                              :on-tap (jetpacs-action
                                        "views.rendering"
                                        :args `((name . ,(alist-get 'name view))
                                                (rendering . ,r))
@@ -212,18 +212,18 @@ vanish from the board."
                     (glasspane-views--items view)
                   (user-error (list 'error (error-message-string err)))))
          (broken (eq (car-safe items) 'error)))
-    (eabp-shell-nav-view
+    (jetpacs-shell-nav-view
      (alist-get 'name view)
-     (apply #'eabp-lazy-column
+     (apply #'jetpacs-lazy-column
             (append
              (list (glasspane-views--rendering-chips view)
-                   (eabp-spacer :height 4))
+                   (jetpacs-spacer :height 4))
              (cond
               (broken
-               (list (eabp-text (cadr items) 'body)))
+               (list (jetpacs-text (cadr items) 'body)))
               ((null items)
                ;; %s: a hand-authored query may be a sexp, not a string.
-               (list (eabp-empty-state :icon "manage_search"
+               (list (jetpacs-empty-state :icon "manage_search"
                                        :title "No matches"
                                        :caption (format "%s"
                                                         (alist-get 'query view)))))
@@ -231,64 +231,64 @@ vanish from the board."
                    ("board" (list (glasspane-views--board-node items)))
                    ("calendar" (glasspane-views--calendar-nodes items))
                    (_ (list (glasspane-views--table-node items))))))))
-     :nav-action (eabp-action "views.back" :when-offline "drop")
+     :nav-action (jetpacs-action "views.back" :when-offline "drop")
      :snackbar snackbar)))
 
 (defun glasspane-views--new-form ()
   "The collapsed new-view form at the hub's foot.
 Field values mirror through the UI-state store; views.save reads them."
   (let ((gen glasspane-views--form-gen))
-    (eabp-collapsible
+    (jetpacs-collapsible
      "views-new"
-     (eabp-section-header "New view")
+     (jetpacs-section-header "New view")
      (list
-      (eabp-text-input (format "views-new-name-%d" gen)
+      (jetpacs-text-input (format "views-new-name-%d" gen)
                        :label "Name" :single-line t)
-      (eabp-text-input (format "views-new-query-%d" gen)
+      (jetpacs-text-input (format "views-new-query-%d" gen)
                        :label "Query"
                        :hint "todo:TODO tags:work — or an org-ql sexp"
                        :single-line t)
-      (eabp-enum-list (format "views-new-rendering-%d" gen)
+      (jetpacs-enum-list (format "views-new-rendering-%d" gen)
                       glasspane-views--renderings
                       :value '("list"))
-      (eabp-button "Save view"
-                   (eabp-action "views.save" :when-offline "drop")
+      (jetpacs-button "Save view"
+                   (jetpacs-action "views.save" :when-offline "drop")
                    :icon "add"))
      :collapsed t)))
 
 (defun glasspane-views--hub (snackbar)
   "The hub: every saved view as a card, plus the new-view form."
-  (eabp-shell-nav-view
+  (jetpacs-shell-nav-view
    "Saved views"
-   (apply #'eabp-lazy-column
+   (apply #'jetpacs-lazy-column
           (append
            (if glasspane-saved-views
                (mapcar
                 (lambda (view)
                   (let ((name (alist-get 'name view)))
-                    (eabp-card
+                    (jetpacs-card
                      (list
-                      (eabp-row
-                       (eabp-box
-                        (list (eabp-column
-                               (eabp-text name 'label)
-                               (eabp-text (format "%s · %s"
+                      (jetpacs-row
+                       (jetpacs-box
+                        (list (jetpacs-column
+                               (jetpacs-text name 'label)
+                               (jetpacs-text (format "%s · %s"
                                                   (alist-get 'rendering view)
                                                   (alist-get 'query view))
                                           'caption)))
                         :weight 1)
-                       (eabp-icon-button
+                       (jetpacs-icon-button
                         "delete"
-                        (eabp-action "views.delete" :args `((name . ,name))
+                        (jetpacs-action "views.delete" :args `((name . ,name))
                                      :when-offline "queue")
                         :content-description "Delete view")))
-                     :on-tap (eabp-action "views.open" :args `((name . ,name))
+                     :on-tap (jetpacs-action "views.open" :args `((name . ,name))
                                           :when-offline "drop"))))
                 glasspane-saved-views)
-             (list (eabp-empty-state
+             (list (jetpacs-empty-state
                     :icon "manage_search" :title "No saved views"
                     :caption "Name a query below and it becomes a view")))
-           (list (eabp-divider) (glasspane-views--new-form))))
+           (list (jetpacs-divider) (glasspane-views--new-form))))
    :snackbar snackbar))
 
 (defun glasspane-views--view (snackbar)
@@ -297,54 +297,54 @@ Field values mirror through the UI-state store; views.save reads them."
       (glasspane-views--open-view view snackbar)
     (glasspane-views--hub snackbar)))
 
-(eabp-shell-define-view "views" :builder #'glasspane-views--view :order 75)
+(jetpacs-shell-define-view "views" :builder #'glasspane-views--view :order 75)
 
 ;; Everyday nav: saved views are a daily destination, so they ride the
 ;; drawer (the contract: drawer = everyday nav, satellites = settings).
-(eabp-shell-add-drawer-item
+(jetpacs-shell-add-drawer-item
  40 (lambda ()
-      (eabp-drawer-item "manage_search" "Saved views"
-                        (eabp-shell-switch-view "views"))))
+      (jetpacs-drawer-item "manage_search" "Saved views"
+                        (jetpacs-shell-switch-view "views"))))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "views.open"
+(jetpacs-defaction "views.open"
   (lambda (args _)
     (let ((name (alist-get 'name args)))
       (when (glasspane-views--get name)
         (setq glasspane-views--current name)
-        (eabp-shell-push nil :switch-to "views")))))
+        (jetpacs-shell-push nil :switch-to "views")))))
 
-(eabp-defaction "views.back"
+(jetpacs-defaction "views.back"
   (lambda (_args _)
     (setq glasspane-views--current nil)
-    (eabp-shell-push nil :switch-to "views")))
+    (jetpacs-shell-push nil :switch-to "views")))
 
-(eabp-defaction "views.rendering"
+(jetpacs-defaction "views.rendering"
   (lambda (args _)
     (let ((view (glasspane-views--get (alist-get 'name args)))
           (rendering (alist-get 'rendering args)))
       (when (and view (member rendering glasspane-views--renderings))
         (glasspane-views--set-rendering (alist-get 'name view) rendering)
         (glasspane-views--persist)
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "views.save"
+(jetpacs-defaction "views.save"
   (lambda (_args _)
     (let* ((gen glasspane-views--form-gen)
            (name (string-trim
-                  (or (eabp-ui-state (format "views-new-name-%d" gen)) "")))
+                  (or (jetpacs-ui-state (format "views-new-name-%d" gen)) "")))
            (query (string-trim
-                   (or (eabp-ui-state (format "views-new-query-%d" gen)) "")))
-           (rendering (let ((r (eabp-ui-state
+                   (or (jetpacs-ui-state (format "views-new-query-%d" gen)) "")))
+           (rendering (let ((r (jetpacs-ui-state
                                 (format "views-new-rendering-%d" gen))))
                         (cond ((stringp r) r)
                               ((consp r) (car r))
                               ((vectorp r) (aref r 0))
                               (t "list")))))
       (cond
-       ((string-empty-p name) (eabp-shell-notify "The view needs a name"))
-       ((string-empty-p query) (eabp-shell-notify "The view needs a query"))
+       ((string-empty-p name) (jetpacs-shell-notify "The view needs a name"))
+       ((string-empty-p query) (jetpacs-shell-notify "The view needs a query"))
        (t
         (condition-case err
             (progn
@@ -360,13 +360,13 @@ Field values mirror through the UI-state store; views.save reads them."
                                                               glasspane-views--renderings)
                                                       rendering "list"))))))
               (glasspane-views--persist)
-              (eabp-ui-state-clear "views-new")
+              (jetpacs-ui-state-clear "views-new")
               (cl-incf glasspane-views--form-gen)
-              (eabp-shell-notify (format "Saved view %s" name)))
-          (user-error (eabp-shell-notify (error-message-string err))))))
-      (eabp-shell-push))))
+              (jetpacs-shell-notify (format "Saved view %s" name)))
+          (user-error (jetpacs-shell-notify (error-message-string err))))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "views.delete"
+(jetpacs-defaction "views.delete"
   (lambda (args _)
     (let ((name (alist-get 'name args)))
       (when (glasspane-views--get name)
@@ -376,8 +376,8 @@ Field values mirror through the UI-state store; views.save reads them."
         (glasspane-views--persist)
         (when (equal glasspane-views--current name)
           (setq glasspane-views--current nil))
-        (eabp-shell-notify (format "Deleted view %s" name))
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify (format "Deleted view %s" name))
+        (jetpacs-shell-push)))))
 
 (provide 'glasspane-views)
 ;;; glasspane-views.el ends here

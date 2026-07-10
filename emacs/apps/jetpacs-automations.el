@@ -1,15 +1,15 @@
-;;; eabp-automations.el --- Automations management view -*- lexical-binding: t; -*-
+;;; jetpacs-automations.el --- Automations management view -*- lexical-binding: t; -*-
 
 ;; The phone-side management surface for device triggers (SPEC §11):
 ;; one card per registration with an enable switch (persisted through
 ;; Customize), the wire fields at a glance, the last-fired time, and a
 ;; "Fire now" test button.  Pure rendering — the registry, the actions
 ;; (`trigger.toggle' / `trigger.test'), and the persistence live in
-;; core eabp-triggers.el; authoring stays in elisp (`eabp-deftrigger'
+;; core jetpacs-triggers.el; authoring stays in elisp (`jetpacs-deftrigger'
 ;; in your init).  Org-file-defined rules are the next layer
 ;; (glasspane-automations, plan Task 13).
 ;;
-;; Deliberately NOT an `eabp-defapp': that would flip the launcher into
+;; Deliberately NOT an `jetpacs-defapp': that would flip the launcher into
 ;; multi-app mode for everyone.  It is a satellite screen behind a
 ;; settings link, per the drawer contract.
 
@@ -17,14 +17,14 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-shell)
-(require 'eabp-triggers)
-(require 'eabp-settings)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-triggers)
+(require 'jetpacs-settings)
 
-(defun eabp-automations--summary (reg)
+(defun jetpacs-automations--summary (reg)
   "One-line wire summary of registration plist REG."
   (let ((params (plist-get reg :params)))
     (string-join
@@ -40,81 +40,81 @@
                  (when (plist-get reg :on-fire) "on-fire")))
      " · ")))
 
-(defun eabp-automations--last-fired (id)
+(defun jetpacs-automations--last-fired (id)
   "Human line for ID's most recent fire, or a quiet placeholder."
-  (if-let ((at (gethash id eabp-triggers--last-fired)))
+  (if-let ((at (gethash id jetpacs-triggers--last-fired)))
       (format-time-string "Last fired %b %e %H:%M" at)
     "Never fired"))
 
-(defun eabp-automations--card (id reg)
+(defun jetpacs-automations--card (id reg)
   "The management card for trigger ID."
-  (let ((enabled (eabp-trigger-enabled-p id)))
-    (eabp-card
+  (let ((enabled (jetpacs-trigger-enabled-p id)))
+    (jetpacs-card
      (list
-      (eabp-column
-       (eabp-row
-        (eabp-box (list (eabp-text id 'title)) :weight 1)
-        (eabp-switch (concat "trigger-enabled/" id)
+      (jetpacs-column
+       (jetpacs-row
+        (jetpacs-box (list (jetpacs-text id 'title)) :weight 1)
+        (jetpacs-switch (concat "trigger-enabled/" id)
                      :checked enabled
-                     :on-change (eabp-action "trigger.toggle"
+                     :on-change (jetpacs-action "trigger.toggle"
                                              :args `((id . ,id))
                                              :when-offline "drop")))
-       (eabp-text (eabp-automations--summary reg) 'caption)
-       (eabp-row
-        (eabp-box (list (eabp-text (eabp-automations--last-fired id)
+       (jetpacs-text (jetpacs-automations--summary reg) 'caption)
+       (jetpacs-row
+        (jetpacs-box (list (jetpacs-text (jetpacs-automations--last-fired id)
                                    'caption))
                   :weight 1)
-        (eabp-button "Fire now"
-                     (eabp-action "trigger.test"
+        (jetpacs-button "Fire now"
+                     (jetpacs-action "trigger.test"
                                   :args `((id . ,id))
                                   :when-offline "drop")
                      :variant "text"
                      :icon "play_arrow")))))))
 
-(defun eabp-automations--view (snackbar)
+(defun jetpacs-automations--view (snackbar)
   "The Automations screen: every registered trigger, or an empty state."
-  (eabp-shell-nav-view
+  (jetpacs-shell-nav-view
    "Automations"
-   (if (zerop (hash-table-count eabp-triggers--table))
-       (eabp-empty-state
+   (if (zerop (hash-table-count jetpacs-triggers--table))
+       (jetpacs-empty-state
         :icon "bolt" :title "No automations"
-        :caption (concat "Define device triggers with eabp-deftrigger "
+        :caption (concat "Define device triggers with jetpacs-deftrigger "
                          "in your init, then manage them here"))
-     (apply #'eabp-lazy-column
+     (apply #'jetpacs-lazy-column
             (mapcar (lambda (id)
-                      (eabp-automations--card
-                       id (gethash id eabp-triggers--table)))
-                    (sort (hash-table-keys eabp-triggers--table)
+                      (jetpacs-automations--card
+                       id (gethash id jetpacs-triggers--table)))
+                    (sort (hash-table-keys jetpacs-triggers--table)
                           #'string<))))
    :snackbar snackbar))
 
-(eabp-shell-define-view "automations"
-                        :builder #'eabp-automations--view :order 83)
+(jetpacs-shell-define-view "automations"
+                        :builder #'jetpacs-automations--view :order 83)
 
 ;; Entry point: a card in the settings screen's Emacs section (a
 ;; companion-local view switch, so it opens offline too).
-(eabp-settings-add-link
+(jetpacs-settings-add-link
  15 (lambda ()
-      (eabp-card
-       (list (eabp-row
-              (eabp-icon "bolt")
-              (eabp-box (list (eabp-column
-                               (eabp-text "Automations" 'label)
-                               (eabp-text "Device triggers: enable, test, inspect"
+      (jetpacs-card
+       (list (jetpacs-row
+              (jetpacs-icon "bolt")
+              (jetpacs-box (list (jetpacs-column
+                               (jetpacs-text "Automations" 'label)
+                               (jetpacs-text "Device triggers: enable, test, inspect"
                                           'caption)))
                         :weight 1)
-              (eabp-icon "chevron_right")))
-       :on-tap (eabp-shell-switch-view "automations"))))
+              (jetpacs-icon "chevron_right")))
+       :on-tap (jetpacs-shell-switch-view "automations"))))
 
 ;; Registry changes (a toggle from the phone, a deftrigger evaluated on
 ;; a live session) re-render this view.  Debounced: an automations
 ;; reload fires this hook once per rule, and one idle push after the
 ;; burst beats a full view rebuild per rule (the scheduler no-ops
 ;; while disconnected).
-(defun eabp-automations--on-change ()
-  (eabp-shell--schedule-repush))
+(defun jetpacs-automations--on-change ()
+  (jetpacs-shell--schedule-repush))
 
-(add-hook 'eabp-triggers-changed-hook #'eabp-automations--on-change)
+(add-hook 'jetpacs-triggers-changed-hook #'jetpacs-automations--on-change)
 
-(provide 'eabp-automations)
-;;; eabp-automations.el ends here
+(provide 'jetpacs-automations)
+;;; jetpacs-automations.el ends here

@@ -1,4 +1,4 @@
-;;; glasspane-org.el --- EABP Org-Mode Data Extraction -*- lexical-binding: t; -*-
+;;; glasspane-org.el --- Jetpacs Org-Mode Data Extraction -*- lexical-binding: t; -*-
 
 ;; Provides functions to extract structured data from org-mode buffers.
 ;; This layer is pure Elisp and has no bridge dependencies.
@@ -125,7 +125,7 @@ Returns a list of alists representing agenda items.  Memoised; see
   (glasspane-org--with-cache (glasspane-org--cache-key 'agenda (or span 'day) start-day)
     (glasspane-org--agenda-items-1 span start-day)))
 
-(defconst glasspane-org--agenda-buffer "*EABP Agenda*"
+(defconst glasspane-org--agenda-buffer "*Jetpacs Agenda*"
   "Private buffer the agenda extraction builds into (and kills after).")
 
 (defun glasspane-org--agenda-items-1 (span start-day)
@@ -635,7 +635,7 @@ the carrier for text shared from another app via the share sheet."
           ;; but if any escape slips through, never let `org-capture' block
           ;; Emacs forever on a minibuffer the phone can't answer. `with-timeout'
           ;; fires even while a synchronous read is waiting.
-          (with-timeout (30 (message "eabp: capture timed out (a prompt was left unanswered)"))
+          (with-timeout (30 (message "jetpacs: capture timed out (a prompt was left unanswered)"))
             (org-capture)))))))
 
 (defun glasspane-org--item-hm (time)

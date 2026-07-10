@@ -1,8 +1,8 @@
-;;; eabp-package-browser.el --- Package browser skin for the tablist renderer -*- lexical-binding: t; -*-
+;;; jetpacs-package-browser.el --- Package browser skin for the tablist renderer -*- lexical-binding: t; -*-
 
 ;; The first Tier 1 tablist skin, and the worked example of the pattern:
 ;; package-menu-mode derives from tabulated-list-mode, so the generic walk
-;; in eabp-tablist.el is reused; this file only registers the three skin
+;; in jetpacs-tablist.el is reused; this file only registers the three skin
 ;; hooks (header, row, filter) plus its curated actions.
 ;;
 ;; It adds search + status chips, install/delete per row, and archive
@@ -14,19 +14,19 @@
 
 (require 'cl-lib)
 (require 'package)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-tablist)
-(require 'eabp-settings)
-(require 'eabp-shell)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-tablist)
+(require 'jetpacs-settings)
+(require 'jetpacs-shell)
 
-(defvar eabp-pkg--search ""
+(defvar jetpacs-pkg--search ""
   "Current package search string (matches name and summary).")
 
-(defvar eabp-pkg--status "all"
+(defvar jetpacs-pkg--status "all"
   "Current package status filter chip.")
 
-(defconst eabp-pkg--statuses
+(defconst jetpacs-pkg--statuses
   '(("all")
     ("installed" "installed" "dependency" "unsigned" "external" "held")
     ("available" "available" "new")
@@ -34,92 +34,92 @@
     ("upgradable" "obsolete"))
   "Chip name -> package-menu status strings it admits.")
 
-(defun eabp-pkg--toast (text)
-  (eabp-send "toast.show" `((text . ,text))))
+(defun jetpacs-pkg--toast (text)
+  (jetpacs-send "toast.show" `((text . ,text))))
 
-(defun eabp-pkg--filter (id entry)
+(defun jetpacs-pkg--filter (id entry)
   "Keep package row (ID ENTRY) when it matches the search and status chips."
-  (let ((statuses (cdr (assoc eabp-pkg--status eabp-pkg--statuses)))
-        (status (or (eabp-tablist-entry-col entry "Status") ""))
-        (hay (concat (eabp-tablist-col-string (aref entry 0)) " "
+  (let ((statuses (cdr (assoc jetpacs-pkg--status jetpacs-pkg--statuses)))
+        (status (or (jetpacs-tablist-entry-col entry "Status") ""))
+        (hay (concat (jetpacs-tablist-col-string (aref entry 0)) " "
                      (and (package-desc-p id)
                           (or (package-desc-summary id) "")))))
     (and (or (null statuses) (member status statuses))
-         (or (string-empty-p eabp-pkg--search)
-             (string-match-p (regexp-quote eabp-pkg--search)
+         (or (string-empty-p jetpacs-pkg--search)
+             (string-match-p (regexp-quote jetpacs-pkg--search)
                              (downcase hay))))))
 
-(defun eabp-pkg--header (_buf)
+(defun jetpacs-pkg--header (_buf)
   (list
-   (eabp-text-input "pkg-search"
-                    :value eabp-pkg--search
+   (jetpacs-text-input "pkg-search"
+                    :value jetpacs-pkg--search
                     :label "Search packages" :single-line t
-                    :on-submit (eabp-action "packages.search"))
-   (apply #'eabp-flow-row
+                    :on-submit (jetpacs-action "packages.search"))
+   (apply #'jetpacs-flow-row
           (mapcar (lambda (chip)
                     (let ((s (car chip)))
-                      (eabp-chip (capitalize s)
-                                 :selected (equal eabp-pkg--status s)
-                                 :on-tap (eabp-action
+                      (jetpacs-chip (capitalize s)
+                                 :selected (equal jetpacs-pkg--status s)
+                                 :on-tap (jetpacs-action
                                           "packages.status-filter"
                                           :args `((status . ,s))
                                           :when-offline "drop"))))
-                  eabp-pkg--statuses))
-   (eabp-row
-    (eabp-button "Refresh archives"
-                 (eabp-action "packages.refresh-archives" :when-offline "drop")
+                  jetpacs-pkg--statuses))
+   (jetpacs-row
+    (jetpacs-button "Refresh archives"
+                 (jetpacs-action "packages.refresh-archives" :when-offline "drop")
                  :variant "text")
-    (eabp-spacer :weight 1)
+    (jetpacs-spacer :weight 1)
     (when (fboundp 'package-upgrade-all)
-      (eabp-button "Upgrade all"
-                   (eabp-action "packages.upgrade-all" :when-offline "drop")
+      (jetpacs-button "Upgrade all"
+                   (jetpacs-action "packages.upgrade-all" :when-offline "drop")
                    :variant "text")))))
 
-(defun eabp-pkg--row (id entry _pos)
+(defun jetpacs-pkg--row (id entry _pos)
   (when (package-desc-p id)
     (let* ((sym (package-desc-name id))
            (name (symbol-name sym))
-           (version (or (eabp-tablist-entry-col entry "Version") ""))
-           (status (or (eabp-tablist-entry-col entry "Status") ""))
+           (version (or (jetpacs-tablist-entry-col entry "Version") ""))
+           (status (or (jetpacs-tablist-entry-col entry "Status") ""))
            (summary (or (package-desc-summary id) ""))
            (installed (assq sym package-alist)))
-      (eabp-card
+      (jetpacs-card
        (list
-        (eabp-row
-         (eabp-box
-          (list (eabp-column
-                 (eabp-row (eabp-text name 'label)
-                           (eabp-text version 'caption)
-                           (eabp-text status 'caption))
-                 (eabp-text summary 'caption)))
+        (jetpacs-row
+         (jetpacs-box
+          (list (jetpacs-column
+                 (jetpacs-row (jetpacs-text name 'label)
+                           (jetpacs-text version 'caption)
+                           (jetpacs-text status 'caption))
+                 (jetpacs-text summary 'caption)))
           :weight 1)
          (cond
           (installed
-           (eabp-icon-button "delete"
-                             (eabp-action "packages.delete"
+           (jetpacs-icon-button "delete"
+                             (jetpacs-action "packages.delete"
                                           :args `((package . ,name))
                                           :when-offline "drop")
                              :content-description (format "Uninstall %s" name)))
           ((not (equal status "built-in"))
-           (eabp-icon-button "arrow_downward"
-                             (eabp-action "packages.install"
+           (jetpacs-icon-button "arrow_downward"
+                             (jetpacs-action "packages.install"
                                           :args `((package . ,name))
                                           :when-offline "drop")
                              :content-description (format "Install %s" name))))))
-       :on-tap (eabp-action "packages.describe"
+       :on-tap (jetpacs-action "packages.describe"
                             :args `((package . ,name))
                             :when-offline "drop")))))
 
-(setf (alist-get 'package-menu-mode eabp-tablist-header-functions)
-      #'eabp-pkg--header)
-(setf (alist-get 'package-menu-mode eabp-tablist-row-functions)
-      #'eabp-pkg--row)
-(setf (alist-get 'package-menu-mode eabp-tablist-filter-functions)
-      #'eabp-pkg--filter)
+(setf (alist-get 'package-menu-mode jetpacs-tablist-header-functions)
+      #'jetpacs-pkg--header)
+(setf (alist-get 'package-menu-mode jetpacs-tablist-row-functions)
+      #'jetpacs-pkg--row)
+(setf (alist-get 'package-menu-mode jetpacs-tablist-filter-functions)
+      #'jetpacs-pkg--filter)
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(defun eabp-pkg--buffer ()
+(defun jetpacs-pkg--buffer ()
   "The live *Packages* menu buffer, creating (without fetching) if needed."
   (require 'package)
   (unless package--initialized (package-initialize))
@@ -128,94 +128,94 @@
         (list-packages t)
         (get-buffer "*Packages*"))))
 
-(defun eabp-pkg--revert ()
+(defun jetpacs-pkg--revert ()
   "Re-generate the package menu after an install/delete and re-push."
   (let ((buf (get-buffer "*Packages*")))
     (when buf
       (with-current-buffer buf
         (ignore-errors (revert-buffer)))))
-  (eabp-tablist-refresh-view))
+  (jetpacs-tablist-refresh-view))
 
-(eabp-defaction "packages.show"
+(jetpacs-defaction "packages.show"
   (lambda (_ __)
-    (let ((buf (eabp-pkg--buffer)))
+    (let ((buf (jetpacs-pkg--buffer)))
       (when (and buf (null package-archive-contents))
-        (eabp-pkg--toast
+        (jetpacs-pkg--toast
          "Archives not fetched yet - tap Refresh archives"))
-      (funcall eabp-tablist-view-buffer-function (buffer-name buf)))))
+      (funcall jetpacs-tablist-view-buffer-function (buffer-name buf)))))
 
-(eabp-defaction "packages.search"
+(jetpacs-defaction "packages.search"
   (lambda (args _)
     (let ((q (alist-get 'value args)))
-      (setq eabp-pkg--search
+      (setq jetpacs-pkg--search
             (downcase (or (and (stringp q) q) "")))
-      (eabp-tablist-refresh-view))))
+      (jetpacs-tablist-refresh-view))))
 
-(eabp-defaction "packages.status-filter"
+(jetpacs-defaction "packages.status-filter"
   (lambda (args _)
     (let ((s (alist-get 'status args)))
-      (when (assoc s eabp-pkg--statuses)
-        (setq eabp-pkg--status s)
-        (eabp-tablist-refresh-view)))))
+      (when (assoc s jetpacs-pkg--statuses)
+        (setq jetpacs-pkg--status s)
+        (jetpacs-tablist-refresh-view)))))
 
-(eabp-defaction "packages.install"
+(jetpacs-defaction "packages.install"
   (lambda (args _)
     (let* ((name (alist-get 'package args))
            (sym (and (stringp name) (intern-soft name))))
       (if (not (and sym (assq sym package-archive-contents)))
-          (eabp-pkg--toast (format "%s is not in the archives" name))
-        (eabp-pkg--toast (format "Installing %s…" name))
+          (jetpacs-pkg--toast (format "%s is not in the archives" name))
+        (jetpacs-pkg--toast (format "Installing %s…" name))
         (condition-case err
             (progn
               (package-install sym)
-              (eabp-pkg--toast (format "Installed %s" name)))
-          (error (eabp-pkg--toast
+              (jetpacs-pkg--toast (format "Installed %s" name)))
+          (error (jetpacs-pkg--toast
                   (format "Install failed: %s" (error-message-string err)))))
-        (eabp-pkg--revert)))))
+        (jetpacs-pkg--revert)))))
 
-(eabp-defaction "packages.delete"
+(jetpacs-defaction "packages.delete"
   (lambda (args _)
     (let* ((name (alist-get 'package args))
            (sym (and (stringp name) (intern-soft name)))
            (desc (and sym (cadr (assq sym package-alist)))))
       (if (not desc)
-          (eabp-pkg--toast (format "%s is not installed" name))
+          (jetpacs-pkg--toast (format "%s is not installed" name))
         (condition-case err
             (progn
               (package-delete desc)
-              (eabp-pkg--toast (format "Deleted %s" name)))
-          (error (eabp-pkg--toast
+              (jetpacs-pkg--toast (format "Deleted %s" name)))
+          (error (jetpacs-pkg--toast
                   ;; Typically: something still depends on it.
                   (format "Delete failed: %s" (error-message-string err)))))
-        (eabp-pkg--revert)))))
+        (jetpacs-pkg--revert)))))
 
-(eabp-defaction "packages.refresh-archives"
+(jetpacs-defaction "packages.refresh-archives"
   (lambda (_ __)
-    (eabp-pkg--toast "Refreshing package archives…")
+    (jetpacs-pkg--toast "Refreshing package archives…")
     (condition-case err
         (progn
           (require 'package)
           (unless package--initialized (package-initialize))
           (package-refresh-contents)
-          (eabp-pkg--toast "Archives refreshed"))
-      (error (eabp-pkg--toast
+          (jetpacs-pkg--toast "Archives refreshed"))
+      (error (jetpacs-pkg--toast
               (format "Refresh failed: %s" (error-message-string err)))))
-    (eabp-pkg--revert)))
+    (jetpacs-pkg--revert)))
 
-(eabp-defaction "packages.upgrade-all"
+(jetpacs-defaction "packages.upgrade-all"
   (lambda (_ __)
     (if (not (fboundp 'package-upgrade-all))
-        (eabp-pkg--toast "Upgrade-all needs Emacs 29+")
-      (eabp-pkg--toast "Upgrading all packages…")
+        (jetpacs-pkg--toast "Upgrade-all needs Emacs 29+")
+      (jetpacs-pkg--toast "Upgrading all packages…")
       (condition-case err
           (progn
             (package-upgrade-all nil)
-            (eabp-pkg--toast "Upgrades complete"))
-        (error (eabp-pkg--toast
+            (jetpacs-pkg--toast "Upgrades complete"))
+        (error (jetpacs-pkg--toast
                 (format "Upgrade failed: %s" (error-message-string err)))))
-      (eabp-pkg--revert))))
+      (jetpacs-pkg--revert))))
 
-(eabp-defaction "packages.describe"
+(jetpacs-defaction "packages.describe"
   (lambda (args _)
     (let* ((name (alist-get 'package args))
            (sym (and (stringp name) (intern-soft name))))
@@ -224,22 +224,22 @@
                      (assq sym package-alist)
                      (assq sym package--builtins)))
         (save-window-excursion (describe-package sym))
-        (funcall eabp-tablist-view-buffer-function "*Help*")))))
+        (funcall jetpacs-tablist-view-buffer-function "*Help*")))))
 
 ;; The browser's entry point: a card in the settings screen's Emacs
 ;; section (drawer slots stay reserved for everyday navigation).
-(eabp-settings-add-link
+(jetpacs-settings-add-link
  10 (lambda ()
-      (eabp-card
-       (list (eabp-row
-              (eabp-icon "archive")
-              (eabp-box (list (eabp-column
-                               (eabp-text "Packages" 'label)
-                               (eabp-text "Install and manage Emacs packages"
+      (jetpacs-card
+       (list (jetpacs-row
+              (jetpacs-icon "archive")
+              (jetpacs-box (list (jetpacs-column
+                               (jetpacs-text "Packages" 'label)
+                               (jetpacs-text "Install and manage Emacs packages"
                                           'caption)))
                         :weight 1)
-              (eabp-icon "chevron_right")))
-       :on-tap (eabp-action "packages.show" :when-offline "drop"))))
+              (jetpacs-icon "chevron_right")))
+       :on-tap (jetpacs-action "packages.show" :when-offline "drop"))))
 
-(provide 'eabp-package-browser)
-;;; eabp-package-browser.el ends here
+(provide 'jetpacs-package-browser)
+;;; jetpacs-package-browser.el ends here

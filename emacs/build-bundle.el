@@ -10,28 +10,28 @@
 ;;                   magit pie, the package/customize browsers, the tools hub,
 ;;                   the automations skin, the demo tour.
 ;;
-;; Unlike the old monorepo bundle, this does NOT inline the EABP core. The
-;; bundle opens with `(require 'eabp-core)`, so the eabp foundation bundle
-;; (eabp-core.el, from the separate eabp repo / the `eabp' submodule) must be
+;; Unlike the old monorepo bundle, this does NOT inline the Jetpacs core. The
+;; bundle opens with `(require 'jetpacs-core)`, so the jetpacs foundation bundle
+;; (jetpacs-core.el, from the separate jetpacs repo / the `jetpacs' submodule) must be
 ;; on `load-path' first. That is the whole point of the split: Glasspane is
 ;; pure elisp that `(require 's the core, never a copy of it.
 ;;
 ;; The files are emitted in dependency order. Because every source ends with a
 ;; `(provide 'FEATURE)', the inter-file `(require ...)' forms for app features
 ;; become no-ops once the providing chunk has loaded earlier in the bundle;
-;; the core `(require 'eabp-...)' forms resolve against the already-loaded
-;; eabp-core. External requires (org, dired, cl-lib, ...) resolve normally.
+;; the core `(require 'jetpacs-...)' forms resolve against the already-loaded
+;; jetpacs-core. External requires (org, dired, cl-lib, ...) resolve normally.
 
 ;;; Code:
 
 (let* ((here (file-name-directory (or load-file-name buffer-file-name)))
        ;; Dependency order. Do not reorder without re-checking the require
        ;; graph.
-       (app-files '("apps/eabp-package-browser.el"
-                    "apps/eabp-customize.el"
-                    "apps/eabp-tools.el"
-                    "apps/eabp-automations.el"
-                    "apps/eabp-magit.el"
+       (app-files '("apps/jetpacs-package-browser.el"
+                    "apps/jetpacs-customize.el"
+                    "apps/jetpacs-tools.el"
+                    "apps/jetpacs-automations.el"
+                    "apps/jetpacs-magit.el"
                     "apps/glasspane/glasspane-org.el"
                     "apps/glasspane/glasspane-org-rich.el"
                     "apps/glasspane/glasspane-org-reader.el"
@@ -48,17 +48,17 @@
                     "apps/glasspane/glasspane.el"))
        (out (expand-file-name "../glasspane.el" here)))
   (with-temp-file out
-    (insert ";;; glasspane.el --- Glasspane Emacs client (EABP Tier-1 app), single-file bundle -*- lexical-binding: t; -*-\n"
+    (insert ";;; glasspane.el --- Glasspane Emacs client (Jetpacs Tier-1 app), single-file bundle -*- lexical-binding: t; -*-\n"
             ";;\n"
             ";; GENERATED FILE -- do not edit by hand.\n"
             ";; Produced by emacs/build-bundle.el from the emacs/apps/ sources.\n"
             ";; Concatenated in dependency order; each part keeps its own `provide',\n"
             ";; so the inter-file `require' forms resolve within this file.\n"
             ";;\n"
-            ";; Requires the EABP core (eabp-core.el) on `load-path' first.\n"
+            ";; Requires the Jetpacs core (jetpacs-core.el) on `load-path' first.\n"
             ";;\n"
             ";;; Code:\n\n"
-            "(require 'eabp-core)\n\n")
+            "(require 'jetpacs-core)\n\n")
     (dolist (f app-files)
       (insert ";;; ==================================================================\n"
               (format ";;; BEGIN %s\n" f)

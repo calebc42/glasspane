@@ -1,25 +1,25 @@
-;;; glasspane.el --- Glasspane Emacs client (EABP Tier-1 app), single-file bundle -*- lexical-binding: t; -*-
+;;; glasspane.el --- Glasspane Emacs client (Jetpacs Tier-1 app), single-file bundle -*- lexical-binding: t; -*-
 ;;
 ;; GENERATED FILE -- do not edit by hand.
 ;; Produced by emacs/build-bundle.el from the emacs/apps/ sources.
 ;; Concatenated in dependency order; each part keeps its own `provide',
 ;; so the inter-file `require' forms resolve within this file.
 ;;
-;; Requires the EABP core (eabp-core.el) on `load-path' first.
+;; Requires the Jetpacs core (jetpacs-core.el) on `load-path' first.
 ;;
 ;;; Code:
 
-(require 'eabp-core)
+(require 'jetpacs-core)
 
 ;;; ==================================================================
-;;; BEGIN apps/eabp-package-browser.el
+;;; BEGIN apps/jetpacs-package-browser.el
 ;;; ==================================================================
 
-;;; eabp-package-browser.el --- Package browser skin for the tablist renderer -*- lexical-binding: t; -*-
+;;; jetpacs-package-browser.el --- Package browser skin for the tablist renderer -*- lexical-binding: t; -*-
 
 ;; The first Tier 1 tablist skin, and the worked example of the pattern:
 ;; package-menu-mode derives from tabulated-list-mode, so the generic walk
-;; in eabp-tablist.el is reused; this file only registers the three skin
+;; in jetpacs-tablist.el is reused; this file only registers the three skin
 ;; hooks (header, row, filter) plus its curated actions.
 ;;
 ;; It adds search + status chips, install/delete per row, and archive
@@ -31,19 +31,19 @@
 
 (require 'cl-lib)
 (require 'package)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-tablist)
-(require 'eabp-settings)
-(require 'eabp-shell)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-tablist)
+(require 'jetpacs-settings)
+(require 'jetpacs-shell)
 
-(defvar eabp-pkg--search ""
+(defvar jetpacs-pkg--search ""
   "Current package search string (matches name and summary).")
 
-(defvar eabp-pkg--status "all"
+(defvar jetpacs-pkg--status "all"
   "Current package status filter chip.")
 
-(defconst eabp-pkg--statuses
+(defconst jetpacs-pkg--statuses
   '(("all")
     ("installed" "installed" "dependency" "unsigned" "external" "held")
     ("available" "available" "new")
@@ -51,92 +51,92 @@
     ("upgradable" "obsolete"))
   "Chip name -> package-menu status strings it admits.")
 
-(defun eabp-pkg--toast (text)
-  (eabp-send "toast.show" `((text . ,text))))
+(defun jetpacs-pkg--toast (text)
+  (jetpacs-send "toast.show" `((text . ,text))))
 
-(defun eabp-pkg--filter (id entry)
+(defun jetpacs-pkg--filter (id entry)
   "Keep package row (ID ENTRY) when it matches the search and status chips."
-  (let ((statuses (cdr (assoc eabp-pkg--status eabp-pkg--statuses)))
-        (status (or (eabp-tablist-entry-col entry "Status") ""))
-        (hay (concat (eabp-tablist-col-string (aref entry 0)) " "
+  (let ((statuses (cdr (assoc jetpacs-pkg--status jetpacs-pkg--statuses)))
+        (status (or (jetpacs-tablist-entry-col entry "Status") ""))
+        (hay (concat (jetpacs-tablist-col-string (aref entry 0)) " "
                      (and (package-desc-p id)
                           (or (package-desc-summary id) "")))))
     (and (or (null statuses) (member status statuses))
-         (or (string-empty-p eabp-pkg--search)
-             (string-match-p (regexp-quote eabp-pkg--search)
+         (or (string-empty-p jetpacs-pkg--search)
+             (string-match-p (regexp-quote jetpacs-pkg--search)
                              (downcase hay))))))
 
-(defun eabp-pkg--header (_buf)
+(defun jetpacs-pkg--header (_buf)
   (list
-   (eabp-text-input "pkg-search"
-                    :value eabp-pkg--search
+   (jetpacs-text-input "pkg-search"
+                    :value jetpacs-pkg--search
                     :label "Search packages" :single-line t
-                    :on-submit (eabp-action "packages.search"))
-   (apply #'eabp-flow-row
+                    :on-submit (jetpacs-action "packages.search"))
+   (apply #'jetpacs-flow-row
           (mapcar (lambda (chip)
                     (let ((s (car chip)))
-                      (eabp-chip (capitalize s)
-                                 :selected (equal eabp-pkg--status s)
-                                 :on-tap (eabp-action
+                      (jetpacs-chip (capitalize s)
+                                 :selected (equal jetpacs-pkg--status s)
+                                 :on-tap (jetpacs-action
                                           "packages.status-filter"
                                           :args `((status . ,s))
                                           :when-offline "drop"))))
-                  eabp-pkg--statuses))
-   (eabp-row
-    (eabp-button "Refresh archives"
-                 (eabp-action "packages.refresh-archives" :when-offline "drop")
+                  jetpacs-pkg--statuses))
+   (jetpacs-row
+    (jetpacs-button "Refresh archives"
+                 (jetpacs-action "packages.refresh-archives" :when-offline "drop")
                  :variant "text")
-    (eabp-spacer :weight 1)
+    (jetpacs-spacer :weight 1)
     (when (fboundp 'package-upgrade-all)
-      (eabp-button "Upgrade all"
-                   (eabp-action "packages.upgrade-all" :when-offline "drop")
+      (jetpacs-button "Upgrade all"
+                   (jetpacs-action "packages.upgrade-all" :when-offline "drop")
                    :variant "text")))))
 
-(defun eabp-pkg--row (id entry _pos)
+(defun jetpacs-pkg--row (id entry _pos)
   (when (package-desc-p id)
     (let* ((sym (package-desc-name id))
            (name (symbol-name sym))
-           (version (or (eabp-tablist-entry-col entry "Version") ""))
-           (status (or (eabp-tablist-entry-col entry "Status") ""))
+           (version (or (jetpacs-tablist-entry-col entry "Version") ""))
+           (status (or (jetpacs-tablist-entry-col entry "Status") ""))
            (summary (or (package-desc-summary id) ""))
            (installed (assq sym package-alist)))
-      (eabp-card
+      (jetpacs-card
        (list
-        (eabp-row
-         (eabp-box
-          (list (eabp-column
-                 (eabp-row (eabp-text name 'label)
-                           (eabp-text version 'caption)
-                           (eabp-text status 'caption))
-                 (eabp-text summary 'caption)))
+        (jetpacs-row
+         (jetpacs-box
+          (list (jetpacs-column
+                 (jetpacs-row (jetpacs-text name 'label)
+                           (jetpacs-text version 'caption)
+                           (jetpacs-text status 'caption))
+                 (jetpacs-text summary 'caption)))
           :weight 1)
          (cond
           (installed
-           (eabp-icon-button "delete"
-                             (eabp-action "packages.delete"
+           (jetpacs-icon-button "delete"
+                             (jetpacs-action "packages.delete"
                                           :args `((package . ,name))
                                           :when-offline "drop")
                              :content-description (format "Uninstall %s" name)))
           ((not (equal status "built-in"))
-           (eabp-icon-button "arrow_downward"
-                             (eabp-action "packages.install"
+           (jetpacs-icon-button "arrow_downward"
+                             (jetpacs-action "packages.install"
                                           :args `((package . ,name))
                                           :when-offline "drop")
                              :content-description (format "Install %s" name))))))
-       :on-tap (eabp-action "packages.describe"
+       :on-tap (jetpacs-action "packages.describe"
                             :args `((package . ,name))
                             :when-offline "drop")))))
 
-(setf (alist-get 'package-menu-mode eabp-tablist-header-functions)
-      #'eabp-pkg--header)
-(setf (alist-get 'package-menu-mode eabp-tablist-row-functions)
-      #'eabp-pkg--row)
-(setf (alist-get 'package-menu-mode eabp-tablist-filter-functions)
-      #'eabp-pkg--filter)
+(setf (alist-get 'package-menu-mode jetpacs-tablist-header-functions)
+      #'jetpacs-pkg--header)
+(setf (alist-get 'package-menu-mode jetpacs-tablist-row-functions)
+      #'jetpacs-pkg--row)
+(setf (alist-get 'package-menu-mode jetpacs-tablist-filter-functions)
+      #'jetpacs-pkg--filter)
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(defun eabp-pkg--buffer ()
+(defun jetpacs-pkg--buffer ()
   "The live *Packages* menu buffer, creating (without fetching) if needed."
   (require 'package)
   (unless package--initialized (package-initialize))
@@ -145,94 +145,94 @@
         (list-packages t)
         (get-buffer "*Packages*"))))
 
-(defun eabp-pkg--revert ()
+(defun jetpacs-pkg--revert ()
   "Re-generate the package menu after an install/delete and re-push."
   (let ((buf (get-buffer "*Packages*")))
     (when buf
       (with-current-buffer buf
         (ignore-errors (revert-buffer)))))
-  (eabp-tablist-refresh-view))
+  (jetpacs-tablist-refresh-view))
 
-(eabp-defaction "packages.show"
+(jetpacs-defaction "packages.show"
   (lambda (_ __)
-    (let ((buf (eabp-pkg--buffer)))
+    (let ((buf (jetpacs-pkg--buffer)))
       (when (and buf (null package-archive-contents))
-        (eabp-pkg--toast
+        (jetpacs-pkg--toast
          "Archives not fetched yet - tap Refresh archives"))
-      (funcall eabp-tablist-view-buffer-function (buffer-name buf)))))
+      (funcall jetpacs-tablist-view-buffer-function (buffer-name buf)))))
 
-(eabp-defaction "packages.search"
+(jetpacs-defaction "packages.search"
   (lambda (args _)
     (let ((q (alist-get 'value args)))
-      (setq eabp-pkg--search
+      (setq jetpacs-pkg--search
             (downcase (or (and (stringp q) q) "")))
-      (eabp-tablist-refresh-view))))
+      (jetpacs-tablist-refresh-view))))
 
-(eabp-defaction "packages.status-filter"
+(jetpacs-defaction "packages.status-filter"
   (lambda (args _)
     (let ((s (alist-get 'status args)))
-      (when (assoc s eabp-pkg--statuses)
-        (setq eabp-pkg--status s)
-        (eabp-tablist-refresh-view)))))
+      (when (assoc s jetpacs-pkg--statuses)
+        (setq jetpacs-pkg--status s)
+        (jetpacs-tablist-refresh-view)))))
 
-(eabp-defaction "packages.install"
+(jetpacs-defaction "packages.install"
   (lambda (args _)
     (let* ((name (alist-get 'package args))
            (sym (and (stringp name) (intern-soft name))))
       (if (not (and sym (assq sym package-archive-contents)))
-          (eabp-pkg--toast (format "%s is not in the archives" name))
-        (eabp-pkg--toast (format "Installing %s…" name))
+          (jetpacs-pkg--toast (format "%s is not in the archives" name))
+        (jetpacs-pkg--toast (format "Installing %s…" name))
         (condition-case err
             (progn
               (package-install sym)
-              (eabp-pkg--toast (format "Installed %s" name)))
-          (error (eabp-pkg--toast
+              (jetpacs-pkg--toast (format "Installed %s" name)))
+          (error (jetpacs-pkg--toast
                   (format "Install failed: %s" (error-message-string err)))))
-        (eabp-pkg--revert)))))
+        (jetpacs-pkg--revert)))))
 
-(eabp-defaction "packages.delete"
+(jetpacs-defaction "packages.delete"
   (lambda (args _)
     (let* ((name (alist-get 'package args))
            (sym (and (stringp name) (intern-soft name)))
            (desc (and sym (cadr (assq sym package-alist)))))
       (if (not desc)
-          (eabp-pkg--toast (format "%s is not installed" name))
+          (jetpacs-pkg--toast (format "%s is not installed" name))
         (condition-case err
             (progn
               (package-delete desc)
-              (eabp-pkg--toast (format "Deleted %s" name)))
-          (error (eabp-pkg--toast
+              (jetpacs-pkg--toast (format "Deleted %s" name)))
+          (error (jetpacs-pkg--toast
                   ;; Typically: something still depends on it.
                   (format "Delete failed: %s" (error-message-string err)))))
-        (eabp-pkg--revert)))))
+        (jetpacs-pkg--revert)))))
 
-(eabp-defaction "packages.refresh-archives"
+(jetpacs-defaction "packages.refresh-archives"
   (lambda (_ __)
-    (eabp-pkg--toast "Refreshing package archives…")
+    (jetpacs-pkg--toast "Refreshing package archives…")
     (condition-case err
         (progn
           (require 'package)
           (unless package--initialized (package-initialize))
           (package-refresh-contents)
-          (eabp-pkg--toast "Archives refreshed"))
-      (error (eabp-pkg--toast
+          (jetpacs-pkg--toast "Archives refreshed"))
+      (error (jetpacs-pkg--toast
               (format "Refresh failed: %s" (error-message-string err)))))
-    (eabp-pkg--revert)))
+    (jetpacs-pkg--revert)))
 
-(eabp-defaction "packages.upgrade-all"
+(jetpacs-defaction "packages.upgrade-all"
   (lambda (_ __)
     (if (not (fboundp 'package-upgrade-all))
-        (eabp-pkg--toast "Upgrade-all needs Emacs 29+")
-      (eabp-pkg--toast "Upgrading all packages…")
+        (jetpacs-pkg--toast "Upgrade-all needs Emacs 29+")
+      (jetpacs-pkg--toast "Upgrading all packages…")
       (condition-case err
           (progn
             (package-upgrade-all nil)
-            (eabp-pkg--toast "Upgrades complete"))
-        (error (eabp-pkg--toast
+            (jetpacs-pkg--toast "Upgrades complete"))
+        (error (jetpacs-pkg--toast
                 (format "Upgrade failed: %s" (error-message-string err)))))
-      (eabp-pkg--revert))))
+      (jetpacs-pkg--revert))))
 
-(eabp-defaction "packages.describe"
+(jetpacs-defaction "packages.describe"
   (lambda (args _)
     (let* ((name (alist-get 'package args))
            (sym (and (stringp name) (intern-soft name))))
@@ -241,39 +241,39 @@
                      (assq sym package-alist)
                      (assq sym package--builtins)))
         (save-window-excursion (describe-package sym))
-        (funcall eabp-tablist-view-buffer-function "*Help*")))))
+        (funcall jetpacs-tablist-view-buffer-function "*Help*")))))
 
 ;; The browser's entry point: a card in the settings screen's Emacs
 ;; section (drawer slots stay reserved for everyday navigation).
-(eabp-settings-add-link
+(jetpacs-settings-add-link
  10 (lambda ()
-      (eabp-card
-       (list (eabp-row
-              (eabp-icon "archive")
-              (eabp-box (list (eabp-column
-                               (eabp-text "Packages" 'label)
-                               (eabp-text "Install and manage Emacs packages"
+      (jetpacs-card
+       (list (jetpacs-row
+              (jetpacs-icon "archive")
+              (jetpacs-box (list (jetpacs-column
+                               (jetpacs-text "Packages" 'label)
+                               (jetpacs-text "Install and manage Emacs packages"
                                           'caption)))
                         :weight 1)
-              (eabp-icon "chevron_right")))
-       :on-tap (eabp-action "packages.show" :when-offline "drop"))))
+              (jetpacs-icon "chevron_right")))
+       :on-tap (jetpacs-action "packages.show" :when-offline "drop"))))
 
-(provide 'eabp-package-browser)
-;;; eabp-package-browser.el ends here
+(provide 'jetpacs-package-browser)
+;;; jetpacs-package-browser.el ends here
 
 ;;; ==================================================================
-;;; BEGIN apps/eabp-customize.el
+;;; BEGIN apps/jetpacs-customize.el
 ;;; ==================================================================
 
-;;; eabp-customize.el --- Customize browser over the defcustom group tree -*- lexical-binding: t; -*-
+;;; jetpacs-customize.el --- Customize browser over the defcustom group tree -*- lexical-binding: t; -*-
 
 ;; The M-x customize counterpart of the tablist story.  For
 ;; tabulated-list the printed buffer is itself the declarative source,
-;; so eabp-tablist walks it; a Custom-mode buffer is widget.el *layout*
+;; so jetpacs-tablist walks it; a Custom-mode buffer is widget.el *layout*
 ;; — positions and markers, not data — and the wrong thing to scrape.
 ;; The declarative framework behind Customize is the metadata: the
 ;; defgroup tree plus each variable's `custom-type' schema, and
-;; eabp-settings.el already renders those schemas as native controls.
+;; jetpacs-settings.el already renders those schemas as native controls.
 ;; So this app skips Custom-mode entirely: `custom-group-members'
 ;; provides the structure, the shared settings item renderer and apply
 ;; pipeline provide the leaves, and edits persist through Customize
@@ -293,40 +293,40 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'cus-edit)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-settings)
-(require 'eabp-shell)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-settings)
+(require 'jetpacs-shell)
 
 ;; ─── View state ──────────────────────────────────────────────────────────────
 
-(defcustom eabp-customize-max-items 50
+(defcustom jetpacs-customize-max-items 50
   "Maximum subgroups and maximum variables rendered per customize screen.
 Huge groups (or a broad search) are capped with a trailing note; narrow
 with the search box rather than paging."
-  :type 'integer :group 'eabp)
+  :type 'integer :group 'jetpacs)
 
-(defvar eabp-customize--path '(emacs)
+(defvar jetpacs-customize--path '(emacs)
   "Breadcrumb of group symbols from the root to the group being shown.")
 
-(defvar eabp-customize--search ""
+(defvar jetpacs-customize--search ""
   "Current search string; non-empty switches to the flat variable list.")
 
-(defvar eabp-customize--modified-only nil
+(defvar jetpacs-customize--modified-only nil
   "Non-nil limits the view to variables changed from their defaults.")
 
-(defun eabp-customize--group ()
+(defun jetpacs-customize--group ()
   "The group currently being browsed."
-  (car (last eabp-customize--path)))
+  (car (last jetpacs-customize--path)))
 
-(defun eabp-customize--flat-p ()
+(defun jetpacs-customize--flat-p ()
   "Non-nil when showing the flat variable list instead of the group tree."
-  (or eabp-customize--modified-only
-      (not (string-empty-p eabp-customize--search))))
+  (or jetpacs-customize--modified-only
+      (not (string-empty-p jetpacs-customize--search))))
 
 ;; ─── Reading the group tree ──────────────────────────────────────────────────
 
-(defun eabp-customize--group-p (sym)
+(defun jetpacs-customize--group-p (sym)
   "Non-nil when SYM names a customization group, loading it if deferred.
 `custom-load-symbol' pulls in members a package declared via
 `custom-autoload' — the same load Customize performs opening a group."
@@ -336,7 +336,7 @@ with the search box rather than paging."
              (get sym 'group-documentation))
          t)))
 
-(defun eabp-customize--members (group)
+(defun jetpacs-customize--members (group)
   "GROUP's members as (GROUPS VARIABLES FACES), each a list of symbols."
   (let (groups vars faces)
     (dolist (m (custom-group-members group nil))
@@ -346,290 +346,290 @@ with the search box rather than paging."
         ('custom-face (push (car m) faces))))
     (list (nreverse groups) (nreverse vars) (nreverse faces))))
 
-(defun eabp-customize--flat-vars ()
+(defun jetpacs-customize--flat-vars ()
   "All customizable variables passing the search and modified filters."
-  (let ((q eabp-customize--search) out)
+  (let ((q jetpacs-customize--search) out)
     (mapatoms
      (lambda (sym)
        (when (and (custom-variable-p sym)
                   (or (string-empty-p q)
                       (string-match-p (regexp-quote q) (symbol-name sym)))
-                  (or (not eabp-customize--modified-only)
-                      (eabp-settings-modified-p sym)))
+                  (or (not jetpacs-customize--modified-only)
+                      (jetpacs-settings-modified-p sym)))
          (push sym out))))
     (sort out #'string-lessp)))
 
 ;; ─── Rendering ───────────────────────────────────────────────────────────────
 
-(defvar eabp-customize--watched (make-hash-table :test 'eq)
+(defvar jetpacs-customize--watched (make-hash-table :test 'eq)
   "Symbols whose switch state handler has been registered this session.
 The settings registry registers its handlers at load, so queued toggles
 always replay; customize covers arbitrary variables, so handlers are
 registered when a variable first renders.  A toggle queued offline
 against a variable this session has never rendered lands in
-`eabp-ui-state' without applying — the documented cost of not
+`jetpacs-ui-state' without applying — the documented cost of not
 enumerating every defcustom up front.")
 
-(defun eabp-customize--watch (sym)
+(defun jetpacs-customize--watch (sym)
   "Register SYM's switch handler under custom/SYM once."
-  (unless (gethash sym eabp-customize--watched)
-    (puthash sym t eabp-customize--watched)
-    (eabp-settings-watch-toggle sym (concat "custom/" (symbol-name sym)))))
+  (unless (gethash sym jetpacs-customize--watched)
+    (puthash sym t jetpacs-customize--watched)
+    (jetpacs-settings-watch-toggle sym (concat "custom/" (symbol-name sym)))))
 
-(defun eabp-customize--var-item (sym)
+(defun jetpacs-customize--var-item (sym)
   "SYM as a native settings card dispatching customize.* actions."
   (if (not (boundp sym))
       ;; Autoloaded defcustom whose library isn't loaded: no type schema
       ;; to render a control from yet.
-      (eabp-card
-       (list (eabp-text (symbol-name sym) 'label)
-             (eabp-text "Not loaded — tap to load its library" 'caption))
-       :on-tap (eabp-action "customize.load"
+      (jetpacs-card
+       (list (jetpacs-text (symbol-name sym) 'label)
+             (jetpacs-text "Not loaded — tap to load its library" 'caption))
+       :on-tap (jetpacs-action "customize.load"
                             :args `((name . ,(symbol-name sym)))
                             :when-offline "drop"))
-    (eabp-customize--watch sym)
-    (eabp-card (list (eabp-settings-item
+    (jetpacs-customize--watch sym)
+    (jetpacs-card (list (jetpacs-settings-item
                       sym
                       :id-prefix "custom/"
                       :set-action "customize.set"
                       :reset-action "customize.reset")))))
 
-(defun eabp-customize--group-card (sym)
+(defun jetpacs-customize--group-card (sym)
   "A tappable card descending into group SYM."
   (let ((doc (get sym 'group-documentation)))
-    (eabp-card
-     (list (eabp-row
-            (eabp-box
-             (list (apply #'eabp-column
+    (jetpacs-card
+     (list (jetpacs-row
+            (jetpacs-box
+             (list (apply #'jetpacs-column
                           (delq nil
-                                (list (eabp-text (symbol-name sym) 'label)
+                                (list (jetpacs-text (symbol-name sym) 'label)
                                       (when doc
-                                        (eabp-text (car (split-string doc "\n"))
+                                        (jetpacs-text (car (split-string doc "\n"))
                                                    'caption))))))
              :weight 1)
-            (eabp-icon "chevron_right")))
-     :on-tap (eabp-action "customize.browse"
+            (jetpacs-icon "chevron_right")))
+     :on-tap (jetpacs-action "customize.browse"
                           :args `((group . ,(symbol-name sym)))
                           :when-offline "drop"))))
 
-(defun eabp-customize--crumbs ()
+(defun jetpacs-customize--crumbs ()
   "The breadcrumb path as one line: link-styled ancestors › bold current.
 Tapping an ancestor pops back to it (customize.browse truncates the
 path when the group is already on it)."
-  (let ((current (eabp-customize--group)))
-    (eabp-rich-text
-     (cl-loop for g in eabp-customize--path
+  (let ((current (jetpacs-customize--group)))
+    (jetpacs-rich-text
+     (cl-loop for g in jetpacs-customize--path
               for i from 0
-              unless (zerop i) collect (eabp-span " › ")
+              unless (zerop i) collect (jetpacs-span " › ")
               collect (if (eq g current)
-                          (eabp-span (capitalize (symbol-name g)) :bold t)
-                        (eabp-span (capitalize (symbol-name g))
-                                   :on-tap (eabp-action
+                          (jetpacs-span (capitalize (symbol-name g)) :bold t)
+                        (jetpacs-span (capitalize (symbol-name g))
+                                   :on-tap (jetpacs-action
                                             "customize.browse"
                                             :args `((group . ,(symbol-name g)))
                                             :when-offline "drop"))))
      :style 'body)))
 
-(defun eabp-customize--cap-note (total what)
+(defun jetpacs-customize--cap-note (total what)
   "The trailing truncation note, as a list, when TOTAL exceeds the cap."
-  (when (> total eabp-customize-max-items)
-    (list (eabp-text (format "Showing %d of %d %s — narrow with the search."
-                             eabp-customize-max-items total what)
+  (when (> total jetpacs-customize-max-items)
+    (list (jetpacs-text (format "Showing %d of %d %s — narrow with the search."
+                             jetpacs-customize-max-items total what)
                      'caption))))
 
-(defun eabp-customize--group-nodes ()
+(defun jetpacs-customize--group-nodes ()
   "The browse view: breadcrumbs, subgroup cards, variable items."
-  (pcase-let* ((group (eabp-customize--group))
-               (`(,groups ,vars ,faces) (eabp-customize--members group))
+  (pcase-let* ((group (jetpacs-customize--group))
+               (`(,groups ,vars ,faces) (jetpacs-customize--members group))
                (doc (get group 'group-documentation)))
     (append
-     (list (eabp-customize--crumbs))
-     (when doc (list (eabp-text (car (split-string doc "\n")) 'caption)))
+     (list (jetpacs-customize--crumbs))
+     (when doc (list (jetpacs-text (car (split-string doc "\n")) 'caption)))
      (when groups
        (append
-        (list (eabp-section-header (format "Groups (%d)" (length groups))))
-        (mapcar #'eabp-customize--group-card
+        (list (jetpacs-section-header (format "Groups (%d)" (length groups))))
+        (mapcar #'jetpacs-customize--group-card
                 (cl-subseq groups 0 (min (length groups)
-                                         eabp-customize-max-items)))
-        (eabp-customize--cap-note (length groups) "groups")))
+                                         jetpacs-customize-max-items)))
+        (jetpacs-customize--cap-note (length groups) "groups")))
      (when vars
        (append
-        (list (eabp-section-header (format "Variables (%d)" (length vars))))
-        (mapcar #'eabp-customize--var-item
+        (list (jetpacs-section-header (format "Variables (%d)" (length vars))))
+        (mapcar #'jetpacs-customize--var-item
                 (cl-subseq vars 0 (min (length vars)
-                                       eabp-customize-max-items)))
-        (eabp-customize--cap-note (length vars) "variables")))
+                                       jetpacs-customize-max-items)))
+        (jetpacs-customize--cap-note (length vars) "variables")))
      (when faces
-       (list (eabp-text (format "%d face%s — edit faces in Emacs"
+       (list (jetpacs-text (format "%d face%s — edit faces in Emacs"
                                 (length faces)
                                 (if (= (length faces) 1) "" "s"))
                         'caption)))
      (unless (or groups vars faces)
-       (list (eabp-empty-state :icon "tune" :title "Nothing here"
+       (list (jetpacs-empty-state :icon "tune" :title "Nothing here"
                                :caption "This group declares no members."))))))
 
-(defun eabp-customize--flat-nodes ()
+(defun jetpacs-customize--flat-nodes ()
   "The search/modified view: a flat, capped list of variable items."
-  (let* ((syms (eabp-customize--flat-vars))
+  (let* ((syms (jetpacs-customize--flat-vars))
          (total (length syms)))
     (if (null syms)
-        (list (eabp-empty-state
+        (list (jetpacs-empty-state
                :icon "search" :title "No matching variables"
                :caption "Search matches customizable variable names."))
       (append
-       (list (eabp-text (format "%d variable%s" total (if (= total 1) "" "s"))
+       (list (jetpacs-text (format "%d variable%s" total (if (= total 1) "" "s"))
                         'caption))
-       (mapcar #'eabp-customize--var-item
-               (cl-subseq syms 0 (min total eabp-customize-max-items)))
-       (eabp-customize--cap-note total "variables")))))
+       (mapcar #'jetpacs-customize--var-item
+               (cl-subseq syms 0 (min total jetpacs-customize-max-items)))
+       (jetpacs-customize--cap-note total "variables")))))
 
-(defun eabp-customize--body ()
+(defun jetpacs-customize--body ()
   ;; lazy_column, not column: the scaffold body has no scroll container
   ;; on the client, so a plain column taller than the screen is simply
   ;; unreachable below the fold.
-  (apply #'eabp-lazy-column
+  (apply #'jetpacs-lazy-column
          (append
           ;; The framing: the Settings screen is the curated Tier 1
           ;; experience; this browser is the escape hatch to everything
           ;; else, and "everything else" is desktop-oriented.
-          (list (eabp-text
+          (list (jetpacs-text
                  (concat "These are desktop Emacs's own options — many "
                          "won't affect the phone experience. Curated "
                          "options live in Settings.")
                  'caption)
-                (eabp-text-input "customize-search"
-                                 :value eabp-customize--search
+                (jetpacs-text-input "customize-search"
+                                 :value jetpacs-customize--search
                                  :label "Search all variables" :single-line t
-                                 :on-submit (eabp-action "customize.search"))
-                (eabp-flow-row
-                 (eabp-chip "Modified"
-                            :selected eabp-customize--modified-only
-                            :on-tap (eabp-action "customize.modified-filter"
+                                 :on-submit (jetpacs-action "customize.search"))
+                (jetpacs-flow-row
+                 (jetpacs-chip "Modified"
+                            :selected jetpacs-customize--modified-only
+                            :on-tap (jetpacs-action "customize.modified-filter"
                                                  :when-offline "drop"))))
-          (if (eabp-customize--flat-p)
-              (eabp-customize--flat-nodes)
-            (eabp-customize--group-nodes)))))
+          (if (jetpacs-customize--flat-p)
+              (jetpacs-customize--flat-nodes)
+            (jetpacs-customize--group-nodes)))))
 
-(defun eabp-customize--view (snackbar)
+(defun jetpacs-customize--view (snackbar)
   "The shell view: back pops one level until the root, then leaves."
-  (eabp-shell-nav-view
-   "Customize" (eabp-customize--body)
-   :nav-action (unless (and (null (cdr eabp-customize--path))
-                            (not (eabp-customize--flat-p)))
-                 (eabp-action "customize.up" :when-offline "drop"))
+  (jetpacs-shell-nav-view
+   "Customize" (jetpacs-customize--body)
+   :nav-action (unless (and (null (cdr jetpacs-customize--path))
+                            (not (jetpacs-customize--flat-p)))
+                 (jetpacs-action "customize.up" :when-offline "drop"))
    :snackbar snackbar))
 
-(eabp-shell-define-view "customize" :builder #'eabp-customize--view :order 85)
+(jetpacs-shell-define-view "customize" :builder #'jetpacs-customize--view :order 85)
 
 ;; Entry point: a card in the settings screen's Emacs section (a
 ;; companion-local view switch, so it works offline).
-(eabp-settings-add-link
+(jetpacs-settings-add-link
  20 (lambda ()
-      (eabp-card
-       (list (eabp-row
-              (eabp-icon "tune")
-              (eabp-box (list (eabp-column
-                               (eabp-text "Customize" 'label)
-                               (eabp-text "Browse and edit any Emacs option"
+      (jetpacs-card
+       (list (jetpacs-row
+              (jetpacs-icon "tune")
+              (jetpacs-box (list (jetpacs-column
+                               (jetpacs-text "Customize" 'label)
+                               (jetpacs-text "Browse and edit any Emacs option"
                                           'caption)))
                         :weight 1)
-              (eabp-icon "chevron_right")))
-       :on-tap (eabp-shell-switch-view "customize"))))
+              (jetpacs-icon "chevron_right")))
+       :on-tap (jetpacs-shell-switch-view "customize"))))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "customize.show"
+(jetpacs-defaction "customize.show"
   ;; Open the browser, optionally at GROUP (for cross-links from other
   ;; screens); with no group it resumes wherever the user last was.
   (lambda (args _)
     (let* ((name (alist-get 'group args))
            (sym (and (stringp name) (intern-soft name))))
-      (when (eabp-customize--group-p sym)
-        (setq eabp-customize--path (if (eq sym 'emacs) '(emacs)
+      (when (jetpacs-customize--group-p sym)
+        (setq jetpacs-customize--path (if (eq sym 'emacs) '(emacs)
                                      (list 'emacs sym))
-              eabp-customize--search ""
-              eabp-customize--modified-only nil)))
-    (eabp-shell-push nil :switch-to "customize")))
+              jetpacs-customize--search ""
+              jetpacs-customize--modified-only nil)))
+    (jetpacs-shell-push nil :switch-to "customize")))
 
-(eabp-defaction "customize.browse"
+(jetpacs-defaction "customize.browse"
   (lambda (args _)
     (let* ((name (alist-get 'group args))
            (sym (and (stringp name) (intern-soft name))))
-      (if (not (eabp-customize--group-p sym))
-          (eabp-shell-notify (format "%s is not a customization group"
+      (if (not (jetpacs-customize--group-p sym))
+          (jetpacs-shell-notify (format "%s is not a customization group"
                                      (or name "?")))
-        (setq eabp-customize--search ""
-              eabp-customize--modified-only nil
-              eabp-customize--path
-              (let ((at (cl-position sym eabp-customize--path)))
+        (setq jetpacs-customize--search ""
+              jetpacs-customize--modified-only nil
+              jetpacs-customize--path
+              (let ((at (cl-position sym jetpacs-customize--path)))
                 (if at ; a breadcrumb tap: pop back to that depth
-                    (cl-subseq eabp-customize--path 0 (1+ at))
-                  (append eabp-customize--path (list sym))))))
-      (eabp-shell-push))))
+                    (cl-subseq jetpacs-customize--path 0 (1+ at))
+                  (append jetpacs-customize--path (list sym))))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "customize.up"
+(jetpacs-defaction "customize.up"
   ;; The view's back arrow: dismiss the flat list first, then pop one
   ;; group; the arrow only leaves the view once both are spent (the
   ;; builder omits the action at the root, restoring the default back).
   (lambda (_ __)
-    (cond ((eabp-customize--flat-p)
-           (setq eabp-customize--search ""
-                 eabp-customize--modified-only nil))
-          ((cdr eabp-customize--path)
-           (setq eabp-customize--path (butlast eabp-customize--path))))
-    (eabp-shell-push)))
+    (cond ((jetpacs-customize--flat-p)
+           (setq jetpacs-customize--search ""
+                 jetpacs-customize--modified-only nil))
+          ((cdr jetpacs-customize--path)
+           (setq jetpacs-customize--path (butlast jetpacs-customize--path))))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "customize.search"
+(jetpacs-defaction "customize.search"
   (lambda (args _)
     (let ((q (alist-get 'value args)))
-      (setq eabp-customize--search
+      (setq jetpacs-customize--search
             (downcase (string-trim (or (and (stringp q) q) ""))))
-      (eabp-shell-push))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "customize.modified-filter"
+(jetpacs-defaction "customize.modified-filter"
   (lambda (_ __)
-    (setq eabp-customize--modified-only (not eabp-customize--modified-only))
-    (eabp-shell-push)))
+    (setq jetpacs-customize--modified-only (not jetpacs-customize--modified-only))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "customize.load"
+(jetpacs-defaction "customize.load"
   (lambda (args _)
     (let* ((name (alist-get 'name args))
            (sym (and (stringp name) (intern-soft name))))
       (when (and sym (custom-variable-p sym))
         (condition-case err
             (custom-load-symbol sym)
-          (error (eabp-shell-notify (error-message-string err)))))
-      (eabp-shell-push))))
+          (error (jetpacs-shell-notify (error-message-string err)))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "customize.set"
+(jetpacs-defaction "customize.set"
   (lambda (args _)
     (let* ((name (alist-get 'name args))
            (sym (and (stringp name) (intern-soft name))))
       (if (not (and sym (custom-variable-p sym)))
-          (eabp-shell-notify
+          (jetpacs-shell-notify
            (format "%s is not a customizable variable" (or name "?")))
         ;; A deferred defcustom must load before its type can validate.
         (ignore-errors (custom-load-symbol sym))
-        (eabp-settings-apply-wire sym (alist-get 'value args)))
-      (eabp-shell-push))))
+        (jetpacs-settings-apply-wire sym (alist-get 'value args)))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "customize.reset"
+(jetpacs-defaction "customize.reset"
   (lambda (args _)
     (let* ((name (alist-get 'name args))
            (sym (and (stringp name) (intern-soft name))))
       (if (not (and sym (custom-variable-p sym)))
-          (eabp-shell-notify "Cannot reset this setting")
-        (eabp-settings-reset sym))
-      (eabp-shell-push))))
+          (jetpacs-shell-notify "Cannot reset this setting")
+        (jetpacs-settings-reset sym))
+      (jetpacs-shell-push))))
 
-(provide 'eabp-customize)
-;;; eabp-customize.el ends here
+(provide 'jetpacs-customize)
+;;; jetpacs-customize.el ends here
 
 ;;; ==================================================================
-;;; BEGIN apps/eabp-tools.el
+;;; BEGIN apps/jetpacs-tools.el
 ;;; ==================================================================
 
-;;; eabp-tools.el --- Built-in Emacs tools: bookmarks, kill ring, shell, processes, timers -*- lexical-binding: t; -*-
+;;; jetpacs-tools.el --- Built-in Emacs tools: bookmarks, kill ring, shell, processes, timers -*- lexical-binding: t; -*-
 
 ;; Entry points for screens the substrates already cover.
 ;; `bookmark-bmenu-mode', `process-menu-mode' and `timer-list-mode' all
@@ -637,7 +637,7 @@ path when the group is already on it)."
 ;; draws them today — each needs only a semantic action that creates the
 ;; buffer and navigates the buffer view to it (the packages.show
 ;; pattern).  A shell entry does the same for `M-x shell', rendered by
-;; the comint substrate (eabp-comint.el).  The kill ring is pure data —
+;; the comint substrate (jetpacs-comint.el).  The kill ring is pure data —
 ;; no buffer at all — so it renders as its own view of cards, each with
 ;; a companion-local copy button (works offline, no round trip).
 ;;
@@ -647,10 +647,10 @@ path when the group is already on it)."
 ;;; Code:
 
 (require 'cl-lib)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-tablist)
-(require 'eabp-shell)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-tablist)
+(require 'jetpacs-shell)
 
 (declare-function bookmark-maybe-load-default-file "bookmark")
 (declare-function bookmark-bmenu-list "bookmark")
@@ -659,7 +659,7 @@ path when the group is already on it)."
 
 ;; ─── Showing a tool buffer ───────────────────────────────────────────────────
 
-(defun eabp-tools--view-buffer-of (fn)
+(defun jetpacs-tools--view-buffer-of (fn)
   "Call FN (returning a buffer or buffer name) and view the result.
 Window excursion contains the pop-to-buffer these commands do; errors
 land in the snackbar instead of dying silently."
@@ -667,27 +667,27 @@ land in the snackbar instead of dying silently."
       (let ((buf (save-window-excursion (funcall fn))))
         (when (bufferp buf) (setq buf (buffer-name buf)))
         (if (and (stringp buf) (get-buffer buf))
-            (funcall eabp-tablist-view-buffer-function buf)
-          (eabp-shell-notify "Nothing to show")))
-    (error (eabp-shell-notify (error-message-string err)))))
+            (funcall jetpacs-tablist-view-buffer-function buf)
+          (jetpacs-shell-notify "Nothing to show")))
+    (error (jetpacs-shell-notify (error-message-string err)))))
 
-(eabp-defaction "tools.bookmarks"
+(jetpacs-defaction "tools.bookmarks"
   (lambda (_ __)
-    (eabp-tools--view-buffer-of
+    (jetpacs-tools--view-buffer-of
      (lambda ()
        (require 'bookmark)
        (bookmark-maybe-load-default-file)
        (bookmark-bmenu-list)
        "*Bookmark List*"))))
 
-(eabp-defaction "tools.processes"
+(jetpacs-defaction "tools.processes"
   (lambda (_ __)
-    (eabp-tools--view-buffer-of
+    (jetpacs-tools--view-buffer-of
      (lambda () (list-processes) "*Process List*"))))
 
-(eabp-defaction "tools.timers"
+(jetpacs-defaction "tools.timers"
   (lambda (_ __)
-    (eabp-tools--view-buffer-of
+    (jetpacs-tools--view-buffer-of
      (lambda ()
        (unless (fboundp 'list-timers) (require 'timer-list))
        ;; Called as a function, so its `disabled' novice flag (which
@@ -695,39 +695,39 @@ land in the snackbar instead of dying silently."
        (list-timers)
        "*timer-list*"))))
 
-(eabp-defaction "tools.shell"
+(jetpacs-defaction "tools.shell"
   (lambda (_ __)
-    (eabp-tools--view-buffer-of
+    (jetpacs-tools--view-buffer-of
      (lambda ()
        (require 'shell)
        (shell)))))
 
 ;; ─── Bookmark rows: tap = jump ───────────────────────────────────────────────
 
-(defun eabp-tools--bookmark-name (id)
+(defun jetpacs-tools--bookmark-name (id)
   "The bookmark name from a bmenu row ID (a name string or a record)."
   (cond ((stringp id) id)
         ((and (consp id) (stringp (car id))) (car id))))
 
-(defun eabp-tools--bookmark-row (id entry _pos)
+(defun jetpacs-tools--bookmark-row (id entry _pos)
   "Tablist row skin for bookmark-bmenu: tapping jumps to the bookmark."
-  (let ((name (eabp-tools--bookmark-name id)))
+  (let ((name (jetpacs-tools--bookmark-name id)))
     (when name
-      (let ((file (or (eabp-tablist-entry-col entry "File") "")))
-        (eabp-card
-         (list (apply #'eabp-column
+      (let ((file (or (jetpacs-tablist-entry-col entry "File") "")))
+        (jetpacs-card
+         (list (apply #'jetpacs-column
                       (delq nil
-                            (list (eabp-text name 'label)
+                            (list (jetpacs-text name 'label)
                                   (unless (string-empty-p file)
-                                    (eabp-text file 'caption))))))
-         :on-tap (eabp-action "tools.bookmark-jump"
+                                    (jetpacs-text file 'caption))))))
+         :on-tap (jetpacs-action "tools.bookmark-jump"
                               :args `((bookmark . ,name))
                               :when-offline "drop"))))))
 
-(setf (alist-get 'bookmark-bmenu-mode eabp-tablist-row-functions)
-      #'eabp-tools--bookmark-row)
+(setf (alist-get 'bookmark-bmenu-mode jetpacs-tablist-row-functions)
+      #'jetpacs-tools--bookmark-row)
 
-(eabp-defaction "tools.bookmark-jump"
+(jetpacs-defaction "tools.bookmark-jump"
   ;; Validated against the bookmark alist; the jump runs inside the
   ;; action handler, so a relocation prompt (file moved) is bridged.
   ;; The whole flow sits in the condition-case — even loading the
@@ -744,110 +744,110 @@ land in the snackbar instead of dying silently."
                 (let ((target (save-window-excursion
                                 (bookmark-jump name)
                                 (buffer-name (current-buffer)))))
-                  (funcall eabp-tablist-view-buffer-function target))))
-          (error (eabp-shell-notify
+                  (funcall jetpacs-tablist-view-buffer-function target))))
+          (error (jetpacs-shell-notify
                   (format "Bookmark failed: %s"
                           (error-message-string err)))))))))
 
 ;; ─── Kill ring ───────────────────────────────────────────────────────────────
 
-(defcustom eabp-tools-kill-ring-max 50
+(defcustom jetpacs-tools-kill-ring-max 50
   "Kill-ring entries shown in the Kill ring view."
-  :type 'integer :group 'eabp)
+  :type 'integer :group 'jetpacs)
 
-(defun eabp-tools--kill-card (text)
+(defun jetpacs-tools--kill-card (text)
   "A card for one kill: a trimmed preview plus a copy-to-phone button.
 The copy is the companion-local clipboard builtin, so it works offline
 and carries the full (untrimmed) text."
   (let* ((clean (substring-no-properties text))
          (preview (string-trim
                    (if (> (length clean) 500) (substring clean 0 500) clean))))
-    (eabp-card
-     (list (eabp-row
-            (eabp-box (list (eabp-text (if (string-empty-p preview) " " preview)
+    (jetpacs-card
+     (list (jetpacs-row
+            (jetpacs-box (list (jetpacs-text (if (string-empty-p preview) " " preview)
                                        'body nil nil t 4))
                       :weight 1)
-            (eabp-icon-button "content_copy"
-                              (eabp-clipboard-action clean)
+            (jetpacs-icon-button "content_copy"
+                              (jetpacs-clipboard-action clean)
                               :content-description "Copy to phone clipboard"))))))
 
-(defun eabp-tools--kill-ring-body ()
+(defun jetpacs-tools--kill-ring-body ()
   (let ((kills (cl-subseq kill-ring
-                          0 (min (length kill-ring) eabp-tools-kill-ring-max))))
+                          0 (min (length kill-ring) jetpacs-tools-kill-ring-max))))
     (if (null kills)
-        (eabp-empty-state :icon "content_paste" :title "Kill ring is empty"
+        (jetpacs-empty-state :icon "content_paste" :title "Kill ring is empty"
                           :caption "Text killed in Emacs shows up here.")
-      (apply #'eabp-lazy-column
-             (cons (eabp-text (format "%d of %d kills, newest first"
+      (apply #'jetpacs-lazy-column
+             (cons (jetpacs-text (format "%d of %d kills, newest first"
                                       (length kills) (length kill-ring))
                               'caption)
-                   (mapcar #'eabp-tools--kill-card kills))))))
+                   (mapcar #'jetpacs-tools--kill-card kills))))))
 
-(defun eabp-tools--kill-ring-view (snackbar)
-  (eabp-shell-nav-view "Kill ring" (eabp-tools--kill-ring-body)
+(defun jetpacs-tools--kill-ring-view (snackbar)
+  (jetpacs-shell-nav-view "Kill ring" (jetpacs-tools--kill-ring-body)
                        :back-to "tools"
                        :snackbar snackbar))
 
 ;; ─── The hub view and drawer entry ───────────────────────────────────────────
 
-(defun eabp-tools--entry (icon title caption action)
-  (eabp-card
-   (list (eabp-row
-          (eabp-icon icon)
-          (eabp-box (list (eabp-column (eabp-text title 'label)
-                                       (eabp-text caption 'caption)))
+(defun jetpacs-tools--entry (icon title caption action)
+  (jetpacs-card
+   (list (jetpacs-row
+          (jetpacs-icon icon)
+          (jetpacs-box (list (jetpacs-column (jetpacs-text title 'label)
+                                       (jetpacs-text caption 'caption)))
                     :weight 1)
-          (eabp-icon "chevron_right")))
+          (jetpacs-icon "chevron_right")))
    :on-tap action))
 
-(defun eabp-tools--view (snackbar)
-  (eabp-shell-nav-view
+(defun jetpacs-tools--view (snackbar)
+  (jetpacs-shell-nav-view
    "Tools"
-   (eabp-lazy-column
-    (eabp-tools--entry "bookmark" "Bookmarks"
+   (jetpacs-lazy-column
+    (jetpacs-tools--entry "bookmark" "Bookmarks"
                        "Jump to saved places"
-                       (eabp-action "tools.bookmarks" :when-offline "drop"))
-    (eabp-tools--entry "content_paste" "Kill ring"
+                       (jetpacs-action "tools.bookmarks" :when-offline "drop"))
+    (jetpacs-tools--entry "content_paste" "Kill ring"
                        "Copy recent kills to the phone clipboard"
-                       (eabp-shell-switch-view "kill-ring"))
-    (eabp-tools--entry "terminal" "Shell"
+                       (jetpacs-shell-switch-view "kill-ring"))
+    (jetpacs-tools--entry "terminal" "Shell"
                        "M-x shell, rendered as a REPL"
-                       (eabp-action "tools.shell" :when-offline "drop"))
-    (eabp-tools--entry "memory" "Processes"
+                       (jetpacs-action "tools.shell" :when-offline "drop"))
+    (jetpacs-tools--entry "memory" "Processes"
                        "Subprocesses of this Emacs"
-                       (eabp-action "tools.processes" :when-offline "drop"))
-    (eabp-tools--entry "timer" "Timers"
+                       (jetpacs-action "tools.processes" :when-offline "drop"))
+    (jetpacs-tools--entry "timer" "Timers"
                        "Active Emacs timers"
-                       (eabp-action "tools.timers" :when-offline "drop")))
+                       (jetpacs-action "tools.timers" :when-offline "drop")))
    :snackbar snackbar))
 
-(eabp-shell-define-view "tools" :builder #'eabp-tools--view :order 86)
-(eabp-shell-define-view "kill-ring" :builder #'eabp-tools--kill-ring-view
+(jetpacs-shell-define-view "tools" :builder #'jetpacs-tools--view :order 86)
+(jetpacs-shell-define-view "kill-ring" :builder #'jetpacs-tools--kill-ring-view
                         :order 87)
 
-(eabp-shell-add-drawer-item
+(jetpacs-shell-add-drawer-item
  50 (lambda ()
-      (eabp-drawer-item "build" "Tools" (eabp-shell-switch-view "tools"))))
+      (jetpacs-drawer-item "build" "Tools" (jetpacs-shell-switch-view "tools"))))
 
-(provide 'eabp-tools)
-;;; eabp-tools.el ends here
+(provide 'jetpacs-tools)
+;;; jetpacs-tools.el ends here
 
 ;;; ==================================================================
-;;; BEGIN apps/eabp-automations.el
+;;; BEGIN apps/jetpacs-automations.el
 ;;; ==================================================================
 
-;;; eabp-automations.el --- Automations management view -*- lexical-binding: t; -*-
+;;; jetpacs-automations.el --- Automations management view -*- lexical-binding: t; -*-
 
 ;; The phone-side management surface for device triggers (SPEC §11):
 ;; one card per registration with an enable switch (persisted through
 ;; Customize), the wire fields at a glance, the last-fired time, and a
 ;; "Fire now" test button.  Pure rendering — the registry, the actions
 ;; (`trigger.toggle' / `trigger.test'), and the persistence live in
-;; core eabp-triggers.el; authoring stays in elisp (`eabp-deftrigger'
+;; core jetpacs-triggers.el; authoring stays in elisp (`jetpacs-deftrigger'
 ;; in your init).  Org-file-defined rules are the next layer
 ;; (glasspane-automations, plan Task 13).
 ;;
-;; Deliberately NOT an `eabp-defapp': that would flip the launcher into
+;; Deliberately NOT an `jetpacs-defapp': that would flip the launcher into
 ;; multi-app mode for everyone.  It is a satellite screen behind a
 ;; settings link, per the drawer contract.
 
@@ -855,14 +855,14 @@ and carries the full (untrimmed) text."
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-shell)
-(require 'eabp-triggers)
-(require 'eabp-settings)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-triggers)
+(require 'jetpacs-settings)
 
-(defun eabp-automations--summary (reg)
+(defun jetpacs-automations--summary (reg)
   "One-line wire summary of registration plist REG."
   (let ((params (plist-get reg :params)))
     (string-join
@@ -878,107 +878,107 @@ and carries the full (untrimmed) text."
                  (when (plist-get reg :on-fire) "on-fire")))
      " · ")))
 
-(defun eabp-automations--last-fired (id)
+(defun jetpacs-automations--last-fired (id)
   "Human line for ID's most recent fire, or a quiet placeholder."
-  (if-let ((at (gethash id eabp-triggers--last-fired)))
+  (if-let ((at (gethash id jetpacs-triggers--last-fired)))
       (format-time-string "Last fired %b %e %H:%M" at)
     "Never fired"))
 
-(defun eabp-automations--card (id reg)
+(defun jetpacs-automations--card (id reg)
   "The management card for trigger ID."
-  (let ((enabled (eabp-trigger-enabled-p id)))
-    (eabp-card
+  (let ((enabled (jetpacs-trigger-enabled-p id)))
+    (jetpacs-card
      (list
-      (eabp-column
-       (eabp-row
-        (eabp-box (list (eabp-text id 'title)) :weight 1)
-        (eabp-switch (concat "trigger-enabled/" id)
+      (jetpacs-column
+       (jetpacs-row
+        (jetpacs-box (list (jetpacs-text id 'title)) :weight 1)
+        (jetpacs-switch (concat "trigger-enabled/" id)
                      :checked enabled
-                     :on-change (eabp-action "trigger.toggle"
+                     :on-change (jetpacs-action "trigger.toggle"
                                              :args `((id . ,id))
                                              :when-offline "drop")))
-       (eabp-text (eabp-automations--summary reg) 'caption)
-       (eabp-row
-        (eabp-box (list (eabp-text (eabp-automations--last-fired id)
+       (jetpacs-text (jetpacs-automations--summary reg) 'caption)
+       (jetpacs-row
+        (jetpacs-box (list (jetpacs-text (jetpacs-automations--last-fired id)
                                    'caption))
                   :weight 1)
-        (eabp-button "Fire now"
-                     (eabp-action "trigger.test"
+        (jetpacs-button "Fire now"
+                     (jetpacs-action "trigger.test"
                                   :args `((id . ,id))
                                   :when-offline "drop")
                      :variant "text"
                      :icon "play_arrow")))))))
 
-(defun eabp-automations--view (snackbar)
+(defun jetpacs-automations--view (snackbar)
   "The Automations screen: every registered trigger, or an empty state."
-  (eabp-shell-nav-view
+  (jetpacs-shell-nav-view
    "Automations"
-   (if (zerop (hash-table-count eabp-triggers--table))
-       (eabp-empty-state
+   (if (zerop (hash-table-count jetpacs-triggers--table))
+       (jetpacs-empty-state
         :icon "bolt" :title "No automations"
-        :caption (concat "Define device triggers with eabp-deftrigger "
+        :caption (concat "Define device triggers with jetpacs-deftrigger "
                          "in your init, then manage them here"))
-     (apply #'eabp-lazy-column
+     (apply #'jetpacs-lazy-column
             (mapcar (lambda (id)
-                      (eabp-automations--card
-                       id (gethash id eabp-triggers--table)))
-                    (sort (hash-table-keys eabp-triggers--table)
+                      (jetpacs-automations--card
+                       id (gethash id jetpacs-triggers--table)))
+                    (sort (hash-table-keys jetpacs-triggers--table)
                           #'string<))))
    :snackbar snackbar))
 
-(eabp-shell-define-view "automations"
-                        :builder #'eabp-automations--view :order 83)
+(jetpacs-shell-define-view "automations"
+                        :builder #'jetpacs-automations--view :order 83)
 
 ;; Entry point: a card in the settings screen's Emacs section (a
 ;; companion-local view switch, so it opens offline too).
-(eabp-settings-add-link
+(jetpacs-settings-add-link
  15 (lambda ()
-      (eabp-card
-       (list (eabp-row
-              (eabp-icon "bolt")
-              (eabp-box (list (eabp-column
-                               (eabp-text "Automations" 'label)
-                               (eabp-text "Device triggers: enable, test, inspect"
+      (jetpacs-card
+       (list (jetpacs-row
+              (jetpacs-icon "bolt")
+              (jetpacs-box (list (jetpacs-column
+                               (jetpacs-text "Automations" 'label)
+                               (jetpacs-text "Device triggers: enable, test, inspect"
                                           'caption)))
                         :weight 1)
-              (eabp-icon "chevron_right")))
-       :on-tap (eabp-shell-switch-view "automations"))))
+              (jetpacs-icon "chevron_right")))
+       :on-tap (jetpacs-shell-switch-view "automations"))))
 
 ;; Registry changes (a toggle from the phone, a deftrigger evaluated on
 ;; a live session) re-render this view.  Debounced: an automations
 ;; reload fires this hook once per rule, and one idle push after the
 ;; burst beats a full view rebuild per rule (the scheduler no-ops
 ;; while disconnected).
-(defun eabp-automations--on-change ()
-  (eabp-shell--schedule-repush))
+(defun jetpacs-automations--on-change ()
+  (jetpacs-shell--schedule-repush))
 
-(add-hook 'eabp-triggers-changed-hook #'eabp-automations--on-change)
+(add-hook 'jetpacs-triggers-changed-hook #'jetpacs-automations--on-change)
 
-(provide 'eabp-automations)
-;;; eabp-automations.el ends here
+(provide 'jetpacs-automations)
+;;; jetpacs-automations.el ends here
 
 ;;; ==================================================================
-;;; BEGIN apps/eabp-magit.el
+;;; BEGIN apps/jetpacs-magit.el
 ;;; ==================================================================
 
-;;; eabp-magit.el --- Curated Tier 1 magit pie menu -*- lexical-binding: t; -*-
+;;; jetpacs-magit.el --- Curated Tier 1 magit pie menu -*- lexical-binding: t; -*-
 
 ;; The first curated Tier 1 radial menu: magit-status.  Four categories
 ;; fan out as a speed dial; each opens a pie of hand-labelled bindings.
 ;; Entries marked as prefixes (Commit, Push, Branch, …) are magit's
 ;; transient commands — running one activates the transient, and
-;; `eabp-keymap--sync-pie' then pushes the live transient's own pie, so
+;; `jetpacs-keymap--sync-pie' then pushes the live transient's own pie, so
 ;; the drill-in continues seamlessly into magit's real menus.
 ;;
 ;; This is pure data plus key dispatch: nothing here requires magit at
 ;; load time.  Keys are executed in the magit buffer through the same
-;; allowlisted `eabp.keymap.run' action as everything else.
+;; allowlisted `jetpacs.keymap.run' action as everything else.
 
 ;;; Code:
 
-(require 'eabp-keymap)
+(require 'jetpacs-keymap)
 
-(defconst eabp-magit--menu
+(defconst jetpacs-magit--menu
   '(("Stage" "add"
      ("s"   "Stage")
      ("u"   "Unstage")
@@ -1007,19 +1007,19 @@ and carries the full (untrimmed) text."
 PREFIX-P marks a transient prefix — the pie shows a ▸ and running it
 drills into the live transient's own pie.")
 
-(defun eabp-magit--binding-spec (entry buffer-name)
+(defun jetpacs-magit--binding-spec (entry buffer-name)
   "Build one pie binding spec from ENTRY (KEY LABEL [PREFIX-P])."
   (pcase-let ((`(,key ,label ,prefix-p) entry))
     (append
      `((key . ,key)
        (label . ,label)
-       (action . ,(eabp-action "eabp.keymap.run"
+       (action . ,(jetpacs-action "jetpacs.keymap.run"
                                :args `((buffer . ,buffer-name)
                                        (key . ,key))
                                :when-offline "drop")))
      (when prefix-p '((is_prefix . t))))))
 
-(defun eabp-magit-pie-spec (buffer)
+(defun jetpacs-magit-pie-spec (buffer)
   "Curated Tier 1 pie-menu spec for magit BUFFER."
   (let ((buffer-name (buffer-name buffer)))
     `((center_label . "Magit")
@@ -1033,20 +1033,20 @@ drills into the live transient's own pie.")
                   (icon . ,icon)
                   (bindings . ,(vconcat
                                 (mapcar (lambda (e)
-                                          (eabp-magit--binding-spec e buffer-name))
+                                          (jetpacs-magit--binding-spec e buffer-name))
                                         entries))))))
-            eabp-magit--menu))))))
+            jetpacs-magit--menu))))))
 
-(eabp-keymap-register-tier1 'magit-status-mode #'eabp-magit-pie-spec)
+(jetpacs-keymap-register-tier1 'magit-status-mode #'jetpacs-magit-pie-spec)
 
-(provide 'eabp-magit)
-;;; eabp-magit.el ends here
+(provide 'jetpacs-magit)
+;;; jetpacs-magit.el ends here
 
 ;;; ==================================================================
 ;;; BEGIN apps/glasspane/glasspane-org.el
 ;;; ==================================================================
 
-;;; glasspane-org.el --- EABP Org-Mode Data Extraction -*- lexical-binding: t; -*-
+;;; glasspane-org.el --- Jetpacs Org-Mode Data Extraction -*- lexical-binding: t; -*-
 
 ;; Provides functions to extract structured data from org-mode buffers.
 ;; This layer is pure Elisp and has no bridge dependencies.
@@ -1173,7 +1173,7 @@ Returns a list of alists representing agenda items.  Memoised; see
   (glasspane-org--with-cache (glasspane-org--cache-key 'agenda (or span 'day) start-day)
     (glasspane-org--agenda-items-1 span start-day)))
 
-(defconst glasspane-org--agenda-buffer "*EABP Agenda*"
+(defconst glasspane-org--agenda-buffer "*Jetpacs Agenda*"
   "Private buffer the agenda extraction builds into (and kills after).")
 
 (defun glasspane-org--agenda-items-1 (span start-day)
@@ -1683,7 +1683,7 @@ the carrier for text shared from another app via the share sheet."
           ;; but if any escape slips through, never let `org-capture' block
           ;; Emacs forever on a minibuffer the phone can't answer. `with-timeout'
           ;; fires even while a synchronous read is waiting.
-          (with-timeout (30 (message "eabp: capture timed out (a prompt was left unanswered)"))
+          (with-timeout (30 (message "jetpacs: capture timed out (a prompt was left unanswered)"))
             (org-capture)))))))
 
 (defun glasspane-org--item-hm (time)
@@ -1813,14 +1813,14 @@ ready for the companion's `reminders.set' frame."
 
 ;;; glasspane-org-rich.el --- Org → rich-text SDUI emitter -*- lexical-binding: t; -*-
 
-;; Turns org content into EABP `rich_text' nodes (styled span runs) instead of
-;; the syntax-highlighted monospace `eabp-markup' produces. Emacs does the
+;; Turns org content into Jetpacs `rich_text' nodes (styled span runs) instead of
+;; the syntax-highlighted monospace `jetpacs-markup' produces. Emacs does the
 ;; parsing via `org-element', so the device never re-parses org — it only paints
 ;; the spans. Inline emphasis (bold/italic/underline/strike/code/verbatim),
 ;; links (tappable), timestamps, and #hashtags all map to native styling.
 ;;
 ;; Block-level content that doesn't fit a single styled paragraph — source
-;; blocks, example blocks — falls back to `eabp-markup' so code keeps its
+;; blocks, example blocks — falls back to `jetpacs-markup' so code keeps its
 ;; highlighted, fixed-width look.  Org tables render as native `table' grids
 ;; (tap-to-edit, long-press row/column menu, and add-row/add-column when
 ;; file context is supplied); table.el tables keep the markup fallback.
@@ -1835,7 +1835,7 @@ ready for the companion's `reminders.set' frame."
 (require 'org-element)
 (require 'org-table)
 (require 'cl-lib)
-(require 'eabp-widgets)
+(require 'jetpacs-widgets)
 
 ;; ─── Dynamic context for interactive elements ───────────────────────────────
 
@@ -1868,7 +1868,7 @@ Prepended so `plist-get' sees the new value first; STYLE is never mutated."
 
 (defun glasspane-org-rich--leaf (text style)
   "Build a span for TEXT carrying the emphasis flags set in STYLE."
-  (apply #'eabp-span (or text "")
+  (apply #'jetpacs-span (or text "")
          (append (when (plist-get style :bold)      '(:bold t))
                  (when (plist-get style :italic)    '(:italic t))
                  (when (plist-get style :underline) '(:underline t))
@@ -1967,7 +1967,7 @@ words jam together after emphasis, links, and timestamps."
                   (child (if contents
                              (glasspane-org-rich--inline contents style)
                            (list (glasspane-org-rich--leaf (or raw "link") style))))
-                  (action (eabp-action "org.link.open"
+                  (action (jetpacs-action "org.link.open"
                                        :args (list (cons 'link raw)))))
              (setq spans (append spans (glasspane-org-rich--linkify child action)))))
           ('timestamp
@@ -2004,17 +2004,17 @@ words jam together after emphasis, links, and timestamps."
                               (org-element-interpret-data
                                (org-element-contents obj)))
                             "")))
-                  (action (eabp-action "org.footnote.show"
+                  (action (jetpacs-action "org.footnote.show"
                                        :args (list (cons 'label (or label ""))
                                                    (cons 'def def)))))
              (setq spans
                    (append spans
-                           (list (eabp-span marker
+                           (list (jetpacs-span marker
                                             :baseline "super"
                                             :tag t
                                             :on-tap action))))))
           ('line-break
-           (setq spans (append spans (list (eabp-span "\n")))))
+           (setq spans (append spans (list (jetpacs-span "\n")))))
           (_
            ;; Anything else (latex fragment, export snippet, …): fall back to
            ;; its interpreted source text.
@@ -2055,29 +2055,29 @@ toggles the checkbox via Emacs without entering edit mode."
                                 ('on  "check_box")
                                 ('off "check_box_outline_blank")
                                 (_    "indeterminate_check_box")))
-                     (cb (eabp-box
-                          (list (eabp-icon cb-icon :size 20))
-                          :on-tap (eabp-action
+                     (cb (jetpacs-box
+                          (list (jetpacs-icon cb-icon :size 20))
+                          :on-tap (jetpacs-action
                                    "checkbox.toggle"
                                    :args `((file . ,glasspane-org-rich--file)
                                            (pos  . ,item-pos))))))
-                (eabp-row cb
-                          (eabp-box
-                           (list (eabp-rich-text
-                                  (cons (eabp-span lead-text)
-                                        (or inline (list (eabp-span ""))))))
+                (jetpacs-row cb
+                          (jetpacs-box
+                           (list (jetpacs-rich-text
+                                  (cons (jetpacs-span lead-text)
+                                        (or inline (list (jetpacs-span ""))))))
                            :weight 1)))
             ;; No checkbox, or no file context — plain text as before.
             (let* ((mark (pcase checkbox
                            ('on "☑ ") ('off "☐ ") ('trans "◪ ") (_ "")))
-                   (lead (eabp-span (concat lead-text mark))))
-              (eabp-rich-text (cons lead (or inline (list (eabp-span ""))))))))
+                   (lead (jetpacs-span (concat lead-text mark))))
+              (jetpacs-rich-text (cons lead (or inline (list (jetpacs-span ""))))))))
          (rest-contents (delq para (copy-sequence contents)))
          (sub-nodes (delq nil (mapcar #'glasspane-org-rich--element rest-contents))))
     (if sub-nodes
-        (eabp-column head
-                     (eabp-row (eabp-spacer :width 16)
-                               (eabp-box (list (apply #'eabp-column sub-nodes)) :weight 1)))
+        (jetpacs-column head
+                     (jetpacs-row (jetpacs-spacer :width 16)
+                               (jetpacs-box (list (apply #'jetpacs-column sub-nodes)) :weight 1)))
       head)))
 
 (defun glasspane-org-rich--list (el)
@@ -2087,7 +2087,7 @@ toggles the checkbox via Emacs without entering edit mode."
                                (when (eq (org-element-type item) 'item)
                                  (glasspane-org-rich--item item)))
                              (org-element-contents el)))))
-    (when items (apply #'eabp-column items))))
+    (when items (apply #'jetpacs-column items))))
 
 ;; ─── Source blocks ───────────────────────────────────────────────────────────
 
@@ -2100,7 +2100,7 @@ so the button never promises more than `org-babel-load-languages'
 delivers.  The action carries the block's real-file position; the code
 itself never crosses the wire."
   (let* ((lang (org-element-property :language el))
-         (code (eabp-markup (or (org-element-property :value el) "")
+         (code (jetpacs-markup (or (org-element-property :value el) "")
                             :syntax (or lang "text")))
          (pos (and glasspane-org-rich--file glasspane-org-rich--body-offset
                    lang
@@ -2109,12 +2109,12 @@ itself never crosses the wire."
                       (org-element-property :post-affiliated el)))))
     (if (not pos)
         code
-      (eabp-column
-       (eabp-row
-        (eabp-text lang 'label)
-        (eabp-spacer :weight 1)
-        (eabp-icon-button "play_arrow"
-                          (eabp-action "org.babel.execute"
+      (jetpacs-column
+       (jetpacs-row
+        (jetpacs-text lang 'label)
+        (jetpacs-spacer :weight 1)
+        (jetpacs-icon-button "play_arrow"
+                          (jetpacs-action "org.babel.execute"
                                        :args `((file . ,glasspane-org-rich--file)
                                                (pos . ,pos)))
                           :content-description "Run block"))
@@ -2181,7 +2181,7 @@ edits it through `org.table.edit' and long-pressing opens the
 row/column menu (`org.table.cell-menu'), both at its real-file
 position.  Read-only renders (babel results) stay inert."
   (let* ((spans (or (glasspane-org-rich--inline (org-element-contents cell) nil)
-                    (list (eabp-span ""))))
+                    (list (jetpacs-span ""))))
          (pos (and glasspane-org-rich--file glasspane-org-rich--body-offset
                    (not glasspane-org-rich--read-only)
                    (+ glasspane-org-rich--body-offset
@@ -2189,13 +2189,13 @@ position.  Read-only renders (babel results) stay inert."
                           (org-element-property :begin cell)))))
          (args (when pos
                  `((file . ,glasspane-org-rich--file) (pos . ,pos)))))
-    (eabp-table-cell
+    (jetpacs-table-cell
      spans
-     :on-tap (when pos (eabp-action "org.table.edit" :args args))
-     :on-long-tap (when pos (eabp-action "org.table.cell-menu" :args args)))))
+     :on-tap (when pos (jetpacs-action "org.table.edit" :args args))
+     :on-long-tap (when pos (jetpacs-action "org.table.cell-menu" :args args)))))
 
 (defun glasspane-org-rich--table (el)
-  "Render an org table EL to a native `eabp-table' node, or nil when empty.
+  "Render an org table EL to a native `jetpacs-table' node, or nil when empty.
 Cookie-only rows configure column alignment and drop out of display;
 alignment otherwise follows org's numeric-majority rule.  Header rows
 are the first row group when a rule separates it from more groups
@@ -2234,22 +2234,22 @@ tap-edit and the client offers add-row/add-column affordances."
                               (not glasspane-org-rich--read-only)
                               (+ offset
                                  (org-element-property :post-affiliated el)))))
-          (eabp-table
+          (jetpacs-table
            (mapcar (lambda (shape)
                      (if (eq shape 'rule)
-                         (eabp-table-rule)
-                       (eabp-table-row
+                         (jetpacs-table-rule)
+                       (jetpacs-table-row
                         (mapcar #'glasspane-org-rich--table-cell shape)
                         :header (and (memq shape header-rows) t))))
                    shapes)
            :aligns (glasspane-org-rich--table-aligns
                     (nreverse cookie-rows) data-rows ncols)
            :on-add-row (when table-pos
-                         (eabp-action "org.table.add-row"
+                         (jetpacs-action "org.table.add-row"
                                       :args `((file . ,file)
                                               (pos . ,table-pos))))
            :on-add-col (when table-pos
-                         (eabp-action "org.table.add-col"
+                         (jetpacs-action "org.table.add-col"
                                       :args `((file . ,file)
                                               (pos . ,table-pos))))))))))
 
@@ -2262,17 +2262,17 @@ and for drawers whose content renders to nothing."
       (let ((inner (delq nil (mapcar #'glasspane-org-rich--element
                                      (org-element-contents el)))))
         (when inner
-          (eabp-collapsible
+          (jetpacs-collapsible
            (format "drawer/%s/%s"
                    (or glasspane-org-rich--file "")
                    (+ (or glasspane-org-rich--body-offset 0)
                       (org-element-property :begin el)))
-           (eabp-text name 'label)
+           (jetpacs-text name 'label)
            inner
            :collapsed t))))))
 
 (defun glasspane-org-rich--paragraph-image (el)
-  "If paragraph EL is just a single image link, return an `eabp-image' node."
+  "If paragraph EL is just a single image link, return an `jetpacs-image' node."
   (let* ((contents (org-element-contents el))
          (non-blank (cl-remove-if (lambda (c) (and (stringp c) (string-blank-p c)))
                                   contents)))
@@ -2282,7 +2282,7 @@ and for drawers whose content renders to nothing."
       (let* ((lnk (car non-blank))
              (url (glasspane-org-rich--image-url (org-element-property :type lnk)
                                             (org-element-property :path lnk))))
-        (when url (eabp-image url))))))
+        (when url (jetpacs-image url))))))
 
 (defun glasspane-org-rich--element (el)
   "Render one top-level org element EL to a node, or nil to skip it.
@@ -2296,12 +2296,12 @@ renders read-only inside a foldable RESULTS section, like desktop org."
           ;; RESULTS — don't nest a second collapsible around it.
           (if (equal (alist-get 't node) "collapsible")
               node
-            (eabp-collapsible
+            (jetpacs-collapsible
              (format "results/%s/%s"
                      (or glasspane-org-rich--file "")
                      (+ (or glasspane-org-rich--body-offset 0)
                         (org-element-property :begin el)))
-             (eabp-text "RESULTS" 'label)
+             (jetpacs-text "RESULTS" 'label)
              (list node)))))
     (glasspane-org-rich--element-1 el)))
 
@@ -2311,22 +2311,22 @@ renders read-only inside a foldable RESULTS section, like desktop org."
     ('paragraph
      (or (glasspane-org-rich--paragraph-image el)
          (let ((spans (glasspane-org-rich--inline (org-element-contents el) nil)))
-           (when spans (eabp-rich-text spans)))))
+           (when spans (jetpacs-rich-text spans)))))
     ('plain-list (glasspane-org-rich--list el))
     ('src-block (glasspane-org-rich--src-block el))
     ((or 'example-block 'fixed-width)
-     (eabp-markup (or (org-element-property :value el) "")))
+     (jetpacs-markup (or (org-element-property :value el) "")))
     ('quote-block
      (let ((inner (delq nil (mapcar #'glasspane-org-rich--element
                                     (org-element-contents el)))))
-       (when inner (apply #'eabp-column inner))))
+       (when inner (apply #'jetpacs-column inner))))
     ('table
      ;; table.el tables keep the monospace fallback; org tables go native.
      (if (eq (org-element-property :type el) 'table.el)
-         (eabp-markup (string-trim (org-element-interpret-data el)) :syntax "org")
+         (jetpacs-markup (string-trim (org-element-interpret-data el)) :syntax "org")
        (or (glasspane-org-rich--table el)
-           (eabp-markup (string-trim (org-element-interpret-data el)) :syntax "org"))))
-    ('horizontal-rule (eabp-divider))
+           (jetpacs-markup (string-trim (org-element-interpret-data el)) :syntax "org"))))
+    ('horizontal-rule (jetpacs-divider))
     ('drawer (glasspane-org-rich--drawer el))
     ;; Structural noise the reader handles elsewhere (properties drawer) or
     ;; that carries no display value on its own.
@@ -2336,7 +2336,7 @@ renders read-only inside a foldable RESULTS section, like desktop org."
     (_
      (let ((txt (ignore-errors (string-trim (org-element-interpret-data el)))))
        (when (and (stringp txt) (not (string-empty-p txt)))
-         (eabp-markup txt :syntax "org"))))))
+         (jetpacs-markup txt :syntax "org"))))))
 
 (defun glasspane-org-rich--top-elements (tree)
   "Return the top-level elements of parsed TREE, descending through a section."
@@ -2349,9 +2349,9 @@ renders read-only inside a foldable RESULTS section, like desktop org."
 
 ;;;###autoload
 (defun glasspane-org-rich-body (body &optional base-dir file offset)
-  "Parse org BODY string into a list of EABP rich/markup nodes.
+  "Parse org BODY string into a list of Jetpacs rich/markup nodes.
 Paragraphs and lists become native `rich_text'; code/tables/examples
-fall back to highlighted `eabp-markup'. BASE-DIR resolves relative image
+fall back to highlighted `jetpacs-markup'. BASE-DIR resolves relative image
 paths (pass the org file's directory).
 
 FILE and OFFSET enable interactive elements (checkboxes): OFFSET maps
@@ -2379,10 +2379,10 @@ Returns nil for empty input."
 ;;; BEGIN apps/glasspane/glasspane-org-reader.el
 ;;; ==================================================================
 
-;;; glasspane-org-reader.el --- Foldable org outline renderer for EABP -*- lexical-binding: t; -*-
+;;; glasspane-org-reader.el --- Foldable org outline renderer for Jetpacs -*- lexical-binding: t; -*-
 
-;; Renders an org buffer (or a single subtree) into a tree of EABP widgets:
-;; each heading becomes an `eabp-collapsible' whose header is the org-highlighted
+;; Renders an org buffer (or a single subtree) into a tree of Jetpacs widgets:
+;; each heading becomes an `jetpacs-collapsible' whose header is the org-highlighted
 ;; heading line and whose children are an optional (collapsed) PROPERTIES drawer,
 ;; the heading's own body as highlighted org text, and its child headings —
 ;; recursively. Folding is resolved entirely on the device (see the `collapsible'
@@ -2396,12 +2396,12 @@ Returns nil for empty input."
 
 (require 'org)
 (require 'cl-lib)
-(require 'eabp-widgets)
+(require 'jetpacs-widgets)
 (require 'glasspane-org-rich)
 
 (defcustom glasspane-org-reader-max-headings 400
   "Cap on headings rendered in one reader pass, to bound very large files."
-  :type 'integer :group 'eabp)
+  :type 'integer :group 'jetpacs)
 
 ;; ─── Parsing ───────────────────────────────────────────────────────────────────
 
@@ -2474,9 +2474,9 @@ INCLUDE-FIRST non-nil includes the heading at BEG (used for subtrees)."
   "A collapsed PROPERTIES drawer node for PROPS (an alist of KEY . VALUE)."
   (let ((text (mapconcat (lambda (kv) (format ":%s: %s" (car kv) (cdr kv)))
                          props "\n")))
-    (eabp-collapsible (format "fold-props/%s/%s" file pos)
-                      (eabp-text "PROPERTIES" 'label)
-                      (list (eabp-text text 'mono))
+    (jetpacs-collapsible (format "fold-props/%s/%s" file pos)
+                      (jetpacs-text "PROPERTIES" 'label)
+                      (list (jetpacs-text text 'mono))
                       :collapsed t)))
 
 (defun glasspane-org-reader--content-nodes (n file &optional skip-props)
@@ -2505,18 +2505,18 @@ detail view already shows properties in its own section)."
            (mapcar (lambda (c) (glasspane-org-reader--heading-node c file)) children)))))
 
 (defun glasspane-org-reader--heading-node (n file)
-  "Render tree node N (and its subtree) to a foldable `eabp-collapsible'.
+  "Render tree node N (and its subtree) to a foldable `jetpacs-collapsible'.
 Long-pressing the header opens the heading detail view when FILE is available."
   (let* ((pos (plist-get n :pos))
          (ref (when file
                 `((file . ,file) (pos . ,pos) (headline . "")))))
-    (eabp-collapsible (format "fold/%s/%s" file pos)
-                      (eabp-markup (plist-get n :line) :syntax "org")
+    (jetpacs-collapsible (format "fold/%s/%s" file pos)
+                      (jetpacs-markup (plist-get n :line) :syntax "org")
                       (glasspane-org-reader--content-nodes n file)
                       :on-long-tap (when ref
-                                     (eabp-action "heading.tap" :args ref))
+                                     (jetpacs-action "heading.tap" :args ref))
                       :on-swipe (when ref
-                                  (eabp-action "heading.todo-cycle" :args ref)))))
+                                  (jetpacs-action "heading.todo-cycle" :args ref)))))
 
 ;; ─── Entry points ───────────────────────────────────────────────────────────────
 
@@ -2559,7 +2559,7 @@ When SKIP-PROPS is non-nil, the top-level PROPERTIES drawer is omitted."
 
 (defun glasspane-org-reader-refile-list (file)
   "Render all headings in FILE as a flat reorderable item list.
-Returns a single `eabp-reorderable-list' node for refile mode."
+Returns a single `jetpacs-reorderable-list' node for refile mode."
   (when (and file (file-readable-p file))
     (with-current-buffer (find-file-noselect file)
       (org-with-wide-buffer
@@ -2571,9 +2571,9 @@ Returns a single `eabp-reorderable-list' node for refile mode."
                                  (pos   . ,(plist-get r :pos))
                                  (file  . ,file)))
                              records)))
-         (eabp-reorderable-list
+         (jetpacs-reorderable-list
           items
-          :on-reorder (eabp-action "heading.reorder"
+          :on-reorder (jetpacs-action "heading.reorder"
                                    :args `((file . ,file)))))))))
 
 (provide 'glasspane-org-reader)
@@ -2590,50 +2590,50 @@ Returns a single `eabp-reorderable-list' node for refile mode."
 ;; buttons, and re-asserts it on reconnect so the phone's cache matches
 ;; reality after an Emacs restart.
 ;;
-;; This is app-layer code — the core (eabp-surfaces) knows nothing about
+;; This is app-layer code — the core (jetpacs-surfaces) knows nothing about
 ;; org; it only carries the `notification:org-clock' surface this module
 ;; pushes through the generic senders.
 
 ;;; Code:
 
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
 (require 'org-clock)
 
 (defun glasspane-clock-in-notification ()
   "Push the org-clock chronometer notification surface."
   (when (and (boundp 'org-clock-current-task) org-clock-current-task)
-    (eabp-surface-push
+    (jetpacs-surface-push
      "notification:org-clock"
-     (eabp-notification-spec
+     (jetpacs-notification-spec
       :channel "clocking" :ongoing t :category "stopwatch"
       :chronometer `((base_ms . ,(truncate (* (float-time org-clock-start-time) 1000))))
       :body (list
-             (eabp-text (format "Clocked in: %s" org-clock-current-task) 'title)
-             (eabp-row
-              (eabp-button "Clock out"
-                           (eabp-action "org.clock.out" :when-offline "wake"))
-              (eabp-button "Switch task"
-                           (eabp-action "org.clock.switch" :when-offline "wake"))))))))
+             (jetpacs-text (format "Clocked in: %s" org-clock-current-task) 'title)
+             (jetpacs-row
+              (jetpacs-button "Clock out"
+                           (jetpacs-action "org.clock.out" :when-offline "wake"))
+              (jetpacs-button "Switch task"
+                           (jetpacs-action "org.clock.switch" :when-offline "wake"))))))))
 
 (defun glasspane-clock-out-notification ()
   "Remove the org-clock notification surface."
-  (eabp-surface-remove "notification:org-clock"))
+  (jetpacs-surface-remove "notification:org-clock"))
 
 ;; Closing the loop: a tap on "Clock out" arrives here as an event.action.
-(eabp-defaction "org.clock.out"
+(jetpacs-defaction "org.clock.out"
                 (lambda (&rest _) (when (org-clock-is-active) (org-clock-out))))
-(eabp-defaction "org.clock.switch"
+(jetpacs-defaction "org.clock.switch"
                 ;; Placeholder: jump to the running task. Swap for a real
                 ;; task-picker (e.g. org-clock-in to a recent task) when ready.
                 (lambda (&rest _) (org-clock-goto)))
-(eabp-defaction "org.clock.in-last"
+(jetpacs-defaction "org.clock.in-last"
                 ;; The home-screen widget's "Clock In (Last)" button.
                 (lambda (&rest _)
                   (condition-case err
                       (org-clock-in-last)
-                    (error (message "EABP clock-in-last failed: %s"
+                    (error (message "Jetpacs clock-in-last failed: %s"
                                     (error-message-string err))))))
 
 (add-hook 'org-clock-in-hook  #'glasspane-clock-in-notification)
@@ -2641,8 +2641,8 @@ Returns a single `eabp-reorderable-list' node for refile mode."
 
 ;; On (re)connect, re-assert current clock state so the companion's cache
 ;; matches reality after an Emacs restart. (Runs after the revision snapshot
-;; has been absorbed — see the -50 depth in eabp-surfaces.)
-(add-hook 'eabp-connected-hook
+;; has been absorbed — see the -50 depth in jetpacs-surfaces.)
+(add-hook 'jetpacs-connected-hook
           (lambda (_welcome)
             (when (and (fboundp 'org-clock-is-active) (org-clock-is-active))
               (glasspane-clock-in-notification))))
@@ -2654,10 +2654,10 @@ Returns a single `eabp-reorderable-list' node for refile mode."
 ;;; BEGIN apps/glasspane/glasspane-ui.el
 ;;; ==================================================================
 
-;;; glasspane-ui.el --- The Glasspane org app for EABP -*- lexical-binding: t; -*-
+;;; glasspane-ui.el --- The Glasspane org app for Jetpacs -*- lexical-binding: t; -*-
 
 ;; The reference Tier 1 app: registers the org views (agenda, tasks, clock,
-;; search, detail, settings) into the generic shell (eabp-shell.el) and
+;; search, detail, settings) into the generic shell (jetpacs-shell.el) and
 ;; handles their semantic actions.  Everything here is one opinionated take
 ;; built on the core seams — shell views, the files module's editor hooks,
 ;; the settings registry, the render-buffer skin registry.  Nothing below
@@ -2665,22 +2665,22 @@ Returns a single `eabp-reorderable-list' node for refile mode."
 
 ;;; Code:
 
-(require 'eabp)
-(require 'eabp-surfaces)
-(require 'eabp-widgets)
-(require 'eabp-shell)
-(require 'eabp-apps)
+(require 'jetpacs)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-widgets)
+(require 'jetpacs-shell)
+(require 'jetpacs-apps)
 (require 'glasspane-org)
 (require 'glasspane-clock)
 (require 'glasspane-org-reader)
-(require 'eabp-files)
-(require 'eabp-keymap)
-(require 'eabp-magit)
-(require 'eabp-settings)
+(require 'jetpacs-files)
+(require 'jetpacs-keymap)
+(require 'jetpacs-magit)
+(require 'jetpacs-settings)
 ;; Not used directly — pulled in so (require 'glasspane-ui) still assembles
 ;; the complete reference app for init-file users.
-(require 'eabp-emacs-ui)
-(require 'eabp-package-browser)
+(require 'jetpacs-emacs-ui)
+(require 'jetpacs-package-browser)
 (require 'cl-lib)
 
 (defvar glasspane-ui--detail-ref nil
@@ -2696,9 +2696,9 @@ Returns a single `eabp-reorderable-list' node for refile mode."
   "Last submitted query for the Search view.")
 
 (defcustom glasspane-org-custom-agendas nil
-  "Alist of custom agenda views (Name . Query) for EABP."
+  "Alist of custom agenda views (Name . Query) for Jetpacs."
   :type '(alist :key-type string :value-type string)
-  :group 'eabp)
+  :group 'jetpacs)
 
 (defvar glasspane-ui--search-results nil
   "Cached heading items from the last search.")
@@ -2716,7 +2716,7 @@ Returns a single `eabp-reorderable-list' node for refile mode."
   (let ((rems (condition-case nil (glasspane-org--upcoming-reminders) (error nil))))
     (unless (equal rems glasspane-ui--last-reminders)
       (setq glasspane-ui--last-reminders rems)
-      (eabp-send "reminders.set" `((reminders . ,(vconcat rems)))))))
+      (jetpacs-send "reminders.set" `((reminders . ,(vconcat rems)))))))
 
 (defvar glasspane-ui--last-widget 'unset
   "Widget views from the previous push, to suppress identical pushes.")
@@ -2760,14 +2760,14 @@ trailing circle todo-cycles silently — the companion just renders."
          (ref (alist-get 'ref it))
          (meta (glasspane-ui--widget-item-meta it hm))
          (meta (unless (string-empty-p meta) meta)))
-    (eabp-widget-item
+    (jetpacs-widget-item
      (or (alist-get 'headline it) "Untitled")
      :todo todo :done done
      :meta meta
      :icon (and meta (glasspane-ui--widget-agenda-icon (alist-get 'type it)))
-     :on-tap (eabp-action "heading.tap" :args ref) :in-app t
+     :on-tap (jetpacs-action "heading.tap" :args ref) :in-app t
      :button (and todo (if done "todo_done" "todo_open"))
-     :on-button (and todo (eabp-action "heading.todo-cycle" :args ref)))))
+     :on-button (and todo (jetpacs-action "heading.todo-cycle" :args ref)))))
 
 (defun glasspane-ui--widget-items ()
   "Today's agenda as widget rows, overdue grouped under dividers."
@@ -2786,10 +2786,10 @@ trailing circle todo-cycles silently — the companion just renders."
     (if (null overdue)
         (mapcar #'glasspane-ui--widget-row raw)
       (append
-       (cons (eabp-widget-divider "Overdue")
+       (cons (jetpacs-widget-divider "Overdue")
              (mapcar #'glasspane-ui--widget-row overdue))
        (when current
-         (cons (eabp-widget-divider "Today")
+         (cons (jetpacs-widget-divider "Today")
                (mapcar #'glasspane-ui--widget-row current)))))))
 
 (defun glasspane-ui--widget-query-items (query)
@@ -2806,14 +2806,14 @@ re-pushing is cheap."
                        t))
             (file (alist-get 'file it))
             (ref (alist-get 'ref it)))
-       (eabp-widget-item
+       (jetpacs-widget-item
         (or (alist-get 'headline it) "Untitled")
         :todo todo :done done
         :meta (and file (file-name-nondirectory file))
         :icon (and file "folder")
-        :on-tap (eabp-action "heading.tap" :args ref) :in-app t
+        :on-tap (jetpacs-action "heading.tap" :args ref) :in-app t
         :button (and todo (if done "todo_done" "todo_open"))
-        :on-button (and todo (eabp-action "heading.todo-cycle" :args ref)))))
+        :on-button (and todo (jetpacs-action "heading.todo-cycle" :args ref)))))
    (seq-take (condition-case nil (glasspane-org--search query) (error nil))
              20)))
 
@@ -2836,14 +2836,14 @@ View keys are interned because `json-serialize' requires symbol keys."
                   glasspane-org-custom-agendas))))
     (unless (equal views glasspane-ui--last-widget)
       (setq glasspane-ui--last-widget views)
-      (eabp-surface-push
+      (jetpacs-surface-push
        "widget:agenda"
        `((views . ,views)
          (initial_view . "today"))))))
 
 ;; Both are memo-guarded, so unchanged data sends nothing.
-(add-hook 'eabp-shell-after-push-hook #'glasspane-ui--sync-reminders)
-(add-hook 'eabp-shell-after-push-hook #'glasspane-ui--push-widget)
+(add-hook 'jetpacs-shell-after-push-hook #'glasspane-ui--sync-reminders)
+(add-hook 'jetpacs-shell-after-push-hook #'glasspane-ui--push-widget)
 
 (defun glasspane-ui--forget-widget-memo ()
   "Force the next widget push even when the items are unchanged.
@@ -2852,28 +2852,28 @@ button) must visibly bump the widget's \"Synced\" caption, and a
 suppressed identical push would leave it frozen."
   (setq glasspane-ui--last-widget 'unset))
 
-(add-hook 'eabp-shell-refresh-hook #'glasspane-ui--forget-widget-memo)
+(add-hook 'jetpacs-shell-refresh-hook #'glasspane-ui--forget-widget-memo)
 
 ;; ─── Shell views ─────────────────────────────────────────────────────────────
 
 (defun glasspane-ui--agenda-view (snackbar)
-  (eabp-shell-tab-view "agenda" (glasspane-ui--agenda-body)
+  (jetpacs-shell-tab-view "agenda" (glasspane-ui--agenda-body)
                        :snackbar snackbar))
 
 (defun glasspane-ui--tasks-view (snackbar)
-  (eabp-shell-tab-view "tasks" (glasspane-ui--tasks-body)
+  (jetpacs-shell-tab-view "tasks" (glasspane-ui--tasks-body)
                        :snackbar snackbar))
 
 (defun glasspane-ui--clock-view (snackbar)
-  (eabp-shell-tab-view "clock" (glasspane-ui--clock-body)
+  (jetpacs-shell-tab-view "clock" (glasspane-ui--clock-body)
                        :snackbar snackbar))
 
 (defun glasspane-ui--search-view (snackbar)
-  (eabp-shell-nav-view "Search" (glasspane-ui--search-body)
+  (jetpacs-shell-nav-view "Search" (glasspane-ui--search-body)
                        :snackbar snackbar))
 
 (defun glasspane-ui--settings-view (snackbar)
-  (eabp-shell-nav-view "Settings" (glasspane-ui--settings-body)
+  (jetpacs-shell-nav-view "Settings" (glasspane-ui--settings-body)
                        :snackbar snackbar))
 
 (defun glasspane-ui--detail-view (snackbar)
@@ -2889,7 +2889,7 @@ suppressed identical push would leave it frozen."
                              (with-current-buffer buf
                                (= (line-number-at-pos pos)
                                   (line-number-at-pos org-clock-hd-marker))))))
-    (eabp-shell-nav-view
+    (jetpacs-shell-nav-view
      "Detail" (glasspane-ui--detail-body-with-notes ref)
      ;; Back is pure navigation: builtin = instant, local, works offline.
      ;; heading.back stays registered for compatibility but nothing emits
@@ -2898,95 +2898,95 @@ suppressed identical push would leave it frozen."
                     (list
                      (when ref
                        (if is-clocked-in
-                           (eabp-icon-button "timer_off" (eabp-action "org.clock.out")
+                           (jetpacs-icon-button "timer_off" (jetpacs-action "org.clock.out")
                                              :content-description "Clock Out")
-                         (eabp-icon-button "timer" (eabp-action "heading.clock-in" :args ref)
+                         (jetpacs-icon-button "timer" (jetpacs-action "heading.clock-in" :args ref)
                                            :content-description "Clock In")))
-                     (eabp-icon-button
+                     (jetpacs-icon-button
                       (if glasspane-ui--detail-read-mode "edit" "visibility")
-                      (eabp-action "detail.toggle-read")
+                      (jetpacs-action "detail.toggle-read")
                       :content-description
                       (if glasspane-ui--detail-read-mode "Edit" "Read"))
                      (when (and ref (glasspane-ui--org-file-p file))
-                       (eabp-icon-button
+                       (jetpacs-icon-button
                         "tune"
-                        (eabp-action "files.properties.show"
+                        (jetpacs-action "files.properties.show"
                                      :args `((file . ,file)))
                         :content-description "Properties"))))
    :bottom-bar (when glasspane-ui--detail-read-mode
-                 (eabp-bottom-bar
+                 (jetpacs-bottom-bar
                   (list
-                   (eabp-nav-item
+                   (jetpacs-nav-item
                     "note_add" "New Note"
-                    (eabp-action "heading.add-note"
+                    (jetpacs-action "heading.add-note"
                                  :args glasspane-ui--detail-ref
                                  :when-offline "drop")))))
    :floating-toolbar (when glasspane-ui--detail-read-mode
                        (vconcat
                         (list
-                         (eabp-nav-item
+                         (jetpacs-nav-item
                           "drive_file_move" "Refile"
-                          (eabp-action "heading.refile"
+                          (jetpacs-action "heading.refile"
                                        :args glasspane-ui--detail-ref
                                        :when-offline "drop"))
-                         (eabp-nav-item
+                         (jetpacs-nav-item
                           "archive" "Archive"
-                          (eabp-action "heading.archive"
+                          (jetpacs-action "heading.archive"
                                        :args glasspane-ui--detail-ref
                                        :when-offline "drop")))))
    :snackbar snackbar)))
 
-(eabp-shell-define-view "agenda" :builder #'glasspane-ui--agenda-view
+(jetpacs-shell-define-view "agenda" :builder #'glasspane-ui--agenda-view
                         :tab '(:icon "event" :label "Agenda") :order 10)
-(eabp-shell-define-view "tasks" :builder #'glasspane-ui--tasks-view
+(jetpacs-shell-define-view "tasks" :builder #'glasspane-ui--tasks-view
                         :tab '(:icon "checklist" :label "Tasks") :order 20)
 ;; The clock lost its tab 2026-07-06 (user decision: six tabs was
 ;; crowded and the screen alone felt barren) — its body now renders as
 ;; a section of the Journal view.  The view stays registered so cached
 ;; `view.switch' targets from older pushes still resolve.
-(eabp-shell-define-view "clock" :builder #'glasspane-ui--clock-view
+(jetpacs-shell-define-view "clock" :builder #'glasspane-ui--clock-view
                         :order 30)
-(eabp-shell-define-view "search" :builder #'glasspane-ui--search-view
+(jetpacs-shell-define-view "search" :builder #'glasspane-ui--search-view
                         :order 70)
-(eabp-shell-define-view "settings" :builder #'glasspane-ui--settings-view
+(jetpacs-shell-define-view "settings" :builder #'glasspane-ui--settings-view
                         :order 80)
-(eabp-shell-define-view "detail" :builder #'glasspane-ui--detail-view
+(jetpacs-shell-define-view "detail" :builder #'glasspane-ui--detail-view
                         :when (lambda () (and glasspane-ui--detail-ref t))
                         :overlay (lambda () (and glasspane-ui--detail-ref t))
                         :order 110)
 
-;; Glasspane is the first `eabp-defapp'. Zero visible change while it is
-;; the only app; load a second app (eabp-hello.el) and the launcher home
+;; Glasspane is the first `jetpacs-defapp'. Zero visible change while it is
+;; the only app; load a second app (jetpacs-hello.el) and the launcher home
 ;; appears with these views grouped as Glasspane's own.
-(eabp-defapp "glasspane" :label "Glasspane" :icon "event"
+(jetpacs-defapp "glasspane" :label "Glasspane" :icon "event"
              :views '("agenda" "journal" "tasks" "clock" "search" "views"
                       "srs" "settings" "detail")
              :order 10)
 
 ;; Landing on any non-overlay view closes the detail drill-in.
-(add-hook 'eabp-shell-view-switched-hook
+(add-hook 'jetpacs-shell-view-switched-hook
           (lambda (_view) (setq glasspane-ui--detail-ref nil)))
 
 ;; Capture is this app's global affordance: the default FAB on every tab
 ;; view that doesn't define its own.
-(setq eabp-shell-default-fab-function
+(setq jetpacs-shell-default-fab-function
       (lambda (_name)
-        (eabp-fab "add" :label "Capture"
-                  :on-tap (eabp-action "org.capture.show"))))
+        (jetpacs-fab "add" :label "Capture"
+                  :on-tap (jetpacs-action "org.capture.show"))))
 
 ;; Search from every tab's top bar; Settings from the drawer.  (There
 ;; used to be a second filter_list icon here doing the same switch —
 ;; one affordance per destination.)
-(eabp-shell-add-top-action
- 10 (lambda () (eabp-icon-button "search" (eabp-shell-switch-view "search")
+(jetpacs-shell-add-top-action
+ 10 (lambda () (jetpacs-icon-button "search" (jetpacs-shell-switch-view "search")
                                  :content-description "Search")))
-(eabp-shell-add-drawer-item
- 60 (lambda () (eabp-drawer-item "settings" "Settings"
-                                 (eabp-shell-switch-view "settings"))))
+(jetpacs-shell-add-drawer-item
+ 60 (lambda () (jetpacs-drawer-item "settings" "Settings"
+                                 (jetpacs-shell-switch-view "settings"))))
 
 ;; The org extractions are memoised; an explicit refresh (pull-to-refresh,
 ;; the drawer item, a queue drain) must drop them.
-(add-hook 'eabp-shell-refresh-hook #'glasspane-org-cache-invalidate)
+(add-hook 'jetpacs-shell-refresh-hook #'glasspane-org-cache-invalidate)
 
 ;; ─── Tab Bodies ──────────────────────────────────────────────────────────────
 
@@ -2999,7 +2999,7 @@ suppressed identical push would leave it frozen."
 
 (defun glasspane-ui--agenda-anchor ()
   "The agenda's anchor date as \"YYYY-MM-DD\"; today when unset."
-  (let ((a (eabp-ui-state "agenda-anchor")))
+  (let ((a (jetpacs-ui-state "agenda-anchor")))
     (if (and (stringp a) (string-match-p "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" a))
         a
       (format-time-string "%Y-%m-%d"))))
@@ -3039,19 +3039,19 @@ month is Feb 28, not an invalid date."
                   (_ (if at-today
                          (concat "Today · " (glasspane-ui--format-date anchor "%a, %b %d"))
                        (glasspane-ui--format-date anchor "%a, %b %d"))))))
-    (apply #'eabp-row
+    (apply #'jetpacs-row
            (delq nil
                  (list
-                  (eabp-icon-button "chevron_left"
-                                    (eabp-action "agenda.nav" :args '((dir . -1)))
+                  (jetpacs-icon-button "chevron_left"
+                                    (jetpacs-action "agenda.nav" :args '((dir . -1)))
                                     :content-description "Previous")
-                  (eabp-box (list (eabp-text label 'label))
+                  (jetpacs-box (list (jetpacs-text label 'label))
                             :weight 1 :alignment "center")
                   (unless at-today
-                    (eabp-icon-button "today" (eabp-action "agenda.today")
+                    (jetpacs-icon-button "today" (jetpacs-action "agenda.today")
                                       :content-description "Back to today"))
-                  (eabp-icon-button "chevron_right"
-                                    (eabp-action "agenda.nav" :args '((dir . 1)))
+                  (jetpacs-icon-button "chevron_right"
+                                    (jetpacs-action "agenda.nav" :args '((dir . 1)))
                                     :content-description "Next"))))))
 
 ;; ── Agenda cards ──
@@ -3080,7 +3080,7 @@ month is Feb 28, not an invalid date."
              (string-match "\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)" ts))
     (let* ((month (string-to-number (match-string 2 ts)))
            (day   (string-to-number (match-string 3 ts)))
-           (mon   (aref eabp--month-abbrevs (1- month)))
+           (mon   (aref jetpacs--month-abbrevs (1- month)))
            (time  (glasspane-ui--ts-time ts)))
       (if time (format "%s %d %s" mon day time)
         (format "%s %d" mon day)))))
@@ -3095,13 +3095,13 @@ Returns nil when neither is set."
          (dlabel (glasspane-ui--card-date-label deadline))
          (children (delq nil
                          (list
-                          (when slabel (eabp-icon "schedule" :size 14 :color "#9E9E9E"))
-                          (when slabel (eabp-text (concat " " slabel) 'caption))
-                          (when (and slabel dlabel) (eabp-spacer :width 16))
-                          (when dlabel (eabp-icon "flag" :size 14 :color "#EF5350"))
-                          (when dlabel (eabp-text (concat " " dlabel) 'caption))))))
+                          (when slabel (jetpacs-icon "schedule" :size 14 :color "#9E9E9E"))
+                          (when slabel (jetpacs-text (concat " " slabel) 'caption))
+                          (when (and slabel dlabel) (jetpacs-spacer :width 16))
+                          (when dlabel (jetpacs-icon "flag" :size 14 :color "#EF5350"))
+                          (when dlabel (jetpacs-text (concat " " dlabel) 'caption))))))
     (when children
-      (apply #'eabp-row children))))
+      (apply #'jetpacs-row children))))
 
 (defun glasspane-ui--agenda-card (it)
   "A detail-rich agenda card for item IT.
@@ -3128,43 +3128,43 @@ and a quick complete button for open todos."
                                    (and file (file-name-nondirectory file))))
                    "  ·  "))
          (lead (cond ((and (stringp time) (not (string-empty-p time)))
-                      (eabp-text time 'label))
+                      (jetpacs-text time 'label))
                      (icon+color
-                      (eabp-icon (car icon+color) :size 18 :color (cdr icon+color)))))
+                      (jetpacs-icon (car icon+color) :size 18 :color (cdr icon+color)))))
          (headline-node
-          (eabp-rich-text
+          (jetpacs-rich-text
            (delq nil
                  (list
                   (when priority
-                    (eabp-span (format "[%s] " priority) :bold t :color "#F57C00"))
+                    (jetpacs-span (format "[%s] " priority) :bold t :color "#F57C00"))
                   (if done
-                      (eabp-span headline :strike t)
-                    (eabp-span headline))))))
+                      (jetpacs-span headline :strike t)
+                    (jetpacs-span headline))))))
          (middle
-          (apply #'eabp-column
+          (apply #'jetpacs-column
                  (delq nil
                        (list
                         headline-node
                         (unless (string-empty-p caption)
-                          (eabp-text caption 'caption))
+                          (jetpacs-text caption 'caption))
                         (glasspane-ui--card-date-row it)
                         (when tags
-                          (apply #'eabp-flow-row
+                          (apply #'jetpacs-flow-row
                                  (mapcar (lambda (tg)
-                                           (eabp-assist-chip tg :on-tap (eabp-action "search.by-tag" :args `((tag . ,tg)))))
+                                           (jetpacs-assist-chip tg :on-tap (jetpacs-action "search.by-tag" :args `((tag . ,tg)))))
                                          tags))))))))
-    (eabp-card
-     (list (apply #'eabp-row
+    (jetpacs-card
+     (list (apply #'jetpacs-row
                   (delq nil (list lead
-                                  (eabp-box (list middle) :weight 1)))))
-     :on-tap (eabp-action "heading.tap" :args ref)
-     :on-swipe (eabp-action "heading.todo-cycle" :args ref))))
+                                  (jetpacs-box (list middle) :weight 1)))))
+     :on-tap (jetpacs-action "heading.tap" :args ref)
+     :on-swipe (jetpacs-action "heading.todo-cycle" :args ref))))
 
 (defun glasspane-ui--agenda-day-view (items)
   (let ((cards (mapcar #'glasspane-ui--agenda-card items)))
     (if cards
-        (apply #'eabp-lazy-column cards)
-      (eabp-empty-state :icon "event_busy"
+        (apply #'jetpacs-lazy-column cards)
+      (jetpacs-empty-state :icon "event_busy"
                         :title "No agenda items"
                         :caption "Nothing scheduled for this day."))))
 
@@ -3175,11 +3175,11 @@ and a quick complete button for open todos."
       (let ((date (alist-get 'date it)))
         (unless (equal date current-date)
           (setq current-date date)
-          (push (eabp-section-header (or date "Unknown Date")) elements))
+          (push (jetpacs-section-header (or date "Unknown Date")) elements))
         (push (glasspane-ui--agenda-card it) elements)))
     (if elements
-        (apply #'eabp-lazy-column (nreverse elements))
-      (eabp-empty-state :icon "event_busy"
+        (apply #'jetpacs-lazy-column (nreverse elements))
+      (jetpacs-empty-state :icon "event_busy"
                         :title "No agenda items"
                         :caption "Nothing scheduled for this week."))))
 
@@ -3187,7 +3187,7 @@ and a quick complete button for open todos."
   "Month grid for ITEMS, showing the month containing ANCHOR (YYYY-MM-DD)."
   (let* ((today (format-time-string "%Y-%m-%d"))
          (month-prefix (substring anchor 0 7))
-         (sel (eabp-ui-state "agenda-selected-date"))
+         (sel (jetpacs-ui-state "agenda-selected-date"))
          ;; A remembered selection only counts inside the shown month;
          ;; otherwise select today (when visible) or the anchor day.
          (selected-date (cond
@@ -3202,45 +3202,45 @@ and a quick complete button for open todos."
          (first-day-of-month (calendar-day-of-week (list month 1 year)))
          (grid-rows nil)
          (current-day 1)
-         (week-header (apply #'eabp-row
-                             (mapcar (lambda (d) (eabp-box (list (eabp-text d 'caption)) :weight 1 :alignment "center"))
+         (week-header (apply #'jetpacs-row
+                             (mapcar (lambda (d) (jetpacs-box (list (jetpacs-text d 'caption)) :weight 1 :alignment "center"))
                                      '("S" "M" "T" "W" "T" "F" "S")))))
     (while (<= current-day days-in-month)
       (let ((row-cells nil))
         (dotimes (dow 7)
           (if (or (and (= current-day 1) (< dow first-day-of-month))
                   (> current-day days-in-month))
-              (push (eabp-box (list (eabp-spacer)) :weight 1) row-cells)
+              (push (jetpacs-box (list (jetpacs-spacer)) :weight 1) row-cells)
             (let* ((date-str (format "%04d-%02d-%02d" year month current-day))
                    (day-items (cdr (assoc date-str items-by-date)))
                    (is-selected (equal date-str selected-date))
                    (text-color (if is-selected "#FFFFFF" nil))
                    (bg-color (if is-selected "#1976D2" nil))
                    (cell-content (list
-                                  (eabp-surface
+                                  (jetpacs-surface
                                    (list
-                                    (eabp-text (number-to-string current-day) 'body nil text-color)
+                                    (jetpacs-text (number-to-string current-day) 'body nil text-color)
                                     (if day-items
-                                        (eabp-icon "circle" :size 6 :color (if is-selected "#FFFFFF" "#1976D2") :padding 2)
-                                      (eabp-spacer :height 8)))
+                                        (jetpacs-icon "circle" :size 6 :color (if is-selected "#FFFFFF" "#1976D2") :padding 2)
+                                      (jetpacs-spacer :height 8)))
                                    :color bg-color :shape "rounded" :padding 4))))
-              (push (eabp-box cell-content :weight 1 :alignment "center"
-                              :on-tap (eabp-action "agenda.select-date" :args `((date . ,date-str))))
+              (push (jetpacs-box cell-content :weight 1 :alignment "center"
+                              :on-tap (jetpacs-action "agenda.select-date" :args `((date . ,date-str))))
                     row-cells)
               (setq current-day (1+ current-day)))))
-        (push (apply #'eabp-row (nreverse row-cells)) grid-rows)))
-    (eabp-column
+        (push (apply #'jetpacs-row (nreverse row-cells)) grid-rows)))
+    (jetpacs-column
      week-header
-     (eabp-spacer :height 8)
-     (apply #'eabp-column (nreverse grid-rows))
-     (eabp-divider)
-     (eabp-section-header (format "Events for %s" selected-date))
+     (jetpacs-spacer :height 8)
+     (apply #'jetpacs-column (nreverse grid-rows))
+     (jetpacs-divider)
+     (jetpacs-section-header (format "Events for %s" selected-date))
      (if selected-items
-         (apply #'eabp-lazy-column (mapcar #'glasspane-ui--agenda-card selected-items))
-       (eabp-text "No events" 'caption)))))
+         (apply #'jetpacs-lazy-column (mapcar #'glasspane-ui--agenda-card selected-items))
+       (jetpacs-text "No events" 'caption)))))
 
 (defun glasspane-ui--agenda-body ()
-  (let* ((mode (or (eabp-ui-state "agenda-mode") "day"))
+  (let* ((mode (or (jetpacs-ui-state "agenda-mode") "day"))
          (is-span (member mode '("day" "week" "month")))
          (anchor (glasspane-ui--agenda-anchor))
          ;; The month span always starts on the 1st so the grid and the
@@ -3254,27 +3254,27 @@ and a quick complete button for open todos."
                  (t (condition-case nil (glasspane-org--search (cdr (assoc mode glasspane-org-custom-agendas))) (error nil)))))
          (custom-chips (mapcar (lambda (ca)
                                  (let ((name (car ca)))
-                                   (eabp-chip name
+                                   (jetpacs-chip name
                                               :selected (equal mode name)
-                                              :on-tap (eabp-action "agenda.set-mode" :args `((mode . ,name))))))
+                                              :on-tap (jetpacs-action "agenda.set-mode" :args `((mode . ,name))))))
                                glasspane-org-custom-agendas)))
-    (apply #'eabp-column
+    (apply #'jetpacs-column
            (delq nil
                  (list
-                  (apply #'eabp-flow-row
-                         (eabp-chip "Day"
+                  (apply #'jetpacs-flow-row
+                         (jetpacs-chip "Day"
                                     :selected (equal mode "day")
-                                    :on-tap (eabp-action "agenda.set-mode" :args '((mode . "day"))))
-                         (eabp-chip "Week"
+                                    :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "day"))))
+                         (jetpacs-chip "Week"
                                     :selected (equal mode "week")
-                                    :on-tap (eabp-action "agenda.set-mode" :args '((mode . "week"))))
-                         (eabp-chip "Month"
+                                    :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "week"))))
+                         (jetpacs-chip "Month"
                                     :selected (equal mode "month")
-                                    :on-tap (eabp-action "agenda.set-mode" :args '((mode . "month"))))
+                                    :on-tap (jetpacs-action "agenda.set-mode" :args '((mode . "month"))))
                          custom-chips)
                   (when is-span
                     (glasspane-ui--agenda-nav-row mode anchor))
-                  (eabp-spacer :height 4)
+                  (jetpacs-spacer :height 4)
                   (cond
                    ((equal mode "day")
                     (glasspane-ui--agenda-day-view items))
@@ -3284,8 +3284,8 @@ and a quick complete button for open todos."
                     (glasspane-ui--agenda-month-view items anchor))
                    (t
                     (if items
-                        (apply #'eabp-lazy-column (mapcar #'glasspane-ui--agenda-card items))
-                      (eabp-empty-state :icon "event_busy"
+                        (apply #'jetpacs-lazy-column (mapcar #'glasspane-ui--agenda-card items))
+                      (jetpacs-empty-state :icon "event_busy"
                                         :title "No results"
                                         :caption "This custom agenda found no items.")))))))))
 
@@ -3299,23 +3299,23 @@ and a quick complete button for open todos."
                         (equal (alist-get 'todo it) glasspane-ui--tasks-filter))
                       items)))
          (cards (mapcar #'glasspane-ui--agenda-card filtered)))
-    (eabp-column
-     (apply #'eabp-flow-row
+    (jetpacs-column
+     (apply #'jetpacs-flow-row
             (mapcar (lambda (kw)
-                      (eabp-chip kw
+                      (jetpacs-chip kw
                                  :selected (equal glasspane-ui--tasks-filter kw)
-                                 :on-tap (eabp-action "tasks.filter"
+                                 :on-tap (jetpacs-action "tasks.filter"
                                                       :args `((filter . ,kw)))))
                     (cons "ALL" (or (glasspane-ui--global-todo-keywords)
                                     '("TODO" "DONE")))))
      (if cards
-         (apply #'eabp-lazy-column cards)
-       (eabp-empty-state :icon "task_alt"
+         (apply #'jetpacs-lazy-column cards)
+       (jetpacs-empty-state :icon "task_alt"
                          :title "No tasks"
                          :caption "Nothing matches this filter.")))))
 
 ;; The old agenda-files-only "files" body is superseded by the full
-;; browser in eabp-files.el (eabp-files-browser-body).
+;; browser in jetpacs-files.el (jetpacs-files-browser-body).
 
 (defun glasspane-ui--clock-body ()
   (let* ((status (glasspane-org--clock-status))
@@ -3327,28 +3327,28 @@ and a quick complete button for open todos."
               (let* ((start (alist-get 'start status))
                      (mins (when start
                              (max 0 (floor (/ (- (float-time) start) 60))))))
-                (eabp-card
-                 (list (eabp-column
-                        (eabp-text "Currently Clocked In" 'caption)
-                        (eabp-text (or (alist-get 'task status) "?") 'headline)
-                        (eabp-text (if mins (format "%d min elapsed" mins) "")
+                (jetpacs-card
+                 (list (jetpacs-column
+                        (jetpacs-text "Currently Clocked In" 'caption)
+                        (jetpacs-text (or (alist-get 'task status) "?") 'headline)
+                        (jetpacs-text (if mins (format "%d min elapsed" mins) "")
                                    'caption)
-                        (eabp-button "Clock Out" (eabp-action "org.clock.out"))))))
-            (eabp-empty-state :icon "schedule"
+                        (jetpacs-button "Clock Out" (jetpacs-action "org.clock.out"))))))
+            (jetpacs-empty-state :icon "schedule"
                               :title "Not clocked in"
                               :caption "Pick a recent task below to start.")))
          (recent-cards
           (mapcar (lambda (r)
-                    (eabp-card
-                     (list (eabp-text (or (alist-get 'headline r) "?") 'body))
-                     :on-tap (eabp-action "heading.clock-in"
+                    (jetpacs-card
+                     (list (jetpacs-text (or (alist-get 'headline r) "?") 'body))
+                     :on-tap (jetpacs-action "heading.clock-in"
                                           :args (alist-get 'ref r))))
                   recent))
          (all-children (append (list status-card)
                                (when recent-cards
-                                 (cons (eabp-section-header "Recent Tasks")
+                                 (cons (jetpacs-section-header "Recent Tasks")
                                        recent-cards)))))
-    (apply #'eabp-column all-children)))
+    (apply #'jetpacs-column all-children)))
 
 (defun glasspane-ui--result-card (it)
   "Render a search/heading item IT to a tappable card with tag chips."
@@ -3362,23 +3362,23 @@ and a quick complete button for open todos."
                    "  ·  "))
          (children (delq nil
                          (list
-                          (eabp-text headline 'body)
+                          (jetpacs-text headline 'body)
                           (unless (string-empty-p caption)
-                            (eabp-text caption 'caption))
+                            (jetpacs-text caption 'caption))
                           (when tags
-                            (apply #'eabp-flow-row
+                            (apply #'jetpacs-flow-row
                                    (mapcar (lambda (tg)
-                                             (eabp-assist-chip tg :on-tap (eabp-action "search.by-tag" :args `((tag . ,tg)))))
+                                             (jetpacs-assist-chip tg :on-tap (jetpacs-action "search.by-tag" :args `((tag . ,tg)))))
                                            tags)))))))
-    (eabp-card (list (apply #'eabp-column children))
-               :on-tap (eabp-action "heading.tap" :args ref))))
+    (jetpacs-card (list (apply #'jetpacs-column children))
+               :on-tap (jetpacs-action "heading.tap" :args ref))))
 
 (defun glasspane-ui--filter-values (id)
   "Selected values for builder filter ID, as a list of strings.
 UI state for an enum may hold the parsed vector from an action's
 args, the raw JSON text a `state.changed' event delivered, or a
 plain seed string — normalise them all."
-  (let ((v (eabp-ui-state id)))
+  (let ((v (jetpacs-ui-state id)))
     (cond
      ((null v) nil)
      ((vectorp v) (append v nil))
@@ -3395,13 +3395,13 @@ KEY names the fold-state id; LABEL is the always-visible section
 name.  SUMMARY, when non-nil, is the active filter rendered into the
 header so a folded section still shows what it contributes.  WIDGET
 is the section's control."
-  (eabp-collapsible
+  (jetpacs-collapsible
    (concat "search-sec-" key)
    (if summary
-       (eabp-rich-text (list (eabp-span (concat label ": ") :bold t)
-                             (eabp-span summary))
+       (jetpacs-rich-text (list (jetpacs-span (concat label ": ") :bold t)
+                             (jetpacs-span summary))
                        :style 'body)
-     (eabp-text label 'body))
+     (jetpacs-text label 'body))
    (list widget)
    :collapsed t))
 
@@ -3415,98 +3415,98 @@ folded builder reads as a filter summary.  The whole card starts
 folded once a search has results, to keep them above the fold."
   (let* ((todo-val (or (car (glasspane-ui--filter-values "search-filter-todo")) "Any"))
          (tags-list (glasspane-ui--filter-values "search-filter-tags"))
-         (text-val (or (eabp-ui-state "search-filter-text") ""))
+         (text-val (or (jetpacs-ui-state "search-filter-text") ""))
          (prio-val (or (car (glasspane-ui--filter-values "search-filter-priority")) "Any"))
          (due-val (or (car (glasspane-ui--filter-values "search-filter-due")) "Any")))
-    (eabp-card
+    (jetpacs-card
      (list
-      (eabp-collapsible
+      (jetpacs-collapsible
        "search-builder"
-       (eabp-text "Query builder" 'headline)
+       (jetpacs-text "Query builder" 'headline)
        (list
         (glasspane-ui--search-builder-section
          "todo" "Status" (unless (equal todo-val "Any") todo-val)
-         (eabp-enum-list "search-filter-todo"
+         (jetpacs-enum-list "search-filter-todo"
                          (append '("Any") (glasspane-ui--global-todo-keywords)
                                  '("Done (any)"))
                          :value todo-val
-                         :on-change (eabp-action "search.update-filter"
+                         :on-change (jetpacs-action "search.update-filter"
                                                  :args '((field . "todo")))))
         (glasspane-ui--search-builder-section
          "tags" "Tags (all must match)"
          (when tags-list (string-join tags-list ", "))
-         (eabp-enum-list "search-filter-tags" (glasspane-org--all-tags)
+         (jetpacs-enum-list "search-filter-tags" (glasspane-org--all-tags)
                          :value (vconcat tags-list)
                          :multi-select t
                          :allow-add t
-                         :on-change (eabp-action "search.update-filter"
+                         :on-change (jetpacs-action "search.update-filter"
                                                  :args '((field . "tags")))))
         (glasspane-ui--search-builder-section
          "priority" "Priority" (unless (equal prio-val "Any") prio-val)
-         (eabp-enum-list "search-filter-priority" '("Any" "A" "B" "C")
+         (jetpacs-enum-list "search-filter-priority" '("Any" "A" "B" "C")
                          :value prio-val
-                         :on-change (eabp-action "search.update-filter"
+                         :on-change (jetpacs-action "search.update-filter"
                                                  :args '((field . "priority")))))
         (glasspane-ui--search-builder-section
          "due" "Due" (unless (equal due-val "Any") due-val)
-         (eabp-enum-list "search-filter-due" '("Any" "Overdue" "Today" "This week")
+         (jetpacs-enum-list "search-filter-due" '("Any" "Overdue" "Today" "This week")
                          :value due-val
-                         :on-change (eabp-action "search.update-filter"
+                         :on-change (jetpacs-action "search.update-filter"
                                                  :args '((field . "due")))))
         (glasspane-ui--search-builder-section
          "text" "Text contains"
          (unless (string-empty-p text-val) text-val)
-         (eabp-text-input "search-filter-text"
+         (jetpacs-text-input "search-filter-text"
                           :value text-val
                           :hint "e.g. meeting notes"
                           :single-line t
-                          :on-submit (eabp-action "search.update-filter"
+                          :on-submit (jetpacs-action "search.update-filter"
                                                   :args '((field . "text")))))
-        (eabp-row
-         (eabp-box (list (eabp-text "Filters search as you pick them and write the org-ql query below — edit it there to go further."
+        (jetpacs-row
+         (jetpacs-box (list (jetpacs-text "Filters search as you pick them and write the org-ql query below — edit it there to go further."
                                     'caption))
                    :weight 1)
-         (eabp-button "Clear" (eabp-action "search.clear-filters"))))
+         (jetpacs-button "Clear" (jetpacs-action "search.clear-filters"))))
        :collapsed (and glasspane-ui--search-results t)))
      :padding 16)))
 
 (defun glasspane-ui--search-body ()
   (let* ((q (or glasspane-ui--search-query ""))
          (results glasspane-ui--search-results)
-         (input (eabp-text-input "search-query"
+         (input (jetpacs-text-input "search-query"
                                  :value q
                                  :hint "Text, todo:NEXT tags:work, or (org-ql query)"
                                  :single-line t
-                                 :on-submit (eabp-action "org.search.run")))
+                                 :on-submit (jetpacs-action "org.search.run")))
          (cards (mapcar #'glasspane-ui--result-card results)))
     ;; One lazy column for the whole view: the builder card can grow
     ;; taller than the screen (a big tag vocabulary), so everything —
     ;; builder, search row, results — must share a single scroll.  A
     ;; plain column gives overflowing children zero height instead.
     (apply
-     #'eabp-lazy-column
+     #'jetpacs-lazy-column
      (glasspane-ui--search-builder)
-     (eabp-spacer :height 8)
-     (eabp-row
-      (eabp-box (list input) :weight 1)
-      (eabp-button "Search" (eabp-action "org.search.run" :args `((value . ,q))))
-      (eabp-button "Save" (eabp-action "agenda.save-custom" :args `((query . ,q)))))
-     (eabp-spacer :height 8)
+     (jetpacs-spacer :height 8)
+     (jetpacs-row
+      (jetpacs-box (list input) :weight 1)
+      (jetpacs-button "Search" (jetpacs-action "org.search.run" :args `((value . ,q))))
+      (jetpacs-button "Save" (jetpacs-action "agenda.save-custom" :args `((query . ,q)))))
+     (jetpacs-spacer :height 8)
      (cond
       (glasspane-ui--search-error
-       (list (eabp-empty-state :icon "error"
+       (list (jetpacs-empty-state :icon "error"
                                :title "Query error"
                                :caption glasspane-ui--search-error)))
       (cards
-       (cons (eabp-section-header (format "%d match%s" (length cards)
+       (cons (jetpacs-section-header (format "%d match%s" (length cards)
                                           (if (= (length cards) 1) "" "es")))
              cards))
       ((and (stringp q) (not (string-empty-p q)))
-       (list (eabp-empty-state :icon "manage_search"
+       (list (jetpacs-empty-state :icon "manage_search"
                                :title "No matches"
                                :caption (format "Nothing matched \"%s\"." q))))
       (t
-       (list (eabp-empty-state :icon "search"
+       (list (jetpacs-empty-state :icon "search"
                                :title "Search your notes"
                                :caption "Type a query, or open the query builder above.")))))))
 
@@ -3547,34 +3547,34 @@ is the finished state."
 
 (defun glasspane-ui--settings-body ()
   (let* ((available-tags (mapcar (lambda (x) (if (consp x) (car x) x)) org-tag-alist))
-         (enum-list (eabp-enum-list "settings-tags" available-tags
+         (enum-list (jetpacs-enum-list "settings-tags" available-tags
                                     :value available-tags
                                     :multi-select t
                                     :allow-add t
-                                    :on-change (eabp-action "settings.tags")))
-         (linenum-value (pcase eabp-line-numbers
+                                    :on-change (jetpacs-action "settings.tags")))
+         (linenum-value (pcase jetpacs-line-numbers
                           ('absolute "Absolute")
                           ('relative "Relative")
                           (_ "Off")))
          (agenda-cards
           (cl-loop for (name . query) in glasspane-org-custom-agendas
                    collect
-                   (eabp-card
+                   (jetpacs-card
                     (list
-                     (eabp-row
-                      (eabp-box
+                     (jetpacs-row
+                      (jetpacs-box
                        (list
-                        (eabp-column
-                         (eabp-text name 'label)
-                         (eabp-text query 'body)))
+                        (jetpacs-column
+                         (jetpacs-text name 'label)
+                         (jetpacs-text query 'body)))
                        :weight 1)
-                      (eabp-icon-button "edit"
-                                        (eabp-action "settings.agenda.edit"
+                      (jetpacs-icon-button "edit"
+                                        (jetpacs-action "settings.agenda.edit"
                                                      :args `((name . ,name))
                                                      :when-offline "drop")
                                         :content-description "Edit search")
-                      (eabp-icon-button "delete"
-                                        (eabp-action "settings.agenda.delete"
+                      (jetpacs-icon-button "delete"
+                                        (jetpacs-action "settings.agenda.delete"
                                                      :args `((name . ,name))
                                                      :when-offline "drop")
                                         :content-description "Delete search"))))))
@@ -3590,73 +3590,73 @@ is the finished state."
                                         w)))
                               (active (mapcar bare (car split)))
                               (finished (mapcar bare (cdr split))))
-                         (eabp-card
+                         (jetpacs-card
                           (list
-                           (eabp-row
+                           (jetpacs-row
                             ;; The text column must carry the flex weight
                             ;; itself: the client renders columns fillMaxWidth,
                             ;; so an unweighted one swallows the whole row and
                             ;; pushes the buttons off-screen.
-                            (eabp-box
+                            (jetpacs-box
                              (list
-                              (eabp-column
-                               (eabp-text (format "Sequence %d" (1+ i)) 'label)
-                               (eabp-text (concat (mapconcat #'identity active ", ") " | " (mapconcat #'identity finished ", ")) 'body)))
+                              (jetpacs-column
+                               (jetpacs-text (format "Sequence %d" (1+ i)) 'label)
+                               (jetpacs-text (concat (mapconcat #'identity active ", ") " | " (mapconcat #'identity finished ", ")) 'body)))
                              :weight 1)
-                            (eabp-icon-button "edit"
-                                              (eabp-action "settings.todo.edit"
+                            (jetpacs-icon-button "edit"
+                                              (jetpacs-action "settings.todo.edit"
                                                            :args `((index . ,i))
                                                            :when-offline "drop")
                                               :content-description "Edit sequence")
-                            (eabp-icon-button "delete"
-                                              (eabp-action "settings.todo.delete"
+                            (jetpacs-icon-button "delete"
+                                              (jetpacs-action "settings.todo.delete"
                                                            :args `((index . ,i))
                                                            :when-offline "drop")
                                               :content-description "Delete sequence"))))))
-            (error (list (eabp-text (format "Error loading sequences: %s" (error-message-string err)) 'caption))))))
+            (error (list (jetpacs-text (format "Error loading sequences: %s" (error-message-string err)) 'caption))))))
     ;; lazy_column, not column: the scaffold body has no scroll container
     ;; on the client, so a plain column taller than the screen is simply
     ;; unreachable below the fold.
-    (apply #'eabp-lazy-column
+    (apply #'jetpacs-lazy-column
            (append
-            (list (eabp-section-header "Display")
-                  (eabp-text "Line numbers in the buffer view and editor." 'caption)
-                  (eabp-enum-list "settings-linenum" '("Off" "Absolute" "Relative")
+            (list (jetpacs-section-header "Display")
+                  (jetpacs-text "Line numbers in the buffer view and editor." 'caption)
+                  (jetpacs-enum-list "settings-linenum" '("Off" "Absolute" "Relative")
                                   :value (list linenum-value)
-                                  :on-change (eabp-action "settings.line-numbers"))
-                  (eabp-divider)
-                  (eabp-section-header "Saved Searches")
-                  (eabp-text "Manage your custom agenda queries." 'caption))
+                                  :on-change (jetpacs-action "settings.line-numbers"))
+                  (jetpacs-divider)
+                  (jetpacs-section-header "Saved Searches")
+                  (jetpacs-text "Manage your custom agenda queries." 'caption))
             agenda-cards
-            (list (eabp-button "New Saved Search"
-                               (eabp-action "settings.agenda.edit")
+            (list (jetpacs-button "New Saved Search"
+                               (jetpacs-action "settings.agenda.edit")
                                :variant "outlined")
-                  (eabp-divider)
-                  (eabp-section-header "Global TODO Sequences")
-                  (eabp-text "Manage your global TODO states and workflows." 'caption))
+                  (jetpacs-divider)
+                  (jetpacs-section-header "Global TODO Sequences")
+                  (jetpacs-text "Manage your global TODO states and workflows." 'caption))
             seq-cards
-            (list (eabp-button "Add Sequence"
-                               (eabp-action "settings.todo.edit"
+            (list (jetpacs-button "Add Sequence"
+                               (jetpacs-action "settings.todo.edit"
                                             :args '((index . -1))
                                             :when-offline "drop")
                                :variant "outlined")
-                  (eabp-divider)
-                  (eabp-section-header "Global Org Tags")
-                  (eabp-text "Manage the global tag list (org-tag-alist)." 'caption)
+                  (jetpacs-divider)
+                  (jetpacs-section-header "Global Org Tags")
+                  (jetpacs-text "Manage the global tag list (org-tag-alist)." 'caption)
                   enum-list)
             ;; Schema-driven sections: every allowlisted defcustom in
-            ;; `eabp-settings-registry', rendered from its custom-type.
-            (eabp-settings-sections)))))
+            ;; `jetpacs-settings-registry', rendered from its custom-type.
+            (jetpacs-settings-sections)))))
 
 (defun glasspane-ui--todo-chips (current keywords ref)
   "A single-line chip rail for KEYWORDS with CURRENT selected.
 Tapping an active chip removes the state.  Long sequences pan
 sideways rather than wrapping into a stack."
-  (apply #'eabp-scroll-row
+  (apply #'jetpacs-scroll-row
          (mapcar (lambda (kw)
-                   (eabp-chip kw
+                   (jetpacs-chip kw
                               :selected (equal kw current)
-                              :on-tap (eabp-action
+                              :on-tap (jetpacs-action
                                        "heading.todo-set"
                                        :args (cons (cons 'state (if (equal kw current) "" kw)) ref))))
                  keywords)))
@@ -3685,11 +3685,11 @@ The one part of a timestamp the date-stamp chip can't display."
   (let* ((hi (or (bound-and-true-p org-priority-highest) ?A))
          (lo (or (bound-and-true-p org-priority-lowest) ?C))
          (levels (mapcar #'char-to-string (number-sequence hi lo))))
-    (apply #'eabp-flow-row
+    (apply #'jetpacs-flow-row
            (mapcar (lambda (p)
-                     (eabp-chip p
+                     (jetpacs-chip p
                                 :selected (equal p current)
-                                :on-tap (eabp-action
+                                :on-tap (jetpacs-action
                                          "heading.priority"
                                          :args (cons (cons 'value (if (equal p current) "" p)) ref))))
                    levels))))
@@ -3710,25 +3710,25 @@ breaks links); every other value is an inline input whose submit runs
                          (string-match-p "\\?" key)))
          (is-date (or (string-match-p "_DATE\\|_TIME\\'" key)
                       (member key '("CREATED" "SCHEDULED" "DEADLINE"))))
-         (action (eabp-action "heading.prop-set" :args (cons `(name . ,key) ref))))
-    (eabp-row
-     (eabp-box (list (eabp-text key 'label)) :weight 2)
-     (eabp-box
+         (action (jetpacs-action "heading.prop-set" :args (cons `(name . ,key) ref))))
+    (jetpacs-row
+     (jetpacs-box (list (jetpacs-text key 'label)) :weight 2)
+     (jetpacs-box
       (list (cond
              ((equal key "ID")
-              (eabp-text value 'caption nil nil t))
+              (jetpacs-text value 'caption nil nil t))
              (is-boolean
-              (eabp-switch (format "prop-%s/%s" pos key)
+              (jetpacs-switch (format "prop-%s/%s" pos key)
                            :value (member value '("t" "true" "1"))
                            :on-toggle action))
              ((and allowed (listp allowed))
-              (eabp-enum-list (format "prop-%s/%s" pos key) allowed
+              (jetpacs-enum-list (format "prop-%s/%s" pos key) allowed
                               :value (list value)
                               :on-select action))
              (is-date
-              (eabp-date-button value action :value value))
+              (jetpacs-date-button value action :value value))
              (t
-              (eabp-text-input (format "prop-%s/%s" pos key)
+              (jetpacs-text-input (format "prop-%s/%s" pos key)
                                :value value
                                :single-line t
                                :on-submit action))))
@@ -3792,37 +3792,37 @@ breaks links); every other value is an inline input whose submit runs
   (let ((type (plist-get entry :type)))
     (cl-case type
       (clock
-       (eabp-box
+       (jetpacs-box
         (list
-         (eabp-row
-          (eabp-icon "timer" :color "primary" :padding [0 12 0 0])
-          (eabp-column
-           (eabp-text (if (plist-get entry :active)
+         (jetpacs-row
+          (jetpacs-icon "timer" :color "primary" :padding [0 12 0 0])
+          (jetpacs-column
+           (jetpacs-text (if (plist-get entry :active)
                           (format "Started %s" (plist-get entry :start))
                         (glasspane-org--format-clock-time (plist-get entry :start) (plist-get entry :end)))
                       'body t nil nil nil [0 0 4 0])
-           (eabp-text (plist-get entry :duration) 'caption))))
+           (jetpacs-text (plist-get entry :duration) 'caption))))
         :padding [8 16 8 16]))
       (note
-       (eabp-box
+       (jetpacs-box
         (list
-         (eabp-row
-          (eabp-icon "chat" :color "primary" :padding [0 12 0 0])
-          (eabp-column
-           (eabp-text (format "Note • %s" (plist-get entry :timestamp)) 'caption nil nil nil nil [0 0 4 0])
-           (eabp-text (plist-get entry :content) 'body))))
+         (jetpacs-row
+          (jetpacs-icon "chat" :color "primary" :padding [0 12 0 0])
+          (jetpacs-column
+           (jetpacs-text (format "Note • %s" (plist-get entry :timestamp)) 'caption nil nil nil nil [0 0 4 0])
+           (jetpacs-text (plist-get entry :content) 'body))))
         :padding [8 16 8 16]))
       (state
-       (eabp-box
+       (jetpacs-box
         (list
-         (eabp-row
-          (eabp-icon "change_history" :color "primary" :padding [0 12 0 0])
-          (eabp-column
-           (eabp-text (if (plist-get entry :from)
+         (jetpacs-row
+          (jetpacs-icon "change_history" :color "primary" :padding [0 12 0 0])
+          (jetpacs-column
+           (jetpacs-text (if (plist-get entry :from)
                           (format "%s → %s" (plist-get entry :from) (plist-get entry :to))
                         (format "Set to %s" (plist-get entry :to)))
                       'body t nil nil nil [0 0 4 0])
-           (eabp-text (if (not (string-empty-p (plist-get entry :content)))
+           (jetpacs-text (if (not (string-empty-p (plist-get entry :content)))
                           (format "%s\n%s" (plist-get entry :timestamp) (plist-get entry :content))
                         (plist-get entry :timestamp))
                       'caption))))
@@ -3845,9 +3845,9 @@ valid org), explicitly rather than via ambient `case-fold-search'."
 (defun glasspane-ui--properties-section (props ref pos)
   "The Properties collapsible: KEY → VALUE rows plus an + Add button.
 Always present (even with no properties yet) so + Add is reachable."
-  (eabp-collapsible
+  (jetpacs-collapsible
    (format "detail-props/%s" pos)
-   (eabp-text (if props (format "Properties (%d)" (length props)) "Properties")
+   (jetpacs-text (if props (format "Properties (%d)" (length props)) "Properties")
               'label)
    (delq nil
          (append
@@ -3856,11 +3856,11 @@ Always present (even with no properties yet) so + Add is reachable."
                   props)
           (list
            (when props
-             (eabp-text "Submit an empty value to remove a property." 'caption))
-           (eabp-row
-            (eabp-spacer :weight 1)
-            (eabp-button "+ Add property"
-                         (eabp-action "heading.prop-add" :args ref)
+             (jetpacs-text "Submit an empty value to remove a property." 'caption))
+           (jetpacs-row
+            (jetpacs-spacer :weight 1)
+            (jetpacs-button "+ Add property"
+                         (jetpacs-action "heading.prop-add" :args ref)
                          :variant "outlined")))))
    :collapsed t))
 
@@ -3887,7 +3887,7 @@ container would break Compose) and wrap otherwise."
                     (cons 'children (vconcat (cdr kv) extras))
                   kv))
               body))
-     (t (apply #'eabp-column body extras)))))
+     (t (apply #'jetpacs-column body extras)))))
 
 (defun glasspane-ui--detail-body (ref)
   (condition-case err
@@ -3937,8 +3937,8 @@ container would break Compose) and wrap otherwise."
                                       (line-number-at-pos org-clock-hd-marker)))))
              (sched-button
               (lambda (label when)
-                (eabp-button label
-                             (eabp-action "heading.schedule"
+                (jetpacs-button label
+                             (jetpacs-action "heading.schedule"
                                           :args (cons (cons 'when when) ref))
                              :variant "text"))))
         (if (not glasspane-ui--detail-read-mode)
@@ -3947,13 +3947,13 @@ container would break Compose) and wrap otherwise."
                               (goto-char pos)
                               (org-mark-subtree)
                               (buffer-substring-no-properties (region-beginning) (region-end))))))
-              (eabp-column
-               (eabp-editor (format "detail-%s" pos) content
+              (jetpacs-column
+               (jetpacs-editor (format "detail-%s" pos) content
                             :syntax "org"
                             :toolbar "org"
-                            :line-numbers (and eabp-line-numbers
-                                               (symbol-name eabp-line-numbers))
-                            :on-save (eabp-action "detail.save"
+                            :line-numbers (and jetpacs-line-numbers
+                                               (symbol-name jetpacs-line-numbers))
+                            :on-save (jetpacs-action "detail.save"
                                                   :args `((ref . ,ref))
                                                   :when-offline "queue"
                                                   :dedupe (format "save-detail/%s" pos)))))
@@ -3968,7 +3968,7 @@ container would break Compose) and wrap otherwise."
                                    (with-current-buffer buf
                                      (org-with-wide-buffer
                                       (glasspane-ui--logbook-entries pos))))))
-            (apply #'eabp-lazy-column
+            (apply #'jetpacs-lazy-column
                    (delq nil
                          (append
                           (list
@@ -3976,95 +3976,95 @@ container would break Compose) and wrap otherwise."
                            ;; ancestor heading.  Every chip taps up to that
                            ;; level, so climbing out of a deep subtree never
                            ;; detours through the file picker.
-                           (apply #'eabp-scroll-row
+                           (apply #'jetpacs-scroll-row
                                   (cons
                                    (if file
-                                       (eabp-assist-chip
+                                       (jetpacs-assist-chip
                                         (file-name-nondirectory file)
                                         :icon "description"
-                                        :on-tap (eabp-action
+                                        :on-tap (jetpacs-action
                                                  "files.open"
                                                  :args `((file . ,file))))
-                                     (eabp-text "?" 'caption))
+                                     (jetpacs-text "?" 'caption))
                                    (mapcan
                                     (lambda (anc)
-                                      (list (eabp-icon "chevron_right" :size 16)
-                                            (eabp-assist-chip
+                                      (list (jetpacs-icon "chevron_right" :size 16)
+                                            (jetpacs-assist-chip
                                              (car anc)
-                                             :on-tap (eabp-action
+                                             :on-tap (jetpacs-action
                                                       "heading.tap"
                                                       :args `((file . ,file)
                                                               (pos . ,(cdr anc))
                                                               (headline . ""))))))
                                     (plist-get meta :ancestors))))
                            ;; Headline
-                           (eabp-text headline 'title)
+                           (jetpacs-text headline 'title)
                            ;; State (always visible)
                            (glasspane-ui--todo-chips todo keywords ref)
                            ;; Priority (always visible)
                            (glasspane-ui--priority-chips priority ref)
-                           (eabp-divider)
+                           (jetpacs-divider)
                            ;; ▸ Scheduling (collapsible — expanded when any date is set)
                            ;; The date-stamp chip IS the display (date + time);
                            ;; the raw "<2026-07-02 Thu>" caption is gone. Only a
                            ;; repeater cookie — which the chip can't show —
                            ;; surfaces as a caption.
-                           (eabp-collapsible
+                           (jetpacs-collapsible
                             (format "detail-sched/%s" pos)
-                            (eabp-text "Scheduling" 'label)
+                            (jetpacs-text "Scheduling" 'label)
                             (list
-                             (eabp-row
+                             (jetpacs-row
                               (if sdate
-                                  (eabp-date-stamp :date sdate
+                                  (jetpacs-date-stamp :date sdate
                                                    :time (glasspane-ui--ts-time scheduled))
-                                (eabp-spacer :width 0))
-                              (eabp-box
+                                (jetpacs-spacer :width 0))
+                              (jetpacs-box
                                (list
-                                (apply #'eabp-column
+                                (apply #'jetpacs-column
                                        (delq nil
                                              (list
-                                              (eabp-text "Scheduled" 'label)
+                                              (jetpacs-text "Scheduled" 'label)
                                               (unless sdate
-                                                (eabp-text "Not scheduled" 'caption))
+                                                (jetpacs-text "Not scheduled" 'caption))
                                               (when-let ((rep (glasspane-ui--ts-repeater scheduled)))
-                                                (eabp-text (concat "Repeats " rep) 'caption))
-                                              (eabp-flow-row
-                                               (eabp-date-button "Set date"
-                                                                 (eabp-action "heading.schedule" :args ref)
+                                                (jetpacs-text (concat "Repeats " rep) 'caption))
+                                              (jetpacs-flow-row
+                                               (jetpacs-date-button "Set date"
+                                                                 (jetpacs-action "heading.schedule" :args ref)
                                                                  :value sdate)
-                                               (eabp-time-button "Set time"
-                                                                 (eabp-action "heading.schedule-time" :args ref)
+                                               (jetpacs-time-button "Set time"
+                                                                 (jetpacs-action "heading.schedule-time" :args ref)
                                                                  :value (glasspane-ui--ts-time scheduled))
                                                (funcall sched-button "Today" "+0d")
                                                (funcall sched-button "+1d" "+1d")
                                                (funcall sched-button "+1w" "+1w")
-                                               (eabp-button "Clear"
-                                                            (eabp-action "heading.schedule"
+                                               (jetpacs-button "Clear"
+                                                            (jetpacs-action "heading.schedule"
                                                                          :args (cons '(clear . t) ref))
                                                             :variant "text"))))))
                                :weight 1))
-                             (eabp-divider)
-                             (eabp-row
+                             (jetpacs-divider)
+                             (jetpacs-row
                               (if ddate
-                                  (eabp-date-stamp :date ddate
+                                  (jetpacs-date-stamp :date ddate
                                                    :time (glasspane-ui--ts-time deadline))
-                                (eabp-spacer :width 0))
-                              (eabp-box
+                                (jetpacs-spacer :width 0))
+                              (jetpacs-box
                                (list
-                                (apply #'eabp-column
+                                (apply #'jetpacs-column
                                        (delq nil
                                              (list
-                                              (eabp-text "Deadline" 'label)
+                                              (jetpacs-text "Deadline" 'label)
                                               (unless ddate
-                                                (eabp-text "No deadline" 'caption))
+                                                (jetpacs-text "No deadline" 'caption))
                                               (when-let ((rep (glasspane-ui--ts-repeater deadline)))
-                                                (eabp-text (concat "Repeats " rep) 'caption))
-                                              (eabp-flow-row
-                                               (eabp-date-button "Set date"
-                                                                 (eabp-action "heading.deadline" :args ref)
+                                                (jetpacs-text (concat "Repeats " rep) 'caption))
+                                              (jetpacs-flow-row
+                                               (jetpacs-date-button "Set date"
+                                                                 (jetpacs-action "heading.deadline" :args ref)
                                                                  :value ddate)
-                                               (eabp-button "Clear"
-                                                            (eabp-action "heading.deadline"
+                                               (jetpacs-button "Clear"
+                                                            (jetpacs-action "heading.deadline"
                                                                          :args (cons '(clear . t) ref))
                                                             :variant "text"))))))
                                :weight 1)))
@@ -4074,72 +4074,72 @@ container would break Compose) and wrap otherwise."
                                   (inherited-tags (seq-difference tags local-tags))
                                   (available (seq-uniq (append local-tags (mapcar (lambda (x) (if (consp x) (car x) x)) org-tag-alist))))
                                   (tags-content
-                                   (apply #'eabp-column
+                                   (apply #'jetpacs-column
                                           (delq nil
                                                 (list
-                                                 (eabp-enum-list (format "detail-tags/%s" pos) available
+                                                 (jetpacs-enum-list (format "detail-tags/%s" pos) available
                                                                  :value local-tags :multi-select t :allow-add t
-                                                                 :on-change (eabp-action "heading.tags" :args ref))
+                                                                 :on-change (jetpacs-action "heading.tags" :args ref))
                                                  (when inherited-tags
-                                                   (eabp-column
-                                                    (eabp-text "Inherited" 'caption nil nil nil nil 8)
-                                                    (apply #'eabp-flow-row
+                                                   (jetpacs-column
+                                                    (jetpacs-text "Inherited" 'caption nil nil nil nil 8)
+                                                    (apply #'jetpacs-flow-row
                                                            (mapcar (lambda (tg)
-                                                                     (eabp-assist-chip tg))
+                                                                     (jetpacs-assist-chip tg))
                                                                    inherited-tags)))))))))
-                             (eabp-collapsible
+                             (jetpacs-collapsible
                               (format "detail-tags-fold/%s" pos)
-                              (eabp-text (if tags (format "Tags (%d)" (length tags)) "Tags") 'label)
+                              (jetpacs-text (if tags (format "Tags (%d)" (length tags)) "Tags") 'label)
                               (list tags-content)
                               :collapsed (null tags)))
                            ;; ▸ Logbook (collapsible)
                            (when logbook-entries
-                             (eabp-collapsible
+                             (jetpacs-collapsible
                               (format "detail-logbook/%s" pos)
-                              (eabp-text (format "Logbook (%d)" (length logbook-entries)) 'label)
+                              (jetpacs-text (format "Logbook (%d)" (length logbook-entries)) 'label)
                               (let ((notes (seq-filter (lambda (e) (eq (plist-get e :type) 'note)) logbook-entries))
                                     (states (seq-filter (lambda (e) (eq (plist-get e :type) 'state)) logbook-entries))
                                     (clocks (seq-filter (lambda (e) (eq (plist-get e :type) 'clock)) logbook-entries)))
                                 (delq nil
                                       (list
                                        (when notes
-                                         (eabp-collapsible
+                                         (jetpacs-collapsible
                                           (format "detail-logbook-notes/%s" pos)
-                                          (eabp-text (format "Notes (%d)" (length notes)) 'label)
+                                          (jetpacs-text (format "Notes (%d)" (length notes)) 'label)
                                           (delq nil (cl-loop for entry in notes
                                                              for i from 0
                                                              append (list (glasspane-ui--render-logbook-entry entry)
-                                                                          (when (< i (1- (length notes))) (eabp-divider)))))
+                                                                          (when (< i (1- (length notes))) (jetpacs-divider)))))
                                           :collapsed nil))
                                        (when states
-                                         (eabp-collapsible
+                                         (jetpacs-collapsible
                                           (format "detail-logbook-states/%s" pos)
-                                          (eabp-text (format "State Changes (%d)" (length states)) 'label)
+                                          (jetpacs-text (format "State Changes (%d)" (length states)) 'label)
                                           (delq nil (cl-loop for entry in states
                                                              for i from 0
                                                              append (list (glasspane-ui--render-logbook-entry entry)
-                                                                          (when (< i (1- (length states))) (eabp-divider)))))
+                                                                          (when (< i (1- (length states))) (jetpacs-divider)))))
                                           :collapsed t))
                                        (when clocks
-                                         (eabp-collapsible
+                                         (jetpacs-collapsible
                                           (format "detail-logbook-clocks/%s" pos)
-                                          (eabp-text (format "Clocks (%d)" (length clocks)) 'label)
+                                          (jetpacs-text (format "Clocks (%d)" (length clocks)) 'label)
                                           (delq nil (cl-loop for entry in clocks
                                                              for i from 0
                                                              append (list (glasspane-ui--render-logbook-entry entry)
-                                                                          (when (< i (1- (length clocks))) (eabp-divider)))))
+                                                                          (when (< i (1- (length clocks))) (jetpacs-divider)))))
                                           :collapsed t)))))
                               :collapsed t))
                            ;; ▸ Properties (collapsible — collapsed by default)
                            (glasspane-ui--properties-section entry-props ref pos)
-                           (eabp-divider))
+                           (jetpacs-divider))
                           ;; Reader: body (highlighted) and child headings (foldable).
                           ;; Properties are shown above, so skip them here.
                           (glasspane-org-reader-subtree file pos t)))))))
     (error
-     (eabp-column
-      (eabp-text "Error loading heading" 'title)
-      (eabp-text (error-message-string err) 'body)))))
+     (jetpacs-column
+      (jetpacs-text "Error loading heading" 'title)
+      (jetpacs-text (error-message-string err) 'body)))))
 
 ;; ─── Capture Dialog ──────────────────────────────────────────────────────────
 
@@ -4153,41 +4153,41 @@ container would break Compose) and wrap otherwise."
       (let* ((templates (glasspane-org--capture-templates))
              (template-buttons
               (mapcar (lambda (t-info)
-                        (eabp-button
+                        (jetpacs-button
                          (alist-get 'description t-info)
-                         (eabp-action "org.capture.select"
+                         (jetpacs-action "org.capture.select"
                                       :args `((key . ,(alist-get 'key t-info))))
                          :variant "outlined"))
                       templates))
              (dialog-body
-              (apply #'eabp-column
-                     (eabp-text "Quick Capture" 'title)
-                     (eabp-text "Select a template:" 'caption)
+              (apply #'jetpacs-column
+                     (jetpacs-text "Quick Capture" 'title)
+                     (jetpacs-text "Select a template:" 'caption)
                      (append
                       ;; Shared-in content shows a preview so the user knows
                       ;; what this capture will carry.
                       (when glasspane-ui--shared-text
-                        (list (eabp-card
-                               (list (eabp-text
+                        (list (jetpacs-card
+                               (list (jetpacs-text
                                       (truncate-string-to-width
                                        glasspane-ui--shared-text 200 nil nil "…")
                                       'caption)))))
                       template-buttons
-                      (list (eabp-button "Cancel"
-                                         (eabp-action "org.capture.cancel")
+                      (list (jetpacs-button "Cancel"
+                                         (jetpacs-action "org.capture.cancel")
                                          :variant "text"))))))
-        (eabp-send-dialog dialog-body))
+        (jetpacs-send-dialog dialog-body))
     (error
-     (message "EABP capture dialog error: %s" (error-message-string err)))))
+     (message "Jetpacs capture dialog error: %s" (error-message-string err)))))
 
 (defun glasspane-ui-show-capture-form (template-key)
   ;; Forget values from any previous capture so they can't leak into
-  ;; this submit (`eabp--ui-state' is global and persistent).
-  (eabp-ui-state-clear "cap-")
+  ;; this submit (`jetpacs--ui-state' is global and persistent).
+  (jetpacs-ui-state-clear "cap-")
   ;; A shared-in subject pre-fills the Headline field; it must also land
   ;; in UI state, since state.changed only fires for edits the user makes.
   (when glasspane-ui--shared-subject
-    (eabp-ui-state-put "cap-Headline" glasspane-ui--shared-subject))
+    (jetpacs-ui-state-put "cap-Headline" glasspane-ui--shared-subject))
   (condition-case err
       (let* ((templates (glasspane-org--capture-templates))
              (tmpl (cl-find-if
@@ -4195,43 +4195,43 @@ container would break Compose) and wrap otherwise."
                     templates))
              (prompts (append (alist-get 'prompts tmpl) nil)) ;; coerce vector to list
              (inputs (mapcar (lambda (p)
-                               (eabp-text-input
+                               (jetpacs-text-input
                                 (format "cap-%s" p) :label p
                                 :value (and (equal p "Headline")
                                             glasspane-ui--shared-subject)))
                              prompts))
              (dialog-body
-              (apply #'eabp-column
-                     (eabp-text (format "Capture: %s" (alist-get 'description tmpl)) 'title)
+              (apply #'jetpacs-column
+                     (jetpacs-text (format "Capture: %s" (alist-get 'description tmpl)) 'title)
                      (append inputs
                              (list
-                              (eabp-row
-                               (eabp-button "Cancel"
-                                            (eabp-action "org.capture.cancel")
+                              (jetpacs-row
+                               (jetpacs-button "Cancel"
+                                            (jetpacs-action "org.capture.cancel")
                                             :variant "text")
-                               (eabp-button "Capture"
-                                            (eabp-action "org.capture.submit"
+                               (jetpacs-button "Capture"
+                                            (jetpacs-action "org.capture.submit"
                                                          :args `((key . ,template-key))))))))))
-        (eabp-send-dialog dialog-body))
+        (jetpacs-send-dialog dialog-body))
     (error
-     (message "EABP capture form error: %s" (error-message-string err)))))
+     (message "Jetpacs capture form error: %s" (error-message-string err)))))
 
 ;; ─── Action Handlers ─────────────────────────────────────────────────────────
 
-(eabp-defaction "heading.tap"
+(jetpacs-defaction "heading.tap"
   (lambda (args _)
     ;; ARGS is the ref alist (id/file/pos/headline) the card embedded.
     ;; This push IS the navigation, so it forces the detail view.
     (setq glasspane-ui--detail-ref args)
     (setq glasspane-ui--detail-read-mode t)
-    (eabp-shell-push nil :switch-to "detail")))
+    (jetpacs-shell-push nil :switch-to "detail")))
 
-(eabp-defaction "detail.toggle-read"
+(jetpacs-defaction "detail.toggle-read"
   (lambda (_ _)
     (setq glasspane-ui--detail-read-mode (not glasspane-ui--detail-read-mode))
-    (eabp-shell-push nil :switch-to "detail")))
+    (jetpacs-shell-push nil :switch-to "detail")))
 
-(eabp-defaction "detail.save"
+(jetpacs-defaction "detail.save"
   (lambda (args _)
     (let ((ref (alist-get 'ref args))
           (value (alist-get 'value args)))
@@ -4254,22 +4254,22 @@ container would break Compose) and wrap otherwise."
               (when (fboundp 'glasspane-org-cache-invalidate)
                 (glasspane-org-cache-invalidate))
               (setq glasspane-ui--detail-read-mode t)
-              (eabp-shell-notify "Saved heading"))
+              (jetpacs-shell-notify "Saved heading"))
           (error
-           (eabp-shell-notify (format "Save failed: %s" (error-message-string err))))))
-      (eabp-shell-push))))
+           (jetpacs-shell-notify (format "Save failed: %s" (error-message-string err))))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "heading.back"
+(jetpacs-defaction "heading.back"
   ;; Legacy: detail's back button is now a companion-local view.switch.
   ;; Kept for stale cached UIs.
   (lambda (_ _)
     (setq glasspane-ui--detail-ref nil)
-    (eabp-shell-push nil :switch-to (eabp-shell-current-tab))))
+    (jetpacs-shell-push nil :switch-to (jetpacs-shell-current-tab))))
 
-(eabp-defaction "tasks.filter"
+(jetpacs-defaction "tasks.filter"
   (lambda (args _)
     (setq glasspane-ui--tasks-filter (alist-get 'filter args))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
 (defun glasspane-ui--run-search (q)
   "Run search query Q, refreshing the cached results and error state.
@@ -4285,14 +4285,14 @@ show — the search body renders it instead of a bogus \"no matches\"."
            nil)))
   ;; Mirror the query into the client-side field state so the search
   ;; box shows what actually ran (builder edits included).
-  (eabp-ui-state-put "search-query" q))
+  (jetpacs-ui-state-put "search-query" q))
 
 (defun glasspane-ui--search-filter-query ()
   "Build an org-ql query string from the query-builder filter state.
 Returns \"\" when every filter is at its resting value."
   (let ((todo (car (glasspane-ui--filter-values "search-filter-todo")))
         (tags (glasspane-ui--filter-values "search-filter-tags"))
-        (text (eabp-ui-state "search-filter-text"))
+        (text (jetpacs-ui-state "search-filter-text"))
         (prio (car (glasspane-ui--filter-values "search-filter-priority")))
         (due (car (glasspane-ui--filter-values "search-filter-due")))
         (clauses nil))
@@ -4315,26 +4315,26 @@ Returns \"\" when every filter is at its resting value."
           ((null (cdr clauses)) (format "%S" (car clauses)))
           (t (format "%S" `(and ,@clauses))))))
 
-(eabp-defaction "org.search.run"
+(jetpacs-defaction "org.search.run"
   ;; The query arrives as the search field's submitted `value'. Run it,
   ;; cache the results, and land the user on the search view.
   (lambda (args _)
     (glasspane-ui--run-search (or (alist-get 'value args) ""))
-    (eabp-shell-push nil :switch-to "search")))
+    (jetpacs-shell-push nil :switch-to "search")))
 
-(eabp-defaction "org.capture.show"
+(jetpacs-defaction "org.capture.show"
   (lambda (_ _)
     (glasspane-ui-show-capture-dialog)))
 
-(eabp-defaction "org.capture.select"
+(jetpacs-defaction "org.capture.select"
   (lambda (args _)
     (glasspane-ui-show-capture-form (alist-get 'key args))))
 
-(eabp-defaction "org.capture.cancel"
+(jetpacs-defaction "org.capture.cancel"
   (lambda (_ _)
     (setq glasspane-ui--shared-text nil
           glasspane-ui--shared-subject nil)
-    (eabp-dismiss-dialog)))
+    (jetpacs-dismiss-dialog)))
 
 (defun glasspane-ui--on-share (args _payload)
   "Android share sheet → capture: stash the text/subject, open the picker.
@@ -4356,10 +4356,10 @@ appears on the next replay."
 ;; The companion's share sheet emits the app-agnostic `share.text'; this
 ;; app answers it with org capture.  The old app-specific id stays
 ;; registered so shares queued by a pre-rename companion still replay.
-(eabp-defaction "share.text" #'glasspane-ui--on-share)
-(eabp-defaction "org.capture.share" #'glasspane-ui--on-share)
+(jetpacs-defaction "share.text" #'glasspane-ui--on-share)
+(jetpacs-defaction "org.capture.share" #'glasspane-ui--on-share)
 
-(eabp-defaction "org.capture.submit"
+(jetpacs-defaction "org.capture.submit"
   (lambda (args _)
     (let ((key (alist-get 'key args)))
       (condition-case err
@@ -4369,26 +4369,26 @@ appears on the next replay."
                         templates))
                  (prompts (append (alist-get 'prompts tmpl) nil))
                  ;; Field values arrived earlier as state.changed events and
-                 ;; were recorded into `eabp--ui-state' by eabp-surfaces.
+                 ;; were recorded into `jetpacs--ui-state' by jetpacs-surfaces.
                  (values (mapcar
                           (lambda (p)
-                            (let ((v (eabp-ui-state (format "cap-%s" p))))
+                            (let ((v (jetpacs-ui-state (format "cap-%s" p))))
                               (cons p (if (stringp v) v ""))))
                           prompts)))
             (glasspane-org--do-capture key values glasspane-ui--shared-text)
             (setq glasspane-ui--shared-text nil
                   glasspane-ui--shared-subject nil)
             (glasspane-org-cache-invalidate)
-            (eabp-ui-state-clear "cap-")
-            (eabp-shell-notify "Captured ✓")
-            (eabp-dismiss-dialog)
-            (eabp-shell-push))
+            (jetpacs-ui-state-clear "cap-")
+            (jetpacs-shell-notify "Captured ✓")
+            (jetpacs-dismiss-dialog)
+            (jetpacs-shell-push))
         (error
-         (message "EABP capture submit error: %s" (error-message-string err))
+         (message "Jetpacs capture submit error: %s" (error-message-string err))
          (setq glasspane-ui--shared-text nil
                glasspane-ui--shared-subject nil)
-         (eabp-ui-state-clear "cap-")
-         (eabp-dismiss-dialog))))))
+         (jetpacs-ui-state-clear "cap-")
+         (jetpacs-dismiss-dialog))))))
 
 (defun glasspane-ui--at-ref (args fn &optional save)
   "Resolve ARGS to its heading and call FN with point there.
@@ -4408,21 +4408,21 @@ Returns non-nil on success; messages and returns nil on failure."
         (glasspane-org-cache-invalidate)
         t)
     (error
-     (message "EABP: heading action failed: %s" (error-message-string err))
-     (eabp-shell-notify "Couldn't find that heading — refreshing")
-     (eabp-shell-push)
+     (message "Jetpacs: heading action failed: %s" (error-message-string err))
+     (jetpacs-shell-notify "Couldn't find that heading — refreshing")
+     (jetpacs-shell-push)
      nil)))
 
-(eabp-defaction "heading.todo-set"
+(jetpacs-defaction "heading.todo-set"
   (lambda (args _)
     (let* ((state (alist-get 'state args))
            (clear (equal state "")))
       (when (and state
                  (glasspane-ui--at-ref args (lambda () (org-todo (if clear 'none state))) t))
-        (eabp-shell-notify (if clear "State cleared" (format "State → %s" state)))
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify (if clear "State cleared" (format "State → %s" state)))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "heading.todo-cycle"
+(jetpacs-defaction "heading.todo-cycle"
   (lambda (args _)
     (when (glasspane-ui--at-ref args
                                 (lambda ()
@@ -4435,10 +4435,10 @@ Returns non-nil on success; messages and returns nil on failure."
                       (org-with-wide-buffer
                        (goto-char marker)
                        (org-get-todo-state)))))
-        (eabp-shell-notify (if state (format "State → %s" state) "State cleared"))
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify (if state (format "State → %s" state) "State cleared"))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "heading.schedule"
+(jetpacs-defaction "heading.schedule"
   (lambda (args _)
     ;; CLEAR removes the timestamp; otherwise WHEN (relative, e.g. "+1d") or
     ;; VALUE (concrete "YYYY-MM-DD", from the date picker) sets it.
@@ -4449,10 +4449,10 @@ Returns non-nil on success; messages and returns nil on failure."
                 ((and (stringp date) (not (string-empty-p date)))
                  (glasspane-ui--at-ref args (lambda () (org-schedule nil date)) t)))))
       (when ok
-        (eabp-shell-notify (if clear "Schedule cleared" (format "Scheduled %s" date)))
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify (if clear "Schedule cleared" (format "Scheduled %s" date)))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "heading.schedule-time"
+(jetpacs-defaction "heading.schedule-time"
   ;; Adds/updates the clock time on the existing SCHEDULED date (today if
   ;; none yet). VALUE is the "HH:MM" the time picker injected.
   (lambda (args _)
@@ -4466,22 +4466,22 @@ Returns non-nil on success; messages and returns nil on failure."
                                      (format-time-string "%Y-%m-%d"))))
                       (org-schedule nil (format "%s %s" date time))))
                   t))
-        (eabp-shell-notify (format "Scheduled %s" time))
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify (format "Scheduled %s" time))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "org.footnote.show"
+(jetpacs-defaction "org.footnote.show"
   ;; A tapped footnote marker in rich text: surface its inline definition
   ;; (when the reference carried one) or just its label.
   (lambda (args _)
     (let ((def (alist-get 'def args))
           (label (alist-get 'label args)))
-      (eabp-shell-notify
+      (jetpacs-shell-notify
        (if (and (stringp def) (not (string-empty-p def)))
            (format "Footnote: %s" def)
          (format "Footnote %s" (or label ""))))
-      (eabp-shell-push))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "heading.deadline"
+(jetpacs-defaction "heading.deadline"
   (lambda (args _)
     (let* ((clear (alist-get 'clear args))
            (date (or (alist-get 'when args) (alist-get 'value args)))
@@ -4490,10 +4490,10 @@ Returns non-nil on success; messages and returns nil on failure."
                 ((and (stringp date) (not (string-empty-p date)))
                  (glasspane-ui--at-ref args (lambda () (org-deadline nil date)) t)))))
       (when ok
-        (eabp-shell-notify (if clear "Deadline cleared" (format "Deadline %s" date)))
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify (if clear "Deadline cleared" (format "Deadline %s" date)))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "heading.priority"
+(jetpacs-defaction "heading.priority"
   (lambda (args _)
     ;; Empty VALUE means None (remove); otherwise the first char is the priority.
     (let* ((val (alist-get 'value args))
@@ -4505,11 +4505,11 @@ Returns non-nil on success; messages and returns nil on failure."
                     (org-priority (string-to-char val))))
                 t)))
       (when ok
-        (eabp-shell-notify (if remove "Priority cleared"
+        (jetpacs-shell-notify (if remove "Priority cleared"
                                 (format "Priority %s" val)))
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "heading.refile"
+(jetpacs-defaction "heading.refile"
   ;; Bridged picker over org-refile targets; refiles the whole subtree.
   (lambda (args _)
     (condition-case err
@@ -4526,26 +4526,26 @@ Returns non-nil on success; messages and returns nil on failure."
                               (quit nil)))
                     (target (and choice (assoc choice targets))))
                (if (not target)
-                   (eabp-shell-notify "Refile cancelled")
+                   (jetpacs-shell-notify "Refile cancelled")
                  (org-refile nil nil target)
                  (let ((glasspane-org--inhibit-save-refresh t)
                        (save-silently t))
                    (org-save-all-org-buffers))
                  (glasspane-org-cache-invalidate)
                  (setq glasspane-ui--detail-ref nil)
-                 (eabp-shell-notify (format "Refiled to %s" choice))))))
-          (eabp-shell-push nil :switch-to (eabp-shell-current-tab)))
+                 (jetpacs-shell-notify (format "Refiled to %s" choice))))))
+          (jetpacs-shell-push nil :switch-to (jetpacs-shell-current-tab)))
       (error
-       (eabp-shell-notify (format "Refile failed: %s"
+       (jetpacs-shell-notify (format "Refile failed: %s"
                                      (error-message-string err)))
-       (eabp-shell-push)))))
+       (jetpacs-shell-push)))))
 
-(eabp-defaction "heading.archive"
+(jetpacs-defaction "heading.archive"
   ;; Bridged y/n confirm, then org-archive-subtree; saves source + archive.
   (lambda (args _)
     (let ((headline (or (alist-get 'headline args) "this heading")))
       (if (not (yes-or-no-p (format "Archive \"%s\"? " headline)))
-          (eabp-shell-notify "Archive cancelled")
+          (jetpacs-shell-notify "Archive cancelled")
         (when (glasspane-ui--at-ref
                args
                (lambda ()
@@ -4554,10 +4554,10 @@ Returns non-nil on success; messages and returns nil on failure."
                        (save-silently t))
                    (org-save-all-org-buffers))))
           (setq glasspane-ui--detail-ref nil)
-          (eabp-shell-notify "Archived")))
-      (eabp-shell-push nil :switch-to (eabp-shell-current-tab)))))
+          (jetpacs-shell-notify "Archived")))
+      (jetpacs-shell-push nil :switch-to (jetpacs-shell-current-tab)))))
 
-(eabp-defaction "heading.add-note"
+(jetpacs-defaction "heading.add-note"
   ;; Quick logbook note: bridged prompt, written where org-log-into-drawer
   ;; says notes belong, in org's own note format.
   (lambda (args _)
@@ -4565,7 +4565,7 @@ Returns non-nil on success; messages and returns nil on failure."
                                  (read-string "Note: ")
                                (quit "")))))
       (if (string-empty-p note)
-          (eabp-shell-notify "Note cancelled")
+          (jetpacs-shell-notify "Note cancelled")
         (when (glasspane-ui--at-ref
                args
                (lambda ()
@@ -4576,10 +4576,10 @@ Returns non-nil on success; messages and returns nil on failure."
                                     (org-time-stamp-format t t))
                                    (replace-regexp-in-string "\n" "\n  " note)))))
                t)
-          (eabp-shell-notify "Note added")))
-      (eabp-shell-push))))
+          (jetpacs-shell-notify "Note added")))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "heading.prop-set"
+(jetpacs-defaction "heading.prop-set"
   ;; VALUE arrives injected by the row input's on-submit; NAME rides in
   ;; args. An empty value deletes the property.
   (lambda (args _)
@@ -4601,12 +4601,12 @@ Returns non-nil on success; messages and returns nil on failure."
                          (org-set-property name value)))
                      t))))
       (when ok
-        (eabp-shell-notify (if (string-empty-p value)
+        (jetpacs-shell-notify (if (string-empty-p value)
                                   (format "Removed %s" name)
                                 (format "%s → %s" name value)))
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "heading.prop-add"
+(jetpacs-defaction "heading.prop-add"
   ;; The bridged read-string asks for the key; the new (empty) property
   ;; then appears as a row whose value column is ready to fill in.
   (lambda (args _)
@@ -4616,14 +4616,14 @@ Returns non-nil on success; messages and returns nil on failure."
       (cond
        ((string-empty-p name) nil)
        ((string-match-p "[: \t]" name)
-        (eabp-shell-notify "Property names can't contain colons or spaces"))
+        (jetpacs-shell-notify "Property names can't contain colons or spaces"))
        ((glasspane-ui--at-ref args
                              (lambda () (org-set-property (upcase name) ""))
                              t)
-        (eabp-shell-notify (format "Added %s — fill in its value" (upcase name)))))
-      (eabp-shell-push))))
+        (jetpacs-shell-notify (format "Added %s — fill in its value" (upcase name)))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "heading.tags"
+(jetpacs-defaction "heading.tags"
   (lambda (args _)
     (let* ((val (alist-get 'value args))
            (tags (cond
@@ -4633,11 +4633,11 @@ Returns non-nil on success; messages and returns nil on failure."
                   (t nil)))
            (ok (glasspane-ui--at-ref args (lambda () (org-set-tags tags)) t)))
       (when ok
-        (eabp-shell-notify (if tags (format "Tags: %s" (string-join tags " "))
+        (jetpacs-shell-notify (if tags (format "Tags: %s" (string-join tags " "))
                                 "Tags cleared"))
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "settings.line-numbers"
+(jetpacs-defaction "settings.line-numbers"
   ;; Single-select enum: value arrives as a JSON array with (at most) one
   ;; entry.  Deselecting everything counts as Off.
   (lambda (args _)
@@ -4647,12 +4647,12 @@ Returns non-nil on success; messages and returns nil on failure."
                   ("Absolute" 'absolute)
                   ("Relative" 'relative)
                   (_ nil))))
-      (setq eabp-line-numbers sym)
-      (ignore-errors (customize-save-variable 'eabp-line-numbers sym))
-      (eabp-shell-notify (format "Line numbers: %s" (or choice "Off")))
-      (eabp-shell-push))))
+      (setq jetpacs-line-numbers sym)
+      (ignore-errors (customize-save-variable 'jetpacs-line-numbers sym))
+      (jetpacs-shell-notify (format "Line numbers: %s" (or choice "Off")))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "settings.tags"
+(jetpacs-defaction "settings.tags"
   (lambda (args _)
     (let* ((val (alist-get 'value args))
            (tags-list (cond
@@ -4667,35 +4667,35 @@ Returns non-nil on success; messages and returns nil on failure."
                                  tags-list)))
           (setq org-tag-alist new-alist)
           (glasspane-ui--customize-save 'org-tag-alist org-tag-alist)))
-      (eabp-shell-notify "Settings saved")
-      (eabp-shell-push))))
+      (jetpacs-shell-notify "Settings saved")
+      (jetpacs-shell-push))))
 
 ;; The org settings exposed to the companion, through the generic
 ;; schema-driven machinery (the registry is the security boundary:
 ;; only symbols listed here can be modified from the wire).
-(eabp-settings-register-section
+(jetpacs-settings-register-section
  "Org Workflow"
  '((org-directory :label "Org directory")
    (org-log-done :label "Log task completion")
    (org-log-into-drawer :label "Log into drawer")
    (org-archive-location :label "Archive location")))
-(eabp-settings-register-section
+(jetpacs-settings-register-section
  "Org Agenda"
  '((org-agenda-span :label "Agenda span")
    (org-deadline-warning-days :label "Deadline warning days")
    (org-extend-today-until :label "Extend today until (hour)")))
-(eabp-settings-register-section
+(jetpacs-settings-register-section
  "Org Editing & Display"
  '((org-startup-folded :label "Initial folding")
    (org-startup-indented :label "Indent to outline level")
    (org-hide-emphasis-markers :label "Hide emphasis markers")
    (org-return-follows-link :label "Enter follows links")
    (glasspane-babel-timeout :label "Babel run timeout (s)")))
-(eabp-settings-register-section
+(jetpacs-settings-register-section
  "User Defaults"
  '((user-full-name :label "Author (Name)")
    (user-mail-address :label "Email")))
-(eabp-settings-register-section
+(jetpacs-settings-register-section
  "Calendar & Location"
  '((calendar-week-start-day :label "Week start day (0=Sun, 1=Mon)")
    (calendar-latitude :label "Latitude (e.g. 40.7)")
@@ -4703,16 +4703,16 @@ Returns non-nil on success; messages and returns nil on failure."
 
 ;; Org-derived views are memoised; per the cache contract every mutation
 ;; must drop the memo or the phone keeps rendering stale data.
-(add-hook 'eabp-settings-after-set-hook
+(add-hook 'jetpacs-settings-after-set-hook
           (lambda (sym _value)
             (when (or (string-prefix-p "org-" (symbol-name sym))
                       (string-prefix-p "calendar-" (symbol-name sym)))
               (glasspane-org-cache-invalidate))))
 
-(defalias 'glasspane-ui--customize-save #'eabp-settings-save-variable
+(defalias 'glasspane-ui--customize-save #'jetpacs-settings-save-variable
   "Persist a variable through Customize, surfacing failures.
 Kept as an alias for the todo/tag actions that predate the generic
-settings module (`eabp-settings-save-variable').")
+settings module (`jetpacs-settings-save-variable').")
 
 (defun glasspane-ui--todo-keywords-apply (seqs)
   "Make SEQS the effective and persisted `org-todo-keywords'.
@@ -4728,7 +4728,7 @@ with the new states.  Returns non-nil when persisting succeeded."
   (glasspane-org-cache-invalidate)
   (glasspane-ui--customize-save 'org-todo-keywords seqs))
 
-(eabp-defaction "settings.todo.edit"
+(jetpacs-defaction "settings.todo.edit"
   (lambda (args _)
     (condition-case err
         (let* ((idx (alist-get 'index args))
@@ -4736,8 +4736,8 @@ with the new states.  Returns non-nil when persisting succeeded."
                (seq (if (>= idx 0) (nth idx seqs) '(sequence "TODO" "|" "DONE"))))
           (if (null seq)
               ;; Stale index: the list changed since the card was rendered.
-              (progn (eabp-shell-notify "That sequence no longer exists")
-                     (eabp-shell-push))
+              (progn (jetpacs-shell-notify "That sequence no longer exists")
+                     (jetpacs-shell-push))
             (let* ((type (car seq))
                    ;; Keep the raw keyword strings, fast-access keys and all
                    ;; ("TODO(t!)"), so an untouched save round-trips losslessly.
@@ -4747,72 +4747,72 @@ with the new states.  Returns non-nil when persisting succeeded."
               ;; Pre-filled `:value's must be seeded by hand: state.changed
               ;; only fires for edits the user makes, and these ids may still
               ;; hold text from the previously edited sequence.
-              (eabp-ui-state-clear "todo-")
-              (eabp-ui-state-put "todo-active" active)
-              (eabp-ui-state-put "todo-finished" finished)
-              (eabp-send-dialog
-               (eabp-column
-                (eabp-text (if (>= idx 0) "Edit Sequence" "New Sequence") 'title)
-                (eabp-text "Comma-separated states; fast keys like TODO(t) are kept." 'caption)
-                (eabp-text-input "todo-active" :label "Active States" :value active :single-line t)
-                (eabp-text-input "todo-finished" :label "Finished States" :value finished :single-line t)
-                (eabp-row
-                 (eabp-spacer :weight 1)
+              (jetpacs-ui-state-clear "todo-")
+              (jetpacs-ui-state-put "todo-active" active)
+              (jetpacs-ui-state-put "todo-finished" finished)
+              (jetpacs-send-dialog
+               (jetpacs-column
+                (jetpacs-text (if (>= idx 0) "Edit Sequence" "New Sequence") 'title)
+                (jetpacs-text "Comma-separated states; fast keys like TODO(t) are kept." 'caption)
+                (jetpacs-text-input "todo-active" :label "Active States" :value active :single-line t)
+                (jetpacs-text-input "todo-finished" :label "Finished States" :value finished :single-line t)
+                (jetpacs-row
+                 (jetpacs-spacer :weight 1)
                  (when (>= idx 0)
-                   (eabp-button "Delete" (eabp-action "settings.todo.delete" :args `((index . ,idx))) :variant "text"))
-                 (eabp-button "Cancel" (eabp-action "dialog.dismiss") :variant "text")
-                 (eabp-spacer :width 8)
-                 (eabp-button "Save" (eabp-action "settings.todo.save" :args `((index . ,idx) (type . ,(symbol-name type)))))))))))
+                   (jetpacs-button "Delete" (jetpacs-action "settings.todo.delete" :args `((index . ,idx))) :variant "text"))
+                 (jetpacs-button "Cancel" (jetpacs-action "dialog.dismiss") :variant "text")
+                 (jetpacs-spacer :width 8)
+                 (jetpacs-button "Save" (jetpacs-action "settings.todo.save" :args `((index . ,idx) (type . ,(symbol-name type)))))))))))
       (error
-       (eabp-shell-notify (format "Edit failed: %s" (error-message-string err)))))))
+       (jetpacs-shell-notify (format "Edit failed: %s" (error-message-string err)))))))
 
-(eabp-defaction "settings.agenda.edit"
+(jetpacs-defaction "settings.agenda.edit"
   (lambda (args _)
     (let* ((name (alist-get 'name args))
            (query (if name (cdr (assoc name glasspane-org-custom-agendas)) "")))
-      (eabp-ui-state-clear "agenda-")
-      (eabp-ui-state-put "agenda-name" (or name ""))
-      (eabp-ui-state-put "agenda-query" query)
-      (eabp-send-dialog
-       (eabp-column
-        (eabp-text (if name "Edit Saved Search" "New Saved Search") 'title)
-        (eabp-text "Enter the display name and the org-ql query string." 'caption)
-        (eabp-text-input "agenda-name" :label "Name" :value (or name "") :single-line t)
-        (eabp-text-input "agenda-query" :label "Query String" :value query)
-        (eabp-row
-         (eabp-spacer :weight 1)
+      (jetpacs-ui-state-clear "agenda-")
+      (jetpacs-ui-state-put "agenda-name" (or name ""))
+      (jetpacs-ui-state-put "agenda-query" query)
+      (jetpacs-send-dialog
+       (jetpacs-column
+        (jetpacs-text (if name "Edit Saved Search" "New Saved Search") 'title)
+        (jetpacs-text "Enter the display name and the org-ql query string." 'caption)
+        (jetpacs-text-input "agenda-name" :label "Name" :value (or name "") :single-line t)
+        (jetpacs-text-input "agenda-query" :label "Query String" :value query)
+        (jetpacs-row
+         (jetpacs-spacer :weight 1)
          (when name
-           (eabp-button "Delete" (eabp-action "settings.agenda.delete" :args `((name . ,name))) :variant "text"))
-         (eabp-button "Cancel" (eabp-action "dialog.dismiss") :variant "text")
-         (eabp-spacer :width 8)
-         (eabp-button "Save" (eabp-action "settings.agenda.save" :args `((old-name . ,name))))))))))
+           (jetpacs-button "Delete" (jetpacs-action "settings.agenda.delete" :args `((name . ,name))) :variant "text"))
+         (jetpacs-button "Cancel" (jetpacs-action "dialog.dismiss") :variant "text")
+         (jetpacs-spacer :width 8)
+         (jetpacs-button "Save" (jetpacs-action "settings.agenda.save" :args `((old-name . ,name))))))))))
 
-(eabp-defaction "settings.agenda.delete"
+(jetpacs-defaction "settings.agenda.delete"
   (lambda (args _)
     (let ((name (alist-get 'name args)))
       (setq glasspane-org-custom-agendas (assoc-delete-all name glasspane-org-custom-agendas))
       (glasspane-ui--customize-save 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
-      (eabp-dismiss-dialog)
-      (eabp-shell-notify (format "Deleted saved search: %s" name))
-      (eabp-shell-push))))
+      (jetpacs-dismiss-dialog)
+      (jetpacs-shell-notify (format "Deleted saved search: %s" name))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "settings.agenda.save"
+(jetpacs-defaction "settings.agenda.save"
   (lambda (args _)
     (let ((old-name (alist-get 'old-name args))
-          (new-name (eabp-ui-state "agenda-name"))
-          (query (eabp-ui-state "agenda-query")))
+          (new-name (jetpacs-ui-state "agenda-name"))
+          (query (jetpacs-ui-state "agenda-query")))
       (if (or (not (stringp new-name)) (string-empty-p new-name))
-          (eabp-shell-notify "Name cannot be empty")
+          (jetpacs-shell-notify "Name cannot be empty")
         (when (and old-name (not (equal old-name new-name)))
           (setq glasspane-org-custom-agendas (assoc-delete-all old-name glasspane-org-custom-agendas)))
         (setq glasspane-org-custom-agendas (assoc-delete-all new-name glasspane-org-custom-agendas))
         (setq glasspane-org-custom-agendas (append glasspane-org-custom-agendas (list (cons new-name query))))
         (glasspane-ui--customize-save 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
-        (eabp-dismiss-dialog)
-        (eabp-shell-notify "Saved custom agenda")
-        (eabp-shell-push)))))
+        (jetpacs-dismiss-dialog)
+        (jetpacs-shell-notify "Saved custom agenda")
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "settings.todo.save"
+(jetpacs-defaction "settings.todo.save"
   (lambda (args _)
     (let* ((idx (alist-get 'index args))
            (type (intern (alist-get 'type args)))
@@ -4821,29 +4821,29 @@ with the new states.  Returns non-nil when persisting succeeded."
                           (mapcar (lambda (x)
                                     (let ((x (replace-regexp-in-string "^[ \t\n\r]+\\|[ \t\n\r]+$" "" x)))
                                       (if (equal x "") nil x)))
-                                  (split-string (or (eabp-ui-state id) "") ",")))))
+                                  (split-string (or (jetpacs-ui-state id) "") ",")))))
            (active (funcall parse "todo-active"))
            (finished (funcall parse "todo-finished"))
            (seqs (copy-sequence (or (default-value 'org-todo-keywords) '((sequence "TODO" "DONE")))))
            (new-seq (append (list type) active (when finished (cons "|" finished)))))
       (cond
        ((and (null active) (null finished))
-        (eabp-shell-notify "A sequence needs at least one state"))
+        (jetpacs-shell-notify "A sequence needs at least one state"))
        ((>= idx (length seqs))
         ;; Stale index: the list changed since the dialog was built.
-        (eabp-shell-notify "Sequences changed underneath; reopen the editor")
-        (eabp-dismiss-dialog)
-        (eabp-shell-push))
+        (jetpacs-shell-notify "Sequences changed underneath; reopen the editor")
+        (jetpacs-dismiss-dialog)
+        (jetpacs-shell-push))
        (t
         (if (>= idx 0)
             (setcar (nthcdr idx seqs) new-seq)
           (setq seqs (append seqs (list new-seq))))
         (when (glasspane-ui--todo-keywords-apply seqs)
-          (eabp-shell-notify "TODO sequence saved"))
-        (eabp-dismiss-dialog)
-        (eabp-shell-push))))))
+          (jetpacs-shell-notify "TODO sequence saved"))
+        (jetpacs-dismiss-dialog)
+        (jetpacs-shell-push))))))
 
-(eabp-defaction "settings.todo.delete"
+(jetpacs-defaction "settings.todo.delete"
   (lambda (args _)
     (let* ((idx (alist-get 'index args))
            (seqs (or (default-value 'org-todo-keywords) '((sequence "TODO" "DONE")))))
@@ -4853,27 +4853,27 @@ with the new states.  Returns non-nil when persisting succeeded."
                        ;; the last sequence falls back to the stock one.
                        '((sequence "TODO" "|" "DONE"))))
         (when (glasspane-ui--todo-keywords-apply seqs)
-          (eabp-shell-notify "TODO sequence deleted"))
-        (eabp-dismiss-dialog)
-        (eabp-shell-push)))))
+          (jetpacs-shell-notify "TODO sequence deleted"))
+        (jetpacs-dismiss-dialog)
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "search.update-filter"
+(jetpacs-defaction "search.update-filter"
   ;; A builder filter changed: rebuild the org-ql query from the whole
   ;; filter state and run it immediately — the results and the query
   ;; text update together, no extra Search tap needed.
   (lambda (args _)
-    (eabp-ui-state-put (concat "search-filter-" (alist-get 'field args))
+    (jetpacs-ui-state-put (concat "search-filter-" (alist-get 'field args))
                        (alist-get 'value args))
     (glasspane-ui--run-search (glasspane-ui--search-filter-query))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "search.clear-filters"
+(jetpacs-defaction "search.clear-filters"
   (lambda (_ _)
-    (eabp-ui-state-clear "search-filter-")
+    (jetpacs-ui-state-clear "search-filter-")
     (glasspane-ui--run-search "")
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "agenda.save-custom"
+(jetpacs-defaction "agenda.save-custom"
   (lambda (args _)
     (let* ((query (alist-get 'query args))
            (name (read-string "Agenda Name: ")))
@@ -4882,60 +4882,60 @@ with the new states.  Returns non-nil when persisting succeeded."
         (setq glasspane-org-custom-agendas (assoc-delete-all name glasspane-org-custom-agendas))
         (add-to-list 'glasspane-org-custom-agendas (cons name query) t)
         (customize-save-variable 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
-        (eabp-shell-notify (format "Saved custom agenda: %s" name))
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify (format "Saved custom agenda: %s" name))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "agenda.set-mode"
+(jetpacs-defaction "agenda.set-mode"
   (lambda (args _)
     (let ((mode (alist-get 'mode args)))
-      (eabp-ui-state-put "agenda-mode" mode)
-      (eabp-shell-push))))
+      (jetpacs-ui-state-put "agenda-mode" mode)
+      (jetpacs-shell-push))))
 
-(eabp-defaction "agenda.nav"
+(jetpacs-defaction "agenda.nav"
   ;; Shift the agenda anchor by DIR (±1) in units of the active span.
   (lambda (args _)
     (let* ((dir (alist-get 'dir args))
            (dir (if (numberp dir) dir 1))
-           (mode (or (eabp-ui-state "agenda-mode") "day"))
+           (mode (or (jetpacs-ui-state "agenda-mode") "day"))
            (unit (pcase mode ("week" 'week) ("month" 'month) (_ 'day)))
            (anchor (glasspane-ui--agenda-anchor)))
       ;; Month steps walk 1st → 1st so ±1 never skips a short month.
       (when (eq unit 'month)
         (setq anchor (concat (substring anchor 0 7) "-01")))
-      (eabp-ui-state-put "agenda-anchor"
+      (jetpacs-ui-state-put "agenda-anchor"
                          (glasspane-ui--shift-date anchor dir unit))
-      (eabp-shell-push))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "agenda.today"
+(jetpacs-defaction "agenda.today"
   ;; Reset the anchor (and any month-grid selection) back to today.
   (lambda (_ _)
-    (eabp-ui-state-put "agenda-anchor" nil)
-    (eabp-ui-state-put "agenda-selected-date" nil)
-    (eabp-shell-push)))
+    (jetpacs-ui-state-put "agenda-anchor" nil)
+    (jetpacs-ui-state-put "agenda-selected-date" nil)
+    (jetpacs-shell-push)))
 
-(eabp-defaction "agenda.select-date"
+(jetpacs-defaction "agenda.select-date"
   (lambda (args _)
     (let ((date (alist-get 'date args)))
-      (eabp-ui-state-put "agenda-selected-date" date)
-      (eabp-shell-push))))
+      (jetpacs-ui-state-put "agenda-selected-date" date)
+      (jetpacs-shell-push))))
 
-(eabp-defaction "heading.clock-in"
+(jetpacs-defaction "heading.clock-in"
   (lambda (args _)
     (when (glasspane-ui--at-ref args #'org-clock-in)
-      (eabp-shell-notify "Clocked in")
-      (eabp-shell-push "clock"))))
+      (jetpacs-shell-notify "Clocked in")
+      (jetpacs-shell-push "clock"))))
 
-(eabp-defaction "search.by-tag"
+(jetpacs-defaction "search.by-tag"
   ;; A tag chip tap: reset the builder to just that tag, then run the
   ;; same query the builder would generate, so the search field shows a
   ;; query the user can retype or edit.
   (lambda (args _)
-    (eabp-ui-state-clear "search-filter-")
-    (eabp-ui-state-put "search-filter-tags" (vector (alist-get 'tag args)))
+    (jetpacs-ui-state-clear "search-filter-")
+    (jetpacs-ui-state-put "search-filter-tags" (vector (alist-get 'tag args)))
     (glasspane-ui--run-search (glasspane-ui--search-filter-query))
-    (eabp-shell-push nil :switch-to "search")))
+    (jetpacs-shell-push nil :switch-to "search")))
 
-(eabp-defaction "org.link.open"
+(jetpacs-defaction "org.link.open"
   ;; A tappable link inside rich org text. Emacs resolves it (id:, file:,
   ;; http(s):, attachment:, …) via the org link machinery; we report the
   ;; outcome back as a snackbar since the action itself happens Emacs-side.
@@ -4946,19 +4946,19 @@ with the new states.  Returns non-nil when persisting succeeded."
           (condition-case err
               (progn
                 (org-link-open-from-string link)
-                (eabp-shell-notify (format "Opened %s" link))
+                (jetpacs-shell-notify (format "Opened %s" link))
                 (when (derived-mode-p 'org-mode)
                   (setq glasspane-ui--detail-ref (glasspane-org--heading-ref))
                   (setq glasspane-ui--detail-read-mode t)
                   (setq navigated t)))
             (error
-             (eabp-shell-notify
+             (jetpacs-shell-notify
               (format "Couldn't open %s: %s" link (error-message-string err)))))
           (if navigated
-              (eabp-shell-push nil :switch-to "detail")
-            (eabp-shell-push)))))))
+              (jetpacs-shell-push nil :switch-to "detail")
+            (jetpacs-shell-push)))))))
 
-(eabp-defaction "checkbox.toggle"
+(jetpacs-defaction "checkbox.toggle"
   ;; Toggle a checkbox in an org file from the reader view.  The companion
   ;; sends FILE and POS (the real-buffer position of the list item line).
   (lambda (args _)
@@ -4975,12 +4975,12 @@ with the new states.  Returns non-nil when persisting succeeded."
                       (save-silently t))
                   (save-buffer)))
               (glasspane-org-cache-invalidate)
-              (eabp-shell-push))
+              (jetpacs-shell-push))
           (error
-           (eabp-shell-notify
+           (jetpacs-shell-notify
             (format "Toggle failed: %s" (error-message-string err)))))))))
 
-(eabp-defaction "heading.reorder"
+(jetpacs-defaction "heading.reorder"
   (lambda (args _)
     (let* ((file      (alist-get 'file args))
            (from-pos  (alist-get 'from_pos args))
@@ -5016,7 +5016,7 @@ with the new states.  Returns non-nil when persisting succeeded."
           (with-current-buffer (find-file-noselect file)
             (save-buffer)))
         (glasspane-org-cache-invalidate)
-        (eabp-shell-push nil :switch-to "edit")))))
+        (jetpacs-shell-push nil :switch-to "edit")))))
 
 ;; ─── Table actions ───────────────────────────────────────────────────────────
 ;; The rich renderer emits native `table' nodes whose cells and "+"
@@ -5050,7 +5050,7 @@ row) skips the realign instead of erroring."
           (save-silently t))
       (save-buffer)))
   (glasspane-org-cache-invalidate)
-  (eabp-shell-push))
+  (jetpacs-shell-push))
 
 (defun glasspane-ui--table-field-formula ()
   "The #+TBLFM entry (LHS . RHS) computing the field at point, or nil.
@@ -5074,7 +5074,7 @@ are not resolved — those cells stay value-editable."
       (or (cl-find (format "@%d$%d" dline col) stored :key norm :test #'equal)
           (cl-find (format "$%d" col) stored :key norm :test #'equal)))))
 
-(eabp-defaction "org.table.edit"
+(jetpacs-defaction "org.table.edit"
   ;; Tap a table cell in the reader: a native dialog (bridged
   ;; `read-string') prefilled with the current field, written back
   ;; through the org table machinery so formulas recalculate.  A field
@@ -5116,11 +5116,11 @@ are not resolved — those cells stay value-editable."
                   (glasspane-ui--table-mutate file pos
                     (lambda () (org-table-get-field nil new))))))
           (error
-           (eabp-shell-notify
+           (jetpacs-shell-notify
             (format "Edit failed: %s" (error-message-string err)))
-           (eabp-shell-push)))))))
+           (jetpacs-shell-push)))))))
 
-(eabp-defaction "org.table.cell-menu"
+(jetpacs-defaction "org.table.cell-menu"
   ;; Long-press a table cell in the reader: row/column structure edits
   ;; picked from a bridged `completing-read'.  Org's own commands fix up
   ;; #+TBLFM references (or mark them INVALID) on the way through.
@@ -5142,11 +5142,11 @@ are not resolved — those cells stay value-editable."
                     ("Delete row"         (org-table-kill-row))
                     ("Delete column"      (org-table-delete-column))))))
           (error
-           (eabp-shell-notify
+           (jetpacs-shell-notify
             (format "Table edit failed: %s" (error-message-string err)))
-           (eabp-shell-push)))))))
+           (jetpacs-shell-push)))))))
 
-(eabp-defaction "org.table.add-row"
+(jetpacs-defaction "org.table.add-row"
   ;; The "+" strip under the table: append an empty row at the bottom,
   ;; then tap-to-edit fills it in.
   (lambda (args _)
@@ -5160,11 +5160,11 @@ are not resolved — those cells stay value-editable."
                 (forward-line -1)       ; last table line
                 (org-table-insert-row t)))
           (error
-           (eabp-shell-notify
+           (jetpacs-shell-notify
             (format "Add row failed: %s" (error-message-string err)))
-           (eabp-shell-push)))))))
+           (jetpacs-shell-push)))))))
 
-(eabp-defaction "org.table.add-col"
+(jetpacs-defaction "org.table.add-col"
   ;; The "+" gutter at the right edge: append an empty column.
   (lambda (args _)
     (let ((file (alist-get 'file args))
@@ -5188,9 +5188,9 @@ are not resolved — those cells stay value-editable."
                                                (line-end-position))))))
                   (org-table-goto-column (1+ (max 1 ncols)) nil 'force))))
           (error
-           (eabp-shell-notify
+           (jetpacs-shell-notify
             (format "Add column failed: %s" (error-message-string err)))
-           (eabp-shell-push)))))))
+           (jetpacs-shell-push)))))))
 
 ;; ─── Babel ───────────────────────────────────────────────────────────────────
 
@@ -5199,9 +5199,9 @@ are not resolved — those cells stay value-editable."
 Best-effort: the timer can't interrupt a synchronous subprocess mid-call,
 but it fires between process reads and stops a runaway block from
 wedging the bridge forever."
-  :type 'integer :group 'eabp)
+  :type 'integer :group 'jetpacs)
 
-(eabp-defaction "org.babel.execute"
+(jetpacs-defaction "org.babel.execute"
   ;; The play button on a src-block header.  The wire names only a
   ;; location — the code that runs lives in the user's own file, so the
   ;; semantic-action boundary holds.  `org-confirm-babel-evaluate' is
@@ -5233,20 +5233,20 @@ wedging the bridge forever."
                       (save-silently t))
                   (save-buffer)))
               (glasspane-org-cache-invalidate)
-              (eabp-shell-notify "Block executed")
-              (eabp-shell-push))
+              (jetpacs-shell-notify "Block executed")
+              (jetpacs-shell-push))
           (error
-           (eabp-shell-notify
+           (jetpacs-shell-notify
             (format "Run failed: %s" (error-message-string err)))
-           (eabp-shell-push)))))))
+           (jetpacs-shell-push)))))))
 
-(eabp-defaction "file.view"
-  ;; Legacy (old cached UIs): now routes into the eabp-files editor.
+(jetpacs-defaction "file.view"
+  ;; Legacy (old cached UIs): now routes into the jetpacs-files editor.
   (lambda (args _)
     (let ((file (alist-get 'file args)))
       (when (and (stringp file) (file-readable-p file))
-        (setq eabp-files--file (expand-file-name file))
-        (eabp-shell-push nil :switch-to "edit")))))
+        (setq jetpacs-files--file (expand-file-name file))
+        (jetpacs-shell-push nil :switch-to "edit")))))
 
 ;; ─── Files integration: org files open reader-first ─────────────────────────
 ;; Registered on the core files module's app seams; the editor itself stays
@@ -5273,7 +5273,7 @@ orgro sparse-filter parity item."
   (when (and glasspane-ui--files-read-mode (glasspane-ui--org-file-p file))
     (if glasspane-ui--files-refile-mode
         (or (glasspane-org-reader-refile-list file)
-            (eabp-text "No headings to show." 'caption))
+            (jetpacs-text "No headings to show." 'caption))
       (let* ((items (glasspane-org--file-heading-items file))
              (query (string-trim glasspane-ui--files-filter))
              (active (not (string-empty-p query)))
@@ -5283,45 +5283,45 @@ orgro sparse-filter parity item."
                            (user-error
                             (list 'error (error-message-string err))))))
              (broken (eq (car-safe filtered) 'error)))
-        (apply #'eabp-lazy-column
+        (apply #'jetpacs-lazy-column
                (append
-                (list (eabp-text-input "files-filter"
+                (list (jetpacs-text-input "files-filter"
                                        :value glasspane-ui--files-filter
                                        :hint "Filter: todo:TODO tags:work text…"
                                        :single-line t
                                        :on-submit
-                                       (eabp-action "files.filter"
+                                       (jetpacs-action "files.filter"
                                                     :when-offline "drop")))
                 (when (and active (not broken))
-                  (list (eabp-row
-                         (eabp-box
-                          (list (eabp-text
+                  (list (jetpacs-row
+                         (jetpacs-box
+                          (list (jetpacs-text
                                  (format "%d of %d headings"
                                          (length filtered) (length items))
                                  'caption))
                           :weight 1)
-                         (eabp-chip "Clear"
-                                    :on-tap (eabp-action
+                         (jetpacs-chip "Clear"
+                                    :on-tap (jetpacs-action
                                              "files.filter"
                                              :args '((value . ""))
                                              :when-offline "drop")))))
                 (cond
-                 (broken (list (eabp-text (cadr filtered) 'caption)))
+                 (broken (list (jetpacs-text (cadr filtered) 'caption)))
                  ((null filtered)
-                  (list (eabp-empty-state
+                  (list (jetpacs-empty-state
                          :icon "description"
                          :title (if active "No matches" "Empty file")
                          :caption (if active query "No headings found."))))
                  (t (mapcar #'glasspane-ui--agenda-card filtered)))))))))
 
-(eabp-defaction "files.filter"
+(jetpacs-defaction "files.filter"
   ;; The sparse filter for the open org file: VALUE is the submitted
   ;; query ("" clears). State only — matching happens at render.
   (lambda (args _)
     (let ((value (alist-get 'value args)))
       (when (stringp value)
         (setq glasspane-ui--files-filter value)
-        (eabp-shell-push nil :switch-to "edit")))))
+        (jetpacs-shell-push nil :switch-to "edit")))))
 
 (defun glasspane-ui--org-editor-actions (file)
   "Reader/refile toggles and the properties dialog for org FILE."
@@ -5329,55 +5329,55 @@ orgro sparse-filter parity item."
     (delq nil
           (list
            (when glasspane-ui--files-read-mode
-             (eabp-icon-button
+             (jetpacs-icon-button
               (if glasspane-ui--files-refile-mode "visibility" "swap_vert")
-              (eabp-action "files.toggle-refile")
+              (jetpacs-action "files.toggle-refile")
               :content-description
               (if glasspane-ui--files-refile-mode "Reader" "Refile")))
-           (eabp-icon-button
+           (jetpacs-icon-button
             (if glasspane-ui--files-read-mode "edit" "visibility")
-            (eabp-action "files.toggle-read")
+            (jetpacs-action "files.toggle-read")
             :content-description
             (if glasspane-ui--files-read-mode "Edit" "Read"))
-           (eabp-icon-button
+           (jetpacs-icon-button
             "tune"
-            (eabp-action "files.properties.show" :args `((file . ,file)))
+            (jetpacs-action "files.properties.show" :args `((file . ,file)))
             :content-description "Properties")))))
 
-(add-hook 'eabp-files-editor-body-functions #'glasspane-ui--org-editor-body)
-(add-hook 'eabp-files-editor-actions-functions #'glasspane-ui--org-editor-actions)
+(add-hook 'jetpacs-files-editor-body-functions #'glasspane-ui--org-editor-body)
+(add-hook 'jetpacs-files-editor-actions-functions #'glasspane-ui--org-editor-actions)
 
 ;; Org files get the org formatting toolbar above the keyboard — declared
 ;; in the editor spec, so the renderer stays app-agnostic.
-(setq eabp-files-editor-toolbar-function
+(setq jetpacs-files-editor-toolbar-function
       (lambda (file) (when (glasspane-ui--org-file-p file) "org")))
 
 ;; Org files open reader-first; everything else lands in the editor.
 ;; A fresh file starts unfiltered.
-(add-hook 'eabp-files-open-hook
+(add-hook 'jetpacs-files-open-hook
           (lambda (file)
             (setq glasspane-ui--files-read-mode (glasspane-ui--org-file-p file)
                   glasspane-ui--files-filter "")))
 
 ;; A phone-side save may have changed org data the views memoise.
-(add-hook 'eabp-files-after-save-hook
+(add-hook 'jetpacs-files-after-save-hook
           (lambda (_file) (glasspane-org-cache-invalidate)))
 
-(eabp-defaction "files.toggle-read"
+(jetpacs-defaction "files.toggle-read"
   (lambda (_ _)
     (setq glasspane-ui--files-read-mode (not glasspane-ui--files-read-mode))
-    (eabp-shell-push nil :switch-to "edit")))
+    (jetpacs-shell-push nil :switch-to "edit")))
 
-(eabp-defaction "files.toggle-refile"
+(jetpacs-defaction "files.toggle-refile"
   (lambda (_ _)
     (setq glasspane-ui--files-refile-mode (not glasspane-ui--files-refile-mode))
-    (eabp-shell-push nil :switch-to "edit")))
+    (jetpacs-shell-push nil :switch-to "edit")))
 
-(eabp-defaction "files.properties.show"
+(jetpacs-defaction "files.properties.show"
   (lambda (args _)
     (let ((file (alist-get 'file args)))
       (if (not (and file (stringp file) (file-readable-p file)))
-          (eabp-shell-notify (format "Cannot open properties: %s" (or file "no file")))
+          (jetpacs-shell-notify (format "Cannot open properties: %s" (or file "no file")))
         (condition-case err
             (let* ((buf (or (get-file-buffer file) (find-file-noselect file)))
                    (kwds (with-current-buffer buf (org-collect-keywords '("TITLE" "CATEGORY" "FILETAGS" "TODO" "SEQ_TODO" "TYP_TODO" "STARTUP" "AUTHOR" "EMAIL" "DATE" "ARCHIVE"))))
@@ -5399,56 +5399,56 @@ orgro sparse-filter parity item."
                    (email (car (alist-get "EMAIL" kwds nil nil #'equal)))
                    (date (car (alist-get "DATE" kwds nil nil #'equal)))
                    (archive (car (alist-get "ARCHIVE" kwds nil nil #'equal))))
-              (eabp-send-dialog
-               (eabp-scroll-column
-                (eabp-text "File Properties" 'title)
-                (eabp-text (file-name-nondirectory file) 'caption)
-                (eabp-text-input "file-prop-title" :label "Title" :value title :single-line t)
-                (eabp-text-input "file-prop-category" :label "Category" :value category :single-line t)
-                (eabp-text "File Tags" 'caption nil nil nil nil 8)
-                (eabp-enum-list "file-prop-tags" available-tags
+              (jetpacs-send-dialog
+               (jetpacs-scroll-column
+                (jetpacs-text "File Properties" 'title)
+                (jetpacs-text (file-name-nondirectory file) 'caption)
+                (jetpacs-text-input "file-prop-title" :label "Title" :value title :single-line t)
+                (jetpacs-text-input "file-prop-category" :label "Category" :value category :single-line t)
+                (jetpacs-text "File Tags" 'caption nil nil nil nil 8)
+                (jetpacs-enum-list "file-prop-tags" available-tags
                                 :value filetags :multi-select t :allow-add t)
-                (eabp-text "TODO Sequence" 'caption nil nil nil nil 8)
-                (eabp-text-input "file-prop-todo-active" :label "Active States" :value todo-active :single-line t)
-                (eabp-text-input "file-prop-todo-finished" :label "Finished States" :value todo-finished :single-line t)
-                (eabp-text "Metadata" 'caption nil nil nil nil 8)
-                (eabp-text-input "file-prop-author" :label "Author" :value author :single-line t)
-                (eabp-text-input "file-prop-email" :label "Email" :value email :single-line t)
-                (eabp-text-input "file-prop-date" :label "Date" :value date :single-line t)
-                (eabp-text "Options" 'caption nil nil nil nil 8)
-                (eabp-text-input "file-prop-startup" :label "Startup" :value startup :single-line t)
-                (eabp-text-input "file-prop-archive" :label "Archive" :value archive :single-line t)
-                (eabp-row
-                 (eabp-spacer :weight 1)
-                 (eabp-button "Cancel" (eabp-action "dialog.dismiss") :variant "text")
-                 (eabp-spacer :width 8)
-                 (eabp-button "Save" (eabp-action "files.properties.save" :args `((file . ,file))))))))
+                (jetpacs-text "TODO Sequence" 'caption nil nil nil nil 8)
+                (jetpacs-text-input "file-prop-todo-active" :label "Active States" :value todo-active :single-line t)
+                (jetpacs-text-input "file-prop-todo-finished" :label "Finished States" :value todo-finished :single-line t)
+                (jetpacs-text "Metadata" 'caption nil nil nil nil 8)
+                (jetpacs-text-input "file-prop-author" :label "Author" :value author :single-line t)
+                (jetpacs-text-input "file-prop-email" :label "Email" :value email :single-line t)
+                (jetpacs-text-input "file-prop-date" :label "Date" :value date :single-line t)
+                (jetpacs-text "Options" 'caption nil nil nil nil 8)
+                (jetpacs-text-input "file-prop-startup" :label "Startup" :value startup :single-line t)
+                (jetpacs-text-input "file-prop-archive" :label "Archive" :value archive :single-line t)
+                (jetpacs-row
+                 (jetpacs-spacer :weight 1)
+                 (jetpacs-button "Cancel" (jetpacs-action "dialog.dismiss") :variant "text")
+                 (jetpacs-spacer :width 8)
+                 (jetpacs-button "Save" (jetpacs-action "files.properties.save" :args `((file . ,file))))))))
           (error
-           (eabp-shell-notify (format "Properties error: %s" (error-message-string err)))))))))
+           (jetpacs-shell-notify (format "Properties error: %s" (error-message-string err)))))))))
 
-(eabp-defaction "files.properties.save"
+(jetpacs-defaction "files.properties.save"
   (lambda (args _)
     (let* ((file (alist-get 'file args))
            (buf (or (get-file-buffer file) (find-file-noselect file)))
-           (title (eabp-ui-state "file-prop-title"))
-           (category (eabp-ui-state "file-prop-category"))
-           (tags-val (eabp-ui-state "file-prop-tags"))
+           (title (jetpacs-ui-state "file-prop-title"))
+           (category (jetpacs-ui-state "file-prop-category"))
+           (tags-val (jetpacs-ui-state "file-prop-tags"))
            (tags (cond
                   ((vectorp tags-val) (append tags-val nil))
                   ((listp tags-val) tags-val)
                   (t nil)))
-           (todo-active (eabp-ui-state "file-prop-todo-active"))
-           (todo-finished (eabp-ui-state "file-prop-todo-finished"))
+           (todo-active (jetpacs-ui-state "file-prop-todo-active"))
+           (todo-finished (jetpacs-ui-state "file-prop-todo-finished"))
            (todo-str (let ((a (when (stringp todo-active) (string-join (split-string todo-active "[ \t]*,[ \t]*" t) " ")))
                            (f (when (stringp todo-finished) (string-join (split-string todo-finished "[ \t]*,[ \t]*" t) " "))))
                        (if (and a f (not (string-empty-p a)) (not (string-empty-p f)))
                            (concat a " | " f)
                          (or a f))))
-           (startup (eabp-ui-state "file-prop-startup"))
-           (author (eabp-ui-state "file-prop-author"))
-           (email (eabp-ui-state "file-prop-email"))
-           (date (eabp-ui-state "file-prop-date"))
-           (archive (eabp-ui-state "file-prop-archive")))
+           (startup (jetpacs-ui-state "file-prop-startup"))
+           (author (jetpacs-ui-state "file-prop-author"))
+           (email (jetpacs-ui-state "file-prop-email"))
+           (date (jetpacs-ui-state "file-prop-date"))
+           (archive (jetpacs-ui-state "file-prop-archive")))
       (with-current-buffer buf
         (save-excursion
           (save-restriction
@@ -5478,9 +5478,9 @@ orgro sparse-filter parity item."
             (let ((glasspane-org--inhibit-save-refresh t)
                   (save-silently t))
               (save-buffer)))))
-      (eabp-dismiss-dialog)
+      (jetpacs-dismiss-dialog)
       (glasspane-org-cache-invalidate)
-      (eabp-shell-push))))
+      (jetpacs-shell-push))))
 
 ;; ─── Auto-refresh ────────────────────────────────────────────────────────────
 
@@ -5489,17 +5489,17 @@ orgro sparse-filter parity item."
 (defcustom glasspane-ui-save-refresh-delay 2
   "Idle seconds after saving an agenda file before re-pushing the dashboard.
 Debounces bursts of saves (e.g. `org-save-all-org-buffers') into one push."
-  :type 'integer :group 'eabp)
+  :type 'integer :group 'jetpacs)
 
 (defun glasspane-ui--after-save-refresh ()
   "Schedule a dashboard refresh if an org agenda file was just saved.
-No-op for saves EABP itself performs — anything inside an action
-handler (`eabp--in-action-handler') pushes explicitly, and other
+No-op for saves Jetpacs itself performs — anything inside an action
+handler (`jetpacs--in-action-handler') pushes explicitly, and other
 programmatic saves bind `glasspane-org--inhibit-save-refresh' — which would
 otherwise refresh twice or loop."
-  (when (and (eabp-connected-p)
+  (when (and (jetpacs-connected-p)
              (not (bound-and-true-p glasspane-org--inhibit-save-refresh))
-             (not (bound-and-true-p eabp--in-action-handler))
+             (not (bound-and-true-p jetpacs--in-action-handler))
              buffer-file-name
              (derived-mode-p 'org-mode)
              (ignore-errors
@@ -5510,7 +5510,7 @@ otherwise refresh twice or loop."
       (cancel-timer glasspane-ui--save-refresh-timer))
     (setq glasspane-ui--save-refresh-timer
           (run-with-idle-timer glasspane-ui-save-refresh-delay nil
-                               #'eabp-shell-push))))
+                               #'jetpacs-shell-push))))
 
 (add-hook 'after-save-hook #'glasspane-ui--after-save-refresh)
 
@@ -5519,15 +5519,15 @@ otherwise refresh twice or loop."
 Safe to put on any hook: a no-op while disconnected.  Invalidates the
 extraction cache first — this runs on clock in/out, which mutate the
 org buffer without necessarily saving it."
-  (when (eabp-connected-p)
+  (when (jetpacs-connected-p)
     (glasspane-org-cache-invalidate)
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
 ;; The connect and queue-drained pushes are owned by the shell; this app
-;; only contributes its cache invalidation via `eabp-shell-refresh-hook'.
+;; only contributes its cache invalidation via `jetpacs-shell-refresh-hook'.
 
 ;; Clock state shows on the Clock tab and the dashboard generally —
-;; keep it live. Depth 90: after eabp-surfaces' notification hooks.
+;; keep it live. Depth 90: after jetpacs-surfaces' notification hooks.
 (add-hook 'org-clock-in-hook  #'glasspane-ui--refresh-if-connected 90)
 (add-hook 'org-clock-out-hook #'glasspane-ui--refresh-if-connected 90)
 
@@ -5561,11 +5561,11 @@ org buffer without necessarily saving it."
 (require 'subr-x)
 (require 'org)
 (require 'org-datetree)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-shell)
-(require 'eabp-settings)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-settings)
 (require 'glasspane-org)
 (require 'glasspane-org-reader)
 (require 'glasspane-ui)                ; date helpers + the glasspane defapp
@@ -5574,11 +5574,11 @@ org buffer without necessarily saving it."
   "The journal file holding the datetree.
 nil means journal.org inside `org-directory'."
   :type '(choice (const :tag "journal.org in org-directory" nil) file)
-  :group 'eabp)
+  :group 'jetpacs)
 
 (defcustom glasspane-journal-landing nil
   "When non-nil the app opens on the Journal view instead of Agenda."
-  :type 'boolean :group 'eabp)
+  :type 'boolean :group 'jetpacs)
 
 (defvar glasspane-journal--date nil
   "The day being viewed (\"YYYY-MM-DD\"), or nil for today.")
@@ -5645,38 +5645,38 @@ Creates the datetree levels (and the file) on first use."
 
 (defun glasspane-journal--nav-row (date today-p)
   "‹ yesterday | the day (a native date picker) | tomorrow › chrome."
-  (apply #'eabp-row
+  (apply #'jetpacs-row
          (delq nil
                (list
-                (eabp-icon-button
+                (jetpacs-icon-button
                  "chevron_left"
-                 (eabp-action "journal.nav" :args '((delta . -1))
+                 (jetpacs-action "journal.nav" :args '((delta . -1))
                               :when-offline "drop")
                  :content-description "Previous day")
-                (eabp-box
-                 (list (eabp-date-button
+                (jetpacs-box
+                 (list (jetpacs-date-button
                         (glasspane-ui--format-date
                          date (if today-p "Today · %a, %b %e" "%a, %b %e, %Y"))
-                        (eabp-action "journal.goto" :when-offline "drop")
+                        (jetpacs-action "journal.goto" :when-offline "drop")
                         :value date))
                  :weight 1 :alignment "center")
                 (unless today-p
-                  (eabp-chip "Today"
-                             :on-tap (eabp-action "journal.today"
+                  (jetpacs-chip "Today"
+                             :on-tap (jetpacs-action "journal.today"
                                                   :when-offline "drop")))
-                (eabp-icon-button
+                (jetpacs-icon-button
                  "chevron_right"
-                 (eabp-action "journal.nav" :args '((delta . 1))
+                 (jetpacs-action "journal.nav" :args '((delta . 1))
                               :when-offline "drop")
                  :content-description "Next day")))))
 
 (defun glasspane-journal--capture-row (date)
   "The always-on-top quick-capture input for DATE."
-  (eabp-text-input
+  (jetpacs-text-input
    (format "journal-capture-%d" glasspane-journal--capture-gen)
    :hint "Add to this day…"
    :single-line t
-   :on-submit (eabp-action "journal.capture"
+   :on-submit (jetpacs-action "journal.capture"
                            :args `((date . ,date))
                            :when-offline "queue")))
 
@@ -5684,7 +5684,7 @@ Creates the datetree levels (and the file) on first use."
   "DATE's datetree content through the foldable reader, or a placeholder."
   (or (when-let ((pos (glasspane-journal--day-pos date)))
         (glasspane-org-reader-subtree (glasspane-journal--file) pos t))
-      (list (eabp-text "Nothing here yet — the row above starts the day."
+      (list (jetpacs-text "Nothing here yet — the row above starts the day."
                        'caption))))
 
 (defun glasspane-journal--carried-card (item)
@@ -5692,23 +5692,23 @@ Creates the datetree levels (and the file) on first use."
 The buttons ride the existing allowlisted `heading.schedule' — the
 orgro timestamp-tap-edit item folds in here."
   (let ((ref (alist-get 'ref item)))
-    (eabp-card
+    (jetpacs-card
      (list
-      (eabp-column
-       (eabp-text (or (alist-get 'headline item) "") 'body)
-       (eabp-text (format "%s · %s"
+      (jetpacs-column
+       (jetpacs-text (or (alist-get 'headline item) "") 'body)
+       (jetpacs-text (format "%s · %s"
                           (or (alist-get 'todo item) "TODO")
                           (or (alist-get 'scheduled item) ""))
                   'caption)
-       (eabp-row
-        (eabp-spacer :weight 1)
-        (eabp-button "Today"
-                     (eabp-action "heading.schedule"
+       (jetpacs-row
+        (jetpacs-spacer :weight 1)
+        (jetpacs-button "Today"
+                     (jetpacs-action "heading.schedule"
                                   :args (append ref '((when . "+0d")))
                                   :when-offline "queue")
                      :variant "text")
-        (eabp-date-button "Pick"
-                          (eabp-action "heading.schedule"
+        (jetpacs-date-button "Pick"
+                          (jetpacs-action "heading.schedule"
                                        :args ref
                                        :when-offline "queue"))))))))
 
@@ -5721,29 +5721,29 @@ orgro timestamp-tap-edit item folds in here."
                        (condition-case nil
                            (glasspane-journal--carried-over)
                          (error nil)))))
-    (eabp-shell-tab-view
+    (jetpacs-shell-tab-view
      "journal"
-     (apply #'eabp-lazy-column
+     (apply #'jetpacs-lazy-column
             (append
              (list (glasspane-journal--nav-row date today-p)
                    (glasspane-journal--capture-row date)
-                   (eabp-spacer :height 4))
+                   (jetpacs-spacer :height 4))
              (glasspane-journal--day-nodes date)
              (when carried
                (append
-                (list (eabp-divider)
-                      (eabp-section-header
+                (list (jetpacs-divider)
+                      (jetpacs-section-header
                        (format "Carried over (%d)" (length carried))))
                 (mapcar #'glasspane-journal--carried-card carried)))
              ;; The clock rides the journal (its own tab felt barren and
              ;; crowded the bottom bar) — today's time is journal matter.
              (when (and today-p (fboundp 'glasspane-ui--clock-body))
-               (list (eabp-divider)
-                     (eabp-section-header "Clock")
+               (list (jetpacs-divider)
+                     (jetpacs-section-header "Clock")
                      (glasspane-ui--clock-body)))))
      :snackbar snackbar)))
 
-(eabp-shell-define-view "journal"
+(jetpacs-shell-define-view "journal"
                         :builder #'glasspane-journal--view
                         :tab '(:icon "today" :label "Journal")
                         :order 15)
@@ -5753,48 +5753,48 @@ orgro timestamp-tap-edit item folds in here."
 (defun glasspane-journal--apply-landing (_welcome)
   "Land on the journal when configured and no tab was chosen this session.
 Depth 5: before the shell's on-connect push (10) builds the surface."
-  (when (and glasspane-journal-landing (null eabp-shell--current-tab))
-    (setq eabp-shell--current-tab "journal")))
+  (when (and glasspane-journal-landing (null jetpacs-shell--current-tab))
+    (setq jetpacs-shell--current-tab "journal")))
 
-(add-hook 'eabp-connected-hook #'glasspane-journal--apply-landing 5)
+(add-hook 'jetpacs-connected-hook #'glasspane-journal--apply-landing 5)
 
 (defun glasspane-journal--on-view-switched (view)
   "Leaving the journal resets it to today — returning starts fresh."
   (unless (equal view "journal")
     (setq glasspane-journal--date nil)))
 
-(add-hook 'eabp-shell-view-switched-hook #'glasspane-journal--on-view-switched)
+(add-hook 'jetpacs-shell-view-switched-hook #'glasspane-journal--on-view-switched)
 
-(eabp-settings-register-section
+(jetpacs-settings-register-section
  "Journal"
  '((glasspane-journal-landing :label "Open on the journal")))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "journal.nav"
+(jetpacs-defaction "journal.nav"
   (lambda (args _)
     (let ((delta (alist-get 'delta args)))
       (when (integerp delta)
         (setq glasspane-journal--date
               (glasspane-ui--shift-date (glasspane-journal--current)
                                         delta 'day))
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "journal.goto"
+(jetpacs-defaction "journal.goto"
   (lambda (args _)
     (let ((date (alist-get 'value args)))
       (when (and (stringp date)
                  (string-match-p
                   "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" date))
         (setq glasspane-journal--date date)
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "journal.today"
+(jetpacs-defaction "journal.today"
   (lambda (_args _)
     (setq glasspane-journal--date nil)
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "journal.capture"
+(jetpacs-defaction "journal.capture"
   (lambda (args _)
     (let ((text (string-trim (or (alist-get 'value args) "")))
           (date (alist-get 'date args)))
@@ -5803,8 +5803,8 @@ Depth 5: before the shell's on-connect push (10) builds the surface."
          text (and (stringp date) (not (string-empty-p date)) date))
         ;; Rotate the input id: the re-render clears the field.
         (cl-incf glasspane-journal--capture-gen)
-        (eabp-shell-notify "Added to journal")
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify "Added to journal")
+        (jetpacs-shell-push)))))
 
 (provide 'glasspane-journal)
 ;;; glasspane-journal.el ends here
@@ -5831,11 +5831,11 @@ Depth 5: before the shell's on-connect push (10) builds the surface."
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-shell)
-(require 'eabp-settings)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-settings)
 (require 'glasspane-org)
 (require 'glasspane-ui)
 
@@ -5844,7 +5844,7 @@ Depth 5: before the shell's on-connect push (10) builds the surface."
 `query' is anything `glasspane-org--parse-query' accepts (org-ql sexp,
 filter tokens, or free text); `rendering' is \"list\" | \"board\" |
 \"calendar\".  Managed from the phone; persisted through Customize."
-  :type '(repeat sexp) :group 'eabp)
+  :type '(repeat sexp) :group 'jetpacs)
 
 (defvar glasspane-views--current nil
   "Name of the saved view being shown, or nil for the hub.")
@@ -5859,7 +5859,7 @@ filter tokens, or free text); `rendering' is \"list\" | \"board\" |
            :key (lambda (v) (alist-get 'name v)) :test #'equal))
 
 (defun glasspane-views--persist ()
-  (eabp-settings-save-variable 'glasspane-saved-views glasspane-saved-views))
+  (jetpacs-settings-save-variable 'glasspane-saved-views glasspane-saved-views))
 
 (defun glasspane-views--set-rendering (name rendering)
   "Set view NAME's rendering to RENDERING, rebuilding the saved list.
@@ -5883,34 +5883,34 @@ mutates the value Customize handed out."
 
 (defun glasspane-views--tap (item)
   "The drill-in action for ITEM's heading."
-  (eabp-action "heading.tap" :args (alist-get 'ref item)
+  (jetpacs-action "heading.tap" :args (alist-get 'ref item)
                :when-offline "drop"))
 
 (defun glasspane-views--table-node (items)
   "The list rendering: one table row per item, tappable cells."
-  (eabp-table
+  (jetpacs-table
    (cons
-    (eabp-table-row
-     (list (eabp-table-cell (list (eabp-span "Heading" :bold t)))
-           (eabp-table-cell (list (eabp-span "State" :bold t)))
-           (eabp-table-cell (list (eabp-span "Scheduled" :bold t)))
-           (eabp-table-cell (list (eabp-span "Tags" :bold t))))
+    (jetpacs-table-row
+     (list (jetpacs-table-cell (list (jetpacs-span "Heading" :bold t)))
+           (jetpacs-table-cell (list (jetpacs-span "State" :bold t)))
+           (jetpacs-table-cell (list (jetpacs-span "Scheduled" :bold t)))
+           (jetpacs-table-cell (list (jetpacs-span "Tags" :bold t))))
      :header t)
     (mapcar
      (lambda (item)
        (let ((tap (glasspane-views--tap item)))
-         (eabp-table-row
-          (list (eabp-table-cell
-                 (list (eabp-span (or (alist-get 'headline item) "")))
+         (jetpacs-table-row
+          (list (jetpacs-table-cell
+                 (list (jetpacs-span (or (alist-get 'headline item) "")))
                  :on-tap tap)
-                (eabp-table-cell
-                 (list (eabp-span (or (alist-get 'todo item) ""))))
-                (eabp-table-cell
-                 (list (eabp-span (or (glasspane-ui--ts-date
+                (jetpacs-table-cell
+                 (list (jetpacs-span (or (alist-get 'todo item) ""))))
+                (jetpacs-table-cell
+                 (list (jetpacs-span (or (glasspane-ui--ts-date
                                        (alist-get 'scheduled item))
                                       ""))))
-                (eabp-table-cell
-                 (list (eabp-span (mapconcat #'identity
+                (jetpacs-table-cell
+                 (list (jetpacs-span (mapconcat #'identity
                                              (append (alist-get 'tags item) nil)
                                              " "))))))))
      items))
@@ -5937,16 +5937,16 @@ vanish from the board."
   "A board card: tap opens the heading; the menu moves it to a column."
   (let ((ref (alist-get 'ref item))
         (state (or (alist-get 'todo item) "")))
-    (eabp-card
+    (jetpacs-card
      (list
-      (eabp-row
-       (eabp-box (list (eabp-text (or (alist-get 'headline item) "") 'body))
+      (jetpacs-row
+       (jetpacs-box (list (jetpacs-text (or (alist-get 'headline item) "") 'body))
                  :weight 1)
-       (eabp-menu
+       (jetpacs-menu
         (mapcar (lambda (target)
-                  (eabp-menu-item
+                  (jetpacs-menu-item
                    (if (string-empty-p target) "No state" target)
-                   (eabp-action "heading.todo-set"
+                   (jetpacs-action "heading.todo-set"
                                 :args (append ref `((state . ,target)))
                                 :when-offline "queue")))
                 (remove state columns))
@@ -5956,16 +5956,16 @@ vanish from the board."
 (defun glasspane-views--board-node (items)
   "The kanban rendering: one column per TODO state, panning sideways."
   (let ((columns (glasspane-views--board-columns items)))
-    (apply #'eabp-scroll-row
+    (apply #'jetpacs-scroll-row
            (mapcar
             (lambda (col)
               (let ((in-col (cl-remove-if-not
                              (lambda (i) (equal (or (alist-get 'todo i) "")
                                                 col))
                              items)))
-                (eabp-box
-                 (list (apply #'eabp-column
-                              (cons (eabp-section-header
+                (jetpacs-box
+                 (list (apply #'jetpacs-column
+                              (cons (jetpacs-section-header
                                      (format "%s (%d)"
                                              (if (string-empty-p col)
                                                  "No state" col)
@@ -5992,12 +5992,12 @@ vanish from the board."
                                (t (string< a b)))))))
       (cl-loop for date in dates
                append
-               (cons (eabp-section-header
+               (cons (jetpacs-section-header
                       (if (string-empty-p date) "Unscheduled"
                         (glasspane-ui--format-date date "%a, %b %e")))
                      (mapcar (lambda (item)
-                               (eabp-card
-                                (list (eabp-text
+                               (jetpacs-card
+                                (list (jetpacs-text
                                        (format "%s%s"
                                                (if-let ((todo (alist-get 'todo item)))
                                                    (concat todo " ") "")
@@ -6010,11 +6010,11 @@ vanish from the board."
 
 (defun glasspane-views--rendering-chips (view)
   "The List | Board | Calendar switcher for VIEW."
-  (apply #'eabp-row
+  (apply #'jetpacs-row
          (mapcar (lambda (r)
-                   (eabp-chip (capitalize r)
+                   (jetpacs-chip (capitalize r)
                               :selected (equal r (alist-get 'rendering view))
-                              :on-tap (eabp-action
+                              :on-tap (jetpacs-action
                                        "views.rendering"
                                        :args `((name . ,(alist-get 'name view))
                                                (rendering . ,r))
@@ -6027,18 +6027,18 @@ vanish from the board."
                     (glasspane-views--items view)
                   (user-error (list 'error (error-message-string err)))))
          (broken (eq (car-safe items) 'error)))
-    (eabp-shell-nav-view
+    (jetpacs-shell-nav-view
      (alist-get 'name view)
-     (apply #'eabp-lazy-column
+     (apply #'jetpacs-lazy-column
             (append
              (list (glasspane-views--rendering-chips view)
-                   (eabp-spacer :height 4))
+                   (jetpacs-spacer :height 4))
              (cond
               (broken
-               (list (eabp-text (cadr items) 'body)))
+               (list (jetpacs-text (cadr items) 'body)))
               ((null items)
                ;; %s: a hand-authored query may be a sexp, not a string.
-               (list (eabp-empty-state :icon "manage_search"
+               (list (jetpacs-empty-state :icon "manage_search"
                                        :title "No matches"
                                        :caption (format "%s"
                                                         (alist-get 'query view)))))
@@ -6046,64 +6046,64 @@ vanish from the board."
                    ("board" (list (glasspane-views--board-node items)))
                    ("calendar" (glasspane-views--calendar-nodes items))
                    (_ (list (glasspane-views--table-node items))))))))
-     :nav-action (eabp-action "views.back" :when-offline "drop")
+     :nav-action (jetpacs-action "views.back" :when-offline "drop")
      :snackbar snackbar)))
 
 (defun glasspane-views--new-form ()
   "The collapsed new-view form at the hub's foot.
 Field values mirror through the UI-state store; views.save reads them."
   (let ((gen glasspane-views--form-gen))
-    (eabp-collapsible
+    (jetpacs-collapsible
      "views-new"
-     (eabp-section-header "New view")
+     (jetpacs-section-header "New view")
      (list
-      (eabp-text-input (format "views-new-name-%d" gen)
+      (jetpacs-text-input (format "views-new-name-%d" gen)
                        :label "Name" :single-line t)
-      (eabp-text-input (format "views-new-query-%d" gen)
+      (jetpacs-text-input (format "views-new-query-%d" gen)
                        :label "Query"
                        :hint "todo:TODO tags:work — or an org-ql sexp"
                        :single-line t)
-      (eabp-enum-list (format "views-new-rendering-%d" gen)
+      (jetpacs-enum-list (format "views-new-rendering-%d" gen)
                       glasspane-views--renderings
                       :value '("list"))
-      (eabp-button "Save view"
-                   (eabp-action "views.save" :when-offline "drop")
+      (jetpacs-button "Save view"
+                   (jetpacs-action "views.save" :when-offline "drop")
                    :icon "add"))
      :collapsed t)))
 
 (defun glasspane-views--hub (snackbar)
   "The hub: every saved view as a card, plus the new-view form."
-  (eabp-shell-nav-view
+  (jetpacs-shell-nav-view
    "Saved views"
-   (apply #'eabp-lazy-column
+   (apply #'jetpacs-lazy-column
           (append
            (if glasspane-saved-views
                (mapcar
                 (lambda (view)
                   (let ((name (alist-get 'name view)))
-                    (eabp-card
+                    (jetpacs-card
                      (list
-                      (eabp-row
-                       (eabp-box
-                        (list (eabp-column
-                               (eabp-text name 'label)
-                               (eabp-text (format "%s · %s"
+                      (jetpacs-row
+                       (jetpacs-box
+                        (list (jetpacs-column
+                               (jetpacs-text name 'label)
+                               (jetpacs-text (format "%s · %s"
                                                   (alist-get 'rendering view)
                                                   (alist-get 'query view))
                                           'caption)))
                         :weight 1)
-                       (eabp-icon-button
+                       (jetpacs-icon-button
                         "delete"
-                        (eabp-action "views.delete" :args `((name . ,name))
+                        (jetpacs-action "views.delete" :args `((name . ,name))
                                      :when-offline "queue")
                         :content-description "Delete view")))
-                     :on-tap (eabp-action "views.open" :args `((name . ,name))
+                     :on-tap (jetpacs-action "views.open" :args `((name . ,name))
                                           :when-offline "drop"))))
                 glasspane-saved-views)
-             (list (eabp-empty-state
+             (list (jetpacs-empty-state
                     :icon "manage_search" :title "No saved views"
                     :caption "Name a query below and it becomes a view")))
-           (list (eabp-divider) (glasspane-views--new-form))))
+           (list (jetpacs-divider) (glasspane-views--new-form))))
    :snackbar snackbar))
 
 (defun glasspane-views--view (snackbar)
@@ -6112,54 +6112,54 @@ Field values mirror through the UI-state store; views.save reads them."
       (glasspane-views--open-view view snackbar)
     (glasspane-views--hub snackbar)))
 
-(eabp-shell-define-view "views" :builder #'glasspane-views--view :order 75)
+(jetpacs-shell-define-view "views" :builder #'glasspane-views--view :order 75)
 
 ;; Everyday nav: saved views are a daily destination, so they ride the
 ;; drawer (the contract: drawer = everyday nav, satellites = settings).
-(eabp-shell-add-drawer-item
+(jetpacs-shell-add-drawer-item
  40 (lambda ()
-      (eabp-drawer-item "manage_search" "Saved views"
-                        (eabp-shell-switch-view "views"))))
+      (jetpacs-drawer-item "manage_search" "Saved views"
+                        (jetpacs-shell-switch-view "views"))))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "views.open"
+(jetpacs-defaction "views.open"
   (lambda (args _)
     (let ((name (alist-get 'name args)))
       (when (glasspane-views--get name)
         (setq glasspane-views--current name)
-        (eabp-shell-push nil :switch-to "views")))))
+        (jetpacs-shell-push nil :switch-to "views")))))
 
-(eabp-defaction "views.back"
+(jetpacs-defaction "views.back"
   (lambda (_args _)
     (setq glasspane-views--current nil)
-    (eabp-shell-push nil :switch-to "views")))
+    (jetpacs-shell-push nil :switch-to "views")))
 
-(eabp-defaction "views.rendering"
+(jetpacs-defaction "views.rendering"
   (lambda (args _)
     (let ((view (glasspane-views--get (alist-get 'name args)))
           (rendering (alist-get 'rendering args)))
       (when (and view (member rendering glasspane-views--renderings))
         (glasspane-views--set-rendering (alist-get 'name view) rendering)
         (glasspane-views--persist)
-        (eabp-shell-push)))))
+        (jetpacs-shell-push)))))
 
-(eabp-defaction "views.save"
+(jetpacs-defaction "views.save"
   (lambda (_args _)
     (let* ((gen glasspane-views--form-gen)
            (name (string-trim
-                  (or (eabp-ui-state (format "views-new-name-%d" gen)) "")))
+                  (or (jetpacs-ui-state (format "views-new-name-%d" gen)) "")))
            (query (string-trim
-                   (or (eabp-ui-state (format "views-new-query-%d" gen)) "")))
-           (rendering (let ((r (eabp-ui-state
+                   (or (jetpacs-ui-state (format "views-new-query-%d" gen)) "")))
+           (rendering (let ((r (jetpacs-ui-state
                                 (format "views-new-rendering-%d" gen))))
                         (cond ((stringp r) r)
                               ((consp r) (car r))
                               ((vectorp r) (aref r 0))
                               (t "list")))))
       (cond
-       ((string-empty-p name) (eabp-shell-notify "The view needs a name"))
-       ((string-empty-p query) (eabp-shell-notify "The view needs a query"))
+       ((string-empty-p name) (jetpacs-shell-notify "The view needs a name"))
+       ((string-empty-p query) (jetpacs-shell-notify "The view needs a query"))
        (t
         (condition-case err
             (progn
@@ -6175,13 +6175,13 @@ Field values mirror through the UI-state store; views.save reads them."
                                                               glasspane-views--renderings)
                                                       rendering "list"))))))
               (glasspane-views--persist)
-              (eabp-ui-state-clear "views-new")
+              (jetpacs-ui-state-clear "views-new")
               (cl-incf glasspane-views--form-gen)
-              (eabp-shell-notify (format "Saved view %s" name)))
-          (user-error (eabp-shell-notify (error-message-string err))))))
-      (eabp-shell-push))))
+              (jetpacs-shell-notify (format "Saved view %s" name)))
+          (user-error (jetpacs-shell-notify (error-message-string err))))))
+      (jetpacs-shell-push))))
 
-(eabp-defaction "views.delete"
+(jetpacs-defaction "views.delete"
   (lambda (args _)
     (let ((name (alist-get 'name args)))
       (when (glasspane-views--get name)
@@ -6191,8 +6191,8 @@ Field values mirror through the UI-state store; views.save reads them."
         (glasspane-views--persist)
         (when (equal glasspane-views--current name)
           (setq glasspane-views--current nil))
-        (eabp-shell-notify (format "Deleted view %s" name))
-        (eabp-shell-push)))))
+        (jetpacs-shell-notify (format "Deleted view %s" name))
+        (jetpacs-shell-push)))))
 
 (provide 'glasspane-views)
 ;;; glasspane-views.el ends here
@@ -6238,16 +6238,16 @@ Field values mirror through the UI-state store; views.save reads them."
 (require 'subr-x)
 (require 'org)
 (require 'org-element)
-(require 'eabp)
-(require 'eabp-triggers)
-(require 'eabp-shell)
+(require 'jetpacs)
+(require 'jetpacs-triggers)
+(require 'jetpacs-shell)
 (require 'glasspane-org)
 
 (defcustom glasspane-automations-file nil
   "The org file holding trigger rules.
 nil means automations.org inside `org-directory'."
   :type '(choice (const :tag "automations.org in org-directory" nil) file)
-  :group 'eabp)
+  :group 'jetpacs)
 
 (defvar glasspane-automations--ids nil
   "Trigger ids registered from the org file (replaced on each reload).")
@@ -6258,10 +6258,10 @@ nil means automations.org inside `org-directory'."
 
 ;; ─── Parsing ─────────────────────────────────────────────────────────────────
 
-(defconst glasspane-automations--types eabp-triggers-supported-types
+(defconst glasspane-automations--types jetpacs-triggers-supported-types
   "Trigger types rules may use — the shipped SPEC §11 catalog.
 An unknown type would make the companion reject the whole replace-set
-\(and `eabp-triggers--specs' skips it as a second line of defense), so
+\(and `jetpacs-triggers--specs' skips it as a second line of defense), so
 unknown rules are caught at parse time with a message naming the rule.
 Notably NOT here yet: wifi.ssid / bluetooth.device — hardware-gated,
 see the automation plan.")
@@ -6308,7 +6308,7 @@ trust as init.el — see the file header."
                ,(car (read-from-string (format "(progn %s)" src))))
             t)
     (error
-     (message "EABP automations: bad handler in %S: %s"
+     (message "Jetpacs automations: bad handler in %S: %s"
               headline (error-message-string err))
      nil)))
 
@@ -6329,7 +6329,7 @@ A rule = a headline with a `:TRIGGER:' property that is not DONE."
                  (cond
                   (done nil)            ; org semantics as the enable switch
                   ((null parsed)
-                   (message "EABP automations: skipping %S — unknown trigger %S"
+                   (message "Jetpacs automations: skipping %S — unknown trigger %S"
                             headline trigger))
                   (t
                    (let* ((src (car (org-element-map hl 'src-block
@@ -6373,17 +6373,17 @@ the file is the source of truth for the `org/' id namespace."
     ;; and replace-set makes the intermediate states harmless.
     (dolist (stale (cl-set-difference glasspane-automations--ids ids
                                       :test #'equal))
-      (eabp-trigger-unregister stale))
+      (jetpacs-trigger-unregister stale))
     (dolist (r rules)
-      (apply #'eabp-trigger-register (plist-get r :id)
+      (apply #'jetpacs-trigger-register (plist-get r :id)
              (cl-loop for (k v) on r by #'cddr
                       unless (eq k :id) append (list k v))))
     (setq glasspane-automations--ids ids)
     (when (called-interactively-p 'interactive)
-      (message "EABP automations: %d rule(s) active" (length ids)))
+      (message "Jetpacs automations: %d rule(s) active" (length ids)))
     ids))
 
-(defvar eabp-files-after-save-hook)
+(defvar jetpacs-files-after-save-hook)
 
 (defun glasspane-automations--after-save (file)
   "Reload when the phone saves the automations FILE."
@@ -6391,8 +6391,8 @@ the file is the source of truth for the `org/' id namespace."
                (expand-file-name (glasspane-automations--file)))
     (glasspane-automations-reload)))
 
-(with-eval-after-load 'eabp-files
-  (add-hook 'eabp-files-after-save-hook #'glasspane-automations--after-save))
+(with-eval-after-load 'jetpacs-files
+  (add-hook 'jetpacs-files-after-save-hook #'glasspane-automations--after-save))
 
 ;; Load rules when the file exists; a missing file is simply zero rules.
 (when (file-readable-p (glasspane-automations--file))
@@ -6428,11 +6428,11 @@ the file is the source of truth for the `org/' id namespace."
 (require 'cl-lib)
 (require 'subr-x)
 (require 'org)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-shell)
-(require 'eabp-sync)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-sync)
 (require 'glasspane-org)
 
 (declare-function vulpea-db-search-by-title "vulpea-db-query")
@@ -6453,7 +6453,7 @@ the file is the source of truth for the `org/' id namespace."
 
 (defcustom glasspane-notes-completion-limit 20
   "Notes offered per wikilink completion request."
-  :type 'integer :group 'eabp)
+  :type 'integer :group 'jetpacs)
 
 (defun glasspane-notes--matches (partial)
   "Vulpea notes whose title (or alias) matches PARTIAL, capped."
@@ -6496,7 +6496,7 @@ so the brackets must be part of it)."
                   (lambda (c)
                     (when-let ((n (cdr (assoc c table))))
                       (file-name-nondirectory (vulpea-note-path n))))
-                  :eabp-insert-function
+                  :jetpacs-insert-function
                   (lambda (c)
                     (when-let ((n (cdr (assoc c table))))
                       (format "[[id:%s][%s]]"
@@ -6512,7 +6512,7 @@ so the brackets must be part of it)."
     (add-hook 'completion-at-point-functions
               #'glasspane-notes--wikilink-capf -10 t)))
 
-(add-hook 'eabp-sync-shadow-setup-hook #'glasspane-notes--setup-shadow)
+(add-hook 'jetpacs-sync-shadow-setup-hook #'glasspane-notes--setup-shadow)
 
 ;; ─── PKM 4: backlinks + unlinked mentions ────────────────────────────────────
 
@@ -6529,12 +6529,12 @@ Dropped wholesale by the cache seam.")
                     (list (when (and id (stringp id) (not (string-empty-p id))) `(id . ,id))
                           (when path `(file . ,path))
                           (when title `(headline . ,title))))))
-    (eabp-card
-     (list (eabp-column
-            (eabp-text title 'body)
-            (eabp-text (file-name-nondirectory path) 'caption)))
+    (jetpacs-card
+     (list (jetpacs-column
+            (jetpacs-text title 'body)
+            (jetpacs-text (file-name-nondirectory path) 'caption)))
      :on-tap (when ref
-               (eabp-action "heading.tap" :args ref :when-offline "drop")))))
+               (jetpacs-action "heading.tap" :args ref :when-offline "drop")))))
 
 (defun glasspane-notes--mention-card (mention note-id)
   "A card for MENTION (a :note :path :line :context plist).
@@ -6552,15 +6552,15 @@ plist's own :path, with the mentioning note's file as backstop."
                     (list (when (and id (stringp id) (not (string-empty-p id))) `(id . ,id))
                           (when path `(file . ,path))
                           (when title `(headline . ,title))))))
-    (eabp-card
+    (jetpacs-card
      (list
-      (eabp-column
-       (eabp-text title 'body)
-       (eabp-text (or (plist-get mention :context) "") 'caption)
-       (eabp-row
-        (eabp-spacer :weight 1)
-        (eabp-button "Link it"
-                     (eabp-action "link.materialize"
+      (jetpacs-column
+       (jetpacs-text title 'body)
+       (jetpacs-text (or (plist-get mention :context) "") 'caption)
+       (jetpacs-row
+        (jetpacs-spacer :weight 1)
+        (jetpacs-button "Link it"
+                     (jetpacs-action "link.materialize"
                                   :args `((id . ,note-id)
                                           (path . ,path)
                                           (line . ,(plist-get mention :line))
@@ -6568,7 +6568,7 @@ plist's own :path, with the mentioning note's file as backstop."
                                   :when-offline "queue")
                      :variant "text" :icon "link"))))
      :on-tap (when ref
-               (eabp-action "heading.tap" :args ref :when-offline "drop")))))
+               (jetpacs-action "heading.tap" :args ref :when-offline "drop")))))
 
 (defun glasspane-notes--ref-id (ref)
   "REF's org ID: carried in the ref, or read from the heading itself.
@@ -6592,17 +6592,17 @@ with an :ID: still gets its backlink section."
                         (error nil)))
            (mentions (gethash id glasspane-notes--mentions 'unfetched)))
       (append
-       (list (eabp-divider)
-             (eabp-collapsible
+       (list (jetpacs-divider)
+             (jetpacs-collapsible
               (concat "backlinks/" id)
-              (eabp-section-header
+              (jetpacs-section-header
                (format "Linked references (%d)" (length backlinks)))
               (or (mapcar #'glasspane-notes--note-card backlinks)
-                  (list (eabp-text "Nothing links here yet." 'caption)))
+                  (list (jetpacs-text "Nothing links here yet." 'caption)))
               :collapsed (null backlinks)))
-       (list (eabp-collapsible
+       (list (jetpacs-collapsible
               (concat "mentions/" id)
-              (eabp-section-header
+              (jetpacs-section-header
                (pcase mentions
                  ('unfetched "Unlinked mentions")
                  ('pending "Unlinked mentions (searching…)")
@@ -6610,15 +6610,15 @@ with an :ID: still gets its backlink section."
                  (found (format "Unlinked mentions (%d)" (length found)))))
               (pcase mentions
                 ('unfetched
-                 (list (eabp-button
+                 (list (jetpacs-button
                         "Find mentions"
-                        (eabp-action "notes.mentions" :args `((id . ,id))
+                        (jetpacs-action "notes.mentions" :args `((id . ,id))
                                      :when-offline "drop")
                         :variant "text" :icon "manage_search")))
-                ('pending (list (eabp-progress :variant "linear")))
-                ('error (list (eabp-text "ripgrep unavailable or the search failed."
+                ('pending (list (jetpacs-progress :variant "linear")))
+                ('error (list (jetpacs-text "ripgrep unavailable or the search failed."
                                          'caption)))
-                ('nil (list (eabp-text "No unlinked mentions." 'caption)))
+                ('nil (list (jetpacs-text "No unlinked mentions." 'caption)))
                 (found (mapcar (lambda (m)
                                  (glasspane-notes--mention-card m id))
                                found)))
@@ -6626,7 +6626,7 @@ with an :ID: still gets its backlink section."
 
 ;; The mention grep is the battery-risk item: computed only on the
 ;; explicit button tap, cached per note, dropped by the standard seam.
-(eabp-defaction "notes.mentions"
+(jetpacs-defaction "notes.mentions"
   (lambda (args _)
     (let ((id (alist-get 'id args)))
       (when (and (stringp id) (glasspane-notes-available-p)
@@ -6637,11 +6637,11 @@ with an :ID: still gets its backlink section."
            note
            (lambda (mentions)
              (puthash id mentions glasspane-notes--mentions)
-             (eabp-shell-push))
+             (jetpacs-shell-push))
            (lambda (_err)
              (puthash id 'error glasspane-notes--mentions)
-             (eabp-shell-push)))
-          (eabp-shell-push))))))
+             (jetpacs-shell-push)))
+          (jetpacs-shell-push))))))
 
 (defun glasspane-notes--materialize-terms (id matched)
   "The strings to look for on the mention line, most specific first.
@@ -6674,7 +6674,7 @@ must not nest a link inside a link."
                                          (org-in-regexp org-link-any-re)))
                               return term))))
 
-(eabp-defaction "link.materialize"
+(jetpacs-defaction "link.materialize"
   ;; Replace the first un-linked occurrence of the mention on LINE in
   ;; PATH with a real id link.  Matching is case-insensitive (search
   ;; UX); the replacement keeps the text exactly as written in the
@@ -6689,9 +6689,9 @@ must not nest a link inside a link."
                         id (alist-get 'matched args)))))
       (cond
        ((not (and (stringp id) (stringp path) (integerp line) terms))
-        (eabp-shell-notify "Couldn't link — mention data incomplete"))
+        (jetpacs-shell-notify "Couldn't link — mention data incomplete"))
        ((not (file-writable-p path))
-        (eabp-shell-notify (format "Couldn't link — %s not writable"
+        (jetpacs-shell-notify (format "Couldn't link — %s not writable"
                                    (file-name-nondirectory path))))
        (t
         (with-current-buffer (find-file-noselect path)
@@ -6700,17 +6700,17 @@ must not nest a link inside a link."
            (forward-line (1- line))
            (if (not (glasspane-notes--find-unlinked
                      terms (line-end-position)))
-               (eabp-shell-notify
+               (jetpacs-shell-notify
                 "Couldn't find the mention — file changed? Refresh and retry")
              (replace-match (format "[[id:%s][%s]]" id (match-string 0))
                             t t)
              (let ((save-silently t)) (save-buffer))
              (remhash id glasspane-notes--mentions)
              (glasspane-org-cache-invalidate)
-             (eabp-shell-notify "Linked"))))))
-      (eabp-shell-push))))
+             (jetpacs-shell-notify "Linked"))))))
+      (jetpacs-shell-push))))
 
-(add-hook 'eabp-shell-refresh-hook
+(add-hook 'jetpacs-shell-refresh-hook
           (lambda () (clrhash glasspane-notes--mentions)))
 
 ;; The detail view splices this module's sections through the ui seam.
@@ -6759,12 +6759,12 @@ must not nest a link inside a link."
 (require 'cl-lib)
 (require 'subr-x)
 (require 'org)
-(require 'eabp)
-(require 'eabp-widgets)
-(require 'eabp-surfaces)
-(require 'eabp-buffer)
-(require 'eabp-shell)
-(require 'eabp-settings)
+(require 'jetpacs)
+(require 'jetpacs-widgets)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-buffer)
+(require 'jetpacs-shell)
+(require 'jetpacs-settings)
 (require 'glasspane-org)
 
 (declare-function org-srs-review-pending-items "org-srs-review")
@@ -6792,7 +6792,7 @@ must not nest a link inside a link."
   "The review scope: a file or directory org-srs reviews over.
 nil means `org-directory' — review everything, the phone default."
   :type '(choice (const :tag "org-directory" nil) directory file)
-  :group 'eabp)
+  :group 'jetpacs)
 
 (defvar glasspane-srs--available 'unknown
   "Cached org-srs availability; `unknown' re-probes on next ask.")
@@ -6806,7 +6806,7 @@ org-srs mid-session only needs a refresh."
     (setq glasspane-srs--available (and (require 'org-srs nil t) t)))
   glasspane-srs--available)
 
-(add-hook 'eabp-shell-refresh-hook
+(add-hook 'jetpacs-shell-refresh-hook
           (lambda () (setq glasspane-srs--available 'unknown)))
 
 (defun glasspane-srs--source ()
@@ -6841,7 +6841,7 @@ crash — a review tap that silently dies is a bug class."
        (let ((inhibit-message t) (message-log-max nil))
          ,@body)
      (error
-      (eabp-shell-notify (format "Review: %s" (error-message-string err)))
+      (jetpacs-shell-notify (format "Review: %s" (error-message-string err)))
       nil)))
 
 (defmacro glasspane-srs--quietly (&rest body)
@@ -6945,22 +6945,22 @@ explicit `Front`/`Back` children, and Logseq-style nested block children."
   "Render a card PART: (title . STRING), (region BEG END), or (title-and-region ...)."
   (pcase part
     (`(title . ,s)
-     (and (stringp s) (not (string-empty-p s)) (list (eabp-text s 'title))))
+     (and (stringp s) (not (string-empty-p s)) (list (jetpacs-text s 'title))))
     (`(title-and-region ,title ,beg . ,rest)
      (let* ((end (if (consp rest) (car rest) rest))
             (title-nodes (and (stringp title) (not (string-empty-p title))
-                              (list (eabp-text title 'title))))
-            (eabp-line-numbers nil)
-            (eabp-buffer-monospace nil)
+                              (list (jetpacs-text title 'title))))
+            (jetpacs-line-numbers nil)
+            (jetpacs-buffer-monospace nil)
             (region-nodes (when (and (integerp beg) (integerp end) (< beg end))
-                            (eabp-buffer-render-region (current-buffer) beg end))))
+                            (jetpacs-buffer-render-region (current-buffer) beg end))))
        (append title-nodes region-nodes)))
     (`(region ,beg . ,rest)
      (let ((end (if (consp rest) (car rest) rest))
-           (eabp-line-numbers nil)
-           (eabp-buffer-monospace nil))
+           (jetpacs-line-numbers nil)
+           (jetpacs-buffer-monospace nil))
        (when (and (integerp beg) (integerp end) (< beg end))
-         (eabp-buffer-render-region (current-buffer) beg end))))
+         (jetpacs-buffer-render-region (current-buffer) beg end))))
     (_ nil)))
 
 (defun glasspane-srs--card-content (item revealed)
@@ -7042,15 +7042,15 @@ ITEM is `(card SIDE)'; SIDE (default `back') is the hidden answer."
               ;; Render parts
               (append
                (or (glasspane-srs--part-nodes (car parts))
-                   (list (eabp-text "(no question)" 'caption)))
+                   (list (jetpacs-text "(no question)" 'caption)))
                (when revealed
-                 (cons (eabp-divider)
+                 (cons (jetpacs-divider)
                        (or (glasspane-srs--part-nodes (cdr parts))
-                           (list (eabp-text "(no answer)" 'caption)))))))
+                           (list (jetpacs-text "(no answer)" 'caption)))))))
           ;; Restore original spec and clean up overlays.
           (setq buffer-invisibility-spec orig-invis-spec)
           (mapc #'delete-overlay overlays)))
-    (error (list (eabp-text "Couldn't lay out this card." 'caption)))))
+    (error (list (jetpacs-text "Couldn't lay out this card." 'caption)))))
 
 (defun glasspane-srs--cloze-content (item revealed)
   "Nodes for a `cloze' ITEM: the sentence with the reviewed blank.
@@ -7074,13 +7074,13 @@ come from plain org; only `org-srs-item-cloze-collect' is org-srs."
                   parts)
             (setq pos cend)))
         (push (buffer-substring-no-properties pos end) parts)
-        (list (eabp-text (string-trim (apply #'concat (nreverse parts))) 'body)))
-    (error (list (eabp-text "Couldn't lay out this cloze." 'caption)))))
+        (list (jetpacs-text (string-trim (apply #'concat (nreverse parts))) 'body)))
+    (error (list (jetpacs-text "Couldn't lay out this cloze." 'caption)))))
 
 (defun glasspane-srs--fallback-content ()
   "Render the narrowed entry cleanly for an unknown item type.
 Drawers and gutter line numbers stripped; transient overlays only."
-  (let ((eabp-line-numbers nil) (eabp-buffer-monospace nil) (overlays nil)
+  (let ((jetpacs-line-numbers nil) (jetpacs-buffer-monospace nil) (overlays nil)
         (open (format "^[ \t]*:%s:[ \t]*$"
                       (regexp-opt glasspane-srs--noise-drawers))))
     (unwind-protect
@@ -7099,7 +7099,7 @@ Drawers and gutter line numbers stripped; transient overlays only."
                     (overlay-put ov 'invisible 'glasspane-srs-hide)
                     (push ov overlays))
                   (goto-char dend)))))
-          (eabp-buffer-render (current-buffer)))
+          (jetpacs-buffer-render (current-buffer)))
       (mapc #'delete-overlay overlays)
       (remove-from-invisibility-spec 'glasspane-srs-hide))))
 
@@ -7111,7 +7111,7 @@ narrows to its entry, and dispatches on the item type."
          (type (car item))
          (marker (glasspane-srs--quietly (apply #'org-srs-item-marker item-args))))
     (if (not (and (markerp marker) (marker-buffer marker)))
-        (list (eabp-text "Couldn't load this card." 'caption))
+        (list (jetpacs-text "Couldn't load this card." 'caption))
       (with-current-buffer (marker-buffer marker)
         (save-excursion
           (save-restriction
@@ -7161,10 +7161,10 @@ its log row and a `rating' column, the simulator runs."
     (delq nil
           (list
            (when intervals
-             (apply #'eabp-row
+             (apply #'jetpacs-row
                     (mapcar (lambda (row)
-                              (eabp-box
-                               (list (eabp-text
+                              (jetpacs-box
+                               (list (jetpacs-text
                                       (if-let ((secs (plist-get intervals
                                                                 (cadr row))))
                                           (glasspane-srs--format-interval secs)
@@ -7172,11 +7172,11 @@ its log row and a `rating' column, the simulator runs."
                                       'caption))
                                :weight 1 :alignment "center"))
                             glasspane-srs--ratings)))
-           (apply #'eabp-row
+           (apply #'jetpacs-row
                   (mapcar (lambda (row)
                             (cl-destructuring-bind (name _kw label variant) row
-                              (eabp-button label
-                                           (eabp-action
+                              (jetpacs-button label
+                                           (jetpacs-action
                                             "srs.rate"
                                             :args `((rating . ,name))
                                             :when-offline "drop")
@@ -7188,20 +7188,20 @@ its log row and a `rating' column, the simulator runs."
 (defun glasspane-srs--session-body ()
   "The active-session screen: the card, then reveal or rating controls."
   (if (null glasspane-srs--current)
-      (eabp-empty-state
+      (jetpacs-empty-state
        :icon "school" :title "All caught up"
        :caption "Review complete."
        :action-label "Done"
-       :on-tap (eabp-action "srs.quit" :when-offline "drop"))
-    (apply #'eabp-lazy-column
+       :on-tap (jetpacs-action "srs.quit" :when-offline "drop"))
+    (apply #'jetpacs-lazy-column
            (append
             (glasspane-srs--item-nodes glasspane-srs--current
                                        glasspane-srs--revealed)
-            (list (eabp-spacer :height 8) (eabp-divider))
+            (list (jetpacs-spacer :height 8) (jetpacs-divider))
             (if glasspane-srs--revealed
                 (glasspane-srs--rating-controls)
-              (list (eabp-button "Show answer"
-                                 (eabp-action "srs.answer.show"
+              (list (jetpacs-button "Show answer"
+                                 (jetpacs-action "srs.answer.show"
                                               :when-offline "drop")
                                  :variant "filled" :icon "visibility")))))))
 
@@ -7210,24 +7210,24 @@ its log row and a `rating' column, the simulator runs."
   (let ((due (glasspane-srs--due-count)))
     (cond
      ((null due)
-      (eabp-column
-       (eabp-text "Couldn't count due items — check *Messages*." 'caption)
-       (eabp-button "Start review"
-                    (eabp-action "srs.review.start" :when-offline "drop")
+      (jetpacs-column
+       (jetpacs-text "Couldn't count due items — check *Messages*." 'caption)
+       (jetpacs-button "Start review"
+                    (jetpacs-action "srs.review.start" :when-offline "drop")
                     :variant "filled" :icon "play_arrow")))
      ((zerop due)
-      (eabp-empty-state :icon "school" :title "All caught up"
+      (jetpacs-empty-state :icon "school" :title "All caught up"
                         :caption "Nothing due right now."))
      (t
-      (eabp-column
-       (eabp-text (format "%d item%s due" due (if (= due 1) "" "s")) 'title)
-       (eabp-spacer :height 8)
-       (eabp-button "Start review"
-                    (eabp-action "srs.review.start" :when-offline "drop")
+      (jetpacs-column
+       (jetpacs-text (format "%d item%s due" due (if (= due 1) "" "s")) 'title)
+       (jetpacs-spacer :height 8)
+       (jetpacs-button "Start review"
+                    (jetpacs-action "srs.review.start" :when-offline "drop")
                     :variant "filled" :icon "play_arrow"))))))
 
 (defun glasspane-srs--install-body ()
-  (eabp-empty-state
+  (jetpacs-empty-state
    :icon "school" :title "org-srs not installed"
    :caption (concat "Install the org-srs package (MELPA) in the on-device "
                     "Emacs — the starter init does it on first launch — "
@@ -7241,16 +7241,16 @@ labelled menu rather than cluttering the bar."
   (delq nil
         (list
          (when glasspane-srs--undo
-           (eabp-icon-button "undo"
-                             (eabp-action "srs.undo" :when-offline "drop")
+           (jetpacs-icon-button "undo"
+                             (jetpacs-action "srs.undo" :when-offline "drop")
                              :content-description "Undo last rating"))
-         (eabp-icon-button "close"
-                           (eabp-action "srs.quit" :when-offline "drop")
+         (jetpacs-icon-button "close"
+                           (jetpacs-action "srs.quit" :when-offline "drop")
                            :content-description "End review"))))
 
 (defun glasspane-srs--view (snackbar)
   "The Review screen for the current session state."
-  (eabp-shell-nav-view
+  (jetpacs-shell-nav-view
    "Review"
    (cond
     ((not (glasspane-srs-available-p)) (glasspane-srs--install-body))
@@ -7260,28 +7260,28 @@ labelled menu rather than cluttering the bar."
               (glasspane-srs--top-actions))
    :snackbar snackbar))
 
-(eabp-shell-define-view "srs" :builder #'glasspane-srs--view :order 78)
+(jetpacs-shell-define-view "srs" :builder #'glasspane-srs--view :order 78)
 
 ;; Everyday nav (the drawer contract); no entry while org-srs is absent.
-(eabp-shell-add-drawer-item
+(jetpacs-shell-add-drawer-item
  45 (lambda ()
       (when (glasspane-srs-available-p)
-        (eabp-drawer-item "school" "Review" (eabp-shell-switch-view "srs")))))
+        (jetpacs-drawer-item "school" "Review" (jetpacs-shell-switch-view "srs")))))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "srs.review.start"
+(jetpacs-defaction "srs.review.start"
   (lambda (_args _)
     (if (not (glasspane-srs-available-p))
-        (eabp-shell-notify "org-srs is not installed")
+        (jetpacs-shell-notify "org-srs is not installed")
       (setq glasspane-srs--active t glasspane-srs--undo nil)
       (glasspane-srs--advance))
-    (eabp-shell-push nil :switch-to "srs")))
+    (jetpacs-shell-push nil :switch-to "srs")))
 
-(eabp-defaction "srs.answer.show"
+(jetpacs-defaction "srs.answer.show"
   (lambda (_args _)
     (when glasspane-srs--current (setq glasspane-srs--revealed t))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
 (defun glasspane-srs--push-undo (item-args)
   "Snapshot ITEM-ARGS's log drawer onto the undo stack (capped).
@@ -7298,7 +7298,7 @@ Best-effort: a snapshot failure must not block the rating."
            (when (nthcdr 20 glasspane-srs--undo)
              (setcdr (nthcdr 19 glasspane-srs--undo) nil))))))))
 
-(eabp-defaction "srs.rate"
+(jetpacs-defaction "srs.rate"
   (lambda (args _)
     (let ((kw (cadr (assoc (alist-get 'rating args) glasspane-srs--ratings))))
       (when (and kw glasspane-srs--current)
@@ -7318,24 +7318,24 @@ Best-effort: a snapshot failure must not block the rating."
               (apply #'org-srs-review-rate kw glasspane-srs--current))))
         (glasspane-org-cache-invalidate)
         (glasspane-srs--advance)))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "srs.quit"
+(jetpacs-defaction "srs.quit"
   (lambda (_args _)
     (setq glasspane-srs--active nil glasspane-srs--current nil
           glasspane-srs--revealed nil glasspane-srs--undo nil)
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "srs.postpone"
+(jetpacs-defaction "srs.postpone"
   (lambda (_args _)
     (when glasspane-srs--current
       (glasspane-srs--engine
         (apply #'org-srs-review-postpone '(1 :day) glasspane-srs--current))
       (glasspane-org-cache-invalidate)
       (glasspane-srs--advance))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "srs.suspend"
+(jetpacs-defaction "srs.suspend"
   (lambda (_args _)
     (when glasspane-srs--current
       (glasspane-srs--engine
@@ -7350,9 +7350,9 @@ Best-effort: a snapshot failure must not block the rating."
                 (let ((save-silently t)) (save-buffer)))))))
       (glasspane-org-cache-invalidate)
       (glasspane-srs--advance))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "srs.undo"
+(jetpacs-defaction "srs.undo"
   ;; org-srs's own undo history is set up only by the session we don't
   ;; run, so we restore the item's log drawer from our own snapshot and
   ;; re-present the card (answer shown) for a fresh rating.
@@ -7373,17 +7373,17 @@ Best-effort: a snapshot failure must not block the rating."
                  (let ((save-silently t)) (save-buffer))))))
           (glasspane-org-cache-invalidate)
           (setq glasspane-srs--current (car snap) glasspane-srs--revealed t))
-      (eabp-shell-notify "Nothing to undo"))
-    (eabp-shell-push)))
+      (jetpacs-shell-notify "Nothing to undo"))
+    (jetpacs-shell-push)))
 
 ;; ─── Authoring: Make flashcard on the heading detail view ───────────────────
 
-(eabp-defaction "srs.item.create"
+(jetpacs-defaction "srs.item.create"
   ;; The type picker and any follow-up prompts arrive as phone dialogs
   ;; through the minibuffer bridge — write it as if at the keyboard.
   (lambda (args _)
     (if (not (glasspane-srs-available-p))
-        (eabp-shell-notify "org-srs is not installed")
+        (jetpacs-shell-notify "org-srs is not installed")
       (condition-case err
           (let ((marker (glasspane-org--resolve-ref args)))
             (with-current-buffer (marker-buffer marker)
@@ -7392,21 +7392,21 @@ Best-effort: a snapshot failure must not block the rating."
                (org-srs-item-create))
               (let ((save-silently t)) (save-buffer)))
             (glasspane-org-cache-invalidate)
-            (eabp-shell-notify "Review item created"))
-        (quit (eabp-shell-notify "Cancelled"))
-        (error (eabp-shell-notify
+            (jetpacs-shell-notify "Review item created"))
+        (quit (jetpacs-shell-notify "Cancelled"))
+        (error (jetpacs-shell-notify
                 (format "Flashcard: %s" (error-message-string err))))))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
 (defun glasspane-srs-detail-nodes (ref)
   "The detail-view section for REF: make this heading reviewable."
   (when (glasspane-srs-available-p)
-    (list (eabp-divider)
-          (eabp-row
-           (eabp-box (list (eabp-text "Spaced repetition" 'caption))
+    (list (jetpacs-divider)
+          (jetpacs-row
+           (jetpacs-box (list (jetpacs-text "Spaced repetition" 'caption))
                      :weight 1)
-           (eabp-button "Make flashcard"
-                        (eabp-action "srs.item.create"
+           (jetpacs-button "Make flashcard"
+                        (jetpacs-action "srs.item.create"
                                      :args ref
                                      :when-offline "drop")
                         :variant "text" :icon "school")))))
@@ -7416,7 +7416,7 @@ Best-effort: a snapshot failure must not block the rating."
 ;; ─── Settings ────────────────────────────────────────────────────────────────
 
 (with-eval-after-load 'org-srs
-  (eabp-settings-register-section
+  (jetpacs-settings-register-section
    "Review"
    '((org-srs-review-new-items-per-day :label "New cards per day")
      (org-srs-review-max-reviews-per-day :label "Max reviews per day"))))
@@ -7447,14 +7447,14 @@ Best-effort: a snapshot failure must not block the rating."
 ;;; Code:
 
 (require 'org)
-(require 'eabp-surfaces)
+(require 'jetpacs-surfaces)
 (require 'glasspane-srs)               ; SRS registration for the flashcards
 
 (defcustom glasspane-demo-directory "~/glasspane-demo/"
   "Directory `glasspane-demo-setup' writes the tour files into.
-Must lie within `eabp-files-roots' to be reachable from the phone's
+Must lie within `jetpacs-files-roots' to be reachable from the phone's
 Files browser (the default is inside the Home root)."
-  :type 'directory :group 'eabp)
+  :type 'directory :group 'jetpacs)
 
 (defconst glasspane-demo--files
   `(("demo.el" . "\
@@ -7605,7 +7605,7 @@ to try the features below.
 
 * TODO Try tag completion                                    :server:
 If your init opts =my/org-tag-completion= into shadow buffers via
-=eabp-sync-shadow-setup-hook=, typing =:ser= at the end of a
+=jetpacs-sync-shadow-setup-hook=, typing =:ser= at the end of a
 headline completes your =:server:= tag from the phone.
 
 * Scratch space
@@ -8251,31 +8251,31 @@ Returns the directory the files were written to."
       (write-region (cdr spec) nil (expand-file-name (car spec) dir)
                     nil 'silent))
     (when (called-interactively-p 'interactive)
-      (message "EABP demo files written to %s" dir))
+      (message "Jetpacs demo files written to %s" dir))
     dir))
 
-(eabp-defaction "demo.setup"
+(jetpacs-defaction "demo.setup"
   ;; Allowlisted and argument-free: always writes the fixed file set into
   ;; `glasspane-demo-directory' — nothing on the wire chooses paths or content.
   (lambda (_ _)
     (glasspane-demo-setup)
-    (when (fboundp 'eabp-shell-notify)
-      (eabp-shell-notify
+    (when (fboundp 'jetpacs-shell-notify)
+      (jetpacs-shell-notify
        (format "Demo files in %s"
                (abbreviate-file-name
                 (expand-file-name glasspane-demo-directory)))))))
 
-(eabp-defaction "demo.setup-org"
+(jetpacs-defaction "demo.setup-org"
   ;; Same shape as demo.setup: argument-free, fixed file set, fixed target
   ;; (`org-directory').  Overwrites the six corpus files — reset-to-pristine
   ;; is the point — but never touches anything else in the directory.
   (lambda (_ _)
     (let ((dir (glasspane-demo-setup-org)))
-      (when (fboundp 'eabp-shell-notify)
-        (eabp-shell-notify
+      (when (fboundp 'jetpacs-shell-notify)
+        (jetpacs-shell-notify
          (format "Demo org corpus in %s" (abbreviate-file-name dir)))))
-    (when (fboundp 'eabp-shell-push)
-      (eabp-shell-push))))
+    (when (fboundp 'jetpacs-shell-push)
+      (jetpacs-shell-push))))
 
 (provide 'glasspane-demo)
 ;;; glasspane-demo.el ends here
@@ -8294,15 +8294,15 @@ Returns the directory the files were written to."
 ;; `M-x glasspane-demo-gallery' — the newest of the demo commands next to
 ;; `glasspane-demo-setup'.
 ;;
-;; Everything here is composed from core `eabp-*' constructors: it is also
+;; Everything here is composed from core `jetpacs-*' constructors: it is also
 ;; the worked example that a whole visual surface is Elisp, no Kotlin.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'eabp-widgets)
-(require 'eabp-shell)
-(require 'eabp-surfaces)
+(require 'jetpacs-widgets)
+(require 'jetpacs-shell)
+(require 'jetpacs-surfaces)
 
 (defvar glasspane-gallery--open nil
   "Non-nil while the gallery overlay is showing.")
@@ -8328,103 +8328,103 @@ Screen y grows downward, so a top semicircle spans 180°→0°."
          (na (degrees-to-radians end))
          (nx (+ cx (* r 0.9 (cos na))))
          (ny (- cy (* r 0.9 (sin na)))))
-    (eabp-canvas
+    (jetpacs-canvas
      w h
-     (list (eabp-draw-path (glasspane-gallery--arc-points cx cy r 180 0 44)
+     (list (jetpacs-draw-path (glasspane-gallery--arc-points cx cy r 180 0 44)
                            :color "#8888aa" :stroke 12)
-           (eabp-draw-path (glasspane-gallery--arc-points cx cy r 180 end 44)
+           (jetpacs-draw-path (glasspane-gallery--arc-points cx cy r 180 end 44)
                            :color "#00A676" :stroke 12)
-           (eabp-draw-line cx cy nx ny :color "#E64980" :stroke 3)
-           (eabp-draw-circle cx cy 7 :fill t :color "#E64980")
-           (eabp-draw-text cx 74 (format "%d%%" (round (* 100 level)))
+           (jetpacs-draw-line cx cy nx ny :color "#E64980" :stroke 3)
+           (jetpacs-draw-circle cx cy 7 :fill t :color "#E64980")
+           (jetpacs-draw-text cx 74 (format "%d%%" (round (* 100 level)))
                            :align "center" :size 28 :color "primary")))))
 
 ;; ─── Body ────────────────────────────────────────────────────────────────────
 
 (defun glasspane-gallery--kind-chips ()
   "A chip rail selecting `glasspane-gallery--kind'."
-  (apply #'eabp-flow-row
+  (apply #'jetpacs-flow-row
          (append
           (mapcar (lambda (k)
-                    (eabp-chip k
+                    (jetpacs-chip k
                                :selected (equal k glasspane-gallery--kind)
-                               :on-tap (eabp-action "demo.gallery.kind"
+                               :on-tap (jetpacs-action "demo.gallery.kind"
                                                     :args (list (cons 'kind k)))))
                   '("line" "bar" "area" "sparkline"))
           (list :spacing 8))))
 
 (defun glasspane-gallery--body ()
   "The scrollable gallery content (a `lazy_column', so it scrolls)."
-  (eabp-lazy-column
-   (eabp-section-header "Chart — tap a point, switch the kind")
+  (jetpacs-lazy-column
+   (jetpacs-section-header "Chart — tap a point, switch the kind")
    (glasspane-gallery--kind-chips)
-   (eabp-chart
-    (list (eabp-chart-series '(3 7 4 9 6 8 5) :label "alpha" :color "#4C6FFF")
-          (eabp-chart-series '(5 4 6 5 7 5 8) :label "beta"))
+   (jetpacs-chart
+    (list (jetpacs-chart-series '(3 7 4 9 6 8 5) :label "alpha" :color "#4C6FFF")
+          (jetpacs-chart-series '(5 4 6 5 7 5 8) :label "beta"))
     :kind glasspane-gallery--kind :height 150 :summary "two sample series"
-    :on-point-tap (eabp-action "demo.gallery.point"))
-   (eabp-divider)
-   (eabp-section-header "Slider → live canvas gauge")
-   (eabp-slider "gallery.level" (eabp-action "demo.gallery.level")
+    :on-point-tap (jetpacs-action "demo.gallery.point"))
+   (jetpacs-divider)
+   (jetpacs-section-header "Slider → live canvas gauge")
+   (jetpacs-slider "gallery.level" (jetpacs-action "demo.gallery.level")
                 :value glasspane-gallery--level :min 0.0 :max 1.0)
    (glasspane-gallery--gauge glasspane-gallery--level)
-   (eabp-divider)
-   (eabp-section-header "Sizing · border · spacing · align")
-   (eabp-row
-    (eabp-surface (list (eabp-text "100×64"))
+   (jetpacs-divider)
+   (jetpacs-section-header "Sizing · border · spacing · align")
+   (jetpacs-row
+    (jetpacs-surface (list (jetpacs-text "100×64"))
                   :width 100 :height 64
-                  :border (eabp-border :width 2 :color "primary"))
-    (eabp-surface (list (eabp-text "rounded, fills rest"))
+                  :border (jetpacs-border :width 2 :color "primary"))
+    (jetpacs-surface (list (jetpacs-text "rounded, fills rest"))
                   :height 64 :color "surface_container" :shape "rounded"
                   :fill-fraction 1.0)
     :spacing 12 :align "center")
-   (eabp-spacer :height 12)))
+   (jetpacs-spacer :height 12)))
 
 (defun glasspane-gallery--view (snackbar)
   "The gallery as a back-arrow nav view."
-  (eabp-shell-nav-view "Widget Gallery" (glasspane-gallery--body)
+  (jetpacs-shell-nav-view "Widget Gallery" (glasspane-gallery--body)
                        :snackbar snackbar))
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(eabp-defaction "demo.gallery"
+(jetpacs-defaction "demo.gallery"
   (lambda (_args _payload)
     (setq glasspane-gallery--open t)
-    (eabp-shell-push nil :switch-to "gallery")))
+    (jetpacs-shell-push nil :switch-to "gallery")))
 
-(eabp-defaction "demo.gallery.kind"
+(jetpacs-defaction "demo.gallery.kind"
   (lambda (args _payload)
     (setq glasspane-gallery--kind (or (alist-get 'kind args) "line"))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "demo.gallery.level"
+(jetpacs-defaction "demo.gallery.level"
   (lambda (args _payload)
     (setq glasspane-gallery--level (or (alist-get 'value args) 0.5))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
-(eabp-defaction "demo.gallery.point"
+(jetpacs-defaction "demo.gallery.point"
   (lambda (args _payload)
     (let ((v (alist-get 'value args)))
-      (when (fboundp 'eabp-shell-notify)
-        (eabp-shell-notify (format "point %s = %s"
+      (when (fboundp 'jetpacs-shell-notify)
+        (jetpacs-shell-notify (format "point %s = %s"
                                    (alist-get 'index v) (alist-get 'y v)))))
-    (eabp-shell-push)))
+    (jetpacs-shell-push)))
 
 ;; ─── Registration ────────────────────────────────────────────────────────────
 
-(eabp-shell-define-view "gallery"
+(jetpacs-shell-define-view "gallery"
   :builder #'glasspane-gallery--view
   :when (lambda () glasspane-gallery--open)
   :overlay (lambda () glasspane-gallery--open)
   :order 120)
 
 ;; Landing on any real view closes the overlay (mirrors the detail drill-in).
-(add-hook 'eabp-shell-view-switched-hook
+(add-hook 'jetpacs-shell-view-switched-hook
           (lambda (_view) (setq glasspane-gallery--open nil)))
 
-(eabp-shell-add-drawer-item
- 65 (lambda () (eabp-drawer-item "insights" "Widget Gallery"
-                                 (eabp-action "demo.gallery"))))
+(jetpacs-shell-add-drawer-item
+ 65 (lambda () (jetpacs-drawer-item "insights" "Widget Gallery"
+                                 (jetpacs-action "demo.gallery"))))
 
 ;;;###autoload
 (defun glasspane-demo-gallery ()
@@ -8432,10 +8432,10 @@ Screen y grows downward, so a top semicircle spans 180°→0°."
 The newest of the demo commands (see also `glasspane-demo-setup')."
   (interactive)
   (setq glasspane-gallery--open t)
-  (if (and (fboundp 'eabp-connected-p) (eabp-connected-p))
-      (progn (eabp-shell-push nil :switch-to "gallery")
+  (if (and (fboundp 'jetpacs-connected-p) (jetpacs-connected-p))
+      (progn (jetpacs-shell-push nil :switch-to "gallery")
              (message "Widget gallery opened on the phone"))
-    (message "EABP: not connected — connect a phone, then reopen")))
+    (message "Jetpacs: not connected — connect a phone, then reopen")))
 
 (provide 'glasspane-gallery)
 ;;; glasspane-gallery.el ends here
@@ -8468,14 +8468,14 @@ The newest of the demo commands (see also `glasspane-demo-setup')."
 
 ;;; Code:
 
-(require 'eabp-surfaces)
+(require 'jetpacs-surfaces)
 
 (defcustom glasspane-config-directory
   (expand-file-name "elisp/glasspane/" user-emacs-directory)
   "Directory holding Glasspane's app-managed configuration files.
 Files here are rewritten wholesale by `glasspane-config-sync' — treat
 the directory as the app's, not yours."
-  :type 'directory :group 'eabp)
+  :type 'directory :group 'jetpacs)
 
 (defconst glasspane-config-version 1
   "Version of the managed defaults; stamped into every written file.")
@@ -8580,18 +8580,18 @@ rewritten."
       (glasspane-config-load)
     (glasspane-config-sync)))
 
-(eabp-defaction "config.sync"
+(jetpacs-defaction "config.sync"
   ;; Allowlisted and argument-free: rewrites the fixed file set into
   ;; `glasspane-config-directory' — nothing on the wire chooses paths
   ;; or content.
   (lambda (_ _)
     (let ((dir (glasspane-config-sync)))
-      (when (fboundp 'eabp-shell-notify)
-        (eabp-shell-notify
+      (when (fboundp 'jetpacs-shell-notify)
+        (jetpacs-shell-notify
          (format "App defaults refreshed in %s"
                  (abbreviate-file-name dir)))))
-    (when (fboundp 'eabp-shell-push)
-      (eabp-shell-push))))
+    (when (fboundp 'jetpacs-shell-push)
+      (jetpacs-shell-push))))
 
 (provide 'glasspane-config)
 ;;; glasspane-config.el ends here
@@ -8600,10 +8600,10 @@ rewritten."
 ;;; BEGIN apps/glasspane/glasspane.el
 ;;; ==================================================================
 
-;;; glasspane.el --- Glasspane: the reference org app on EABP -*- lexical-binding: t; -*-
+;;; glasspane.el --- Glasspane: the reference org app on Jetpacs -*- lexical-binding: t; -*-
 
 ;; The one-require entry point for the full reference app.  Pulls in the
-;; EABP core (transport, shell, renderers, editor bridge) plus every
+;; Jetpacs core (transport, shell, renderers, editor bridge) plus every
 ;; Glasspane module (org views, clock notification, magit pie, package
 ;; browser, demo tour):
 ;;

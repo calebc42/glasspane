@@ -40,7 +40,7 @@ duplicate):
 Org-mode subsumes the *data models* of all three apps. Nothing below
 requires new storage concepts — the delta is UX abstraction.
 
-| Their concept | Org / eabp equivalent | Status |
+| Their concept | Org / jetpacs equivalent | Status |
 |---|---|---|
 | Pages / notes (md files, Notion pages) | org files / headings | ✅ |
 | Outliner blocks (Logseq) | headings + plain lists | ✅ data, ❌ manipulation UX |
@@ -226,11 +226,11 @@ needed; SPEC §8 draft of the `conceal` run attribute.
 
 **Landed:** `emacs/apps/glasspane/glasspane-notes.el` — a wikilink
 capf installed in org shadow buffers (via
-`eabp-sync-shadow-setup-hook`, so desktop org buffers stay untouched);
+`jetpacs-sync-shadow-setup-hook`, so desktop org buffers stay untouched);
 candidates from `vulpea-db-search-by-title` (capped, annotated with
 the file); acceptance inserts the full `[[id:…][Title]]` link through
 the new candidate `insert` attr (SPEC §8, core
-`:eabp-insert-function` capf prop, Kotlin strip applies insert over
+`:jetpacs-insert-function` capf prop, Kotlin strip applies insert over
 label). Kotlin: `[` added to the completion trigger chars;
 strip narrowing made case-insensitive. Degrades to absent without
 vulpea. starter-init installs vulpea + autosync. On-device pass
@@ -239,8 +239,8 @@ pending; vulpea perf numbers still owed by the Task 1 spike.
 **Goal:** typing `[[` in any editor offers headings/files, inserts a
 proper org link.
 
-**Files:** `emacs/core/eabp-complete.el` (source),
-`app/src/main/java/com/calebc42/eabp/SduiInputNodes.kt`
+**Files:** `emacs/core/jetpacs-complete.el` (source),
+`app/src/main/java/com/calebc42/jetpacs/SduiInputNodes.kt`
 (`COMPLETION_TRIGGER_CHARS` — add `[`; Kotlin change, same pass),
 `emacs/apps/glasspane/` (org candidate source from the Task 1 engine).
 
@@ -351,7 +351,7 @@ landing view back to Agenda.
 **Goal:** emphasis markers, link syntax, and entities invisible while
 editing; what you type is what you see.
 
-**Files:** `emacs/core/eabp-sync.el` (emit conceal runs),
+**Files:** `emacs/core/jetpacs-sync.el` (emit conceal runs),
 `SduiInputNodes.kt` / `EditorSync.kt` (apply runs: zero-width render +
 caret-adjacent reveal), SPEC §8.
 
@@ -377,7 +377,7 @@ outdent by gesture or toolbar, fold state persists — Logseq's feel on
 org data.
 
 **Files:** `emacs/apps/glasspane/glasspane-org-reader.el` (reader is
-already collapsible trees), `eabp-widgets.el` if `reorderable_list`
+already collapsible trees), `jetpacs-widgets.el` if `reorderable_list`
 needs nesting support (wire change + golden), org actions in
 `glasspane-ui.el` (`heading.refile-to`, `heading.promote/demote`,
 `item.indent/outdent` — allowlisted, position-validated).
@@ -397,9 +397,9 @@ toolbar; refile via picker; file diff shows clean org moves
 table, image, date, src block, quote) — Notion's muscle memory.
 
 **Files:** `SduiInputNodes.kt` (trigger + menu strip, reusing the
-completion-strip UI), `emacs/core/eabp-complete.el` (a `slash`
+completion-strip UI), `emacs/core/jetpacs-complete.el` (a `slash`
 completion kind answered from a registered menu),
-`eabp-files.el`/glasspane (org menu registration — per-file-type via
+`jetpacs-files.el`/glasspane (org menu registration — per-file-type via
 the existing editor seams).
 
 **Pitfalls:** `/` is common in prose and paths — trigger only at
@@ -468,7 +468,7 @@ building the forms.
 **Files:** `emacs/apps/glasspane/` (detail view section + a property-
 schema registry: per-key type/options, defcustom'd), actions
 `property.set` (exists already? extend), reusing the settings-controls
-pattern (`eabp-settings` proved the schema→control mapping).
+pattern (`jetpacs-settings` proved the schema→control mapping).
 
 **Pitfalls:** schema is advisory — unknown keys still render as free
 text (org files are wild); dates must round-trip org timestamp format

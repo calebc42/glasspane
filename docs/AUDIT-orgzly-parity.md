@@ -14,9 +14,9 @@ already tracked on the roadmap; calendar sync is the only unplanned one.
 
 ## Parity matrix
 
-| Orgzly area | Orgzly capability | Glasspane/EABP status |
+| Orgzly area | Orgzly capability | Glasspane/Jetpacs status |
 |---|---|---|
-| Notebooks | list/create/rename/delete/export, preface, default notebook | ✅ different shape: org files on disk via `eabp-files` browser (create/rename/delete/grep/properties); export/import moot (plain files); capture templates choose targets |
+| Notebooks | list/create/rename/delete/export, preface, default notebook | ✅ different shape: org files on disk via `jetpacs-files` browser (create/rename/delete/grep/properties); export/import moot (plain files); capture templates choose targets |
 | Note rendering | styled text, checkboxes, drawers, breadcrumbs, inline images | ✅➕ rich renderer: emphasis, links, checkbox toggle, folded drawers, footnotes, logbook, foldable outline reader; **tables rendered + editable + formulas** and **babel execution** (orgzly has neither); inline images display (file/http/attachment) — capture/storage story is PKM 9 |
 | Note editing | state, priority, schedule/deadline w/ time+repeater, tags, properties | ✅ detail view: todo chips, priority chips, schedule/deadline incl. time + repeater fields, tags, prop add/set, add-note, clock-in; plus full-text editor w/ org toolbar + capf |
 | Structure ops | promote/demote/move, cut/copy/paste, delete | ⚠️ drag reorder with level change (`heading.reorder`), refile, archive — but **no subtree delete/cut/copy/paste from the UI** (editor text-ops only). PKM 7 (H5, parked) covers the rest; *delete* is the everyday one worth pulling forward |

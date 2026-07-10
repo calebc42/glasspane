@@ -155,6 +155,51 @@
           (should-not (assq 'todo plain))
           (should-not (assq 'button plain)))))))
 
+(ert-deftest glasspane-org-surfaces-as-data ()
+  "The capture tile, clock widget, and widget header button are pure data.
+These replaced the companion's CaptureTileService /
+JetpacsClockWidgetProvider / hardcoded header wiring (jetpacs 55b5a23) —
+the specs must carry the org actions the Kotlin used to hardcode."
+  ;; Clock widget: two silent queue-policy rows.
+  (let* ((spec (glasspane-clock-widget-spec))
+         (items (append (alist-get 'items spec) nil)))
+    (should (= 2 (length items)))
+    (should (equal "org.clock.in-last"
+                   (alist-get 'action (alist-get 'on_tap (nth 0 items)))))
+    (should (equal "org.clock.out"
+                   (alist-get 'action (alist-get 'on_tap (nth 1 items)))))
+    ;; Silent broadcasts: taps must not open the app.
+    (should-not (assq 'tap_in_app (nth 0 items))))
+  ;; Capture tile: an in-app tap carrying org.capture.show.
+  (let ((glasspane-ui--capture-tile-pushed nil)
+        pushed)
+    (cl-letf (((symbol-function 'jetpacs-surface-push)
+               (lambda (surface spec &rest _) (push (cons surface spec) pushed))))
+      (glasspane-ui--push-capture-tile)
+      (let ((tile (cdr (assoc "tile:custom1" pushed))))
+        (should tile)
+        (should (eq (alist-get 'tap_in_app tile) t))
+        (should (equal "org.capture.show"
+                       (alist-get 'action (alist-get 'on_tap tile)))))
+      ;; Once per session: a second call pushes nothing new.
+      (glasspane-ui--push-capture-tile)
+      (should (= 1 (length pushed)))))
+  ;; Agenda widget: header_action rides at the spec top level (SPEC §4,
+  ;; a sibling of views — chrome is view-independent).
+  (let ((glasspane-ui--last-widget 'unset)
+        (glasspane-org-custom-agendas nil)
+        pushed)
+    (cl-letf (((symbol-function 'jetpacs-surface-push)
+               (lambda (surface spec &rest _) (push (cons surface spec) pushed)))
+              ((symbol-function 'glasspane-org--agenda-items)
+               (lambda (&rest _) nil)))
+      (glasspane-ui--push-widget)
+      (let ((spec (cdr (assoc "widget:agenda" pushed))))
+        (should spec)
+        (should (assq 'views spec))
+        (should (equal "org.capture.show"
+                       (alist-get 'action (alist-get 'header_action spec))))))))
+
 ;; ─── Extraction cache ───────────────────────────────────────────────────────
 
 (ert-deftest glasspane-org-cache-memoises ()

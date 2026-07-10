@@ -290,3 +290,26 @@ Open an org file in the phone editor (edit mode, keyboard up):
       Language dialog (free text) → entering `dot` inserts a
       `#+begin_src dot` block on its own lines with the cursor on the
       empty middle line.
+
+## 13. Org surfaces as data (decoupling, 2026-07-10 — needs fresh APK + bundle)
+
+The capture QS tile, the clock widget, and the agenda widget's "+"
+button are now elisp-composed (jetpacs `55b5a23`; the Kotlin
+`CaptureTileService` / `JetpacsClockWidgetProvider` are gone). Note:
+any previously-added clock widget / capture tile from the old APK
+disappears on update — re-add the new ones.
+
+- [ ] **Agenda widget "+":** after the first dashboard push, the agenda
+      widget still shows the header "+" and tapping it opens the app on
+      the capture template picker (it now rides the pushed
+      `header_action`, so a pre-push widget hides the button).
+- [ ] **Capture tile:** QS tile picker → add the first Jetpacs slot
+      tile → it shows "Capture" with the add icon (grayed-out until the
+      first push after connecting) → tapping from the shade unlocks if
+      needed, opens the app, and the template picker arrives; with
+      Emacs dead the action queues and the picker appears on reconnect.
+- [ ] **Clock widget:** widget picker → "Jetpacs slot 1" → after a push
+      it shows "Org clock" with the two rows; "Clock in (last)" resumes
+      the last task (chronometer notification appears) and "Clock out"
+      stops it, both without opening the app; with Emacs dead the taps
+      queue and replay on reconnect.

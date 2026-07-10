@@ -183,8 +183,35 @@ View keys are interned because `json-serialize' requires symbol keys."
       (setq glasspane-ui--last-widget views)
       (jetpacs-surface-push
        "widget:agenda"
+       ;; header_action: the widget header's "+" is server-driven chrome
+       ;; (SPEC §4) — the companion hardcodes nothing; this is where the
+       ;; org-capture opinion lives now.
        `((views . ,views)
-         (initial_view . "today"))))))
+         (initial_view . "today")
+         (header_action . ,(jetpacs-action "org.capture.show"
+                                        :when-offline "queue")))))))
+
+(defvar glasspane-ui--capture-tile-pushed nil
+  "Non-nil once the static capture tile spec has been pushed this session.")
+
+(defun glasspane-ui--push-capture-tile ()
+  "Push the `tile:custom1' Quick Settings tile: one-tap org capture.
+The foundation's CaptureTileService is gone (it hardcoded an org
+action); the tile is now composed here and rendered by the companion's
+blank tile slots. Static content — pushed once per session; the
+companion persists it, and the user adds the tile to the shade from
+the tile picker."
+  (unless glasspane-ui--capture-tile-pushed
+    (setq glasspane-ui--capture-tile-pushed t)
+    (jetpacs-surface-push
+     "tile:custom1"
+     (jetpacs-tile "Capture" :icon "add" :state "active"
+                :on-tap (jetpacs-action "org.capture.show"
+                                     :when-offline "queue")
+                ;; Capture needs a keyboard, so the tap opens the app.
+                :in-app t))))
+
+(add-hook 'jetpacs-shell-after-push-hook #'glasspane-ui--push-capture-tile)
 
 ;; Both are memo-guarded, so unchanged data sends nothing.
 (add-hook 'jetpacs-shell-after-push-hook #'glasspane-ui--sync-reminders)

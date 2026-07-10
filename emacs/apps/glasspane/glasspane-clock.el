@@ -54,6 +54,40 @@
 (add-hook 'org-clock-in-hook  #'glasspane-clock-in-notification)
 (add-hook 'org-clock-out-hook #'glasspane-clock-out-notification)
 
+;; ─── Home-screen clock widget (a blank widget:customN slot) ──────────────────
+
+(defvar glasspane-clock--widget-pushed nil
+  "Non-nil once the static clock widget spec has been pushed this session.")
+
+(defun glasspane-clock-widget-spec ()
+  "The `widget:custom1' spec: clock in (last) / clock out rows.
+The foundation's JetpacsClockWidgetProvider is gone (it hardcoded the
+two org actions in Kotlin); the same widget is composed here and
+rendered by the companion's blank widget slots. Taps are silent
+broadcasts — no app open — and queue when Emacs is dead, exactly as
+the old static widget did."
+  `((title . "Org clock")
+    (items . ,(vconcat
+               (list
+                (jetpacs-widget-item "Clock in (last)"
+                                  :meta "Resume the last task"
+                                  :icon "scheduled"
+                                  :on-tap (jetpacs-action "org.clock.in-last"
+                                                       :when-offline "queue"))
+                (jetpacs-widget-item "Clock out"
+                                  :meta "Stop the running clock"
+                                  :icon "event"
+                                  :on-tap (jetpacs-action "org.clock.out"
+                                                       :when-offline "queue")))))))
+
+(defun glasspane-clock--push-widget ()
+  "Push the clock widget once per session (static content; it persists)."
+  (unless glasspane-clock--widget-pushed
+    (setq glasspane-clock--widget-pushed t)
+    (jetpacs-surface-push "widget:custom1" (glasspane-clock-widget-spec))))
+
+(add-hook 'jetpacs-shell-after-push-hook #'glasspane-clock--push-widget)
+
 ;; On (re)connect, re-assert current clock state so the companion's cache
 ;; matches reality after an Emacs restart. (Runs after the revision snapshot
 ;; has been absorbed — see the -50 depth in jetpacs-surfaces.)

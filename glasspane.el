@@ -2639,6 +2639,40 @@ Returns a single `jetpacs-reorderable-list' node for refile mode."
 (add-hook 'org-clock-in-hook  #'glasspane-clock-in-notification)
 (add-hook 'org-clock-out-hook #'glasspane-clock-out-notification)
 
+;; ─── Home-screen clock widget (a blank widget:customN slot) ──────────────────
+
+(defvar glasspane-clock--widget-pushed nil
+  "Non-nil once the static clock widget spec has been pushed this session.")
+
+(defun glasspane-clock-widget-spec ()
+  "The `widget:custom1' spec: clock in (last) / clock out rows.
+The foundation's JetpacsClockWidgetProvider is gone (it hardcoded the
+two org actions in Kotlin); the same widget is composed here and
+rendered by the companion's blank widget slots. Taps are silent
+broadcasts — no app open — and queue when Emacs is dead, exactly as
+the old static widget did."
+  `((title . "Org clock")
+    (items . ,(vconcat
+               (list
+                (jetpacs-widget-item "Clock in (last)"
+                                  :meta "Resume the last task"
+                                  :icon "scheduled"
+                                  :on-tap (jetpacs-action "org.clock.in-last"
+                                                       :when-offline "queue"))
+                (jetpacs-widget-item "Clock out"
+                                  :meta "Stop the running clock"
+                                  :icon "event"
+                                  :on-tap (jetpacs-action "org.clock.out"
+                                                       :when-offline "queue")))))))
+
+(defun glasspane-clock--push-widget ()
+  "Push the clock widget once per session (static content; it persists)."
+  (unless glasspane-clock--widget-pushed
+    (setq glasspane-clock--widget-pushed t)
+    (jetpacs-surface-push "widget:custom1" (glasspane-clock-widget-spec))))
+
+(add-hook 'jetpacs-shell-after-push-hook #'glasspane-clock--push-widget)
+
 ;; On (re)connect, re-assert current clock state so the companion's cache
 ;; matches reality after an Emacs restart. (Runs after the revision snapshot
 ;; has been absorbed — see the -50 depth in jetpacs-surfaces.)
@@ -2922,8 +2956,35 @@ View keys are interned because `json-serialize' requires symbol keys."
       (setq glasspane-ui--last-widget views)
       (jetpacs-surface-push
        "widget:agenda"
+       ;; header_action: the widget header's "+" is server-driven chrome
+       ;; (SPEC §4) — the companion hardcodes nothing; this is where the
+       ;; org-capture opinion lives now.
        `((views . ,views)
-         (initial_view . "today"))))))
+         (initial_view . "today")
+         (header_action . ,(jetpacs-action "org.capture.show"
+                                        :when-offline "queue")))))))
+
+(defvar glasspane-ui--capture-tile-pushed nil
+  "Non-nil once the static capture tile spec has been pushed this session.")
+
+(defun glasspane-ui--push-capture-tile ()
+  "Push the `tile:custom1' Quick Settings tile: one-tap org capture.
+The foundation's CaptureTileService is gone (it hardcoded an org
+action); the tile is now composed here and rendered by the companion's
+blank tile slots. Static content — pushed once per session; the
+companion persists it, and the user adds the tile to the shade from
+the tile picker."
+  (unless glasspane-ui--capture-tile-pushed
+    (setq glasspane-ui--capture-tile-pushed t)
+    (jetpacs-surface-push
+     "tile:custom1"
+     (jetpacs-tile "Capture" :icon "add" :state "active"
+                :on-tap (jetpacs-action "org.capture.show"
+                                     :when-offline "queue")
+                ;; Capture needs a keyboard, so the tap opens the app.
+                :in-app t))))
+
+(add-hook 'jetpacs-shell-after-push-hook #'glasspane-ui--push-capture-tile)
 
 ;; Both are memo-guarded, so unchanged data sends nothing.
 (add-hook 'jetpacs-shell-after-push-hook #'glasspane-ui--sync-reminders)

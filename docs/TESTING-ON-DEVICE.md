@@ -354,3 +354,27 @@ disappears on update — re-add the new ones.
       its **question** page (the id-keyed reset). Undo from the top bar
       restores the previous card **answer-shown**. Long answers scroll
       within the page without fighting the horizontal swipe.
+
+## 16. Launcher shortcuts (shortcut.pin / shortcuts.set — 2026-07-10, fresh APK + bundle)
+
+- [ ] **Pin with a custom logo:** from eval, `(jetpacs-device-shortcut-pin
+      "glasspane" "Glasspane" (jetpacs-action "app.open" :args '((app
+      . "glasspane"))) :icon-file "<some square PNG>")` → the launcher's
+      confirm dialog shows the PNG (masked to the launcher shape, small
+      companion badge in the corner); placing it puts the icon on the
+      home screen.
+- [ ] **Shortcut opens into the app:** tapping the pin cold (companion
+      swiped away) and warm both land on the app's landing tab, not the
+      last-viewed screen; with Emacs dead the app opens on the cached
+      view and the action replays on reconnect (queue policy).
+- [ ] **Re-pin updates in place:** call again with a different PNG and
+      label → no confirm dialog, the existing pin's icon/label change
+      (may need a launcher redraw / a few seconds).
+- [ ] **Icon fallback:** pin without `:icon-file` → the companion's own
+      icon, un-double-masked (no shrunken icon-in-icon).
+- [ ] **Long-press menu:** `(jetpacs-device-shortcuts-set (list (list
+      "capture" "Capture" (jetpacs-action "org.capture.show"))))` → long-press
+      the companion's launcher icon shows Capture; firing it works;
+      `(jetpacs-device-shortcuts-set nil)` clears it.
+- [ ] **Oversized set refused:** six entries → `cap-failed` naming the
+      launcher max in *Messages*, and the previous set is untouched.

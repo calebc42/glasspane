@@ -183,10 +183,30 @@ with an :ID: still gets its backlink section."
     (let* ((backlinks (condition-case nil
                           (vulpea-db-query-by-links-some (list id))
                         (error nil)))
-           (mentions (gethash id glasspane-notes--mentions 'unfetched)))
+           (mentions (gethash id glasspane-notes--mentions 'unfetched))
+           (current-note (condition-case nil
+                             (vulpea-db-get-by-id id)
+                           (error nil)))
+           (forward-link-ids (and current-note
+                                  (delq nil
+                                        (mapcar (lambda (l)
+                                                  (when (equal (plist-get l :type) "id")
+                                                    (plist-get l :dest)))
+                                                (vulpea-note-links current-note)))))
+           (forward-links (and forward-link-ids
+                               (condition-case nil
+                                   (vulpea-db-query-by-ids forward-link-ids)
+                                 (error nil)))))
       (append
        (list (jetpacs-divider)
              (jetpacs-collapsible
+              (concat "forwardlinks/" id)
+              (jetpacs-section-header
+               (format "Outgoing links (%d)" (length forward-links)))
+              (or (mapcar #'glasspane-notes--note-card forward-links)
+                  (list (jetpacs-text "No outgoing links." 'caption)))
+              :collapsed (null forward-links)))
+       (list (jetpacs-collapsible
               (concat "backlinks/" id)
               (jetpacs-section-header
                (format "Linked references (%d)" (length backlinks)))

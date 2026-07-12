@@ -13,6 +13,11 @@
 ;;; Code:
 
 (require 'glasspane-ui)
+(require 'glasspane-agenda)
+(require 'glasspane-capture)
+(require 'glasspane-detail)
+(require 'glasspane-search)
+(require 'glasspane-table)
 (require 'glasspane-journal)
 (require 'glasspane-views)
 (require 'glasspane-automations)

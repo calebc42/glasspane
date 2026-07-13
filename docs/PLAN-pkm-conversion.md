@@ -83,7 +83,7 @@ Per-app distinctives, positioned:
 | Outliner drag/indent/fold | Logseq | `reorderable_list` node is the seed → Task 7 |
 | Typed-property forms | Notion/Obsidian | Settings controls pattern reused → Task 10 |
 | Templates UI | all | capture templates + Task 19 org-apps → Task 5/11 side-effects |
-| Graph view | Obsidian/Logseq | demo candy, low retention — non-goal v1 |
+| Graph view | Obsidian/Logseq | demo candy, low retention — non-goal v1; local-neighborhood variant reopened 2026-07-10, see decision note in non-goals |
 | SRS / PDF annotation | Logseq | SRS ✅ 2026-07-06 (glasspane-srs.el over org-srs; TESTING-ON-DEVICE §11); PDF deferred |
 
 ## Constraints & realities (read before estimating)
@@ -296,6 +296,47 @@ source buffer; use the grep output.
 **Acceptance:** fixture vault: linked refs correct, mention
 materializes and moves lists on refresh; case test (org links are
 case-sensitive in paths, titles matched case-insensitively).
+
+### Task 19: org-roam vault interop (added 2026-07-10)
+
+**Goal:** an existing org-roam user points Glasspane at their vault and
+everything just works — no conversion, no fork, no engine change. This
+is the cheapest adoption channel the plan has: org-roam users already
+run Emacs and already have id-linked org files. The conversion phases
+(C6) target Obsidian/Logseq/Notion; this task covers the audience the
+plan previously skipped.
+
+**Files:** `emacs/apps/glasspane/glasspane-notes.el` (alias/ref
+candidate sources), `glasspane-journal.el` (dailies layout),
+`docs/starter-init.el` (coexistence notes); findings recorded here.
+
+**Implementation — three interop surfaces, each verified against a
+real org-roam vault fixture:**
+1. **Aliases & refs.** Verify (don't assume — vulpea v2 is standalone)
+   whether the vulpea index reads `ROAM_ALIASES` / `ROAM_REFS` drawer
+   properties; if not, add a Glasspane-side candidate/mention source
+   for them so `[[` autocomplete and unlinked mentions see roam
+   aliases.
+2. **Dailies.** Map the org-roam-dailies layout (`daily/YYYY-MM-DD.org`,
+   one file per day) onto the journal view as an alternative to
+   datetree — a defcustom for the layout, one code path branching on
+   it.
+3. **Coexistence.** Confirm Glasspane/vulpea and a live desktop
+   org-roam session (its sqlite db, its save hooks) index the same
+   vault without fighting; document any ordering constraints in
+   starter-init.
+
+**Pitfalls:** don't reverse the Task 1 engine decision through the
+back door — org-roam stays the *user's desktop tool*, vulpea stays our
+index. Drawer reads are case-insensitive per the standing convention
+(ship case tests). org-roam v1 vaults (`#+ROAM_ALIAS` file keywords)
+are out of scope — v2 drawer format only; report the rest, don't
+mangle.
+
+**Acceptance:** fixture org-roam vault: `[[` autocomplete offers a
+note by its roam alias; its dailies render in the journal; unlinked
+mentions catch alias text; a desktop org-roam session against the
+same vault stays consistent after Glasspane edits.
 
 ---
 
@@ -679,6 +720,7 @@ scope, and an explicit list of what iOS v1 does **not** do.
 ```
 C0: 1, 2 (the bets — do first, cheap, everything layers on them)
 C1: 3, 4  ──┐                    (needs 1)
+    19      │                    (interop — cheap, anytime after 1's spike)
 C2: 5     ──┤ independent after C0
 C3: 6, 7, 8 ┘                    (needs 2; order per its design)
 C4: 9      (anytime; pairs with automation-plan Task 2/3)
@@ -700,6 +742,17 @@ Task 1's decision.
 - **Plugin-marketplace parity** — the answer is Tier 1 elisp builds
   and declarative org-apps (launcher plan L2/L3), not a plugin store.
 - **Graph view v1** — demo candy; a cheap 2D canvas *maybe* ever.
+  *Decision note (2026-07-10):* owner appetite recorded for a
+  knowledge-graph surface. The **global** graph stays a non-goal —
+  both audits agree it's low-retention demo candy. The live candidate
+  is a **local-neighborhood graph** (current note + 1–2 hops), where
+  the data is already free (the vulpea db's link table feeds it) and
+  the cost is rendering: a canvas/graph wire node, which is foundation
+  work filed against the jetpacs repo first, per the tracking
+  convention. Sits behind the vulpea spike (Task 1 numbers) and the
+  battery gate; H5 design-notes item until then. Build/no-build is
+  re-decided at the next roadmap review — this note records the
+  reopening, not a commitment.
 - **Native markdown as a second first-class syntax** — import converts
   to org; one syntax, one feature set. Gate to revisit: import churn
   data says otherwise.

@@ -131,6 +131,10 @@ than inventing one.)*
 
 ## Suggested roadmap insertions
 
+*(2026-07-10: absorbed into ROADMAP.md — P1/P2/P3/P5/P7 under "Quick
+wins", P4/P6 under H4, P8 already landed in the PKM 10/11 design
+notes. The PKM 13 line below still stands as an importer note.)*
+
 - **H3:** P1 (undo snackbar), P2 (favorites/recents), P3+P5 (PKM 5
   riders), P7 opportunistically.
 - **H4:** P4 (voice capture, beside PKM 9), P6 (file history).

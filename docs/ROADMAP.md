@@ -48,11 +48,47 @@ The measurement itself is foundation work (jetpacs roadmap, near-term
 gate was deliberately deferred once (2026-07-05, away from hardware) —
 it does not defer again.
 
+## Quick wins (small, audit-fed, not gate-blocked)
+
+Items the two audits recommended that fell through the horizon lists
+when the unified roadmap split. None adds background work, so the ⛔
+gate doesn't apply; pull any of these whenever a small win is wanted.
+Anchors are in the audits.
+
+- **Undo snackbar** on mutating actions
+  ([AUDIT-logseq-plunder.md](AUDIT-logseq-plunder.md) P1) — the
+  audit's "cheapest genuinely-daily win"; engine-side undo already
+  works, this is the phone affordance.
+- **Favorites + recents** in the drawer (P2) — bookmarks + drawer, no
+  new machinery.
+- **Journal riders** (P3 + P5) — a "due today" foldable on the daily
+  note and the quick-add inbox convention (seeded template, inbox
+  count badge, one-tap refile).
+- **Search scope chips + in-buffer find** (P7) — opportunistic, when
+  search is next touched.
+- **Subtree delete** from the detail view
+  ([AUDIT-orgzly-parity.md](AUDIT-orgzly-parity.md) #2) — one
+  allowlisted action + confirm dialog; the most-noticed structure-ops
+  hole.
+- **Date-only reminder time** (orgzly #3) — small extension of the
+  upcoming-reminders pass.
+- **Reminder Done/Snooze actions** (orgzly #1) *(foundation:
+  `reminder.action` wire)* — the largest true orgzly gap; SPEC +
+  Kotlin filed against jetpacs first.
+- **Decide: calendar provider sync** (orgzly #5) — want/don't-want;
+  if wanted, it's a new device capability (foundation), not app work.
+
 ## Horizon 4 — daily-driver maturity
 
 In dependency order; items marked *(foundation)* need jetpacs-side work
 first.
 
+- **PKM 19 — org-roam vault interop.** Aliases/refs in autocomplete
+  and mentions, roam-dailies journal layout, desktop-coexistence
+  check — the cheapest adoption channel (existing Emacs users), added
+  2026-07-10; details in
+  [PLAN-pkm-conversion.md](PLAN-pkm-conversion.md). Depends only on
+  the vulpea spike confirming the engine.
 - **PKM 9 — inline images + photo capture.** Settles the cross-app
   storage-boundary question; genuine personal value now,
   convert-critical later.
@@ -70,6 +106,12 @@ first.
 - **Special-access effectors** *(foundation: AUTO 5)* — brightness,
   DND; opportunistic, pull earlier whenever a real automation wants
   one.
+- **Voice-note capture** *(foundation: `media.record`)* —
+  [AUDIT-logseq-plunder.md](AUDIT-logseq-plunder.md) P4; rides PKM 9's
+  storage-boundary decision, optional on-device transcription.
+- **Per-file git history** — Logseq audit P6; pure composition of
+  landed pieces (magit bridge, diff shading), and makes the future
+  PKM 14 autocommit visible and trustable.
 
 ## Horizon 5 — convert-facing (parked, not cancelled)
 
@@ -90,18 +132,23 @@ horizon accrues design notes only.
   (19 may pull into H4 on personal desire — useful without converts).
 - **ORGRO: org-crypt, org-protocol** (org-protocol is mostly a desktop
   concern; the share sheet already covers Android capture).
+- **Local-neighborhood graph view** *(foundation: canvas/graph wire
+  node)* — reopened 2026-07-10 as a design-notes candidate; the global
+  graph stays a non-goal. See the decision note in
+  [PLAN-pkm-conversion.md](PLAN-pkm-conversion.md) non-goals; behind
+  the vulpea spike and the ⛔ gate.
 
 ## Backlog feeds
 
 Two standing audits mine competitor UX for candidates; neither is a
 commitment list:
 
-- [AUDIT-logseq-plunder.md](AUDIT-logseq-plunder.md) — undo snackbar,
-  favorites/recents, voice capture, git file history, tag-keyed
-  schemas, …
+- [AUDIT-logseq-plunder.md](AUDIT-logseq-plunder.md) — suggested
+  insertions absorbed 2026-07-10 (→ Quick wins + H4); still mines
+  fresh candidates.
 - [AUDIT-orgzly-parity.md](AUDIT-orgzly-parity.md) — parity confirmed
-  exceeded except: reminder actions (Done/Snooze), subtree delete,
-  image share (→ PKM 9), calendar sync (unplanned).
+  exceeded; the four true gaps slotted 2026-07-10 (→ Quick wins;
+  image share stays PKM 9).
 
 ## Standing gates (every substantial change)
 

@@ -41,6 +41,8 @@
 
 (require 'glasspane-org)
 
+(require 'glasspane-source)
+
 (require 'jetpacs-keymap)
 
 (require 'jetpacs-magit)

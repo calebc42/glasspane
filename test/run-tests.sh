@@ -19,6 +19,7 @@ EMACS="${EMACS:-emacs}"
   -l glasspane-journal-test \
   -l glasspane-notes-test \
   -l glasspane-org-test \
+  -l glasspane-source-test \
   -l glasspane-sparse-test \
   -l glasspane-srs-test \
   -l glasspane-ui-test \

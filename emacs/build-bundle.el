@@ -31,6 +31,7 @@
        ;; graph.
        (app-files '("apps/jetpacs-magit.el"
                     "apps/glasspane/glasspane-org.el"
+                    "apps/glasspane/glasspane-source.el"
                     "apps/glasspane/glasspane-org-rich.el"
                     "apps/glasspane/glasspane-org-reader.el"
                     "apps/glasspane/glasspane-clock.el"

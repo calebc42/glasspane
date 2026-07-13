@@ -8073,35 +8073,37 @@ The newest of the demo commands (see also `glasspane-demo-setup')."
 ;;; glasspane-config.el --- App-managed org defaults on disk -*- lexical-binding: t; -*-
 
 ;; Glasspane's opinionated defaults — capture templates, agenda wiring,
-;; babel languages — live as small elisp files in
-;; `glasspane-config-directory', written and refreshed by the app rather
-;; than hand-maintained in init.el.  The contract:
+;; babel languages — live as small elisp files in Glasspane's config
+;; subtree, written and refreshed by the app rather than hand-maintained in
+;; init.el.  As of the jetpacs foundation-root work the subtree and its
+;; sync/ensure/load contract are owned by core: this file is a thin caller
+;; of `jetpacs-app-config-*', keyed by the app-id "glasspane", so the files
+;; live under `(jetpacs-app-dir "glasspane")' (i.e.
+;; ~/.emacs.d/jetpacs/apps/glasspane/) alongside every other app's subtree.
+;; The contract is unchanged:
 ;;
 ;;   - `glasspane-config-sync' (or the allowlisted `config.sync' action)
-;;     rewrites every managed file to the bundle's current defaults, so
-;;     an app update can evolve them; edits to the files themselves are
+;;     rewrites every managed file to the bundle's current defaults, so an
+;;     app update can evolve them; edits to the files themselves are
 ;;     expected to be lost.
-;;   - Personal configuration belongs in init.el (which runs after the
-;;     `require'-time load below, so it wins) or in Customize.
-;;   - The defaults are deliberately soft: capture templates merge by
-;;     key and never replace one the user already defined; variables are
-;;     seeded only while still at their stock values.
+;;   - Personal configuration belongs in init.el or ~/.emacs.d/jetpacs/user.el
+;;     (both load after these files, so they win) or in Customize.
+;;   - The defaults are deliberately soft: capture templates merge by key
+;;     and never replace one the user already defined; variables are seeded
+;;     only while still at their stock values.
 ;;
-;; The starter init (docs/starter-init.el) calls
-;; `glasspane-config-ensure': first run creates and loads the
-;; directory, later runs just load it.  An existing init opts in the
-;; same way — nothing is written until asked.
+;; The starter init (and the bundle's own load) call `glasspane-config-ensure':
+;; first run creates and loads the subtree, later runs just load it.  An
+;; existing init opts in the same way — nothing is written until asked.
 
 ;;; Code:
 
+(require 'jetpacs-config)
 (require 'jetpacs-surfaces)
 
-(defcustom glasspane-config-directory
-  (expand-file-name "elisp/glasspane/" user-emacs-directory)
-  "Directory holding Glasspane's app-managed configuration files.
-Files here are rewritten wholesale by `glasspane-config-sync' — treat
-the directory as the app's, not yours."
-  :type 'directory :group 'jetpacs)
+(defconst glasspane-config-app-id "glasspane"
+  "App-id keying Glasspane's config subtree and its foundation ownership.
+The managed files live under `(jetpacs-app-dir glasspane-config-app-id)'.")
 
 (defconst glasspane-config-version 1
   "Version of the managed defaults; stamped into every written file.")
@@ -8163,53 +8165,33 @@ the directory as the app's, not yours."
   "Alist of (FILENAME . CONTENT) written by `glasspane-config-sync'.")
 
 ;;;###autoload
-(defun glasspane-config-sync (&optional dir)
-  "Write the app-managed defaults into DIR and load them.
-DIR defaults to `glasspane-config-directory'.  Every file in
-`glasspane-config--files' is overwritten — the reset-to-current-bundle
-semantics are the point.  Returns DIR."
+(defun glasspane-config-sync ()
+  "Rewrite Glasspane's app-managed defaults and load them.
+Delegates to `jetpacs-app-config-sync' under the app-id
+`glasspane-config-app-id'; every file in `glasspane-config--files' is
+overwritten — the reset-to-current-bundle semantics are the point.
+Returns the subtree directory."
   (interactive)
-  (let ((dir (file-name-as-directory
-              (expand-file-name (or dir glasspane-config-directory))))
-        (coding-system-for-write 'utf-8))
-    (make-directory dir t)
-    (dolist (spec glasspane-config--files)
-      (write-region (cdr spec) nil (expand-file-name (car spec) dir)
-                    nil 'silent))
-    (glasspane-config-load dir)
-    (when (called-interactively-p 'interactive)
-      (message "Glasspane defaults written to %s" dir))
-    dir))
+  (jetpacs-app-config-sync glasspane-config-app-id glasspane-config--files))
 
-(defun glasspane-config-load (&optional dir)
-  "Load every elisp file in DIR (default `glasspane-config-directory').
-A missing directory is fine — nothing loads until the user opts in via
-`glasspane-config-ensure' or `glasspane-config-sync'.  Files load in
-name order, so extra user files sort predictably among the managed
-ones."
-  (let ((dir (expand-file-name (or dir glasspane-config-directory))))
-    (when (file-directory-p dir)
-      (dolist (file (directory-files dir t "\\.el\\'"))
-        (condition-case err
-            (load file nil 'nomessage)
-          (error (message "glasspane-config: error loading %s: %s"
-                          file (error-message-string err))))))))
+(defun glasspane-config-load ()
+  "Load every elisp file in Glasspane's config subtree, in name order.
+A missing subtree is fine — nothing loads until the user opts in via
+`glasspane-config-ensure' or `glasspane-config-sync'."
+  (jetpacs-app-config-load glasspane-config-app-id))
 
 ;;;###autoload
 (defun glasspane-config-ensure ()
   "Create the app-managed defaults on first run; load them afterwards.
-The starter init calls this right after (require \\='glasspane): a
-missing `glasspane-config-directory' is populated via
-`glasspane-config-sync'; an existing one is only loaded, never
+Delegates to `jetpacs-app-config-ensure': a missing subtree is populated
+via `glasspane-config-sync'; an existing one is only loaded, never
 rewritten."
-  (if (file-directory-p glasspane-config-directory)
-      (glasspane-config-load)
-    (glasspane-config-sync)))
+  (jetpacs-app-config-ensure glasspane-config-app-id glasspane-config--files))
 
 (jetpacs-defaction "config.sync"
   ;; Allowlisted and argument-free: rewrites the fixed file set into
-  ;; `glasspane-config-directory' — nothing on the wire chooses paths
-  ;; or content.
+  ;; Glasspane's config subtree — nothing on the wire chooses paths or
+  ;; content.
   (lambda (_ _)
     (let ((dir (glasspane-config-sync)))
       (when (fboundp 'jetpacs-shell-notify)

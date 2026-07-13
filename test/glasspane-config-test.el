@@ -8,7 +8,8 @@
 (ert-deftest glasspane-config-sync-and-ensure ()
   "Managed defaults merge softly; ensure never rewrites an existing dir."
   (let* ((root (make-temp-file "glasspane-config" t))
-         (glasspane-config-directory (expand-file-name "managed/" root))
+         (jetpacs-root (file-name-as-directory (expand-file-name "root" root)))
+         (managed (jetpacs-app-dir "glasspane"))
          (org-directory (expand-file-name "org/" root))
          (org-default-notes-file (convert-standard-filename "~/.notes"))
          (org-capture-templates '(("t" "Mine" entry (file "x.org") "* %?")))
@@ -18,7 +19,7 @@
         (progn
           ;; First run: directory missing -> created and loaded.
           (glasspane-config-ensure)
-          (should (file-directory-p glasspane-config-directory))
+          (should (file-directory-p managed))
           ;; Soft merge: the user's "t" survives, missing keys append.
           (should (equal "Mine" (nth 1 (assoc "t" org-capture-templates))))
           (should (assoc "n" org-capture-templates))
@@ -33,8 +34,7 @@
           (glasspane-config-load)
           (should (equal org-agenda-files '("/tmp/keep")))
           ;; `ensure' never rewrites an existing directory; `sync' does.
-          (let ((file (expand-file-name "org-defaults.el"
-                                        glasspane-config-directory))
+          (let ((file (expand-file-name "org-defaults.el" managed))
                 (mangled ";; user mangled\n"))
             (write-region mangled nil file nil 'silent)
             (glasspane-config-ensure)

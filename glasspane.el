@@ -2156,22 +2156,6 @@ suppressed identical push would leave it frozen."
 ;; the drawer item, a queue drain) must drop them.
 (add-hook 'jetpacs-shell-refresh-hook #'glasspane-org-cache-invalidate)
 
-(defun glasspane-ui--filter-values (id)
-  "Selected values for builder filter ID, as a list of strings.
-UI state for an enum may hold the parsed vector from an action's
-args, the raw JSON text a `state.changed' event delivered, or a
-plain seed string — normalise them all."
-  (let ((v (jetpacs-ui-state id)))
-    (cond
-     ((null v) nil)
-     ((vectorp v) (append v nil))
-     ((and (stringp v) (string-prefix-p "[" v))
-      (condition-case nil
-          (append (json-parse-string v) nil)
-        (error (list v))))
-     ((stringp v) (list v))
-     ((listp v) v))))
-
 (defun glasspane-ui--global-todo-keywords ()
   "Extract a flat list of all global TODO keywords from `org-todo-keywords'."
   (let ((kws nil))
@@ -2560,10 +2544,9 @@ wedging the bridge forever."
 (jetpacs-defaction "file.view"
   ;; Legacy (old cached UIs): now routes into the jetpacs-files editor.
   (lambda (args _)
-    (let ((file (alist-get 'file args)))
-      (when (and (stringp file) (file-readable-p file))
-        (setq jetpacs-files--file (expand-file-name file))
-        (jetpacs-shell-push nil :switch-to "edit")))))
+    ;; `jetpacs-files-open' guards stringp + readability + within-root,
+    ;; runs the open hook, and does the :switch-to "edit" push itself.
+    (jetpacs-files-open (alist-get 'file args))))
 
 ;; ─── Files integration: org files open reader-first ─────────────────────────
 ;; Registered on the core files module's app seams; the editor itself stays
@@ -2635,12 +2618,12 @@ Debounces bursts of saves (e.g. `org-save-all-org-buffers') into one push."
 (defun glasspane-ui--after-save-refresh ()
   "Schedule a dashboard refresh if an org agenda file was just saved.
 No-op for saves Jetpacs itself performs — anything inside an action
-handler (`jetpacs--in-action-handler') pushes explicitly, and other
+handler (see `jetpacs-in-action-p') pushes explicitly, and other
 programmatic saves bind `glasspane-org--inhibit-save-refresh' — which would
 otherwise refresh twice or loop."
   (when (and (jetpacs-connected-p)
              (not (bound-and-true-p glasspane-org--inhibit-save-refresh))
-             (not (bound-and-true-p jetpacs--in-action-handler))
+             (not (jetpacs-in-action-p))
              buffer-file-name
              (derived-mode-p 'org-mode)
              (ignore-errors
@@ -2886,7 +2869,7 @@ month is Feb 28, not an invalid date."
              (string-match "\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)" ts))
     (let* ((month (string-to-number (match-string 2 ts)))
            (day   (string-to-number (match-string 3 ts)))
-           (mon   (aref jetpacs--month-abbrevs (1- month)))
+           (mon   (jetpacs-month-abbrev month))
            (time  (glasspane-ui--ts-time ts)))
       (if time (format "%s %d %s" mon day time)
         (format "%s %d" mon day)))))
@@ -4752,11 +4735,11 @@ worked example of the query language.  Each filter lives in its own
 collapsible section whose header names the active value, so the
 folded builder reads as a filter summary.  The whole card starts
 folded once a search has results, to keep them above the fold."
-  (let* ((todo-val (or (car (glasspane-ui--filter-values "search-filter-todo")) "Any"))
-         (tags-list (glasspane-ui--filter-values "search-filter-tags"))
+  (let* ((todo-val (or (car (jetpacs-ui-state-list "search-filter-todo")) "Any"))
+         (tags-list (jetpacs-ui-state-list "search-filter-tags"))
          (text-val (or (jetpacs-ui-state "search-filter-text") ""))
-         (prio-val (or (car (glasspane-ui--filter-values "search-filter-priority")) "Any"))
-         (due-val (or (car (glasspane-ui--filter-values "search-filter-due")) "Any")))
+         (prio-val (or (car (jetpacs-ui-state-list "search-filter-priority")) "Any"))
+         (due-val (or (car (jetpacs-ui-state-list "search-filter-due")) "Any")))
     (jetpacs-card
      (list
       (jetpacs-collapsible
@@ -4868,11 +4851,11 @@ show — the search body renders it instead of a bogus \"no matches\"."
 (defun glasspane-ui--search-filter-query ()
   "Build an org-ql query string from the query-builder filter state.
 Returns \"\" when every filter is at its resting value."
-  (let ((todo (car (glasspane-ui--filter-values "search-filter-todo")))
-        (tags (glasspane-ui--filter-values "search-filter-tags"))
+  (let ((todo (car (jetpacs-ui-state-list "search-filter-todo")))
+        (tags (jetpacs-ui-state-list "search-filter-tags"))
         (text (jetpacs-ui-state "search-filter-text"))
-        (prio (car (glasspane-ui--filter-values "search-filter-priority")))
-        (due (car (glasspane-ui--filter-values "search-filter-due")))
+        (prio (car (jetpacs-ui-state-list "search-filter-priority")))
+        (due (car (jetpacs-ui-state-list "search-filter-due")))
         (clauses nil))
     (cond
      ((or (null todo) (equal todo "Any")))
@@ -5414,7 +5397,16 @@ orgro timestamp-tap-edit item folds in here."
 
 (defun glasspane-journal--apply-landing (_welcome)
   "Land on the journal when configured and no tab was chosen this session.
-Depth 5: before the shell's on-connect push (10) builds the surface."
+Depth 5: before the shell's on-connect push (10) builds the surface.
+
+This deliberately reads and seeds the internal `jetpacs-shell--current-tab'
+rather than the promoted `jetpacs-shell-current-tab' / -set-current-tab
+seams: the public getter falls back to the first registered tab (so it can
+never report \"no tab chosen\"), and the public setter routes through
+`jetpacs-shell-push' — which at connect depth 5 would fire a premature push
+and the view-switched hook before the depth-10 push builds the surface.
+A public \"is a tab explicitly set / seed without pushing\" accessor does
+not exist in jetpacs 1.5.0; until it does, this seam stays on the raw var."
   (when (and glasspane-journal-landing (null jetpacs-shell--current-tab))
     (setq jetpacs-shell--current-tab "glasspane.journal")))
 

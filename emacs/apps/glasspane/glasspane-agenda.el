@@ -203,7 +203,7 @@ month is Feb 28, not an invalid date."
              (string-match "\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)" ts))
     (let* ((month (string-to-number (match-string 2 ts)))
            (day   (string-to-number (match-string 3 ts)))
-           (mon   (aref jetpacs--month-abbrevs (1- month)))
+           (mon   (jetpacs-month-abbrev month))
            (time  (glasspane-ui--ts-time ts)))
       (if time (format "%s %d %s" mon day time)
         (format "%s %d" mon day)))))

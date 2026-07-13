@@ -213,7 +213,16 @@ orgro timestamp-tap-edit item folds in here."
 
 (defun glasspane-journal--apply-landing (_welcome)
   "Land on the journal when configured and no tab was chosen this session.
-Depth 5: before the shell's on-connect push (10) builds the surface."
+Depth 5: before the shell's on-connect push (10) builds the surface.
+
+This deliberately reads and seeds the internal `jetpacs-shell--current-tab'
+rather than the promoted `jetpacs-shell-current-tab' / -set-current-tab
+seams: the public getter falls back to the first registered tab (so it can
+never report \"no tab chosen\"), and the public setter routes through
+`jetpacs-shell-push' — which at connect depth 5 would fire a premature push
+and the view-switched hook before the depth-10 push builds the surface.
+A public \"is a tab explicitly set / seed without pushing\" accessor does
+not exist in jetpacs 1.5.0; until it does, this seam stays on the raw var."
   (when (and glasspane-journal-landing (null jetpacs-shell--current-tab))
     (setq jetpacs-shell--current-tab "glasspane.journal")))
 

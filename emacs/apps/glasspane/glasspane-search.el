@@ -43,11 +43,11 @@ worked example of the query language.  Each filter lives in its own
 collapsible section whose header names the active value, so the
 folded builder reads as a filter summary.  The whole card starts
 folded once a search has results, to keep them above the fold."
-  (let* ((todo-val (or (car (glasspane-ui--filter-values "search-filter-todo")) "Any"))
-         (tags-list (glasspane-ui--filter-values "search-filter-tags"))
+  (let* ((todo-val (or (car (jetpacs-ui-state-list "search-filter-todo")) "Any"))
+         (tags-list (jetpacs-ui-state-list "search-filter-tags"))
          (text-val (or (jetpacs-ui-state "search-filter-text") ""))
-         (prio-val (or (car (glasspane-ui--filter-values "search-filter-priority")) "Any"))
-         (due-val (or (car (glasspane-ui--filter-values "search-filter-due")) "Any")))
+         (prio-val (or (car (jetpacs-ui-state-list "search-filter-priority")) "Any"))
+         (due-val (or (car (jetpacs-ui-state-list "search-filter-due")) "Any")))
     (jetpacs-card
      (list
       (jetpacs-collapsible
@@ -159,11 +159,11 @@ show — the search body renders it instead of a bogus \"no matches\"."
 (defun glasspane-ui--search-filter-query ()
   "Build an org-ql query string from the query-builder filter state.
 Returns \"\" when every filter is at its resting value."
-  (let ((todo (car (glasspane-ui--filter-values "search-filter-todo")))
-        (tags (glasspane-ui--filter-values "search-filter-tags"))
+  (let ((todo (car (jetpacs-ui-state-list "search-filter-todo")))
+        (tags (jetpacs-ui-state-list "search-filter-tags"))
         (text (jetpacs-ui-state "search-filter-text"))
-        (prio (car (glasspane-ui--filter-values "search-filter-priority")))
-        (due (car (glasspane-ui--filter-values "search-filter-due")))
+        (prio (car (jetpacs-ui-state-list "search-filter-priority")))
+        (due (car (jetpacs-ui-state-list "search-filter-due")))
         (clauses nil))
     (cond
      ((or (null todo) (equal todo "Any")))

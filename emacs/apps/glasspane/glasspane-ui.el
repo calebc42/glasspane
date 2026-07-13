@@ -114,22 +114,6 @@ suppressed identical push would leave it frozen."
 ;; the drawer item, a queue drain) must drop them.
 (add-hook 'jetpacs-shell-refresh-hook #'glasspane-org-cache-invalidate)
 
-(defun glasspane-ui--filter-values (id)
-  "Selected values for builder filter ID, as a list of strings.
-UI state for an enum may hold the parsed vector from an action's
-args, the raw JSON text a `state.changed' event delivered, or a
-plain seed string — normalise them all."
-  (let ((v (jetpacs-ui-state id)))
-    (cond
-     ((null v) nil)
-     ((vectorp v) (append v nil))
-     ((and (stringp v) (string-prefix-p "[" v))
-      (condition-case nil
-          (append (json-parse-string v) nil)
-        (error (list v))))
-     ((stringp v) (list v))
-     ((listp v) v))))
-
 (defun glasspane-ui--global-todo-keywords ()
   "Extract a flat list of all global TODO keywords from `org-todo-keywords'."
   (let ((kws nil))
@@ -518,10 +502,9 @@ wedging the bridge forever."
 (jetpacs-defaction "file.view"
   ;; Legacy (old cached UIs): now routes into the jetpacs-files editor.
   (lambda (args _)
-    (let ((file (alist-get 'file args)))
-      (when (and (stringp file) (file-readable-p file))
-        (setq jetpacs-files--file (expand-file-name file))
-        (jetpacs-shell-push nil :switch-to "edit")))))
+    ;; `jetpacs-files-open' guards stringp + readability + within-root,
+    ;; runs the open hook, and does the :switch-to "edit" push itself.
+    (jetpacs-files-open (alist-get 'file args))))
 
 ;; ─── Files integration: org files open reader-first ─────────────────────────
 ;; Registered on the core files module's app seams; the editor itself stays
@@ -593,12 +576,12 @@ Debounces bursts of saves (e.g. `org-save-all-org-buffers') into one push."
 (defun glasspane-ui--after-save-refresh ()
   "Schedule a dashboard refresh if an org agenda file was just saved.
 No-op for saves Jetpacs itself performs — anything inside an action
-handler (`jetpacs--in-action-handler') pushes explicitly, and other
+handler (see `jetpacs-in-action-p') pushes explicitly, and other
 programmatic saves bind `glasspane-org--inhibit-save-refresh' — which would
 otherwise refresh twice or loop."
   (when (and (jetpacs-connected-p)
              (not (bound-and-true-p glasspane-org--inhibit-save-refresh))
-             (not (bound-and-true-p jetpacs--in-action-handler))
+             (not (jetpacs-in-action-p))
              buffer-file-name
              (derived-mode-p 'org-mode)
              (ignore-errors

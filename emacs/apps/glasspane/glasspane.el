@@ -28,10 +28,13 @@
 (require 'glasspane-config)
 (require 'glasspane-pack)
 
-;; Load the app-managed defaults (capture templates, agenda wiring) if
-;; the user has opted in — init.el code after (require 'glasspane) still
-;; runs later, so personal settings always win.
-(glasspane-config-load)
+;; The app-managed defaults (capture templates, agenda wiring): under
+;; the foundation flow (listed in ~/.emacs.d/jetpacs/apps.el) a missing
+;; subtree is created — first boot on a device must yield a working
+;; capture sheet and agenda.  Elsewhere this only loads what exists —
+;; and either way init.el code after (require 'glasspane) still runs
+;; later, so personal settings always win.
+(glasspane-config-startup)
 
 (provide 'glasspane)
 ;;; glasspane.el ends here

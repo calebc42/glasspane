@@ -47,4 +47,31 @@
                                  (insert-file-contents file) (buffer-string))))))
       (delete-directory root t))))
 
+(ert-deftest glasspane-config-startup-ensures-only-when-installed ()
+  "The bundle's own load seeds the defaults only under the foundation
+flow — being listed in `jetpacs-installed-bundles' (apps.el) is the
+install consent.  A bare require (desktop init, batch) writes nothing."
+  (let* ((root (make-temp-file "glasspane-config" t))
+         (jetpacs-root (file-name-as-directory (expand-file-name "root" root)))
+         (managed (jetpacs-app-dir "glasspane"))
+         (org-directory (expand-file-name "org/" root))
+         (org-default-notes-file (convert-standard-filename "~/.notes"))
+         (org-capture-templates nil)
+         (org-agenda-files nil)
+         (org-log-into-drawer nil))
+    (unwind-protect
+        (progn
+          ;; Not installed: startup is read-only — the subtree stays absent.
+          (let ((jetpacs-installed-bundles nil))
+            (glasspane-config-startup)
+            (should-not (file-directory-p managed)))
+          ;; Installed via apps.el: first startup creates and loads it —
+          ;; the phone comes up with capture templates and agenda files.
+          (let ((jetpacs-installed-bundles '("glasspane.el")))
+            (glasspane-config-startup)
+            (should (file-directory-p managed))
+            (should (assoc "t" org-capture-templates))
+            (should (equal org-agenda-files (list org-directory)))))
+      (delete-directory root t))))
+
 (provide 'glasspane-config-test)

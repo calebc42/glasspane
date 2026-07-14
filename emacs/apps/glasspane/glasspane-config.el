@@ -20,9 +20,13 @@
 ;;     and never replace one the user already defined; variables are seeded
 ;;     only while still at their stock values.
 ;;
-;; The starter init (and the bundle's own load) call `glasspane-config-ensure':
-;; first run creates and loads the subtree, later runs just load it.  An
-;; existing init opts in the same way — nothing is written until asked.
+;; Who writes the subtree the first time depends on the install flow:
+;; the legacy starter init calls `glasspane-config-ensure' itself, and
+;; under the foundation flow (jetpacs-init + apps.el) the bundle's own
+;; load does it via `glasspane-config-startup' — being listed in
+;; ~/.emacs.d/jetpacs/apps.el IS the install consent.  A bare
+;; (require 'glasspane) anywhere else only loads what already exists;
+;; nothing is written until asked.
 
 ;;; Code:
 
@@ -115,6 +119,21 @@ Delegates to `jetpacs-app-config-ensure': a missing subtree is populated
 via `glasspane-config-sync'; an existing one is only loaded, never
 rewritten."
   (jetpacs-app-config-ensure glasspane-config-app-id glasspane-config--files))
+
+(defun glasspane-config-startup ()
+  "Load the managed defaults; under the foundation flow, create them first.
+Being listed in ~/.emacs.d/jetpacs/apps.el (`jetpacs-installed-bundles')
+is the install consent: the bundle's require during
+`jetpacs-config-bootstrap' is Glasspane starting up on a device, and a
+fresh one must come up with capture templates and agenda wiring or the
+phone shows an empty Agenda and an empty capture sheet.  Bootstrap loads
+custom.el and user.el after the app bundles, so personal settings still
+win.  Anywhere else — a desktop `require', batch loads (tests, the pack
+build) — nothing is written until the user opts in explicitly via
+`glasspane-config-ensure'."
+  (if (member "glasspane.el" (bound-and-true-p jetpacs-installed-bundles))
+      (glasspane-config-ensure)
+    (glasspane-config-load)))
 
 (with-jetpacs-owner "glasspane"
   (jetpacs-defaction "config.sync"

@@ -508,7 +508,7 @@ with the new states.  Returns non-nil when persisting succeeded."
       (when (derived-mode-p 'org-mode)
         (ignore-errors (org-mode-restart)))))
   (jetpacs-org-cache-invalidate 'glasspane)
-  (glasspane-ui--customize-save 'org-todo-keywords seqs))
+  (jetpacs-settings-save-variable 'org-todo-keywords seqs))
 
 (jetpacs-defaction "settings.todo.save"
   (lambda (args _)

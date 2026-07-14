@@ -2058,7 +2058,7 @@ error UX are app policy and stay here."
                                      (if existing existing tg)))
                                  tags-list)))
           (setq org-tag-alist new-alist)
-          (glasspane-ui--customize-save 'org-tag-alist org-tag-alist)))
+          (jetpacs-settings-save-variable 'org-tag-alist org-tag-alist)))
       (jetpacs-shell-notify "Settings saved")
       (jetpacs-shell-push))))
 
@@ -2069,11 +2069,6 @@ error UX are app policy and stay here."
             (when (or (string-prefix-p "org-" (symbol-name sym))
                       (string-prefix-p "calendar-" (symbol-name sym)))
               (jetpacs-org-cache-invalidate 'glasspane))))
-
-(defalias 'glasspane-ui--customize-save #'jetpacs-settings-save-variable
-  "Persist a variable through Customize, surfacing failures.
-Kept as an alias for the todo/tag actions that predate the generic
-settings module (`jetpacs-settings-save-variable').")
 
 (jetpacs-defaction "settings.todo.edit"
   (lambda (args _)
@@ -2138,7 +2133,7 @@ settings module (`jetpacs-settings-save-variable').")
   (lambda (args _)
     (let ((name (alist-get 'name args)))
       (setq glasspane-org-custom-agendas (assoc-delete-all name glasspane-org-custom-agendas))
-      (glasspane-ui--customize-save 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
+      (jetpacs-settings-save-variable 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
       (jetpacs-dismiss-dialog)
       (jetpacs-shell-notify (format "Deleted saved search: %s" name))
       (jetpacs-shell-push))))
@@ -2154,7 +2149,7 @@ settings module (`jetpacs-settings-save-variable').")
           (setq glasspane-org-custom-agendas (assoc-delete-all old-name glasspane-org-custom-agendas)))
         (setq glasspane-org-custom-agendas (assoc-delete-all new-name glasspane-org-custom-agendas))
         (setq glasspane-org-custom-agendas (append glasspane-org-custom-agendas (list (cons new-name query))))
-        (glasspane-ui--customize-save 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
+        (jetpacs-settings-save-variable 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
         (jetpacs-dismiss-dialog)
         (jetpacs-shell-notify "Saved custom agenda")
         (jetpacs-shell-push)))))
@@ -2173,7 +2168,7 @@ settings module (`jetpacs-settings-save-variable').")
         ;; Remove existing if overriding
         (setq glasspane-org-custom-agendas (assoc-delete-all name glasspane-org-custom-agendas))
         (add-to-list 'glasspane-org-custom-agendas (cons name query) t)
-        (customize-save-variable 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
+        (jetpacs-settings-save-variable 'glasspane-org-custom-agendas glasspane-org-custom-agendas)
         (jetpacs-shell-notify (format "Saved custom agenda: %s" name))
         (jetpacs-shell-push)))))
 
@@ -2869,7 +2864,7 @@ with the new states.  Returns non-nil when persisting succeeded."
       (when (derived-mode-p 'org-mode)
         (ignore-errors (org-mode-restart)))))
   (jetpacs-org-cache-invalidate 'glasspane)
-  (glasspane-ui--customize-save 'org-todo-keywords seqs))
+  (jetpacs-settings-save-variable 'org-todo-keywords seqs))
 
 (jetpacs-defaction "settings.todo.save"
   (lambda (args _)

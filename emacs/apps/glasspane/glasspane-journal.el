@@ -44,10 +44,11 @@ nil means journal.org inside `org-directory'."
 (defvar glasspane-journal--date nil
   "The day being viewed (\"YYYY-MM-DD\"), or nil for today.")
 
-(defvar glasspane-journal--capture-gen 0
-  "Generation counter for the capture row's widget id.
-Bumped after each append: rotating the id is the server-driven way to
-clear the input field.")
+(defun glasspane-journal--capture-form ()
+  "The capture row's field registry (`jetpacs-form').
+Reset after each append: rotating the field id is the server-driven
+way to clear the input field."
+  (jetpacs-form "journal" "glasspane"))
 
 (defun glasspane-journal--file ()
   "The journal file path."
@@ -134,7 +135,7 @@ Creates the datetree levels (and the file) on first use."
 (defun glasspane-journal--capture-row (date)
   "The always-on-top quick-capture input for DATE."
   (jetpacs-text-input
-   (format "journal-capture-%d" glasspane-journal--capture-gen)
+   (jetpacs-form-field-id (glasspane-journal--capture-form) "capture")
    :hint "Add to this day…"
    :single-line t
    :on-submit (jetpacs-action "journal.capture"
@@ -273,7 +274,7 @@ not exist in jetpacs 1.5.0; until it does, this seam stays on the raw var."
         (glasspane-journal--append
          text (and (stringp date) (not (string-empty-p date)) date))
         ;; Rotate the input id: the re-render clears the field.
-        (cl-incf glasspane-journal--capture-gen)
+        (jetpacs-form-reset (glasspane-journal--capture-form))
         (jetpacs-shell-notify "Added to journal")
         (jetpacs-shell-push))))
   :doc "Append text to the current journal day."

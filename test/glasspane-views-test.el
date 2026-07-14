@@ -50,7 +50,7 @@ vanish from the board."
   "The save/open/rendering/delete lifecycle over the UI-state store."
   (let ((glasspane-saved-views nil)
         (glasspane-views--current nil)
-        (glasspane-views--form-gen 0)
+        (jetpacs--forms (make-hash-table :test 'equal))
         (jetpacs--ui-state (make-hash-table :test 'equal))
         (persisted 0))
     (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
@@ -63,7 +63,7 @@ vanish from the board."
       (jetpacs-ui-state-put "views-new-rendering-0" "board")
       (jetpacs--on-action '((action . "views.save")) nil)
       (should (= (length glasspane-saved-views) 1))
-      (should (= glasspane-views--form-gen 1))   ; field-clearing id rotation
+      (should (= 1 (jetpacs-form-gen (glasspane-views--form)))) ; field-clearing id rotation
       (should (= persisted 1))
       (let ((view (glasspane-views--get "Work")))
         (should (equal (alist-get 'query view) "todo:TODO tags:work"))

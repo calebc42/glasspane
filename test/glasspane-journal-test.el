@@ -51,7 +51,7 @@ input id (the server-driven field clear)."
   (let* ((file (make-temp-file "jetpacs-journal-act" nil ".org"))
          (glasspane-journal-file file)
          (glasspane-journal--date nil)
-         (glasspane-journal--capture-gen 0)
+         (jetpacs--forms (make-hash-table :test 'equal))
          (today (glasspane-journal--today))
          (yesterday (glasspane-ui--shift-date today -1 'day)))
     (unwind-protect
@@ -73,7 +73,7 @@ input id (the server-driven field clear)."
           (jetpacs--on-action '((action . "journal.capture")
                              (args . ((value . "  typed on phone  ")
                                       (date . "2026-01-15")))) nil)
-          (should (= glasspane-journal--capture-gen 1))
+          (should (= 1 (jetpacs-form-gen (glasspane-journal--capture-form))))
           (let ((content (with-temp-buffer
                            (insert-file-contents file) (buffer-string))))
             (should (string-search "- typed on phone" content))

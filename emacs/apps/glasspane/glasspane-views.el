@@ -34,8 +34,11 @@ filter tokens, or free text); `rendering' is \"list\" | \"board\" |
 (defvar glasspane-views--current nil
   "Name of the saved view being shown, or nil for the hub.")
 
-(defvar glasspane-views--form-gen 0
-  "Generation counter for the new-view form's widget ids (field clear).")
+(defun glasspane-views--form ()
+  "The new-view form's field registry (`jetpacs-form').
+Owner passed explicitly so resolution never depends on dynamic context;
+resetting it rotates the field ids, the server-driven field clear."
+  (jetpacs-form "views-new" "glasspane"))
 
 (defconst glasspane-views--renderings '("list" "board" "calendar"))
 
@@ -236,19 +239,19 @@ vanish from the board."
 
 (defun glasspane-views--new-form ()
   "The collapsed new-view form at the hub's foot.
-Field values mirror through the UI-state store; views.save reads them."
-  (let ((gen glasspane-views--form-gen))
+Field ids come from the `jetpacs-form' registry; views.save reads them."
+  (let ((form (glasspane-views--form)))
     (jetpacs-collapsible
      "views-new"
      (jetpacs-section-header "New view")
      (list
-      (jetpacs-text-input (format "views-new-name-%d" gen)
+      (jetpacs-text-input (jetpacs-form-field-id form "name")
                        :label "Name" :single-line t)
-      (jetpacs-text-input (format "views-new-query-%d" gen)
+      (jetpacs-text-input (jetpacs-form-field-id form "query")
                        :label "Query"
                        :hint "todo:TODO tags:work — or an org-ql sexp"
                        :single-line t)
-      (jetpacs-enum-list (format "views-new-rendering-%d" gen)
+      (jetpacs-enum-list (jetpacs-form-field-id form "rendering")
                       glasspane-views--renderings
                       :value '("list"))
       (jetpacs-button "Save view"
@@ -337,13 +340,12 @@ Field values mirror through the UI-state store; views.save reads them."
 
 (jetpacs-defaction "views.save"
   (lambda (_args _)
-    (let* ((gen glasspane-views--form-gen)
+    (let* ((form (glasspane-views--form))
            (name (string-trim
-                  (or (jetpacs-ui-state (format "views-new-name-%d" gen)) "")))
+                  (or (jetpacs-form-value form "name") "")))
            (query (string-trim
-                   (or (jetpacs-ui-state (format "views-new-query-%d" gen)) "")))
-           (rendering (let ((r (jetpacs-ui-state
-                                (format "views-new-rendering-%d" gen))))
+                   (or (jetpacs-form-value form "query") "")))
+           (rendering (let ((r (jetpacs-form-value form "rendering")))
                         (cond ((stringp r) r)
                               ((consp r) (car r))
                               ((vectorp r) (aref r 0))
@@ -366,8 +368,7 @@ Field values mirror through the UI-state store; views.save reads them."
                                                               glasspane-views--renderings)
                                                       rendering "list"))))))
               (glasspane-views--persist)
-              (jetpacs-ui-state-clear "views-new")
-              (cl-incf glasspane-views--form-gen)
+              (jetpacs-form-reset form)
               (jetpacs-shell-notify (format "Saved view %s" name)))
           (user-error (jetpacs-shell-notify (error-message-string err))))))
       (jetpacs-shell-push))))

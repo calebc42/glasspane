@@ -5583,7 +5583,7 @@ cleared when a view opens or closes."
 ;; ─── The two screens (one shell view) ────────────────────────────────────────
 
 (defun glasspane-views--rendering-chips (view)
-  "The List | Board | Calendar switcher for VIEW."
+  "The List | Board | Calendar switcher for companions predating `tabs'."
   (apply #'jetpacs-row
          (mapcar (lambda (r)
                    (jetpacs-chip (capitalize r)
@@ -5594,6 +5594,32 @@ cleared when a view opens or closes."
                                                (rendering . ,r))
                                        :when-offline "drop")))
                  glasspane-views--renderings)))
+
+(defun glasspane-views--rendering-tabs (view items file)
+  "The list | board | calendar pager for VIEW over ITEMS.
+Every page ships in the push, so switching is companion-local and
+works offline; on_change persists the settled page as the view's
+rendering.  `:id' is keyed by the view name — deliberately, unlike the
+agenda's no-id tabs: opening a DIFFERENT view must reset the pager to
+that view's persisted rendering, while re-pushes of the same view keep
+the user's page.  FILE is the single-file guard result gating the list
+page's drag-reorder body."
+  (let* ((name (alist-get 'name view))
+         (rendering (or (alist-get 'rendering view) "list"))
+         (initial (or (seq-position glasspane-views--renderings rendering) 0)))
+    (jetpacs-tabs
+     (mapcar (lambda (r) (jetpacs-tab-item (capitalize r)))
+             glasspane-views--renderings)
+     (list (if (and glasspane-views--reorder file)
+               (glasspane-views--reorder-node items file)
+             (glasspane-views--table-node items))
+           (glasspane-views--board-node items)
+           (glasspane-views--calendar-node items))
+     :initial initial
+     :id (concat "views-tabs-" name)
+     :on-change (jetpacs-action "views.rendering"
+                             :args `((name . ,name))
+                             :when-offline "drop"))))
 
 (defun glasspane-views--open-view (view snackbar)
   "The screen for one saved VIEW."
@@ -5607,21 +5633,15 @@ cleared when a view opens or closes."
      (alist-get 'name view)
      (apply #'jetpacs-lazy-column
             (append
-             (list (apply #'jetpacs-row
-                          (delq nil
-                                (list
-                                 (jetpacs-box
-                                  (list (glasspane-views--rendering-chips view))
-                                  :weight 1)
-                                 ;; Drag reorder only makes sense on one
-                                 ;; file's list — see --single-file.
-                                 (when (and file (equal rendering "list"))
-                                   (jetpacs-icon-button
-                                    "swap_vert"
-                                    (jetpacs-action "views.reorder"
-                                                 :when-offline "drop")
-                                    :content-description "Toggle drag reorder")))))
-                   (jetpacs-spacer :height 4))
+             ;; Drag reorder only makes sense on one file's list —
+             ;; see --single-file.
+             (when file
+               (list (jetpacs-row
+                      (jetpacs-spacer :weight 1)
+                      (jetpacs-icon-button
+                       "swap_vert"
+                       (jetpacs-action "views.reorder" :when-offline "drop")
+                       :content-description "Toggle drag reorder"))))
              (cond
               (broken
                (list (jetpacs-text (cadr items) 'body)))
@@ -5631,12 +5651,21 @@ cleared when a view opens or closes."
                                        :title "No matches"
                                        :caption (format "%s"
                                                         (alist-get 'query view)))))
-              (t (pcase rendering
-                   ("board" (list (glasspane-views--board-node items)))
-                   ("calendar" (list (glasspane-views--calendar-node items)))
-                   (_ (if (and glasspane-views--reorder file)
-                          (list (glasspane-views--reorder-node items file))
-                        (list (glasspane-views--table-node items)))))))))
+              (t
+               (list
+                (jetpacs-node-or "tabs"
+                    (glasspane-views--rendering-tabs view items file)
+                  ;; Pre-`tabs' companions keep the chip switcher over
+                  ;; the one persisted rendering.
+                  (jetpacs-column
+                   (glasspane-views--rendering-chips view)
+                   (jetpacs-spacer :height 4)
+                   (pcase rendering
+                     ("board" (glasspane-views--board-node items))
+                     ("calendar" (glasspane-views--calendar-node items))
+                     (_ (if (and glasspane-views--reorder file)
+                            (glasspane-views--reorder-node items file)
+                          (glasspane-views--table-node items)))))))))))
      :nav-action (jetpacs-action "views.back" :when-offline "drop")
      :snackbar snackbar)))
 
@@ -5761,9 +5790,15 @@ Field ids come from the `jetpacs-form' registry; views.save reads them."
           (jetpacs-shell-push)))))
 
   (jetpacs-defaction "views.rendering"
+    ;; `rendering' names come from the fallback chips; `value' (a page
+    ;; index) from the tabs pager's on_change. Either way the result
+    ;; must name a rendering we actually offer.
     (lambda (args _)
-      (let ((view (glasspane-views--get (alist-get 'name args)))
-            (rendering (alist-get 'rendering args)))
+      (let* ((view (glasspane-views--get (alist-get 'name args)))
+             (idx (alist-get 'value args))
+             (rendering (or (alist-get 'rendering args)
+                            (and (integerp idx)
+                                 (nth idx glasspane-views--renderings)))))
         (when (and view (member rendering glasspane-views--renderings))
           (glasspane-views--set-rendering (alist-get 'name view) rendering)
           (glasspane-views--persist)

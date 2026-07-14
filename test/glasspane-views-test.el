@@ -108,6 +108,56 @@ on the real disconnected predicate; the Unscheduled section survives."
                          (args . ((value . "nope")))) nil)
       (should (equal "2026-08-01" (jetpacs-ui-state "views-cal-anchor"))))))
 
+(ert-deftest glasspane-views-rendering-tabs-pager ()
+  "Under a tabs-supporting companion the three renderings are pager
+pages: initial from the persisted rendering, id keyed by the view name,
+on_change persisting through views.rendering.  Batch (no session) keeps
+the chip fallback."
+  (let ((view '((name . "V") (query . "todo:TODO") (rendering . "board")))
+        (items (jetpacs-tests--views-items))
+        (org-todo-keywords-1 '("TODO" "NEXT" "DONE")))
+    (cl-letf (((symbol-function 'jetpacs-node-supported-p) (lambda (_) t)))
+      (let* ((node (glasspane-views--rendering-tabs view items nil))
+             (json (jetpacs-render-to-json node)))
+        (should-not (jetpacs-lint-spec node))
+        (should (equal "tabs" (alist-get 't json)))
+        (should (= 1 (alist-get 'initial json)))   ; board page
+        (should (equal "views-tabs-V" (alist-get 'id json)))
+        (should (= 3 (length (alist-get 'children json))))
+        (should (equal "views.rendering"
+                       (alist-get 'action (alist-get 'on_change json))))))
+    ;; Real disconnected predicate: the chip switcher survives as the
+    ;; capability fallback.
+    (cl-letf (((symbol-function 'glasspane-views--items)
+               (lambda (_view) items)))
+      (let ((json (json-serialize (jetpacs-tests--canon
+                                   (glasspane-views--open-view view nil))
+                                  :null-object :null :false-object :false)))
+        (should-not (string-search "\"tabs\"" json))
+        (should (string-search "views.rendering" json))))))
+
+(ert-deftest glasspane-views-rendering-accepts-pager-index ()
+  "views.rendering takes the pager's page index or the legacy chip name."
+  (let ((glasspane-saved-views
+         (list (list (cons 'name "V") (cons 'query "todo:TODO")
+                     (cons 'rendering "list")))))
+    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
+               (lambda (_sym _val) t))
+              ((symbol-function 'jetpacs-shell-push)
+               (cl-function (lambda (&optional _tab &key _switch-to)))))
+      (jetpacs--on-action '((action . "views.rendering")
+                         (args . ((name . "V") (value . 1)))) nil)
+      (should (equal "board" (alist-get 'rendering (glasspane-views--get "V"))))
+      ;; Out-of-range index is ignored.
+      (jetpacs--on-action '((action . "views.rendering")
+                         (args . ((name . "V") (value . 9)))) nil)
+      (should (equal "board" (alist-get 'rendering (glasspane-views--get "V"))))
+      ;; The legacy chip path still works.
+      (jetpacs--on-action '((action . "views.rendering")
+                         (args . ((name . "V") (rendering . "calendar")))) nil)
+      (should (equal "calendar"
+                     (alist-get 'rendering (glasspane-views--get "V")))))))
+
 (ert-deftest glasspane-views-swipe-actions ()
   "Open cards swipe to complete (start) and schedule-today (end); done
 cards keep only the schedule swipe."

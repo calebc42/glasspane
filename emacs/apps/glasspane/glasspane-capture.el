@@ -199,7 +199,7 @@ appears on the next replay."
             (glasspane-org--do-capture key values glasspane-ui--shared-text)
             (setq glasspane-ui--shared-text nil
                   glasspane-ui--shared-subject nil)
-            (glasspane-org-cache-invalidate)
+            (jetpacs-org-cache-invalidate 'glasspane)
             (jetpacs-ui-state-clear "cap-")
             (jetpacs-shell-notify "Captured ✓")
             (jetpacs-dismiss-dialog)

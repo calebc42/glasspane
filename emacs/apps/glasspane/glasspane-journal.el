@@ -96,7 +96,7 @@ Creates the datetree levels (and the file) on first use."
         (let ((glasspane-org--inhibit-save-refresh t)
               (save-silently t))
           (save-buffer))))
-    (glasspane-org-cache-invalidate)))
+    (jetpacs-org-cache-invalidate 'glasspane)))
 
 (defun glasspane-journal--carried-over ()
   "Unfinished TODOs scheduled before today — the carry-over list."

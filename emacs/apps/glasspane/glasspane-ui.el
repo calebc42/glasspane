@@ -112,7 +112,9 @@ suppressed identical push would leave it frozen."
 
 ;; The org extractions are memoised; an explicit refresh (pull-to-refresh,
 ;; the drawer item, a queue drain) must drop them.
-(add-hook 'jetpacs-shell-refresh-hook #'glasspane-org-cache-invalidate)
+;; A pull-to-refresh recomputes everything: drop the whole org memo table
+;; (no namespace arg — a refresh is an explicit "give me fresh state").
+(add-hook 'jetpacs-shell-refresh-hook #'jetpacs-org-cache-invalidate)
 
 (defun glasspane-ui--global-todo-keywords ()
   "Extract a flat list of all global TODO keywords from `org-todo-keywords'."
@@ -273,9 +275,19 @@ costs its own section, never the body.")
   "Resolve ARGS to its heading and call FN with point there.
 With SAVE non-nil, save the buffer afterwards (guarded against
 triggering our own after-save refresh on top of the explicit push).
-Returns non-nil on success; messages and returns nil on failure."
+Returns non-nil on success; messages and returns nil on failure.
+
+This is the app's ONE mutation funnel, deliberately NOT built on
+`jetpacs-org-with-mutation': the core mutators defer saves to an idle
+timer, which fires outside `glasspane-org--inhibit-save-refresh's
+dynamic extent (double-firing the after-save refresh) and leaves the
+file not-yet-on-disk for flows that read it back immediately
+(share-sheet capture finalize, offline-queue replay).  The canonical
+pieces it DOES stand on: `jetpacs-org-resolve-ref' and
+`jetpacs-org-cache-invalidate'.  Save timing and the notify+repush
+error UX are app policy and stay here."
   (condition-case err
-      (let ((marker (glasspane-org--resolve-ref args)))
+      (let ((marker (jetpacs-org-resolve-ref args)))
         (with-current-buffer (marker-buffer marker)
           (org-with-wide-buffer
            (goto-char marker)
@@ -284,7 +296,7 @@ Returns non-nil on success; messages and returns nil on failure."
             (let ((glasspane-org--inhibit-save-refresh t)
                   (save-silently t))
               (save-buffer))))
-        (glasspane-org-cache-invalidate)
+        (jetpacs-org-cache-invalidate 'glasspane)
         t)
     (error
      (message "Jetpacs: heading action failed: %s" (error-message-string err))
@@ -331,7 +343,7 @@ Returns non-nil on success; messages and returns nil on failure."
           (lambda (sym _value)
             (when (or (string-prefix-p "org-" (symbol-name sym))
                       (string-prefix-p "calendar-" (symbol-name sym)))
-              (glasspane-org-cache-invalidate))))
+              (jetpacs-org-cache-invalidate 'glasspane))))
 
 (defalias 'glasspane-ui--customize-save #'jetpacs-settings-save-variable
   "Persist a variable through Customize, surfacing failures.
@@ -484,7 +496,7 @@ settings module (`jetpacs-settings-save-variable').")
                 (let ((glasspane-org--inhibit-save-refresh t)
                       (save-silently t))
                   (save-buffer)))
-              (glasspane-org-cache-invalidate)
+              (jetpacs-org-cache-invalidate 'glasspane)
               (jetpacs-shell-push))
           (error
            (jetpacs-shell-notify
@@ -552,7 +564,7 @@ Reset when a different file opens.")
 
 ;; A phone-side save may have changed org data the views memoise.
 (add-hook 'jetpacs-files-after-save-hook
-          (lambda (_file) (glasspane-org-cache-invalidate)))
+          (lambda (_file) (jetpacs-org-cache-invalidate 'glasspane)))
 
 (jetpacs-defaction "files.toggle-read"
   (lambda (_ _)
@@ -587,7 +599,7 @@ otherwise refresh twice or loop."
              (ignore-errors
                (member (expand-file-name buffer-file-name)
                        (mapcar #'expand-file-name (org-agenda-files)))))
-    (glasspane-org-cache-invalidate)
+    (jetpacs-org-cache-invalidate 'glasspane)
     (when (timerp glasspane-ui--save-refresh-timer)
       (cancel-timer glasspane-ui--save-refresh-timer))
     (setq glasspane-ui--save-refresh-timer
@@ -602,7 +614,7 @@ Safe to put on any hook: a no-op while disconnected.  Invalidates the
 extraction cache first — this runs on clock in/out, which mutate the
 org buffer without necessarily saving it."
   (when (jetpacs-connected-p)
-    (glasspane-org-cache-invalidate)
+    (jetpacs-org-cache-invalidate 'glasspane)
     (jetpacs-shell-push)))
 
 ;; The connect and queue-drained pushes are owned by the shell; this app

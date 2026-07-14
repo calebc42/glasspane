@@ -33,13 +33,15 @@ vulpea-backed `glasspane.notes`), an annotated action catalog, and
 `glasspane-pack.json` for the composer, while rich cards stay
 `:builder`s.
 
+The **org-adoption** landed too: `glasspane-org.el` stands on the
+core's `jetpacs-org-*` primitives (one query grammar, canonical
+refs/cache, the guarded vulpea note path — api 1.6.0), keeping only
+Glasspane's extractions and its mutation-funnel policy
+([PLAN-glasspane-org-adoption.md](PLAN-glasspane-org-adoption.md) has
+the record, including the deliberate keep-the-funnel decision).
+
 What that leaves is **debt, not features**:
 
-0. **org-adoption** — rip the duplicated query/cache/ref/mutation logic
-   out of `glasspane-org.el` and stand on the core's `jetpacs-org-*`
-   (now including the guarded vulpea note path, api 1.6.0).
-   [PLAN-glasspane-org-adoption.md](PLAN-glasspane-org-adoption.md) is
-   the executable plan, prerequisites refreshed 2026-07-13.
 1. **On-device acceptance.** Most of the automation/trigger/journal
    work has never had its acceptance pass on real hardware. The full
    pending list is [TESTING-ON-DEVICE.md](TESTING-ON-DEVICE.md) — this

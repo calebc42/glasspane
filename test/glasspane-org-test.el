@@ -51,15 +51,15 @@ the specs must carry the org actions the Kotlin used to hardcode."
 ;; ─── Extraction cache ───────────────────────────────────────────────────────
 
 (ert-deftest glasspane-org-cache-memoises ()
-  "Readers memoise until `glasspane-org-cache-invalidate' drops the table."
+  "Readers memoise until `jetpacs-org-cache-invalidate' drops the namespace."
   (let ((n 0))
     (cl-letf (((symbol-function 'glasspane-org--todo-items-1)
                (lambda (_files) (setq n (1+ n)) '(fake))))
-      (glasspane-org-cache-invalidate)
+      (jetpacs-org-cache-invalidate 'glasspane)
       (glasspane-org--todo-items)
       (glasspane-org--todo-items)
       (should (= n 1))
-      (glasspane-org-cache-invalidate)
+      (jetpacs-org-cache-invalidate 'glasspane)
       (glasspane-org--todo-items)
       (should (= n 2)))))
 

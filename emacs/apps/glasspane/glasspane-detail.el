@@ -269,7 +269,7 @@ sideways rather than wrapping into a stack."
 KEY renders without org's colons.  ID is shown read-only (editing it
 breaks links); every other value is an inline input whose submit runs
 `heading.prop-set' — submitting an empty value removes the property."
-  (let* ((marker (ignore-errors (glasspane-org--resolve-ref ref)))
+  (let* ((marker (ignore-errors (jetpacs-org-resolve-ref ref)))
          (buf (and marker (marker-buffer marker)))
          (allowed (and buf
                        (with-current-buffer buf
@@ -458,7 +458,7 @@ container would break Compose) and wrap otherwise."
 
 (defun glasspane-ui--detail-body (ref)
   (condition-case err
-      (let* ((marker (glasspane-org--resolve-ref ref))
+      (let* ((marker (jetpacs-org-resolve-ref ref))
              (buf (marker-buffer marker))
              (file (buffer-file-name buf))
              (pos (marker-position marker))
@@ -731,7 +731,7 @@ container would break Compose) and wrap otherwise."
           (value (alist-get 'value args)))
       (when (and ref value)
         (condition-case err
-            (let* ((marker (glasspane-org--resolve-ref ref))
+            (let* ((marker (jetpacs-org-resolve-ref ref))
                    (buf (marker-buffer marker))
                    (pos (marker-position marker)))
               (with-current-buffer buf
@@ -741,12 +741,11 @@ container would break Compose) and wrap otherwise."
                  (delete-region (region-beginning) (region-end))
                  (insert value)
                  (goto-char pos)
-                 (setq glasspane-ui--detail-ref (glasspane-org--heading-ref))
+                 (setq glasspane-ui--detail-ref (jetpacs-org-heading-ref))
                  (let ((glasspane-org--inhibit-save-refresh t)
                        (save-silently t))
                    (save-buffer))))
-              (when (fboundp 'glasspane-org-cache-invalidate)
-                (glasspane-org-cache-invalidate))
+              (jetpacs-org-cache-invalidate 'glasspane)
               (setq glasspane-ui--detail-read-mode t)
               (jetpacs-shell-notify "Saved heading"))
           (error
@@ -780,7 +779,7 @@ container would break Compose) and wrap otherwise."
                                   (unless (org-get-todo-state)
                                     (org-todo)))
                                 t)
-      (let* ((marker (glasspane-org--resolve-ref args))
+      (let* ((marker (jetpacs-org-resolve-ref args))
              (state (with-current-buffer (marker-buffer marker)
                       (org-with-wide-buffer
                        (goto-char marker)
@@ -858,7 +857,7 @@ container would break Compose) and wrap otherwise."
   ;; Bridged picker over org-refile targets; refiles the whole subtree.
   (lambda (args _)
     (condition-case err
-        (let ((marker (glasspane-org--resolve-ref args)))
+        (let ((marker (jetpacs-org-resolve-ref args)))
           (with-current-buffer (marker-buffer marker)
             (org-with-wide-buffer
              (goto-char marker)
@@ -876,7 +875,7 @@ container would break Compose) and wrap otherwise."
                  (let ((glasspane-org--inhibit-save-refresh t)
                        (save-silently t))
                    (org-save-all-org-buffers))
-                 (glasspane-org-cache-invalidate)
+                 (jetpacs-org-cache-invalidate 'glasspane)
                  (setq glasspane-ui--detail-ref nil)
                  (jetpacs-shell-notify (format "Refiled to %s" choice))))))
           (jetpacs-shell-push nil :switch-to (jetpacs-shell-current-tab)))
@@ -1001,7 +1000,7 @@ container would break Compose) and wrap otherwise."
                 (org-link-open-from-string link)
                 (jetpacs-shell-notify (format "Opened %s" link))
                 (when (derived-mode-p 'org-mode)
-                  (setq glasspane-ui--detail-ref (glasspane-org--heading-ref))
+                  (setq glasspane-ui--detail-ref (jetpacs-org-heading-ref))
                   (setq glasspane-ui--detail-read-mode t)
                   (setq navigated t)))
             (error
@@ -1046,7 +1045,7 @@ container would break Compose) and wrap otherwise."
               (save-silently t))
           (with-current-buffer (find-file-noselect file)
             (save-buffer)))
-        (glasspane-org-cache-invalidate)
+        (jetpacs-org-cache-invalidate 'glasspane)
         (jetpacs-shell-push nil :switch-to "edit")))))
 
 (defun glasspane-ui--org-editor-actions (file)
@@ -1176,7 +1175,7 @@ container would break Compose) and wrap otherwise."
                   (save-silently t))
               (save-buffer)))))
       (jetpacs-dismiss-dialog)
-      (glasspane-org-cache-invalidate)
+      (jetpacs-org-cache-invalidate 'glasspane)
       (jetpacs-shell-push))))
 
 (provide 'glasspane-detail)

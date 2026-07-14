@@ -2,7 +2,7 @@
 
 ;; The data half of Glasspane's declarative (`:spec') views: a jetpacs
 ;; `jetpacs-defsource' named "glasspane.org" that wraps the app's org query
-;; engine — `glasspane-org--query' over `glasspane-org--parse-query', i.e.
+;; engine — `glasspane-org--query' over `jetpacs-org-parse-query', i.e.
 ;; whichever of vulpea / org-ql / the built-in interpreter is live — and
 ;; NORMALIZES each result item to core's domain-neutral field contract before
 ;; core sees it.  This is the "a source normalizes engine data" half of the
@@ -17,12 +17,12 @@
 ;;   - `priority' is a char in the vulpea path; a "text" field wants a string.
 ;; `glasspane-source--canonicalize' maps each item to those canonical types,
 ;; and `:fields' declares them so a `:spec' template can bind them.  `ref' is
-;; an opaque locator (an alist as built by `glasspane-org--heading-ref') and is
+;; an opaque locator (an alist as built by `jetpacs-org-heading-ref') and is
 ;; passed through intact for an action's `:args'.
 ;;
 ;; Why UNCACHED.  `glasspane-org--query' is itself memoised, and its memo is
 ;; the one seam every mutation path already busts via
-;; `glasspane-org-cache-invalidate' — including in-buffer edits that have not
+;; `jetpacs-org-cache-invalidate' — including in-buffer edits that have not
 ;; yet reached disk.  A source-level `:cache-key' keyed on file mtime (the only
 ;; freshness signal a nullary token could cheaply read) would serve stale rows
 ;; after exactly those edits.  Re-canonicalising the already-memoised query
@@ -74,11 +74,11 @@ per-field normalization contract."
 (defun glasspane-source--org-query (params)
   "The \"glasspane.org\" `:query' thunk: PARAMS -> canonical item list.
 PARAMS is the canonical params alist; its `query' is a search string in
-any shape `glasspane-org--parse-query' accepts.  An empty/nil query yields
+any shape `jetpacs-org-parse-query' accepts.  An empty/nil query yields
 no items (never an error)."
   (mapcar #'glasspane-source--canonicalize
           (glasspane-org--query
-           (glasspane-org--parse-query (alist-get 'query params)))))
+           (jetpacs-org-parse-query (alist-get 'query params)))))
 
 (with-jetpacs-owner "glasspane"
   (jetpacs-defsource "glasspane.org"

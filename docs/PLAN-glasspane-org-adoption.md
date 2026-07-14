@@ -1,6 +1,34 @@
 # Plan: Adopt `jetpacs-org` core primitives in Glasspane
 
-**STATUS (2026-07-13): decided, not run; prerequisites REFRESHED below.**
+**STATUS (2026-07-13): EXECUTED.** All three phases ran against the api-1.6.0
+submodule; suite 91/91 throughout, bundle regenerated.
+- **Phases A+B:** every duplicated primitive is gone from `glasspane-org.el`
+  (cache table/keys/macro, cache-invalidate, heading-ref/resolve-ref, the
+  query parser + normalizers + tokenizer, the point matcher, planning
+  helpers, the org-ql-less search fallback, and — per the 1.6.0 amendment —
+  the private vulpea note matcher). The file stands on
+  `jetpacs-org-{with-cache,cache-invalidate,heading-ref,resolve-ref,parse-query,entry-matches-p,note-matches-p,query}`
+  under the `glasspane` namespace; `--vulpea-query` matches via the canonical
+  `jetpacs-org-note-matches-p`. ~616 net lines deleted across 18 files.
+- **Phase C resolved as KEEP-THE-FUNNEL:** the audit confirmed risk #1 —
+  `glasspane-ui--at-ref` is the app's one mutation funnel and already stands
+  on the canonical resolve + cache-invalidate, while its *synchronous* save
+  inside `glasspane-org--inhibit-save-refresh` and its notify+repush error
+  UX are load-bearing app policy. Adopting the core's idle-timer mutators
+  would double-fire the after-save refresh and break read-back flows
+  (capture finalize, queue replay), and half the thunks (`org-todo 'none`,
+  `org-schedule '(4)`, priority, schedule-with-time) have no core
+  equivalent. The decision is recorded in `at-ref`'s docstring.
+- **Known semantic deltas (accepted):** the canonical point matcher reads
+  *local* tags (`org-get-tags nil t`) where the old matcher read inherited
+  tags — visible only in the sparse filter and the no-org-ql/no-vulpea
+  search fallback; the canonical note matcher is stricter/richer than the
+  old private one (done-ness honors the "DONE" fallback + CLOSED, properties
+  match case-insensitively, `regexp` covers title+properties, unsupported
+  terms signal `user-error` instead of silently not matching — the
+  documented contract).
+
+The original plan follows as the design record.
 
 Execute the Glasspane half of `jetpacs/docs/PLAN-org-extraction.md` §1: rip the
 duplicated org logic out of `glasspane-org.el` and stand the app on the

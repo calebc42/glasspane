@@ -26,7 +26,7 @@
 
 (defcustom glasspane-saved-views nil
   "Saved query views: a list of alists with `name', `query', `rendering'.
-`query' is anything `glasspane-org--parse-query' accepts (org-ql sexp,
+`query' is anything `jetpacs-org-parse-query' accepts (org-ql sexp,
 filter tokens, or free text); `rendering' is \"list\" | \"board\" |
 \"calendar\".  Managed from the phone; persisted through Customize."
   :type '(repeat sexp) :group 'jetpacs)
@@ -62,7 +62,7 @@ mutates the value Customize handed out."
 (defun glasspane-views--items (view)
   "Run VIEW's query; heading items, or signal `user-error'."
   (glasspane-org--query
-   (glasspane-org--parse-query (alist-get 'query view))))
+   (jetpacs-org-parse-query (alist-get 'query view))))
 
 ;; ─── Renderings ──────────────────────────────────────────────────────────────
 
@@ -355,7 +355,7 @@ Field values mirror through the UI-state store; views.save reads them."
         (condition-case err
             (progn
               ;; Parse now so a broken query fails at save, not render.
-              (glasspane-org--parse-query query)
+              (jetpacs-org-parse-query query)
               (setq glasspane-saved-views
                     (append (cl-remove name glasspane-saved-views
                                        :key (lambda (v) (alist-get 'name v))

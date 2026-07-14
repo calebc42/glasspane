@@ -114,7 +114,7 @@ the list is rebuilt, never mutated in place."
               "* DONE Omega\n"))
     (unwind-protect
         (let ((org-agenda-files (list agenda)))
-          (glasspane-org-cache-invalidate)
+          (jetpacs-org-cache-invalidate 'glasspane)
           (let ((json (json-serialize
                        (jetpacs-tests--canon (glasspane-views--view nil))
                        :null-object :null :false-object :false)))

@@ -83,7 +83,7 @@ row) skips the realign instead of erroring."
     (let ((glasspane-org--inhibit-save-refresh t)
           (save-silently t))
       (save-buffer)))
-  (glasspane-org-cache-invalidate)
+  (jetpacs-org-cache-invalidate 'glasspane)
   (jetpacs-shell-push))
 
 (defun glasspane-ui--table-field-formula ()
@@ -257,7 +257,7 @@ are not resolved — those cells stay value-editable."
                 (let ((glasspane-org--inhibit-save-refresh t)
                       (save-silently t))
                   (save-buffer)))
-              (glasspane-org-cache-invalidate)
+              (jetpacs-org-cache-invalidate 'glasspane)
               (jetpacs-shell-notify "Block executed")
               (jetpacs-shell-push))
           (error

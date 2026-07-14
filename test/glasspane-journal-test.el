@@ -38,7 +38,7 @@
               (format "* TODO Future task\nSCHEDULED: <%s>\n" tomorrow)))
     (unwind-protect
         (let ((org-agenda-files (list file)))
-          (glasspane-org-cache-invalidate)
+          (jetpacs-org-cache-invalidate 'glasspane)
           (let ((items (glasspane-journal--carried-over)))
             (should (= (length items) 1))
             (should (equal (alist-get 'headline (car items)) "Old task"))
@@ -95,7 +95,7 @@ input id (the server-driven field clear)."
       (insert (format "* TODO Carry me\nSCHEDULED: <%s>\n" yesterday)))
     (unwind-protect
         (let ((org-agenda-files (list agenda)))
-          (glasspane-org-cache-invalidate)
+          (jetpacs-org-cache-invalidate 'glasspane)
           (glasspane-journal--append "a journal line")
           (let ((json (json-serialize
                        (jetpacs-tests--canon (glasspane-journal--view nil))

@@ -93,7 +93,7 @@
                "* TODO Call plumber :home:\n"))
      (unwind-protect
          (let ((org-agenda-files (list file)))
-           (glasspane-org-cache-invalidate)
+           (jetpacs-org-cache-invalidate 'glasspane)
            ,@body)
        (delete-file file))))
 

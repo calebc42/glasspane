@@ -7,14 +7,14 @@
   "Between sessions the view shows the due count and the start button;
 zero due shows the caught-up empty state."
   (jetpacs-tests--with-fake-org-srs
-    (glasspane-org-cache-invalidate)
+    (jetpacs-org-cache-invalidate 'glasspane)
     (let* ((jetpacs-tests--srs-items '(a b c))
            (json (json-serialize
                   (jetpacs-tests--canon (glasspane-srs--view nil))
                   :null-object :null :false-object :false)))
       (should (string-search "3 items due" json))
       (should (string-search "srs.review.start" json)))
-    (glasspane-org-cache-invalidate)
+    (jetpacs-org-cache-invalidate 'glasspane)
     (let* ((jetpacs-tests--srs-items nil)
            (json (json-serialize
                   (jetpacs-tests--canon (glasspane-srs--view nil))

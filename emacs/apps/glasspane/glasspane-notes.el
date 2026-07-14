@@ -180,7 +180,7 @@ Reader-built drill-in refs carry only file/pos, so a child heading
 with an :ID: still gets its backlink section."
   (or (alist-get 'id ref)
       (condition-case nil
-          (let ((marker (glasspane-org--resolve-ref ref)))
+          (let ((marker (jetpacs-org-resolve-ref ref)))
             (with-current-buffer (marker-buffer marker)
               (org-with-wide-buffer
                (goto-char marker)
@@ -377,7 +377,7 @@ must not nest a link inside a link."
                             t t)
              (let ((save-silently t)) (save-buffer))
              (remhash id glasspane-notes--mentions)
-             (glasspane-org-cache-invalidate)
+             (jetpacs-org-cache-invalidate 'glasspane)
              (jetpacs-shell-notify "Linked"))))))
       (jetpacs-shell-push))))
 

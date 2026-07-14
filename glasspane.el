@@ -113,6 +113,7 @@ drills into the live transient's own pie.")
 (require 'org-capture)
 (require 'org-id)
 (require 'cl-lib)
+(require 'jetpacs-org)
 
 ;; ─── Refresh coordination ──────────────────────────────────────────────────────
 
@@ -123,121 +124,29 @@ explicit dashboard push isn't doubled by the save-hook firing on top.")
 
 ;; The dashboard pushes every view on every action (so navigation stays
 ;; instant and offline-capable), which means the expensive extractions here
-;; — a full `org-agenda' run, an `org-map-entries' sweep — used to execute
-;; on every chip tap and snackbar.  They are memoised now; this table is
-;; dropped through `glasspane-org-cache-invalidate', the single seam every
-;; mutation path (heading actions, saves, capture, queue replay) already
-;; calls.
-(defvar glasspane-org--cache (make-hash-table :test 'equal)
-  "Memoised org extraction results.
-Keys are built by `glasspane-org--cache-key' and include today's date, so
-day-relative readers (the agenda) roll over at midnight even without an
-explicit invalidation.")
-
-(defun glasspane-org--files-mtime (files)
-  "Return the maximum modification time of FILES (or 0 if none exist)."
-  (let ((mtime 0.0))
-    (dolist (file files)
-      (when (file-exists-p file)
-        (let* ((attrs (file-attributes (file-truename file)))
-               (t-val (float-time (file-attribute-modification-time attrs))))
-          (when (> t-val mtime)
-            (setq mtime t-val)))))
-    mtime))
-
-(defun glasspane-org--cache-key (&rest parts)
-  "Build a cache key from PARTS, scoped to today's date and the agenda files' mtime.
-This ensures external edits (via sync) automatically bust the cache."
-  (cons (format-time-string "%Y-%m-%d")
-        (cons (glasspane-org--files-mtime (org-agenda-files)) parts)))
-
-(defmacro glasspane-org--with-cache (key &rest body)
-  "Memoise BODY's result in `glasspane-org--cache' under KEY."
-  (declare (indent 1))
-  (let ((k (gensym "key")) (hit (gensym "hit")))
-    `(let* ((,k ,key)
-            (,hit (gethash ,k glasspane-org--cache 'glasspane-org--miss)))
-       (if (eq ,hit 'glasspane-org--miss)
-           (puthash ,k (progn ,@body) glasspane-org--cache)
-         ,hit))))
-
-(defun glasspane-org-cache-invalidate ()
-  "Drop every memoised org extraction.
-Called by every mutation path (heading actions, phone/desktop saves,
-capture, offline-queue drain), so the readers recompute from fresh org
-state on the next dashboard push."
-  (clrhash glasspane-org--cache))
+;; — a full `org-agenda' run, an `org-map-entries' sweep — would execute on
+;; every chip tap and snackbar.  They are memoised in the CORE's table
+;; (`jetpacs-org-with-cache' under the `glasspane' namespace; keys carry
+;; today's date + the agenda files' mtime, so date roll-over and external
+;; edits bust automatically).  Every mutation path (heading actions, saves,
+;; capture, queue replay) drops the namespace via
+;; `jetpacs-org-cache-invalidate'.
 
 ;; ─── Heading references ────────────────────────────────────────────────────────
 ;;
 ;; Every heading the UI lists carries a `ref' — a small, JSON-safe alist that
 ;; lets a later action (drill-in, todo-set, schedule, clock-in) find the same
-;; heading again. The round-trip is: build with `glasspane-org--heading-ref' while
-;; point is on the heading, ship it to the device inside an action's `:args',
-;; and resolve it back to a live marker with `glasspane-org--resolve-ref'.
-
-(defun glasspane-org--heading-ref ()
-  "Build a location ref for the org heading at point.
-Returns an alist with `file'/`pos'/`headline', plus `id' when the entry
-already has an ID property (never created here — we don't mutate files).
-nil-valued keys are omitted so the alist serialises cleanly to JSON."
-  (save-excursion
-    (unless (org-at-heading-p)
-      (ignore-errors (org-back-to-heading t)))
-    (let ((id (org-entry-get nil "ID"))
-          (ref `((file . ,(or (buffer-file-name) ""))
-                 (pos . ,(point))
-                 (headline . ,(or (nth 4 (org-heading-components)) "")))))
-      (if (and (stringp id) (not (string-empty-p id)))
-          (cons `(id . ,id) ref)
-        ref))))
-
-(defun glasspane-org--resolve-ref (ref)
-  "Resolve REF to a live marker at its org heading, or signal an error.
-REF is an alist as built by `glasspane-org--heading-ref' (extra keys such as a
-consed-on `state' are ignored). Resolution tries, in order: the stable
-`id' (survives edits anywhere), the recorded `pos' accepted only if its
-headline still matches, then a headline search through the file."
-  (let ((id (alist-get 'id ref))
-        (file (alist-get 'file ref))
-        (pos (alist-get 'pos ref))
-        (headline (alist-get 'headline ref)))
-    (or
-     ;; 1. Stable org ID — robust against edits elsewhere in the file.
-     (and (stringp id) (not (string-empty-p id))
-          (ignore-errors (org-id-find id 'marker)))
-     ;; 2. Recorded position, trusted only if the headline still matches.
-     (and (stringp file) (file-readable-p file)
-          (let ((buf (find-file-noselect file)))
-            (with-current-buffer buf
-              (org-with-wide-buffer
-               (when (and (integerp pos) (<= (point-min) pos (point-max)))
-                 (goto-char pos)
-                 (when (ignore-errors (org-back-to-heading t) t)
-                   (when (or (not (stringp headline)) (string-empty-p headline)
-                             (equal (nth 4 (org-heading-components)) headline))
-                     (copy-marker (point)))))))))
-     ;; 3. Headline search — the heading moved but still exists in the file.
-     (and (stringp file) (file-readable-p file)
-          (stringp headline) (not (string-empty-p headline))
-          (let ((buf (find-file-noselect file)))
-            (with-current-buffer buf
-              (org-with-wide-buffer
-               (goto-char (point-min))
-               (catch 'found
-                 (while (re-search-forward org-heading-regexp nil t)
-                   (when (equal (nth 4 (org-heading-components)) headline)
-                     (throw 'found (copy-marker (line-beginning-position)))))
-                 nil)))))
-     (error "Heading not found: %s"
-            (or headline id file "?")))))
+;; heading again.  Both halves are canonical core primitives now: build with
+;; `jetpacs-org-heading-ref' while point is on the heading, ship it to the
+;; device inside an action's `:args', and resolve it back to a live marker
+;; with `jetpacs-org-resolve-ref'.
 
 (defun glasspane-org--agenda-items (&optional span start-day)
   "Extract agenda items for SPAN (\\='day, \\='week, or \\='month).
 START-DAY is an optional string (e.g. \"2026-11-01\") to start the agenda on.
 Returns a list of alists representing agenda items.  Memoised; see
-`glasspane-org-cache-invalidate'."
-  (glasspane-org--with-cache (glasspane-org--cache-key 'agenda (or span 'day) start-day)
+`jetpacs-org-cache-invalidate'."
+  (jetpacs-org-with-cache 'glasspane (list 'agenda (or span 'day) start-day)
     (glasspane-org--agenda-items-1 span start-day)))
 
 (defconst glasspane-org--agenda-buffer "*Jetpacs Agenda*"
@@ -303,7 +212,7 @@ Returns a list of alists representing agenda items.  Memoised; see
                               (type . ,(when type (format "%s" type)))
                               (extra . ,extra)
                               (ts-date . ,ts-date)
-                              (ref . ,(glasspane-org--heading-ref)))
+                              (ref . ,(jetpacs-org-heading-ref)))
                             items))))))
             (forward-line 1)))))
       ;; Kill by buffer object, not name, and even when extraction errored.
@@ -333,8 +242,8 @@ Returns a list of alists representing agenda items.  Memoised; see
 
 (defun glasspane-org--todo-items (&optional files)
   "Extract TODO items from FILES (or agenda files).
-Memoised; see `glasspane-org-cache-invalidate'."
-  (glasspane-org--with-cache (glasspane-org--cache-key 'todos files)
+Memoised; see `jetpacs-org-cache-invalidate'."
+  (jetpacs-org-with-cache 'glasspane (list 'todos files)
     (if (and (featurep 'vulpea) (fboundp 'vulpea-db-query) (null files))
         (mapcar #'glasspane-org--vulpea-note-to-item
                 (vulpea-db-query (lambda (note) (vulpea-note-todo note))))
@@ -361,7 +270,7 @@ Memoised; see `glasspane-org-cache-invalidate'."
                    (deadline  . ,deadline)
                    (file . ,(buffer-file-name))
                    (pos . ,(point))
-                   (ref . ,(glasspane-org--heading-ref)))
+                   (ref . ,(jetpacs-org-heading-ref)))
                  items))))
      "TODO<>\"\"" (or files 'agenda))
     (nreverse items)))
@@ -385,7 +294,7 @@ tags/file/pos/ref); used by the search layer."
       (deadline  . ,deadline)
       (file . ,(buffer-file-name))
       (pos . ,(point))
-      (ref . ,(glasspane-org--heading-ref)))))
+      (ref . ,(jetpacs-org-heading-ref)))))
 
 (defun glasspane-org--file-heading-items (file)
   "Extract level-1 headings from FILE as item alists.
@@ -414,275 +323,49 @@ suitable for `glasspane-ui--agenda-card'."
                         (deadline  . ,deadline)
                         (file . ,(buffer-file-name))
                         (pos . ,(point))
-                        (ref . ,(glasspane-org--heading-ref)))
+                        (ref . ,(jetpacs-org-heading-ref)))
                       items))))
           nil nil)
          (nreverse items))))))
 
-;; Search queries pass through one parser (`glasspane-org--parse-query')
-;; into an org-ql-shaped sexp, whichever of the three input shapes the
-;; user typed.  With org-ql installed the sexp runs there; without it a
-;; built-in interpreter (`glasspane-org--query-match-p') covers the
-;; common predicates.  Malformed queries signal `user-error' so the UI
-;; can show the problem — an empty result must mean "nothing matched",
-;; never "the query didn't parse".
-
-(defconst glasspane-org--ql-literals '(today nil t < <= > >= =)
-  "Symbols with meaning to org-ql that normalization must not stringify.")
-
-(defun glasspane-org--normalize-ql (form)
-  "Return sexp query FORM with elisp-isms rewritten to org-ql shape.
-Hand-typed queries arrive looking like elisp — (tags \\='server) or
-\(todo NEXT) — but org-ql wants plain strings, so quotes are unwrapped
-and bare symbols in argument positions become strings.  Clause heads,
-keywords, and the symbols org-ql itself understands (`today',
-comparators) pass through untouched."
-  (if (and (consp form) (eq (car form) 'quote) (cdr form))
-      (glasspane-org--normalize-ql (cadr form))
-    (if (not (consp form))
-        form
-      (cons (car form)
-            (mapcar #'glasspane-org--normalize-ql-arg (cdr form))))))
-
-(defun glasspane-org--normalize-ql-arg (arg)
-  "Normalize ARG, a clause argument inside a sexp query.
-Sub-clauses recurse through `glasspane-org--normalize-ql'; quoted or
-bare symbols become strings unless org-ql assigns them meaning."
-  (cond
-   ((and (consp arg) (eq (car arg) 'quote) (cdr arg))
-    (glasspane-org--normalize-ql-arg (cadr arg)))
-   ((consp arg) (glasspane-org--normalize-ql arg))
-   ((keywordp arg) arg)
-   ((memq arg glasspane-org--ql-literals) arg)
-   ((symbolp arg) (symbol-name arg))
-   (t arg)))
-
-(defun glasspane-org--query-tokens (q)
-  "Split query Q on whitespace, keeping \"quoted phrases\" whole."
-  (let ((pos 0) (tokens nil))
-    (while (string-match "\"\\([^\"]*\\)\"\\|\\S-+" q pos)
-      (push (or (match-string 1 q) (match-string 0 q)) tokens)
-      (setq pos (match-end 0)))
-    (nreverse tokens)))
-
-(defun glasspane-org--parse-query (query)
-  "Parse the search QUERY string into an org-ql sexp, or nil if empty.
-Three input shapes are accepted:
-- an org-ql sexp:  (and (todo \"TODO\") (tags \"work\"))
-- filter tokens:   todo:TODO,NEXT tags:work priority:A
-- free text:       \"exact phrase\" or bare words (matched
-  case-insensitively against the heading and body)
-Tokens of different kinds AND together; comma-separated values within
-todo:/tags: mean any-of.  Signals `user-error' on a malformed sexp."
-  (let ((q (string-trim query)))
-    (cond
-     ((string-empty-p q) nil)
-     ;; A sexp query, possibly pasted with its elisp quote: '(tags "x")
-     ((string-match-p "\\`'?(" q)
-      (let ((form (condition-case nil (read q)
-                    (error (user-error "Query has unbalanced parentheses: %s" q)))))
-        (glasspane-org--normalize-ql form)))
-     (t
-      (let ((clauses
-             (mapcar
-              (lambda (tok)
-                (cond
-                 ((string-prefix-p "todo:" tok)
-                  `(todo ,@(split-string (substring tok 5) "," t)))
-                 ((string-prefix-p "tags:" tok)
-                  `(tags ,@(split-string (substring tok 5) "," t)))
-                 ((string-prefix-p "priority:" tok)
-                  `(priority ,(substring tok 9)))
-                 (t `(regexp ,(regexp-quote tok)))))
-              (glasspane-org--query-tokens q))))
-        (if (cdr clauses) `(and ,@clauses) (car clauses)))))))
-
-(defun glasspane-org--query-match-p (tree)
-  "Non-nil when the heading at point matches query sexp TREE.
-The org-ql subset the built-in search understands; anything else
-signals `user-error' naming the term.  Tags and TODO keywords compare
-case-sensitively (they are org data); free text and headings match
-case-insensitively (search UX)."
-  (pcase tree
-    (`(and . ,cs) (cl-every #'glasspane-org--query-match-p cs))
-    (`(or . ,cs) (and (cl-some #'glasspane-org--query-match-p cs) t))
-    (`(not ,c) (not (glasspane-org--query-match-p c)))
-    (`(todo . ,kws)
-     (let ((st (org-get-todo-state)))
-       (and st (if kws (and (member st kws) t)
-                 (not (member st org-done-keywords))))))
-    (`(done)
-     (let ((st (org-get-todo-state)))
-       (and st (member st org-done-keywords) t)))
-    (`(tags . ,tags)
-     (let ((have (org-get-tags)))
-       (if tags (and (cl-some (lambda (tg) (member tg have)) tags) t)
-         (and have t))))
-    (`(priority ,(and op (pred symbolp)) ,val)
-     ;; Comparators run on priority rank, where #A outranks #B — the
-     ;; char values order the other way round, so the tests flip.
-     (let ((pr (nth 3 (org-heading-components)))
-           (want (string-to-char val)))
-       (and pr (pcase op
-                 ('< (> pr want)) ('<= (>= pr want))
-                 ('> (< pr want)) ('>= (<= pr want))
-                 ('= (= pr want))
-                 (_ (user-error "Unsupported priority comparator %s" op))))))
-    (`(priority . ,ps)
-     (let ((pr (nth 3 (org-heading-components))))
-       (if ps (and pr (member (char-to-string pr) ps) t)
-         (and pr t))))
-    (`(heading . ,texts)
-     (let ((hl (or (nth 4 (org-heading-components)) ""))
-           (case-fold-search t))
-       (cl-every (lambda (s) (string-match-p (regexp-quote s) hl)) texts)))
-    (`(regexp . ,res)
-     ;; Heading plus body, up to the next heading — close enough to
-     ;; org-ql's entry scope for search purposes.
-     (let ((end (save-excursion (outline-next-heading) (point)))
-           (case-fold-search t))
-       (cl-every (lambda (re)
-                   (save-excursion (re-search-forward re end t)))
-                 res)))
-    (`(property ,name . ,val)
-     (let ((v (org-entry-get (point) name)))
-       (if val (equal v (car val)) (and v t))))
-    (`(level ,n) (eql (org-current-level) n))
-    (`(level ,n ,m) (let ((l (org-current-level))) (and l (<= n l m))))
-    (`(scheduled . ,args) (glasspane-org--planning-match-p "SCHEDULED" args))
-    (`(deadline . ,args) (glasspane-org--planning-match-p "DEADLINE" args))
-    (_ (user-error "Query term %S needs the org-ql package installed" tree))))
-
-(defun glasspane-org--planning-day (spec)
-  "Resolve a query date SPEC to an absolute day number.
-SPEC is `today', an integer offset in days from today, or a date
-string org can read (\"2026-07-05\")."
-  (cond
-   ((eq spec 'today) (org-today))
-   ((integerp spec) (+ (org-today) spec))
-   ((stringp spec) (org-time-string-to-absolute spec))
-   (t (user-error "Unsupported query date %S" spec))))
-
-(defun glasspane-org--planning-match-p (which args)
-  "Match the WHICH (\"SCHEDULED\"/\"DEADLINE\") stamp at point against ARGS.
-ARGS is an org-ql-style plist of :on / :from / :to date specs; empty
-ARGS matches mere presence of the stamp."
-  (let ((ts (org-entry-get (point) which)))
-    (and ts
-         (let ((day (org-time-string-to-absolute ts)))
-           (cl-loop for (key spec) on args by #'cddr
-                    always (pcase key
-                             (:on (= day (glasspane-org--planning-day spec)))
-                             (:from (>= day (glasspane-org--planning-day spec)))
-                             (:to (<= day (glasspane-org--planning-day spec)))
-                             (_ (user-error "Unsupported %s option %s"
-                                            (downcase which) key))))))))
-
-(defun glasspane-org--search-fallback (tree)
-  "Run parsed query TREE over the agenda files without org-ql."
-  (let (items)
-    (org-map-entries
-     (lambda ()
-       (when (glasspane-org--query-match-p tree)
-         (push (glasspane-org--heading-item-at) items)))
-     nil 'agenda)
-    (nreverse items)))
-
-(defun glasspane-org--vulpea-query-match-p (tree note)
-  "Non-nil when NOTE matches query sexp TREE."
-  (pcase tree
-    (`(and . ,cs) (cl-every (lambda (c) (glasspane-org--vulpea-query-match-p c note)) cs))
-    (`(or . ,cs) (and (cl-some (lambda (c) (glasspane-org--vulpea-query-match-p c note)) cs) t))
-    (`(not ,c) (not (glasspane-org--vulpea-query-match-p c note)))
-    (`(todo . ,kws)
-     (let ((st (vulpea-note-todo note)))
-       (and st (if kws (and (member st kws) t)
-                 (not (member st org-done-keywords))))))
-    (`(done)
-     (let ((st (vulpea-note-todo note)))
-       (and st (member st org-done-keywords) t)))
-    (`(tags . ,tags)
-     (let ((have (vulpea-note-tags note)))
-       (if tags (and (cl-some (lambda (tg) (member tg have)) tags) t)
-         (and have t))))
-    (`(priority ,(and op (pred symbolp)) ,val)
-     (let ((pr (vulpea-note-priority note))
-           (want (string-to-char val)))
-       (and pr (let ((pr-char (string-to-char pr)))
-                 (pcase op
-                   ('< (> pr-char want)) ('<= (>= pr-char want))
-                   ('> (< pr-char want)) ('>= (<= pr-char want))
-                   ('= (= pr-char want))
-                   (_ nil))))))
-    (`(priority . ,ps)
-     (let ((pr (vulpea-note-priority note)))
-       (if ps (and pr (member pr ps) t)
-         (and pr t))))
-    (`(heading . ,texts)
-     (let ((hl (or (vulpea-note-title note) ""))
-           (case-fold-search t))
-       (cl-every (lambda (s) (string-match-p (regexp-quote s) hl)) texts)))
-    (`(regexp . ,res)
-     (let ((hl (or (vulpea-note-title note) ""))
-           (case-fold-search t))
-       (cl-every (lambda (re) (string-match-p re hl)) res)))
-    (`(property ,name . ,val)
-     (let ((v (cdr (assoc name (vulpea-note-properties note)))))
-       (if val (equal v (car val)) (and v t))))
-    (`(level ,n) (eql (vulpea-note-level note) n))
-    (`(level ,n ,m) (let ((l (vulpea-note-level note))) (and l (<= n l m))))
-    (`(scheduled . ,args)
-     (let ((ts (vulpea-note-scheduled note)))
-       (and ts
-            (let ((day (org-time-string-to-absolute ts)))
-              (cl-loop for (key spec) on args by #'cddr
-                       always (pcase key
-                                (:on (= day (glasspane-org--planning-day spec)))
-                                (:from (>= day (glasspane-org--planning-day spec)))
-                                (:to (<= day (glasspane-org--planning-day spec)))
-                                (_ nil)))))))
-    (`(deadline . ,args)
-     (let ((ts (vulpea-note-deadline note)))
-       (and ts
-            (let ((day (org-time-string-to-absolute ts)))
-              (cl-loop for (key spec) on args by #'cddr
-                       always (pcase key
-                                (:on (= day (glasspane-org--planning-day spec)))
-                                (:from (>= day (glasspane-org--planning-day spec)))
-                                (:to (<= day (glasspane-org--planning-day spec)))
-                                (_ nil)))))))
-    (_ nil)))
+;; Search queries pass through the canonical parser (`jetpacs-org-parse-query')
+;; into an org-ql-shaped sexp, whichever of the three input shapes the user
+;; typed.  Matching is the core's ONE grammar — `jetpacs-org-entry-matches-p'
+;; at a buffer point, `jetpacs-org-note-matches-p' over a `vulpea-note' —
+;; with org-ql taking over when installed.  Malformed queries signal
+;; `user-error' so the UI can show the problem — an empty result must mean
+;; "nothing matched", never "the query didn't parse".
 
 (defun glasspane-org--vulpea-query (tree)
-  "Run parsed query sexp TREE over the Vulpea database."
-  (let ((notes (vulpea-db-query (lambda (note) (glasspane-org--vulpea-query-match-p tree note)))))
+  "Run parsed query sexp TREE over the whole Vulpea database.
+Matching runs entirely off the index via the canonical
+`jetpacs-org-note-matches-p'; a term outside
+`jetpacs-org-note-query-terms' signals `user-error'."
+  (let ((notes (vulpea-db-query (lambda (note) (jetpacs-org-note-matches-p tree note)))))
     (mapcar #'glasspane-org--vulpea-note-to-item notes)))
 
 (defun glasspane-org--query (tree)
-  "Run parsed query sexp TREE over the agenda files; heading items.
-The engine behind search and every saved/derived view: `org-ql' when
-installed, the built-in interpreter otherwise.  Signals `user-error'
-on unsupported terms.  Memoised; see `glasspane-org-cache-invalidate'."
+  "Run parsed query sexp TREE over the org data; heading items.
+The engine behind search and every saved/derived view.  Vulpea's note
+index answers when the app has it loaded (Glasspane's indexed-query
+policy); otherwise `jetpacs-org-query' dispatches org-ql → the built-in
+interpreter over the agenda files.  Signals `user-error' on unsupported
+terms.  Memoised; see `jetpacs-org-cache-invalidate'."
   (when tree
-    (glasspane-org--with-cache
-        (glasspane-org--cache-key 'query (format "%S" tree))
-      (if (and (featurep 'vulpea) (fboundp 'vulpea-db-query))
-          (glasspane-org--vulpea-query tree)
-        (if (fboundp 'org-ql-select)
-            (condition-case err
-                (org-ql-select (org-agenda-files) tree
-                               :action #'glasspane-org--heading-item-at)
-              (user-error (signal (car err) (cdr err)))
-              (error (user-error "Query failed: %s" (error-message-string err))))
-          (glasspane-org--search-fallback tree))))))
+    (if (and (featurep 'vulpea) (fboundp 'vulpea-db-query))
+        ;; `jetpacs-org-query' caches internally; only the vulpea arm
+        ;; needs its own memo.
+        (jetpacs-org-with-cache 'glasspane (list 'query (format "%S" tree))
+          (glasspane-org--vulpea-query tree))
+      (jetpacs-org-query 'glasspane tree #'glasspane-org--heading-item-at))))
 
 (defun glasspane-org--search (query)
   "Search agenda files for QUERY; return a list of heading items.
 QUERY may be an org-ql sexp, filter tokens, or free text — see
-`glasspane-org--parse-query'.  Signals `user-error' on queries that
+`jetpacs-org-parse-query'.  Signals `user-error' on queries that
 don't parse or use unsupported terms, so callers can surface the
 problem."
-  (glasspane-org--query (glasspane-org--parse-query query)))
+  (glasspane-org--query (jetpacs-org-parse-query query)))
 
 (defun glasspane-org--filter-items (items query)
   "ITEMS whose headings match QUERY — the sparse filter.
@@ -690,7 +373,7 @@ QUERY takes the standard search syntax; matching runs the built-in
 matcher at each item's own heading, so it works on any file, agenda
 or not.  Signals `user-error' on queries that don't parse or use
 unsupported terms."
-  (let ((tree (glasspane-org--parse-query query)))
+  (let ((tree (jetpacs-org-parse-query query)))
     (if (null tree)
         items
       (cl-remove-if-not
@@ -703,15 +386,15 @@ unsupported terms."
                    (goto-char (min pos (point-max)))
                    (unless (org-at-heading-p)
                      (ignore-errors (org-back-to-heading t)))
-                   (glasspane-org--query-match-p tree))))))
+                   (jetpacs-org-entry-matches-p tree))))))
        items))))
 
 (defun glasspane-org--all-tags ()
   "Sorted tags for the query builder.
 Combines `org-tag-alist' (the configured vocabulary) with every tag
 actually used in the agenda files.  Memoised; see
-`glasspane-org-cache-invalidate'."
-  (glasspane-org--with-cache (glasspane-org--cache-key 'all-tags)
+`jetpacs-org-cache-invalidate'."
+  (jetpacs-org-with-cache 'glasspane (list 'all-tags)
     (let ((tags nil))
       (dolist (entry org-tag-alist)
         (let ((tg (if (consp entry) (car entry) entry)))
@@ -913,7 +596,7 @@ ready for the companion's `reminders.set' frame."
               (push `((headline . ,headline)
                       (file . ,(buffer-file-name))
                       (pos . ,(marker-position m))
-                      (ref . ,(glasspane-org--heading-ref)))
+                      (ref . ,(jetpacs-org-heading-ref)))
                     items))))))
     (cl-subseq (nreverse items) 0 (min n (length items)))))
 
@@ -983,7 +666,7 @@ ready for the companion's `reminders.set' frame."
 
 ;; The data half of Glasspane's declarative (`:spec') views: a jetpacs
 ;; `jetpacs-defsource' named "glasspane.org" that wraps the app's org query
-;; engine — `glasspane-org--query' over `glasspane-org--parse-query', i.e.
+;; engine — `glasspane-org--query' over `jetpacs-org-parse-query', i.e.
 ;; whichever of vulpea / org-ql / the built-in interpreter is live — and
 ;; NORMALIZES each result item to core's domain-neutral field contract before
 ;; core sees it.  This is the "a source normalizes engine data" half of the
@@ -998,12 +681,12 @@ ready for the companion's `reminders.set' frame."
 ;;   - `priority' is a char in the vulpea path; a "text" field wants a string.
 ;; `glasspane-source--canonicalize' maps each item to those canonical types,
 ;; and `:fields' declares them so a `:spec' template can bind them.  `ref' is
-;; an opaque locator (an alist as built by `glasspane-org--heading-ref') and is
+;; an opaque locator (an alist as built by `jetpacs-org-heading-ref') and is
 ;; passed through intact for an action's `:args'.
 ;;
 ;; Why UNCACHED.  `glasspane-org--query' is itself memoised, and its memo is
 ;; the one seam every mutation path already busts via
-;; `glasspane-org-cache-invalidate' — including in-buffer edits that have not
+;; `jetpacs-org-cache-invalidate' — including in-buffer edits that have not
 ;; yet reached disk.  A source-level `:cache-key' keyed on file mtime (the only
 ;; freshness signal a nullary token could cheaply read) would serve stale rows
 ;; after exactly those edits.  Re-canonicalising the already-memoised query
@@ -1055,11 +738,11 @@ per-field normalization contract."
 (defun glasspane-source--org-query (params)
   "The \"glasspane.org\" `:query' thunk: PARAMS -> canonical item list.
 PARAMS is the canonical params alist; its `query' is a search string in
-any shape `glasspane-org--parse-query' accepts.  An empty/nil query yields
+any shape `jetpacs-org-parse-query' accepts.  An empty/nil query yields
 no items (never an error)."
   (mapcar #'glasspane-source--canonicalize
           (glasspane-org--query
-           (glasspane-org--parse-query (alist-get 'query params)))))
+           (jetpacs-org-parse-query (alist-get 'query params)))))
 
 (with-jetpacs-owner "glasspane"
   (jetpacs-defsource "glasspane.org"
@@ -2154,7 +1837,9 @@ suppressed identical push would leave it frozen."
 
 ;; The org extractions are memoised; an explicit refresh (pull-to-refresh,
 ;; the drawer item, a queue drain) must drop them.
-(add-hook 'jetpacs-shell-refresh-hook #'glasspane-org-cache-invalidate)
+;; A pull-to-refresh recomputes everything: drop the whole org memo table
+;; (no namespace arg — a refresh is an explicit "give me fresh state").
+(add-hook 'jetpacs-shell-refresh-hook #'jetpacs-org-cache-invalidate)
 
 (defun glasspane-ui--global-todo-keywords ()
   "Extract a flat list of all global TODO keywords from `org-todo-keywords'."
@@ -2315,9 +2000,19 @@ costs its own section, never the body.")
   "Resolve ARGS to its heading and call FN with point there.
 With SAVE non-nil, save the buffer afterwards (guarded against
 triggering our own after-save refresh on top of the explicit push).
-Returns non-nil on success; messages and returns nil on failure."
+Returns non-nil on success; messages and returns nil on failure.
+
+This is the app's ONE mutation funnel, deliberately NOT built on
+`jetpacs-org-with-mutation': the core mutators defer saves to an idle
+timer, which fires outside `glasspane-org--inhibit-save-refresh's
+dynamic extent (double-firing the after-save refresh) and leaves the
+file not-yet-on-disk for flows that read it back immediately
+(share-sheet capture finalize, offline-queue replay).  The canonical
+pieces it DOES stand on: `jetpacs-org-resolve-ref' and
+`jetpacs-org-cache-invalidate'.  Save timing and the notify+repush
+error UX are app policy and stay here."
   (condition-case err
-      (let ((marker (glasspane-org--resolve-ref args)))
+      (let ((marker (jetpacs-org-resolve-ref args)))
         (with-current-buffer (marker-buffer marker)
           (org-with-wide-buffer
            (goto-char marker)
@@ -2326,7 +2021,7 @@ Returns non-nil on success; messages and returns nil on failure."
             (let ((glasspane-org--inhibit-save-refresh t)
                   (save-silently t))
               (save-buffer))))
-        (glasspane-org-cache-invalidate)
+        (jetpacs-org-cache-invalidate 'glasspane)
         t)
     (error
      (message "Jetpacs: heading action failed: %s" (error-message-string err))
@@ -2373,7 +2068,7 @@ Returns non-nil on success; messages and returns nil on failure."
           (lambda (sym _value)
             (when (or (string-prefix-p "org-" (symbol-name sym))
                       (string-prefix-p "calendar-" (symbol-name sym)))
-              (glasspane-org-cache-invalidate))))
+              (jetpacs-org-cache-invalidate 'glasspane))))
 
 (defalias 'glasspane-ui--customize-save #'jetpacs-settings-save-variable
   "Persist a variable through Customize, surfacing failures.
@@ -2526,7 +2221,7 @@ settings module (`jetpacs-settings-save-variable').")
                 (let ((glasspane-org--inhibit-save-refresh t)
                       (save-silently t))
                   (save-buffer)))
-              (glasspane-org-cache-invalidate)
+              (jetpacs-org-cache-invalidate 'glasspane)
               (jetpacs-shell-push))
           (error
            (jetpacs-shell-notify
@@ -2594,7 +2289,7 @@ Reset when a different file opens.")
 
 ;; A phone-side save may have changed org data the views memoise.
 (add-hook 'jetpacs-files-after-save-hook
-          (lambda (_file) (glasspane-org-cache-invalidate)))
+          (lambda (_file) (jetpacs-org-cache-invalidate 'glasspane)))
 
 (jetpacs-defaction "files.toggle-read"
   (lambda (_ _)
@@ -2629,7 +2324,7 @@ otherwise refresh twice or loop."
              (ignore-errors
                (member (expand-file-name buffer-file-name)
                        (mapcar #'expand-file-name (org-agenda-files)))))
-    (glasspane-org-cache-invalidate)
+    (jetpacs-org-cache-invalidate 'glasspane)
     (when (timerp glasspane-ui--save-refresh-timer)
       (cancel-timer glasspane-ui--save-refresh-timer))
     (setq glasspane-ui--save-refresh-timer
@@ -2644,7 +2339,7 @@ Safe to put on any hook: a no-op while disconnected.  Invalidates the
 extraction cache first — this runs on clock in/out, which mutate the
 org buffer without necessarily saving it."
   (when (jetpacs-connected-p)
-    (glasspane-org-cache-invalidate)
+    (jetpacs-org-cache-invalidate 'glasspane)
     (jetpacs-shell-push)))
 
 ;; The connect and queue-drained pushes are owned by the shell; this app
@@ -3173,7 +2868,7 @@ with the new states.  Returns non-nil when persisting succeeded."
     (with-current-buffer buf
       (when (derived-mode-p 'org-mode)
         (ignore-errors (org-mode-restart)))))
-  (glasspane-org-cache-invalidate)
+  (jetpacs-org-cache-invalidate 'glasspane)
   (glasspane-ui--customize-save 'org-todo-keywords seqs))
 
 (jetpacs-defaction "settings.todo.save"
@@ -3504,7 +3199,7 @@ appears on the next replay."
             (glasspane-org--do-capture key values glasspane-ui--shared-text)
             (setq glasspane-ui--shared-text nil
                   glasspane-ui--shared-subject nil)
-            (glasspane-org-cache-invalidate)
+            (jetpacs-org-cache-invalidate 'glasspane)
             (jetpacs-ui-state-clear "cap-")
             (jetpacs-shell-notify "Captured ✓")
             (jetpacs-dismiss-dialog)
@@ -3793,7 +3488,7 @@ sideways rather than wrapping into a stack."
 KEY renders without org's colons.  ID is shown read-only (editing it
 breaks links); every other value is an inline input whose submit runs
 `heading.prop-set' — submitting an empty value removes the property."
-  (let* ((marker (ignore-errors (glasspane-org--resolve-ref ref)))
+  (let* ((marker (ignore-errors (jetpacs-org-resolve-ref ref)))
          (buf (and marker (marker-buffer marker)))
          (allowed (and buf
                        (with-current-buffer buf
@@ -3982,7 +3677,7 @@ container would break Compose) and wrap otherwise."
 
 (defun glasspane-ui--detail-body (ref)
   (condition-case err
-      (let* ((marker (glasspane-org--resolve-ref ref))
+      (let* ((marker (jetpacs-org-resolve-ref ref))
              (buf (marker-buffer marker))
              (file (buffer-file-name buf))
              (pos (marker-position marker))
@@ -4255,7 +3950,7 @@ container would break Compose) and wrap otherwise."
           (value (alist-get 'value args)))
       (when (and ref value)
         (condition-case err
-            (let* ((marker (glasspane-org--resolve-ref ref))
+            (let* ((marker (jetpacs-org-resolve-ref ref))
                    (buf (marker-buffer marker))
                    (pos (marker-position marker)))
               (with-current-buffer buf
@@ -4265,12 +3960,11 @@ container would break Compose) and wrap otherwise."
                  (delete-region (region-beginning) (region-end))
                  (insert value)
                  (goto-char pos)
-                 (setq glasspane-ui--detail-ref (glasspane-org--heading-ref))
+                 (setq glasspane-ui--detail-ref (jetpacs-org-heading-ref))
                  (let ((glasspane-org--inhibit-save-refresh t)
                        (save-silently t))
                    (save-buffer))))
-              (when (fboundp 'glasspane-org-cache-invalidate)
-                (glasspane-org-cache-invalidate))
+              (jetpacs-org-cache-invalidate 'glasspane)
               (setq glasspane-ui--detail-read-mode t)
               (jetpacs-shell-notify "Saved heading"))
           (error
@@ -4304,7 +3998,7 @@ container would break Compose) and wrap otherwise."
                                   (unless (org-get-todo-state)
                                     (org-todo)))
                                 t)
-      (let* ((marker (glasspane-org--resolve-ref args))
+      (let* ((marker (jetpacs-org-resolve-ref args))
              (state (with-current-buffer (marker-buffer marker)
                       (org-with-wide-buffer
                        (goto-char marker)
@@ -4382,7 +4076,7 @@ container would break Compose) and wrap otherwise."
   ;; Bridged picker over org-refile targets; refiles the whole subtree.
   (lambda (args _)
     (condition-case err
-        (let ((marker (glasspane-org--resolve-ref args)))
+        (let ((marker (jetpacs-org-resolve-ref args)))
           (with-current-buffer (marker-buffer marker)
             (org-with-wide-buffer
              (goto-char marker)
@@ -4400,7 +4094,7 @@ container would break Compose) and wrap otherwise."
                  (let ((glasspane-org--inhibit-save-refresh t)
                        (save-silently t))
                    (org-save-all-org-buffers))
-                 (glasspane-org-cache-invalidate)
+                 (jetpacs-org-cache-invalidate 'glasspane)
                  (setq glasspane-ui--detail-ref nil)
                  (jetpacs-shell-notify (format "Refiled to %s" choice))))))
           (jetpacs-shell-push nil :switch-to (jetpacs-shell-current-tab)))
@@ -4525,7 +4219,7 @@ container would break Compose) and wrap otherwise."
                 (org-link-open-from-string link)
                 (jetpacs-shell-notify (format "Opened %s" link))
                 (when (derived-mode-p 'org-mode)
-                  (setq glasspane-ui--detail-ref (glasspane-org--heading-ref))
+                  (setq glasspane-ui--detail-ref (jetpacs-org-heading-ref))
                   (setq glasspane-ui--detail-read-mode t)
                   (setq navigated t)))
             (error
@@ -4570,7 +4264,7 @@ container would break Compose) and wrap otherwise."
               (save-silently t))
           (with-current-buffer (find-file-noselect file)
             (save-buffer)))
-        (glasspane-org-cache-invalidate)
+        (jetpacs-org-cache-invalidate 'glasspane)
         (jetpacs-shell-push nil :switch-to "edit")))))
 
 (defun glasspane-ui--org-editor-actions (file)
@@ -4700,7 +4394,7 @@ container would break Compose) and wrap otherwise."
                   (save-silently t))
               (save-buffer)))))
       (jetpacs-dismiss-dialog)
-      (glasspane-org-cache-invalidate)
+      (jetpacs-org-cache-invalidate 'glasspane)
       (jetpacs-shell-push))))
 
 (provide 'glasspane-detail)
@@ -5015,7 +4709,7 @@ row) skips the realign instead of erroring."
     (let ((glasspane-org--inhibit-save-refresh t)
           (save-silently t))
       (save-buffer)))
-  (glasspane-org-cache-invalidate)
+  (jetpacs-org-cache-invalidate 'glasspane)
   (jetpacs-shell-push))
 
 (defun glasspane-ui--table-field-formula ()
@@ -5189,7 +4883,7 @@ are not resolved — those cells stay value-editable."
                 (let ((glasspane-org--inhibit-save-refresh t)
                       (save-silently t))
                   (save-buffer)))
-              (glasspane-org-cache-invalidate)
+              (jetpacs-org-cache-invalidate 'glasspane)
               (jetpacs-shell-notify "Block executed")
               (jetpacs-shell-push))
           (error
@@ -5301,7 +4995,7 @@ Creates the datetree levels (and the file) on first use."
         (let ((glasspane-org--inhibit-save-refresh t)
               (save-silently t))
           (save-buffer))))
-    (glasspane-org-cache-invalidate)))
+    (jetpacs-org-cache-invalidate 'glasspane)))
 
 (defun glasspane-journal--carried-over ()
   "Unfinished TODOs scheduled before today — the carry-over list."
@@ -5520,7 +5214,7 @@ not exist in jetpacs 1.5.0; until it does, this seam stays on the raw var."
 
 (defcustom glasspane-saved-views nil
   "Saved query views: a list of alists with `name', `query', `rendering'.
-`query' is anything `glasspane-org--parse-query' accepts (org-ql sexp,
+`query' is anything `jetpacs-org-parse-query' accepts (org-ql sexp,
 filter tokens, or free text); `rendering' is \"list\" | \"board\" |
 \"calendar\".  Managed from the phone; persisted through Customize."
   :type '(repeat sexp) :group 'jetpacs)
@@ -5556,7 +5250,7 @@ mutates the value Customize handed out."
 (defun glasspane-views--items (view)
   "Run VIEW's query; heading items, or signal `user-error'."
   (glasspane-org--query
-   (glasspane-org--parse-query (alist-get 'query view))))
+   (jetpacs-org-parse-query (alist-get 'query view))))
 
 ;; ─── Renderings ──────────────────────────────────────────────────────────────
 
@@ -5849,7 +5543,7 @@ Field values mirror through the UI-state store; views.save reads them."
         (condition-case err
             (progn
               ;; Parse now so a broken query fails at save, not render.
-              (glasspane-org--parse-query query)
+              (jetpacs-org-parse-query query)
               (setq glasspane-saved-views
                     (append (cl-remove name glasspane-saved-views
                                        :key (lambda (v) (alist-get 'name v))
@@ -6274,7 +5968,7 @@ Reader-built drill-in refs carry only file/pos, so a child heading
 with an :ID: still gets its backlink section."
   (or (alist-get 'id ref)
       (condition-case nil
-          (let ((marker (glasspane-org--resolve-ref ref)))
+          (let ((marker (jetpacs-org-resolve-ref ref)))
             (with-current-buffer (marker-buffer marker)
               (org-with-wide-buffer
                (goto-char marker)
@@ -6471,7 +6165,7 @@ must not nest a link inside a link."
                             t t)
              (let ((save-silently t)) (save-buffer))
              (remhash id glasspane-notes--mentions)
-             (glasspane-org-cache-invalidate)
+             (jetpacs-org-cache-invalidate 'glasspane)
              (jetpacs-shell-notify "Linked"))))))
       (jetpacs-shell-push))))
 
@@ -6635,8 +6329,7 @@ Memoised through the org cache seam — every mutating srs.* action
 invalidates, so the count follows ratings without a per-render scan."
   (when (glasspane-srs-available-p)
     (glasspane-srs--quietly
-      (glasspane-org--with-cache
-          (glasspane-org--cache-key 'srs-due (glasspane-srs--source))
+      (jetpacs-org-with-cache 'glasspane (list 'srs-due (glasspane-srs--source))
         (length (org-srs-review-pending-items (glasspane-srs--source)))))))
 
 ;; ─── Content extraction & clean rendering ────────────────────────────────────
@@ -7126,7 +6819,7 @@ Best-effort: a snapshot failure must not block the rating."
                 (org-srs-review-item nil))
             (with-current-buffer buf
               (apply #'org-srs-review-rate kw glasspane-srs--current))))
-        (glasspane-org-cache-invalidate)
+        (jetpacs-org-cache-invalidate 'glasspane)
         (glasspane-srs--advance)))
     (jetpacs-shell-push)))
 
@@ -7141,7 +6834,7 @@ Best-effort: a snapshot failure must not block the rating."
     (when glasspane-srs--current
       (glasspane-srs--engine
         (apply #'org-srs-review-postpone '(1 :day) glasspane-srs--current))
-      (glasspane-org-cache-invalidate)
+      (jetpacs-org-cache-invalidate 'glasspane)
       (glasspane-srs--advance))
     (jetpacs-shell-push)))
 
@@ -7158,7 +6851,7 @@ Best-effort: a snapshot failure must not block the rating."
                 (org-back-to-heading t)
                 (unless (org-in-commented-heading-p) (org-toggle-comment))
                 (let ((save-silently t)) (save-buffer)))))))
-      (glasspane-org-cache-invalidate)
+      (jetpacs-org-cache-invalidate 'glasspane)
       (glasspane-srs--advance))
     (jetpacs-shell-push)))
 
@@ -7181,7 +6874,7 @@ Best-effort: a snapshot failure must not block the rating."
                  (insert (cdr snap))
                  (org-srs-log-hide-drawer)
                  (let ((save-silently t)) (save-buffer))))))
-          (glasspane-org-cache-invalidate)
+          (jetpacs-org-cache-invalidate 'glasspane)
           (setq glasspane-srs--current (car snap) glasspane-srs--revealed t))
       (jetpacs-shell-notify "Nothing to undo"))
     (jetpacs-shell-push)))
@@ -7195,13 +6888,13 @@ Best-effort: a snapshot failure must not block the rating."
     (if (not (glasspane-srs-available-p))
         (jetpacs-shell-notify "org-srs is not installed")
       (condition-case err
-          (let ((marker (glasspane-org--resolve-ref args)))
+          (let ((marker (jetpacs-org-resolve-ref args)))
             (with-current-buffer (marker-buffer marker)
               (org-with-wide-buffer
                (goto-char marker)
                (org-srs-item-create))
               (let ((save-silently t)) (save-buffer)))
-            (glasspane-org-cache-invalidate)
+            (jetpacs-org-cache-invalidate 'glasspane)
             (jetpacs-shell-notify "Review item created"))
         (quit (jetpacs-shell-notify "Cancelled"))
         (error (jetpacs-shell-notify
@@ -8040,8 +7733,7 @@ other files in the directory are untouched.  Returns DIR."
     ;; The flashcards become live review items when org-srs is around.
     (glasspane-demo--register-srs-items dir)
     ;; Agenda/search memos now describe files that no longer exist.
-    (when (fboundp 'glasspane-org-cache-invalidate)
-      (glasspane-org-cache-invalidate))
+    (jetpacs-org-cache-invalidate 'glasspane)
     (when (called-interactively-p 'interactive)
       (message "Demo org corpus written to %s" dir))
     dir))

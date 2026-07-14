@@ -145,8 +145,7 @@ Memoised through the org cache seam — every mutating srs.* action
 invalidates, so the count follows ratings without a per-render scan."
   (when (glasspane-srs-available-p)
     (glasspane-srs--quietly
-      (glasspane-org--with-cache
-          (glasspane-org--cache-key 'srs-due (glasspane-srs--source))
+      (jetpacs-org-with-cache 'glasspane (list 'srs-due (glasspane-srs--source))
         (length (org-srs-review-pending-items (glasspane-srs--source)))))))
 
 ;; ─── Content extraction & clean rendering ────────────────────────────────────
@@ -636,7 +635,7 @@ Best-effort: a snapshot failure must not block the rating."
                 (org-srs-review-item nil))
             (with-current-buffer buf
               (apply #'org-srs-review-rate kw glasspane-srs--current))))
-        (glasspane-org-cache-invalidate)
+        (jetpacs-org-cache-invalidate 'glasspane)
         (glasspane-srs--advance)))
     (jetpacs-shell-push)))
 
@@ -651,7 +650,7 @@ Best-effort: a snapshot failure must not block the rating."
     (when glasspane-srs--current
       (glasspane-srs--engine
         (apply #'org-srs-review-postpone '(1 :day) glasspane-srs--current))
-      (glasspane-org-cache-invalidate)
+      (jetpacs-org-cache-invalidate 'glasspane)
       (glasspane-srs--advance))
     (jetpacs-shell-push)))
 
@@ -668,7 +667,7 @@ Best-effort: a snapshot failure must not block the rating."
                 (org-back-to-heading t)
                 (unless (org-in-commented-heading-p) (org-toggle-comment))
                 (let ((save-silently t)) (save-buffer)))))))
-      (glasspane-org-cache-invalidate)
+      (jetpacs-org-cache-invalidate 'glasspane)
       (glasspane-srs--advance))
     (jetpacs-shell-push)))
 
@@ -691,7 +690,7 @@ Best-effort: a snapshot failure must not block the rating."
                  (insert (cdr snap))
                  (org-srs-log-hide-drawer)
                  (let ((save-silently t)) (save-buffer))))))
-          (glasspane-org-cache-invalidate)
+          (jetpacs-org-cache-invalidate 'glasspane)
           (setq glasspane-srs--current (car snap) glasspane-srs--revealed t))
       (jetpacs-shell-notify "Nothing to undo"))
     (jetpacs-shell-push)))
@@ -705,13 +704,13 @@ Best-effort: a snapshot failure must not block the rating."
     (if (not (glasspane-srs-available-p))
         (jetpacs-shell-notify "org-srs is not installed")
       (condition-case err
-          (let ((marker (glasspane-org--resolve-ref args)))
+          (let ((marker (jetpacs-org-resolve-ref args)))
             (with-current-buffer (marker-buffer marker)
               (org-with-wide-buffer
                (goto-char marker)
                (org-srs-item-create))
               (let ((save-silently t)) (save-buffer)))
-            (glasspane-org-cache-invalidate)
+            (jetpacs-org-cache-invalidate 'glasspane)
             (jetpacs-shell-notify "Review item created"))
         (quit (jetpacs-shell-notify "Cancelled"))
         (error (jetpacs-shell-notify

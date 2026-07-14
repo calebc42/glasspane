@@ -799,8 +799,7 @@ other files in the directory are untouched.  Returns DIR."
     ;; The flashcards become live review items when org-srs is around.
     (glasspane-demo--register-srs-items dir)
     ;; Agenda/search memos now describe files that no longer exist.
-    (when (fboundp 'glasspane-org-cache-invalidate)
-      (glasspane-org-cache-invalidate))
+    (jetpacs-org-cache-invalidate 'glasspane)
     (when (called-interactively-p 'interactive)
       (message "Demo org corpus written to %s" dir))
     dir))

@@ -50,7 +50,7 @@
               (format "* TODO Untimed thing\nSCHEDULED: <%s>\n" tomorrow)))
     (unwind-protect
         (let ((org-agenda-files (list file)))
-          (glasspane-org-cache-invalidate)
+          (jetpacs-org-cache-invalidate 'glasspane)
           (let ((rems (glasspane-org--upcoming-reminders 48)))
             (should (= (length rems) 1))
             (let ((r (car rems)))
@@ -130,7 +130,7 @@
           (with-current-buffer (get-buffer-create "*Org Agenda*")
             (erase-buffer)
             (insert "user content"))
-          (glasspane-org-cache-invalidate)
+          (jetpacs-org-cache-invalidate 'glasspane)
           (should (cl-some (lambda (it)
                              (equal (alist-get 'headline it) "Water plants"))
                            (glasspane-org--agenda-items 'day nil)))
@@ -148,7 +148,7 @@
       (insert (format "* TODO Future thing\nSCHEDULED: <%s>\n" tomorrow)))
     (unwind-protect
         (let ((org-agenda-files (list file)))
-          (glasspane-org-cache-invalidate)
+          (jetpacs-org-cache-invalidate 'glasspane)
           (should-not (cl-some (lambda (it)
                                  (equal (alist-get 'headline it) "Future thing"))
                                (glasspane-org--agenda-items 'day nil)))
@@ -161,28 +161,28 @@
 
 (ert-deftest jetpacs-search-parse-normalizes-sexp-queries ()
   "Hand-typed elisp-isms — quoted or bare symbols — become org-ql strings."
-  (should (equal (glasspane-org--parse-query "(tags 'server)") '(tags "server")))
-  (should (equal (glasspane-org--parse-query "(tags \"server\")") '(tags "server")))
-  (should (equal (glasspane-org--parse-query "'(and (todo NEXT) (tags 'a b))")
+  (should (equal (jetpacs-org-parse-query "(tags 'server)") '(tags "server")))
+  (should (equal (jetpacs-org-parse-query "(tags \"server\")") '(tags "server")))
+  (should (equal (jetpacs-org-parse-query "'(and (todo NEXT) (tags 'a b))")
                  '(and (todo "NEXT") (tags "a" "b"))))
   ;; Symbols org-ql assigns meaning survive: dates, comparators, keywords.
-  (should (equal (glasspane-org--parse-query "(deadline :on today)")
+  (should (equal (jetpacs-org-parse-query "(deadline :on today)")
                  '(deadline :on today)))
-  (should (equal (glasspane-org--parse-query "(priority >= \"B\")")
+  (should (equal (jetpacs-org-parse-query "(priority >= \"B\")")
                  '(priority >= "B"))))
 
 (ert-deftest jetpacs-search-parse-tokens-and-text ()
   "Token queries AND together; quoted phrases stay whole; empty is nil."
-  (should (equal (glasspane-org--parse-query
+  (should (equal (jetpacs-org-parse-query
                   "todo:TODO,NEXT tags:work \"buy milk\" cheese")
                  '(and (todo "TODO" "NEXT") (tags "work")
                        (regexp "buy milk") (regexp "cheese"))))
-  (should (equal (glasspane-org--parse-query "milk") '(regexp "milk")))
-  (should (null (glasspane-org--parse-query "   "))))
+  (should (equal (jetpacs-org-parse-query "milk") '(regexp "milk")))
+  (should (null (jetpacs-org-parse-query "   "))))
 
 (ert-deftest jetpacs-search-parse-unbalanced-query-errors ()
   "A malformed sexp must error visibly, never silently match nothing."
-  (should-error (glasspane-org--parse-query "(tags \"server\"")
+  (should-error (jetpacs-org-parse-query "(tags \"server\"")
                 :type 'user-error))
 
 (ert-deftest jetpacs-search-matches-quoted-tag-query ()
@@ -240,7 +240,7 @@
     (jetpacs-ui-state-put "search-filter-tags" ["server" "urgent"])
     (jetpacs-ui-state-put "search-filter-due" "Today")
     (jetpacs-ui-state-put "search-filter-text" "reboot")
-    (should (equal (glasspane-org--parse-query (glasspane-ui--search-filter-query))
+    (should (equal (jetpacs-org-parse-query (glasspane-ui--search-filter-query))
                    '(and (todo "TODO") (tags "server") (tags "urgent")
                          (deadline :on today) (regexp "reboot")))))
   ;; A lone filter emits a bare clause — the same shape a tag tap makes.

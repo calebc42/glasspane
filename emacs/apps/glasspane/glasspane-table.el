@@ -80,10 +80,7 @@ row) skips the realign instead of erroring."
                  (let ((case-fold-search t))
                    (looking-at-p "[ \t]*#\\+TBLFM:")))
            (org-table-recalculate t)))))
-    (let ((glasspane-org--inhibit-save-refresh t)
-          (save-silently t))
-      (save-buffer)))
-  (jetpacs-org-cache-invalidate 'glasspane)
+    (glasspane-org--save-and-invalidate))
   (jetpacs-shell-push))
 
 (defun glasspane-ui--table-field-formula ()
@@ -254,10 +251,7 @@ are not resolved — those cells stay value-editable."
                                     (error "Timed out after %ss"
                                            glasspane-babel-timeout))
                        (org-babel-execute-src-block nil info)))))
-                (let ((glasspane-org--inhibit-save-refresh t)
-                      (save-silently t))
-                  (save-buffer)))
-              (jetpacs-org-cache-invalidate 'glasspane)
+                (glasspane-org--save-and-invalidate))
               (jetpacs-shell-notify "Block executed")
               (jetpacs-shell-push))
           (error

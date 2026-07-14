@@ -375,9 +375,8 @@ must not nest a link inside a link."
                 "Couldn't find the mention — file changed? Refresh and retry")
              (replace-match (format "[[id:%s][%s]]" id (match-string 0))
                             t t)
-             (let ((save-silently t)) (save-buffer))
+             (glasspane-org--save-and-invalidate)
              (remhash id glasspane-notes--mentions)
-             (jetpacs-org-cache-invalidate 'glasspane)
              (jetpacs-shell-notify "Linked"))))))
       (jetpacs-shell-push))))
 

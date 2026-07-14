@@ -488,10 +488,7 @@ error UX are app policy and stay here."
                 (org-with-wide-buffer
                  (goto-char pos)
                  (org-toggle-checkbox))
-                (let ((glasspane-org--inhibit-save-refresh t)
-                      (save-silently t))
-                  (save-buffer)))
-              (jetpacs-org-cache-invalidate 'glasspane)
+                (glasspane-org--save-and-invalidate))
               (jetpacs-shell-push))
           (error
            (jetpacs-shell-notify

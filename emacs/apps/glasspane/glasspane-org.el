@@ -20,6 +20,18 @@
 Bound around our own programmatic saves (heading edits, file saves) so an
 explicit dashboard push isn't doubled by the save-hook firing on top.")
 
+(defun glasspane-org--save-and-invalidate (&optional buffer)
+  "Synchronously save BUFFER (default: current buffer); drop the org memo.
+The shared tail of every mutation outside `glasspane-ui--at-ref' —
+keep-the-funnel: the save happens NOW, never on an idle timer
+\(`jetpacs-org-defer-save'), with the after-save dashboard refresh
+suppressed so the caller's explicit repush isn't doubled."
+  (with-current-buffer (or buffer (current-buffer))
+    (let ((glasspane-org--inhibit-save-refresh t)
+          (save-silently t))
+      (save-buffer)))
+  (jetpacs-org-cache-invalidate 'glasspane))
+
 ;; The dashboard pushes every view on every action (so navigation stays
 ;; instant and offline-capable), which means the expensive extractions here
 ;; — a full `org-agenda' run, an `org-map-entries' sweep — would execute on

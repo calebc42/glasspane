@@ -78,8 +78,6 @@ Y-m-d makes the match unambiguous against month/year levels."
                 nil t)
            (line-beginning-position)))))))
 
-(defvar glasspane-org--inhibit-save-refresh)
-
 (defun glasspane-journal--append (text &optional date)
   "Append TEXT as a plain list item under DATE's (default today) day.
 Creates the datetree levels (and the file) on first use."
@@ -94,10 +92,7 @@ Creates the datetree levels (and the file) on first use."
          (org-end-of-subtree t t)
          (unless (bolp) (insert "\n"))
          (insert "- " text "\n"))
-        (let ((glasspane-org--inhibit-save-refresh t)
-              (save-silently t))
-          (save-buffer))))
-    (jetpacs-org-cache-invalidate 'glasspane)))
+        (glasspane-org--save-and-invalidate)))))
 
 (defun glasspane-journal--carried-over ()
   "Unfinished TODOs scheduled before today — the carry-over list."

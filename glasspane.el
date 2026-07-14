@@ -122,6 +122,18 @@ drills into the live transient's own pie.")
 Bound around our own programmatic saves (heading edits, file saves) so an
 explicit dashboard push isn't doubled by the save-hook firing on top.")
 
+(defun glasspane-org--save-and-invalidate (&optional buffer)
+  "Synchronously save BUFFER (default: current buffer); drop the org memo.
+The shared tail of every mutation outside `glasspane-ui--at-ref' —
+keep-the-funnel: the save happens NOW, never on an idle timer
+\(`jetpacs-org-defer-save'), with the after-save dashboard refresh
+suppressed so the caller's explicit repush isn't doubled."
+  (with-current-buffer (or buffer (current-buffer))
+    (let ((glasspane-org--inhibit-save-refresh t)
+          (save-silently t))
+      (save-buffer)))
+  (jetpacs-org-cache-invalidate 'glasspane))
+
 ;; The dashboard pushes every view on every action (so navigation stays
 ;; instant and offline-capable), which means the expensive extractions here
 ;; — a full `org-agenda' run, an `org-map-entries' sweep — would execute on
@@ -2226,10 +2238,7 @@ error UX are app policy and stay here."
                 (org-with-wide-buffer
                  (goto-char pos)
                  (org-toggle-checkbox))
-                (let ((glasspane-org--inhibit-save-refresh t)
-                      (save-silently t))
-                  (save-buffer)))
-              (jetpacs-org-cache-invalidate 'glasspane)
+                (glasspane-org--save-and-invalidate))
               (jetpacs-shell-push))
           (error
            (jetpacs-shell-notify
@@ -3979,10 +3988,7 @@ container would break Compose) and wrap otherwise."
                  (insert value)
                  (goto-char pos)
                  (setq glasspane-ui--detail-ref (jetpacs-org-heading-ref))
-                 (let ((glasspane-org--inhibit-save-refresh t)
-                       (save-silently t))
-                   (save-buffer))))
-              (jetpacs-org-cache-invalidate 'glasspane)
+                 (glasspane-org--save-and-invalidate)))
               (setq glasspane-ui--detail-read-mode t)
               (jetpacs-shell-notify "Saved heading"))
           (error
@@ -4278,11 +4284,7 @@ container would break Compose) and wrap otherwise."
                  (goto-char (line-beginning-position))))
              ;; Paste at the new level (or original level if nil)
              (org-paste-subtree (or new-level from-level)))))
-        (let ((glasspane-org--inhibit-save-refresh t)
-              (save-silently t))
-          (with-current-buffer (find-file-noselect file)
-            (save-buffer)))
-        (jetpacs-org-cache-invalidate 'glasspane)
+        (glasspane-org--save-and-invalidate (find-file-noselect file))
         (jetpacs-shell-push nil :switch-to "edit")))))
 
 (defun glasspane-ui--org-editor-actions (file)
@@ -4408,11 +4410,8 @@ container would break Compose) and wrap otherwise."
               (funcall update-kwd "EMAIL" email)
               (funcall update-kwd "DATE" date)
               (funcall update-kwd "ARCHIVE" archive))
-            (let ((glasspane-org--inhibit-save-refresh t)
-                  (save-silently t))
-              (save-buffer)))))
+            (glasspane-org--save-and-invalidate))))
       (jetpacs-dismiss-dialog)
-      (jetpacs-org-cache-invalidate 'glasspane)
       (jetpacs-shell-push))))
 
 (provide 'glasspane-detail)
@@ -4731,10 +4730,7 @@ row) skips the realign instead of erroring."
                  (let ((case-fold-search t))
                    (looking-at-p "[ \t]*#\\+TBLFM:")))
            (org-table-recalculate t)))))
-    (let ((glasspane-org--inhibit-save-refresh t)
-          (save-silently t))
-      (save-buffer)))
-  (jetpacs-org-cache-invalidate 'glasspane)
+    (glasspane-org--save-and-invalidate))
   (jetpacs-shell-push))
 
 (defun glasspane-ui--table-field-formula ()
@@ -4905,10 +4901,7 @@ are not resolved — those cells stay value-editable."
                                     (error "Timed out after %ss"
                                            glasspane-babel-timeout))
                        (org-babel-execute-src-block nil info)))))
-                (let ((glasspane-org--inhibit-save-refresh t)
-                      (save-silently t))
-                  (save-buffer)))
-              (jetpacs-org-cache-invalidate 'glasspane)
+                (glasspane-org--save-and-invalidate))
               (jetpacs-shell-notify "Block executed")
               (jetpacs-shell-push))
           (error
@@ -5002,8 +4995,6 @@ Y-m-d makes the match unambiguous against month/year levels."
                 nil t)
            (line-beginning-position)))))))
 
-(defvar glasspane-org--inhibit-save-refresh)
-
 (defun glasspane-journal--append (text &optional date)
   "Append TEXT as a plain list item under DATE's (default today) day.
 Creates the datetree levels (and the file) on first use."
@@ -5018,10 +5009,7 @@ Creates the datetree levels (and the file) on first use."
          (org-end-of-subtree t t)
          (unless (bolp) (insert "\n"))
          (insert "- " text "\n"))
-        (let ((glasspane-org--inhibit-save-refresh t)
-              (save-silently t))
-          (save-buffer))))
-    (jetpacs-org-cache-invalidate 'glasspane)))
+        (glasspane-org--save-and-invalidate)))))
 
 (defun glasspane-journal--carried-over ()
   "Unfinished TODOs scheduled before today — the carry-over list."
@@ -6190,9 +6178,8 @@ must not nest a link inside a link."
                 "Couldn't find the mention — file changed? Refresh and retry")
              (replace-match (format "[[id:%s][%s]]" id (match-string 0))
                             t t)
-             (let ((save-silently t)) (save-buffer))
+             (glasspane-org--save-and-invalidate)
              (remhash id glasspane-notes--mentions)
-             (jetpacs-org-cache-invalidate 'glasspane)
              (jetpacs-shell-notify "Linked"))))))
       (jetpacs-shell-push))))
 

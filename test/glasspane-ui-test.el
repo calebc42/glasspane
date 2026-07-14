@@ -200,4 +200,20 @@ otherwise block on the real prompt)."
                    (with-temp-buffer (insert-file-contents file) (buffer-string)))))
       (delete-file file))))
 
+(ert-deftest glasspane-ui-absorbs-core-files-and-eval-tabs ()
+  "Loading Glasspane suppresses the core's vanilla \"Jetpacs\" app,
+so the stock Files and Eval tabs ride Glasspane's own bottom bar and
+the unowned core drawer entries (Buffers, Messages, Tools) switch to
+views that are actually in the push — not dead taps in a second app."
+  ;; Single-app mode: Glasspane is the only registered app.
+  (should (equal (mapcar #'car jetpacs-apps--registry) '("glasspane")))
+  ;; Every stock view passes the app filter again...
+  (dolist (v '("files" "eval" "buffers" "messages" "tools"))
+    (should (jetpacs-shell--view-filtered-p v)))
+  ;; ...and the bar reads org tabs first, then the stock pair.
+  (should (equal (cl-remove-if-not #'jetpacs-shell--tab-p
+                                   (mapcar #'car jetpacs-shell-views))
+                 '("glasspane.agenda" "glasspane.journal" "glasspane.tasks"
+                   "files" "eval"))))
+
 (provide 'glasspane-ui-test)

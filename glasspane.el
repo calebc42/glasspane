@@ -1843,6 +1843,24 @@ suppressed identical push would leave it frozen."
                       "glasspane.gallery")
              :order 10)
 
+;; The core auto-registers a vanilla "Jetpacs" app claiming the stock
+;; views (`jetpacs-apps-show-vanilla-app', default t) — with Glasspane
+;; loaded that makes two apps, and containment takes Files and Eval
+;; (the only stock bottom-bar tabs) out of Glasspane's bar into the
+;; launcher's second app.  It also turns the core's unowned drawer
+;; entries (Buffers, Messages, Tools) into dead taps here: they render
+;; in every app, but switch to views the app filter drops from the
+;; push while Glasspane is current.  Glasspane's opinion is the
+;; single-app world: flip the option off through its :set (which does
+;; the actual unregistration), and every stock view shows here again —
+;; Files (order 40) and Eval (order 50) slot in after the org tabs,
+;; the drawer entries land.  The user keeps the last word both ways:
+;; an already-loaded saved customization is respected (the `get'
+;; guard), and the Settings toggle saves to custom.el, which the
+;; starter init loads after this bundle — re-enabling re-registers.
+(unless (get 'jetpacs-apps-show-vanilla-app 'saved-value)
+  (customize-set-variable 'jetpacs-apps-show-vanilla-app nil))
+
 ;; Landing on any non-overlay view closes the detail drill-in.
 (add-hook 'jetpacs-shell-view-switched-hook
           (lambda (_view) (setq glasspane-ui--detail-ref nil)))

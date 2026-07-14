@@ -72,6 +72,38 @@ rich renderers (native table, babel run button)."
           (kill-buffer buf)))
       (delete-directory dir t))))
 
+(ert-deftest glasspane-demo-org-dates-land-relative-to-today ()
+  "The corpus's authored dates shift as one block onto the run day:
+what was scheduled on the authoring anchor is scheduled today, and the
+shifter rewrites every day-named stamp — repeaters and clock ranges
+ride along with day names recomputed."
+  ;; The pure shifter, deterministically.
+  (should (equal (glasspane-demo--shift-timestamps
+                  (concat "SCHEDULED: <2026-07-05 Sun +1w>\n"
+                          "CLOCK: [2026-07-01 Wed 06:30]--[2026-07-01 Wed 07:15] =>  0:45")
+                  3)
+                 (concat "SCHEDULED: <2026-07-08 Wed +1w>\n"
+                         "CLOCK: [2026-07-04 Sat 06:30]--[2026-07-04 Sat 07:15] =>  0:45")))
+  ;; A zero shift (running on the authoring day) is byte-identical.
+  (should (equal (glasspane-demo--shift-timestamps "<2026-07-06 Mon>" 0)
+                 "<2026-07-06 Mon>"))
+  ;; End to end: the written corpus schedules the anchor items today,
+  ;; whatever day the suite runs.
+  (let ((dir (make-temp-file "glasspane-demo-dates" t)))
+    (unwind-protect
+        (progn
+          (glasspane-demo-setup-org dir)
+          (let ((today (let ((system-time-locale "C"))
+                         (format-time-string "%Y-%m-%d %a")))
+                (all (mapconcat
+                      (lambda (spec)
+                        (with-temp-buffer
+                          (insert-file-contents (expand-file-name (car spec) dir))
+                          (buffer-string)))
+                      glasspane-demo--org-files "\n")))
+            (should (string-search (format "SCHEDULED: <%s>" today) all))))
+      (delete-directory dir t))))
+
 (ert-deftest glasspane-demo-link-graph-consistent ()
   "The demo corpus's id links resolve to real :ID: properties, and the
 unlinked-mention fixtures ('Babel playground', 'Grace Hopper') appear

@@ -8117,21 +8117,67 @@ cost the registration, never the demo setup."
       (error (message "glasspane-demo: SRS registration failed: %s"
                       (error-message-string err))))))
 
+;; ─── Relative dates ──────────────────────────────────────────────────────────
+
+(defconst glasspane-demo--org-anchor "2026-07-06"
+  "The \"today\" the org corpus above was authored against.
+Setup shifts every timestamp by (today − anchor) days at write time,
+so the corpus always lands with its authored spread — overdue items,
+a today, a tomorrow, deadlines weeks out — relative to the day the
+command runs.  Editing corpus dates means re-anchoring this to the
+new authoring day.")
+
+(defun glasspane-demo--noon (date)
+  "Encoded noon of DATE (\"YYYY-MM-DD\"); noon dodges DST date flips."
+  (encode-time 0 0 12
+               (string-to-number (substring date 8 10))
+               (string-to-number (substring date 5 7))
+               (string-to-number (substring date 0 4))))
+
+(defun glasspane-demo--shift-timestamps (content days)
+  "CONTENT with every day-named \"YYYY-MM-DD Day\" date moved DAYS forward.
+One rewrite covers every org form in the corpus — active and inactive
+stamps, CLOCK ranges, CLOSED/LAST_REPEAT entries, table rows — because
+all of them carry the day-named date; whatever follows it (a time, a
+repeater cookie) rides along untouched.  Day names are recomputed in
+the C locale to match the corpus style, and the fixed-width stamp
+keeps table alignment intact."
+  (if (zerop days) content
+    (let ((system-time-locale "C"))
+      (replace-regexp-in-string
+       "[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} \\(?:Mon\\|Tue\\|Wed\\|Thu\\|Fri\\|Sat\\|Sun\\)"
+       (lambda (stamp)
+         (format-time-string
+          "%Y-%m-%d %a"
+          (time-add (glasspane-demo--noon (substring stamp 0 10))
+                    (days-to-time days))))
+       content t t))))
+
+(defun glasspane-demo--org-shift ()
+  "Days from the corpus's authoring anchor to today."
+  (- (time-to-days (current-time))
+     (time-to-days (glasspane-demo--noon glasspane-demo--org-anchor))))
+
 ;;;###autoload
 (defun glasspane-demo-setup-org (&optional dir)
   "Write the demo org corpus into DIR (default `org-directory').
 Overwrites exactly the files named in `glasspane-demo--org-files' —
-other files in the directory are untouched.  Returns DIR."
+other files in the directory are untouched.  Timestamps land relative
+to today: the authored dates shift as one block (see
+`glasspane-demo--org-anchor'), so the agenda always opens onto the
+same mix of overdue, due-today, and upcoming items.  Returns DIR."
   (interactive)
   (let ((dir (file-name-as-directory
               (expand-file-name
                (or dir
                    (and (boundp 'org-directory) org-directory)
                    "~/org/"))))
+        (shift (glasspane-demo--org-shift))
         (coding-system-for-write 'utf-8))
     (make-directory dir t)
     (dolist (spec glasspane-demo--org-files)
-      (write-region (cdr spec) nil (expand-file-name (car spec) dir)
+      (write-region (glasspane-demo--shift-timestamps (cdr spec) shift)
+                    nil (expand-file-name (car spec) dir)
                     nil 'silent))
     ;; The flashcards become live review items when org-srs is around.
     (glasspane-demo--register-srs-items dir)

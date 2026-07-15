@@ -50,6 +50,7 @@
                     "apps/glasspane/glasspane-demo.el"
                     "apps/glasspane/glasspane-gallery.el"
                     "apps/glasspane/glasspane-config.el"
+                    "apps/glasspane/glasspane-packages.el"
                     "apps/glasspane/glasspane-pack.el"
                     "apps/glasspane/glasspane.el"))
        (out (expand-file-name "../glasspane.el" here)))

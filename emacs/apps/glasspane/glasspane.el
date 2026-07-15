@@ -26,6 +26,7 @@
 (require 'glasspane-srs)
 (require 'glasspane-gallery)
 (require 'glasspane-config)
+(require 'glasspane-packages)
 (require 'glasspane-pack)
 
 ;; The app-managed defaults (capture templates, agenda wiring): under
@@ -35,6 +36,12 @@
 ;; and either way init.el code after (require 'glasspane) still runs
 ;; later, so personal settings always win.
 (glasspane-config-startup)
+
+;; A device install also provisions the optional engines the starter
+;; init used to install (org-ql, vulpea, org-srs): one idle attempt per
+;; session, batch and desktop requires never reach for MELPA — see
+;; glasspane-packages.el.
+(glasspane-packages-maybe-auto-install)
 
 (provide 'glasspane)
 ;;; glasspane.el ends here

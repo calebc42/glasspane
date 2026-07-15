@@ -20,6 +20,7 @@ EMACS="${EMACS:-emacs}"
   -l glasspane-notes-test \
   -l glasspane-org-test \
   -l glasspane-pack-test \
+  -l glasspane-packages-test \
   -l glasspane-source-test \
   -l glasspane-sparse-test \
   -l glasspane-srs-test \

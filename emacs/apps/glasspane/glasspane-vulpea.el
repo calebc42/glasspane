@@ -1,62 +1,78 @@
-;;; glasspane-vulpea.el --- Vulpea integration for Glasspane -*- lexical-binding: t; -*-
+;;; glasspane-vulpea.el --- Mobile-context vulpea extractor -*- lexical-binding: t; -*-
 
-(require 'vulpea-db-extract nil t)
+;; Indexes Tasker/Mobile context properties (LOCATION, WIFI_SSID,
+;; BATTERY_LEVEL, ACTIVITY, BLUETOOTH_DEVICES) into a `glasspane_mobile'
+;; plugin table riding the user's vulpea note index (vulpea 2.6 extractor
+;; API).  Rows are keyed to the note id with a cascade foreign key, so
+;; vulpea's own delete-then-reinsert file update and file removals clean
+;; them — no delete hook.
+;;
+;; This file is the extractor's `:worker-lib': vulpea's extraction worker
+;; `require's it to resolve the extract-fn in its own process, so loading
+;; it must have no side effects — definitions only.  Registration (which
+;; applies the plugin schema, DDL only the main process may run) happens
+;; through `glasspane-vulpea-register', called where Glasspane detects
+;; vulpea: the glasspane-org load tail and the packages light-up.
 
-(defun glasspane-vulpea--extract-mobile (ctx note-data)
-  "Extract Tasker/Mobile context properties from a note."
+;;; Code:
+
+(declare-function emacsql "emacsql" (connection sql &rest args))
+(declare-function vulpea-db "vulpea-db" ())
+(declare-function vulpea-db-register-extractor "vulpea-db-extract"
+                  (extractor-or-name &optional fn))
+(declare-function make-vulpea-extractor "vulpea-db-extract" (&rest slots))
+
+(defun glasspane-vulpea--extract-mobile (_ctx note-data)
+  "Index NOTE-DATA's mobile context properties into `glasspane_mobile'.
+Runs per note, inside vulpea's file-update transaction, after the note
+row is inserted — so the row it writes can hold a foreign key against
+the note.  Props-only: never reads the AST, which keeps the extractor
+worker-eligible.  Returns NOTE-DATA unchanged (side-effecting
+extractor)."
   (let* ((props (plist-get note-data :properties))
+         (id (plist-get note-data :id))
          (location (cdr (assoc "LOCATION" props)))
          (wifi (cdr (assoc "WIFI_SSID" props)))
          (battery (cdr (assoc "BATTERY_LEVEL" props)))
          (activity (cdr (assoc "ACTIVITY" props)))
          (bluetooth (cdr (assoc "BLUETOOTH_DEVICES" props))))
-    (if (or location wifi battery activity bluetooth)
-        (plist-put note-data :glasspane-mobile
-                   (list :note-id (plist-get note-data :id)
-                         :location location
-                         :wifi wifi
-                         :battery (when battery (string-to-number battery))
-                         :activity activity
-                         :bluetooth bluetooth))
-      note-data)))
+    (when (and id (or location wifi battery activity bluetooth))
+      (emacsql (vulpea-db)
+               [:insert :into glasspane-mobile :values $v1]
+               (vector id location wifi
+                       (and battery (string-to-number battery))
+                       activity bluetooth)))
+    note-data))
 
-(defun glasspane-vulpea--batch-insert-mobile (db tx all-note-data)
-  "Insert mobile context data into SQLite."
-  (let (rows)
-    (dolist (data all-note-data)
-      (when-let ((mobile (plist-get data :glasspane-mobile)))
-        (push (vector (plist-get mobile :note-id)
-                      (plist-get mobile :location)
-                      (plist-get mobile :wifi)
-                      (plist-get mobile :battery)
-                      (plist-get mobile :activity)
-                      (plist-get mobile :bluetooth))
-              rows)))
-    (when rows
-      (emacsql db [:insert :into glasspane_mobile :values $v1] (vconcat rows)))))
+(defvar glasspane-vulpea--registered nil
+  "Non-nil once the mobile extractor has been registered this session.")
 
-(defun glasspane-vulpea--delete-mobile (db tx file-path)
-  "Delete mobile context data for FILE-PATH."
-  (emacsql db [:delete :from glasspane_mobile
-               :where (in note-id [:select id :from notes
-                                   :where (= path $s1)])]
-           file-path))
-
-(when (fboundp 'vulpea-db-register-extractor)
-  (vulpea-db-register-extractor
-   (make-vulpea-extractor
-    :name 'glasspane-mobile
-    :version 1
-    :priority 90
-    :schema '((glasspane_mobile (note-id text :not-null :primary-key)
-                                (location text)
-                                (wifi text)
-                                (battery integer)
-                                (activity text)
-                                (bluetooth text)))
-    :extract-fn #'glasspane-vulpea--extract-mobile
-    :batch-insert-fn #'glasspane-vulpea--batch-insert-mobile
-    :delete-fn #'glasspane-vulpea--delete-mobile)))
+(defun glasspane-vulpea-register ()
+  "Register the mobile-context extractor with vulpea (idempotent).
+Creates the plugin table via the extractor `:schema'; the cascade
+foreign key keeps it consistent from then on.  A no-op when vulpea's
+extractor registry isn't loaded — Glasspane never force-loads vulpea,
+it only rides an index the user's own config (or the packages
+light-up) brought up."
+  (when (and (not glasspane-vulpea--registered)
+             (fboundp 'vulpea-db-register-extractor))
+    (vulpea-db-register-extractor
+     (make-vulpea-extractor
+      :name 'glasspane-mobile
+      :version 1
+      :priority 90
+      ;; Explicit nil (default is `unset'): declares the props-only
+      ;; contract, so extraction never forces a full object parse and
+      ;; stays eligible for the async worker.
+      :requires-ast nil
+      :worker-safe t
+      :worker-lib 'glasspane-vulpea
+      :schema '((glasspane-mobile
+                 [(note-id :not-null) location wifi battery activity bluetooth]
+                 (:foreign-key [note-id] :references notes [id]
+                  :on-delete :cascade)))
+      :extract-fn #'glasspane-vulpea--extract-mobile))
+    (setq glasspane-vulpea--registered t)))
 
 (provide 'glasspane-vulpea)
 ;;; glasspane-vulpea.el ends here

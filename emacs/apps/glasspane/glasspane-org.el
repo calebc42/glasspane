@@ -578,8 +578,11 @@ ready for the companion's `reminders.set' frame."
             (let ((org-property-changed-functions nil))
               (org-set-property "MODIFIED" (glasspane-org--timestamp-string)))))
 
+(declare-function glasspane-vulpea-register "glasspane-vulpea" ())
+
 (when (featurep 'vulpea)
-  (require 'glasspane-vulpea nil t))
+  (when (require 'glasspane-vulpea nil t)
+    (glasspane-vulpea-register)))
 
 (provide 'glasspane-org)
 ;;; glasspane-org.el ends here

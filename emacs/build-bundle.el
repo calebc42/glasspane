@@ -30,6 +30,7 @@
        ;; Dependency order. Do not reorder without re-checking the require
        ;; graph.
        (app-files '("apps/jetpacs-magit.el"
+                    "apps/glasspane/glasspane-vulpea.el"
                     "apps/glasspane/glasspane-org.el"
                     "apps/glasspane/glasspane-source.el"
                     "apps/glasspane/glasspane-org-rich.el"

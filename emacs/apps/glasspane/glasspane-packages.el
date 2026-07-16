@@ -32,6 +32,7 @@
 
 (declare-function vulpea-db-autosync-mode "vulpea-db" (&optional arg))
 (declare-function vulpea-db-sync-full-scan "vulpea-db" ())
+(declare-function glasspane-vulpea-register "glasspane-vulpea" ())
 (declare-function org-srs-item-confirm-command "org-srs" ())
 
 ;; Forward-declared: `org-directory' lives in org, which this file must not
@@ -88,6 +89,10 @@ view — the Review drawer entry and the notes sections appear live."
     (defvar vulpea-db-sync-directories)
     (when (and (stringp org-directory) (file-directory-p org-directory))
       (add-to-list 'vulpea-db-sync-directories org-directory))
+    ;; The mobile-context extractor must be in the registry before
+    ;; autosync or the once-per-device full scan index anything.
+    (when (require 'glasspane-vulpea nil t)
+      (glasspane-vulpea-register))
     (when (fboundp 'vulpea-db-autosync-mode)
       (vulpea-db-autosync-mode 1))
     ;; Autosync watches for changes; a vault that predates vulpea still

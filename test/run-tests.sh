@@ -27,6 +27,7 @@ EMACS="${EMACS:-emacs}"
   -l glasspane-srs-test \
   -l glasspane-ui-test \
   -l glasspane-views-test \
+  -l glasspane-vulpea-test \
   -f ert-run-tests-batch-and-exit </dev/null
 
 # The foundation byte-compiles an adopted bundle BEFORE loading it, when

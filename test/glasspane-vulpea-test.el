@@ -48,24 +48,35 @@ absent properties become nil (SQL NULL)."
       (should (eq (glasspane-vulpea--extract-mobile nil note-data) note-data))
       (should-not calls))))
 
+(cl-defun glasspane-vulpea-tests--register-slots (&key v26)
+  "Drive `glasspane-vulpea-register' twice against mocked vulpea.
+V26 non-nil fakes `vulpea-extractor-requires-ast-p' defined (the 2.6
+probe); nil forces it undefined.  Asserts once-only registration and
+returns the slot plist handed to `make-vulpea-extractor'."
+  (let ((glasspane-vulpea--registered nil)
+        made registered)
+    (cl-letf (((symbol-function 'vulpea-db-register-extractor)
+               (lambda (ext) (push ext registered) ext))
+              ((symbol-function 'make-vulpea-extractor)
+               (lambda (&rest slots) (setq made slots) 'fake-extractor))
+              ((symbol-function 'vulpea-extractor-requires-ast-p)
+               (and v26 #'ignore)))     ; nil function cell = not fboundp
+      (glasspane-vulpea-register)
+      (glasspane-vulpea-register))
+    ;; Registered exactly once (idempotent flag), with the built struct.
+    (should (equal registered '(fake-extractor)))
+    made))
+
 (ert-deftest glasspane-vulpea-register-uses-only-v26-slots ()
   "Registration passes only vulpea 2.6 extractor slots, once.
 The pre-rewrite file passed `:batch-insert-fn'/`:delete-fn' — slots
 2.6's cl-defstruct constructor rejects, so glasspane crashed at load
 whenever vulpea was installed.  Pins the 2.6 contract: cascade FK
 schema instead of a delete hook, props-only worker eligibility, and
-a symbol extract-fn the worker can resolve via `:worker-lib'."
-  (let ((glasspane-vulpea--registered nil)
-        made registered)
-    (cl-letf (((symbol-function 'vulpea-db-register-extractor)
-               (lambda (ext) (push ext registered) ext))
-              ((symbol-function 'make-vulpea-extractor)
-               (lambda (&rest slots) (setq made slots) 'fake-extractor)))
-      (glasspane-vulpea-register)
-      (glasspane-vulpea-register))
-    ;; Registered exactly once (idempotent flag), with the built struct.
-    (should (equal registered '(fake-extractor)))
-    (should glasspane-vulpea--registered)
+a symbol extract-fn the worker can resolve via `:worker-lib'.
+The 2.6 slot trio is gated on `vulpea-extractor-requires-ast-p'
+(fake it defined here); its absence is the older-vulpea test below."
+  (let ((made (glasspane-vulpea-tests--register-slots :v26 t)))
     (let ((keys (cl-loop for (k _v) on made by #'cddr collect k)))
       (should-not (memq :batch-insert-fn keys))
       (should-not (memq :delete-fn keys))
@@ -86,6 +97,18 @@ a symbol extract-fn the worker can resolve via `:worker-lib'."
       (should table)
       (should (equal fk '(:foreign-key [note-id] :references notes [id]
                           :on-delete :cascade))))))
+
+(ert-deftest glasspane-vulpea-register-omits-v26-slots-on-older-vulpea ()
+  "Pre-2.6 vulpea gets no `:requires-ast'/`:worker-safe'/`:worker-lib'.
+Those slots don't exist there and a cl-defstruct constructor signals
+on unknown keywords — the same mechanism as the crash this file's
+rewrite fixed, just aimed the other way.  Omission is correct, not
+degraded: pre-2.6 always populates the AST and has no worker."
+  (let ((made (glasspane-vulpea-tests--register-slots :v26 nil)))
+    (should made)                       ; still registers
+    (let ((keys (cl-loop for (k _v) on made by #'cddr collect k)))
+      (dolist (k keys)
+        (should (memq k '(:name :version :schema :priority :extract-fn)))))))
 
 (ert-deftest glasspane-vulpea-register-noop-without-vulpea ()
   "Without vulpea's registry loaded, registration quietly does nothing."

@@ -162,21 +162,27 @@ light-up) brought up."
   (when (and (not glasspane-vulpea--registered)
              (fboundp 'vulpea-db-register-extractor))
     (vulpea-db-register-extractor
-     (make-vulpea-extractor
-      :name 'glasspane-mobile
-      :version 1
-      :priority 90
-      ;; Explicit nil (default is `unset'): declares the props-only
-      ;; contract, so extraction never forces a full object parse and
-      ;; stays eligible for the async worker.
-      :requires-ast nil
-      :worker-safe t
-      :worker-lib 'glasspane-vulpea
-      :schema '((glasspane-mobile
-                 [(note-id :not-null) location wifi battery activity bluetooth]
-                 (:foreign-key [note-id] :references notes [id]
-                  :on-delete :cascade)))
-      :extract-fn #'glasspane-vulpea--extract-mobile))
+     (apply #'make-vulpea-extractor
+            :name 'glasspane-mobile
+            :version 1
+            :priority 90
+            :schema '((glasspane-mobile
+                       [(note-id :not-null) location wifi battery activity bluetooth]
+                       (:foreign-key [note-id] :references notes [id]
+                        :on-delete :cascade)))
+            :extract-fn #'glasspane-vulpea--extract-mobile
+            ;; The declaration trio shipped together in vulpea 2.6's
+            ;; extractor struct: explicit `:requires-ast nil' (default is
+            ;; the `unset' sentinel) pins the props-only contract so
+            ;; extraction never forces a full object parse, and
+            ;; `:worker-safe'/`:worker-lib' keep it eligible for the
+            ;; async worker.  Probed because pre-2.6 vulpea has none of
+            ;; these slots — a cl-defstruct constructor signals on
+            ;; unknown keywords (the exact load-crash this rewrite
+            ;; fixes), and pre-2.6 always populates the AST and has no
+            ;; worker, so omitting them there is correct, not degraded.
+            (when (fboundp 'vulpea-extractor-requires-ast-p)
+              '(:requires-ast nil :worker-safe t :worker-lib glasspane-vulpea))))
     (setq glasspane-vulpea--registered t)))
 
 (provide 'glasspane-vulpea)

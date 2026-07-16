@@ -506,6 +506,13 @@ owned by this task: vulpea metadata lives in **description lists**,
 not drawers — decide what Glasspane reads/writes (or both) before
 building the forms.
 
+**Execution plan (2026-07-16):** expanded to full depth in
+[PLAN-typed-properties-vault-doctor.md](PLAN-typed-properties-vault-doctor.md)
+— its S1–S3 deliver this task, S4 adds the vault doctor, S5 files the
+grammar's property-value comparisons against jetpacs. The convention
+call above is resolved there (D2: drawers canonical, vulpea meta stays
+a read-layer).
+
 **Files:** `emacs/apps/glasspane/` (detail view section + a property-
 schema registry: per-key type/options, defcustom'd), actions
 `property.set` (exists already? extend), reusing the settings-controls

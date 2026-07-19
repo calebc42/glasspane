@@ -123,14 +123,61 @@ detail view already shows properties in its own section)."
                                         file (when body-start (1- body-start)))))
            (mapcar (lambda (c) (glasspane-org-reader--heading-node c file)) children)))))
 
+(defun glasspane-org-reader--clocked-in-p (pos)
+  "Whether the heading at POS in the current buffer is the clocked task."
+  (and (bound-and-true-p org-clock-hd-marker)
+       (marker-buffer org-clock-hd-marker)
+       (eq (marker-buffer org-clock-hd-marker) (current-buffer))
+       (save-excursion
+         (goto-char pos)
+         (= (line-beginning-position)
+            (save-excursion (goto-char org-clock-hd-marker)
+                            (line-beginning-position))))))
+
+(defun glasspane-org-reader--heading-menu (ref clocked-in)
+  "The per-heading overflow menu: quick actions without the detail drill-in.
+Schedule/Deadline/Priority arrive with no value, which the handlers
+answer with a bridged prompt dialog."
+  (jetpacs-menu
+   (list
+    (jetpacs-menu-item "Open" (jetpacs-action "heading.tap" :args ref)
+                    :icon "open_in_new")
+    (if clocked-in
+        (jetpacs-menu-item "Clock Out" (jetpacs-action "org.clock.out")
+                        :icon "timer_off")
+      (jetpacs-menu-item "Clock In"
+                      (jetpacs-action "heading.clock-in" :args ref
+                                   :when-offline "drop")
+                      :icon "timer"))
+    (jetpacs-menu-item "Priority…"
+                    (jetpacs-action "heading.priority"
+                                 :args (cons '(ask . t) ref)
+                                 :when-offline "drop")
+                    :icon "flag")
+    (jetpacs-menu-item "Schedule…"
+                    (jetpacs-action "heading.schedule" :args ref
+                                 :when-offline "drop")
+                    :icon "event")
+    (jetpacs-menu-item "Deadline…"
+                    (jetpacs-action "heading.deadline" :args ref
+                                 :when-offline "drop")
+                    :icon "event_busy"))))
+
 (defun glasspane-org-reader--heading-node (n file)
   "Render tree node N (and its subtree) to a foldable `jetpacs-collapsible'.
-Long-pressing the header opens the heading detail view when FILE is available."
+Long-pressing the header opens the heading detail view when FILE is
+available; the trailing overflow menu carries the quick actions."
   (let* ((pos (plist-get n :pos))
          (ref (when file
-                `((file . ,file) (pos . ,pos) (headline . "")))))
+                `((file . ,file) (pos . ,pos) (headline . ""))))
+         (line (jetpacs-markup (plist-get n :line) :syntax "org")))
     (jetpacs-collapsible (format "fold/%s/%s" file pos)
-                      (jetpacs-markup (plist-get n :line) :syntax "org")
+                      (if ref
+                          (jetpacs-row
+                           (jetpacs-box (list line) :weight 1)
+                           (glasspane-org-reader--heading-menu
+                            ref (glasspane-org-reader--clocked-in-p pos)))
+                        line)
                       (glasspane-org-reader--content-nodes n file)
                       :on-long-tap (when ref
                                      (jetpacs-action "heading.tap" :args ref))

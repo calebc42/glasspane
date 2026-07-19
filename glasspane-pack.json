@@ -116,7 +116,7 @@
   "actions": [
     {
       "action": "heading.schedule",
-      "doc": "Schedule a heading (WHEN relative like \"+1d\", VALUE a date, or CLEAR).",
+      "doc": "Schedule a heading (WHEN relative like \"+1d\", VALUE a date, CLEAR, or a bridged prompt with neither).",
       "args": [
         {
           "name": "ref",

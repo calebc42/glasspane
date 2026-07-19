@@ -212,6 +212,28 @@ path) suppresses the raw LOGBOOK drawer its structured section replaces."
       (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
       (delete-file file))))
 
+(ert-deftest glasspane-org-reader-heading-overflow-menu ()
+  "Every reader heading header carries the quick-action overflow menu;
+the clocked-in heading offers Clock Out instead of Clock In."
+  (let ((file (make-temp-file "jetpacs-menu-test" nil ".org")))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "* Alpha\n* Beta\n"))
+          (let* ((nodes (glasspane-org-reader-file file))
+                 (json (json-serialize
+                        (jetpacs-tests--canon (apply #'jetpacs-column nodes))
+                        :null-object :null :false-object :false)))
+            (should (jetpacs-tests--find-node
+                     nodes (lambda (n) (equal (alist-get 't n) "menu"))))
+            (should (string-search "Clock In" json))
+            (should-not (string-search "Clock Out" json))
+            (should (string-search "heading.schedule" json))
+            (should (string-search "heading.deadline" json))
+            (should (string-search "heading.priority" json))
+            (should (string-search "\"ask\":true" json))))
+      (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
+      (delete-file file))))
+
 (ert-deftest glasspane-org-lowercase-drawer-and-clock ()
   "Lowercase :logbook:/:end:/clock: parse structurally and render folded."
   ;; Structured logbook parsing (detail view path).

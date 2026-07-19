@@ -216,4 +216,108 @@ views that are actually in the push — not dead taps in a second app."
                  '("glasspane.agenda" "glasspane.journal" "glasspane.tasks"
                    "files" "eval"))))
 
+;; ─── Heading mutations: add/delete/copy-link and prompted set-ops ───────────
+
+(defmacro glasspane-ui-test--with-org-file (content &rest body)
+  "Run BODY with `file' bound to a temp org FILE holding CONTENT.
+`jetpacs-shell-push' is stubbed out; the buffer and file are cleaned up."
+  (declare (indent 1))
+  `(let ((file (make-temp-file "jetpacs-ui-test" nil ".org")))
+     (with-temp-file file (insert ,content))
+     (unwind-protect
+         (cl-letf (((symbol-function 'jetpacs-shell-push)
+                    (cl-function (lambda (&optional _tab &key _switch-to)))))
+           ,@body)
+       (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
+       (delete-file file))))
+
+(defun glasspane-ui-test--file-content (file)
+  (with-temp-buffer (insert-file-contents file) (buffer-string)))
+
+(ert-deftest glasspane-ui-add-heading-child-and-sibling ()
+  "heading.add-heading nests a child at the end of the subtree;
+heading.add-sibling lands at the same level after it."
+  (glasspane-ui-test--with-org-file "* Parent\nBody.\n** Child\n"
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Fresh")))
+      (jetpacs--on-action
+       `((action . "heading.add-heading")
+         (args . ((file . ,file) (pos . 1) (headline . "Parent"))))
+       nil))
+    (should (string-search "** Child\n** Fresh\n"
+                           (glasspane-ui-test--file-content file)))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Next")))
+      (jetpacs--on-action
+       `((action . "heading.add-sibling")
+         (args . ((file . ,file) (pos . 1) (headline . "Parent"))))
+       nil))
+    (should (string-search "** Fresh\n* Next\n"
+                           (glasspane-ui-test--file-content file)))))
+
+(ert-deftest glasspane-ui-delete-heading-removes-subtree ()
+  "heading.delete confirms, then removes the whole subtree — no archive."
+  (glasspane-ui-test--with-org-file "* Keep\n* Kill\n** Sub\nBody.\n* After\n"
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t)))
+      (jetpacs--on-action
+       `((action . "heading.delete")
+         (args . ((file . ,file) (pos . 8) (headline . "Kill"))))
+       nil))
+    (let ((content (glasspane-ui-test--file-content file)))
+      (should (equal content "* Keep\n* After\n"))))
+  ;; Declining the confirm leaves the file untouched.
+  (glasspane-ui-test--with-org-file "* Kill\n"
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) nil)))
+      (jetpacs--on-action
+       `((action . "heading.delete")
+         (args . ((file . ,file) (pos . 1) (headline . "Kill"))))
+       nil))
+    (should (equal (glasspane-ui-test--file-content file) "* Kill\n"))))
+
+(ert-deftest glasspane-ui-file-add-heading-appends-top-level ()
+  "file.add-heading appends a top-level heading at the end of the file."
+  (glasspane-ui-test--with-org-file "* One\n** Two\n"
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Tail")))
+      (jetpacs--on-action
+       `((action . "file.add-heading") (args . ((file . ,file))))
+       nil))
+    (should (equal (glasspane-ui-test--file-content file)
+                   "* One\n** Two\n* Tail\n"))))
+
+(ert-deftest glasspane-ui-copy-link-item-id-and-file-links ()
+  "The Copy Link chip carries an id link when the heading has an :ID:,
+a file::*headline link otherwise — dispatched companion-locally."
+  (glasspane-ui-test--with-org-file
+      "* Plain\n* Known\n:PROPERTIES:\n:ID: known-42\n:END:\n"
+    (let* ((item (glasspane-ui--detail-copy-link-item
+                  `((file . ,file) (pos . 9) (headline . "Known"))))
+           (json (json-serialize (jetpacs-tests--canon item)
+                                 :null-object :null :false-object :false)))
+      (should (string-search "clipboard.copy" json))
+      (should (string-search "[[id:known-42][Known]]" json)))
+    (let* ((item (glasspane-ui--detail-copy-link-item
+                  `((file . ,file) (pos . 1) (headline . "Plain"))))
+           (json (json-serialize (jetpacs-tests--canon item)
+                                 :null-object :null :false-object :false)))
+      (should (string-search "clipboard.copy" json))
+      (should (string-search "::*Plain" json)))))
+
+(ert-deftest glasspane-ui-schedule-and-priority-prompt-paths ()
+  "With no value on the wire, heading.schedule asks through org-read-date
+and heading.priority (ask) through a bridged read-string."
+  (glasspane-ui-test--with-org-file "* Task\n"
+    (cl-letf (((symbol-function 'org-read-date)
+               (lambda (&rest _) "2026-08-01")))
+      (jetpacs--on-action
+       `((action . "heading.schedule")
+         (args . ((file . ,file) (pos . 1) (headline . "Task"))))
+       nil))
+    (should (string-search "SCHEDULED: <2026-08-01"
+                           (glasspane-ui-test--file-content file)))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "b")))
+      (jetpacs--on-action
+       `((action . "heading.priority")
+         (args . ((ask . t) (file . ,file) (pos . 1) (headline . "Task"))))
+       nil))
+    (should (string-search "* [#B] Task"
+                           (glasspane-ui-test--file-content file)))))
+
 (provide 'glasspane-ui-test)

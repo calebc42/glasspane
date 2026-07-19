@@ -84,6 +84,26 @@ companion-local (`clipboard.copy') and works offline."
                             (jetpacs-clipboard-action link))))))
     (error nil)))
 
+(defun glasspane-ui--detail-subtree-text (ref)
+  "REF's whole subtree as a string, or nil when the ref can't resolve."
+  (condition-case nil
+      (let ((marker (jetpacs-org-resolve-ref ref)))
+        (with-current-buffer (marker-buffer marker)
+          (org-with-wide-buffer
+           (goto-char marker)
+           (buffer-substring-no-properties
+            (point)
+            (progn (org-end-of-subtree t t) (point))))))
+    (error nil)))
+
+(defun glasspane-ui--detail-copy-text-item (ref)
+  "The Copy Text chip for REF: the whole subtree onto the clipboard.
+Companion-local (`clipboard.copy'), so it works offline; nil when the
+ref can't resolve."
+  (when-let ((text (glasspane-ui--detail-subtree-text ref)))
+    (jetpacs-nav-item "copy_all" "Copy Text"
+                   (jetpacs-clipboard-action text))))
+
 (defun glasspane-ui--detail-view (snackbar)
   "The heading drill-in: reader/editor body under curated heading actions."
   (let* ((ref glasspane-ui--detail-ref)
@@ -155,6 +175,8 @@ companion-local (`clipboard.copy') and works offline."
                                              :when-offline "drop"))
                                (when ref
                                  (glasspane-ui--detail-copy-link-item ref))
+                               (when ref
+                                 (glasspane-ui--detail-copy-text-item ref))
                                (jetpacs-nav-item
                                 "delete" "Delete"
                                 (jetpacs-action "heading.delete"
@@ -363,9 +385,12 @@ breaks links); every other value is an inline input whose submit runs
                            :value (member value '("t" "true" "1"))
                            :on-toggle action))
              ((and allowed (listp allowed))
+              ;; :on-change is the enum-list's real callback key — the
+              ;; old :on-select signalled whenever a property carried
+              ;; org allowed values (KEY_ALL), killing the whole row.
               (jetpacs-enum-list (format "prop-%s/%s" pos key) allowed
                               :value (list value)
-                              :on-select action))
+                              :on-change action))
              (is-date
               (jetpacs-date-button (if (string-empty-p value) "Set Date" value) action :value value))
              (is-number
@@ -779,6 +804,100 @@ container would break Compose) and wrap otherwise."
       (jetpacs-text "Error loading heading" 'title)
       (jetpacs-text (error-message-string err) 'body)))))
 
+;; ─── The structured Scheduled/Deadline editor dialog ─────────────────────────
+
+(defun glasspane-ui--set-repeater (type repeater)
+  "Rewrite the repeater cookie on the TYPE planning timestamp at point.
+TYPE is \"SCHEDULED\" or \"DEADLINE\"; REPEATER like \"+1w\" (nil
+removes).  A heading without a TYPE timestamp is a no-op — the dialog
+asks for a date first."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((bound (save-excursion (outline-next-heading) (point))))
+      (when (re-search-forward (concat type ":[ \t]*\\([<[]\\)") bound t)
+        (let* ((beg (match-beginning 1))
+               (close (if (equal (match-string 1) "<") ">" "]"))
+               (end (progn (goto-char beg) (search-forward close bound)))
+               (ts (buffer-substring-no-properties beg end))
+               (stripped (replace-regexp-in-string
+                          "[ \t]+[.+]?\\+[0-9]+[hdwmy]" "" ts))
+               (new (if repeater
+                        (concat (substring stripped 0 -1) " " repeater
+                                (substring stripped -1))
+                      stripped)))
+          (delete-region beg end)
+          (goto-char beg)
+          (insert new))))))
+
+(defconst glasspane-ui--repeater-choices
+  '("none" "+1d" "+1w" "+2w" "+1m" "+3m" "+1y")
+  "Repeater cookies offered in the planning dialog.")
+
+(defun glasspane-ui--planning-dialog (ref type)
+  "Send the structured TYPE editor dialog for REF.
+TYPE is \"SCHEDULED\" or \"DEADLINE\".  Every control dispatches the
+ordinary planning actions with a (dialog . TYPE) marker, and those
+handlers re-send this dialog after the write so the values on screen
+stay live."
+  (let* ((marker (jetpacs-org-resolve-ref ref))
+         (info (with-current-buffer (marker-buffer marker)
+                 (org-with-wide-buffer
+                  (goto-char marker)
+                  (list (org-get-heading t t t t)
+                        (org-entry-get nil type)))))
+         (headline (nth 0 info))
+         (ts (nth 1 info))
+         (date (glasspane-ui--ts-date ts))
+         (time (glasspane-ui--ts-time ts))
+         (rep (glasspane-ui--ts-repeater ts))
+         (scheduled-p (equal type "SCHEDULED"))
+         (set-name (if scheduled-p "heading.schedule" "heading.deadline"))
+         (mark `(dialog . ,type))
+         (when-chip
+          (lambda (label when)
+            (jetpacs-button label
+                         (jetpacs-action set-name
+                                      :args (append (list mark `(when . ,when)) ref)
+                                      :when-offline "queue")
+                         :variant "outlined"))))
+    (jetpacs-send-dialog
+     (jetpacs-scroll-column
+      (jetpacs-text (if scheduled-p "Edit schedule" "Edit deadline") 'title)
+      (jetpacs-text headline 'caption)
+      (jetpacs-row
+       (jetpacs-date-button (or date "Set date")
+                         (jetpacs-action set-name :args (cons mark ref))
+                         :value date)
+       (jetpacs-time-button (or time "Set time")
+                         (jetpacs-action (if scheduled-p "heading.schedule-time"
+                                        "heading.deadline-time")
+                                      :args (cons mark ref))
+                         :value time))
+      (apply #'jetpacs-flow-row
+             (mapcar (lambda (pair) (funcall when-chip (car pair) (cdr pair)))
+                     '(("Today" . "+0d") ("+1d" . "+1d")
+                       ("+1w" . "+1w") ("+1m" . "+1m"))))
+      (jetpacs-text "Repeat" 'label)
+      (jetpacs-enum-list (format "planning-rep/%s" type)
+                      glasspane-ui--repeater-choices
+                      :value (list (or rep "none"))
+                      :on-change (jetpacs-action "heading.repeater"
+                                              :args (append (list mark `(type . ,type)) ref)))
+      (jetpacs-row
+       (jetpacs-button "Clear"
+                    (jetpacs-action set-name
+                                 :args (append (list mark '(clear . t)) ref))
+                    :variant "text")
+       (jetpacs-spacer :weight 1)
+       (jetpacs-button "Done" (jetpacs-action "dialog.dismiss") :variant "text"))))))
+
+(defun glasspane-ui--planning-dialog-resend (args &optional type)
+  "Re-send the planning dialog when ARGS carry the (dialog . TYPE) marker."
+  (when-let ((marked (alist-get 'dialog args)))
+    (ignore-errors
+      (glasspane-ui--planning-dialog
+       args (or type (and (stringp marked) marked) "SCHEDULED")))))
+
 ;; ─── Action Handlers ─────────────────────────────────────────────────────────
 
 (defun glasspane-ui--add-heading (args child)
@@ -907,6 +1026,7 @@ the end of the file."
            ((and (stringp date) (not (string-empty-p date)))
             (glasspane-ui--at-ref args (lambda () (org-schedule nil date)) t)))
           (jetpacs-shell-notify (if clear "Schedule cleared" (format "Scheduled %s" date)))
+          (glasspane-ui--planning-dialog-resend args "SCHEDULED")
           (jetpacs-shell-push)))))
     :doc "Schedule a heading (WHEN relative like \"+1d\", VALUE a date, CLEAR, or a bridged prompt with neither)."
     :args '((:name ref :type "ref" :required t)
@@ -929,7 +1049,55 @@ the end of the file."
                         (org-schedule nil (format "%s %s" date time))))
                     t))
           (jetpacs-shell-notify (format "Scheduled %s" time))
+          (glasspane-ui--planning-dialog-resend args "SCHEDULED")
           (jetpacs-shell-push)))))
+
+  (jetpacs-defaction "heading.deadline-time"
+    ;; The deadline sibling of heading.schedule-time, for the dialog's
+    ;; time picker.
+    (lambda (args _)
+      (let ((time (alist-get 'value args)))
+        (when (and (stringp time) (not (string-empty-p time))
+                   (glasspane-ui--at-ref
+                    args
+                    (lambda ()
+                      (let* ((dl (org-entry-get nil "DEADLINE"))
+                             (date (or (glasspane-ui--ts-date dl)
+                                       (format-time-string "%Y-%m-%d"))))
+                        (org-deadline nil (format "%s %s" date time))))
+                    t))
+          (jetpacs-shell-notify (format "Deadline %s" time))
+          (glasspane-ui--planning-dialog-resend args "DEADLINE")
+          (jetpacs-shell-push)))))
+
+  (jetpacs-defaction "heading.repeater"
+    ;; VALUE from the dialog's enum ("none" removes); rewrites the
+    ;; repeater cookie in place, preserving the date and time.
+    (lambda (args _)
+      (let* ((type (or (alist-get 'type args) "SCHEDULED"))
+             (raw (alist-get 'value args))
+             (value (cond
+                     ((vectorp raw) (if (> (length raw) 0) (aref raw 0) "none"))
+                     ((and (listp raw) raw) (car raw))
+                     ((stringp raw) raw)
+                     (t "none")))
+             (value (unless (equal value "none") value)))
+        (when (glasspane-ui--at-ref
+               args (lambda () (glasspane-ui--set-repeater type value)) t)
+          (jetpacs-shell-notify (if value (format "Repeats %s" value)
+                                  "Repeat removed"))
+          (glasspane-ui--planning-dialog-resend args type)
+          (jetpacs-shell-push)))))
+
+  (jetpacs-defaction "heading.planning.show"
+    ;; The structured Scheduled/Deadline editor (the overflow-menu path).
+    (lambda (args _)
+      (condition-case err
+          (glasspane-ui--planning-dialog
+           args (or (alist-get 'type args) "SCHEDULED"))
+        (error
+         (jetpacs-shell-notify (format "Planning: %s" (error-message-string err)))
+         (jetpacs-shell-push)))))
 
   (jetpacs-defaction "heading.deadline"
     (lambda (args _)
@@ -951,6 +1119,7 @@ the end of the file."
            ((and (stringp date) (not (string-empty-p date)))
             (glasspane-ui--at-ref args (lambda () (org-deadline nil date)) t)))
           (jetpacs-shell-notify (if clear "Deadline cleared" (format "Deadline %s" date)))
+          (glasspane-ui--planning-dialog-resend args "DEADLINE")
           (jetpacs-shell-push))))))
 
   (jetpacs-defaction "heading.priority"
@@ -1068,6 +1237,23 @@ the end of the file."
             (setq glasspane-ui--detail-ref nil)
             (jetpacs-shell-notify "Deleted")))
         (jetpacs-shell-push nil :switch-to (jetpacs-shell-current-tab)))))
+
+  (jetpacs-defaction "heading.duplicate"
+    ;; Copy the whole subtree and insert it right after itself — the
+    ;; recurring-meeting-notes idiom (organice's Duplicate).
+    (lambda (args _)
+      (when (glasspane-ui--at-ref
+             args
+             (lambda ()
+               (let ((subtree (buffer-substring-no-properties
+                               (point)
+                               (save-excursion (org-end-of-subtree t t) (point)))))
+                 (org-end-of-subtree t t)
+                 (unless (bolp) (insert "\n"))
+                 (insert subtree)))
+             t)
+        (jetpacs-shell-notify "Duplicated")
+        (jetpacs-shell-push))))
 
   (jetpacs-defaction "heading.add-heading"
     ;; Bridged prompt for the title; the new heading lands as a child at

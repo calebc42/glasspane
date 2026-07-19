@@ -345,8 +345,74 @@ must not read the stale row (the tasks-view swipe bug)."
          (json (json-serialize (jetpacs-tests--canon card)
                                :null-object :null :false-object :false)))
     (should (string-search "\"menu\"" json))
-    (should (string-search "heading.schedule" json))
+    (should (string-search "heading.planning.show" json))
     (should (string-search "heading.props.show" json))))
+
+(ert-deftest glasspane-ui-duplicate-heading ()
+  "heading.duplicate copies the subtree in place, right after itself."
+  (glasspane-ui-test--with-org-file "* A\nbody\n** A sub\n* B\n"
+    (jetpacs--on-action
+     `((action . "heading.duplicate")
+       (args . ((file . ,file) (pos . 1) (headline . "A"))))
+     nil)
+    (should (equal (glasspane-ui-test--file-content file)
+                   "* A\nbody\n** A sub\n* A\nbody\n** A sub\n* B\n"))))
+
+(ert-deftest glasspane-ui-repeater-set-and-clear ()
+  "heading.repeater rewrites the cookie on the planning timestamp in
+place, preserving date and time; \"none\" removes it."
+  (glasspane-ui-test--with-org-file
+      "* Task\nSCHEDULED: <2026-08-01 Sat 10:00>\n"
+    (jetpacs--on-action
+     `((action . "heading.repeater")
+       (args . ((type . "SCHEDULED") (value . ["+1w"])
+                (file . ,file) (pos . 1) (headline . "Task"))))
+     nil)
+    (should (string-search "SCHEDULED: <2026-08-01 Sat 10:00 +1w>"
+                           (glasspane-ui-test--file-content file)))
+    (jetpacs--on-action
+     `((action . "heading.repeater")
+       (args . ((type . "SCHEDULED") (value . ["none"])
+                (file . ,file) (pos . 1) (headline . "Task"))))
+     nil)
+    (should (string-search "SCHEDULED: <2026-08-01 Sat 10:00>"
+                           (glasspane-ui-test--file-content file)))))
+
+(ert-deftest glasspane-ui-planning-dialog-builds ()
+  "heading.planning.show sends the structured editor: pickers, quick
+chips, the repeater enum, and Clear — all marked to re-send the dialog."
+  (glasspane-ui-test--with-org-file
+      "* Task\nSCHEDULED: <2026-08-01 Sat 10:00 +1w>\n"
+    (let (sent)
+      (cl-letf (((symbol-function 'jetpacs-send-dialog)
+                 (lambda (spec &optional _style) (setq sent spec))))
+        (jetpacs--on-action
+         `((action . "heading.planning.show")
+           (args . ((type . "SCHEDULED") (file . ,file) (pos . 1)
+                    (headline . "Task"))))
+         nil))
+      (let ((json (json-serialize (jetpacs-tests--canon sent)
+                                  :null-object :null :false-object :false)))
+        (should (string-search "Edit schedule" json))
+        (should (string-search "2026-08-01" json))
+        (should (string-search "10:00" json))
+        (should (string-search "heading.repeater" json))
+        (should (string-search "\"+1w\"" json))
+        (should (string-search "heading.schedule-time" json))
+        (should (string-search "\"dialog\":\"SCHEDULED\"" json))
+        (should (string-search "dialog.dismiss" json))))))
+
+(ert-deftest glasspane-ui-copy-text-item-carries-subtree ()
+  "The Copy Text chip embeds the whole subtree for companion-local copy."
+  (glasspane-ui-test--with-org-file "* Task\nThe body line.\n** Child\n"
+    (let ((json (json-serialize
+                 (jetpacs-tests--canon
+                  (glasspane-ui--detail-copy-text-item
+                   `((file . ,file) (pos . 1) (headline . "Task"))))
+                 :null-object :null :false-object :false)))
+      (should (string-search "clipboard.copy" json))
+      (should (string-search "The body line." json))
+      (should (string-search "** Child" json)))))
 
 (ert-deftest glasspane-ui-tags-ask-prompts-and-sets ()
   "heading.tags with ask prompts via the bridged crm and replaces the

@@ -22,6 +22,16 @@
   "Cap on headings rendered in one reader pass, to bound very large files."
   :type 'integer :group 'jetpacs)
 
+(defcustom glasspane-org-reader-show-deadline t
+  "Show each heading's DEADLINE date on its reader header (red when overdue)."
+  :type 'boolean :group 'jetpacs)
+
+(defcustom glasspane-org-reader-show-clocked nil
+  "Show each heading's total clocked time on its reader header.
+Off by default: computing the sums adds an `org-clock-sum' pass over
+the file on every render."
+  :type 'boolean :group 'jetpacs)
+
 ;; ─── Parsing ───────────────────────────────────────────────────────────────────
 
 (defun glasspane-org-reader--record (pos next)
@@ -39,6 +49,10 @@ elements (checkboxes)."
            (title (or (nth 4 comps) ""))
            (tags (ignore-errors (org-get-tags pos t)))
            (done (and todo (member todo org-done-keywords) t))
+           (deadline (and glasspane-org-reader-show-deadline
+                          (ignore-errors (org-entry-get pos "DEADLINE"))))
+           (clocked (and glasspane-org-reader-show-clocked
+                         (get-text-property pos :org-clock-minutes)))
            (line (buffer-substring-no-properties
                   (line-beginning-position) (line-end-position)))
            (props (ignore-errors (org-entry-properties pos 'standard)))
@@ -59,6 +73,7 @@ elements (checkboxes)."
       (list :level level :pos pos :line line :props props
             :todo todo :priority (and priority (char-to-string priority))
             :title title :tags tags :done done
+            :deadline deadline :clocked clocked
             :body body :body-start body-start))))
 
 (defun glasspane-org-reader--collect (beg end include-first)
@@ -167,11 +182,13 @@ handlers answer with a bridged prompt dialog."
                                  :when-offline "drop")
                     :icon "flag")
     (jetpacs-menu-item "Schedule…"
-                    (jetpacs-action "heading.schedule" :args ref
+                    (jetpacs-action "heading.planning.show"
+                                 :args (cons '(type . "SCHEDULED") ref)
                                  :when-offline "drop")
                     :icon "event")
     (jetpacs-menu-item "Deadline…"
-                    (jetpacs-action "heading.deadline" :args ref
+                    (jetpacs-action "heading.planning.show"
+                                 :args (cons '(type . "DEADLINE") ref)
                                  :when-offline "drop")
                     :icon "event_busy")
     (jetpacs-menu-item "Tags…"
@@ -182,7 +199,11 @@ handlers answer with a bridged prompt dialog."
     (jetpacs-menu-item "Properties"
                     (jetpacs-action "heading.props.show" :args ref
                                  :when-offline "drop")
-                    :icon "data_object"))))
+                    :icon "data_object")
+    (jetpacs-menu-item "Duplicate"
+                    (jetpacs-action "heading.duplicate" :args ref
+                                 :when-offline "queue")
+                    :icon "content_copy"))))
 
 (defconst glasspane-org-reader--todo-color "#EF5350"
   "Span color for open TODO keywords in reader headers.")
@@ -191,12 +212,41 @@ handlers answer with a bridged prompt dialog."
 (defconst glasspane-org-reader--priority-color "#F57C00"
   "Span color for priority cookies (matches the agenda cards).")
 
+(defconst glasspane-org-reader--overdue-color "#EF5350"
+  "Span color for overdue deadline badges.")
+
+(defun glasspane-org-reader--meta-line (n)
+  "The deadline/clocked badge line for tree node N, or nil.
+The deadline date shows in the priority orange, switching to red once
+overdue; the clocked total renders as h:mm."
+  (let* ((deadline (plist-get n :deadline))
+         (ddate (and (stringp deadline)
+                     (string-match "[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}" deadline)
+                     (match-string 0 deadline)))
+         (overdue (and ddate (not (plist-get n :done))
+                       (string< ddate (format-time-string "%Y-%m-%d"))))
+         (mins (plist-get n :clocked))
+         (spans (delq nil
+                      (list
+                       (when ddate
+                         (jetpacs-span (concat "Deadline " ddate)
+                                    :bold overdue
+                                    :color (if overdue
+                                               glasspane-org-reader--overdue-color
+                                             glasspane-org-reader--priority-color)))
+                       (when (and (numberp mins) (> mins 0))
+                         (jetpacs-span (format "%s%d:%02d clocked"
+                                            (if ddate "  ·  " "")
+                                            (/ mins 60) (% mins 60))))))))
+    (when spans (jetpacs-rich-text spans))))
+
 (defun glasspane-org-reader--heading-header (n)
   "The structured header for tree node N.
 Todo keyword and priority render as colored spans, the title strikes
-through when done, and tags become tappable chips — instead of the
-raw org heading line.  Falls back to org markup when the heading
-didn't parse (no title)."
+through when done, tags become tappable chips, and deadline/clocked
+badges follow on their own line — instead of the raw org heading
+line.  Falls back to org markup when the heading didn't parse (no
+title)."
   (let ((todo (plist-get n :todo))
         (priority (plist-get n :priority))
         (title (plist-get n :title))
@@ -204,29 +254,31 @@ didn't parse (no title)."
         (done (plist-get n :done)))
     (if (string-empty-p (or title ""))
         (jetpacs-markup (plist-get n :line) :syntax "org")
-      (let ((line (jetpacs-rich-text
-                   (delq nil
-                         (list
-                          (when todo
-                            (jetpacs-span (concat todo " ") :bold t
-                                       :color (if done
-                                                  glasspane-org-reader--done-color
-                                                glasspane-org-reader--todo-color)))
-                          (when priority
-                            (jetpacs-span (format "[#%s] " priority) :bold t
-                                       :color glasspane-org-reader--priority-color))
-                          (if done
-                              (jetpacs-span title :strike t)
-                            (jetpacs-span title)))))))
-        (if tags
-            (jetpacs-column
-             line
-             (apply #'jetpacs-flow-row
-                    (mapcar (lambda (tg)
-                              (jetpacs-assist-chip
-                               tg :on-tap (jetpacs-action "search.by-tag"
-                                                       :args `((tag . ,tg)))))
-                            tags)))
+      (let* ((line (jetpacs-rich-text
+                    (delq nil
+                          (list
+                           (when todo
+                             (jetpacs-span (concat todo " ") :bold t
+                                        :color (if done
+                                                   glasspane-org-reader--done-color
+                                                 glasspane-org-reader--todo-color)))
+                           (when priority
+                             (jetpacs-span (format "[#%s] " priority) :bold t
+                                        :color glasspane-org-reader--priority-color))
+                           (if done
+                               (jetpacs-span title :strike t)
+                             (jetpacs-span title))))))
+             (meta (glasspane-org-reader--meta-line n))
+             (tag-row (when tags
+                        (apply #'jetpacs-flow-row
+                               (mapcar (lambda (tg)
+                                         (jetpacs-assist-chip
+                                          tg :on-tap (jetpacs-action
+                                                      "search.by-tag"
+                                                      :args `((tag . ,tg)))))
+                                       tags)))))
+        (if (or meta tag-row)
+            (apply #'jetpacs-column (delq nil (list line meta tag-row)))
           line)))))
 
 (defun glasspane-org-reader--heading-node (n file)
@@ -264,6 +316,8 @@ Content before the first heading is not shown."
   (when (and file (file-readable-p file))
     (with-current-buffer (find-file-noselect file)
       (org-with-wide-buffer
+       (when glasspane-org-reader-show-clocked
+         (ignore-errors (org-clock-sum)))
        (let* ((records (glasspane-org-reader--cap
                         (glasspane-org-reader--collect (point-min) (point-max) nil)))
               (tree (glasspane-org-reader--build-tree records)))
@@ -278,6 +332,8 @@ When SKIP-PROPS is non-nil, the top-level PROPERTIES drawer is omitted."
   (when (and file (file-readable-p file))
     (with-current-buffer (find-file-noselect file)
       (org-with-wide-buffer
+       (when glasspane-org-reader-show-clocked
+         (ignore-errors (org-clock-sum)))
        (goto-char (min pos (point-max)))
        (unless (org-at-heading-p) (ignore-errors (org-back-to-heading t)))
        (let* ((beg (point))
@@ -307,6 +363,13 @@ Returns a single `jetpacs-reorderable-list' node for refile mode."
           items
           :on-reorder (jetpacs-action "heading.reorder"
                                    :args `((file . ,file)))))))))
+
+(when (fboundp 'jetpacs-settings-register-section)
+  (with-jetpacs-owner "glasspane"
+    (jetpacs-settings-register-section
+     "Reader"
+     '((glasspane-org-reader-show-deadline :label "Deadline on headings")
+       (glasspane-org-reader-show-clocked :label "Clocked time on headings")))))
 
 (provide 'glasspane-org-reader)
 ;;; glasspane-org-reader.el ends here

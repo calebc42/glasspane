@@ -227,11 +227,13 @@ the clocked-in heading offers Clock Out instead of Clock In."
                      nodes (lambda (n) (equal (alist-get 't n) "menu"))))
             (should (string-search "Clock In" json))
             (should-not (string-search "Clock Out" json))
-            (should (string-search "heading.schedule" json))
-            (should (string-search "heading.deadline" json))
+            (should (string-search "heading.planning.show" json))
+            (should (string-search "SCHEDULED" json))
+            (should (string-search "DEADLINE" json))
             (should (string-search "heading.priority" json))
             (should (string-search "heading.tags" json))
             (should (string-search "heading.props.show" json))
+            (should (string-search "heading.duplicate" json))
             (should (string-search "\"ask\":true" json))))
       (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
       (delete-file file))))
@@ -266,6 +268,40 @@ struck-through done title, and tag chips — not the raw org line."
             (should (string-search "Fix the backup job" json))
             ;; The done heading strikes through.
             (should (string-search "\"strike\":true" json))))
+      (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
+      (delete-file file))))
+
+(ert-deftest glasspane-org-reader-header-badges ()
+  "Reader headers carry deadline and clocked badges under their toggles:
+deadline in orange (red+bold once overdue), clock totals as h:mm."
+  (let ((file (make-temp-file "jetpacs-badges-test" nil ".org")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* TODO Pay the bill\nDEADLINE: <2001-01-05 Fri>\n"
+                    "* Logged work\n:LOGBOOK:\n"
+                    "CLOCK: [2026-07-03 Fri 10:00]--[2026-07-03 Fri 11:30] =>  1:30\n"
+                    ":END:\n"))
+          (let ((json (json-serialize
+                       (jetpacs-tests--canon
+                        (apply #'jetpacs-column (glasspane-org-reader-file file)))
+                       :null-object :null :false-object :false)))
+            (should (string-search "Deadline 2001-01-05" json))
+            (should (string-search glasspane-org-reader--overdue-color json))
+            ;; Clock badge is opt-in and off by default.
+            (should-not (string-search "clocked" json)))
+          (let* ((glasspane-org-reader-show-clocked t)
+                 (json (json-serialize
+                        (jetpacs-tests--canon
+                         (apply #'jetpacs-column (glasspane-org-reader-file file)))
+                        :null-object :null :false-object :false)))
+            (should (string-search "1:30 clocked" json)))
+          (let* ((glasspane-org-reader-show-deadline nil)
+                 (json (json-serialize
+                        (jetpacs-tests--canon
+                         (apply #'jetpacs-column (glasspane-org-reader-file file)))
+                        :null-object :null :false-object :false)))
+            (should-not (string-search "Deadline 2001-01-05" json))))
       (when-let ((buf (find-buffer-visiting file))) (kill-buffer buf))
       (delete-file file))))
 

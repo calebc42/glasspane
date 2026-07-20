@@ -113,6 +113,28 @@ can't resolve."
                    (jetpacs-share-action
                     text :title (alist-get 'headline ref)))))
 
+(defun glasspane-ui--sibling-ref (ref direction)
+  "A `heading.tap' ref for REF's same-level sibling in DIRECTION, or nil.
+DIRECTION is `next' or `prev'.  Drives the detail view's Prev/Next
+bottom-bar navigation, which only appears when a sibling exists — so
+this doubles as the availability check."
+  (condition-case nil
+      (let ((marker (jetpacs-org-resolve-ref ref)))
+        (with-current-buffer (marker-buffer marker)
+          (org-with-wide-buffer
+           (goto-char marker)
+           (org-back-to-heading t)
+           (when (org-goto-sibling (eq direction 'prev))
+             (let ((file (buffer-file-name))
+                   (pos (point))
+                   (title (nth 4 (org-heading-components))))
+               (delq nil
+                     (list (when file `(file . ,file))
+                           `(pos . ,pos)
+                           (when (and title (not (string-empty-p title)))
+                             `(headline . ,title)))))))))
+    (error nil)))
+
 (defun glasspane-ui--detail-view (snackbar)
   "The heading drill-in: reader/editor body under curated heading actions."
   (let* ((ref glasspane-ui--detail-ref)
@@ -151,23 +173,32 @@ can't resolve."
                                      :args `((file . ,file)))
                         :content-description "Properties"))))
    :bottom-bar (when glasspane-ui--detail-read-mode
-                 (jetpacs-bottom-bar
-                  (list
-                   (jetpacs-nav-item
-                    "edit_note" "Log Note"
-                    (jetpacs-action "heading.add-note"
-                                 :args glasspane-ui--detail-ref
-                                 :when-offline "drop"))
-                   (jetpacs-nav-item
-                    "post_add" "Add Heading"
-                    (jetpacs-action "heading.add-heading"
-                                 :args glasspane-ui--detail-ref
-                                 :when-offline "drop"))
-                   (jetpacs-nav-item
-                    "playlist_add" "Add Next"
-                    (jetpacs-action "heading.add-sibling"
-                                 :args glasspane-ui--detail-ref
-                                 :when-offline "drop")))))
+                 ;; Prev/Next flank the bar (leftmost / rightmost) and
+                 ;; appear only when a same-level sibling exists; the two
+                 ;; add actions sit between them.
+                 (let ((prev (and ref (glasspane-ui--sibling-ref ref 'prev)))
+                       (next (and ref (glasspane-ui--sibling-ref ref 'next))))
+                   (jetpacs-bottom-bar
+                    (delq nil
+                          (list
+                           (when prev
+                             (jetpacs-nav-item
+                              "chevron_left" "Prev"
+                              (jetpacs-action "heading.tap" :args prev)))
+                           (jetpacs-nav-item
+                            "edit_note" "Log Note"
+                            (jetpacs-action "heading.add-note"
+                                         :args glasspane-ui--detail-ref
+                                         :when-offline "drop"))
+                           (jetpacs-nav-item
+                            "post_add" "Add Heading"
+                            (jetpacs-action "heading.add-heading"
+                                         :args glasspane-ui--detail-ref
+                                         :when-offline "drop"))
+                           (when next
+                             (jetpacs-nav-item
+                              "chevron_right" "Next"
+                              (jetpacs-action "heading.tap" :args next))))))))
    :floating-toolbar (when glasspane-ui--detail-read-mode
                        (vconcat
                         (delq nil
@@ -1274,11 +1305,6 @@ the end of the file."
     ;; the end of this subtree (or top-level at the end of a file-level
     ;; note, where there is no subtree to nest under).
     (lambda (args _) (glasspane-ui--add-heading args t)))
-
-  (jetpacs-defaction "heading.add-sibling"
-    ;; The "Add Next" button: same bridged prompt, but the new heading
-    ;; follows this subtree at the same level.
-    (lambda (args _) (glasspane-ui--add-heading args nil)))
 
   (jetpacs-defaction "heading.prop-set"
     ;; VALUE arrives injected by the row input's on-submit; NAME rides in

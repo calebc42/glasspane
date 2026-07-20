@@ -234,9 +234,8 @@ views that are actually in the push — not dead taps in a second app."
 (defun glasspane-ui-test--file-content (file)
   (with-temp-buffer (insert-file-contents file) (buffer-string)))
 
-(ert-deftest glasspane-ui-add-heading-child-and-sibling ()
-  "heading.add-heading nests a child at the end of the subtree;
-heading.add-sibling lands at the same level after it."
+(ert-deftest glasspane-ui-add-heading-nests-child ()
+  "heading.add-heading nests a child at the end of the subtree."
   (glasspane-ui-test--with-org-file "* Parent\nBody.\n** Child\n"
     (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Fresh")))
       (jetpacs--on-action
@@ -244,14 +243,57 @@ heading.add-sibling lands at the same level after it."
          (args . ((file . ,file) (pos . 1) (headline . "Parent"))))
        nil))
     (should (string-search "** Child\n** Fresh\n"
-                           (glasspane-ui-test--file-content file)))
-    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Next")))
-      (jetpacs--on-action
-       `((action . "heading.add-sibling")
-         (args . ((file . ,file) (pos . 1) (headline . "Parent"))))
-       nil))
-    (should (string-search "** Fresh\n* Next\n"
                            (glasspane-ui-test--file-content file)))))
+
+(ert-deftest glasspane-ui-sibling-ref-navigation ()
+  "glasspane-ui--sibling-ref returns the same-level neighbour's ref, and
+nil at the ends — the Prev/Next availability check.  Same-level means a
+child heading is skipped, not descended into."
+  (glasspane-ui-test--with-org-file
+      "* One\n** kid\n* Two\n* Three\n"
+    (let* ((content (glasspane-ui-test--file-content file))
+           (pos-one (1+ (string-search "* One" content)))
+           (pos-two (1+ (string-search "* Two" content)))
+           (pos-three (1+ (string-search "* Three" content)))
+           (mkref (lambda (p h) `((file . ,file) (pos . ,p) (headline . ,h)))))
+      ;; From "Two": prev is "One" (skipping One's child), next is "Three".
+      (should (equal (alist-get 'headline
+                                (glasspane-ui--sibling-ref (funcall mkref pos-two "Two") 'prev))
+                     "One"))
+      (should (equal (alist-get 'headline
+                                (glasspane-ui--sibling-ref (funcall mkref pos-two "Two") 'next))
+                     "Three"))
+      ;; Ends: "One" has no previous sibling; "Three" has no next.
+      (should-not (glasspane-ui--sibling-ref (funcall mkref pos-one "One") 'prev))
+      (should-not (glasspane-ui--sibling-ref (funcall mkref pos-three "Three") 'next)))))
+
+(ert-deftest glasspane-ui-detail-bottom-bar-prev-next ()
+  "The read-mode detail bottom bar shows Prev/Next only when a sibling
+exists (firing heading.tap) and no longer offers Add Next."
+  (glasspane-ui-test--with-org-file "* One\n* Two\n* Three\n"
+    (let* ((content (glasspane-ui-test--file-content file))
+           (pos-one (1+ (string-search "* One" content)))
+           (pos-two (1+ (string-search "* Two" content)))
+           (glasspane-ui--detail-read-mode t))
+      ;; Middle heading: both Prev and Next, Add Next gone.
+      (let* ((glasspane-ui--detail-ref
+              `((file . ,file) (pos . ,pos-two) (headline . "Two")))
+             (json (json-serialize (jetpacs-tests--canon (glasspane-ui--detail-view nil))
+                                   :null-object :null :false-object :false)))
+        (should (string-search "\"Prev\"" json))
+        (should (string-search "\"Next\"" json))
+        (should (string-search "chevron_left" json))
+        (should (string-search "chevron_right" json))
+        (should (string-search "heading.tap" json))
+        (should-not (string-search "Add Next" json))
+        (should-not (string-search "heading.add-sibling" json)))
+      ;; First heading: no Prev, Next still offered.
+      (let* ((glasspane-ui--detail-ref
+              `((file . ,file) (pos . ,pos-one) (headline . "One")))
+             (json (json-serialize (jetpacs-tests--canon (glasspane-ui--detail-view nil))
+                                   :null-object :null :false-object :false)))
+        (should-not (string-search "\"Prev\"" json))
+        (should (string-search "\"Next\"" json))))))
 
 (ert-deftest glasspane-ui-delete-heading-removes-subtree ()
   "heading.delete confirms, then removes the whole subtree — no archive."

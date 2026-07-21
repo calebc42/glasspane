@@ -45,9 +45,9 @@
 
 (require 'jetpacs-keymap)
 
-(require 'jetpacs-magit)
+(require 'glasspane-magit)
 
-(require 'jetpacs-ghostel)
+(require 'glasspane-ghostel)
 
 (require 'jetpacs-files)
 

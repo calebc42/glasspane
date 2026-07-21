@@ -15,10 +15,10 @@
 (require 'jetpacs-core)
 
 ;;; ==================================================================
-;;; BEGIN apps/jetpacs-magit.el
+;;; BEGIN apps/glasspane-magit.el
 ;;; ==================================================================
 
-;;; jetpacs-magit.el --- Curated Tier 1 magit pie menu -*- lexical-binding: t; -*-
+;;; glasspane-magit.el --- Curated Tier 1 magit pie menu -*- lexical-binding: t; -*-
 
 ;; The first curated Tier 1 radial menu: magit-status.  Four categories
 ;; fan out as a speed dial; each opens a pie of hand-labelled bindings.
@@ -35,7 +35,7 @@
 
 (require 'jetpacs-keymap)
 
-(defconst jetpacs-magit--menu
+(defconst glasspane-magit--menu
   '(("Stage" "add"
      ("s"   "Stage")
      ("u"   "Unstage")
@@ -64,7 +64,7 @@
 PREFIX-P marks a transient prefix — the pie shows a ▸ and running it
 drills into the live transient's own pie.")
 
-(defun jetpacs-magit--binding-spec (entry buffer-name)
+(defun glasspane-magit--binding-spec (entry buffer-name)
   "Build one pie binding spec from ENTRY (KEY LABEL [PREFIX-P])."
   (pcase-let ((`(,key ,label ,prefix-p) entry))
     (append
@@ -76,7 +76,7 @@ drills into the live transient's own pie.")
                                :when-offline "drop")))
      (when prefix-p '((is_prefix . t))))))
 
-(defun jetpacs-magit-pie-spec (buffer)
+(defun glasspane-magit-pie-spec (buffer)
   "Curated Tier 1 pie-menu spec for magit BUFFER."
   (let ((buffer-name (buffer-name buffer)))
     `((center_label . "Magit")
@@ -90,14 +90,14 @@ drills into the live transient's own pie.")
                   (icon . ,icon)
                   (bindings . ,(vconcat
                                 (mapcar (lambda (e)
-                                          (jetpacs-magit--binding-spec e buffer-name))
+                                          (glasspane-magit--binding-spec e buffer-name))
                                         entries))))))
-            jetpacs-magit--menu))))))
+            glasspane-magit--menu))))))
 
-(jetpacs-keymap-register-tier1 'magit-status-mode #'jetpacs-magit-pie-spec)
+(jetpacs-keymap-register-tier1 'magit-status-mode #'glasspane-magit-pie-spec)
 
-(provide 'jetpacs-magit)
-;;; jetpacs-magit.el ends here
+(provide 'glasspane-magit)
+;;; glasspane-magit.el ends here
 
 ;;; ==================================================================
 ;;; BEGIN apps/glasspane/glasspane-vulpea.el
@@ -2109,7 +2109,7 @@ round-trips to Emacs through the ordinary action pipeline."
 
 (require 'jetpacs-keymap)
 
-;; (require 'jetpacs-magit) — bundle-internal, provided above
+;; (require 'glasspane-magit) — bundle-internal, provided above
 
 (require 'jetpacs-settings)
 

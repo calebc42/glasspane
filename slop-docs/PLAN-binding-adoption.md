@@ -8,7 +8,7 @@ action catalog + `glasspane-pack.el` + dependency-aware `glasspane-pack.json`
 (S3.7), and agenda capability fallbacks via `jetpacs-node-or`. The planned
 `:spec` migrations of the rich card surfaces (S3.2/S3.4/S3.5/S3.6) were
 **dropped by design** — see
-[DECISION-no-binding-template-dsl.md](DECISION-no-binding-template-dsl.md):
+[DECISION-no-binding-template-dsl.md](../jetpacs/docs/DECISION-no-binding-template-dsl.md):
 rich rendering stays in elisp `:builder`s; `:spec` is the composer-facing
 grammar, not a Tier-1 replication target. Task 21 and the submodule bump
 landed too (`edf5eb7`, `edeba78`; the pin has since moved to api 1.11.0).
@@ -35,7 +35,7 @@ The working tree is **not clean** and org-adoption has **not** run yet:
   (Phase G **Task 21** — config rebase onto `jetpacs-app-config-*`, source done),
   a modified `glasspane-agenda.el`, the `jetpacs` submodule pointer, and several
   docs (`README.md`, `docs/ROADMAP.md`, …). Untracked: `docs/PLAN-glasspane-org-adoption.md`,
-  `emacs/apps/jetpacs-ghostel.el`.
+  `emacs/apps/glasspane-ghostel.el`.
 - **org-adoption is PENDING:** `glasspane-org--parse-query` still exists
   (`glasspane-org.el:366`) and `glasspane-org--query` still calls it (`:583`); no
   `jetpacs-org-query`/`jetpacs-org-parse-query` delegation yet.

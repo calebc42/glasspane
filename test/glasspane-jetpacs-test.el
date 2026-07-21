@@ -313,7 +313,7 @@ can't resurface in the next capture."
 
 ;; ─── Tier 1 keymap menus ────────────────────────────────────────────────────
 
-(ert-deftest jetpacs-magit-tier1 ()
+(ert-deftest glasspane-magit-tier1 ()
   "The curated magit pie registers, fits the pie, and serializes."
   (with-temp-buffer
     (setq major-mode 'magit-status-mode)
@@ -371,7 +371,7 @@ the empty string must still be returned by `org-entry-properties'."
           (should (assoc "NEWKEY" (org-entry-properties nil 'standard))))
       (delete-file file))))
 
-(ert-deftest jetpacs-ghostel-render-dead-and-live ()
+(ert-deftest glasspane-ghostel-render-dead-and-live ()
   "The skin dispatches for ghostel-mode; input surfaces only when live."
   (jetpacs-tests--with-fake-ghostel "*ghostel-render-test*"
     ;; Live: transcript + key chips + input row, all lint-clean.
@@ -396,7 +396,7 @@ the empty string must still be returned by `org-entry-properties'."
       (should (string-search "file-a" json))
       (should-not (string-search "ghostel.send" json)))))
 
-(ert-deftest jetpacs-ghostel-send-encodes-and-bumps-gen ()
+(ert-deftest glasspane-ghostel-send-encodes-and-bumps-gen ()
   "ghostel.send writes UTF-8 bytes then Return; a send rotates the field id."
   (let (sent keys)
     (cl-letf (((symbol-function 'ghostel-send-string)
@@ -431,7 +431,7 @@ the empty string must still be returned by `org-entry-properties'."
       (should-not sent)
       (should-not keys))))
 
-(ert-deftest jetpacs-ghostel-send-key-allowlist ()
+(ert-deftest glasspane-ghostel-send-key-allowlist ()
   "ghostel.send-key presses exactly the curated keys, nothing else."
   (let (keys)
     (cl-letf (((symbol-function 'ghostel-send-key)

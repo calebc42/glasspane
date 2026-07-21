@@ -9,7 +9,7 @@ build real apps by leaning on stable, library-first Emacs packages — **vulpea*
 foremost — as engines, exposed to the no-code layer through jetpacs sources /
 actions and installed via the pack dependency model. This is the constructive
 follow-through on the "rich server, thin client" pivot
-(`docs/DECISION-no-binding-template-dsl.md`): the SDUI keeps the client thin, so
+(`jetpacs/docs/DECISION-no-binding-template-dsl.md`): the SDUI keeps the client thin, so
 the server can be as powerful as Emacs + MELPA/ELPA allow.
 
 > Cross-repo note: the *execution* of this belongs partly in `jetpacs-composer`
@@ -187,7 +187,7 @@ criteria (score each candidate):
 | Transclusion / compose | org-transclusion | live document composition | headless transclude API |
 | Feeds / read-later | elfeed, elfeed-org | an RSS reader app | elfeed has a DB + query API (→ sources) |
 | Mail | notmuch, mu4e | a mail triage app | notmuch has a strong query/DB API; heavier deps |
-| Git / forge | magit, forge (already: jetpacs-magit) | repo/PR dashboards | magit is command-first but has porcelain data fns |
+| Git / forge | magit, forge (already: glasspane-magit) | repo/PR dashboards | magit is command-first but has porcelain data fns |
 | Time / clocking | org-clock, activity-watch-mode | a time-tracking app | org-clock data is queryable |
 | Contacts | org-contacts, BBDB | a contacts app | structured records |
 | Tabular / data | org-table, ses, ledger/hledger, csv-mode | budgets, ledgers, sheets | ledger has a reporting API |
@@ -256,7 +256,7 @@ line. Cross-check current MELPA/ELPA status and maintenance.
 
 ## See also
 
-- `docs/DECISION-no-binding-template-dsl.md` · `emacs/apps/glasspane/glasspane-pack.el`
+- `jetpacs/docs/DECISION-no-binding-template-dsl.md` · `emacs/apps/glasspane/glasspane-pack.el`
   (the `depends` model) · `emacs/apps/glasspane/glasspane-notes.el` (the seed
   vulpea source) · vulpea docs `api-reference.org` / `plugin-guide.org` /
   `architecture.org` (in the vulpea repo).

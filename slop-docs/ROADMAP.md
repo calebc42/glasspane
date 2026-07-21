@@ -27,7 +27,7 @@ review skin over org-srs.
 
 Since then the **binding-layer adoption** landed in re-scoped form
 ([PLAN-binding-adoption.md](PLAN-binding-adoption.md) has the status;
-[DECISION-no-binding-template-dsl.md](DECISION-no-binding-template-dsl.md)
+[DECISION-no-binding-template-dsl.md](../jetpacs/docs/DECISION-no-binding-template-dsl.md)
 the why): Glasspane now exposes engine **sources** (`glasspane.org`,
 vulpea-backed `glasspane.notes`), an annotated action catalog, and
 `glasspane-pack.json` for the composer, while rich cards stay

@@ -35,7 +35,7 @@
 
 (require 'jetpacs-keymap)
 
-(require 'jetpacs-magit)
+(require 'glasspane-magit)
 
 (require 'jetpacs-settings)
 

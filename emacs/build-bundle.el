@@ -29,7 +29,7 @@
 (let* ((here (file-name-directory (or load-file-name buffer-file-name)))
        ;; Dependency order. Do not reorder without re-checking the require
        ;; graph.
-       (app-files '("apps/jetpacs-magit.el"
+       (app-files '("apps/glasspane-magit.el"
                     "apps/glasspane/glasspane-vulpea.el"
                     "apps/glasspane/glasspane-org.el"
                     "apps/glasspane/glasspane-source.el"

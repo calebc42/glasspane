@@ -1,4 +1,4 @@
-;;; jetpacs-ghostel.el --- Tier 1 buffer skin for Ghostel terminals -*- lexical-binding: t; -*-
+;;; glasspane-ghostel.el --- Tier 1 buffer skin for Ghostel terminals -*- lexical-binding: t; -*-
 
 ;; A shell on your phone, not a terminal emulator on your phone: the
 ;; Ghostel buffer (ghostel-mode, the libghostty-vt terminal) renders as
@@ -14,7 +14,7 @@
 ;; already opened.  They never start one, so the wire gains no new
 ;; execution surface beyond what `comint.send' already sanctions.
 ;; `ghostel.send-key' is tighter still: the key vocabulary is the
-;; enumerable allowlist in `jetpacs-ghostel--keys'.
+;; enumerable allowlist in `glasspane-ghostel--keys'.
 ;;
 ;; Every action here is `:when-offline "drop"', deliberately diverging
 ;; from comint's queue default: a terminal's screen moves under you
@@ -45,11 +45,11 @@
 (declare-function ghostel-send-key "ghostel" (key-name &optional mods))
 (defvar ghostel--process)  ; buffer-local lifecycle process, both PTY paths
 
-(defcustom jetpacs-ghostel-tail-lines 200
+(defcustom glasspane-ghostel-tail-lines 200
   "Transcript lines rendered from the tail of a ghostel buffer."
   :type 'integer :group 'jetpacs)
 
-(defconst jetpacs-ghostel--keys
+(defconst glasspane-ghostel--keys
   '(("Esc" "escape" "")
     ("Tab" "tab" "")
     ("↑"   "up" "")
@@ -60,16 +60,16 @@
 Doubles as the `ghostel.send-key' allowlist — the wire can press
 exactly these keys, nothing else.")
 
-(defvar jetpacs-ghostel--gen (make-hash-table :test 'equal)
+(defvar glasspane-ghostel--gen (make-hash-table :test 'equal)
   "Buffer name -> send counter, spliced into the input's widget id.
 A send bumps it, handing the client a fresh (empty) field; background
 transcript refreshes don't, so the seed guard keeps half-typed input.")
 
-(defun jetpacs-ghostel--refresh ()
+(defun glasspane-ghostel--refresh ()
   (when (functionp jetpacs-buffer-refresh-function)
     (funcall jetpacs-buffer-refresh-function)))
 
-(defun jetpacs-ghostel--live-p (buf)
+(defun glasspane-ghostel--live-p (buf)
   "Non-nil when BUF is a ghostel buffer with a live terminal process.
 Checks the buffer-local `ghostel--process', the same handle ghostel's
 own kill-buffer guard uses — it is the shell process when Emacs owns
@@ -83,7 +83,7 @@ the PTY and the native event pipe when libghostty does."
 
 ;; ─── Rendering ───────────────────────────────────────────────────────────────
 
-(defun jetpacs-ghostel--key-row (name)
+(defun glasspane-ghostel--key-row (name)
   "The curated key-chip row for ghostel buffer NAME."
   (apply #'jetpacs-scroll-row
          (mapcar (pcase-lambda (`(,label ,key ,mods))
@@ -93,13 +93,13 @@ the PTY and the native event pipe when libghostty does."
                                                            (key . ,key)
                                                            (mods . ,mods))
                                                    :when-offline "drop")))
-                 jetpacs-ghostel--keys)))
+                 glasspane-ghostel--keys)))
 
-(defun jetpacs-ghostel-render (buf)
+(defun glasspane-ghostel-render (buf)
   "Tier-1 skin: ghostel BUF as status row + transcript tail + keys + input."
   (with-current-buffer buf
     (let* ((name (buffer-name))
-           (live (jetpacs-ghostel--live-p buf)))
+           (live (glasspane-ghostel--live-p buf)))
       (append
        (list (jetpacs-text
               (if live
@@ -107,27 +107,27 @@ the PTY and the native event pipe when libghostty does."
                           (abbreviate-file-name default-directory))
                 "no live process")
               'caption))
-       (jetpacs-buffer-render-tail buf jetpacs-ghostel-tail-lines)
+       (jetpacs-buffer-render-tail buf glasspane-ghostel-tail-lines)
        (when live
          (list
-          (jetpacs-ghostel--key-row name)
+          (glasspane-ghostel--key-row name)
           ;; The input row is the scroll target: it sits at the bottom, and
           ;; every output line shifts its index, so the view follows the
           ;; transcript — the terminal "tail -f" feel.
           (jetpacs-scroll-here
            (jetpacs-text-input
-            (format "ghostel/%s/%d" name (gethash name jetpacs-ghostel--gen 0))
+            (format "ghostel/%s/%d" name (gethash name glasspane-ghostel--gen 0))
             :hint "Input — Enter sends"
             :single-line t :monospace t
             :on-submit (jetpacs-action "ghostel.send"
                                     :args `((buffer . ,name))
                                     :when-offline "drop")))))))))
 
-(jetpacs-render-buffer-register 'ghostel-mode #'jetpacs-ghostel-render)
+(jetpacs-render-buffer-register 'ghostel-mode #'glasspane-ghostel-render)
 
 ;; ─── Actions ─────────────────────────────────────────────────────────────────
 
-(defun jetpacs-ghostel--live-buffer (name)
+(defun glasspane-ghostel--live-buffer (name)
   "The ghostel buffer NAME when it has a live process, else nil (messaged).
 The gate for both wire actions: an arbitrary name off the wire can only
 ever reach the process of an already-open ghostel buffer."
@@ -136,7 +136,7 @@ ever reach the process of an already-open ghostel buffer."
      ((not (and buf (with-current-buffer buf (derived-mode-p 'ghostel-mode))))
       (message "%s is not a ghostel buffer" (or name "?"))
       nil)
-     ((not (jetpacs-ghostel--live-p buf))
+     ((not (glasspane-ghostel--live-p buf))
       (message "%s has no live process" name)
       nil)
      (t buf))))
@@ -145,7 +145,7 @@ ever reach the process of an already-open ghostel buffer."
 
   (jetpacs-defaction "ghostel.send"
     (lambda (args _)
-      (let ((buf (jetpacs-ghostel--live-buffer (alist-get 'buffer args)))
+      (let ((buf (glasspane-ghostel--live-buffer (alist-get 'buffer args)))
             (input (alist-get 'value args)))
         (when buf
           (condition-case err
@@ -159,24 +159,24 @@ ever reach the process of an already-open ghostel buffer."
                   (ghostel-send-string (encode-coding-string input 'utf-8)))
                 (ghostel-send-key "return"))
             (error (message "Send failed: %s" (error-message-string err))))
-          (cl-incf (gethash (buffer-name buf) jetpacs-ghostel--gen 0))
-          (jetpacs-ghostel--refresh)))))
+          (cl-incf (gethash (buffer-name buf) glasspane-ghostel--gen 0))
+          (glasspane-ghostel--refresh)))))
 
   (jetpacs-defaction "ghostel.send-key"
     (lambda (args _)
-      (let ((buf (jetpacs-ghostel--live-buffer (alist-get 'buffer args)))
+      (let ((buf (glasspane-ghostel--live-buffer (alist-get 'buffer args)))
             (key (alist-get 'key args))
             (mods (or (alist-get 'mods args) "")))
         (when buf
           (if (not (seq-find (pcase-lambda (`(,_ ,k ,m))
                                (and (equal key k) (equal mods m)))
-                             jetpacs-ghostel--keys))
+                             glasspane-ghostel--keys))
               (message "ghostel: key %S %S not allowlisted" key mods)
             (condition-case err
                 (with-current-buffer buf
                   (ghostel-send-key key (unless (string-empty-p mods) mods)))
               (error (message "Send failed: %s" (error-message-string err))))
-            (jetpacs-ghostel--refresh)))))))
+            (glasspane-ghostel--refresh)))))))
 
-(provide 'jetpacs-ghostel)
-;;; jetpacs-ghostel.el ends here
+(provide 'glasspane-ghostel)
+;;; glasspane-ghostel.el ends here

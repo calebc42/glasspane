@@ -26,12 +26,16 @@ data class CompanionConfig(
 
 class CompanionEngine(
     private val config: CompanionConfig,
+    /** Shared across connections: surface state outlives a session (13.5). */
+    val surfaces: SurfaceStore = SurfaceStore(
+        config.limits.getLong("max_surfaces"), config.limits.getLong("max_surface_ids")),
     private val sink: (ByteArray) -> Unit,
 ) {
     var state: SessionState = SessionState.CONNECTED
         private set
     var closeReason: String? = null
         private set
+    private var granted: List<String> = emptyList()
 
     private val decoder = FrameDecoder()
     private var pendingPairingId: String? = null
@@ -107,6 +111,8 @@ class CompanionEngine(
             // SPEC 10.1: post-auth, wrong-state requests get 1204.
             return respondError(id, 1204, "Not legal in this session state", "session-state")
         when (method) {
+            "surface.update" -> handleSurfaceUpdate(id, params)
+            "surface.remove" -> handleSurfaceRemove(id, params)
             "queue.replay" -> respondResult(id, JSONObject()
                 .put("delivered", 0).put("rejected", 0).put("expired", 0)
                 .put("remaining", 0).put("blocked_by", JSONObject.NULL))
@@ -119,6 +125,67 @@ class CompanionEngine(
             else ->
                 // Registered in SPEC 11 but its rung has not landed yet.
                 respondError(id, -32603, "Not implemented at this rung", "internal-error")
+        }
+    }
+
+    // ------------------------------------------------------ surfaces (13)
+
+    private fun surfaceRevision(value: Any?): Long? =
+        when (value) {
+            is Int -> value.toLong()
+            is Long -> value
+            else -> null
+        }?.takeIf { it in 0..9_007_199_254_740_991L } // SPEC 4.2
+
+    private fun handleSurfaceUpdate(id: Any, params: JSONObject) {
+        val surface = params.opt("surface") as? String
+        val revision = surfaceRevision(params.opt("revision"))
+        val spec = params.optJSONObject("spec")
+        if (surface == null || revision == null || spec == null)
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        if (!surfaces.isValidSurfaceId(surface))
+            return respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("reason", "surface-id"))
+        // SPEC 13.1: the namespace's capability must have been granted.
+        val requiredCap = when (surfaces.namespace(surface)) {
+            "notification" -> "surfaces.notification"
+            "widget" -> "surfaces.widget"
+            else -> null
+        }
+        if (requiredCap != null && requiredCap !in granted)
+            return respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("reason", "namespace-not-granted"))
+        try {
+            val result = surfaces.update(
+                surface, revision, spec,
+                params.optJSONObject("stale_spec"),
+                params.opt("current_view") as? String,
+                params.optJSONArray("reset_input_ids"))
+            respondResult(id, JSONObject()
+                .put("status", result.status)
+                .put("revision", result.revision)
+                .put("present", result.present))
+        } catch (e: ContentInvalid) {
+            respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("path", e.path).put("reason", e.reason))
+        }
+    }
+
+    private fun handleSurfaceRemove(id: Any, params: JSONObject) {
+        val surface = params.opt("surface") as? String
+        val revision = surfaceRevision(params.opt("revision"))
+        if (surface == null || revision == null)
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        // SPEC 13.1: removal is legal for any reported surface, no gate.
+        try {
+            val result = surfaces.remove(surface, revision)
+            respondResult(id, JSONObject()
+                .put("status", result.status)
+                .put("revision", result.revision)
+                .put("present", result.present))
+        } catch (e: ContentInvalid) {
+            respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("path", e.path).put("reason", e.reason))
         }
     }
 
@@ -201,8 +268,8 @@ class CompanionEngine(
     private var lastWants: List<String> = emptyList()
 
     private fun buildWelcome(token: ByteArray): JSONObject {
-        val granted = lastWants.filter { it in config.supportedCapabilities }
-        return JSONObject()
+        granted = lastWants.filter { it in config.supportedCapabilities }
+        val welcome = JSONObject()
             .put("server_proof", EbpAuth.serverProof(
                 token, pendingPairingId!!, pendingClientNonce!!, pendingServerNonce!!))
             .put("protocol", 2)
@@ -210,10 +277,14 @@ class CompanionEngine(
                 .put("name", config.serverName).put("version", config.serverVersion))
             .put("granted", JSONArray(granted))
             .put("surface_profiles", config.surfaceProfiles)
-            .put("surfaces", JSONObject())     // the surface store lands at W4
-            .put("queued_events", 0)           // the durable queue lands at W6
+            .put("surfaces", surfaces.snapshot()) // snapshots AND tombstones (10.2)
+            .put("queued_events", 0)              // the durable queue lands at W6
             .put("limits", config.limits)
-        // input_state omitted while empty; device omitted until granted.
+        // SPEC 10.2: input_state MUST be omitted when empty; device waits
+        // for the capability/trigger modules.
+        surfaces.inputState().takeIf { it.length() > 0 }
+            ?.let { welcome.put("input_state", it) }
+        return welcome
     }
 
     /**

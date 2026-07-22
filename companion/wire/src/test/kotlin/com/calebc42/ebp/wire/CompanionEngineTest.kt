@@ -231,6 +231,78 @@ class CompanionEngineTest {
         }
     }
 
+    // ------------------------------------------------- surfaces via wire
+
+    @Test
+    fun surfaceLifecycleThroughEngineAndAcrossConnections() {
+        val out = mutableListOf<JSONObject>()
+        val store = SurfaceStore(16, 1024)
+        val engine = CompanionEngine(CompanionConfig(
+            serverName = "kat-companion", serverVersion = "1.0.0",
+            pairings = mapOf(katPid to katToken),
+            supportedCapabilities = setOf("theme"),
+            surfaceProfiles = profiles(), limits = limits(),
+            nonceSource = { katSn })) { bytes ->
+            FrameDecoder().let { d -> d.feed(bytes).forEach(out::add); d.finish() }
+        }
+        // Reuse the shared-store constructor path.
+        val engineWithStore = CompanionEngine(CompanionConfig(
+            serverName = "kat-companion", serverVersion = "1.0.0",
+            pairings = mapOf(katPid to katToken),
+            supportedCapabilities = setOf("theme"),
+            surfaceProfiles = profiles(), limits = limits(),
+            nonceSource = { katSn }), store) { bytes ->
+            FrameDecoder().let { d -> d.feed(bytes).forEach(out::add); d.finish() }
+        }
+        engineWithStore.feed(frame(hello()))
+        engineWithStore.feed(frame(auth()))
+        // Applied result through the wire.
+        val spec = JSONObject().put("t", "text").put("text", "hi")
+        engineWithStore.feed(frame(request("s1", "surface.update", JSONObject()
+            .put("surface", "app:main").put("revision", 5).put("spec", spec))))
+        val applied = out.last().getJSONObject("result")
+        assertEquals("applied", applied.getString("status"))
+        assertEquals(5, applied.getLong("revision"))
+        // Structural params failure is -32602, not 1201.
+        engineWithStore.feed(frame(request("s2", "surface.update", JSONObject()
+            .put("surface", "app:main").put("spec", spec))))
+        assertEquals(-32602, out.last().getJSONObject("error").getInt("code"))
+        // Content failure is 1201 with the failing path (SPEC 13.2).
+        engineWithStore.feed(frame(request("s3", "surface.update", JSONObject()
+            .put("surface", "app:main").put("revision", 6)
+            .put("spec", JSONObject().put("t", "text")))))
+        val contentError = out.last().getJSONObject("error")
+        assertEquals(1201, contentError.getInt("code"))
+        assertTrue(contentError.getJSONObject("data").has("path"))
+        // Ungranted namespace is 1201 (SPEC 13.1).
+        engineWithStore.feed(frame(request("s4", "surface.update", JSONObject()
+            .put("surface", "widget:w").put("revision", 1).put("spec", spec))))
+        assertEquals("namespace-not-granted", out.last().getJSONObject("error")
+            .getJSONObject("data").getString("reason"))
+        // Removal tombstones; the shared store carries floors to the next
+        // connection's welcome (SPEC 10.4/13.3).
+        engineWithStore.feed(frame(request("s5", "surface.remove", JSONObject()
+            .put("surface", "app:main").put("revision", 9))))
+        assertEquals(false, out.last().getJSONObject("result").getBoolean("present"))
+        val secondOut = mutableListOf<JSONObject>()
+        val second = CompanionEngine(CompanionConfig(
+            serverName = "kat-companion", serverVersion = "1.0.0",
+            pairings = mapOf(katPid to katToken),
+            supportedCapabilities = setOf("theme"),
+            surfaceProfiles = profiles(), limits = limits(),
+            nonceSource = { katSn }), store) { bytes ->
+            FrameDecoder().let { d -> d.feed(bytes).forEach(secondOut::add); d.finish() }
+        }
+        second.feed(frame(hello()))
+        second.feed(frame(auth()))
+        val reported = secondOut.last().getJSONObject("result")
+            .getJSONObject("surfaces").getJSONObject("app:main")
+        assertEquals(9, reported.getLong("revision"))
+        assertEquals(false, reported.getBoolean("present"))
+        // The first engine (fresh store) never saw any of it.
+        assertEquals(SessionState.CONNECTED, engine.state)
+    }
+
     // -------------------------------------------- registry drift guard --
 
     @Test

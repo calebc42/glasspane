@@ -282,9 +282,10 @@ of decoded outbound messages so far, in send order."
     :max_field_bytes 65536 :max_input_state_bytes 262144
     :max_capture_fields 64))
 
-(defun ebp-test--welcome-result (&optional server-proof drop)
+(defun ebp-test--welcome-result (&optional server-proof drop surfaces)
   "A minimal SPEC 10.2 welcome result plist.
-SERVER-PROOF overrides the correct KAT proof; DROP removes that member."
+SERVER-PROOF overrides the correct KAT proof; DROP removes that member;
+SURFACES overrides the empty surfaces map."
   (let ((welcome
          `(:server_proof ,(or server-proof
                               (ebp-server-proof ebp-test--kat-token
@@ -299,7 +300,7 @@ SERVER-PROOF overrides the correct KAT proof; DROP removes that member."
                                "divider" "button" "text_input"]
                   :builtins ["view.switch" "companion.settings.open"]
                   :features []))
-           :surfaces ,ebp--empty-object
+           :surfaces ,(or surfaces ebp--empty-object)
            :queued_events 0
            :limits ,ebp-test--welcome-limits)))
     (if drop
@@ -427,6 +428,72 @@ is ebp.el's, its content the application's (REWRITE-PLAN boundary)."
       (should (equal (alist-get 'id last-msg) "ev1"))
       (should (equal (alist-get 'status (alist-get 'result last-msg))
                      "accepted")))))
+
+;;;; W4: the surface push path (SPEC 13.1-13.3, client half)
+
+(defun ebp-test--run-handshake-with-floors (client outbox)
+  "Handshake with a welcome reporting app:main at revision 41 (present)
+and a tombstone for app:old at 9."
+  (ebp-client-start client)
+  (ebp-test--respond client "c1" `(:server_nonce ,ebp-test--kat-sn))
+  (ebp-test--respond
+   client "c2"
+   (ebp-test--welcome-result nil nil
+                             '(:app:main (:revision 41 :present t)
+                               :app:old (:revision 9 :present :false))))
+  (ebp-test--respond client "c3"
+                     '(:delivered 0 :rejected 0 :expired 0 :remaining 0
+                       :blocked_by :null))
+  (ebp-test--respond client "c4" ebp--empty-object)
+  (funcall outbox))
+
+(ert-deftest ebp-test-client-surface-revisions-above-floors ()
+  "SPEC 10.3 step 3 + 13.1: pushes use revisions above the reported
+floors — including tombstone floors — and absorb stale results."
+  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness)))
+    (ebp-test--run-handshake-with-floors client outbox)
+    (should (eq (ebp-client-state client) 'ready))
+    ;; First push climbs past the welcome floor.
+    (should (= (ebp-client-surface-update client "app:main"
+                                          '(:t "text" :text "hi"))
+               42))
+    (let ((update (car (last (funcall outbox)))))
+      (should (equal (alist-get 'method update) "surface.update"))
+      (should (= (alist-get 'revision (alist-get 'params update)) 42)))
+    (ebp-test--respond client "c5" '(:status "applied" :revision 42 :present t))
+    ;; The tombstoned surface's floor is honored on reuse.
+    (should (= (ebp-client-surface-update client "app:old"
+                                          '(:t "text" :text "back"))
+               10))
+    ;; A second push while one is in flight still gets a newer revision.
+    (should (= (ebp-client-surface-update client "app:main"
+                                          '(:t "text" :text "again"))
+               43))
+    ;; A stale result absorbs the Companion's higher floor (SPEC 13.2).
+    (ebp-test--respond client "c7" '(:status "stale" :revision 50 :present t))
+    (should (= (ebp-client-surface-update client "app:main"
+                                          '(:t "text" :text "newest"))
+               51))))
+
+(ert-deftest ebp-test-client-surface-remove-is-revisioned ()
+  "SPEC 13.3: removal claims a fresh revision like any mutation."
+  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness))
+               (status-seen nil))
+    (ebp-test--run-handshake-with-floors client outbox)
+    (should (= (ebp-client-surface-remove
+                client "app:main"
+                :callback (lambda (status _err) (setq status-seen status)))
+               42))
+    (let ((remove (car (last (funcall outbox)))))
+      (should (equal (alist-get 'method remove) "surface.remove"))
+      (should (= (alist-get 'revision (alist-get 'params remove)) 42))
+      (should-not (assq 'spec (alist-get 'params remove))))
+    (ebp-test--respond client "c5" '(:status "applied" :revision 42 :present :false))
+    (should (equal status-seen "applied"))
+    ;; Recreating the surface climbs past the tombstone.
+    (should (= (ebp-client-surface-update client "app:main"
+                                          '(:t "text" :text "reborn"))
+               43))))
 
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

@@ -395,6 +395,9 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   client-nonce
   ;; Welcome absorption (SPEC 10.2/10.3 step 1-2).
   granted profiles surfaces limits input-state
+  ;; SPEC 13.1: monotonic per-surface revisions; floors absorbed from the
+  ;; welcome and from every applied/stale result.
+  (revisions (make-hash-table :test #'equal))
   ready-functions ; abnormal hook: called with the client on READY
   close-reason)
 
@@ -507,6 +510,10 @@ synchronization barrier (SPEC 10.3)."
           (ebp-client-surfaces client) (alist-get 'surfaces result)
           (ebp-client-limits client) (alist-get 'limits result)
           (ebp-client-input-state client) (alist-get 'input_state result))
+    ;; Reported floors cover snapshots AND tombstones (SPEC 10.2/13.3).
+    (pcase-dolist (`(,surface . ,entry) (alist-get 'surfaces result))
+      (puthash (symbol-name surface) (alist-get 'revision entry)
+               (ebp-client-revisions client)))
     (ebp-client--step client 'welcome-verified)
     ;; Step 3, required surface pushes, arrives with rung W4.
     ;; Step 4: replay concludes before session.ready.
@@ -562,6 +569,53 @@ Framing failures close the connection (SPEC 6.2)."
          ;; SPEC 7.3: unknown notifications are logged and ignored.
          (message "ebp: unknown notification %S ignored" method))))
     (_ (message "ebp: structurally invalid message dropped"))))
+
+;;;; Surface push (SPEC 13.1-13.3), the client half
+
+(defun ebp-client--surface-floor (client surface)
+  (gethash surface (ebp-client-revisions client) -1))
+
+(defun ebp-client--absorb-floor (client surface revision)
+  "Absorb a reported revision floor; floors only ever rise (SPEC 13.1)."
+  (puthash surface
+           (max revision (ebp-client--surface-floor client surface))
+           (ebp-client-revisions client)))
+
+(defun ebp-client--surface-request (client method surface params callback)
+  "Send a revisioned surface request and absorb the result floor.
+Returns the revision used.  CALLBACK, when given, receives (STATUS ERROR)
+where STATUS is \"applied\" or \"stale\" (SPEC 13.2: stale is benign)."
+  (let ((revision (1+ (ebp-client--surface-floor client surface))))
+    ;; Claim the revision at send time so a second push in flight is newer.
+    (puthash surface revision (ebp-client-revisions client))
+    (ebp-client--request
+     client method
+     (append `(:surface ,surface :revision ,revision) params)
+     (lambda (result error)
+       (unless error
+         (ebp-client--absorb-floor client surface (alist-get 'revision result)))
+       (when callback
+         (funcall callback (and result (alist-get 'status result)) error))))
+    revision))
+
+(cl-defun ebp-client-surface-update (client surface spec
+                                     &key stale-after-s stale-spec current-view
+                                     reset-input-ids callback)
+  "Push a complete snapshot for SURFACE (SPEC 13.2); returns its revision.
+SPEC is the SurfaceSpec value.  What the spec contains is the
+application's business (REWRITE-PLAN boundary); this owns the revisions."
+  (ebp-client--surface-request
+   client "surface.update" surface
+   `(:spec ,spec
+     ,@(when stale-after-s `(:stale_after_s ,stale-after-s))
+     ,@(when stale-spec `(:stale_spec ,stale-spec))
+     ,@(when current-view `(:current_view ,current-view))
+     ,@(when reset-input-ids `(:reset_input_ids ,(vconcat reset-input-ids))))
+   callback))
+
+(cl-defun ebp-client-surface-remove (client surface &key callback)
+  "Tombstone SURFACE at a fresh revision (SPEC 13.3); returns the revision."
+  (ebp-client--surface-request client "surface.remove" surface nil callback))
 
 ;;;; TCP transport (SPEC 5.2), thin wrapper over the engine
 

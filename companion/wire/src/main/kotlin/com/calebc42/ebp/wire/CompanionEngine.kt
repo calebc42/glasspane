@@ -29,6 +29,11 @@ class CompanionEngine(
     /** Shared across connections: surface state outlives a session (13.5). */
     val surfaces: SurfaceStore = SurfaceStore(
         config.limits.getLong("max_surfaces"), config.limits.getLong("max_surface_ids")),
+    /** Shared across connections AND restarts: the SPEC 15 durable queue. */
+    val queue: DurableQueue = DurableQueue(
+        MemoryQueueStore(),
+        config.limits.getLong("max_queued_events"),
+        config.limits.getLong("max_queued_bytes")),
     private val sink: (ByteArray) -> Unit,
 ) {
     var state: SessionState = SessionState.CONNECTED
@@ -65,14 +70,32 @@ class CompanionEngine(
         catch (e: InvalidRequest) { return close("body: ${e.message}") }
         for (msg in messages) {
             if (state == SessionState.CLOSED) return
-            dispatch(msg)
+            try {
+                dispatch(msg)
+            } catch (e: Exception) {
+                // A dispatch failure must fail closed, never crash-loop
+                // the host (review: poison-record scenario).
+                close("dispatch failure: ${e.message}")
+            }
         }
     }
 
+    @Synchronized
     fun close(reason: String) {
         state = SessionState.CLOSED
         closeReason = reason
+        // P0 (review): the in-flight marker is connection state. If this
+        // engine's request dies with the connection, the record MUST
+        // return to plain queued so the next session's replay can move
+        // (SPEC 15.3: events without a permanent result remain queued).
+        if (myInFlightSeq != null && queue.inFlightSeq == myInFlightSeq) {
+            queue.inFlightSeq = null
+        }
+        myInFlightSeq = null
     }
+
+    /** The queue_seq this engine's connection put in flight, if any. */
+    private var myInFlightSeq: Long? = null
 
     // ------------------------------------------------------------ dispatch
 
@@ -123,7 +146,6 @@ class CompanionEngine(
     fun dispatchAction(surface: String, descriptor: JSONObject, hookValue: Any?,
                        callback: ((String?, JSONObject?) -> Unit)? = null) {
         if (descriptor.has("builtin")) return // W7
-        if (state != SessionState.READY) return // drop while not READY
         val revision = surfaces.revisionOf(surface) ?: return
         val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
         // SPEC 14.3: the hook's produced value is injected, never authored.
@@ -133,9 +155,10 @@ class CompanionEngine(
             .put("action", descriptor.getString("action"))
             .put("surface", surface)
             .put("revision_seen", revision)
-            .put("occurred_at_ms", System.currentTimeMillis())
+            .put("occurred_at_ms", queue.effectiveNow())
         if (args.length() > 0) params.put("args", args)
-        // SPEC 14.1: capture_fields is one occurrence-time snapshot.
+        // SPEC 14.1: capture_fields is one occurrence-time snapshot,
+        // stored inside the durable record for queued policies (15.1).
         descriptor.optJSONArray("capture_fields")?.let { capture ->
             if (capture.length() > 0) {
                 val fields = JSONObject()
@@ -147,8 +170,53 @@ class CompanionEngine(
                 params.put("fields", fields)
             }
         }
-        sendRequest("event.action", params) { result, error ->
-            callback?.invoke(result?.optString("status"), error)
+        // SPEC 14.4/15.4: serialize the complete params and verify the
+        // event limit BEFORE persistence or transmission; an oversized
+        // occurrence is a local diagnostic, never a frame or a record.
+        if (params.toString().toByteArray(Charsets.UTF_8).size >
+            config.limits.getLong("max_event_bytes")) {
+            callback?.invoke(null, JSONObject()
+                .put("code", 1201).put("message", "Event exceeds max_event_bytes")
+                .put("data", JSONObject().put("kind", "content-invalid")
+                    .put("reason", "event-too-large")))
+            return
+        }
+        when (descriptor.optString("when_offline", OFFLINE_DEFAULT)) {
+            "queue", "wake" -> {
+                // SPEC 22.3/15.1: durable admission precedes every wake or
+                // delivery attempt, including when READY right now.
+                params.put("queued_at_ms", queue.effectiveNow())
+                val policy = descriptor.getString("when_offline")
+                when (queue.admit(params, policy,
+                        descriptor.optString("dedupe").takeIf { it.isNotEmpty() },
+                        descriptor.getLong("ttl_s"))) {
+                    is AdmitResult.Admitted -> {
+                        if (policy == "wake" && state != SessionState.READY &&
+                            queue.effectiveNow() - lastWakeMs >= 60_000) {
+                            lastWakeMs = queue.effectiveNow()
+                            wakeListener?.invoke()
+                        }
+                        callback?.invoke("queued", null)
+                        pumpAdvance() // no-op unless READY and unpaused
+                    }
+                    AdmitResult.QueueFull ->
+                        // SPEC 15.1: the 1601 queue-full equivalent, local.
+                        callback?.invoke(null, JSONObject()
+                            .put("code", 1601).put("message", "Queue full")
+                            .put("data", JSONObject().put("kind", "queue-full")))
+                    AdmitResult.StorageFailed ->
+                        // SPEC 15.1: MUST NOT claim the interaction queued.
+                        callback?.invoke(null, JSONObject()
+                            .put("code", -32603).put("message", "Storage failed")
+                            .put("data", JSONObject().put("kind", "internal-error")))
+                }
+            }
+            else -> { // drop: live delivery only (SPEC 15.1)
+                if (state != SessionState.READY) return
+                sendRequest("event.action", params) { result, error ->
+                    callback?.invoke(result?.optString("status"), error)
+                }
+            }
         }
     }
 
@@ -158,6 +226,8 @@ class CompanionEngine(
      * P1 #2 flush barrier holds trivially — nothing is ever pending.
      * State-before-action ordering falls out of the shared ordered sink.
      */
+    private val syncingDirty = LinkedHashSet<Pair<String, String>>()
+
     @Synchronized
     fun publishState(surface: String, id: String, value: Any?) {
         // SPEC 14.6: a password node MUST NOT emit state.changed, and
@@ -166,7 +236,12 @@ class CompanionEngine(
         if (!surfaces.isStatefulNode(surface, id)) return
         if (surfaces.isPasswordNode(surface, id)) return
         surfaces.putDraft(surface, id, value)
-        if (state != SessionState.READY) return
+        if (state != SessionState.READY) {
+            // SPEC 10.3: divergent values changed before READY flush on
+            // entering READY, ahead of any released event.
+            syncingDirty.add(surface to id)
+            return
+        }
         val revision = surfaces.revisionOf(surface) ?: return
         emit(JSONObject().put("jsonrpc", "2.0").put("method", "state.changed")
             .put("params", JSONObject()
@@ -204,19 +279,136 @@ class CompanionEngine(
         when (method) {
             "surface.update" -> handleSurfaceUpdate(id, params)
             "surface.remove" -> handleSurfaceRemove(id, params)
-            "queue.replay" -> respondResult(id, JSONObject()
-                .put("delivered", 0).put("rejected", 0).put("expired", 0)
-                .put("remaining", 0).put("blocked_by", JSONObject.NULL))
+            "queue.replay" -> handleQueueReplay(id)
             "session.ready" -> {
                 // SPEC 10.3: the {} response serializes ahead of every
                 // READY-only frame; emitting before transitioning does that.
                 respondResult(id, JSONObject())
                 state = sessionStep(state, SessionEvent.READY_CONFIRMED) ?: state
+                // SPEC 10.3: flush every divergent value changed during
+                // SYNCING as ordered state.changed BEFORE releasing events.
+                for ((surface, nodeId) in syncingDirty.toList()) {
+                    if (!surfaces.hasDraft(surface, nodeId)) continue
+                    val revision = surfaces.revisionOf(surface) ?: continue
+                    emit(notification("state.changed", JSONObject()
+                        .put("surface", surface).put("revision_seen", revision)
+                        .put("id", nodeId)
+                        .put("value", surfaces.draft(surface, nodeId)
+                            ?: JSONObject.NULL)))
+                }
+                syncingDirty.clear()
+                // SPEC 15.3: only after that flush may events flow.
+                pumpAdvance()
             }
             else ->
                 // Registered in SPEC 11 but its rung has not landed yet.
                 respondError(id, -32603, "Not implemented at this rung", "internal-error")
         }
+    }
+
+    // -------------------------------------- durable delivery pump (SPEC 15)
+
+    /** Platform hook for the `wake` policy: called after durable admission
+     * (SPEC 15.1: persistence precedes every wake attempt). */
+    var wakeListener: (() -> Unit)? = null
+    private var lastWakeMs = 0L
+
+    private var pumpPaused = false
+    private var replayId: Any? = null
+    private var replayDelivered = 0
+    private var replayRejected = 0
+    private var blockedBy: Any = JSONObject.NULL
+
+    private fun handleQueueReplay(id: Any) {
+        // SPEC 15.3: only one replay may be active.
+        if (replayId != null)
+            return respondError(id, 1600, "A replay is already active", "queue-busy")
+        replayId = id
+        replayDelivered = 0
+        replayRejected = 0
+        blockedBy = JSONObject.NULL
+        pumpPaused = false // an explicit replay resumes a paused pump
+        queue.sweepExpired()
+        // SPEC 15.3: join an in-flight durable request rather than duplicate
+        // it; its disposition lands in this summary via onPumpResult.
+        if (queue.inFlightSeq == null) pumpAdvance()
+    }
+
+    private fun replayActive() = replayId != null
+
+    /** Send the head event when the pump is free; conclude a replay at a
+     * stable stop (SPEC 15.3). */
+    private fun pumpAdvance() {
+        if (queue.inFlightSeq != null || pumpPaused) {
+            if (pumpPaused) concludeReplay()
+            return
+        }
+        // Auto-delivery needs READY; an explicit replay drives the pump in
+        // SYNCING too — that IS the 10.3 barrier draining the backlog.
+        if (!replayActive() && state != SessionState.READY) return
+        if (replayActive() && state != SessionState.SYNCING &&
+            state != SessionState.READY) return
+        queue.sweepExpired()
+        val record = queue.head() ?: return concludeReplay()
+        // SPEC 10.3/15.3: newly generated events stay behind the barrier
+        // until the replay concludes AND session.ready succeeds.
+        if (state == SessionState.SYNCING &&
+            record.getLong("queue_seq") >= sessionBoundarySeq)
+            return concludeReplay()
+        val seq = record.getLong("queue_seq")
+        queue.inFlightSeq = seq
+        myInFlightSeq = seq
+        // SPEC 15.3: the stored record replays with its stored event_id.
+        sendRequest("event.action", record.getJSONObject("event")) { result, error ->
+            onPumpResult(seq, result, error)
+        }
+    }
+
+    private fun onPumpResult(seq: Long, result: JSONObject?, error: JSONObject?) {
+        queue.inFlightSeq = null
+        myInFlightSeq = null
+        when {
+            error != null -> {
+                // SPEC 15.3: any well-formed error retains the head and
+                // pauses the pump; later admissions never bypass it.
+                pumpPaused = true
+                // SPEC 15.3: only a valid string kind rides blocked_by.
+                blockedBy = ((error.opt("data") as? JSONObject)
+                    ?.opt("kind") as? String)?.takeIf { it.isNotEmpty() }
+                    ?: "json-rpc-error"
+                concludeReplay()
+            }
+            result?.optString("status") in listOf("accepted", "duplicate") -> {
+                replayDelivered++
+                queue.deleteRecord(seq)
+                pumpAdvance()
+            }
+            result?.optString("status") in listOf("stale", "rejected") -> {
+                replayRejected++
+                queue.deleteRecord(seq)
+                pumpAdvance()
+            }
+            else -> {
+                // SPEC 15.3: unknown status is a protocol violation —
+                // retain the event, one safe log.error, close.
+                emit(notification("log.error", JSONObject()
+                    .put("code", -32603)
+                    .put("message", "event.action result with unknown status")
+                    .put("data", JSONObject().put("kind", "internal-error"))))
+                close("event.action result with unknown status")
+            }
+        }
+    }
+
+    private fun concludeReplay() {
+        val id = replayId ?: return
+        replayId = null
+        respondResult(id, JSONObject()
+            .put("delivered", replayDelivered)
+            .put("rejected", replayRejected)
+            .put("expired", queue.takeExpiredCount())
+            .put("remaining", queue.count())
+            .put("blocked_by", blockedBy))
     }
 
     // ------------------------------------------------------ surfaces (13)
@@ -359,9 +551,11 @@ class CompanionEngine(
     // ------------------------------------------------------------- welcome
 
     private var lastWants: List<String> = emptyList()
+    private var sessionBoundarySeq = Long.MAX_VALUE
 
     private fun buildWelcome(token: ByteArray): JSONObject {
         granted = lastWants.filter { it in config.supportedCapabilities }
+        sessionBoundarySeq = queue.boundarySeq()
         val welcome = JSONObject()
             .put("server_proof", EbpAuth.serverProof(
                 token, pendingPairingId!!, pendingClientNonce!!, pendingServerNonce!!))
@@ -371,7 +565,9 @@ class CompanionEngine(
             .put("granted", JSONArray(granted))
             .put("surface_profiles", config.surfaceProfiles)
             .put("surfaces", surfaces.snapshot()) // snapshots AND tombstones (10.2)
-            .put("queued_events", 0)              // the durable queue lands at W6
+            // SPEC 10.2: the count visible to the next replay, after the
+            // already-identified expired records are gone.
+            .put("queued_events", queue.let { it.sweepExpired(); it.count() })
             .put("limits", config.limits)
         // SPEC 10.2: input_state MUST be omitted when empty; device waits
         // for the capability/trigger modules.

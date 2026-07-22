@@ -21,10 +21,20 @@ import org.json.JSONObject
 class MainActivity : ComponentActivity() {
 
     private val currentSpec = MutableStateFlow<JSONObject?>(null)
-    private val bridge = DeviceBridge { spec -> currentSpec.value = spec }
+    private lateinit var bridge: DeviceBridge
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        bridge = DeviceBridge(
+            java.io.File(filesDir, "ebp-queue.json"),
+            onSurfaceChanged = { spec -> currentSpec.value = spec },
+            onQueueProblem = { message ->
+                runOnUiThread {
+                    android.widget.Toast.makeText(
+                        this, "EBP queue: $message",
+                        android.widget.Toast.LENGTH_LONG).show()
+                }
+            })
         bridge.start()
         setContent {
             MaterialTheme {

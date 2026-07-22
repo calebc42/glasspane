@@ -10,19 +10,31 @@ package com.calebc42.ebp.companion
 
 import com.calebc42.ebp.wire.CompanionEngine
 import com.calebc42.ebp.wire.CompanionConfig
+import com.calebc42.ebp.wire.DurableQueue
 import com.calebc42.ebp.wire.EbpAuth
+import com.calebc42.ebp.wire.FileQueueStore
 import com.calebc42.ebp.wire.SessionState
 import com.calebc42.ebp.wire.SurfaceStore
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import kotlin.concurrent.thread
 
-class DeviceBridge(private val onSurfaceChanged: (JSONObject?) -> Unit) {
+class DeviceBridge(
+    queueFile: File,
+    private val onSurfaceChanged: (JSONObject?) -> Unit,
+    /** SPEC 15.1: storage failure and queue exhaustion MUST reach the
+     * user as a visible diagnostic. */
+    private val onQueueProblem: (String) -> Unit = {},
+) {
 
     val store = SurfaceStore(64, 4096)
+
+    /** SPEC 15: the durable queue survives process and device restarts. */
+    val queue = DurableQueue(FileQueueStore(queueFile), 256, 8_388_608)
     @Volatile private var current: Socket? = null
 
     private val config = CompanionConfig(
@@ -74,7 +86,12 @@ class DeviceBridge(private val onSurfaceChanged: (JSONObject?) -> Unit) {
     /** SPEC 14.1: renderer hook -> remote action through the live engine. */
     fun action(surface: String, descriptor: JSONObject?, value: Any? = null) {
         descriptor ?: return
-        dispatchExecutor.execute { engine?.dispatchAction(surface, descriptor, value) }
+        dispatchExecutor.execute {
+            engine?.dispatchAction(surface, descriptor, value) { _, error ->
+                // SPEC 15.1: surface queue-full/storage failures visibly.
+                error?.let { onQueueProblem(it.optString("message", "queue error")) }
+            }
+        }
     }
 
     /** SPEC 14.6: renderer edit -> draft + state.changed publication. */
@@ -84,7 +101,7 @@ class DeviceBridge(private val onSurfaceChanged: (JSONObject?) -> Unit) {
 
     private fun serve(socket: Socket) {
         val out = socket.getOutputStream()
-        val engine = CompanionEngine(config, store) { bytes ->
+        val engine = CompanionEngine(config, store, queue) { bytes ->
             out.write(bytes); out.flush()
         }
         this.engine = engine
@@ -102,6 +119,9 @@ class DeviceBridge(private val onSurfaceChanged: (JSONObject?) -> Unit) {
         } catch (_: Exception) {
             // transport loss: SPEC 10.1, any state may close
         } finally {
+            // SPEC 15.3: the engine releases its in-flight marker so the
+            // next session's replay is never wedged (review P0).
+            engine.close("transport closed")
             socket.runCatching { close() }
         }
     }

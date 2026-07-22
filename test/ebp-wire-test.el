@@ -318,22 +318,30 @@ SCRIPT is called with (MSG SEND) per decoded inbound message."
           :received (lambda () (reverse received))
           :stop (lambda () (delete-process server)))))
 
-(cl-defun ebp-test--kat-script (&key welcome-fn after-ready surface-fn)
-  "The default conformant companion script over the KAT pairing."
-  (lambda (msg send)
-    (let* ((method (alist-get 'method msg))
-           (id (alist-get 'id msg))
-           (reply (lambda (result)
-                    (funcall send `(:jsonrpc "2.0" :id ,id :result ,result)))))
-      (pcase method
-        ("session.hello"
-         (funcall reply `(:server_nonce ,ebp-test--kat-sn)))
-        ("auth.response"
-         (funcall reply (funcall (or welcome-fn #'identity)
-                                 (ebp-test--welcome-result))))
-        ("queue.replay"
-         (funcall reply '(:delivered 0 :rejected 0 :expired 0 :remaining 0
-                          :blocked_by :null)))
+(cl-defun ebp-test--kat-script (&key welcome-fn after-ready surface-fn
+                                     replay-fn)
+  "The default conformant companion script over the KAT pairing.
+REPLAY-FN, when given, is called with the 1-based replay call number and
+returns that call's summary plist."
+  (let ((replay-calls 0))
+    (lambda (msg send)
+      (let* ((method (alist-get 'method msg))
+             (id (alist-get 'id msg))
+             (reply (lambda (result)
+                      (funcall send `(:jsonrpc "2.0" :id ,id :result ,result)))))
+        (pcase method
+          ("session.hello"
+           (funcall reply `(:server_nonce ,ebp-test--kat-sn)))
+          ("auth.response"
+           (funcall reply (funcall (or welcome-fn #'identity)
+                                   (ebp-test--welcome-result))))
+          ("queue.replay"
+           (cl-incf replay-calls)
+           (funcall reply
+                    (if replay-fn
+                        (funcall replay-fn replay-calls)
+                      '(:delivered 0 :rejected 0 :expired 0 :remaining 0
+                        :blocked_by :null))))
         ("session.ready"
          (funcall reply ebp--empty-object)
          (when after-ready (funcall after-ready send)))
@@ -349,14 +357,17 @@ SCRIPT is called with (MSG SEND) per decoded inbound message."
         ("surface.remove"
          (funcall reply `(:status "applied"
                           :revision ,(alist-get 'revision (alist-get 'params msg))
-                          :present :false)))))))
+                          :present :false))))))))
 
 (defun ebp-test--connect (port &rest extra)
   (apply #'ebp-connect "127.0.0.1" port
          :client-name "test-client" :client-version "0.0.1"
          :pairing-id ebp-test--kat-pid :token ebp-test--kat-token
          :wants '("theme") :client-nonce ebp-test--kat-cn
-         extra))
+         ;; Tests never write the default user-emacs-directory receipts;
+         ;; callers may override with their own :receipt-file first.
+         (append extra (list :receipt-file
+                             (make-temp-file "ebp-test-receipts")))))
 
 (defun ebp-test--wait (pred &optional timeout)
   "Pump the event loop until PRED or TIMEOUT (default 5 s); return PRED."
@@ -689,6 +700,91 @@ reset at a higher revision supersedes; a later report reinstates."
                 :id "title" :value "reinstated"))
       (should (equal (ebp-client-input-value client "app:main" "title")
                      "reinstated")))))
+
+;;;; W6: replay retries with bounded backoff (SPEC 10.3/15.3)
+
+(ert-deftest ebp-test-replay-retry-until-drained ()
+  "A blocked barrier replay still reaches READY (SPEC 10.3), then the
+client retries with backoff until `remaining' drains (SPEC 15.3)."
+  (let ((ready nil))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :replay-fn
+                 (lambda (n)
+                   (if (= n 1)
+                       ;; The first replay stops on a transient error with
+                       ;; two events still retained.
+                       '(:delivered 1 :rejected 0 :expired 0 :remaining 2
+                         :blocked_by "event-retry")
+                     '(:delivered 2 :rejected 0 :expired 0 :remaining 0
+                       :blocked_by :null))))
+                :replay-retry-delay 0.15
+                :ready-function (lambda (_c) (setq ready t)))
+      ;; SPEC 10.3: the blocked replay concluded; READY is reached.
+      (should (ebp-test--wait (lambda () ready)))
+      (should (= (plist-get (ebp-client-replay-summary client) :remaining) 2))
+      ;; The bounded-backoff retry drains the backlog.
+      (should (ebp-test--wait
+               (lambda ()
+                 (= (plist-get (ebp-client-replay-summary client) :remaining)
+                    0))))
+      (let ((replays (cl-count-if
+                      (lambda (m) (equal (alist-get 'method m) "queue.replay"))
+                      (funcall (plist-get server :received)))))
+        (should (= replays 2))))))
+
+(ert-deftest ebp-test-barrier-seam-and-kind-carrying-errors ()
+  "SPEC 10.3 step 3: :before-replay-function pushes surfaces before the
+replay on the wire; SPEC 8: a receipt-commit failure answers 1500 with
+data.kind event-retry surviving jsonrpc.el's reply path."
+  (let ((ready nil))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :after-ready
+                 (lambda (send)
+                   (ebp-test--send-event send 500 (make-string 32 ?d))))
+                :receipt-file "/nonexistent-ebp-dir/receipts"
+                :before-replay-function
+                (lambda (c)
+                  (ebp-client-surface-update c "app:pre"
+                                             '(:t "text" :text "step 3")))
+                :ready-function (lambda (_c) (setq ready t)))
+      (ebp-client-register-action
+       client "demo.count" (lambda (_c _p) 'accepted))
+      (should (ebp-test--wait (lambda () ready)))
+      ;; Step 3 before step 4, in wire order.
+      (let ((methods (mapcar (lambda (m) (alist-get 'method m))
+                             (funcall (plist-get server :received)))))
+        (should (equal (cl-subseq methods 0 5)
+                       '("session.hello" "auth.response" "surface.update"
+                         "queue.replay" "session.ready"))))
+      ;; The un-writable receipt file forces 1500 — with its kind intact.
+      (should (ebp-test--wait (lambda () (ebp-test--response-for server 500))))
+      (let ((err (alist-get 'error (ebp-test--response-for server 500))))
+        (should (= (alist-get 'code err) 1500))
+        (should (equal (alist-get 'kind (alist-get 'data err))
+                       "event-retry"))))))
+
+(ert-deftest ebp-test-negative-revision-seen-is-invalid ()
+  "SPEC 14.4: revision_seen is a non-negative integer."
+  (ebp-test--with-companion
+      (server client
+              (ebp-test--kat-script
+               :after-ready
+               (lambda (send)
+                 (funcall send '(:jsonrpc "2.0" :id 501 :method "event.action"
+                                 :params (:event_id "00112233445566778899aabbccddeeff"
+                                          :action "demo.count"
+                                          :surface "app:main" :revision_seen -1
+                                          :occurred_at_ms 1784700000000))))))
+    (ebp-client-register-action
+     client "demo.count" (lambda (_c _p) 'accepted))
+    (should (ebp-test--wait (lambda () (ebp-test--response-for server 501))))
+    (should (= (alist-get 'code (alist-get 'error
+                                           (ebp-test--response-for server 501)))
+               -32602))))
 
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

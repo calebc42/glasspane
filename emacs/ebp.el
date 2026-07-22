@@ -377,6 +377,35 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
     (`(,_ . close) 'closed)
     (_ nil)))
 
+;;;; The connection subclass (kit section 3's sanctioned seam)
+
+;; jsonrpc.el's dispatch loop strips `:data' from outbound error replies
+;; (verified against 1.0.25, and documented in the conversion kit).  SPEC 8
+;; requires every EBP error to carry `data.kind', and SPEC 15.3 degrades
+;; `blocked_by' to "json-rpc-error" without it.  The reply is emitted
+;; synchronously within the dispatch extent, so a handler stashes its data
+;; on the connection and this override re-attaches it.
+
+(defclass ebp--connection (jsonrpc-process-connection)
+  ((ebp-error-data :initform nil :accessor ebp--connection-error-data)))
+
+(cl-defmethod jsonrpc-convert-to-endpoint ((conn ebp--connection)
+                                           message subtype)
+  (let ((converted (cl-call-next-method)))
+    (when-let* ((data (ebp--connection-error-data conn)))
+      (setf (ebp--connection-error-data conn) nil)
+      (when (eq subtype 'reply)
+        (when-let* ((err (plist-get converted :error)))
+          (plist-put err :data data))))
+    converted))
+
+(defun ebp-client--error (client code message kind &rest extra)
+  "Signal a SPEC 8 error whose `data.kind' survives the reply path."
+  (when-let* ((conn (ebp-client-connection client)))
+    (setf (ebp--connection-error-data conn)
+          (append (list :kind kind) extra)))
+  (jsonrpc-error :code code :message message))
+
 ;;;; Client engine (SPEC 9-10) on core jsonrpc.el
 
 ;; Decision log #2 (ebp slop-docs/JSONRPC-conversion-kit.md): the Emacs
@@ -411,11 +440,22 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   (reset-history (make-hash-table :test #'equal))
   state-changed-functions ; called with (client surface revision id value)
   ready-functions ; abnormal hook: called with the client on READY
+  ;; SPEC 15.3: the latest replay summary and the bounded-backoff timer
+  ;; that retries while `remaining' is nonzero.
+  replay-summary
+  replay-retry-timer
   close-reason)
 
 (defun ebp-client-create (&rest config)
   "Create a client engine in `connected'.  CONFIG is the struct's config
-plist plus optionally :ready-function and :state-changed-function."
+plist plus optionally :ready-function, :state-changed-function,
+:before-replay-function (the SPEC 10.3 step-3 seam), :receipt-file, and
+:replay-retry-delay.  Without :receipt-file the SPEC 14.4 EventId
+receipts default to `ebp-receipts' under `user-emacs-directory' —
+`accepted' always names a durable commitment."
+  (unless (plist-member config :receipt-file)
+    (setq config (plist-put (copy-sequence config) :receipt-file
+                            (locate-user-emacs-file "ebp-receipts"))))
   (let ((client (ebp--make-client :config config)))
     (when-let* ((fn (plist-get config :ready-function)))
       (push fn (ebp-client-ready-functions client)))
@@ -442,6 +482,8 @@ For a notification the return value is ignored."
   (unless (eq (ebp-client-state client) 'closed)
     (setf (ebp-client-state client) 'closed
           (ebp-client-close-reason client) reason)
+    (when-let* ((timer (ebp-client-replay-retry-timer client)))
+      (cancel-timer timer))
     (when-let* ((conn (ebp-client-connection client)))
       (ignore-errors (jsonrpc-shutdown conn)))))
 
@@ -453,12 +495,15 @@ For a notification the return value is ignored."
       (ebp-client-close client (list 'illegal-transition
                                      (ebp-client-state client) event)))))
 
-(defun ebp-client--request (client method params callback)
+(defun ebp-client--request (client method params callback &optional timeout)
   "Send a request through jsonrpc.el; ids are the library's integers.
 CALLBACK receives (RESULT ERROR); exactly one is non-nil except for the
-{} result, where both may be nil — check ERROR, not RESULT."
+{} result, where both may be nil — check ERROR, not RESULT.  TIMEOUT
+overrides jsonrpc.el's 10 s default (SPEC 10.3 step 4: a replay must be
+allowed to run to a stable stop)."
   (jsonrpc-async-request
    (ebp-client-connection client) method params
+   :timeout (or timeout jsonrpc-default-request-timeout)
    :success-fn (lambda (result) (funcall callback result nil))
    :error-fn (lambda (error) (funcall callback nil (or error '(:code -32603))))
    :timeout-fn (lambda ()
@@ -541,13 +586,19 @@ synchronization barrier (SPEC 10.3)."
                                      value
                                      (ebp-client-input-values client))))
     (ebp-client--step client 'welcome-verified)
-    ;; Step 3, required surface pushes, arrives with rung W4's callers.
-    ;; Step 4: replay concludes before session.ready.
+    ;; SPEC 10.3 step 3: the application pushes required surfaces (with
+    ;; retained drafts reflected) BEFORE replay; send order is wire order.
+    (when-let* ((fn (plist-get (ebp-client-config client)
+                               :before-replay-function)))
+      (funcall fn client))
+    ;; Step 4: replay concludes before session.ready — and SPEC 10.3: a
+    ;; replay blocked by a transient error HAS concluded for the barrier.
     (ebp-client--request
      client 'queue.replay ebp--empty-object
-     (lambda (_result error)
+     (lambda (result error)
        (if error
            (ebp-client-close client (list 'replay-failed error))
+         (setf (ebp-client-replay-summary client) result)
          ;; Step 5.
          (ebp-client--request
           client 'session.ready ebp--empty-object
@@ -556,7 +607,55 @@ synchronization barrier (SPEC 10.3)."
                 (ebp-client-close client (list 'ready-failed error))
               (ebp-client--step client 'ready-confirmed)
               (dolist (fn (ebp-client-ready-functions client))
-                (funcall fn client)))))))))))
+                (funcall fn client))
+              ;; SPEC 15.3: retry with bounded backoff while remaining.
+              (ebp-client--schedule-replay-retry client nil))))))
+     300))))
+
+(defun ebp-client--schedule-replay-retry (client delay)
+  "SPEC 10.3/15.3: after READY, retry `queue.replay' with bounded
+backoff while the backlog has `remaining' events.  DELAY nil starts at
+the configured :replay-retry-delay (default 5 s); each retry doubles it,
+capped at 60 s."
+  (let* ((summary (ebp-client-replay-summary client))
+         (remaining (and summary (plist-get summary :remaining))))
+    (when (and remaining (> remaining 0)
+               (eq (ebp-client-state client) 'ready))
+      (let ((next (or delay
+                      (plist-get (ebp-client-config client)
+                                 :replay-retry-delay)
+                      5)))
+        (setf (ebp-client-replay-retry-timer client)
+              (run-at-time
+               next nil
+               (lambda ()
+                 (when (eq (ebp-client-state client) 'ready)
+                   (ebp-client--request
+                    client 'queue.replay ebp--empty-object
+                    (lambda (result error)
+                      (if error
+                          ;; SPEC 15.3: bounded backoff continues even
+                          ;; across an errored retry (1600 and friends).
+                          (ebp-client--schedule-replay-retry
+                           client (min 60 (* 2 next)))
+                        (setf (ebp-client-replay-summary client) result)
+                        (ebp-client--schedule-replay-retry
+                         client (min 60 (* 2 next)))))
+                    300)))))))))
+
+(defun ebp-client--force-replay-retry (client)
+  "SPEC 15.3: after answering 1500 event-retry, Emacs SHOULD call
+`queue.replay' again with bounded backoff — the pump is paused until it
+does.  Forces one retry cycle even when the last summary was clean."
+  (unless (ebp-client-replay-retry-timer client)
+    (setf (ebp-client-replay-summary client)
+          (plist-put (copy-sequence (or (ebp-client-replay-summary client)
+                                        '(:remaining 0)))
+                     :remaining (max 1 (or (plist-get
+                                            (ebp-client-replay-summary client)
+                                            :remaining)
+                                           1))))
+    (ebp-client--schedule-replay-retry client nil)))
 
 ;;;; Dispatchers (SPEC 7.3) — ours because the library is fail-open
 
@@ -565,7 +664,8 @@ synchronization barrier (SPEC 10.3)."
   (let ((handler (gethash (symbol-name method) (ebp-client-handlers client))))
     (if handler
         (funcall handler client params)
-      (jsonrpc-error :code -32601 :message "Method not found"))))
+      (ebp-client--error client -32601 "Method not found"
+                         "method-not-found"))))
 
 (defun ebp-client--notification-dispatcher (client _conn method params)
   "SPEC 7.3: unknown notifications are logged and ignored."
@@ -613,7 +713,10 @@ without also making it idempotent, as 14.4 recommends."
       (let ((now (float-time)))
         (when-let* ((file (plist-get (ebp-client-config client)
                                      :receipt-file)))
-          (write-region (format "%s %s\n" event-id now) nil file t 'silent))
+          ;; Emacs 30 defaults write-region-inhibit-fsync to t; a receipt
+          ;; that is not on stable storage is not a 14.4 commitment.
+          (let ((write-region-inhibit-fsync nil))
+            (write-region (format "%s %s\n" event-id now) nil file t 'silent)))
         (puthash event-id now (ebp-client-receipts client))
         t)
     (error nil)))
@@ -624,7 +727,8 @@ without also making it idempotent, as 14.4 recommends."
         (revision (plist-get params :revision_seen))
         (dialog (plist-get params :dialog_id)))
     (cond
-     (surface (and (stringp surface) (integerp revision) (null dialog)))
+     (surface (and (stringp surface) (integerp revision) (>= revision 0)
+                   (null dialog)))
      (dialog (and (stringp dialog) (null revision)))
      (t (null revision)))))
 
@@ -641,7 +745,7 @@ leaves, which is exactly the ordering 14.4 requires."
                  (stringp action) (string-search "." action)
                  (integerp (plist-get params :occurred_at_ms))
                  (ebp-client--event-context-valid-p params))
-      (jsonrpc-error :code -32602 :message "Invalid params"))
+      (ebp-client--error client -32602 "Invalid params" "invalid-params"))
     (cond
      ;; SPEC 14.4: a repeated ID MUST NOT deliberately repeat the effect.
      ((gethash event-id (ebp-client-receipts client))
@@ -654,13 +758,16 @@ leaves, which is exactly the ordering 14.4 requires."
         ('accepted
          (if (ebp-client--receipt-commit client event-id)
              '(:status "accepted")
-           ;; SPEC 14.4: no commitment, no accepted — retryable instead.
-           (jsonrpc-error :code 1500 :message "Receipt commit failed")))
+           ;; SPEC 14.4: no commitment, no accepted — retryable instead,
+           ;; and SPEC 15.3: schedule the replay that unpauses the pump.
+           (ebp-client--force-replay-retry client)
+           (ebp-client--error client 1500 "Receipt commit failed"
+                              "event-retry")))
         ('stale '(:status "stale"))
         ('rejected '(:status "rejected"))
-        (other (jsonrpc-error :code -32603
-                              :message (format "handler returned %S"
-                                               other))))))))
+        (other (ebp-client--error client -32603
+                                  (format "handler returned %S" other)
+                                  "internal-error")))))))
 
 ;;;; Input state (SPEC 14.6 + P1 #2), the Emacs endpoint half
 
@@ -763,7 +870,7 @@ stays with the caller for now."
          (proc (make-network-process
                 :name "ebp" :host host :service port :noquery t))
          (conn (make-instance
-                'jsonrpc-process-connection
+                'ebp--connection
                 :name "ebp" :process proc
                 :request-dispatcher
                 (lambda (c m p) (ebp-client--request-dispatcher client c m p))
@@ -771,9 +878,7 @@ stays with the caller for now."
                 (lambda (c m p) (ebp-client--notification-dispatcher client c m p))
                 :on-shutdown
                 (lambda (_c)
-                  (unless (eq (ebp-client-state client) 'closed)
-                    (setf (ebp-client-state client) 'closed
-                          (ebp-client-close-reason client) '(shutdown)))))))
+                  (ebp-client-close client '(shutdown))))))
     (setf (ebp-client-connection client) conn)
     (ebp-client-start client)
     client))

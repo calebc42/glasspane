@@ -92,7 +92,11 @@ conformance suite pinned to the `ebp/` corpus; and the delineation guard —
   that sets a `defcustom` uses `setopt` so custom setters run. `setq`
   remains correct for internal variables and lexical state — do not
   blanket-replace it.
-- `lexical-binding: t` everywhere; wire modules stay dependency-free.
+- `lexical-binding: t` everywhere. **The Emacs endpoint rents core
+  `jsonrpc.el` unmodified** for transport, framing, and id bookkeeping
+  (decision log #2, ebp amendment #34); the strict reference decoder in
+  ebp.el serves conformance suites and future non-jsonrpc transports, not
+  the live path. Beyond core libraries, wire modules stay dependency-free.
 
 ## Standing product decisions
 

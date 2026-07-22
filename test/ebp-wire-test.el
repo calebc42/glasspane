@@ -248,32 +248,17 @@ character count, and our encoder reproduces the octet count exactly."
   (should (eq (ebp-session-step 'ready 'close) 'closed))
   (should (eq (ebp-session-step 'connected 'close) 'closed)))
 
-;;;; W3: client engine against a scripted companion (SPEC 9-10)
+;;;; W3/W4: the jsonrpc-backed client against a scripted loopback companion
+
+;; The client under test is the real `ebp-connect' live path (core
+;; jsonrpc.el, decision log #2).  The scripted companion on the other end
+;; of the loopback speaks through the reference encoder/decoder, so both
+;; conformance layers exercise each other.
 
 (defconst ebp-test--kat-token (ebp-decode-pairing-token "AAECAwQFBgcICQoLDA0ODw"))
 (defconst ebp-test--kat-pid "101112131415161718191a1b1c1d1e1f")
 (defconst ebp-test--kat-cn "202122232425262728292a2b2c2d2e2f")
 (defconst ebp-test--kat-sn "303132333435363738393a3b3c3d3e3f")
-
-(defun ebp-test--harness ()
-  "Return (CLIENT . OUTBOX) where OUTBOX is a closure returning the list
-of decoded outbound messages so far, in send order."
-  (let* ((bytes "")
-         (client (ebp-client-create
-                  :client-name "test-client" :client-version "0.0.1"
-                  :pairing-id ebp-test--kat-pid
-                  :token ebp-test--kat-token
-                  :wants '("theme")
-                  :client-nonce ebp-test--kat-cn
-                  :outbound-fn (lambda (b) (setq bytes (concat bytes b))))))
-    (cons client
-          (lambda () (ebp-decoder-feed (ebp-make-decoder) bytes)))))
-
-(defun ebp-test--respond (client id result)
-  "Feed CLIENT a framed success response for ID carrying RESULT."
-  (ebp-client-feed client (ebp-encode-frame
-                           (ebp--json-serialize
-                            `(:jsonrpc "2.0" :id ,id :result ,result)))))
 
 (defconst ebp-test--welcome-limits
   '(:max_frame_bytes 4194304 :max_queued_events 256
@@ -308,192 +293,262 @@ SURFACES overrides the empty surfaces map."
                  unless (eq k drop) append (list k v))
       welcome)))
 
-(defun ebp-test--run-handshake (client outbox)
-  "Drive CLIENT through nonce and welcome; return the outbox messages."
-  (ebp-client-start client)
-  (ebp-test--respond client "c1" `(:server_nonce ,ebp-test--kat-sn))
-  (ebp-test--respond client "c2" (ebp-test--welcome-result))
-  (funcall outbox))
+(defun ebp-test--start-companion (script)
+  "Loopback scripted companion; returns (:port P :received FN :stop FN).
+SCRIPT is called with (MSG SEND) per decoded inbound message."
+  (let* ((received '())
+         (decoders (make-hash-table :test #'eq))
+         (server
+          (make-network-process
+           :name "ebp-test-companion" :server t :host "127.0.0.1" :service t
+           :coding 'binary :noquery t
+           :filter
+           (lambda (conn bytes)
+             (let ((dec (or (gethash conn decoders)
+                            (puthash conn (ebp-make-decoder) decoders))))
+               (dolist (msg (ebp-decoder-feed dec bytes))
+                 (push msg received)
+                 (funcall script msg
+                          (lambda (reply)
+                            (process-send-string
+                             conn
+                             (ebp-encode-frame
+                              (ebp--json-serialize reply)))))))))))
+    (list :port (cadr (process-contact server))
+          :received (lambda () (reverse received))
+          :stop (lambda () (delete-process server)))))
+
+(cl-defun ebp-test--kat-script (&key welcome-fn after-ready surface-fn)
+  "The default conformant companion script over the KAT pairing."
+  (lambda (msg send)
+    (let* ((method (alist-get 'method msg))
+           (id (alist-get 'id msg))
+           (reply (lambda (result)
+                    (funcall send `(:jsonrpc "2.0" :id ,id :result ,result)))))
+      (pcase method
+        ("session.hello"
+         (funcall reply `(:server_nonce ,ebp-test--kat-sn)))
+        ("auth.response"
+         (funcall reply (funcall (or welcome-fn #'identity)
+                                 (ebp-test--welcome-result))))
+        ("queue.replay"
+         (funcall reply '(:delivered 0 :rejected 0 :expired 0 :remaining 0
+                          :blocked_by :null)))
+        ("session.ready"
+         (funcall reply ebp--empty-object)
+         (when after-ready (funcall after-ready send)))
+        ("surface.update"
+         (funcall reply
+                  (funcall (or surface-fn
+                               (lambda (m)
+                                 `(:status "applied"
+                                   :revision ,(alist-get
+                                               'revision (alist-get 'params m))
+                                   :present t)))
+                           msg)))
+        ("surface.remove"
+         (funcall reply `(:status "applied"
+                          :revision ,(alist-get 'revision (alist-get 'params msg))
+                          :present :false)))))))
+
+(defun ebp-test--connect (port &rest extra)
+  (apply #'ebp-connect "127.0.0.1" port
+         :client-name "test-client" :client-version "0.0.1"
+         :pairing-id ebp-test--kat-pid :token ebp-test--kat-token
+         :wants '("theme") :client-nonce ebp-test--kat-cn
+         extra))
+
+(defun ebp-test--wait (pred &optional timeout)
+  "Pump the event loop until PRED or TIMEOUT (default 5 s); return PRED."
+  (let ((deadline (+ (float-time) (or timeout 5))))
+    (while (and (not (funcall pred)) (< (float-time) deadline))
+      (accept-process-output nil 0.05))
+    (funcall pred)))
+
+(defmacro ebp-test--with-companion (spec &rest body)
+  "Bind SPEC = (SERVER-VAR CLIENT-VAR SCRIPT &rest CONNECT-ARGS); cleanup after."
+  (declare (indent 1))
+  (pcase-let ((`(,server-var ,client-var ,script . ,connect-args) spec))
+    `(let* ((,server-var (ebp-test--start-companion ,script))
+            (,client-var (ebp-test--connect (plist-get ,server-var :port)
+                                            ,@connect-args)))
+       (unwind-protect (progn ,@body)
+         (ignore-errors (ebp-client-close ,client-var 'test-done))
+         (funcall (plist-get ,server-var :stop))))))
 
 (ert-deftest ebp-test-client-handshake-to-ready ()
-  "The full SPEC 10.3 barrier: hello, auth, replay, ready — in order,
-with the KAT proof on the wire and READY only after the ready result."
-  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness))
-               (ready-ran nil))
-    (push (lambda (_c) (setq ready-ran t))
-          (ebp-client-ready-functions client))
-    (ebp-test--run-handshake client outbox)
-    ;; Barrier order on the wire (SPEC 10.3): replay concluded before ready.
-    (should (equal (mapcar (lambda (m) (alist-get 'method m)) (funcall outbox))
-                   '("session.hello" "auth.response" "queue.replay")))
-    (should (eq (ebp-client-state client) 'syncing))
-    (should-not ready-ran)
-    (ebp-test--respond client "c3"
-                       '(:delivered 0 :rejected 0 :expired 0 :remaining 0
-                         :blocked_by :null))
-    (should (equal (alist-get 'method (car (last (funcall outbox))))
-                   "session.ready"))
-    (should (eq (ebp-client-state client) 'syncing))
-    (ebp-test--respond client "c4" ebp--empty-object)
-    (should (eq (ebp-client-state client) 'ready))
-    (should ready-ran)
-    ;; The auth request carried the exact KAT client proof.
-    (let ((auth (nth 1 (funcall outbox))))
-      (should (equal (alist-get 'client_proof (alist-get 'params auth))
-                     (ebp-client-proof ebp-test--kat-token ebp-test--kat-pid
-                                       ebp-test--kat-cn ebp-test--kat-sn))))
-    ;; Welcome absorption (SPEC 10.3 steps 1-2).
-    (should (equal (ebp-client-granted client) '("theme")))
-    (should (= (alist-get 'max_frame_bytes (ebp-client-limits client))
-               4194304))))
+  "The full SPEC 10.3 barrier over a live loopback: hello, auth, replay,
+ready — in order, with the KAT proof on the wire."
+  (let ((ready nil))
+    (ebp-test--with-companion
+        (server client (ebp-test--kat-script)
+                :ready-function (lambda (_c) (setq ready t)))
+      (should (ebp-test--wait (lambda () ready)))
+      (should (eq (ebp-client-state client) 'ready))
+      (let ((methods (mapcar (lambda (m) (alist-get 'method m))
+                             (funcall (plist-get server :received)))))
+        (should (equal methods '("session.hello" "auth.response"
+                                 "queue.replay" "session.ready"))))
+      ;; The auth request carried the exact KAT client proof.
+      (let ((auth (nth 1 (funcall (plist-get server :received)))))
+        (should (equal (alist-get 'client_proof (alist-get 'params auth))
+                       (ebp-client-proof ebp-test--kat-token ebp-test--kat-pid
+                                         ebp-test--kat-cn ebp-test--kat-sn))))
+      ;; Welcome absorption (jsonrpc parses arrays as vectors).
+      (should (equal (ebp-client-granted client) ["theme"]))
+      (should (= (plist-get (ebp-client-limits client) :max_frame_bytes)
+                 4194304)))))
 
 (ert-deftest ebp-test-client-rejects-bad-server-proof ()
   "SPEC 9.3: Emacs MUST verify server_proof before trusting the welcome."
-  (pcase-let* ((`(,client . ,_outbox) (ebp-test--harness)))
-    (ebp-client-start client)
-    (ebp-test--respond client "c1" `(:server_nonce ,ebp-test--kat-sn))
-    (ebp-test--respond client "c2"
-                       (ebp-test--welcome-result
-                        (ebp-client-proof ebp-test--kat-token ebp-test--kat-pid
-                                          ebp-test--kat-cn ebp-test--kat-sn)))
-    (should (eq (ebp-client-state client) 'closed))
+  (ebp-test--with-companion
+      (server client
+              (ebp-test--kat-script
+               :welcome-fn
+               (lambda (w)
+                 (plist-put (copy-sequence w) :server_proof
+                            (ebp-client-proof ebp-test--kat-token
+                                              ebp-test--kat-pid
+                                              ebp-test--kat-cn
+                                              ebp-test--kat-sn)))))
+    (should (ebp-test--wait
+             (lambda () (eq (ebp-client-state client) 'closed))))
     (should (equal (ebp-client-close-reason client) '(server-proof-invalid)))))
 
 (ert-deftest ebp-test-client-rejects-incomplete-welcome ()
   "SPEC 10.2: the welcome MUST contain the required members."
-  (pcase-let* ((`(,client . ,_outbox) (ebp-test--harness)))
-    (ebp-client-start client)
-    (ebp-test--respond client "c1" `(:server_nonce ,ebp-test--kat-sn))
-    (ebp-test--respond client "c2" (ebp-test--welcome-result nil :limits))
-    (should (eq (ebp-client-state client) 'closed))
+  (ebp-test--with-companion
+      (server client
+              (ebp-test--kat-script
+               :welcome-fn (lambda (_w) (ebp-test--welcome-result nil :limits))))
+    (should (ebp-test--wait
+             (lambda () (eq (ebp-client-state client) 'closed))))
     (should (equal (ebp-client-close-reason client) '(welcome-incomplete)))))
 
 (ert-deftest ebp-test-client-answers-unknown-request ()
-  "SPEC 7.3: an unknown request receives -32601."
-  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness)))
-    (ebp-test--run-handshake client outbox)
-    (ebp-client-feed client
-                     (ebp-encode-frame
-                      (ebp--json-serialize
-                       `(:jsonrpc "2.0" :id "srv1" :method "no.such"
-                         :params ,ebp--empty-object))))
-    (let ((last-msg (car (last (funcall outbox)))))
-      (should (equal (alist-get 'id last-msg) "srv1"))
-      (should (= (alist-get 'code (alist-get 'error last-msg)) -32601)))
-    ;; Still alive: unknown methods never kill the session.
-    (should-not (eq (ebp-client-state client) 'closed))))
-
-(ert-deftest ebp-test-client-ignores-unknown-notification-and-id ()
-  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness)))
-    (ebp-test--run-handshake client outbox)
-    (let ((before (length (funcall outbox))))
-      (ebp-client-feed client
-                       (ebp-encode-frame
-                        (ebp--json-serialize
-                         `(:jsonrpc "2.0" :method "no.such"
-                           :params ,ebp--empty-object))))
-      (ebp-test--respond client "never-sent" ebp--empty-object)
-      ;; SPEC 7.3: both are logged and ignored, nothing emitted.
-      (should (= (length (funcall outbox)) before))
-      (should-not (eq (ebp-client-state client) 'closed)))))
-
-(ert-deftest ebp-test-client-closes-on-frame-error ()
-  "SPEC 6.2: framing failures are transport-fatal."
-  (pcase-let* ((`(,client . ,_outbox) (ebp-test--harness)))
-    (ebp-client-start client)
-    (ebp-client-feed client "X-No-Length: 1\r\n\r\n")
-    (should (eq (ebp-client-state client) 'closed))
-    (should (eq (car (ebp-client-close-reason client)) 'frame-error))))
+  "SPEC 7.3: an unknown request receives -32601 — hand-rolled, because
+jsonrpc.el's default is fail-open (kit section 3)."
+  (ebp-test--with-companion
+      (server client
+              (ebp-test--kat-script
+               :after-ready
+               (lambda (send)
+                 (funcall send `(:jsonrpc "2.0" :id 99 :method "no.such"
+                                 :params ,ebp--empty-object)))))
+    (should (ebp-test--wait
+             (lambda ()
+               (cl-find-if (lambda (m)
+                             (and (equal (alist-get 'id m) 99)
+                                  (alist-get 'error m)))
+                           (funcall (plist-get server :received))))))
+    (let ((response (cl-find-if (lambda (m) (equal (alist-get 'id m) 99))
+                                (funcall (plist-get server :received)))))
+      (should (= (alist-get 'code (alist-get 'error response)) -32601)))
+    (should (eq (ebp-client-state client) 'ready))))
 
 (ert-deftest ebp-test-client-handler-registry ()
-  "Registered handlers receive inbound traffic; the registry mechanism
-is ebp.el's, its content the application's (REWRITE-PLAN boundary)."
-  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness))
-               (seen nil))
-    (ebp-test--run-handshake client outbox)
-    (ebp-client-register-handler
-     client "event.action"
-     (lambda (c id params)
-       (setq seen (alist-get 'action params))
-       (ebp-client--send c (ebp-result-response id '(:status "accepted")))))
-    (ebp-client-feed client
-                     (ebp-encode-frame
-                      (ebp--json-serialize
-                       '(:jsonrpc "2.0" :id "ev1" :method "event.action"
-                         :params (:event_id "00112233445566778899aabbccddeeff"
-                                  :action "demo.tap"
-                                  :occurred_at_ms 1784700000000)))))
-    (should (equal seen "demo.tap"))
-    (let ((last-msg (car (last (funcall outbox)))))
-      (should (equal (alist-get 'id last-msg) "ev1"))
-      (should (equal (alist-get 'status (alist-get 'result last-msg))
-                     "accepted")))))
-
-;;;; W4: the surface push path (SPEC 13.1-13.3, client half)
-
-(defun ebp-test--run-handshake-with-floors (client outbox)
-  "Handshake with a welcome reporting app:main at revision 41 (present)
-and a tombstone for app:old at 9."
-  (ebp-client-start client)
-  (ebp-test--respond client "c1" `(:server_nonce ,ebp-test--kat-sn))
-  (ebp-test--respond
-   client "c2"
-   (ebp-test--welcome-result nil nil
-                             '(:app:main (:revision 41 :present t)
-                               :app:old (:revision 9 :present :false))))
-  (ebp-test--respond client "c3"
-                     '(:delivered 0 :rejected 0 :expired 0 :remaining 0
-                       :blocked_by :null))
-  (ebp-test--respond client "c4" ebp--empty-object)
-  (funcall outbox))
+  "Registered handlers answer inbound requests through the library's
+reply path; params arrive as plists."
+  (let ((seen nil))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :after-ready
+                 (lambda (send)
+                   (funcall send
+                            '(:jsonrpc "2.0" :id 100 :method "event.action"
+                              :params (:event_id "00112233445566778899aabbccddeeff"
+                                       :action "demo.tap"
+                                       :occurred_at_ms 1784700000000))))))
+      (ebp-client-register-handler
+       client "event.action"
+       (lambda (_c params)
+         (setq seen (plist-get params :action))
+         '(:status "accepted")))
+      (should (ebp-test--wait
+               (lambda ()
+                 (cl-find-if (lambda (m)
+                               (and (equal (alist-get 'id m) 100)
+                                    (alist-get 'result m)))
+                             (funcall (plist-get server :received))))))
+      (should (equal seen "demo.tap"))
+      (let ((response (cl-find-if (lambda (m) (equal (alist-get 'id m) 100))
+                                  (funcall (plist-get server :received)))))
+        (should (equal (alist-get 'status (alist-get 'result response))
+                       "accepted"))))))
 
 (ert-deftest ebp-test-client-surface-revisions-above-floors ()
-  "SPEC 10.3 step 3 + 13.1: pushes use revisions above the reported
-floors — including tombstone floors — and absorb stale results."
-  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness)))
-    (ebp-test--run-handshake-with-floors client outbox)
-    (should (eq (ebp-client-state client) 'ready))
-    ;; First push climbs past the welcome floor.
-    (should (= (ebp-client-surface-update client "app:main"
-                                          '(:t "text" :text "hi"))
-               42))
-    (let ((update (car (last (funcall outbox)))))
-      (should (equal (alist-get 'method update) "surface.update"))
-      (should (= (alist-get 'revision (alist-get 'params update)) 42)))
-    (ebp-test--respond client "c5" '(:status "applied" :revision 42 :present t))
-    ;; The tombstoned surface's floor is honored on reuse.
-    (should (= (ebp-client-surface-update client "app:old"
-                                          '(:t "text" :text "back"))
-               10))
-    ;; A second push while one is in flight still gets a newer revision.
-    (should (= (ebp-client-surface-update client "app:main"
-                                          '(:t "text" :text "again"))
-               43))
-    ;; A stale result absorbs the Companion's higher floor (SPEC 13.2).
-    (ebp-test--respond client "c7" '(:status "stale" :revision 50 :present t))
-    (should (= (ebp-client-surface-update client "app:main"
-                                          '(:t "text" :text "newest"))
-               51))))
+  "SPEC 10.3 step 3 + 13.1 over the live path: pushes climb past reported
+floors (including tombstones) and absorb applied/stale results."
+  (let ((ready nil) (statuses '()))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :welcome-fn
+                 (lambda (_w)
+                   (ebp-test--welcome-result
+                    nil nil '(:app:main (:revision 41 :present t)
+                              :app:old (:revision 9 :present :false))))
+                 :surface-fn
+                 (lambda (m)
+                   (let ((rev (alist-get 'revision (alist-get 'params m))))
+                     (if (= rev 43)
+                         '(:status "stale" :revision 50 :present t)
+                       `(:status "applied" :revision ,rev :present t)))))
+                :ready-function (lambda (_c) (setq ready t)))
+      (should (ebp-test--wait (lambda () ready)))
+      (let ((record (lambda (status _err) (push status statuses))))
+        ;; First push climbs past the welcome floor.
+        (should (= (ebp-client-surface-update client "app:main"
+                                              '(:t "text" :text "hi")
+                                              :callback record)
+                   42))
+        ;; The tombstoned surface's floor is honored on reuse.
+        (should (= (ebp-client-surface-update client "app:old"
+                                              '(:t "text" :text "back")
+                                              :callback record)
+                   10))
+        ;; In-flight pushes still get newer revisions; this one draws the
+        ;; scripted stale at 50.
+        (should (= (ebp-client-surface-update client "app:main"
+                                              '(:t "text" :text "again")
+                                              :callback record)
+                   43))
+        (should (ebp-test--wait (lambda () (= (length statuses) 3))))
+        (should (equal (sort (copy-sequence statuses) #'string<)
+                       '("applied" "applied" "stale")))
+        ;; The stale result absorbed the Companion's floor (SPEC 13.2).
+        (should (= (ebp-client-surface-update client "app:main"
+                                              '(:t "text" :text "newest"))
+                   51))))))
 
 (ert-deftest ebp-test-client-surface-remove-is-revisioned ()
   "SPEC 13.3: removal claims a fresh revision like any mutation."
-  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness))
-               (status-seen nil))
-    (ebp-test--run-handshake-with-floors client outbox)
-    (should (= (ebp-client-surface-remove
-                client "app:main"
-                :callback (lambda (status _err) (setq status-seen status)))
-               42))
-    (let ((remove (car (last (funcall outbox)))))
-      (should (equal (alist-get 'method remove) "surface.remove"))
-      (should (= (alist-get 'revision (alist-get 'params remove)) 42))
-      (should-not (assq 'spec (alist-get 'params remove))))
-    (ebp-test--respond client "c5" '(:status "applied" :revision 42 :present :false))
-    (should (equal status-seen "applied"))
-    ;; Recreating the surface climbs past the tombstone.
-    (should (= (ebp-client-surface-update client "app:main"
-                                          '(:t "text" :text "reborn"))
-               43))))
+  (let ((ready nil) (status nil))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :welcome-fn
+                 (lambda (_w)
+                   (ebp-test--welcome-result
+                    nil nil '(:app:main (:revision 41 :present t)))))
+                :ready-function (lambda (_c) (setq ready t)))
+      (should (ebp-test--wait (lambda () ready)))
+      (should (= (ebp-client-surface-remove
+                  client "app:main"
+                  :callback (lambda (s _e) (setq status s)))
+                 42))
+      (should (ebp-test--wait (lambda () status)))
+      (should (equal status "applied"))
+      (let ((remove (cl-find-if
+                     (lambda (m) (equal (alist-get 'method m) "surface.remove"))
+                     (funcall (plist-get server :received)))))
+        (should (= (alist-get 'revision (alist-get 'params remove)) 42))
+        (should-not (assq 'spec (alist-get 'params remove))))
+      ;; Recreating the surface climbs past the tombstone.
+      (should (= (ebp-client-surface-update client "app:main"
+                                            '(:t "text" :text "reborn"))
+                 43)))))
 
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

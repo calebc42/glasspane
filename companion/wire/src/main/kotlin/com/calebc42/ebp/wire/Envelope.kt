@@ -7,11 +7,17 @@ import org.json.JSONObject
 enum class MessageClass { REQUEST, NOTIFICATION, RESPONSE }
 
 private val REQUEST_ID = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]*")
+private const val MAX_SAFE_INTEGER = 9_007_199_254_740_991L
 
-/** SPEC 7.2: a string identifier of at most 64 ASCII octets, never empty. */
-fun isValidRequestId(id: Any?): Boolean =
-    id is String && id.length in 1..WireLimits.MAX_REQUEST_ID_OCTETS &&
+/** SPEC 7.2 (amendment #34): a string identifier of at most 64 ASCII
+ * octets, or a safe integer — jsonrpc.el's sequential ids conform. */
+fun isValidRequestId(id: Any?): Boolean = when (id) {
+    is String -> id.length in 1..WireLimits.MAX_REQUEST_ID_OCTETS &&
         REQUEST_ID.matches(id)
+    is Int -> true
+    is Long -> id in -MAX_SAFE_INTEGER..MAX_SAFE_INTEGER
+    else -> false
+}
 
 /**
  * Classify a parsed message per SPEC 7.1, or null when structurally invalid

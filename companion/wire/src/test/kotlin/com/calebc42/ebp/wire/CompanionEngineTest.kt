@@ -193,10 +193,12 @@ class CompanionEngineTest {
         // Notification-class method sent as a request -> -32600.
         engine.feed(frame(request("d4", "theme.set", JSONObject())))
         assertEquals(-32600, out.last().getJSONObject("error").getInt("code"))
-        // Numeric request id -> -32600 (SPEC 7.2: ids are strings).
+        // Integer request id conforms (SPEC 7.2, amendment #34 — the
+        // jsonrpc.el floor) and is answered under the same id.
         engine.feed(frame(JSONObject().put("jsonrpc", "2.0").put("id", 7)
             .put("method", "queue.replay").put("params", JSONObject())))
-        assertEquals(-32600, out.last().getJSONObject("error").getInt("code"))
+        assertEquals(7, out.last().getInt("id"))
+        assertTrue(out.last().has("result"))
         // None of that killed the session.
         assertEquals(SessionState.SYNCING, engine.state)
     }

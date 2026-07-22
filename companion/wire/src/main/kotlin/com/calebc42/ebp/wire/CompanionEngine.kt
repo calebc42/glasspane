@@ -89,7 +89,7 @@ class CompanionEngine(
     }
 
     private fun handleRequest(id: Any, method: String, params: JSONObject) {
-        // SPEC 7.2: request IDs are strings.
+        // SPEC 7.2 (amendment #34): ids are strings or safe integers.
         if (!isValidRequestId(id))
             return respondError(id, -32600, "Invalid Request", "invalid-request")
         // SPEC 10.1: fail closed before authentication — only the exact
@@ -344,11 +344,15 @@ class CompanionEngine(
     // -------------------------------------------------------------- output
 
     private fun respondResult(id: Any, result: JSONObject) =
-        emit(resultResponse(id as String, result))
+        emit(JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result))
 
     private fun respondError(id: Any, code: Int, message: String, kind: String,
                              data: JSONObject = JSONObject()) {
-        if (id is String) emit(errorResponse(id, code, message, kind, data))
+        // SPEC 7.2 (amendment #34): ids are strings or safe integers.
+        if (isValidRequestId(id))
+            emit(JSONObject().put("jsonrpc", "2.0").put("id", id)
+                .put("error", JSONObject().put("code", code).put("message", message)
+                    .put("data", data.put("kind", kind))))
     }
 
     private fun emit(msg: JSONObject) = sink(encodeFrame(msg.toString()))

@@ -146,7 +146,10 @@ class WireConformanceTest {
         assertTrue(isValidRequestId("a".repeat(64)))
         assertFalse(isValidRequestId("a".repeat(65)))
         assertFalse(isValidRequestId(""))
-        assertFalse(isValidRequestId(7))
+        assertTrue(isValidRequestId(7)) // amendment #34: jsonrpc.el ids
+        assertTrue(isValidRequestId(9_007_199_254_740_991L))
+        assertFalse(isValidRequestId(9_007_199_254_740_992L))
+        assertFalse(isValidRequestId(7.5))
         assertFalse(isValidRequestId(null))
     }
 

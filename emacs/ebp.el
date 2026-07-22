@@ -373,5 +373,217 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
     (`(,_ . close) 'closed)
     (_ nil)))
 
+;;;; Client engine (SPEC 9-10), transport-agnostic
+
+;; The engine consumes inbound bytes through `ebp-client-feed' and emits
+;; outbound bytes through the configured sink, so conformance tests drive
+;; it without sockets; `ebp-connect' below wires it to a TCP process.
+
+(defconst ebp--empty-object (make-hash-table :test #'equal :size 1)
+  "Serializes as {} — SPEC 7.1 requires object params, never null.")
+
+(cl-defstruct (ebp-client (:constructor ebp--make-client))
+  (state 'connected)
+  config          ; plist: :client-name :client-version :pairing-id :token
+                  ;        :wants and, for tests, :client-nonce
+  outbound-fn     ; function of one unibyte-string argument
+  process         ; network process when `ebp-connect' owns the transport
+  (decoder (ebp-make-decoder))
+  (next-id 0)
+  (pending (make-hash-table :test #'equal)) ; id -> callback
+  (handlers (make-hash-table :test #'equal)) ; method -> fn
+  client-nonce
+  ;; Welcome absorption (SPEC 10.2/10.3 step 1-2).
+  granted profiles surfaces limits input-state
+  ready-functions ; abnormal hook: called with the client on READY
+  close-reason)
+
+(defun ebp-client-create (&rest config)
+  "Create a client engine in `connected'.  CONFIG is the struct's plist
+plus :outbound-fn and optionally :ready-function."
+  (let ((client (ebp--make-client
+                 :config config
+                 :outbound-fn (plist-get config :outbound-fn))))
+    (when-let* ((fn (plist-get config :ready-function)))
+      (push fn (ebp-client-ready-functions client)))
+    client))
+
+(defun ebp-client--send (client message)
+  "Serialize and frame MESSAGE, then hand it to the outbound sink."
+  (funcall (ebp-client-outbound-fn client)
+           (ebp-encode-frame (ebp--json-serialize message))))
+
+(defun ebp-client--request (client method params callback)
+  "Send a request with a fresh SPEC 7.2 id; register CALLBACK for the
+response, called with (RESULT . nil) on success or (nil . ERROR-ALIST)."
+  (let ((id (format "c%d" (cl-incf (ebp-client-next-id client)))))
+    (puthash id callback (ebp-client-pending client))
+    (ebp-client--send client (ebp-request id method params))
+    id))
+
+(defun ebp-client-notify (client method params)
+  "Send a notification (SPEC 7.1)."
+  (ebp-client--send client (ebp-notification method params)))
+
+(defun ebp-client-register-handler (client method fn)
+  "Register FN for inbound METHOD.  For a request FN is called with
+(CLIENT ID PARAMS) and must eventually answer; for a notification with
+(CLIENT nil PARAMS)."
+  (puthash method fn (ebp-client-handlers client)))
+
+(defun ebp-client-close (client reason)
+  "Enter `closed' (SPEC 10.1: any state may transition to CLOSED)."
+  (unless (eq (ebp-client-state client) 'closed)
+    (setf (ebp-client-state client) 'closed
+          (ebp-client-close-reason client) reason)
+    (when-let* ((proc (ebp-client-process client)))
+      (delete-process proc))))
+
+(defun ebp-client--step (client event)
+  "Advance the pure SPEC 10.1 machine or close on an illegal EVENT."
+  (let ((next (ebp-session-step (ebp-client-state client) event)))
+    (if next
+        (setf (ebp-client-state client) next)
+      (ebp-client-close client (list 'illegal-transition
+                                     (ebp-client-state client) event)))))
+
+;;;###autoload
+(defun ebp-client-start (client)
+  "Send `session.hello' (SPEC 9.2) and drive the handshake to READY."
+  (let* ((config (ebp-client-config client))
+         (nonce (or (plist-get config :client-nonce) (ebp-generate-nonce))))
+    (setf (ebp-client-client-nonce client) nonce)
+    (ebp-client--request
+     client "session.hello"
+     (ebp-hello-params (plist-get config :client-name)
+                       (plist-get config :client-version)
+                       (plist-get config :pairing-id)
+                       nonce
+                       (plist-get config :wants))
+     (lambda (result error) (ebp-client--on-nonce client result error)))
+    (ebp-client--step client 'hello-sent)))
+
+(defun ebp-client--on-nonce (client result error)
+  "Handle the `session.hello' result (SPEC 9.2)."
+  (let ((server-nonce (and (null error) (alist-get 'server_nonce result))))
+    (if (not (and server-nonce (ebp-valid-nonce-p server-nonce)))
+        (ebp-client-close client (list 'hello-failed error))
+      (ebp-client--step client 'nonce-received)
+      (let ((config (ebp-client-config client)))
+        (ebp-client--request
+         client "auth.response"
+         (ebp-auth-params (plist-get config :pairing-id)
+                          (ebp-client-client-nonce client)
+                          server-nonce
+                          (plist-get config :token))
+         (lambda (result error)
+           (ebp-client--on-welcome client server-nonce result error))))
+      (ebp-client--step client 'auth-sent))))
+
+(defconst ebp--welcome-required
+  '(server_proof protocol server granted surface_profiles surfaces
+    queued_events limits)
+  "SPEC 10.2: members the welcome result MUST contain.")
+
+(defun ebp-client--on-welcome (client server-nonce result error)
+  "Verify and absorb the welcome (SPEC 9.3, 10.2), then run the
+synchronization barrier (SPEC 10.3)."
+  (cond
+   (error (ebp-client-close client (list 'auth-failed error)))
+   ((cl-notevery (lambda (m) (assq m result)) ebp--welcome-required)
+    (ebp-client-close client '(welcome-incomplete)))
+   ((not (let ((config (ebp-client-config client)))
+           ;; SPEC 9.3: verify server_proof before trusting welcome data.
+           (ebp-verify-server-proof (alist-get 'server_proof result)
+                                    (plist-get config :token)
+                                    (plist-get config :pairing-id)
+                                    (ebp-client-client-nonce client)
+                                    server-nonce)))
+    (ebp-client-close client '(server-proof-invalid)))
+   (t
+    ;; SPEC 10.3 steps 1-2: absorb floors and merge input state.
+    (setf (ebp-client-granted client) (alist-get 'granted result)
+          (ebp-client-profiles client) (alist-get 'surface_profiles result)
+          (ebp-client-surfaces client) (alist-get 'surfaces result)
+          (ebp-client-limits client) (alist-get 'limits result)
+          (ebp-client-input-state client) (alist-get 'input_state result))
+    (ebp-client--step client 'welcome-verified)
+    ;; Step 3, required surface pushes, arrives with rung W4.
+    ;; Step 4: replay concludes before session.ready.
+    (ebp-client--request
+     client "queue.replay" ebp--empty-object
+     (lambda (_result error)
+       (if error
+           (ebp-client-close client (list 'replay-failed error))
+         ;; Step 5.
+         (ebp-client--request
+          client "session.ready" ebp--empty-object
+          (lambda (_result error)
+            (if error
+                (ebp-client-close client (list 'ready-failed error))
+              (ebp-client--step client 'ready-confirmed)
+              (dolist (fn (ebp-client-ready-functions client))
+                (funcall fn client)))))))))))
+
+(defun ebp-client-feed (client bytes)
+  "Feed inbound unibyte BYTES; dispatch every complete message.
+Framing failures close the connection (SPEC 6.2)."
+  (condition-case err
+      (dolist (msg (ebp-decoder-feed (ebp-client-decoder client) bytes))
+        (ebp-client--dispatch client msg))
+    ((ebp-frame-close ebp-parse-error ebp-invalid-request)
+     (ebp-client-close client (list 'frame-error (car err))))))
+
+(defun ebp-client--dispatch (client msg)
+  "Route one parsed message per its SPEC 7.1 class."
+  (pcase (ebp-message-class msg)
+    ('response
+     (let* ((id (alist-get 'id msg))
+            (callback (gethash id (ebp-client-pending client))))
+       (if (not callback)
+           (message "ebp: response for unknown id %S dropped" id)
+         (remhash id (ebp-client-pending client))
+         (funcall callback (alist-get 'result msg) (alist-get 'error msg)))))
+    ('request
+     (let* ((method (alist-get 'method msg))
+            (id (alist-get 'id msg))
+            (handler (gethash method (ebp-client-handlers client))))
+       (if handler
+           (funcall handler client id (alist-get 'params msg))
+         ;; SPEC 7.3: unknown requests receive -32601.
+         (ebp-client--send
+          client (ebp-error-response id -32601 "Method not found"
+                                     '(:kind "method-not-found"))))))
+    ('notification
+     (let* ((method (alist-get 'method msg))
+            (handler (gethash method (ebp-client-handlers client))))
+       (if handler
+           (funcall handler client nil (alist-get 'params msg))
+         ;; SPEC 7.3: unknown notifications are logged and ignored.
+         (message "ebp: unknown notification %S ignored" method))))
+    (_ (message "ebp: structurally invalid message dropped"))))
+
+;;;; TCP transport (SPEC 5.2), thin wrapper over the engine
+
+;;;###autoload
+(defun ebp-connect (host port &rest config)
+  "Dial the Companion at HOST:PORT and start the handshake.
+CONFIG is `ebp-client-create' config (sans :outbound-fn).  Returns the
+client.  Reconnection policy stays with the caller for now."
+  (let* ((client (apply #'ebp-client-create config))
+         (proc (make-network-process
+                :name "ebp" :host host :service port
+                :coding 'binary :noquery t
+                :filter (lambda (_proc bytes)
+                          (ebp-client-feed client bytes))
+                :sentinel (lambda (_proc event)
+                            (unless (string-prefix-p "open" event)
+                              (ebp-client-close client (list 'transport event)))))))
+    (setf (ebp-client-process client) proc
+          (ebp-client-outbound-fn client)
+          (lambda (bytes) (process-send-string proc bytes)))
+    (ebp-client-start client)
+    client))
+
 (provide 'ebp)
 ;;; ebp.el ends here

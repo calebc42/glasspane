@@ -248,5 +248,185 @@ character count, and our encoder reproduces the octet count exactly."
   (should (eq (ebp-session-step 'ready 'close) 'closed))
   (should (eq (ebp-session-step 'connected 'close) 'closed)))
 
+;;;; W3: client engine against a scripted companion (SPEC 9-10)
+
+(defconst ebp-test--kat-token (ebp-decode-pairing-token "AAECAwQFBgcICQoLDA0ODw"))
+(defconst ebp-test--kat-pid "101112131415161718191a1b1c1d1e1f")
+(defconst ebp-test--kat-cn "202122232425262728292a2b2c2d2e2f")
+(defconst ebp-test--kat-sn "303132333435363738393a3b3c3d3e3f")
+
+(defun ebp-test--harness ()
+  "Return (CLIENT . OUTBOX) where OUTBOX is a closure returning the list
+of decoded outbound messages so far, in send order."
+  (let* ((bytes "")
+         (client (ebp-client-create
+                  :client-name "test-client" :client-version "0.0.1"
+                  :pairing-id ebp-test--kat-pid
+                  :token ebp-test--kat-token
+                  :wants '("theme")
+                  :client-nonce ebp-test--kat-cn
+                  :outbound-fn (lambda (b) (setq bytes (concat bytes b))))))
+    (cons client
+          (lambda () (ebp-decoder-feed (ebp-make-decoder) bytes)))))
+
+(defun ebp-test--respond (client id result)
+  "Feed CLIENT a framed success response for ID carrying RESULT."
+  (ebp-client-feed client (ebp-encode-frame
+                           (ebp--json-serialize
+                            `(:jsonrpc "2.0" :id ,id :result ,result)))))
+
+(defconst ebp-test--welcome-limits
+  '(:max_frame_bytes 4194304 :max_queued_events 256
+    :max_queued_bytes 8388608 :max_event_bytes 262144
+    :max_surfaces 16 :max_surface_ids 1024
+    :max_field_bytes 65536 :max_input_state_bytes 262144
+    :max_capture_fields 64))
+
+(defun ebp-test--welcome-result (&optional server-proof drop)
+  "A minimal SPEC 10.2 welcome result plist.
+SERVER-PROOF overrides the correct KAT proof; DROP removes that member."
+  (let ((welcome
+         `(:server_proof ,(or server-proof
+                              (ebp-server-proof ebp-test--kat-token
+                                                ebp-test--kat-pid
+                                                ebp-test--kat-cn
+                                                ebp-test--kat-sn))
+           :protocol 2
+           :server (:name "kat-companion" :version "1.0.0")
+           :granted ["theme"]
+           :surface_profiles
+           (:app (:node_types ["text" "row" "column" "box" "spacer"
+                               "divider" "button" "text_input"]
+                  :builtins ["view.switch" "companion.settings.open"]
+                  :features []))
+           :surfaces ,ebp--empty-object
+           :queued_events 0
+           :limits ,ebp-test--welcome-limits)))
+    (if drop
+        (cl-loop for (k v) on welcome by #'cddr
+                 unless (eq k drop) append (list k v))
+      welcome)))
+
+(defun ebp-test--run-handshake (client outbox)
+  "Drive CLIENT through nonce and welcome; return the outbox messages."
+  (ebp-client-start client)
+  (ebp-test--respond client "c1" `(:server_nonce ,ebp-test--kat-sn))
+  (ebp-test--respond client "c2" (ebp-test--welcome-result))
+  (funcall outbox))
+
+(ert-deftest ebp-test-client-handshake-to-ready ()
+  "The full SPEC 10.3 barrier: hello, auth, replay, ready — in order,
+with the KAT proof on the wire and READY only after the ready result."
+  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness))
+               (ready-ran nil))
+    (push (lambda (_c) (setq ready-ran t))
+          (ebp-client-ready-functions client))
+    (ebp-test--run-handshake client outbox)
+    ;; Barrier order on the wire (SPEC 10.3): replay concluded before ready.
+    (should (equal (mapcar (lambda (m) (alist-get 'method m)) (funcall outbox))
+                   '("session.hello" "auth.response" "queue.replay")))
+    (should (eq (ebp-client-state client) 'syncing))
+    (should-not ready-ran)
+    (ebp-test--respond client "c3"
+                       '(:delivered 0 :rejected 0 :expired 0 :remaining 0
+                         :blocked_by :null))
+    (should (equal (alist-get 'method (car (last (funcall outbox))))
+                   "session.ready"))
+    (should (eq (ebp-client-state client) 'syncing))
+    (ebp-test--respond client "c4" ebp--empty-object)
+    (should (eq (ebp-client-state client) 'ready))
+    (should ready-ran)
+    ;; The auth request carried the exact KAT client proof.
+    (let ((auth (nth 1 (funcall outbox))))
+      (should (equal (alist-get 'client_proof (alist-get 'params auth))
+                     (ebp-client-proof ebp-test--kat-token ebp-test--kat-pid
+                                       ebp-test--kat-cn ebp-test--kat-sn))))
+    ;; Welcome absorption (SPEC 10.3 steps 1-2).
+    (should (equal (ebp-client-granted client) '("theme")))
+    (should (= (alist-get 'max_frame_bytes (ebp-client-limits client))
+               4194304))))
+
+(ert-deftest ebp-test-client-rejects-bad-server-proof ()
+  "SPEC 9.3: Emacs MUST verify server_proof before trusting the welcome."
+  (pcase-let* ((`(,client . ,_outbox) (ebp-test--harness)))
+    (ebp-client-start client)
+    (ebp-test--respond client "c1" `(:server_nonce ,ebp-test--kat-sn))
+    (ebp-test--respond client "c2"
+                       (ebp-test--welcome-result
+                        (ebp-client-proof ebp-test--kat-token ebp-test--kat-pid
+                                          ebp-test--kat-cn ebp-test--kat-sn)))
+    (should (eq (ebp-client-state client) 'closed))
+    (should (equal (ebp-client-close-reason client) '(server-proof-invalid)))))
+
+(ert-deftest ebp-test-client-rejects-incomplete-welcome ()
+  "SPEC 10.2: the welcome MUST contain the required members."
+  (pcase-let* ((`(,client . ,_outbox) (ebp-test--harness)))
+    (ebp-client-start client)
+    (ebp-test--respond client "c1" `(:server_nonce ,ebp-test--kat-sn))
+    (ebp-test--respond client "c2" (ebp-test--welcome-result nil :limits))
+    (should (eq (ebp-client-state client) 'closed))
+    (should (equal (ebp-client-close-reason client) '(welcome-incomplete)))))
+
+(ert-deftest ebp-test-client-answers-unknown-request ()
+  "SPEC 7.3: an unknown request receives -32601."
+  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness)))
+    (ebp-test--run-handshake client outbox)
+    (ebp-client-feed client
+                     (ebp-encode-frame
+                      (ebp--json-serialize
+                       `(:jsonrpc "2.0" :id "srv1" :method "no.such"
+                         :params ,ebp--empty-object))))
+    (let ((last-msg (car (last (funcall outbox)))))
+      (should (equal (alist-get 'id last-msg) "srv1"))
+      (should (= (alist-get 'code (alist-get 'error last-msg)) -32601)))
+    ;; Still alive: unknown methods never kill the session.
+    (should-not (eq (ebp-client-state client) 'closed))))
+
+(ert-deftest ebp-test-client-ignores-unknown-notification-and-id ()
+  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness)))
+    (ebp-test--run-handshake client outbox)
+    (let ((before (length (funcall outbox))))
+      (ebp-client-feed client
+                       (ebp-encode-frame
+                        (ebp--json-serialize
+                         `(:jsonrpc "2.0" :method "no.such"
+                           :params ,ebp--empty-object))))
+      (ebp-test--respond client "never-sent" ebp--empty-object)
+      ;; SPEC 7.3: both are logged and ignored, nothing emitted.
+      (should (= (length (funcall outbox)) before))
+      (should-not (eq (ebp-client-state client) 'closed)))))
+
+(ert-deftest ebp-test-client-closes-on-frame-error ()
+  "SPEC 6.2: framing failures are transport-fatal."
+  (pcase-let* ((`(,client . ,_outbox) (ebp-test--harness)))
+    (ebp-client-start client)
+    (ebp-client-feed client "X-No-Length: 1\r\n\r\n")
+    (should (eq (ebp-client-state client) 'closed))
+    (should (eq (car (ebp-client-close-reason client)) 'frame-error))))
+
+(ert-deftest ebp-test-client-handler-registry ()
+  "Registered handlers receive inbound traffic; the registry mechanism
+is ebp.el's, its content the application's (REWRITE-PLAN boundary)."
+  (pcase-let* ((`(,client . ,outbox) (ebp-test--harness))
+               (seen nil))
+    (ebp-test--run-handshake client outbox)
+    (ebp-client-register-handler
+     client "event.action"
+     (lambda (c id params)
+       (setq seen (alist-get 'action params))
+       (ebp-client--send c (ebp-result-response id '(:status "accepted")))))
+    (ebp-client-feed client
+                     (ebp-encode-frame
+                      (ebp--json-serialize
+                       '(:jsonrpc "2.0" :id "ev1" :method "event.action"
+                         :params (:event_id "00112233445566778899aabbccddeeff"
+                                  :action "demo.tap"
+                                  :occurred_at_ms 1784700000000)))))
+    (should (equal seen "demo.tap"))
+    (let ((last-msg (car (last (funcall outbox)))))
+      (should (equal (alist-get 'id last-msg) "ev1"))
+      (should (equal (alist-get 'status (alist-get 'result last-msg))
+                     "accepted")))))
+
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

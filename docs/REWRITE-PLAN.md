@@ -57,6 +57,31 @@ Resolved: ebp amendment #33 (2026-07-22) pinned local-editing efficiency —
 delta coalescing before `seq` assignment and source-throttled carets are
 explicitly conformant; the W7 editor module builds on that reading.
 
+## The ebp.el boundary (the jsonrpc.el model)
+
+**Decided 2026-07-22:** `emacs/ebp.el` is *the Emacs implementation of the
+EBP spec* — the analogue of jsonrpc.el to JSON-RPC — and Jetpacs is an
+application built on it. Same split the Kotlin side already has with
+`companion/wire`. The line is SPEC §24.2: ebp.el owns every duty the spec
+assigns to "a conforming EBP 2 Emacs endpoint"; Jetpacs owns everything
+above the semantic-action boundary.
+
+| ebp.el (the endpoint) | jetpacs (the application) |
+|---|---|
+| Framing, envelope, auth, session lifecycle, reconnection | Widget/surface DSL and builders |
+| Surface push plumbing: revisions, tombstone absorption, applied/stale results | What the surfaces contain; org layer, apps, shell |
+| `event.action` server: allowlist registry, EventId receipt store, 4-status results | The registered handlers' behavior |
+| `state.changed` reconciliation, `input_state` merge, draft rules | What to do with the values |
+| Module method plumbing (dialogs, editor sync, triggers, capabilities) | Dialog content, editor commands, trigger policy |
+
+The registry *mechanism* is ebp.el; the registered *content* is Jetpacs.
+
+Enforcement, in-tree (physical extraction is a U-phase `git mv`, not now):
+`ebp-` namespace only; **zero `jetpacs-` dependencies, ever**; its own
+conformance suite pinned to the `ebp/` corpus; and the delineation guard —
+`test/run-tests.sh` batch-loads `ebp.el` alone and fails if any
+`jetpacs-`-prefixed symbol exists afterward.
+
 ## Code conventions
 
 - **elisp floor: Emacs 30.1** (Jetpacs requires Emacs on the device, and

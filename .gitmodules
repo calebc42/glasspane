@@ -1,0 +1,4 @@
+[submodule "ebp"]
+	path = ebp
+	url = https://github.com/calebc42/ebp.git
+	branch = slop-fork/main

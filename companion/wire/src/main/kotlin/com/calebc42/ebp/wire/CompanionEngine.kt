@@ -52,6 +52,9 @@ class CompanionEngine(
         checkLimits()
     }
 
+    // Synchronized with sendRequest/dispatchAction/publishState: the UI
+    // thread and the reader thread share one ordered sink (SPEC 7.4).
+    @Synchronized
     fun feed(bytes: ByteArray) {
         if (state == SessionState.CLOSED) return
         val messages = try {
@@ -80,12 +83,95 @@ class CompanionEngine(
                     msg.optJSONObject("params") ?: JSONObject())
             MessageClass.NOTIFICATION ->
                 handleNotification(msg.getString("method"))
-            MessageClass.RESPONSE -> Unit // no outstanding Companion requests yet (W5)
+            MessageClass.RESPONSE -> {
+                val callback = (msg.opt("id") as? Int)?.let(pending::remove)
+                callback?.invoke(msg.optJSONObject("result"),
+                    msg.optJSONObject("error"))
+            }
             null ->
                 // SPEC 7.3: structurally invalid; answer only when an id exists.
                 if (msg.has("id") && msg.has("method"))
                     respondError(msg.get("id"), -32600, "Invalid Request", "invalid-request")
         }
+    }
+
+    // ------------------------------------------ outbound requests (SPEC 7)
+
+    private var nextOutboundId = 0
+    private val pending = HashMap<Int, (JSONObject?, JSONObject?) -> Unit>()
+
+    /** Send a Companion-originated request; integer ids per SPEC 7.2. */
+    @Synchronized
+    fun sendRequest(method: String, params: JSONObject,
+                    callback: (JSONObject?, JSONObject?) -> Unit) {
+        val id = ++nextOutboundId
+        pending[id] = callback
+        emit(JSONObject().put("jsonrpc", "2.0").put("id", id)
+            .put("method", method).put("params", params))
+    }
+
+    // ---------------------------------------- actions and input (SPEC 14)
+
+    /**
+     * SPEC 14.1/14.3/14.4: dispatch a remote user action from a surface
+     * node. W5 carries the live path only: while READY the event is a
+     * request awaiting its 4-status result; otherwise the occurrence is
+     * dropped, which is exactly `when_offline: "drop"` — the durable
+     * queue and wake policies land at W6, builtins at W7.
+     */
+    @Synchronized
+    fun dispatchAction(surface: String, descriptor: JSONObject, hookValue: Any?,
+                       callback: ((String?, JSONObject?) -> Unit)? = null) {
+        if (descriptor.has("builtin")) return // W7
+        if (state != SessionState.READY) return // drop while not READY
+        val revision = surfaces.revisionOf(surface) ?: return
+        val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
+        // SPEC 14.3: the hook's produced value is injected, never authored.
+        if (hookValue != null) args.put("value", hookValue)
+        val params = JSONObject()
+            .put("event_id", EbpAuth.generateNonce())
+            .put("action", descriptor.getString("action"))
+            .put("surface", surface)
+            .put("revision_seen", revision)
+            .put("occurred_at_ms", System.currentTimeMillis())
+        if (args.length() > 0) params.put("args", args)
+        // SPEC 14.1: capture_fields is one occurrence-time snapshot.
+        descriptor.optJSONArray("capture_fields")?.let { capture ->
+            if (capture.length() > 0) {
+                val fields = JSONObject()
+                for (i in 0 until capture.length()) {
+                    val fieldId = capture.getString(i)
+                    fields.put(fieldId,
+                        surfaces.currentValue(surface, fieldId) ?: JSONObject.NULL)
+                }
+                params.put("fields", fields)
+            }
+        }
+        sendRequest("event.action", params) { result, error ->
+            callback?.invoke(result?.optString("status"), error)
+        }
+    }
+
+    /**
+     * SPEC 14.6: record a user edit and publish it while READY. W5 sends
+     * immediately (a zero debounce conforms to the 500 ms cap), so the
+     * P1 #2 flush barrier holds trivially — nothing is ever pending.
+     * State-before-action ordering falls out of the shared ordered sink.
+     */
+    @Synchronized
+    fun publishState(surface: String, id: String, value: Any?) {
+        // SPEC 14.6: a password node MUST NOT emit state.changed, and
+        // only stateful nodes in the accepted snapshot have a wire
+        // address at all.
+        if (!surfaces.isStatefulNode(surface, id)) return
+        if (surfaces.isPasswordNode(surface, id)) return
+        surfaces.putDraft(surface, id, value)
+        if (state != SessionState.READY) return
+        val revision = surfaces.revisionOf(surface) ?: return
+        emit(JSONObject().put("jsonrpc", "2.0").put("method", "state.changed")
+            .put("params", JSONObject()
+                .put("surface", surface).put("revision_seen", revision)
+                .put("id", id).put("value", value ?: JSONObject.NULL)))
     }
 
     private fun handleRequest(id: Any, method: String, params: JSONObject) {

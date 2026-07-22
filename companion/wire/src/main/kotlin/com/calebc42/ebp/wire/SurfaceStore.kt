@@ -32,6 +32,25 @@ class SurfaceStore(private val maxSurfaces: Long, private val maxSurfaceIds: Lon
     fun spec(surface: String): JSONObject? =
         records[surface]?.takeIf { it.present }?.spec
 
+    /** SPEC 14.4: the accepted revision the user is looking at. */
+    fun revisionOf(surface: String): Long? =
+        records[surface]?.takeIf { it.present }?.revision
+
+    /** SPEC 14.1: the occurrence-time logical value of a stateful node —
+     * the dirty draft when one exists, else the authored value/default. */
+    fun currentValue(surface: String, id: String): Any? {
+        if (surface to id in drafts) return drafts[surface to id]
+        return records[surface]?.statefuls?.get(id)?.let { authoredValue(it) }
+    }
+
+    /** SPEC 14.6: password nodes never emit state or retain drafts. */
+    fun isPasswordNode(surface: String, id: String): Boolean =
+        records[surface]?.statefuls?.get(id)?.optBoolean("password") == true
+
+    /** Whether ID is a stateful node in SURFACE's accepted snapshot. */
+    fun isStatefulNode(surface: String, id: String): Boolean =
+        records[surface]?.statefuls?.containsKey(id) == true
+
     fun namespace(id: String): String = id.substringBefore(':')
 
     // ------------------------------------------------------ update (13.2)

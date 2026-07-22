@@ -28,7 +28,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 @Composable
-fun RenderNode(node: JSONObject) {
+fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge) {
     val padding = Modifier.padding((node.optDouble("padding", 0.0)).dp)
     when (node.optString("t")) {
         "text" -> Text(
@@ -40,14 +40,17 @@ fun RenderNode(node: JSONObject) {
                 else -> MaterialTheme.typography.bodyLarge
             },
             modifier = padding)
-        "row" -> Row(modifier = padding) { RenderChildren(node.optJSONArray("children")) }
-        "column" -> Column(modifier = padding) { RenderChildren(node.optJSONArray("children")) }
-        "box" -> Box(modifier = padding) { RenderChildren(node.optJSONArray("children")) }
+        "row" -> Row(modifier = padding) { RenderChildren(node.optJSONArray("children"), surface, bridge) }
+        "column" -> Column(modifier = padding) { RenderChildren(node.optJSONArray("children"), surface, bridge) }
+        "box" -> Box(modifier = padding) { RenderChildren(node.optJSONArray("children"), surface, bridge) }
         "spacer" -> Spacer(Modifier
             .width((node.optDouble("width", 0.0)).dp)
             .height((node.optDouble("height", 0.0)).dp))
         "divider" -> HorizontalDivider(modifier = padding)
-        "button" -> Button(onClick = { /* event.action arrives at W5 */ },
+        "button" -> Button(
+            onClick = { // SPEC 14.1: dispatch the authored descriptor
+                bridge.action(surface, node.optJSONObject("on_tap"))
+            },
             modifier = padding) { Text(node.optString("label")) }
         "text_input" -> {
             // Seeded from the authored value; draft publication is W5.
@@ -56,7 +59,11 @@ fun RenderNode(node: JSONObject) {
             }
             OutlinedTextField(
                 value = value,
-                onValueChange = { value = it },
+                onValueChange = {
+                    value = it
+                    // SPEC 14.6: publish each user edit as state.changed.
+                    bridge.state(surface, node.optString("id"), it)
+                },
                 label = node.optString("label").takeIf { it.isNotEmpty() }
                     ?.let { { Text(it) } },
                 singleLine = node.optBoolean("single_line"),
@@ -66,15 +73,15 @@ fun RenderNode(node: JSONObject) {
             // SPEC 16.2: unknown types render children as a neutral
             // vertical sequence, or nothing.
             node.optJSONArray("children")?.let { children ->
-                Column { RenderChildren(children) }
+                Column { RenderChildren(children, surface, bridge) }
             }
     }
 }
 
 @Composable
-private fun RenderChildren(children: JSONArray?) {
+private fun RenderChildren(children: JSONArray?, surface: String, bridge: DeviceBridge) {
     if (children == null) return
     for (i in 0 until children.length()) {
-        (children.opt(i) as? JSONObject)?.let { RenderNode(it) }
+        (children.opt(i) as? JSONObject)?.let { RenderNode(it, surface, bridge) }
     }
 }

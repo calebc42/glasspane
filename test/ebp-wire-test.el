@@ -550,5 +550,145 @@ floors (including tombstones) and absorb applied/stale results."
                                             '(:t "text" :text "reborn"))
                  43)))))
 
+;;;; W5: the event.action server and state.changed (SPEC 14)
+
+(defun ebp-test--event-params (event-id &optional action)
+  `(:event_id ,event-id
+    :action ,(or action "demo.count")
+    :surface "app:main" :revision_seen 41
+    :occurred_at_ms 1784700000000))
+
+(defun ebp-test--send-event (send id event-id &optional action)
+  (funcall send `(:jsonrpc "2.0" :id ,id :method "event.action"
+                  :params ,(ebp-test--event-params event-id action))))
+
+(defun ebp-test--response-for (server id)
+  (cl-find-if (lambda (m) (and (equal (alist-get 'id m) id)
+                               (or (alist-get 'result m) (alist-get 'error m))))
+              (funcall (plist-get server :received))))
+
+(ert-deftest ebp-test-event-action-statuses-and-duplicates ()
+  "SPEC 14.4: accepted commits a receipt; a repeated EventId returns
+duplicate without repeating the effect; unregistered actions reject."
+  (let ((runs 0))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :after-ready
+                 (lambda (send)
+                   (ebp-test--send-event send 200 (make-string 32 ?a))
+                   (ebp-test--send-event send 201 (make-string 32 ?a))
+                   (ebp-test--send-event send 202 (make-string 32 ?b)
+                                         "no.handler"))))
+      (ebp-client-register-action
+       client "demo.count"
+       (lambda (_c _params) (cl-incf runs) 'accepted))
+      (should (ebp-test--wait (lambda () (ebp-test--response-for server 202))))
+      (should (equal (alist-get 'status (alist-get 'result
+                                                   (ebp-test--response-for server 200)))
+                     "accepted"))
+      (should (equal (alist-get 'status (alist-get 'result
+                                                   (ebp-test--response-for server 201)))
+                     "duplicate"))
+      (should (= runs 1))
+      (should (equal (alist-get 'status (alist-get 'result
+                                                   (ebp-test--response-for server 202)))
+                     "rejected")))))
+
+(ert-deftest ebp-test-event-action-duplicate-after-restart ()
+  "SPEC 24.6 item 9: duplicate delivery after Emacs restart returns
+duplicate from the durable receipt store, without the handler running."
+  (let* ((receipt-file (make-temp-file "ebp-receipts"))
+         (event-id (make-string 32 ?c))
+         (runs 0))
+    (unwind-protect
+        (progn
+          ;; First life: accept and durably commit.
+          (ebp-test--with-companion
+              (server client
+                      (ebp-test--kat-script
+                       :after-ready
+                       (lambda (send) (ebp-test--send-event send 300 event-id)))
+                      :receipt-file receipt-file)
+            (ebp-client-register-action
+             client "demo.count" (lambda (_c _p) (cl-incf runs) 'accepted))
+            (should (ebp-test--wait
+                     (lambda () (ebp-test--response-for server 300)))))
+          (should (= runs 1))
+          ;; Second life: same receipt file, same EventId redelivered.
+          (ebp-test--with-companion
+              (server client
+                      (ebp-test--kat-script
+                       :after-ready
+                       (lambda (send) (ebp-test--send-event send 301 event-id)))
+                      :receipt-file receipt-file)
+            (ebp-client-register-action
+             client "demo.count" (lambda (_c _p) (cl-incf runs) 'accepted))
+            (should (ebp-test--wait
+                     (lambda () (ebp-test--response-for server 301))))
+            (should (equal (alist-get 'status
+                                      (alist-get 'result
+                                                 (ebp-test--response-for server 301)))
+                           "duplicate"))
+            (should (= runs 1))))
+      (delete-file receipt-file))))
+
+(ert-deftest ebp-test-event-action-malformed-is-invalid-params ()
+  "SPEC 7.3: structurally invalid request params receive -32602."
+  (ebp-test--with-companion
+      (server client
+              (ebp-test--kat-script
+               :after-ready
+               (lambda (send)
+                 ;; Both surface and dialog context: exclusivity violated.
+                 (funcall send '(:jsonrpc "2.0" :id 400 :method "event.action"
+                                 :params (:event_id "00112233445566778899aabbccddeeff"
+                                          :action "demo.count"
+                                          :surface "app:main" :revision_seen 1
+                                          :dialog_id "d1"
+                                          :occurred_at_ms 1784700000000))))))
+    (should (ebp-test--wait (lambda () (ebp-test--response-for server 400))))
+    (should (= (alist-get 'code (alist-get 'error
+                                           (ebp-test--response-for server 400)))
+               -32602))))
+
+(ert-deftest ebp-test-state-changed-adopt-and-reset ()
+  "SPEC 14.6 + P1 #2: values adopt across old revisions; an explicit
+reset at a higher revision supersedes; a later report reinstates."
+  (let ((ready nil) (seen '()))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :welcome-fn
+                 (lambda (_w) (ebp-test--welcome-result
+                               nil nil '(:app:main (:revision 41 :present t))))
+                 :after-ready
+                 (lambda (send)
+                   ;; Adopted: no reset history yet.
+                   (funcall send '(:jsonrpc "2.0" :method "state.changed"
+                                   :params (:surface "app:main" :revision_seen 41
+                                            :id "title" :value "first")))))
+                :ready-function (lambda (_c) (setq ready t))
+                :state-changed-function
+                (lambda (_c _s _r id value) (push (cons id value) seen)))
+      (should (ebp-test--wait (lambda () (and ready seen))))
+      (should (equal (ebp-client-input-value client "app:main" "title")
+                     "first"))
+      ;; Push revision 42 resetting the draft; a racing report against 41
+      ;; must be discarded, one against 42 adopted (P1 #2).
+      (ebp-client-surface-update client "app:main"
+                                 '(:t "text_input" :id "title")
+                                 :reset-input-ids '("title"))
+      (ebp-client--handle-state-changed
+       client '(:surface "app:main" :revision_seen 41
+                :id "title" :value "raced-and-lost"))
+      (should (equal (ebp-client-input-value client "app:main" "title")
+                     "first"))
+      (ebp-client--handle-state-changed
+       client '(:surface "app:main" :revision_seen 42
+                :id "title" :value "reinstated"))
+      (should (equal (ebp-client-input-value client "app:main" "title")
+                     "reinstated")))))
+
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

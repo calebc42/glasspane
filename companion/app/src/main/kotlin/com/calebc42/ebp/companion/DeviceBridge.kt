@@ -61,11 +61,33 @@ class DeviceBridge(private val onSurfaceChanged: (JSONObject?) -> Unit) {
         }
     }
 
+    @Volatile private var engine: CompanionEngine? = null
+
+    // Renderer hooks arrive on the Compose main thread; socket writes are
+    // prohibited there (NetworkOnMainThreadException). One dispatch thread
+    // also preserves SPEC 14.6 state-before-action ordering by itself.
+    private val dispatchExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "ebp-dispatch").apply { isDaemon = true }
+        }
+
+    /** SPEC 14.1: renderer hook -> remote action through the live engine. */
+    fun action(surface: String, descriptor: JSONObject?, value: Any? = null) {
+        descriptor ?: return
+        dispatchExecutor.execute { engine?.dispatchAction(surface, descriptor, value) }
+    }
+
+    /** SPEC 14.6: renderer edit -> draft + state.changed publication. */
+    fun state(surface: String, id: String, value: Any?) {
+        dispatchExecutor.execute { engine?.publishState(surface, id, value) }
+    }
+
     private fun serve(socket: Socket) {
         val out = socket.getOutputStream()
         val engine = CompanionEngine(config, store) { bytes ->
             out.write(bytes); out.flush()
         }
+        this.engine = engine
         engine.surfaceListener = { surface ->
             if (surface.startsWith("app:")) onSurfaceChanged(store.spec(surface))
         }

@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
                         null -> Text(
                             "EBP Companion — waiting for Emacs on 127.0.0.1:8765",
                             Modifier.padding(24.dp))
-                        else -> RenderNode(s)
+                        else -> RenderNode(s, "app:main", bridge)
                     }
                 }
             }

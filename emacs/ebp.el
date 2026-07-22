@@ -393,7 +393,7 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
 (cl-defstruct (ebp-client (:constructor ebp--make-client))
   (state 'connected)
   config          ; plist: :client-name :client-version :pairing-id :token
-                  ;        :wants and, for tests, :client-nonce
+                  ;        :wants, :receipt-file, and for tests :client-nonce
   connection      ; jsonrpc-process-connection
   (handlers (make-hash-table :test #'equal)) ; method-name -> fn
   client-nonce
@@ -402,15 +402,32 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; SPEC 13.1: monotonic per-surface revisions; floors absorbed from the
   ;; welcome and from every applied/stale result.
   (revisions (make-hash-table :test #'equal))
+  ;; SPEC 14: the action allowlist and the durable EventId receipts.
+  (actions (make-hash-table :test #'equal))
+  (receipts (make-hash-table :test #'equal))
+  ;; SPEC 14.6: latest input values by (surface . id), and this side's
+  ;; reset history for the P1 #2 reconciliation rule.
+  (input-values (make-hash-table :test #'equal))
+  (reset-history (make-hash-table :test #'equal))
+  state-changed-functions ; called with (client surface revision id value)
   ready-functions ; abnormal hook: called with the client on READY
   close-reason)
 
 (defun ebp-client-create (&rest config)
   "Create a client engine in `connected'.  CONFIG is the struct's config
-plist plus optionally :ready-function."
+plist plus optionally :ready-function and :state-changed-function."
   (let ((client (ebp--make-client :config config)))
     (when-let* ((fn (plist-get config :ready-function)))
       (push fn (ebp-client-ready-functions client)))
+    (when-let* ((fn (plist-get config :state-changed-function)))
+      (push fn (ebp-client-state-changed-functions client)))
+    ;; The endpoint's own SPEC 14 method servers; their registered
+    ;; content is the application's (REWRITE-PLAN boundary).
+    (ebp-client-register-handler client "event.action"
+                                 #'ebp-client--handle-event-action)
+    (ebp-client-register-handler client "state.changed"
+                                 #'ebp-client--handle-state-changed)
+    (ebp-client--receipts-load client)
     client))
 
 (defun ebp-client-register-handler (client method fn)
@@ -516,6 +533,13 @@ synchronization barrier (SPEC 10.3)."
              do (puthash (substring (symbol-name key) 1)
                          (plist-get entry :revision)
                          (ebp-client-revisions client)))
+    ;; Step 2: merge welcome input_state into the UI-state store.
+    (cl-loop for (skey svals) on (plist-get result :input_state) by #'cddr
+             do (cl-loop for (ikey value) on svals by #'cddr
+                         do (puthash (cons (substring (symbol-name skey) 1)
+                                           (substring (symbol-name ikey) 1))
+                                     value
+                                     (ebp-client-input-values client))))
     (ebp-client--step client 'welcome-verified)
     ;; Step 3, required surface pushes, arrives with rung W4's callers.
     ;; Step 4: replay concludes before session.ready.
@@ -549,6 +573,130 @@ synchronization barrier (SPEC 10.3)."
     (if handler
         (funcall handler client params)
       (message "ebp: unknown notification %s ignored" method))))
+
+;;;; Actions and events (SPEC 14), the Emacs endpoint half
+
+(defconst ebp--event-id-re "\\`[0-9a-f]\\{32\\}\\'"
+  "SPEC 4.4: an EventId is exactly 32 lowercase hexadecimal characters.")
+
+(defconst ebp-receipt-retention-seconds 604800
+  "SPEC 14.4: accepted EventIds are durably retained at least this long.")
+
+(defun ebp-client-register-action (client action fn)
+  "Register FN as the allowlisted handler for ACTION (SPEC 14.1).
+FN is called with (CLIENT PARAMS) after envelope validation and the
+duplicate check, inside the dispatch extent.  It MUST return one of the
+symbols `accepted', `stale', or `rejected' (SPEC 14.4/14.5); for
+`accepted', this library durably commits the EventId receipt before the
+result leaves — never author a handler whose effect must not run twice
+without also making it idempotent, as 14.4 recommends."
+  (puthash action fn (ebp-client-actions client)))
+
+(defun ebp-client--receipts-load (client)
+  "Load surviving receipts from :receipt-file, pruning expired ones."
+  (when-let* ((file (plist-get (ebp-client-config client) :receipt-file)))
+    (when (file-readable-p file)
+      (let ((cutoff (- (float-time) ebp-receipt-retention-seconds)))
+        (dolist (line (split-string
+                       (with-temp-buffer
+                         (insert-file-contents file)
+                         (buffer-string))
+                       "\n" t))
+          (pcase-let ((`(,id ,ts) (split-string line " ")))
+            (when (and id ts (> (string-to-number ts) cutoff))
+              (puthash id (string-to-number ts)
+                       (ebp-client-receipts client)))))))))
+
+(defun ebp-client--receipt-commit (client event-id)
+  "Durably record EVENT-ID (SPEC 14.4); nil when the commitment failed."
+  (condition-case nil
+      (let ((now (float-time)))
+        (when-let* ((file (plist-get (ebp-client-config client)
+                                     :receipt-file)))
+          (write-region (format "%s %s\n" event-id now) nil file t 'silent))
+        (puthash event-id now (ebp-client-receipts client))
+        t)
+    (error nil)))
+
+(defun ebp-client--event-context-valid-p (params)
+  "SPEC 14.4: surface, dialog, and global events carry exclusive context."
+  (let ((surface (plist-get params :surface))
+        (revision (plist-get params :revision_seen))
+        (dialog (plist-get params :dialog_id)))
+    (cond
+     (surface (and (stringp surface) (integerp revision) (null dialog)))
+     (dialog (and (stringp dialog) (null revision)))
+     (t (null revision)))))
+
+(defun ebp-client--handle-event-action (client params)
+  "The `event.action' server (SPEC 14.4).
+Validation order per 14.4: envelope, allowlist, duplicate ID — before
+any application behavior.  The reply is the dispatcher's return value;
+the durable receipt commit happens synchronously before `accepted'
+leaves, which is exactly the ordering 14.4 requires."
+  (let ((event-id (plist-get params :event_id))
+        (action (plist-get params :action)))
+    (unless (and (stringp event-id)
+                 (string-match-p ebp--event-id-re event-id)
+                 (stringp action) (string-search "." action)
+                 (integerp (plist-get params :occurred_at_ms))
+                 (ebp-client--event-context-valid-p params))
+      (jsonrpc-error :code -32602 :message "Invalid params"))
+    (cond
+     ;; SPEC 14.4: a repeated ID MUST NOT deliberately repeat the effect.
+     ((gethash event-id (ebp-client-receipts client))
+      '(:status "duplicate"))
+     ((null (gethash action (ebp-client-actions client)))
+      '(:status "rejected" :message "action not allowlisted"))
+     (t
+      (pcase (funcall (gethash action (ebp-client-actions client))
+                      client params)
+        ('accepted
+         (if (ebp-client--receipt-commit client event-id)
+             '(:status "accepted")
+           ;; SPEC 14.4: no commitment, no accepted — retryable instead.
+           (jsonrpc-error :code 1500 :message "Receipt commit failed")))
+        ('stale '(:status "stale"))
+        ('rejected '(:status "rejected"))
+        (other (jsonrpc-error :code -32603
+                              :message (format "handler returned %S"
+                                               other))))))))
+
+;;;; Input state (SPEC 14.6 + P1 #2), the Emacs endpoint half
+
+(defun ebp-client-input-value (client surface id)
+  "The latest reconciled value for SURFACE's stateful node ID."
+  (gethash (cons surface id) (ebp-client-input-values client)))
+
+(defun ebp-client--record-reset-ids (client surface revision reset-ids)
+  "Remember that REVISION explicitly reset RESET-IDS (P1 #2)."
+  (when reset-ids
+    (push (cons revision (append reset-ids nil))
+          (gethash surface (ebp-client-reset-history client)))))
+
+(defun ebp-client--state-reset-p (client surface revision-seen id)
+  "SPEC 14.6: a reset at a revision above REVISION-SEEN supersedes the
+reported draft; only a later-revision report reinstates one."
+  (cl-some (lambda (entry)
+             (and (> (car entry) revision-seen)
+                  (member id (cdr entry))))
+           (gethash surface (ebp-client-reset-history client))))
+
+(defun ebp-client--handle-state-changed (client params)
+  "The `state.changed' receiver (SPEC 14.6 + P1 #2).
+An old `revision_seen' is never an error: the value is adopted unless a
+later snapshot explicitly reset that ID."
+  (let ((surface (plist-get params :surface))
+        (revision (plist-get params :revision_seen))
+        (id (plist-get params :id)))
+    (when (and (stringp surface) (integerp revision) (stringp id))
+      (if (ebp-client--state-reset-p client surface revision id)
+          (message "ebp: state.changed for reset %s/%s discarded" surface id)
+        (puthash (cons surface id) (plist-get params :value)
+                 (ebp-client-input-values client))
+        (dolist (fn (ebp-client-state-changed-functions client))
+          (funcall fn client surface revision id
+                   (plist-get params :value)))))))
 
 ;;;; Surface push (SPEC 13.1-13.3), the client half
 
@@ -585,14 +733,19 @@ where STATUS is \"applied\" or \"stale\" (SPEC 13.2: stale is benign)."
   "Push a complete snapshot for SURFACE (SPEC 13.2); returns its revision.
 SPEC is the SurfaceSpec value.  What the spec contains is the
 application's business (REWRITE-PLAN boundary); this owns the revisions."
-  (ebp-client--surface-request
-   client 'surface.update surface
-   `(:spec ,spec
-     ,@(when stale-after-s `(:stale_after_s ,stale-after-s))
-     ,@(when stale-spec `(:stale_spec ,stale-spec))
-     ,@(when current-view `(:current_view ,current-view))
-     ,@(when reset-input-ids `(:reset_input_ids ,(vconcat reset-input-ids))))
-   callback))
+  (let ((revision
+         (ebp-client--surface-request
+          client 'surface.update surface
+          `(:spec ,spec
+            ,@(when stale-after-s `(:stale_after_s ,stale-after-s))
+            ,@(when stale-spec `(:stale_spec ,stale-spec))
+            ,@(when current-view `(:current_view ,current-view))
+            ,@(when reset-input-ids
+                `(:reset_input_ids ,(vconcat reset-input-ids))))
+          callback)))
+    ;; P1 #2: this side's reset history reconciles racing state.changed.
+    (ebp-client--record-reset-ids client surface revision reset-input-ids)
+    revision))
 
 (cl-defun ebp-client-surface-remove (client surface &key callback)
   "Tombstone SURFACE at a fresh revision (SPEC 13.3); returns the revision."

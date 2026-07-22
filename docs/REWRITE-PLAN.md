@@ -97,6 +97,17 @@ conformance suite pinned to the `ebp/` corpus; and the delineation guard —
   (decision log #2, ebp amendment #34); the strict reference decoder in
   ebp.el serves conformance suites and future non-jsonrpc transports, not
   the live path. Beyond core libraries, wire modules stay dependency-free.
+- **The rental rule** (from the jsonrpc.el correction, applied broadly):
+  rent a core built-in wherever its contract matches a spec duty;
+  hand-roll only where the spec demands behavior the library lacks; no
+  non-core dependencies in the protocol library. Rented so far: native
+  JSON, jsonrpc.el, secure-hash, base64, timer.el, **sqlite.el** (the
+  receipt store; file fallback when `sqlite-available-p` is nil — VERIFY
+  on the on-device Android Emacs), **custom.el** (defgroup `ebp`; user
+  options overridable from init.el with `setopt`, per-connection config
+  still wins). Earmarked: `auth-source` for pairing tokens (SPEC 9.1) at
+  the pairing rung; `tabulated-list`/`hierarchy` for devtools buffers;
+  capf (not completion.el) when the editor module serves `edit.complete`.
 
 ## Standing product decisions
 

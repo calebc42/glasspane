@@ -21,6 +21,32 @@
 (require 'cl-lib)
 (require 'jsonrpc)
 
+;;;; User options (custom.el: declared defaults, overridable from init.el
+;;;; with `setopt' without touching code; per-connection config plists
+;;;; override these per client)
+
+(defgroup ebp nil
+  "The Emacs Bridge Protocol endpoint."
+  :group 'comm
+  :prefix "ebp-")
+
+(defcustom ebp-receipt-file (locate-user-emacs-file "ebp-receipts")
+  "Default durable store for accepted EventId receipts (SPEC 14.4).
+When built-in SQLite is available this names a SQLite database;
+otherwise an append-only text file.  A connection's :receipt-file
+config overrides it."
+  :type 'file)
+
+(defcustom ebp-replay-retry-delay 5
+  "Initial seconds before retrying `queue.replay' (SPEC 15.3).
+Each retry doubles the delay, capped at `ebp-replay-retry-max'.
+A connection's :replay-retry-delay config overrides it."
+  :type 'number)
+
+(defcustom ebp-replay-retry-max 60
+  "Ceiling in seconds for the replay retry backoff (SPEC 15.3)."
+  :type 'number)
+
 ;;;; Errors
 
 ;; SPEC 6.2: header-section failures force connection closure.
@@ -434,6 +460,7 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; SPEC 14: the action allowlist and the durable EventId receipts.
   (actions (make-hash-table :test #'equal))
   (receipts (make-hash-table :test #'equal))
+  receipt-db     ; sqlite handle when the backend is built-in SQLite
   ;; SPEC 14.6: latest input values by (surface . id), and this side's
   ;; reset history for the P1 #2 reconciliation rule.
   (input-values (make-hash-table :test #'equal))
@@ -455,7 +482,7 @@ receipts default to `ebp-receipts' under `user-emacs-directory' —
 `accepted' always names a durable commitment."
   (unless (plist-member config :receipt-file)
     (setq config (plist-put (copy-sequence config) :receipt-file
-                            (locate-user-emacs-file "ebp-receipts"))))
+                            ebp-receipt-file)))
   (let ((client (ebp--make-client :config config)))
     (when-let* ((fn (plist-get config :ready-function)))
       (push fn (ebp-client-ready-functions client)))
@@ -484,6 +511,9 @@ For a notification the return value is ignored."
           (ebp-client-close-reason client) reason)
     (when-let* ((timer (ebp-client-replay-retry-timer client)))
       (cancel-timer timer))
+    (when-let* ((db (ebp-client-receipt-db client)))
+      (ignore-errors (sqlite-close db))
+      (setf (ebp-client-receipt-db client) nil))
     (when-let* ((conn (ebp-client-connection client)))
       (ignore-errors (jsonrpc-shutdown conn)))))
 
@@ -624,7 +654,7 @@ capped at 60 s."
       (let ((next (or delay
                       (plist-get (ebp-client-config client)
                                  :replay-retry-delay)
-                      5)))
+                      ebp-replay-retry-delay)))
         (setf (ebp-client-replay-retry-timer client)
               (run-at-time
                next nil
@@ -637,10 +667,10 @@ capped at 60 s."
                           ;; SPEC 15.3: bounded backoff continues even
                           ;; across an errored retry (1600 and friends).
                           (ebp-client--schedule-replay-retry
-                           client (min 60 (* 2 next)))
+                           client (min ebp-replay-retry-max (* 2 next)))
                         (setf (ebp-client-replay-summary client) result)
                         (ebp-client--schedule-replay-retry
-                         client (min 60 (* 2 next)))))
+                         client (min ebp-replay-retry-max (* 2 next)))))
                     300)))))))))
 
 (defun ebp-client--force-replay-retry (client)
@@ -693,10 +723,29 @@ without also making it idempotent, as 14.4 recommends."
   (puthash action fn (ebp-client-actions client)))
 
 (defun ebp-client--receipts-load (client)
-  "Load surviving receipts from :receipt-file, pruning expired ones."
+  "Open the durable receipt store and load surviving EventIds.
+Backend: built-in SQLite when available (transactional commits, indexed
+duplicate lookup, in-place pruning); otherwise the append-only text
+file with load-time pruning."
   (when-let* ((file (plist-get (ebp-client-config client) :receipt-file)))
-    (when (file-readable-p file)
-      (let ((cutoff (- (float-time) ebp-receipt-retention-seconds)))
+    (let ((cutoff (- (float-time) ebp-receipt-retention-seconds)))
+      (cond
+       ((and (fboundp 'sqlite-available-p) (sqlite-available-p))
+        (condition-case nil
+            (let ((db (sqlite-open file)))
+              (sqlite-execute db "CREATE TABLE IF NOT EXISTS receipts \
+(event_id TEXT PRIMARY KEY, ts REAL)")
+              ;; SPEC 14.4: the 604800 s retention is a floor; prune past it.
+              (sqlite-execute db "DELETE FROM receipts WHERE ts < ?"
+                              (list cutoff))
+              (dolist (row (sqlite-select db "SELECT event_id, ts \
+FROM receipts"))
+                (puthash (car row) (cadr row)
+                         (ebp-client-receipts client)))
+              (setf (ebp-client-receipt-db client) db))
+          ;; An unopenable path degrades to commit-time failure -> 1500.
+          (error nil)))
+       ((file-readable-p file)
         (dolist (line (split-string
                        (with-temp-buffer
                          (insert-file-contents file)
@@ -705,18 +754,30 @@ without also making it idempotent, as 14.4 recommends."
           (pcase-let ((`(,id ,ts) (split-string line " ")))
             (when (and id ts (> (string-to-number ts) cutoff))
               (puthash id (string-to-number ts)
-                       (ebp-client-receipts client)))))))))
+                       (ebp-client-receipts client))))))))))
 
 (defun ebp-client--receipt-commit (client event-id)
   "Durably record EVENT-ID (SPEC 14.4); nil when the commitment failed."
   (condition-case nil
-      (let ((now (float-time)))
-        (when-let* ((file (plist-get (ebp-client-config client)
-                                     :receipt-file)))
-          ;; Emacs 30 defaults write-region-inhibit-fsync to t; a receipt
-          ;; that is not on stable storage is not a 14.4 commitment.
-          (let ((write-region-inhibit-fsync nil))
-            (write-region (format "%s %s\n" event-id now) nil file t 'silent)))
+      (let ((now (float-time))
+            (db (ebp-client-receipt-db client)))
+        (cond
+         (db
+          ;; SQLite's default synchronous=FULL is the durable commit.
+          (sqlite-execute db
+                          "INSERT OR REPLACE INTO receipts VALUES (?, ?)"
+                          (list event-id now)))
+         ((and (fboundp 'sqlite-available-p) (sqlite-available-p))
+          ;; SQLite exists but the store never opened: no durable path.
+          (error "receipt store unavailable"))
+         (t
+          (when-let* ((file (plist-get (ebp-client-config client)
+                                       :receipt-file)))
+            ;; Emacs 30 defaults write-region-inhibit-fsync to t; a
+            ;; receipt not on stable storage is not a 14.4 commitment.
+            (let ((write-region-inhibit-fsync nil))
+              (write-region (format "%s %s\n" event-id now)
+                            nil file t 'silent)))))
         (puthash event-id now (ebp-client-receipts client))
         t)
     (error nil)))

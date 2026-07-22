@@ -1,6 +1,7 @@
 ;;; ebp.el --- EBP 2 wire core, client side -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Package-Requires: ((emacs "30.1"))
 
 ;;; Commentary:
 

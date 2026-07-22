@@ -57,6 +57,18 @@ Resolved: ebp amendment #33 (2026-07-22) pinned local-editing efficiency —
 delta coalescing before `seq` assignment and source-throttled carets are
 explicitly conformant; the W7 editor module builds on that reading.
 
+## Code conventions
+
+- **elisp floor: Emacs 30.1** (Jetpacs requires Emacs on the device, and
+  the on-device build is 30.1). Every library declares
+  `Package-Requires: ((emacs "30.1"))`; modern stdlib is assumed —
+  no compat shims.
+- **`setopt` for user options** (Emacs 29+): any code, example, or doc
+  that sets a `defcustom` uses `setopt` so custom setters run. `setq`
+  remains correct for internal variables and lexical state — do not
+  blanket-replace it.
+- `lexical-binding: t` everywhere; wire modules stay dependency-free.
+
 ## Standing product decisions
 
 **orgseq editing tier (decided 2026-07-22):** orgseq block editing uses the

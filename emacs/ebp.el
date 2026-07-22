@@ -47,6 +47,12 @@ A connection's :replay-retry-delay config overrides it."
   "Ceiling in seconds for the replay retry backoff (SPEC 15.3)."
   :type 'number)
 
+(defcustom ebp-dialog-timeout 3600
+  "Seconds a `dialog.show' request waits before giving up (SPEC 18.1).
+The protocol holds a dialog open with no timeout; this is only the
+client-side ceiling on how long Emacs keeps the request outstanding."
+  :type 'number)
+
 ;;;; Errors
 
 ;; SPEC 6.2: header-section failures force connection closure.
@@ -416,7 +422,7 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ((ebp-error-data :initform nil :accessor ebp--connection-error-data)))
 
 (cl-defmethod jsonrpc-convert-to-endpoint ((conn ebp--connection)
-                                           message subtype)
+                                           _message subtype)
   (let ((converted (cl-call-next-method)))
     (when-let* ((data (ebp--connection-error-data conn)))
       (setf (ebp--connection-error-data conn) nil)
@@ -918,6 +924,26 @@ application's business (REWRITE-PLAN boundary); this owns the revisions."
 (cl-defun ebp-client-surface-remove (client surface &key callback)
   "Tombstone SURFACE at a fresh revision (SPEC 13.3); returns the revision."
   (ebp-client--surface-request client 'surface.remove surface nil callback))
+
+;;;; Dialogs (SPEC 18.1), the client half
+
+(cl-defun ebp-client-dialog-show (client dialog-id spec &key style callback)
+  "Show a modal dialog (SPEC 18.1).  DIALOG-ID is an identifier; SPEC is
+the dialog SurfaceSpec.  CALLBACK receives (STATUS RESULT ERROR): STATUS
+is submitted or dismissed; RESULT is the full result plist (with
+`value' and `fields' on submit); a cancelled dialog arrives as ERROR
+1301.  This is the endpoint's send mechanism; turning an Emacs prompt
+into a dialog is an application concern above this boundary."
+  (ebp-client--request
+   client 'dialog.show
+   `(:dialog_id ,dialog-id :spec ,spec ,@(when style `(:style ,style)))
+   (lambda (result error)
+     (when callback
+       (funcall callback (and result (plist-get result :status))
+                result error)))
+   ;; SPEC 18.1: a dialog is held until the user acts — there is no
+   ;; protocol timeout; use a long client-side one, overridable.
+   ebp-dialog-timeout))
 
 ;;;; TCP transport (SPEC 5.2): jsonrpc-process-connection, unmodified
 

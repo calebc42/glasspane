@@ -29,6 +29,9 @@ class DeviceBridge(
     /** SPEC 15.1: storage failure and queue exhaustion MUST reach the
      * user as a visible diagnostic. */
     private val onQueueProblem: (String) -> Unit = {},
+    /** SPEC 18.1: (dialog_id, spec) to present; (dialog_id, null) to
+     * dismiss. */
+    private val onDialogChanged: (String?, JSONObject?) -> Unit = { _, _ -> },
 ) {
 
     val store = SurfaceStore(64, 4096)
@@ -43,33 +46,53 @@ class DeviceBridge(
         pairings = mapOf(
             "101112131415161718191a1b1c1d1e1f" to
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
-        supportedCapabilities = setOf("theme"),
-        surfaceProfiles = JSONObject().put("app", JSONObject()
-            .put("node_types", JSONArray(listOf(
-                "text", "row", "column", "box", "spacer", "divider",
-                "button", "text_input")))
-            .put("builtins", JSONArray(listOf(
-                "view.switch", "companion.settings.open")))
-            .put("features", JSONArray())),
+        supportedCapabilities = setOf("theme", "surfaces.dialog"),
+        surfaceProfiles = JSONObject()
+            .put("app", JSONObject()
+                .put("node_types", JSONArray(listOf(
+                    "text", "row", "column", "box", "spacer", "divider",
+                    "button", "text_input")))
+                .put("builtins", JSONArray(listOf(
+                    "view.switch", "companion.settings.open")))
+                .put("features", JSONArray()))
+            .put("dialog", JSONObject()
+                .put("node_types", JSONArray(listOf(
+                    "text", "row", "column", "box", "spacer", "divider",
+                    "button", "text_input")))
+                .put("builtins", JSONArray(listOf("dialog.submit", "dialog.dismiss")))
+                .put("features", JSONArray())),
         limits = JSONObject()
             .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
             .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
             .put("max_surfaces", 64).put("max_surface_ids", 4096)
             .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
-            .put("max_capture_fields", 64),
+            .put("max_capture_fields", 64).put("max_dialogs", 4),
     )
 
     fun start() = thread(name = "ebp-bridge", isDaemon = true) {
-        val server = ServerSocket()
-        server.reuseAddress = true
-        // SPEC 5.2: bind only a loopback interface.
-        server.bind(InetSocketAddress("127.0.0.1", 8765))
-        while (true) {
-            val socket = server.accept()
-            // SPEC 5.2: one session at a time; the newcomer supersedes.
-            current?.runCatching { close() }
-            current = socket
-            thread(name = "ebp-conn", isDaemon = true) { serve(socket) }
+        try {
+            val server = ServerSocket()
+            server.reuseAddress = true
+            // SPEC 5.2: bind only a loopback interface. A restart can race
+            // the previous process's socket release (EADDRINUSE); retry
+            // rather than crash the app.
+            var bound = false
+            for (attempt in 0 until 20) {
+                try {
+                    server.bind(InetSocketAddress("127.0.0.1", 8765))
+                    bound = true; break
+                } catch (e: java.net.BindException) { Thread.sleep(500) }
+            }
+            if (!bound) return@thread
+            while (true) {
+                val socket = server.accept()
+                // SPEC 5.2: one session at a time; the newcomer supersedes.
+                current?.runCatching { close() }
+                current = socket
+                thread(name = "ebp-conn", isDaemon = true) { serve(socket) }
+            }
+        } catch (_: Exception) {
+            // The listener thread must never take down the host app.
         }
     }
 
@@ -99,15 +122,34 @@ class DeviceBridge(
         dispatchExecutor.execute { engine?.publishState(surface, id, value) }
     }
 
+    /** SPEC 18.1: dialog.submit builtin -> complete the outstanding request. */
+    fun dialogSubmit(dialogId: String, value: Any?, fields: JSONObject) {
+        dispatchExecutor.execute { engine?.completeDialogSubmit(dialogId, value, fields) }
+    }
+
+    /** SPEC 18.1: dialog.dismiss builtin / platform dismissal. */
+    fun dialogDismiss(dialogId: String) {
+        dispatchExecutor.execute { engine?.completeDialogDismiss(dialogId) }
+    }
+
     private fun serve(socket: Socket) {
         val out = socket.getOutputStream()
         val engine = CompanionEngine(config, store, queue) { bytes ->
-            out.write(bytes); out.flush()
+            // The sink runs on whatever thread emits — the reader, the pump,
+            // or the UI dispatch executor. A peer that went away mid-write
+            // MUST NOT crash that thread (and with it the app): close the
+            // socket so the reader loop unwinds through engine.close().
+            try {
+                out.write(bytes); out.flush()
+            } catch (_: java.io.IOException) {
+                socket.runCatching { close() }
+            }
         }
         this.engine = engine
         engine.surfaceListener = { surface ->
             if (surface.startsWith("app:")) onSurfaceChanged(store.spec(surface))
         }
+        engine.dialogListener = { id, spec -> onDialogChanged(id, spec) }
         val input = socket.getInputStream()
         val buffer = ByteArray(8192)
         try {

@@ -21,6 +21,7 @@ import org.json.JSONObject
 class MainActivity : ComponentActivity() {
 
     private val currentSpec = MutableStateFlow<JSONObject?>(null)
+    private val currentDialog = MutableStateFlow<Pair<String, JSONObject>?>(null)
     private lateinit var bridge: DeviceBridge
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,6 +35,11 @@ class MainActivity : ComponentActivity() {
                         this, "EBP queue: $message",
                         android.widget.Toast.LENGTH_LONG).show()
                 }
+            },
+            onDialogChanged = { id, spec ->
+                // SPEC 18.1: one outstanding dialog presented at a time here.
+                currentDialog.value = if (spec != null && id != null) id to spec
+                    else null
             })
         bridge.start()
         setContent {
@@ -45,6 +51,21 @@ class MainActivity : ComponentActivity() {
                             "EBP Companion — waiting for Emacs on 127.0.0.1:8765",
                             Modifier.padding(24.dp))
                         else -> RenderNode(s, "app:main", bridge)
+                    }
+                    val dialog by currentDialog.collectAsState()
+                    dialog?.let { (id, dspec) ->
+                        androidx.compose.ui.window.Dialog(
+                            // SPEC 18.1: a platform dismissal is a dismiss.
+                            onDismissRequest = { bridge.dialogDismiss(id) }) {
+                            Surface(
+                                shape = MaterialTheme.shapes.large,
+                                tonalElevation = 6.dp) {
+                                androidx.compose.foundation.layout.Column(
+                                    Modifier.padding(24.dp)) {
+                                    RenderDialogRoot(id, dspec, bridge)
+                                }
+                            }
+                        }
                     }
                 }
             }

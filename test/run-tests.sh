@@ -20,5 +20,13 @@ emacs -Q --batch -L emacs --eval '
       (kill-emacs 1))
     (message "delineation guard: ebp.el loads alone, no jetpacs symbols")))'
 
+# Byte-compile guard: free-variable and undefined-function warnings are
+# treated as errors (catches unescaped-quote docstrings and typos before
+# they reach a device).
+emacs -Q --batch -L emacs \
+  --eval '(setq byte-compile-error-on-warn t)' \
+  -f batch-byte-compile emacs/ebp.el
+rm -f emacs/ebp.elc
+
 emacs -Q --batch -L emacs -l test/ebp-wire-test.el \
   -f ert-run-tests-batch-and-exit

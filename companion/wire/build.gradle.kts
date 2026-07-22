@@ -1,17 +1,15 @@
 plugins {
-    kotlin("jvm") version "2.0.21"
+    kotlin("jvm")
 }
 
 kotlin { jvmToolchain(21) }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
-    // org.json is the JSON surface shared with Android (where the platform
-    // provides it); on the JVM we depend on the reference artifact.
-    implementation("org.json:json:20240303")
+    // org.json is the JSON surface shared with Android. compileOnly: on the
+    // device the framework provides these classes; packaging the artifact
+    // would shadow the boot classpath. JVM tests supply the reference jar.
+    compileOnly("org.json:json:20240303")
+    testImplementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
 }
 

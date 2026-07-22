@@ -37,6 +37,11 @@ class CompanionEngine(
         private set
     private var granted: List<String> = emptyList()
 
+    /** Presentation hook: called with the surface ID after an applied
+     * update or remove, so a host can re-render (the mechanism is the
+     * endpoint's, what to draw is the application's). */
+    var surfaceListener: ((String) -> Unit)? = null
+
     private val decoder = FrameDecoder()
     private var pendingPairingId: String? = null
     private var pendingClientNonce: String? = null
@@ -165,6 +170,7 @@ class CompanionEngine(
                 .put("status", result.status)
                 .put("revision", result.revision)
                 .put("present", result.present))
+            if (result.status == "applied") surfaceListener?.invoke(surface)
         } catch (e: ContentInvalid) {
             respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("path", e.path).put("reason", e.reason))
@@ -183,6 +189,7 @@ class CompanionEngine(
                 .put("status", result.status)
                 .put("revision", result.revision)
                 .put("present", result.present))
+            if (result.status == "applied") surfaceListener?.invoke(surface)
         } catch (e: ContentInvalid) {
             respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("path", e.path).put("reason", e.reason))

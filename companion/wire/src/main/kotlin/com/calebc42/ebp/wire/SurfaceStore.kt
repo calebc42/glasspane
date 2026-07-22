@@ -28,6 +28,10 @@ class SurfaceStore(private val maxSurfaces: Long, private val maxSurfaceIds: Lon
     fun isValidSurfaceId(id: String): Boolean =
         SURFACE_ID.matches(id) && id.toByteArray(Charsets.UTF_8).size <= 128
 
+    /** The accepted snapshot for a present surface, for rendering. */
+    fun spec(surface: String): JSONObject? =
+        records[surface]?.takeIf { it.present }?.spec
+
     fun namespace(id: String): String = id.substringBefore(':')
 
     // ------------------------------------------------------ update (13.2)

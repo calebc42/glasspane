@@ -92,6 +92,13 @@ class CompanionEngine(
             queue.inFlightSeq = null
         }
         myInFlightSeq = null
+        // SPEC 18.1: on transport loss every outstanding dialog is
+        // dismissed locally; its request dies with the connection.
+        if (dialogs.isNotEmpty()) {
+            val ids = dialogs.keys.toList()
+            dialogs.clear()
+            ids.forEach { dialogListener?.invoke(it, null) }
+        }
     }
 
     /** The queue_seq this engine's connection put in flight, if any. */
@@ -105,7 +112,8 @@ class CompanionEngine(
                 handleRequest(msg.get("id"), msg.getString("method"),
                     msg.optJSONObject("params") ?: JSONObject())
             MessageClass.NOTIFICATION ->
-                handleNotification(msg.getString("method"))
+                handleNotification(msg.getString("method"),
+                    msg.optJSONObject("params") ?: JSONObject())
             MessageClass.RESPONSE -> {
                 val callback = (msg.opt("id") as? Int)?.let(pending::remove)
                 callback?.invoke(msg.optJSONObject("result"),
@@ -280,6 +288,7 @@ class CompanionEngine(
             "surface.update" -> handleSurfaceUpdate(id, params)
             "surface.remove" -> handleSurfaceRemove(id, params)
             "queue.replay" -> handleQueueReplay(id)
+            "dialog.show" -> handleDialogShow(id, params)
             "session.ready" -> {
                 // SPEC 10.3: the {} response serializes ahead of every
                 // READY-only frame; emitting before transitioning does that.
@@ -474,13 +483,80 @@ class CompanionEngine(
         }
     }
 
-    private fun handleNotification(method: String) {
+    private fun handleNotification(method: String, params: JSONObject) {
         // Pre-auth (SPEC 10.1) and unknown/wrong-direction (SPEC 7.3)
         // notifications are logged and dropped; nothing is emitted.
         if (state == SessionState.CONNECTED || state == SessionState.CHALLENGED) return
         val spec = METHOD_REGISTRY[method] ?: return
         if (spec.sender == Sender.COMPANION || spec.isRequest) return
-        // rpc.cancel and friends: nothing cancellable exists at this rung.
+        // SPEC 7.5/18.1: rpc.cancel concludes an outstanding dialog with 1301.
+        if (method == "rpc.cancel") {
+            val cancelId = params.opt("id")
+            val entry = dialogs.entries.find { it.value == cancelId } ?: return
+            dialogs.remove(entry.key)
+            respondError(entry.value, 1301, "Request was cancelled",
+                "request-cancelled")
+            dialogListener?.invoke(entry.key, null)
+        }
+    }
+
+    // ------------------------------------------------------ dialogs (18.1)
+
+    // dialog_id -> the outstanding dialog.show request id (deferred reply).
+    private val dialogs = LinkedHashMap<String, Any>()
+
+    /** Present hook: (dialog_id, spec) to show; (dialog_id, null) to
+     * dismiss. What the dialog contains is the application's; the request
+     * correlation is the endpoint's. */
+    var dialogListener: ((String, JSONObject?) -> Unit)? = null
+
+    private fun handleDialogShow(id: Any, params: JSONObject) {
+        val dialogId = params.opt("dialog_id") as? String
+        val spec = params.optJSONObject("spec")
+        if (dialogId.isNullOrEmpty() || spec == null)
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        // SPEC 18.1: gated on surfaces.dialog.
+        if ("surfaces.dialog" !in granted)
+            return respondError(id, -32601, "Method not found", "method-not-found")
+        // SPEC 18.1: a second outstanding request with the same id is
+        // content-invalid; the first is neither replaced nor aliased.
+        if (dialogs.containsKey(dialogId))
+            return respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("reason", "dialog-duplicate"))
+        // SPEC 18.1: exceeding max_dialogs is 1401; existing dialogs stand.
+        if (dialogs.size >= config.limits.optLong("max_dialogs", 4))
+            return respondError(id, 1401, "Too many dialogs", "overloaded")
+        try {
+            SpecValidator.validateSurfaceSpec(spec)
+        } catch (e: ContentInvalid) {
+            return respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("path", e.path).put("reason", e.reason))
+        }
+        // SPEC 18.1: held outstanding — no reply until a builtin or cancel.
+        dialogs[dialogId] = id
+        dialogListener?.invoke(dialogId, spec)
+    }
+
+    /** SPEC 18.1: dialog.submit builtin completes the request as submitted.
+     * VALUE is the builtin's authored value; FIELDS the captured node
+     * values (the renderer holds dialog-local state, SPEC 18.1). */
+    @Synchronized
+    fun completeDialogSubmit(dialogId: String, value: Any? = null,
+                             fields: JSONObject? = null) {
+        val reqId = dialogs.remove(dialogId) ?: return
+        val result = JSONObject().put("status", "submitted")
+        if (value != null) result.put("value", value)
+        if (fields != null && fields.length() > 0) result.put("fields", fields)
+        respondResult(reqId, result)
+        dialogListener?.invoke(dialogId, null)
+    }
+
+    /** SPEC 18.1: dialog.dismiss builtin or a platform dismissal. */
+    @Synchronized
+    fun completeDialogDismiss(dialogId: String) {
+        val reqId = dialogs.remove(dialogId) ?: return
+        respondResult(reqId, JSONObject().put("status", "dismissed"))
+        dialogListener?.invoke(dialogId, null)
     }
 
     // ----------------------------------------------------------- handshake

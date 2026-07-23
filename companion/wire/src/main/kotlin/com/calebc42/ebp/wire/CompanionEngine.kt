@@ -331,6 +331,7 @@ class CompanionEngine(
             "queue.replay" -> handleQueueReplay(id)
             "dialog.show" -> handleDialogShow(id, params)
             "reminders.set" -> handleRemindersSet(id, params)
+            "triggers.set" -> handleTriggersSet(id, params)
             "capability.invoke" -> handleCapabilityInvoke(id, params)
             "edit.apply" -> handleEditApply(id, params)
             "edit.resync" -> handleEditResync(id, params)
@@ -870,6 +871,50 @@ class CompanionEngine(
         val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
             .put("owner", owner).put("reminder_id", reminderId)
         dispatchDescriptorContextless(onTap, args, callback)
+    }
+
+    // -------------------------------------------- device triggers (SPEC 21)
+
+    /** Trigger registrations, scoped to the pairing identity. In-memory for
+     * now like reminders; durable backing lands with the firing runtime. */
+    val triggers = TriggerStore()
+
+    /** Arm hook: (identity, its complete new registration list) after an
+     * accepted replace. The host arms/cancels platform event sources. */
+    var triggerListener: ((String, List<JSONObject>) -> Unit)? = null
+
+    /**
+     * SPEC 21.1: atomically replace the pairing identity's trigger set. The
+     * whole set is validated first (types, predicates, policy/ttl/dedupe,
+     * on_fire structure, resource limits); on any failure nothing changes and
+     * the reply is 1101 identifying the offending trigger. An accepted set
+     * carries forward every unchanged id's runtime records (SPEC 21.1).
+     */
+    private fun handleTriggersSet(id: Any, params: JSONObject) {
+        if ("triggers" !in granted)
+            return respondError(id, -32601, "Method not found", "method-not-found")
+        val identity = pendingPairingId
+            ?: return respondError(id, 1200, "Not authenticated", "not-authenticated")
+        val caps = TriggerCaps(
+            triggerTypes = stringSet(config.deviceReport, "trigger_types"),
+            stateTypes = stringSet(config.deviceReport, "state_types"),
+            trackableStateTypes = stringSet(config.deviceReport, "trackable_state_types"),
+            triggerCaps = stringSet(config.deviceReport, "trigger_caps"),
+            maxResponses = config.limits.optLong("max_trigger_responses", 16).toInt())
+        val entries = try {
+            TriggerValidator.validateSet(params, caps)
+        } catch (e: ContentInvalid) {
+            return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
+                JSONObject().put("path", e.path).put("reason", e.reason))
+        }
+        val count = triggers.replace(identity, entries)
+        respondResult(id, JSONObject().put("count", count))
+        triggerListener?.invoke(identity, entries)
+    }
+
+    private fun stringSet(o: JSONObject, key: String): Set<String> {
+        val arr = o.optJSONArray(key) ?: return emptySet()
+        return (0 until arr.length()).mapNotNull { arr.opt(it) as? String }.toSet()
     }
 
     // ---------------------------------------- device capabilities (SPEC 20)

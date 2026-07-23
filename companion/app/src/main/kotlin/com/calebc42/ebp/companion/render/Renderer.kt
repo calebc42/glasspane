@@ -95,17 +95,14 @@ fun RenderNode(node: JSONObject, ctx: RenderCtx, modifier: Modifier = Modifier) 
     val type = node.optString("t")
     val m = modifier.universal(node)
     when (type) {
-        "text" -> Text(
-            text = node.optString("text"),
-            style = when (node.optString("style")) {
-                "title" -> MaterialTheme.typography.titleLarge
-                "headline" -> MaterialTheme.typography.headlineMedium
-                "caption" -> MaterialTheme.typography.bodySmall
-                else -> MaterialTheme.typography.bodyLarge
-            },
-            color = resolveColor(node.optString("color").takeIf { it.isNotEmpty() })
-                ?: androidx.compose.ui.graphics.Color.Unspecified,
-            modifier = m)
+        "text" -> RenderText(node, m)
+        "rich_text" -> RenderRichText(node, ctx, m)
+        "icon" -> RenderIcon(node, m)
+        "badge" -> RenderBadge(node, ctx, m)
+        "section_header" -> RenderSectionHeader(node, ctx, m)
+        "empty_state" -> RenderEmptyState(node, ctx, m)
+        "progress" -> RenderProgress(node, m)
+        "date_stamp" -> RenderDateStamp(node, m)
         "row" -> Row(modifier = m) {
             RenderRowChildren(node.optJSONArray("children"), ctx) }
         "column" -> Column(modifier = m) {

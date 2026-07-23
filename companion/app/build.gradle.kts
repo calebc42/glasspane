@@ -28,6 +28,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.material.icons)
     // JVM unit tests (the NodeSupport pin test): the framework isn't present,
     // so tests supply the reference org.json jar exactly as :wire does.
     testImplementation(libs.junit)

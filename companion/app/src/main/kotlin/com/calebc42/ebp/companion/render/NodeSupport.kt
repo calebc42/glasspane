@@ -14,15 +14,20 @@ import org.json.JSONObject
 
 object NodeSupport {
 
+    /** SPEC 17.2 content nodes shared by the app and dialog profiles. */
+    private val CONTENT_NODE_TYPES: Set<String> = sortedSetOf(
+        "rich_text", "icon", "badge", "section_header", "empty_state",
+        "progress", "date_stamp")
+
     /** SPEC 10.2: the app profile MUST include the Core Node Set plus
      * view.switch and companion.settings.open. */
     val APP_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",
-        "text_input", "scaffold", "editor")
+        "text_input", "scaffold", "editor") + CONTENT_NODE_TYPES
 
     val DIALOG_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",
-        "text_input")
+        "text_input") + CONTENT_NODE_TYPES
 
     val NOTIFICATION_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider")

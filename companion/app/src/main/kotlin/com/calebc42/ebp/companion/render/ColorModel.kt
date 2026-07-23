@@ -33,10 +33,14 @@ fun parseHexColor(spec: String): Long? {
  * legible fallback (onSurface), never transparent.
  */
 @Composable
-fun resolveColor(spec: String?): Color? {
+fun resolveColor(spec: String?): Color? =
+    resolveColorIn(MaterialTheme.colorScheme, spec)
+
+/** Non-composable form for span builders that capture the scheme once. */
+fun resolveColorIn(scheme: androidx.compose.material3.ColorScheme,
+                   spec: String?): Color? {
     if (spec.isNullOrEmpty()) return null
     parseHexColor(spec)?.let { return Color(it) } // Color(Long) takes ARGB
-    val scheme = MaterialTheme.colorScheme
     return when (spec) {
         "primary" -> scheme.primary
         "on_primary" -> scheme.onPrimary

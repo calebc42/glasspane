@@ -876,12 +876,83 @@ class CompanionEngine(
     // -------------------------------------------- device triggers (SPEC 21)
 
     /** Trigger registrations, scoped to the pairing identity. In-memory for
-     * now like reminders; durable backing lands with the firing runtime. */
+     * now like reminders; durable backing lands with the device sources. */
     val triggers = TriggerStore()
 
     /** Arm hook: (identity, its complete new registration list) after an
      * accepted replace. The host arms/cancels platform event sources. */
     var triggerListener: ((String, List<JSONObject>) -> Unit)? = null
+
+    /** SPEC 21.3/21.7: current sample for a state type, for gate/edge/window
+     * evaluation. The host supplies live device state; null is unavailable. */
+    var triggerStateProvider: (String) -> JSONObject? = { null }
+
+    /** SPEC 21.2-21.6: the firing runtime — decides admitted occurrences and
+     * drives the ordered pipeline into trigger.fired events. */
+    val triggerRuntime = TriggerRuntime(
+        store = triggers, now = { queue.effectiveNow() },
+        zone = java.time.ZoneId.systemDefault(),
+        stateProvider = { type -> triggerStateProvider(type) },
+        emit = ::emitTriggerFired)
+
+    /** SPEC 21.5: a level-type observation from a device source. */
+    @Synchronized
+    fun observeTriggerSample(type: String, sample: JSONObject) {
+        val id = pendingPairingId ?: return
+        if ("triggers" in granted) triggerRuntime.onSample(id, type, sample)
+    }
+
+    /** SPEC 21.5: an external occurrence (package/sms/boot/time/timezone/manual). */
+    @Synchronized
+    fun observeTriggerEvent(type: String, data: JSONObject) {
+        val id = pendingPairingId ?: return
+        if ("triggers" in granted) triggerRuntime.onExternal(id, type, data)
+    }
+
+    /** SPEC 21.4/21.5: a `manual` trigger fired via the builtin or trigger.fire. */
+    @Synchronized
+    fun fireManualTrigger(triggerId: String, source: String) {
+        val id = pendingPairingId ?: return
+        if ("triggers" !in granted) return
+        val reg = triggers.registration(id, triggerId) ?: return
+        if (reg.entry.getString("type") != "manual") return
+        triggerRuntime.onExternal(id, "manual", JSONObject().put("source", source))
+    }
+
+    // SPEC 21.2: an admitted occurrence becomes a context-less trigger.fired
+    // event, routed by the trigger's own offline policy exactly as a surface
+    // action would be. (on_fire local responses attach in a later atom.)
+    private fun emitTriggerFired(reg: TriggerStore.Registration, data: JSONObject) {
+        val entry = reg.entry
+        val args = JSONObject().put("id", entry.getString("id"))
+            .put("type", entry.getString("type")).put("data", data)
+        val params = JSONObject()
+            .put("event_id", EbpAuth.generateNonce())
+            .put("action", "trigger.fired")
+            .put("occurred_at_ms", queue.effectiveNow()).put("args", args)
+        val policy = entry.getString("policy")
+        if (policy == "queue" || policy == "wake")
+            params.put("queued_at_ms", queue.effectiveNow())
+        if (params.toString().toByteArray(Charsets.UTF_8).size >
+            config.limits.getLong("max_event_bytes")) return
+        when (policy) {
+            "queue", "wake" -> when (queue.admit(params, policy,
+                    entry.optString("dedupe").takeIf { it.isNotEmpty() },
+                    entry.getLong("ttl_s"))) {
+                is AdmitResult.Admitted -> {
+                    if (policy == "wake" && state != SessionState.READY &&
+                        queue.effectiveNow() - lastWakeMs >= 60_000) {
+                        lastWakeMs = queue.effectiveNow(); wakeListener?.invoke()
+                    }
+                    pumpAdvance()
+                }
+                else -> Unit // queue full / storage failed: best-effort, dropped
+            }
+            else -> // SPEC 15.1/21.2: a drop trigger delivers live only in READY.
+                if (state == SessionState.READY)
+                    sendRequest("event.action", params) { _, _ -> }
+        }
+    }
 
     /**
      * SPEC 21.1: atomically replace the pairing identity's trigger set. The
@@ -908,6 +979,9 @@ class CompanionEngine(
                 JSONObject().put("path", e.path).put("reason", e.reason))
         }
         val count = triggers.replace(identity, entries)
+        // SPEC 21.5: silently baseline the new/changed registrations now;
+        // unchanged ids keep the baseline they carried forward (SPEC 21.1).
+        triggerRuntime.armBaselines(identity)
         respondResult(id, JSONObject().put("count", count))
         triggerListener?.invoke(identity, entries)
     }

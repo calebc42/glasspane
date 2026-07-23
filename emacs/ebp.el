@@ -82,6 +82,30 @@ client-side ceiling on how long Emacs keeps the request outstanding."
                          :null-object :null :false-object :false)
     (error (signal 'ebp-parse-error (list text)))))
 
+(defconst ebp-max-json-depth 64
+  "SPEC 4.5: a JSON body nests at most 64 containers.")
+
+(defun ebp--exceeds-depth-p (text)
+  "Non-nil if TEXT nests JSON containers past `ebp-max-json-depth'.
+One linear scan (string contents and escapes skipped) so a hostile body
+is refused before the recursive parser can exhaust the stack (SPEC 4.5)."
+  (let ((depth 0) (in-string nil) (escaped nil)
+        (i 0) (n (length text)) (over nil))
+    (while (and (< i n) (not over))
+      (let ((c (aref text i)))
+        (cond
+         (in-string
+          (cond (escaped (setq escaped nil))
+                ((eq c ?\\) (setq escaped t))
+                ((eq c ?\") (setq in-string nil))))
+         ((eq c ?\") (setq in-string t))
+         ((or (eq c ?{) (eq c ?\[))
+          (setq depth (1+ depth))
+          (when (> depth ebp-max-json-depth) (setq over t)))
+         ((or (eq c ?}) (eq c ?\])) (setq depth (1- depth)))))
+      (setq i (1+ i)))
+    over))
+
 (defun ebp--json-serialize (value)
   "Serialize VALUE (alists/plists per `json-serialize') to a JSON string."
   (json-serialize value :null-object :null :false-object :false))
@@ -187,20 +211,24 @@ Return the declared body length or signal `ebp-frame-close' (SPEC 6.2)."
   "Decode one complete frame body BYTES into a message object.
 SPEC 6.2 + 4.1: strict UTF-8, valid JSON, single top-level object,
 no duplicate member names."
-  (let* ((text (ebp--decode-utf-8 bytes))
-         (value (ebp--json-parse text)))
-    (unless (and (listp value) (or (null value) (consp (car value))))
-      ;; Top-level arrays (batches) and scalars are prohibited.
-      (signal 'ebp-invalid-request (list "top-level value is not an object")))
-    ;; `nil' parses ambiguously ({} and [] both -> nil); {} is a valid
-    ;; (if useless) message object, [] is a prohibited batch.  Disambiguate
-    ;; on the first non-whitespace character.
-    (when (and (null value)
-               (eq (aref (string-trim-left text) 0) ?\[))
-      (signal 'ebp-invalid-request (list "batch arrays are prohibited")))
-    (when (ebp--duplicate-members-p text)
-      (signal 'ebp-invalid-request (list "duplicate member names")))
-    value))
+  (let ((text (ebp--decode-utf-8 bytes)))
+    ;; SPEC 4.5/23.5: refuse an over-deep body before the recursive parser
+    ;; can exhaust the stack — enforcement precedes expensive decoding.
+    (when (ebp--exceeds-depth-p text)
+      (signal 'ebp-parse-error (list "nesting depth exceeds 64")))
+    (let ((value (ebp--json-parse text)))
+      (unless (and (listp value) (or (null value) (consp (car value))))
+        ;; Top-level arrays (batches) and scalars are prohibited.
+        (signal 'ebp-invalid-request (list "top-level value is not an object")))
+      ;; `nil' parses ambiguously ({} and [] both -> nil); {} is a valid
+      ;; (if useless) message object, [] is a prohibited batch.  Disambiguate
+      ;; on the first non-whitespace character.
+      (when (and (null value)
+                 (eq (aref (string-trim-left text) 0) ?\[))
+        (signal 'ebp-invalid-request (list "batch arrays are prohibited")))
+      (when (ebp--duplicate-members-p text)
+        (signal 'ebp-invalid-request (list "duplicate member names")))
+      value)))
 
 (defun ebp-decoder-feed (decoder bytes)
   "Feed unibyte BYTES into DECODER; return the list of complete messages.

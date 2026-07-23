@@ -162,6 +162,18 @@ character count, and our encoder reproduces the octet count exactly."
   (let ((frame (ebp-encode-frame "{\"a\":\"é\"}")))
     (should (string-prefix-p "Content-Length: 10\r\n\r\n" frame))))
 
+(ert-deftest ebp-test-over-deep-body-is-parse-error ()
+  "SPEC 4.5: a body nesting past 64 containers is a parse error, refused
+before the recursive parser can run."
+  (let ((deep (concat (apply #'concat (make-list 65 "{\"a\":"))
+                      "1" (make-string 65 ?}))))
+    (should-error (ebp-decoder-feed (ebp-make-decoder) (ebp-encode-frame deep))
+                  :type 'ebp-parse-error))
+  ;; Exactly 64 containers is within the limit and decodes.
+  (let ((ok (concat (apply #'concat (make-list 64 "{\"a\":"))
+                    "1" (make-string 64 ?}))))
+    (should (ebp-decoder-feed (ebp-make-decoder) (ebp-encode-frame ok)))))
+
 ;;;; Envelope (SPEC 7)
 
 (ert-deftest ebp-test-envelope-classification ()

@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets
 object WireLimits {
     const val MAX_HEADER_OCTETS = 8192
     const val MAX_BODY_OCTETS = 4_194_304
+    const val MAX_JSON_DEPTH = 64
     const val MAX_NODES_PER_SNAPSHOT = 10_000
     const val MAX_CHILDREN_PER_NODE = 10_000
     const val MAX_IDENTIFIER_OCTETS = 128
@@ -131,6 +132,9 @@ class FrameDecoder {
         } catch (_: CharacterCodingException) {
             throw WireParseError("invalid UTF-8")
         }
+        // SPEC 4.5/23.5: reject an over-deep body BEFORE the recursive parser
+        // can exhaust the stack — enforcement precedes expensive decoding.
+        if (exceedsDepthLimit(text)) throw WireParseError("nesting depth exceeds 64")
         val tokener = JSONTokener(text)
         val value = try {
             tokener.nextValue()
@@ -147,6 +151,34 @@ class FrameDecoder {
             throw InvalidRequest("top-level value is not a single message object")
         if (hasDuplicateMembers(text)) throw InvalidRequest("duplicate member names")
         return value
+    }
+
+    /**
+     * SPEC 4.5: a JSON body nests at most 64 containers. One linear scan
+     * (skipping string contents and escapes) so the check runs in constant
+     * stack — the recursive parser would otherwise overflow on a hostile
+     * body. Returns true once nesting passes the limit.
+     */
+    private fun exceedsDepthLimit(text: String): Boolean {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (c in text) {
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    c == '\\' -> escaped = true
+                    c == '"' -> inString = false
+                }
+                continue
+            }
+            when (c) {
+                '"' -> inString = true
+                '{', '[' -> if (++depth > WireLimits.MAX_JSON_DEPTH) return true
+                '}', ']' -> depth--
+            }
+        }
+        return false
     }
 }
 

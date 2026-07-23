@@ -413,6 +413,24 @@ class CompanionEngineTest {
     }
 
     @Test
+    fun overDeepBodyIsRejectedBeforeParsing() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello())); engine.feed(frame(auth()))
+        // SPEC 4.5: 65 nested containers exceed the limit -> Parse Error with
+        // id:null, and no stack overflow because the check precedes the parse.
+        engine.feed(encodeFrame("{\"a\":".repeat(65) + "1" + "}".repeat(65)))
+        assertEquals(JSONObject.NULL, out.last().get("id"))
+        assertEquals(-32700, out.last().getJSONObject("error").getInt("code"))
+        assertTrue(engine.state != SessionState.CLOSED)
+        // Exactly 64 is within the limit: it parses (and, lacking a jsonrpc
+        // marker, is dropped) — no Parse Error is emitted.
+        val base = out.size
+        engine.feed(encodeFrame("{\"a\":".repeat(64) + "1" + "}".repeat(64)))
+        assertTrue(out.drop(base).none { it.optJSONObject("error")?.optInt("code") == -32700 })
+    }
+
+    @Test
     fun welcomeReservationCountsWorstCaseSurfaces() {
         // SPEC 4.5: a config whose max_surface_ids reservation alone overflows
         // the frame budget MUST be rejected — surfaces used to be counted as

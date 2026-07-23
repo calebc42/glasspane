@@ -55,6 +55,10 @@ object ToolbarEdits {
                     }
                     token == "selection" -> sb.append(selText)
                     token == "cursor" && cursor < 0 -> cursor = sb.length
+                    // A repeat ${cursor} is a KNOWN position token — consume it
+                    // (only the first records the caret); it MUST NOT leak as
+                    // literal "${cursor}" text.
+                    token == "cursor" -> {}
                     token == "date" -> sb.append(date)
                     token == "time" -> sb.append(time)
                     token.startsWith("input:") && input != null -> sb.append(input)
@@ -128,11 +132,10 @@ object ToolbarEdits {
         val text = edit.text
         val cursor = edit.selStart.coerceIn(0, text.length)
         val lineStart = text.lastIndexOf('\n', cursor - 1) + 1
-        val want = prefix.trimStart()
-        if (want.isNotEmpty()) {
-            val here = text.substring(lineStart, minOf(lineStart + prefix.length + 10, text.length))
-            if (here.trimStart().startsWith(want)) return edit // already present
-        }
+        // SPEC 17.7: no-op when the line already starts with the EXACT literal
+        // inserted prefix (a whitespace-trimmed match is not the exact prefix).
+        if (prefix.isNotEmpty() && text.regionMatches(lineStart, prefix, 0, prefix.length))
+            return edit
         val newText = text.substring(0, lineStart) + prefix + text.substring(lineStart)
         return ToolbarEdit.caret(newText, cursor + prefix.length)
     }

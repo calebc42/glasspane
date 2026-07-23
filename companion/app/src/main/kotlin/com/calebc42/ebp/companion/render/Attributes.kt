@@ -142,7 +142,10 @@ internal fun Modifier.universal(node: JSONObject): Modifier {
         safeAspect(node.optDouble("aspect_ratio"))?.let { m = m.aspectRatio(it) }
     // Visual ops in SPEC order: corner shape, clipping, background, border.
     val shape = cornerShape(node)
-    if (node.optBoolean("clip") && shape != RectangleShape) m = m.clip(shape)
+    // SPEC 16.5: `clip` applies overflow clipping to the node's shape — a
+    // rectangular shape (no corner) still clips the bounding box, so this MUST
+    // NOT be gated on a non-rectangular corner.
+    if (node.optBoolean("clip")) m = m.clip(shape)
     resolveColor(node.optString("bg").takeIf { it.isNotEmpty() })?.let {
         m = m.background(it, shape)
     }

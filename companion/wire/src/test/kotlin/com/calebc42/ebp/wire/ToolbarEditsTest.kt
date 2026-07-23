@@ -53,6 +53,26 @@ class ToolbarEditsTest {
     }
 
     @Test
+    fun secondCursorTokenIsConsumedNotLeakedLiterally() {
+        // Only the first ${cursor} records the caret; a repeat is a KNOWN token
+        // and MUST be consumed, not emitted as literal "${cursor}" text.
+        val out = ToolbarEdits.applySnippet(caret("", 0), "[\${cursor}]\${cursor}", "cursor")
+        assertEquals("[]", out.text)
+        assertEquals(1, out.selStart) // the first cursor, between the brackets
+    }
+
+    @Test
+    fun lineStartNoOpIsTheExactLiteralPrefixNotATrimmedMatch() {
+        // "* head" already starts with the exact "* " -> no-op.
+        assertEquals("* head",
+            ToolbarEdits.applySnippet(caret("* head", 2), "* ", "line-start").text)
+        // "  * head" does NOT literally start with "* " (it starts with spaces),
+        // so the prefix IS inserted — a trimmed match would have wrongly no-op'd.
+        assertEquals("* " + "  * head",
+            ToolbarEdits.applySnippet(caret("  * head", 4), "* ", "line-start").text)
+    }
+
+    @Test
     fun unknownTokenStaysLiteral() {
         val out = ToolbarEdits.applySnippet(caret("x", 1), "\${bogus}", "cursor")
         assertEquals("x\${bogus}", out.text)

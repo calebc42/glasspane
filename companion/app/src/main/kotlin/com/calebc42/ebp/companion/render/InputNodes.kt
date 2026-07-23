@@ -158,11 +158,15 @@ internal fun RenderMenu(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             if (items != null) for (i in 0 until items.length()) {
                 val item = items.optJSONObject(i) ?: continue
                 val itemIcon = item.optString("icon")
+                // SPEC 17.4: a disabled MenuItem shows the disabled affordance
+                // and MUST NOT dispatch.
+                val itemEnabled = item.optBoolean("enabled", true)
                 DropdownMenuItem(
                     text = { Text(item.optString("label")) },
+                    enabled = itemEnabled,
                     onClick = {
                         open = false
-                        item.optJSONObject("on_tap")?.let { onButton(it, ctx) }
+                        if (itemEnabled) item.optJSONObject("on_tap")?.let { onButton(it, ctx) }
                     },
                     leadingIcon = if (itemIcon.isNotEmpty()) {
                         { Icon(IconMap.get(itemIcon), null, Modifier.size(18.dp)) }

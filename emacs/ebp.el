@@ -53,6 +53,14 @@ The protocol holds a dialog open with no timeout; this is only the
 client-side ceiling on how long Emacs keeps the request outstanding."
   :type 'number)
 
+(defcustom ebp-log-events nil
+  "When non-nil, log full JSON-RPC message bodies to the connection's
+`*ebp events*' buffer.  Off by default (SPEC 23.3): message bodies carry
+authentication proofs, clipboard text, SMS/call content, and private
+editor documents that MUST NOT be captured in the clear.  Enable only for
+local development."
+  :type 'boolean)
+
 ;;;; Errors
 
 ;; SPEC 6.2: header-section failures force connection closure.
@@ -1266,6 +1274,10 @@ stays with the caller for now."
          (conn (make-instance
                 'ebp--connection
                 :name "ebp" :process proc
+                ;; SPEC 23.3: do not capture message bodies in the clear by
+                ;; default; :size 0 disables the events buffer (opt in for dev).
+                :events-buffer-config
+                (if ebp-log-events '(:size nil :format full) '(:size 0))
                 :request-dispatcher
                 (lambda (c m p) (ebp-client--request-dispatcher client c m p))
                 :notification-dispatcher

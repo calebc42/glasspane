@@ -11,6 +11,7 @@ import com.calebc42.ebp.wire.DurableQueue
 import com.calebc42.ebp.wire.FileQueueStore
 import com.calebc42.ebp.wire.FileReminderBacking
 import com.calebc42.ebp.wire.FileSurfaceBacking
+import com.calebc42.ebp.wire.LiveSession
 import com.calebc42.ebp.wire.ReminderStore
 import com.calebc42.ebp.wire.SurfaceStore
 import java.io.File
@@ -20,6 +21,13 @@ object CompanionStores {
     @Volatile private var queueInstance: DurableQueue? = null
     @Volatile private var surfacesInstance: SurfaceStore? = null
     @Volatile private var remindersInstance: ReminderStore? = null
+
+    /** The current live engine, or null when disconnected. A cold receiver
+     * (reminder tap/alarm) routes queue/wake events durably regardless and a
+     * drop live only through this slot (SPEC 15.1). Newest-wins (SPEC 5.2). */
+    @Volatile var liveSession: LiveSession? = null
+
+    const val MAX_EVENT_BYTES = 262_144L
 
     /** SPEC 15: the durable queue survives process and device restarts. */
     fun queue(ctx: Context): DurableQueue =

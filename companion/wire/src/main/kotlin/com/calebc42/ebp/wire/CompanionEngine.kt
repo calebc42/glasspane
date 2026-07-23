@@ -49,7 +49,7 @@ class CompanionEngine(
      * receipts outlive a session exactly like the queue and surfaces. */
     val reminders: ReminderStore = ReminderStore(),
     private val sink: (ByteArray) -> Unit,
-) {
+) : LiveSession {
     var state: SessionState = SessionState.CONNECTED
         private set
     var closeReason: String? = null
@@ -744,58 +744,41 @@ class CompanionEngine(
      * wake admit to the durable queue exactly as a surface action would.
      */
     private fun dispatchDescriptorContextless(descriptor: JSONObject, args: JSONObject,
-                                              callback: ((String?, JSONObject?) -> Unit)? = null) {
-        val params = JSONObject()
-            .put("event_id", EbpAuth.generateNonce())
-            .put("action", descriptor.getString("action"))
-            .put("occurred_at_ms", queue.effectiveNow())
-        if (args.length() > 0) params.put("args", args)
-        val policy = descriptor.optString("when_offline", OFFLINE_DEFAULT)
-        if (policy == "queue" || policy == "wake")
-            params.put("queued_at_ms", queue.effectiveNow())
-        if (params.toString().toByteArray(Charsets.UTF_8).size >
-            config.limits.getLong("max_event_bytes")) {
-            callback?.invoke(null, JSONObject().put("code", 1201)
-                .put("message", "Event exceeds max_event_bytes")
-                .put("data", JSONObject().put("kind", "content-invalid")
-                    .put("reason", "event-too-large")))
-            return
+                                              callback: ((String?, JSONObject?) -> Unit)? = null) =
+        dispatchContextless(queue, config.limits.getLong("max_event_bytes"),
+            descriptor, args, this, callback)
+
+    // ------- LiveSession: the connection-bound half of a context-less event.
+    // Held as a newest-wins slot by cold senders (reminder taps, the firing
+    // service); invoked never while the caller holds another module's monitor.
+
+    /** SPEC 15.1: a drop event.action delivers live only while READY. */
+    @Synchronized
+    override fun deliverLiveDrop(params: JSONObject,
+                                 callback: ((String?, JSONObject?) -> Unit)?) {
+        if (state != SessionState.READY) return
+        sendRequest("event.action", params) { result, error ->
+            callback?.invoke(result?.optString("status"), error)
         }
-        when (policy) {
-            "queue", "wake" ->
-                when (queue.admit(params, policy,
-                        descriptor.optString("dedupe").takeIf { it.isNotEmpty() },
-                        descriptor.getLong("ttl_s"))) {
-                    is AdmitResult.Admitted -> {
-                        if (policy == "wake" && state != SessionState.READY &&
-                            queue.effectiveNow() - lastWakeMs >= 60_000) {
-                            lastWakeMs = queue.effectiveNow()
-                            wakeListener?.invoke()
-                        }
-                        callback?.invoke("queued", null)
-                        pumpAdvance()
-                    }
-                    AdmitResult.QueueFull -> callback?.invoke(null, JSONObject()
-                        .put("code", 1601).put("message", "Queue full")
-                        .put("data", JSONObject().put("kind", "queue-full")))
-                    AdmitResult.StorageFailed -> callback?.invoke(null, JSONObject()
-                        .put("code", -32603).put("message", "Storage failed")
-                        .put("data", JSONObject().put("kind", "internal-error")))
-                }
-            else -> {
-                if (state != SessionState.READY) return
-                sendRequest("event.action", params) { result, error ->
-                    callback?.invoke(result?.optString("status"), error)
-                }
-            }
+    }
+
+    /** SPEC 15.3: after a durable admit, wake (for `wake`) and advance the pump. */
+    @Synchronized
+    override fun onDurableAdmitted(policy: String) {
+        if (policy == "wake" && state != SessionState.READY &&
+            queue.effectiveNow() - lastWakeMs >= 60_000) {
+            lastWakeMs = queue.effectiveNow()
+            wakeListener?.invoke()
         }
+        pumpAdvance()
     }
 
     // ------------------------------------------------------ reminders (18.6)
 
-    /** Schedule hook: (owner, its complete new reminder set) after an
-     * accepted replace. The host arms/cancels platform alarms. */
-    var reminderListener: ((String, JSONArray) -> Unit)? = null
+    /** Schedule hook after an accepted replace: (owner, complete NEW set,
+     * complete PRIOR set) so the host can cancel removed alarms and arm only
+     * new/changed tuples (SPEC 18.6). */
+    var reminderListener: ((String, JSONArray, JSONArray) -> Unit)? = null
 
     private val identifier = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]*")
     private val reminderMembers = setOf("id", "title", "body", "at_ms", "on_tap")
@@ -828,13 +811,16 @@ class CompanionEngine(
                 JSONObject().put("reason", "reminder-limit"))
         // SPEC 18.6: the accepted set commits durably before it is claimed; a
         // storage failure leaves the prior set in force and answers an error.
+        // Capture the prior set BEFORE the replace so the host can cancel
+        // alarms for removed tuples.
+        val prior = reminders.reminders(owner)
         val count = try {
             reminders.replace(owner, parsed)
         } catch (e: Exception) {
             return respondError(id, -32603, "Storage failed", "internal-error")
         }
         respondResult(id, JSONObject().put("count", count))
-        reminderListener?.invoke(owner, JSONArray(parsed))
+        reminderListener?.invoke(owner, JSONArray(parsed), JSONArray(prior))
     }
 
     private fun validateReminder(r: JSONObject, seen: MutableSet<String>) {
@@ -877,10 +863,8 @@ class CompanionEngine(
     @Synchronized
     fun dispatchReminderTap(owner: String, reminderId: String,
                             callback: ((String?, JSONObject?) -> Unit)? = null) {
-        val onTap = reminders.reminder(owner, reminderId)?.optJSONObject("on_tap") ?: return
-        val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
-            .put("owner", owner).put("reminder_id", reminderId)
-        dispatchDescriptorContextless(onTap, args, callback)
+        routeReminderTap(reminders, queue, config.limits.getLong("max_event_bytes"),
+            owner, reminderId, this, callback)
     }
 
     // -------------------------------------------- device triggers (SPEC 21)

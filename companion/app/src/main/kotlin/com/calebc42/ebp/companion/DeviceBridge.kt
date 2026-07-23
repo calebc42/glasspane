@@ -194,6 +194,9 @@ class DeviceBridge(
             }
         }
         this.engine = engine
+        // SPEC 5.2 newest-wins: cold receivers (reminder tap/alarm) reach the
+        // current live session through this slot; a drop with no session is lost.
+        CompanionStores.liveSession = engine
         engine.surfaceListener = { surface ->
             when {
                 // SPEC 18.5: a notification:* surface is a system notification;
@@ -206,9 +209,10 @@ class DeviceBridge(
                 surface.startsWith("app:") -> onSurfaceChanged(store.spec(surface))
             }
         }
-        // SPEC 18.6: an accepted reminder set arms exact alarms.
-        engine.reminderListener = { owner, reminders ->
-            Notifications.scheduleReminders(appContext, owner, reminders)
+        // SPEC 18.6: reconcile platform alarms with the accepted set (cancel
+        // removed, arm new/changed non-fired).
+        engine.reminderListener = { owner, newSet, priorSet ->
+            Notifications.scheduleReminders(appContext, owner, newSet, priorSet)
         }
         engine.dialogListener = { id, spec -> onDialogChanged(id, spec) }
         // SPEC 18.1: an oversized submit keeps the dialog up; tell the user to
@@ -234,6 +238,11 @@ class DeviceBridge(
             // SPEC 15.3: the engine releases its in-flight marker so the
             // next session's replay is never wedged (review P0).
             engine.close("transport closed")
+            // Compare-and-clear: only if a newer connection has not already
+            // superseded this one in the slot (SPEC 5.2 newest-wins).
+            synchronized(CompanionStores) {
+                if (CompanionStores.liveSession === engine) CompanionStores.liveSession = null
+            }
             socket.runCatching { close() }
         }
     }

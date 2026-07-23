@@ -42,10 +42,13 @@ class DurableQueue(
     }
 
     /** SPEC 15.2: the effective wall clock never runs backwards. */
+    @Synchronized
     fun effectiveNow(): Long = maxOf(clock(), highWater)
 
+    @Synchronized
     fun count(): Int = records.size
 
+    @Synchronized
     fun head(): JSONObject? = records.minByOrNull { it.getLong("queue_seq") }
 
     private fun persist() =
@@ -57,6 +60,7 @@ class DurableQueue(
      * event.action params (delivery payload, event_id, captured fields,
      * occurred_at_ms, queued_at_ms).
      */
+    @Synchronized
     fun admit(event: JSONObject, policy: String, dedupe: String?,
               ttlSeconds: Long): AdmitResult {
         val now = effectiveNow()
@@ -98,6 +102,7 @@ class DurableQueue(
 
     /** SPEC 15.2: delete expired records before delivery; rollback-proof
      * via the durable high-water mark. Returns the number deleted. */
+    @Synchronized
     fun sweepExpired(): Int {
         val now = effectiveNow()
         val (expired, kept) = records.partition {
@@ -118,16 +123,19 @@ class DurableQueue(
     }
 
     /** Consume the accumulated expiry count for a replay summary. */
+    @Synchronized
     fun takeExpiredCount(): Int = pendingExpired.also { pendingExpired = 0 }
 
     /** The next queue_seq to be assigned — the session-barrier boundary:
      * records at or above a snapshot of this value are newly generated
      * relative to that snapshot (SPEC 10.3/15.3). */
+    @Synchronized
     fun boundarySeq(): Long = nextSeq
 
     /** SPEC 15.3: delete only after a permanent result. A failed persist
      * leaves the record durable; redelivery is answered `duplicate' by
      * the Emacs receipt store (14.4), so at-least-once holds either way. */
+    @Synchronized
     fun deleteRecord(seq: Long) {
         if (records.removeAll { it.getLong("queue_seq") == seq })
             runCatching { persist() }

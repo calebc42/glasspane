@@ -99,6 +99,62 @@ class ReminderBackingTest {
         assertTrue(store.markFired("owner", "r1"))
     }
 
+    // ------------------------------------------------- tap routing (cold path)
+
+    private fun withOnTap(r: JSONObject, action: String, offline: String? = null) = r
+        .put("on_tap", JSONObject().put("action", action)
+            .also { if (offline != null) it.put("when_offline", offline).put("ttl_s", 3600) }
+            .put("args", JSONObject().put("k", "v")))
+
+    private class RecordingSession : LiveSession {
+        var dropped: JSONObject? = null
+        var admittedPolicy: String? = null
+        override fun deliverLiveDrop(params: JSONObject, callback: ((String?, JSONObject?) -> Unit)?) {
+            dropped = params
+        }
+        override fun onDurableAdmitted(policy: String) { admittedPolicy = policy }
+    }
+
+    @Test
+    fun tapQueuePolicyAdmitsDurablyWithNoSession() {
+        val store = ReminderStore()
+        store.replace("org", listOf(withOnTap(reminder("r1", 1000), "reminder.done", "queue")))
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        // No live session: a queue-policy tap still lands durably (SPEC 18.6/15).
+        routeReminderTap(store, queue, 262_144, "org", "r1", live = null)
+        assertEquals(1, queue.count())
+        val ev = queue.head()!!.getJSONObject("event")
+        assertEquals("reminder.done", ev.getString("action"))
+        assertEquals("org", ev.getJSONObject("args").getString("owner"))     // injected
+        assertEquals("r1", ev.getJSONObject("args").getString("reminder_id")) // injected
+        assertEquals("v", ev.getJSONObject("args").getString("k"))           // authored
+    }
+
+    @Test
+    fun tapDropIsLostWithoutSessionAndDeliversWithOne() {
+        val store = ReminderStore()
+        store.replace("org", listOf(withOnTap(reminder("r1", 1000), "reminder.done"))) // default drop
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        routeReminderTap(store, queue, 262_144, "org", "r1", live = null)
+        assertEquals(0, queue.count()) // drop + no session = lost, nothing durable
+        val live = RecordingSession()
+        routeReminderTap(store, queue, 262_144, "org", "r1", live = live)
+        assertEquals("reminder.done", live.dropped!!.getString("action"))
+        assertEquals("r1", live.dropped!!.getJSONObject("args").getString("reminder_id"))
+    }
+
+    @Test
+    fun tapWithNoOnTapDispatchesNothing() {
+        val store = ReminderStore()
+        store.replace("org", listOf(reminder("r1", 1000))) // no on_tap
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        val live = RecordingSession()
+        routeReminderTap(store, queue, 262_144, "org", "r1", live = live)
+        assertEquals(0, queue.count())
+        assertEquals(null, live.dropped)
+        assertEquals(null, live.admittedPolicy)
+    }
+
     @Test
     fun engineAcceptsInjectedStoreAndAnswersStorageFailure() {
         // The engine takes the store as a constructor param (between queue and

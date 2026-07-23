@@ -119,6 +119,16 @@ fun RenderDialogRoot(dialogId: String, spec: JSONObject, bridge: DeviceBridge) {
 @Composable
 fun RenderNode(node: JSONObject, ctx: RenderCtx, modifier: Modifier = Modifier) {
     val type = node.optString("t")
+    // SPEC 17.1/16.2: a type not advertised for THIS target (a dialog advertises
+    // fewer than the app profile) is unsupported — degrade to its children as a
+    // neutral column, never render its semantics or dispatch its actions.
+    val advertised = if (ctx.inDialog) NodeSupport.DIALOG_NODE_TYPES else NodeSupport.APP_NODE_TYPES
+    if (type !in advertised) {
+        node.optJSONArray("children")?.let { kids ->
+            Column(modifier) { RenderChildren(kids, ctx) }
+        }
+        return
+    }
     val m = modifier.universal(node)
     when (type) {
         "text" -> RenderText(node, m)

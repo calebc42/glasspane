@@ -8,6 +8,14 @@ package com.calebc42.ebp.wire
 
 import org.json.JSONObject
 
+/** SPEC 17.1: the advertised node_types for a target from surface_profiles, or
+ * null when the profile is absent (allow all — the reference always advertises
+ * them; null keeps unit tests and the golden corpus ungated). */
+fun nodeTypesFromProfiles(profiles: JSONObject, target: String): Set<String>? {
+    val arr = profiles.optJSONObject(target)?.optJSONArray("node_types") ?: return null
+    return buildSet { for (i in 0 until arr.length()) arr.optString(i)?.let(::add) }
+}
+
 /**
  * The live-session duties a context-less event needs only when a connection
  * exists: deliver a `drop` event live, and wake + advance the pump after a

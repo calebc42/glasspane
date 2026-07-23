@@ -41,7 +41,9 @@ class CompanionEngine(
         config.limits.getLong("max_surfaces"), config.limits.getLong("max_surface_ids"),
         config.limits.optLong("max_capture_fields", 64),
         config.limits.optLong("max_chart_points", Long.MAX_VALUE),
-        config.limits.optLong("max_canvas_ops", Long.MAX_VALUE)),
+        config.limits.optLong("max_canvas_ops", Long.MAX_VALUE),
+        nodeTypesFromProfiles(config.surfaceProfiles, "app"),
+        nodeTypesFromProfiles(config.surfaceProfiles, "notification")),
     /** Shared across connections AND restarts: the SPEC 15 durable queue. */
     val queue: DurableQueue = DurableQueue(
         MemoryQueueStore(),
@@ -1412,7 +1414,11 @@ class CompanionEngine(
             SpecValidator.validateSurfaceSpec(
                 spec, maxCaptureFields = config.limits.optLong("max_capture_fields", 64),
                 maxChartPoints = config.limits.optLong("max_chart_points", Long.MAX_VALUE),
-                maxCanvasOps = config.limits.optLong("max_canvas_ops", Long.MAX_VALUE))
+                maxCanvasOps = config.limits.optLong("max_canvas_ops", Long.MAX_VALUE),
+                // SPEC 17.1: a dialog spec is gated to the dialog profile's
+                // advertised node_types — an app-only type (chart/editor/
+                // scaffold) degrades instead of rendering + dispatching here.
+                advertisedTypes = nodeTypesFromProfiles(config.surfaceProfiles, "dialog"))
         } catch (e: ContentInvalid) {
             return respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("path", e.path).put("reason", e.reason))

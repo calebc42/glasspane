@@ -19,6 +19,10 @@ class SurfaceStore(
     // SPEC 4.5: chart/canvas count caps enforced at validation when advertised.
     private val maxChartPoints: Long = Long.MAX_VALUE,
     private val maxCanvasOps: Long = Long.MAX_VALUE,
+    // SPEC 17.1: the app / notification profiles' advertised node_types, so an
+    // unadvertised-but-known type degrades. null = allow all (in-memory tests).
+    private val appNodeTypes: Set<String>? = null,
+    private val notificationNodeTypes: Set<String>? = null,
     /** SPEC 13.1/15.1: durable surface histories + input_state. In-memory
      * by default; DeviceBridge wires a file so both survive process death. */
     private val backing: SurfaceBacking = MemorySurfaceBacking(),
@@ -45,7 +49,8 @@ class SurfaceStore(
                 runCatching {
                     SpecValidator.validateSurfaceSpec(r.spec,
                         maxCaptureFields = maxCaptureFields,
-                        maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps)
+                        maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
+                        advertisedTypes = appNodeTypes)
                 }.getOrNull() ?: continue
             else emptyMap()
             records[r.surface] = Record(r.revision, r.present, r.spec, r.currentView, statefuls)
@@ -126,13 +131,15 @@ class SurfaceStore(
         val isMultiView: Boolean
         if (namespace(surface) == "notification") {
             // SPEC 13.4/18.5: {body: Node, meta?}, no views, no drafts.
-            SpecValidator.validateNotificationSpec(spec, maxCaptureFields = maxCaptureFields)
+            SpecValidator.validateNotificationSpec(spec, maxCaptureFields = maxCaptureFields,
+                advertisedTypes = notificationNodeTypes)
             if (currentView != null)
                 throw ContentInvalid("current_view", "not valid for a notification surface")
             if (resetIds != null && resetIds.length() > 0)
                 throw ContentInvalid("reset_input_ids", "a notification surface has no drafts")
             staleSpec?.let {
-                SpecValidator.validateNotificationSpec(it, "stale_spec", maxCaptureFields)
+                SpecValidator.validateNotificationSpec(it, "stale_spec", maxCaptureFields,
+                    advertisedTypes = notificationNodeTypes)
             }
             statefuls = emptyMap()
             reset = emptySet()
@@ -140,7 +147,8 @@ class SurfaceStore(
         } else {
             statefuls = SpecValidator.validateSurfaceSpec(
                 spec, maxCaptureFields = maxCaptureFields,
-                maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps)
+                maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
+                advertisedTypes = appNodeTypes)
             reset = resetIds?.let { SpecValidator.validateResetIds(it, statefuls) }
                 ?: emptySet()
             staleSpec?.let { SpecValidator.validateStaleSpec(it, spec.has("views")) }

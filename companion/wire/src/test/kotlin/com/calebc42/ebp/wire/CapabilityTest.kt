@@ -56,7 +56,7 @@ class CapabilityTest {
             pairings = mapOf(katPid to katToken),
             supportedCapabilities = setOf("capabilities"),
             surfaceProfiles = JSONObject().put("app", JSONObject()
-                .put("node_types", JSONArray()).put("builtins", JSONArray())
+                .put("node_types", JSONArray(NODE_SCHEMA.keys.toList())).put("builtins", JSONArray())
                 .put("features", JSONArray())),
             limits = limits(), deviceReport = deviceReport,
             capabilityHandler = handler, nonceSource = { katSn })) { bytes ->

@@ -145,7 +145,7 @@ class ActionEventTest {
             pairings = mapOf(katPid to katToken),
             supportedCapabilities = emptySet(),
             surfaceProfiles = JSONObject().put("app", JSONObject()
-                .put("node_types", JSONArray()).put("builtins", JSONArray())
+                .put("node_types", JSONArray(NODE_SCHEMA.keys.toList())).put("builtins", JSONArray())
                 .put("features", JSONArray())),
             limits = limits())) { bytes ->
             FrameDecoder().let { d -> d.feed(bytes).forEach(out::add); d.finish() }

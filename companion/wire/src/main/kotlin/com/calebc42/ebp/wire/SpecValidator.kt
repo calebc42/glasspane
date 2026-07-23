@@ -69,6 +69,10 @@ object SpecValidator {
         val maxCaptureFields: Long,
         val maxChartPoints: Long,
         val maxCanvasOps: Long,
+        // SPEC 17.1: a node type absent from the TARGET profile's advertised
+        // node_types is treated as unsupported (§16.2 degrade), even though it
+        // is a known contract type. null = allow all (unit tests / golden corpus).
+        val advertisedTypes: Set<String>?,
     ) {
         val ids = mutableSetOf<String>()
         val statefuls = mutableMapOf<String, JSONObject>()
@@ -85,9 +89,10 @@ object SpecValidator {
         maxCaptureFields: Long = 64,
         maxChartPoints: Long = Long.MAX_VALUE,
         maxCanvasOps: Long = Long.MAX_VALUE,
+        advertisedTypes: Set<String>? = null,
     ): Map<String, JSONObject> {
         if (spec !is JSONObject) throw ContentInvalid(path, "spec must be an object")
-        val ctx = Ctx(maxCaptureFields, maxChartPoints, maxCanvasOps)
+        val ctx = Ctx(maxCaptureFields, maxChartPoints, maxCanvasOps, advertisedTypes)
         if (spec.has("views")) {
             val views = spec.optJSONObject("views")
                 ?: throw ContentInvalid("$path.views", "views must be an object")
@@ -160,7 +165,8 @@ object SpecValidator {
      * so nothing is returned.
      */
     fun validateNotificationSpec(spec: Any?, path: String = "spec",
-                                 maxCaptureFields: Long = 64) {
+                                 maxCaptureFields: Long = 64,
+                                 advertisedTypes: Set<String>? = null) {
         if (spec !is JSONObject) throw ContentInvalid(path, "must be an object")
         if (spec.has("views")) throw ContentInvalid(path, "multi-view prohibited")
         for (k in spec.keySet()) if (k != "body" && k != "meta")
@@ -168,7 +174,9 @@ object SpecValidator {
         val body = spec.opt("body")
         if (body !is JSONObject || body.opt("t") !is String)
             throw ContentInvalid("$path.body", "must be a node")
-        validateSurfaceSpec(body, "$path.body", maxCaptureFields)
+        // SPEC 17.1: gate the body to the notification profile's node_types.
+        validateSurfaceSpec(body, "$path.body", maxCaptureFields,
+            advertisedTypes = advertisedTypes)
         if (spec.has("meta")) {
             val meta = spec.opt("meta") as? JSONObject
                 ?: throw ContentInvalid("$path.meta", "must be an object")
@@ -322,7 +330,12 @@ object SpecValidator {
         validateNode(node, path, ctx)
         // SPEC 16.2: unknown node types degrade — their subtrees are scanned
         // for nested known nodes but not held to per-type structural rules.
-        val known = NODE_SCHEMA.containsKey(node.optString("t"))
+        val t = node.optString("t")
+        // SPEC 17.1/16.2: a known type absent from the target profile degrades
+        // exactly like an unknown type — its subtree is scanned but its per-type
+        // hooks/schema are not applied and it dispatches nothing.
+        val known = NODE_SCHEMA.containsKey(t) &&
+            (ctx.advertisedTypes == null || t in ctx.advertisedTypes)
         for (key in node.keySet()) {
             val child = node.get(key)
             when {
@@ -368,6 +381,10 @@ object SpecValidator {
             if (!ctx.ids.add(id))
                 throw ContentInvalid("$path.id", "duplicate node ID")
         }
+        // SPEC 17.1: a type absent from the target profile is unsupported —
+        // degrade like an unknown type (skip required members, per-type schema,
+        // and stateful registration; the renderer renders its children only).
+        if (ctx.advertisedTypes != null && t !in ctx.advertisedTypes) return
         val row = NODE_SCHEMA[t] ?: return // SPEC 16.2: unknown types degrade
         for (req in row.required)
             if (!node.has(req))

@@ -69,6 +69,10 @@ object CompanionStores {
     fun surfaces(ctx: Context): SurfaceStore =
         surfacesInstance ?: synchronized(this) {
             surfacesInstance ?: SurfaceStore(64, 4096,
+                maxCaptureFields = 64,
+                // SPEC 4.5/17.5: enforced at validation when chart/canvas are
+                // advertised — must match DeviceBridge's advertised limits.
+                maxChartPoints = 4096, maxCanvasOps = 4096,
                 backing = FileSurfaceBacking(File(ctx.filesDir, "ebp-surfaces.json"))
             ).also { surfacesInstance = it }
         }

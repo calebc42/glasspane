@@ -65,21 +65,29 @@ object SpecValidator {
      * resolution until the whole document is walked, because a named node
      * may appear after the descriptor that captures it (SPEC 14.1).
      */
-    private class Ctx(val maxCaptureFields: Long) {
+    private class Ctx(
+        val maxCaptureFields: Long,
+        val maxChartPoints: Long,
+        val maxCanvasOps: Long,
+    ) {
         val ids = mutableSetOf<String>()
         val statefuls = mutableMapOf<String, JSONObject>()
         val captureRefs = mutableListOf<Pair<String, List<String>>>()
         var nodeCount = 0
     }
 
-    /** Validate one SurfaceSpec; returns the stateful nodes by ID. */
+    /** Validate one SurfaceSpec; returns the stateful nodes by ID. The chart/
+     * canvas count limits default high so unit tests and the golden corpus
+     * pass; the engine passes the profile's real §4.5 values. */
     fun validateSurfaceSpec(
         spec: Any?,
         path: String = "spec",
         maxCaptureFields: Long = 64,
+        maxChartPoints: Long = Long.MAX_VALUE,
+        maxCanvasOps: Long = Long.MAX_VALUE,
     ): Map<String, JSONObject> {
         if (spec !is JSONObject) throw ContentInvalid(path, "spec must be an object")
-        val ctx = Ctx(maxCaptureFields)
+        val ctx = Ctx(maxCaptureFields, maxChartPoints, maxCanvasOps)
         if (spec.has("views")) {
             val views = spec.optJSONObject("views")
                 ?: throw ContentInvalid("$path.views", "views must be an object")
@@ -507,8 +515,8 @@ object SpecValidator {
             }
             "tabs" -> validateTabs(node, path)
             "table" -> validateTable(node, path)
-            "chart" -> validateChart(node, path)
-            "canvas" -> validateCanvas(node, path)
+            "chart" -> validateChart(node, path, ctx)
+            "canvas" -> validateCanvas(node, path, ctx)
             "month_grid" -> validateMonthGrid(node, path)
             "editor" -> {
                 validateLineCounts(node, path)
@@ -626,14 +634,19 @@ object SpecValidator {
 
     /** SPEC 17.5: every ChartPoint is finite numeric x/y; y_range is a
      * two-number [min,max] with min < max; height is positive. */
-    private fun validateChart(node: JSONObject, path: String) {
+    private fun validateChart(node: JSONObject, path: String, ctx: Ctx) {
         val series = node.optJSONArray("series")
             ?: throw ContentInvalid("$path.series", "series must be an array")
+        var totalPoints = 0L
         for (i in 0 until series.length()) {
             val s = series.optJSONObject(i)
                 ?: throw ContentInvalid("$path.series[$i]", "must be a series object")
             val points = s.optJSONArray("points")
                 ?: throw ContentInvalid("$path.series[$i].points", "points must be an array")
+            // SPEC 4.5: max_chart_points bounds the total across all series.
+            totalPoints += points.length()
+            if (totalPoints > ctx.maxChartPoints)
+                throw ContentInvalid("$path.series", "exceeds max_chart_points")
             for (j in 0 until points.length()) {
                 val p = points.optJSONObject(j)
                     ?: throw ContentInvalid("$path.series[$i].points[$j]", "must be a point object")
@@ -661,7 +674,7 @@ object SpecValidator {
     /** SPEC 17.5: canvas dims are positive; KNOWN ops carry their closed
      * shape's required finite members (an unknown op is skipped at render,
      * never rejected); path points are exactly {x, y}. */
-    private fun validateCanvas(node: JSONObject, path: String) {
+    private fun validateCanvas(node: JSONObject, path: String, ctx: Ctx) {
         for (dim in listOf("width", "height")) {
             val v = (node.opt(dim) as? Number)?.toDouble()
             if (v == null || v.isNaN() || v <= 0)
@@ -669,6 +682,9 @@ object SpecValidator {
         }
         val ops = node.optJSONArray("ops")
             ?: throw ContentInvalid("$path.ops", "ops must be an array")
+        // SPEC 4.5: max_canvas_ops bounds the op count (unknown ops still count).
+        if (ops.length().toLong() > ctx.maxCanvasOps)
+            throw ContentInvalid("$path.ops", "exceeds max_canvas_ops")
         for (i in 0 until ops.length()) {
             val op = ops.optJSONObject(i)
                 ?: throw ContentInvalid("$path.ops[$i]", "must be an op object")

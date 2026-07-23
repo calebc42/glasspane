@@ -33,11 +33,15 @@ object NodeSupport {
         "flow_row", "surface", "lazy_column", "card", "collapsible",
         "reorderable_list", "tabs", "table")
 
+    /** SPEC 17.5 visualization nodes (app profile). */
+    private val VIZ_NODE_TYPES: Set<String> = sortedSetOf("chart", "canvas", "month_grid")
+
     /** SPEC 10.2: the app profile MUST include the Core Node Set plus
      * view.switch and companion.settings.open. */
     val APP_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",
-        "text_input", "scaffold", "editor") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES + LAYOUT_NODE_TYPES
+        "text_input", "scaffold", "editor") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES +
+        LAYOUT_NODE_TYPES + VIZ_NODE_TYPES
 
     val DIALOG_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",

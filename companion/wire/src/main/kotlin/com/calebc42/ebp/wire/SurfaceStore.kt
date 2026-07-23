@@ -16,6 +16,9 @@ class SurfaceStore(
     private val maxSurfaces: Long,
     private val maxSurfaceIds: Long,
     private val maxCaptureFields: Long = 64,
+    // SPEC 4.5: chart/canvas count caps enforced at validation when advertised.
+    private val maxChartPoints: Long = Long.MAX_VALUE,
+    private val maxCanvasOps: Long = Long.MAX_VALUE,
     /** SPEC 13.1/15.1: durable surface histories + input_state. In-memory
      * by default; DeviceBridge wires a file so both survive process death. */
     private val backing: SurfaceBacking = MemorySurfaceBacking(),
@@ -40,7 +43,9 @@ class SurfaceStore(
         for (r in state.records) {
             val statefuls = if (r.present && r.spec != null)
                 runCatching {
-                    SpecValidator.validateSurfaceSpec(r.spec, maxCaptureFields = maxCaptureFields)
+                    SpecValidator.validateSurfaceSpec(r.spec,
+                        maxCaptureFields = maxCaptureFields,
+                        maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps)
                 }.getOrNull() ?: continue
             else emptyMap()
             records[r.surface] = Record(r.revision, r.present, r.spec, r.currentView, statefuls)
@@ -134,7 +139,8 @@ class SurfaceStore(
             isMultiView = false
         } else {
             statefuls = SpecValidator.validateSurfaceSpec(
-                spec, maxCaptureFields = maxCaptureFields)
+                spec, maxCaptureFields = maxCaptureFields,
+                maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps)
             reset = resetIds?.let { SpecValidator.validateResetIds(it, statefuls) }
                 ?: emptySet()
             staleSpec?.let { SpecValidator.validateStaleSpec(it, spec.has("views")) }

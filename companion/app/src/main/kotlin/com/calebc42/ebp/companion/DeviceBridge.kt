@@ -77,7 +77,9 @@ class DeviceBridge(
             // is advertised — the loader enforces every one.
             .put("max_image_bytes", 8_388_608)          // 8 MiB encoded
             .put("max_decoded_image_bytes", 67_108_864) // 64 MiB decoded (ARGB)
-            .put("max_image_pixels", 16_777_216),       // 4096x4096
+            .put("max_image_pixels", 16_777_216)        // 4096x4096
+            // SPEC 4.5/17.5: REQUIRED whenever chart/canvas are advertised.
+            .put("max_chart_points", 4096).put("max_canvas_ops", 4096),
         // SPEC 20.1/20.2: advertise the device report and the platform executor.
         deviceReport = AppCapabilities.deviceReport(),
         capabilityHandler = AppCapabilities.handler(appContext, 65_536),

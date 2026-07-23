@@ -26,7 +26,7 @@ class TriggerRuntimeTest {
     private val state = HashMap<String, JSONObject>()
     private val fired = mutableListOf<Pair<String, JSONObject>>()
     private val store = TriggerStore()
-    private val rt = TriggerRuntime(store, { clock }, ZoneId.of("UTC"),
+    private val rt = TriggerRuntime(store, { clock }, { ZoneId.of("UTC") },
         { state[it] }, emit = { reg, data, commit ->
             commit(); fired.add(reg.entry.getString("id") to data) })
 

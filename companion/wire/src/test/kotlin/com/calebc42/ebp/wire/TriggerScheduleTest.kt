@@ -34,7 +34,7 @@ class TriggerScheduleTest {
     private var generation: String? = "1"
     private val fired = mutableListOf<Pair<String, JSONObject>>()
     private val store = TriggerStore()
-    private val rt = TriggerRuntime(store, { clock }, ZoneId.of("UTC"), { null },
+    private val rt = TriggerRuntime(store, { clock }, { ZoneId.of("UTC") }, { null },
         emit = { reg, data, commit -> commit(); fired.add(reg.entry.getString("id") to data) },
         bootGeneration = { generation })
 
@@ -145,6 +145,25 @@ class TriggerScheduleTest {
         val next = TriggerRuntime.nextRepeatDueMs(reg("ev"))!!
         assertTrue(next > 500_000)
         assertEquals(541_000L, next)                      // 1000 + 9·60000
+    }
+
+    @Test
+    fun everySThrottledBoundaryAdvancesCursorNoSpin() {
+        clock = 1_000
+        register(trig("ev", "time") {
+            put("params", JSONObject().put("every_s", 60)); put("throttle_s", 3600)
+        })
+        clock = 61_000
+        rt.fireScheduled("id", "ev", JSONObject())        // first boundary: admits
+        assertEquals(1, fired.size)
+        // A later boundary inside the throttle window is NOT admitted — but the
+        // schedule cursor MUST still advance so the host re-arms the NEXT
+        // boundary, never re-arming a past-due one (the RTC_WAKEUP spin).
+        clock = 121_000
+        rt.fireScheduled("id", "ev", JSONObject())
+        assertEquals(1, fired.size)                        // throttled: no new fire
+        assertEquals(121_000L, reg("ev").lastFireFloorMs)  // cursor advanced past now
+        assertTrue(TriggerRuntime.nextRepeatDueMs(reg("ev"))!! > 121_000)
     }
 
     @Test

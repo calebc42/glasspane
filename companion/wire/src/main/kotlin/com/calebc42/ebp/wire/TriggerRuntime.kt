@@ -21,8 +21,10 @@ class TriggerRuntime(
     private val store: TriggerStore,
     /** Milliseconds; rollback-resistant wall time (queue.effectiveNow). */
     private val now: () -> Long,
-    /** Civil-time zone for time.window predicates. */
-    private val zone: ZoneId,
+    /** Civil-time zone for time.window predicates — a supplier read fresh at
+     * each evaluation, so a device timezone change takes effect immediately
+     * (the systemDefault() default) rather than being frozen at construction. */
+    private val zone: () -> ZoneId,
     /** Current sample object for a state type, or null if unavailable. */
     private val stateProvider: (String) -> JSONObject?,
     /**
@@ -165,7 +167,20 @@ class TriggerRuntime(
      */
     fun fireScheduled(identity: String, triggerId: String, data: JSONObject) {
         val reg = store.registration(identity, triggerId) ?: return
-        if (reg.entry.getString("type") == "time") tryAdmit(reg, data)
+        if (reg.entry.getString("type") != "time") return
+        tryAdmit(reg, data)
+        // SPEC 21.5: a repeating every_s advances its schedule cursor to the
+        // current boundary on EVERY elapsed alarm, even when the gate/throttle/
+        // queue blocked admission — otherwise the host recomputes the SAME
+        // past-due boundary and re-arms it, and the alarm spins (an RTC_WAKEUP
+        // storm) until the blocking condition clears. On a successful admit the
+        // commit already floored lastFireFloorMs to now, so this is a no-op.
+        val params = reg.entry.optJSONObject("params")
+        if (params != null && params.has("every_s") &&
+            (reg.lastFireFloorMs ?: Long.MIN_VALUE) < now()) {
+            reg.lastFireFloorMs = now()
+            runCatching { persistRecords() }
+        }
     }
 
     // -------------------------------------------------------- crossing logic
@@ -331,7 +346,7 @@ class TriggerRuntime(
     // SPEC 21.7: local civil time in the half-open window; wraps at midnight
     // when after > before; days selects the civil day the after-portion begins.
     private fun timeWindowHolds(p: JSONObject): Boolean {
-        val zdt = Instant.ofEpochMilli(now()).atZone(zone)
+        val zdt = Instant.ofEpochMilli(now()).atZone(zone())
         val nowT = zdt.toLocalTime()
         val after = p.optString("after", "").takeIf { it.isNotEmpty() }?.let { LocalTime.parse(it) }
         val before = p.optString("before", "").takeIf { it.isNotEmpty() }?.let { LocalTime.parse(it) }

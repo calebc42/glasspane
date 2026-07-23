@@ -35,7 +35,7 @@ class TriggerFiringService(
     private val maxEventBytes: Long,
     private val triggerCaps: Set<String> = emptySet(),
     private val capabilityHandler: CapabilityHandler? = null,
-    private val zone: ZoneId = ZoneId.systemDefault(),
+    private val zone: () -> ZoneId = { ZoneId.systemDefault() },
     /** SPEC 21.5: current device boot generation (Settings.Global.BOOT_COUNT). */
     private val bootGeneration: () -> String? = { null },
 ) {

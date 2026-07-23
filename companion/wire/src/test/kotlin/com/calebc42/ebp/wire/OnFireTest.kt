@@ -24,7 +24,7 @@ class OnFireTest {
     private val state = HashMap<String, JSONObject>()
     private val ran = mutableListOf<JSONObject>()
     private val store = TriggerStore()
-    private val rt = TriggerRuntime(store, { 1_000L }, java.time.ZoneId.of("UTC"),
+    private val rt = TriggerRuntime(store, { 1_000L }, { java.time.ZoneId.of("UTC") },
         { state[it] }, emit = { _, _, commit -> commit() }, onFire = { ran.add(it) })
 
     private fun trig(id: String, type: String, block: JSONObject.() -> Unit = {}) =
@@ -61,7 +61,7 @@ class OnFireTest {
     fun failingEntryIsIsolated() {
         // A throw on the first entry must not stop the second (SPEC 21.4).
         val seen = mutableListOf<String>()
-        val rt2 = TriggerRuntime(store, { 1_000L }, java.time.ZoneId.of("UTC"),
+        val rt2 = TriggerRuntime(store, { 1_000L }, { java.time.ZoneId.of("UTC") },
             { state[it] }, emit = { _, _, commit -> commit() }, onFire = { e ->
                 if (e.has("notify")) throw RuntimeException("boom")
                 seen.add(e.getString("cap"))
@@ -84,7 +84,7 @@ class OnFireTest {
         state["battery.level"] = battery(50)
         val store2 = TriggerStore()
         val ran2 = mutableListOf<JSONObject>()
-        val rt3 = TriggerRuntime(store2, { 1_000L }, java.time.ZoneId.of("UTC"),
+        val rt3 = TriggerRuntime(store2, { 1_000L }, { java.time.ZoneId.of("UTC") },
             { state[it] }, emit = { _, _, _ -> /* QueueFull: never commit */ },
             onFire = { ran2.add(it) })
         val entries = TriggerValidator.validateSet(JSONObject().put("triggers",

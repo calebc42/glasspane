@@ -90,6 +90,25 @@ class DialogTest {
     }
 
     @Test
+    fun oversizeSubmitKeepsDialogOutstanding() {
+        val out = mutableListOf<JSONObject>()
+        val engine = readyEngine(out, mutableListOf())
+        val overflowed = mutableListOf<String>()
+        engine.dialogOverflowListener = { overflowed.add(it) }
+        show(engine, "d1", "rename")
+        // SPEC 18.1: a submit whose prospective response exceeds max_frame_bytes
+        // writes nothing and does NOT complete the dialog.
+        engine.completeDialogSubmit("rename", "ok",
+            JSONObject().put("blob", "x".repeat(4_300_000)))
+        assertNull(responseFor(out, "d1"))          // no part of the response written
+        assertEquals(listOf("rename"), overflowed)  // host told to diagnose + erase
+        // The dialog is still outstanding: a shrunk submit now completes it.
+        engine.completeDialogSubmit("rename", "ok", JSONObject().put("name", "small"))
+        assertEquals("submitted",
+            responseFor(out, "d1")!!.getJSONObject("result").getString("status"))
+    }
+
+    @Test
     fun dismissCompletesAsDismissed() {
         val out = mutableListOf<JSONObject>()
         val engine = readyEngine(out, mutableListOf())

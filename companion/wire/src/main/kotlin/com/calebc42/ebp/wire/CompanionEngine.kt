@@ -1330,6 +1330,10 @@ class CompanionEngine(
      * dismiss. What the dialog contains is the application's; the request
      * correlation is the endpoint's. */
     var dialogListener: ((String, JSONObject?) -> Unit)? = null
+    /** SPEC 18.1: a submit whose prospective response would exceed
+     * max_frame_bytes. The dialog stays outstanding; the host MUST show a
+     * local validation diagnostic and erase any volatile password (§14.6). */
+    var dialogOverflowListener: ((String) -> Unit)? = null
 
     private fun handleDialogShow(id: Any, params: JSONObject) {
         val dialogId = params.opt("dialog_id") as? String
@@ -1365,10 +1369,23 @@ class CompanionEngine(
     @Synchronized
     fun completeDialogSubmit(dialogId: String, value: Any? = null,
                              fields: JSONObject? = null) {
-        val reqId = dialogs.remove(dialogId) ?: return
+        val reqId = dialogs[dialogId] ?: return
         val result = JSONObject().put("status", "submitted")
         if (value != null) result.put("value", value)
         if (fields != null && fields.length() > 0) result.put("fields", fields)
+        // SPEC 18.1: serialize the prospective complete response FIRST. If its
+        // body would exceed max_frame_bytes, write no part of it and do NOT
+        // complete the dialog — the dialog stays outstanding so the user can
+        // shrink the input, and the host concludes any password attempt with a
+        // §14.6 erasure. This ordering prevents orphaning the request in
+        // encodeFrame after the dialog was already removed.
+        val body = JSONObject().put("jsonrpc", "2.0").put("id", reqId)
+            .put("result", result).toString().toByteArray(Charsets.UTF_8).size
+        if (body > WireLimits.MAX_BODY_OCTETS) {
+            dialogOverflowListener?.invoke(dialogId)
+            return
+        }
+        dialogs.remove(dialogId)
         respondResult(reqId, result)
         dialogListener?.invoke(dialogId, null)
     }

@@ -218,6 +218,9 @@ class DeviceBridge(
             Notifications.scheduleReminders(appContext, owner, reminders)
         }
         engine.dialogListener = { id, spec -> onDialogChanged(id, spec) }
+        // SPEC 18.1: an oversized submit keeps the dialog up; tell the user to
+        // shorten the input (password erasure in the renderer is a follow-on).
+        engine.dialogOverflowListener = { onToast("Input too large — please shorten it") }
         engine.toastListener = { text, _ -> onToast(text) }
         engine.themeListener = { dark, _, _ -> onTheme(dark) }
         engine.pieMenuListener = { id, spec -> onPieMenuChanged(id, spec) }

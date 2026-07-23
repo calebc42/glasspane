@@ -119,7 +119,14 @@ fun EbpTheme(payload: JSONObject?, content: @Composable () -> Unit) {
     val colors = payload?.optJSONObject("colors")
     val scheme = buildColorScheme(colors, if (dark) darkColorScheme() else lightColorScheme())
     val extended = buildExtendedColors(colors, dark)
-    CompositionLocalProvider(LocalExtendedColors provides extended) {
+    // SPEC 18.4: the pushed `syntax` SyntaxStyle map overlays the polarity
+    // palette; the editor/text nodes read it from LocalSyntaxColors.
+    val syntax = emacsSyntaxColors(
+        payload?.optJSONObject("syntax"), SyntaxColors.forBackground(dark))
+    CompositionLocalProvider(
+        LocalExtendedColors provides extended,
+        LocalSyntaxColors provides syntax,
+    ) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }

@@ -3,8 +3,8 @@
 // format-6 vocabulary: RichSpan is {text, font_weight, italic, underline,
 // color, bg, mono, on_tap} (poc's strike/tag/baseline/code members are gone;
 // code→mono); Colors resolve as roles OR hex (§16.6) everywhere, not hex-only.
-// buildSpanString is shared with table cells at W9-e. Syntax-highlighted text
-// (`text.syntax`) renders plain until SyntaxHighlight ports at W9-h.
+// buildSpanString is shared with table cells at W9-e. A `text.syntax` language
+// fontifies the text through SyntaxHighlight (W9-h) with the active palette.
 package com.calebc42.ebp.companion.render
 
 import androidx.compose.foundation.background
@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -76,9 +77,21 @@ internal fun RenderText(node: JSONObject, m: Modifier) {
     val style = textStyleForName(node.optString("style"))
     val maxLines = node.optInt("max_lines", Int.MAX_VALUE)
         .takeIf { it > 0 } ?: Int.MAX_VALUE
+    val raw = node.optString("text")
+    // SPEC 18.4: a `syntax` language fontifies the text with the active (pushed
+    // or fallback) token palette; absent, it renders plain.
+    val language = node.optString("syntax")
+    val syntaxColors = LocalSyntaxColors.current
+    val text: AnnotatedString = remember(raw, language, syntaxColors) {
+        if (language.isEmpty()) AnnotatedString(raw)
+        else highlightSpans(language, raw, syntaxColors).let { spans ->
+            if (spans.isEmpty()) AnnotatedString(raw)
+            else AnnotatedString(raw, spanStyles = spans)
+        }
+    }
     val content: @Composable () -> Unit = {
         Text(
-            text = node.optString("text"),
+            text = text,
             style = style,
             fontWeight = fontWeightOf(node.opt("font_weight")),
             color = resolveColor(node.optString("color").takeIf { it.isNotEmpty() })

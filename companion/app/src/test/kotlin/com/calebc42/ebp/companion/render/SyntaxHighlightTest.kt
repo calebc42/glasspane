@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// W9-h2 SPEC 18.4: best-effort syntax fontification. The tokenizer emits
+// non-empty span sets for each supported language and never changes the source
+// length (identity transform); emacsSyntaxColors reads each pushed role's
+// SyntaxStyle `fg`, merging holes from the polarity fallback.
+package com.calebc42.ebp.companion.render
+
+import androidx.compose.ui.graphics.Color
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SyntaxHighlightTest {
+
+    private val c = SyntaxColors.forBackground(dark = true)
+
+    @Test
+    fun highlightsEachSupportedLanguage() {
+        assertTrue(highlightSpans("elisp", "(defun f (x) ;; c\n  \"s\")", c).isNotEmpty())
+        assertTrue(highlightSpans("python", "def f():\n  return 'x'  # c", c).isNotEmpty())
+        assertTrue(highlightSpans("rust", "fn main() { let x = 1; }", c).isNotEmpty())
+        assertTrue(highlightSpans("org", "* TODO heading :tag:\n- item", c).isNotEmpty())
+        // An unknown language degrades to no styles, never throws.
+        assertEquals(emptyList<Any>(), highlightSpans("brainfuck", "+++.", c))
+    }
+
+    @Test
+    fun elispKeywordAndCommentAreColoured() {
+        val spans = highlightSpans("elisp", "(defun f () nil) ; done", c)
+        // The `defun` keyword and the `;` comment both produce coloured spans.
+        assertTrue(spans.any { it.item.color == c.keyword })
+        assertTrue(spans.any { it.item.color == c.comment })
+    }
+
+    @Test
+    fun transformationPreservesLength() {
+        val src = androidx.compose.ui.text.AnnotatedString("(let ((x 1)) x)")
+        val out = SyntaxTransformation("elisp", c).filter(src)
+        assertEquals(src.text.length, out.text.text.length)
+    }
+
+    @Test
+    fun emacsSyntaxColorsOverlaysFgAndKeepsFallback() {
+        val fallback = SyntaxColors.forBackground(dark = false)
+        val payload = JSONObject()
+            .put("keyword", JSONObject().put("fg", "#ff0000").put("italic", true))
+            .put("string", "#00ff00") // lenient: a bare color string is accepted
+        val merged = emacsSyntaxColors(payload, fallback)
+        assertEquals(Color(0xFFFF0000), merged.keyword)
+        assertEquals(Color(0xFF00FF00), merged.string)
+        // Un-pushed roles keep the fallback.
+        assertEquals(fallback.comment, merged.comment)
+        assertNotEquals(fallback.keyword, merged.keyword)
+        // A null map is the plain fallback.
+        assertEquals(fallback, emacsSyntaxColors(null, fallback))
+    }
+
+    @Test
+    fun pushedHeadingRecoloursTheWholeRainbowUniformly() {
+        val merged = emacsSyntaxColors(
+            JSONObject().put("heading", JSONObject().put("fg", "#123456")),
+            SyntaxColors.forBackground(dark = true))
+        assertTrue(merged.heading.all { it == Color(0xFF123456) })
+    }
+}

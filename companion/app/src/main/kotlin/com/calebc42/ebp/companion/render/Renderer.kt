@@ -41,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.companion.DeviceBridge
 import com.calebc42.ebp.wire.EditorSession
@@ -197,9 +198,18 @@ private fun RenderTextInput(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // structural re-push with the same key/id keeps the draft and a new
     // identity discards it.
     var value by rememberSaveable(ctx.path, id) { mutableStateOf(node.optString("value")) }
+    // SPEC 18.4/17.4: a `syntax` language recolours the field in place (identity
+    // transform — the cursor/selection/IME are untouched).
+    val language = node.optString("syntax")
+    val syntaxColors = LocalSyntaxColors.current
+    val transform = remember(language, syntaxColors) {
+        if (language.isEmpty()) VisualTransformation.None
+        else SyntaxTransformation(language, syntaxColors)
+    }
     OutlinedTextField(
         value = value,
         enabled = enabled,
+        visualTransformation = transform,
         onValueChange = {
             value = it
             ctx.state(id, it) // dialog-local (18.1) or state.changed (14.6)
@@ -219,10 +229,20 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val readOnly = node.optBoolean("read_only", false)
     val enabled = node.optBoolean("enabled", true)
     var text by rememberSaveable(ctx.path, id) { mutableStateOf(node.optString("value")) }
+    // SPEC 18.4/17.4: a `syntax` language recolours the field in place via an
+    // identity VisualTransformation (never changes the character count, so the
+    // cursor/selection/IME behave exactly as on a plain field).
+    val language = node.optString("syntax")
+    val syntaxColors = LocalSyntaxColors.current
+    val transform = remember(language, syntaxColors) {
+        if (language.isEmpty()) VisualTransformation.None
+        else SyntaxTransformation(language, syntaxColors)
+    }
     OutlinedTextField(
         value = text,
         readOnly = readOnly,
         enabled = enabled,
+        visualTransformation = transform,
         onValueChange = { new ->
             // A read-only editor's value is authoritative from the server:
             // never mirror a local edit (SPEC 17.4).

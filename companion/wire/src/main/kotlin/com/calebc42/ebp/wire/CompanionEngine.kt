@@ -63,21 +63,29 @@ class CompanionEngine(
     @Synchronized
     fun feed(bytes: ByteArray) {
         if (state == SessionState.CLOSED) return
-        val messages = try {
-            decoder.feed(bytes)
+        try {
+            decoder.feed(bytes) { msg ->
+                if (state != SessionState.CLOSED) {
+                    try {
+                        dispatch(msg)
+                    } catch (e: Exception) {
+                        // A dispatch failure must fail closed, never
+                        // crash-loop the host (review: poison-record).
+                        close("dispatch failure: ${e.message}")
+                    }
+                }
+            }
         } catch (e: FrameClose) { return close("frame: ${e.message}") }
         catch (e: FrameIncomplete) { return close("frame: ${e.message}") }
-        catch (e: WireParseError) { return close("body: ${e.message}") }
-        catch (e: InvalidRequest) { return close("body: ${e.message}") }
-        for (msg in messages) {
-            if (state == SessionState.CLOSED) return
-            try {
-                dispatch(msg)
-            } catch (e: Exception) {
-                // A dispatch failure must fail closed, never crash-loop
-                // the host (review: poison-record scenario).
-                close("dispatch failure: ${e.message}")
-            }
+        catch (e: WireParseError) {
+            // SPEC 6.2: a complete body that is invalid UTF-8 or JSON gets a
+            // Parse Error with id:null; the stream stayed synchronized, so
+            // the connection MAY (and here does) continue.
+            emitFramingError(-32700, "Parse error", "parse-error")
+        } catch (e: InvalidRequest) {
+            // SPEC 6.2/4.1: a non-object top level, batch array, or duplicate
+            // member names get one Invalid Request with id:null; continue.
+            emitFramingError(-32600, "Invalid Request", "invalid-request")
         }
     }
 
@@ -110,11 +118,11 @@ class CompanionEngine(
     private fun dispatch(msg: JSONObject) {
         when (classifyMessage(msg)) {
             MessageClass.REQUEST ->
-                handleRequest(msg.get("id"), msg.getString("method"),
-                    msg.optJSONObject("params") ?: JSONObject())
+                // SPEC 4.1/7.3: the raw params reach handleRequest so a
+                // non-object (a positional array) is rejected, not coerced.
+                handleRequest(msg.get("id"), msg.getString("method"), msg.opt("params"))
             MessageClass.NOTIFICATION ->
-                handleNotification(msg.getString("method"),
-                    msg.optJSONObject("params") ?: JSONObject())
+                handleNotification(msg.getString("method"), msg.opt("params"))
             MessageClass.RESPONSE -> {
                 val callback = (msg.opt("id") as? Int)?.let(pending::remove)
                 callback?.invoke(msg.optJSONObject("result"),
@@ -258,23 +266,33 @@ class CompanionEngine(
                 .put("id", id).put("value", value ?: JSONObject.NULL)))
     }
 
-    private fun handleRequest(id: Any, method: String, params: JSONObject) {
+    private fun handleRequest(id: Any, method: String, rawParams: Any?) {
         // SPEC 7.2 (amendment #34): ids are strings or safe integers.
         if (!isValidRequestId(id))
             return respondError(id, -32600, "Invalid Request", "invalid-request")
-        // SPEC 10.1: fail closed before authentication — only the exact
-        // expected handshake method is answered on its merits.
+        // SPEC 10.1: fail closed before authentication on method and state,
+        // BEFORE params — a non-handshake request is 1200 even when its
+        // params are malformed.
         when (state) {
-            SessionState.CONNECTED -> {
+            SessionState.CONNECTED ->
                 if (method != "session.hello")
                     return respondError(id, 1200, "Not authenticated", "not-authenticated")
-                return handleHello(id, params)
-            }
-            SessionState.CHALLENGED -> {
+            SessionState.CHALLENGED ->
                 if (method != "auth.response")
                     return respondError(id, 1200, "Not authenticated", "not-authenticated")
-                return handleAuth(id, params)
-            }
+            else -> Unit
+        }
+        // SPEC 4.1/7.3: params, when present, MUST be an object — no
+        // positional array, no coercion. A legal handshake method with
+        // malformed params is -32602 here too (SPEC 10.1).
+        val params = when (rawParams) {
+            null -> JSONObject()
+            is JSONObject -> rawParams
+            else -> return respondError(id, -32602, "Invalid params", "invalid-params")
+        }
+        when (state) {
+            SessionState.CONNECTED -> return handleHello(id, params)
+            SessionState.CHALLENGED -> return handleAuth(id, params)
             else -> Unit
         }
         val spec = METHOD_REGISTRY[method]
@@ -484,12 +502,15 @@ class CompanionEngine(
         }
     }
 
-    private fun handleNotification(method: String, params: JSONObject) {
+    private fun handleNotification(method: String, rawParams: Any?) {
         // Pre-auth (SPEC 10.1) and unknown/wrong-direction (SPEC 7.3)
         // notifications are logged and dropped; nothing is emitted.
         if (state == SessionState.CONNECTED || state == SessionState.CHALLENGED) return
         val spec = METHOD_REGISTRY[method] ?: return
         if (spec.sender == Sender.COMPANION || spec.isRequest) return
+        // SPEC 7.3: structurally invalid notification params are dropped —
+        // a notification has no id to answer (log.error arrives with W9).
+        val params = rawParams as? JSONObject ?: return
         // SPEC 7.5/18.1: rpc.cancel concludes an outstanding dialog with 1301.
         if (method == "rpc.cancel") {
             val cancelId = params.opt("id")
@@ -713,6 +734,15 @@ class CompanionEngine(
             emit(JSONObject().put("jsonrpc", "2.0").put("id", id)
                 .put("error", JSONObject().put("code", code).put("message", message)
                     .put("data", data.put("kind", kind))))
+    }
+
+    /** SPEC 6.2/8: a framing-level error carries `id: null`, which
+     * `respondError` deliberately rejects (a request id is never null). */
+    private fun emitFramingError(code: Int, message: String, kind: String) {
+        if (state == SessionState.CLOSED) return
+        emit(JSONObject().put("jsonrpc", "2.0").put("id", JSONObject.NULL)
+            .put("error", JSONObject().put("code", code).put("message", message)
+                .put("data", JSONObject().put("kind", kind))))
     }
 
     private fun emit(msg: JSONObject) = sink(encodeFrame(msg.toString()))

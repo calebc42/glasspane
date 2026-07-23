@@ -41,26 +41,35 @@ class InvalidRequest(message: String) : Exception(message)
 class FrameDecoder {
     private var buffer = ByteArray(0)
 
-    fun feed(bytes: ByteArray): List<JSONObject> {
+    fun feed(bytes: ByteArray): List<JSONObject> =
+        mutableListOf<JSONObject>().also { feed(bytes, it::add) }
+
+    /**
+     * Deliver each complete message to CONSUMER in wire order as it is
+     * decoded, then throw the taxonomy error for a bad frame. Because good
+     * frames are handed off before the throw, a well-formed frame pipelined
+     * ahead of a bad one in the same read is not lost — the live receiver
+     * can answer the bad frame per SPEC 6.2 and keep the earlier work.
+     */
+    fun feed(bytes: ByteArray, consumer: (JSONObject) -> Unit) {
         buffer += bytes
-        val messages = mutableListOf<JSONObject>()
         while (true) {
             val term = indexOfTerminator(buffer)
             if (term < 0) {
                 // SPEC 6.2: the header section may not exceed 8,192 octets.
                 if (buffer.size > WireLimits.MAX_HEADER_OCTETS)
                     throw FrameClose("header section too large")
-                return messages
+                return
             }
             if (term + 4 > WireLimits.MAX_HEADER_OCTETS)
                 throw FrameClose("header section too large")
             val length = parseHeader(String(buffer, 0, term, StandardCharsets.ISO_8859_1))
             val bodyStart = term + 4
             val bodyEnd = bodyStart + length
-            if (buffer.size < bodyEnd) return messages // retain partial data
+            if (buffer.size < bodyEnd) return // retain partial data
             val body = buffer.copyOfRange(bodyStart, bodyEnd)
             buffer = buffer.copyOfRange(bodyEnd, buffer.size)
-            messages.add(parseBody(body))
+            consumer(parseBody(body))
         }
     }
 

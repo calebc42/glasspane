@@ -326,4 +326,77 @@ class CompanionEngineTest {
                 spec.states.map { it.name }.toSet())
         }
     }
+
+    // ---------------------------------------- wire error responses (6.2/7.3)
+
+    private fun arrayParamsRequest(id: String, method: String): JSONObject =
+        JSONObject().put("jsonrpc", "2.0").put("id", id).put("method", method)
+            .put("params", JSONArray().put(1))
+
+    @Test
+    fun nonObjectParamsAreInvalidParamsNotCoerced() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        // SPEC 10.1: a non-handshake pre-auth request is 1200 regardless of
+        // params — the state gate precedes the params check.
+        engine.feed(frame(arrayParamsRequest("x1", "surface.update")))
+        assertEquals(1200, out.last().getJSONObject("error").getInt("code"))
+        // SPEC 10.1: the legal handshake method with array params is -32602.
+        engine.feed(frame(arrayParamsRequest("h1", "session.hello")))
+        assertEquals(-32602, out.last().getJSONObject("error").getInt("code"))
+        assertEquals(SessionState.CONNECTED, engine.state)
+        // Post-auth: session.ready with a positional array is -32602 and MUST
+        // NOT drive the machine to READY (audit finding: coercion to {}).
+        engine.feed(frame(hello())); engine.feed(frame(auth()))
+        assertEquals(SessionState.SYNCING, engine.state)
+        engine.feed(frame(arrayParamsRequest("r1", "session.ready")))
+        assertEquals(-32602, out.last().getJSONObject("error").getInt("code"))
+        assertEquals(SessionState.SYNCING, engine.state)
+        // The well-formed request still reaches READY.
+        engine.feed(frame(request("r2", "session.ready", JSONObject())))
+        assertEquals(SessionState.READY, engine.state)
+    }
+
+    @Test
+    fun bodyErrorsAnswerWithIdNullAndKeepTheConnection() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello())); engine.feed(frame(auth()))
+        assertEquals(SessionState.SYNCING, engine.state)
+        // SPEC 6.2: invalid JSON -> Parse Error, id:null, connection open.
+        engine.feed(encodeFrame("{ not json"))
+        assertEquals(JSONObject.NULL, out.last().get("id"))
+        assertEquals(-32700, out.last().getJSONObject("error").getInt("code"))
+        assertTrue(engine.state != SessionState.CLOSED)
+        // SPEC 6.2/4.1: a top-level array -> Invalid Request, id:null.
+        engine.feed(encodeFrame("[]"))
+        assertEquals(JSONObject.NULL, out.last().get("id"))
+        assertEquals(-32600, out.last().getJSONObject("error").getInt("code"))
+        // SPEC 4.1: duplicate member names -> Invalid Request, id:null.
+        engine.feed(encodeFrame("""{"a":1,"a":2}"""))
+        assertEquals(-32600, out.last().getJSONObject("error").getInt("code"))
+        assertTrue(engine.state != SessionState.CLOSED)
+        // The session still works: a valid request is answered normally.
+        engine.feed(frame(request("q1", "queue.replay", JSONObject())))
+        assertEquals("q1", out.last().getString("id"))
+        assertNotNull(out.last().getJSONObject("result"))
+    }
+
+    @Test
+    fun aGoodFramePipelinedBeforeABadOneIsNotLost() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello())); engine.feed(frame(auth()))
+        val base = out.size
+        // One transport read: a valid queue.replay then an invalid-JSON
+        // frame. The good frame is answered AND the bad one gets its id:null
+        // Parse Error — the earlier decode is not discarded.
+        engine.feed(frame(request("q1", "queue.replay", JSONObject())) + encodeFrame("{bad"))
+        val emitted = out.drop(base)
+        assertTrue("queue.replay answered",
+            emitted.any { it.opt("id") == "q1" && it.has("result") })
+        assertTrue("parse error emitted", emitted.any {
+            it.get("id") == JSONObject.NULL &&
+                it.optJSONObject("error")?.getInt("code") == -32700 })
+    }
 }

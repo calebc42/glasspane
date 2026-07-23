@@ -8,6 +8,8 @@
     <!-- SPEC 18.6: reminders fire at an exact wall-clock time. -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- SPEC 20.3: the `vibrate` capability. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:label="EBP Companion"

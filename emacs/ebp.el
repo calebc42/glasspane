@@ -488,6 +488,8 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   client-nonce
   ;; Welcome absorption (SPEC 10.2/10.3 steps 1-2).
   granted profiles surfaces limits input-state
+  ;; SPEC 20.1: the device report, present when capabilities/triggers granted.
+  device
   ;; SPEC 13.1: monotonic per-surface revisions; floors absorbed from the
   ;; welcome and from every applied/stale result.
   (revisions (make-hash-table :test #'equal))
@@ -653,7 +655,9 @@ synchronization barrier (SPEC 10.3)."
           (ebp-client-profiles client) (plist-get result :surface_profiles)
           (ebp-client-surfaces client) (plist-get result :surfaces)
           (ebp-client-limits client) (plist-get result :limits)
-          (ebp-client-input-state client) (plist-get result :input_state))
+          (ebp-client-input-state client) (plist-get result :input_state)
+          ;; SPEC 20.1: absorb the device report (nil unless a module granted).
+          (ebp-client-device client) (plist-get result :device))
     ;; Reported floors cover snapshots AND tombstones (SPEC 10.2/13.3).
     (cl-loop for (key entry) on (plist-get result :surfaces) by #'cddr
              do (puthash (substring (symbol-name key) 1)
@@ -1164,6 +1168,27 @@ COUNT is the owner's accepted total, ERROR the JSON-RPC error plist (1201
    (lambda (result error)
      (when callback
        (funcall callback (and result (plist-get result :count)) error)))))
+
+;;;; Device capabilities (SPEC 20), the client half
+
+(defun ebp-client-device-caps (client)
+  "The capability identifiers the Companion advertised (SPEC 20.1), a list.
+Nil until the welcome carried a device report (capabilities/triggers)."
+  (append (plist-get (ebp-client-device client) :caps) nil))
+
+(cl-defun ebp-client-capability-invoke (client cap &key args callback)
+  "Invoke Companion capability CAP (SPEC 20.2).  ARGS is the closed Args
+plist for the catalog row, or nil for an empty `{}'.  CALLBACK receives
+(RESULT ERROR): RESULT is the exact catalog Result plist; ERROR the
+JSON-RPC error plist (1001 `cap-unsupported', 1002 `cap-permission',
+1003 `cap-failed', or -32602 for an invalid Args shape).  A capability
+invocation is session-scoped and non-durable, and an indeterminate
+outcome MUST NOT be auto-retried (SPEC 20.2)."
+  (ebp-client--request
+   client 'capability.invoke
+   `(:cap ,cap ,@(when args `(:args ,args)))
+   (lambda (result error)
+     (when callback (funcall callback result error)))))
 
 ;;;; Pie menus (SPEC 18.3), the client half
 

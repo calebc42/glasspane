@@ -59,7 +59,7 @@ class DeviceBridge(
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
         supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
             "presentation.pie-menu", "reminders.owner", "surfaces.notification",
-            "editor.sync"),
+            "editor.sync", "capabilities"),
         surfaceProfiles = JSONObject()
             .put("app", JSONObject()
                 .put("node_types", JSONArray(listOf(
@@ -87,6 +87,9 @@ class DeviceBridge(
             .put("max_capture_fields", 64).put("max_dialogs", 4)
             .put("max_pie_menus", 1).put("max_reminders", 256)
             .put("max_editor_sessions", 8),
+        // SPEC 20.1/20.2: advertise the device report and the platform executor.
+        deviceReport = AppCapabilities.deviceReport(),
+        capabilityHandler = AppCapabilities.handler(appContext, 65_536),
     )
 
     fun start() = thread(name = "ebp-bridge", isDaemon = true) {

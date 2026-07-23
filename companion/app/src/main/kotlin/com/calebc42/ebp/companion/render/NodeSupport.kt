@@ -24,11 +24,16 @@ object NodeSupport {
         "icon_button", "chip", "assist_chip", "menu", "checkbox", "switch",
         "enum_list", "slider", "date_button", "time_button")
 
+    /** SPEC 17.3 layout nodes (app profile). */
+    private val LAYOUT_NODE_TYPES: Set<String> = sortedSetOf(
+        "flow_row", "surface", "lazy_column", "card", "collapsible",
+        "reorderable_list", "tabs", "table")
+
     /** SPEC 10.2: the app profile MUST include the Core Node Set plus
      * view.switch and companion.settings.open. */
     val APP_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",
-        "text_input", "scaffold", "editor") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES
+        "text_input", "scaffold", "editor") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES + LAYOUT_NODE_TYPES
 
     val DIALOG_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",

@@ -71,6 +71,10 @@ class RenderCtx(
     fun action(descriptor: JSONObject?, value: Any? = null) =
         bridge.action(surface, descriptor, value)
 
+    /** §14.3 multi-member hooks (on_reorder, on_add_row/col, swipe sides). */
+    fun actionInjecting(descriptor: JSONObject?, injected: JSONObject) =
+        bridge.actionInjecting(surface, descriptor, injected)
+
     fun state(id: String, value: Any?) {
         if (dialog != null) dialog.fields[id] = value // SPEC 18.1: local only
         else bridge.state(surface, id, value)
@@ -105,12 +109,17 @@ fun RenderNode(node: JSONObject, ctx: RenderCtx, modifier: Modifier = Modifier) 
         "empty_state" -> RenderEmptyState(node, ctx, m)
         "progress" -> RenderProgress(node, m)
         "date_stamp" -> RenderDateStamp(node, m)
-        "row" -> Row(modifier = m) {
-            RenderRowChildren(node.optJSONArray("children"), ctx) }
-        "column" -> Column(modifier = m) {
-            RenderColumnChildren(node.optJSONArray("children"), ctx) }
-        "box" -> Box(modifier = m) {
-            RenderChildren(node.optJSONArray("children"), ctx) }
+        "row" -> RenderRow(node, ctx, m)
+        "column" -> RenderColumn(node, ctx, m)
+        "flow_row" -> RenderFlowRow(node, ctx, m)
+        "box" -> RenderBox(node, ctx, m)
+        "surface" -> RenderSurfaceNode(node, ctx, m)
+        "lazy_column" -> RenderLazyColumn(node, ctx, m)
+        "card" -> RenderCard(node, ctx, m)
+        "collapsible" -> RenderCollapsible(node, ctx, m)
+        "tabs" -> RenderTabs(node, ctx, m)
+        "table" -> RenderTable(node, ctx, m)
+        "reorderable_list" -> RenderReorderableList(node, ctx, m)
         "spacer" -> Spacer(m
             .width((safeDp(node.optDouble("width", 0.0)) ?: 0f).dp)
             .height((safeDp(node.optDouble("height", 0.0)) ?: 0f).dp))

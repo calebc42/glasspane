@@ -95,8 +95,11 @@ class ReminderTest {
         assertEquals("non-empty string required", reason(
             JSONObject().put("id", "x").put("title", "").put("at_ms", 1)))
         // Missing at_ms.
-        assertEquals("must be a non-negative timestamp", reason(
+        assertEquals("must be a non-negative integer timestamp", reason(
             JSONObject().put("id", "x").put("title", "T")))
+        // SPEC 4.3: a non-integer at_ms (JSON float) is rejected, not truncated.
+        assertEquals("must be a non-negative integer timestamp", reason(
+            JSONObject().put("id", "x").put("title", "T").put("at_ms", 1.5)))
         // Unknown member (closed object).
         assertEquals("unknown reminder member", reason(
             reminder("x", 1).put("extra", true)))

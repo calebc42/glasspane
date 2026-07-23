@@ -859,8 +859,13 @@ class CompanionEngine(
         if (r.has("body") && r.opt("body") !is String)
             throw ContentInvalid("body", "must be a string")
         val at = r.opt("at_ms")
-        if (at !is Number || at.toLong() < 0 || at.toLong() > 9_007_199_254_740_991L)
-            throw ContentInvalid("at_ms", "must be a non-negative timestamp")
+        // SPEC 4.3: an epoch timestamp is a non-negative INTEGER — a JSON number
+        // with a fractional part (e.g. 1.5, silently truncated by toLong) is
+        // rejected, not accepted. Integrality is checked by value so it holds
+        // whether the parser boxed it as Double or BigDecimal.
+        if (at !is Number || at.toLong() < 0 || at.toLong() > 9_007_199_254_740_991L ||
+            at.toDouble() != Math.floor(at.toDouble()))
+            throw ContentInvalid("at_ms", "must be a non-negative integer timestamp")
         r.optJSONObject("on_tap")?.let { onTap ->
             if (onTap.opt("action") !is String)
                 throw ContentInvalid("on_tap", "must be a remote ActionDescriptor")

@@ -1,7 +1,7 @@
 // AGP 9 carries built-in Kotlin; only the compose compiler plugin is added.
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.plugin.compose")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -17,15 +17,15 @@ android {
     }
     buildFeatures { compose = true }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 }
 
 dependencies {
-    implementation(project(":wire")) // org.json comes from the framework
-    implementation(platform("androidx.compose:compose-bom:2026.02.01"))
-    implementation("androidx.activity:activity-compose:1.10.0")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.ui:ui")
+    implementation(projects.wire) // org.json comes from the framework
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.ui)
 }

@@ -18,6 +18,9 @@ data class TriggerCaps(
     val trackableStateTypes: Set<String>,
     val triggerCaps: Set<String>,
     val maxResponses: Int,
+    /** SPEC 21.4: whether the user approved substituting sensitive-source
+     * (sms/call/calendar) data into an on_fire sink. Default deny. */
+    val sensitiveSubstitutionApproved: Boolean = false,
 )
 
 object TriggerValidator {
@@ -26,6 +29,12 @@ object TriggerValidator {
     private val POLICIES = setOf("drop", "queue", "wake")
     private val EDGES = setOf("rise", "fall", "both")
     private val WEEK = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    // SPEC 21.4: sources whose data reaching a sink needs explicit approval.
+    private val SENSITIVE = setOf("sms.received", "call.state", "calendar.event")
+    // SPEC 21.4: caps that MUST NOT appear in trigger_caps / on_fire (they are
+    // interactive, unbounded, or return non-{} results).
+    private val FORBIDDEN_TRIGGER_CAPS = setOf("settings.open", "apps.list",
+        "clipboard.read", "shortcut.pin", "shortcuts.set", "trigger.fire")
 
     // ------------------------------------------------------------- entrypoint
 
@@ -99,6 +108,10 @@ object TriggerValidator {
             else -> throw ContentInvalid("$path.on_fire", "must be an array")
         }
         val normOnFire = normOnFire(onFire, "$path.on_fire", caps)
+        // SPEC 21.4: routing sensitive-source data into a sink needs approval.
+        if (type in SENSITIVE && !caps.sensitiveSubstitutionApproved &&
+            Substitution.referencesData(normOnFire))
+            throw ContentInvalid("$path.on_fire", "sensitive substitution requires approval")
 
         // Canonical normalized entry: fixed members always present, the three
         // conditional members present only when they apply/were supplied.
@@ -302,6 +315,8 @@ object TriggerValidator {
             if (isCap) {
                 closed(e, "$path[$i]", "cap", "args")
                 val cap = ident(e, "$path[$i].cap")
+                if (cap in FORBIDDEN_TRIGGER_CAPS)
+                    throw ContentInvalid("$path[$i].cap", "cap forbidden in on_fire")
                 if (cap !in caps.triggerCaps)
                     throw ContentInvalid("$path[$i].cap", "cap not in device.trigger_caps")
                 if (e.has("args") && e.opt("args") !is JSONObject)

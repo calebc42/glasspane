@@ -27,6 +27,9 @@ data class CompanionConfig(
     /** SPEC 20.2: the platform executor for capability.invoke. REQUIRED when
      * `device.caps` is non-empty; a null handler fails every invoke as 1003. */
     val capabilityHandler: CapabilityHandler? = null,
+    /** SPEC 21.4: whether the user approved substituting sensitive-source
+     * (sms/call/calendar) trigger data into an on_fire sink. Default deny. */
+    val sensitiveSubstitutionApproved: Boolean = false,
     /** Nonce source, injectable for tests. */
     val nonceSource: () -> String = EbpAuth::generateNonce,
 )
@@ -887,13 +890,39 @@ class CompanionEngine(
      * evaluation. The host supplies live device state; null is unavailable. */
     var triggerStateProvider: (String) -> JSONObject? = { null }
 
+    /** SPEC 21.4: post a substituted local notification ({title?, text}) from
+     * an on_fire entry. The host renders it; a null hook drops it safely. */
+    var triggerNotifyListener: ((JSONObject) -> Unit)? = null
+
     /** SPEC 21.2-21.6: the firing runtime — decides admitted occurrences and
      * drives the ordered pipeline into trigger.fired events. */
     val triggerRuntime = TriggerRuntime(
         store = triggers, now = { queue.effectiveNow() },
         zone = java.time.ZoneId.systemDefault(),
         stateProvider = { type -> triggerStateProvider(type) },
-        emit = ::emitTriggerFired)
+        emit = ::emitTriggerFired, onFire = ::executeOnFire)
+
+    // SPEC 21.4: execute one already-substituted on_fire entry. A notify posts
+    // through the host; a cap re-checks trigger_caps membership and its Args
+    // schema (post-substitution) and runs through the same executor as
+    // capability.invoke. Every failure mode is a safe no-op, never a throw
+    // that could strand later entries or the remote event.
+    private fun executeOnFire(entry: JSONObject) {
+        if (entry.has("notify")) {
+            triggerNotifyListener?.invoke(entry.getJSONObject("notify"))
+            return
+        }
+        val cap = entry.getString("cap")
+        // SPEC 21.4: only unattended trigger_caps may run here.
+        if (cap !in stringSet(config.deviceReport, "trigger_caps")) return
+        val args = entry.optJSONObject("args") ?: JSONObject()
+        try {
+            CapabilityCatalog.validateArgs(cap, args)
+        } catch (e: ContentInvalid) {
+            return // a substitution that broke the Args schema: skip safely
+        }
+        config.capabilityHandler?.invoke(cap, args)
+    }
 
     /** SPEC 21.5: a level-type observation from a device source. */
     @Synchronized
@@ -971,7 +1000,8 @@ class CompanionEngine(
             stateTypes = stringSet(config.deviceReport, "state_types"),
             trackableStateTypes = stringSet(config.deviceReport, "trackable_state_types"),
             triggerCaps = stringSet(config.deviceReport, "trigger_caps"),
-            maxResponses = config.limits.optLong("max_trigger_responses", 16).toInt())
+            maxResponses = config.limits.optLong("max_trigger_responses", 16).toInt(),
+            sensitiveSubstitutionApproved = config.sensitiveSubstitutionApproved)
         val entries = try {
             TriggerValidator.validateSet(params, caps)
         } catch (e: ContentInvalid) {

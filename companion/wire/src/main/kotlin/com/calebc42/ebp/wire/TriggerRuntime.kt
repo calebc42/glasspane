@@ -27,6 +27,9 @@ class TriggerRuntime(
     private val stateProvider: (String) -> JSONObject?,
     /** Route an admitted trigger.fired for this registration + fire data. */
     private val emit: (TriggerStore.Registration, JSONObject) -> Unit,
+    /** SPEC 21.4: execute one substituted on_fire entry ({cap,args?}|{notify}).
+     * Called in authored order at admission; a throw is isolated per entry. */
+    private val onFire: (JSONObject) -> Unit = {},
 ) {
 
     private val WEEK = listOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
@@ -169,7 +172,18 @@ class TriggerRuntime(
         }
         // Steps 2-3: freeze + commit the throttle floor before emitting.
         reg.throttleFloorMs = now()
-        // Step 4 (on_fire) is a later atom. Step 5: remote event eligible.
+        // Step 4: local on_fire in authored order, each substituted against the
+        // fire context; a failing entry is isolated and never stops the others
+        // or cancels the remote event (SPEC 21.4).
+        val id = reg.entry.getString("id")
+        val type = reg.entry.getString("type")
+        val list = reg.entry.getJSONArray("on_fire")
+        for (j in 0 until list.length()) {
+            try {
+                onFire(Substitution.apply(list.getJSONObject(j), id, type, data) as JSONObject)
+            } catch (_: Exception) { /* recorded safely; continue */ }
+        }
+        // Step 5: remote event eligible.
         emit(reg, data)
     }
 

@@ -41,6 +41,7 @@ class DeviceBridge(
     val store = CompanionStores.surfaces(appContext)
     val queue = CompanionStores.queue(appContext)
     private val reminders = CompanionStores.reminders(appContext)
+    private val triggers = CompanionStores.triggers(appContext)
     @Volatile private var current: Socket? = null
 
     private val config = CompanionConfig(
@@ -182,7 +183,7 @@ class DeviceBridge(
 
     private fun serve(socket: Socket) {
         val out = socket.getOutputStream()
-        val engine = CompanionEngine(config, store, queue, reminders) { bytes ->
+        val engine = CompanionEngine(config, store, queue, reminders, triggers) { bytes ->
             // The sink runs on whatever thread emits — the reader, the pump,
             // or the UI dispatch executor. A peer that went away mid-write
             // MUST NOT crash that thread (and with it the app): close the

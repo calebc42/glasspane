@@ -48,6 +48,9 @@ class CompanionEngine(
     /** Shared across connections AND restarts: SPEC 18.6 reminders + fired
      * receipts outlive a session exactly like the queue and surfaces. */
     val reminders: ReminderStore = ReminderStore(),
+    /** Shared across connections AND restarts: SPEC 21.1 trigger registrations
+     * + runtime records outlive a session (baselines re-established on arm). */
+    val triggers: TriggerStore = TriggerStore(),
     private val sink: (ByteArray) -> Unit,
 ) : LiveSession {
     var state: SessionState = SessionState.CONNECTED
@@ -869,10 +872,6 @@ class CompanionEngine(
 
     // -------------------------------------------- device triggers (SPEC 21)
 
-    /** Trigger registrations, scoped to the pairing identity. In-memory for
-     * now like reminders; durable backing lands with the device sources. */
-    val triggers = TriggerStore()
-
     /** Arm hook: (identity, its complete new registration list) after an
      * accepted replace. The host arms/cancels platform event sources. */
     var triggerListener: ((String, List<JSONObject>) -> Unit)? = null
@@ -1015,7 +1014,13 @@ class CompanionEngine(
         if (entries.size > config.limits.optLong("max_triggers", 64))
             return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
                 JSONObject().put("reason", "trigger-limit"))
-        val count = triggers.replace(identity, entries)
+        // SPEC 21.1: the accepted set commits durably before it is claimed; a
+        // storage failure leaves the prior set in force and answers an error.
+        val count = try {
+            triggers.replace(identity, entries)
+        } catch (e: Exception) {
+            return respondError(id, -32603, "Storage failed", "internal-error")
+        }
         // SPEC 21.5: silently baseline the new/changed registrations now;
         // unchanged ids keep the baseline they carried forward (SPEC 21.1).
         triggerRuntime.armBaselines(identity)

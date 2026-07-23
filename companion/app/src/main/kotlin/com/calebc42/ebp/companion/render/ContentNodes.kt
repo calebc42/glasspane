@@ -7,10 +7,13 @@
 // fontifies the text through SyntaxHighlight (W9-h) with the active palette.
 package com.calebc42.ebp.companion.render
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,8 +32,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -49,6 +54,62 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
+
+/**
+ * SPEC 17.2 image: fetch through the guarded ImageLoader off the main thread,
+ * showing a neutral placeholder (labelled by content_description) while it
+ * loads AND on any failure — a blocked address, an over-limit or undecodable
+ * response, a non-advertised form. The response is never treated as an
+ * executable format. content_scale maps fit/crop/fill; width/height/
+ * aspect_ratio size the box.
+ */
+@Composable
+internal fun RenderImage(node: JSONObject, m: Modifier) {
+    val url = node.optString("url")
+    val desc = node.optString("content_description").takeIf { it.isNotEmpty() }
+    val limits = androidx.compose.runtime.remember {
+        ImageLoader.Limits(8_388_608L, 67_108_864L, 16_777_216L)
+    }
+    val bitmap by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, url) {
+        value = ImageLoader.load(url, limits)
+    }
+    val scale = when (node.optString("content_scale")) {
+        "crop" -> androidx.compose.ui.layout.ContentScale.Crop
+        "fill" -> androidx.compose.ui.layout.ContentScale.FillBounds
+        else -> androidx.compose.ui.layout.ContentScale.Fit
+    }
+    val sizeMod = m.then(
+        when {
+            node.has("width") && node.has("height") ->
+                Modifier.size(node.optInt("width").dp, node.optInt("height").dp)
+            node.has("aspect_ratio") ->
+                Modifier.fillMaxWidth().then(
+                    Modifier.aspectRatio(node.optDouble("aspect_ratio", 1.0).toFloat()))
+            else -> Modifier
+        })
+    val bmp = bitmap
+    if (bmp != null) {
+        androidx.compose.foundation.Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = desc,
+            contentScale = scale,
+            modifier = sizeMod)
+    } else {
+        // Neutral placeholder: a broken-image glyph + the description, never the
+        // response content.
+        Box(
+            modifier = sizeMod.then(
+                Modifier.background(
+                    MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))),
+            contentAlignment = Alignment.Center) {
+            Icon(
+                IconMap.get("broken_image"),
+                contentDescription = desc,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(32.dp))
+        }
+    }
+}
 
 /** Map a §17.2 text style name to a TextStyle; unknown falls back to body. */
 @Composable

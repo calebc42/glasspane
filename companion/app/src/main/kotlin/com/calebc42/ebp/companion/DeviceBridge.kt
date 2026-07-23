@@ -72,7 +72,12 @@ class DeviceBridge(
             .put("max_capture_fields", 64).put("max_dialogs", 4)
             .put("max_pie_menus", 1).put("max_reminders", 256)
             .put("max_editor_sessions", 8).put("max_trigger_responses", 8)
-            .put("max_triggers", 64).put("max_device_report_bytes", 8192),
+            .put("max_triggers", 64).put("max_device_report_bytes", 8192)
+            // SPEC 4.5/17.2: the three image limits are REQUIRED whenever image
+            // is advertised — the loader enforces every one.
+            .put("max_image_bytes", 8_388_608)          // 8 MiB encoded
+            .put("max_decoded_image_bytes", 67_108_864) // 64 MiB decoded (ARGB)
+            .put("max_image_pixels", 16_777_216),       // 4096x4096
         // SPEC 20.1/20.2: advertise the device report and the platform executor.
         deviceReport = AppCapabilities.deviceReport(),
         capabilityHandler = AppCapabilities.handler(appContext, 65_536),

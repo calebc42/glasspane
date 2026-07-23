@@ -16,8 +16,12 @@ object NodeSupport {
 
     /** SPEC 17.2 content nodes shared by the app and dialog profiles. */
     private val CONTENT_NODE_TYPES: Set<String> = sortedSetOf(
-        "rich_text", "icon", "badge", "section_header", "empty_state",
+        "rich_text", "icon", "badge", "image", "section_header", "empty_state",
         "progress", "date_stamp")
+
+    /** SPEC 17.2: advertising `image` REQUIRES at least one form feature in the
+     * same profile — the guarded loader handles both https and base64 data. */
+    private val IMAGE_FEATURES: Set<String> = sortedSetOf("image.https", "image.data")
 
     /** SPEC 17.4 input nodes shared by the app and dialog profiles. */
     private val INPUT_NODE_TYPES: Set<String> = sortedSetOf(
@@ -54,8 +58,8 @@ object NodeSupport {
 
     /** SPEC 17.2 image forms / §17.7 registered toolbars land here with their
      * renderer support (image.https, image.data, toolbar.<id>). */
-    val APP_FEATURES: Set<String> = sortedSetOf()
-    val DIALOG_FEATURES: Set<String> = sortedSetOf()
+    val APP_FEATURES: Set<String> = IMAGE_FEATURES
+    val DIALOG_FEATURES: Set<String> = IMAGE_FEATURES
     val NOTIFICATION_FEATURES: Set<String> = sortedSetOf()
 
     private fun profile(nodes: Set<String>, builtins: Set<String>,

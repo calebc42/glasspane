@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
     private val currentDialog = MutableStateFlow<Pair<String, JSONObject>?>(null)
     // SPEC 18.4: null = follow-system (amendment #36).
     private val forcedDark = MutableStateFlow<Boolean?>(null)
+    private val currentPieMenu = MutableStateFlow<Pair<String, JSONObject>?>(null)
     private lateinit var bridge: DeviceBridge
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,7 +54,10 @@ class MainActivity : ComponentActivity() {
                         this, text, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
-            onTheme = { dark -> forcedDark.value = dark })
+            onTheme = { dark -> forcedDark.value = dark },
+            onPieMenuChanged = { id, spec ->
+                currentPieMenu.value = if (spec != null) id to spec else null
+            })
         bridge.start()
         setContent {
             val dark by forcedDark.collectAsState()
@@ -69,6 +73,8 @@ class MainActivity : ComponentActivity() {
                             Modifier.padding(24.dp))
                         else -> RenderNode(s, "app:main", bridge)
                     }
+                    val pie by currentPieMenu.collectAsState()
+                    pie?.let { (id, spec) -> RenderPieMenu(id, spec, bridge) }
                     val dialog by currentDialog.collectAsState()
                     dialog?.let { (id, dspec) ->
                         androidx.compose.ui.window.Dialog(

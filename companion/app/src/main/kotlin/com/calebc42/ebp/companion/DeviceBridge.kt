@@ -38,6 +38,8 @@ class DeviceBridge(
     private val onToast: (String) -> Unit = {},
     /** SPEC 18.4: theme polarity — true/false forced, null follow-system. */
     private val onTheme: (Boolean?) -> Unit = {},
+    /** SPEC 18.3: (menu_id, spec) to present; (menu_id, null) to dismiss. */
+    private val onPieMenuChanged: (String, JSONObject?) -> Unit = { _, _ -> },
 ) {
 
     // SPEC 13.1/15.1: surface histories, tombstones, and input_state drafts
@@ -54,7 +56,8 @@ class DeviceBridge(
         pairings = mapOf(
             "101112131415161718191a1b1c1d1e1f" to
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
-        supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast"),
+        supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
+            "presentation.pie-menu"),
         surfaceProfiles = JSONObject()
             .put("app", JSONObject()
                 .put("node_types", JSONArray(listOf(
@@ -74,7 +77,8 @@ class DeviceBridge(
             .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
             .put("max_surfaces", 64).put("max_surface_ids", 4096)
             .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
-            .put("max_capture_fields", 64).put("max_dialogs", 4),
+            .put("max_capture_fields", 64).put("max_dialogs", 4)
+            .put("max_pie_menus", 1),
     )
 
     fun start() = thread(name = "ebp-bridge", isDaemon = true) {
@@ -140,6 +144,22 @@ class DeviceBridge(
         dispatchExecutor.execute { engine?.completeDialogDismiss(dialogId) }
     }
 
+    /** SPEC 18.3: a radial selection with its zero-based indices. */
+    fun pieMenuSelect(menuId: String, categoryIndex: Int, itemIndex: Int?) {
+        dispatchExecutor.execute { engine?.selectPieMenu(menuId, categoryIndex, itemIndex) }
+    }
+
+    /** SPEC 18.3: dismiss the pie menu on an outside tap. */
+    fun pieMenuDismiss(menuId: String) {
+        dispatchExecutor.execute {
+            engine?.let { e ->
+                e.feed(com.calebc42.ebp.wire.encodeFrame(JSONObject()
+                    .put("jsonrpc", "2.0").put("method", "pie_menu.dismiss")
+                    .put("params", JSONObject().put("menu_id", menuId)).toString()))
+            }
+        }
+    }
+
     private fun serve(socket: Socket) {
         val out = socket.getOutputStream()
         val engine = CompanionEngine(config, store, queue) { bytes ->
@@ -160,6 +180,7 @@ class DeviceBridge(
         engine.dialogListener = { id, spec -> onDialogChanged(id, spec) }
         engine.toastListener = { text, _ -> onToast(text) }
         engine.themeListener = { dark, _, _ -> onTheme(dark) }
+        engine.pieMenuListener = { id, spec -> onPieMenuChanged(id, spec) }
         val input = socket.getInputStream()
         val buffer = ByteArray(8192)
         try {

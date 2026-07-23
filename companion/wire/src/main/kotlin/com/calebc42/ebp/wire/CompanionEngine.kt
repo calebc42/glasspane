@@ -108,6 +108,12 @@ class CompanionEngine(
             dialogs.clear()
             ids.forEach { dialogListener?.invoke(it, null) }
         }
+        // SPEC 18.3: pie menus are ephemeral to the session — dismiss all.
+        if (pieMenus.isNotEmpty()) {
+            val ids = pieMenus.keys.toList()
+            pieMenus.clear()
+            ids.forEach { pieMenuListener?.invoke(it, null) }
+        }
     }
 
     /** The queue_seq this engine's connection put in flight, if any. */
@@ -532,7 +538,117 @@ class CompanionEngine(
             }
             "toast.show" -> handleToastShow(params)
             "theme.set" -> handleThemeSet(params)
+            "pie_menu.show" -> handlePieMenuShow(params)
+            "pie_menu.dismiss" -> handlePieMenuDismiss(params)
         }
+    }
+
+    // ----------------------------------------------------- pie menus (18.3)
+
+    // menu_id -> the categories array of an open menu (ephemeral).
+    private val pieMenus = LinkedHashMap<String, JSONArray>()
+
+    /** Present hook: (menu_id, {categories, center_label?}) to show;
+     * (menu_id, null) to dismiss. */
+    var pieMenuListener: ((String, JSONObject?) -> Unit)? = null
+
+    private fun handlePieMenuShow(params: JSONObject) {
+        if ("presentation.pie-menu" !in granted) return
+        val menuId = params.opt("menu_id") as? String ?: return
+        val categories = params.optJSONArray("categories") ?: return
+        // SPEC 18.3: an invalid menu is dropped, not partially shown.
+        if (!validPieCategories(categories)) return
+        // SPEC 18.3: a new id over the limit is dropped with a diagnostic;
+        // replacing an existing id stays legal at the limit.
+        if (!pieMenus.containsKey(menuId) &&
+            pieMenus.size >= config.limits.optLong("max_pie_menus", 1)) {
+            // SHOULD send a rate-limited log.error (rate limiting is W9).
+            emit(notification("log.error", JSONObject().put("code", 1201)
+                .put("message", "Too many pie menus")
+                .put("data", JSONObject().put("kind", "content-invalid")
+                    .put("reason", "pie-menu-limit"))))
+            return
+        }
+        pieMenus[menuId] = categories
+        val present = JSONObject().put("categories", categories)
+        (params.opt("center_label") as? String)?.let { present.put("center_label", it) }
+        pieMenuListener?.invoke(menuId, present)
+    }
+
+    private fun handlePieMenuDismiss(params: JSONObject) {
+        if ("presentation.pie-menu" !in granted) return
+        val menuId = params.opt("menu_id") as? String ?: return
+        // SPEC 18.3: dismissing an unknown id is a no-op.
+        if (pieMenus.remove(menuId) != null) pieMenuListener?.invoke(menuId, null)
+    }
+
+    private fun validPieCategories(categories: JSONArray): Boolean {
+        if (categories.length() !in 1..10) return false
+        for (i in 0 until categories.length()) {
+            val cat = categories.optJSONObject(i) ?: return false
+            if (cat.opt("label") !is String) return false
+            val hasItems = cat.has("items")
+            val hasOnTap = cat.has("on_tap")
+            if (hasItems == hasOnTap) return false // exactly one
+            if (hasOnTap) {
+                if (!validPieDescriptor(cat.optJSONObject("on_tap"))) return false
+            } else {
+                val items = cat.optJSONArray("items") ?: return false
+                if (items.length() < 1) return false
+                for (j in 0 until items.length()) {
+                    val item = items.optJSONObject(j) ?: return false
+                    if (item.opt("label") !is String) return false
+                    if (!validPieDescriptor(item.optJSONObject("on_tap"))) return false
+                }
+            }
+        }
+        return true
+    }
+
+    /** SPEC 18.3: a pie-menu descriptor is a remote action, drop-only, with
+     * no authored conflict on the injected members. */
+    private fun validPieDescriptor(d: JSONObject?): Boolean {
+        if (d == null || d.opt("action") !is String) return false
+        if (d.optString("when_offline", OFFLINE_DEFAULT) != "drop") return false
+        val args = d.optJSONObject("args") ?: return true
+        return !(args.has("menu_id") || args.has("category_index") ||
+            args.has("item_index"))
+    }
+
+    /**
+     * SPEC 18.3: a user selection. Injects menu_id, zero-based
+     * category_index, and (for a nested item) item_index into a copy of
+     * the descriptor's args, dismisses the ephemeral menu, and dispatches
+     * the drop-only, context-less event.
+     */
+    @Synchronized
+    fun selectPieMenu(menuId: String, categoryIndex: Int, itemIndex: Int? = null) {
+        val categories = pieMenus[menuId] ?: return
+        val category = categories.optJSONObject(categoryIndex) ?: return
+        val descriptor = if (itemIndex != null)
+            category.optJSONArray("items")?.optJSONObject(itemIndex)?.optJSONObject("on_tap")
+        else category.optJSONObject("on_tap")
+        descriptor ?: return
+        val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
+            .put("menu_id", menuId).put("category_index", categoryIndex)
+        if (itemIndex != null) args.put("item_index", itemIndex)
+        pieMenus.remove(menuId)
+        pieMenuListener?.invoke(menuId, null)
+        dispatchContextlessAction(descriptor.getString("action"), args)
+    }
+
+    /** A surface-less, drop-only event.action (SPEC 14.4: pie-menu events
+     * omit surface/revision_seen/dialog_id). Live delivery only. */
+    private fun dispatchContextlessAction(action: String, args: JSONObject) {
+        if (state != SessionState.READY) return
+        val params = JSONObject()
+            .put("event_id", EbpAuth.generateNonce())
+            .put("action", action)
+            .put("occurred_at_ms", queue.effectiveNow())
+        if (args.length() > 0) params.put("args", args)
+        if (params.toString().toByteArray(Charsets.UTF_8).size >
+            config.limits.getLong("max_event_bytes")) return
+        sendRequest("event.action", params) { _, _ -> }
     }
 
     // ------------------------------------------------------- themes (18.4)

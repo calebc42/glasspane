@@ -1003,6 +1003,24 @@ fully replaces the previously pushed theme."
      ,@(when colors `(:colors ,(if (eq colors 'null) :null colors)))
      ,@(when syntax `(:syntax ,(if (eq syntax 'null) :null syntax))))))
 
+;;;; Pie menus (SPEC 18.3), the client half
+
+(cl-defun ebp-client-pie-menu-show (client menu-id categories &key center-label)
+  "Show an ephemeral radial menu (SPEC 18.3).  CATEGORIES is a vector of
+1..10 plists, each `(:label S :on_tap DESC)' for a leaf or
+`(:label S :items [(:label S :on_tap DESC) ...])' for a nested set.
+Every DESC is a remote drop-only ActionDescriptor; the Companion injects
+`menu_id'/`category_index'/`item_index' at selection.  Showing an
+existing MENU-ID replaces it."
+  (ebp-client-notify
+   client 'pie_menu.show
+   `(:menu_id ,menu-id :categories ,categories
+     ,@(when center-label `(:center_label ,center-label)))))
+
+(defun ebp-client-pie-menu-dismiss (client menu-id)
+  "Dismiss the pie menu MENU-ID (SPEC 18.3); unknown ids are a no-op."
+  (ebp-client-notify client 'pie_menu.dismiss `(:menu_id ,menu-id)))
+
 ;;;; Dialogs (SPEC 18.1), the client half
 
 (cl-defun ebp-client-dialog-show (client dialog-id spec &key style callback)

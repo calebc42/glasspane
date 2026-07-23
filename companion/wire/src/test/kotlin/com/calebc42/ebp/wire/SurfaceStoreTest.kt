@@ -360,6 +360,30 @@ class SurfaceStoreTest {
     }
 
     @Test
+    fun durableStoreSurvivesProcessDeath() {
+        // SPEC 13.1/15.1: surface histories, tombstones, and the input_state
+        // draft outlive process death — a fresh store on the same file.
+        val file = File.createTempFile("ebp-surfaces", ".json").also { it.deleteOnExit() }
+        val s1 = SurfaceStore(16, 1024, backing = FileSurfaceBacking(file))
+        s1.update("app:main", 5, inputSpec("authored"), null, null, null)
+        s1.putDraft("app:main", "title", "offline edit")
+        s1.remove("app:gone", 3)
+        // A wholly new store reads the same file (the process died).
+        val s2 = SurfaceStore(16, 1024, backing = FileSurfaceBacking(file))
+        // The dirty draft survived and is reported for the present surface.
+        assertEquals("offline edit",
+            s2.inputState().getJSONObject("app:main").getString("title"))
+        assertEquals("offline edit", s2.currentValue("app:main", "title"))
+        // The revision floor survived — a stale update is refused.
+        assertEquals("stale", s2.update("app:main", 5, inputSpec("authored"),
+            null, null, null).status)
+        // The tombstone survived, reported not-present (SPEC 13.1).
+        val snap = s2.snapshot().getJSONObject("app:gone")
+        assertEquals(3L, snap.getLong("revision"))
+        assertFalse(snap.getBoolean("present"))
+    }
+
+    @Test
     fun injectedMemberConflictRejects() {
         // SPEC 14.3: a remote descriptor on a value-producing hook must not
         // author the injected member; on hooks that inject nothing it may.

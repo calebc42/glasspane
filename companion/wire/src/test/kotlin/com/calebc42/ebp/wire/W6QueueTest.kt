@@ -411,21 +411,31 @@ class W6QueueTest {
 
     @Test
     fun offlineDraftThenSynchronizationThenReplay() {
-        val file = temp.newFile("queue.json")
-        val store = surfaceWithInput()
-        val out1 = mutableListOf<JSONObject>()
-        val q1 = DurableQueue(FileQueueStore(file), 256, 8_388_608)
-        val e1 = engineOn(q1, store, out1)
-        // Offline: the user edits, then taps an action capturing the field.
-        e1.publishState("app:main", "title", "offline edit")
-        e1.dispatchAction("app:main",
-            queuedDescriptor().put("capture_fields", JSONArray(listOf("title"))), null)
-        assertTrue(out1.isEmpty()) // nothing on the wire without a session
+        val queueFile = temp.newFile("queue.json")
+        val surfaceFile = temp.newFile("surfaces.json")
+        // Life 1: the user edits offline, then taps an action capturing the
+        // field. Process death drops every object; only the two files carry
+        // state forward — a genuine kill, not a same-object reconnection.
+        run {
+            val store = SurfaceStore(16, 1024, backing = FileSurfaceBacking(surfaceFile))
+            store.update("app:main", 1, JSONObject().put("t", "text_input")
+                .put("id", "title").put("value", "authored"), null, null, null)
+            val q1 = DurableQueue(FileQueueStore(queueFile), 256, 8_388_608)
+            val out1 = mutableListOf<JSONObject>()
+            val e1 = engineOn(q1, store, out1)
+            e1.publishState("app:main", "title", "offline edit")
+            e1.dispatchAction("app:main",
+                queuedDescriptor().put("capture_fields", JSONArray(listOf("title"))), null)
+            assertTrue(out1.isEmpty()) // nothing on the wire without a session
+        }
 
-        // Reconnection: welcome carries the draft AND the queued count;
-        // replay delivers the event with its occurrence-time capture.
+        // Life 2: fresh objects read the same files. The welcome carries the
+        // durable draft (SPEC 15.1 input_state) AND the queued count; replay
+        // delivers the event with its occurrence-time capture.
+        val store2 = SurfaceStore(16, 1024, backing = FileSurfaceBacking(surfaceFile))
+        val q2 = DurableQueue(FileQueueStore(queueFile), 256, 8_388_608)
         val out2 = mutableListOf<JSONObject>()
-        val e2 = engineOn(q1, store, out2)
+        val e2 = engineOn(q2, store2, out2)
         e2.handshake(toReady = false)
         val welcome = out2.last().getJSONObject("result")
         assertEquals("offline edit", welcome.getJSONObject("input_state")
@@ -436,6 +446,6 @@ class W6QueueTest {
         assertEquals("offline edit", event.getJSONObject("fields").getString("title"))
         assertNotNull(event.getLong("queued_at_ms"))
         respondTo(e2, out2.events().single(), "accepted")
-        assertEquals(0, q1.count())
+        assertEquals(0, q2.count())
     }
 }

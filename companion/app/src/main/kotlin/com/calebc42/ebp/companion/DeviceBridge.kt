@@ -13,6 +13,7 @@ import com.calebc42.ebp.wire.CompanionConfig
 import com.calebc42.ebp.wire.DurableQueue
 import com.calebc42.ebp.wire.EbpAuth
 import com.calebc42.ebp.wire.FileQueueStore
+import com.calebc42.ebp.wire.FileSurfaceBacking
 import com.calebc42.ebp.wire.SessionState
 import com.calebc42.ebp.wire.SurfaceStore
 import org.json.JSONArray
@@ -25,6 +26,7 @@ import kotlin.concurrent.thread
 
 class DeviceBridge(
     queueFile: File,
+    surfaceFile: File,
     private val onSurfaceChanged: (JSONObject?) -> Unit,
     /** SPEC 15.1: storage failure and queue exhaustion MUST reach the
      * user as a visible diagnostic. */
@@ -34,7 +36,9 @@ class DeviceBridge(
     private val onDialogChanged: (String?, JSONObject?) -> Unit = { _, _ -> },
 ) {
 
-    val store = SurfaceStore(64, 4096)
+    // SPEC 13.1/15.1: surface histories, tombstones, and input_state drafts
+    // survive process and device restarts, like the durable queue.
+    val store = SurfaceStore(64, 4096, backing = FileSurfaceBacking(surfaceFile))
 
     /** SPEC 15: the durable queue survives process and device restarts. */
     val queue = DurableQueue(FileQueueStore(queueFile), 256, 8_388_608)

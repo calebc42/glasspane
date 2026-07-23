@@ -16,6 +16,9 @@ class SurfaceStore(
     private val maxSurfaces: Long,
     private val maxSurfaceIds: Long,
     private val maxCaptureFields: Long = 64,
+    /** SPEC 13.1/15.1: durable surface histories + input_state. In-memory
+     * by default; DeviceBridge wires a file so both survive process death. */
+    private val backing: SurfaceBacking = MemorySurfaceBacking(),
 ) {
 
     private class Record(
@@ -28,6 +31,39 @@ class SurfaceStore(
 
     private val records = LinkedHashMap<String, Record>()
     private val drafts = HashMap<Pair<String, String>, Any?>()
+
+    init {
+        // SPEC 10.4/13.1: the store outlives connections AND process death.
+        // Statefuls are recomputed from the durable spec; a record whose
+        // spec no longer validates is dropped rather than crashing startup.
+        val state = backing.load()
+        for (r in state.records) {
+            val statefuls = if (r.present && r.spec != null)
+                runCatching {
+                    SpecValidator.validateSurfaceSpec(r.spec, maxCaptureFields = maxCaptureFields)
+                }.getOrNull() ?: continue
+            else emptyMap()
+            records[r.surface] = Record(r.revision, r.present, r.spec, r.currentView, statefuls)
+        }
+        for (d in state.drafts) drafts[d.surface to d.id] = d.value
+    }
+
+    /**
+     * SPEC 15.1: commit the surface histories and the input_state snapshot
+     * durably. Best-effort like the queue's expiry sweep — a persist failure
+     * leaves the last durable state, and Emacs re-pushes surfaces on
+     * reconnect regardless. Called on every accepted mutation, so a draft
+     * is durable before any later durable event (SPEC 15.1 ordering).
+     */
+    private fun persist() {
+        runCatching {
+            val recs = records.map { (surface, r) ->
+                PersistedRecord(surface, r.revision, r.present, r.spec, r.currentView)
+            }
+            val drs = drafts.map { (k, v) -> PersistedDraft(k.first, k.second, v) }
+            backing.replace(SurfaceState(recs, drs))
+        }
+    }
 
     fun isValidSurfaceId(id: String): Boolean =
         SURFACE_ID.matches(id) && id.toByteArray(Charsets.UTF_8).size <= 128
@@ -104,6 +140,7 @@ class SurfaceStore(
         next.statefuls = statefuls
         records[surface] = next
         reconcileDrafts(surface, statefuls, reset)
+        persist()
         return SurfaceResult("applied", revision, true)
     }
 
@@ -125,6 +162,7 @@ class SurfaceStore(
         records[surface] = next
         // SPEC 13.3: tombstoning erases every draft belonging to the surface.
         drafts.keys.removeAll { it.first == surface }
+        persist()
         return SurfaceResult("applied", revision, false)
     }
 
@@ -159,6 +197,9 @@ class SurfaceStore(
         val node = records[surface]?.statefuls?.get(id) ?: return
         if (node.optBoolean("password")) return // SPEC 14.6: never retained
         drafts[surface to id] = value
+        // SPEC 15.1: the input_state snapshot is durable no later than any
+        // event created from this interaction.
+        persist()
     }
 
     fun draft(surface: String, id: String): Any? = drafts[surface to id]

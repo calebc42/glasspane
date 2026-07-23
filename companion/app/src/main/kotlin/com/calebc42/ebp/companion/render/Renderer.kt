@@ -48,7 +48,9 @@ import org.json.JSONObject
  * local and never emit state.changed. */
 class DialogContext(
     val dialogId: String,
-    val fields: SnapshotStateMap<String, String>,
+    // Raw scalar values (string, boolean, number) so §14.6 capture returns
+    // each stateful node's logical value, not a stringified one.
+    val fields: SnapshotStateMap<String, Any?>,
     val bridge: DeviceBridge,
 )
 
@@ -70,7 +72,7 @@ class RenderCtx(
         bridge.action(surface, descriptor, value)
 
     fun state(id: String, value: Any?) {
-        if (dialog != null) dialog.fields[id] = value?.toString() ?: ""
+        if (dialog != null) dialog.fields[id] = value // SPEC 18.1: local only
         else bridge.state(surface, id, value)
     }
 }
@@ -85,7 +87,7 @@ fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
 /** Root of a dialog's node tree: owns the local field map (SPEC 18.1). */
 @Composable
 fun RenderDialogRoot(dialogId: String, spec: JSONObject, bridge: DeviceBridge) {
-    val fields = remember(dialogId) { mutableStateMapOf<String, String>() }
+    val fields = remember(dialogId) { mutableStateMapOf<String, Any?>() }
     RenderNode(spec, RenderCtx("dialog:$dialogId", bridge,
         DialogContext(dialogId, fields, bridge)))
 }
@@ -115,10 +117,17 @@ fun RenderNode(node: JSONObject, ctx: RenderCtx, modifier: Modifier = Modifier) 
         "divider" -> HorizontalDivider(modifier = m)
         "scaffold" -> RenderScaffold(node, ctx)
         "editor" -> RenderEditor(node, ctx, m)
-        "button" -> Button(
-            enabled = node.optBoolean("enabled", true), // SPEC 17.4
-            onClick = { onButton(node.optJSONObject("on_tap"), ctx) },
-            modifier = m) { Text(node.optString("label")) }
+        "button" -> RenderButton(node, ctx, m)
+        "icon_button" -> RenderIconButton(node, ctx, m)
+        "chip" -> RenderChip(node, ctx, m)
+        "assist_chip" -> RenderAssistChip(node, ctx, m)
+        "menu" -> RenderMenu(node, ctx, m)
+        "checkbox" -> RenderCheckbox(node, ctx, m)
+        "switch" -> RenderSwitch(node, ctx, m)
+        "enum_list" -> RenderEnumList(node, ctx, m)
+        "slider" -> RenderSlider(node, ctx, m)
+        "date_button" -> RenderDateButton(node, ctx, m)
+        "time_button" -> RenderTimeButton(node, ctx, m)
         "text_input" -> RenderTextInput(node, ctx, m)
         else ->
             // SPEC 16.2: unknown types render children as a neutral

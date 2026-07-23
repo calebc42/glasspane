@@ -19,15 +19,20 @@ object NodeSupport {
         "rich_text", "icon", "badge", "section_header", "empty_state",
         "progress", "date_stamp")
 
+    /** SPEC 17.4 input nodes shared by the app and dialog profiles. */
+    private val INPUT_NODE_TYPES: Set<String> = sortedSetOf(
+        "icon_button", "chip", "assist_chip", "menu", "checkbox", "switch",
+        "enum_list", "slider", "date_button", "time_button")
+
     /** SPEC 10.2: the app profile MUST include the Core Node Set plus
      * view.switch and companion.settings.open. */
     val APP_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",
-        "text_input", "scaffold", "editor") + CONTENT_NODE_TYPES
+        "text_input", "scaffold", "editor") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES
 
     val DIALOG_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",
-        "text_input") + CONTENT_NODE_TYPES
+        "text_input") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES
 
     val NOTIFICATION_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider")

@@ -521,14 +521,37 @@ class CompanionEngine(
         // a notification has no id to answer (log.error arrives with W9).
         val params = rawParams as? JSONObject ?: return
         // SPEC 7.5/18.1: rpc.cancel concludes an outstanding dialog with 1301.
-        if (method == "rpc.cancel") {
-            val cancelId = params.opt("id")
-            val entry = dialogs.entries.find { it.value == cancelId } ?: return
-            dialogs.remove(entry.key)
-            respondError(entry.value, 1301, "Request was cancelled",
-                "request-cancelled")
-            dialogListener?.invoke(entry.key, null)
+        when (method) {
+            "rpc.cancel" -> {
+                val cancelId = params.opt("id")
+                val entry = dialogs.entries.find { it.value == cancelId } ?: return
+                dialogs.remove(entry.key)
+                respondError(entry.value, 1301, "Request was cancelled",
+                    "request-cancelled")
+                dialogListener?.invoke(entry.key, null)
+            }
+            "toast.show" -> handleToastShow(params)
         }
+    }
+
+    // ------------------------------------------------------- toasts (18.2)
+
+    /** Present hook: (text, duration_s or null for the platform default).
+     * Best-effort presentation — never an acknowledgement (SPEC 18.2). */
+    var toastListener: ((String, Long?) -> Unit)? = null
+
+    private fun handleToastShow(params: JSONObject) {
+        // SPEC 22.1: presentation.toast must have been granted.
+        if ("presentation.toast" !in granted) return
+        // SPEC 18.2: text REQUIRED plain text; duration_s in 1..10 or absent.
+        val text = params.opt("text") as? String ?: return
+        val duration = when (val d = params.opt("duration_s")) {
+            null -> null
+            is Int -> d.toLong().takeIf { it in 1..10 } ?: return
+            is Long -> d.takeIf { it in 1..10 } ?: return
+            else -> return
+        }
+        toastListener?.invoke(text, duration)
     }
 
     // ------------------------------------------------------ dialogs (18.1)

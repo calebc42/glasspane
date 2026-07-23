@@ -41,6 +41,12 @@ class MainActivity : ComponentActivity() {
                 // SPEC 18.1: one outstanding dialog presented at a time here.
                 currentDialog.value = if (spec != null && id != null) id to spec
                     else null
+            },
+            onToast = { text ->
+                runOnUiThread {
+                    android.widget.Toast.makeText(
+                        this, text, android.widget.Toast.LENGTH_SHORT).show()
+                }
             })
         bridge.start()
         setContent {

@@ -34,6 +34,8 @@ class DeviceBridge(
     /** SPEC 18.1: (dialog_id, spec) to present; (dialog_id, null) to
      * dismiss. */
     private val onDialogChanged: (String?, JSONObject?) -> Unit = { _, _ -> },
+    /** SPEC 18.2: best-effort toast text. */
+    private val onToast: (String) -> Unit = {},
 ) {
 
     // SPEC 13.1/15.1: surface histories, tombstones, and input_state drafts
@@ -50,7 +52,7 @@ class DeviceBridge(
         pairings = mapOf(
             "101112131415161718191a1b1c1d1e1f" to
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
-        supportedCapabilities = setOf("theme", "surfaces.dialog"),
+        supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast"),
         surfaceProfiles = JSONObject()
             .put("app", JSONObject()
                 .put("node_types", JSONArray(listOf(
@@ -154,6 +156,7 @@ class DeviceBridge(
             if (surface.startsWith("app:")) onSurfaceChanged(store.spec(surface))
         }
         engine.dialogListener = { id, spec -> onDialogChanged(id, spec) }
+        engine.toastListener = { text, _ -> onToast(text) }
         val input = socket.getInputStream()
         val buffer = ByteArray(8192)
         try {

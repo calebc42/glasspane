@@ -978,6 +978,16 @@ application's business (REWRITE-PLAN boundary); this owns the revisions."
   "Tombstone SURFACE at a fresh revision (SPEC 13.3); returns the revision."
   (ebp-client--surface-request client 'surface.remove surface nil callback))
 
+;;;; Toasts (SPEC 18.2), the client half
+
+(cl-defun ebp-client-toast (client text &key duration-s)
+  "Show a best-effort toast (SPEC 18.2).  TEXT is plain text; DURATION-S,
+when given, is 1..10 seconds.  Fire-and-forget: a toast is never an
+acknowledgement and carries no result."
+  (ebp-client-notify
+   client 'toast.show
+   `(:text ,text ,@(when duration-s `(:duration_s ,duration-s)))))
+
 ;;;; Dialogs (SPEC 18.1), the client half
 
 (cl-defun ebp-client-dialog-show (client dialog-id spec &key style callback)

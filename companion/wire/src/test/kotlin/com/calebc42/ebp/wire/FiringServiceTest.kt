@@ -10,6 +10,7 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -131,5 +132,46 @@ class FiringServiceTest {
         service.recover()
         assertTrue(!queue.headIsPendingLocal())                              // marker cleared
         assertEquals(12_345L, store.registration("id", "bat")!!.throttleFloorMs) // floored
+    }
+
+    private val timeCaps = TriggerCaps(
+        triggerTypes = setOf("time"), stateTypes = emptySet(),
+        trackableStateTypes = emptySet(), triggerCaps = emptySet(), maxResponses = 4)
+
+    private fun timeEntries(id: String, params: JSONObject) =
+        TriggerValidator.validateSet(JSONObject().put("triggers", JSONArray().put(
+            JSONObject().put("id", id).put("type", "time").put("params", params)
+                .put("policy", "queue").put("ttl_s", 86_400))), timeCaps)
+
+    private fun firedEvent(id: String, occurred: Long) = JSONObject()
+        .put("event_id", "e-$id").put("action", "trigger.fired")
+        .put("occurred_at_ms", occurred)
+        .put("args", JSONObject().put("id", id).put("type", "time").put("data", JSONObject()))
+
+    @Test
+    fun recoverReconstructsOneShotAndEverySMarkers() {
+        // A torn A/B commit: the trigger.fired event is durably queued but the
+        // registration record (oneShotCompleted / lastFireFloorMs) was lost to a
+        // crash. recover() must re-assert both so a restart cannot re-fire an
+        // exactly-once one-shot nor re-phase a repeat (SPEC 21.5).
+        val storeFile = File(tmp.root, "t.json")
+        val store = TriggerStore(FileTriggerBacking(storeFile))
+        store.replace("os", timeEntries("os", JSONObject().put("at_ms", 9_999_999_999L)))
+        store.replace("ev", timeEntries("ev", JSONObject().put("every_s", 60)))
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        queue.admit(firedEvent("os", 5_000L), "queue", null, 86_400)
+        queue.admit(firedEvent("ev", 7_000L), "queue", null, 86_400)
+        // Records lost: neither marker is set on disk before recovery.
+        assertFalse(store.registration("os", "os")!!.oneShotCompleted)
+        assertNull(store.registration("ev", "ev")!!.lastFireFloorMs)
+
+        TriggerFiringService(store, queue, 262_144).recover()
+
+        assertTrue(store.registration("os", "os")!!.oneShotCompleted)     // reconstructed
+        assertEquals(7_000L, store.registration("ev", "ev")!!.lastFireFloorMs)
+        // And both survive a store reload (persisted, not just in memory).
+        val reloaded = TriggerStore(FileTriggerBacking(storeFile))
+        assertTrue(reloaded.registration("os", "os")!!.oneShotCompleted)
+        assertEquals(7_000L, reloaded.registration("ev", "ev")!!.lastFireFloorMs)
     }
 }

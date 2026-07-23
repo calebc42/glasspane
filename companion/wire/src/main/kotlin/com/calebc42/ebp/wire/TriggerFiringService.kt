@@ -201,9 +201,15 @@ class TriggerFiringService(
      * mid-transaction. (1) Clear every pending-local marker so its remote event
      * becomes eligible — recovery MUST NOT strand a remote event because a
      * local effect cannot be proven; the skipped local effect is the accepted
-     * cost. (2) Floor each registration's throttle from surviving queued
-     * trigger.fired records, so an A-committed/B-lost window cannot re-fire
-     * immediately after restart.
+     * cost. (2) Reconstruct each registration's runtime records from surviving
+     * queued trigger.fired records so an A-committed/B-lost window (the queue
+     * event durably written but the record write lost to a crash) cannot re-fire
+     * after restart: floor the throttle, AND — critically for the un-throttled
+     * cases — re-assert a one-shot's completion and a repeat's last-fire floor,
+     * which a bare throttle floor does not cover (SPEC 21.5: the completion
+     * marker MUST survive; a completed one-shot MUST NOT create another
+     * occurrence). A `drop` needs no coverage here: its marker persists before
+     * any live delivery, so no torn window exists.
      */
     @Synchronized
     fun recover() {
@@ -218,6 +224,15 @@ class TriggerFiringService(
                 val reg = store.registration(identity, id) ?: continue
                 if (occurred > (reg.throttleFloorMs ?: Long.MIN_VALUE)) {
                     reg.throttleFloorMs = occurred; changed = true
+                }
+                val params = reg.entry.optJSONObject("params")
+                if (reg.entry.getString("type") == "time" && params != null) {
+                    if (params.has("at_ms") && !reg.oneShotCompleted) {
+                        reg.oneShotCompleted = true; changed = true
+                    } else if (params.has("every_s") &&
+                        occurred > (reg.lastFireFloorMs ?: Long.MIN_VALUE)) {
+                        reg.lastFireFloorMs = occurred; changed = true
+                    }
                 }
             }
         }

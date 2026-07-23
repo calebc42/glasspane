@@ -51,6 +51,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -177,7 +178,7 @@ internal fun RenderMenu(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 internal fun RenderCheckbox(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val id = node.optString("id")
     val enabled = node.optBoolean("enabled", true)
-    var checked by rememberSaveable(ctx.path, id) {
+    var checked by rememberSaveable(ctx.surface, id, key = "in:${ctx.surface}:$id") {
         mutableStateOf(node.optBoolean("checked", false))
     }
     val onChange = node.optJSONObject("on_change")
@@ -197,7 +198,7 @@ internal fun RenderCheckbox(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 internal fun RenderSwitch(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val id = node.optString("id")
     val enabled = node.optBoolean("enabled", true)
-    var checked by rememberSaveable(ctx.path, id) {
+    var checked by rememberSaveable(ctx.surface, id, key = "in:${ctx.surface}:$id") {
         mutableStateOf(node.optBoolean("checked", false))
     }
     val onChange = node.optJSONObject("on_change")
@@ -230,26 +231,36 @@ internal fun RenderEnumList(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val onChange = node.optJSONObject("on_change")
     val options = node.optJSONArray("options") ?: JSONArray()
 
-    // Seed selected indices from the authored value (§4.3 equality).
-    fun seedIndices(): Set<Int> {
-        val v = node.opt("value") ?: return emptySet()
+    val optionValues = (0 until options.length()).mapNotNull { options.optJSONObject(it)?.opt("value") }
+    // Seed selection from the authored value (§4.3 equality), keeping only
+    // values that match an authored option.
+    fun seedValues(): List<Any> {
+        val v = node.opt("value") ?: return emptyList()
         val wanted: List<Any> = if (v is JSONArray)
             (0 until v.length()).map { v.get(it) } else listOf(v)
-        val out = mutableSetOf<Int>()
-        for (i in 0 until options.length()) {
-            val ov = options.optJSONObject(i)?.opt("value") ?: continue
-            if (wanted.any { jsonValueEquals(it, ov) }) out.add(i)
-        }
-        return out
+        return wanted.filter { w -> optionValues.any { jsonValueEquals(w, it) } }
     }
-    var selected by remember(ctx.path, id) { mutableStateOf(seedIndices()) }
-    var added by remember(ctx.path, id) { mutableStateOf(listOf<String>()) }
-    var selectedAdded by remember(ctx.path, id) { mutableStateOf(setOf<String>()) }
+    // SPEC 16.1/13.6: input drafts key on the wire address (surface+id), NOT the
+    // key-first presentation path — changing only a `key` keeps the draft.
+    // Selection is retained by VALUE, not index, so a same-identity re-push that
+    // reorders/changes options never re-points a stale index at a new value.
+    var selectedValues by remember(ctx.surface, id) { mutableStateOf(seedValues()) }
+    var added by remember(ctx.surface, id) { mutableStateOf(listOf<String>()) }
+    var selectedAdded by remember(ctx.surface, id) { mutableStateOf(setOf<String>()) }
     var showAdd by remember { mutableStateOf(false) }
 
+    // SPEC 17.4 (audit I7): drop a retained selected value that the new options
+    // no longer offer, mirroring the tabs invalid-index reset.
+    val optSig = options.toString()
+    LaunchedEffect(optSig) {
+        val pruned = selectedValues.filter { s -> optionValues.any { jsonValueEquals(s, it) } }
+        if (pruned.size != selectedValues.size) selectedValues = pruned
+    }
+    fun isSelected(optValue: Any?): Boolean =
+        optValue != null && selectedValues.any { jsonValueEquals(it, optValue) }
+
     fun currentValue(): Any? {
-        val values = selected.sorted().mapNotNull { options.optJSONObject(it)?.opt("value") } +
-            selectedAdded.toList()
+        val values = selectedValues + selectedAdded.toList()
         return if (multi) JSONArray(values)
         else values.firstOrNull() ?: JSONObject.NULL
     }
@@ -266,13 +277,17 @@ internal fun RenderEnumList(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for (i in 0 until options.length()) {
             val opt = options.optJSONObject(i) ?: continue
+            val ov = opt.opt("value")
             FilterChip(
-                selected = i in selected,
+                selected = isSelected(ov),
                 enabled = enabled,
                 onClick = {
-                    selected = if (i in selected) selected - i
-                    else (if (multi) selected + i else setOf(i))
-                        .also { if (!multi) selectedAdded = emptySet() }
+                    if (ov == null) return@FilterChip
+                    selectedValues = when {
+                        isSelected(ov) -> selectedValues.filterNot { jsonValueEquals(it, ov) }
+                        multi -> selectedValues + ov
+                        else -> listOf(ov).also { selectedAdded = emptySet() }
+                    }
                     publish()
                 },
                 label = { Text(opt.optString("label")) })
@@ -284,7 +299,7 @@ internal fun RenderEnumList(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 onClick = {
                     selectedAdded = if (extra in selectedAdded) selectedAdded - extra
                     else (if (multi) selectedAdded + extra else setOf(extra))
-                        .also { if (!multi) selected = emptySet() }
+                        .also { if (!multi) selectedValues = emptyList() }
                     publish()
                 },
                 label = { Text(extra) })
@@ -302,7 +317,7 @@ internal fun RenderEnumList(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             if (v.isNotEmpty() && v !in added) {
                 added = added + v
                 selectedAdded = if (multi) selectedAdded + v else setOf(v)
-                if (!multi) selected = emptySet()
+                if (!multi) selectedValues = emptyList()
                 publish()
             }
             showAdd = false
@@ -341,7 +356,7 @@ internal fun RenderSlider(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 if (jsonValueEquals(values.get(i), v)) return i
             return 0
         }
-        var index by remember(ctx.path, id) { mutableIntStateOf(seedIndex()) }
+        var index by remember(ctx.surface, id) { mutableIntStateOf(seedIndex()) }
         Slider(
             value = index.toFloat(),
             onValueChange = { index = it.toInt().coerceIn(0, n - 1) },
@@ -357,7 +372,7 @@ internal fun RenderSlider(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     } else {
         val min = node.optDouble("min", 0.0).toFloat()
         val max = node.optDouble("max", 1.0).toFloat()
-        var pos by remember(ctx.path, id) {
+        var pos by remember(ctx.surface, id) {
             mutableFloatStateOf(node.optDouble("value", min.toDouble()).toFloat())
         }
         Slider(

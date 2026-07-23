@@ -313,7 +313,10 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val enabled = node.optBoolean("enabled", true)
     // A TextFieldValue (not a bare String) so the toolbar can read the live
     // selection/caret for ${selection}, placements, line ops, and edit.command.
-    var value by rememberSaveable(ctx.path, id, stateSaver = TextFieldValue.Saver) {
+    // SPEC 16.1/13.6: the draft keys on the wire address (surface+id), not the
+    // key-first path — changing only a `key` keeps a compatible draft.
+    var value by rememberSaveable(ctx.surface, id, stateSaver = TextFieldValue.Saver,
+        key = "ed:${ctx.surface}:$id") {
         mutableStateOf(TextFieldValue(node.optString("value")))
     }
     // SPEC 18.4/17.4: a `syntax` language recolours the field in place via an

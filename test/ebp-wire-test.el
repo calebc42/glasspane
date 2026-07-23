@@ -578,6 +578,46 @@ floors (including tombstones) and absorb applied/stale results."
                                (or (alist-get 'result m) (alist-get 'error m))))
               (funcall (plist-get server :received))))
 
+(ert-deftest ebp-test-inbound-fails-closed-before-auth ()
+  "SPEC 10.1/7.3: before the welcome is verified every inbound request
+receives 1200 not-authenticated — even a registered or unknown one — and
+every notification is dropped, with no handler run.  `syncing' (replay)
+and `ready' dispatch normally."
+  (let* ((ran nil)
+         (params (ebp-test--event-params "00112233445566778899aabbccddeeff"))
+         (client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts")))
+         (dispatch-code
+          (lambda (method)
+            (condition-case err
+                (progn (ebp-client--request-dispatcher client nil method params)
+                       nil)
+              (jsonrpc-error (alist-get 'jsonrpc-error-code (cdr err)))))))
+    ;; Spy handlers replace the endpoint's real SPEC 14 servers.
+    (ebp-client-register-handler client "event.action"
+                                 (lambda (_c _p) (setq ran t) '(:status "accepted")))
+    (ebp-client-register-handler client "state.changed"
+                                 (lambda (_c _p) (setq ran t)))
+    (dolist (state '(connected awaiting-nonce challenged awaiting-welcome))
+      (setf (ebp-client-state client) state)
+      (setq ran nil)
+      ;; A registered request fails closed with 1200, handler untouched.
+      (should (equal (funcall dispatch-code 'event.action) 1200))
+      (should-not ran)
+      ;; An unknown request is 1200 too — not -32601 (SPEC 10.1).
+      (should (equal (funcall dispatch-code 'no.such) 1200))
+      ;; A notification is dropped silently.
+      (ebp-client--notification-dispatcher client nil 'state.changed params)
+      (should-not ran))
+    (dolist (state '(syncing ready))
+      (setf (ebp-client-state client) state)
+      (setq ran nil)
+      (ebp-client--request-dispatcher client nil 'event.action params)
+      (should ran)
+      (setq ran nil)
+      (ebp-client--notification-dispatcher client nil 'state.changed params)
+      (should ran))))
+
 (ert-deftest ebp-test-event-action-statuses-and-duplicates ()
   "SPEC 14.4: accepted commits a receipt; a repeated EventId returns
 duplicate without repeating the effect; unregistered actions reject."

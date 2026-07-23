@@ -695,8 +695,27 @@ does.  Forces one retry cycle even when the last summary was clean."
 
 ;;;; Dispatchers (SPEC 7.3) — ours because the library is fail-open
 
+(defun ebp-client--authenticated-p (client)
+  "Non-nil once CLIENT has verified the welcome (SPEC 10.1).
+Authentication completes at the `awaiting-welcome' -> `syncing'
+transition (the server_proof and welcome are verified there), so
+`syncing' and `ready' are the authenticated states.  `syncing' counts
+because SPEC 15.3 queue replay delivers `event.action' requests before
+`session.ready'."
+  (memq (ebp-client-state client) '(syncing ready)))
+
 (defun ebp-client--request-dispatcher (client _conn method params)
-  "SPEC 7.3: unknown requests receive -32601; the library never sends it."
+  "Gate an inbound request on session state, then dispatch (SPEC 7.3/10.1).
+Framing and the JSON-RPC shape are already validated by the library.
+Before authentication the Companion is untrusted: every request fails
+closed with 1200, even a known or wrong-direction one (SPEC 10.1).
+Afterwards an unknown request receives -32601; the library never sends
+either error itself."
+  ;; SPEC 10.1: pre-auth, a structurally valid request other than the
+  ;; handshake reply MUST receive 1200 not-authenticated — and the client
+  ;; never receives the handshake methods, so every inbound request does.
+  (unless (ebp-client--authenticated-p client)
+    (ebp-client--error client 1200 "Not authenticated" "not-authenticated"))
   (let ((handler (gethash (symbol-name method) (ebp-client-handlers client))))
     (if handler
         (funcall handler client params)
@@ -704,11 +723,17 @@ does.  Forces one retry cycle even when the last summary was clean."
                          "method-not-found"))))
 
 (defun ebp-client--notification-dispatcher (client _conn method params)
-  "SPEC 7.3: unknown notifications are logged and ignored."
-  (let ((handler (gethash (symbol-name method) (ebp-client-handlers client))))
-    (if handler
-        (funcall handler client params)
-      (message "ebp: unknown notification %s ignored" method))))
+  "Gate an inbound notification on session state, then dispatch (SPEC 7.3/10.1).
+Before authentication all notifications are logged locally and dropped
+without `log.error' (SPEC 10.1); afterwards an unknown notification is
+logged and ignored (SPEC 7.3)."
+  (cond
+   ((not (ebp-client--authenticated-p client))
+    (message "ebp: pre-auth notification %s dropped" method))
+   ((gethash (symbol-name method) (ebp-client-handlers client))
+    (funcall (gethash (symbol-name method) (ebp-client-handlers client))
+             client params))
+   (t (message "ebp: unknown notification %s ignored" method))))
 
 ;;;; Actions and events (SPEC 14), the Emacs endpoint half
 

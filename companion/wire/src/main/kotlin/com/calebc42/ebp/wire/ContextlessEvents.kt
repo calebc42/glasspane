@@ -34,12 +34,15 @@ fun dispatchContextless(
     args: JSONObject,
     live: LiveSession?,
     callback: ((String?, JSONObject?) -> Unit)? = null,
+    fields: JSONObject? = null,
 ) {
     val params = JSONObject()
         .put("event_id", EbpAuth.generateNonce())
         .put("action", descriptor.getString("action"))
         .put("occurred_at_ms", queue.effectiveNow())
     if (args.length() > 0) params.put("args", args)
+    // SPEC 18.5: a notification inline-reply carries the typed text in `fields`.
+    if (fields != null && fields.length() > 0) params.put("fields", fields)
     val policy = descriptor.optString("when_offline", OFFLINE_DEFAULT)
     if (policy == "queue" || policy == "wake")
         params.put("queued_at_ms", queue.effectiveNow())
@@ -90,4 +93,27 @@ fun routeReminderTap(
     val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
         .put("owner", owner).put("reminder_id", reminderId)
     dispatchContextless(queue, maxEventBytes, onTap, args, live, callback)
+}
+
+/**
+ * SPEC 18.5: route a notification action tap into the Section 14 pipeline. The
+ * remote on_tap descriptor rides the tap intent (so a cold receiver needs no
+ * store), its authored args are preserved, and an inline reply's typed text is
+ * placed in `fields` under the action's key. Callable off any thread and
+ * without a live engine. A `dismiss:true` action's caller cancels the
+ * notification only after the callback reports safe admission (§14.4).
+ */
+fun routeNotificationAction(
+    queue: DurableQueue,
+    maxEventBytes: Long,
+    onTap: JSONObject,
+    replyKey: String?,
+    replyText: String?,
+    live: LiveSession?,
+    callback: ((String?, JSONObject?) -> Unit)? = null,
+) {
+    val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
+    val fields = if (replyKey != null && replyText != null)
+        JSONObject().put(replyKey, replyText) else null
+    dispatchContextless(queue, maxEventBytes, onTap, args, live, callback, fields)
 }

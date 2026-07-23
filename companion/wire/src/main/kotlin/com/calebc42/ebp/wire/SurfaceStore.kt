@@ -132,14 +132,16 @@ class SurfaceStore(
         if (namespace(surface) == "notification") {
             // SPEC 13.4/18.5: {body: Node, meta?}, no views, no drafts.
             SpecValidator.validateNotificationSpec(spec, maxCaptureFields = maxCaptureFields,
-                advertisedTypes = notificationNodeTypes)
+                advertisedTypes = notificationNodeTypes,
+                maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps)
             if (currentView != null)
                 throw ContentInvalid("current_view", "not valid for a notification surface")
             if (resetIds != null && resetIds.length() > 0)
                 throw ContentInvalid("reset_input_ids", "a notification surface has no drafts")
             staleSpec?.let {
                 SpecValidator.validateNotificationSpec(it, "stale_spec", maxCaptureFields,
-                    advertisedTypes = notificationNodeTypes)
+                    advertisedTypes = notificationNodeTypes,
+                    maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps)
             }
             statefuls = emptyMap()
             reset = emptySet()

@@ -166,7 +166,9 @@ object SpecValidator {
      */
     fun validateNotificationSpec(spec: Any?, path: String = "spec",
                                  maxCaptureFields: Long = 64,
-                                 advertisedTypes: Set<String>? = null) {
+                                 advertisedTypes: Set<String>? = null,
+                                 maxChartPoints: Long = Long.MAX_VALUE,
+                                 maxCanvasOps: Long = Long.MAX_VALUE) {
         if (spec !is JSONObject) throw ContentInvalid(path, "must be an object")
         if (spec.has("views")) throw ContentInvalid(path, "multi-view prohibited")
         for (k in spec.keySet()) if (k != "body" && k != "meta")
@@ -176,6 +178,7 @@ object SpecValidator {
             throw ContentInvalid("$path.body", "must be a node")
         // SPEC 17.1: gate the body to the notification profile's node_types.
         validateSurfaceSpec(body, "$path.body", maxCaptureFields,
+            maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
             advertisedTypes = advertisedTypes)
         if (spec.has("meta")) {
             val meta = spec.opt("meta") as? JSONObject

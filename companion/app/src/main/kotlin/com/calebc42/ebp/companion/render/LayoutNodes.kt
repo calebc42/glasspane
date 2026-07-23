@@ -164,6 +164,13 @@ internal fun RenderFlowRow(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     FlowRow(
         modifier = m,
         horizontalArrangement = horizontalArrange(node),
+        // SPEC 17.3: flow_row.align is the per-run cross-axis alignment
+        // (top|center|bottom, default top).
+        itemVerticalAlignment = when (node.optString("align")) {
+            "center" -> Alignment.CenterVertically
+            "bottom" -> Alignment.Bottom
+            else -> Alignment.Top
+        },
         verticalArrangement = Arrangement.spacedBy(
             (safeDp(node.optDouble("run_spacing", 0.0)) ?: 0f).dp)) {
         RenderChildren(node.optJSONArray("children"), ctx)
@@ -398,7 +405,12 @@ internal fun RenderTabs(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         // §17.3: a smaller same-identity snapshot with an invalid retained
         // index selects `initial` WITHOUT emitting on_change.
         LaunchedEffect(pageCount) {
-            if (pagerState.currentPage >= pageCount) {
+            // SPEC 17.3: if the RETAINED index is no longer valid under a
+            // smaller snapshot, select `initial` WITHOUT emitting on_change.
+            // Check lastReported (the retained user index), not currentPage —
+            // Compose silently coerces currentPage into range, which would mask
+            // the invalid retained page.
+            if (lastReported >= pageCount || pagerState.currentPage >= pageCount) {
                 lastReported = initial
                 pagerState.scrollToPage(initial)
             }
@@ -645,7 +657,11 @@ internal fun RenderReorderableList(node: JSONObject, ctx: RenderCtx, m: Modifier
                     contentDescription = "Drag to reorder",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
-                        .pointerInput(pos, order) {
+                        // SPEC 17.3: key the gesture on the item's STABLE
+                        // identity, not the mutating `order` — keying on `order`
+                        // restarts pointerInput mid-drag and aborts the gesture
+                        // after the first swap.
+                        .pointerInput(itemKey(authored)) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
                                     draggedPos = pos

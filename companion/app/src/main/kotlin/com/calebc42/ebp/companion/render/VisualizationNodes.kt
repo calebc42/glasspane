@@ -104,7 +104,9 @@ internal fun RenderChart(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     node.optJSONArray("y_range")?.let {
         if (it.length() == 2) { yMin = it.optDouble(0, yMin); yMax = it.optDouble(1, yMax) }
     }
-    if ((kind == "bar" || kind == "area") && yMin > 0.0) yMin = 0.0
+    // SPEC 17.5: bars/areas read against a zero baseline — but an explicit
+    // y_range is authoritative, so only default the baseline when none was given.
+    if ((kind == "bar" || kind == "area") && !node.has("y_range") && yMin > 0.0) yMin = 0.0
     if (!yMin.isFinite() || !yMax.isFinite()) { yMin = 0.0; yMax = 1.0 }
     if (yMax == yMin) yMax += 1.0
 
@@ -118,10 +120,13 @@ internal fun RenderChart(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         mod = mod.pointerInput(node.toString()) {
             detectTapGestures { off ->
                 val s0 = series.firstOrNull() ?: return@detectTapGestures
-                val n = s0.ys.size
-                if (n == 0) return@detectTapGestures
-                val idx = if (n == 1) 0
-                    else ((off.x / size.width.toFloat()) * (n - 1)).roundToInt().coerceIn(0, n - 1)
+                if (s0.points.isEmpty()) return@detectTapGestures
+                // Map tap-x on the SAME denominator the layout uses (maxLen),
+                // then select the first series' point at that index (clamped) so
+                // the tapped x-position and the returned point agree.
+                val idx = if (maxLen <= 1) 0
+                    else ((off.x / size.width.toFloat()) * (maxLen - 1)).roundToInt()
+                        .coerceIn(0, s0.points.size - 1)
                 // SPEC 17.5: return the COMPLETE authored point object.
                 ctx.action(onPointTap, s0.points.getOrNull(idx))
             }

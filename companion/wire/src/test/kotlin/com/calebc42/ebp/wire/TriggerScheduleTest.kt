@@ -8,15 +8,22 @@
 // host-armable next due per time entry, dropping a completed one-shot.
 package com.calebc42.ebp.wire
 
+import java.io.File
 import java.time.ZoneId
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class TriggerScheduleTest {
+
+    @get:Rule
+    val tmp = TemporaryFolder()
 
     private val caps = TriggerCaps(
         triggerTypes = setOf("time", "boot", "manual"),
@@ -70,6 +77,23 @@ class TriggerScheduleTest {
         assertEquals("2", reg("b").bootGeneration)
         rt.onExternal("id", "boot", JSONObject())        // same gen again: no refire
         assertEquals(1, fired.size)
+    }
+
+    @Test
+    fun recordedGenerationAndAnchorPersistAcrossReload() {
+        // SPEC 21.1: armBaselines' silent recordings (boot generation, every_s
+        // anchor) are durable records — they MUST survive a restart, or a boot
+        // would re-fire and a repeating cadence would re-phase on every restart.
+        val file = File(tmp.root, "t.json")
+        val store = TriggerStore(FileTriggerBacking(file))
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        val service = TriggerFiringService(store, queue, 262_144, bootGeneration = { "7" })
+        service.replaceSet("id", TriggerValidator.validateSet(JSONObject().put("triggers",
+            JSONArray().put(trig("b", "boot"))
+                .put(trig("ev", "time") { put("params", JSONObject().put("every_s", 60)) })), caps))
+        val reloaded = TriggerStore(FileTriggerBacking(file))  // a restart
+        assertEquals("7", reloaded.registration("id", "b")!!.bootGeneration)
+        assertNotNull(reloaded.registration("id", "ev")!!.scheduleAnchorMs)
     }
 
     @Test

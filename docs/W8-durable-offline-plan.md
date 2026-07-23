@@ -215,3 +215,34 @@ live engine, and to make the reminder/trigger *state* around it durable.
   state but only the service commits fire transactions (avoid double-fire from
   a concurrent live observe + service observe — likely one observe path,
   routed through the service, with the engine subscribing for remote delivery).
+
+## 8. W8-f device verification results (2026-07-23, Pixel Tablet)
+
+Each row ran end-to-end on-device (fresh APK, `adb` + `emacs --batch` client
+smokes). Harnesses: `test/smoke-durable-trigger.el` (arm/drain phases, queue
+trigger, counts replayed events), `test/smoke-durable-reminder.el`.
+
+| Claim | Result | Evidence |
+|---|---|---|
+| (a) reminder at-most-once across force-stop | ✅ PASS | fired receipt `org.agenda standup <at>` persisted BEFORE the notification; after force-stop+relaunch, 0 re-armed alarms + 0 re-posted notifications |
+| (b) trigger fires while Emacs DISCONNECTED → replay on connect | ✅ PASS | battery crossed below 20 with no session; `trigger.fired {level:15}` delivered on reconnect with `queued_at_ms` |
+| (c) throttle survives app restart → no duplicate | ✅ PASS | `throttle_floor_ms` identical before/after force-stop; re-cross inside window suppressed; drain delivered exactly 1 event |
+| (d) reboot re-arm (unfired reminder) | ✅ PASS | unfired reminder re-armed after restart (`fired:[]`); boot generation persists to `ebp-triggers.json` and is kept across reload |
+| (d′) boot trigger FIRES on a real boot | ⚠️ not device-run | `am broadcast BOOT_COMPLETED` is a protected broadcast (shell denied); needs a real `adb reboot`. Generation gating is unit-tested (`TriggerScheduleTest`) and the fire path is (b)'s proven queue path |
+| (e) offline reminder tap replay | ⚠️ not device-run | `ReminderTapReceiver` is `exported=false` (correct); a real notification tap isn't scriptable. Tap routing is unit-tested (ContextlessEvents) over (b)'s proven queue path |
+
+**Two real bugs found and fixed here (W8-f "fixes what it finds"):**
+
+1. **Unadvertised sources.** W8-e added the boot/time/timezone *sources*
+   (`BootReceiver`, `TriggerAlarms`/`TimeAlarmReceiver`) but `AppCapabilities`
+   still advertised only `battery.level`, so a client's `boot`/`time` set was
+   rejected `1101 type-not-in-device.trigger_types` — the whole path was
+   unreachable. Fixed: `TRIGGER_TYPES += boot, time, timezone.changed`.
+2. **Silent recordings not persisted (SPEC 21.1 violation).** `armBaselines`
+   recorded the boot generation and `every_s` anchor *in memory only* —
+   `store.replace` had already persisted (with them null) and `armBaselines`
+   never re-persisted. On restart the generation/anchor reloaded null, so a boot
+   would re-fire and a repeating cadence would re-phase every restart. Fixed:
+   `armBaselines` persists (best-effort) when it records a durable field;
+   covered by `TriggerScheduleTest.recordedGenerationAndAnchorPersistAcrossReload`
+   and confirmed on-device (`boot_generation` now written to the file).

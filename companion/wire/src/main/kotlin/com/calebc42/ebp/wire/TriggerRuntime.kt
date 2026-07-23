@@ -70,6 +70,11 @@ class TriggerRuntime(
      * baseline — this only fills a fresh one, never re-baselines it.
      */
     fun armBaselines(identity: String) {
+        // SPEC 21.1: the every_s anchor and boot generation recorded below are
+        // durable records (unlike the silent level/edge baselines, which are
+        // re-established from live state) — a fresh recording must be persisted
+        // so it survives restart.
+        var recorded = false
         for (reg in store.registrations(identity)) {
             val type = reg.entry.getString("type")
             when {
@@ -92,7 +97,7 @@ class TriggerRuntime(
                 // Registration has no anchor; a carried-forward one keeps the
                 // anchor it was accepted with, so arming never resets the phase.
                 type == "time" && reg.entry.getJSONObject("params").has("every_s") ->
-                    if (reg.scheduleAnchorMs == null) reg.scheduleAnchorMs = now()
+                    if (reg.scheduleAnchorMs == null) { reg.scheduleAnchorMs = now(); recorded = true }
                 // SPEC 21.5: installing a new/changed boot registration silently
                 // records the CURRENT generation and arms for the NEXT boot — it
                 // must not fire for the boot it was installed during. A carried-
@@ -100,9 +105,13 @@ class TriggerRuntime(
                 // restart in the same boot creates no occurrence. Recorded only
                 // when the platform generation is known; null stays ungated.
                 type == "boot" ->
-                    if (reg.bootGeneration == null) reg.bootGeneration = bootGeneration()
+                    if (reg.bootGeneration == null) bootGeneration()?.let {
+                        reg.bootGeneration = it; recorded = true }
             }
         }
+        // Best-effort (SPEC 21.5 re-establishes silently on the next arm if this
+        // is lost): never fail a triggers.set because a baseline persist hiccups.
+        if (recorded) runCatching { persistRecords() }
     }
 
     // ------------------------------------------------------ observation feed

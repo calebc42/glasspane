@@ -24,11 +24,12 @@ import org.json.JSONObject
 object AppCapabilities {
 
     private val CAPS = listOf("vibrate", "clipboard.read")
-    // SPEC 21/20.1: advertise ONLY what a source actually feeds — battery.level
-    // here; screen/power/etc. attach the same way (register a receiver, feed
-    // observeTriggerSample) and get advertised as they land. trigger_caps is
-    // the unattended subset runnable inside on_fire.
-    private val TRIGGER_TYPES = listOf("battery.level")
+    // SPEC 21/20.1: advertise ONLY what a source actually feeds. battery.level
+    // (TriggerSources) plus the W8-e scheduled/external sources: boot and
+    // timezone.changed (BootReceiver) and time (TriggerAlarms + TimeAlarmReceiver).
+    // screen/power/etc. attach the same way and get advertised as they land.
+    // trigger_caps is the unattended subset runnable inside on_fire.
+    private val TRIGGER_TYPES = listOf("battery.level", "boot", "time", "timezone.changed")
     private val STATE_TYPES = listOf("battery.level")
 
     /** SPEC 20.1: the device report echoed in the welcome (capabilities and

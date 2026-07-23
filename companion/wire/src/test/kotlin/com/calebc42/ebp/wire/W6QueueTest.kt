@@ -448,4 +448,43 @@ class W6QueueTest {
         respondTo(e2, out2.events().single(), "accepted")
         assertEquals(0, q2.count())
     }
+
+    @Test
+    fun surfaceRemoveRejectsInvalidId() {
+        // SPEC 13.1: a structurally invalid surface id is rejected, not made
+        // into a tombstone that pollutes the welcome (audit finding 24).
+        val store = SurfaceStore(16, 1024)
+        val out = mutableListOf<JSONObject>()
+        val engine = engineOn(DurableQueue(MemoryQueueStore(), 256, 8_388_608), store, out)
+        engine.handshake(toReady = true)
+        engine.feed(frame(request("rm", "surface.remove", JSONObject()
+            .put("surface", "not a valid id!").put("revision", 1L))))
+        val err = out.last { it.opt("id") == "rm" }.getJSONObject("error")
+        assertEquals(1201, err.getInt("code"))
+        assertEquals("surface-id", err.getJSONObject("data").getString("reason"))
+        assertEquals(0, store.snapshot().length()) // no tombstone created
+    }
+
+    @Test
+    fun maxEventBytesCountsTheQueuedAtMsField() {
+        // SPEC 4.5/15.4: max_event_bytes measures the COMPLETE persisted
+        // params, INCLUDING queued_at_ms — an event that fits only without
+        // that field must still be rejected (audit finding 22).
+        val limit = 262144
+        val overhead = JSONObject()
+            .put("event_id", "0".repeat(32)).put("action", "demo.tap")
+            .put("surface", "app:main").put("revision_seen", 1L)
+            .put("occurred_at_ms", 1000L).put("args", JSONObject().put("pad", ""))
+            .toString().toByteArray(Charsets.UTF_8).size
+        val pad = "x".repeat(limit - overhead) // params sans queued_at_ms == limit
+        val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608) { 1000L }
+        val out = mutableListOf<JSONObject>()
+        val engine = engineOn(q, surfaceWithInput(), out)
+        var error: JSONObject? = null
+        engine.dispatchAction("app:main",
+            queuedDescriptor().put("args", JSONObject().put("pad", pad)), null) { _, e -> error = e }
+        assertEquals(1201, error!!.getInt("code"))
+        assertEquals("event-too-large", error!!.getJSONObject("data").getString("reason"))
+        assertEquals(0, q.count()) // not admitted
+    }
 }

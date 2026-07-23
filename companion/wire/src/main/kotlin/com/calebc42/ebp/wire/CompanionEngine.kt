@@ -187,9 +187,14 @@ class CompanionEngine(
                 params.put("fields", fields)
             }
         }
-        // SPEC 14.4/15.4: serialize the complete params and verify the
-        // event limit BEFORE persistence or transmission; an oversized
-        // occurrence is a local diagnostic, never a frame or a record.
+        val policy = descriptor.optString("when_offline", OFFLINE_DEFAULT)
+        // SPEC 15.1: a durable policy persists a queued_at_ms; it is part of
+        // the stored and replayed params, so add it BEFORE the size check.
+        if (policy == "queue" || policy == "wake")
+            params.put("queued_at_ms", queue.effectiveNow())
+        // SPEC 14.4/15.4: verify the COMPLETE params against max_event_bytes
+        // before persistence or transmission; an oversized occurrence is a
+        // local diagnostic, never a frame or a record.
         if (params.toString().toByteArray(Charsets.UTF_8).size >
             config.limits.getLong("max_event_bytes")) {
             callback?.invoke(null, JSONObject()
@@ -198,12 +203,10 @@ class CompanionEngine(
                     .put("reason", "event-too-large")))
             return
         }
-        when (descriptor.optString("when_offline", OFFLINE_DEFAULT)) {
+        when (policy) {
             "queue", "wake" -> {
                 // SPEC 22.3/15.1: durable admission precedes every wake or
                 // delivery attempt, including when READY right now.
-                params.put("queued_at_ms", queue.effectiveNow())
-                val policy = descriptor.getString("when_offline")
                 when (queue.admit(params, policy,
                         descriptor.optString("dedupe").takeIf { it.isNotEmpty() },
                         descriptor.getLong("ttl_s"))) {
@@ -488,7 +491,13 @@ class CompanionEngine(
         val revision = surfaceRevision(params.opt("revision"))
         if (surface == null || revision == null)
             return respondError(id, -32602, "Invalid params", "invalid-params")
-        // SPEC 13.1: removal is legal for any reported surface, no gate.
+        // SPEC 13.1: a structurally invalid ID must not become a tombstone —
+        // it would enter the welcome `surfaces` map and consume a
+        // max_surface_ids slot. surface.update rejects it identically.
+        if (!surfaces.isValidSurfaceId(surface))
+            return respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("reason", "surface-id"))
+        // SPEC 13.1: removal is legal for any reported surface, no cap gate.
         try {
             val result = surfaces.remove(surface, revision)
             respondResult(id, JSONObject()

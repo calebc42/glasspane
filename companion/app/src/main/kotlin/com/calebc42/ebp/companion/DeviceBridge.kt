@@ -57,25 +57,10 @@ class DeviceBridge(
         supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
             "presentation.pie-menu", "reminders.owner", "surfaces.notification",
             "editor.sync", "capabilities", "triggers"),
-        surfaceProfiles = JSONObject()
-            .put("app", JSONObject()
-                .put("node_types", JSONArray(listOf(
-                    "text", "row", "column", "box", "spacer", "divider",
-                    "button", "text_input", "scaffold", "editor")))
-                .put("builtins", JSONArray(listOf(
-                    "view.switch", "companion.settings.open")))
-                .put("features", JSONArray()))
-            .put("dialog", JSONObject()
-                .put("node_types", JSONArray(listOf(
-                    "text", "row", "column", "box", "spacer", "divider",
-                    "button", "text_input")))
-                .put("builtins", JSONArray(listOf("dialog.submit", "dialog.dismiss")))
-                .put("features", JSONArray()))
-            .put("notification", JSONObject()
-                .put("node_types", JSONArray(listOf(
-                    "text", "row", "column", "box", "spacer", "divider")))
-                .put("builtins", JSONArray())
-                .put("features", JSONArray())),
+        // SPEC 10.2: what this build's renderer actually honors — derived from
+        // the render/NodeSupport registry (the pin test holds the renderer's
+        // dispatch to the same sets), never hand-kept here.
+        surfaceProfiles = com.calebc42.ebp.companion.render.NodeSupport.surfaceProfiles(),
         limits = JSONObject()
             .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
             .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)

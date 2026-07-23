@@ -24,7 +24,7 @@ class CapabilityTest {
         .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
         .put("max_surfaces", 16).put("max_surface_ids", 1024)
         .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
-        .put("max_capture_fields", 64)
+        .put("max_capture_fields", 64).put("max_device_report_bytes", 8192)
 
     private fun frame(msg: JSONObject) = encodeFrame(msg.toString())
     private fun response(out: List<JSONObject>, id: String) = out.last { it.opt("id") == id }
@@ -88,6 +88,15 @@ class CapabilityTest {
         val out2 = mutableListOf<JSONObject>()
         engine(out2, grant = false)
         assertFalse(response(out2, "h2").getJSONObject("result").has("device"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun oversizeDeviceReportFailsTheReservation() {
+        // SPEC 4.5/20.1: a report larger than max_device_report_bytes cannot be
+        // reserved for, so construction fails the welcome reservation check.
+        val bloated = report("vibrate").put("permissions",
+            JSONObject().put("blob", "y".repeat(9000)))
+        engine(mutableListOf(), deviceReport = bloated)
     }
 
     @Test

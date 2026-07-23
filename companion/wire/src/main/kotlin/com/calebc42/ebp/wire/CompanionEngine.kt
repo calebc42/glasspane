@@ -1582,9 +1582,22 @@ class CompanionEngine(
                 .put("queued_events", l.getLong("max_queued_events"))
                 .put("input_state", JSONObject())
                 .put("limits", l))
+        // SPEC 4.5/20.1 (amendment #40): the welcome device report is a variable
+        // member emitted when capabilities or triggers is granted. Reserve
+        // max_device_report_bytes for it (rather than embed it in `prospective`,
+        // which cannot see a per-session grant), and require the configured
+        // report to fit that bound so it never depends on truncation.
+        val emitsReport = "capabilities" in config.supportedCapabilities ||
+            "triggers" in config.supportedCapabilities
+        val deviceBudget = if (emitsReport) l.optLong("max_device_report_bytes", 0) else 0
+        if (deviceBudget > 0)
+            require(config.deviceReport.toString().toByteArray(Charsets.UTF_8).size <= deviceBudget) {
+                "device report exceeds max_device_report_bytes"
+            }
         val b = prospective.toString().toByteArray(Charsets.UTF_8).size.toLong()
-        require(b + l.getLong("max_input_state_bytes") - 2 <= l.getLong("max_frame_bytes")) {
-            "welcome reservation violated: B=$b"
+        require(b + deviceBudget + l.getLong("max_input_state_bytes") - 2 <=
+            l.getLong("max_frame_bytes")) {
+            "welcome reservation violated: B=$b, device=$deviceBudget"
         }
     }
 

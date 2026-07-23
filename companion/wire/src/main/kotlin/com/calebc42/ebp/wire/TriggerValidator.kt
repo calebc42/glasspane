@@ -108,7 +108,13 @@ object TriggerValidator {
             else -> throw ContentInvalid("$path.on_fire", "must be an array")
         }
         val normOnFire = normOnFire(onFire, "$path.on_fire", caps)
-        // SPEC 21.4: routing sensitive-source data into a sink needs approval.
+        // SPEC 21.4 (amendment #42): routing sensitive-source data into a sink
+        // needs approval, which is per (source type, sink kind) and default-deny.
+        // The current seam is a single conservative boolean (deny unless the
+        // host approved), which is safe but coarse — when an approval UI lands,
+        // it should carry a set of approved (source, sink) pairs, not a blanket
+        // flag. Today's reference never sets it, so sensitive substitution is
+        // always rejected.
         if (type in SENSITIVE && !caps.sensitiveSubstitutionApproved &&
             Substitution.referencesData(normOnFire))
             throw ContentInvalid("$path.on_fire", "sensitive substitution requires approval")

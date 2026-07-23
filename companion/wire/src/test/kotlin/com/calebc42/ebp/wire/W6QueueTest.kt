@@ -132,7 +132,7 @@ class W6QueueTest {
 
         val out2 = mutableListOf<JSONObject>()
         val q2 = DurableQueue(FileQueueStore(file), 256, 8_388_608)
-        assertNull(q2.inFlightSeq) // nothing is in flight after death
+        assertTrue(!q2.hasInFlight()) // nothing is in flight after death
         val e2 = engineOn(q2, surfaceWithInput(), out2)
         e2.handshake(toReady = false)
         e2.feed(frame(request("q1", "queue.replay", JSONObject())))
@@ -262,12 +262,31 @@ class W6QueueTest {
         assertEquals(1, q.count())
         assertTrue(q.head()!!.getJSONObject("event").getString("event_id").startsWith("b"))
         // An in-flight record is never replaced.
-        q.inFlightSeq = q.head()!!.getLong("queue_seq")
+        q.beginDelivery(null) // atomically marks the head in-flight
         q.admit(event("c"), "queue", "key", 3600)
         assertEquals(2, q.count())
         // Sequence numbers stay strictly increasing across compaction.
         val seqs = listOf(q.head()!!.getLong("queue_seq"))
         assertTrue(seqs.all { it >= 1 })
+    }
+
+    @Test
+    fun beginDeliveryGatesPendingLocalBarrierAndEmpty() {
+        val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        fun ev(id: String) = JSONObject().put("event_id", id).put("action", "a.b")
+            .put("occurred_at_ms", q.effectiveNow())
+        assertTrue(q.beginDelivery(null) is Delivery.Empty)
+        // A pending-local head is withheld (the pump waits, not concludes).
+        q.admit(ev("x"), "queue", null, 3600, pendingLocal = true)
+        assertTrue(q.beginDelivery(null) is Delivery.PendingLocal)
+        q.clearPendingLocal(q.head()!!.getLong("queue_seq"))
+        // Now deliverable — and atomically marked in-flight.
+        val d = q.beginDelivery(null)
+        assertTrue(d is Delivery.Ready)
+        assertTrue(q.hasInFlight())
+        // The SYNCING replay barrier withholds a head at/after the boundary.
+        q.clearInFlight((d as Delivery.Ready).record.getLong("queue_seq"))
+        assertTrue(q.beginDelivery(q.head()!!.getLong("queue_seq")) is Delivery.BarrierHeld)
     }
 
     @Test
@@ -314,9 +333,9 @@ class W6QueueTest {
         val e1 = engineOn(q, store, out1)
         e1.handshake()
         e1.dispatchAction("app:main", queuedDescriptor(), null)
-        assertNotNull(q.inFlightSeq) // request written, no response yet
+        assertTrue(q.hasInFlight()) // request written, no response yet
         e1.close("transport closed") // connection loss, process survives
-        assertNull(q.inFlightSeq)    // the marker died with the session
+        assertTrue(!q.hasInFlight())  // the marker died with the session
         val out2 = mutableListOf<JSONObject>()
         val e2 = engineOn(q, store, out2)
         e2.handshake(toReady = false)

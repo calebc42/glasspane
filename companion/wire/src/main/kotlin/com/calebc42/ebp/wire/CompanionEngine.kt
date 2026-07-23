@@ -122,9 +122,7 @@ class CompanionEngine(
         // engine's request dies with the connection, the record MUST
         // return to plain queued so the next session's replay can move
         // (SPEC 15.3: events without a permanent result remain queued).
-        if (myInFlightSeq != null && queue.inFlightSeq == myInFlightSeq) {
-            queue.inFlightSeq = null
-        }
+        queue.clearInFlight(myInFlightSeq)
         myInFlightSeq = null
         // SPEC 18.1: on transport loss every outstanding dialog is
         // dismissed locally; its request dies with the connection.
@@ -410,7 +408,7 @@ class CompanionEngine(
         queue.sweepExpired()
         // SPEC 15.3: join an in-flight durable request rather than duplicate
         // it; its disposition lands in this summary via onPumpResult.
-        if (queue.inFlightSeq == null) pumpAdvance()
+        if (!queue.hasInFlight()) pumpAdvance()
     }
 
     private fun replayActive() = replayId != null
@@ -418,7 +416,7 @@ class CompanionEngine(
     /** Send the head event when the pump is free; conclude a replay at a
      * stable stop (SPEC 15.3). */
     private fun pumpAdvance() {
-        if (queue.inFlightSeq != null || pumpPaused) {
+        if (queue.hasInFlight() || pumpPaused) {
             if (pumpPaused) concludeReplay()
             return
         }
@@ -427,27 +425,27 @@ class CompanionEngine(
         if (!replayActive() && state != SessionState.READY) return
         if (replayActive() && state != SessionState.SYNCING &&
             state != SessionState.READY) return
-        queue.sweepExpired()
-        // SPEC 21.2: a head still running its on_fire is not yet deliverable;
-        // wait rather than deliver ahead of Step 4 (recovery clears it).
-        if (queue.headIsPendingLocal()) return
-        val record = queue.head() ?: return concludeReplay()
-        // SPEC 10.3/15.3: newly generated events stay behind the barrier
-        // until the replay concludes AND session.ready succeeds.
-        if (state == SessionState.SYNCING &&
-            record.getLong("queue_seq") >= sessionBoundarySeq)
-            return concludeReplay()
-        val seq = record.getLong("queue_seq")
-        queue.inFlightSeq = seq
-        myInFlightSeq = seq
-        // SPEC 15.3: the stored record replays with its stored event_id.
-        sendRequest("event.action", record.getJSONObject("event")) { result, error ->
-            onPumpResult(seq, result, error)
+        // SPEC 15.3/21.2: atomically select + mark-in-flight the head, applying
+        // the SYNCING replay barrier and the pending-local gate inside one queue
+        // critical section — closing the head()+assign compaction race and the
+        // headIsPendingLocal()/head() TOCTOU.
+        val barrier = if (state == SessionState.SYNCING) sessionBoundarySeq else null
+        when (val d = queue.beginDelivery(barrier)) {
+            is Delivery.Ready -> {
+                val seq = d.record.getLong("queue_seq")
+                myInFlightSeq = seq
+                // SPEC 15.3: the stored record replays with its stored event_id.
+                sendRequest("event.action", d.record.getJSONObject("event")) { result, error ->
+                    onPumpResult(seq, result, error)
+                }
+            }
+            Delivery.PendingLocal -> return                  // wait for on_fire (Step 4)
+            Delivery.Empty, Delivery.BarrierHeld -> concludeReplay()
         }
     }
 
     private fun onPumpResult(seq: Long, result: JSONObject?, error: JSONObject?) {
-        queue.inFlightSeq = null
+        queue.clearInFlight(seq)
         myInFlightSeq = null
         when {
             error != null -> {

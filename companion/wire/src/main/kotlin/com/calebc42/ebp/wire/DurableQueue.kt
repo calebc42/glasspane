@@ -15,6 +15,21 @@ sealed class AdmitResult {
     object StorageFailed : AdmitResult()
 }
 
+/** SPEC 15.3/21.2: the atomic outcome of selecting the next event to deliver.
+ * Folding head-selection, the pending-local gate, and the SYNCING replay barrier
+ * into one critical section — together with the in-flight mark — closes the
+ * TOCTOU where a concurrent admit could compact a head between select and mark. */
+sealed class Delivery {
+    /** Ready to send; the record is now marked in-flight. */
+    data class Ready(val record: JSONObject) : Delivery()
+    /** Queue empty — a replay concludes. */
+    object Empty : Delivery()
+    /** Head is still running its on_fire (SPEC 21.2) — wait, do not conclude. */
+    object PendingLocal : Delivery()
+    /** Head is a newly generated event beyond the replay barrier — conclude. */
+    object BarrierHeld : Delivery()
+}
+
 class DurableQueue(
     private val store: QueueStore,
     private val maxEvents: Long,
@@ -26,8 +41,10 @@ class DurableQueue(
     private var highWater: Long
 
     /** queue_seq of the record currently in flight, runtime-only: after a
-     * process death nothing is in flight (SPEC 15.3). */
-    var inFlightSeq: Long? = null
+     * process death nothing is in flight (SPEC 15.3). Private + touched only
+     * under this monitor — the engine drives it via beginDelivery/clearInFlight
+     * so it is never raced across the engine and queue monitors. */
+    @Volatile private var inFlightSeq: Long? = null
 
     /** Expiry deletions not yet reported in a replay summary (SPEC 15.2:
      * counted in the NEXT summary). In-memory: informational count. */
@@ -50,6 +67,37 @@ class DurableQueue(
 
     @Synchronized
     fun head(): JSONObject? = records.minByOrNull { it.getLong("queue_seq") }
+
+    /**
+     * SPEC 15.3/21.2: atomically pick the next deliverable head and mark it
+     * in-flight, all under this monitor. Sweeps expired first; a pending-local
+     * head yields PendingLocal (the pump waits, does NOT conclude), a head at or
+     * beyond `barrierSeq` (the SYNCING replay barrier; null = no barrier) yields
+     * BarrierHeld, an empty queue yields Empty. Only `Ready` sets the in-flight
+     * mark — so no concurrent `admit` can compact the selected record between
+     * selection and the mark (the old head()+assign race). The caller MUST
+     * `clearInFlight(seq)` when the delivery reaches a permanent result.
+     */
+    @Synchronized
+    fun beginDelivery(barrierSeq: Long?): Delivery {
+        sweepExpired()
+        val record = records.minByOrNull { it.getLong("queue_seq") } ?: return Delivery.Empty
+        if (record.optBoolean("pending_local")) return Delivery.PendingLocal
+        if (barrierSeq != null && record.getLong("queue_seq") >= barrierSeq)
+            return Delivery.BarrierHeld
+        inFlightSeq = record.getLong("queue_seq")
+        return Delivery.Ready(record)
+    }
+
+    /** SPEC 15.3: is a record in flight (a replay must join, not duplicate it). */
+    @Synchronized
+    fun hasInFlight(): Boolean = inFlightSeq != null
+
+    /** Release the in-flight marker iff it is still `seq` — owner-safe and
+     * idempotent, so a stale releaser (a superseded connection's close) cannot
+     * clear a newer delivery's marker. */
+    @Synchronized
+    fun clearInFlight(seq: Long?) { if (seq != null && inFlightSeq == seq) inFlightSeq = null }
 
     private fun persist() =
         store.replace(QueueSnapshot(records.toList(), nextSeq, highWater))

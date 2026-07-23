@@ -13,6 +13,7 @@ import com.calebc42.ebp.wire.CompanionConfig
 import com.calebc42.ebp.wire.EbpAuth
 import com.calebc42.ebp.wire.SessionState
 import org.json.JSONArray
+import java.io.File
 import org.json.JSONObject
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -30,8 +31,10 @@ class DeviceBridge(
     private val onDialogChanged: (String?, JSONObject?) -> Unit = { _, _ -> },
     /** SPEC 18.2: best-effort toast text. */
     private val onToast: (String) -> Unit = {},
-    /** SPEC 18.4: theme polarity — true/false forced, null follow-system. */
-    private val onTheme: (Boolean?) -> Unit = {},
+    /** SPEC 18.4: the accepted theme payload (`{dark, colors, syntax}`) to
+     * mirror, or null for the native scheme. Persisted, so a cached theme is
+     * delivered once at start before any session. */
+    private val onTheme: (JSONObject?) -> Unit = {},
     /** SPEC 18.3: (menu_id, spec) to present; (menu_id, null) to dismiss. */
     private val onPieMenuChanged: (String, JSONObject?) -> Unit = { _, _ -> },
 ) {
@@ -75,7 +78,27 @@ class DeviceBridge(
         capabilityHandler = AppCapabilities.handler(appContext, 65_536),
     )
 
+    // SPEC 18.4: the theme survives disconnects and process restarts — like a
+    // cached surface, the device keeps looking like your Emacs while it is away.
+    private val themeFile = File(appContext.filesDir, "ebp-theme.json")
+
+    private fun loadTheme(): JSONObject? =
+        try {
+            if (themeFile.exists()) JSONObject(themeFile.readText()) else null
+        } catch (e: Exception) { null }
+
+    private fun saveTheme(payload: JSONObject) {
+        try {
+            val tmp = File(themeFile.parentFile, "ebp-theme.json.tmp")
+            tmp.writeText(payload.toString())
+            tmp.renameTo(themeFile) // atomic swap; a torn write never survives
+        } catch (e: Exception) { /* best-effort; a lost theme re-syncs next run */ }
+    }
+
     fun start() = thread(name = "ebp-bridge", isDaemon = true) {
+        // Deliver the cached theme before any session so a reconnecting device
+        // renders in the mirrored palette immediately (§18.4 persistence).
+        loadTheme()?.let { onTheme(it) }
         try {
             val server = ServerSocket()
             server.reuseAddress = true
@@ -249,7 +272,13 @@ class DeviceBridge(
         // shorten the input (password erasure in the renderer is a follow-on).
         engine.dialogOverflowListener = { onToast("Input too large — please shorten it") }
         engine.toastListener = { text, _ -> onToast(text) }
-        engine.themeListener = { dark, _, _ -> onTheme(dark) }
+        // SPEC 18.4: persist the accepted theme and mirror it. currentTheme()
+        // is the normalized `{dark, colors, syntax}` payload after the merge.
+        engine.themeListener = { _, _, _ ->
+            val payload = engine.currentTheme()
+            saveTheme(payload)
+            onTheme(payload)
+        }
         engine.pieMenuListener = { id, spec -> onPieMenuChanged(id, spec) }
         val input = socket.getInputStream()
         val buffer = ByteArray(8192)

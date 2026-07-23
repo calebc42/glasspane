@@ -2,8 +2,9 @@
 // The SPEC 16.6 color model: a Color is a theme-role identifier or one of
 // #rgb / #rgba / #rrggbb / #rrggbbaa (case-insensitive). Unknown roles get a
 // LEGIBLE platform fallback — never transparent. The hex parser is pure and
-// JVM-tested; role resolution reads the active MaterialTheme (the full wire
-// theme → scheme mapping — ThemeBridge — lands at W9-h).
+// JVM-tested; role resolution reads the active MaterialTheme, which EbpTheme
+// (ThemeModel) builds from the pushed §18.4 palette, plus the success/warning
+// extension roles from LocalExtendedColors.
 package com.calebc42.ebp.companion.render
 
 import androidx.compose.material3.MaterialTheme
@@ -34,13 +35,22 @@ fun parseHexColor(spec: String): Long? {
  */
 @Composable
 fun resolveColor(spec: String?): Color? =
-    resolveColorIn(MaterialTheme.colorScheme, spec)
+    resolveColorIn(MaterialTheme.colorScheme, spec, LocalExtendedColors.current)
 
-/** Non-composable form for span builders that capture the scheme once. */
+/** Non-composable form for span builders that capture the scheme once.
+ * [extended] resolves the §18.4 success/warning roles that have no Material
+ * slot; when absent they take the legible fallback like any unknown role. */
 fun resolveColorIn(scheme: androidx.compose.material3.ColorScheme,
-                   spec: String?): Color? {
+                   spec: String?,
+                   extended: ExtendedColors? = null): Color? {
     if (spec.isNullOrEmpty()) return null
     parseHexColor(spec)?.let { return Color(it) } // Color(Long) takes ARGB
+    when (spec) {
+        "success" -> extended?.let { return it.success }
+        "on_success" -> extended?.let { return it.onSuccess }
+        "warning" -> extended?.let { return it.warning }
+        "on_warning" -> extended?.let { return it.onWarning }
+    }
     return when (spec) {
         "primary" -> scheme.primary
         "on_primary" -> scheme.onPrimary
@@ -66,9 +76,9 @@ fun resolveColorIn(scheme: androidx.compose.material3.ColorScheme,
         "outline_variant" -> scheme.outlineVariant
         "inverse_surface" -> scheme.inverseSurface
         "inverse_on_surface" -> scheme.inverseOnSurface
-        // Extension roles with no Material slot (success/warning) get their
-        // dedicated mapping with ThemeBridge at W9-h; until then they take the
-        // legible fallback below like any unknown role.
+        // success/warning are handled above from ExtendedColors when supplied;
+        // without it (e.g. a span builder that captured only the scheme) they
+        // fall through to the legible fallback like any unknown role.
         else -> scheme.onSurface // SPEC 16.6: legible, never transparent
     }
 }

@@ -8,16 +8,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.calebc42.ebp.companion.render.EbpTheme
 import com.calebc42.ebp.companion.render.RenderDialogRoot
 import com.calebc42.ebp.companion.render.RenderNode
 import com.calebc42.ebp.companion.render.RenderPieMenu
@@ -28,8 +26,9 @@ class MainActivity : ComponentActivity() {
 
     private val currentSpec = MutableStateFlow<JSONObject?>(null)
     private val currentDialog = MutableStateFlow<Pair<String, JSONObject>?>(null)
-    // SPEC 18.4: null = follow-system (amendment #36).
-    private val forcedDark = MutableStateFlow<Boolean?>(null)
+    // SPEC 18.4: the accepted theme payload ({dark, colors, syntax}) to mirror,
+    // or null for the native scheme (dark = follow-system, amendment #36).
+    private val theme = MutableStateFlow<JSONObject?>(null)
     private val currentPieMenu = MutableStateFlow<Pair<String, JSONObject>?>(null)
     private lateinit var bridge: DeviceBridge
 
@@ -62,17 +61,16 @@ class MainActivity : ComponentActivity() {
                         this, text, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
-            onTheme = { dark -> forcedDark.value = dark },
+            onTheme = { payload -> theme.value = payload },
             onPieMenuChanged = { id, spec ->
                 currentPieMenu.value = if (spec != null) id to spec else null
             })
         bridge.start()
         setContent {
-            val dark by forcedDark.collectAsState()
-            // SPEC 18.4: forced polarity, or the system setting when null.
-            val useDark = dark ?: isSystemInDarkTheme()
-            MaterialTheme(colorScheme = if (useDark) darkColorScheme()
-                else lightColorScheme()) {
+            // SPEC 18.4: mirror the pushed palette (colors/dark), or the native
+            // scheme following the system when no theme is set.
+            val themePayload by theme.collectAsState()
+            EbpTheme(themePayload) {
                 Surface(Modifier.fillMaxSize()) {
                     val spec by currentSpec.collectAsState()
                     when (val s = spec) {

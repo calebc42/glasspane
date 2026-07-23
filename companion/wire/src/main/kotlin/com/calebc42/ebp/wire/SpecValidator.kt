@@ -125,6 +125,114 @@ object SpecValidator {
             throw ContentInvalid("stale_spec", "editor nodes are prohibited in stale_spec")
     }
 
+    /**
+     * SPEC 13.4/18.5: a notification surface spec is `{body: Node, meta?}`,
+     * never a multi-view object. The body is a node tree; meta is the
+     * optional §18.5 metadata (channel, ongoing, category, priority,
+     * chronometer, actions). Notification surfaces have no input drafts,
+     * so nothing is returned.
+     */
+    fun validateNotificationSpec(spec: Any?, path: String = "spec",
+                                 maxCaptureFields: Long = 64) {
+        if (spec !is JSONObject) throw ContentInvalid(path, "must be an object")
+        if (spec.has("views")) throw ContentInvalid(path, "multi-view prohibited")
+        for (k in spec.keySet()) if (k != "body" && k != "meta")
+            throw ContentInvalid("$path.$k", "unknown notification member")
+        val body = spec.opt("body")
+        if (body !is JSONObject || body.opt("t") !is String)
+            throw ContentInvalid("$path.body", "must be a node")
+        validateSurfaceSpec(body, "$path.body", maxCaptureFields)
+        if (spec.has("meta")) {
+            val meta = spec.opt("meta") as? JSONObject
+                ?: throw ContentInvalid("$path.meta", "must be an object")
+            validateNotificationMeta(meta, "$path.meta")
+        }
+    }
+
+    private val PRIORITIES = setOf("min", "low", "default", "high", "max")
+
+    private fun validateNotificationMeta(meta: JSONObject, path: String) {
+        val allowed = setOf("channel", "ongoing", "category", "priority",
+            "chronometer", "actions")
+        for (k in meta.keySet()) if (k !in allowed)
+            throw ContentInvalid("$path.$k", "unknown meta member")
+        (meta.opt("channel"))?.takeIf { meta.has("channel") }?.let {
+            if (it !is String || !IDENTIFIER.matches(it))
+                throw ContentInvalid("$path.channel", "must be an identifier")
+        }
+        (meta.opt("category"))?.takeIf { meta.has("category") }?.let {
+            if (it !is String || !IDENTIFIER.matches(it))
+                throw ContentInvalid("$path.category", "must be an identifier")
+        }
+        if (meta.has("ongoing") && meta.opt("ongoing") !is Boolean)
+            throw ContentInvalid("$path.ongoing", "must be a boolean")
+        if (meta.has("priority") && meta.opt("priority") !in PRIORITIES)
+            throw ContentInvalid("$path.priority", "min|low|default|high|max")
+        meta.optJSONObject("chronometer")?.let { chrono ->
+            if (chrono.opt("base_ms") !is Number)
+                throw ContentInvalid("$path.chronometer.base_ms", "epoch timestamp required")
+            if (chrono.has("count_down") && chrono.opt("count_down") !is Boolean)
+                throw ContentInvalid("$path.chronometer.count_down", "must be a boolean")
+        }
+        meta.optJSONArray("actions")?.let { actions ->
+            for (i in 0 until actions.length()) {
+                val a = actions.optJSONObject(i)
+                    ?: throw ContentInvalid("$path.actions[$i]", "must be an object")
+                validateNotificationAction(a, "$path.actions[$i]")
+            }
+        }
+    }
+
+    private fun validateNotificationAction(a: JSONObject, path: String) {
+        val allowed = setOf("label", "on_tap", "icon", "dismiss", "input")
+        for (k in a.keySet()) if (k !in allowed)
+            throw ContentInvalid("$path.$k", "unknown action member")
+        if (a.opt("label") !is String || (a.opt("label") as String).isEmpty())
+            throw ContentInvalid("$path.label", "non-empty string required")
+        val onTap = a.optJSONObject("on_tap")
+            ?: throw ContentInvalid("$path.on_tap", "required")
+        if (a.has("icon") && (a.opt("icon") !is String ||
+                !IDENTIFIER.matches(a.getString("icon"))))
+            throw ContentInvalid("$path.icon", "must be an identifier")
+        val dismiss = a.opt("dismiss")
+        if (a.has("dismiss") && dismiss !is Boolean)
+            throw ContentInvalid("$path.dismiss", "must be a boolean")
+        val hasInput = a.has("input")
+        if (hasInput) {
+            val input = a.optJSONObject("input")
+                ?: throw ContentInvalid("$path.input", "must be an object")
+            for (k in input.keySet()) if (k != "hint" && k != "key")
+                throw ContentInvalid("$path.input.$k", "unknown input member")
+            if (input.has("hint") && input.opt("hint") !is String)
+                throw ContentInvalid("$path.input.hint", "must be a string")
+            if (input.has("key") && (input.opt("key") !is String ||
+                    !IDENTIFIER.matches(input.getString("key"))))
+                throw ContentInvalid("$path.input.key", "must be an identifier")
+        }
+        // SPEC 18.5: when input or dismiss:true is present, on_tap MUST be
+        // a remote ActionDescriptor; an inline reply MUST NOT capture_fields.
+        val requiresRemote = hasInput || dismiss == true
+        val isRemote = onTap.has("action") && !onTap.has("builtin")
+        if (requiresRemote && !isRemote)
+            throw ContentInvalid("$path.on_tap", "must be a remote action for input/dismiss")
+        if (hasInput && onTap.has("capture_fields"))
+            throw ContentInvalid("$path.on_tap", "an inline reply must not capture_fields")
+        // Validate the descriptor itself (remote or an advertised builtin).
+        if (onTap.has("action") == onTap.has("builtin"))
+            throw ContentInvalid("$path.on_tap", "exactly one of action/builtin")
+        if (onTap.has("action")) {
+            val name = onTap.opt("action") as? String
+                ?: throw ContentInvalid("$path.on_tap.action", "must be a string")
+            if ('.' !in name)
+                throw ContentInvalid("$path.on_tap.action", "action names contain a dot")
+            val policy = onTap.optString("when_offline", OFFLINE_DEFAULT)
+            if (policy !in OFFLINE_POLICIES)
+                throw ContentInvalid("$path.on_tap.when_offline", "unknown offline policy")
+            if (policy in setOf("queue", "wake") && !onTap.has("ttl_s"))
+                throw ContentInvalid("$path.on_tap", "$policy requires ttl_s")
+        }
+    }
+
     private fun containsEditor(value: Any?): Boolean = when (value) {
         is JSONObject -> value.opt("t") == "editor" ||
             value.keySet().any { containsEditor(value.get(it)) }

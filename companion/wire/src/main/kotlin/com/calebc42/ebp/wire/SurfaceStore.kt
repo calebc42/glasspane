@@ -99,16 +99,35 @@ class SurfaceStore(
                staleSpec: JSONObject?, currentView: String?,
                resetIds: JSONArray?): SurfaceResult {
         // SPEC 13.2: validate the entire request before changing state.
-        val statefuls = SpecValidator.validateSurfaceSpec(
-            spec, maxCaptureFields = maxCaptureFields)
-        val reset = resetIds?.let { SpecValidator.validateResetIds(it, statefuls) }
-            ?: emptySet()
-        staleSpec?.let { SpecValidator.validateStaleSpec(it, spec.has("views")) }
-        val isMultiView = spec.has("views")
-        if (currentView != null) {
-            if (!isMultiView || !spec.getJSONObject("views").has(currentView))
-                throw ContentInvalid("current_view",
-                    "valid only for a multi-view app spec naming an existing view")
+        // SPEC 13.4: the namespace decides the SurfaceSpec variant.
+        val statefuls: Map<String, JSONObject>
+        val reset: Set<String>
+        val isMultiView: Boolean
+        if (namespace(surface) == "notification") {
+            // SPEC 13.4/18.5: {body: Node, meta?}, no views, no drafts.
+            SpecValidator.validateNotificationSpec(spec, maxCaptureFields = maxCaptureFields)
+            if (currentView != null)
+                throw ContentInvalid("current_view", "not valid for a notification surface")
+            if (resetIds != null && resetIds.length() > 0)
+                throw ContentInvalid("reset_input_ids", "a notification surface has no drafts")
+            staleSpec?.let {
+                SpecValidator.validateNotificationSpec(it, "stale_spec", maxCaptureFields)
+            }
+            statefuls = emptyMap()
+            reset = emptySet()
+            isMultiView = false
+        } else {
+            statefuls = SpecValidator.validateSurfaceSpec(
+                spec, maxCaptureFields = maxCaptureFields)
+            reset = resetIds?.let { SpecValidator.validateResetIds(it, statefuls) }
+                ?: emptySet()
+            staleSpec?.let { SpecValidator.validateStaleSpec(it, spec.has("views")) }
+            isMultiView = spec.has("views")
+            if (currentView != null) {
+                if (!isMultiView || !spec.getJSONObject("views").has(currentView))
+                    throw ContentInvalid("current_view",
+                        "valid only for a multi-view app spec naming an existing view")
+            }
         }
         val record = records[surface]
         val floor = record?.revision ?: -1L

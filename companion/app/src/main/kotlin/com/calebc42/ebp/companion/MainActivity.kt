@@ -40,8 +40,6 @@ class MainActivity : ComponentActivity() {
         }
         bridge = DeviceBridge(
             applicationContext,
-            java.io.File(filesDir, "ebp-queue.json"),
-            java.io.File(filesDir, "ebp-surfaces.json"),
             onSurfaceChanged = { spec -> currentSpec.value = spec },
             onQueueProblem = { message ->
                 runOnUiThread {

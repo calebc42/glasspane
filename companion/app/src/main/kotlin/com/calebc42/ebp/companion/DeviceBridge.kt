@@ -10,15 +10,10 @@ package com.calebc42.ebp.companion
 
 import com.calebc42.ebp.wire.CompanionEngine
 import com.calebc42.ebp.wire.CompanionConfig
-import com.calebc42.ebp.wire.DurableQueue
 import com.calebc42.ebp.wire.EbpAuth
-import com.calebc42.ebp.wire.FileQueueStore
-import com.calebc42.ebp.wire.FileSurfaceBacking
 import com.calebc42.ebp.wire.SessionState
-import com.calebc42.ebp.wire.SurfaceStore
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -26,8 +21,6 @@ import kotlin.concurrent.thread
 
 class DeviceBridge(
     private val appContext: android.content.Context,
-    queueFile: File,
-    surfaceFile: File,
     private val onSurfaceChanged: (JSONObject?) -> Unit,
     /** SPEC 15.1: storage failure and queue exhaustion MUST reach the
      * user as a visible diagnostic. */
@@ -43,12 +36,11 @@ class DeviceBridge(
     private val onPieMenuChanged: (String, JSONObject?) -> Unit = { _, _ -> },
 ) {
 
-    // SPEC 13.1/15.1: surface histories, tombstones, and input_state drafts
-    // survive process and device restarts, like the durable queue.
-    val store = SurfaceStore(64, 4096, backing = FileSurfaceBacking(surfaceFile))
-
-    /** SPEC 15: the durable queue survives process and device restarts. */
-    val queue = DurableQueue(FileQueueStore(queueFile), 256, 8_388_608)
+    // SPEC 13.1/15.1/18.6: the durable stores are process-wide singletons
+    // (CompanionStores), shared with cold-started manifest receivers.
+    val store = CompanionStores.surfaces(appContext)
+    val queue = CompanionStores.queue(appContext)
+    private val reminders = CompanionStores.reminders(appContext)
     @Volatile private var current: Socket? = null
 
     private val config = CompanionConfig(
@@ -190,7 +182,7 @@ class DeviceBridge(
 
     private fun serve(socket: Socket) {
         val out = socket.getOutputStream()
-        val engine = CompanionEngine(config, store, queue) { bytes ->
+        val engine = CompanionEngine(config, store, queue, reminders) { bytes ->
             // The sink runs on whatever thread emits — the reader, the pump,
             // or the UI dispatch executor. A peer that went away mid-write
             // MUST NOT crash that thread (and with it the app): close the

@@ -49,6 +49,35 @@ Concretely:
 
 ## 3. Components
 
+### 3.0 Resolved design decisions (2026-07-23, approved plan)
+The seam design was settled after a dedicated architecture pass; where the
+subsections below differ, these rulings win:
+- **`TriggerFiringService` lives in the wire library** (pure JVM), owns the one
+  `TriggerStore` + `TriggerRuntime` + a ref to the shared `DurableQueue`, and is
+  process-lifetime. Firing eligibility = durable registrations exist; the
+  `granted` gate stays only on `triggers.set`/welcome (§21.1/21.2 impose no
+  session precondition on firing).
+- **`LiveSession` interface** (wire): `deliverLiveDrop(params)` +
+  `onDurableAdmitted(policy)`. The engine implements it, attaches in init /
+  detaches in `close()`; the service holds one newest-wins `@Volatile` slot and
+  invokes it only AFTER releasing its monitor. Lock order: engine → service →
+  queue; `DurableQueue` becomes an internally-synchronized leaf.
+- **Baselines are NOT persisted** — §21.5 requires silent re-establishment from
+  current state after restart; persisting would wrongly fire on a
+  change-while-dead. `FileTriggerBacking` omits them by design.
+- **`CompanionStores`** (app object) is the ONLY constructor of the file-backed
+  instances (`ebp-queue.json`, `ebp-surfaces.json`, `ebp-reminders.json`,
+  `ebp-triggers.json`), so cold manifest receivers and DeviceBridge share one
+  instance per file; **`EbpApplication.onCreate`** bootstraps sources +
+  `recover()` + `armBaselines()` regardless of MainActivity.
+- **`dispatchContextless`** is extracted from the engine's
+  `dispatchDescriptorContextless` so cold receivers (reminder tap) and the
+  engine share one implementation.
+- The queue-record **`pending_local`** flag gates the pump (a pending head is
+  not yet eligible), closing the deliver-before-local race; `recover()`
+  floor-reconstructs throttle/one-shot from surviving queued `trigger.fired`
+  records for the A-committed/B-lost crash window.
+
 ### 3.1 Durable `ReminderStore`
 - Add `ReminderBacking { load(): ReminderState; replace(state) }` +
   `MemoryReminderBacking` + `FileReminderBacking(file)`; `ReminderState` holds
@@ -130,24 +159,39 @@ future connection: it already survives restarts and replays on the next READY
 session. W8's job is to feed it from a firing path that no longer requires a
 live engine, and to make the reminder/trigger *state* around it durable.
 
-## 5. Atom breakdown (sequence)
+## 5. Atom breakdown (amended sequence; the approved plan is canonical)
 
-1. **W8-a** `ReminderBacking` + `FileReminderBacking`; make `ReminderStore`
-   hold fired receipts durably; make it an engine constructor param; hoist +
-   inject in `DeviceBridge`. (No behavior change yet; pure hoist + persistence.)
-2. **W8-b** Reminder presentation: cancel-on-remove, arm-only-new/changed,
-   fired-receipt gate in `ReminderAlarmReceiver`, `contentIntent` →
-   `dispatchReminderTap`. Device-verify at-most-once across a force-stop.
-3. **W8-c** `TriggerBacking` + `FileTriggerBacking`; persist registrations +
-   runtime records; hoist + inject; carry-forward now survives reconnect.
-4. **W8-d** `TriggerFiringService` (device-lifetime) + the §21.2 durable
-   transaction (throttle/receipts/queue_seq) + `pending-local` recovery;
-   `TriggerSources` feeds the service, not the per-connection engine.
-5. **W8-e** `BootReceiver` (boot/timezone/time) re-arm for reminders + `time.*`
-   + `boot` triggers; re-baseline on boot generation.
-6. **W8-f** Device verification: reminder fires after force-stop; a queued
-   trigger fires while Emacs is disconnected and is delivered on the next
-   connect via replay; throttle survives a restart (no immediate duplicate).
+1. **W8-a** `ReminderBacking` + `FileReminderBacking`; `ReminderStore(backing)`
+   synchronized, `markFired` persists before returning true; engine constructor
+   param; **`CompanionStores`** (queue/surfaces/reminders) consumed by
+   DeviceBridge/MainActivity; REWRITE-PLAN renumbered (organ ports → W9).
+2. **W8-b** Reminder presentation: diff-based arm/cancel/skip-fired;
+   receipt-before-notify in `ReminderAlarmReceiver`; `ReminderTapReceiver` +
+   `contentIntent` → `dispatchContextless`; **`LiveSession` + the
+   `dispatchContextless` extraction land here**; `CompanionStores.liveSession`.
+   Device-verify at-most-once across a force-stop + offline tap replay.
+3. **W8-c** `TriggerBacking` + `FileTriggerBacking` (entries + runtime records,
+   NO baselines); `TriggerStore(backing)` synchronized + `identities()` +
+   `persistRecords()`; engine param; `CompanionStores.triggers`.
+4. **W8-d** `TriggerFiringService` owns the runtime; engine delegates +
+   attach/detach; grant gate off the firing path; DeviceBridge feeds the
+   service; §21.2 A/B transaction + `pending_local` + rollback + `recover()`;
+   `DurableQueue` synchronized + `pendingLocal`/`clearPendingLocal` + pump
+   gate; `time.at_ms` future check in `replaceSet`; one-shot completed + boot
+   generation consult/commit; **`EbpApplication`** bootstrap.
+5. **W8-e** `BootReceiver` (BOOT_COMPLETED/TIMEZONE_CHANGED/TIME_SET) re-arm
+   for reminders + `time.*`; `TimeAlarmReceiver`; boot generation via
+   BOOT_COUNT (admit once per generation); `every_s` scheduling +
+   missed-interval coalescing (`nextRepeatDueMs`, wire, unit-tested);
+   re-baseline on boot.
+6. **W8-f** Device verification matrix: reminder at-most-once across
+   force-stop; trigger fires while Emacs disconnected → delivered on next
+   connect via replay; throttle survives restart (no immediate duplicate);
+   reboot re-arm; offline tap replay.
+7. **W8-g** Engine P2 sweep: every on_tap through canonical `validateAction`;
+   uniform §4.4 128-octet identifier cap (trigger id/dedupe, pie menu_id,
+   reminder owner/id); notification state gate (READY-only notifications
+   dropped during SYNCING).
 
 ## 6. Also-fixable alongside (from the audit, same neighborhoods)
 - `time.every_s` scheduling + missed-interval coalescing, and the one-shot

@@ -45,6 +45,9 @@ class CompanionEngine(
         MemoryQueueStore(),
         config.limits.getLong("max_queued_events"),
         config.limits.getLong("max_queued_bytes")),
+    /** Shared across connections AND restarts: SPEC 18.6 reminders + fired
+     * receipts outlive a session exactly like the queue and surfaces. */
+    val reminders: ReminderStore = ReminderStore(),
     private val sink: (ByteArray) -> Unit,
 ) {
     var state: SessionState = SessionState.CONNECTED
@@ -790,8 +793,6 @@ class CompanionEngine(
 
     // ------------------------------------------------------ reminders (18.6)
 
-    val reminders = ReminderStore()
-
     /** Schedule hook: (owner, its complete new reminder set) after an
      * accepted replace. The host arms/cancels platform alarms. */
     var reminderListener: ((String, JSONArray) -> Unit)? = null
@@ -825,7 +826,13 @@ class CompanionEngine(
         if (others + parsed.size > config.limits.optLong("max_reminders", 256))
             return respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("reason", "reminder-limit"))
-        val count = reminders.replace(owner, parsed)
+        // SPEC 18.6: the accepted set commits durably before it is claimed; a
+        // storage failure leaves the prior set in force and answers an error.
+        val count = try {
+            reminders.replace(owner, parsed)
+        } catch (e: Exception) {
+            return respondError(id, -32603, "Storage failed", "internal-error")
+        }
         respondResult(id, JSONObject().put("count", count))
         reminderListener?.invoke(owner, JSONArray(parsed))
     }

@@ -17,8 +17,9 @@ unit; a rung lands only with its exit gate green.
 | **W5 actions + events** | ActionDescriptors incl. `capture_fields`; `event.action` request protocol with EventId, 4-status results, Emacs receipt store; `state.changed` with barrier rules (§14.6) | Counter round trip; duplicate-after-restart (§24.6 item 9); state-before-action flush test |
 | **W6 durability** | Companion durable queue (`queue_seq`, expiry high-water mark, dedupe transaction); `queue.replay` pump; safe admission | Kill matrix (§24.6 item 8); replay interruption/capacity (item 10); offline draft + sync + replay (item 11) |
 | **W7 modules, by need** | dialogs (request + builtins), toasts, pie menus, themes, reminders, editor sync (new method layer over ported splice math), capabilities, triggers (§21.1 state carry-over, §21.2 transaction) | Each module's REQUIRED rules + its §24.6 module cases; password exclusion (item 12) |
-| **W8 organ ports** | Port-safe modules from poc-v1 (see manifest) with vocabulary updates | poc-v1 feature parity checklist; core-load-test equivalent stays green |
-| **W9 overload + polish** | §22 traffic classes, bounded processing, `log.error` protocol | Bounded overload per class (§24.6 item 14) |
+| **W8 durable-offline conformance** | Hoist reminders/triggers to durable file backing shared across connections; device-lifetime `TriggerFiringService`; §21.2 durable transaction + pending-local recovery; boot re-arm; reminder tap routing; engine P2 sweep (validateAction delegation, identifier caps, notification state gate). Closes the W7 audit's P1 cluster — see docs/W8-durable-offline-plan.md | JVM: fire-with-no-engine admits durably; throttle/receipts survive restart; device matrix: at-most-once across force-stop, offline fire → replay on connect, reboot re-arm |
+| **W9 organ ports** | Port-safe modules from poc-v1 (see manifest) with vocabulary updates (was W8; renumbered 2026-07-23 when the audit made durable-offline the conformance blocker) | poc-v1 feature parity checklist; core-load-test equivalent stays green |
+| **W10 overload + polish** | §22 traffic classes, bounded processing, `log.error` protocol | Bounded overload per class (§24.6 item 14) |
 
 Interleave W2 with W4/W5 client work as device access allows; the ladder
 orders gates, not calendar.

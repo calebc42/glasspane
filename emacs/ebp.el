@@ -1190,6 +1190,30 @@ outcome MUST NOT be auto-retried (SPEC 20.2)."
    (lambda (result error)
      (when callback (funcall callback result error)))))
 
+;;;; Device triggers (SPEC 21), the client half
+
+(defun ebp-client-device-trigger-types (client)
+  "The trigger-type identifiers the Companion advertised (SPEC 20.1/21).
+Nil until the welcome carried a device report (triggers granted)."
+  (append (plist-get (ebp-client-device client) :trigger_types) nil))
+
+(cl-defun ebp-client-triggers-set (client triggers &key callback)
+  "Replace the pairing identity's trigger set (SPEC 21.1).  TRIGGERS is a
+vector of trigger plists — each `(:id ID :type TYPE)' plus optional
+`:params', `:when' (a vector of state predicates, flat AND), `:policy'
+\(drop/queue/wake), `:ttl_s', `:dedupe', `:throttle_s', and `:on_fire' (a
+vector of `(:cap C :args ...)' or `(:notify (:text S :title? S))').  A fired
+trigger arrives as an `event.action' whose action is `trigger.fired'; register
+a handler with `ebp-client-register-action'.  CALLBACK receives (COUNT ERROR):
+COUNT is the accepted total, ERROR the JSON-RPC error plist (1101
+`triggers-rejected', identifying the offending trigger).  An empty vector
+clears every registration; the whole set is validated before any change."
+  (ebp-client--request
+   client 'triggers.set
+   `(:triggers ,triggers)
+   (lambda (result error)
+     (when callback (funcall callback (and result (plist-get result :count)) error)))))
+
 ;;;; Pie menus (SPEC 18.3), the client half
 
 (cl-defun ebp-client-pie-menu-show (client menu-id categories &key center-label)

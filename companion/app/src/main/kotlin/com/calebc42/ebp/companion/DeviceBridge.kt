@@ -59,7 +59,7 @@ class DeviceBridge(
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
         supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
             "presentation.pie-menu", "reminders.owner", "surfaces.notification",
-            "editor.sync", "capabilities"),
+            "editor.sync", "capabilities", "triggers"),
         surfaceProfiles = JSONObject()
             .put("app", JSONObject()
                 .put("node_types", JSONArray(listOf(
@@ -86,13 +86,15 @@ class DeviceBridge(
             .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
             .put("max_capture_fields", 64).put("max_dialogs", 4)
             .put("max_pie_menus", 1).put("max_reminders", 256)
-            .put("max_editor_sessions", 8),
+            .put("max_editor_sessions", 8).put("max_trigger_responses", 8),
         // SPEC 20.1/20.2: advertise the device report and the platform executor.
         deviceReport = AppCapabilities.deviceReport(),
         capabilityHandler = AppCapabilities.handler(appContext, 65_536),
     )
 
     fun start() = thread(name = "ebp-bridge", isDaemon = true) {
+        // SPEC 21: begin watching platform signals (sticky battery seeds now).
+        triggerSources.start()
         try {
             val server = ServerSocket()
             server.reuseAddress = true
@@ -128,6 +130,15 @@ class DeviceBridge(
         java.util.concurrent.Executors.newSingleThreadExecutor { r ->
             Thread(r, "ebp-dispatch").apply { isDaemon = true }
         }
+
+    // SPEC 21: platform trigger sources feed the live engine's runtime and
+    // hold the latest state for gate evaluation.
+    private val triggerSources = TriggerSources(appContext, ::feedTriggerSample)
+
+    /** SPEC 21.5: forward a device state sample to the live engine's runtime. */
+    private fun feedTriggerSample(type: String, sample: JSONObject) {
+        dispatchExecutor.execute { engine?.observeTriggerSample(type, sample) }
+    }
 
     /** SPEC 14.1: renderer hook -> remote action through the live engine. */
     fun action(surface: String, descriptor: JSONObject?, value: Any? = null) {
@@ -210,6 +221,9 @@ class DeviceBridge(
         engine.toastListener = { text, _ -> onToast(text) }
         engine.themeListener = { dark, _, _ -> onTheme(dark) }
         engine.pieMenuListener = { id, spec -> onPieMenuChanged(id, spec) }
+        // SPEC 21.3/21.4: current device state for gates; on_fire notifications.
+        engine.triggerStateProvider = { type -> triggerSources.currentState(type) }
+        engine.triggerNotifyListener = { notify -> Notifications.postTrigger(appContext, notify) }
         val input = socket.getInputStream()
         val buffer = ByteArray(8192)
         try {

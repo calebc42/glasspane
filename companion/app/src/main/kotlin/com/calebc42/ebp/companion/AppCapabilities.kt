@@ -24,12 +24,24 @@ import org.json.JSONObject
 object AppCapabilities {
 
     private val CAPS = listOf("vibrate", "clipboard.read")
+    // SPEC 21/20.1: advertise ONLY what a source actually feeds — battery.level
+    // here; screen/power/etc. attach the same way (register a receiver, feed
+    // observeTriggerSample) and get advertised as they land. trigger_caps is
+    // the unattended subset runnable inside on_fire.
+    private val TRIGGER_TYPES = listOf("battery.level")
+    private val STATE_TYPES = listOf("battery.level")
 
-    /** SPEC 20.1: the device report echoed in the welcome. */
+    /** SPEC 20.1: the device report echoed in the welcome (capabilities and
+     * triggers share one report). */
     fun deviceReport(): JSONObject = JSONObject()
         .put("caps", JSONArray(CAPS))
-        .put("trigger_caps", JSONArray()) // no trigger module yet
+        .put("trigger_caps", JSONArray(listOf("vibrate")))
         .put("permissions", JSONObject())
+        // SPEC 20.1: REQUIRED once triggers is granted.
+        .put("trigger_types", JSONArray(TRIGGER_TYPES))
+        .put("state_types", JSONArray(STATE_TYPES))
+        .put("trackable_state_types", JSONArray(STATE_TYPES))
+        .put("trigger_unavailable", JSONObject())
 
     /**
      * SPEC 20.2: the executor. `maxFieldBytes` bounds clipboard text per the

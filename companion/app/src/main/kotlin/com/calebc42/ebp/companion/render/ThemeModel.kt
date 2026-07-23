@@ -60,29 +60,39 @@ fun buildColorScheme(colors: JSONObject?, base: ColorScheme): ColorScheme {
     val c = colors ?: return base
     val surface = c.role("surface") ?: base.surface
     val surfaceVariant = c.role("surface_variant") ?: base.surfaceVariant
+    // SPEC 18.4 (amendment #56): when a base role is pushed but its paired
+    // on-color is absent, derive a contrast-legible on-color from the PUSHED
+    // color, not the base scheme's on-color (which may be illegible against the
+    // foreign color). When neither is pushed, keep the base on-color.
+    fun on(onRole: String, baseRole: String, baseOn: Color): Color {
+        c.role(onRole)?.let { return it }
+        c.role(baseRole)?.let { return legibleOn(it) }
+        return baseOn
+    }
     return base.copy(
         primary = c.role("primary") ?: base.primary,
-        onPrimary = c.role("on_primary") ?: base.onPrimary,
+        onPrimary = on("on_primary", "primary", base.onPrimary),
         primaryContainer = c.role("primary_container") ?: base.primaryContainer,
-        onPrimaryContainer = c.role("on_primary_container") ?: base.onPrimaryContainer,
+        onPrimaryContainer = on("on_primary_container", "primary_container", base.onPrimaryContainer),
         secondary = c.role("secondary") ?: base.secondary,
-        onSecondary = c.role("on_secondary") ?: base.onSecondary,
+        onSecondary = on("on_secondary", "secondary", base.onSecondary),
         secondaryContainer = c.role("secondary_container") ?: base.secondaryContainer,
-        onSecondaryContainer = c.role("on_secondary_container") ?: base.onSecondaryContainer,
+        onSecondaryContainer = on("on_secondary_container", "secondary_container", base.onSecondaryContainer),
         tertiary = c.role("tertiary") ?: base.tertiary,
-        onTertiary = c.role("on_tertiary") ?: base.onTertiary,
+        onTertiary = on("on_tertiary", "tertiary", base.onTertiary),
         tertiaryContainer = c.role("tertiary_container") ?: base.tertiaryContainer,
-        onTertiaryContainer = c.role("on_tertiary_container") ?: base.onTertiaryContainer,
+        onTertiaryContainer = on("on_tertiary_container", "tertiary_container", base.onTertiaryContainer),
         error = c.role("error") ?: base.error,
-        onError = c.role("on_error") ?: base.onError,
+        onError = on("on_error", "error", base.onError),
         errorContainer = c.role("error_container") ?: base.errorContainer,
-        onErrorContainer = c.role("on_error_container") ?: base.onErrorContainer,
+        onErrorContainer = on("on_error_container", "error_container", base.onErrorContainer),
         background = c.role("background") ?: c.role("surface") ?: base.background,
-        onBackground = c.role("on_background") ?: c.role("on_surface") ?: base.onBackground,
+        onBackground = on("on_background", "background", c.role("on_surface")
+            ?: c.role("surface")?.let { legibleOn(it) } ?: base.onBackground),
         surface = surface,
-        onSurface = c.role("on_surface") ?: base.onSurface,
+        onSurface = on("on_surface", "surface", base.onSurface),
         surfaceVariant = surfaceVariant,
-        onSurfaceVariant = c.role("on_surface_variant") ?: base.onSurfaceVariant,
+        onSurfaceVariant = on("on_surface_variant", "surface_variant", base.onSurfaceVariant),
         outline = c.role("outline") ?: base.outline,
         surfaceContainerLow = lerp(surface, surfaceVariant, 0.25f),
         surfaceContainer = lerp(surface, surfaceVariant, 0.5f),

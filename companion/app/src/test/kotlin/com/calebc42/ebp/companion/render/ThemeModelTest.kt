@@ -37,6 +37,20 @@ class ThemeModelTest {
     }
 
     @Test
+    fun missingOnColorIsDerivedFromThePushedRoleNotTheBase() {
+        // A LIGHT primary pushed without on_primary: the on-color must be
+        // derived contrast-legible from the pushed color (dark), NOT the light
+        // scheme's white onPrimary (amendment #56).
+        val base = lightColorScheme()
+        val scheme = buildColorScheme(JSONObject().put("primary", "#fffff0"), base)
+        assertEquals(Color(0xFFFFFFF0), scheme.primary)
+        assertEquals(Color(0xFF1A1A1A), scheme.onPrimary) // legible dark, not base white
+        assertNotEquals(base.onPrimary, scheme.onPrimary)
+        // An un-pushed role keeps the base on-color.
+        assertEquals(base.onTertiary, scheme.onTertiary)
+    }
+
+    @Test
     fun nullColorsIsTheNativeScheme() {
         val base = darkColorScheme()
         assertEquals(base, buildColorScheme(null, base))

@@ -156,6 +156,11 @@ class SpecValidatorCompletenessTest {
         rejects(toolbar(JSONObject().put("label", "X").put("snippet", "s")
             .put("line", "promote")), "exactly one primary operation")
         rejects(toolbar(JSONObject().put("snippet", "s")), "label or icon")
+        // SPEC 17.7 (amendment #61): at most one ${input:...} token per snippet.
+        rejects(toolbar(JSONObject().put("label", "X")
+            .put("snippet", "\${input:First} \${input:Second}")), "at most one")
+        accepts(node("editor", "id" to "e", "toolbar" to JSONArray()
+            .put(JSONObject().put("label", "X").put("snippet", "hi \${input:Name}"))))
         rejects(toolbar(JSONObject().put("label", "X").put("command", "fmt")),
             "command requires document")
         accepts(node("editor", "id" to "e", "document" to "doc.org",

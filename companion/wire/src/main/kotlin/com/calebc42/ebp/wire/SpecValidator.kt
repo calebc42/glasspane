@@ -27,6 +27,8 @@ private val YYYY_MM_DD = Regex("\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])")
 
 // SPEC 17.7: a ToolbarItem carries exactly one primary operation.
 private val TOOLBAR_OPS = setOf("snippet", "on_tap", "menu", "command", "line")
+// SPEC 17.7 (amendment #61): the ${input:...} placeholder — at most one per snippet.
+private val INPUT_TOKEN = Regex("""\$\{input:""")
 private val TOOLBAR_PLACEMENTS = setOf("cursor", "line-start", "block")
 
 // SPEC 17.5: the closed canvas-op shapes — required members per known op.
@@ -844,8 +846,14 @@ object SpecValidator {
                 if (!hasDocument)
                     throw ContentInvalid("$path.command", "command requires document")
             }
-            "snippet" -> if (item.opt("snippet") !is String)
-                throw ContentInvalid("$path.snippet", "must be a string")
+            "snippet" -> {
+                val snippet = item.opt("snippet") as? String
+                    ?: throw ContentInvalid("$path.snippet", "must be a string")
+                // SPEC 17.7 (amendment #61): at most one ${input:...} token.
+                if (INPUT_TOKEN.findAll(snippet).count() > 1)
+                    throw ContentInvalid("$path.snippet",
+                        "at most one \${input:...} token per snippet")
+            }
             "line" -> if (item.opt("line") !is String)
                 throw ContentInvalid("$path.line", "must be a string")
             // on_tap descriptors are validated by the generic walk.

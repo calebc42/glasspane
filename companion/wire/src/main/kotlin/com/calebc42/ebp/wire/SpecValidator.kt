@@ -495,6 +495,16 @@ object SpecValidator {
                         throw ContentInvalid("$path.items[$i]", "duplicate item key")
                 }
             }
+            "image" -> {
+                // SPEC 17.2: no URI form is implicit — the url MUST be https or
+                // a well-formed base64 data:image of a supported (non-active)
+                // media type. Anything else (http, file, javascript:, svg,
+                // malformed data:) is content-invalid. The per-form
+                // advertisement gate and the SSRF/limit stack are runtime.
+                if (!ImageGuards.isValidImageUrl(node.optString("url")))
+                    throw ContentInvalid("$path.url",
+                        "image url must be https or a supported base64 data:image")
+            }
             "tabs" -> validateTabs(node, path)
             "table" -> validateTable(node, path)
             "chart" -> validateChart(node, path)

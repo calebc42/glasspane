@@ -14,8 +14,12 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.companion.DeviceBridge
 import com.calebc42.ebp.wire.EditorSession
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -242,16 +247,24 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 // ------------------------------------------------------------ scaffold
 
 /**
- * SPEC 17.6: the scaffold's application chrome. This slice renders top_bar,
- * body, and a snackbar (whose action dispatches on a user tap only, never on
- * timeout). bottom_bar / fab / floating_toolbar / drawer / on_refresh land
- * at W9-g.
+ * SPEC 17.6: the scaffold's application chrome — every slot (top_bar, body,
+ * bottom_bar, fab, floating_toolbar, drawer) is structural NODE content with
+ * no hidden navigation behavior beyond its own nodes. The snackbar action
+ * dispatches only on a user tap (never timeout); on_refresh only after a user
+ * refresh gesture (the spinner self-clears — there is no completion signal,
+ * the refreshed push lands in roughly the same window). A drawer opens from
+ * the hamburger (Companion-local, like view switching) and closes by scrim.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
     val hostState = remember { SnackbarHostState() }
     val snackbar = node.optString("snackbar").takeIf { it.isNotEmpty() }
     val action = node.optJSONObject("snackbar_action")
+    val drawer = node.optJSONObject("drawer")
+    val drawerState = androidx.compose.material3.rememberDrawerState(
+        androidx.compose.material3.DrawerValue.Closed)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(snackbar) {
         if (snackbar != null) {
             val result = hostState.showSnackbar(
@@ -262,16 +275,99 @@ fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
                 ctx.action(action?.optJSONObject("on_tap"))
         }
     }
-    Scaffold(
-        snackbarHost = { SnackbarHost(hostState) },
-        topBar = {
-            node.optJSONObject("top_bar")?.let { RenderNode(it, ctx.child(it, 0)) }
-        },
-    ) { inner ->
-        Box(Modifier.padding(inner)) {
-            node.optJSONObject("body")?.let { RenderNode(it, ctx.child(it, 1)) }
+    val scaffold: @Composable () -> Unit = {
+        Scaffold(
+            snackbarHost = { SnackbarHost(hostState) },
+            topBar = {
+                val topBar = node.optJSONObject("top_bar")
+                if (topBar != null || drawer != null) {
+                    // §17.6: the top bar is drawn edge-to-edge, so it MUST clear
+                    // the system status bar itself (a plain Row, unlike M3's
+                    // TopAppBar, gets no automatic inset) — else the hamburger
+                    // sits under the status icons and is neither visible nor
+                    // tappable.
+                    Row(
+                        modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        if (drawer != null) {
+                            androidx.compose.material3.IconButton(
+                                onClick = {
+                                    scope.launch {
+                                        if (drawerState.isClosed) drawerState.open()
+                                        else drawerState.close()
+                                    }
+                                }) {
+                                androidx.compose.material3.Icon(
+                                    IconMap.get("menu"), contentDescription = "Menu")
+                            }
+                        }
+                        topBar?.let { RenderNode(it, ctx.child(it, 0)) }
+                    }
+                }
+            },
+            floatingActionButton = {
+                node.optJSONObject("fab")?.let { RenderNode(it, ctx.child(it, 2)) }
+            },
+            bottomBar = {
+                val floatingToolbar = node.optJSONObject("floating_toolbar")
+                val bottomBar = node.optJSONObject("bottom_bar")
+                if (floatingToolbar != null || bottomBar != null) {
+                    Column {
+                        floatingToolbar?.let {
+                            androidx.compose.material3.Surface(
+                                tonalElevation = 3.dp, shadowElevation = 4.dp,
+                                modifier = Modifier.fillMaxWidth()) {
+                                RenderNode(it, ctx.child(it, 3))
+                            }
+                        }
+                        bottomBar?.let {
+                            androidx.compose.material3.Surface(
+                                tonalElevation = 2.dp,
+                                modifier = Modifier.fillMaxWidth()) {
+                                RenderNode(it, ctx.child(it, 4))
+                            }
+                        }
+                    }
+                }
+            },
+        ) { inner ->
+            // Edge-to-edge: lift keyboard-adjacent body content clear of the
+            // IME while the bottom bar stays put; consumeWindowInsets keeps
+            // descendants with their own imePadding from double-padding.
+            val bodyModifier = Modifier.padding(inner)
+                .consumeWindowInsets(inner)
+                .imePadding()
+            val onRefresh = node.optJSONObject("on_refresh")
+            val body = node.optJSONObject("body")
+            if (onRefresh != null) {
+                var refreshing by remember { mutableStateOf(false) }
+                LaunchedEffect(refreshing) {
+                    if (refreshing) { kotlinx.coroutines.delay(1200); refreshing = false }
+                }
+                androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+                    isRefreshing = refreshing,
+                    onRefresh = {
+                        refreshing = true
+                        ctx.action(onRefresh) // §17.6: user gesture only
+                    },
+                    modifier = bodyModifier) {
+                    body?.let { RenderNode(it, ctx.child(it, 1)) }
+                }
+            } else {
+                Box(bodyModifier) { body?.let { RenderNode(it, ctx.child(it, 1)) } }
+            }
         }
     }
+    if (drawer != null) {
+        androidx.compose.material3.ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                androidx.compose.material3.ModalDrawerSheet(
+                    modifier = Modifier.fillMaxWidth(0.75f)) {
+                    RenderNode(drawer, ctx.child(drawer, 5))
+                }
+            }) { scaffold() }
+    } else scaffold()
 }
 
 // ------------------------------------------------------------ actions

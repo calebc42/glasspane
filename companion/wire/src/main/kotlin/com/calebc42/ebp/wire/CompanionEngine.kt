@@ -317,6 +317,7 @@ class CompanionEngine(
             "surface.remove" -> handleSurfaceRemove(id, params)
             "queue.replay" -> handleQueueReplay(id)
             "dialog.show" -> handleDialogShow(id, params)
+            "reminders.set" -> handleRemindersSet(id, params)
             "session.ready" -> {
                 // SPEC 10.3: the {} response serializes ahead of every
                 // READY-only frame; emitting before transitioning does that.
@@ -634,21 +635,149 @@ class CompanionEngine(
         if (itemIndex != null) args.put("item_index", itemIndex)
         pieMenus.remove(menuId)
         pieMenuListener?.invoke(menuId, null)
-        dispatchContextlessAction(descriptor.getString("action"), args)
+        dispatchDescriptorContextless(descriptor, args)
     }
 
-    /** A surface-less, drop-only event.action (SPEC 14.4: pie-menu events
-     * omit surface/revision_seen/dialog_id). Live delivery only. */
-    private fun dispatchContextlessAction(action: String, args: JSONObject) {
-        if (state != SessionState.READY) return
+    /**
+     * A context-less event.action (SPEC 14.4: pie-menu and reminder events
+     * omit surface/revision_seen/dialog_id), honoring the descriptor's
+     * offline policy. A drop descriptor delivers live or is lost; queue and
+     * wake admit to the durable queue exactly as a surface action would.
+     */
+    private fun dispatchDescriptorContextless(descriptor: JSONObject, args: JSONObject,
+                                              callback: ((String?, JSONObject?) -> Unit)? = null) {
         val params = JSONObject()
             .put("event_id", EbpAuth.generateNonce())
-            .put("action", action)
+            .put("action", descriptor.getString("action"))
             .put("occurred_at_ms", queue.effectiveNow())
         if (args.length() > 0) params.put("args", args)
+        val policy = descriptor.optString("when_offline", OFFLINE_DEFAULT)
+        if (policy == "queue" || policy == "wake")
+            params.put("queued_at_ms", queue.effectiveNow())
         if (params.toString().toByteArray(Charsets.UTF_8).size >
-            config.limits.getLong("max_event_bytes")) return
-        sendRequest("event.action", params) { _, _ -> }
+            config.limits.getLong("max_event_bytes")) {
+            callback?.invoke(null, JSONObject().put("code", 1201)
+                .put("message", "Event exceeds max_event_bytes")
+                .put("data", JSONObject().put("kind", "content-invalid")
+                    .put("reason", "event-too-large")))
+            return
+        }
+        when (policy) {
+            "queue", "wake" ->
+                when (queue.admit(params, policy,
+                        descriptor.optString("dedupe").takeIf { it.isNotEmpty() },
+                        descriptor.getLong("ttl_s"))) {
+                    is AdmitResult.Admitted -> {
+                        if (policy == "wake" && state != SessionState.READY &&
+                            queue.effectiveNow() - lastWakeMs >= 60_000) {
+                            lastWakeMs = queue.effectiveNow()
+                            wakeListener?.invoke()
+                        }
+                        callback?.invoke("queued", null)
+                        pumpAdvance()
+                    }
+                    AdmitResult.QueueFull -> callback?.invoke(null, JSONObject()
+                        .put("code", 1601).put("message", "Queue full")
+                        .put("data", JSONObject().put("kind", "queue-full")))
+                    AdmitResult.StorageFailed -> callback?.invoke(null, JSONObject()
+                        .put("code", -32603).put("message", "Storage failed")
+                        .put("data", JSONObject().put("kind", "internal-error")))
+                }
+            else -> {
+                if (state != SessionState.READY) return
+                sendRequest("event.action", params) { result, error ->
+                    callback?.invoke(result?.optString("status"), error)
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------ reminders (18.6)
+
+    val reminders = ReminderStore()
+
+    /** Schedule hook: (owner, its complete new reminder set) after an
+     * accepted replace. The host arms/cancels platform alarms. */
+    var reminderListener: ((String, JSONArray) -> Unit)? = null
+
+    private val identifier = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]*")
+    private val reminderMembers = setOf("id", "title", "body", "at_ms", "on_tap")
+
+    private fun handleRemindersSet(id: Any, params: JSONObject) {
+        if ("reminders.owner" !in granted)
+            return respondError(id, -32601, "Method not found", "method-not-found")
+        val owner = params.opt("owner") as? String
+        val arr = params.optJSONArray("reminders")
+        if (owner.isNullOrEmpty() || !identifier.matches(owner) || arr == null)
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        val parsed = ArrayList<JSONObject>(arr.length())
+        val seen = HashSet<String>()
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i)
+                ?: return respondError(id, 1201, "Invalid content", "content-invalid",
+                    JSONObject().put("path", "reminders[$i]").put("reason", "not-an-object"))
+            try {
+                validateReminder(r, seen)
+            } catch (e: ContentInvalid) {
+                return respondError(id, 1201, "Invalid content", "content-invalid",
+                    JSONObject().put("path", "reminders[$i].${e.path}").put("reason", e.reason))
+            }
+            parsed.add(r)
+        }
+        // SPEC 18.6: replacement plus OTHER owners must fit max_reminders.
+        val others = reminders.totalCount() - reminders.ownerCount(owner)
+        if (others + parsed.size > config.limits.optLong("max_reminders", 256))
+            return respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("reason", "reminder-limit"))
+        val count = reminders.replace(owner, parsed)
+        respondResult(id, JSONObject().put("count", count))
+        reminderListener?.invoke(owner, JSONArray(parsed))
+    }
+
+    private fun validateReminder(r: JSONObject, seen: MutableSet<String>) {
+        for (k in r.keySet()) if (k !in reminderMembers)
+            throw ContentInvalid(k, "unknown reminder member")
+        val rid = r.opt("id") as? String
+        if (rid == null || !identifier.matches(rid))
+            throw ContentInvalid("id", "must be an identifier")
+        if (!seen.add(rid)) throw ContentInvalid("id", "duplicate reminder id")
+        val title = r.opt("title") as? String
+        if (title.isNullOrEmpty()) throw ContentInvalid("title", "non-empty string required")
+        if (r.has("body") && r.opt("body") !is String)
+            throw ContentInvalid("body", "must be a string")
+        val at = r.opt("at_ms")
+        if (at !is Number || at.toLong() < 0 || at.toLong() > 9_007_199_254_740_991L)
+            throw ContentInvalid("at_ms", "must be a non-negative timestamp")
+        r.optJSONObject("on_tap")?.let { onTap ->
+            if (onTap.opt("action") !is String)
+                throw ContentInvalid("on_tap", "must be a remote ActionDescriptor")
+            val policy = onTap.optString("when_offline", OFFLINE_DEFAULT)
+            if ((policy == "queue" || policy == "wake") && !onTap.has("ttl_s"))
+                throw ContentInvalid("on_tap", "$policy requires ttl_s")
+            // SPEC 18.6: the injected members must not be authored.
+            onTap.optJSONObject("args")?.let { a ->
+                if (a.has("owner") || a.has("reminder_id"))
+                    throw ContentInvalid("on_tap.args", "owner/reminder_id are injected")
+            }
+        }
+    }
+
+    /** SPEC 18.6: mark a reminder presented (once per tuple). Returns true
+     * when the host should present it now, false if already fired. */
+    @Synchronized
+    fun markReminderFired(owner: String, reminderId: String): Boolean =
+        reminders.markFired(owner, reminderId)
+
+    /** SPEC 18.6: an explicit tap enters the Section 14 pipeline with the
+     * authored offline policy; owner and reminder_id are injected. A
+     * reminder with no on_tap dispatches nothing (dismissal is not a tap). */
+    @Synchronized
+    fun dispatchReminderTap(owner: String, reminderId: String,
+                            callback: ((String?, JSONObject?) -> Unit)? = null) {
+        val onTap = reminders.reminder(owner, reminderId)?.optJSONObject("on_tap") ?: return
+        val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
+            .put("owner", owner).put("reminder_id", reminderId)
+        dispatchDescriptorContextless(onTap, args, callback)
     }
 
     // ------------------------------------------------------- themes (18.4)

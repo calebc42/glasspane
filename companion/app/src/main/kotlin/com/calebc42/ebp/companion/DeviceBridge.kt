@@ -57,7 +57,7 @@ class DeviceBridge(
             "101112131415161718191a1b1c1d1e1f" to
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
         supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
-            "presentation.pie-menu"),
+            "presentation.pie-menu", "reminders.owner"),
         surfaceProfiles = JSONObject()
             .put("app", JSONObject()
                 .put("node_types", JSONArray(listOf(
@@ -78,7 +78,7 @@ class DeviceBridge(
             .put("max_surfaces", 64).put("max_surface_ids", 4096)
             .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
             .put("max_capture_fields", 64).put("max_dialogs", 4)
-            .put("max_pie_menus", 1),
+            .put("max_pie_menus", 1).put("max_reminders", 256),
     )
 
     fun start() = thread(name = "ebp-bridge", isDaemon = true) {

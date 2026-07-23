@@ -1003,6 +1003,22 @@ fully replaces the previously pushed theme."
      ,@(when colors `(:colors ,(if (eq colors 'null) :null colors)))
      ,@(when syntax `(:syntax ,(if (eq syntax 'null) :null syntax))))))
 
+;;;; Reminders (SPEC 18.6), the client half
+
+(cl-defun ebp-client-reminders-set (client owner reminders &key callback)
+  "Replace OWNER's reminder set (SPEC 18.6).  REMINDERS is a vector of
+plists `(:id ID :title S :at_ms MS)' with optional `:body S' and a remote
+`:on_tap DESC'; the Companion injects `owner'/`reminder_id' at tap time.
+An empty vector clears the owner's set.  CALLBACK receives (COUNT ERROR):
+COUNT is the owner's accepted total, ERROR the JSON-RPC error plist (1201
+`reminder-limit' or content-invalid).  Replaces only this owner's set."
+  (ebp-client--request
+   client 'reminders.set
+   `(:owner ,owner :reminders ,reminders)
+   (lambda (result error)
+     (when callback
+       (funcall callback (and result (plist-get result :count)) error)))))
+
 ;;;; Pie menus (SPEC 18.3), the client half
 
 (cl-defun ebp-client-pie-menu-show (client menu-id categories &key center-label)

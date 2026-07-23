@@ -702,17 +702,32 @@ class CompanionEngine(
         require(l.getLong("max_surfaces") <= l.getLong("max_surface_ids")) {
             "max_surfaces exceeds max_surface_ids"
         }
+        // SPEC 4.5: the actual server strings must fit the 128-octet bound
+        // the reservation reserves for them (SPEC 10.2).
+        require(config.serverName.toByteArray(Charsets.UTF_8).size <= 128 &&
+            config.serverVersion.toByteArray(Charsets.UTF_8).size <= 128) {
+            "server name/version exceed 128 UTF-8 octets"
+        }
+        // SPEC 4.5: `surfaces` at its worst case — max_surface_ids distinct
+        // maximum-length IDs, maximum revision, and the longer `present`
+        // encoding (`false`). Counting it empty was the reservation's hole.
+        val worstSurfaces = JSONObject()
+        for (i in 0 until l.getLong("max_surface_ids"))
+            // A distinct 128-octet key: a byte-size probe, not a real ID.
+            worstSurfaces.put(i.toString().padStart(WireLimits.MAX_IDENTIFIER_OCTETS, 'a'),
+                JSONObject().put("revision", 9_007_199_254_740_991L).put("present", false))
         val prospective = JSONObject()
             .put("jsonrpc", "2.0")
             .put("id", "a".repeat(WireLimits.MAX_REQUEST_ID_OCTETS))
             .put("result", JSONObject()
                 .put("server_proof", "0".repeat(64))
                 .put("protocol", 2)
+                // SPEC 4.5: fixed members at their maximum legal encoded size.
                 .put("server", JSONObject()
-                    .put("name", config.serverName).put("version", config.serverVersion))
+                    .put("name", "a".repeat(128)).put("version", "a".repeat(128)))
                 .put("granted", JSONArray(config.supportedCapabilities.toList()))
                 .put("surface_profiles", config.surfaceProfiles)
-                .put("surfaces", JSONObject())
+                .put("surfaces", worstSurfaces)
                 .put("queued_events", l.getLong("max_queued_events"))
                 .put("input_state", JSONObject())
                 .put("limits", l))

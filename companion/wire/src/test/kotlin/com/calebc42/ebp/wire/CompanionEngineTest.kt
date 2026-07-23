@@ -53,6 +53,18 @@ class CompanionEngineTest {
             FrameDecoder().let { d -> d.feed(bytes).forEach(sink::add); d.finish() }
         }
 
+    private fun engineWithLimits(limits: JSONObject): CompanionEngine =
+        CompanionEngine(
+            CompanionConfig(
+                serverName = "kat-companion", serverVersion = "1.0.0",
+                pairings = mapOf(katPid to katToken),
+                supportedCapabilities = setOf("theme"),
+                surfaceProfiles = profiles(),
+                limits = limits,
+                nonceSource = { katSn },
+            )
+        ) { }
+
     private fun frame(msg: JSONObject): ByteArray = encodeFrame(msg.toString())
 
     private fun hello(wants: List<String> = listOf("theme")): JSONObject =
@@ -398,5 +410,21 @@ class CompanionEngineTest {
         assertTrue("parse error emitted", emitted.any {
             it.get("id") == JSONObject.NULL &&
                 it.optJSONObject("error")?.getInt("code") == -32700 })
+    }
+
+    @Test
+    fun welcomeReservationCountsWorstCaseSurfaces() {
+        // SPEC 4.5: a config whose max_surface_ids reservation alone overflows
+        // the frame budget MUST be rejected — surfaces used to be counted as
+        // an empty object (audit finding 8).
+        val overcommitted = limits().put("max_surfaces", 30000).put("max_surface_ids", 30000)
+        try {
+            engineWithLimits(overcommitted)
+            fail("reservation-violating config accepted")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("reservation"))
+        }
+        // The default config still fits with the worst case now counted.
+        engineWithLimits(limits())
     }
 }

@@ -36,6 +36,8 @@ class DeviceBridge(
     private val onDialogChanged: (String?, JSONObject?) -> Unit = { _, _ -> },
     /** SPEC 18.2: best-effort toast text. */
     private val onToast: (String) -> Unit = {},
+    /** SPEC 18.4: theme polarity — true/false forced, null follow-system. */
+    private val onTheme: (Boolean?) -> Unit = {},
 ) {
 
     // SPEC 13.1/15.1: surface histories, tombstones, and input_state drafts
@@ -157,6 +159,7 @@ class DeviceBridge(
         }
         engine.dialogListener = { id, spec -> onDialogChanged(id, spec) }
         engine.toastListener = { text, _ -> onToast(text) }
+        engine.themeListener = { dark, _, _ -> onTheme(dark) }
         val input = socket.getInputStream()
         val buffer = ByteArray(8192)
         try {

@@ -531,8 +531,42 @@ class CompanionEngine(
                 dialogListener?.invoke(entry.key, null)
             }
             "toast.show" -> handleToastShow(params)
+            "theme.set" -> handleThemeSet(params)
         }
     }
+
+    // ------------------------------------------------------- themes (18.4)
+
+    /** The latest accepted theme (SPEC 18.4): each notification is a
+     * complete replacement. `dark` is a Boolean, or null for follow-system
+     * (amendment #36). `colors`/`syntax` are role maps, or null to clear. */
+    var themeListener: ((dark: Boolean?, colors: JSONObject?, syntax: JSONObject?) -> Unit)? = null
+    private var theme: JSONObject = JSONObject()
+
+    private fun handleThemeSet(params: JSONObject) {
+        if ("theme" !in granted) return
+        // SPEC 18.4: a complete replacement of the previously pushed values.
+        // `dark` absent => follow system; present => forced polarity.
+        val dark = when (val d = params.opt("dark")) {
+            is Boolean -> d
+            else -> null
+        }
+        // `colors`/`syntax`: an object replaces, JSON null clears the mirror.
+        val colors = params.opt("colors").let {
+            if (it == JSONObject.NULL) null else it as? JSONObject
+        }
+        val syntax = params.opt("syntax").let {
+            if (it == JSONObject.NULL) null else it as? JSONObject
+        }
+        theme = JSONObject()
+            .put("dark", if (dark == null) JSONObject.NULL else dark)
+            .put("colors", colors ?: JSONObject.NULL)
+            .put("syntax", syntax ?: JSONObject.NULL)
+        themeListener?.invoke(dark, colors, syntax)
+    }
+
+    /** SPEC 18.4: the persisted theme, for rendering across reconnects. */
+    fun currentTheme(): JSONObject = theme
 
     // ------------------------------------------------------- toasts (18.2)
 

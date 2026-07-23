@@ -988,6 +988,21 @@ acknowledgement and carries no result."
    client 'toast.show
    `(:text ,text ,@(when duration-s `(:duration_s ,duration-s)))))
 
+;;;; Themes (SPEC 18.4), the client half
+
+(cl-defun ebp-client-theme-set (client &key (dark 'system) colors syntax)
+  "Push a complete theme replacement (SPEC 18.4).  DARK selects polarity:
+t forces dark, `:false' forces light, and the default `system' omits it
+so the Companion follows the device setting (amendment #36).  COLORS and
+SYNTAX are role-map plists mirroring the Emacs theme, or the symbol
+`null' to clear the mirror and select the native scheme.  Each call
+fully replaces the previously pushed theme."
+  (ebp-client-notify
+   client 'theme.set
+   `(,@(unless (eq dark 'system) `(:dark ,dark))
+     ,@(when colors `(:colors ,(if (eq colors 'null) :null colors)))
+     ,@(when syntax `(:syntax ,(if (eq syntax 'null) :null syntax))))))
+
 ;;;; Dialogs (SPEC 18.1), the client half
 
 (cl-defun ebp-client-dialog-show (client dialog-id spec &key style callback)

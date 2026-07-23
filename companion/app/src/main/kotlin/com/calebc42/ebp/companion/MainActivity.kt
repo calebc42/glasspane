@@ -8,7 +8,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
@@ -22,6 +25,8 @@ class MainActivity : ComponentActivity() {
 
     private val currentSpec = MutableStateFlow<JSONObject?>(null)
     private val currentDialog = MutableStateFlow<Pair<String, JSONObject>?>(null)
+    // SPEC 18.4: null = follow-system (amendment #36).
+    private val forcedDark = MutableStateFlow<Boolean?>(null)
     private lateinit var bridge: DeviceBridge
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,10 +52,15 @@ class MainActivity : ComponentActivity() {
                     android.widget.Toast.makeText(
                         this, text, android.widget.Toast.LENGTH_SHORT).show()
                 }
-            })
+            },
+            onTheme = { dark -> forcedDark.value = dark })
         bridge.start()
         setContent {
-            MaterialTheme {
+            val dark by forcedDark.collectAsState()
+            // SPEC 18.4: forced polarity, or the system setting when null.
+            val useDark = dark ?: isSystemInDarkTheme()
+            MaterialTheme(colorScheme = if (useDark) darkColorScheme()
+                else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize()) {
                     val spec by currentSpec.collectAsState()
                     when (val s = spec) {

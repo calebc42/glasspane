@@ -372,3 +372,34 @@ on `timezone.changed` and `data.precision` on `time` from the alarm class used.
    (populate `tz`/`precision`; identity-scope reminders when multi-identity
    lands; encryption seam gated behind advertising `sms`/`call`).
 6. P3 sweep.
+
+---
+
+## Remediation status (2026-07-23) — all P1s + P2s fixed
+
+| Finding | Fix | Commit |
+|---|---|---|
+| P1-1 one-shot double-fire | recover() reconstructs oneShotCompleted/lastFireFloorMs | RA-2 `bff9166` |
+| P1-2 txn-B no rollback | admit rolls back queued A on commit throw + in-memory restore | RA-4 `6004821` |
+| P1-3 inFlightSeq race | private @Volatile + atomic beginDelivery() | RA-3 `9d1b049` |
+| P1-4 main-thread crash | firing on a background executor; goAsync receivers | RA-1 `e069809` (device-verified) |
+| P1-5 session-slot lost-update | AtomicReference slots (attach set / detach compareAndSet) | RA-4 `6004821` |
+| P1-6 reminder owner-blind id | owner-scoped truncated-SHA-256 key for alarm/notif | RA-5 `6d34a94` |
+| S1 firing authority (SPEC) | amendment #44 (§21.1/§5.2) | contract `e52b6a9` |
+| S2 fire-data presence (SPEC+impl) | amendment #45 + emit tz/precision | contract `e52b6a9`, impl `af4f8cb` |
+| P2-1 every_s alarm spin | cursor advances on every elapsed boundary | RA-6 `315d4a3` |
+| P2-2 stale ZoneId | zone read fresh per evaluation | RA-6 `315d4a3` |
+| P2-3 no MY_PACKAGE_REPLACED | added to BootReceiver | RA-6 `315d4a3` |
+| P2-4 pending_local TOCTOU | folded into beginDelivery() | RA-3 `9d1b049` |
+| P2-5 tap dismiss unsafe | callback-gated cancel; no setAutoCancel | RA-5 `6d34a94` |
+| P2-6 multi-pairing throttle | trigger_identity stamped + matched in recover | RA-8 `9eb23f4` |
+| P2-7 sensitive plaintext | validator refuses durable policy for sms/call | RA-8 `9eb23f4` |
+| SPEC P2 ×5 (#46–#50) | every_s/at_ms/encryption/reminder-scope/boot amendments | contract `e52b6a9` |
+
+Deferred P3s (rationale in RA-8's commit): markFired-carries-at_ms (~ms race),
+recover() on_fire diagnostic (needs a log sink), pendingExpired durability
+(cosmetic, §15.2 permits), USE_EXACT_ALARM (Play-policy note, not a functional
+bug at minSdk 34), boot null→available (cannot occur where BOOT_COUNT exists).
+
+Baseline after remediation: 192 wire tests / 26 elisp green; the P1-4 crash fix
+device-verified (a live-connected battery fire delivers FIRED without crashing).

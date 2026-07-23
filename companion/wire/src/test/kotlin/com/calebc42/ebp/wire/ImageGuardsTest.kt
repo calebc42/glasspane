@@ -5,6 +5,7 @@
 package com.calebc42.ebp.wire
 
 import java.net.InetAddress
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -31,6 +32,29 @@ class ImageGuardsTest {
     fun allowsGenuinePublicAddresses() {
         for (ip in listOf("8.8.8.8", "1.1.1.1", "93.184.216.34", "2606:4700:4700::1111"))
             assertFalse("$ip should be allowed", blocked(ip))
+    }
+
+    @Test
+    fun blocksIPv4MappedAndNat64EmbeddingPrivateV4() {
+        // ::ffff:169.254.169.254 (IPv4-mapped cloud-metadata) and ::ffff:10.0.0.5.
+        assertTrue(blocked("::ffff:169.254.169.254"))
+        assertTrue(blocked("::ffff:10.0.0.5"))
+        // 64:ff9b::/96 NAT64 embedding a private/loopback v4 must be blocked.
+        assertTrue(blocked("64:ff9b::a00:5"))       // -> 10.0.0.5
+        assertTrue(blocked("64:ff9b::7f00:1"))      // -> 127.0.0.1
+        // NAT64 embedding a genuinely public v4 is allowed.
+        assertFalse(blocked("64:ff9b::808:808"))    // -> 8.8.8.8
+    }
+
+    @Test
+    fun firstAllowedAddressFailsClosedOnAnyBlockedMember() {
+        val pub = InetAddress.getByName("8.8.8.8")
+        val priv = InetAddress.getByName("10.0.0.5")
+        // A clean public set returns the first address.
+        assertEquals(pub, ImageGuards.firstAllowedAddress(arrayOf(pub)))
+        // Split-horizon (one public + one private) fails CLOSED.
+        assertNull(ImageGuards.firstAllowedAddress(arrayOf(pub, priv)))
+        assertNull(ImageGuards.firstAllowedAddress(arrayOf<InetAddress>()))
     }
 
     @Test

@@ -12,16 +12,22 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.calebc42.ebp.wire.ImageGuards
 import java.io.InputStream
-import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.URL
-import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 object ImageLoader {
 
     data class Limits(val maxBytes: Long, val maxDecodedBytes: Long, val maxPixels: Long)
+
+    // SPEC 4.5/17.2: the single source for the three image limits — DeviceBridge
+    // advertises exactly these and RenderImage enforces them, so the advertised
+    // and enforced values cannot drift.
+    const val MAX_IMAGE_BYTES = 8_388_608L          // 8 MiB encoded
+    const val MAX_DECODED_IMAGE_BYTES = 67_108_864L // 64 MiB decoded (ARGB)
+    const val MAX_IMAGE_PIXELS = 16_777_216L        // 4096x4096
+    val DEFAULT_LIMITS = Limits(MAX_IMAGE_BYTES, MAX_DECODED_IMAGE_BYTES, MAX_IMAGE_PIXELS)
 
     private const val MAX_REDIRECTS = 5
     private const val DEADLINE_MS = 15_000L
@@ -47,61 +53,174 @@ object ImageLoader {
         return decodeGuarded(di.bytes, limits)
     }
 
+    /**
+     * SPEC 17.2 HTTPS fetch. A manual pinned-socket client — NOT
+     * HttpsURLConnection, which re-resolves DNS internally and would defeat the
+     * SSRF check (a DNS-rebinding TOCTOU). We resolve once, pin the socket to a
+     * VALIDATED address, and keep SNI + hostname verification for the real host.
+     * The 15s total deadline is enforced on every read; the manual request
+     * attaches ZERO ambient credentials (no cookies/auth/client-certs).
+     */
     private fun loadHttps(start: String, limits: Limits): Bitmap? {
         val deadline = System.currentTimeMillis() + DEADLINE_MS
         var current = start
         for (hop in 0..MAX_REDIRECTS) {
-            if (System.currentTimeMillis() > deadline) return null
+            if (System.currentTimeMillis() >= deadline) return null
             if (!ImageGuards.isHttps(current)) return null
             val u = URL(current)
-            // Before each connection AND after each DNS resolution: reject if
-            // ANY resolved address is non-public (defeats a split-horizon
-            // resolver that returns one public + one private A record).
-            val addrs = runCatching { InetAddress.getAllByName(u.host) }.getOrNull()
-            if (addrs.isNullOrEmpty() || addrs.any { ImageGuards.isBlockedAddress(it) }) return null
-
-            val conn = (u.openConnection() as HttpsURLConnection).apply {
-                instanceFollowRedirects = false // we follow manually, re-checking each hop
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                useCaches = false
-                // No ambient cookies, credentials, client certs, or auth headers.
-                setRequestProperty("Cookie", null)
-                setRequestProperty("Authorization", null)
-                setRequestProperty("Accept", "image/*")
-            }
-            try {
-                conn.connect()
-                val code = conn.responseCode
-                if (code in 300..399) {
-                    val loc = conn.getHeaderField("Location")
-                    // SPEC 17.2: a redirect MUST stay https and re-run the
-                    // address checks (next loop iteration does the latter).
-                    if (!ImageGuards.redirectAllowed(loc)) return null
-                    current = loc
-                    continue
+            val host = u.host
+            val port = if (u.port == -1) 443 else u.port
+            val path = (u.path.ifEmpty { "/" }) + (u.query?.let { "?$it" } ?: "")
+            // Resolve ONCE and pin: fail closed if empty or any address is
+            // non-public (the split-horizon defense). The socket connects to
+            // exactly this address — the check and the connect cannot diverge.
+            val addrs = runCatching { InetAddress.getAllByName(host) }.getOrNull() ?: return null
+            val pinned = ImageGuards.firstAllowedAddress(addrs) ?: return null
+            val hop = fetchOnce(pinned, host, port, path, limits, deadline) ?: return null
+            when (hop) {
+                is Hop.Body -> return decodeGuarded(hop.bytes, limits)
+                is Hop.Redirect -> {
+                    // SPEC 17.2: resolve a relative Location against the current
+                    // URL, require https, and re-validate the address next loop.
+                    val next = runCatching { URL(u, hop.location).toString() }.getOrNull() ?: return null
+                    if (!ImageGuards.isHttps(next)) return null
+                    current = next
                 }
-                if (code != HttpURLConnection.HTTP_OK) return null
-                val bytes = conn.inputStream.use { readLimited(it, limits.maxBytes) } ?: return null
-                return decodeGuarded(bytes, limits)
-            } finally {
-                conn.disconnect()
             }
         }
         return null // exceeded the redirect budget
     }
 
-    /** Read at most [max] bytes; null if the stream would exceed it. */
-    private fun readLimited(input: InputStream, max: Long): ByteArray? {
+    private sealed interface Hop {
+        class Body(val bytes: ByteArray) : Hop
+        class Redirect(val location: String) : Hop
+    }
+
+    /** One HTTPS request against a PINNED address, host used only for SNI +
+     * cert hostname verification. Returns a body (200) or a redirect (3xx);
+     * null on any failure. Enforces [deadline] on every blocking read. */
+    private fun fetchOnce(
+        pinned: InetAddress, host: String, port: Int, path: String,
+        limits: Limits, deadline: Long,
+    ): Hop? {
+        fun remaining() = (deadline - System.currentTimeMillis()).toInt()
+        if (remaining() <= 0) return null
+        val raw = java.net.Socket()
+        try {
+            raw.connect(java.net.InetSocketAddress(pinned, port),
+                minOf(CONNECT_TIMEOUT_MS, remaining()))
+            val ssl = (javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory)
+                .createSocket(raw, host, port, true) as javax.net.ssl.SSLSocket
+            // SNI = the real host; "HTTPS" endpoint identification makes the
+            // handshake verify the cert against `host` (not the pinned IP).
+            ssl.sslParameters = ssl.sslParameters.apply {
+                serverNames = listOf(javax.net.ssl.SNIHostName(host))
+                endpointIdentificationAlgorithm = "HTTPS"
+            }
+            ssl.use { s ->
+                s.soTimeout = minOf(READ_TIMEOUT_MS, remaining().coerceAtLeast(1))
+                s.startHandshake()
+                // Minimal request; Connection: close ends the body at EOF. No
+                // Cookie/Authorization/ambient anything.
+                val req = "GET $path HTTP/1.1\r\nHost: $host\r\n" +
+                    "Accept: image/*\r\nConnection: close\r\nUser-Agent: ebp-companion\r\n\r\n"
+                s.outputStream.write(req.toByteArray(Charsets.US_ASCII))
+                s.outputStream.flush()
+                val input = s.inputStream
+                val (code, headers) = readStatusAndHeaders(input, deadline) ?: return null
+                if (code in 300..399) {
+                    val loc = headers["location"] ?: return null
+                    return Hop.Redirect(loc)
+                }
+                if (code != 200) return null
+                s.soTimeout = minOf(READ_TIMEOUT_MS, remaining().coerceAtLeast(1))
+                val body = if (headers["transfer-encoding"]?.contains("chunked", true) == true)
+                    readChunked(input, limits.maxBytes, deadline)
+                else readToLimit(input, limits.maxBytes, deadline,
+                    headers["content-length"]?.toLongOrNull())
+                return body?.let { Hop.Body(it) }
+            }
+        } catch (e: Exception) {
+            return null
+        } finally {
+            runCatching { raw.close() }
+        }
+    }
+
+    /** Read the status line + headers up to the blank line. Returns (code, lower-
+     * cased header map); null on malformed input or deadline. */
+    private fun readStatusAndHeaders(input: InputStream, deadline: Long): Pair<Int, Map<String, String>>? {
+        val statusLine = readLine(input, deadline) ?: return null
+        // "HTTP/1.1 200 OK"
+        val parts = statusLine.split(' ', limit = 3)
+        val code = parts.getOrNull(1)?.toIntOrNull() ?: return null
+        val headers = HashMap<String, String>()
+        while (true) {
+            if (System.currentTimeMillis() >= deadline) return null
+            val line = readLine(input, deadline) ?: return null
+            if (line.isEmpty()) break
+            val c = line.indexOf(':')
+            if (c > 0) headers[line.substring(0, c).trim().lowercase()] = line.substring(c + 1).trim()
+        }
+        return code to headers
+    }
+
+    /** Read one CRLF-terminated line (header line cap 8 KiB). */
+    private fun readLine(input: InputStream, deadline: Long): String? {
+        val sb = StringBuilder()
+        while (true) {
+            if (System.currentTimeMillis() >= deadline) return null
+            val b = input.read()
+            if (b < 0) return if (sb.isEmpty()) null else sb.toString()
+            if (b == '\n'.code) return sb.removeSuffix("\r").toString()
+            sb.append(b.toChar())
+            if (sb.length > 8192) return null // runaway header line
+        }
+    }
+
+    private fun StringBuilder.removeSuffix(s: String): StringBuilder {
+        if (endsWith(s)) setLength(length - s.length)
+        return this
+    }
+
+    /** Read to EOF or [contentLength], capped at [max]; deadline on every read. */
+    private fun readToLimit(input: InputStream, max: Long, deadline: Long, contentLength: Long?): ByteArray? {
+        if (contentLength != null && contentLength > max) return null
         val out = java.io.ByteArrayOutputStream()
         val buf = ByteArray(16 * 1024)
         var total = 0L
         while (true) {
-            val n = input.read(buf)
+            if (System.currentTimeMillis() >= deadline) return null
+            val n = try { input.read(buf) } catch (e: java.net.SocketTimeoutException) { return null }
             if (n < 0) break
             total += n
             if (total > max) return null
             out.write(buf, 0, n)
+        }
+        return out.toByteArray()
+    }
+
+    /** Decode HTTP chunked transfer-encoding, capped at [max]; deadline-checked. */
+    private fun readChunked(input: InputStream, max: Long, deadline: Long): ByteArray? {
+        val out = java.io.ByteArrayOutputStream()
+        var total = 0L
+        while (true) {
+            if (System.currentTimeMillis() >= deadline) return null
+            val sizeLine = readLine(input, deadline) ?: return null
+            val size = sizeLine.substringBefore(';').trim().toIntOrNull(16) ?: return null
+            if (size == 0) break // last chunk
+            total += size
+            if (total > max) return null
+            val chunk = ByteArray(size)
+            var off = 0
+            while (off < size) {
+                if (System.currentTimeMillis() >= deadline) return null
+                val n = try { input.read(chunk, off, size - off) } catch (e: java.net.SocketTimeoutException) { return null }
+                if (n < 0) return null
+                off += n
+            }
+            out.write(chunk)
+            readLine(input, deadline) // trailing CRLF after the chunk data
         }
         return out.toByteArray()
     }

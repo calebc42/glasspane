@@ -67,9 +67,7 @@ import org.json.JSONObject
 internal fun RenderImage(node: JSONObject, m: Modifier) {
     val url = node.optString("url")
     val desc = node.optString("content_description").takeIf { it.isNotEmpty() }
-    val limits = androidx.compose.runtime.remember {
-        ImageLoader.Limits(8_388_608L, 67_108_864L, 16_777_216L)
-    }
+    val limits = ImageLoader.DEFAULT_LIMITS
     val bitmap by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, url) {
         value = ImageLoader.load(url, limits)
     }

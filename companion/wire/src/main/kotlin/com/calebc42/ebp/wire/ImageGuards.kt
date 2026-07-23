@@ -31,23 +31,58 @@ object ImageGuards {
             addr.isSiteLocalAddress) return true
         val b = addr.address
         when (addr) {
-            is Inet4Address -> {
-                val o0 = b[0].toInt() and 0xFF
-                val o1 = b[1].toInt() and 0xFF
-                if (o0 == 0) return true                       // 0.0.0.0/8
-                if (o0 == 100 && o1 in 64..127) return true    // 100.64/10 CGNAT
-                if (o0 == 192 && o1 == 0) return true          // 192.0.0/24 + TEST-NET-1
-                if (o0 == 198 && (o1 == 18 || o1 == 19)) return true // 198.18/15 bench
-                if (o0 == 198 && o1 == 51) return true         // 198.51.100/24 TEST-NET-2
-                if (o0 == 203 && o1 == 0) return true          // 203.0.113/24 TEST-NET-3
-                if (o0 >= 240) return true                     // 240/4 reserved + broadcast
-            }
+            is Inet4Address -> if (isBlockedV4(b)) return true
             is Inet6Address -> {
                 if ((b[0].toInt() and 0xFE) == 0xFC) return true // fc00::/7 ULA
                 if (addr.isIPv4CompatibleAddress) return true    // ::/96 compat
+                // ::ffff:a.b.c.d IPv4-mapped: some resolvers hand back an
+                // Inet6Address; re-check the embedded IPv4 explicitly rather
+                // than relying on JVM normalization to Inet4Address.
+                if (isV4Mapped(b) && isBlockedV4(b.copyOfRange(12, 16))) return true
+                // 64:ff9b::/96 NAT64 (RFC 6052): the last 32 bits embed an IPv4
+                // that the far side translates to — re-check it, so a NAT64
+                // literal can't smuggle a private/loopback v4 destination.
+                if (isNat64(b) && isBlockedV4(b.copyOfRange(12, 16))) return true
             }
         }
         return false
+    }
+
+    private fun isBlockedV4(b: ByteArray): Boolean {
+        val o0 = b[0].toInt() and 0xFF
+        val o1 = b[1].toInt() and 0xFF
+        if (o0 == 0) return true                        // 0.0.0.0/8
+        if (o0 == 10) return true                        // 10/8 (isSiteLocal misses a raw v4 here)
+        if (o0 == 127) return true                       // 127/8 loopback
+        if (o0 == 100 && o1 in 64..127) return true      // 100.64/10 CGNAT
+        if (o0 == 169 && o1 == 254) return true          // 169.254/16 link-local
+        if (o0 == 172 && o1 in 16..31) return true       // 172.16/12 private
+        if (o0 == 192 && o1 == 168) return true          // 192.168/16 private
+        if (o0 == 192 && o1 == 0) return true            // 192.0.0/24 + TEST-NET-1
+        if (o0 == 198 && (o1 == 18 || o1 == 19)) return true // 198.18/15 bench
+        if (o0 == 198 && o1 == 51) return true           // 198.51.100/24 TEST-NET-2
+        if (o0 == 203 && o1 == 0) return true            // 203.0.113/24 TEST-NET-3
+        if (o0 >= 224) return true                        // 224/4 multicast + 240/4 reserved + broadcast
+        return false
+    }
+
+    private fun isV4Mapped(b: ByteArray): Boolean =
+        b.size == 16 && (0..9).all { b[it].toInt() == 0 } &&
+            (b[10].toInt() and 0xFF) == 0xFF && (b[11].toInt() and 0xFF) == 0xFF
+
+    private fun isNat64(b: ByteArray): Boolean =
+        b.size == 16 && (b[0].toInt() and 0xFF) == 0x00 && (b[1].toInt() and 0xFF) == 0x64 &&
+            (b[2].toInt() and 0xFF) == 0xFF && (b[3].toInt() and 0xFF) == 0x9B &&
+            (4..11).all { b[it].toInt() == 0 }
+
+    /** SPEC 17.2: pick a resolved address safe to connect to. Fails CLOSED —
+     * returns null if the set is empty OR any address is non-public (defeats a
+     * split-horizon resolver returning one public + one private A record).
+     * The returned address is the exact one the caller MUST pin the socket to. */
+    fun firstAllowedAddress(addrs: Array<InetAddress>): InetAddress? {
+        if (addrs.isEmpty()) return null
+        if (addrs.any { isBlockedAddress(it) }) return null
+        return addrs.first()
     }
 
     /** SPEC 17.2: a redirect MUST NOT change the URI scheme away from https. */

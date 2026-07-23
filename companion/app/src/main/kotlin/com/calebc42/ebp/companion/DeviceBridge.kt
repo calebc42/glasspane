@@ -74,10 +74,13 @@ class DeviceBridge(
             .put("max_editor_sessions", 8).put("max_trigger_responses", 8)
             .put("max_triggers", 64).put("max_device_report_bytes", 8192)
             // SPEC 4.5/17.2: the three image limits are REQUIRED whenever image
-            // is advertised — the loader enforces every one.
-            .put("max_image_bytes", 8_388_608)          // 8 MiB encoded
-            .put("max_decoded_image_bytes", 67_108_864) // 64 MiB decoded (ARGB)
-            .put("max_image_pixels", 16_777_216)        // 4096x4096
+            // is advertised — the same constants the loader enforces (no drift).
+            .put("max_image_bytes",
+                com.calebc42.ebp.companion.render.ImageLoader.MAX_IMAGE_BYTES)
+            .put("max_decoded_image_bytes",
+                com.calebc42.ebp.companion.render.ImageLoader.MAX_DECODED_IMAGE_BYTES)
+            .put("max_image_pixels",
+                com.calebc42.ebp.companion.render.ImageLoader.MAX_IMAGE_PIXELS)
             // SPEC 4.5/17.5: REQUIRED whenever chart/canvas are advertised.
             .put("max_chart_points", 4096).put("max_canvas_ops", 4096),
         // SPEC 20.1/20.2: advertise the device report and the platform executor.

@@ -51,6 +51,13 @@ class CompanionEngine(
     /** Shared across connections AND restarts: SPEC 21.1 trigger registrations
      * + runtime records outlive a session (baselines re-established on arm). */
     val triggers: TriggerStore = TriggerStore(),
+    /** Device-lifetime SPEC 21.2 firing service. The app injects one shared
+     * instance; the default builds a per-engine one for tests. This engine
+     * attaches as the LiveSession for live drop delivery + wake/pump. */
+    val firing: TriggerFiringService = TriggerFiringService(
+        triggers, queue, maxEventBytes = config.limits.getLong("max_event_bytes"),
+        triggerCaps = jsonStringSet(config.deviceReport, "trigger_caps"),
+        capabilityHandler = config.capabilityHandler),
     private val sink: (ByteArray) -> Unit,
 ) : LiveSession {
     var state: SessionState = SessionState.CONNECTED
@@ -72,6 +79,8 @@ class CompanionEngine(
     init {
         // SPEC 4.5: the welcome reservation must hold before any session.
         checkLimits()
+        // SPEC 5.2: become the firing service's live session (newest wins).
+        firing.attach(this)
     }
 
     // Synchronized with sendRequest/dispatchAction/publishState: the UI
@@ -136,6 +145,8 @@ class CompanionEngine(
         editors.clear()
         surfaceEditors.clear()
         pendingEditors.clear()
+        // SPEC 5.2: stop being the firing service's live session (if still it).
+        firing.detach(this)
     }
 
     /** The queue_seq this engine's connection put in flight, if any. */
@@ -417,6 +428,9 @@ class CompanionEngine(
         if (replayActive() && state != SessionState.SYNCING &&
             state != SessionState.READY) return
         queue.sweepExpired()
+        // SPEC 21.2: a head still running its on_fire is not yet deliverable;
+        // wait rather than deliver ahead of Step 4 (recovery clears it).
+        if (queue.headIsPendingLocal()) return
         val record = queue.head() ?: return concludeReplay()
         // SPEC 10.3/15.3: newly generated events stay behind the barrier
         // until the replay concludes AND session.ready succeeds.
@@ -876,112 +890,36 @@ class CompanionEngine(
      * accepted replace. The host arms/cancels platform event sources. */
     var triggerListener: ((String, List<JSONObject>) -> Unit)? = null
 
-    /** SPEC 21.3/21.7: current sample for a state type, for gate/edge/window
-     * evaluation. The host supplies live device state; null is unavailable. */
-    var triggerStateProvider: (String) -> JSONObject? = { null }
+    /** SPEC 21.3/21.7: current sample for a state type (delegates to the shared
+     * firing service, which owns the runtime). */
+    var triggerStateProvider: (String) -> JSONObject?
+        get() = firing.stateProvider
+        set(v) { firing.stateProvider = v }
 
-    /** SPEC 21.4: post a substituted local notification ({title?, text}) from
-     * an on_fire entry. The host renders it; a null hook drops it safely. */
-    var triggerNotifyListener: ((JSONObject) -> Unit)? = null
+    /** SPEC 21.4: post a substituted on_fire notification (delegates to the
+     * shared firing service). */
+    var triggerNotifyListener: ((JSONObject) -> Unit)?
+        get() = firing.notifyListener
+        set(v) { firing.notifyListener = v }
 
-    /** SPEC 21.2-21.6: the firing runtime — decides admitted occurrences and
-     * drives the ordered pipeline into trigger.fired events. */
-    val triggerRuntime = TriggerRuntime(
-        store = triggers, now = { queue.effectiveNow() },
-        zone = java.time.ZoneId.systemDefault(),
-        stateProvider = { type -> triggerStateProvider(type) },
-        emit = ::emitTriggerFired, onFire = ::executeOnFire)
-
-    // SPEC 21.4: execute one already-substituted on_fire entry. A notify posts
-    // through the host; a cap re-checks trigger_caps membership and its Args
-    // schema (post-substitution) and runs through the same executor as
-    // capability.invoke. Every failure mode is a safe no-op, never a throw
-    // that could strand later entries or the remote event.
-    private fun executeOnFire(entry: JSONObject) {
-        if (entry.has("notify")) {
-            triggerNotifyListener?.invoke(entry.getJSONObject("notify"))
-            return
-        }
-        val cap = entry.getString("cap")
-        // SPEC 21.4: only unattended trigger_caps may run here.
-        if (cap !in stringSet(config.deviceReport, "trigger_caps")) return
-        val args = entry.optJSONObject("args") ?: JSONObject()
-        try {
-            CapabilityCatalog.validateArgs(cap, args)
-        } catch (e: ContentInvalid) {
-            return // a substitution that broke the Args schema: skip safely
-        }
-        config.capabilityHandler?.invoke(cap, args)
-    }
-
-    /** SPEC 21.5: a level-type observation from a device source. */
+    /** SPEC 21.5: a level-type observation. Firing lives in the device-lifetime
+     * service and needs no live session (SPEC 21.1/21.2); the observe entry
+     * points remain for a session-driven source and delegate to it. */
     @Synchronized
-    fun observeTriggerSample(type: String, sample: JSONObject) {
-        val id = pendingPairingId ?: return
-        if ("triggers" in granted) triggerRuntime.onSample(id, type, sample)
-    }
+    fun observeTriggerSample(type: String, sample: JSONObject) =
+        firing.observeSample(type, sample)
 
     /** SPEC 21.5: an external occurrence (package/sms/boot/time/timezone/manual). */
     @Synchronized
-    fun observeTriggerEvent(type: String, data: JSONObject) {
-        val id = pendingPairingId ?: return
-        if ("triggers" in granted) triggerRuntime.onExternal(id, type, data)
-    }
+    fun observeTriggerEvent(type: String, data: JSONObject) =
+        firing.observeExternal(type, data)
 
     /** SPEC 21.4/21.5: a `manual` trigger fired via the builtin or trigger.fire. */
     @Synchronized
     fun fireManualTrigger(triggerId: String, source: String) {
         val id = pendingPairingId ?: return
         if ("triggers" !in granted) return
-        // Fire ONLY this id (SPEC 21.5), not every manual registration.
-        triggerRuntime.fireManual(id, triggerId, JSONObject().put("source", source))
-    }
-
-    // SPEC 21.2: an admitted occurrence becomes a context-less trigger.fired
-    // event, routed by the trigger's own offline policy. The five-step order is
-    // enforced here: the durable commit precedes `commit` (throttle + on_fire),
-    // which precedes remote delivery. `commit` runs ONLY when the occurrence is
-    // durably admitted, so a failed queue transaction consumes no throttle and
-    // runs no local response.
-    private fun emitTriggerFired(reg: TriggerStore.Registration, data: JSONObject,
-                                 commit: () -> Unit) {
-        val entry = reg.entry
-        val args = JSONObject().put("id", entry.getString("id"))
-            .put("type", entry.getString("type")).put("data", data)
-        val params = JSONObject()
-            .put("event_id", EbpAuth.generateNonce())
-            .put("action", "trigger.fired")
-            .put("occurred_at_ms", queue.effectiveNow()).put("args", args)
-        val policy = entry.getString("policy")
-        if (policy == "queue" || policy == "wake")
-            params.put("queued_at_ms", queue.effectiveNow())
-        // An event that cannot be created is a failed admission: commit nothing.
-        if (params.toString().toByteArray(Charsets.UTF_8).size >
-            config.limits.getLong("max_event_bytes")) return
-        when (policy) {
-            "queue", "wake" -> when (queue.admit(params, policy,
-                    entry.optString("dedupe").takeIf { it.isNotEmpty() },
-                    entry.getLong("ttl_s"))) {
-                // Step 3 (event record) committed -> step 3 throttle + step 4
-                // on_fire -> step 5 wake/FIFO eligibility.
-                is AdmitResult.Admitted -> {
-                    commit()
-                    if (policy == "wake" && state != SessionState.READY &&
-                        queue.effectiveNow() - lastWakeMs >= 60_000) {
-                        lastWakeMs = queue.effectiveNow(); wakeListener?.invoke()
-                    }
-                    pumpAdvance()
-                }
-                else -> Unit // durable transaction failed: no throttle, no on_fire
-            }
-            // SPEC 21.2: a drop occurrence commits throttle + on_fire even with
-            // no live session; only the remote event is READY-gated.
-            else -> {
-                commit()
-                if (state == SessionState.READY)
-                    sendRequest("event.action", params) { _, _ -> }
-            }
-        }
+        firing.fireManual(id, triggerId, source)
     }
 
     /**
@@ -997,10 +935,10 @@ class CompanionEngine(
         val identity = pendingPairingId
             ?: return respondError(id, 1200, "Not authenticated", "not-authenticated")
         val caps = TriggerCaps(
-            triggerTypes = stringSet(config.deviceReport, "trigger_types"),
-            stateTypes = stringSet(config.deviceReport, "state_types"),
-            trackableStateTypes = stringSet(config.deviceReport, "trackable_state_types"),
-            triggerCaps = stringSet(config.deviceReport, "trigger_caps"),
+            triggerTypes = jsonStringSet(config.deviceReport, "trigger_types"),
+            stateTypes = jsonStringSet(config.deviceReport, "state_types"),
+            trackableStateTypes = jsonStringSet(config.deviceReport, "trackable_state_types"),
+            triggerCaps = jsonStringSet(config.deviceReport, "trigger_caps"),
             maxResponses = config.limits.optLong("max_trigger_responses", 16).toInt(),
             sensitiveSubstitutionApproved = config.sensitiveSubstitutionApproved)
         val entries = try {
@@ -1014,23 +952,16 @@ class CompanionEngine(
         if (entries.size > config.limits.optLong("max_triggers", 64))
             return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
                 JSONObject().put("reason", "trigger-limit"))
-        // SPEC 21.1: the accepted set commits durably before it is claimed; a
-        // storage failure leaves the prior set in force and answers an error.
+        // SPEC 21.1: the accepted set commits durably (via the firing service)
+        // before it is claimed, then the new/changed registrations are silently
+        // baselined; a storage failure leaves the prior set in force.
         val count = try {
-            triggers.replace(identity, entries)
+            firing.replaceSet(identity, entries)
         } catch (e: Exception) {
             return respondError(id, -32603, "Storage failed", "internal-error")
         }
-        // SPEC 21.5: silently baseline the new/changed registrations now;
-        // unchanged ids keep the baseline they carried forward (SPEC 21.1).
-        triggerRuntime.armBaselines(identity)
         respondResult(id, JSONObject().put("count", count))
         triggerListener?.invoke(identity, entries)
-    }
-
-    private fun stringSet(o: JSONObject, key: String): Set<String> {
-        val arr = o.optJSONArray(key) ?: return emptySet()
-        return (0 until arr.length()).mapNotNull { arr.opt(it) as? String }.toSet()
     }
 
     // ---------------------------------------- device capabilities (SPEC 20)

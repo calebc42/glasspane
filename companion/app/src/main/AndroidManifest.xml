@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
+        android:name=".EbpApplication"
         android:label="EBP Companion"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
         <activity

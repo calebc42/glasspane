@@ -42,6 +42,10 @@ class DeviceBridge(
     val queue = CompanionStores.queue(appContext)
     private val reminders = CompanionStores.reminders(appContext)
     private val triggers = CompanionStores.triggers(appContext)
+    // SPEC 21: the device-lifetime firing service (process-wide). This engine
+    // attaches to it as the LiveSession in its constructor; the sources feed it
+    // directly (EbpApplication), independent of any connection.
+    private val firing = CompanionStores.firing(appContext)
     @Volatile private var current: Socket? = null
 
     private val config = CompanionConfig(
@@ -87,8 +91,6 @@ class DeviceBridge(
     )
 
     fun start() = thread(name = "ebp-bridge", isDaemon = true) {
-        // SPEC 21: begin watching platform signals (sticky battery seeds now).
-        triggerSources.start()
         try {
             val server = ServerSocket()
             server.reuseAddress = true
@@ -125,14 +127,6 @@ class DeviceBridge(
             Thread(r, "ebp-dispatch").apply { isDaemon = true }
         }
 
-    // SPEC 21: platform trigger sources feed the live engine's runtime and
-    // hold the latest state for gate evaluation.
-    private val triggerSources = TriggerSources(appContext, ::feedTriggerSample)
-
-    /** SPEC 21.5: forward a device state sample to the live engine's runtime. */
-    private fun feedTriggerSample(type: String, sample: JSONObject) {
-        dispatchExecutor.execute { engine?.observeTriggerSample(type, sample) }
-    }
 
     /** SPEC 14.1: renderer hook -> remote action through the live engine. */
     fun action(surface: String, descriptor: JSONObject?, value: Any? = null) {
@@ -183,7 +177,7 @@ class DeviceBridge(
 
     private fun serve(socket: Socket) {
         val out = socket.getOutputStream()
-        val engine = CompanionEngine(config, store, queue, reminders, triggers) { bytes ->
+        val engine = CompanionEngine(config, store, queue, reminders, triggers, firing) { bytes ->
             // The sink runs on whatever thread emits — the reader, the pump,
             // or the UI dispatch executor. A peer that went away mid-write
             // MUST NOT crash that thread (and with it the app): close the
@@ -222,9 +216,6 @@ class DeviceBridge(
         engine.toastListener = { text, _ -> onToast(text) }
         engine.themeListener = { dark, _, _ -> onTheme(dark) }
         engine.pieMenuListener = { id, spec -> onPieMenuChanged(id, spec) }
-        // SPEC 21.3/21.4: current device state for gates; on_fire notifications.
-        engine.triggerStateProvider = { type -> triggerSources.currentState(type) }
-        engine.triggerNotifyListener = { notify -> Notifications.postTrigger(appContext, notify) }
         val input = socket.getInputStream()
         val buffer = ByteArray(8192)
         try {

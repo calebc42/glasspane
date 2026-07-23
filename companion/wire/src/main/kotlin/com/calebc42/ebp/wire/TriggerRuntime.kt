@@ -37,6 +37,9 @@ class TriggerRuntime(
     /** SPEC 21.4: execute one substituted on_fire entry ({cap,args?}|{notify}).
      * Called in authored order at admission; a throw is isolated per entry. */
     private val onFire: (JSONObject) -> Unit = {},
+    /** SPEC 21.2 step 3: durably commit the throttle floor / one-shot / boot
+     * records BEFORE on_fire runs. A no-op with the default in-memory store. */
+    private val persistRecords: () -> Unit = {},
 ) {
 
     private val WEEK = listOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
@@ -196,7 +199,14 @@ class TriggerRuntime(
         // (QueueFull/StorageFailed) never calls commit — so no throttle is
         // consumed and no local response runs (SPEC 21.2).
         emit(reg, data) {
+            // Step 3: consume the throttle floor and mark a one-shot complete,
+            // then durably persist those records BEFORE any local response.
             reg.throttleFloorMs = now()
+            if (reg.entry.getString("type") == "time" &&
+                reg.entry.getJSONObject("params").has("at_ms"))
+                reg.oneShotCompleted = true
+            persistRecords()
+            // Step 4: on_fire in authored order, substituted, failure-isolated.
             val id = reg.entry.getString("id")
             val type = reg.entry.getString("type")
             val list = reg.entry.getJSONArray("on_fire")

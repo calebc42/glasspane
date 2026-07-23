@@ -15,7 +15,9 @@ import com.calebc42.ebp.wire.FileTriggerBacking
 import com.calebc42.ebp.wire.LiveSession
 import com.calebc42.ebp.wire.ReminderStore
 import com.calebc42.ebp.wire.SurfaceStore
+import com.calebc42.ebp.wire.TriggerFiringService
 import com.calebc42.ebp.wire.TriggerStore
+import com.calebc42.ebp.wire.jsonStringSet
 import java.io.File
 
 object CompanionStores {
@@ -24,6 +26,8 @@ object CompanionStores {
     @Volatile private var surfacesInstance: SurfaceStore? = null
     @Volatile private var remindersInstance: ReminderStore? = null
     @Volatile private var triggersInstance: TriggerStore? = null
+    @Volatile private var firingInstance: TriggerFiringService? = null
+    @Volatile private var sourcesInstance: TriggerSources? = null
 
     /** The current live engine, or null when disconnected. A cold receiver
      * (reminder tap/alarm) routes queue/wake events durably regardless and a
@@ -63,4 +67,35 @@ object CompanionStores {
                 FileTriggerBacking(File(ctx.filesDir, "ebp-triggers.json"))
             ).also { triggersInstance = it }
         }
+
+    /** SPEC 21: the device-lifetime firing service over the durable stores.
+     * Fires regardless of a live socket; a live engine attaches as its
+     * LiveSession. Wired with the platform state provider + on_fire executors. */
+    fun firing(ctx: Context): TriggerFiringService {
+        firingInstance?.let { return it }
+        val app = ctx.applicationContext
+        return synchronized(this) {
+            firingInstance ?: TriggerFiringService(
+                triggers(app), queue(app), MAX_EVENT_BYTES,
+                triggerCaps = jsonStringSet(AppCapabilities.deviceReport(), "trigger_caps"),
+                capabilityHandler = AppCapabilities.handler(app, 65_536),
+            ).also { svc ->
+                svc.stateProvider = { type -> triggerSources(app).currentState(type) }
+                svc.notifyListener = { notify -> Notifications.postTrigger(app, notify) }
+                firingInstance = svc
+            }
+        }
+    }
+
+    /** SPEC 21: platform trigger sources, feeding the firing service (which the
+     * lambda resolves lazily, breaking the source<->service cycle). */
+    fun triggerSources(ctx: Context): TriggerSources {
+        sourcesInstance?.let { return it }
+        val app = ctx.applicationContext
+        return synchronized(this) {
+            sourcesInstance ?: TriggerSources(app) { type, sample ->
+                firing(app).observeSample(type, sample)
+            }.also { sourcesInstance = it }
+        }
+    }
 }

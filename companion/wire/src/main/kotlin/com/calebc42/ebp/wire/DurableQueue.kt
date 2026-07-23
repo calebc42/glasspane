@@ -62,13 +62,16 @@ class DurableQueue(
      */
     @Synchronized
     fun admit(event: JSONObject, policy: String, dedupe: String?,
-              ttlSeconds: Long): AdmitResult {
+              ttlSeconds: Long, pendingLocal: Boolean = false): AdmitResult {
         val now = effectiveNow()
         val record = JSONObject()
             .put("event", event)
             .put("policy", policy)
             .put("expires_at_ms", event.getLong("occurred_at_ms") + ttlSeconds * 1000)
             .also { if (dedupe != null) it.put("dedupe", dedupe) }
+            // SPEC 21.2: a pending-local record is not yet eligible for remote
+            // delivery — the pump waits on it until on_fire completes (clear).
+            .also { if (pendingLocal) it.put("pending_local", true) }
         // SPEC 15.2: replace older queued, non-in-flight, same-key events.
         val kept = if (dedupe == null) records.toMutableList()
         else records.filterNot {
@@ -141,4 +144,31 @@ class DurableQueue(
             runCatching { persist() }
         if (inFlightSeq == seq) inFlightSeq = null
     }
+
+    /** True while the lowest-seq record is still running its on_fire (SPEC
+     * 21.2): the pump MUST wait rather than deliver ahead of Step 4. */
+    @Synchronized
+    fun headIsPendingLocal(): Boolean = head()?.optBoolean("pending_local") == true
+
+    /** SPEC 21.2: clear a record's pending-local marker once its on_fire has
+     * completed (or recovery has resolved it), making it deliverable. */
+    @Synchronized
+    fun clearPendingLocal(seq: Long) {
+        records.firstOrNull { it.getLong("queue_seq") == seq }
+            ?.takeIf { it.has("pending_local") }
+            ?.let { it.remove("pending_local"); runCatching { persist() } }
+    }
+
+    /** SPEC 21.2 recovery: every record still marked pending-local (a crash
+     * during on_fire). Returns their (queue_seq, event) so the firing service
+     * can resume/resolve them, then clear the markers. */
+    @Synchronized
+    fun pendingLocalRecords(): List<Pair<Long, JSONObject>> =
+        records.filter { it.optBoolean("pending_local") }
+            .map { it.getLong("queue_seq") to it.getJSONObject("event") }
+
+    /** A read-only snapshot of the queued event payloads (for SPEC 21.2
+     * throttle reconstruction at recovery). */
+    @Synchronized
+    fun events(): List<JSONObject> = records.map { it.getJSONObject("event") }
 }

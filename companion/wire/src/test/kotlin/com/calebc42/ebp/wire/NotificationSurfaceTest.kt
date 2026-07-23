@@ -68,14 +68,15 @@ class NotificationSurfaceTest {
         fun action(a: JSONObject) = spec(JSONObject().put("actions", JSONArray().put(a)))
         // Missing on_tap.
         rejects(action(JSONObject().put("label", "X")), "required")
-        // input requires a remote on_tap (a builtin is not remote).
+        // SPEC 14.2/18.5 (audit I10): a notification action's on_tap MUST be a
+        // remote action — a builtin has no context-less execution path here and
+        // would throw at tap time, so it is rejected outright.
         rejects(action(JSONObject().put("label", "Reply")
             .put("on_tap", JSONObject().put("builtin", "dialog.dismiss"))
-            .put("input", JSONObject())), "remote action for input/dismiss")
-        // dismiss:true likewise requires remote.
+            .put("input", JSONObject())), "not a builtin")
         rejects(action(JSONObject().put("label", "Done").put("dismiss", true)
             .put("on_tap", JSONObject().put("builtin", "dialog.dismiss"))),
-            "remote action for input/dismiss")
+            "not a builtin")
         // An inline reply must not capture_fields.
         rejects(action(JSONObject().put("label", "Reply")
             .put("input", JSONObject().put("hint", "Reply..."))
@@ -86,18 +87,19 @@ class NotificationSurfaceTest {
         assertEquals("applied", notif(action(JSONObject().put("label", "Reply")
             .put("input", JSONObject().put("hint", "Reply...").put("key", "text"))
             .put("on_tap", JSONObject().put("action", "note.reply")))).status)
-        // SPEC 14.2: an unknown builtin rejects the notification.
+        // SPEC 14.2/18.5: ANY builtin on_tap rejects (I10) — known or unknown.
         rejects(action(JSONObject().put("label", "X")
-            .put("on_tap", JSONObject().put("builtin", "no.such.builtin"))), "unknown builtin")
+            .put("on_tap", JSONObject().put("builtin", "no.such.builtin"))), "not a builtin")
         // SPEC 14.1: ttl_s is an integer 1..604800.
         rejects(action(JSONObject().put("label", "X").put("on_tap", JSONObject()
             .put("action", "a.b").put("when_offline", "queue").put("ttl_s", 0))), "1..604800")
         // SPEC 14.1: a drop action MUST NOT carry ttl_s/dedupe.
         rejects(action(JSONObject().put("label", "X").put("on_tap", JSONObject()
             .put("action", "a.b").put("ttl_s", 100))), "invalid for drop")
-        // A known builtin on_tap (no input/dismiss) is accepted.
+        // A plain remote action (no input/dismiss) is accepted.
         assertEquals("applied", notif(action(JSONObject().put("label", "Snooze")
-            .put("on_tap", JSONObject().put("builtin", "dialog.dismiss")))).status)
+            .put("on_tap", JSONObject().put("action", "task.snooze")
+                .put("when_offline", "drop")))).status)
     }
 
     @Test

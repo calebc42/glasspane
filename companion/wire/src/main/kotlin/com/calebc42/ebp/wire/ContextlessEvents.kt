@@ -118,8 +118,24 @@ fun routeNotificationAction(
     replyKey: String?,
     replyText: String?,
     live: LiveSession?,
+    maxFieldBytes: Long = Long.MAX_VALUE,
     callback: ((String?, JSONObject?) -> Unit)? = null,
 ) {
+    // SPEC 18.5/14.1: an inline reply is a field value bounded by
+    // max_field_bytes — an over-limit reply is content-invalid, not dispatched
+    // (so its notification is NOT dismissed).
+    if (replyKey != null && replyText != null &&
+        replyText.toByteArray(Charsets.UTF_8).size.toLong() > maxFieldBytes) {
+        callback?.invoke(null, JSONObject().put("code", 1201)
+            .put("message", "Reply exceeds max_field_bytes")
+            .put("data", JSONObject().put("kind", "content-invalid")
+                .put("reason", "field-too-large")))
+        return
+    }
+    // SPEC 18.5: a notification action's on_tap is a remote descriptor (the
+    // validator rejects a builtin); guard defensively so a stray non-action
+    // never throws here.
+    if (!onTap.has("action")) return
     val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
     val fields = if (replyKey != null && replyText != null)
         JSONObject().put(replyKey, replyText) else null

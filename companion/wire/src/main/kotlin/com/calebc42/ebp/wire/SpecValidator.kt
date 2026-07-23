@@ -204,8 +204,12 @@ object SpecValidator {
         if (meta.has("priority") && meta.opt("priority") !in PRIORITIES)
             throw ContentInvalid("$path.priority", "min|low|default|high|max")
         meta.optJSONObject("chronometer")?.let { chrono ->
-            if (chrono.opt("base_ms") !is Number)
-                throw ContentInvalid("$path.chronometer.base_ms", "epoch timestamp required")
+            // SPEC 4.3/18.5: base_ms is a non-negative epoch-millis INTEGER,
+            // not any Number (a fractional or negative timestamp is invalid).
+            val base = (chrono.opt("base_ms") as? Number)?.toDouble()
+            if (base == null || base != Math.floor(base) || base < 0)
+                throw ContentInvalid("$path.chronometer.base_ms",
+                    "must be a non-negative epoch-millis integer")
             if (chrono.has("count_down") && chrono.opt("count_down") !is Boolean)
                 throw ContentInvalid("$path.chronometer.count_down", "must be a boolean")
         }
@@ -226,6 +230,12 @@ object SpecValidator {
             throw ContentInvalid("$path.label", "non-empty string required")
         val onTap = a.optJSONObject("on_tap")
             ?: throw ContentInvalid("$path.on_tap", "required")
+        // SPEC 14.2/18.5: a notification action's on_tap MUST be a remote
+        // ActionDescriptor — the notification profile advertises no builtins and
+        // there is no context-less builtin execution path, so a builtin on_tap
+        // would validate but throw at tap time.
+        if (onTap.has("builtin"))
+            throw ContentInvalid("$path.on_tap", "notification action must be a remote action, not a builtin")
         if (a.has("icon") && (a.opt("icon") !is String ||
                 !IDENTIFIER.matches(a.getString("icon"))))
             throw ContentInvalid("$path.icon", "must be an identifier")

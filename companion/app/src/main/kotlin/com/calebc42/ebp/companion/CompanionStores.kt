@@ -45,6 +45,8 @@ object CompanionStores {
     fun clearLiveSession(s: LiveSession) { liveSessionRef.compareAndSet(s, null) }
 
     const val MAX_EVENT_BYTES = 262_144L
+    // SPEC 14.1: matches DeviceBridge's advertised max_field_bytes.
+    const val MAX_FIELD_BYTES = 65_536L
 
     /** SPEC 21.2: every firing + cold-event route runs on this single background
      * thread, NEVER the Android main thread — an admitted occurrence may deliver

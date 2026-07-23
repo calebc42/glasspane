@@ -606,6 +606,14 @@ internal fun RenderReorderableList(node: JSONObject, ctx: RenderCtx, m: Modifier
         it?.optString("key").takeIf { k -> !k.isNullOrEmpty() }
             ?: it?.optString("id").orEmpty()
     }
+    // SPEC 14.3: `order` is an array of closed identity OBJECTS — {key: id} or
+    // {id: id}, choosing `key` when the child has both — not bare strings.
+    val itemIdentity = { i: Int ->
+        val it = itemsJson.optJSONObject(i)
+        val key = it?.optString("key").takeIf { k -> !k.isNullOrEmpty() }
+        if (key != null) JSONObject().put("key", key)
+        else JSONObject().put("id", it?.optString("id").orEmpty())
+    }
     // Display order as authored indices; reset when the authored list changes.
     var order by remember(itemsJson.toString()) {
         mutableStateOf((0 until itemsJson.length()).toList())
@@ -675,13 +683,14 @@ internal fun RenderReorderableList(node: JSONObject, ctx: RenderCtx, m: Modifier
                                     val to = draggedPos
                                     if (to != null && onReorder != null &&
                                         to != dragStartPos) {
-                                        // §14.3: from/to/order injected.
-                                        val keys = JSONArray()
-                                        order.forEach { keys.put(itemKey(it)) }
+                                        // §14.3: from/to/order injected; order
+                                        // is the post-move identity-object list.
+                                        val ids = JSONArray()
+                                        order.forEach { ids.put(itemIdentity(it)) }
                                         ctx.actionInjecting(onReorder, JSONObject()
                                             .put("from", dragStartPos)
                                             .put("to", to)
-                                            .put("order", keys))
+                                            .put("order", ids))
                                         haptic.performHapticFeedback(
                                             HapticFeedbackType.LongPress)
                                     }

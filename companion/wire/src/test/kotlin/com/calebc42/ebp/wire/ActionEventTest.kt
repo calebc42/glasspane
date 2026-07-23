@@ -97,6 +97,23 @@ class ActionEventTest {
     }
 
     @Test
+    fun multiMemberInjectionRidesBesideAuthoredArgs() {
+        // SPEC 14.3: on_reorder-style hooks inject several members (from/to/
+        // order), not just `value`; they land in a COPY beside authored args.
+        val out = mutableListOf<JSONObject>()
+        val engine = readyEngine(out)
+        val injected = JSONObject().put("from", 2).put("to", 0)
+            .put("order", JSONArray(listOf("c", "a", "b")))
+        engine.dispatchAction("app:main", descriptor(), null, injected)
+        val args = out.first { it.opt("method") == "event.action" }
+            .getJSONObject("params").getJSONObject("args")
+        assertEquals(2, args.getInt("from"))
+        assertEquals(0, args.getInt("to"))
+        assertEquals("c", args.getJSONArray("order").getString(0))
+        assertEquals(1, args.getInt("k")) // authored args intact
+    }
+
+    @Test
     fun captureIsOccurrenceTimeNotDeliveryTime() {
         val out = mutableListOf<JSONObject>()
         val engine = readyEngine(out)

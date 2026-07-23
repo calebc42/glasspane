@@ -198,12 +198,17 @@ class CompanionEngine(
      */
     @Synchronized
     fun dispatchAction(surface: String, descriptor: JSONObject, hookValue: Any?,
+                       injected: JSONObject? = null,
                        callback: ((String?, JSONObject?) -> Unit)? = null) {
         if (descriptor.has("builtin")) return // W7
         val revision = surfaces.revisionOf(surface) ?: return
         val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
         // SPEC 14.3: the hook's produced value is injected, never authored.
         if (hookValue != null) args.put("value", hookValue)
+        // SPEC 14.3: multi-member hooks (on_reorder from/to/order, on_add_row/
+        // on_add_col index, swipe on_trigger direction) inject a copy of their
+        // produced members; authored conflicts were rejected at accept time.
+        injected?.let { for (k in it.keySet()) args.put(k, it.get(k)) }
         val params = JSONObject()
             .put("event_id", EbpAuth.generateNonce())
             .put("action", descriptor.getString("action"))

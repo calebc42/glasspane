@@ -20,6 +20,25 @@ class ContentInvalid(val path: String, val reason: String) :
 
 private val IDENTIFIER = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]*")
 
+// SPEC 17.5: month_grid calendar formats (zero-padded, so string order is
+// chronological order for the min/max bound check).
+private val YYYY_MM = Regex("\\d{4}-(0[1-9]|1[0-2])")
+private val YYYY_MM_DD = Regex("\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])")
+
+// SPEC 17.7: a ToolbarItem carries exactly one primary operation.
+private val TOOLBAR_OPS = setOf("snippet", "on_tap", "menu", "command", "line")
+private val TOOLBAR_PLACEMENTS = setOf("cursor", "line-start", "block")
+
+// SPEC 17.5: the closed canvas-op shapes — required members per known op.
+// An UNKNOWN op is skipped at render, never rejected (SPEC 17.5).
+private val CANVAS_OPS: Map<String, List<String>> = mapOf(
+    "line" to listOf("x1", "y1", "x2", "y2"),
+    "rect" to listOf("x", "y", "width", "height"),
+    "circle" to listOf("cx", "cy", "radius"),
+    "path" to listOf("points"),
+    "text" to listOf("x", "y", "text"),
+)
+
 // SPEC 14.3: the members each value-producing hook injects into a copy of
 // `args`. A remote descriptor on such a hook MUST NOT author a conflicting
 // member — that makes the containing surface invalid.
@@ -357,6 +376,7 @@ object SpecValidator {
                 if (node.optBoolean("password") &&
                     (value is String && value.isNotEmpty() || node.has("on_change")))
                     throw ContentInvalid(path, "password nodes cannot seed values or publish state")
+                validateLineCounts(node, path)
             }
             "slider" -> {
                 val values = node.optJSONArray("values")
@@ -373,11 +393,28 @@ object SpecValidator {
                             throw ContentInvalid("$path.values", "must be strictly increasing")
                         prev = n.toDouble()
                     }
+                    // SPEC 17.4: a discrete value must equal one listed number
+                    // (Section 4.3 numeric equality); default is the first.
+                    if (node.has("value")) {
+                        val v = node.opt("value") as? Number
+                            ?: throw ContentInvalid("$path.value", "must be a number")
+                        val listed = (0 until values.length())
+                            .any { jsonValueEquals(values.get(it), v) }
+                        if (!listed)
+                            throw ContentInvalid("$path.value", "must equal a listed discrete value")
+                    }
                 } else {
                     val min = (node.opt("min") as? Number)?.toDouble() ?: 0.0
                     val max = (node.opt("max") as? Number)?.toDouble() ?: 1.0
                     if (min >= max)
                         throw ContentInvalid(path, "slider min must be less than max")
+                    // SPEC 17.4: a continuous value lies in the closed range.
+                    if (node.has("value")) {
+                        val v = (node.opt("value") as? Number)?.toDouble()
+                            ?: throw ContentInvalid("$path.value", "must be a number")
+                        if (v.isNaN() || v < min || v > max)
+                            throw ContentInvalid("$path.value", "must be within min..max")
+                    }
                 }
             }
             "enum_list" -> {
@@ -395,6 +432,82 @@ object SpecValidator {
                         throw ContentInvalid("$path.options[$i]", "duplicate option value")
                     seen.add(opt.get("value"))
                 }
+                // SPEC 17.4: unless allow_add, every selected value appears in
+                // options; multi_select values are an array of distinct values.
+                if (node.has("value") && !node.isNull("value")) {
+                    val allowAdd = node.optBoolean("allow_add")
+                    fun checkMember(v: Any, p: String) {
+                        if (!allowAdd && seen.none { jsonValueEquals(it, v) })
+                            throw ContentInvalid(p, "selected value not in options")
+                    }
+                    if (node.optBoolean("multi_select")) {
+                        val arr = node.opt("value") as? JSONArray
+                            ?: throw ContentInvalid("$path.value", "multi-select value must be an array")
+                        val chosen = mutableListOf<Any>()
+                        for (i in 0 until arr.length()) {
+                            val v = arr.get(i)
+                            if (chosen.any { jsonValueEquals(it, v) })
+                                throw ContentInvalid("$path.value[$i]", "duplicate selected value")
+                            chosen.add(v)
+                            checkMember(v, "$path.value[$i]")
+                        }
+                    } else {
+                        if (node.opt("value") is JSONArray)
+                            throw ContentInvalid("$path.value", "single-select value must be scalar")
+                        checkMember(node.get("value"), "$path.value")
+                    }
+                }
+            }
+            "text" -> validatePositiveInt(node, "max_lines", path)
+            "rich_text" -> validateSpans(node.opt("spans"), "$path.spans")
+            "empty_state" ->
+                // SPEC 17.2: action_label and on_tap together or both absent.
+                if (node.has("action_label") != node.has("on_tap"))
+                    throw ContentInvalid(path,
+                        "action_label and on_tap must appear together or both be absent")
+            "progress" ->
+                if (node.has("value")) {
+                    val v = (node.opt("value") as? Number)?.toDouble()
+                        ?: throw ContentInvalid("$path.value", "must be a number 0..1")
+                    if (v.isNaN() || v < 0.0 || v > 1.0)
+                        throw ContentInvalid("$path.value", "must be a number 0..1")
+                }
+            "date_stamp" -> {
+                validateIntRange(node, "day", 1, 31, path)
+                validateIntRange(node, "month_index", 1, 12, path)
+                if (node.has("year")) {
+                    val y = (node.opt("year") as? Number)?.toDouble()
+                    if (y == null || y != Math.floor(y) || y < 0)
+                        throw ContentInvalid("$path.year", "must be a non-negative integer")
+                }
+            }
+            "reorderable_list" -> {
+                // SPEC 17.3: every item has a unique key or id — else invalid.
+                val items = node.optJSONArray("items")
+                    ?: throw ContentInvalid("$path.items", "items must be an array")
+                val keys = mutableSetOf<String>()
+                for (i in 0 until items.length()) {
+                    val item = items.optJSONObject(i)
+                        ?: throw ContentInvalid("$path.items[$i]", "must be a node")
+                    val k = (item.opt("key") as? String) ?: (item.opt("id") as? String)
+                        ?: throw ContentInvalid("$path.items[$i]", "item needs a key or id")
+                    if (!keys.add(k))
+                        throw ContentInvalid("$path.items[$i]", "duplicate item key")
+                }
+            }
+            "tabs" -> validateTabs(node, path)
+            "table" -> validateTable(node, path)
+            "chart" -> validateChart(node, path)
+            "canvas" -> validateCanvas(node, path)
+            "month_grid" -> validateMonthGrid(node, path)
+            "editor" -> {
+                validateLineCounts(node, path)
+                val hasDocument = node.has("document")
+                // SPEC 17.4: complete:true requires document.
+                if (node.optBoolean("complete") && !hasDocument)
+                    throw ContentInvalid(path, "complete requires document")
+                if (node.has("toolbar"))
+                    validateToolbar(node.opt("toolbar"), "$path.toolbar", hasDocument)
             }
         }
         if (t in STATEFUL_NODE_TYPES) {
@@ -404,6 +517,289 @@ object SpecValidator {
                     ?: throw ContentInvalid(path, "$t requires an id")
                 ctx.statefuls[id] = node
             }
+        }
+    }
+
+    // ------------------------------------------- per-type deep rules (17.x)
+
+    /** SPEC 17.4: min_lines/max_lines are positive integers, min ≤ max, and
+     * single_line:true requires both to equal 1. */
+    private fun validateLineCounts(node: JSONObject, path: String) {
+        validatePositiveInt(node, "min_lines", path)
+        validatePositiveInt(node, "max_lines", path)
+        val min = (node.opt("min_lines") as? Number)?.toInt()
+        val max = (node.opt("max_lines") as? Number)?.toInt()
+        if (min != null && max != null && min > max)
+            throw ContentInvalid(path, "min_lines must not exceed max_lines")
+        if (node.optBoolean("single_line") &&
+            ((min ?: 1) != 1 || (max ?: 1) != 1))
+            throw ContentInvalid(path, "single_line requires line counts of 1")
+    }
+
+    private fun validatePositiveInt(node: JSONObject, member: String, path: String) {
+        if (!node.has(member)) return
+        val n = (node.opt(member) as? Number)?.toDouble()
+        if (n == null || n != Math.floor(n) || n < 1)
+            throw ContentInvalid("$path.$member", "must be a positive integer")
+    }
+
+    private fun validateIntRange(node: JSONObject, member: String, lo: Int, hi: Int, path: String) {
+        if (!node.has(member)) return
+        val n = (node.opt(member) as? Number)?.toDouble()
+        if (n == null || n != Math.floor(n) || n < lo || n > hi)
+            throw ContentInvalid("$path.$member", "must be an integer $lo..$hi")
+    }
+
+    /** SPEC 17.2: a RichSpan MUST contain text: string. */
+    private fun validateSpans(spans: Any?, path: String) {
+        val arr = spans as? JSONArray
+            ?: throw ContentInvalid(path, "must be an array of spans")
+        for (i in 0 until arr.length()) {
+            val span = arr.optJSONObject(i)
+                ?: throw ContentInvalid("$path[$i]", "must be a span object")
+            if (span.opt("text") !is String)
+                throw ContentInvalid("$path[$i].text", "span text must be a string")
+        }
+    }
+
+    /** SPEC 17.3: tabs arrays pair 1:1 and are non-empty; TabItem needs a
+     * label; initial indexes the common count. */
+    private fun validateTabs(node: JSONObject, path: String) {
+        val items = node.optJSONArray("items")
+            ?: throw ContentInvalid("$path.items", "items must be an array")
+        val children = node.optJSONArray("children")
+            ?: throw ContentInvalid("$path.children", "children must be an array")
+        if (items.length() == 0 || items.length() != children.length())
+            throw ContentInvalid(path, "items and children must have equal non-zero length")
+        for (i in 0 until items.length()) {
+            val item = items.optJSONObject(i)
+                ?: throw ContentInvalid("$path.items[$i]", "must be a TabItem object")
+            if (item.opt("label") !is String)
+                throw ContentInvalid("$path.items[$i].label", "TabItem label must be a string")
+        }
+        if (node.has("initial")) {
+            val init = (node.opt("initial") as? Number)?.toDouble()
+            if (init == null || init != Math.floor(init) ||
+                init < 0 || init >= items.length())
+                throw ContentInvalid("$path.initial", "must index the item count")
+        }
+    }
+
+    /** SPEC 17.3: an unknown TableRow kind is invalid; data/header cells MUST
+     * contain spans (RichSpan[]); aligns entries are start|center|end. */
+    private fun validateTable(node: JSONObject, path: String) {
+        val rows = node.optJSONArray("rows")
+            ?: throw ContentInvalid("$path.rows", "rows must be an array")
+        for (i in 0 until rows.length()) {
+            val row = rows.optJSONObject(i)
+                ?: throw ContentInvalid("$path.rows[$i]", "must be a TableRow object")
+            when (row.opt("kind")) {
+                "rule" -> Unit
+                "data", "header" -> {
+                    val cells = row.optJSONArray("cells")
+                        ?: throw ContentInvalid("$path.rows[$i].cells", "must be an array")
+                    for (j in 0 until cells.length()) {
+                        val cell = cells.optJSONObject(j)
+                            ?: throw ContentInvalid("$path.rows[$i].cells[$j]", "must be a cell object")
+                        validateSpans(cell.opt("spans"), "$path.rows[$i].cells[$j].spans")
+                    }
+                }
+                else -> throw ContentInvalid("$path.rows[$i].kind", "unknown table row kind")
+            }
+        }
+        node.optJSONArray("aligns")?.let { aligns ->
+            for (i in 0 until aligns.length())
+                if (aligns.opt(i) !in setOf("start", "center", "end"))
+                    throw ContentInvalid("$path.aligns[$i]", "must be start|center|end")
+        }
+    }
+
+    /** SPEC 17.5: every ChartPoint is finite numeric x/y; y_range is a
+     * two-number [min,max] with min < max; height is positive. */
+    private fun validateChart(node: JSONObject, path: String) {
+        val series = node.optJSONArray("series")
+            ?: throw ContentInvalid("$path.series", "series must be an array")
+        for (i in 0 until series.length()) {
+            val s = series.optJSONObject(i)
+                ?: throw ContentInvalid("$path.series[$i]", "must be a series object")
+            val points = s.optJSONArray("points")
+                ?: throw ContentInvalid("$path.series[$i].points", "points must be an array")
+            for (j in 0 until points.length()) {
+                val p = points.optJSONObject(j)
+                    ?: throw ContentInvalid("$path.series[$i].points[$j]", "must be a point object")
+                for (coord in listOf("x", "y")) {
+                    val v = (p.opt(coord) as? Number)?.toDouble()
+                    if (v == null || v.isNaN() || v.isInfinite())
+                        throw ContentInvalid("$path.series[$i].points[$j].$coord",
+                            "must be a finite number")
+                }
+            }
+        }
+        node.optJSONArray("y_range")?.let { r ->
+            val lo = (r.opt(0) as? Number)?.toDouble()
+            val hi = (r.opt(1) as? Number)?.toDouble()
+            if (r.length() != 2 || lo == null || hi == null || !(lo < hi))
+                throw ContentInvalid("$path.y_range", "must be [min, max] with min < max")
+        }
+        if (node.has("height")) {
+            val h = (node.opt("height") as? Number)?.toDouble()
+            if (h == null || h.isNaN() || h <= 0)
+                throw ContentInvalid("$path.height", "must be positive")
+        }
+    }
+
+    /** SPEC 17.5: canvas dims are positive; KNOWN ops carry their closed
+     * shape's required finite members (an unknown op is skipped at render,
+     * never rejected); path points are exactly {x, y}. */
+    private fun validateCanvas(node: JSONObject, path: String) {
+        for (dim in listOf("width", "height")) {
+            val v = (node.opt(dim) as? Number)?.toDouble()
+            if (v == null || v.isNaN() || v <= 0)
+                throw ContentInvalid("$path.$dim", "must be positive")
+        }
+        val ops = node.optJSONArray("ops")
+            ?: throw ContentInvalid("$path.ops", "ops must be an array")
+        for (i in 0 until ops.length()) {
+            val op = ops.optJSONObject(i)
+                ?: throw ContentInvalid("$path.ops[$i]", "must be an op object")
+            val kind = op.opt("op") as? String
+                ?: throw ContentInvalid("$path.ops[$i].op", "op discriminator required")
+            val required = CANVAS_OPS[kind] ?: continue // unknown op: render-skip
+            for (m in required) {
+                if (!op.has(m))
+                    throw ContentInvalid("$path.ops[$i]", "$kind missing required $m")
+                if (m != "points" && m != "text") {
+                    val v = (op.opt(m) as? Number)?.toDouble()
+                    if (v == null || v.isNaN() || v.isInfinite())
+                        throw ContentInvalid("$path.ops[$i].$m", "must be a finite number")
+                }
+            }
+            if (kind == "path") {
+                val pts = op.optJSONArray("points")
+                    ?: throw ContentInvalid("$path.ops[$i].points", "must be an array")
+                for (j in 0 until pts.length()) {
+                    val p = pts.optJSONObject(j)
+                        ?: throw ContentInvalid("$path.ops[$i].points[$j]", "must be {x, y}")
+                    for (coord in listOf("x", "y")) {
+                        val v = (p.opt(coord) as? Number)?.toDouble()
+                        if (v == null || v.isNaN() || v.isInfinite())
+                            throw ContentInvalid("$path.ops[$i].points[$j].$coord",
+                                "must be a finite number")
+                    }
+                }
+            }
+            // SPEC 17.5: rect widths/heights, circle radii, stroke widths, and
+            // a line op's width are non-negative.
+            val nonNegative = when (kind) {
+                "rect" -> listOf("width", "height", "stroke_width")
+                "circle" -> listOf("radius", "stroke_width")
+                "line" -> listOf("width")
+                else -> listOf("stroke_width")
+            }
+            for (m in nonNegative) {
+                if (op.has(m)) {
+                    val v = (op.opt(m) as? Number)?.toDouble()
+                    if (v == null || v.isNaN() || v < 0)
+                        throw ContentInvalid("$path.ops[$i].$m", "must be non-negative")
+                }
+            }
+        }
+    }
+
+    /** SPEC 17.5: month formats, dots 0..3, min_month ≤ max_month. */
+    private fun validateMonthGrid(node: JSONObject, path: String) {
+        val month = node.opt("month") as? String
+        if (month == null || !YYYY_MM.matches(month))
+            throw ContentInvalid("$path.month", "must be YYYY-MM")
+        for (m in listOf("min_month", "max_month")) {
+            (node.opt(m))?.takeIf { node.has(m) }?.let {
+                if (it !is String || !YYYY_MM.matches(it))
+                    throw ContentInvalid("$path.$m", "must be YYYY-MM")
+            }
+        }
+        val lo = node.opt("min_month") as? String
+        val hi = node.opt("max_month") as? String
+        if (lo != null && hi != null && lo > hi)
+            throw ContentInvalid(path, "min_month must not follow max_month")
+        (node.opt("selected"))?.takeIf { node.has("selected") }?.let {
+            if (it !is String || !YYYY_MM_DD.matches(it))
+                throw ContentInvalid("$path.selected", "must be YYYY-MM-DD")
+        }
+        node.optJSONObject("marks")?.let { marks ->
+            for (key in marks.keySet()) {
+                if (!YYYY_MM_DD.matches(key))
+                    throw ContentInvalid("$path.marks.$key", "keys must be YYYY-MM-DD")
+                val mark = marks.optJSONObject(key)
+                    ?: throw ContentInvalid("$path.marks.$key", "must be an object")
+                val dots = (mark.opt("dots") as? Number)?.toDouble()
+                if (dots == null || dots != Math.floor(dots) || dots < 0 || dots > 3)
+                    throw ContentInvalid("$path.marks.$key.dots", "must be an integer 0..3")
+            }
+        }
+    }
+
+    /**
+     * SPEC 17.7: editor.toolbar is a registered identifier (profile-features
+     * gating happens at the engine's profile check) or an array of
+     * ToolbarItems: label or icon, exactly one primary operation, `menu` of
+     * non-menu items, `long_press` exactly one non-menu operation, placement
+     * from the closed set. An unrecognized `line` VALUE is a render no-op,
+     * never a reject. A `command` op requires a synchronized editor
+     * (document present).
+     */
+    private fun validateToolbar(toolbar: Any?, path: String, hasDocument: Boolean) {
+        if (toolbar is String) {
+            if (!IDENTIFIER.matches(toolbar))
+                throw ContentInvalid(path, "must be a toolbar identifier or item array")
+            return
+        }
+        val items = toolbar as? JSONArray
+            ?: throw ContentInvalid(path, "must be a toolbar identifier or item array")
+        for (i in 0 until items.length())
+            validateToolbarItem(items.optJSONObject(i)
+                ?: throw ContentInvalid("$path[$i]", "must be a ToolbarItem object"),
+                "$path[$i]", hasDocument, allowMenu = true)
+    }
+
+    private fun validateToolbarItem(item: JSONObject, path: String,
+                                    hasDocument: Boolean, allowMenu: Boolean) {
+        if (!item.has("label") && !item.has("icon"))
+            throw ContentInvalid(path, "ToolbarItem needs label or icon")
+        val ops = TOOLBAR_OPS.filter { item.has(it) }
+        if (ops.size != 1)
+            throw ContentInvalid(path, "exactly one primary operation required")
+        val op = ops.single()
+        if (op == "menu" && !allowMenu)
+            throw ContentInvalid(path, "menu items must carry non-menu operations")
+        when (op) {
+            "menu" -> {
+                val sub = item.optJSONArray("menu")
+                    ?: throw ContentInvalid("$path.menu", "must be an array of items")
+                for (j in 0 until sub.length())
+                    validateToolbarItem(sub.optJSONObject(j)
+                        ?: throw ContentInvalid("$path.menu[$j]", "must be a ToolbarItem"),
+                        "$path.menu[$j]", hasDocument, allowMenu = false)
+            }
+            "command" -> {
+                val c = item.opt("command")
+                if (c !is String || !IDENTIFIER.matches(c))
+                    throw ContentInvalid("$path.command", "must be an identifier")
+                // SPEC 17.4: a toolbar command requires document.
+                if (!hasDocument)
+                    throw ContentInvalid("$path.command", "command requires document")
+            }
+            "snippet" -> if (item.opt("snippet") !is String)
+                throw ContentInvalid("$path.snippet", "must be a string")
+            "line" -> if (item.opt("line") !is String)
+                throw ContentInvalid("$path.line", "must be a string")
+            // on_tap descriptors are validated by the generic walk.
+        }
+        if (item.has("placement") && item.opt("placement") !in TOOLBAR_PLACEMENTS)
+            throw ContentInvalid("$path.placement", "must be cursor|line-start|block")
+        if (item.has("long_press")) {
+            val lp = item.optJSONObject("long_press")
+                ?: throw ContentInvalid("$path.long_press", "must be an object")
+            validateToolbarItem(lp, "$path.long_press", hasDocument, allowMenu = false)
         }
     }
 

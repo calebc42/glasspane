@@ -168,6 +168,17 @@ class DeviceBridge(
         }
     }
 
+    /** SPEC 14.6: a renderer-supplied occurrence-time field value — a
+     * text_input password's on_submit, whose secret has no retained draft. */
+    fun actionWithFields(surface: String, descriptor: JSONObject?, fields: JSONObject) {
+        descriptor ?: return
+        dispatchExecutor.execute {
+            engine?.dispatchAction(surface, descriptor, null, null, fields) { _, error ->
+                error?.let { onQueueProblem(it.optString("message", "queue error")) }
+            }
+        }
+    }
+
     /** SPEC 14.6: renderer edit -> draft + state.changed publication. */
     fun state(surface: String, id: String, value: Any?) {
         dispatchExecutor.execute { engine?.publishState(surface, id, value) }

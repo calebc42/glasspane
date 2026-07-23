@@ -248,6 +248,7 @@ class CompanionEngine(
     @Synchronized
     fun dispatchAction(surface: String, descriptor: JSONObject, hookValue: Any?,
                        injected: JSONObject? = null,
+                       extraFields: JSONObject? = null,
                        callback: ((String?, JSONObject?) -> Unit)? = null) {
         if (descriptor.has("builtin")) return executeBuiltin(surface, descriptor)
         val revision = surfaces.revisionOf(surface) ?: return
@@ -267,17 +268,19 @@ class CompanionEngine(
         if (args.length() > 0) params.put("args", args)
         // SPEC 14.1: capture_fields is one occurrence-time snapshot,
         // stored inside the durable record for queued policies (15.1).
+        val fields = JSONObject()
         descriptor.optJSONArray("capture_fields")?.let { capture ->
-            if (capture.length() > 0) {
-                val fields = JSONObject()
-                for (i in 0 until capture.length()) {
-                    val fieldId = capture.getString(i)
-                    fields.put(fieldId,
-                        surfaces.currentValue(surface, fieldId) ?: JSONObject.NULL)
-                }
-                params.put("fields", fields)
+            for (i in 0 until capture.length()) {
+                val fieldId = capture.getString(i)
+                fields.put(fieldId,
+                    surfaces.currentValue(surface, fieldId) ?: JSONObject.NULL)
             }
         }
+        // SPEC 14.6: a value the renderer supplies at occurrence time — a
+        // text_input password's on_submit, whose secret has no retained draft
+        // for currentValue() to read (it never emits state.changed).
+        extraFields?.let { for (k in it.keySet()) fields.put(k, it.get(k)) }
+        if (fields.length() > 0) params.put("fields", fields)
         val policy = descriptor.optString("when_offline", OFFLINE_DEFAULT)
         // SPEC 15.1: a durable policy persists a queued_at_ms; it is part of
         // the stored and replayed params, so add it BEFORE the size check.

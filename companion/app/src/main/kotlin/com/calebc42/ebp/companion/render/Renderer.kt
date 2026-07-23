@@ -82,6 +82,14 @@ class RenderCtx(
     fun actionInjecting(descriptor: JSONObject?, injected: JSONObject) =
         bridge.actionInjecting(surface, descriptor, injected)
 
+    /** §14.6 an app-surface password on_submit — the secret rides `fields`,
+     * never `args` and never a retained draft. (In a dialog the secret is
+     * captured dialog-locally via dialog.submit + capture_fields instead.) */
+    fun actionWithFields(descriptor: JSONObject?, fields: JSONObject) =
+        bridge.actionWithFields(surface, descriptor, fields)
+
+    val inDialog: Boolean get() = dialog != null
+
     fun state(id: String, value: Any?) {
         if (dialog != null) dialog.fields[id] = value // SPEC 18.1: local only
         else bridge.state(surface, id, value)
@@ -204,30 +212,85 @@ fun ColumnScope.RenderColumnChildren(children: JSONArray?, ctx: RenderCtx) {
 private fun RenderTextInput(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val id = node.optString("id")
     val enabled = node.optBoolean("enabled", true) // SPEC 17.4
-    // §16.1: local widget state keys on the presentation identity path, so a
-    // structural re-push with the same key/id keeps the draft and a new
-    // identity discards it.
-    var value by rememberSaveable(ctx.path, id) { mutableStateOf(node.optString("value")) }
-    // SPEC 18.4/17.4: a `syntax` language recolours the field in place (identity
-    // transform — the cursor/selection/IME are untouched).
+    val password = node.optBoolean("password")
+    val singleLine = node.optBoolean("single_line")
+    val onChange = node.optJSONObject("on_change")
+    val onSubmit = node.optJSONObject("on_submit")
+    // SPEC 14.6: a password value MUST NOT be persisted to saved-instance-state.
+    // A non-password draft keys on the §13.6 wire address (surface+id), NOT the
+    // key-first presentation path, so changing only a `key` keeps a compatible
+    // draft (§16.1 input-draft exception).
+    var value by if (password)
+        remember(id) { mutableStateOf("") } // never seeded, never saved
+    else
+        rememberSaveable(ctx.surface, id, key = "ti:${ctx.surface}:$id") {
+            mutableStateOf(node.optString("value"))
+        }
+    // SPEC 18.4/17.4: a `syntax` language recolours the field in place; a
+    // password masks with dots instead (a syntax highlight on a secret is moot).
     val language = node.optString("syntax")
     val syntaxColors = LocalSyntaxColors.current
-    val transform = remember(language, syntaxColors) {
-        if (language.isEmpty()) VisualTransformation.None
-        else SyntaxTransformation(language, syntaxColors)
+    val transform = remember(language, syntaxColors, password) {
+        when {
+            password -> androidx.compose.ui.text.input.PasswordVisualTransformation()
+            language.isEmpty() -> VisualTransformation.None
+            else -> SyntaxTransformation(language, syntaxColors)
+        }
+    }
+    fun submit() {
+        val v = value
+        when {
+            onSubmit == null -> {}
+            // SPEC 14.6/14.3: a password submission carries the secret in
+            // `fields.<id>`, never in `args`.
+            password -> ctx.actionWithFields(onSubmit, JSONObject().put(id, v))
+            else -> ctx.action(onSubmit, v) // §14.3 value injection
+        }
+        // SPEC 17.4: clear_on_submit resets the field after submit.
+        if (node.optBoolean("clear_on_submit")) value = ""
     }
     OutlinedTextField(
         value = value,
         enabled = enabled,
         visualTransformation = transform,
-        onValueChange = {
-            value = it
-            ctx.state(id, it) // dialog-local (18.1) or state.changed (14.6)
+        onValueChange = { raw ->
+            // SPEC 17.4: single_line strips every U+000A from entered text.
+            val next = if (singleLine) raw.replace("\n", "") else raw
+            value = next
+            // SPEC 14.6: a password MUST NOT emit state.changed. On an app
+            // surface, suppress state entirely; in a dialog the value stays
+            // dialog-local in memory for a dialog.submit capture.
+            if (!password) {
+                ctx.state(id, next)           // state.changed (14.6) or dialog-local
+                onChange?.let { ctx.action(it, next) } // §14.6: after state.changed
+            } else if (ctx.inDialog) {
+                ctx.state(id, next)           // dialog-local only, in memory
+            }
         },
         label = node.optString("label").takeIf { it.isNotEmpty() }
             ?.let { { Text(it) } },
-        singleLine = node.optBoolean("single_line"),
+        singleLine = singleLine,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            keyboardType = keyboardTypeOf(node.optString("keyboard"), password),
+            imeAction = if (onSubmit != null) androidx.compose.ui.text.input.ImeAction.Done
+                else androidx.compose.ui.text.input.ImeAction.Default),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+            onDone = { submit() }),
         modifier = m)
+}
+
+/** SPEC 17.4 `keyboard`: text|number|decimal|email|phone|uri; password wins. */
+private fun keyboardTypeOf(name: String, password: Boolean): androidx.compose.ui.text.input.KeyboardType {
+    val kt = androidx.compose.ui.text.input.KeyboardType
+    if (password) return kt.Password
+    return when (name) {
+        "number" -> kt.Number
+        "decimal" -> kt.Decimal
+        "email" -> kt.Email
+        "phone" -> kt.Phone
+        "uri" -> kt.Uri
+        else -> kt.Text
+    }
 }
 
 @Composable

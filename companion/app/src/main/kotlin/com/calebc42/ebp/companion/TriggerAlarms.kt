@@ -82,8 +82,10 @@ class BootReceiver : BroadcastReceiver() {
                 val firing = CompanionStores.firing(app)
                 when (action) {
                     Intent.ACTION_BOOT_COMPLETED -> firing.observeExternal("boot", JSONObject())
-                    Intent.ACTION_TIMEZONE_CHANGED ->
-                        firing.observeExternal("timezone.changed", JSONObject())
+                    // SPEC 21.5 fire-data: timezone.changed carries the new tz.
+                    Intent.ACTION_TIMEZONE_CHANGED -> firing.observeExternal(
+                        "timezone.changed",
+                        JSONObject().put("tz", java.time.ZoneId.systemDefault().id))
                 }
             } finally { pending.finish() }
         }

@@ -92,9 +92,13 @@ class TriggerFiringService(
         runLocked { runtime.fireManual(identity, triggerId, JSONObject().put("source", source)) }
 
     /** SPEC 21.5 (time): a host alarm for exactly this time.* registration
-     * elapsed — fire only it (each time entry has its own due time). */
+     * elapsed — fire only it (each time entry has its own due time). The fire
+     * data carries `precision` (SPEC 21.5 fire-data): the host arms
+     * setExactAndAllowWhileIdle, whose Doze / allow-while-idle quota MAY defer
+     * it, so the honest never-over-claimed value is `inexact`. */
     fun fireScheduled(identity: String, triggerId: String) =
-        runLocked { runtime.fireScheduled(identity, triggerId, JSONObject()) }
+        runLocked { runtime.fireScheduled(identity, triggerId,
+            JSONObject().put("precision", "inexact")) }
 
     /** SPEC 21.5: every time.* registration that still needs a host alarm, with
      * its next due wall-clock ms. A completed one-shot time.at_ms is omitted; a

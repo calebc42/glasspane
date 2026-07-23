@@ -32,7 +32,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // SPEC 18.5/18.6: request notification presentation permission.
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
+        }
         bridge = DeviceBridge(
+            applicationContext,
             java.io.File(filesDir, "ebp-queue.json"),
             java.io.File(filesDir, "ebp-surfaces.json"),
             onSurfaceChanged = { spec -> currentSpec.value = spec },

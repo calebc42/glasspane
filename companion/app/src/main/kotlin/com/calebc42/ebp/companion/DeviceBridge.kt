@@ -25,6 +25,7 @@ import java.net.Socket
 import kotlin.concurrent.thread
 
 class DeviceBridge(
+    private val appContext: android.content.Context,
     queueFile: File,
     surfaceFile: File,
     private val onSurfaceChanged: (JSONObject?) -> Unit,
@@ -57,7 +58,7 @@ class DeviceBridge(
             "101112131415161718191a1b1c1d1e1f" to
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
         supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
-            "presentation.pie-menu", "reminders.owner"),
+            "presentation.pie-menu", "reminders.owner", "surfaces.notification"),
         surfaceProfiles = JSONObject()
             .put("app", JSONObject()
                 .put("node_types", JSONArray(listOf(
@@ -71,6 +72,11 @@ class DeviceBridge(
                     "text", "row", "column", "box", "spacer", "divider",
                     "button", "text_input")))
                 .put("builtins", JSONArray(listOf("dialog.submit", "dialog.dismiss")))
+                .put("features", JSONArray()))
+            .put("notification", JSONObject()
+                .put("node_types", JSONArray(listOf(
+                    "text", "row", "column", "box", "spacer", "divider")))
+                .put("builtins", JSONArray())
                 .put("features", JSONArray())),
         limits = JSONObject()
             .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
@@ -175,7 +181,20 @@ class DeviceBridge(
         }
         this.engine = engine
         engine.surfaceListener = { surface ->
-            if (surface.startsWith("app:")) onSurfaceChanged(store.spec(surface))
+            when {
+                // SPEC 18.5: a notification:* surface is a system notification;
+                // its removal (tombstone -> null spec) cancels it.
+                surface.startsWith("notification:") -> {
+                    val spec = store.spec(surface)
+                    if (spec != null) Notifications.postSurface(appContext, surface, spec)
+                    else Notifications.cancelSurface(appContext, surface)
+                }
+                surface.startsWith("app:") -> onSurfaceChanged(store.spec(surface))
+            }
+        }
+        // SPEC 18.6: an accepted reminder set arms exact alarms.
+        engine.reminderListener = { owner, reminders ->
+            Notifications.scheduleReminders(appContext, owner, reminders)
         }
         engine.dialogListener = { id, spec -> onDialogChanged(id, spec) }
         engine.toastListener = { text, _ -> onToast(text) }

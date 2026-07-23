@@ -117,6 +117,16 @@ class TriggerRuntime(
             if (reg.entry.getString("type") == type) tryAdmit(reg, data)
     }
 
+    /**
+     * SPEC 21.5 (manual): fire exactly the named `manual` registration (via the
+     * builtin or trigger.fire), NOT every manual trigger. Unknown or non-manual
+     * ids are a no-op.
+     */
+    fun fireManual(identity: String, triggerId: String, data: JSONObject) {
+        val reg = store.registration(identity, triggerId) ?: return
+        if (reg.entry.getString("type") == "manual") tryAdmit(reg, data)
+    }
+
     // -------------------------------------------------------- crossing logic
 
     // SPEC 21.5: a filtered level fires only when entering the configured side.

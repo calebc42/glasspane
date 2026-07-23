@@ -175,6 +175,13 @@ class TriggerRuntimeTest {
         assertEquals("tap", fired[0].second.getString("source"))
     }
 
+    @Test
+    fun fireManualFiresOnlyNamedTrigger() {
+        register(trig("m1", "manual"), trig("m2", "manual"))
+        rt.fireManual("id", "m1", JSONObject().put("source", "emacs"))
+        assertEquals(listOf("m1"), firedIds()) // not m2
+    }
+
     // -------------------------------------- engine integration: real event
 
     @Test

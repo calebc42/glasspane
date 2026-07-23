@@ -943,9 +943,8 @@ class CompanionEngine(
     fun fireManualTrigger(triggerId: String, source: String) {
         val id = pendingPairingId ?: return
         if ("triggers" !in granted) return
-        val reg = triggers.registration(id, triggerId) ?: return
-        if (reg.entry.getString("type") != "manual") return
-        triggerRuntime.onExternal(id, "manual", JSONObject().put("source", source))
+        // Fire ONLY this id (SPEC 21.5), not every manual registration.
+        triggerRuntime.fireManual(id, triggerId, JSONObject().put("source", source))
     }
 
     // SPEC 21.2: an admitted occurrence becomes a context-less trigger.fired
@@ -1020,6 +1019,11 @@ class CompanionEngine(
             return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
                 JSONObject().put("path", e.path).put("reason", e.reason))
         }
+        // SPEC 21.1: the replace-set size MUST fit max_triggers; reject, never
+        // truncate. Validated before any registration changes.
+        if (entries.size > config.limits.optLong("max_triggers", 64))
+            return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
+                JSONObject().put("reason", "trigger-limit"))
         val count = triggers.replace(identity, entries)
         // SPEC 21.5: silently baseline the new/changed registrations now;
         // unchanged ids keep the baseline they carried forward (SPEC 21.1).
@@ -1501,9 +1505,24 @@ class CompanionEngine(
         surfaces.inputState().takeIf { it.length() > 0 }
             ?.let { welcome.put("input_state", it) }
         // SPEC 20.1: the device report is REQUIRED once capabilities or
-        // triggers is granted, and carries the caps/permissions snapshot.
-        if ("capabilities" in granted || "triggers" in granted)
-            welcome.put("device", config.deviceReport)
+        // triggers is granted. trigger_caps MUST be empty unless triggers is
+        // granted, and the trigger-only members MAY be empty then too — so a
+        // capabilities-only session never sees a non-empty trigger surface.
+        if ("capabilities" in granted || "triggers" in granted) {
+            val report = JSONObject(config.deviceReport.toString())
+            if ("triggers" !in granted) {
+                report.put("trigger_caps", JSONArray())
+                report.put("trigger_types", JSONArray())
+                report.put("trackable_state_types", JSONArray())
+                report.put("trigger_unavailable", JSONObject())
+                // state_types is REQUIRED only when triggers granted or
+                // state.get is in caps; otherwise it too may be empty.
+                val caps = report.optJSONArray("caps") ?: JSONArray()
+                if ((0 until caps.length()).none { caps.opt(it) == "state.get" })
+                    report.put("state_types", JSONArray())
+            }
+            welcome.put("device", report)
+        }
         return welcome
     }
 

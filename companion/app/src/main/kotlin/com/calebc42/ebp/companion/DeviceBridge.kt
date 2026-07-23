@@ -86,7 +86,8 @@ class DeviceBridge(
             .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
             .put("max_capture_fields", 64).put("max_dialogs", 4)
             .put("max_pie_menus", 1).put("max_reminders", 256)
-            .put("max_editor_sessions", 8).put("max_trigger_responses", 8),
+            .put("max_editor_sessions", 8).put("max_trigger_responses", 8)
+            .put("max_triggers", 64),
         // SPEC 20.1/20.2: advertise the device report and the platform executor.
         deviceReport = AppCapabilities.deviceReport(),
         capabilityHandler = AppCapabilities.handler(appContext, 65_536),

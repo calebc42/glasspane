@@ -36,6 +36,7 @@ class TriggerTest {
         .put("max_surfaces", 16).put("max_surface_ids", 1024)
         .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
         .put("max_capture_fields", 64).put("max_trigger_responses", 4)
+        .put("max_triggers", 3)
 
     private fun report() = JSONObject()
         .put("caps", JSONArray()).put("trigger_caps", JSONArray(listOf("vibrate")))
@@ -105,6 +106,18 @@ class TriggerTest {
         val engine = engine(out, grant = false)
         set(engine, "s1", trig("t", "boot"))
         assertEquals(-32601, response(out, "s1").getJSONObject("error").getInt("code"))
+    }
+
+    @Test
+    fun overLimitSetIsRejected() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        // max_triggers is 3; a 4-entry set is rejected, not truncated (SPEC 21.1).
+        set(engine, "s1", trig("a", "boot"), trig("b", "boot"),
+            trig("c", "boot"), trig("d", "boot"))
+        assertEquals(1101, response(out, "s1").getJSONObject("error").getInt("code"))
+        assertEquals("trigger-limit", reason(out, "s1"))
+        assertEquals(0, engine.triggers.count(katPid)) // nothing armed
     }
 
     @Test

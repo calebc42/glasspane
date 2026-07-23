@@ -90,6 +90,24 @@ class CapabilityTest {
         assertFalse(response(out2, "h2").getJSONObject("result").has("device"))
     }
 
+    @Test
+    fun capabilitiesOnlyWelcomeEmptiesTriggerSurface() {
+        val out = mutableListOf<JSONObject>()
+        // A report that lists a trigger surface while only capabilities is
+        // granted: SPEC 20.1 requires trigger_caps empty (and the trigger-only
+        // members MAY be empty) in that session.
+        val report = report("vibrate")
+            .put("trigger_caps", JSONArray(listOf("vibrate")))
+            .put("trigger_types", JSONArray(listOf("battery.level")))
+            .put("trackable_state_types", JSONArray(listOf("battery.level")))
+            .put("state_types", JSONArray(listOf("battery.level")))
+        engine(out, deviceReport = report)
+        val device = response(out, "h2").getJSONObject("result").getJSONObject("device")
+        assertEquals(0, device.getJSONArray("trigger_caps").length())
+        assertEquals(0, device.getJSONArray("trigger_types").length())
+        assertEquals(0, device.getJSONArray("state_types").length()) // no state.get in caps
+    }
+
     // ------------------------------------------------- invoke happy + gating
 
     @Test

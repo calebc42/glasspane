@@ -59,7 +59,7 @@ class DeviceBridge(
             .put("app", JSONObject()
                 .put("node_types", JSONArray(listOf(
                     "text", "row", "column", "box", "spacer", "divider",
-                    "button", "text_input")))
+                    "button", "text_input", "scaffold")))
                 .put("builtins", JSONArray(listOf(
                     "view.switch", "companion.settings.open")))
                 .put("features", JSONArray()))

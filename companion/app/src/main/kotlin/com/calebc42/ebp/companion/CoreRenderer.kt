@@ -18,8 +18,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +78,7 @@ fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
             .width((node.optDouble("width", 0.0)).dp)
             .height((node.optDouble("height", 0.0)).dp))
         "divider" -> HorizontalDivider(modifier = padding)
+        "scaffold" -> RenderScaffold(node, surface, bridge)
         "button" -> Button(
             onClick = { onButton(node.optJSONObject("on_tap"), surface, bridge, dialog) },
             modifier = padding) { Text(node.optString("label")) }
@@ -98,6 +105,42 @@ fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
             node.optJSONArray("children")?.let { children ->
                 Column { RenderChildren(children, surface, bridge, dialog) }
             }
+    }
+}
+
+/**
+ * SPEC 17.6: the scaffold's application chrome. This W7 slice renders
+ * top_bar, body, and a snackbar (with an optional snackbar_action whose
+ * on_tap dispatches on a user tap only, never on timeout). The remaining
+ * chrome — bottom_bar, fab, floating_toolbar, drawer, on_refresh — ports
+ * from poc-v1's SduiScaffold at W8.
+ */
+@Composable
+fun RenderScaffold(node: JSONObject, surface: String, bridge: DeviceBridge) {
+    val hostState = remember { SnackbarHostState() }
+    val snackbar = node.optString("snackbar").takeIf { it.isNotEmpty() }
+    val action = node.optJSONObject("snackbar_action")
+    // Show once when the message changes; SPEC 17.6 dispatches the action
+    // only on a user tap, distinguished from a timeout dismissal here.
+    LaunchedEffect(snackbar) {
+        if (snackbar != null) {
+            val result = hostState.showSnackbar(
+                message = snackbar,
+                actionLabel = action?.optString("label")?.takeIf { it.isNotEmpty() },
+                duration = SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed)
+                bridge.action(surface, action?.optJSONObject("on_tap"))
+        }
+    }
+    Scaffold(
+        snackbarHost = { SnackbarHost(hostState) },
+        topBar = {
+            node.optJSONObject("top_bar")?.let { RenderNode(it, surface, bridge) }
+        },
+    ) { inner ->
+        Box(Modifier.padding(inner)) {
+            node.optJSONObject("body")?.let { RenderNode(it, surface, bridge) }
+        }
     }
 }
 

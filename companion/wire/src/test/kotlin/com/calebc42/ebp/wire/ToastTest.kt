@@ -7,6 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ToastTest {
@@ -47,6 +48,27 @@ class ToastTest {
 
     private fun toast(vararg kv: Pair<String, Any>) = frame(notification(
         "toast.show", JSONObject().apply { kv.forEach { put(it.first, it.second) } }))
+
+    @Test
+    fun toastDuringSyncingIsDropped() {
+        val seen = mutableListOf<Pair<String, Long?>>()
+        // Reach SYNCING (auth ok) but NOT READY — no session.ready.
+        val engine = CompanionEngine(CompanionConfig(
+            serverName = "kat", serverVersion = "1", pairings = mapOf(katPid to katToken),
+            supportedCapabilities = setOf("presentation.toast"),
+            surfaceProfiles = JSONObject().put("app", JSONObject()
+                .put("node_types", JSONArray(listOf("text")))
+                .put("builtins", JSONArray()).put("features", JSONArray())),
+            limits = limits(), nonceSource = { katSn })) { }
+        engine.toastListener = { text, d -> seen.add(text to d) }
+        engine.feed(frame(request("h1", "session.hello",
+            EbpAuth.helloParams("t", "1", katPid, katCn, listOf("presentation.toast")))))
+        engine.feed(frame(request("h2", "auth.response",
+            EbpAuth.authParams(katPid, katCn, katSn, katToken))))
+        // SPEC 10.1: a READY-only toast.show arriving during SYNCING is dropped.
+        engine.feed(toast("text" to "Saved"))
+        assertTrue(seen.isEmpty())
+    }
 
     @Test
     fun plainToastAndDurationBounds() {

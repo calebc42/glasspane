@@ -86,6 +86,18 @@ class NotificationSurfaceTest {
         assertEquals("applied", notif(action(JSONObject().put("label", "Reply")
             .put("input", JSONObject().put("hint", "Reply...").put("key", "text"))
             .put("on_tap", JSONObject().put("action", "note.reply")))).status)
+        // SPEC 14.2: an unknown builtin rejects the notification.
+        rejects(action(JSONObject().put("label", "X")
+            .put("on_tap", JSONObject().put("builtin", "no.such.builtin"))), "unknown builtin")
+        // SPEC 14.1: ttl_s is an integer 1..604800.
+        rejects(action(JSONObject().put("label", "X").put("on_tap", JSONObject()
+            .put("action", "a.b").put("when_offline", "queue").put("ttl_s", 0))), "1..604800")
+        // SPEC 14.1: a drop action MUST NOT carry ttl_s/dedupe.
+        rejects(action(JSONObject().put("label", "X").put("on_tap", JSONObject()
+            .put("action", "a.b").put("ttl_s", 100))), "invalid for drop")
+        // A known builtin on_tap (no input/dismiss) is accepted.
+        assertEquals("applied", notif(action(JSONObject().put("label", "Snooze")
+            .put("on_tap", JSONObject().put("builtin", "dialog.dismiss")))).status)
     }
 
     @Test

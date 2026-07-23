@@ -25,7 +25,8 @@ data class TriggerCaps(
 
 object TriggerValidator {
 
-    private val IDENT = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]*")
+    // SPEC 4.4: 1..128 ASCII chars — bounds trigger id/type/dedupe length.
+    private val IDENT = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
     private val POLICIES = setOf("drop", "queue", "wake")
     private val EDGES = setOf("rise", "fall", "both")
     private val WEEK = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")

@@ -217,7 +217,10 @@ object SpecValidator {
             throw ContentInvalid("$path.on_tap", "must be a remote action for input/dismiss")
         if (hasInput && onTap.has("capture_fields"))
             throw ContentInvalid("$path.on_tap", "an inline reply must not capture_fields")
-        // Validate the descriptor itself (remote or an advertised builtin).
+        // SPEC 14.1/14.2: validate the descriptor itself with the SAME rules
+        // the surface path uses — exactly-one action/builtin, a dotted action
+        // name, a known offline policy, ttl_s only for queue/wake and in
+        // 1..604800, no ttl_s/dedupe on drop, and a globally-known builtin.
         if (onTap.has("action") == onTap.has("builtin"))
             throw ContentInvalid("$path.on_tap", "exactly one of action/builtin")
         if (onTap.has("action")) {
@@ -230,6 +233,20 @@ object SpecValidator {
                 throw ContentInvalid("$path.on_tap.when_offline", "unknown offline policy")
             if (policy in setOf("queue", "wake") && !onTap.has("ttl_s"))
                 throw ContentInvalid("$path.on_tap", "$policy requires ttl_s")
+            if (policy == "drop" && (onTap.has("ttl_s") || onTap.has("dedupe")))
+                throw ContentInvalid("$path.on_tap", "ttl_s/dedupe are invalid for drop")
+            if (onTap.has("ttl_s")) {
+                val ttl = onTap.opt("ttl_s") as? Number
+                    ?: throw ContentInvalid("$path.on_tap.ttl_s", "must be an integer 1..604800")
+                val d = ttl.toDouble()
+                if (d != Math.floor(d) || d.isInfinite() || d < 1.0 || d > 604800.0)
+                    throw ContentInvalid("$path.on_tap.ttl_s", "must be an integer 1..604800")
+            }
+        } else {
+            val name = onTap.opt("builtin") as? String
+                ?: throw ContentInvalid("$path.on_tap.builtin", "must be a string")
+            if (name !in ACTION_SCHEMA)
+                throw ContentInvalid("$path.on_tap.builtin", "unknown builtin $name")
         }
     }
 

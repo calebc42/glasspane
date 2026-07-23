@@ -638,6 +638,10 @@ class CompanionEngine(
         if (state == SessionState.CONNECTED || state == SessionState.CHALLENGED) return
         val spec = METHOD_REGISTRY[method] ?: return
         if (spec.sender == Sender.COMPANION || spec.isRequest) return
+        // SPEC 10.1: a notification not legal in this session state is dropped
+        // (a notification has no id, so the request's 1204 has no analogue) —
+        // e.g. a READY-only toast/pie/annotation arriving during SYNCING.
+        if (state !in spec.states) return
         // SPEC 7.3: structurally invalid notification params are dropped —
         // a notification has no id to answer (log.error arrives with W9).
         val params = rawParams as? JSONObject ?: return
@@ -672,6 +676,8 @@ class CompanionEngine(
     private fun handlePieMenuShow(params: JSONObject) {
         if ("presentation.pie-menu" !in granted) return
         val menuId = params.opt("menu_id") as? String ?: return
+        // SPEC 4.4/18.3: menu_id MUST be a valid identifier, not any string.
+        if (!identifier.matches(menuId)) return
         val categories = params.optJSONArray("categories") ?: return
         // SPEC 18.3: an invalid menu is dropped, not partially shown.
         if (!validPieCategories(categories)) return
@@ -797,7 +803,10 @@ class CompanionEngine(
      * new/changed tuples (SPEC 18.6). */
     var reminderListener: ((String, JSONArray, JSONArray) -> Unit)? = null
 
-    private val identifier = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]*")
+    // SPEC 4.4: an identifier is 1..128 ASCII chars (the leading char plus up
+    // to 127 more) — the length bound applies to reminder owner/id, cap names,
+    // and pie menu_id alike.
+    private val identifier = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
     private val reminderMembers = setOf("id", "title", "body", "at_ms", "on_tap")
 
     private fun handleRemindersSet(id: Any, params: JSONObject) {

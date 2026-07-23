@@ -186,6 +186,7 @@ class TriggerTest {
             val a = JSONArray()
             repeat(5) { a.put(JSONObject().put("notify", JSONObject().put("text", "x"))) }
             put("on_fire", a) })
+        bad("id over 128 chars", trig("x".repeat(129), "boot")) // SPEC 4.4
         bad("state.edge non-trackable+timewindow", trig("x", "state.edge").apply {
             put("params", JSONObject().put("when", JSONArray()
                 .put(JSONObject().put("type", "time.window")))) })

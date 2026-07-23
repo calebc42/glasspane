@@ -87,6 +87,20 @@ class PieMenuTest {
     }
 
     @Test
+    fun invalidMenuIdIsDropped() {
+        val presented = mutableListOf<Pair<String, JSONObject?>>()
+        val engine = engine(mutableListOf(), presented)
+        // SPEC 4.4/18.3: menu_id must be a valid identifier — a spaced string
+        // and an over-128-char one are both dropped, not presented.
+        show(engine, "not a menu id", JSONArray().put(leaf("demo.todo")))
+        show(engine, "m".repeat(129), JSONArray().put(leaf("demo.todo")))
+        assertTrue(presented.isEmpty())
+        // A valid id still presents.
+        show(engine, "capture", JSONArray().put(leaf("demo.todo")))
+        assertEquals("capture", presented.single().first)
+    }
+
+    @Test
     fun leafSelectionInjectsCategoryIndex() {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out, mutableListOf())

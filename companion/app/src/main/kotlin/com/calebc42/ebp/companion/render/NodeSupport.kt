@@ -42,7 +42,12 @@ object NodeSupport {
     val NOTIFICATION_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider")
 
-    val APP_BUILTINS: Set<String> = sortedSetOf("view.switch", "companion.settings.open")
+    /** SPEC 14.2: view.switch + companion.settings.open REQUIRED; the
+     * optional clipboard.copy / share.send / trigger.fire are implemented by
+     * the host and positively advertised here. */
+    val APP_BUILTINS: Set<String> = sortedSetOf(
+        "view.switch", "companion.settings.open", "clipboard.copy",
+        "share.send", "trigger.fire")
 
     /** SPEC 10.2: the dialog profile MUST include dialog.submit/dismiss. */
     val DIALOG_BUILTINS: Set<String> = sortedSetOf("dialog.submit", "dialog.dismiss")

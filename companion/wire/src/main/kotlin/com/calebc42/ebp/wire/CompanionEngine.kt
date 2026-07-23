@@ -189,6 +189,53 @@ class CompanionEngine(
 
     // ---------------------------------------- actions and input (SPEC 14)
 
+    /** SPEC 14.2: clipboard.copy / share.send / companion.settings.open are
+     * host-platform duties — (builtin name, descriptor) for the app layer. */
+    var hostBuiltinListener: ((String, JSONObject) -> Unit)? = null
+
+    /**
+     * SPEC 14.2: execute a Companion-local builtin from a surface hook. The
+     * descriptor's shape was validated at accept time (unknown builtin or bad
+     * members rejected the document); an invalid CONTEXT here — a view.switch
+     * on a single-view surface, an unknown view, a dialog completion outside
+     * a dialog — is a safe no-op, never a crash.
+     */
+    private fun executeBuiltin(surface: String, descriptor: JSONObject) {
+        when (descriptor.optString("builtin")) {
+            "view.switch" -> {
+                val view = descriptor.opt("view") as? String ?: return
+                if (!surfaces.switchView(surface, view)) return
+                surfaceListener?.invoke(surface)
+                // SPEC 14.2: while READY, report view.switched with the view
+                // in args — when_offline drop, so never queued.
+                if (state != SessionState.READY) return
+                val revision = surfaces.revisionOf(surface) ?: return
+                val params = JSONObject()
+                    .put("event_id", EbpAuth.generateNonce())
+                    .put("action", "view.switched")
+                    .put("surface", surface)
+                    .put("revision_seen", revision)
+                    .put("occurred_at_ms", queue.effectiveNow())
+                    .put("args", JSONObject().put("view", view))
+                if (params.toString().toByteArray(Charsets.UTF_8).size <=
+                    config.limits.getLong("max_event_bytes"))
+                    sendRequest("event.action", params) { _, _ -> }
+            }
+            "trigger.fire" -> {
+                // SPEC 14.2/21.5: fire the named manual trigger through the
+                // normal pipeline; requires the triggers capability.
+                if ("triggers" !in granted) return
+                val id = descriptor.opt("id") as? String ?: return
+                pendingPairingId?.let { firing.fireManual(it, id, "tap") }
+            }
+            "clipboard.copy", "share.send", "companion.settings.open" ->
+                hostBuiltinListener?.invoke(descriptor.optString("builtin"), descriptor)
+            // dialog.submit/dismiss are valid only inside their dialog; the
+            // renderer routes those through DialogContext. Reaching here is an
+            // invalid context: no-op.
+        }
+    }
+
     /**
      * SPEC 14.1/14.3/14.4: dispatch a remote user action from a surface
      * node. W5 carries the live path only: while READY the event is a
@@ -200,7 +247,7 @@ class CompanionEngine(
     fun dispatchAction(surface: String, descriptor: JSONObject, hookValue: Any?,
                        injected: JSONObject? = null,
                        callback: ((String?, JSONObject?) -> Unit)? = null) {
-        if (descriptor.has("builtin")) return // W7
+        if (descriptor.has("builtin")) return executeBuiltin(surface, descriptor)
         val revision = surfaces.revisionOf(surface) ?: return
         val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
         // SPEC 14.3: the hook's produced value is injected, never authored.

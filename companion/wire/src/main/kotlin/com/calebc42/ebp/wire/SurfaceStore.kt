@@ -76,6 +76,22 @@ class SurfaceStore(
     fun revisionOf(surface: String): Long? =
         records[surface]?.takeIf { it.present }?.revision
 
+    /** SPEC 13.4/14.2: the view a present multi-view surface shows. */
+    fun currentView(surface: String): String? =
+        records[surface]?.takeIf { it.present }?.currentView
+
+    /** SPEC 14.2 view.switch: valid only inside a present multi-view surface
+     * whose snapshot names `view`; the local choice persists like any other
+     * presentation state. Returns whether the switch happened. */
+    fun switchView(surface: String, view: String): Boolean {
+        val r = records[surface]?.takeIf { it.present } ?: return false
+        val views = r.spec?.optJSONObject("views") ?: return false
+        if (!views.has(view)) return false
+        r.currentView = view
+        persist()
+        return true
+    }
+
     /** SPEC 14.1: the occurrence-time logical value of a stateful node —
      * the dirty draft when one exists, else the authored value/default. */
     fun currentValue(surface: String, id: String): Any? {

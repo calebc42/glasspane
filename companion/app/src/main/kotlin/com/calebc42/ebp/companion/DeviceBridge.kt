@@ -171,6 +171,15 @@ class DeviceBridge(
         }
     }
 
+    /** SPEC 13.4/14.2: resolve a multi-view spec to the view being shown;
+     * a single-view spec passes through. */
+    private fun resolveView(surface: String): JSONObject? {
+        val spec = store.spec(surface) ?: return null
+        val views = spec.optJSONObject("views") ?: return spec
+        val name = store.currentView(surface) ?: spec.optString("initial_view")
+        return views.optJSONObject(name)
+    }
+
     private fun serve(socket: Socket) {
         val out = socket.getOutputStream()
         val engine = CompanionEngine(config, store, queue, reminders, triggers, firing) { bytes ->
@@ -197,7 +206,37 @@ class DeviceBridge(
                     if (spec != null) Notifications.postSurface(appContext, surface, spec)
                     else Notifications.cancelSurface(appContext, surface)
                 }
-                surface.startsWith("app:") -> onSurfaceChanged(store.spec(surface))
+                surface.startsWith("app:") -> onSurfaceChanged(resolveView(surface))
+            }
+        }
+        // SPEC 14.2: host-platform builtins. Settings is a stub until the app
+        // shell lands (deferred scope) — visible, honest, no silent drop.
+        engine.hostBuiltinListener = { builtin, descriptor ->
+            when (builtin) {
+                "clipboard.copy" -> {
+                    val clip = android.content.ClipData.newPlainText(
+                        "EBP", descriptor.optString("text"))
+                    appContext.getSystemService(
+                        android.content.ClipboardManager::class.java)
+                        .setPrimaryClip(clip)
+                    // SPEC 14.2: no additional private copy, no logging.
+                }
+                "share.send" -> {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_TEXT,
+                            descriptor.optString("text"))
+                        .also {
+                            descriptor.optString("title").takeIf { t -> t.isNotEmpty() }
+                                ?.let { t -> it.putExtra(
+                                    android.content.Intent.EXTRA_TITLE, t) }
+                        }
+                    appContext.startActivity(
+                        android.content.Intent.createChooser(send, null)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                "companion.settings.open" ->
+                    onToast("Companion settings arrive with the app shell")
             }
         }
         // SPEC 18.6: reconcile platform alarms with the accepted set (cancel

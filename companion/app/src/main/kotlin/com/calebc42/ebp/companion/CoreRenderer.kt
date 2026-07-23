@@ -90,34 +90,52 @@ fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
         "editor" -> {
             val id = node.optString("id")
             val document = node.optString("document")
+            // SPEC 17.4: `read_only` governs editing permission and `enabled`
+            // the platform disabled state; a disabled/read-only node MUST NOT
+            // dispatch (§1909-1913). (The §19 "read-only whenever not READY"
+            // rule for a synchronized editor needs reactive connection state —
+            // part of the W8 presentation wiring.)
+            val readOnly = node.optBoolean("read_only", false)
+            val enabled = node.optBoolean("enabled", true)
             var text by rememberSaveable(id) { mutableStateOf(node.optString("value")) }
             OutlinedTextField(
                 value = text,
+                readOnly = readOnly,
+                enabled = enabled,
                 onValueChange = { new ->
-                    // SPEC 19.3: a synchronized editor mirrors each local edit
-                    // as a minimal splice — the changed span only, not a
-                    // whole-buffer replace — so deltas stay small and the
-                    // Companion shadow tracks the field scalar-for-scalar.
-                    if (document.isNotEmpty()) {
-                        val (start, del, ins) = EditorSession.diff(text, new)
-                        if (del > 0 || ins.isNotEmpty())
-                            bridge.editorEdit(document, id, start, del, ins)
-                    } else {
-                        bridge.state(surface, id, new) // local editor: state.changed
+                    // A read-only editor's value is authoritative from the
+                    // server: never mirror a local edit (SPEC 17.4). readOnly
+                    // already suppresses user input; this is belt-and-braces
+                    // against IME/autofill paths.
+                    if (!readOnly) {
+                        // SPEC 19.3: mirror each local edit as a minimal splice
+                        // — the changed span only, not a whole-buffer replace —
+                        // so deltas stay small and the Companion shadow tracks
+                        // the field scalar-for-scalar.
+                        if (document.isNotEmpty()) {
+                            val (start, del, ins) = EditorSession.diff(text, new)
+                            if (del > 0 || ins.isNotEmpty())
+                                bridge.editorEdit(document, id, start, del, ins)
+                        } else {
+                            bridge.state(surface, id, new) // local: state.changed
+                        }
+                        text = new
                     }
-                    text = new
                 },
                 minLines = 3,
                 modifier = padding)
         }
         "button" -> Button(
+            enabled = node.optBoolean("enabled", true), // SPEC 17.4
             onClick = { onButton(node.optJSONObject("on_tap"), surface, bridge, dialog) },
             modifier = padding) { Text(node.optString("label")) }
         "text_input" -> {
             val id = node.optString("id")
+            val enabled = node.optBoolean("enabled", true) // SPEC 17.4
             var value by rememberSaveable(id) { mutableStateOf(node.optString("value")) }
             OutlinedTextField(
                 value = value,
+                enabled = enabled,
                 onValueChange = {
                     value = it
                     if (dialog != null)

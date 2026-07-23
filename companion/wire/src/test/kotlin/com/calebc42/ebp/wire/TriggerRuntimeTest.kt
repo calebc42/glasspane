@@ -27,7 +27,8 @@ class TriggerRuntimeTest {
     private val fired = mutableListOf<Pair<String, JSONObject>>()
     private val store = TriggerStore()
     private val rt = TriggerRuntime(store, { clock }, ZoneId.of("UTC"),
-        { state[it] }, emit = { reg, data -> fired.add(reg.entry.getString("id") to data) })
+        { state[it] }, emit = { reg, data, commit ->
+            commit(); fired.add(reg.entry.getString("id") to data) })
 
     private fun trig(id: String, type: String, block: JSONObject.() -> Unit = {}) =
         JSONObject().put("id", id).put("type", type).apply(block)

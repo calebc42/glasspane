@@ -25,8 +25,15 @@ class TriggerRuntime(
     private val zone: ZoneId,
     /** Current sample object for a state type, or null if unavailable. */
     private val stateProvider: (String) -> JSONObject?,
-    /** Route an admitted trigger.fired for this registration + fire data. */
-    private val emit: (TriggerStore.Registration, JSONObject) -> Unit,
+    /**
+     * SPEC 21.2: perform the durable commit for an admitted occurrence and,
+     * only if it succeeds, invoke `commit` (which consumes throttle + runs
+     * on_fire) BEFORE making the remote trigger.fired eligible. For queue/wake
+     * this means committing the event record first and skipping `commit`
+     * entirely on QueueFull/StorageFailed; for drop it means committing
+     * throttle+on_fire even with no live session, delivering live only in READY.
+     */
+    private val emit: (TriggerStore.Registration, JSONObject, commit: () -> Unit) -> Unit,
     /** SPEC 21.4: execute one substituted on_fire entry ({cap,args?}|{notify}).
      * Called in authored order at admission; a throw is isolated per entry. */
     private val onFire: (JSONObject) -> Unit = {},
@@ -163,28 +170,32 @@ class TriggerRuntime(
     // ----------------------------------------------- admission (SPEC 21.2)
 
     private fun tryAdmit(reg: TriggerStore.Registration, data: JSONObject) {
-        // Step 1: state gate + throttle eligibility. A failure consumes nothing.
+        // SPEC 21.2 step 1: state gate + throttle eligibility. A failed check
+        // consumes NOTHING — no throttle, no local response, no event.
         if (!allHold(reg.entry.getJSONArray("when"))) return
         val throttle = reg.entry.optLong("throttle_s", 0)
         if (throttle > 0) {
             val floor = reg.throttleFloorMs
             if (floor != null && now() - floor < throttle * 1000) return
         }
-        // Steps 2-3: freeze + commit the throttle floor before emitting.
-        reg.throttleFloorMs = now()
-        // Step 4: local on_fire in authored order, each substituted against the
-        // fire context; a failing entry is isolated and never stops the others
-        // or cancels the remote event (SPEC 21.4).
-        val id = reg.entry.getString("id")
-        val type = reg.entry.getString("type")
-        val list = reg.entry.getJSONArray("on_fire")
-        for (j in 0 until list.length()) {
-            try {
-                onFire(Substitution.apply(list.getJSONObject(j), id, type, data) as JSONObject)
-            } catch (_: Exception) { /* recorded safely; continue */ }
+        // SPEC 21.2 steps 2-5, ordered by emit: the durable commit happens
+        // FIRST; only if it succeeds does emit invoke this `commit` closure,
+        // which consumes the throttle floor (step 3) and runs on_fire in
+        // authored order (step 4). Remote FIFO eligibility / live delivery
+        // (step 5) follows inside emit. A failed durable transaction
+        // (QueueFull/StorageFailed) never calls commit — so no throttle is
+        // consumed and no local response runs (SPEC 21.2).
+        emit(reg, data) {
+            reg.throttleFloorMs = now()
+            val id = reg.entry.getString("id")
+            val type = reg.entry.getString("type")
+            val list = reg.entry.getJSONArray("on_fire")
+            for (j in 0 until list.length()) {
+                try {
+                    onFire(Substitution.apply(list.getJSONObject(j), id, type, data) as JSONObject)
+                } catch (_: Exception) { /* isolated per entry; SPEC 21.4 */ }
+            }
         }
-        // Step 5: remote event eligible.
-        emit(reg, data)
     }
 
     // ---------------------------------------------- gate predicate eval

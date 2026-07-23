@@ -25,7 +25,7 @@ class OnFireTest {
     private val ran = mutableListOf<JSONObject>()
     private val store = TriggerStore()
     private val rt = TriggerRuntime(store, { 1_000L }, java.time.ZoneId.of("UTC"),
-        { state[it] }, emit = { _, _ -> }, onFire = { ran.add(it) })
+        { state[it] }, emit = { _, _, commit -> commit() }, onFire = { ran.add(it) })
 
     private fun trig(id: String, type: String, block: JSONObject.() -> Unit = {}) =
         JSONObject().put("id", id).put("type", type).apply(block)
@@ -62,7 +62,7 @@ class OnFireTest {
         // A throw on the first entry must not stop the second (SPEC 21.4).
         val seen = mutableListOf<String>()
         val rt2 = TriggerRuntime(store, { 1_000L }, java.time.ZoneId.of("UTC"),
-            { state[it] }, emit = { _, _ -> }, onFire = { e ->
+            { state[it] }, emit = { _, _, commit -> commit() }, onFire = { e ->
                 if (e.has("notify")) throw RuntimeException("boom")
                 seen.add(e.getString("cap"))
             })
@@ -75,6 +75,29 @@ class OnFireTest {
         state["battery.level"] = battery(50); rt2.armBaselines("id")
         state["battery.level"] = battery(19); rt2.onSample("id", "battery.level", battery(19))
         assertEquals(listOf("vibrate"), seen) // second entry still ran
+    }
+
+    @Test
+    fun failedDurableCommitRunsNoOnFireAndKeepsThrottle() {
+        // SPEC 21.2: if the durable transaction fails, emit never calls commit,
+        // so no local response runs and no throttle floor is consumed.
+        state["battery.level"] = battery(50)
+        val store2 = TriggerStore()
+        val ran2 = mutableListOf<JSONObject>()
+        val rt3 = TriggerRuntime(store2, { 1_000L }, java.time.ZoneId.of("UTC"),
+            { state[it] }, emit = { _, _, _ -> /* QueueFull: never commit */ },
+            onFire = { ran2.add(it) })
+        val entries = TriggerValidator.validateSet(JSONObject().put("triggers",
+            JSONArray().put(trig("bat", "battery.level") {
+                put("params", JSONObject().put("below", 20)); put("throttle_s", 60)
+                put("on_fire", JSONArray().put(JSONObject().put("notify",
+                    JSONObject().put("text", "x"))))
+            })), caps())
+        store2.replace("id", entries)
+        rt3.armBaselines("id")
+        state["battery.level"] = battery(19); rt3.onSample("id", "battery.level", battery(19))
+        assertTrue(ran2.isEmpty())                                         // no on_fire
+        assertEquals(null, store2.registration("id", "bat")!!.throttleFloorMs) // no throttle
     }
 
     // -------------------------------------------- install-time validation

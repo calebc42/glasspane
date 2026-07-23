@@ -949,9 +949,13 @@ class CompanionEngine(
     }
 
     // SPEC 21.2: an admitted occurrence becomes a context-less trigger.fired
-    // event, routed by the trigger's own offline policy exactly as a surface
-    // action would be. (on_fire local responses attach in a later atom.)
-    private fun emitTriggerFired(reg: TriggerStore.Registration, data: JSONObject) {
+    // event, routed by the trigger's own offline policy. The five-step order is
+    // enforced here: the durable commit precedes `commit` (throttle + on_fire),
+    // which precedes remote delivery. `commit` runs ONLY when the occurrence is
+    // durably admitted, so a failed queue transaction consumes no throttle and
+    // runs no local response.
+    private fun emitTriggerFired(reg: TriggerStore.Registration, data: JSONObject,
+                                 commit: () -> Unit) {
         val entry = reg.entry
         val args = JSONObject().put("id", entry.getString("id"))
             .put("type", entry.getString("type")).put("data", data)
@@ -962,24 +966,32 @@ class CompanionEngine(
         val policy = entry.getString("policy")
         if (policy == "queue" || policy == "wake")
             params.put("queued_at_ms", queue.effectiveNow())
+        // An event that cannot be created is a failed admission: commit nothing.
         if (params.toString().toByteArray(Charsets.UTF_8).size >
             config.limits.getLong("max_event_bytes")) return
         when (policy) {
             "queue", "wake" -> when (queue.admit(params, policy,
                     entry.optString("dedupe").takeIf { it.isNotEmpty() },
                     entry.getLong("ttl_s"))) {
+                // Step 3 (event record) committed -> step 3 throttle + step 4
+                // on_fire -> step 5 wake/FIFO eligibility.
                 is AdmitResult.Admitted -> {
+                    commit()
                     if (policy == "wake" && state != SessionState.READY &&
                         queue.effectiveNow() - lastWakeMs >= 60_000) {
                         lastWakeMs = queue.effectiveNow(); wakeListener?.invoke()
                     }
                     pumpAdvance()
                 }
-                else -> Unit // queue full / storage failed: best-effort, dropped
+                else -> Unit // durable transaction failed: no throttle, no on_fire
             }
-            else -> // SPEC 15.1/21.2: a drop trigger delivers live only in READY.
+            // SPEC 21.2: a drop occurrence commits throttle + on_fire even with
+            // no live session; only the remote event is READY-gated.
+            else -> {
+                commit()
                 if (state == SessionState.READY)
                     sendRequest("event.action", params) { _, _ -> }
+            }
         }
     }
 

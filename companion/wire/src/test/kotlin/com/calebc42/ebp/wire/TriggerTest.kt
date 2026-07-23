@@ -163,6 +163,10 @@ class TriggerTest {
         bad("queue needs ttl", trig("x", "boot").apply { put("policy", "queue") })
         bad("drop forbids ttl", trig("x", "boot").apply { put("ttl_s", 10) })
         bad("dedupe needs durable", trig("x", "boot").apply { put("dedupe", "d") })
+        // SPEC 21.5: a sensitive sms.received/call.state must not queue plaintext
+        // until the keystore seam exists — a durable policy is rejected.
+        bad("sensitive needs drop", trig("x", "sms.received")
+            .apply { put("policy", "queue").put("ttl_s", 3600) })
         bad("battery both", trig("x", "battery.level").apply {
             put("params", JSONObject().put("above", 10).put("below", 90)) })
         bad("battery range", trig("x", "battery.level").apply {

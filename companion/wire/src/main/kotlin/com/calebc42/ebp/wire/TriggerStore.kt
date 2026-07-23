@@ -22,6 +22,7 @@ class TriggerStore(private val backing: TriggerBacking = MemoryTriggerBacking())
      * records that outlive an unchanged replace (SPEC 21.1) and persist across
      * restart (all but the baselines, which SPEC 21.5 re-establishes silently). */
     class Registration(val entry: JSONObject) {
+        var identity: String? = null         // owning pairing (for recover attribution)
         var throttleFloorMs: Long? = null    // last admitted occurrence (21.2)
         var oneShotCompleted = false         // time.at_ms completed marker (21.5)
         var scheduleAnchorMs: Long? = null   // time.every_s acceptance anchor
@@ -38,6 +39,7 @@ class TriggerStore(private val backing: TriggerBacking = MemoryTriggerBacking())
             val map = LinkedHashMap<String, Registration>()
             for (p in regs) {
                 val r = Registration(p.entry)
+                r.identity = identity
                 r.throttleFloorMs = p.throttleFloorMs
                 r.oneShotCompleted = p.oneShotCompleted
                 r.scheduleAnchorMs = p.scheduleAnchorMs
@@ -90,7 +92,7 @@ class TriggerStore(private val backing: TriggerBacking = MemoryTriggerBacking())
             val prior = old[id]
             next[id] = if (prior != null && canonicalEquals(prior.entry, e))
                 prior                       // unchanged: keep records (21.1)
-            else Registration(e)            // new or changed: fresh records
+            else Registration(e).also { it.identity = identity } // new/changed: fresh
         }
         if (next.isEmpty()) byIdentity.remove(identity) else byIdentity[identity] = next
         try {

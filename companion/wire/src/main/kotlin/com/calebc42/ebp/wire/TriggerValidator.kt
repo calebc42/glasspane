@@ -32,6 +32,11 @@ object TriggerValidator {
     private val WEEK = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")
     // SPEC 21.4: sources whose data reaching a sink needs explicit approval.
     private val SENSITIVE = setOf("sms.received", "call.state", "calendar.event")
+    // SPEC 21.5: sms.received/call.state fire payloads MUST be keystore-encrypted
+    // at rest if queued. Until that encryption seam exists, a durable policy is
+    // refused for them so a sensitive payload can never land plaintext in the
+    // durable queue (drop, RECOMMENDED anyway, is the only accepted policy).
+    private val ENCRYPTED_IF_QUEUED = setOf("sms.received", "call.state")
     // SPEC 21.4: caps that MUST NOT appear in trigger_caps / on_fire (they are
     // interactive, unbounded, or return non-{} results).
     private val FORBIDDEN_TRIGGER_CAPS = setOf("settings.open", "apps.list",
@@ -92,6 +97,8 @@ object TriggerValidator {
         }
         if (policy !in POLICIES) throw ContentInvalid("$path.policy", "not a policy")
         val durable = policy == "queue" || policy == "wake"
+        if (durable && type in ENCRYPTED_IF_QUEUED)
+            throw ContentInvalid("$path.policy", "sensitive type requires policy drop")
         // SPEC 21.1: ttl_s REQUIRED for queue/wake, forbidden for drop.
         val hasTtl = t.has("ttl_s")
         if (durable && !hasTtl) throw ContentInvalid("$path.ttl_s", "$policy requires ttl_s")

@@ -110,7 +110,8 @@ class DurableQueue(
      */
     @Synchronized
     fun admit(event: JSONObject, policy: String, dedupe: String?,
-              ttlSeconds: Long, pendingLocal: Boolean = false): AdmitResult {
+              ttlSeconds: Long, pendingLocal: Boolean = false,
+              triggerIdentity: String? = null): AdmitResult {
         val now = effectiveNow()
         val record = JSONObject()
             .put("event", event)
@@ -120,6 +121,9 @@ class DurableQueue(
             // SPEC 21.2: a pending-local record is not yet eligible for remote
             // delivery — the pump waits on it until on_fire completes (clear).
             .also { if (pendingLocal) it.put("pending_local", true) }
+            // SPEC 21.2 recovery: the firing pairing, so throttle reconstruction
+            // floors only that pairing's registration (not every id-sharing one).
+            .also { if (triggerIdentity != null) it.put("trigger_identity", triggerIdentity) }
         // SPEC 15.2: replace older queued, non-in-flight, same-key events.
         val kept = if (dedupe == null) records.toMutableList()
         else records.filterNot {
@@ -219,4 +223,12 @@ class DurableQueue(
      * throttle reconstruction at recovery). */
     @Synchronized
     fun events(): List<JSONObject> = records.map { it.getJSONObject("event") }
+
+    /** SPEC 21.2 recovery: each record's (trigger_identity, event). The identity
+     * is null for a non-trigger record or one admitted before identity-stamping,
+     * so recover falls back to all identities in that case. */
+    @Synchronized
+    fun firedRecords(): List<Pair<String?, JSONObject>> = records.map {
+        it.optString("trigger_identity").takeIf { s -> s.isNotEmpty() } to it.getJSONObject("event")
+    }
 }

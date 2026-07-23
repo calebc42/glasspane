@@ -181,6 +181,26 @@ class FiringServiceTest {
     }
 
     @Test
+    fun recoverAttributesThrottleToTheFiringPairingOnly() {
+        // Two pairings both register `bat`. Pairing A's occurrence is queued
+        // (identity stamped) then a crash loses its record write. recover() must
+        // floor only A's throttle — not spuriously throttle B (SPEC 21.2: the
+        // throttle is per pairing's trigger id).
+        val store = TriggerStore()
+        store.replace("A", entries(trig("bat") { put("policy", "queue").put("ttl_s", 86_400) }))
+        store.replace("B", entries(trig("bat") { put("policy", "queue").put("ttl_s", 86_400) }))
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        val event = JSONObject().put("event_id", "e").put("action", "trigger.fired")
+            .put("occurred_at_ms", 12_345L)
+            .put("args", JSONObject().put("id", "bat").put("type", "battery.level")
+                .put("data", battery(19)))
+        queue.admit(event, "queue", null, 86_400, triggerIdentity = "A")
+        TriggerFiringService(store, queue, 262_144).recover()
+        assertEquals(12_345L, store.registration("A", "bat")!!.throttleFloorMs) // floored
+        assertNull(store.registration("B", "bat")!!.throttleFloorMs)             // untouched
+    }
+
+    @Test
     fun recoverReconstructsOneShotAndEverySMarkers() {
         // A torn A/B commit: the trigger.fired event is durably queued but the
         // registration record (oneShotCompleted / lastFireFloorMs) was lost to a

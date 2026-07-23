@@ -160,7 +160,8 @@ class TriggerFiringService(
         when (policy) {
             "queue", "wake" -> when (val r = queue.admit(params, policy,
                     entry.optString("dedupe").takeIf { it.isNotEmpty() },
-                    entry.getLong("ttl_s"), pendingLocal = hasLocal)) {
+                    entry.getLong("ttl_s"), pendingLocal = hasLocal,
+                    triggerIdentity = reg.identity)) {
                 is AdmitResult.Admitted -> {
                     // SPEC 21.2: A (the event record) is committed. If B (throttle
                     // + records + on_fire) fails, roll A back so a failed durable
@@ -229,12 +230,15 @@ class TriggerFiringService(
     fun recover() {
         for ((seq, _) in queue.pendingLocalRecords()) queue.clearPendingLocal(seq)
         var changed = false
-        for (event in queue.events()) {
+        for ((recIdentity, event) in queue.firedRecords()) {
             if (event.optString("action") != "trigger.fired") continue
             val a = event.optJSONObject("args") ?: continue
             val id = a.optString("id")
             val occurred = event.optLong("occurred_at_ms", 0)
-            for (identity in store.identities()) {
+            // Scope to the firing pairing when the record carries it; fall back
+            // to every identity for a record admitted before identity-stamping.
+            val identities = recIdentity?.let { listOf(it) } ?: store.identities()
+            for (identity in identities) {
                 val reg = store.registration(identity, id) ?: continue
                 if (occurred > (reg.throttleFloorMs ?: Long.MIN_VALUE)) {
                     reg.throttleFloorMs = occurred; changed = true

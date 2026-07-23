@@ -41,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.companion.DeviceBridge
@@ -85,6 +86,11 @@ class RenderCtx(
         if (dialog != null) dialog.fields[id] = value // SPEC 18.1: local only
         else bridge.state(surface, id, value)
     }
+
+    /** §17.7 toolbar `command` -> edit.command with the live editor context. */
+    fun editorCommand(document: String, editorId: String, command: String,
+                      cursor: Int, selStart: Int, selEnd: Int) =
+        bridge.editorCommand(surface, document, editorId, command, cursor, selStart, selEnd)
 }
 
 /** Root entry for a surface (MainActivity). */
@@ -228,7 +234,11 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // platform disabled state; a disabled/read-only node MUST NOT dispatch.
     val readOnly = node.optBoolean("read_only", false)
     val enabled = node.optBoolean("enabled", true)
-    var text by rememberSaveable(ctx.path, id) { mutableStateOf(node.optString("value")) }
+    // A TextFieldValue (not a bare String) so the toolbar can read the live
+    // selection/caret for ${selection}, placements, line ops, and edit.command.
+    var value by rememberSaveable(ctx.path, id, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(node.optString("value")))
+    }
     // SPEC 18.4/17.4: a `syntax` language recolours the field in place via an
     // identity VisualTransformation (never changes the character count, so the
     // cursor/selection/IME behave exactly as on a plain field).
@@ -238,30 +248,67 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         if (language.isEmpty()) VisualTransformation.None
         else SyntaxTransformation(language, syntaxColors)
     }
-    OutlinedTextField(
-        value = text,
-        readOnly = readOnly,
-        enabled = enabled,
-        visualTransformation = transform,
-        onValueChange = { new ->
-            // A read-only editor's value is authoritative from the server:
-            // never mirror a local edit (SPEC 17.4).
-            if (!readOnly) {
-                // SPEC 19.3: mirror each local edit as a minimal splice — the
-                // changed span only — so deltas stay small and the shadow
-                // tracks the field scalar-for-scalar.
-                if (document.isNotEmpty()) {
-                    val (start, del, ins) = EditorSession.diff(text, new)
-                    if (del > 0 || ins.isNotEmpty())
-                        ctx.bridge.editorEdit(document, id, start, del, ins)
-                } else {
-                    ctx.state(id, new) // local editor: state.changed
-                }
-                text = new
+    // Commit a new field state: mirror any TEXT change (§19.3 splice for a
+    // synchronized editor, else state.changed); a selection-only change just
+    // updates the local value. A read-only editor is server-authoritative.
+    val commit: (TextFieldValue) -> Unit = commit@{ new ->
+        if (readOnly) return@commit
+        val old = value.text
+        if (new.text != old) {
+            if (document.isNotEmpty()) {
+                val (start, del, ins) = EditorSession.diff(old, new.text)
+                if (del > 0 || ins.isNotEmpty())
+                    ctx.bridge.editorEdit(document, id, start, del, ins)
+            } else {
+                ctx.state(id, new.text) // local editor: state.changed
             }
-        },
-        minLines = 3,
-        modifier = m)
+        }
+        value = new
+    }
+    Column(modifier = m) {
+        // SPEC 17.7: the toolbar rail above the field. `command` is valid only
+        // for a synchronized editor (document present) in READY — the wire side
+        // enforces the session/state gate; a local editor's command no-ops.
+        node.optJSONArray("toolbar")?.let { items ->
+            EditorToolbar(
+                items = items,
+                value = { value },
+                onValueChange = commit,
+                dispatch = { ctx.action(it) },
+                onCommand = { command ->
+                    if (document.isNotEmpty())
+                        ctx.editorCommand(document, id, command,
+                            value.selection.start, value.selection.start, value.selection.end)
+                },
+                localDate = ::localDateStamp,
+                localTime = ::localTimeStamp)
+        }
+        OutlinedTextField(
+            value = value,
+            readOnly = readOnly,
+            enabled = enabled,
+            visualTransformation = transform,
+            onValueChange = commit,
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth())
+    }
+}
+
+/** SPEC 17.7 `${date}`: local `YYYY-MM-DD Day`. */
+private fun localDateStamp(): String {
+    val cal = java.util.Calendar.getInstance()
+    val days = arrayOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+    return "%04d-%02d-%02d %s".format(
+        cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1,
+        cal.get(java.util.Calendar.DAY_OF_MONTH),
+        days[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1])
+}
+
+/** SPEC 17.7 `${time}`: local `HH:MM`. */
+private fun localTimeStamp(): String {
+    val cal = java.util.Calendar.getInstance()
+    return "%02d:%02d".format(
+        cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
 }
 
 // ------------------------------------------------------------ scaffold

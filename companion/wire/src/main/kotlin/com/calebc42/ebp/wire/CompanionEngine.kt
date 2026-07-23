@@ -1153,6 +1153,36 @@ class CompanionEngine(
         emit(notification("edit.caret", p))
     }
 
+    /**
+     * SPEC 17.7 `command`: a non-durable edit.command event.action. Valid only
+     * for a synchronized editor in READY (an OPEN session); connection loss or
+     * any transient error abandons it without replay, so it never touches the
+     * durable queue. args carry command + full editor context; Emacs allowlists
+     * edit.command and then the nested command, never evaluating either string.
+     */
+    @Synchronized
+    fun editorCommand(surface: String, document: String, editorId: String,
+                      command: String, cursor: Int, selStart: Int, selEnd: Int): Boolean {
+        val s = editors[document to editorId] ?: return false
+        if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return false
+        val revision = surfaces.revisionOf(surface) ?: return false
+        val params = JSONObject()
+            .put("event_id", EbpAuth.generateNonce())
+            .put("action", "edit.command")
+            .put("surface", surface)
+            .put("revision_seen", revision)
+            .put("occurred_at_ms", queue.effectiveNow())
+            .put("args", JSONObject()
+                .put("command", command).put("document", document)
+                .put("editor_id", editorId).put("session", s.sessionId)
+                .put("seq", s.seq).put("cursor", cursor)
+                .put("sel_start", selStart).put("sel_end", selEnd))
+        if (params.toString().toByteArray(Charsets.UTF_8).size >
+            config.limits.getLong("max_event_bytes")) return false
+        sendRequest("event.action", params) { _, _ -> }
+        return true
+    }
+
     /** SPEC 19: close a session (removal, identity/document change). */
     @Synchronized
     fun closeEditor(document: String, editorId: String) {

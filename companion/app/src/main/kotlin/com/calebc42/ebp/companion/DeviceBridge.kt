@@ -168,6 +168,14 @@ class DeviceBridge(
         dispatchExecutor.execute { engine?.localEditorEdit(document, editorId, start, del, text) }
     }
 
+    /** SPEC 17.7: a toolbar `command` -> non-durable edit.command event.action. */
+    fun editorCommand(surface: String, document: String, editorId: String,
+                      command: String, cursor: Int, selStart: Int, selEnd: Int) {
+        dispatchExecutor.execute {
+            engine?.editorCommand(surface, document, editorId, command, cursor, selStart, selEnd)
+        }
+    }
+
     /** SPEC 18.1: dialog.submit builtin -> complete the outstanding request. */
     fun dialogSubmit(dialogId: String, value: Any?, fields: JSONObject) {
         dispatchExecutor.execute { engine?.completeDialogSubmit(dialogId, value, fields) }

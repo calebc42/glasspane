@@ -148,6 +148,38 @@ class FiringServiceTest {
         .put("occurred_at_ms", occurred)
         .put("args", JSONObject().put("id", id).put("type", "time").put("data", JSONObject()))
 
+    private class ThrowOnReplace(
+        private val delegate: TriggerBacking = MemoryTriggerBacking(),
+        var throwNow: Boolean = false,
+    ) : TriggerBacking {
+        override fun load() = delegate.load()
+        override fun replace(state: TriggerState) {
+            if (throwNow) throw java.io.IOException("disk full")
+            delegate.replace(state)
+        }
+    }
+
+    @Test
+    fun transactionBFailureRollsBackTheQueuedEvent() {
+        // A committed (queue.admit), then B (persistRecords) fails: the event
+        // record MUST be rolled back so a failed durable transaction never claims
+        // remote admission, and no throttle is consumed (SPEC 21.2).
+        val backing = ThrowOnReplace()
+        val store = TriggerStore(backing)
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        val state = hashMapOf<String, JSONObject>("battery.level" to battery(50))
+        val service = TriggerFiringService(store, queue, 262_144)
+            .also { it.stateProvider = { t -> state[t] } }
+        service.replaceSet("id", entries(trig("bat") {
+            put("policy", "queue").put("ttl_s", 86_400)
+        }))
+        backing.throwNow = true                                 // next persist (B) fails
+        state["battery.level"] = battery(19)
+        service.observeSample("battery.level", battery(19))
+        assertEquals(0, queue.count())                          // A rolled back
+        assertNull(store.registration("id", "bat")!!.throttleFloorMs) // throttle restored
+    }
+
     @Test
     fun recoverReconstructsOneShotAndEverySMarkers() {
         // A torn A/B commit: the trigger.fired event is durably queued but the

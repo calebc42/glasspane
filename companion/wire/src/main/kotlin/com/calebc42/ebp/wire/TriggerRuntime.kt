@@ -251,6 +251,10 @@ class TriggerRuntime(
             // response: a one-shot time.at_ms is done for good, a repeating
             // time.every_s floors its last fire so missed intervals coalesce and
             // the cadence resumes, and a boot occurrence records its generation.
+            val priorThrottle = reg.throttleFloorMs
+            val priorOneShot = reg.oneShotCompleted
+            val priorLastFire = reg.lastFireFloorMs
+            val priorBoot = reg.bootGeneration
             reg.throttleFloorMs = now()
             val type = reg.entry.getString("type")
             val params = reg.entry.optJSONObject("params")
@@ -261,7 +265,18 @@ class TriggerRuntime(
                     reg.lastFireFloorMs = now()
                 type == "boot" -> reg.bootGeneration = bootGeneration()
             }
-            persistRecords()
+            // SPEC 21.2: if the record write (transaction B) fails, RESTORE the
+            // in-memory records and rethrow so `emit` rolls back the event
+            // (transaction A) — a failed transaction consumes nothing.
+            try {
+                persistRecords()
+            } catch (e: Exception) {
+                reg.throttleFloorMs = priorThrottle
+                reg.oneShotCompleted = priorOneShot
+                reg.lastFireFloorMs = priorLastFire
+                reg.bootGeneration = priorBoot
+                throw e
+            }
             // Step 4: on_fire in authored order, substituted, failure-isolated.
             val id = reg.entry.getString("id")
             val list = reg.entry.getJSONArray("on_fire")

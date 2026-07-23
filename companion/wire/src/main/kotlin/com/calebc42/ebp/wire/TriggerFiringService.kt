@@ -49,9 +49,12 @@ class TriggerFiringService(
     @Volatile var onTimeScheduleChanged: (() -> Unit)? = null
 
     // Newest-wins live session (SPEC 5.2); read after releasing the monitor.
-    @Volatile private var session: LiveSession? = null
-    fun attach(s: LiveSession) { session = s }
-    fun detach(s: LiveSession) { if (session === s) session = null }
+    // AtomicReference so attach/detach are atomic: a superseded connection's
+    // detach (compareAndSet on itself) can never null out a newer session that
+    // attached in between (the lost-update race of a plain volatile RMW).
+    private val session = java.util.concurrent.atomic.AtomicReference<LiveSession?>()
+    fun attach(s: LiveSession) { session.set(s) }
+    fun detach(s: LiveSession) { session.compareAndSet(s, null) }
 
     private val runtime = TriggerRuntime(
         store, { queue.effectiveNow() }, zone, { stateProvider(it) },
@@ -159,17 +162,28 @@ class TriggerFiringService(
                     entry.optString("dedupe").takeIf { it.isNotEmpty() },
                     entry.getLong("ttl_s"), pendingLocal = hasLocal)) {
                 is AdmitResult.Admitted -> {
-                    commit() // step 3 (throttle + persist) + step 4 (on_fire)
+                    // SPEC 21.2: A (the event record) is committed. If B (throttle
+                    // + records + on_fire) fails, roll A back so a failed durable
+                    // transaction never claims remote admission; commit() restores
+                    // its in-memory records before it rethrows.
+                    try {
+                        commit() // step 3 (throttle + persist) + step 4 (on_fire)
+                    } catch (_: Exception) {
+                        queue.deleteRecord(r.record.getLong("queue_seq"))
+                        return
+                    }
                     if (hasLocal) queue.clearPendingLocal(r.record.getLong("queue_seq"))
-                    pending.add { session?.onDurableAdmitted(policy) } // step 5, post-lock
+                    pending.add { session.get()?.onDurableAdmitted(policy) } // step 5, post-lock
                 }
                 else -> Unit // durable transaction failed: no throttle, no on_fire
             }
             // SPEC 21.2: a drop commits throttle + on_fire even with no session;
-            // only the remote event is READY-gated (deferred, post-lock).
+            // only the remote event is READY-gated (deferred, post-lock). A commit
+            // failure (nothing durable to roll back) is swallowed so one identity's
+            // storage error never aborts the fan-out over the others.
             else -> {
-                commit()
-                pending.add { session?.deliverLiveDrop(params, null) }
+                try { commit() } catch (_: Exception) { return }
+                pending.add { session.get()?.deliverLiveDrop(params, null) }
             }
         }
     }

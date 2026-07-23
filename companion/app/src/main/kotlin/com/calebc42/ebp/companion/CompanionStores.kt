@@ -30,10 +30,19 @@ object CompanionStores {
     @Volatile private var firingInstance: TriggerFiringService? = null
     @Volatile private var sourcesInstance: TriggerSources? = null
 
+    private val liveSessionRef = java.util.concurrent.atomic.AtomicReference<LiveSession?>()
+
     /** The current live engine, or null when disconnected. A cold receiver
      * (reminder tap/alarm) routes queue/wake events durably regardless and a
      * drop live only through this slot (SPEC 15.1). Newest-wins (SPEC 5.2). */
-    @Volatile var liveSession: LiveSession? = null
+    val liveSession: LiveSession? get() = liveSessionRef.get()
+
+    /** SPEC 5.2: a connection publishes itself as the live session. */
+    fun setLiveSession(s: LiveSession) { liveSessionRef.set(s) }
+
+    /** Clear only if still this exact session — a superseded connection's
+     * teardown must not null out the newer session (the lost-update race). */
+    fun clearLiveSession(s: LiveSession) { liveSessionRef.compareAndSet(s, null) }
 
     const val MAX_EVENT_BYTES = 262_144L
 

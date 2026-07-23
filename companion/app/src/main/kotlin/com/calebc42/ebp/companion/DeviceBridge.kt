@@ -191,7 +191,7 @@ class DeviceBridge(
         this.engine = engine
         // SPEC 5.2 newest-wins: cold receivers (reminder tap/alarm) reach the
         // current live session through this slot; a drop with no session is lost.
-        CompanionStores.liveSession = engine
+        CompanionStores.setLiveSession(engine)
         engine.surfaceListener = { surface ->
             when {
                 // SPEC 18.5: a notification:* surface is a system notification;
@@ -230,11 +230,9 @@ class DeviceBridge(
             // SPEC 15.3: the engine releases its in-flight marker so the
             // next session's replay is never wedged (review P0).
             engine.close("transport closed")
-            // Compare-and-clear: only if a newer connection has not already
-            // superseded this one in the slot (SPEC 5.2 newest-wins).
-            synchronized(CompanionStores) {
-                if (CompanionStores.liveSession === engine) CompanionStores.liveSession = null
-            }
+            // Atomic compare-and-clear: only if a newer connection has not
+            // already superseded this one in the slot (SPEC 5.2 newest-wins).
+            CompanionStores.clearLiveSession(engine)
             socket.runCatching { close() }
         }
     }

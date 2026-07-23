@@ -28,7 +28,8 @@ class CompanionEngine(
     private val config: CompanionConfig,
     /** Shared across connections: surface state outlives a session (13.5). */
     val surfaces: SurfaceStore = SurfaceStore(
-        config.limits.getLong("max_surfaces"), config.limits.getLong("max_surface_ids")),
+        config.limits.getLong("max_surfaces"), config.limits.getLong("max_surface_ids"),
+        config.limits.optLong("max_capture_fields", 64)),
     /** Shared across connections AND restarts: the SPEC 15 durable queue. */
     val queue: DurableQueue = DurableQueue(
         MemoryQueueStore(),
@@ -527,7 +528,8 @@ class CompanionEngine(
         if (dialogs.size >= config.limits.optLong("max_dialogs", 4))
             return respondError(id, 1401, "Too many dialogs", "overloaded")
         try {
-            SpecValidator.validateSurfaceSpec(spec)
+            SpecValidator.validateSurfaceSpec(
+                spec, maxCaptureFields = config.limits.optLong("max_capture_fields", 64))
         } catch (e: ContentInvalid) {
             return respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("path", e.path).put("reason", e.reason))

@@ -12,10 +12,13 @@ import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 
-/** SPEC 4.5 fixed limits. */
+/** SPEC 4.5 fixed limits (contract.json `limits.fixed`). */
 object WireLimits {
     const val MAX_HEADER_OCTETS = 8192
     const val MAX_BODY_OCTETS = 4_194_304
+    const val MAX_NODES_PER_SNAPSHOT = 10_000
+    const val MAX_CHILDREN_PER_NODE = 10_000
+    const val MAX_IDENTIFIER_OCTETS = 128
     const val MAX_REQUEST_ID_OCTETS = 64
 }
 

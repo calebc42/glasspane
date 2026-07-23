@@ -244,6 +244,136 @@ class SurfaceStoreTest {
         s.remove("app:a", 2)
         assertEquals(0, s.inputState().length())
     }
+
+    // ------------------------------------------ completeness pass (16-17)
+
+    /** A spec whose update MUST be refused with a recoverable 1201. */
+    private fun rejects(s: SurfaceStore, spec: JSONObject, fragment: String) {
+        try { s.update("app:x", 1, spec, null, null, null); fail("accepted: $fragment") }
+        catch (e: ContentInvalid) {
+            assertTrue("${e.reason} @ ${e.path} !~ $fragment",
+                e.reason.contains(fragment) || e.path.contains(fragment))
+        }
+    }
+
+    private fun button(action: JSONObject): JSONObject =
+        JSONObject().put("t", "button").put("label", "b").put("on_tap", action)
+
+    @Test
+    fun malformedNodeRejectsInsteadOfCrashing() {
+        // SPEC 16.1: a wrong-typed required member is a recoverable 1201,
+        // never a thrown getter that tears the session down (audit P1 #3).
+        val s = store()
+        rejects(s, JSONObject().put("t", "enum_list").put("id", "e")
+            .put("options", "not-an-array"), "options must be an array")
+        // SPEC 17.1: an on_* member must be an ActionDescriptor object.
+        rejects(s, JSONObject().put("t", "button").put("label", "b")
+            .put("on_tap", "nope"), "action descriptor must be an object")
+        // SPEC 16.1: a single-view root must itself be a node.
+        rejects(s, JSONObject().put("foo", 1), "surface root must be a node")
+        // SPEC 17.1: children are Nodes — a scalar or a t-less object rejects.
+        rejects(s, JSONObject().put("t", "column")
+            .put("children", JSONArray().put("scalar")), "child must be a node object")
+        rejects(s, JSONObject().put("t", "column")
+            .put("children", JSONArray().put(JSONObject().put("no", "t"))),
+            "child node missing discriminator t")
+        // SPEC 16.1: each view of a multi-view spec is a node.
+        rejects(s, JSONObject()
+            .put("views", JSONObject().put("v", JSONObject().put("no", "t")))
+            .put("initial_view", "v"), "each view must be a node")
+    }
+
+    @Test
+    fun resourceLimitsEnforced() {
+        val s = store()
+        // SPEC 4.5: at most 10,000 children of one node.
+        val manyChildren = JSONArray()
+        repeat(10_001) { manyChildren.put(JSONObject().put("t", "spacer")) }
+        rejects(s, JSONObject().put("t", "column").put("children", manyChildren),
+            "max_children_per_node")
+        // SPEC 4.5: at most 10,000 nodes in one snapshot — nested so that no
+        // single node trips the children limit first.
+        val outer = JSONArray()
+        repeat(101) {
+            val inner = JSONArray()
+            repeat(100) { inner.put(JSONObject().put("t", "spacer")) }
+            outer.put(JSONObject().put("t", "column").put("children", inner))
+        }
+        rejects(s, JSONObject().put("t", "column").put("children", outer),
+            "max_nodes_per_snapshot")
+    }
+
+    @Test
+    fun captureFieldsRules() {
+        val s = store()
+        // SPEC 14.1: each name resolves to exactly one stateful node.
+        rejects(s, button(JSONObject().put("action", "a.b")
+            .put("capture_fields", JSONArray().put("ghost"))),
+            "must name a stateful node in the document")
+        // A named non-stateful node (a `text` with an id) does not resolve.
+        rejects(s, JSONObject().put("t", "column").put("children", JSONArray()
+            .put(JSONObject().put("t", "text").put("id", "note").put("text", "x"))
+            .put(button(JSONObject().put("action", "a.b")
+                .put("capture_fields", JSONArray().put("note"))))),
+            "must name a stateful node in the document")
+        // Distinct IDs only.
+        rejects(s, button(JSONObject().put("action", "a.b")
+            .put("capture_fields", JSONArray().put("title").put("title"))),
+            "duplicate capture field")
+        // An array of IDs — not a bare value.
+        rejects(s, button(JSONObject().put("action", "a.b")
+            .put("capture_fields", "title")), "must be an array")
+        // SPEC 4.5: length must not exceed max_capture_fields (default 64).
+        val over = JSONArray().also { repeat(65) { i -> it.put("f$i") } }
+        rejects(s, button(JSONObject().put("action", "a.b")
+            .put("capture_fields", over)), "exceeds max_capture_fields")
+        // A resolving capture is accepted.
+        val ok = JSONObject().put("t", "column").put("children", JSONArray()
+            .put(JSONObject().put("t", "text_input").put("id", "title"))
+            .put(button(JSONObject().put("action", "save.it")
+                .put("capture_fields", JSONArray().put("title")))))
+        assertEquals("applied", s.update("app:ok", 1, ok, null, null, null).status)
+    }
+
+    @Test
+    fun ttlAndConfirmValidation() {
+        val s = store()
+        // SPEC 14.1: ttl_s is an integer 1..604800.
+        rejects(s, button(JSONObject().put("action", "a.b")
+            .put("when_offline", "queue").put("ttl_s", 0)), "1..604800")
+        rejects(s, button(JSONObject().put("action", "a.b")
+            .put("when_offline", "queue").put("ttl_s", 604801)), "1..604800")
+        rejects(s, button(JSONObject().put("action", "a.b")
+            .put("when_offline", "queue").put("ttl_s", "86400")), "1..604800")
+        rejects(s, button(JSONObject().put("action", "a.b")
+            .put("when_offline", "queue").put("ttl_s", 86400.5)), "1..604800")
+        // SPEC 14.1: confirm is a non-empty string.
+        rejects(s, button(JSONObject().put("action", "a.b").put("confirm", "")),
+            "non-empty string")
+        rejects(s, button(JSONObject().put("action", "a.b").put("confirm", 5)),
+            "non-empty string")
+        // Valid queue descriptor with confirm is accepted.
+        assertEquals("applied", s.update("app:ok", 1,
+            button(JSONObject().put("action", "a.b").put("when_offline", "queue")
+                .put("ttl_s", 86400).put("confirm", "Sure?")),
+            null, null, null).status)
+    }
+
+    @Test
+    fun injectedMemberConflictRejects() {
+        // SPEC 14.3: a remote descriptor on a value-producing hook must not
+        // author the injected member; on hooks that inject nothing it may.
+        val s = store()
+        rejects(s, JSONObject().put("t", "text_input").put("id", "t")
+            .put("on_change", JSONObject().put("action", "x.y")
+                .put("args", JSONObject().put("value", "preset"))),
+            "conflicts with the value injected by on_change")
+        // on_tap injects nothing — an authored args.value is fine.
+        assertEquals("applied", s.update("app:ok", 1,
+            button(JSONObject().put("action", "x.y")
+                .put("args", JSONObject().put("value", 1))),
+            null, null, null).status)
+    }
 }
 
 class VocabularyDriftTest {

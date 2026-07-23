@@ -12,7 +12,11 @@ private val SURFACE_ID = Regex("(app|notification|widget):[A-Za-z0-9][A-Za-z0-9.
 
 data class SurfaceResult(val status: String, val revision: Long, val present: Boolean)
 
-class SurfaceStore(private val maxSurfaces: Long, private val maxSurfaceIds: Long) {
+class SurfaceStore(
+    private val maxSurfaces: Long,
+    private val maxSurfaceIds: Long,
+    private val maxCaptureFields: Long = 64,
+) {
 
     private class Record(
         var revision: Long,
@@ -59,7 +63,8 @@ class SurfaceStore(private val maxSurfaces: Long, private val maxSurfaceIds: Lon
                staleSpec: JSONObject?, currentView: String?,
                resetIds: JSONArray?): SurfaceResult {
         // SPEC 13.2: validate the entire request before changing state.
-        val statefuls = SpecValidator.validateSurfaceSpec(spec)
+        val statefuls = SpecValidator.validateSurfaceSpec(
+            spec, maxCaptureFields = maxCaptureFields)
         val reset = resetIds?.let { SpecValidator.validateResetIds(it, statefuls) }
             ?: emptySet()
         staleSpec?.let { SpecValidator.validateStaleSpec(it, spec.has("views")) }

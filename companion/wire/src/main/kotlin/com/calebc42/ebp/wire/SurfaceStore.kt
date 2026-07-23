@@ -134,12 +134,14 @@ class SurfaceStore(
                 spec.getJSONObject("views").has(next.currentView!!) -> next.currentView
             else -> spec.getString("initial_view")
         }
+        // SPEC 13.6: the pre-update node types decide draft compatibility.
+        val oldStatefuls = next.statefuls
         next.revision = revision
         next.present = true
         next.spec = spec
         next.statefuls = statefuls
         records[surface] = next
-        reconcileDrafts(surface, statefuls, reset)
+        reconcileDrafts(surface, oldStatefuls, statefuls, reset)
         persist()
         return SurfaceResult("applied", revision, true)
     }
@@ -206,14 +208,19 @@ class SurfaceStore(
 
     fun hasDraft(surface: String, id: String): Boolean = (surface to id) in drafts
 
-    private fun reconcileDrafts(surface: String, statefuls: Map<String, JSONObject>,
-                                reset: Set<String>) {
+    private fun reconcileDrafts(surface: String, oldStatefuls: Map<String, JSONObject>,
+                                newStatefuls: Map<String, JSONObject>, reset: Set<String>) {
         val stale = drafts.keys.filter { (s, id) ->
             s == surface && run {
-                val node = statefuls[id]
+                val node = newStatefuls[id]
                 val value = drafts[s to id]
+                val oldNode = oldStatefuls[id]
                 node == null ||                      // ID disappeared
                     id in reset ||                   // explicitly replaced
+                    // SPEC 13.6/16.1: reusing an ID for a different node type
+                    // is a new identity — erase even when the value schema is
+                    // still compatible (checkbox<->switch, text_input->editor).
+                    (oldNode != null && oldNode.getString("t") != node.getString("t")) ||
                     !compatible(node, value) ||      // schema incompatible
                     jsonValueEquals(authoredValue(node), value) // acknowledged
             }

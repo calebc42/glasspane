@@ -360,6 +360,33 @@ class SurfaceStoreTest {
     }
 
     @Test
+    fun nodeTypeChangeErasesCompatibleDraft() {
+        val s = store()
+        // checkbox -> switch: identical boolean value schema, different type.
+        update(s, "app:t", 1, JSONObject().put("t", "checkbox").put("id", "flag")
+            .put("checked", false))
+        s.putDraft("app:t", "flag", true)
+        assertTrue(s.hasDraft("app:t", "flag"))
+        update(s, "app:t", 2, JSONObject().put("t", "switch").put("id", "flag")
+            .put("checked", false))
+        assertFalse(s.hasDraft("app:t", "flag")) // SPEC 13.6/16.1: new identity
+        // text_input -> local editor: both hold a string, still a type change.
+        update(s, "app:e", 1, JSONObject().put("t", "text_input").put("id", "note")
+            .put("value", "x"))
+        s.putDraft("app:e", "note", "typed")
+        update(s, "app:e", 2, JSONObject().put("t", "editor").put("id", "note")
+            .put("publish_state", true).put("value", "x"))
+        assertFalse(s.hasDraft("app:e", "note"))
+        // Control: a same-type refresh keeps a compatible unacknowledged draft.
+        update(s, "app:c", 1, JSONObject().put("t", "switch").put("id", "flag")
+            .put("checked", false))
+        s.putDraft("app:c", "flag", true)
+        update(s, "app:c", 2, JSONObject().put("t", "switch").put("id", "flag")
+            .put("checked", false))
+        assertTrue(s.hasDraft("app:c", "flag"))
+    }
+
+    @Test
     fun durableStoreSurvivesProcessDeath() {
         // SPEC 13.1/15.1: surface histories, tombstones, and the input_state
         // draft outlive process death — a fresh store on the same file.

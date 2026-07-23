@@ -57,6 +57,7 @@ internal fun EditorToolbar(
     onCommand: (String) -> Unit,
     localDate: () -> String,
     localTime: () -> String,
+    enabled: Boolean = true,
 ) {
     // The op whose snippet carries ${input:...} parks here while its dialog shows.
     var pendingInput by remember { mutableStateOf<JSONObject?>(null) }
@@ -69,7 +70,9 @@ internal fun EditorToolbar(
         onValueChange(TextFieldValue(r.text, TextRange(r.selStart, r.selEnd)))
     }
 
-    val runOp: (JSONObject) -> Unit = { op ->
+    val runOp: (JSONObject) -> Unit = runOp@{ op ->
+        // SPEC 17.4: a disabled/read-only editor's toolbar dispatches nothing.
+        if (!enabled) return@runOp
         val tap = op.optJSONObject("on_tap")
         val line = op.optString("line")
         when {

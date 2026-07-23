@@ -332,7 +332,9 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // synchronized editor, else state.changed); a selection-only change just
     // updates the local value. A read-only editor is server-authoritative.
     val commit: (TextFieldValue) -> Unit = commit@{ new ->
-        if (readOnly) return@commit
+        // SPEC 17.4: a read-only OR disabled editor MUST NOT dispatch — the
+        // toolbar is otherwise an unblocked side channel around the field.
+        if (readOnly || !enabled) return@commit
         val old = value.text
         if (new.text != old) {
             if (document.isNotEmpty()) {
@@ -352,6 +354,7 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         node.optJSONArray("toolbar")?.let { items ->
             EditorToolbar(
                 items = items,
+                enabled = enabled && !readOnly, // §17.4: disabled/read-only inert
                 value = { value },
                 onValueChange = commit,
                 dispatch = { ctx.action(it) },

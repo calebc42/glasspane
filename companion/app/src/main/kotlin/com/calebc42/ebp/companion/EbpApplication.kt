@@ -18,5 +18,9 @@ class EbpApplication : Application() {
         // change that happened while dead does not fire (SPEC 21.5).
         CompanionStores.triggerSources(this).start()
         firing.armAllBaselines()
+        // SPEC 18.6/21.5: a cold start (after force-stop or reboot) lost the
+        // platform alarms — re-arm reminders + time triggers from durable state.
+        Notifications.rearmAllReminders(this)
+        TriggerAlarms.reschedule(this)
     }
 }

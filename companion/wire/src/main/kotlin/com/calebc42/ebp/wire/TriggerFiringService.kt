@@ -25,6 +25,10 @@ fun jsonStringSet(o: JSONObject, key: String): Set<String> {
     return (0 until arr.length()).mapNotNull { arr.opt(it) as? String }.toSet()
 }
 
+/** SPEC 21.5: one host-armable time alarm — fire `triggerId` for `identity`
+ * when the device wall clock reaches `dueMs`. */
+data class TimeAlarm(val identity: String, val triggerId: String, val dueMs: Long)
+
 class TriggerFiringService(
     val store: TriggerStore,
     private val queue: DurableQueue,
@@ -32,11 +36,17 @@ class TriggerFiringService(
     private val triggerCaps: Set<String> = emptySet(),
     private val capabilityHandler: CapabilityHandler? = null,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    /** SPEC 21.5: current device boot generation (Settings.Global.BOOT_COUNT). */
+    private val bootGeneration: () -> String? = { null },
 ) {
     /** SPEC 21.3/21.7: current sample for a state type (gate/edge/window). */
     var stateProvider: (String) -> JSONObject? = { null }
     /** SPEC 21.4: post a substituted local notification from an on_fire entry. */
     var notifyListener: ((JSONObject) -> Unit)? = null
+    /** SPEC 21.5: the time schedule changed (a set replaced time.* triggers) —
+     * the Android host re-queries timeSchedule() and arms alarms. Invoked after
+     * the service monitor is released; a no-op off-device. */
+    var onTimeScheduleChanged: (() -> Unit)? = null
 
     // Newest-wins live session (SPEC 5.2); read after releasing the monitor.
     @Volatile private var session: LiveSession? = null
@@ -45,7 +55,8 @@ class TriggerFiringService(
 
     private val runtime = TriggerRuntime(
         store, { queue.effectiveNow() }, zone, { stateProvider(it) },
-        emit = ::admit, onFire = ::executeOnFire, persistRecords = store::persistRecords)
+        emit = ::admit, onFire = ::executeOnFire, persistRecords = store::persistRecords,
+        bootGeneration = { bootGeneration() })
 
     // Live-session calls collected under the monitor, run after it is released.
     private val pending = ArrayList<() -> Unit>()
@@ -77,6 +88,33 @@ class TriggerFiringService(
     fun fireManual(identity: String, triggerId: String, source: String) =
         runLocked { runtime.fireManual(identity, triggerId, JSONObject().put("source", source)) }
 
+    /** SPEC 21.5 (time): a host alarm for exactly this time.* registration
+     * elapsed — fire only it (each time entry has its own due time). */
+    fun fireScheduled(identity: String, triggerId: String) =
+        runLocked { runtime.fireScheduled(identity, triggerId, JSONObject()) }
+
+    /** SPEC 21.5: every time.* registration that still needs a host alarm, with
+     * its next due wall-clock ms. A completed one-shot time.at_ms is omitted; a
+     * repeating time.every_s reports its next occurrence (possibly already past,
+     * i.e. immediately due — the host arms it now and fireScheduled coalesces).
+     * The Android host arms one alarm per entry and re-queries after each fire
+     * and on boot/time-change. */
+    @Synchronized
+    fun timeSchedule(): List<TimeAlarm> {
+        val out = ArrayList<TimeAlarm>()
+        for (identity in store.identities()) for (reg in store.registrations(identity)) {
+            if (reg.entry.getString("type") != "time") continue
+            val params = reg.entry.optJSONObject("params") ?: continue
+            val due = when {
+                params.has("at_ms") -> if (reg.oneShotCompleted) null else params.getLong("at_ms")
+                params.has("every_s") -> TriggerRuntime.nextRepeatDueMs(reg)
+                else -> null
+            }
+            if (due != null) out.add(TimeAlarm(identity, reg.entry.getString("id"), due))
+        }
+        return out
+    }
+
     /** SPEC 21.5: silently baseline this identity's new/changed registrations. */
     @Synchronized
     fun armBaselines(identity: String) = runtime.armBaselines(identity)
@@ -87,11 +125,13 @@ class TriggerFiringService(
     fun armAllBaselines() { store.identities().forEach { runtime.armBaselines(it) } }
 
     /** SPEC 21.1: replace an identity's set (durable) then re-baseline the
-     * new/changed registrations. Throws on storage failure. */
-    @Synchronized
+     * new/changed registrations. Throws on storage failure. The host time-alarm
+     * re-arm runs after the monitor is released (it re-enters timeSchedule). */
     fun replaceSet(identity: String, entries: List<JSONObject>): Int {
-        val count = store.replace(identity, entries)
-        runtime.armBaselines(identity)
+        val count = synchronized(this) {
+            store.replace(identity, entries).also { runtime.armBaselines(identity) }
+        }
+        onTimeScheduleChanged?.invoke()
         return count
     }
 

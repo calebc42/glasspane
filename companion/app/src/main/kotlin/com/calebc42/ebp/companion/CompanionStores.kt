@@ -7,6 +7,7 @@
 package com.calebc42.ebp.companion
 
 import android.content.Context
+import android.provider.Settings
 import com.calebc42.ebp.wire.DurableQueue
 import com.calebc42.ebp.wire.FileQueueStore
 import com.calebc42.ebp.wire.FileReminderBacking
@@ -79,13 +80,24 @@ object CompanionStores {
                 triggers(app), queue(app), MAX_EVENT_BYTES,
                 triggerCaps = jsonStringSet(AppCapabilities.deviceReport(), "trigger_caps"),
                 capabilityHandler = AppCapabilities.handler(app, 65_536),
+                bootGeneration = { bootGeneration(app) },
             ).also { svc ->
                 svc.stateProvider = { type -> triggerSources(app).currentState(type) }
                 svc.notifyListener = { notify -> Notifications.postTrigger(app, notify) }
+                // SPEC 21.5: a triggers.set that changed time.* entries re-arms
+                // the platform alarms for the new schedule.
+                svc.onTimeScheduleChanged = { TriggerAlarms.reschedule(app) }
                 firingInstance = svc
             }
         }
     }
+
+    /** SPEC 21.5: the current device boot generation. Settings.Global.BOOT_COUNT
+     * increments once per boot; a `boot` trigger fires at most once per value.
+     * Null (unavailable) leaves boot ungated — the receiver is the sole guard. */
+    private fun bootGeneration(ctx: Context): String? = runCatching {
+        Settings.Global.getString(ctx.contentResolver, Settings.Global.BOOT_COUNT)
+    }.getOrNull()
 
     /** SPEC 21: platform trigger sources, feeding the firing service (which the
      * lambda resolves lazily, breaking the source<->service cycle). */

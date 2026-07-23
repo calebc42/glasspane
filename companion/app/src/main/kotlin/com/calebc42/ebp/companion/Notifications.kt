@@ -80,6 +80,17 @@ object Notifications {
         }
     }
 
+    /** SPEC 18.6: re-arm every owner's unfired reminders from the durable store.
+     * AlarmManager loses alarms across a reboot or a force-stop, so a cold start
+     * (and a wall-clock change) must re-establish them. Arm-only (prior empty):
+     * nothing is cancelled, and already-fired tuples stay skipped, so this never
+     * re-presents a past reminder. */
+    fun rearmAllReminders(ctx: Context) {
+        val store = CompanionStores.reminders(ctx)
+        for (owner in store.owners())
+            scheduleReminders(ctx, owner, JSONArray(store.reminders(owner)), JSONArray())
+    }
+
     /** SPEC 18.6: present a reminder with a tap route into the Section 14
      * pipeline via ReminderTapReceiver (works whether or not a session is up). */
     fun postReminder(ctx: Context, owner: String, rid: String, title: String, body: String?) {

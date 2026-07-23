@@ -961,6 +961,21 @@ class CompanionEngine(
         if (entries.size > config.limits.optLong("max_triggers", 64))
             return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
                 JSONObject().put("reason", "trigger-limit"))
+        // SPEC 21.5: a newly added or changed one-shot time.at_ms MUST be later
+        // than the wall clock at acceptance. An unchanged entry (same id,
+        // canonically equal to the prior) stays valid past its time, even once
+        // completed. Reject the whole set — never apply it partially.
+        val nowMs = queue.effectiveNow()
+        for (e in entries) {
+            val p = e.optJSONObject("params") ?: continue
+            if (e.getString("type") != "time" || !p.has("at_ms")) continue
+            val prior = firing.store.registration(identity, e.getString("id"))?.entry
+            val changed = prior == null || !TriggerStore.canonicalEquals(prior, e)
+            if (changed && p.getLong("at_ms") <= nowMs)
+                return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
+                    JSONObject().put("path", "triggers[${e.getString("id")}].params.at_ms")
+                        .put("reason", "at_ms-not-future"))
+        }
         // SPEC 21.1: the accepted set commits durably (via the firing service)
         // before it is claimed, then the new/changed registrations are silently
         // baselined; a storage failure leaves the prior set in force.

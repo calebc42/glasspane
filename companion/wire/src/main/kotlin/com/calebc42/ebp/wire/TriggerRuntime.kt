@@ -40,6 +40,10 @@ class TriggerRuntime(
     /** SPEC 21.2 step 3: durably commit the throttle floor / one-shot / boot
      * records BEFORE on_fire runs. A no-op with the default in-memory store. */
     private val persistRecords: () -> Unit = {},
+    /** SPEC 21.5: the current device boot generation (Settings.Global.BOOT_COUNT
+     * on Android), or null if unknown. A `boot` registration is admitted at most
+     * once per generation; the JVM default leaves boot triggers ungated. */
+    private val bootGeneration: () -> String? = { null },
 ) {
 
     private val WEEK = listOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
@@ -83,6 +87,20 @@ class TriggerRuntime(
                     } else if (!reg.baselines.containsKey("value")) stateProvider(type)?.let {
                         reg.baselines["value"] = it.opt(field) }
                 }
+                // SPEC 21.5: a repeating time.every_s registration anchors its
+                // cadence at the acceptance that first introduced it. A fresh
+                // Registration has no anchor; a carried-forward one keeps the
+                // anchor it was accepted with, so arming never resets the phase.
+                type == "time" && reg.entry.getJSONObject("params").has("every_s") ->
+                    if (reg.scheduleAnchorMs == null) reg.scheduleAnchorMs = now()
+                // SPEC 21.5: installing a new/changed boot registration silently
+                // records the CURRENT generation and arms for the NEXT boot — it
+                // must not fire for the boot it was installed during. A carried-
+                // forward or persisted receipt keeps its generation, so a process
+                // restart in the same boot creates no occurrence. Recorded only
+                // when the platform generation is known; null stays ungated.
+                type == "boot" ->
+                    if (reg.bootGeneration == null) reg.bootGeneration = bootGeneration()
             }
         }
     }
@@ -128,6 +146,17 @@ class TriggerRuntime(
     fun fireManual(identity: String, triggerId: String, data: JSONObject) {
         val reg = store.registration(identity, triggerId) ?: return
         if (reg.entry.getString("type") == "manual") tryAdmit(reg, data)
+    }
+
+    /**
+     * SPEC 21.5 (time): admit exactly the named time.* registration whose host
+     * alarm just elapsed — NOT every time trigger, because each has its own due
+     * time (unlike a fan-out `boot`). The one-shot/gate/throttle eligibility in
+     * tryAdmit still applies. Unknown or non-time ids are a no-op.
+     */
+    fun fireScheduled(identity: String, triggerId: String, data: JSONObject) {
+        val reg = store.registration(identity, triggerId) ?: return
+        if (reg.entry.getString("type") == "time") tryAdmit(reg, data)
     }
 
     // -------------------------------------------------------- crossing logic
@@ -191,6 +220,15 @@ class TriggerRuntime(
             val floor = reg.throttleFloorMs
             if (floor != null && now() - floor < throttle * 1000) return
         }
+        // SPEC 21.5 eligibility (a skip consumes nothing): a completed one-shot
+        // time.at_ms never fires again, and a boot registration fires at most
+        // once per known device boot generation. An unknown generation (null)
+        // leaves boot ungated — the receiver already feeds it once per boot.
+        if (reg.oneShotCompleted) return
+        if (reg.entry.getString("type") == "boot") {
+            val gen = bootGeneration()
+            if (gen != null && gen == reg.bootGeneration) return
+        }
         // SPEC 21.2 steps 2-5, ordered by emit: the durable commit happens
         // FIRST; only if it succeeds does emit invoke this `commit` closure,
         // which consumes the throttle floor (step 3) and runs on_fire in
@@ -199,16 +237,24 @@ class TriggerRuntime(
         // (QueueFull/StorageFailed) never calls commit — so no throttle is
         // consumed and no local response runs (SPEC 21.2).
         emit(reg, data) {
-            // Step 3: consume the throttle floor and mark a one-shot complete,
-            // then durably persist those records BEFORE any local response.
+            // Step 3: consume the throttle floor and advance the time/boot
+            // records (SPEC 21.5), then durably persist them BEFORE any local
+            // response: a one-shot time.at_ms is done for good, a repeating
+            // time.every_s floors its last fire so missed intervals coalesce and
+            // the cadence resumes, and a boot occurrence records its generation.
             reg.throttleFloorMs = now()
-            if (reg.entry.getString("type") == "time" &&
-                reg.entry.getJSONObject("params").has("at_ms"))
-                reg.oneShotCompleted = true
+            val type = reg.entry.getString("type")
+            val params = reg.entry.optJSONObject("params")
+            when {
+                type == "time" && params != null && params.has("at_ms") ->
+                    reg.oneShotCompleted = true
+                type == "time" && params != null && params.has("every_s") ->
+                    reg.lastFireFloorMs = now()
+                type == "boot" -> reg.bootGeneration = bootGeneration()
+            }
             persistRecords()
             // Step 4: on_fire in authored order, substituted, failure-isolated.
             val id = reg.entry.getString("id")
-            val type = reg.entry.getString("type")
             val list = reg.entry.getJSONArray("on_fire")
             for (j in 0 until list.length()) {
                 try {
@@ -282,5 +328,29 @@ class TriggerRuntime(
         val day = if (wraps && before != null && nowT < before)
             zdt.minusDays(1).dayOfWeek else zdt.dayOfWeek
         return DAY_KEY.getValue(day) in days
+    }
+
+    companion object {
+        /**
+         * SPEC 21.5: the next scheduled occurrence of a repeating time.every_s
+         * registration — the first `anchor + k·interval` boundary (k ≥ 1)
+         * strictly after its last-fire floor, or the acceptance anchor itself if
+         * it has never fired. A returned value in the past means the interval(s)
+         * elapsed while the Companion was dead: the host arms the alarm for it,
+         * it fires once, and the commit floors the last fire past `now` — so the
+         * NEXT call resumes the cadence with no catch-up burst (missed intervals
+         * coalesce into that single occurrence). Null for a non-repeating or
+         * not-yet-anchored entry (nothing to schedule).
+         */
+        fun nextRepeatDueMs(reg: TriggerStore.Registration): Long? {
+            val params = reg.entry.optJSONObject("params") ?: return null
+            if (!params.has("every_s")) return null
+            val interval = params.getLong("every_s") * 1000
+            if (interval <= 0) return null
+            val anchor = reg.scheduleAnchorMs ?: return null
+            val elapsed = (reg.lastFireFloorMs ?: anchor) - anchor
+            val k = (if (elapsed < 0) 0L else elapsed / interval) + 1
+            return anchor + k * interval
+        }
     }
 }

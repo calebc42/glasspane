@@ -28,5 +28,18 @@
         <receiver android:name=".ReminderAlarmReceiver" android:exported="false" />
         <!-- SPEC 18.6: a reminder tap routes into the Section 14 pipeline. -->
         <receiver android:name=".ReminderTapReceiver" android:exported="false" />
+
+        <!-- SPEC 21.5: an armed time.* trigger fires here (our PendingIntent only). -->
+        <receiver android:name=".TimeAlarmReceiver" android:exported="false" />
+        <!-- SPEC 21.5: re-arm reminders/time triggers and fire boot/timezone
+             triggers across reboot and wall-clock changes. Protected system
+             broadcasts only, so exported is safe. -->
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

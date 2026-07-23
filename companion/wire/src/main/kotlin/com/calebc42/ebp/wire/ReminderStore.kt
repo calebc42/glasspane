@@ -38,6 +38,10 @@ class ReminderStore(private val backing: ReminderBacking = MemoryReminderBacking
 
     @Synchronized fun ownerCount(owner: String): Int = owners[owner]?.size ?: 0
 
+    /** SPEC 18.6: every owner with a live set — the host re-arms each owner's
+     * alarms from the durable store after a reboot/force-stop cold start. */
+    @Synchronized fun owners(): List<String> = owners.keys.toList()
+
     @Synchronized fun reminders(owner: String): List<JSONObject> =
         owners[owner]?.values?.toList() ?: emptyList()
 

@@ -114,6 +114,10 @@ class CompanionEngine(
             pieMenus.clear()
             ids.forEach { pieMenuListener?.invoke(it, null) }
         }
+        // SPEC 19: transport loss closes all editor sessions locally; the
+        // session IDs are dead and new sessions are created after reconnect.
+        editors.values.forEach { it.state = EditorSession.State.CLOSED }
+        editors.clear()
     }
 
     /** The queue_seq this engine's connection put in flight, if any. */
@@ -318,6 +322,8 @@ class CompanionEngine(
             "queue.replay" -> handleQueueReplay(id)
             "dialog.show" -> handleDialogShow(id, params)
             "reminders.set" -> handleRemindersSet(id, params)
+            "edit.apply" -> handleEditApply(id, params)
+            "edit.resync" -> handleEditResync(id, params)
             "session.ready" -> {
                 // SPEC 10.3: the {} response serializes ahead of every
                 // READY-only frame; emitting before transitioning does that.
@@ -541,6 +547,8 @@ class CompanionEngine(
             "theme.set" -> handleThemeSet(params)
             "pie_menu.show" -> handlePieMenuShow(params)
             "pie_menu.dismiss" -> handlePieMenuDismiss(params)
+            "diagnostics.show", "eldoc.show", "fontify.show" ->
+                handleAnnotation(method, params)
         }
     }
 
@@ -778,6 +786,164 @@ class CompanionEngine(
         val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
             .put("owner", owner).put("reminder_id", reminderId)
         dispatchDescriptorContextless(onTap, args, callback)
+    }
+
+    // ------------------------------------------------- editor sync (SPEC 19)
+
+    // Keyed by (document, editor_id); the Companion is the shadow's owner.
+    private val editors = LinkedHashMap<Pair<String, String>, EditorSession>()
+
+    /** Re-render hook: the session's shadow changed from an inbound apply or
+     * a resync (the host editor must reflect it). */
+    var editorListener: ((EditorSession) -> Unit)? = null
+    /** Annotation hook: (kind, editorId, payload) after a session/seq match. */
+    var annotationListener: ((String, String, JSONObject) -> Unit)? = null
+
+    private fun findEditor(session: String): EditorSession? =
+        editors.values.firstOrNull { it.sessionId == session &&
+            it.state != EditorSession.State.CLOSED }
+
+    /** SPEC 19: create a fresh session and seed it, sending edit.open. Called
+     * by the host when a synchronized editor node first becomes present in
+     * READY (the surface-node lifecycle wiring is a later atom). */
+    @Synchronized
+    fun openEditor(document: String, editorId: String, seed: String,
+                   cursor: Int = 0): EditorSession {
+        val s = EditorSession(document, editorId, EbpAuth.generateNonce())
+        s.shadow = seed
+        s.setCaret(cursor.coerceIn(0, s.scalarLength()), null, null)
+        editors[document to editorId] = s
+        emit(notification("edit.open", JSONObject()
+            .put("document", document).put("editor_id", editorId)
+            .put("session", s.sessionId).put("seq", 0).put("text", seed)
+            .put("cursor", s.cursor).put("sel_start", s.selStart)
+            .put("sel_end", s.selEnd)))
+        return s
+    }
+
+    /** SPEC 19.3: a local edit applies to the shadow immediately, advances
+     * seq, and mirrors as an edit.delta. Read-only unless OPEN and READY. */
+    @Synchronized
+    fun localEditorEdit(document: String, editorId: String,
+                        start: Int, del: Int, text: String): Boolean {
+        val s = editors[document to editorId] ?: return false
+        if (s.state != EditorSession.State.OPEN || state != SessionState.READY)
+            return false
+        val len = s.scalarLength() - del + text.codePointCount(0, text.length)
+        if (!s.splice(start, del, text, len)) return false
+        s.seq += 1
+        emit(notification("edit.delta", JSONObject()
+            .put("document", document).put("editor_id", editorId)
+            .put("session", s.sessionId).put("seq", s.seq)
+            .put("start", start).put("del", del).put("text", text).put("len", len)))
+        return true
+    }
+
+    /** SPEC 19.3: best-effort caret context; throttled at the source. */
+    @Synchronized
+    fun localEditorCaret(document: String, editorId: String, cursor: Int,
+                         selStart: Int? = null, selEnd: Int? = null) {
+        val s = editors[document to editorId] ?: return
+        if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return
+        if (!s.setCaret(cursor, selStart, selEnd)) return
+        val p = JSONObject().put("document", document).put("editor_id", editorId)
+            .put("session", s.sessionId).put("seq", s.seq).put("cursor", s.cursor)
+        if (selStart != null) p.put("sel_start", s.selStart).put("sel_end", s.selEnd)
+        emit(notification("edit.caret", p))
+    }
+
+    /** SPEC 19: close a session (removal, identity/document change). */
+    @Synchronized
+    fun closeEditor(document: String, editorId: String) {
+        val s = editors.remove(document to editorId) ?: return
+        if (s.state == EditorSession.State.CLOSED) return
+        s.state = EditorSession.State.CLOSED
+        if (state == SessionState.READY)
+            emit(notification("edit.close", JSONObject()
+                .put("document", document).put("editor_id", editorId)
+                .put("session", s.sessionId)))
+    }
+
+    private fun editorStale(id: Any) = respondError(id, 1201, "Invalid content",
+        "content-invalid", JSONObject().put("reason", "editor-stale"))
+
+    private fun handleEditApply(id: Any, params: JSONObject) {
+        if ("editor.sync" !in granted)
+            return respondError(id, -32601, "Method not found", "method-not-found")
+        val doc = params.opt("document") as? String
+        val eid = params.opt("editor_id") as? String
+        val session = params.opt("session") as? String
+        if (doc == null || eid == null || session == null)
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        val s = editors[doc to eid]
+        // SPEC 19.2: an unknown or CLOSED tuple, or a stale session id, is
+        // editor-stale (a later request, not a silently-ignored notification).
+        if (s == null || s.state == EditorSession.State.CLOSED || s.sessionId != session)
+            return editorStale(id)
+        // SPEC 19.4: the move-only form omits the splice and keeps seq.
+        if (!params.has("start")) {
+            val cursor = (params.opt("cursor") as? Number)?.toInt()
+                ?: return respondError(id, -32602, "Invalid params", "invalid-params")
+            val selStart = (params.opt("sel_start") as? Number)?.toInt()
+            val selEnd = (params.opt("sel_end") as? Number)?.toInt()
+            if (!s.setCaret(cursor, selStart, selEnd))
+                return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+            editorListener?.invoke(s)
+            return respondResult(id, JSONObject().put("status", "applied").put("seq", s.seq))
+        }
+        val seq = (params.opt("seq") as? Number)?.toLong()
+        val start = (params.opt("start") as? Number)?.toInt()
+        val del = (params.opt("del") as? Number)?.toInt()
+        val text = params.opt("text") as? String
+        val len = (params.opt("len") as? Number)?.toInt()
+        if (seq == null || start == null || del == null || text == null || len == null)
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        // SPEC 19.4: apply only at seq+1 with a valid splice; otherwise a
+        // typed stale result leaves this (winning) session OPEN.
+        if (seq != s.seq + 1 || !s.splice(start, del, text, len))
+            return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+        s.seq = seq
+        (params.opt("cursor") as? Number)?.toInt()?.let {
+            s.setCaret(it, (params.opt("sel_start") as? Number)?.toInt(),
+                (params.opt("sel_end") as? Number)?.toInt())
+        }
+        editorListener?.invoke(s)
+        respondResult(id, JSONObject().put("status", "applied").put("seq", s.seq))
+    }
+
+    private fun handleEditResync(id: Any, params: JSONObject) {
+        if ("editor.sync" !in granted)
+            return respondError(id, -32601, "Method not found", "method-not-found")
+        val doc = params.opt("document") as? String
+        val eid = params.opt("editor_id") as? String
+        val session = params.opt("session") as? String
+        if (doc == null || eid == null || session == null)
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        val s = editors[doc to eid]
+        if (s == null || s.state == EditorSession.State.CLOSED || s.sessionId != session)
+            return editorStale(id)
+        // SPEC 19.4: close the prior session, mint a fresh id at seq 0,
+        // return the complete current state; old-session messages are dead.
+        s.sessionId = EbpAuth.generateNonce()
+        s.seq = 0
+        s.state = EditorSession.State.OPEN
+        respondResult(id, JSONObject()
+            .put("document", doc).put("editor_id", eid)
+            .put("session", s.sessionId).put("seq", 0).put("text", s.shadow)
+            .put("cursor", s.cursor).put("sel_start", s.selStart)
+            .put("sel_end", s.selEnd))
+    }
+
+    private fun handleAnnotation(method: String, params: JSONObject) {
+        if ("editor.sync" !in granted) return
+        val eid = params.opt("editor_id") as? String ?: return
+        val session = params.opt("session") as? String ?: return
+        val seq = (params.opt("seq") as? Number)?.toLong() ?: return
+        val s = findEditor(session) ?: return
+        // SPEC 19.5: discard an annotation whose session or seq does not
+        // match the current state (latest-wins, never delays text sync).
+        if (s.editorId != eid || s.seq != seq) return
+        annotationListener?.invoke(method, eid, params)
     }
 
     // ------------------------------------------------------- themes (18.4)

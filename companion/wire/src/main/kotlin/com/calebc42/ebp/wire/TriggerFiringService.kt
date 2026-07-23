@@ -40,13 +40,13 @@ class TriggerFiringService(
     private val bootGeneration: () -> String? = { null },
 ) {
     /** SPEC 21.3/21.7: current sample for a state type (gate/edge/window). */
-    var stateProvider: (String) -> JSONObject? = { null }
+    @Volatile var stateProvider: (String) -> JSONObject? = { null }
     /** SPEC 21.4: post a substituted local notification from an on_fire entry. */
-    var notifyListener: ((JSONObject) -> Unit)? = null
+    @Volatile var notifyListener: ((JSONObject) -> Unit)? = null
     /** SPEC 21.5: the time schedule changed (a set replaced time.* triggers) —
      * the Android host re-queries timeSchedule() and arms alarms. Invoked after
      * the service monitor is released; a no-op off-device. */
-    var onTimeScheduleChanged: (() -> Unit)? = null
+    @Volatile var onTimeScheduleChanged: (() -> Unit)? = null
 
     // Newest-wins live session (SPEC 5.2); read after releasing the monitor.
     @Volatile private var session: LiveSession? = null

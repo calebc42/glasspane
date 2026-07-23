@@ -156,12 +156,20 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         val owner = intent.getStringExtra("owner") ?: return
         val title = intent.getStringExtra("title") ?: return
         val rid = intent.getStringExtra("rid") ?: return
-        // SPEC 18.6: commit the fired receipt (durably) BEFORE presenting, so a
-        // restart or a re-armed/re-pushed tuple never re-presents. markFired
-        // returns false if already fired or if the receipt could not be
-        // committed — either way, do not present.
-        if (!CompanionStores.reminders(ctx).markFired(owner, rid)) return
-        Notifications.postReminder(ctx, owner, rid, title, intent.getStringExtra("body"))
+        val body = intent.getStringExtra("body")
+        val app = ctx.applicationContext
+        // SPEC 18.6: markFired persists (file I/O) — off the main thread.
+        val pending = goAsync()
+        CompanionStores.firingExecutor.execute {
+            try {
+                // Commit the fired receipt durably BEFORE presenting, so a restart
+                // or a re-armed/re-pushed tuple never re-presents. markFired
+                // returns false if already fired or the receipt could not be
+                // committed — either way, do not present.
+                if (CompanionStores.reminders(app).markFired(owner, rid))
+                    Notifications.postReminder(app, owner, rid, title, body)
+            } finally { pending.finish() }
+        }
     }
 }
 
@@ -173,9 +181,18 @@ class ReminderTapReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val owner = intent.getStringExtra("owner") ?: return
         val rid = intent.getStringExtra("rid") ?: return
-        com.calebc42.ebp.wire.routeReminderTap(
-            CompanionStores.reminders(ctx), CompanionStores.queue(ctx),
-            CompanionStores.MAX_EVENT_BYTES, owner, rid, CompanionStores.liveSession)
-        ctx.getSystemService(NotificationManager::class.java).cancel("reminder", rid.hashCode())
+        val app = ctx.applicationContext
+        // SPEC 14/18.6: the tap admits to the durable queue (file I/O) and may
+        // deliver live (socket write) — off the main thread.
+        val pending = goAsync()
+        CompanionStores.firingExecutor.execute {
+            try {
+                com.calebc42.ebp.wire.routeReminderTap(
+                    CompanionStores.reminders(app), CompanionStores.queue(app),
+                    CompanionStores.MAX_EVENT_BYTES, owner, rid, CompanionStores.liveSession)
+                app.getSystemService(NotificationManager::class.java)
+                    .cancel("reminder", rid.hashCode())
+            } finally { pending.finish() }
+        }
     }
 }

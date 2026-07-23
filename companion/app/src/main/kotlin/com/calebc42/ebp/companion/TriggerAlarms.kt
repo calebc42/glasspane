@@ -48,8 +48,16 @@ class TimeAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val identity = intent.getStringExtra("identity") ?: return
         val tid = intent.getStringExtra("tid") ?: return
-        CompanionStores.firing(ctx).fireScheduled(identity, tid)
-        TriggerAlarms.reschedule(ctx)
+        val app = ctx.applicationContext
+        // SPEC 21.2: firing may deliver live (socket write) — never on the main
+        // thread. goAsync keeps the receiver alive across the background hop.
+        val pending = goAsync()
+        CompanionStores.firingExecutor.execute {
+            try {
+                CompanionStores.firing(app).fireScheduled(identity, tid)
+                TriggerAlarms.reschedule(app)
+            } finally { pending.finish() }
+        }
     }
 }
 
@@ -62,13 +70,22 @@ class TimeAlarmReceiver : BroadcastReceiver() {
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        val firing = CompanionStores.firing(ctx)
-        Notifications.rearmAllReminders(ctx)
-        TriggerAlarms.reschedule(ctx)
-        when (intent.action) {
-            Intent.ACTION_BOOT_COMPLETED -> firing.observeExternal("boot", JSONObject())
-            Intent.ACTION_TIMEZONE_CHANGED ->
-                firing.observeExternal("timezone.changed", JSONObject())
+        val app = ctx.applicationContext
+        val action = intent.action
+        // SPEC 21.2/18.6: re-arm + fire off the main thread (goAsync keeps the
+        // cold-started receiver alive across the background hop).
+        val pending = goAsync()
+        CompanionStores.firingExecutor.execute {
+            try {
+                Notifications.rearmAllReminders(app)
+                TriggerAlarms.reschedule(app)
+                val firing = CompanionStores.firing(app)
+                when (action) {
+                    Intent.ACTION_BOOT_COMPLETED -> firing.observeExternal("boot", JSONObject())
+                    Intent.ACTION_TIMEZONE_CHANGED ->
+                        firing.observeExternal("timezone.changed", JSONObject())
+                }
+            } finally { pending.finish() }
         }
     }
 }

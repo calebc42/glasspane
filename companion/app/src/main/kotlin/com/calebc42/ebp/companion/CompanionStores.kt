@@ -37,6 +37,17 @@ object CompanionStores {
 
     const val MAX_EVENT_BYTES = 262_144L
 
+    /** SPEC 21.2: every firing + cold-event route runs on this single background
+     * thread, NEVER the Android main thread — an admitted occurrence may deliver
+     * live (a loopback socket write, which throws NetworkOnMainThreadException on
+     * the main thread) and persists records / runs on_fire (file + platform I/O).
+     * A single thread also serializes all firing behind one writer. */
+    val firingExecutor: java.util.concurrent.ExecutorService by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "ebp-firing").apply { isDaemon = true }
+        }
+    }
+
     /** SPEC 15: the durable queue survives process and device restarts. */
     fun queue(ctx: Context): DurableQueue =
         queueInstance ?: synchronized(this) {
@@ -106,7 +117,9 @@ object CompanionStores {
         val app = ctx.applicationContext
         return synchronized(this) {
             sourcesInstance ?: TriggerSources(app) { type, sample ->
-                firing(app).observeSample(type, sample)
+                // SPEC 21.2: never fire on the main thread (the battery receiver's
+                // onReceive) — a live delivery would socket-write there.
+                firingExecutor.execute { firing(app).observeSample(type, sample) }
             }.also { sourcesInstance = it }
         }
     }

@@ -20,6 +20,13 @@ data class CompanionConfig(
     val surfaceProfiles: JSONObject,
     /** The welcome limits object (SPEC 4.5). */
     val limits: JSONObject,
+    /** SPEC 20.1: the device report, echoed in the welcome when `capabilities`
+     * or `triggers` is granted. Its `caps` are the exact capability.invoke
+     * catalog this Companion supports; empty means neither module is offered. */
+    val deviceReport: JSONObject = JSONObject(),
+    /** SPEC 20.2: the platform executor for capability.invoke. REQUIRED when
+     * `device.caps` is non-empty; a null handler fails every invoke as 1003. */
+    val capabilityHandler: CapabilityHandler? = null,
     /** Nonce source, injectable for tests. */
     val nonceSource: () -> String = EbpAuth::generateNonce,
 )
@@ -324,6 +331,7 @@ class CompanionEngine(
             "queue.replay" -> handleQueueReplay(id)
             "dialog.show" -> handleDialogShow(id, params)
             "reminders.set" -> handleRemindersSet(id, params)
+            "capability.invoke" -> handleCapabilityInvoke(id, params)
             "edit.apply" -> handleEditApply(id, params)
             "edit.resync" -> handleEditResync(id, params)
             "session.ready" -> {
@@ -864,6 +872,52 @@ class CompanionEngine(
         dispatchDescriptorContextless(onTap, args, callback)
     }
 
+    // ---------------------------------------- device capabilities (SPEC 20)
+
+    /**
+     * SPEC 20.2: run one advertised platform operation. The library gates cap
+     * existence (1001) and validates the closed Args before any side effect
+     * (-32602); the host handler then re-checks authorization and executes,
+     * its typed refusal (1002 cap-permission / 1003 cap-failed) forwarded
+     * verbatim. capability.invoke is available only when `capabilities` was
+     * granted; invocations are session-scoped and non-durable (SPEC 20.2).
+     */
+    private fun handleCapabilityInvoke(id: Any, params: JSONObject) {
+        if ("capabilities" !in granted)
+            return respondError(id, -32601, "Method not found", "method-not-found")
+        for (k in params.keySet()) if (k != "cap" && k != "args")
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        val cap = params.opt("cap") as? String
+        if (cap == null || !identifier.matches(cap))
+            return respondError(id, -32602, "Invalid params", "invalid-params")
+        val args = when (val a = params.opt("args")) {
+            null, JSONObject.NULL -> JSONObject()
+            is JSONObject -> a
+            else -> return respondError(id, -32602, "Invalid params", "invalid-params")
+        }
+        // SPEC 20.2: cap MUST appear in device.caps, else 1001.
+        val caps = config.deviceReport.optJSONArray("caps") ?: JSONArray()
+        if ((0 until caps.length()).none { caps.opt(it) == cap })
+            return respondError(id, 1001, "Unsupported capability", "cap-unsupported")
+        // SPEC 20.3: validate the closed Args before any side effect.
+        try {
+            CapabilityCatalog.validateArgs(cap, args)
+        } catch (e: ContentInvalid) {
+            return respondError(id, -32602, "Invalid params", "invalid-params",
+                JSONObject().put("path", e.path).put("reason", e.reason))
+        }
+        // SPEC 20.2: the host re-checks authorization at invocation and runs it.
+        val handler = config.capabilityHandler
+            ?: return respondError(id, 1003, "Capability failed", "cap-failed",
+                JSONObject().put("reason", "no-handler"))
+        when (val out = handler.invoke(cap, args)) {
+            is CapabilityOutcome.Ok -> respondResult(id, out.result)
+            is CapabilityOutcome.Fail -> respondError(id, out.code, "Capability failed",
+                if (out.code == 1002) "cap-permission" else "cap-failed",
+                JSONObject().put("reason", out.reason))
+        }
+    }
+
     // ------------------------------------------------- editor sync (SPEC 19)
 
     // Keyed by (document, editor_id); the Companion is the shadow's owner.
@@ -1268,6 +1322,10 @@ class CompanionEngine(
         // for the capability/trigger modules.
         surfaces.inputState().takeIf { it.length() > 0 }
             ?.let { welcome.put("input_state", it) }
+        // SPEC 20.1: the device report is REQUIRED once capabilities or
+        // triggers is granted, and carries the caps/permissions snapshot.
+        if ("capabilities" in granted || "triggers" in granted)
+            welcome.put("device", config.deviceReport)
         return welcome
     }
 

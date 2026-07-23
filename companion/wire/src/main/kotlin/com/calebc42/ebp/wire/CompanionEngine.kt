@@ -118,6 +118,8 @@ class CompanionEngine(
         // session IDs are dead and new sessions are created after reconnect.
         editors.values.forEach { it.state = EditorSession.State.CLOSED }
         editors.clear()
+        surfaceEditors.clear()
+        pendingEditors.clear()
     }
 
     /** The queue_seq this engine's connection put in flight, if any. */
@@ -341,6 +343,10 @@ class CompanionEngine(
                             ?: JSONObject.NULL)))
                 }
                 syncingDirty.clear()
+                // SPEC 19: open editor sessions accepted during SYNCING.
+                val pend = pendingEditors.toList()
+                pendingEditors.clear()
+                for ((doc, eid, seed) in pend) openEditor(doc, eid, seed)
                 // SPEC 15.3: only after that flush may events flow.
                 pumpAdvance()
             }
@@ -482,6 +488,17 @@ class CompanionEngine(
         if (requiredCap != null && requiredCap !in granted)
             return respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("reason", "namespace-not-granted"))
+        // SPEC 19: count distinct synchronized-editor identities the whole
+        // mutation would yield — every other surface's editors plus this
+        // spec's — and reject before applying if it exceeds the limit.
+        val newEditors = if ("editor.sync" in granted) scanSyncedEditors(spec)
+            else emptyMap()
+        val othersEditorCount = surfaceEditors.entries
+            .filter { it.key != surface }.sumOf { it.value.size }
+        if (othersEditorCount + newEditors.size >
+            config.limits.optLong("max_editor_sessions", 8))
+            return respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("reason", "editor-session-limit"))
         try {
             val result = surfaces.update(
                 surface, revision, spec,
@@ -492,10 +509,66 @@ class CompanionEngine(
                 .put("status", result.status)
                 .put("revision", result.revision)
                 .put("present", result.present))
-            if (result.status == "applied") surfaceListener?.invoke(surface)
+            if (result.status == "applied") {
+                reconcileEditors(surface, newEditors)
+                surfaceListener?.invoke(surface)
+            }
         } catch (e: ContentInvalid) {
             respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("path", e.path).put("reason", e.reason))
+        }
+    }
+
+    // Per-surface synchronized editors: surface -> (editor_id -> document).
+    private val surfaceEditors = HashMap<String, MutableMap<String, String>>()
+    // Editors accepted during SYNCING, opened on entering READY (SPEC 19).
+    private val pendingEditors = ArrayList<Triple<String, String, String>>()
+
+    /** SPEC 17.4/19: an `editor` node with a `document` is synchronized;
+     * its editor_id is the node id. Walks the spec (all views). */
+    private fun scanSyncedEditors(spec: JSONObject): Map<String, JSONObject> {
+        val out = LinkedHashMap<String, JSONObject>()
+        fun walk(v: Any?) {
+            when (v) {
+                is JSONArray -> for (i in 0 until v.length()) walk(v.get(i))
+                is JSONObject -> {
+                    if (v.opt("t") == "editor" && v.opt("document") is String &&
+                        v.opt("id") is String)
+                        out[v.getString("id")] = v
+                    for (k in v.keySet()) walk(v.get(k))
+                }
+            }
+        }
+        walk(spec)
+        return out
+    }
+
+    /** SPEC 19: open sessions for newly present synchronized editors (or
+     * queue them until READY), and close those removed or whose document
+     * changed. Same document+editor_id preserves the session. */
+    private fun reconcileEditors(surface: String, newEditors: Map<String, JSONObject>) {
+        val prev = surfaceEditors[surface] ?: emptyMap()
+        val next = LinkedHashMap<String, String>()
+        for ((editorId, node) in newEditors) {
+            val document = node.getString("document")
+            next[editorId] = document
+            val existed = prev[editorId]
+            if (existed == document) continue // identity preserved
+            if (existed != null) closeEditor(existed, editorId) // document changed
+            val seed = node.optString("value", "")
+            if (state == SessionState.READY) openEditor(document, editorId, seed)
+            else pendingEditors.add(Triple(document, editorId, seed))
+        }
+        // Editors that vanished from this surface close.
+        for ((editorId, document) in prev)
+            if (editorId !in next) closeEditor(document, editorId)
+        if (next.isEmpty()) surfaceEditors.remove(surface)
+        else surfaceEditors[surface] = next
+    }
+
+    private fun closeSurfaceEditors(surface: String) {
+        surfaceEditors.remove(surface)?.forEach { (editorId, document) ->
+            closeEditor(document, editorId)
         }
     }
 
@@ -517,7 +590,10 @@ class CompanionEngine(
                 .put("status", result.status)
                 .put("revision", result.revision)
                 .put("present", result.present))
-            if (result.status == "applied") surfaceListener?.invoke(surface)
+            if (result.status == "applied") {
+                closeSurfaceEditors(surface)
+                surfaceListener?.invoke(surface)
+            }
         } catch (e: ContentInvalid) {
             respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("path", e.path).put("reason", e.reason))
@@ -932,6 +1008,49 @@ class CompanionEngine(
             .put("session", s.sessionId).put("seq", 0).put("text", s.shadow)
             .put("cursor", s.cursor).put("sel_start", s.selStart)
             .put("sel_end", s.selEnd))
+    }
+
+    /** SPEC 19.3: ask Emacs to complete at the current cursor. The result's
+     * {prefix, candidates} reach CALLBACK; candidate selection is a later
+     * local edit via [selectCompletion]. Non-durable, session-scoped. */
+    @Synchronized
+    fun requestCompletion(document: String, editorId: String,
+                          callback: (String, JSONArray) -> Unit) {
+        val s = editors[document to editorId] ?: return
+        if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return
+        val atSession = s.sessionId
+        val atSeq = s.seq
+        val atCursor = s.cursor
+        sendRequest("edit.complete", JSONObject()
+            .put("document", document).put("editor_id", editorId)
+            .put("session", atSession).put("seq", atSeq).put("cursor", atCursor)) { result, error ->
+            if (error == null && result != null &&
+                editors[document to editorId]?.sessionId == atSession)
+                callback(result.optString("prefix"),
+                    result.optJSONArray("candidates") ?: JSONArray())
+        }
+    }
+
+    /**
+     * SPEC 19.3: apply a chosen candidate. Only when the session, seq, and
+     * cursor still match and the prefix still precedes the cursor does the
+     * Companion replace that prefix with `insert` as one local edit (an
+     * edit.delta); otherwise it discards the result without changing text.
+     */
+    @Synchronized
+    fun selectCompletion(document: String, editorId: String, atSession: String,
+                         atSeq: Long, atCursor: Int, prefix: String, insert: String): Boolean {
+        val s = editors[document to editorId] ?: return false
+        if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return false
+        if (s.sessionId != atSession || s.seq != atSeq || s.cursor != atCursor) return false
+        val prefixLen = prefix.codePointCount(0, prefix.length)
+        val start = atCursor - prefixLen
+        if (start < 0) return false
+        // The prefix must still be the text immediately before the cursor.
+        val from = s.shadow.offsetByCodePoints(0, start)
+        val to = s.shadow.offsetByCodePoints(0, atCursor)
+        if (s.shadow.substring(from, to) != prefix) return false
+        return localEditorEdit(document, editorId, start, prefixLen, insert)
     }
 
     private fun handleAnnotation(method: String, params: JSONObject) {

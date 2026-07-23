@@ -500,6 +500,11 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   (input-values (make-hash-table :test #'equal))
   (reset-history (make-hash-table :test #'equal))
   state-changed-functions ; called with (client surface revision id value)
+  ;; SPEC 19: Emacs's mirror of synchronized editors, (doc . id) ->
+  ;; plist (:session :seq :text :cursor).  Emacs chars ARE Unicode
+  ;; scalar values, so splice positions are char positions directly.
+  (editors (make-hash-table :test #'equal))
+  edit-change-functions ; called with (client document editor-id text)
   ready-functions ; abnormal hook: called with the client on READY
   ;; SPEC 15.3: the latest replay summary and the bounded-backoff timer
   ;; that retries while `remaining' is nonzero.
@@ -528,6 +533,18 @@ receipts default to `ebp-receipts' under `user-emacs-directory' —
                                  #'ebp-client--handle-event-action)
     (ebp-client-register-handler client "state.changed"
                                  #'ebp-client--handle-state-changed)
+    (when-let* ((fn (plist-get config :edit-change-function)))
+      (push fn (ebp-client-edit-change-functions client)))
+    (ebp-client-register-handler client "edit.open"
+                                 #'ebp-client--handle-edit-open)
+    (ebp-client-register-handler client "edit.delta"
+                                 #'ebp-client--handle-edit-delta)
+    (ebp-client-register-handler client "edit.caret"
+                                 #'ebp-client--handle-edit-caret)
+    (ebp-client-register-handler client "edit.close"
+                                 #'ebp-client--handle-edit-close)
+    (ebp-client-register-handler client "edit.complete"
+                                 #'ebp-client--handle-edit-complete)
     (ebp-client--receipts-load client)
     client))
 
@@ -924,6 +941,135 @@ later snapshot explicitly reset that ID."
         (dolist (fn (ebp-client-state-changed-functions client))
           (funcall fn client surface revision id
                    (plist-get params :value)))))))
+
+;;;; Editor sync (SPEC 19), the Emacs endpoint half
+
+;; Emacs mirrors the Companion's shadow.  It RECEIVES edit.open/delta/caret/
+;; close (notifications) and answers edit.complete (request); it SENDS
+;; edit.apply/resync (requests) and the annotation notifications.  Positions
+;; are Unicode scalar values = Emacs char positions.
+
+(defun ebp-client-editor-text (client document editor-id)
+  "The mirrored text of the synchronized editor, or nil."
+  (plist-get (gethash (cons document editor-id) (ebp-client-editors client))
+             :text))
+
+(defun ebp-client--editor-changed (client document editor-id)
+  (dolist (fn (ebp-client-edit-change-functions client))
+    (funcall fn client document editor-id
+             (ebp-client-editor-text client document editor-id))))
+
+(defun ebp-client--handle-edit-open (client params)
+  "SPEC 19.3: seed the mirror for a new editor session."
+  (let ((doc (plist-get params :document))
+        (eid (plist-get params :editor_id)))
+    (puthash (cons doc eid)
+             (list :session (plist-get params :session)
+                   :seq (plist-get params :seq)
+                   :text (plist-get params :text)
+                   :cursor (plist-get params :cursor))
+             (ebp-client-editors client))
+    (ebp-client--editor-changed client doc eid)))
+
+(defun ebp-client--handle-edit-delta (client params)
+  "SPEC 19.3: apply the splice at seq+1; on any mismatch, mark the local
+view stale and resync once."
+  (let* ((doc (plist-get params :document))
+         (eid (plist-get params :editor_id))
+         (ed (gethash (cons doc eid) (ebp-client-editors client))))
+    (when (and ed (equal (plist-get ed :session) (plist-get params :session)))
+      (let ((text (plist-get ed :text))
+            (start (plist-get params :start))
+            (del (plist-get params :del))
+            (ins (plist-get params :text))
+            (len (plist-get params :len)))
+        (if (and (= (plist-get params :seq) (1+ (plist-get ed :seq)))
+                 (<= 0 start) (<= 0 del) (<= (+ start del) (length text)))
+            (let ((new (concat (substring text 0 start) ins
+                               (substring text (+ start del)))))
+              (if (= (length new) len)
+                  (progn
+                    (setf (plist-get ed :text) new
+                          (plist-get ed :seq) (plist-get params :seq))
+                    (ebp-client--editor-changed client doc eid))
+                (ebp-client-edit-resync client doc eid)))
+          (ebp-client-edit-resync client doc eid))))))
+
+(defun ebp-client--handle-edit-caret (client params)
+  "SPEC 19.3: best-effort caret; accepted only on session/seq match."
+  (let ((ed (gethash (cons (plist-get params :document)
+                           (plist-get params :editor_id))
+                     (ebp-client-editors client))))
+    (when (and ed (equal (plist-get ed :session) (plist-get params :session))
+               (= (plist-get ed :seq) (plist-get params :seq)))
+      (setf (plist-get ed :cursor) (plist-get params :cursor)))))
+
+(defun ebp-client--handle-edit-close (client params)
+  "SPEC 19.3: release the mirrored session."
+  (let ((doc (plist-get params :document))
+        (eid (plist-get params :editor_id)))
+    (remhash (cons doc eid) (ebp-client-editors client))
+    (ebp-client--editor-changed client doc eid)))
+
+(defun ebp-client--handle-edit-complete (client params)
+  "SPEC 19.3: answer a completion request from the application's
+`:edit-complete-function' (doc editor-id text cursor) -> (PREFIX . CANDS),
+each candidate a plist (:label :annotation? :insert?).  Session/seq must
+match or the query is editor-stale."
+  (let* ((doc (plist-get params :document))
+         (eid (plist-get params :editor_id))
+         (ed (gethash (cons doc eid) (ebp-client-editors client)))
+         (fn (plist-get (ebp-client-config client) :edit-complete-function)))
+    (unless (and ed (equal (plist-get ed :session) (plist-get params :session))
+                 (= (plist-get ed :seq) (plist-get params :seq)))
+      (ebp-client--error client 1201 "Editor stale" "content-invalid"
+                         :reason "editor-stale"))
+    (if fn
+        (let ((r (funcall fn doc eid (plist-get ed :text)
+                          (plist-get params :cursor))))
+          (list :prefix (or (car r) "") :candidates (vconcat (cdr r))))
+      (list :prefix "" :candidates []))))
+
+(cl-defun ebp-client-edit-apply (client document editor-id start del text
+                                 &key callback)
+  "SPEC 19.4: push an Emacs edit to the Companion; it wins seq+1 or loses
+with a typed stale (the incoming delta is then authoritative)."
+  (let ((ed (gethash (cons document editor-id) (ebp-client-editors client))))
+    (when ed
+      (let ((len (+ (- (length (plist-get ed :text)) del) (length text))))
+        (ebp-client--request
+         client 'edit.apply
+         (list :document document :editor_id editor-id
+               :session (plist-get ed :session)
+               :seq (1+ (plist-get ed :seq)) :start start :del del
+               :text text :len len :cursor (+ start (length text)))
+         (lambda (result error)
+           (when (and (null error) (equal (plist-get result :status) "applied"))
+             (setf (plist-get ed :text)
+                   (concat (substring (plist-get ed :text) 0 start) text
+                           (substring (plist-get ed :text) (+ start del)))
+                   (plist-get ed :seq) (plist-get result :seq))
+             (ebp-client--editor-changed client document editor-id))
+           (when callback
+             (funcall callback (and result (plist-get result :status)) error))))))))
+
+(defun ebp-client-edit-resync (client document editor-id)
+  "SPEC 19.4: recover a stale local view — the Companion returns full
+state under a fresh session at seq 0."
+  (let ((ed (gethash (cons document editor-id) (ebp-client-editors client))))
+    (when ed
+      (ebp-client--request
+       client 'edit.resync
+       (list :document document :editor_id editor-id
+             :session (plist-get ed :session))
+       (lambda (result error)
+         (unless error
+           (puthash (cons document editor-id)
+                    (list :session (plist-get result :session) :seq 0
+                          :text (plist-get result :text)
+                          :cursor (plist-get result :cursor))
+                    (ebp-client-editors client))
+           (ebp-client--editor-changed client document editor-id)))))))
 
 ;;;; Surface push (SPEC 13.1-13.3), the client half
 

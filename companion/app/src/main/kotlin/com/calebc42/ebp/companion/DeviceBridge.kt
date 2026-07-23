@@ -58,12 +58,13 @@ class DeviceBridge(
             "101112131415161718191a1b1c1d1e1f" to
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
         supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
-            "presentation.pie-menu", "reminders.owner", "surfaces.notification"),
+            "presentation.pie-menu", "reminders.owner", "surfaces.notification",
+            "editor.sync"),
         surfaceProfiles = JSONObject()
             .put("app", JSONObject()
                 .put("node_types", JSONArray(listOf(
                     "text", "row", "column", "box", "spacer", "divider",
-                    "button", "text_input", "scaffold")))
+                    "button", "text_input", "scaffold", "editor")))
                 .put("builtins", JSONArray(listOf(
                     "view.switch", "companion.settings.open")))
                 .put("features", JSONArray()))
@@ -84,7 +85,8 @@ class DeviceBridge(
             .put("max_surfaces", 64).put("max_surface_ids", 4096)
             .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
             .put("max_capture_fields", 64).put("max_dialogs", 4)
-            .put("max_pie_menus", 1).put("max_reminders", 256),
+            .put("max_pie_menus", 1).put("max_reminders", 256)
+            .put("max_editor_sessions", 8),
     )
 
     fun start() = thread(name = "ebp-bridge", isDaemon = true) {
@@ -138,6 +140,11 @@ class DeviceBridge(
     /** SPEC 14.6: renderer edit -> draft + state.changed publication. */
     fun state(surface: String, id: String, value: Any?) {
         dispatchExecutor.execute { engine?.publishState(surface, id, value) }
+    }
+
+    /** SPEC 19.3: a synchronized editor's local edit -> shadow + edit.delta. */
+    fun editorEdit(document: String, editorId: String, start: Int, del: Int, text: String) {
+        dispatchExecutor.execute { engine?.localEditorEdit(document, editorId, start, del, text) }
     }
 
     /** SPEC 18.1: dialog.submit builtin -> complete the outstanding request. */

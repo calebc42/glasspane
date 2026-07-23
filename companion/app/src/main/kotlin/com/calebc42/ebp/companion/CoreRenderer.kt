@@ -42,6 +42,7 @@ import androidx.compose.ui.window.Dialog
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import com.calebc42.ebp.wire.EditorSession
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -86,6 +87,29 @@ fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
             .height((node.optDouble("height", 0.0)).dp))
         "divider" -> HorizontalDivider(modifier = padding)
         "scaffold" -> RenderScaffold(node, surface, bridge)
+        "editor" -> {
+            val id = node.optString("id")
+            val document = node.optString("document")
+            var text by rememberSaveable(id) { mutableStateOf(node.optString("value")) }
+            OutlinedTextField(
+                value = text,
+                onValueChange = { new ->
+                    // SPEC 19.3: a synchronized editor mirrors each local edit
+                    // as a minimal splice — the changed span only, not a
+                    // whole-buffer replace — so deltas stay small and the
+                    // Companion shadow tracks the field scalar-for-scalar.
+                    if (document.isNotEmpty()) {
+                        val (start, del, ins) = EditorSession.diff(text, new)
+                        if (del > 0 || ins.isNotEmpty())
+                            bridge.editorEdit(document, id, start, del, ins)
+                    } else {
+                        bridge.state(surface, id, new) // local editor: state.changed
+                    }
+                    text = new
+                },
+                minLines = 3,
+                modifier = padding)
+        }
         "button" -> Button(
             onClick = { onButton(node.optJSONObject("on_tap"), surface, bridge, dialog) },
             modifier = padding) { Text(node.optString("label")) }

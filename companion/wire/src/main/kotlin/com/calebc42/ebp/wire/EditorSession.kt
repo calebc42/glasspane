@@ -44,6 +44,29 @@ class EditorSession(
         return true
     }
 
+    companion object {
+        /**
+         * SPEC 19.3: reduce an old→new text change to the single half-open
+         * scalar splice (start, del, insert) that produces it, by trimming the
+         * common prefix and suffix. Counts are Unicode scalar values so astral
+         * characters stay whole. A synchronized client feeds the result to
+         * edit.delta; the Companion derives len from its own shadow. When the
+         * client's pre-edit text equals the Companion shadow (the invariant a
+         * live session maintains), this splice applies cleanly.
+         */
+        fun diff(old: String, new: String): Triple<Int, Int, String> {
+            val o = old.codePoints().toArray()
+            val n = new.codePoints().toArray()
+            var pre = 0
+            val min = minOf(o.size, n.size)
+            while (pre < min && o[pre] == n[pre]) pre++
+            var suf = 0
+            while (suf < min - pre && o[o.size - 1 - suf] == n[n.size - 1 - suf]) suf++
+            val del = o.size - pre - suf
+            return Triple(pre, del, String(n, pre, n.size - pre - suf))
+        }
+    }
+
     /** SPEC 19.3: caret/selection is paired-or-omitted; cursor is one end of
      * a non-collapsed selection. Returns false on an invalid caret. */
     fun setCaret(cursor: Int, selStart: Int?, selEnd: Int?): Boolean {

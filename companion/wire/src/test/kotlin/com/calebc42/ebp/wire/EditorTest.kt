@@ -72,6 +72,28 @@ class EditorTest {
     }
 
     @Test
+    fun diffReducesToMinimalScalarSplice() {
+        // Pure prefix/suffix trimming: insertion, deletion, replacement, and
+        // the astral-safe path a synchronized field relies on.
+        assertEquals(Triple(5, 0, "a"), EditorSession.diff("org: ", "org: a"))
+        assertEquals(Triple(3, 2, ""), EditorSession.diff("abcde", "abc"))
+        assertEquals(Triple(1, 3, "X"), EditorSession.diff("abcde", "aXe"))
+        // No change: prefix consumes all, yielding an empty no-op splice at
+        // the end (onValueChange's del>0||insert guard drops it before send).
+        assertEquals(Triple(4, 0, ""), EditorSession.diff("same", "same"))
+        // An astral char is one scalar; a replacement around it counts whole.
+        assertEquals(Triple(1, 1, "!"), EditorSession.diff("a😀b", "a!b"))
+        assertEquals(Triple(0, 0, "😀"), EditorSession.diff("xy", "😀xy"))
+        // The diff, applied to a shadow equal to `old`, yields `new` — the
+        // invariant that keeps a live field and the Companion shadow in step.
+        val s = EditorSession("d", "e", "sess"); s.shadow = "hello world"
+        val (start, del, ins) = EditorSession.diff(s.shadow, "hey world")
+        val len = s.scalarLength() - del + ins.codePointCount(0, ins.length)
+        assertTrue(s.splice(start, del, ins, len))
+        assertEquals("hey world", s.shadow)
+    }
+
+    @Test
     fun openEmitsSeedAndLocalEditMirrors() {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out)

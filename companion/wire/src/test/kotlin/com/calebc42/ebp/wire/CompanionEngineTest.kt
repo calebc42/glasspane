@@ -39,7 +39,8 @@ class CompanionEngineTest {
         .put("features", JSONArray()))
 
     private fun engine(sink: MutableList<JSONObject>,
-                       supported: Set<String> = setOf("theme")): CompanionEngine =
+                       supported: Set<String> = setOf("theme"),
+                       nonce: String = katSn): CompanionEngine =
         CompanionEngine(
             CompanionConfig(
                 serverName = "kat-companion", serverVersion = "1.0.0",
@@ -47,7 +48,7 @@ class CompanionEngineTest {
                 supportedCapabilities = supported,
                 surfaceProfiles = profiles(),
                 limits = limits(),
-                nonceSource = { katSn },
+                nonceSource = { nonce },
             )
         ) { bytes ->
             FrameDecoder().let { d -> d.feed(bytes).forEach(sink::add); d.finish() }
@@ -158,6 +159,37 @@ class CompanionEngineTest {
             .put("server_nonce", katSn).put("client_proof", "not-hex"))
         engine.feed(frame(malformed))
         assertEquals(-32602, out.last().getJSONObject("error").getInt("code"))
+        assertEquals(SessionState.CLOSED, engine.state)
+    }
+
+    @Test
+    fun mismatchedNonceInAuthFailsClosed() {
+        // SPEC 24.6 item 6 (mismatched): a well-formed auth.response whose
+        // client_nonce is not the one the challenge issued fails at 1203 —
+        // the cn == pendingClientNonce guard, exercised in the failing case.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello())) // issues cn = katCn
+        val otherCn = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        engine.feed(frame(request("h2", "auth.response",
+            EbpAuth.authParams(katPid, otherCn, katSn, katToken))))
+        assertEquals(1203, out.last().getJSONObject("error").getInt("code"))
+        assertEquals(SessionState.CLOSED, engine.state)
+    }
+
+    @Test
+    fun replayedProofFromAnotherSessionFailsClosed() {
+        // SPEC 24.6 item 6 (replayed): a proof bound to a prior session's
+        // server_nonce cannot authenticate a session that issued a different
+        // one — the sn == pendingServerNonce guard, in the failing case.
+        val out = mutableListOf<JSONObject>()
+        val snB = "3f3e3d3c3b3a39383736353433323130"
+        val engine = engine(out, nonce = snB) // this session issues snB, not katSn
+        engine.feed(frame(hello()))
+        // Replay a valid proof from a session whose server_nonce was katSn.
+        engine.feed(frame(request("h2", "auth.response",
+            EbpAuth.authParams(katPid, katCn, katSn, katToken))))
+        assertEquals(1203, out.last().getJSONObject("error").getInt("code"))
         assertEquals(SessionState.CLOSED, engine.state)
     }
 

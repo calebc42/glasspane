@@ -192,6 +192,56 @@ Runs VAL-FN on each (KEY VALUE); WHAT names the field."
   (unless (= (length fields) (length (delete-dups (copy-sequence fields))))
     (error "jetpacs: capture_fields must be distinct (SPEC 14.1), got %S" fields)))
 
+(defun jetpacs--flag (x)
+  "Return t when X is non-nil (JSON true), else nil (member omitted).
+Use for a boolean member whose false form is its default and is left off
+the wire; use `:json-false' directly for a member that MUST emit false."
+  (and x t))
+
+(defconst jetpacs--text-styles
+  '("body" "title" "headline" "caption" "label" "mono")
+  "The §17.2 text `style' vocabulary (unknown falls back to `body').")
+
+(defun jetpacs--check-enum (v allowed what)
+  "Signal unless V (symbol or string) names a member of ALLOWED; WHAT names
+the field.  Returns the normalized string form."
+  (let ((s (format "%s" v)))
+    (unless (member s allowed)
+      (error "jetpacs: %s must be one of %S, got %S" what allowed v))
+    s))
+
+(defun jetpacs--check-integer (v what min max)
+  "Signal unless V is an integer within inclusive [MIN,MAX] (nil = unbounded);
+WHAT names the field.  Returns V."
+  (unless (integerp v)
+    (error "jetpacs: %s must be an integer (SPEC 4.2), got %S" what v))
+  (when (and min (< v min)) (error "jetpacs: %s must be >= %s, got %S" what min v))
+  (when (and max (> v max)) (error "jetpacs: %s must be <= %s, got %S" what max v))
+  v)
+
+(defun jetpacs--check-font-weight (v)
+  "Signal unless V is a §17.2 font weight: a weight name or a number 100..900."
+  (unless (or (and (stringp v) (not (string-empty-p v)))
+              (and (integerp v) (<= 100 v 900)))
+    (error "jetpacs: font_weight must be a weight name or integer 100..900, got %S" v))
+  v)
+
+(defun jetpacs--check-badge (v)
+  "Signal unless V is a §17.2 badge value (a string or a number); return V."
+  (unless (or (stringp v) (numberp v))
+    (error "jetpacs: badge must be a string or number, got %S" v))
+  v)
+
+(defun jetpacs--check-image-url (url)
+  "Signal unless URL is an advertised §17.2 image form: https or data:image.
+Only the URI FORM is checked here; per-target feature advertisement is a
+runtime concern (JW-7)."
+  (unless (and (stringp url)
+               (or (string-prefix-p "https://" url)
+                   (string-prefix-p "data:image/" url)))
+    (error "jetpacs: image url must be https:// or data:image/ (SPEC 17.2), got %S" url))
+  url)
+
 ;;;; The node funnel
 
 (defun jetpacs--node (type &rest kvs)
@@ -382,6 +432,131 @@ list of distinct field ids to gather."
 (defun jetpacs-dialog-dismiss ()
   "A `dialog.dismiss' builtin action (SPEC §14.2)."
   (jetpacs--node nil :builtin "dialog.dismiss"))
+
+;;;; Content nodes (§17.2)
+;;
+;; Type-specific members only.  Attach universal §16.5 attributes (key,
+;; padding, width, ...) with `jetpacs-with-attrs'.
+
+(cl-defun jetpacs-text (text &key style font-weight color selectable max-lines syntax)
+  "A text node showing plain string TEXT (SPEC §17.2).
+STYLE is body/title/headline/caption/label/mono; FONT-WEIGHT a weight name
+or a number 100..900; COLOR a §16.6 color; SELECTABLE non-nil to allow
+selection; MAX-LINES a positive-integer clamp; SYNTAX a §4.4 identifier
+naming a highlighter."
+  (jetpacs--require-string text ":text")
+  (when style (setq style (jetpacs--check-enum style jetpacs--text-styles ":style")))
+  (when font-weight (jetpacs--check-font-weight font-weight))
+  (when color (jetpacs--check-color color))
+  (when max-lines (jetpacs--check-integer max-lines ":max_lines" 1 nil))
+  (when syntax (jetpacs--check-identifier syntax ":syntax"))
+  (jetpacs--node "text"
+                 :text text
+                 :style style
+                 :font_weight font-weight
+                 :color color
+                 :selectable (jetpacs--flag selectable)
+                 :max_lines max-lines
+                 :syntax syntax))
+
+(cl-defun jetpacs-span (text &key font-weight italic underline color bg mono on-tap)
+  "A styled text run for `jetpacs-rich-text' (SPEC §17.2 RichSpan).
+Plain-text TEXT; FONT-WEIGHT a name or 100..900; ITALIC/UNDERLINE/MONO
+non-nil to enable; COLOR/BG §16.6 colors; ON-TAP an ActionDescriptor that
+makes the run a link."
+  (jetpacs--require-string text ":text")
+  (when font-weight (jetpacs--check-font-weight font-weight))
+  (when color (jetpacs--check-color color))
+  (when bg (jetpacs--check-color bg))
+  (jetpacs--node nil
+                 :text text
+                 :font_weight font-weight
+                 :italic (jetpacs--flag italic)
+                 :underline (jetpacs--flag underline)
+                 :color color
+                 :bg bg
+                 :mono (jetpacs--flag mono)
+                 :on_tap on-tap))
+
+(cl-defun jetpacs-rich-text (spans &key style)
+  "A rich-text node rendering SPANS, a list from `jetpacs-span' (SPEC §17.2).
+STYLE is the base text style."
+  (when style (setq style (jetpacs--check-enum style jetpacs--text-styles ":style")))
+  (jetpacs--node "rich_text" :spans (vconcat spans) :style style))
+
+(cl-defun jetpacs-icon (name &key size color badge content-description)
+  "An icon node named NAME, a §4.4 identifier (SPEC §17.2).
+SIZE a non-negative dp; COLOR a §16.6 color; BADGE a string or number;
+CONTENT-DESCRIPTION an accessibility label."
+  (jetpacs--check-identifier name ":name")
+  (when size (jetpacs--check-number size ":size" 0 nil))
+  (when color (jetpacs--check-color color))
+  (when badge (jetpacs--check-badge badge))
+  (when content-description (jetpacs--require-string content-description ":content_description"))
+  (jetpacs--node "icon" :name name :size size :color color :badge badge
+                 :content_description content-description))
+
+(cl-defun jetpacs-image (url &key content-scale content-description)
+  "An image node loading URL (SPEC §17.2).
+URL MUST be an advertised form: an https URL or a data:image URI.
+CONTENT-SCALE is fit/crop/fill; CONTENT-DESCRIPTION an accessibility label.
+Size it with the universal `width'/`height'/`aspect_ratio' via
+`jetpacs-with-attrs'."
+  (jetpacs--check-image-url url)
+  (when content-scale
+    (setq content-scale (jetpacs--check-enum content-scale '("fit" "crop" "fill") ":content_scale")))
+  (when content-description (jetpacs--require-string content-description ":content_description"))
+  (jetpacs--node "image" :url url :content_scale content-scale
+                 :content_description content-description))
+
+(cl-defun jetpacs-date-stamp (&key day month month-index year time)
+  "A date-stamp node (SPEC §17.2); at least one member SHOULD be present.
+DAY is an integer 1..31, MONTH-INDEX 1..12, YEAR a non-negative integer;
+MONTH and TIME are display strings."
+  (when day (jetpacs--check-integer day ":day" 1 31))
+  (when month (jetpacs--require-string month ":month"))
+  (when month-index (jetpacs--check-integer month-index ":month_index" 1 12))
+  (when year (jetpacs--check-integer year ":year" 0 nil))
+  (when time (jetpacs--require-string time ":time"))
+  (jetpacs--node "date_stamp" :day day :month month :month_index month-index
+                 :year year :time time))
+
+(cl-defun jetpacs-section-header (title &key trailing)
+  "A section-header node titled TITLE (a string) (SPEC §17.2).
+Optional TRAILING is a single node shown at the header's end."
+  (jetpacs--require-string title ":title")
+  (jetpacs--node "section_header" :title title :trailing trailing))
+
+(cl-defun jetpacs-empty-state (&key icon title caption action-label on-tap)
+  "An empty-state placeholder (SPEC §17.2).
+ICON is a §4.4 identifier; TITLE/CAPTION/ACTION-LABEL are strings; ON-TAP
+an ActionDescriptor.  ACTION-LABEL and ON-TAP are both-or-neither."
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when title (jetpacs--require-string title ":title"))
+  (when caption (jetpacs--require-string caption ":caption"))
+  (when action-label (jetpacs--require-string action-label ":action_label"))
+  (unless (eq (null action-label) (null on-tap))
+    (error "jetpacs-empty-state: :action-label and :on-tap are both-or-neither (SPEC 17.2)"))
+  (jetpacs--node "empty_state" :icon icon :title title :caption caption
+                 :action_label action-label :on_tap on-tap))
+
+(cl-defun jetpacs-progress (&key variant value)
+  "A progress node (SPEC §17.2).
+VARIANT is circular (default) or linear; VALUE a number 0..1 (omit for
+indeterminate)."
+  (when variant (setq variant (jetpacs--check-enum variant '("circular" "linear") ":variant")))
+  (when value (jetpacs--check-number value ":value" 0 1))
+  (jetpacs--node "progress" :variant variant :value value))
+
+(cl-defun jetpacs-badge (label &key icon color children)
+  "A badge node showing string LABEL (SPEC §17.2).
+An empty LABEL renders an attention dot.  ICON is a §4.4 identifier; COLOR
+a §16.6 color; CHILDREN a list of nodes the badge annotates."
+  (jetpacs--require-string label ":label")
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when color (jetpacs--check-color color))
+  (jetpacs--node "badge" :label label :icon icon :color color
+                 :children (and children (vconcat children))))
 
 (provide 'jetpacs-widgets)
 ;;; jetpacs-widgets.el ends here

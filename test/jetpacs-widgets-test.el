@@ -74,6 +74,63 @@
       (chk "70" (jetpacs-dialog-submit :capture-fields '("name")))
       (chk "71" (jetpacs-dialog-dismiss)))))
 
+;;;; Byte-parity: Content-family nodes (widgets.golden 00-16, JW-1)
+
+(ert-deftest jetpacs-widgets/content-goldens ()
+  "Content-family constructors build byte-identically to widgets.golden 00-16."
+  (let ((g (jetpacs-test--golden-map "widgets")))
+    (cl-flet ((chk (idx form)
+                (ert-info ((format "widgets.golden line %s" idx))
+                  (should (equal (jetpacs-node->canonical-json form)
+                                 (gethash idx g))))))
+      (chk "00" (jetpacs-text "hi"))
+      (chk "01" (jetpacs-with-attrs
+                 (jetpacs-text "hi" :style 'title :font-weight "bold" :color "#ff0000"
+                               :selectable t :max-lines 2 :syntax "elisp")
+                 :key "k1" :padding 4))
+      (chk "02" (jetpacs-rich-text
+                 (list (jetpacs-span "plain")
+                       (jetpacs-span "styled" :bg "#eeeeee" :color "primary"
+                                     :font-weight 700 :italic t :mono t :underline t
+                                     :on-tap (jetpacs-action "span.tap")))
+                 :style 'body))
+      (chk "03" (jetpacs-icon "star"))
+      (chk "04" (jetpacs-icon "star" :badge "3" :color "primary"
+                              :content-description "Starred" :size 24))
+      (chk "05" (jetpacs-image "https://example.com/a.png"))
+      (chk "06" (jetpacs-with-attrs
+                 (jetpacs-image "https://example.com/a.png" :content-scale 'crop
+                                :content-description "Photo")
+                 :aspect_ratio 1.5 :height 80 :width 120))
+      (chk "07" (jetpacs-date-stamp))
+      (chk "08" (jetpacs-date-stamp :day 5 :month "Jul" :month-index 7
+                                    :time "12:30" :year 2026))
+      (chk "09" (jetpacs-section-header "Inbox"))
+      (chk "10" (jetpacs-section-header "Inbox" :trailing (jetpacs-icon "sort")))
+      (chk "11" (jetpacs-empty-state))
+      (chk "12" (jetpacs-empty-state :icon "inbox" :title "Nothing here"
+                                     :caption "All done" :action-label "Refresh"
+                                     :on-tap (jetpacs-action "demo.tap")))
+      (chk "13" (jetpacs-progress))
+      (chk "14" (jetpacs-progress :variant 'linear :value 0.5))
+      (chk "15" (jetpacs-badge "9"))
+      (chk "16" (jetpacs-badge "99" :icon "mail" :color "error"
+                               :children (list (jetpacs-icon "mail")))))))
+
+(ert-deftest jetpacs-widgets/content-validation ()
+  "Content constructors fail fast on statically-invalid input."
+  (should-error (jetpacs-text 42))                       ; text must be a string
+  (should-error (jetpacs-text "x" :style 'bogus))        ; style enum
+  (should-error (jetpacs-text "x" :max-lines 0))         ; positive integer
+  (should-error (jetpacs-text "x" :font-weight 950))     ; 100..900
+  (should-error (jetpacs-icon "bad!"))                   ; name is a §4.4 id
+  (should-error (jetpacs-image "http://x/a.png"))        ; https/data:image only
+  (should-error (jetpacs-date-stamp :day 32))            ; 1..31
+  (should-error (jetpacs-date-stamp :year 2026.0))       ; integer
+  (should-error (jetpacs-progress :value 2))             ; 0..1
+  (should-error (jetpacs-empty-state :action-label "Go")) ; both-or-neither
+  (should (jetpacs-image "data:image/png;base64,AAAA")))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

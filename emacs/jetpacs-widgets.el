@@ -391,6 +391,16 @@ keep their elisp int/float type.  Leaf strings and numbers are escaped by
    ((eq value :false) "false")           ; tolerate ebp.el's strict sentinel
    ((vectorp value)
     (concat "[" (mapconcat #'jetpacs-node->canonical-json value ",") "]"))
+   ((hash-table-p value)                  ; a string-keyed JSON object (e.g. month_grid marks)
+    (let (pairs)
+      (maphash (lambda (k v) (push (cons k v) pairs)) value)
+      (setq pairs (sort pairs (lambda (a b) (string< (car a) (car b)))))
+      (concat "{"
+              (mapconcat (lambda (p)
+                           (concat (json-serialize (car p)) ":"
+                                   (jetpacs-node->canonical-json (cdr p))))
+                         pairs ",")
+              "}")))
    ((and (consp value) (keywordp (car value)))
     (let (pairs (kvs value))
       (while kvs
@@ -1236,6 +1246,155 @@ or a list of `jetpacs-toolbar-item's.  Booleans take t or :json-false."
                  :complete complete :chromeless chromeless
                  :publish_state publish-state :autofocus autofocus
                  :toolbar toolbar :enabled enabled))
+
+;;;; Visualization nodes (§17.5)
+
+(defconst jetpacs--chart-kinds '("line" "bar" "area" "sparkline"))
+
+(cl-defun jetpacs-chart-point (x y &key meta)
+  "A ChartPoint {x, y, meta?} for `jetpacs-chart-series' (SPEC §17.5).
+X and Y are finite numbers; META is a JSON-data object (a plist)."
+  (jetpacs--check-number x ":x" nil nil)
+  (jetpacs--check-number y ":y" nil nil)
+  (jetpacs--node nil :x x :y y :meta meta))
+
+(cl-defun jetpacs-chart-series (points &key name color)
+  "A ChartSeries {points, name?, color?} (SPEC §17.5).
+POINTS is a list from `jetpacs-chart-point'."
+  (when name (jetpacs--require-string name ":name"))
+  (when color (jetpacs--check-color color))
+  (jetpacs--node nil :points (vconcat points) :name name :color color))
+
+(cl-defun jetpacs-chart (series &key kind height y-range summary on-point-tap
+                                children)
+  "A chart over SERIES, a list from `jetpacs-chart-series' (SPEC §17.5).
+The x-axis is ORDINAL.  KIND is line(default)/bar/area/sparkline; HEIGHT a
+positive dp; Y-RANGE a two-number list with min < max; SUMMARY an accessible
+string; ON-POINT-TAP an ActionDescriptor; CHILDREN a fallback node list."
+  (when kind (setq kind (jetpacs--check-enum kind jetpacs--chart-kinds ":kind")))
+  (when height (jetpacs--check-number height ":height" nil nil t))
+  (when y-range
+    (unless (and (listp y-range) (= (length y-range) 2)
+                 (jetpacs--finite-number-p (nth 0 y-range))
+                 (jetpacs--finite-number-p (nth 1 y-range))
+                 (< (nth 0 y-range) (nth 1 y-range)))
+      (error "jetpacs-chart: :y-range must be [min max] with min < max (SPEC 17.5)")))
+  (when summary (jetpacs--require-string summary ":summary"))
+  (when on-point-tap (jetpacs--check-descriptor on-point-tap ":on-point-tap"))
+  (jetpacs--node "chart"
+                 :series (vconcat series) :kind kind :height height
+                 :y_range (and y-range (vconcat y-range))
+                 :summary summary :on_point_tap on-point-tap
+                 :children (and children (vconcat children))))
+
+(cl-defun jetpacs-canvas-line (x1 y1 x2 y2 &key color width)
+  "A canvas `line' op (SPEC §17.5).  WIDTH is a non-negative stroke width."
+  (dolist (c (list x1 y1 x2 y2)) (jetpacs--check-number c "line coordinate" nil nil))
+  (when color (jetpacs--check-color color))
+  (when width (jetpacs--check-number width ":width" 0 nil))
+  (jetpacs--node nil :op "line" :x1 x1 :y1 y1 :x2 x2 :y2 y2 :color color :width width))
+
+(cl-defun jetpacs-canvas-rect (x y width height &key color fill stroke-width)
+  "A canvas `rect' op (SPEC §17.5).  WIDTH/HEIGHT non-negative; FILL a Color."
+  (dolist (c (list x y)) (jetpacs--check-number c "rect coordinate" nil nil))
+  (jetpacs--check-number width ":width" 0 nil)
+  (jetpacs--check-number height ":height" 0 nil)
+  (when color (jetpacs--check-color color))
+  (when fill (jetpacs--check-color fill))
+  (when stroke-width (jetpacs--check-number stroke-width ":stroke_width" 0 nil))
+  (jetpacs--node nil :op "rect" :x x :y y :width width :height height
+                 :color color :fill fill :stroke_width stroke-width))
+
+(cl-defun jetpacs-canvas-circle (cx cy radius &key color fill stroke-width)
+  "A canvas `circle' op (SPEC §17.5).  RADIUS non-negative; FILL a Color."
+  (dolist (c (list cx cy)) (jetpacs--check-number c "circle coordinate" nil nil))
+  (jetpacs--check-number radius ":radius" 0 nil)
+  (when color (jetpacs--check-color color))
+  (when fill (jetpacs--check-color fill))
+  (when stroke-width (jetpacs--check-number stroke-width ":stroke_width" 0 nil))
+  (jetpacs--node nil :op "circle" :cx cx :cy cy :radius radius
+                 :color color :fill fill :stroke_width stroke-width))
+
+(cl-defun jetpacs-canvas-point (x y)
+  "A CanvasPoint {x, y} for `jetpacs-canvas-path' (SPEC §17.5)."
+  (jetpacs--check-number x ":x" nil nil)
+  (jetpacs--check-number y ":y" nil nil)
+  (jetpacs--node nil :x x :y y))
+
+(cl-defun jetpacs-canvas-path (points &key color fill stroke-width closed)
+  "A canvas `path' op over POINTS (from `jetpacs-canvas-point') (SPEC §17.5)."
+  (when color (jetpacs--check-color color))
+  (when fill (jetpacs--check-color fill))
+  (when stroke-width (jetpacs--check-number stroke-width ":stroke_width" 0 nil))
+  (when closed (jetpacs--check-bool closed ":closed"))
+  (jetpacs--node nil :op "path" :points (vconcat points)
+                 :color color :fill fill :stroke_width stroke-width :closed closed))
+
+(cl-defun jetpacs-canvas-text (x y text &key color size)
+  "A canvas `text' op drawing TEXT at (X, Y) (SPEC §17.5)."
+  (jetpacs--check-number x ":x" nil nil)
+  (jetpacs--check-number y ":y" nil nil)
+  (jetpacs--require-string text ":text")
+  (when color (jetpacs--check-color color))
+  (when size (jetpacs--check-number size ":size" 0 nil))
+  (jetpacs--node nil :op "text" :x x :y y :text text :color color :size size))
+
+(cl-defun jetpacs-canvas (width height ops &key children)
+  "A canvas of WIDTH x HEIGHT drawing OPS (SPEC §17.5).
+WIDTH and HEIGHT MUST be positive; OPS is a list of canvas ops
+\(`jetpacs-canvas-line' etc.); CHILDREN is a fallback node list."
+  (jetpacs--check-number width ":width" nil nil t)
+  (jetpacs--check-number height ":height" nil nil t)
+  (jetpacs--node "canvas" :width width :height height :ops (vconcat ops)
+                 :children (and children (vconcat children))))
+
+(defun jetpacs--check-year-month (value what)
+  "Signal unless VALUE is a §17.5 `YYYY-MM' string with month 01-12."
+  (unless (and (stringp value)
+               (string-match "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)\\'" value))
+    (error "jetpacs: %s must be YYYY-MM (SPEC 17.5), got %S" what value))
+  (let ((mo (string-to-number (match-string 2 value))))
+    (unless (<= 1 mo 12) (error "jetpacs: %s month must be 01-12, got %S" what value)))
+  value)
+
+(defun jetpacs--marks->map (marks)
+  "Convert MARKS, an alist of (YYYY-MM-DD . mark), to a string-keyed hash-table.
+Signals on an invalid or duplicate date key."
+  (let ((h (make-hash-table :test 'equal)))
+    (dolist (cell marks)
+      (let ((date (car cell)))
+        (jetpacs--check-date date)
+        (when (gethash date h)
+          (error "jetpacs-month-grid: duplicate mark date %S (SPEC 17.5)" date))
+        (puthash date (cdr cell) h)))
+    h))
+
+(cl-defun jetpacs-month-mark (dots &key color)
+  "A month_grid mark {dots, color?} (SPEC §17.5).
+DOTS is an integer 0..3; COLOR a §16.6 color."
+  (jetpacs--check-integer dots ":dots" 0 3)
+  (when color (jetpacs--check-color color))
+  (jetpacs--node nil :dots dots :color color))
+
+(cl-defun jetpacs-month-grid (month &key marks selected min-month max-month
+                                    on-day-tap on-month-change children)
+  "A month grid for MONTH, a `YYYY-MM' string (SPEC §17.5).
+MARKS is an alist of (YYYY-MM-DD . mark) from `jetpacs-month-mark'; SELECTED
+a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
+  (jetpacs--check-year-month month ":month")
+  (when selected (jetpacs--check-date selected))
+  (when min-month (jetpacs--check-year-month min-month ":min_month"))
+  (when max-month (jetpacs--check-year-month max-month ":max_month"))
+  (when (and min-month max-month (string> min-month max-month))
+    (error "jetpacs-month-grid: :min-month must not follow :max-month (SPEC 17.5)"))
+  (when on-day-tap (jetpacs--check-descriptor on-day-tap ":on-day-tap"))
+  (when on-month-change (jetpacs--check-descriptor on-month-change ":on-month-change"))
+  (jetpacs--node "month_grid"
+                 :month month
+                 :marks (and marks (jetpacs--marks->map marks))
+                 :selected selected :min_month min-month :max_month max-month
+                 :on_day_tap on-day-tap :on_month_change on-month-change
+                 :children (and children (vconcat children))))
 
 (provide 'jetpacs-widgets)
 ;;; jetpacs-widgets.el ends here

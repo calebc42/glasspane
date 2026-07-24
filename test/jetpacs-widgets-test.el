@@ -440,6 +440,57 @@
   ;; only the 3-char $${ escapes; $$${input:X} then a real token = one token
   (should (jetpacs-toolbar-item :label "L" :snippet "$$${input:X}${input:Y}")))
 
+;;;; Byte-parity: Visualization nodes (widgets.golden 56-58, JW-5)
+
+(ert-deftest jetpacs-widgets/viz-goldens ()
+  "Visualization constructors build byte-identically to widgets.golden 56-58."
+  (let ((g (jetpacs-test--golden-map "widgets")))
+    (cl-flet ((chk (idx form)
+                (ert-info ((format "widgets.golden line %s" idx))
+                  (should (equal (jetpacs-node->canonical-json form)
+                                 (gethash idx g))))))
+      (chk "56" (jetpacs-chart
+                 (list (jetpacs-chart-series
+                        (list (jetpacs-chart-point 0 1)
+                              (jetpacs-chart-point 1 3 :meta '(:n "b")))
+                        :color "primary" :name "steps"))
+                 :height 120 :kind 'bar :on-point-tap (jetpacs-action "point.tap")
+                 :summary "Steps rose from 1 to 3" :y-range '(0 10)))
+      (chk "57" (jetpacs-canvas
+                 100 50
+                 (list (jetpacs-canvas-line 0 0 100 50 :color "#333333" :width 2)
+                       (jetpacs-canvas-rect 5 5 20 10 :color "outline"
+                                            :fill "#eeeeee" :stroke-width 1)
+                       (jetpacs-canvas-circle 50 25 10 :color "primary")
+                       (jetpacs-canvas-path
+                        (list (jetpacs-canvas-point 0 0) (jetpacs-canvas-point 10 10))
+                        :closed :json-false :color "#000000")
+                       (jetpacs-canvas-text 10 40 "label" :size 12))
+                 :children (list (jetpacs-text "fallback"))))
+      (chk "58" (jetpacs-month-grid
+                 "2026-07"
+                 :marks (list (cons "2026-07-04" (jetpacs-month-mark 2 :color "primary")))
+                 :max-month "2026-12" :min-month "2026-01"
+                 :on-day-tap (jetpacs-action "day.tap")
+                 :on-month-change (jetpacs-action "month.nav")
+                 :selected "2026-07-22")))))
+
+(ert-deftest jetpacs-widgets/viz-validation ()
+  "Visualization constructors enforce their §17.5 rules."
+  (should-error (jetpacs-chart-point "x" 1))                  ; x finite number
+  (should-error (jetpacs-chart (list) :height -1))            ; height positive
+  (should-error (jetpacs-chart (list) :y-range '(10 0)))      ; min < max
+  (should-error (jetpacs-chart (list) :kind 'pie))            ; kind enum
+  (should-error (jetpacs-canvas 0 50 (list)))                 ; width positive
+  (should-error (jetpacs-canvas-rect 0 0 -1 5))               ; width non-negative
+  (should-error (jetpacs-canvas-circle 0 0 5 :fill "#12"))     ; fill is a Color (bad hex)
+  (should-error (jetpacs-month-mark 4))                       ; dots 0..3
+  (should-error (jetpacs-month-grid "2026-13"))               ; YYYY-MM month range
+  (should-error (jetpacs-month-grid "2026-07" :min-month "2026-12" :max-month "2026-01"))
+  (should-error (jetpacs-month-grid
+                 "2026-07"
+                 :marks (list (cons "bad-date" (jetpacs-month-mark 1))))))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

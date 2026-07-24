@@ -412,6 +412,34 @@
   (should (jetpacs-toolbar-item :label "L" :snippet "$${input:A} ${input:B}"))
   (should (jetpacs-toolbar-item :label "L" :snippet "${input:Prompt}")))
 
+(ert-deftest jetpacs-widgets/editor-audit-fixes ()
+  "Post-audit: nested command->document, long_press value, snippet scan."
+  ;; command nested in a menu still requires document
+  (should-error (jetpacs-editor "e" :toolbar
+                                (list (jetpacs-toolbar-item
+                                       :icon "m"
+                                       :menu (list (jetpacs-toolbar-item
+                                                    :command "cmd" :icon "i"))))))
+  (should (jetpacs-editor "e" :document "doc:x" :toolbar
+                          (list (jetpacs-toolbar-item
+                                 :icon "m"
+                                 :menu (list (jetpacs-toolbar-item
+                                              :command "cmd" :icon "i"))))))
+  ;; command in a long_press also requires document
+  (should-error (jetpacs-editor "e" :toolbar
+                                (list (jetpacs-toolbar-item
+                                       :label "L" :snippet "x"
+                                       :long-press '(:command "cmd")))))
+  ;; long_press op VALUE is validated (snippet with two input tokens)
+  (should-error (jetpacs-toolbar-item :label "L" :snippet "a"
+                                      :long-press '(:snippet "${input:A}${input:B}")))
+  (should (jetpacs-toolbar-item :label "L" :snippet "a"
+                                :long-press '(:command "org-refile")))
+  ;; snippet: a ${input:} inside another token's prompt body is not double-counted
+  (should (jetpacs-toolbar-item :label "L" :snippet "${input:pre ${input:X}}"))
+  ;; only the 3-char $${ escapes; $$${input:X} then a real token = one token
+  (should (jetpacs-toolbar-item :label "L" :snippet "$$${input:X}${input:Y}")))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

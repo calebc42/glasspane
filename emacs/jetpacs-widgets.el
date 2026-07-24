@@ -1116,16 +1116,20 @@ Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
 
 (defun jetpacs--check-snippet (s)
   "Signal unless S is a valid §17.7 snippet string.
-A snippet MUST contain at most one `${input:...}' token; `$$' escapes the
-following `${' so `$${' does not begin a placeholder."
+A snippet MUST contain at most one `${input:...}' token.  Only the 3-char
+`$${' escapes the following `${', and a token's prompt body runs to its
+closing `}' and is not rescanned."
   (jetpacs--require-string s ":snippet")
   (let ((i 0) (n (length s)) (count 0))
     (while (< i n)
       (cond
-       ((and (< (1+ i) n) (= (aref s i) ?$) (= (aref s (1+ i)) ?$))
-        (setq i (+ i 2)))                                 ; $$ escape
+       ((and (<= (+ i 3) n) (= (aref s i) ?$) (= (aref s (1+ i)) ?$)
+             (= (aref s (+ i 2)) ?\{))
+        (setq i (+ i 3)))                                 ; $${ escape -> literal ${
        ((eq t (compare-strings "${input:" nil nil s i (min n (+ i 8))))
-        (setq count (1+ count) i (+ i 8)))
+        (setq count (1+ count))
+        (let ((close (cl-search "}" s :start2 (+ i 8))))
+          (setq i (if close (1+ close) n))))              ; skip past the closing }
        (t (setq i (1+ i)))))
     (when (> count 1)
       (error "jetpacs: snippet must contain at most one ${input:...} token (SPEC 17.7)")))
@@ -1137,12 +1141,17 @@ following `${' so `$${' does not begin a placeholder."
     (error "jetpacs: :long-press must be an operation plist (SPEC 17.7), got %S" lp))
   (when (plist-member lp :menu)
     (error "jetpacs: :long-press must not contain a :menu op (SPEC 17.7)"))
-  (let ((ops (delq nil (list (and (plist-member lp :snippet) t)
-                             (and (plist-member lp :on_tap) t)
-                             (and (plist-member lp :command) t)
-                             (and (plist-member lp :line) t)))))
-    (unless (= (length ops) 1)
-      (error "jetpacs: :long-press must contain exactly one non-menu op (SPEC 17.7)")))
+  (let ((present (delq nil (list (and (plist-member lp :snippet) :snippet)
+                                 (and (plist-member lp :on_tap) :on_tap)
+                                 (and (plist-member lp :command) :command)
+                                 (and (plist-member lp :line) :line)))))
+    (unless (= (length present) 1)
+      (error "jetpacs: :long-press must contain exactly one non-menu op (SPEC 17.7)"))
+    (pcase (car present)
+      (:snippet (jetpacs--check-snippet (plist-get lp :snippet)))
+      (:on_tap (jetpacs--check-descriptor (plist-get lp :on_tap) ":on_tap"))
+      (:command (jetpacs--check-identifier (plist-get lp :command) ":command"))
+      (:line (jetpacs--check-enum (plist-get lp :line) jetpacs--line-ops ":line"))))
   lp)
 
 (cl-defun jetpacs-toolbar-item (&key label icon snippet on-tap menu command line
@@ -1178,6 +1187,17 @@ MUST have LABEL or ICON plus exactly one primary op: :snippet (a string),
                  :command command :line line
                  :placement placement :long_press long-press))
 
+(defun jetpacs--toolbar-has-command-p (items)
+  "Non-nil when any ToolbarItem in ITEMS carries a `command' op — at top
+level, inside a `menu', or in a `long_press' (SPEC §17.7)."
+  (cl-some (lambda (item)
+             (or (plist-member item :command)
+                 (let ((m (plist-get item :menu)))
+                   (and m (jetpacs--toolbar-has-command-p (append m nil))))
+                 (let ((lp (plist-get item :long_press)))
+                   (and lp (plist-member lp :command)))))
+           items))
+
 (cl-defun jetpacs-editor (id &key document value on-save on-enter read-only syntax
                              line-numbers complete chromeless publish-state autofocus
                              toolbar enabled)
@@ -1205,9 +1225,8 @@ or a list of `jetpacs-toolbar-item's.  Booleans take t or :json-false."
    ((null toolbar))
    ((stringp toolbar) (jetpacs--check-identifier toolbar ":toolbar"))
    ((and (listp toolbar) (jetpacs--node-p (car toolbar)))
-    (dolist (item toolbar)
-      (when (and (plist-member item :command) (not document))
-        (error "jetpacs-editor: a toolbar :command op requires :document (SPEC 17.7)")))
+    (when (and (not document) (jetpacs--toolbar-has-command-p toolbar))
+      (error "jetpacs-editor: a toolbar :command op requires :document (SPEC 17.4/17.7)"))
     (setq toolbar (vconcat toolbar)))
    (t (error "jetpacs-editor: :toolbar must be a registered id string or a list of toolbar items, got %S" toolbar)))
   (jetpacs--node "editor"

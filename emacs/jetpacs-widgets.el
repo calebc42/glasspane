@@ -210,20 +210,27 @@ the field.  Returns the normalized string form."
       (error "jetpacs: %s must be one of %S, got %S" what allowed v))
     s))
 
+(defconst jetpacs--max-safe-integer 9007199254740991
+  "The §4.2 EBP integer ceiling (2^53 - 1); integers must lie in ±this.")
+
 (defun jetpacs--check-integer (v what min max)
   "Signal unless V is an integer within inclusive [MIN,MAX] (nil = unbounded);
-WHAT names the field.  Returns V."
+WHAT names the field.  The §4.2 ceiling (`jetpacs--max-safe-integer') is
+always enforced regardless of MAX.  Returns V."
   (unless (integerp v)
     (error "jetpacs: %s must be an integer (SPEC 4.2), got %S" what v))
+  (unless (<= (- jetpacs--max-safe-integer) v jetpacs--max-safe-integer)
+    (error "jetpacs: %s exceeds the §4.2 integer range, got %S" what v))
   (when (and min (< v min)) (error "jetpacs: %s must be >= %s, got %S" what min v))
   (when (and max (> v max)) (error "jetpacs: %s must be <= %s, got %S" what max v))
   v)
 
 (defun jetpacs--check-font-weight (v)
-  "Signal unless V is a §17.2 font weight: a weight name or a number 100..900."
-  (unless (or (and (stringp v) (not (string-empty-p v)))
-              (and (integerp v) (<= 100 v 900)))
-    (error "jetpacs: font_weight must be a weight name or integer 100..900, got %S" v))
+  "Signal unless V is a §17.1 font weight: the string \"normal\" or \"bold\",
+or an integer multiple of 100 from 100 through 900."
+  (unless (or (member v '("normal" "bold"))
+              (and (integerp v) (<= 100 v 900) (zerop (mod v 100))))
+    (error "jetpacs: font_weight must be \"normal\"/\"bold\" or an integer multiple of 100 in 100..900, got %S" v))
   v)
 
 (defun jetpacs--check-badge (v)
@@ -240,6 +247,8 @@ runtime concern (JW-7)."
                (or (string-prefix-p "https://" url)
                    (string-prefix-p "data:image/" url)))
     (error "jetpacs: image url must be https:// or data:image/ (SPEC 17.2), got %S" url))
+  (when (string-prefix-p "data:image/svg+xml" url)
+    (error "jetpacs: data:image/svg+xml is an active format, rejected before decode (SPEC 17.2)"))
   url)
 
 ;;;; The node funnel
@@ -485,10 +494,11 @@ STYLE is the base text style."
   (jetpacs--node "rich_text" :spans (vconcat spans) :style style))
 
 (cl-defun jetpacs-icon (name &key size color badge content-description)
-  "An icon node named NAME, a §4.4 identifier (SPEC §17.2).
-SIZE a non-negative dp; COLOR a §16.6 color; BADGE a string or number;
-CONTENT-DESCRIPTION an accessibility label."
-  (jetpacs--check-identifier name ":name")
+  "An icon node named NAME, a string (SPEC §17.2; amendment 64).
+An unresolved NAME renders a placeholder or nothing, so any string is
+valid input.  SIZE a non-negative dp; COLOR a §16.6 color; BADGE a string
+or number; CONTENT-DESCRIPTION an accessibility label."
+  (jetpacs--require-string name ":name")
   (when size (jetpacs--check-number size ":size" 0 nil))
   (when color (jetpacs--check-color color))
   (when badge (jetpacs--check-badge badge))

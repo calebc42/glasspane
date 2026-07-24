@@ -123,13 +123,30 @@
   (should-error (jetpacs-text "x" :style 'bogus))        ; style enum
   (should-error (jetpacs-text "x" :max-lines 0))         ; positive integer
   (should-error (jetpacs-text "x" :font-weight 950))     ; 100..900
-  (should-error (jetpacs-icon "bad!"))                   ; name is a §4.4 id
+  (should-error (jetpacs-icon 42))                       ; name must be a string
+  (should (jetpacs-icon "arrow up"))                     ; non-identifier name ok (amend 64)
   (should-error (jetpacs-image "http://x/a.png"))        ; https/data:image only
   (should-error (jetpacs-date-stamp :day 32))            ; 1..31
   (should-error (jetpacs-date-stamp :year 2026.0))       ; integer
   (should-error (jetpacs-progress :value 2))             ; 0..1
   (should-error (jetpacs-empty-state :action-label "Go")) ; both-or-neither
   (should (jetpacs-image "data:image/png;base64,AAAA")))
+
+(ert-deftest jetpacs-widgets/content-validation-domains ()
+  "Post-audit domain tightenings (§17.1 font_weight, §17.2 active image, §4.2 int)."
+  ;; font_weight: only normal/bold or a multiple of 100 in 100..900
+  (should-error (jetpacs-text "x" :font-weight "medium"))
+  (should-error (jetpacs-text "x" :font-weight "Bold"))   ; case-sensitive
+  (should-error (jetpacs-text "x" :font-weight 150))       ; not a multiple of 100
+  (should-error (jetpacs-span "x" :font-weight 999))
+  (should (jetpacs-text "x" :font-weight "normal"))
+  (should (jetpacs-text "x" :font-weight 700))
+  (should (jetpacs-span "x" :font-weight 100))
+  ;; active image format rejected before decode
+  (should-error (jetpacs-image "data:image/svg+xml;base64,AAAA"))
+  ;; §4.2 integer ceiling
+  (should-error (jetpacs-date-stamp :year (1+ 9007199254740991)))
+  (should (jetpacs-date-stamp :year 9007199254740991)))
 
 ;;;; The canonical serializer
 

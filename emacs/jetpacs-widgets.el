@@ -192,6 +192,23 @@ Runs VAL-FN on each (KEY VALUE); WHAT names the field."
   (unless (= (length fields) (length (delete-dups (copy-sequence fields))))
     (error "jetpacs: capture_fields must be distinct (SPEC 14.1), got %S" fields)))
 
+(defun jetpacs--check-descriptor (v what)
+  "Signal unless V is an ActionDescriptor: a plist carrying exactly one of
+:action or :builtin (SPEC §14).  WHAT names the field.  Returns V."
+  (unless (and (consp v) (keywordp (car v))
+               (let ((a (plist-member v :action)) (b (plist-member v :builtin)))
+                 (and (or a b) (not (and a b)))))
+    (error "jetpacs: %s must be an action/builtin descriptor (SPEC 14), got %S" what v))
+  v)
+
+(defun jetpacs--check-swipe (v what)
+  "Signal unless V is a swipe side: a plist with :label and :on_trigger (§17.3).
+WHAT names the field.  Returns V."
+  (unless (and (consp v) (keywordp (car v))
+               (plist-member v :label) (plist-member v :on_trigger))
+    (error "jetpacs: %s must be a swipe side with :label and :on_trigger (SPEC 17.3), got %S" what v))
+  v)
+
 (defun jetpacs--flag (x)
   "Return t when X is non-nil (JSON true), else nil (member omitted).
 Use for a boolean member whose false form is its default and is left off
@@ -477,6 +494,7 @@ makes the run a link."
   (when font-weight (jetpacs--check-font-weight font-weight))
   (when color (jetpacs--check-color color))
   (when bg (jetpacs--check-color bg))
+  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
   (jetpacs--node nil
                  :text text
                  :font_weight font-weight
@@ -547,6 +565,7 @@ an ActionDescriptor.  ACTION-LABEL and ON-TAP are both-or-neither."
   (when action-label (jetpacs--require-string action-label ":action_label"))
   (unless (eq (null action-label) (null on-tap))
     (error "jetpacs-empty-state: :action-label and :on-tap are both-or-neither (SPEC 17.2)"))
+  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
   (jetpacs--node "empty_state" :icon icon :title title :caption caption
                  :action_label action-label :on_tap on-tap))
 
@@ -653,13 +672,15 @@ Trailing options: :spacing, :run-spacing (dp), :align (top/center/bottom),
 Trailing options: :alignment (top_start..bottom_end), :on-tap."
   (let* ((split (jetpacs--children-and-opts args))
          (opts (cdr split))
-         (alignment (plist-get opts :alignment)))
+         (alignment (plist-get opts :alignment))
+         (on-tap (plist-get opts :on-tap)))
     (when alignment
       (setq alignment (jetpacs--check-enum alignment jetpacs--box-alignments ":alignment")))
+    (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
     (jetpacs--node "box"
                    :children (jetpacs--as-children (car split))
                    :alignment alignment
-                   :on_tap (plist-get opts :on-tap))))
+                   :on_tap on-tap)))
 
 (defun jetpacs-surface (&rest args)
   "A visual surface container (SPEC §17.3; distinct from a protocol Surface).
@@ -707,6 +728,7 @@ an ActionDescriptor dispatched at most once per gesture."
   (jetpacs--require-string label ":label")
   (when icon (jetpacs--check-identifier icon ":icon"))
   (when color (jetpacs--check-color color))
+  (jetpacs--check-descriptor on-trigger ":on-trigger")   ; required (§17.3)
   (jetpacs--node nil :label label :icon icon :color color :on_trigger on-trigger))
 
 (defun jetpacs-card (&rest args)
@@ -714,13 +736,21 @@ an ActionDescriptor dispatched at most once per gesture."
 Trailing options: :on-tap, :on-long-tap (ActionDescriptors); :swipe-start,
 :swipe-end (from `jetpacs-swipe')."
   (let* ((split (jetpacs--children-and-opts args))
-         (opts (cdr split)))
+         (opts (cdr split))
+         (on-tap (plist-get opts :on-tap))
+         (on-long-tap (plist-get opts :on-long-tap))
+         (swipe-start (plist-get opts :swipe-start))
+         (swipe-end (plist-get opts :swipe-end)))
+    (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
+    (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
+    (when swipe-start (jetpacs--check-swipe swipe-start ":swipe-start"))
+    (when swipe-end (jetpacs--check-swipe swipe-end ":swipe-end"))
     (jetpacs--node "card"
                    :children (jetpacs--as-children (car split))
-                   :on_tap (plist-get opts :on-tap)
-                   :on_long_tap (plist-get opts :on-long-tap)
-                   :swipe_start (plist-get opts :swipe-start)
-                   :swipe_end (plist-get opts :swipe-end))))
+                   :on_tap on-tap
+                   :on_long_tap on-long-tap
+                   :swipe_start swipe-start
+                   :swipe_end swipe-end)))
 
 (cl-defun jetpacs-collapsible (id header &rest args)
   "A collapsible section with required ID and HEADER node, plus children (§17.3).
@@ -731,15 +761,21 @@ Trailing options: :collapsed (t or :json-false), :on-long-tap, :swipe-start,
     (error "jetpacs-collapsible: HEADER must be a node, got %S" header))
   (let* ((split (jetpacs--children-and-opts args))
          (opts (cdr split))
-         (collapsed (plist-get opts :collapsed)))
+         (collapsed (plist-get opts :collapsed))
+         (on-long-tap (plist-get opts :on-long-tap))
+         (swipe-start (plist-get opts :swipe-start))
+         (swipe-end (plist-get opts :swipe-end)))
     (when collapsed (jetpacs--check-bool collapsed ":collapsed"))
+    (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
+    (when swipe-start (jetpacs--check-swipe swipe-start ":swipe-start"))
+    (when swipe-end (jetpacs--check-swipe swipe-end ":swipe-end"))
     (jetpacs--node "collapsible"
                    :id id :header header
                    :children (jetpacs--as-children (car split))
                    :collapsed collapsed
-                   :on_long_tap (plist-get opts :on-long-tap)
-                   :swipe_start (plist-get opts :swipe-start)
-                   :swipe_end (plist-get opts :swipe-end))))
+                   :on_long_tap on-long-tap
+                   :swipe_start swipe-start
+                   :swipe_end swipe-end)))
 
 (cl-defun jetpacs-reorderable-list (items &key on-reorder)
   "A reorderable list of ITEMS (SPEC §17.3).
@@ -753,6 +789,7 @@ ActionDescriptor.  ITEMS is a list of node plists."
         (when (member k seen)
           (error "jetpacs-reorderable-list: duplicate item key/id %S (SPEC 17.3)" k))
         (push k seen))))
+  (when on-reorder (jetpacs--check-descriptor on-reorder ":on-reorder"))
   (jetpacs--node "reorderable_list"
                  :items (vconcat items)
                  :on_reorder on-reorder))
@@ -777,6 +814,7 @@ ON-CHANGE an ActionDescriptor; ID a §4.4 identifier."
     (when scrollable (jetpacs--check-bool scrollable ":scrollable"))
     (when pager-only (jetpacs--check-bool pager-only ":pager-only"))
     (when id (jetpacs--check-identifier id ":id"))
+    (when on-change (jetpacs--check-descriptor on-change ":on-change"))
     (jetpacs--node "tabs"
                    :items (vconcat items)
                    :children (vconcat children)
@@ -789,6 +827,8 @@ ON-CHANGE an ActionDescriptor; ID a §4.4 identifier."
 (cl-defun jetpacs-table-cell (spans &key on-tap on-long-tap)
   "A table cell {spans, on_tap?, on_long_tap?} (SPEC §17.3).
 SPANS is a list from `jetpacs-span'."
+  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
+  (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
   (jetpacs--node nil :spans (vconcat spans) :on_tap on-tap :on_long_tap on-long-tap))
 
 (defun jetpacs-table-row (kind &rest cells)
@@ -806,6 +846,8 @@ CELLS are from `jetpacs-table-cell'.  For a rule row use `jetpacs-table-rule'."
   "A table of ROWS (from `jetpacs-table-row'/`jetpacs-table-rule') (SPEC §17.3).
 ALIGNS is a list of start/center/end (one per column); :on-add-row and
 :on-add-col are ActionDescriptors."
+  (when on-add-row (jetpacs--check-descriptor on-add-row ":on-add-row"))
+  (when on-add-col (jetpacs--check-descriptor on-add-col ":on-add-col"))
   (jetpacs--node "table"
                  :rows (vconcat rows)
                  :aligns (and aligns

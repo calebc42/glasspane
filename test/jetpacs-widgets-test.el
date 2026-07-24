@@ -229,6 +229,30 @@
   (should-error (jetpacs-table-row 'footer (jetpacs-table-cell (list (jetpacs-span "x")))))
   (should-error (jetpacs-collapsible "s" "not-a-node")))
 
+(ert-deftest jetpacs-widgets/descriptor-validation ()
+  "Post-audit: on_* / on_trigger / swipe fields are validated (§17.1, §17.3)."
+  ;; swipe on_trigger is required (§17.3 {icon?, label, color?, on_trigger})
+  (should-error (jetpacs-swipe "Done"))
+  (should (jetpacs-swipe "Done" :on-trigger (jetpacs-action "demo.done")))
+  ;; on_* must be an action/builtin descriptor, exactly one discriminator
+  (should-error (jetpacs-box (jetpacs-text "a") :on-tap "not-a-descriptor"))
+  (should-error (jetpacs-box (jetpacs-text "a") :on-tap '(:action "x" :builtin "y")))
+  (should-error (jetpacs-tabs (list (jetpacs-tab-item "A")) (list (jetpacs-text "1"))
+                              :on-change '(:foo 1)))
+  (should-error (jetpacs-span "x" :on-tap "nope"))
+  (should (jetpacs-box (jetpacs-text "a") :on-tap (jetpacs-view-switch "detail")))
+  ;; swipe_start/swipe_end must be swipe sides (label + on_trigger)
+  (should-error (jetpacs-card (jetpacs-text "a") :swipe-start '(:label "x")))
+  (should (jetpacs-card (jetpacs-text "a")
+                        :swipe-start (jetpacs-swipe "x" :on-trigger (jetpacs-action "a.b")))))
+
+(ert-deftest jetpacs-widgets/layout-negative-dp ()
+  "Negative dp values are rejected (§17.3)."
+  (should-error (jetpacs-surface (jetpacs-text "a") :elevation -1))
+  (should-error (jetpacs-lazy-column (jetpacs-text "a") :spacing -1))
+  (should-error (jetpacs-divider :thickness -1))
+  (should-error (jetpacs-flow-row (jetpacs-text "a") :run-spacing -1)))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

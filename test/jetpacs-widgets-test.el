@@ -357,6 +357,61 @@
   (should-error (jetpacs-enum-list "e" (list (jetpacs-enum-option "A" "a"))
                                    :multi-select t :value "a")))
 
+;;;; Byte-parity: editor + toolbar (widgets.golden 45-47, JW-4)
+
+(ert-deftest jetpacs-widgets/editor-goldens ()
+  "Editor + toolbar constructors build byte-identically to widgets.golden 45-47."
+  (let ((g (jetpacs-test--golden-map "widgets")))
+    (cl-flet ((chk (idx form)
+                (ert-info ((format "widgets.golden line %s" idx))
+                  (should (equal (jetpacs-node->canonical-json form)
+                                 (gethash idx g))))))
+      (chk "45" (jetpacs-editor "body"))
+      (chk "46" (jetpacs-editor "body"
+                                :autofocus :json-false :chromeless :json-false
+                                :line-numbers t
+                                :on-enter (jetpacs-action "note.enter")
+                                :on-save (jetpacs-action "note.save")
+                                :publish-state t :read-only :json-false :syntax "org"
+                                :toolbar (list
+                                          (jetpacs-toolbar-item :label "TODO"
+                                                                :placement 'line-start
+                                                                :snippet "TODO ")
+                                          (jetpacs-toolbar-item
+                                           :icon "menu"
+                                           :menu (list (jetpacs-toolbar-item
+                                                        :label "Date" :snippet "${date}"))))
+                                :value "local text"))
+      (chk "47" (jetpacs-editor "doc" :complete t :document "doc:notes/123"
+                                :toolbar (list (jetpacs-toolbar-item
+                                                :command "org-refile" :icon "refile")))))))
+
+(ert-deftest jetpacs-widgets/editor-validation ()
+  "Editor + toolbar enforce their §17.4/§17.7 rules."
+  ;; complete requires document
+  (should-error (jetpacs-editor "e" :complete t))
+  (should (jetpacs-editor "e" :complete t :document "doc:x"))
+  ;; a toolbar command op requires document
+  (should-error (jetpacs-editor "e" :toolbar (list (jetpacs-toolbar-item
+                                                    :command "cmd" :icon "i"))))
+  (should (jetpacs-editor "e" :document "doc:x"
+                          :toolbar (list (jetpacs-toolbar-item :command "cmd" :icon "i"))))
+  ;; toolbar-item: label or icon required; exactly one primary op
+  (should-error (jetpacs-toolbar-item :snippet "x"))                 ; no label/icon
+  (should-error (jetpacs-toolbar-item :label "L"))                   ; zero ops
+  (should-error (jetpacs-toolbar-item :label "L" :snippet "x" :line 'promote)) ; two ops
+  (should-error (jetpacs-toolbar-item :label "L" :line 'bogus))      ; line enum
+  ;; menu items must be non-menu
+  (should-error (jetpacs-toolbar-item
+                 :icon "m"
+                 :menu (list (jetpacs-toolbar-item :icon "n"
+                              :menu (list (jetpacs-toolbar-item :label "x" :snippet "y"))))))
+  ;; snippet: at most one ${input:...}, respecting the $$ escape
+  (should-error (jetpacs-toolbar-item :label "L"
+                                      :snippet "${input:A} ${input:B}"))
+  (should (jetpacs-toolbar-item :label "L" :snippet "$${input:A} ${input:B}"))
+  (should (jetpacs-toolbar-item :label "L" :snippet "${input:Prompt}")))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

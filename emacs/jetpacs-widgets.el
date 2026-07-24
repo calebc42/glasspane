@@ -1109,5 +1109,114 @@ Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
                  :min min :max max :values (and values (vconcat values))
                  :enabled enabled))
 
+;;;; Editor + toolbar (§17.4 editor row, §17.7)
+
+(defconst jetpacs--line-ops '("promote" "demote" "move-up" "move-down"))
+(defconst jetpacs--placements '("cursor" "line-start" "block"))
+
+(defun jetpacs--check-snippet (s)
+  "Signal unless S is a valid §17.7 snippet string.
+A snippet MUST contain at most one `${input:...}' token; `$$' escapes the
+following `${' so `$${' does not begin a placeholder."
+  (jetpacs--require-string s ":snippet")
+  (let ((i 0) (n (length s)) (count 0))
+    (while (< i n)
+      (cond
+       ((and (< (1+ i) n) (= (aref s i) ?$) (= (aref s (1+ i)) ?$))
+        (setq i (+ i 2)))                                 ; $$ escape
+       ((eq t (compare-strings "${input:" nil nil s i (min n (+ i 8))))
+        (setq count (1+ count) i (+ i 8)))
+       (t (setq i (1+ i)))))
+    (when (> count 1)
+      (error "jetpacs: snippet must contain at most one ${input:...} token (SPEC 17.7)")))
+  s)
+
+(defun jetpacs--check-long-press (lp)
+  "Signal unless LP is a §17.7 long_press: a plist with exactly one non-menu op."
+  (unless (and (consp lp) (keywordp (car lp)))
+    (error "jetpacs: :long-press must be an operation plist (SPEC 17.7), got %S" lp))
+  (when (plist-member lp :menu)
+    (error "jetpacs: :long-press must not contain a :menu op (SPEC 17.7)"))
+  (let ((ops (delq nil (list (and (plist-member lp :snippet) t)
+                             (and (plist-member lp :on_tap) t)
+                             (and (plist-member lp :command) t)
+                             (and (plist-member lp :line) t)))))
+    (unless (= (length ops) 1)
+      (error "jetpacs: :long-press must contain exactly one non-menu op (SPEC 17.7)")))
+  lp)
+
+(cl-defun jetpacs-toolbar-item (&key label icon snippet on-tap menu command line
+                                     placement long-press)
+  "A ToolbarItem for `jetpacs-editor' :toolbar (SPEC §17.7).
+MUST have LABEL or ICON plus exactly one primary op: :snippet (a string),
+:on-tap (an ActionDescriptor), :menu (a list of non-menu items), :command
+\(an identifier), or :line (promote/demote/move-up/move-down).  Optional
+:placement (cursor/line-start/block) and :long-press (one non-menu op plist)."
+  (unless (or label icon)
+    (error "jetpacs-toolbar-item: needs :label or :icon (SPEC 17.7)"))
+  (when label (jetpacs--require-string label ":label"))
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (let ((ops (delq nil (list (and snippet :snippet) (and on-tap :on-tap)
+                             (and menu :menu) (and command :command)
+                             (and line :line)))))
+    (unless (= (length ops) 1)
+      (error "jetpacs-toolbar-item: needs exactly one primary op, got %S (SPEC 17.7)" ops)))
+  (when snippet (jetpacs--check-snippet snippet))
+  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
+  (when command (jetpacs--check-identifier command ":command"))
+  (when line (setq line (jetpacs--check-enum line jetpacs--line-ops ":line")))
+  (when placement (setq placement (jetpacs--check-enum placement jetpacs--placements ":placement")))
+  (when menu
+    (dolist (mi menu)
+      (when (plist-member mi :menu)
+        (error "jetpacs-toolbar-item: a :menu item must not itself contain :menu (SPEC 17.7)"))))
+  (when long-press (jetpacs--check-long-press long-press))
+  (jetpacs--node nil
+                 :label label :icon icon
+                 :snippet snippet :on_tap on-tap
+                 :menu (and menu (vconcat menu))
+                 :command command :line line
+                 :placement placement :long_press long-press))
+
+(cl-defun jetpacs-editor (id &key document value on-save on-enter read-only syntax
+                             line-numbers complete chromeless publish-state autofocus
+                             toolbar enabled)
+  "An editor identified by ID (SPEC §17.4 + §17.7).
+Without DOCUMENT it is a local input node; with DOCUMENT it is a synchronized
+editor (emit only when `editor.sync' is granted).  COMPLETE and a toolbar
+`command' op each require DOCUMENT.  TOOLBAR is a registered identifier string
+or a list of `jetpacs-toolbar-item's.  Booleans take t or :json-false."
+  (jetpacs--check-identifier id ":id")
+  (when document (jetpacs--check-identifier document ":document"))
+  (when value (jetpacs--require-string value ":value"))
+  (when on-save (jetpacs--check-descriptor on-save ":on-save"))
+  (when on-enter (jetpacs--check-descriptor on-enter ":on-enter"))
+  (when read-only (jetpacs--check-bool read-only ":read-only"))
+  (when syntax (jetpacs--check-identifier syntax ":syntax"))
+  (when line-numbers (jetpacs--check-bool line-numbers ":line-numbers"))
+  (when complete (jetpacs--check-bool complete ":complete"))
+  (when chromeless (jetpacs--check-bool chromeless ":chromeless"))
+  (when publish-state (jetpacs--check-bool publish-state ":publish-state"))
+  (when autofocus (jetpacs--check-bool autofocus ":autofocus"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when (and (eq complete t) (not document))
+    (error "jetpacs-editor: :complete requires :document (SPEC 17.4)"))
+  (cond
+   ((null toolbar))
+   ((stringp toolbar) (jetpacs--check-identifier toolbar ":toolbar"))
+   ((and (listp toolbar) (jetpacs--node-p (car toolbar)))
+    (dolist (item toolbar)
+      (when (and (plist-member item :command) (not document))
+        (error "jetpacs-editor: a toolbar :command op requires :document (SPEC 17.7)")))
+    (setq toolbar (vconcat toolbar)))
+   (t (error "jetpacs-editor: :toolbar must be a registered id string or a list of toolbar items, got %S" toolbar)))
+  (jetpacs--node "editor"
+                 :id id :document document :value value
+                 :on_save on-save :on_enter on-enter
+                 :read_only read-only :syntax syntax :line_numbers line-numbers
+                 :complete complete :chromeless chromeless
+                 :publish_state publish-state :autofocus autofocus
+                 :toolbar toolbar :enabled enabled))
+
 (provide 'jetpacs-widgets)
 ;;; jetpacs-widgets.el ends here

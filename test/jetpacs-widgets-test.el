@@ -148,6 +148,87 @@
   (should-error (jetpacs-date-stamp :year (1+ 9007199254740991)))
   (should (jetpacs-date-stamp :year 9007199254740991)))
 
+;;;; Byte-parity: Layout-family nodes (widgets.golden 17-34, JW-2)
+
+(ert-deftest jetpacs-widgets/layout-goldens ()
+  "Layout-family constructors build byte-identically to widgets.golden 17-34."
+  (let ((g (jetpacs-test--golden-map "widgets")))
+    (cl-flet ((chk (idx form)
+                (ert-info ((format "widgets.golden line %s" idx))
+                  (should (equal (jetpacs-node->canonical-json form)
+                                 (gethash idx g))))))
+      (chk "17" (jetpacs-row))
+      (chk "18" (jetpacs-row (jetpacs-text "a") :align 'center :arrange 'space_between
+                             :fill t :scroll t :spacing 8))
+      (chk "19" (jetpacs-column))
+      (chk "20" (jetpacs-column (jetpacs-text "a") :align 'start :arrange 'start
+                                :fill t :scroll :json-false :spacing 4))
+      ;; golden 21's child is a chip (an input node, JW-3) — use a literal plist
+      (chk "21" (jetpacs-flow-row '(:t "chip" :label "a") :align 'top :arrange 'start
+                                  :run-spacing 2 :spacing 4))
+      (chk "22" (jetpacs-box (jetpacs-text "a") :alignment 'center
+                             :on-tap (jetpacs-action "demo.tap")))
+      (chk "23" (jetpacs-surface (jetpacs-text "a") :color "surface" :elevation 2
+                                 :shape 'rounded))
+      (chk "24" (jetpacs-lazy-column (jetpacs-text "a") :content-padding 8 :spacing 4))
+      (chk "25" (jetpacs-spacer))
+      (chk "26" (jetpacs-with-attrs (jetpacs-spacer) :height 8 :weight 1 :width 8))
+      (chk "27" (jetpacs-divider))
+      (chk "28" (jetpacs-divider :color "outline" :thickness 1))
+      (chk "29" (jetpacs-card (jetpacs-text "a")))
+      (chk "30" (jetpacs-card (jetpacs-text "a")
+                              :on-tap (jetpacs-action "demo.tap")
+                              :on-long-tap (jetpacs-action "demo.long")
+                              :swipe-start (jetpacs-swipe "Done"
+                                            :on-trigger (jetpacs-action "demo.done"))
+                              :swipe-end (jetpacs-swipe "Delete" :icon "delete"
+                                          :color "error"
+                                          :on-trigger (jetpacs-action "demo.delete"))))
+      (chk "31" (jetpacs-collapsible "sec1" (jetpacs-text "Section") (jetpacs-text "body")
+                                     :collapsed t
+                                     :on-long-tap (jetpacs-action "demo.long")
+                                     :swipe-start (jetpacs-swipe "Archive"
+                                                   :on-trigger (jetpacs-action "demo.archive"))))
+      (chk "32" (jetpacs-reorderable-list
+                 (list (jetpacs-with-attrs (jetpacs-text "a") :key "ka")
+                       (jetpacs-with-attrs (jetpacs-text "b") :id "kb"))
+                 :on-reorder (jetpacs-action "demo.reorder")))
+      (chk "33" (jetpacs-tabs
+                 (list (jetpacs-tab-item "One") (jetpacs-tab-item "Two" :icon "star"))
+                 (list (jetpacs-text "1") (jetpacs-text "2"))
+                 :id "tabs1" :initial 1 :on-change (jetpacs-action "demo.tab")
+                 :pager-only :json-false :scrollable t))
+      (chk "34" (jetpacs-table
+                 (list (jetpacs-table-row 'header (jetpacs-table-cell (list (jetpacs-span "H"))))
+                       (jetpacs-table-row 'data (jetpacs-table-cell (list (jetpacs-span "v"))
+                                                 :on-tap (jetpacs-action "cell.tap")))
+                       (jetpacs-table-rule))
+                 :aligns '("start" "center")
+                 :on-add-col (jetpacs-action "col.add")
+                 :on-add-row (jetpacs-action "row.add"))))))
+
+(ert-deftest jetpacs-widgets/layout-validation ()
+  "Layout constructors enforce their §17.3 invariants."
+  (should-error (jetpacs-row (jetpacs-text "a") :align 'bogus))      ; align enum
+  (should-error (jetpacs-row (jetpacs-text "a") :arrange 'nope))     ; arrange enum
+  (should-error (jetpacs-row (jetpacs-text "a") :scroll 1))          ; bool t/:json-false
+  (should-error (jetpacs-box (jetpacs-text "a") :alignment 'middle)) ; box alignment enum
+  (should-error (jetpacs-surface (jetpacs-text "a") :shape 'oval))   ; shape enum
+  ;; reorderable_list: every item needs a unique key/id
+  (should-error (jetpacs-reorderable-list (list (jetpacs-text "a"))))
+  (should-error (jetpacs-reorderable-list
+                 (list (jetpacs-with-attrs (jetpacs-text "a") :key "k")
+                       (jetpacs-with-attrs (jetpacs-text "b") :key "k"))))
+  ;; tabs: equal non-zero length; initial < count
+  (should-error (jetpacs-tabs (list (jetpacs-tab-item "A"))
+                              (list (jetpacs-text "1") (jetpacs-text "2"))))
+  (should-error (jetpacs-tabs '() '()))
+  (should-error (jetpacs-tabs (list (jetpacs-tab-item "A")) (list (jetpacs-text "1"))
+                              :initial 1))
+  ;; table row kind + collapsible header
+  (should-error (jetpacs-table-row 'footer (jetpacs-table-cell (list (jetpacs-span "x")))))
+  (should-error (jetpacs-collapsible "s" "not-a-node")))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

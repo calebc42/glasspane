@@ -568,5 +568,252 @@ a §16.6 color; CHILDREN a list of nodes the badge annotates."
   (jetpacs--node "badge" :label label :icon icon :color color
                  :children (and children (vconcat children))))
 
+;;;; Layout nodes (§17.3)
+;;
+;; Containers take child nodes as `&rest' args followed by keyword options
+;; (split by `jetpacs--children-and-opts').  Booleans that a golden emits
+;; as explicit `false' (row/column `scroll', `tabs.pager_only') accept
+;; `t' or `:json-false' and are validated by `jetpacs--check-bool'.
+
+(defconst jetpacs--row-aligns '("top" "center" "bottom" "baseline"))
+(defconst jetpacs--column-aligns '("start" "center" "end"))
+(defconst jetpacs--flow-aligns '("top" "center" "bottom"))
+(defconst jetpacs--arranges
+  '("start" "center" "end" "space_between" "space_around" "space_evenly"))
+(defconst jetpacs--box-alignments
+  '("top_start" "top_center" "top_end" "center_start" "center" "center_end"
+    "bottom_start" "bottom_center" "bottom_end"))
+(defconst jetpacs--surface-shapes '("rounded" "rounded_small" "circle"))
+(defconst jetpacs--table-aligns '("start" "center" "end"))
+
+(defun jetpacs-row (&rest args)
+  "A horizontal row of child nodes (SPEC §17.3).
+Trailing options: :spacing (dp), :align (top/center/bottom/baseline),
+:arrange (start/center/end/space_between/space_around/space_evenly),
+:scroll, :fill (booleans t or :json-false)."
+  (let* ((split (jetpacs--children-and-opts args))
+         (opts (cdr split))
+         (spacing (plist-get opts :spacing))
+         (align (plist-get opts :align))
+         (arrange (plist-get opts :arrange))
+         (scroll (plist-get opts :scroll))
+         (fill (plist-get opts :fill)))
+    (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
+    (when align (setq align (jetpacs--check-enum align jetpacs--row-aligns ":align")))
+    (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
+    (when scroll (jetpacs--check-bool scroll ":scroll"))
+    (when fill (jetpacs--check-bool fill ":fill"))
+    (jetpacs--node "row"
+                   :children (jetpacs--as-children (car split))
+                   :spacing spacing :align align :arrange arrange
+                   :scroll scroll :fill fill)))
+
+(defun jetpacs-column (&rest args)
+  "A vertical column of child nodes (SPEC §17.3).
+Trailing options: :spacing, :align (start/center/end), :arrange, :scroll,
+:fill (booleans t or :json-false)."
+  (let* ((split (jetpacs--children-and-opts args))
+         (opts (cdr split))
+         (spacing (plist-get opts :spacing))
+         (align (plist-get opts :align))
+         (arrange (plist-get opts :arrange))
+         (scroll (plist-get opts :scroll))
+         (fill (plist-get opts :fill)))
+    (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
+    (when align (setq align (jetpacs--check-enum align jetpacs--column-aligns ":align")))
+    (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
+    (when scroll (jetpacs--check-bool scroll ":scroll"))
+    (when fill (jetpacs--check-bool fill ":fill"))
+    (jetpacs--node "column"
+                   :children (jetpacs--as-children (car split))
+                   :spacing spacing :align align :arrange arrange
+                   :scroll scroll :fill fill)))
+
+(defun jetpacs-flow-row (&rest args)
+  "A flow row whose children wrap to later runs (SPEC §17.3).
+Trailing options: :spacing, :run-spacing (dp), :align (top/center/bottom),
+:arrange."
+  (let* ((split (jetpacs--children-and-opts args))
+         (opts (cdr split))
+         (spacing (plist-get opts :spacing))
+         (run-spacing (plist-get opts :run-spacing))
+         (align (plist-get opts :align))
+         (arrange (plist-get opts :arrange)))
+    (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
+    (when run-spacing (jetpacs--check-number run-spacing ":run_spacing" 0 nil))
+    (when align (setq align (jetpacs--check-enum align jetpacs--flow-aligns ":align")))
+    (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
+    (jetpacs--node "flow_row"
+                   :children (jetpacs--as-children (car split))
+                   :spacing spacing :run_spacing run-spacing
+                   :align align :arrange arrange)))
+
+(defun jetpacs-box (&rest args)
+  "A box (z-stack, back-to-front) of child nodes (SPEC §17.3).
+Trailing options: :alignment (top_start..bottom_end), :on-tap."
+  (let* ((split (jetpacs--children-and-opts args))
+         (opts (cdr split))
+         (alignment (plist-get opts :alignment)))
+    (when alignment
+      (setq alignment (jetpacs--check-enum alignment jetpacs--box-alignments ":alignment")))
+    (jetpacs--node "box"
+                   :children (jetpacs--as-children (car split))
+                   :alignment alignment
+                   :on_tap (plist-get opts :on-tap))))
+
+(defun jetpacs-surface (&rest args)
+  "A visual surface container (SPEC §17.3; distinct from a protocol Surface).
+Options: :color, :shape (rounded/rounded_small/circle), :elevation (a dp)."
+  (let* ((split (jetpacs--children-and-opts args))
+         (opts (cdr split))
+         (color (plist-get opts :color))
+         (shape (plist-get opts :shape))
+         (elevation (plist-get opts :elevation)))
+    (when color (jetpacs--check-color color))
+    (when shape (setq shape (jetpacs--check-enum shape jetpacs--surface-shapes ":shape")))
+    (when elevation (jetpacs--check-number elevation ":elevation" 0 nil))
+    (jetpacs--node "surface"
+                   :children (jetpacs--as-children (car split))
+                   :color color :shape shape :elevation elevation)))
+
+(defun jetpacs-lazy-column (&rest args)
+  "A lazily-composed vertical list preserving array order (SPEC §17.3).
+Trailing options: :spacing (dp), :content-padding (dp)."
+  (let* ((split (jetpacs--children-and-opts args))
+         (opts (cdr split))
+         (spacing (plist-get opts :spacing))
+         (content-padding (plist-get opts :content-padding)))
+    (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
+    (when content-padding (jetpacs--check-number content-padding ":content_padding" 0 nil))
+    (jetpacs--node "lazy_column"
+                   :children (jetpacs--as-children (car split))
+                   :spacing spacing :content_padding content-padding)))
+
+(defun jetpacs-spacer ()
+  "A spacer node (SPEC §17.3); size it with universal width/height/weight."
+  (jetpacs--node "spacer"))
+
+(cl-defun jetpacs-divider (&key color thickness)
+  "A divider node (SPEC §17.3).
+COLOR is a §16.6 color; THICKNESS a non-negative dp."
+  (when color (jetpacs--check-color color))
+  (when thickness (jetpacs--check-number thickness ":thickness" 0 nil))
+  (jetpacs--node "divider" :color color :thickness thickness))
+
+(cl-defun jetpacs-swipe (label &key icon color on-trigger)
+  "A swipe side {label, icon?, color?, on_trigger} for card/collapsible (§17.3).
+LABEL is a string; ICON a §4.4 identifier; COLOR a §16.6 color; ON-TRIGGER
+an ActionDescriptor dispatched at most once per gesture."
+  (jetpacs--require-string label ":label")
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when color (jetpacs--check-color color))
+  (jetpacs--node nil :label label :icon icon :color color :on_trigger on-trigger))
+
+(defun jetpacs-card (&rest args)
+  "A card container of child nodes (SPEC §17.3).
+Trailing options: :on-tap, :on-long-tap (ActionDescriptors); :swipe-start,
+:swipe-end (from `jetpacs-swipe')."
+  (let* ((split (jetpacs--children-and-opts args))
+         (opts (cdr split)))
+    (jetpacs--node "card"
+                   :children (jetpacs--as-children (car split))
+                   :on_tap (plist-get opts :on-tap)
+                   :on_long_tap (plist-get opts :on-long-tap)
+                   :swipe_start (plist-get opts :swipe-start)
+                   :swipe_end (plist-get opts :swipe-end))))
+
+(cl-defun jetpacs-collapsible (id header &rest args)
+  "A collapsible section with required ID and HEADER node, plus children (§17.3).
+Trailing options: :collapsed (t or :json-false), :on-long-tap, :swipe-start,
+:swipe-end."
+  (jetpacs--check-identifier id ":id")
+  (unless (jetpacs--node-p header)
+    (error "jetpacs-collapsible: HEADER must be a node, got %S" header))
+  (let* ((split (jetpacs--children-and-opts args))
+         (opts (cdr split))
+         (collapsed (plist-get opts :collapsed)))
+    (when collapsed (jetpacs--check-bool collapsed ":collapsed"))
+    (jetpacs--node "collapsible"
+                   :id id :header header
+                   :children (jetpacs--as-children (car split))
+                   :collapsed collapsed
+                   :on_long_tap (plist-get opts :on-long-tap)
+                   :swipe_start (plist-get opts :swipe-start)
+                   :swipe_end (plist-get opts :swipe-end))))
+
+(cl-defun jetpacs-reorderable-list (items &key on-reorder)
+  "A reorderable list of ITEMS (SPEC §17.3).
+Every item MUST carry a unique `key' or `id'; ON-REORDER is an
+ActionDescriptor.  ITEMS is a list of node plists."
+  (let (seen)
+    (dolist (it items)
+      (let ((k (or (plist-get it :key) (plist-get it :id))))
+        (unless k
+          (error "jetpacs-reorderable-list: every item needs a :key or :id (SPEC 17.3)"))
+        (when (member k seen)
+          (error "jetpacs-reorderable-list: duplicate item key/id %S (SPEC 17.3)" k))
+        (push k seen))))
+  (jetpacs--node "reorderable_list"
+                 :items (vconcat items)
+                 :on_reorder on-reorder))
+
+(cl-defun jetpacs-tab-item (label &key icon)
+  "A TabItem {label, icon?} for `jetpacs-tabs' (SPEC §17.3)."
+  (jetpacs--require-string label ":label")
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs--node nil :label label :icon icon))
+
+(cl-defun jetpacs-tabs (items children &key initial scrollable pager-only
+                              on-change id)
+  "A tab strip: parallel ITEMS (TabItems) and CHILDREN (Nodes) (SPEC §17.3).
+The two lists MUST have equal non-zero length.  INITIAL is a 0-based index
+below the count; SCROLLABLE/PAGER-ONLY are booleans (t or :json-false);
+ON-CHANGE an ActionDescriptor; ID a §4.4 identifier."
+  (let ((ni (length items)) (nc (length children)))
+    (when (or (zerop ni) (/= ni nc))
+      (error "jetpacs-tabs: items and children must be equal non-zero length (SPEC 17.3): %d vs %d"
+             ni nc))
+    (when initial (jetpacs--check-integer initial ":initial" 0 (1- ni)))
+    (when scrollable (jetpacs--check-bool scrollable ":scrollable"))
+    (when pager-only (jetpacs--check-bool pager-only ":pager-only"))
+    (when id (jetpacs--check-identifier id ":id"))
+    (jetpacs--node "tabs"
+                   :items (vconcat items)
+                   :children (vconcat children)
+                   :initial initial
+                   :scrollable scrollable
+                   :pager_only pager-only
+                   :on_change on-change
+                   :id id)))
+
+(cl-defun jetpacs-table-cell (spans &key on-tap on-long-tap)
+  "A table cell {spans, on_tap?, on_long_tap?} (SPEC §17.3).
+SPANS is a list from `jetpacs-span'."
+  (jetpacs--node nil :spans (vconcat spans) :on_tap on-tap :on_long_tap on-long-tap))
+
+(defun jetpacs-table-row (kind &rest cells)
+  "A table row of KIND `data' or `header' with CELLS (SPEC §17.3).
+CELLS are from `jetpacs-table-cell'.  For a rule row use `jetpacs-table-rule'."
+  (jetpacs--node nil
+                 :kind (jetpacs--check-enum kind '("data" "header") ":kind")
+                 :cells (jetpacs--as-children cells)))
+
+(defun jetpacs-table-rule ()
+  "A table `rule' row, a horizontal separator with no cells (SPEC §17.3)."
+  (jetpacs--node nil :kind "rule"))
+
+(cl-defun jetpacs-table (rows &key aligns on-add-row on-add-col)
+  "A table of ROWS (from `jetpacs-table-row'/`jetpacs-table-rule') (SPEC §17.3).
+ALIGNS is a list of start/center/end (one per column); :on-add-row and
+:on-add-col are ActionDescriptors."
+  (jetpacs--node "table"
+                 :rows (vconcat rows)
+                 :aligns (and aligns
+                              (vconcat (mapcar (lambda (a)
+                                                 (jetpacs--check-enum a jetpacs--table-aligns ":aligns"))
+                                               aligns)))
+                 :on_add_row on-add-row
+                 :on_add_col on-add-col))
+
 (provide 'jetpacs-widgets)
 ;;; jetpacs-widgets.el ends here

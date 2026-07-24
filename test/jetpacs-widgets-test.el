@@ -555,7 +555,15 @@
   (should-error (jetpacs-multi-view (list (cons "bad id" (jetpacs-column))) "bad id"))
   (should-error (jetpacs-multi-view (list (cons "list" (jetpacs-column))) "detail"))
   (should-error (jetpacs-widget-surface "T" "not-a-node"))
-  (should-error (jetpacs-notification-surface "not-a-node")))
+  (should-error (jetpacs-notification-surface "not-a-node"))
+  ;; post-audit: snackbar_action shape validated
+  (should-error (jetpacs-scaffold :snackbar-action "not-an-object"))
+  (should-error (jetpacs-scaffold :snackbar-action '(:label "x")))   ; missing on_tap
+  ;; post-audit: envelope slots require a ROOT node (:t), not a :t-less sub-spec
+  (should-error (jetpacs-scaffold :body (jetpacs-action "a.b")))
+  (should-error (jetpacs-multi-view (list (cons "v" (jetpacs-action "a.b"))) "v"))
+  (should-error (jetpacs-widget-surface "T" (jetpacs-snackbar-action
+                                             "x" (jetpacs-action "a.b")))))
 
 ;;;; The canonical serializer
 

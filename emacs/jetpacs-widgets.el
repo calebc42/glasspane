@@ -318,6 +318,12 @@ A list *of* nodes has a cons as its car instead, which is what lets
 `jetpacs--as-children' tell one node from a list of children."
   (and (consp x) (keywordp (car x))))
 
+(defun jetpacs--root-node-p (x)
+  "Non-nil when X is a typed Node: a plist whose head is `:t' (§16.1).
+Stricter than `jetpacs--node-p', which also accepts `:t'-less sub-specs
+\(action descriptors, spans, table cells).  Use where a root Node is required."
+  (and (consp x) (eq (car x) :t)))
+
 (defun jetpacs--children-and-opts (args)
   "Split container ARGS into (CHILDREN . OPTS) at the first keyword.
 Child nodes are plists; the first bare keyword in ARGS marks the start of
@@ -1423,6 +1429,15 @@ a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
   (jetpacs--check-descriptor on-tap ":on-tap")
   (jetpacs--node nil :label label :on_tap on-tap))
 
+(defun jetpacs--check-snackbar-action (v)
+  "Signal unless V is a scaffold snackbar_action {label, on_tap} (§17.6)."
+  (unless (and (consp v) (keywordp (car v))
+               (stringp (plist-get v :label))
+               (plist-member v :on_tap))
+    (error "jetpacs-scaffold: :snackbar-action must be {label, on_tap} (use jetpacs-snackbar-action), got %S" v))
+  (jetpacs--check-descriptor (plist-get v :on_tap) ":on_tap")
+  v)
+
 (cl-defun jetpacs-scaffold (&key top-bar body bottom-bar fab floating-toolbar
                                  drawer snackbar snackbar-action on-refresh)
   "A scaffold (application chrome) node (SPEC §17.6).
@@ -1432,9 +1447,10 @@ string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor."
                       (cons ":bottom-bar" bottom-bar) (cons ":fab" fab)
                       (cons ":floating-toolbar" floating-toolbar)
                       (cons ":drawer" drawer)))
-    (when (and (cdr pair) (not (jetpacs--node-p (cdr pair))))
+    (when (and (cdr pair) (not (jetpacs--root-node-p (cdr pair))))
       (error "jetpacs-scaffold: %s must be a node, got %S" (car pair) (cdr pair))))
   (when snackbar (jetpacs--require-string snackbar ":snackbar"))
+  (when snackbar-action (jetpacs--check-snackbar-action snackbar-action))
   (when on-refresh (jetpacs--check-descriptor on-refresh ":on-refresh"))
   (jetpacs--node "scaffold"
                  :top_bar top-bar :body body :bottom_bar bottom-bar
@@ -1458,8 +1474,8 @@ INITIAL-VIEW MUST name an existing view."
     (dolist (cell views)
       (let ((id (car cell)))
         (jetpacs--check-identifier id "view id")
-        (unless (jetpacs--node-p (cdr cell))
-          (error "jetpacs-multi-view: view %S value must be a node" id))
+        (unless (jetpacs--root-node-p (cdr cell))
+          (error "jetpacs-multi-view: view %S value must be a root node" id))
         (when (gethash id h)
           (error "jetpacs-multi-view: duplicate view id %S" id))
         (puthash id (cdr cell) h)
@@ -1471,18 +1487,18 @@ INITIAL-VIEW MUST name an existing view."
 (cl-defun jetpacs-notification-surface (body &key meta)
   "A `notification:*' SurfaceSpec {body, meta?} (SPEC §13.4; META is §18.5).
 BODY is a Node."
-  (unless (jetpacs--node-p body)
-    (error "jetpacs-notification-surface: BODY must be a node, got %S" body))
+  (unless (jetpacs--root-node-p body)
+    (error "jetpacs-notification-surface: BODY must be a root node, got %S" body))
   (jetpacs--node nil :body body :meta meta))
 
 (cl-defun jetpacs-widget-surface (title body &key empty header-action)
   "A `widget:*' SurfaceSpec {title, body, empty?, header_action?} (SPEC §13.4).
 TITLE is a string; BODY and EMPTY are Nodes; HEADER-ACTION a descriptor."
   (jetpacs--require-string title ":title")
-  (unless (jetpacs--node-p body)
-    (error "jetpacs-widget-surface: BODY must be a node, got %S" body))
-  (when (and empty (not (jetpacs--node-p empty)))
-    (error "jetpacs-widget-surface: :empty must be a node, got %S" empty))
+  (unless (jetpacs--root-node-p body)
+    (error "jetpacs-widget-surface: BODY must be a root node, got %S" body))
+  (when (and empty (not (jetpacs--root-node-p empty)))
+    (error "jetpacs-widget-surface: :empty must be a root node, got %S" empty))
   (when header-action (jetpacs--check-descriptor header-action ":header-action"))
   (jetpacs--node nil :title title :body body :empty empty :header_action header-action))
 

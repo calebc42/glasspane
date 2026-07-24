@@ -242,6 +242,34 @@ always enforced regardless of MAX.  Returns V."
   (when (and max (> v max)) (error "jetpacs: %s must be <= %s, got %S" what max v))
   v)
 
+(defun jetpacs--json-equal (a b)
+  "SPEC §4.3 equality for scalar option/slider values.
+Numbers compare by numeric value (so 1, 1.0, and 1e0 are equal and -0 equals
+0); strings, booleans, and null compare by `equal'."
+  (if (and (numberp a) (numberp b)) (= a b) (equal a b)))
+
+(defun jetpacs--check-date (value)
+  "Signal unless VALUE is a §17.4 date `YYYY-MM-DD' with in-range fields."
+  (unless (and (stringp value)
+               (string-match "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)\\'" value))
+    (error "jetpacs: date value must be YYYY-MM-DD (SPEC 17.4), got %S" value))
+  (let ((mo (string-to-number (match-string 2 value)))
+        (dy (string-to-number (match-string 3 value))))
+    (unless (<= 1 mo 12) (error "jetpacs: date month must be 01-12, got %S" value))
+    (unless (<= 1 dy 31) (error "jetpacs: date day must be 01-31, got %S" value)))
+  value)
+
+(defun jetpacs--check-time (value)
+  "Signal unless VALUE is a §17.4 time `HH:MM' with in-range fields."
+  (unless (and (stringp value)
+               (string-match "\\`\\([0-9]\\{2\\}\\):\\([0-9]\\{2\\}\\)\\'" value))
+    (error "jetpacs: time value must be HH:MM (SPEC 17.4), got %S" value))
+  (let ((hh (string-to-number (match-string 1 value)))
+        (mm (string-to-number (match-string 2 value))))
+    (unless (<= 0 hh 23) (error "jetpacs: time hour must be 00-23, got %S" value))
+    (unless (<= 0 mm 59) (error "jetpacs: time minute must be 00-59, got %S" value)))
+  value)
+
 (defun jetpacs--check-font-weight (v)
   "Signal unless V is a §17.1 font weight: the string \"normal\" or \"bold\",
 or an integer multiple of 100 from 100 through 900."
@@ -865,12 +893,6 @@ ALIGNS is a list of start/center/end (one per column); :on-add-row and
 
 (defconst jetpacs--button-variants '("filled" "tonal" "outlined" "text"))
 (defconst jetpacs--keyboards '("text" "number" "decimal" "email" "phone" "uri"))
-(defconst jetpacs--date-re
-  (rx bos (= 4 digit) "-" (= 2 digit) "-" (= 2 digit) eos)
-  "A §17.4 `date_button.value': YYYY-MM-DD.")
-(defconst jetpacs--time-re
-  (rx bos (= 2 digit) ":" (= 2 digit) eos)
-  "A §17.4 `time_button.value': HH:MM.")
 
 (cl-defun jetpacs-button (label on-tap &key icon variant enabled)
   "A button labeled LABEL dispatching ON-TAP (SPEC §17.4).
@@ -1018,14 +1040,19 @@ ALLOW-ADD, every selected value MUST appear in OPTIONS.  No implicit selection."
   (when allow-add (jetpacs--check-bool allow-add ":allow-add"))
   (when on-change (jetpacs--check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (when (and (eq multi-select t) value (listp value))
-    (setq value (vconcat value)))
+  (when (and (eq multi-select t) value)
+    (cond ((listp value) (setq value (vconcat value)))
+          ((vectorp value))
+          (t (error "jetpacs-enum-list: multi_select :value must be a list or vector, got %S" value)))
+    (let ((elts (append value nil)))
+      (unless (= (length elts) (length (cl-remove-duplicates elts :test #'jetpacs--json-equal)))
+        (error "jetpacs-enum-list: multi_select :value must have distinct values (SPEC 17.4)"))))
   (let ((option-vals (mapcar (lambda (o) (plist-get o :value)) options)))
-    (unless (= (length option-vals) (length (delete-dups (copy-sequence option-vals))))
-      (error "jetpacs-enum-list: option values must be distinct (SPEC 17.4)"))
+    (unless (= (length option-vals) (length (cl-remove-duplicates option-vals :test #'jetpacs--json-equal)))
+      (error "jetpacs-enum-list: option values must be distinct under SPEC 4.3 (17.4)"))
     (when (and value (not (eq allow-add t)))
       (dolist (s (if (vectorp value) (append value nil) (list value)))
-        (unless (member s option-vals)
+        (unless (cl-member s option-vals :test #'jetpacs--json-equal)
           (error "jetpacs-enum-list: value %S is not among options (SPEC 17.4)" s)))))
   (jetpacs--node "enum_list"
                  :id id :options (vconcat options) :value value
@@ -1037,9 +1064,7 @@ ALLOW-ADD, every selected value MUST appear in OPTIONS.  No implicit selection."
 VALUE is a YYYY-MM-DD string."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-pick ":on-pick")
-  (when value
-    (unless (and (stringp value) (string-match-p jetpacs--date-re value))
-      (error "jetpacs-date-button: :value must be YYYY-MM-DD (SPEC 17.4), got %S" value)))
+  (when value (jetpacs--check-date value))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "date_button" :label label :on_pick on-pick :value value :enabled enabled))
 
@@ -1048,9 +1073,7 @@ VALUE is a YYYY-MM-DD string."
 VALUE is an HH:MM string in local civil time."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-pick ":on-pick")
-  (when value
-    (unless (and (stringp value) (string-match-p jetpacs--time-re value))
-      (error "jetpacs-time-button: :value must be HH:MM (SPEC 17.4), got %S" value)))
+  (when value (jetpacs--check-time value))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "time_button" :label label :on_pick on-pick :value value :enabled enabled))
 
@@ -1070,8 +1093,8 @@ Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
                  (cl-every #'jetpacs--finite-number-p values)
                  (apply #'< values))
       (error "jetpacs-slider: :values must be 2+ strictly-increasing finite numbers (SPEC 17.4)"))
-    (when (and value (not (member value values)))
-      (error "jetpacs-slider: discrete :value must equal a listed number (SPEC 17.4)")))
+    (when (and value (not (cl-member value values :test #'jetpacs--json-equal)))
+      (error "jetpacs-slider: discrete :value must equal a listed number under SPEC 4.3 (17.4)")))
    (t
     (when min (jetpacs--check-number min ":min" nil nil))
     (when max (jetpacs--check-number max ":max" nil nil))

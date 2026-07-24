@@ -335,9 +335,27 @@
   (should-error (jetpacs-slider "s" (jetpacs-action "a.b") :values '(1 1 2))) ; strictly inc
   (should-error (jetpacs-slider "s" (jetpacs-action "a.b") :values '(1 2) :min 0)) ; discrete omits min
   (should-error (jetpacs-slider "s" (jetpacs-action "a.b") :values '(1 2 4) :value 3)) ; value listed
-  ;; date/time formats
+  ;; date/time formats + range
   (should-error (jetpacs-date-button "D" (jetpacs-action "a.b") :value "2026/07/22"))
-  (should-error (jetpacs-time-button "T" (jetpacs-action "a.b") :value "9:30")))
+  (should-error (jetpacs-time-button "T" (jetpacs-action "a.b") :value "9:30"))
+  (should-error (jetpacs-date-button "D" (jetpacs-action "a.b") :value "2026-13-40"))
+  (should-error (jetpacs-time-button "T" (jetpacs-action "a.b") :value "25:61")))
+
+(ert-deftest jetpacs-widgets/input-json-equality ()
+  "Post-audit: §4.3 numeric equality (1 == 1.0) in enum/slider value checks."
+  ;; slider discrete: a float value matching an int-listed number is accepted
+  (should (jetpacs-slider "s" (jetpacs-action "a.b") :values '(1 2 4) :value 2.0))
+  (should (jetpacs-slider "s" (jetpacs-action "a.b") :values '(0.5 1.0 1.5) :value 1))
+  ;; enum value-in-options under §4.3
+  (should (jetpacs-enum-list "e" (list (jetpacs-enum-option "A" 1.0)) :value 1))
+  ;; option distinctness under §4.3: 1 and 1.0 are NOT distinct
+  (should-error (jetpacs-enum-list "e" (list (jetpacs-enum-option "A" 1)
+                                             (jetpacs-enum-option "B" 1.0))))
+  ;; multi-select: distinct value elements; a bare scalar is rejected
+  (should-error (jetpacs-enum-list "e" (list (jetpacs-enum-option "A" "a"))
+                                   :allow-add t :multi-select t :value '("a" "a")))
+  (should-error (jetpacs-enum-list "e" (list (jetpacs-enum-option "A" "a"))
+                                   :multi-select t :value "a")))
 
 ;;;; The canonical serializer
 

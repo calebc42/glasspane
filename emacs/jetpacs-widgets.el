@@ -1502,5 +1502,104 @@ TITLE is a string; BODY and EMPTY are Nodes; HEADER-ACTION a descriptor."
   (when header-action (jetpacs--check-descriptor header-action ":header-action"))
   (jetpacs--node nil :title title :body body :empty empty :header_action header-action))
 
+;;;; Hypertext block sequences
+
+(defun jetpacs-hypertext (&rest nodes)
+  "A hypertext block sequence: a vector of root NODES.
+Each element MUST be a root node (has `:t').  Accepts nodes as `&rest' or
+as a single list."
+  (let ((kids (jetpacs--as-children nodes)))
+    (mapc (lambda (n)
+            (unless (jetpacs--root-node-p n)
+              (error "jetpacs-hypertext: each element must be a root node, got %S" n)))
+          kids)
+    kids))
+
+;;;; Target-profile gating (§16.2 / §10.2)
+;;
+;; §16.2: Emacs MUST NOT emit a node type absent from the applicable
+;; target's advertised `surface_profiles.<target>.node_types'.  The
+;; AUTHORITATIVE set for a connection is its welcome; the defconsts below
+;; are the reference companion's advertised sets, for offline building.
+
+(defconst jetpacs-content-node-types
+  '("rich_text" "icon" "badge" "image" "section_header" "empty_state"
+    "progress" "date_stamp")
+  "The §17.2 content node types shared by the reference app and dialog profiles.")
+
+(defconst jetpacs-input-node-types
+  '("icon_button" "chip" "assist_chip" "menu" "checkbox" "switch"
+    "enum_list" "slider" "date_button" "time_button")
+  "The §17.4 input node types shared by the reference app and dialog profiles.")
+
+(defconst jetpacs-layout-node-types
+  '("flow_row" "surface" "lazy_column" "card" "collapsible"
+    "reorderable_list" "tabs" "table")
+  "The §17.3 non-core layout node types (reference app profile).")
+
+(defconst jetpacs-viz-node-types '("chart" "canvas" "month_grid")
+  "The §17.5 visualization node types (reference app profile).")
+
+(defconst jetpacs-app-node-types
+  (append '("text" "row" "column" "box" "spacer" "divider" "button"
+            "text_input" "scaffold" "editor")
+          jetpacs-content-node-types jetpacs-input-node-types
+          jetpacs-layout-node-types jetpacs-viz-node-types)
+  "The reference companion's advertised `app' node_types (all 39; §10.2/§16.2).
+The AUTHORITATIVE set for a connection is its welcome `surface_profiles'.")
+
+(defconst jetpacs-dialog-node-types
+  (append '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
+          jetpacs-content-node-types jetpacs-input-node-types)
+  "The reference companion's advertised `dialog' node_types (26; no editor/
+scaffold/layout/viz).")
+
+(defconst jetpacs-notification-node-types
+  '("text" "row" "column" "box" "spacer" "divider")
+  "The reference companion's advertised `notification' node_types (6).")
+
+(defun jetpacs--collect-node-types (value acc)
+  "Accumulate every `:t' node-type string in VALUE into ACC (a list)."
+  (cond
+   ((vectorp value)
+    (let ((a acc))
+      (mapc (lambda (v) (setq a (jetpacs--collect-node-types v a))) value) a))
+   ((hash-table-p value)
+    (let ((a acc))
+      (maphash (lambda (_k v) (setq a (jetpacs--collect-node-types v a))) value) a))
+   ((and (consp value) (keywordp (car value)))
+    (let ((p value) (a acc))
+      (while p
+        (let ((k (pop p)) (v (pop p)))
+          (when (eq k :t) (push v a))
+          (setq a (jetpacs--collect-node-types v a))))
+      a))
+   (t acc)))
+
+(defun jetpacs-check-node-types (tree allowed &optional what)
+  "Signal if TREE uses a node type not in ALLOWED (a list of type strings) (§16.2).
+TREE is a node, a hypertext vector, or a SurfaceSpec; the whole subtree is
+scanned.  WHAT names the target for the message.  Returns TREE.  For a live
+connection, pass that connection's advertised
+`surface_profiles.<target>.node_types' as ALLOWED."
+  (dolist (ty (delete-dups (jetpacs--collect-node-types tree '())))
+    (unless (member ty allowed)
+      (error "jetpacs: node type %S is not advertised for %s (SPEC 16.2)"
+             ty (or what "this target"))))
+  tree)
+
+(defun jetpacs-check-profile (tree profile)
+  "Signal if TREE uses a type outside the reference PROFILE's node set (§16.2).
+PROFILE is `app', `dialog', or `notification'.  For a specific connection,
+prefer `jetpacs-check-node-types' with that connection's advertised set."
+  (jetpacs-check-node-types
+   tree
+   (pcase profile
+     ('app jetpacs-app-node-types)
+     ('dialog jetpacs-dialog-node-types)
+     ('notification jetpacs-notification-node-types)
+     (_ (error "jetpacs-check-profile: unknown profile %S (want app/dialog/notification)" profile)))
+   (symbol-name profile)))
+
 (provide 'jetpacs-widgets)
 ;;; jetpacs-widgets.el ends here

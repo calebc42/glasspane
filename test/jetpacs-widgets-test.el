@@ -565,6 +565,66 @@
   (should-error (jetpacs-widget-surface "T" (jetpacs-snackbar-action
                                              "x" (jetpacs-action "a.b")))))
 
+;;;; Byte-parity: hypertext block sequences (hypertext.golden 00-03, JW-7)
+
+(ert-deftest jetpacs-widgets/hypertext-goldens ()
+  "Hypertext block sequences build byte-identically to hypertext.golden."
+  (let ((g (jetpacs-test--golden-map "hypertext")))
+    (cl-flet ((chk (idx form)
+                (ert-info ((format "hypertext.golden line %s" idx))
+                  (should (equal (jetpacs-node->canonical-json form)
+                                 (gethash idx g))))))
+      (chk "00" (jetpacs-hypertext
+                 (jetpacs-section-header "Note")
+                 (jetpacs-text "Body paragraph.")
+                 (jetpacs-divider)
+                 (jetpacs-text "Footer" :style 'caption)))
+      (chk "01" (jetpacs-hypertext
+                 (jetpacs-table
+                  (list (jetpacs-table-row 'header
+                                           (jetpacs-table-cell (list (jetpacs-span "Task")))
+                                           (jetpacs-table-cell (list (jetpacs-span "State"))))
+                        (jetpacs-table-row 'data
+                                           (jetpacs-table-cell (list (jetpacs-span "Write spec")))
+                                           (jetpacs-table-cell (list (jetpacs-span "DONE" :font-weight "bold"))))))))
+      (chk "02" (jetpacs-hypertext
+                 (jetpacs-column
+                  (jetpacs-card (jetpacs-text "Agenda item")
+                                :on-tap (jetpacs-action "agenda.open"))
+                  :spacing 8)))
+      (chk "03" (jetpacs-hypertext
+                 (jetpacs-rich-text
+                  (list (jetpacs-span "Mixed ")
+                        (jetpacs-span "styles" :italic t)
+                        (jetpacs-span " inline" :mono t))))))))
+
+(ert-deftest jetpacs-widgets/profile-gating ()
+  "jetpacs-check-profile / -node-types gate emitted types to the target (§16.2)."
+  ;; reference set sizes
+  (should (= (length jetpacs-app-node-types) 39))
+  (should (= (length jetpacs-dialog-node-types) 26))
+  (should (= (length jetpacs-notification-node-types) 6))
+  ;; notification (6) forbids chart/button/text_input; allows core layout+text
+  (should (jetpacs-check-profile (jetpacs-column (jetpacs-text "x")) 'notification))
+  (should-error (jetpacs-check-profile (jetpacs-chart nil) 'notification))
+  (should-error (jetpacs-check-profile (jetpacs-button "x" (jetpacs-action "a.b"))
+                                       'notification))
+  ;; dialog (26) forbids editor/scaffold/layout/viz
+  (should-error (jetpacs-check-profile (jetpacs-editor "e") 'dialog))
+  (should-error (jetpacs-check-profile (jetpacs-tabs (list (jetpacs-tab-item "A"))
+                                                     (list (jetpacs-text "1")))
+                                       'dialog))
+  (should (jetpacs-check-profile (jetpacs-checkbox "c") 'dialog))
+  ;; app (39) allows everything, incl. nested
+  (should (jetpacs-check-profile (jetpacs-scaffold :body (jetpacs-chart nil)) 'app))
+  ;; the scan is RECURSIVE: a chart nested in a notification tree is caught
+  (should-error (jetpacs-check-profile
+                 (jetpacs-column (jetpacs-chart nil)) 'notification))
+  ;; generic guard against an arbitrary advertised set
+  (should-error (jetpacs-check-node-types (jetpacs-text "x") '("row" "column")))
+  (should (jetpacs-check-node-types (jetpacs-row (jetpacs-text "x"))
+                                    '("row" "text"))))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

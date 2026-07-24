@@ -253,6 +253,92 @@
   (should-error (jetpacs-divider :thickness -1))
   (should-error (jetpacs-flow-row (jetpacs-text "a") :run-spacing -1)))
 
+;;;; Byte-parity: Input-family nodes (widgets.golden 35-44, 48-55, JW-3)
+
+(ert-deftest jetpacs-widgets/input-goldens ()
+  "Input-family constructors build byte-identically (editor 45-47 is JW-4)."
+  (let ((g (jetpacs-test--golden-map "widgets")))
+    (cl-flet ((chk (idx form)
+                (ert-info ((format "widgets.golden line %s" idx))
+                  (should (equal (jetpacs-node->canonical-json form)
+                                 (gethash idx g))))))
+      (chk "35" (jetpacs-button "OK" (jetpacs-action "demo.tap")))
+      (chk "36" (jetpacs-button "OK" (jetpacs-action "demo.tap")
+                                :enabled :json-false :icon "check" :variant 'tonal))
+      (chk "37" (jetpacs-icon-button "menu" (jetpacs-action "demo.tap")
+                                     :badge "2" :content-description "Open menu"))
+      (chk "38" (jetpacs-chip "Tag"))
+      (chk "39" (jetpacs-chip "Tag" :enabled t :icon "tag"
+                              :on-tap (jetpacs-action "demo.tap") :selected t))
+      (chk "40" (jetpacs-assist-chip "Help" :icon "info"
+                                     :on-tap (jetpacs-action "demo.tap")))
+      (chk "41" (jetpacs-menu
+                 (list (jetpacs-menu-item "Open" (jetpacs-action "demo.tap"))
+                       (jetpacs-menu-item "Delete" (jetpacs-action "demo.delete")
+                                          :enabled :json-false :icon "delete"))
+                 :icon "more"))
+      (chk "42" (jetpacs-text-input "title"))
+      (chk "43" (jetpacs-text-input "title"
+                                    :autofocus t :clear-on-submit t :enabled t
+                                    :hint "Title" :keyboard 'text :label "Title"
+                                    :max-lines 1 :min-lines 1 :monospace :json-false
+                                    :on-change (jetpacs-action "title.change")
+                                    :on-submit (jetpacs-action "title.submit")
+                                    :single-line t :syntax "org" :value "draft"))
+      (chk "44" (jetpacs-text-input "pw" :password t
+                                    :on-submit (jetpacs-action "auth.submit"
+                                                :capture-fields '("pw"))))
+      (chk "48" (jetpacs-checkbox "done" :checked t :enabled t :label "Done"
+                                  :on-change (jetpacs-action "todo.toggle")))
+      (chk "49" (jetpacs-switch "dark" :checked :json-false :label "Dark"
+                                :on-change (jetpacs-action "theme.toggle")))
+      (chk "50" (jetpacs-enum-list "state"
+                                   (list (jetpacs-enum-option "Todo" "TODO")
+                                         (jetpacs-enum-option "Done" "DONE"))
+                                   :on-change (jetpacs-action "state.set") :value "TODO"))
+      (chk "51" (jetpacs-enum-list "tags"
+                                   (list (jetpacs-enum-option "Work" "work")
+                                         (jetpacs-enum-option "Home" "home"))
+                                   :allow-add t :multi-select t
+                                   :on-change (jetpacs-action "tags.set")
+                                   :value '("work" "home")))
+      (chk "52" (jetpacs-date-button "Due" (jetpacs-action "due.pick")
+                                     :value "2026-07-22"))
+      (chk "53" (jetpacs-time-button "At" (jetpacs-action "at.pick") :value "09:30"))
+      (chk "54" (jetpacs-slider "vol" (jetpacs-action "vol.set")
+                                :max 10 :min 0 :value 5))
+      (chk "55" (jetpacs-slider "zoom" (jetpacs-action "zoom.set")
+                                :value 2 :values '(1 2 4))))))
+
+(ert-deftest jetpacs-widgets/input-validation ()
+  "Input constructors enforce their §17.4 rules."
+  (should-error (jetpacs-button "x" "not-a-descriptor"))       ; on_tap descriptor
+  (should-error (jetpacs-button "x" (jetpacs-action "a.b") :variant 'ghost)) ; variant enum
+  (should-error (jetpacs-icon-button "bad!" (jetpacs-action "a.b")))         ; icon id
+  ;; text_input line counts + single_line + password
+  (should-error (jetpacs-text-input "i" :min-lines 3 :max-lines 2))
+  (should-error (jetpacs-text-input "i" :single-line t :max-lines 2))
+  (should-error (jetpacs-text-input "i" :single-line t :value "a\nb"))
+  (should-error (jetpacs-text-input "i" :password t :value "secret"))
+  (should-error (jetpacs-text-input "i" :password t :on-change (jetpacs-action "a.b")))
+  (should-error (jetpacs-text-input "i" :keyboard 'braille))
+  ;; enum_list distinct + value-in-options
+  (should-error (jetpacs-enum-list "e" (list (jetpacs-enum-option "A" "x")
+                                             (jetpacs-enum-option "B" "x"))))
+  (should-error (jetpacs-enum-list "e" (list (jetpacs-enum-option "A" "x"))
+                                   :value "y"))
+  (should (jetpacs-enum-list "e" (list (jetpacs-enum-option "A" "x"))
+                             :allow-add t :value "y"))            ; allow_add bypasses
+  ;; slider continuous vs discrete
+  (should-error (jetpacs-slider "s" (jetpacs-action "a.b") :min 5 :max 5))   ; min<max
+  (should-error (jetpacs-slider "s" (jetpacs-action "a.b") :value 9 :max 5)) ; in range
+  (should-error (jetpacs-slider "s" (jetpacs-action "a.b") :values '(1 1 2))) ; strictly inc
+  (should-error (jetpacs-slider "s" (jetpacs-action "a.b") :values '(1 2) :min 0)) ; discrete omits min
+  (should-error (jetpacs-slider "s" (jetpacs-action "a.b") :values '(1 2 4) :value 3)) ; value listed
+  ;; date/time formats
+  (should-error (jetpacs-date-button "D" (jetpacs-action "a.b") :value "2026/07/22"))
+  (should-error (jetpacs-time-button "T" (jetpacs-action "a.b") :value "9:30")))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

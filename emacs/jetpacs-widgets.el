@@ -857,5 +857,234 @@ ALIGNS is a list of start/center/end (one per column); :on-add-row and
                  :on_add_row on-add-row
                  :on_add_col on-add-col))
 
+;;;; Input nodes (§17.4)
+;;
+;; Every input has `enabled' (boolean, default true); pass `t' or
+;; `:json-false' to emit it explicitly.  `on_*' fields are validated as
+;; ActionDescriptors.  (The `editor' node lands with its toolbar in JW-4.)
+
+(defconst jetpacs--button-variants '("filled" "tonal" "outlined" "text"))
+(defconst jetpacs--keyboards '("text" "number" "decimal" "email" "phone" "uri"))
+(defconst jetpacs--date-re
+  (rx bos (= 4 digit) "-" (= 2 digit) "-" (= 2 digit) eos)
+  "A §17.4 `date_button.value': YYYY-MM-DD.")
+(defconst jetpacs--time-re
+  (rx bos (= 2 digit) ":" (= 2 digit) eos)
+  "A §17.4 `time_button.value': HH:MM.")
+
+(cl-defun jetpacs-button (label on-tap &key icon variant enabled)
+  "A button labeled LABEL dispatching ON-TAP (SPEC §17.4).
+ICON a §4.4 identifier; VARIANT filled(default)/tonal/outlined/text; ENABLED
+a boolean (t or :json-false; default true)."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when variant (setq variant (jetpacs--check-enum variant jetpacs--button-variants ":variant")))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "button" :label label :on_tap on-tap
+                 :icon icon :variant variant :enabled enabled))
+
+(cl-defun jetpacs-icon-button (icon on-tap &key content-description badge enabled)
+  "An icon button showing ICON dispatching ON-TAP (SPEC §17.4).
+ICON is a §4.4 identifier (§17.1); BADGE a string or number."
+  (jetpacs--check-identifier icon ":icon")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (when content-description (jetpacs--require-string content-description ":content_description"))
+  (when badge (jetpacs--check-badge badge))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "icon_button" :icon icon :on_tap on-tap
+                 :content_description content-description :badge badge :enabled enabled))
+
+(cl-defun jetpacs-chip (label &key on-tap selected icon enabled)
+  "A chip labeled LABEL (SPEC §17.4).
+ON-TAP an ActionDescriptor; SELECTED/ENABLED booleans; ICON an identifier."
+  (jetpacs--require-string label ":label")
+  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
+  (when selected (jetpacs--check-bool selected ":selected"))
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "chip" :label label :on_tap on-tap
+                 :selected selected :icon icon :enabled enabled))
+
+(cl-defun jetpacs-assist-chip (label &key on-tap icon enabled)
+  "An assist chip labeled LABEL (SPEC §17.4)."
+  (jetpacs--require-string label ":label")
+  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "assist_chip" :label label :on_tap on-tap :icon icon :enabled enabled))
+
+(cl-defun jetpacs-menu-item (label on-tap &key icon enabled)
+  "A MenuItem {label, on_tap, icon?, enabled?} for `jetpacs-menu' (SPEC §17.4)."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node nil :label label :on_tap on-tap :icon icon :enabled enabled))
+
+(cl-defun jetpacs-menu (items &key icon enabled)
+  "A menu of ITEMS (from `jetpacs-menu-item') (SPEC §17.4)."
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "menu" :items (vconcat items) :icon icon :enabled enabled))
+
+(cl-defun jetpacs-text-input (id &key value hint label on-change on-submit
+                                 single-line min-lines max-lines monospace syntax
+                                 password keyboard autofocus clear-on-submit enabled)
+  "A text input identified by ID (SPEC §17.4).
+Booleans (SINGLE-LINE, MONOSPACE, PASSWORD, AUTOFOCUS, CLEAR-ON-SUBMIT,
+ENABLED) take t or :json-false.  Enforces the §17.4 line-count, single-line
+no-newline, and password constraints at build time."
+  (jetpacs--check-identifier id ":id")
+  (when value (jetpacs--require-string value ":value"))
+  (when hint (jetpacs--require-string hint ":hint"))
+  (when label (jetpacs--require-string label ":label"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when on-submit (jetpacs--check-descriptor on-submit ":on-submit"))
+  (when single-line (jetpacs--check-bool single-line ":single-line"))
+  (when min-lines (jetpacs--check-integer min-lines ":min_lines" 1 nil))
+  (when max-lines (jetpacs--check-integer max-lines ":max_lines" 1 nil))
+  (when (and min-lines max-lines (> min-lines max-lines))
+    (error "jetpacs-text-input: :min-lines must not exceed :max-lines (SPEC 17.4)"))
+  (when monospace (jetpacs--check-bool monospace ":monospace"))
+  (when syntax (jetpacs--check-identifier syntax ":syntax"))
+  (when password (jetpacs--check-bool password ":password"))
+  (when keyboard (setq keyboard (jetpacs--check-enum keyboard jetpacs--keyboards ":keyboard")))
+  (when autofocus (jetpacs--check-bool autofocus ":autofocus"))
+  (when clear-on-submit (jetpacs--check-bool clear-on-submit ":clear-on-submit"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when (eq single-line t)
+    (when (and min-lines (/= min-lines 1))
+      (error "jetpacs-text-input: single_line requires :min-lines 1 (SPEC 17.4)"))
+    (when (and max-lines (/= max-lines 1))
+      (error "jetpacs-text-input: single_line requires :max-lines 1 (SPEC 17.4)"))
+    (when (and value (string-search "\n" value))
+      (error "jetpacs-text-input: single_line prohibits U+000A in :value (SPEC 17.4)")))
+  (when (eq password t)
+    (when (and value (not (string-empty-p value)))
+      (error "jetpacs-text-input: password :value must be absent or empty (SPEC 17.4)"))
+    (when on-change
+      (error "jetpacs-text-input: password :on-change must be absent (SPEC 17.4)"))
+    (when (eq clear-on-submit t)
+      (error "jetpacs-text-input: password :clear-on-submit must be absent or false (SPEC 17.4)")))
+  (when (and (eq clear-on-submit t) on-submit (plist-member on-submit :builtin))
+    (error "jetpacs-text-input: :clear-on-submit is invalid when :on-submit is a builtin (SPEC 17.4)"))
+  (jetpacs--node "text_input"
+                 :id id :value value :hint hint :label label
+                 :on_change on-change :on_submit on-submit
+                 :single_line single-line :min_lines min-lines :max_lines max-lines
+                 :monospace monospace :syntax syntax :password password
+                 :keyboard keyboard :autofocus autofocus
+                 :clear_on_submit clear-on-submit :enabled enabled))
+
+(cl-defun jetpacs-checkbox (id &key checked label on-change enabled)
+  "A checkbox identified by ID (SPEC §17.4).
+CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
+  (jetpacs--check-identifier id ":id")
+  (when checked (jetpacs--check-bool checked ":checked"))
+  (when label (jetpacs--require-string label ":label"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "checkbox" :id id :checked checked :label label
+                 :on_change on-change :enabled enabled))
+
+(cl-defun jetpacs-switch (id &key checked label on-change enabled)
+  "A switch identified by ID (SPEC §17.4).
+CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
+  (jetpacs--check-identifier id ":id")
+  (when checked (jetpacs--check-bool checked ":checked"))
+  (when label (jetpacs--require-string label ":label"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "switch" :id id :checked checked :label label
+                 :on_change on-change :enabled enabled))
+
+(defun jetpacs-enum-option (label value)
+  "An EnumOption {label, value} for `jetpacs-enum-list' (SPEC §17.4).
+VALUE is a string, number, or boolean (t or :json-false)."
+  (jetpacs--require-string label ":label")
+  (unless (or (stringp value) (numberp value) (memq value '(t :json-false)))
+    (error "jetpacs-enum-option: value must be a string, number, or boolean, got %S" value))
+  (jetpacs--node nil :label label :value value))
+
+(cl-defun jetpacs-enum-list (id options &key value multi-select allow-add
+                                on-change enabled)
+  "A single/multi-select list identified by ID over OPTIONS (SPEC §17.4).
+OPTIONS is a list from `jetpacs-enum-option'.  VALUE is one option value, or
+\(with MULTI-SELECT) a list/vector of distinct option values.  Unless
+ALLOW-ADD, every selected value MUST appear in OPTIONS.  No implicit selection."
+  (jetpacs--check-identifier id ":id")
+  (when multi-select (jetpacs--check-bool multi-select ":multi-select"))
+  (when allow-add (jetpacs--check-bool allow-add ":allow-add"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when (and (eq multi-select t) value (listp value))
+    (setq value (vconcat value)))
+  (let ((option-vals (mapcar (lambda (o) (plist-get o :value)) options)))
+    (unless (= (length option-vals) (length (delete-dups (copy-sequence option-vals))))
+      (error "jetpacs-enum-list: option values must be distinct (SPEC 17.4)"))
+    (when (and value (not (eq allow-add t)))
+      (dolist (s (if (vectorp value) (append value nil) (list value)))
+        (unless (member s option-vals)
+          (error "jetpacs-enum-list: value %S is not among options (SPEC 17.4)" s)))))
+  (jetpacs--node "enum_list"
+                 :id id :options (vconcat options) :value value
+                 :multi_select multi-select :allow_add allow-add
+                 :on_change on-change :enabled enabled))
+
+(cl-defun jetpacs-date-button (label on-pick &key value enabled)
+  "A date-picker button labeled LABEL dispatching ON-PICK (SPEC §17.4).
+VALUE is a YYYY-MM-DD string."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-descriptor on-pick ":on-pick")
+  (when value
+    (unless (and (stringp value) (string-match-p jetpacs--date-re value))
+      (error "jetpacs-date-button: :value must be YYYY-MM-DD (SPEC 17.4), got %S" value)))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "date_button" :label label :on_pick on-pick :value value :enabled enabled))
+
+(cl-defun jetpacs-time-button (label on-pick &key value enabled)
+  "A time-picker button labeled LABEL dispatching ON-PICK (SPEC §17.4).
+VALUE is an HH:MM string in local civil time."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-descriptor on-pick ":on-pick")
+  (when value
+    (unless (and (stringp value) (string-match-p jetpacs--time-re value))
+      (error "jetpacs-time-button: :value must be HH:MM (SPEC 17.4), got %S" value)))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "time_button" :label label :on_pick on-pick :value value :enabled enabled))
+
+(cl-defun jetpacs-slider (id on-change &key value min max values enabled)
+  "A slider identified by ID dispatching ON-CHANGE (SPEC §17.4).
+Continuous: :min (default 0) < :max (default 1), :value in [min,max].
+Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
+:min/:max, and :value must equal a listed number."
+  (jetpacs--check-identifier id ":id")
+  (jetpacs--check-descriptor on-change ":on-change")
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (cond
+   (values
+    (when (or min max)
+      (error "jetpacs-slider: a discrete slider must omit :min/:max (SPEC 17.4)"))
+    (unless (and (>= (length values) 2)
+                 (cl-every #'jetpacs--finite-number-p values)
+                 (apply #'< values))
+      (error "jetpacs-slider: :values must be 2+ strictly-increasing finite numbers (SPEC 17.4)"))
+    (when (and value (not (member value values)))
+      (error "jetpacs-slider: discrete :value must equal a listed number (SPEC 17.4)")))
+   (t
+    (when min (jetpacs--check-number min ":min" nil nil))
+    (when max (jetpacs--check-number max ":max" nil nil))
+    (when value (jetpacs--check-number value ":value" nil nil))
+    (let ((lo (or min 0)) (hi (or max 1)))
+      (unless (< lo hi)
+        (error "jetpacs-slider: :min must be less than :max (SPEC 17.4)"))
+      (when (and value (not (<= lo value hi)))
+        (error "jetpacs-slider: :value must be within [min,max] (SPEC 17.4)")))))
+  (jetpacs--node "slider"
+                 :id id :on_change on-change :value value
+                 :min min :max max :values (and values (vconcat values))
+                 :enabled enabled))
+
 (provide 'jetpacs-widgets)
 ;;; jetpacs-widgets.el ends here

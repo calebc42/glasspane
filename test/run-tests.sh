@@ -28,5 +28,16 @@ emacs -Q --batch -L emacs \
   -f batch-byte-compile emacs/ebp.el
 rm -f emacs/ebp.elc
 
+# Same guard for the application-layer widget builders.
+emacs -Q --batch -L emacs \
+  --eval '(setq byte-compile-error-on-warn t)' \
+  -f batch-byte-compile emacs/jetpacs-widgets.el
+rm -f emacs/jetpacs-widgets.elc
+
 emacs -Q --batch -L emacs -l test/ebp-wire-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# Application-layer builder suite (jetpacs-widgets; requires ebp, so it is
+# absent from the delineation guard above).
+emacs -Q --batch -L emacs -l test/jetpacs-widgets-test.el \
   -f ert-run-tests-batch-and-exit

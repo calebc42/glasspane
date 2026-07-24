@@ -489,7 +489,23 @@
   (should-error (jetpacs-month-grid "2026-07" :min-month "2026-12" :max-month "2026-01"))
   (should-error (jetpacs-month-grid
                  "2026-07"
-                 :marks (list (cons "bad-date" (jetpacs-month-mark 1))))))
+                 :marks (list (cons "bad-date" (jetpacs-month-mark 1)))))
+  ;; a raw mark value bypassing jetpacs-month-mark is still validated (post-audit)
+  (should-error (jetpacs-month-grid "2026-07"
+                                    :marks (list (cons "2026-07-04" '(:dots 99)))))
+  (should-error (jetpacs-month-grid "2026-07"
+                                    :marks (list (cons "2026-07-04" '(:bogus 1)))))
+  ;; chart point meta must be an object (post-audit)
+  (should-error (jetpacs-chart-point 0 1 :meta 5)))
+
+(ert-deftest jetpacs-widgets/month-grid-marks-order ()
+  "Multiple marks serialize with keys sorted (string<), matching json.dumps."
+  (should (equal
+           (jetpacs-node->canonical-json
+            (jetpacs-month-grid "2026-07"
+                                :marks (list (cons "2026-07-20" (jetpacs-month-mark 1))
+                                             (cons "2026-07-04" (jetpacs-month-mark 2)))))
+           "{\"marks\":{\"2026-07-04\":{\"dots\":2},\"2026-07-20\":{\"dots\":1}},\"month\":\"2026-07\",\"t\":\"month_grid\"}")))
 
 ;;;; The canonical serializer
 

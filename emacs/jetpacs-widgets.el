@@ -1256,6 +1256,8 @@ or a list of `jetpacs-toolbar-item's.  Booleans take t or :json-false."
 X and Y are finite numbers; META is a JSON-data object (a plist)."
   (jetpacs--check-number x ":x" nil nil)
   (jetpacs--check-number y ":y" nil nil)
+  (when (and meta (not (and (consp meta) (keywordp (car meta)))))
+    (error "jetpacs-chart-point: :meta must be an object plist (SPEC 17.5), got %S" meta))
   (jetpacs--node nil :x x :y y :meta meta))
 
 (cl-defun jetpacs-chart-series (points &key name color)
@@ -1357,13 +1359,30 @@ WIDTH and HEIGHT MUST be positive; OPS is a list of canvas ops
     (unless (<= 1 mo 12) (error "jetpacs: %s month must be 01-12, got %S" what value)))
   value)
 
+(defun jetpacs--check-mark (mark)
+  "Signal unless MARK is a valid month_grid mark plist {dots, color?} (§17.5).
+DOTS is a required integer 0..3; COLOR an optional §16.6 color."
+  (unless (and (consp mark) (keywordp (car mark)))
+    (error "jetpacs-month-grid: a mark must be a plist (use jetpacs-month-mark), got %S" mark))
+  (let ((p mark) (has-dots nil))
+    (while p
+      (let ((k (pop p)) (v (pop p)))
+        (pcase k
+          (:dots (setq has-dots t) (jetpacs--check-integer v ":dots" 0 3))
+          (:color (jetpacs--check-color v))
+          (_ (error "jetpacs-month-grid: unknown mark member %S (SPEC 17.5)" k)))))
+    (unless has-dots
+      (error "jetpacs-month-grid: a mark requires :dots (SPEC 17.5)")))
+  mark)
+
 (defun jetpacs--marks->map (marks)
   "Convert MARKS, an alist of (YYYY-MM-DD . mark), to a string-keyed hash-table.
-Signals on an invalid or duplicate date key."
+Signals on an invalid or duplicate date key or an invalid mark value."
   (let ((h (make-hash-table :test 'equal)))
     (dolist (cell marks)
       (let ((date (car cell)))
         (jetpacs--check-date date)
+        (jetpacs--check-mark (cdr cell))
         (when (gethash date h)
           (error "jetpacs-month-grid: duplicate mark date %S (SPEC 17.5)" date))
         (puthash date (cdr cell) h)))

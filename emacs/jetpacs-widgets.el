@@ -1558,8 +1558,17 @@ scaffold/layout/viz).")
   '("text" "row" "column" "box" "spacer" "divider")
   "The reference companion's advertised `notification' node_types (6).")
 
+(defconst jetpacs--opaque-members '(:args :meta :value)
+  "Members carrying opaque JSON data, whose object keys are application data
+and NOT node-type discriminators: §14.1 action `args', §17.5 chart-point
+`meta', and a `dialog.submit' `value'.  These never contain nodes, so the
+node-type scan does not descend into them.")
+
 (defun jetpacs--collect-node-types (value acc)
-  "Accumulate every `:t' node-type string in VALUE into ACC (a list)."
+  "Accumulate every node-type `:t' discriminator in VALUE into ACC (a list).
+Descends into node/vector/hash/list structure but NOT into opaque data
+members (`jetpacs--opaque-members'), so a data key literally named \"t\"
+inside `args'/`meta'/`value' is never mistaken for a node type."
   (cond
    ((vectorp value)
     (let ((a acc))
@@ -1567,13 +1576,17 @@ scaffold/layout/viz).")
    ((hash-table-p value)
     (let ((a acc))
       (maphash (lambda (_k v) (setq a (jetpacs--collect-node-types v a))) value) a))
-   ((and (consp value) (keywordp (car value)))
+   ((and (consp value) (keywordp (car value)))        ; a node / sub-spec plist
     (let ((p value) (a acc))
       (while p
         (let ((k (pop p)) (v (pop p)))
           (when (eq k :t) (push v a))
-          (setq a (jetpacs--collect-node-types v a))))
+          (unless (memq k jetpacs--opaque-members)
+            (setq a (jetpacs--collect-node-types v a)))))
       a))
+   ((consp value)                                     ; a bare list of nodes
+    (let ((a acc))
+      (dolist (n value) (setq a (jetpacs--collect-node-types n a))) a))
    (t acc)))
 
 (defun jetpacs-check-node-types (tree allowed &optional what)

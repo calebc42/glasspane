@@ -600,10 +600,22 @@
 
 (ert-deftest jetpacs-widgets/profile-gating ()
   "jetpacs-check-profile / -node-types gate emitted types to the target (§16.2)."
-  ;; reference set sizes
+  ;; reference set sizes + exact membership (app == the 39 node types)
   (should (= (length jetpacs-app-node-types) 39))
   (should (= (length jetpacs-dialog-node-types) 26))
   (should (= (length jetpacs-notification-node-types) 6))
+  (should (equal (sort (copy-sequence jetpacs-app-node-types) #'string<)
+                 (sort (copy-sequence jetpacs-node-types) #'string<)))
+  ;; post-audit: a data key named "t" inside opaque args/meta is NOT a node type
+  (should (jetpacs-check-profile
+           (jetpacs-button "Go" (jetpacs-action "foo.bar" :args '(:t "note"))) 'app))
+  (should (jetpacs-check-profile
+           (jetpacs-chart (list (jetpacs-chart-series
+                                 (list (jetpacs-chart-point 0 5 :meta '(:t 123))))))
+           'app))
+  ;; post-audit: a bare list of nodes is scanned (not silently skipped)
+  (should-error (jetpacs-check-profile
+                 (list (jetpacs-text "x") (jetpacs-chart nil)) 'notification))
   ;; notification (6) forbids chart/button/text_input; allows core layout+text
   (should (jetpacs-check-profile (jetpacs-column (jetpacs-text "x")) 'notification))
   (should-error (jetpacs-check-profile (jetpacs-chart nil) 'notification))

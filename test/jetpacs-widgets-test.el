@@ -507,6 +507,56 @@
                                              (cons "2026-07-04" (jetpacs-month-mark 2)))))
            "{\"marks\":{\"2026-07-04\":{\"dots\":2},\"2026-07-20\":{\"dots\":1}},\"month\":\"2026-07\",\"t\":\"month_grid\"}")))
 
+;;;; Byte-parity: scaffold (widgets.golden 59-60) + SurfaceSpec shapes (JW-6)
+
+(ert-deftest jetpacs-widgets/scaffold-goldens ()
+  "Scaffold builds byte-identically to widgets.golden 59-60."
+  (let ((g (jetpacs-test--golden-map "widgets")))
+    (cl-flet ((chk (idx form)
+                (ert-info ((format "widgets.golden line %s" idx))
+                  (should (equal (jetpacs-node->canonical-json form)
+                                 (gethash idx g))))))
+      (chk "59" (jetpacs-scaffold))
+      (chk "60" (jetpacs-scaffold
+                 :body (jetpacs-column) :bottom-bar (jetpacs-row)
+                 :drawer (jetpacs-column)
+                 :fab (jetpacs-icon-button "add" (jetpacs-action "demo.tap"))
+                 :floating-toolbar (jetpacs-row)
+                 :on-refresh (jetpacs-action "app.refresh")
+                 :snackbar "Saved"
+                 :snackbar-action (jetpacs-snackbar-action
+                                   "Undo" (jetpacs-action "demo.undo"))
+                 :top-bar (jetpacs-text "App"))))))
+
+(ert-deftest jetpacs-widgets/surface-shapes ()
+  "§13.4 SurfaceSpec wrappers serialize to the documented shapes."
+  ;; app multi-view: {views (id-keyed, sorted), initial_view}
+  (should (equal
+           (jetpacs-node->canonical-json
+            (jetpacs-multi-view (list (cons "list" (jetpacs-column))
+                                      (cons "detail" (jetpacs-column)))
+                                "list"))
+           "{\"initial_view\":\"list\",\"views\":{\"detail\":{\"children\":[],\"t\":\"column\"},\"list\":{\"children\":[],\"t\":\"column\"}}}"))
+  ;; notification: {body, meta?}
+  (should (equal (jetpacs-node->canonical-json
+                  (jetpacs-notification-surface (jetpacs-text "hi")))
+                 "{\"body\":{\"t\":\"text\",\"text\":\"hi\"}}"))
+  ;; widget: {title, body, empty?, header_action?}
+  (should (equal (jetpacs-node->canonical-json
+                  (jetpacs-widget-surface "Title" (jetpacs-text "hi")))
+                 "{\"body\":{\"t\":\"text\",\"text\":\"hi\"},\"title\":\"Title\"}")))
+
+(ert-deftest jetpacs-widgets/scaffold-surface-validation ()
+  "Scaffold + SurfaceSpec wrappers enforce their rules."
+  (should-error (jetpacs-scaffold :body "not-a-node"))
+  (should-error (jetpacs-snackbar-action "Undo" "not-a-descriptor"))
+  ;; multi-view: non-empty, identifier ids, initial_view must exist
+  (should-error (jetpacs-multi-view '() "x"))
+  (should-error (jetpacs-multi-view (list (cons "bad id" (jetpacs-column))) "bad id"))
+  (should-error (jetpacs-multi-view (list (cons "list" (jetpacs-column))) "detail"))
+  (should-error (jetpacs-widget-surface "T" "not-a-node"))
+  (should-error (jetpacs-notification-surface "not-a-node")))
+
 ;;;; The canonical serializer
 
 (ert-deftest jetpacs-widgets/canonical-key-sort ()

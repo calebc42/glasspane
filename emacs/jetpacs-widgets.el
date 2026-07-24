@@ -1415,5 +1415,76 @@ a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
                  :on_day_tap on-day-tap :on_month_change on-month-change
                  :children (and children (vconcat children))))
 
+;;;; Scaffold + application chrome (§17.6)
+
+(cl-defun jetpacs-snackbar-action (label on-tap)
+  "A scaffold snackbar action {label, on_tap} (SPEC §17.6)."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (jetpacs--node nil :label label :on_tap on-tap))
+
+(cl-defun jetpacs-scaffold (&key top-bar body bottom-bar fab floating-toolbar
+                                 drawer snackbar snackbar-action on-refresh)
+  "A scaffold (application chrome) node (SPEC §17.6).
+TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
+string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor."
+  (dolist (pair (list (cons ":top-bar" top-bar) (cons ":body" body)
+                      (cons ":bottom-bar" bottom-bar) (cons ":fab" fab)
+                      (cons ":floating-toolbar" floating-toolbar)
+                      (cons ":drawer" drawer)))
+    (when (and (cdr pair) (not (jetpacs--node-p (cdr pair))))
+      (error "jetpacs-scaffold: %s must be a node, got %S" (car pair) (cdr pair))))
+  (when snackbar (jetpacs--require-string snackbar ":snackbar"))
+  (when on-refresh (jetpacs--check-descriptor on-refresh ":on-refresh"))
+  (jetpacs--node "scaffold"
+                 :top_bar top-bar :body body :bottom_bar bottom-bar
+                 :fab fab :floating_toolbar floating-toolbar :drawer drawer
+                 :snackbar snackbar :snackbar_action snackbar-action
+                 :on_refresh on-refresh))
+
+;;;; SurfaceSpec shapes (§13.4)
+;;
+;; These wrap a node tree into the SurfaceSpec a caller hands to
+;; `ebp-client-surface-update'.  An `app:*' single-root surface is just the
+;; root node itself; the wrappers cover multi-view app, notification, widget.
+
+(defun jetpacs-multi-view (views initial-view)
+  "An `app:*' multi-view SurfaceSpec {views, initial_view} (SPEC §13.4).
+VIEWS is a non-empty alist of (VIEW-ID . root-node) with §4.4-identifier ids;
+INITIAL-VIEW MUST name an existing view."
+  (unless views (error "jetpacs-multi-view: views must be non-empty (SPEC 13.4)"))
+  (jetpacs--check-identifier initial-view ":initial-view")
+  (let ((h (make-hash-table :test 'equal)) (ids '()))
+    (dolist (cell views)
+      (let ((id (car cell)))
+        (jetpacs--check-identifier id "view id")
+        (unless (jetpacs--node-p (cdr cell))
+          (error "jetpacs-multi-view: view %S value must be a node" id))
+        (when (gethash id h)
+          (error "jetpacs-multi-view: duplicate view id %S" id))
+        (puthash id (cdr cell) h)
+        (push id ids)))
+    (unless (member initial-view ids)
+      (error "jetpacs-multi-view: initial_view %S names no existing view (SPEC 13.4)" initial-view))
+    (jetpacs--node nil :views h :initial_view initial-view)))
+
+(cl-defun jetpacs-notification-surface (body &key meta)
+  "A `notification:*' SurfaceSpec {body, meta?} (SPEC §13.4; META is §18.5).
+BODY is a Node."
+  (unless (jetpacs--node-p body)
+    (error "jetpacs-notification-surface: BODY must be a node, got %S" body))
+  (jetpacs--node nil :body body :meta meta))
+
+(cl-defun jetpacs-widget-surface (title body &key empty header-action)
+  "A `widget:*' SurfaceSpec {title, body, empty?, header_action?} (SPEC §13.4).
+TITLE is a string; BODY and EMPTY are Nodes; HEADER-ACTION a descriptor."
+  (jetpacs--require-string title ":title")
+  (unless (jetpacs--node-p body)
+    (error "jetpacs-widget-surface: BODY must be a node, got %S" body))
+  (when (and empty (not (jetpacs--node-p empty)))
+    (error "jetpacs-widget-surface: :empty must be a node, got %S" empty))
+  (when header-action (jetpacs--check-descriptor header-action ":header-action"))
+  (jetpacs--node nil :title title :body body :empty empty :header_action header-action))
+
 (provide 'jetpacs-widgets)
 ;;; jetpacs-widgets.el ends here

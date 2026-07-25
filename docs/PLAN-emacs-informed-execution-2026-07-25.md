@@ -37,7 +37,7 @@ are now recorded as **decided** with the supporting determination stated. §5.3 
 
 ### Execution ledger (2026-07-25, session 2 — build-order steps 1–3 + 5 DONE)
 
-Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `30857a5`, amendments through **#97**):
+Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `3c73d75`, amendments through **#105**):
 
 | Step | What | Commits |
 |---|---|---|
@@ -49,8 +49,8 @@ Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `30857a5`, amendments t
 | §4-4a | **T2** — ScalarPos/Utf16Pos through EditorSession + the four engine entry points, ONE surrogate-safe conversion pair; editorCommand/localEditorCaret convert+order (LD-4); `editorListener` wired → EditorMirror StateFlow → RenderEditor adopts on epoch + refused-edit snap-back (LD-5); edit.apply atomic + form-strict, cursor REQUIRED, peer caret validated pre-splice. Note: insdel's three-case adjust has no live slot (peer-dictated cursor, B2); the sender-side cursor choice is an **ebp.el follow-up** | `271c3df` |
 | audit | **T1/T2 audited against §4/§6/§19** — 9 defects fixed (Unicode-lax hex escapes, move-only `seq` unchecked, local edit from a superseded base, `toInt()` position truncation, `start+del` overflow closing the transport, frames stranded behind a fault, unvalidated `edit.complete` results, `ebp.el`'s line-anchored `Content-Length`, `validate.py`'s lone surrogates + missing unterminated-header cap); amendments **#98–#103**; 11 pre-existing defects confirmed + scheduled. Report: `docs/AUDIT-T1-T2-2026-07-25.md` | `7ed0f82`, `26b635f` |
 
-Baselines: **281 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames,
-17 wire fixtures)**. Spec through **amendment #103**.
+Baselines: **290 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames,
+17 wire fixtures)**. Spec through **amendment #105**.
 
 **Audit backlog CLEARED** (`691b052`, spec `3c73d75`, amendments **#104-#105**): all 11 §3
 items resolved except the one P3 ordering nit (§3.10), each with a regression test. The editor

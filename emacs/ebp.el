@@ -90,6 +90,9 @@ local development."
                          :null-object :null :false-object :false)
     (error (signal 'ebp-parse-error (list text)))))
 
+(defconst ebp-max-safe-integer 9007199254740991
+  "SPEC 4.2: the inclusive EBP integer bound (2^53 - 1).")
+
 (defconst ebp-max-json-depth 64
   "SPEC 4.5: a JSON body nests at most 64 containers.")
 
@@ -287,10 +290,15 @@ The length is computed after UTF-8 encoding, never from characters."
 ;;;; Envelope (SPEC 7)
 
 (defun ebp-valid-request-id-p (id)
-  "SPEC 7.2: a string identifier of at most 64 ASCII octets, never empty."
-  (and (stringp id)
-       (<= 1 (length id) ebp-max-request-id-octets)
-       (string-match-p "\\`[A-Za-z0-9][A-Za-z0-9._:/-]*\\'" id)))
+  "SPEC 7.2: a string identifier of at most 64 ASCII octets (never
+empty), or a safe integer.  Amendments #34/#80: jsonrpc.el's sequential
+integer ids conform without adaptation; `null' and fractional numbers
+do not."
+  (or (and (integerp id)
+           (<= (- ebp-max-safe-integer) id ebp-max-safe-integer))
+      (and (stringp id)
+           (<= 1 (length id) ebp-max-request-id-octets)
+           (string-match-p "\\`[A-Za-z0-9][A-Za-z0-9._:/-]*\\'" id))))
 
 (defun ebp-request (id method params)
   "Build a request plist (SPEC 7.1).  PARAMS must be a JSON object value."
@@ -515,17 +523,28 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; scalar values, so splice positions are char positions directly.
   (editors (make-hash-table :test #'equal))
   edit-change-functions ; called with (client document editor-id text)
+  ;; SPEC 19.3 (amendment #71): called with (client document editor-id
+  ;; seed-text prior-text) when edit.open arrives, so the application can
+  ;; compare the seed against its real document and reconcile explicitly.
+  edit-open-functions
   ready-functions ; abnormal hook: called with the client on READY
   ;; SPEC 15.3: the latest replay summary and the bounded-backoff timer
   ;; that retries while `remaining' is nonzero.
   replay-summary
   replay-retry-timer
+  ;; Called with (client summary) when a replay pass settles with the
+  ;; backlog drained (remaining 0) in READY — the application's seam for
+  ;; refreshing views that replayed events just mutated.
+  after-replay-functions
   close-reason)
 
 (defun ebp-client-create (&rest config)
   "Create a client engine in `connected'.  CONFIG is the struct's config
 plist plus optionally :ready-function, :state-changed-function,
-:before-replay-function (the SPEC 10.3 step-3 seam), :receipt-file, and
+:before-replay-function (the SPEC 10.3 step-3 seam),
+:after-replay-function (called with (CLIENT SUMMARY) when a replay pass
+settles with the backlog drained), :edit-open-function (the SPEC 19.3
+amendment-#71 seed-reconciliation seam), :receipt-file, and
 :replay-retry-delay.  Without :receipt-file the SPEC 14.4 EventId
 receipts default to `ebp-receipts' under `user-emacs-directory' —
 `accepted' always names a durable commitment."
@@ -545,6 +564,10 @@ receipts default to `ebp-receipts' under `user-emacs-directory' —
                                  #'ebp-client--handle-state-changed)
     (when-let* ((fn (plist-get config :edit-change-function)))
       (push fn (ebp-client-edit-change-functions client)))
+    (when-let* ((fn (plist-get config :edit-open-function)))
+      (push fn (ebp-client-edit-open-functions client)))
+    (when-let* ((fn (plist-get config :after-replay-function)))
+      (push fn (ebp-client-after-replay-functions client)))
     (ebp-client-register-handler client "edit.open"
                                  #'ebp-client--handle-edit-open)
     (ebp-client-register-handler client "edit.delta"
@@ -577,6 +600,24 @@ For a notification the return value is ignored."
       (setf (ebp-client-receipt-db client) nil))
     (when-let* ((conn (ebp-client-connection client)))
       (ignore-errors (jsonrpc-shutdown conn)))))
+
+(defun ebp-client-forget-pairing (client)
+  "SPEC 9.1 (amendment #72): local removal of this pairing.
+Closes the connection, durably erases the EventId receipt store (the
+SQLite or text file and its sidecars), clears the in-memory receipts,
+and scrubs the token from this client's config.  Erasure covers
+everything this library persists; a copy of the token the application
+stored elsewhere (auth-source, custom code) is the application's to
+erase.  Removal at this endpoint prevents future authentication but
+cannot erase storage on a disconnected Companion (SPEC 9.1)."
+  (ebp-client-close client 'forget-pairing)
+  (when-let* ((file (plist-get (ebp-client-config client) :receipt-file)))
+    (dolist (f (list file (concat file "-wal") (concat file "-shm")))
+      (when (file-exists-p f)
+        (ignore-errors (delete-file f)))))
+  (clrhash (ebp-client-receipts client))
+  (setf (ebp-client-config client)
+        (plist-put (ebp-client-config client) :token nil)))
 
 (defun ebp-client--step (client event)
   "Advance the pure SPEC 10.1 machine or close on an illegal EVENT."
@@ -702,7 +743,8 @@ synchronization barrier (SPEC 10.3)."
               (dolist (fn (ebp-client-ready-functions client))
                 (funcall fn client))
               ;; SPEC 15.3: retry with bounded backoff while remaining.
-              (ebp-client--schedule-replay-retry client nil))))))
+              (ebp-client--schedule-replay-retry client nil)
+              (ebp-client--replay-settled client))))))
      300))))
 
 (defun ebp-client--schedule-replay-retry (client delay)
@@ -733,8 +775,21 @@ capped at 60 s."
                            client (min ebp-replay-retry-max (* 2 next)))
                         (setf (ebp-client-replay-summary client) result)
                         (ebp-client--schedule-replay-retry
-                         client (min ebp-replay-retry-max (* 2 next)))))
+                         client (min ebp-replay-retry-max (* 2 next)))
+                        (ebp-client--replay-settled client)))
                     300)))))))))
+
+(defun ebp-client--replay-settled (client)
+  "Run the `:after-replay-function' hooks when the backlog is drained.
+Called after a replay summary is absorbed; fires only in `ready' with
+`remaining' 0 — replayed events have all reached a permanent
+disposition, so the application may refresh views they mutated."
+  (let ((summary (ebp-client-replay-summary client)))
+    (when (and (eq (ebp-client-state client) 'ready)
+               summary
+               (eql (plist-get summary :remaining) 0))
+      (dolist (fn (ebp-client-after-replay-functions client))
+        (funcall fn client summary)))))
 
 (defun ebp-client--force-replay-retry (client)
   "SPEC 15.3: after answering 1500 event-retry, Emacs SHOULD call
@@ -972,15 +1027,28 @@ later snapshot explicitly reset that ID."
              (ebp-client-editor-text client document editor-id))))
 
 (defun ebp-client--handle-edit-open (client params)
-  "SPEC 19.3: seed the mirror for a new editor session."
-  (let ((doc (plist-get params :document))
-        (eid (plist-get params :editor_id)))
+  "SPEC 19.3: seed the mirror for a new editor session.
+Amendment #71: Emacs MUST compare the seed against its own document and
+reconcile explicitly, never silently overwrite either side.  The
+document lives above this library, so after the mirror adopts the seed
+\(the mirror shadows the Companion; a reconciling edit needs its fresh
+session and seq) the `:edit-open-function' hooks receive
+\(CLIENT DOCUMENT EDITOR-ID SEED-TEXT PRIOR-TEXT) — PRIOR-TEXT is the
+previous mirror text, nil for a fresh session — and the application
+adopts the seed, issues a reconciling `ebp-client-edit-apply', or
+surfaces a conflict."
+  (let* ((doc (plist-get params :document))
+         (eid (plist-get params :editor_id))
+         (prior (gethash (cons doc eid) (ebp-client-editors client)))
+         (prior-text (plist-get prior :text)))
     (puthash (cons doc eid)
              (list :session (plist-get params :session)
                    :seq (plist-get params :seq)
                    :text (plist-get params :text)
                    :cursor (plist-get params :cursor))
              (ebp-client-editors client))
+    (dolist (fn (ebp-client-edit-open-functions client))
+      (funcall fn client doc eid (plist-get params :text) prior-text))
     (ebp-client--editor-changed client doc eid)))
 
 (defun ebp-client--handle-edit-delta (client params)
@@ -1045,25 +1113,42 @@ match or the query is editor-stale."
 (cl-defun ebp-client-edit-apply (client document editor-id start del text
                                  &key callback)
   "SPEC 19.4: push an Emacs edit to the Companion; it wins seq+1 or loses
-with a typed stale (the incoming delta is then authoritative)."
+with a typed stale (the incoming delta is then authoritative).
+Amendment #84: a splice whose resulting document would exceed the
+negotiated `max_editor_bytes' (its JCS-serialized UTF-8 length, SPEC
+4.5) MUST NOT be emitted; it is refused locally and CALLBACK receives
+\(nil ERROR) with a synthetic `1201' `editor-too-large' plist mirroring
+the wire shape."
   (let ((ed (gethash (cons document editor-id) (ebp-client-editors client))))
     (when ed
-      (let ((len (+ (- (length (plist-get ed :text)) del) (length text))))
-        (ebp-client--request
-         client 'edit.apply
-         (list :document document :editor_id editor-id
-               :session (plist-get ed :session)
-               :seq (1+ (plist-get ed :seq)) :start start :del del
-               :text text :len len :cursor (+ start (length text)))
-         (lambda (result error)
-           (when (and (null error) (equal (plist-get result :status) "applied"))
-             (setf (plist-get ed :text)
-                   (concat (substring (plist-get ed :text) 0 start) text
-                           (substring (plist-get ed :text) (+ start del)))
-                   (plist-get ed :seq) (plist-get result :seq))
-             (ebp-client--editor-changed client document editor-id))
-           (when callback
-             (funcall callback (and result (plist-get result :status)) error))))))))
+      (let* ((old (plist-get ed :text))
+             (new (concat (substring old 0 start) text
+                          (substring old (+ start del))))
+             (max-bytes (plist-get (ebp-client-limits client)
+                                   :max_editor_bytes)))
+        (if (and max-bytes
+                 (> (string-bytes (json-serialize new)) max-bytes))
+            (when callback
+              (funcall callback nil
+                       '(:code 1201
+                         :message "resulting document exceeds max_editor_bytes"
+                         :data (:kind "content-invalid"
+                                :reason "editor-too-large"))))
+          (ebp-client--request
+           client 'edit.apply
+           (list :document document :editor_id editor-id
+                 :session (plist-get ed :session)
+                 :seq (1+ (plist-get ed :seq)) :start start :del del
+                 :text text :len (length new) :cursor (+ start (length text)))
+           (lambda (result error)
+             (when (and (null error)
+                        (equal (plist-get result :status) "applied"))
+               (setf (plist-get ed :text) new
+                     (plist-get ed :seq) (plist-get result :seq))
+               (ebp-client--editor-changed client document editor-id))
+             (when callback
+               (funcall callback (and result (plist-get result :status))
+                        error)))))))))
 
 (defun ebp-client-edit-resync (client document editor-id)
   "SPEC 19.4: recover a stale local view — the Companion returns full
@@ -1150,16 +1235,25 @@ acknowledgement and carries no result."
 
 (cl-defun ebp-client-theme-set (client &key (dark 'system) colors syntax)
   "Push a complete theme replacement (SPEC 18.4).  DARK selects polarity:
-t forces dark, `:false' forces light, and the default `system' omits it
-so the Companion follows the device setting (amendment #36).  COLORS and
-SYNTAX are role-map plists mirroring the Emacs theme, or the symbol
-`null' to clear the mirror and select the native scheme.  Each call
-fully replaces the previously pushed theme."
+t forces dark, `:false' (or `:json-false') forces light, and the default
+`system' omits the member so the Companion follows the device setting
+\(amendment #36).  COLORS and SYNTAX are role-map plists mirroring the
+Emacs theme, or the symbol `null' to send JSON null and select the
+Companion's native scheme.  Each call fully replaces the previously
+pushed theme.  Values are normalized to the live connection's jsonrpc
+sentinels (`:json-false' / nil); the reference encoder's `:false' and
+`:null' are accepted here but never handed to jsonrpc.el, which rejects
+them."
   (ebp-client-notify
    client 'theme.set
-   `(,@(unless (eq dark 'system) `(:dark ,dark))
-     ,@(when colors `(:colors ,(if (eq colors 'null) :null colors)))
-     ,@(when syntax `(:syntax ,(if (eq syntax 'null) :null syntax))))))
+   `(,@(pcase dark
+         ('system nil)
+         ('t '(:dark t))
+         ((or :false :json-false) '(:dark :json-false))
+         (_ (error "ebp-client-theme-set: :dark must be t, :false, or \
+omitted (system); got %S" dark)))
+     ,@(when colors `(:colors ,(if (memq colors '(null :null)) nil colors)))
+     ,@(when syntax `(:syntax ,(if (memq syntax '(null :null)) nil syntax))))))
 
 ;;;; Reminders (SPEC 18.6), the client half
 
@@ -1205,6 +1299,14 @@ outcome MUST NOT be auto-retried (SPEC 20.2)."
 Nil until the welcome carried a device report (triggers granted)."
   (append (plist-get (ebp-client-device client) :trigger_types) nil))
 
+(defun ebp-client-device-state-types (client)
+  "The sampleable state-type identifiers the Companion advertised
+\(SPEC 20.1), a list.  Never includes a predicate-only type:
+`time.window' is valid in a `when' gate but never listed here
+\(SPEC 21.7, amendment #75).  Nil until the welcome carried a device
+report."
+  (append (plist-get (ebp-client-device client) :state_types) nil))
+
 (cl-defun ebp-client-triggers-set (client triggers &key callback)
   "Replace the pairing identity's trigger set (SPEC 21.1).  TRIGGERS is a
 vector of trigger plists — each `(:id ID :type TYPE)' plus optional
@@ -1215,7 +1317,23 @@ trigger arrives as an `event.action' whose action is `trigger.fired'; register
 a handler with `ebp-client-register-action'.  CALLBACK receives (COUNT ERROR):
 COUNT is the accepted total, ERROR the JSON-RPC error plist (1101
 `triggers-rejected', identifying the offending trigger).  An empty vector
-clears every registration; the whole set is validated before any change."
+clears every registration; the whole set is validated before any change.
+
+SPEC 21.3 (amendment #75): every `when' predicate type that is not
+predicate-only MUST be advertised in `device.state_types'; `time.window'
+is predicate-only and always authorable.  Because Emacs MUST omit an
+entire trigger rather than install a weaker one, and this call
+atomically replaces the whole set, a violating set signals an error
+here instead of being sent."
+  (let ((advertised (ebp-client-device-state-types client)))
+    (seq-doseq (trigger triggers)
+      (seq-doseq (pred (or (plist-get trigger :when) []))
+        (let ((type (plist-get pred :type)))
+          (unless (or (equal type "time.window")
+                      (member type advertised))
+            (error "ebp: trigger %S `when' type %S not in device.state_types \
+%S (SPEC 21.3)"
+                   (plist-get trigger :id) type advertised))))))
   (ebp-client--request
    client 'triggers.set
    `(:triggers ,triggers)
@@ -1269,8 +1387,12 @@ CONFIG is `ebp-client-create' config.  Returns the client.  Transport,
 framing, and id bookkeeping are core jsonrpc.el's; reconnection policy
 stays with the caller for now."
   (let* ((client (apply #'ebp-client-create config))
+         ;; :coding binary — jsonrpc.el 1.0.25 never sets the process
+         ;; coding system, and Content-Length counts octets; never let an
+         ;; ambient `coding-system-for-read' reinterpret the stream.
          (proc (make-network-process
-                :name "ebp" :host host :service port :noquery t))
+                :name "ebp" :host host :service port :noquery t
+                :coding 'binary))
          (conn (make-instance
                 'ebp--connection
                 :name "ebp" :process proc

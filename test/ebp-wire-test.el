@@ -191,12 +191,14 @@ before the recursive parser can run."
                                    (result . nil) (error . nil)))))
 
 (ert-deftest ebp-test-request-id-grammar ()
-  "SPEC 7.2: string identifiers, 1..64 octets."
+  "SPEC 7.2 (amendments #34/#80): string identifiers 1..64 octets, or
+safe integers; null and fractional numbers never."
   (should (ebp-valid-request-id-p "r1"))
   (should (ebp-valid-request-id-p (make-string 64 ?a)))
   (should-not (ebp-valid-request-id-p (make-string 65 ?a)))
   (should-not (ebp-valid-request-id-p ""))
-  (should-not (ebp-valid-request-id-p 7))
+  (should (ebp-valid-request-id-p 7))
+  (should-not (ebp-valid-request-id-p 7.0))
   (should-not (ebp-valid-request-id-p nil)))
 
 ;;;; Handshake params against contract.json (format 6)
@@ -837,6 +839,166 @@ data.kind event-retry surviving jsonrpc.el's reply path."
     (should (= (alist-get 'code (alist-get 'error
                                            (ebp-test--response-for server 501)))
                -32602))))
+
+;;;; Endpoint gaps closed after amendments #67-86 (2026-07-24)
+
+(ert-deftest ebp-test-request-id-integer ()
+  "SPEC 7.2 / amendments #34+#80: ids are strings or safe integers."
+  (should (ebp-valid-request-id-p 1))
+  (should (ebp-valid-request-id-p 0))
+  (should (ebp-valid-request-id-p -3))
+  (should (ebp-valid-request-id-p 9007199254740991))
+  (should-not (ebp-valid-request-id-p 9007199254740992))
+  (should-not (ebp-valid-request-id-p 1.5))
+  (should-not (ebp-valid-request-id-p nil))
+  (should (ebp-valid-request-id-p "req-1"))
+  (should-not (ebp-valid-request-id-p ""))
+  (should-not (ebp-valid-request-id-p (make-string 65 ?a))))
+
+(ert-deftest ebp-test-theme-set-live-sentinels ()
+  "theme.set params carry jsonrpc.el's sentinels; the reference
+encoder's `:false'/`:null' are normalized, never sent (live-path bug)."
+  (let* ((sent nil)
+         (client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts"))))
+    (cl-letf (((symbol-function 'ebp-client-notify)
+               (lambda (_c method params) (setq sent (cons method params)))))
+      ;; Default: follow-system omits :dark entirely (amendment #36).
+      (ebp-client-theme-set client)
+      (should (equal (cdr sent) '()))
+      ;; :false and :json-false both normalize to :json-false.
+      (ebp-client-theme-set client :dark :false)
+      (should (equal (cdr sent) '(:dark :json-false)))
+      (ebp-client-theme-set client :dark :json-false)
+      (should (equal (cdr sent) '(:dark :json-false)))
+      (ebp-client-theme-set client :dark t)
+      (should (equal (cdr sent) '(:dark t)))
+      ;; null mirrors clear as JSON null = elisp nil under jsonrpc.el.
+      (ebp-client-theme-set client :colors 'null :syntax 'null)
+      (should (equal (cdr sent) '(:colors nil :syntax nil)))
+      ;; Every emitted shape must survive the live encoder.
+      (dolist (params (list '(:dark :json-false) '(:colors nil :syntax nil)))
+        (should (json-serialize params :false-object :json-false
+                                :null-object nil))))
+    (should-error (ebp-client-theme-set client :dark 'sideways))))
+
+(ert-deftest ebp-test-edit-apply-editor-too-large ()
+  "SPEC 19.4 / amendment #84: a splice past max_editor_bytes is refused
+locally with a synthetic 1201 editor-too-large; nothing reaches the wire."
+  (let* ((sent nil) (cb nil)
+         (client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts"))))
+    (setf (ebp-client-limits client) '(:max_editor_bytes 16))
+    (puthash '("doc:1" . "body")
+             (list :session (make-string 32 ?0) :seq 0 :text "seed" :cursor 0)
+             (ebp-client-editors client))
+    (cl-letf (((symbol-function 'ebp-client--request)
+               (lambda (_c method params _cb &optional _t)
+                 (push (cons method params) sent))))
+      ;; 4 seed chars + 20 inserted + 2 JCS quotes = 26 > 16: refused.
+      (ebp-client-edit-apply client "doc:1" "body" 4 0
+                             (make-string 20 ?x)
+                             :callback (lambda (status error)
+                                         (setq cb (list status error))))
+      (should-not sent)
+      (should (null (car cb)))
+      (should (= (plist-get (cadr cb) :code) 1201))
+      (should (equal (plist-get (plist-get (cadr cb) :data) :reason)
+                     "editor-too-large"))
+      ;; A small splice is sent with the precomputed resulting length.
+      (ebp-client-edit-apply client "doc:1" "body" 4 0 "+ok")
+      (should (equal (caar sent) 'edit.apply))
+      (should (= (plist-get (cdar sent) :len) 7)))))
+
+(ert-deftest ebp-test-triggers-set-when-gate ()
+  "SPEC 21.3 / amendment #75: a `when' type must be advertised in
+device.state_types; predicate-only time.window is always authorable."
+  (let* ((sent nil)
+         (client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts"))))
+    (setf (ebp-client-device client) '(:state_types ["screen"]))
+    (should (equal (ebp-client-device-state-types client) '("screen")))
+    (cl-letf (((symbol-function 'ebp-client--request)
+               (lambda (_c method params _cb &optional _t)
+                 (push (cons method params) sent))))
+      ;; Advertised and predicate-only types pass.
+      (ebp-client-triggers-set
+       client (vector '(:id "t1" :type "battery.level"
+                        :when [(:type "screen" :state "off")
+                               (:type "time.window" :after "22:00")])))
+      (should (= (length sent) 1))
+      ;; An unadvertised type refuses the whole set locally.
+      (should-error
+       (ebp-client-triggers-set
+        client (vector '(:id "t2" :type "battery.level"
+                         :when [(:type "power")]))))
+      (should (= (length sent) 1)))))
+
+(ert-deftest ebp-test-forget-pairing ()
+  "SPEC 9.1 / amendment #72: local pairing removal erases the receipt
+store durably, clears in-memory receipts, and scrubs the token."
+  (let* ((file (make-temp-file "ebp-test-receipts"))
+         (client (ebp-client-create
+                  :receipt-file file
+                  :token "AAECAwQFBgcICQoLDA0ODw"
+                  :pairing-id (make-string 32 ?1))))
+    (should (ebp-client--receipt-commit client (make-string 32 ?c)))
+    (should (= (hash-table-count (ebp-client-receipts client)) 1))
+    (ebp-client-forget-pairing client)
+    (should (eq (ebp-client-state client) 'closed))
+    (should-not (file-exists-p file))
+    (should (= (hash-table-count (ebp-client-receipts client)) 0))
+    (should-not (plist-get (ebp-client-config client) :token))))
+
+(ert-deftest ebp-test-edit-open-reconcile-seam ()
+  "SPEC 19.3 / amendment #71: the :edit-open-function hook sees the seed
+and the prior mirror text, after the mirror adopts the fresh session."
+  (let* ((calls nil)
+         (client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts")
+                  :edit-open-function
+                  (lambda (c doc eid seed prior)
+                    ;; The mirror already carries the seed: a reconciling
+                    ;; edit.apply from here sees the new session/seq.
+                    (push (list doc eid seed prior
+                                (ebp-client-editor-text c doc eid))
+                          calls)))))
+    (ebp-client--handle-edit-open
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?0) :seq 0
+                  :text "fresh seed" :cursor 0))
+    (should (equal (car calls)
+                   '("doc:1" "body" "fresh seed" nil "fresh seed")))
+    ;; Reconnect: a second open for the same identity exposes the prior text.
+    (ebp-client--handle-edit-open
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?1) :seq 0
+                  :text "reconnect seed" :cursor 0))
+    (should (equal (car calls)
+                   '("doc:1" "body" "reconnect seed" "fresh seed"
+                     "reconnect seed")))))
+
+(ert-deftest ebp-test-after-replay-settled ()
+  "The :after-replay-function seam fires only in READY with the backlog
+drained (remaining 0)."
+  (let* ((fired nil)
+         (client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts")
+                  :after-replay-function
+                  (lambda (_c summary) (push summary fired)))))
+    ;; Not ready: never fires.
+    (setf (ebp-client-replay-summary client) '(:remaining 0))
+    (ebp-client--replay-settled client)
+    (should-not fired)
+    ;; Ready with a backlog: not yet.
+    (setf (ebp-client-state client) 'ready
+          (ebp-client-replay-summary client) '(:remaining 2))
+    (ebp-client--replay-settled client)
+    (should-not fired)
+    ;; Ready and drained: fires with the summary.
+    (setf (ebp-client-replay-summary client) '(:remaining 0 :delivered 2))
+    (ebp-client--replay-settled client)
+    (should (equal fired '((:remaining 0 :delivered 2))))))
 
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

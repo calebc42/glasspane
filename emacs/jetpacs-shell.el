@@ -329,7 +329,15 @@ a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
                             (not (plist-member stale-spec :views)))
                   (error "jetpacs: stale_spec must be the same variant \
 as spec (SPEC 13.4/13.5)"))
-                (setq stale-spec (jetpacs-shell--strip-stateful stale-spec)))
+                (let ((stripped (jetpacs-shell--strip-stateful stale-spec)))
+                  ;; A wholly-stateful stale root strips to nothing; say so
+                  ;; rather than silently pushing without a stale view.
+                  (unless stripped
+                    (display-warning
+                     'jetpacs
+                     "stale_spec was entirely stateful (SPEC 13.5); dropped"
+                     :warning))
+                  (setq stale-spec stripped)))
               ;; GATE 2 second half: current_view only for multi-view.
               (unless (plist-member spec :views)
                 (setq current-view nil))

@@ -609,15 +609,44 @@ and scrubs the token from this client's config.  Erasure covers
 everything this library persists; a copy of the token the application
 stored elsewhere (auth-source, custom code) is the application's to
 erase.  Removal at this endpoint prevents future authentication but
-cannot erase storage on a disconnected Companion (SPEC 9.1)."
+cannot erase storage on a disconnected Companion (SPEC 9.1).
+
+Returns t when erasure completed, nil when any part failed — so a
+caller can tell the user the pairing is NOT fully forgotten instead of
+reporting a success that did not happen.
+
+The token is destroyed with `clear-string', which zeroes it in place:
+the config holds the CALLER's string, so dropping this client's
+reference alone would leave the secret live in the caller's structure.
+
+The receipt store is process-wide, not partitioned by pairing.  Under
+`android-loopback-tcp' that is exact — the profile permits exactly one
+paired authority (SPEC 5.2) — but a multi-authority profile MUST
+partition it before reusing this."
   (ebp-client-close client 'forget-pairing)
-  (when-let* ((file (plist-get (ebp-client-config client) :receipt-file)))
-    (dolist (f (list file (concat file "-wal") (concat file "-shm")))
-      (when (file-exists-p f)
-        (ignore-errors (delete-file f)))))
-  (clrhash (ebp-client-receipts client))
-  (setf (ebp-client-config client)
-        (plist-put (ebp-client-config client) :token nil)))
+  (let ((ok t))
+    (when-let* ((file (plist-get (ebp-client-config client) :receipt-file)))
+      (dolist (f (list file (concat file "-wal") (concat file "-shm")))
+        (when (file-exists-p f)
+          (condition-case err
+              (delete-file f)
+            (error (setq ok nil)
+                   (message "ebp: could not erase receipt store %s: %s"
+                            f (car err)))))))
+    ;; Every in-memory store scoped to the identity (SPEC 9.1 names
+    ;; queued payloads, input drafts, cached surfaces, tombstones ...).
+    (clrhash (ebp-client-receipts client))
+    (clrhash (ebp-client-input-values client))
+    (clrhash (ebp-client-reset-history client))
+    (clrhash (ebp-client-revisions client))
+    (clrhash (ebp-client-editors client))
+    (setf (ebp-client-surfaces client) nil
+          (ebp-client-input-state client) nil)
+    (let ((token (plist-get (ebp-client-config client) :token)))
+      (when (stringp token) (ignore-errors (clear-string token))))
+    (setf (ebp-client-config client)
+          (plist-put (ebp-client-config client) :token nil))
+    ok))
 
 (defun ebp-client--step (client event)
   "Advance the pure SPEC 10.1 machine or close on an illegal EVENT."

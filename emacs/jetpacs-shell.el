@@ -59,6 +59,12 @@ generation sweep.")
 (defvar jetpacs-shell--repush-pending nil
   "Surfaces awaiting the debounced registry repush.")
 
+(defvar jetpacs-shell--pending-removals nil
+  "Surfaces whose tombstone could not be sent while disconnected.
+Flushed at the next Section 10.3 barrier; without this a removal made
+offline is lost and the surface stays present forever (SPEC 4.5
+`max_surfaces').")
+
 (defvar jetpacs-shell--repush-timer nil
   "The idle timer draining `jetpacs-shell--repush-pending'.")
 
@@ -119,12 +125,20 @@ schedules a debounced repush on a live session.  Returns SURFACE."
     surface))
 
 (defun jetpacs-shell-remove-root (surface)
-  "Unregister SURFACE's root; tombstone it when connected (SPEC 13.3)."
+  "Unregister SURFACE's root and tombstone it (SPEC 13.3).
+A removal requested while disconnected is REMEMBERED, not dropped: the
+registry entry is gone, so nothing would ever re-push or retire the
+surface, and it would sit present against `max_surfaces' (SPEC 4.5)
+until the pairing was revoked.  The pending tombstone is issued at the
+next Section 10.3 barrier."
   (let ((surface (jetpacs-shell--resolve-surface surface)))
     (setf (alist-get surface jetpacs-shell--roots nil 'remove #'equal) nil)
     (jetpacs--unclaim "surface" surface)
-    (when (jetpacs-connected-p)
-      (ebp-client-surface-remove (jetpacs-client) surface))))
+    (setq jetpacs-shell--repush-pending
+          (delete surface jetpacs-shell--repush-pending))
+    (if (jetpacs-connected-p)
+        (ebp-client-surface-remove (jetpacs-client) surface)
+      (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal))))
 
 (defun jetpacs-shell--schedule-repush (surface)
   "Debounce a repush of SURFACE after a registry mutation (0.5 s idle).
@@ -142,17 +156,48 @@ registrations."
                  (setq jetpacs-shell--repush-pending nil)
                  (dolist (s surfaces) (jetpacs-shell-push s)))))))))
 
+(defun jetpacs-shell--drop-pending (surface)
+  "Forget SURFACE's queued repush; stop the timer once nothing is queued.
+Per surface: an explicit push of one owner's surface satisfies only its
+OWN queued repush — clearing the whole queue would silently drop every
+other owner's pending re-render (decision D1 makes that routine)."
+  (setq jetpacs-shell--repush-pending
+        (delete surface jetpacs-shell--repush-pending))
+  (when (and (null jetpacs-shell--repush-pending)
+             (timerp jetpacs-shell--repush-timer))
+    (cancel-timer jetpacs-shell--repush-timer)
+    (setq jetpacs-shell--repush-timer nil)))
+
 ;;;; Building (degrade in place: the live-coding contract)
+
+(defun jetpacs-shell--error-spec (surface message detail)
+  "A visible error view shaped for SURFACE's SPEC 13.4 variant.
+A bare Node is a valid spec only for `app:*'; emitting one for a
+`notification:'/`widget:' surface would make the degrade path itself
+content-invalid, so the error view could never appear exactly where a
+builder crashed."
+  (let ((node (jetpacs-column
+               (jetpacs-text message :style "title")
+               (jetpacs-text detail :style "body"))))
+    (pcase (jetpacs-shell--surface-target surface)
+      (:notification (jetpacs-notification-surface node))
+      (:widget (jetpacs-widget-surface "Error" node))
+      (_ node))))
 
 (defun jetpacs-shell--build (surface plist)
   "Call SURFACE's :builder from PLIST; a crash degrades to an error view.
-A broken builder costs its own screen, never the whole push."
+A broken builder costs its own screen, never the whole push.  The
+builder runs under its registered owner, so `jetpacs-ui-state' and any
+other owner-scoped lookup resolve to the surface being built — a
+repush or async flush carries no ambient owner of its own."
   (condition-case err
-      (funcall (plist-get plist :builder))
+      (let ((jetpacs-current-owner (or (plist-get plist :owner)
+                                       jetpacs-current-owner)))
+        (funcall (plist-get plist :builder)))
     (error
-     (jetpacs-column
-      (jetpacs-text (format "Error building %s" surface) :style "title")
-      (jetpacs-text (error-message-string err) :style "body")))))
+     (jetpacs-shell--error-spec surface
+                                (format "Error building %s" surface)
+                                (error-message-string err)))))
 
 ;;;; Spec walkers (the `jetpacs--opaque-members' discipline: never descend
 ;;;; into :args/:meta/:value, so application data is never misread)
@@ -332,10 +377,13 @@ Signals; never sanitizes (a sender MUST is loud)."
   "GATE 4: the ratified sender gates.
 Amendment #85: a `wake' descriptor without this session's
 `offline.wake' grant is 1201 content-invalid and voids the surface —
-refuse before pushing.  Amendment #84: a synchronized editor whose
-document text exceeds `max_editor_bytes' must not be presented."
+refuse before pushing.  SPEC 19/17.4: a synchronized `editor' (one
+carrying `document') requires the `editor.sync' grant.  Amendment #84:
+its document text must not exceed `max_editor_bytes'."
   (let* ((wake-granted (seq-contains-p (ebp-client-granted client)
                                        "offline.wake"))
+         (editor-granted (seq-contains-p (ebp-client-granted client)
+                                         "editor.sync"))
          (max-bytes (plist-get (ebp-client-limits client)
                                :max_editor_bytes))
          (check
@@ -344,18 +392,30 @@ document text exceeds `max_editor_bytes' must not be presented."
                        (equal (plist-get p :when_offline) "wake"))
               (error "jetpacs: `wake' descriptor without the offline.wake \
 grant (SPEC 14.1, amendment #85)"))
-            (when (and max-bytes
-                       (equal (plist-get p :t) "editor")
-                       (plist-get p :document)
-                       (stringp (plist-get p :value))
-                       (> (string-bytes
-                           (condition-case nil
-                               (json-serialize (plist-get p :value))
-                             (error (make-string (1+ max-bytes) ?x))))
-                          max-bytes))
-              (error "jetpacs: editor %S document exceeds max_editor_bytes \
-(SPEC 19, amendment #84)"
-                     (plist-get p :id))))))
+            (when (and (equal (plist-get p :t) "editor")
+                       (plist-get p :document))
+              ;; The grant check must NOT hang off max-bytes: that limit is
+              ;; REQUIRED only WHEN editor.sync is granted, so keying on it
+              ;; made this branch dead in exactly the ungranted case.
+              (unless editor-granted
+                (error "jetpacs: synchronized editor %S requires the \
+ungranted `editor.sync' capability (SPEC 19)" (plist-get p :id)))
+              ;; Size the LIVE document, not `:value' — that is an optional
+              ;; seed and is absent when re-pushing an already-open editor,
+              ;; which is precisely when the text has grown.
+              (let* ((doc (plist-get p :document))
+                     (eid (plist-get p :id))
+                     (text (or (and doc eid
+                                    (ebp-client-editor-text client doc eid))
+                               (plist-get p :value))))
+                (when (and max-bytes (stringp text)
+                           (> (string-bytes
+                               (condition-case nil
+                                   (json-serialize text)
+                                 (error (make-string (1+ max-bytes) ?x))))
+                              max-bytes))
+                  (error "jetpacs: editor %S document exceeds \
+max_editor_bytes (SPEC 19, amendment #84)" eid)))))))
     (jetpacs-shell--walk-plists spec check)
     ;; 18.5 notification action descriptors are opaque to the walker, and
     ;; they are the ONLY place 18.5 puts a descriptor — i.e. exactly where
@@ -365,12 +425,24 @@ grant (SPEC 14.1, amendment #85)"))
 
 ;;;; The push
 
+(defun jetpacs-shell--confirm-applied (surface revision status error)
+  "Record REVISION as confirmed-applied for SURFACE when it really was.
+Feeds `jetpacs-event-stale-p'; a refused push must NOT raise the bar."
+  (when (and (null error) (equal status "applied") (integerp revision))
+    (puthash surface
+             (max revision (gethash surface jetpacs--applied-revisions -1))
+             jetpacs--applied-revisions)))
+
 (defun jetpacs-shell--push-callback (status error)
   "Default `surface.update' result callback.
 `applied' and `stale' are both success (SPEC 13.2 idempotency); check
 ERROR, not STATUS — a {} result leaves both nil."
   (when error
-    (message "jetpacs: surface.update failed: %S" error))
+    ;; Code and kind only: an error's `data' may quote the offending
+    ;; object path or value (SPEC 23.3, amendment #74).
+    (message "jetpacs: surface.update failed: code %s (%s)"
+             (plist-get error :code)
+             (or (plist-get (plist-get error :data) :kind) "?")))
   status)
 
 (cl-defun jetpacs-shell-push (&optional surface-or-owner
@@ -388,10 +460,7 @@ SPEC 16.2/10.2 sender MUSTs are loud, never sanitized.  On any failure
 a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
   (let* ((surface (jetpacs-shell--resolve-surface surface-or-owner))
          (entry (alist-get surface jetpacs-shell--roots nil nil #'equal)))
-    (when (timerp jetpacs-shell--repush-timer)
-      (cancel-timer jetpacs-shell--repush-timer)
-      (setq jetpacs-shell--repush-timer nil
-            jetpacs-shell--repush-pending nil))
+    (jetpacs-shell--drop-pending surface)
     (cond
      ((and (null entry) (null spec)) nil)      ; nothing registered
      ((not (or jetpacs-shell--in-barrier (jetpacs-connected-p))) nil)
@@ -418,9 +487,16 @@ as spec (SPEC 13.4/13.5)"))
                       (jetpacs-shell--validate-stripped
                        stale-spec
                        (jetpacs-shell--strip-stateful stale-spec))))
-              ;; GATE 2 second half: current_view only for multi-view.
-              (unless (plist-member spec :views)
+              ;; GATE 2 second half: `current_view' is valid ONLY for a
+              ;; multi-view `app:*' spec (SPEC 13.4), and must name a view
+              ;; that exists — a stale name is content-invalid.
+              (unless (and (plist-member spec :views)
+                           (eq (jetpacs-shell--surface-target surface) :app))
                 (setq current-view nil))
+              (when current-view
+                (unless (gethash current-view (plist-get spec :views))
+                  (error "jetpacs: current_view %S names no view in this \
+spec (SPEC 13.4)" current-view)))
               ;; GATE 1, GATE 3, GATE 4.
               (jetpacs-shell--gate-spec client surface spec stale-spec)
               (jetpacs-shell--gate-capability client surface)
@@ -443,8 +519,13 @@ as spec (SPEC 13.4/13.5)"))
                      :stale-spec stale-spec
                      :current-view current-view
                      :reset-input-ids reset-input-ids
-                     :callback (or callback
-                                   #'jetpacs-shell--push-callback)))
+                     :callback
+                     (lambda (status error)
+                       (jetpacs-shell--confirm-applied
+                        surface revision status error)
+                       (funcall (or callback
+                                    #'jetpacs-shell--push-callback)
+                                status error))))
               ;; The push is on the wire: drain the slot, degrading to a
               ;; toast when no scaffold slot could carry it.
               (when snack
@@ -475,12 +556,23 @@ The Companion re-shows a snackbar only when its text changes."
 The barrier flag bypasses the READY guard: SPEC 10.3 step 3 orders
 required surface pushes ahead of replay."
   (let ((jetpacs-shell--in-barrier t))
+    ;; Tombstones first: a surface removed while disconnected must be
+    ;; retired before the session decides what is present (SPEC 13.3).
+    (let ((pending jetpacs-shell--pending-removals))
+      (setq jetpacs-shell--pending-removals nil)
+      (dolist (surface pending)
+        (condition-case err
+            (ebp-client-surface-remove (jetpacs-client) surface)
+          (error
+           (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal)
+           (message "jetpacs: deferred removal of %s failed: %s"
+                    surface (jetpacs--error-label err))))))
     (pcase-dolist (`(,surface . ,entry) jetpacs-shell--roots)
       (when (plist-get entry :required)
         (condition-case err
             (jetpacs-shell-push surface)
           (error (message "jetpacs: reconnect push of %s failed: %s"
-                          surface (error-message-string err))))))))
+                          surface (jetpacs--error-label err))))))))
 
 ;;;; view.switched (SPEC 14.2 / 24.2)
 

@@ -15,6 +15,7 @@
 (require 'ebp)
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
 (require 'jetpacs-buffer)
 
 (defconst jetpacs-buffer-test--golden
@@ -321,7 +322,8 @@ Companion may re-present, not terminal `rejected'."
     (unwind-protect
         (progn
           (jetpacs-attach client)
-          (puthash "app:demo" 9 (ebp-client-revisions client))
+          ;; Staleness is measured against the CONFIRMED-applied revision.
+          (jetpacs-shell--confirm-applied "app:demo" 9 "applied" nil)
           (with-current-buffer (get-buffer-create "*jc1-stale*")
             (fundamental-mode)
             (erase-buffer)

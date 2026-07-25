@@ -169,14 +169,26 @@ per-client; attach must replay or every event answers rejected."
                  (hash-table-count (ebp-client-handlers bare)))))))
 
 (ert-deftest jetpacs-floor-event-stale-p ()
+  "SPEC 14.5 staleness is measured against the newest CONFIRMED-applied
+revision.  `ebp-client-revisions' cannot serve: it claims floor+1 at
+SEND time and never rolls back, so one refused push would otherwise
+make every later tap on that surface stale forever."
   (jetpacs-floor-test--with-client (client)
-    (puthash "app:demo" 5 (ebp-client-revisions client))
+    (clrhash jetpacs--applied-revisions)
+    ;; Nothing confirmed yet -> nothing is stale.
+    (should-not (jetpacs-event-stale-p '(:surface "app:demo" :revision_seen 3)))
+    ;; A confirmed apply raises the bar.
+    (jetpacs-shell--confirm-applied "app:demo" 5 "applied" nil)
     (should (jetpacs-event-stale-p '(:surface "app:demo" :revision_seen 3)))
+    (should-not (jetpacs-event-stale-p '(:surface "app:demo" :revision_seen 5)))
+    ;; A REFUSED push must not: revision 9 was claimed but never applied.
+    (jetpacs-shell--confirm-applied "app:demo" 9 nil '(:code 1201))
+    (should-not (jetpacs-event-stale-p '(:surface "app:demo" :revision_seen 5)))
+    ;; A `stale' result is not an apply either (SPEC 13.2 idempotency).
+    (jetpacs-shell--confirm-applied "app:demo" 9 "stale" nil)
     (should-not (jetpacs-event-stale-p '(:surface "app:demo" :revision_seen 5)))
     ;; A dialog event has no surface/revision context: never stale.
     (should-not (jetpacs-event-stale-p '(:dialog_id "d1")))))
-
-;;;; State fan-out
 
 (ert-deftest jetpacs-floor-state-fanout ()
   (jetpacs-floor-test--with-client (client)

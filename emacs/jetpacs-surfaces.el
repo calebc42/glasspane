@@ -190,6 +190,15 @@ value for either is shadowed.  Everything else passes through."
 
 ;;;; Actions (the SPEC 14 shim over `ebp-client-register-action')
 
+(defun jetpacs--error-label (err)
+  "A loggable label for ERR that cannot carry payload data.
+SPEC 23.3 (amendment #74) forbids SMS bodies and senders, call numbers,
+calendar titles, clipboard contents, and captured trigger fire data from
+reaching normal logs — and `error-message-string' embeds the offending
+DATUM, which for a `wrong-type-argument' or a handler failure is exactly
+that value.  Only the error symbol is safe to print."
+  (if (consp err) (symbol-name (car err)) (format "%s" err)))
+
 (defvar jetpacs--in-action-handler nil
   "Non-nil in an action handler's dynamic extent.")
 
@@ -239,8 +248,10 @@ logged: amendment #74 puts sensitive trigger data in `args'."
       ;; Companion's durable record.
       (jsonrpc-error (signal (car err) (cdr err)))
       (error
+       ;; Action name and error SYMBOL only: amendment #74 keeps the datum
+       ;; (a trigger's fire data reaches handlers through `args') out of logs.
        (message "jetpacs: action %s failed: %s"
-                (plist-get params :action) (error-message-string err))
+                (plist-get params :action) (jetpacs--error-label err))
        'rejected))))
 
 (defun jetpacs--action-shim (name)
@@ -288,18 +299,30 @@ future client."
     (remhash name (ebp-client-actions jetpacs--client)))
   (jetpacs--unclaim "action" name))
 
+(defvar jetpacs--applied-revisions (make-hash-table :test #'equal)
+  "Map of SURFACE -> the newest revision the Companion CONFIRMED applied.
+`ebp-client-revisions' cannot serve: it claims `floor + 1' at SEND time
+so a second in-flight push is newer, and never rolls back when a push
+fails — one refused update would otherwise leave every later tap looking
+stale forever.  `jetpacs-shell' records confirmations here.")
+
 (defun jetpacs-event-stale-p (params)
   "Non-nil when PARAMS' event was created against an outdated snapshot.
 Nil for a dialog or global event: SPEC 14.4 gives those no surface or
 revision context, so `stale' is not derivable for them.  A helper a
 handler opts into (decision Q4) — the revision floor rises on every
 push, so lag alone is not semantic staleness; use this where the action
-indexes into the snapshot it was tapped against."
-  (let ((surface (plist-get params :surface))
-        (seen (plist-get params :revision_seen))
-        (client (jetpacs-client)))
-    (and client surface (integerp seen)
-         (< seen (gethash surface (ebp-client-revisions client) -1)))))
+indexes into the snapshot it was tapped against.
+
+Compares against the newest CONFIRMED-applied revision, not the claimed
+floor, so a failed push cannot make a surface permanently stale."
+  (let* ((surface (plist-get params :surface))
+         (seen (plist-get params :revision_seen))
+         (client (jetpacs-client))
+         (applied (and surface
+                       (gethash surface jetpacs--applied-revisions))))
+    (and client surface (integerp seen) (integerp applied)
+         (< seen applied))))
 
 ;;;; State (the SPEC 14.6 fan-out; ebp owns the store and reconciliation)
 
@@ -345,8 +368,9 @@ the jsonrpc dispatch extent."
   (when-let* ((fn (gethash (cons surface id) jetpacs--state-handlers)))
     (condition-case err
         (funcall fn value)
+      ;; The datum here is the user's input value — never log it (23.3).
       (error (message "jetpacs: state handler for %s failed: %s"
-                      id (error-message-string err))))))
+                      id (jetpacs--error-label err))))))
 
 (defun jetpacs-ui-state (id &optional surface)
   "The latest reconciled value for stateful node ID — read-through only.

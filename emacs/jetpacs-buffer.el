@@ -507,6 +507,20 @@ except on point's own line, which shows its absolute number undimmed."
 
 ;; --- Budgets (plan section 2.5-5) -------------------------------------------
 
+(defvar jetpacs-buffer--budget nil
+  "When non-nil, a cons (SPANS-LEFT . BYTES-LEFT) shared across renders.
+SPEC 4.5's counts are aggregates across ONE SurfaceSpec, but each
+`jetpacs-buffer--render-region' call otherwise starts from the full
+limit — so a spec containing two rendered regions, or a spec plus its
+`stale_spec', would each take a whole allowance and together blow the
+budget.  Bind with `jetpacs-buffer-with-budget' around a build.")
+
+(defmacro jetpacs-buffer-with-budget (&rest body)
+  "Run BODY sharing ONE SPEC 4.5 render budget across every region."
+  (declare (indent 0))
+  `(let ((jetpacs-buffer--budget (jetpacs-buffer--budgets)))
+     ,@body))
+
 (defun jetpacs-buffer--budgets ()
   "The live welcome budgets as (MAX-SPANS . MAX-BYTES), members nil-able.
 MAX-SPANS is `max_rich_spans', which SPEC 4.5 defines as an AGGREGATE
@@ -573,7 +587,9 @@ containing that position as the scroll target (`:scroll_here')."
          (jetpacs-buffer--default-bg-hex
           (jetpacs-buffer--color-hex
            (face-attribute 'default :background nil t)))
-         (budgets (jetpacs-buffer--budgets))
+         ;; A shared budget (see `jetpacs-buffer-with-budget') carries
+         ;; across regions; otherwise this render gets its own allowance.
+         (budgets (or jetpacs-buffer--budget (jetpacs-buffer--budgets)))
          (spans-left (car budgets))     ; SPEC 4.5: aggregate, spent down
          (bytes-left (cdr budgets))
          (exhausted nil)
@@ -666,6 +682,11 @@ containing that position as the scroll target (`:scroll_here')."
                 (cl-return-from walk))))
           (when ln (setq ln (1+ ln)))
           (forward-line 1))))
+    ;; Hand what is left back to a shared budget, so the next region in
+    ;; this spec starts where this one stopped.
+    (when jetpacs-buffer--budget
+      (setcar jetpacs-buffer--budget spans-left)
+      (setcdr jetpacs-buffer--budget bytes-left))
     (when truncated
       (push (jetpacs-text "… output truncated (surface budget)"
                           :style "caption")

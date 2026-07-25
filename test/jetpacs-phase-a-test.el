@@ -71,11 +71,37 @@ HANGS, so each is asserted explicitly."
                        (cons "read-key"       (lambda () (read-key "x")))
                        (cons "map-y-or-n-p"
                              (lambda () (map-y-or-n-p "q" #'ignore '(1))))
-                       (cons "recursive-edit" (lambda () (recursive-edit)))))
+                       (cons "recursive-edit" (lambda () (recursive-edit)))
+                       ;; rmc.el swallows the guard's error and retries in
+                       ;; a `while' — a 100% CPU spin `with-timeout' cannot
+                       ;; break, because the timer's signal is eaten by the
+                       ;; same handler.  If this regresses, the suite BURNS
+                       ;; A CORE rather than failing.
+                       (cons "read-multiple-choice"
+                             (lambda ()
+                               (read-multiple-choice "p" '((?a "aa")))))
+                       (cons "x-popup-dialog"
+                             (lambda () (x-popup-dialog t '("q" ("ok" . t)))))))
     (should (eq 'inhibited-interaction
                 (condition-case err
                     (progn (jetpacs-with-no-prompts (funcall (cdr probe)))
                            (format "%s RETURNED without signalling" (car probe)))
+                  (error (car err)))))))
+
+(ert-deftest jetpacs-phase-a-no-prompts-refuses-the-gui-dialog-path ()
+  "A yes/no prompt must not answer for the user through the GUI path.
+`Fyes_or_no_p' (src/fns.c:3546) hands off to `x-popup-dialog' whenever
+`use-dialog-box' is on and the last event was a mouse event — a branch
+with no `inhibit-interaction' guard.  Verified before the fix: it
+RETURNED nil, so a handler silently received \"no\" and proceeded.  A
+wrong answer is worse than a hang, because nothing looks broken."
+  (let ((use-dialog-box t)
+        (last-input-event '(mouse-1))
+        (last-nonmenu-event '(mouse-1)))
+    (should (eq 'inhibited-interaction
+                (condition-case err
+                    (progn (jetpacs-with-no-prompts (yes-or-no-p "x?"))
+                           'RETURNED-AN-ANSWER)
                   (error (car err)))))))
 
 (ert-deftest jetpacs-phase-a-no-prompts-holds-through-timers ()

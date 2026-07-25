@@ -193,16 +193,48 @@ value for either is shadowed.  Everything else passes through."
 (eval-and-compile
   (defconst jetpacs--blocking-readers
     '(read-key-sequence read-key-sequence-vector read-key map-y-or-n-p
-      recursive-edit)
-    "Input readers that IGNORE `inhibit-interaction' and must be stubbed.
-Verified empirically on Emacs 30.1: with `inhibit-interaction' bound to
-t, every minibuffer reader (`read-string', `completing-read',
-`read-passwd', `read-file-name', `read-buffer', `read-answer',
-`read-number', `read-char-from-minibuffer'), both yes/no prompts, and
-the raw `read-char'/`read-event'/`read-char-exclusive' all signal
-`inhibited-interaction' — but these five BLOCK FOREVER instead.  Each is
-a C subr, and `cl-letf' on a subr's `symbol-function' works, so they are
-replaced wholesale for the extent."))
+      recursive-edit read-multiple-choice x-popup-dialog)
+    "Input readers that `inhibit-interaction' does not stop.
+
+`inhibit-interaction' has only FOUR guard sites in the whole 30.1 C
+source (`read-char', `read-event', `read-char-exclusive', and
+`read-from-minibuffer' — src/minibuf.c:1286); every other minibuffer
+reader is covered only because it funnels through the last one.  So the
+coverage is wide but the edges are sharp, and each name here was
+verified to escape it:
+
+- `read-key-sequence', `read-key-sequence-vector', `read-key' and
+  `recursive-edit' read the keyboard without touching either guarded
+  path, and BLOCK FOREVER.
+- `map-y-or-n-p' reads with `read-event' but signals `quit', not an
+  `error'.  `jetpacs--dispatch' happens to catch `quit' too, but relying
+  on that would be luck.
+- `read-multiple-choice' is the worst: rmc.el wraps its `read-event' in
+  `(condition-case nil ... (error nil))' inside a `while' (rmc.el:218),
+  so it SWALLOWS the signal and retries forever — a 100% CPU spin that
+  `with-timeout' cannot break, because the timer's own signal is eaten
+  by the same handler.
+- `x-popup-dialog' is reachable from the C body of `yes-or-no-p'
+  (src/fns.c:3546) whenever `use-dialog-box' is on and the last event
+  was a mouse event, bypassing the minibuffer entirely.  Verified: that
+  configuration RETURNS nil instead of signalling, so a handler would
+  silently receive \"no\" rather than a refusal — a wrong answer, which
+  is worse than a hang.  `use-dialog-box' is also bound nil below, so
+  this stub is the second lock on that door.
+
+Native compilation makes `subrp' useless for deciding what can be
+intercepted (a native-compiled Lisp function is a subr too, so
+`subr-primitive-p' is the real predicate) — but `cl-letf' on
+`symbol-function' works for both, which is why this list needs no such
+distinction.
+
+THE RULE when adding to this list: stub the TOP-LEVEL entry point, never
+trust the inner read to signal.  `read-multiple-choice' is why — a
+caller that catches errors around its own read and retries turns a
+refusal into an infinite loop, and stubbing `read-event' underneath it
+would have made things WORSE, not better.  A sweep of Emacs 30.1 found
+rmc.el to be the only instance of that shape in the standard library,
+but a third-party package is free to write the same loop."))
 
 (defmacro jetpacs-with-no-prompts (&rest body)
   "Run BODY with every way of blocking on the local user turned into a signal.
@@ -235,7 +267,10 @@ What it does NOT do: stop a handler from taking a long time.  D2 bans
 blocking on the USER, not bounded local work (magit's washer runs `git
 diff'; `Info-toc' reads files).  Those stay the caller's judgement."
   (declare (indent 0) (debug t))
-  `(let ((inhibit-interaction t))
+  `(let ((inhibit-interaction t)
+         ;; Forces the yes/no prompts down their MINIBUFFER path, which
+         ;; is guarded; the GUI-dialog path is not (see the stub list).
+         (use-dialog-box nil))
      (cl-letf ,(mapcar
                 (lambda (sym)
                   `((symbol-function ',sym)

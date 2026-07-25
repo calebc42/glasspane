@@ -260,7 +260,7 @@ an input to the data path; unmeasurable or non-png/jpeg bytes caption."
 (ert-deftest jetpacs-hypertext-image-respects-frame-budget ()
   "An inlined image competes with the document's own text: base64 past
 the remaining frame budget degrades to the caption, not a blown push."
-  (let ((jetpacs-buffer--budget (cons nil 16)))  ; 16 bytes left
+  (let ((jetpacs-buffer-budget (cons nil 16)))  ; 16 bytes left
     (should (equal (jetpacs-hypertext-test--node-t
                     (jetpacs-hypertext--image
                      (list :kind 'image

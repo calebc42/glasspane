@@ -167,7 +167,7 @@ grep buffer from being walked whole inside the dispatch extent."
               ;; file), which are not Unicode scalar values and which
               ;; `json-serialize' rejects outright — taking the whole push
               ;; down.  Same sanitizer the Tier-0 renderer uses.
-              (push (cons pos (jetpacs-buffer--scalar-text
+              (push (cons pos (jetpacs-buffer-scalar-text
                                (string-trim
                                 (buffer-substring-no-properties bol eol))))
                     loci)
@@ -312,13 +312,20 @@ A host root includes this to show where a `results.visit' landed."
   "Follow the locus at POS in results BUF; return (DEST-BUF . DEST-POS) or nil.
 Runs the row's own goto command through `jetpacs-buffer-call-shimmed', so
 nothing pops a desktop window and a stale input event cannot hijack the
-jump.  Returns nil when the command never left the results buffer."
+jump.  Returns nil when the command never left the results buffer, and
+SIGNALS when the command itself failed — the shim swallows the error and
+still hands back `(current-buffer) . (point)', so without the ON-ERROR
+thunk a failed goto is indistinguishable from having stayed put, and the
+handler answers `accepted' for a visit that never happened."
   (with-current-buffer buf
     (goto-char (min (max (point-min) pos) (point-max)))
     (let ((cmd (jetpacs-results--visit-command (point))))
       (when (commandp cmd)
-        (let* ((dest (jetpacs-buffer-call-shimmed cmd))
+        (let* ((failed nil)
+               (dest (jetpacs-buffer-call-shimmed
+                      cmd (lambda (err) (setq failed err))))
                (dest-buf (car dest)))
+          (when failed (signal (car failed) (cdr failed)))
           (and dest-buf (not (eq dest-buf buf)) dest))))))
 
 (defun jetpacs-results--show (dest index count nav-extra)

@@ -190,6 +190,60 @@ value for either is shadowed.  Everything else passes through."
 
 ;;;; Actions (the SPEC 14 shim over `ebp-client-register-action')
 
+(eval-and-compile
+  (defconst jetpacs--blocking-readers
+    '(read-key-sequence read-key-sequence-vector read-key map-y-or-n-p
+      recursive-edit)
+    "Input readers that IGNORE `inhibit-interaction' and must be stubbed.
+Verified empirically on Emacs 30.1: with `inhibit-interaction' bound to
+t, every minibuffer reader (`read-string', `completing-read',
+`read-passwd', `read-file-name', `read-buffer', `read-answer',
+`read-number', `read-char-from-minibuffer'), both yes/no prompts, and
+the raw `read-char'/`read-event'/`read-char-exclusive' all signal
+`inhibited-interaction' — but these five BLOCK FOREVER instead.  Each is
+a C subr, and `cl-letf' on a subr's `symbol-function' works, so they are
+replaced wholesale for the extent."))
+
+(defmacro jetpacs-with-no-prompts (&rest body)
+  "Run BODY with every way of blocking on the local user turned into a signal.
+
+The single worst failure mode in this bridge: an action handler runs
+INSIDE the jsonrpc dispatch extent, and its return value IS the reply.
+Anything that waits for local input there never returns — the Companion
+waits forever for an answer, and on a headless daemon there is no user
+and no terminal to answer with.  Decision D2 bans it, but D2 is a rule
+about code being WRITTEN correctly; this macro makes it structural.
+
+Two mechanisms, because neither alone suffices:
+
+- `inhibit-interaction' (Emacs 27+) is the built-in answer and covers
+  the whole minibuffer family plus `read-char'/`read-event', signalling
+  `inhibited-interaction' — an `error' subtype, so `jetpacs--dispatch'
+  catches it and answers `rejected'.
+- `jetpacs--blocking-readers' names the five that ignore it and hang;
+  they are stubbed to signal the same condition.
+
+It also holds THROUGH TIMERS, which is what makes it worth having.
+Verified on the live runtime: a body that calls `accept-process-output'
+runs pending timers inside this extent, and those callbacks still see
+the binding.  That is the exact shape of comint's password prompt — a
+process filter defers `read-passwd' into `run-at-time' 0, and the
+echo-wait loop's `accept-process-output' then pulls it in — so the
+deferral cannot be used to escape the ban.
+
+What it does NOT do: stop a handler from taking a long time.  D2 bans
+blocking on the USER, not bounded local work (magit's washer runs `git
+diff'; `Info-toc' reads files).  Those stay the caller's judgement."
+  (declare (indent 0) (debug t))
+  `(let ((inhibit-interaction t))
+     (cl-letf ,(mapcar
+                (lambda (sym)
+                  `((symbol-function ',sym)
+                    (lambda (&rest _)
+                      (signal 'inhibited-interaction (list ,(symbol-name sym))))))
+                jetpacs--blocking-readers)
+       ,@body)))
+
 (defun jetpacs--error-label (err)
   "A loggable label for ERR that cannot carry payload data.
 SPEC 23.3 (amendment #74) forbids SMS bodies and senders, call numbers,
@@ -229,7 +283,7 @@ logged: amendment #74 puts sensitive trigger data in `args'."
         (read-buffer-function nil)
         (disabled-command-function nil))
     (condition-case err
-        (pcase (funcall fn args params)
+        (pcase (jetpacs-with-no-prompts (funcall fn args params))
           ((and status (or 'accepted 'stale 'rejected)) status)
           (other
            (display-warning
@@ -247,6 +301,20 @@ logged: amendment #74 puts sensitive trigger data in `args'."
       ;; `rejected' — which SPEC 14.4 makes PERMANENT, deleting the
       ;; Companion's durable record.
       (jsonrpc-error (signal (car err) (cdr err)))
+      ;; A handler that tried to block on the local user.  Louder than a
+      ;; generic failure on purpose: the answer is still `rejected' (the
+      ;; phone gets a real reply instead of waiting forever, which is the
+      ;; whole point), but this is a CODE bug in the handler — decision
+      ;; D2 — and it must not read as an ordinary runtime error.
+      (inhibited-interaction
+       (display-warning
+        'jetpacs
+        (format "action %s tried to prompt the local user (%s) inside the \
+dispatch extent; answering rejected.  Handlers MUST NOT block (decision D2) \
+— route the question to the phone with a dialog instead"
+                (plist-get params :action) (car (cdr err)))
+        :error)
+       'rejected)
       (error
        ;; Action name and error SYMBOL only: amendment #74 keeps the datum
        ;; (a trigger's fire data reaches handlers through `args') out of logs.

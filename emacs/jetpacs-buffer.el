@@ -309,6 +309,47 @@ position record, so each render supersedes the last."
               (verbs (gethash jetpacs-buffer--whole-buffer-key tbl)))
     (and (member action verbs) t)))
 
+(defmacro jetpacs-buffer-with-scratch-exposure (&rest body)
+  "Run BODY with its exposure records written to a THROWAWAY table.
+`jetpacs-buffer-line-spans' records every actionable position it finds
+for `emacs.buffer.act', because that is the verb the generic tap
+carries.  A Tier-1 skin that REWRITES those descriptors — pointing them
+at its own verb, or stripping the tap entirely — must not leave the
+generic record standing: it would authorize `emacs.buffer.act' at a
+position the document no longer offers it at, and that verb reaches
+`jetpacs-buffer-invoke-at', which runs the binding UNSHIMMED.
+
+So a skin builds its spans inside this macro and then exposes exactly
+the verbs it really emitted (SPEC 23.1: one record authorizes one verb).
+Records written by BODY are discarded wholesale on exit."
+  (declare (indent 0) (debug t))
+  `(let ((jetpacs-buffer-exposed (make-hash-table :test #'equal)))
+     ,@body))
+
+(defun jetpacs-buffer-line-spans (bol eol buffer-name)
+  "Public entry to the Tier-0 span builder for [BOL, EOL) (SPEC 4.1-safe).
+Tier-1 skins reuse the generic walk for their body lines, so face
+emphasis, `display' overrides, overlay strings, TAB expansion and tap
+exposure all come for free.
+
+Binds the color reference hexes when `jetpacs-buffer-emit-colors' is on.
+Without them every resolved color differs from nil, so the walk would
+put an explicit `:color' on EVERY span — bloating the frame and pinning
+text to Emacs's palette instead of the device theme.  The internal
+walker gets them from `jetpacs-buffer--render-region'; a skin calling in
+from outside would not, and the failure is silent, so it is closed here
+rather than documented."
+  (if (or (not jetpacs-buffer-emit-colors)
+          jetpacs-buffer--default-fg-hex)
+      (jetpacs-buffer--line-spans bol eol buffer-name)
+    (let ((jetpacs-buffer--default-fg-hex
+           (jetpacs-buffer--color-hex
+            (face-attribute 'default :foreground nil t)))
+          (jetpacs-buffer--default-bg-hex
+           (jetpacs-buffer--color-hex
+            (face-attribute 'default :background nil t))))
+      (jetpacs-buffer--line-spans bol eol buffer-name))))
+
 (defun jetpacs-buffer--span-action (pos buffer-name)
   "The tap ActionDescriptor for the run starting at POS, or nil.
 The skin override wins; otherwise an actionable region gets the generic
@@ -365,7 +406,7 @@ next line, since modes differ on which carries `invisible'."
 
 ;; --- Region -> spans --------------------------------------------------------
 
-(defun jetpacs-buffer--scalar-text (s)
+(defun jetpacs-buffer-scalar-text (s)
   "S with every non-scalar char replaced by U+FFFD (SPEC 4.1).
 Emacs stores an undecodable octet as a raw-byte char in
 #x3FFF80..#x3FFFFF, and a lone surrogate as #xD800..#xDFFF; neither is a
@@ -431,7 +472,7 @@ display spec render nothing."
                    ((and (consp disp) (eq (car disp) 'space))
                     (make-string (jetpacs-buffer--space-width disp c) ?\s))
                    (t (substring-no-properties str i next))))
-             (raw (and raw (jetpacs-buffer--scalar-text raw)))
+             (raw (and raw (jetpacs-buffer-scalar-text raw)))
              (face (or (get-text-property i 'face str)
                        (get-text-property i 'font-lock-face str)))
              (style (jetpacs-buffer--span-style face)))
@@ -507,7 +548,7 @@ the start of each actionable property run."
                     (setq text (make-string w ?\s) col (+ col w))))
                  (t
                   (let ((exp (jetpacs-buffer--expand-tabs
-                              (jetpacs-buffer--scalar-text
+                              (jetpacs-buffer-scalar-text
                                (buffer-substring-no-properties pos next))
                               col)))
                     (setq text (car exp) col (cdr exp)))))
@@ -554,7 +595,7 @@ except on point's own line, which shows its absolute number undimmed."
 
 ;; --- Budgets (plan section 2.5-5) -------------------------------------------
 
-(defvar jetpacs-buffer--budget nil
+(defvar jetpacs-buffer-budget nil
   "When non-nil, a cons (SPANS-LEFT . BYTES-LEFT) shared across renders.
 SPEC 4.5's counts are aggregates across ONE SurfaceSpec, but each
 `jetpacs-buffer--render-region' call otherwise starts from the full
@@ -565,10 +606,10 @@ budget.  Bind with `jetpacs-buffer-with-budget' around a build.")
 (defmacro jetpacs-buffer-with-budget (&rest body)
   "Run BODY sharing ONE SPEC 4.5 render budget across every region."
   (declare (indent 0))
-  `(let ((jetpacs-buffer--budget (jetpacs-buffer--budgets)))
+  `(let ((jetpacs-buffer-budget (jetpacs-buffer-budgets)))
      ,@body))
 
-(defun jetpacs-buffer--budgets ()
+(defun jetpacs-buffer-budgets ()
   "The live welcome budgets as (MAX-SPANS . MAX-BYTES), members nil-able.
 MAX-SPANS is `max_rich_spans', which SPEC 4.5 defines as an AGGREGATE
 count across one SurfaceSpec — not a per-node cap — so the walk spends
@@ -583,7 +624,7 @@ bound only by the line cap)."
               (max 1024 (- frame jetpacs-buffer--frame-headroom))))
     (cons nil nil)))
 
-(defun jetpacs-buffer--cap-spans (spans max-spans)
+(defun jetpacs-buffer-cap-spans (spans max-spans)
   "SPANS truncated to exactly MAX-SPANS members, an ellipsis marking the cut.
 The result never exceeds MAX-SPANS: the ellipsis replaces the last kept
 span rather than being appended past the budget."
@@ -592,11 +633,11 @@ span rather than being appended past the budget."
    ((<= max-spans 1) (list (jetpacs-span "…")))
    (t (append (seq-take spans (1- max-spans)) (list (jetpacs-span "…"))))))
 
-(defun jetpacs-buffer--node-bytes (node)
+(defun jetpacs-buffer-node-bytes (node)
   "The canonical serialized size of NODE in octets."
   (string-bytes (jetpacs-node->canonical-json node)))
 
-(defun jetpacs-buffer--spans->text (spans)
+(defun jetpacs-buffer-spans->text (spans)
   "Flatten SPANS into one Core `text' node — the non-`rich_text' fallback.
 Per-span styling and tap actions cannot survive: SPEC 17.2's `text' node
 carries neither.  The content does, which beats the alternative — the
@@ -623,7 +664,7 @@ containing that position as the scroll target (`:scroll_here')."
            (face-attribute 'default :background nil t)))
          ;; A shared budget (see `jetpacs-buffer-with-budget') carries
          ;; across regions; otherwise this render gets its own allowance.
-         (budgets (or jetpacs-buffer--budget (jetpacs-buffer--budgets)))
+         (budgets (or jetpacs-buffer-budget (jetpacs-buffer-budgets)))
          (spans-left (car budgets))     ; SPEC 4.5: aggregate, spent down
          (bytes-left (cdr budgets))
          (exhausted nil)
@@ -689,12 +730,12 @@ containing that position as the scroll target (`:scroll_here')."
                   ;; lines — a per-line cap would sail past it.
                   (when spans-left
                     (when (> (length spans) spans-left)
-                      (setq spans (jetpacs-buffer--cap-spans spans spans-left)
+                      (setq spans (jetpacs-buffer-cap-spans spans spans-left)
                             exhausted t))
                     (setq spans-left (- spans-left (length spans))))
                   (let ((line (if rich-ok
                                   (jetpacs-rich-text spans)
-                                (jetpacs-buffer--spans->text spans))))
+                                (jetpacs-buffer-spans->text spans))))
                     (setq node
                           (if (and mark-pos (>= mark-pos bol)
                                    (<= mark-pos eol))
@@ -703,7 +744,7 @@ containing that position as the scroll target (`:scroll_here')."
             (when node
               ;; The byte budget stops the walk BEFORE over-emitting.
               (when bytes-left
-                (let ((size (jetpacs-buffer--node-bytes node)))
+                (let ((size (jetpacs-buffer-node-bytes node)))
                   (when (> size bytes-left)
                     (setq truncated t)
                     (cl-return-from walk))
@@ -718,9 +759,9 @@ containing that position as the scroll target (`:scroll_here')."
           (forward-line 1))))
     ;; Hand what is left back to a shared budget, so the next region in
     ;; this spec starts where this one stopped.
-    (when jetpacs-buffer--budget
-      (setcar jetpacs-buffer--budget spans-left)
-      (setcdr jetpacs-buffer--budget bytes-left))
+    (when jetpacs-buffer-budget
+      (setcar jetpacs-buffer-budget spans-left)
+      (setcdr jetpacs-buffer-budget bytes-left))
     (when truncated
       (push (jetpacs-text "… output truncated (surface budget)"
                           :style "caption")
@@ -816,7 +857,7 @@ dispatch extent.  A JC-4 dialog bridge will re-route it to the phone."
     (`(field . ,_w)
      ;; Editing a field needs a value from the user, and the effect now
      ;; runs INSIDE the jsonrpc dispatch extent (see
-     ;; `jetpacs-buffer--defer-refresh'), where a `read-string' would
+     ;; `jetpacs-buffer-defer-refresh'), where a `read-string' would
      ;; wedge the connection — on a headless daemon, permanently.  Until
      ;; the JC-4 dialog bridge can carry the prompt to the phone, a field
      ;; tap is refused rather than answered with a lie or a hang.
@@ -898,7 +939,7 @@ the jsonrpc dispatch extent (decision D2)."
       (error (message "jetpacs-buffer: refresh failed: %s"
                       (error-message-string err))))))
 
-(defun jetpacs-buffer--defer-refresh (surface)
+(defun jetpacs-buffer-defer-refresh (surface)
   "Re-push SURFACE from a zero-delay continuation.
 Only the REFRESH is deferred.  The tap's effect itself must already
 have run: SPEC 14.4 says \"Returning `accepted' merely because a
@@ -935,7 +976,7 @@ for this action")
       'rejected)
      (t
       (funcall effect buffer pos)
-      (jetpacs-buffer--defer-refresh (plist-get params :surface))
+      (jetpacs-buffer-defer-refresh (plist-get params :surface))
       'accepted))))
 
 (jetpacs-defaction "emacs.buffer.act"

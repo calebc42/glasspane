@@ -147,16 +147,13 @@ be refused."
 
 (defun jetpacs-sections--spans (bol eol name)
   "Tier-0 spans for [BOL, EOL) WITHOUT their automatic exposure records.
-`jetpacs-buffer--line-spans' exposes every actionable position for
-`emacs.buffer.act'.  This substrate STRIPS those taps on headers and
-RE-POINTS them at `sections.visit' on body lines, so letting the default
-records stand would leave the phone able to synthesize `emacs.buffer.act'
-at any section position and reach `jetpacs-buffer-invoke-at' — which runs
-the command UNSHIMMED, popping a desktop window (SPEC 23.1/23.2).  The
-walk therefore writes to a throwaway table, and this file exposes only
+This substrate STRIPS the tap on headers and RE-POINTS it at
+`sections.visit\' on body lines, so the generic `emacs.buffer.act\'
+record the walk writes must not stand — see
+`jetpacs-buffer-with-scratch-exposure\'.  This file then exposes only
 the verbs it actually offers."
-  (let ((jetpacs-buffer-exposed (make-hash-table :test #'equal)))
-    (jetpacs-buffer--line-spans bol eol name)))
+  (jetpacs-buffer-with-scratch-exposure
+    (jetpacs-buffer-line-spans bol eol name)))
 
 (defun jetpacs-sections--rich (spans)
   "SPANS as a `rich_text' node, or a Core `text' when unadvertised (16.2)."
@@ -331,13 +328,26 @@ falling back to Tier 0" (jetpacs--error-label err))
   "Follow the thing at POS in section buffer BUF.
 Runs the region's own RET command under `jetpacs-buffer-call-shimmed'; a
 command that leaves the buffer shows its destination in the region view
-and returns non-nil, one that acts in place returns nil."
+and returns non-nil, one that acts in place returns nil.  SIGNALS when
+the command itself failed.
+
+The ON-ERROR thunk is load-bearing.  `jetpacs-buffer-call-shimmed'
+swallows the error and still returns `(current-buffer) . (point)', so a
+command that blew up is indistinguishable from one that acted in place —
+and the handler would answer `accepted' for a visit that never happened.
+That got sharper with the Phase A prompt ban: a command reaching
+`find-file-noselect' (large-file confirm, unsafe locals, TRAMP auth) now
+SIGNALS `inhibited-interaction' instead of hanging, and swallowing it
+would turn a wedge into a silent lie."
   (with-current-buffer buf
     (goto-char (min (max (point-min) (truncate pos)) (point-max)))
     (let ((cmd (jetpacs-results--visit-command (point))))
       (when (commandp cmd)
-        (let* ((dest (jetpacs-buffer-call-shimmed cmd))
+        (let* ((failed nil)
+               (dest (jetpacs-buffer-call-shimmed
+                      cmd (lambda (err) (setq failed err))))
                (dest-buf (car dest)))
+          (when failed (signal (car failed) (cdr failed)))
           (when (and dest-buf (not (eq dest-buf buf)))
             (pcase-let ((`(,beg ,end ,label ,point)
                          (jetpacs-results--region-around dest-buf (cdr dest))))
@@ -367,22 +377,8 @@ and returns non-nil, one that acts in place returns nil."
         'accepted)))))
 
 (defun jetpacs-sections--refresh (params)
-  "Re-push the surface the event came from, deferred (D1/D2)."
-  (let ((surface (plist-get params :surface)))
-    (run-at-time
-     0 nil
-     (lambda ()
-       (when (functionp jetpacs-buffer-refresh-function)
-         (condition-case err
-             (funcall jetpacs-buffer-refresh-function surface)
-           (error (message "jetpacs-sections: refresh failed: %s"
-                           (jetpacs--error-label err)))))))))
-
-;; --- The section context menu ------------------------------------------------
-;;
-;; Long-press a section header -> that section's own key bindings offered as
-;; an EBP dialog -> the chosen KEY is replayed at the section's position.  No
-;; command name ever crosses the wire.
+  "Re-push the surface the event came from, deferred (SPEC 14.4/D1)."
+  (jetpacs-buffer-defer-refresh (plist-get params :surface)))
 
 (defun jetpacs-sections--menu-label (cmd)
   "A human label for command CMD: prefix-stripped, dashes to spaces."

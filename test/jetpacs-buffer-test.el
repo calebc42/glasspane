@@ -136,7 +136,7 @@ appends a visible truncation note instead of over-emitting."
       (let* ((nodes (jetpacs-buffer-render (current-buffer)))
              (last-node (car (last nodes)))
              (line-nodes (butlast nodes))
-             (total (apply #'+ (mapcar #'jetpacs-buffer--node-bytes
+             (total (apply #'+ (mapcar #'jetpacs-buffer-node-bytes
                                        line-nodes))))
         (should (< (length nodes) 40))
         (should (equal (plist-get last-node :t) "text"))

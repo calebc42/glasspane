@@ -249,7 +249,7 @@ MUST NOT rely on receiver truncation."
          (dims (jetpacs-hypertext--image-dimensions data))
          (pixels (and dims (* (car dims) (cdr dims))))
          (b64-len (* 4 (ceiling (length data) 3)))
-         (frame-left (cdr-safe jetpacs-buffer--budget)))
+         (frame-left (cdr-safe jetpacs-buffer-budget)))
     (and dims
          (or (null max-bytes) (<= (length data) max-bytes))
          (or (null max-pixels) (<= pixels max-pixels))
@@ -281,7 +281,7 @@ never an unadvertised URI form (the push gate would refuse the whole
 surface), never svg (SPEC 17.2 rejects active formats before decode)."
   (let* ((alt (jetpacs-hypertext--nonempty
                (and (stringp (plist-get seg :alt))
-                    (jetpacs-buffer--scalar-text (plist-get seg :alt)))))
+                    (jetpacs-buffer-scalar-text (plist-get seg :alt)))))
          (url (plist-get seg :url))
          (file (plist-get seg :file))
          (data (plist-get seg :data))
@@ -291,7 +291,7 @@ surface), never svg (SPEC 17.2 rejects active formats before decode)."
             (jetpacs-text
              (format "[image: %s]"
                      (or alt
-                         (and (stringp url) (jetpacs-buffer--scalar-text url))
+                         (and (stringp url) (jetpacs-buffer-scalar-text url))
                          "…"))
              :style "caption")))
          (https-ok
@@ -355,12 +355,12 @@ surface), never svg (SPEC 17.2 rejects active formats before decode)."
 Returns the (possibly capped) spans.  `max_rich_spans' is an AGGREGATE
 count across one SurfaceSpec, so every rich_text and table this document
 emits draws on the same allowance."
-  (let ((budget jetpacs-buffer--budget))
+  (let ((budget jetpacs-buffer-budget))
     (if (not (and budget (integerp (car budget))))
         spans
       (let ((left (car budget)))
         (when (> (length spans) left)
-          (setq spans (jetpacs-buffer--cap-spans spans (max 1 left))))
+          (setq spans (jetpacs-buffer-cap-spans spans (max 1 left))))
         (setcar budget (max 0 (- left (length spans))))
         spans))))
 
@@ -375,7 +375,7 @@ Degrades to a flattened Core `text' when `rich_text' is unadvertised
       (setq spans (jetpacs-hypertext--spend-spans spans))
       (if (jetpacs-node-advertised-p "rich_text")
           (jetpacs-rich-text spans)
-        (jetpacs-buffer--spans->text spans)))
+        (jetpacs-buffer-spans->text spans)))
      ((jetpacs-hypertext--nonempty text) (jetpacs-text text))
      (t (jetpacs-text "")))))
 
@@ -431,7 +431,7 @@ exactly what Tier 0 shows, never a reflow."
            (let ((cells (apply #'+ (mapcar (lambda (r)
                                              (length (plist-get r :cells)))
                                            rows)))
-                 (budget jetpacs-buffer--budget))
+                 (budget jetpacs-buffer-budget))
              (or (not (and budget (integerp (car budget))))
                  (and (<= cells (car budget))
                       (progn (setcar budget (- (car budget) cells)) t)))))
@@ -472,18 +472,18 @@ and stops with the same truncation caption `--render-region' appends —
 a sender MUST respect reported limits, never rely on receiver
 truncation.  This is the single place that knows the wire vocabulary;
 adapters build MODEL and never touch nodes."
-  (let ((budget jetpacs-buffer--budget)
+  (let ((budget jetpacs-buffer-budget)
         (truncated nil)
         nodes)
     (cl-block walk
       (dolist (seg (append
                     (when (jetpacs-hypertext--nonempty title)
                       (list (list :kind 'heading
-                                  :text (jetpacs-buffer--scalar-text title))))
+                                  :text (jetpacs-buffer-scalar-text title))))
                     model))
         (let ((node (jetpacs-hypertext--emit-segment seg)))
           (when (and budget (integerp (cdr budget)))
-            (let ((size (jetpacs-buffer--node-bytes node)))
+            (let ((size (jetpacs-buffer-node-bytes node)))
               (when (> size (cdr budget))
                 (setq truncated t)
                 (cl-return-from walk))
@@ -504,7 +504,7 @@ adapters build MODEL and never touch nodes."
 ;; Everything this file knows about shr's *rendered-buffer* markup lives
 ;; in this section, so an shr change across Emacs versions is a one-spot
 ;; edit.  Links and inline emphasis are NOT read here — they ride the
-;; Tier 0 line-span builder (`jetpacs-buffer--line-spans'), which already
+;; Tier 0 line-span builder (`jetpacs-buffer-line-spans'), which already
 ;; turns shr's mouse-face/keymap link runs into `emacs.buffer.act' taps
 ;; and maps face emphasis to span styling.  Only block structure is
 ;; shr-specific.
@@ -650,7 +650,7 @@ beginning; the buffer is not moved."
 
 (defun jetpacs-hypertext--block-spans (beg end buffer-name)
   "Spans for paragraph block [BEG, END), reflowed across its lines.
-Reuses `jetpacs-buffer--line-spans' with monospace and color emission
+Reuses `jetpacs-buffer-line-spans' with monospace and color emission
 off (document prose is proportional and themed by the device), so shr
 links become `emacs.buffer.act' taps and face emphasis maps to span
 styling for free; non-empty lines are joined by a space so the
@@ -666,7 +666,7 @@ EVERY span — bloating the frame and overriding the device theme."
     (save-excursion
       (goto-char beg)
       (while (< (point) end)
-        (let ((line (jetpacs-buffer--line-spans
+        (let ((line (jetpacs-buffer-line-spans
                      (line-beginning-position)
                      (min (line-end-position) end)
                      buffer-name)))
@@ -716,7 +716,7 @@ URL/alt caption."
                ;; row splits the region).
                ((jetpacs-hypertext--table-block-p beg end)
                 (let ((id (jetpacs-hypertext--block-table-id beg end))
-                      (text (jetpacs-buffer--scalar-text
+                      (text (jetpacs-buffer-scalar-text
                              (buffer-substring-no-properties beg end)))
                       (prev (car segments)))
                   (if (and (null id) prev
@@ -736,7 +736,7 @@ URL/alt caption."
                ((setq level (jetpacs-hypertext--block-heading-level beg end))
                 (push (list :kind 'heading :level level
                             :text (jetpacs-hypertext--collapse-ws
-                                   (jetpacs-buffer--scalar-text
+                                   (jetpacs-buffer-scalar-text
                                     (buffer-substring-no-properties beg end))))
                       segments)
                 (cl-incf count))
@@ -758,7 +758,7 @@ Network-derived: sanitized per SPEC 4.1."
     (when-let* ((title (and (boundp 'eww-data) eww-data
                             (jetpacs-hypertext--nonempty
                              (plist-get eww-data :title)))))
-      (jetpacs-buffer--scalar-text title))))
+      (jetpacs-buffer-scalar-text title))))
 
 ;; --- The eww DOM table pass --------------------------------------------------
 ;;
@@ -805,7 +805,7 @@ fallback."
                      :cells (mapcar
                              (lambda (c)
                                (jetpacs-hypertext--collapse-ws
-                                (jetpacs-buffer--scalar-text
+                                (jetpacs-buffer-scalar-text
                                  (dom-texts c ""))))
                              cells))))
            trs))
@@ -949,20 +949,8 @@ descriptors take the default offline policy (`drop') — a queued
               (list :spacing 4))))))
 
 (defun jetpacs-hypertext--refresh (params)
-  "Re-push the surface the event came from, deferred.
-The seam takes a surface as of JC-1: under decision D1 every owner has
-its own, so a zero-arg call would refresh the wrong one.  Deferred
-because `jetpacs-shell-push' signals on a gate failure, which must not
-escape after the navigation already happened."
-  (let ((surface (plist-get params :surface)))
-    (run-at-time
-     0 nil
-     (lambda ()
-       (when (functionp jetpacs-buffer-refresh-function)
-         (condition-case err
-             (funcall jetpacs-buffer-refresh-function surface)
-           (error (message "jetpacs-hypertext: refresh failed: %s"
-                           (jetpacs--error-label err)))))))))
+  "Re-push the surface the event came from, deferred (SPEC 14.4/D1)."
+  (jetpacs-buffer-defer-refresh (plist-get params :surface)))
 
 (jetpacs-defaction "hypertext.nav"
   ;; Navigate a rendered document buffer by running its mode's OWN
@@ -1072,13 +1060,13 @@ to drop it (e.g. an Info underline rule), or nil for a paragraph."
                  ((integerp class)
                   (push (list :kind 'heading :level class
                               :text (jetpacs-hypertext--collapse-ws
-                                     (jetpacs-buffer--scalar-text
+                                     (jetpacs-buffer-scalar-text
                                       (buffer-substring-no-properties
                                        bol eol))))
                         segments)
                   (cl-incf count))
                  (t
-                  (let ((spans (jetpacs-buffer--line-spans bol eol name)))
+                  (let ((spans (jetpacs-buffer-line-spans bol eol name)))
                     (when spans
                       (push (list :kind 'para :spans spans) segments)
                       (cl-incf count))))))))
@@ -1098,7 +1086,7 @@ subject).  Sanitized: the subject can be an arbitrary object printed."
          (consp help-xref-stack-item)
          (when-let* ((s (jetpacs-hypertext--nonempty
                          (format "%s" (cadr help-xref-stack-item)))))
-           (jetpacs-buffer--scalar-text s)))))
+           (jetpacs-buffer-scalar-text s)))))
 
 (defun jetpacs-hypertext-render-help (buf)
   "Tier 0.5 renderer for help-mode: a nav toolbar and the help subject
@@ -1141,7 +1129,7 @@ just below it (Info section headings): * chapter = 1, = section = 2,
     (and (boundp 'Info-current-node)
          (when-let* ((s (jetpacs-hypertext--nonempty
                          (format "%s" Info-current-node))))
-           (jetpacs-buffer--scalar-text s)))))
+           (jetpacs-buffer-scalar-text s)))))
 
 (defun jetpacs-hypertext-render-info (buf)
   "Tier 0.5 renderer for Info-mode: a nav toolbar and the node name over

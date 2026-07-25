@@ -76,7 +76,10 @@ class EditorSession(
      */
     fun spliceJcsBytes(start: ScalarPos, del: Int, text: String): Long {
         val n = scalarLength()
-        if (start.v < 0 || del < 0 || start.v + del > n) return -1
+        // Long arithmetic: `start + del` as Int wraps, and a wrapped sum is
+        // NOT > n, so a legal SPEC 4.2 integer near Int.MAX_VALUE slipped
+        // this guard and reached substring() as a negative index.
+        if (start.v < 0 || del < 0 || start.v.toLong() + del > n) return -1
         val removed = shadow.substring(offset(start.v), offset(start.v + del))
         return jcsUtf8Bytes(shadow) - (jcsUtf8Bytes(removed) - 2) +
             (jcsUtf8Bytes(text) - 2)
@@ -91,7 +94,7 @@ class EditorSession(
      */
     fun splice(start: ScalarPos, del: Int, text: String, len: Int): Boolean {
         val n = scalarLength()
-        if (start.v < 0 || del < 0 || start.v + del > n) return false
+        if (start.v < 0 || del < 0 || start.v.toLong() + del > n) return false
         val inserted = text.codePointCount(0, text.length)
         if (len != n - del + inserted) return false
         shadow = shadow.substring(0, offset(start.v)) + text +
@@ -119,7 +122,7 @@ class EditorSession(
     fun spliceRemote(start: ScalarPos, del: Int, text: String, len: Int,
                      cursor: ScalarPos, selStart: ScalarPos?, selEnd: ScalarPos?): Boolean {
         val n = scalarLength()
-        if (start.v < 0 || del < 0 || start.v + del > n) return false
+        if (start.v < 0 || del < 0 || start.v.toLong() + del > n) return false
         val inserted = text.codePointCount(0, text.length)
         if (len != n - del + inserted) return false
         if (!caretValid(len, cursor.v, selStart?.v, selEnd?.v)) return false

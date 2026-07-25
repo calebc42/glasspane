@@ -78,6 +78,9 @@ class CompanionEngine(
     var surfaceListener: ((String) -> Unit)? = null
 
     private val decoder = FrameDecoder()
+
+    /** Re-entry marker for feed()'s post-fault drain: no new bytes. */
+    private val EMPTY_CHUNK = ByteArray(0)
     private var pendingPairingId: String? = null
     private var pendingClientNonce: String? = null
     private var pendingServerNonce: String? = null
@@ -94,29 +97,45 @@ class CompanionEngine(
     @Synchronized
     fun feed(bytes: ByteArray) {
         if (state == SessionState.CLOSED) return
-        try {
-            decoder.feed(bytes) { msg ->
-                if (state != SessionState.CLOSED) {
-                    try {
-                        dispatch(msg)
-                    } catch (e: Exception) {
-                        // A dispatch failure must fail closed, never
-                        // crash-loop the host (review: poison-record).
-                        close("dispatch failure: ${e.message}")
+        // A recoverable body fault unwinds the decoder's drain loop, so any
+        // frames PIPELINED BEHIND the bad one stay buffered. Re-entering with
+        // no new bytes drains them: the decoder already advanced past the bad
+        // frame before throwing, so the stream is still synchronized. Without
+        // this, a request behind a malformed frame is never dispatched and
+        // never answered until more bytes happen to arrive — the unbounded
+        // stall amendment #91 forbids. Terminates: every pass either drains
+        // to completion or consumes at least one more whole frame.
+        var input: ByteArray? = bytes
+        while (input != null) {
+            val chunk = input
+            input = null
+            try {
+                decoder.feed(chunk) { msg ->
+                    if (state != SessionState.CLOSED) {
+                        try {
+                            dispatch(msg)
+                        } catch (e: Exception) {
+                            // A dispatch failure must fail closed, never
+                            // crash-loop the host (review: poison-record).
+                            close("dispatch failure: ${e.message}")
+                        }
                     }
                 }
+            } catch (e: FrameClose) { return close("frame: ${e.message}") }
+            catch (e: FrameIncomplete) { return close("frame: ${e.message}") }
+            catch (e: WireParseError) {
+                // SPEC 6.2: a complete body that is invalid UTF-8 or JSON gets
+                // a Parse Error with id:null; the stream stayed synchronized,
+                // so the connection MAY (and here does) continue.
+                emitFramingError(-32700, "Parse error", "parse-error")
+                if (state != SessionState.CLOSED) input = EMPTY_CHUNK
+            } catch (e: InvalidRequest) {
+                // SPEC 6.2/4.1: a non-object top level, batch array, or
+                // duplicate member names get one Invalid Request with
+                // id:null; continue.
+                emitFramingError(-32600, "Invalid Request", "invalid-request")
+                if (state != SessionState.CLOSED) input = EMPTY_CHUNK
             }
-        } catch (e: FrameClose) { return close("frame: ${e.message}") }
-        catch (e: FrameIncomplete) { return close("frame: ${e.message}") }
-        catch (e: WireParseError) {
-            // SPEC 6.2: a complete body that is invalid UTF-8 or JSON gets a
-            // Parse Error with id:null; the stream stayed synchronized, so
-            // the connection MAY (and here does) continue.
-            emitFramingError(-32700, "Parse error", "parse-error")
-        } catch (e: InvalidRequest) {
-            // SPEC 6.2/4.1: a non-object top level, batch array, or duplicate
-            // member names get one Invalid Request with id:null; continue.
-            emitFramingError(-32600, "Invalid Request", "invalid-request")
         }
     }
 
@@ -610,6 +629,18 @@ class CompanionEngine(
             config.limits.optLong("max_editor_sessions", 8))
             return respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("reason", "editor-session-limit"))
+        // SPEC 19.4 (amendment #103): the seed carries max_editor_bytes as a
+        // RECEIVER duty. Without this the sender-side rule has no enforcement
+        // point at the seed: an over-limit document is accepted, edit.open
+        // carries it, and every later edit — local and inbound — is refused
+        // by the size rules, leaving the editor silently and permanently
+        // read-only with no diagnostic in either direction.
+        val maxEditorBytes = config.limits.optLong("max_editor_bytes", Long.MAX_VALUE)
+        for ((eid, node) in newEditors)
+            if (EditorSession.jcsUtf8Bytes(node.optString("value")) > maxEditorBytes)
+                return respondError(id, 1201, "Invalid content", "content-invalid",
+                    JSONObject().put("path", "spec.$eid.value")
+                        .put("reason", "editor-too-large"))
         try {
             val result = surfaces.update(
                 surface, revision, spec,
@@ -1301,7 +1332,7 @@ class CompanionEngine(
         // some of them is neither form — structurally invalid.
         val hasSplice = listOf("start", "del", "text", "len").count(params::has)
         if (hasSplice == 0) {
-            val cursor = (params.opt("cursor") as? Number)?.toInt()
+            val cursorL = (params.opt("cursor") as? Number)?.toLong()
                 ?: return respondError(id, -32602, "Invalid params", "invalid-params")
             // SPEC 19.4 (amendment #98): the move-only form carries `seq`
             // (REQUIRED for edit.apply in contract.json) and "succeeds only
@@ -1314,8 +1345,16 @@ class CompanionEngine(
                 return respondError(id, -32602, "Invalid params", "invalid-params")
             if (moveSeq != s.seq)
                 return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
-            val selStart = (params.opt("sel_start") as? Number)?.toInt()
-            val selEnd = (params.opt("sel_end") as? Number)?.toInt()
+            val selStartL = (params.opt("sel_start") as? Number)?.toLong()
+            val selEndL = (params.opt("sel_end") as? Number)?.toLong()
+            // Out-of-domain positions fail the 19.1 range gate (see the
+            // text-form path below) rather than truncating to 32 bits.
+            if (listOfNotNull(cursorL, selStartL, selEndL)
+                    .any { it < 0 || it > Int.MAX_VALUE })
+                return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+            val cursor = cursorL.toInt()
+            val selStart = selStartL?.toInt()
+            val selEnd = selEndL?.toInt()
             if (!s.setCaret(ScalarPos(cursor),
                     selStart?.let(::ScalarPos), selEnd?.let(::ScalarPos)))
                 return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
@@ -1323,22 +1362,39 @@ class CompanionEngine(
             return respondResult(id, JSONObject().put("status", "applied").put("seq", s.seq))
         }
         val seq = (params.opt("seq") as? Number)?.toLong()
-        val start = (params.opt("start") as? Number)?.toInt()
-        val del = (params.opt("del") as? Number)?.toInt()
+        val startL = (params.opt("start") as? Number)?.toLong()
+        val delL = (params.opt("del") as? Number)?.toLong()
         val text = params.opt("text") as? String
-        val len = (params.opt("len") as? Number)?.toInt()
-        if (seq == null || start == null || del == null || text == null || len == null)
+        val lenL = (params.opt("len") as? Number)?.toLong()
+        if (seq == null || startL == null || delL == null || text == null || lenL == null)
             return respondError(id, -32602, "Invalid params", "invalid-params")
         // SPEC 19.4 (LD-5): `cursor` is REQUIRED on every text-changing
         // apply — the peer dictates the post-splice caret — and selection
         // members are paired-or-omitted. Structural absence is -32602, like
         // any other missing required member.
-        val cursor = (params.opt("cursor") as? Number)?.toInt()
+        val cursorL = (params.opt("cursor") as? Number)?.toLong()
             ?: return respondError(id, -32602, "Invalid params", "invalid-params")
-        val selStart = (params.opt("sel_start") as? Number)?.toInt()
-        val selEnd = (params.opt("sel_end") as? Number)?.toInt()
+        val selStartL = (params.opt("sel_start") as? Number)?.toLong()
+        val selEndL = (params.opt("sel_end") as? Number)?.toLong()
         if (params.has("sel_start") != params.has("sel_end"))
             return respondError(id, -32602, "Invalid params", "invalid-params")
+        // SPEC 4.2/16.1/19.1: a legal EBP integer (up to 2^53-1) that cannot
+        // address this document is OUT OF DOMAIN — "a receiver MUST NOT
+        // coerce, clamp, or silently drop an out-of-domain member". Reading
+        // these with Number.toInt() truncated to the low 32 bits, so
+        // start 4294967296 became 0 and a splice Emacs asked for OUTSIDE the
+        // text was applied at the head of the document and reported
+        // `applied`. Out-of-domain fails the 19.1 range gate, whose 19.4
+        // result contract is a typed stale.
+        val positions = listOfNotNull(startL, delL, lenL, cursorL, selStartL, selEndL)
+        if (positions.any { it < 0 || it > Int.MAX_VALUE })
+            return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+        val start = startL.toInt()
+        val del = delL.toInt()
+        val len = lenL.toInt()
+        val cursor = cursorL.toInt()
+        val selStart = selStartL?.toInt()
+        val selEnd = selEndL?.toInt()
         // SPEC 19.4: apply only at seq+1 with a valid splice; otherwise a
         // typed stale result leaves this (winning) session OPEN.
         if (seq != s.seq + 1)
@@ -1402,10 +1458,32 @@ class CompanionEngine(
         sendRequest("edit.complete", JSONObject()
             .put("document", document).put("editor_id", editorId)
             .put("session", atSession).put("seq", atSeq).put("cursor", atCursor)) { result, error ->
+            // SPEC 19.3: "The result and each candidate are closed objects.
+            // `prefix` MUST be a string and `candidates` MUST be an array.
+            // Each candidate MUST contain a non-empty string `label`."
+            // optString() coerced instead: an ABSENT prefix became "", which
+            // selectCompletion's substring check then trivially satisfied, so
+            // a malformed result INSERTED at the cursor without replacing —
+            // §19.2's "never a wrong edit". A non-conforming result is
+            // discarded whole; a completion has no response to carry an error.
             if (error == null && result != null &&
-                editors[document to editorId]?.sessionId == atSession)
-                callback(result.optString("prefix"),
-                    result.optJSONArray("candidates") ?: JSONArray())
+                editors[document to editorId]?.sessionId == atSession) {
+                val prefix = result.opt("prefix") as? String ?: return@sendRequest
+                val cands = result.opt("candidates") as? JSONArray ?: return@sendRequest
+                for (k in result.keySet())
+                    if (k != "prefix" && k != "candidates") return@sendRequest
+                for (i in 0 until cands.length()) {
+                    val c = cands.optJSONObject(i) ?: return@sendRequest
+                    if ((c.opt("label") as? String).isNullOrEmpty()) return@sendRequest
+                    if (c.has("annotation") && c.opt("annotation") !is String)
+                        return@sendRequest
+                    if (c.has("insert") && c.opt("insert") !is String) return@sendRequest
+                    for (k in c.keySet())
+                        if (k != "label" && k != "annotation" && k != "insert")
+                            return@sendRequest
+                }
+                callback(prefix, cands)
+            }
         }
     }
 

@@ -502,6 +502,31 @@ class CompanionEngineTest {
         assertEquals(before, out.size)
     }
 
+    // ------------------------------------------ post-fault drain (SPEC 6.2)
+
+    @Test
+    fun aFramePipelinedBehindABadOneIsStillDispatched() {
+        // SPEC 6.2 permits continuing after a recoverable body fault, and
+        // amendment #91 forbids an unbounded stall. The fault unwound the
+        // decoder's drain loop, so a request pipelined BEHIND the bad frame
+        // stayed buffered — never dispatched, never answered — until more
+        // bytes happened to arrive. If the peer was waiting on that response
+        // before sending anything else, the session deadlocked.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello()))
+        engine.feed(frame(auth()))
+        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        val bad = encodeFrame("[1,2]")                       // top-level array
+        val good = frame(request("q1", "queue.replay", JSONObject()))
+        engine.feed(bad + good)
+        // One Invalid Request for the bad frame...
+        assertTrue(out.any { it.opt("id") == JSONObject.NULL &&
+            it.optJSONObject("error")?.optInt("code") == -32600 })
+        // ...and the pipelined request behind it was answered in the same feed.
+        assertNotNull(out.lastOrNull { it.opt("id") == "q1" })
+    }
+
     // ------------------------------------------------------ close (SPEC 22.3)
 
     @Test

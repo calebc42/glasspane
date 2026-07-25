@@ -210,8 +210,12 @@ SPEC 4.1: a receiver MUST reject a body containing invalid UTF-8."
   (buffer "" :documentation "Pending unibyte bytes."))
 
 (defconst ebp--content-length-re
-  "^\\(?:0\\|[1-9][0-9]*\\)$"
-  "SPEC 6.1/6.2: unsigned decimal, no leading zeroes except the value 0.")
+  "\\`\\(?:0\\|[1-9][0-9]*\\)\\'"
+  "SPEC 6.1/6.2: unsigned decimal, no leading zeroes except the value 0.
+Anchored to the whole STRING (\\=\\` and \\=\\'), not to lines: Emacs `^' and
+`$' match at line boundaries, so the line-anchored form accepted a bare
+LF inside the value and a value like \"2\\nX: 1\" passed as 2.  The header
+section is split on CRLF only, so such a value is reachable on the wire.")
 
 (defun ebp--parse-header (head)
   "Parse the unibyte header section HEAD (without the final CRLFCRLF).

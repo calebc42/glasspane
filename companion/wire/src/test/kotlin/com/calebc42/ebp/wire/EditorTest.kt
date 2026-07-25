@@ -377,6 +377,45 @@ class EditorTest {
     }
 
     @Test
+    fun outOfDomainPositionsAreStaleNotTruncated() {
+        // SPEC 4.2 allows integers to 2^53-1; SPEC 16.1 forbids coercing or
+        // clamping an out-of-domain member. Reading these with Number.toInt()
+        // took the low 32 bits, so start 4294967296 became 0 and a splice
+        // Emacs asked for OUTSIDE the text was applied at the head of the
+        // document and answered `applied`.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "hello")
+        // 2^32 is a legal EBP integer; as an Int it truncates to exactly 0.
+        engine.feed(frame(request("a2", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 1).put("start", 4_294_967_296L)
+            .put("del", 0).put("text", "X").put("len", 6).put("cursor", 1))))
+        assertEquals("stale", response(out, "a2").getJSONObject("result").getString("status"))
+        assertEquals("hello", s.shadow)
+        assertEquals(0L, s.seq)
+    }
+
+    @Test
+    fun nearMaxIntSpliceDoesNotOverflowIntoACrash() {
+        // start + del as Int WRAPS: 2147483647 + 1 is negative, which is not
+        // > n, so the range guard passed and substring() got a negative index
+        // — an uncaught exception that closed the whole transport over one
+        // legal SPEC 4.2 integer.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "hello")
+        engine.feed(frame(request("a1", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 1)
+            .put("start", Int.MAX_VALUE).put("del", 1)
+            .put("text", "x").put("len", 5).put("cursor", 0))))
+        assertEquals("stale", response(out, "a1").getJSONObject("result").getString("status"))
+        assertEquals("hello", s.shadow)
+        assertEquals(SessionState.READY, engine.state) // transport survives
+    }
+
+    @Test
     fun mixedApplyFormIsInvalidParams() {
         // SPEC 19.4: move-only omits ALL of start/del/text/len; a message
         // with only some of them is neither form. The old dispatch keyed on
@@ -463,6 +502,31 @@ class EditorTest {
         assertTrue(out.method("edit.delta").isEmpty())
         // A non-growing local edit still works.
         assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(0), 100, ""))
+    }
+
+    @Test
+    fun anOverLimitSeedIsRefusedAtAcceptance() {
+        // SPEC 19.4 (amendment #103): the seed carries max_editor_bytes as a
+        // receiver duty. Accepted, it produced an editor that was silently
+        // and permanently read-only — edit.open carried the over-limit text
+        // and then every edit was refused by the size rules.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(request("s1", "surface.update", JSONObject()
+            .put("surface", "app:main").put("revision", 1)
+            .put("spec", JSONObject().put("t", "editor").put("id", "body")
+                .put("document", "doc:1").put("value", "a".repeat(70_000))))))
+        val err = response(out, "s1").getJSONObject("error")
+        assertEquals(1201, err.getInt("code"))
+        assertEquals("editor-too-large", err.getJSONObject("data").getString("reason"))
+        assertTrue(out.method("edit.open").isEmpty())
+        // A seed within the limit is accepted and opens normally.
+        engine.feed(frame(request("s2", "surface.update", JSONObject()
+            .put("surface", "app:main").put("revision", 2)
+            .put("spec", JSONObject().put("t", "editor").put("id", "body")
+                .put("document", "doc:1").put("value", "a".repeat(100))))))
+        assertEquals("applied", response(out, "s2").getJSONObject("result").getString("status"))
+        assertEquals(1, out.method("edit.open").size)
     }
 
     @Test

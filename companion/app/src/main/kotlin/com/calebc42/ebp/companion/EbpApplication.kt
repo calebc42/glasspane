@@ -6,11 +6,19 @@
 // boot receiver).
 package com.calebc42.ebp.companion
 
+import android.app.ActivityManager
 import android.app.Application
+import android.content.Context
 
 class EbpApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        // LD-11: size the image cache to this device's per-app memory class.
+        // An eighth of the app heap is a conservative retention budget — the
+        // Semaphore(3) already bounds concurrent decodes on top of it.
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        com.calebc42.ebp.companion.render.ImageCache.configure(
+            am.memoryClass.toLong() * 1024 * 1024 / 8)
         val firing = CompanionStores.firing(this)
         // SPEC 21.2: resolve anything a crash left mid-transaction first.
         firing.recover()

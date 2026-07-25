@@ -68,8 +68,10 @@ internal fun RenderImage(node: JSONObject, m: Modifier) {
     val url = node.optString("url")
     val desc = node.optString("content_description").takeIf { it.isNotEmpty() }
     val limits = ImageLoader.DEFAULT_LIMITS
+    // LD-11: through the cache, so scrolling a lazy_column back to a seen
+    // image does not re-fetch, and N nodes on one URL share one load.
     val bitmap by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, url) {
-        value = ImageLoader.load(url, limits)
+        value = ImageCache.get(url, limits)
     }
     val scale = when (node.optString("content_scale")) {
         "crop" -> androidx.compose.ui.layout.ContentScale.Crop

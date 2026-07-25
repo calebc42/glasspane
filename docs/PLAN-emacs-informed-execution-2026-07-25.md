@@ -85,6 +85,27 @@ the pure wire library and §15.1-barrier integration, and per the review buys no
 on_change field; the tombstone-re-serialization cost (the dominant one) is already gone. (b) The
 image-cache `clear()` awaits an app-side forget-pairing path, which is not wired yet.
 
+**T3 + Tier-2 AUDITED** (`e4f686a`, spec `10c2016`, amendments **#106-#107**): 7 defects fixed.
+The load-bearing ones: the LD-13 refusal fired synchronously and §15.3's pump read it as a PEER
+error, pausing the durable queue and forging `blocked_by` (the pump is single-flight, now exempt —
+#106); T3's epoch was ineffective twice over — every widget seeded from the node's authored value
+rather than the store (so a disposed/recomposed widget reverted while a draft stood, which no epoch
+can detect) and the epoch rode only in the `remember` inputs where a Compose restore beats it, so
+LD-2 returned verbatim in recycled rows — both fixed by publishing `SurfaceStore.inputDisplays`
+(value + generation) and keying on the epoch in BOTH inputs and the saveable key; the image cache
+was keyed on url alone, violating §17.2's pairing-scope MUST, and `clear()` did not fence loads in
+flight. Plus reload retention (a snapshot failing re-validation was deleted with its §13.1 floor —
+#107; notification records were re-validated with the wrong validator and dropped every restart),
+phantom drafts in `input_state`, `stale_spec` bypassing both gates, and legacy-draft migration loss.
+Baselines **302 wire / 24 app / 203 elisp**.
+
+**Known and deliberately open** (recorded, not silently dropped): LD-14's idle-timer amortization;
+the image cache's `clear()` still awaits an app-side forget-pairing path; `SurfaceStore` has no
+internal synchronization and is a process-wide singleton while engines are per-connection (a
+pre-existing overlap window during connection supersession, widened in cost but not in kind by the
+new maps); `RenderDialogRoot` keys its field map on `dialog_id` alone, so a same-id dialog
+presented within one frame of its predecessor can inherit its fields (pre-existing §18.1 issue).
+
 **NEXT:** **A6** — the P2/P3 amendment batch (incl. §5.1's `max_node_depth`/`max_send_header_bytes`
 constants, both §25 restricting rows), then **A8**'s research items.
 

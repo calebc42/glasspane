@@ -46,22 +46,32 @@ Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `30857a5`, amendments t
 | slip-ins | **LD-1** (dialog hang; T3c override chain in `RenderCtx.action`), **LD-12** crash-closers (Semaphore(3) + `Throwable`), **LD-13 half** (close() drains `pending`), **LD-16**, **LD-18**, **LD-19** (+ IconMap caches only resolved vectors), **LD-21** (O(n²) decoder → stateful incremental) | `967ab1e` |
 | §4-3 | **T1** — `EbpJson`/`EbpValue` strict one-pass parser replaces org.json at the boundary; both compensating scans deleted; **LD-8, LD-9** closed; **LD-20** `JsonEquality` type-tag gate, no `else` | `dceb22a` |
 | §4-5 | **A1–A5** = amendments **#92–96** (+ astral `edit.delta` golden row 36, contract `max_method_bytes: 128`); **A7** = **#97** (§24.2 floor). Companion #93 conformance: method-name gate before registry | ebp `30857a5`, `74a09d8` |
+| §4-4a | **T2** — ScalarPos/Utf16Pos through EditorSession + the four engine entry points, ONE surrogate-safe conversion pair; editorCommand/localEditorCaret convert+order (LD-4); `editorListener` wired → EditorMirror StateFlow → RenderEditor adopts on epoch + refused-edit snap-back (LD-5); edit.apply atomic + form-strict, cursor REQUIRED, peer caret validated pre-splice. Note: insdel's three-case adjust has no live slot (peer-dictated cursor, B2); the sender-side cursor choice is an **ebp.el follow-up** | `271c3df` |
 
-Baselines: **268 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames)**.
+Baselines: **274 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames)**.
 
-**NEXT (in order): §4-4 — T2** (editor ownership + typed positions; **wire `editorListener` first**
-— it also gives the renderer its snap-back for refused local edits, noted in `3c16fbb`), then **T3**
-(epoch + defaults layer; the override chain c) is already in). Then the rest of Tier 2 (LD-13 bound
+**NEXT (in order): T3** (epoch + defaults layer; the override chain c) is already in — remaining:
+(a) SurfaceStore per-(surface,id) epoch through `surfaceListener` into widget remember keys, closing
+LD-2; (b) `DialogContext` defaults layer with containment-test lookup, closing LD-3). Then the rest
+of Tier 2 (LD-13 bound
 half, LD-14 split-then-amortize per §5.2, LD-11 image cache, LD-10/LD-17 contract-driven validator
 types + `builtinsFromProfiles`, recompose-scope split, the two serialize-to-compare fixes, §19.5
 companion half, LD-6 pendingEditors pruning), then **A6** (P2/P3 batch incl. §5.1 constants — both
 are §25 restricting rows), then **A8** research items.
 
-**Deferred to device time:** LD-4's astral on-device check (belongs to T2), a dialog-`text_input`
-Done-key smoke (LD-1), and the standing outward handoff — Caleb pushes the CONTRACT repo history
-(now `30857a5`, still local to the submodule clone) to GitHub before llm-poc-2, or the recorded pin
-won't resolve from a fresh clone. The `ebp/llm-poc` worktree is a stale sibling at `4f6f82b` (#62);
-the submodule checkout is the live spec authority.
+**Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the
+checklist wants it on hardware too), an inbound-`edit.apply`-while-the-editor-is-shown smoke (the
+new mirror adoption + snap-back), a dialog-`text_input` Done-key smoke (LD-1), and the standing
+outward handoff — Caleb pushes the CONTRACT repo history (now `30857a5`, still local to the
+submodule clone) to GitHub before llm-poc-2, or the recorded pin won't resolve from a fresh clone.
+The `ebp/llm-poc` worktree is a stale sibling at `4f6f82b` (#62); the submodule checkout is the
+live spec authority.
+
+**ebp.el follow-ups queued by T2 (elisp track):** (1) the sender-side caret choice on
+`edit.apply` — ebp.el dictates `(+ start (length text))` (end of its own splice), which yanks the
+device caret on every remote apply; the three-case marker arithmetic belongs THERE, adjusting the
+device's last-known caret instead; (2) `ebp-client-edit-apply` never sends `sel_start`/`sel_end` —
+fine (paired-or-omitted), recorded for when selection-carrying applies matter.
 
 ---
 

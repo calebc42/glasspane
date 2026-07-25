@@ -53,10 +53,16 @@ Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `30857a5`, amendments t
 Baselines: **281 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames,
 17 wire fixtures)**. Spec through **amendment #103**.
 
-**Feed the audit's §3 backlog into the next passes:** the five P1 editor-lifecycle defects
-(phantom sessions from action `args`, no session after reconnection, two surfaces sharing one
-`(document, editor_id)`, LD-6 `pendingEditors`, `key`-based presentation identity) are all in the
-editor lifecycle — do them as one atom *before* T3, since T3's epoch work touches the same seam.
+**Audit backlog CLEARED** (`691b052`, spec `3c73d75`, amendments **#104-#105**): all 11 §3
+items resolved except the one P3 ordering nit (§3.10), each with a regression test. The editor
+lifecycle is now: node-position-only collection gated on the target profile, sessions keyed by
+§16.1 presentation identity, a READY sweep over the SurfaceStore that fixes reconnect and
+SYNCING-removal together, `(document, identity)` exclusivity, no drafts for synchronized editors,
+dialog editors counted/opened/closed, and validated annotation batches.
+
+**NEXT: T3** — (a) SurfaceStore per-`(surface, id)` epoch through `surfaceListener` into widget
+remember keys (LD-2); (b) `DialogContext` defaults layer with containment-test lookup (LD-3). The
+override chain (c) landed in `967ab1e`.
 
 **NEXT (in order): T3** (epoch + defaults layer; the override chain c) is already in — remaining:
 (a) SurfaceStore per-(surface,id) epoch through `surfaceListener` into widget remember keys, closing

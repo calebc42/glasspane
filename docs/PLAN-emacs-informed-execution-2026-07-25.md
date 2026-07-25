@@ -106,8 +106,25 @@ pre-existing overlap window during connection supersession, widened in cost but 
 new maps); `RenderDialogRoot` keys its field map on `dialog_id` alone, so a same-id dialog
 presented within one frame of its predecessor can inherit its fields (pre-existing §18.1 issue).
 
-**NEXT:** **A6** — the P2/P3 amendment batch (incl. §5.1's `max_node_depth`/`max_send_header_bytes`
-constants, both §25 restricting rows), then **A8**'s research items.
+**A6 IN PROGRESS — all 11 P2 entries DONE** (`833356a`/`83b182c`, `0c4ea57`/`bcd246d`; spec
+amendments **#108-#115**, spec now at **#115**). Both §5.1 constants landed: `max_node_depth: 20`
+(enforced per-path in SpecValidator + the node-depth walk validate.py never had) and
+`max_send_header_bytes: 128`. Highlights: §4.5's limits are now stated as RECEIVER acceptance
+bounds that do not license a sender to build what its own encoder cannot emit (Emacs caps at 50
+containers with no override, and encodes replies outside its dispatcher's condition-case, so the
+failure was a request left forever unanswered); body accounting pinned to TRANSMITTED octets after
+a reproduced frame-injection (one 162-octet frame delivered a notification the peer never framed);
+requester abandonment defined (the blessed library abandons at 10s, sends nothing, and drops the
+answer — losing a submitted password); "cryptographically random" and "constant time" given
+checkable definitions (Emacs 30.1 has NO constant-time helper, so §9.3 would be discharged by
+`string=`); the `data:` base64 profile pinned; `on_point_tap` now injects the ordinal index §17.5
+already resolved and threw away. Baselines **303 wire / 24 app / 203 elisp**.
+
+**A6 REMAINING: the five P3 entries** — negative-golden role dimension (`manifest.json` has no role
+column while §24.2/§6.2 scope duties per role), a §24.6 vector for §4.3 equality with
+differently-spelled operands, §21.5's durability scope for transition-driven triggers,
+`device.trigger_unavailable` permission identifiers resolving against `device.permissions`, and
+§23.2's no-remote-evaluation list omitting *interpretation* sinks. Then **A8**'s research items.
 
 **Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the
 checklist wants it on hardware too), an inbound-`edit.apply`-while-the-editor-is-shown smoke (the

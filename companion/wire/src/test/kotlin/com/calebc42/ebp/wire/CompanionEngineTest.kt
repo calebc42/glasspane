@@ -527,6 +527,38 @@ class CompanionEngineTest {
         assertNotNull(out.lastOrNull { it.opt("id") == "q1" })
     }
 
+    @Test
+    fun outstandingRequestsAreBoundedWithHysteresis() {
+        // SPEC 22.3 (LD-13 bound half): `pending` grew without limit against
+        // a peer that stops answering. kbd_buffer's discipline: hold at HIGH,
+        // resume only below LOW — a single cap thrashes at the boundary.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello()))
+        engine.feed(frame(auth()))
+        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        var refused = 0
+        fun send() = engine.sendRequest("event.action", JSONObject()) { _, err ->
+            if (err?.optInt("code") == 1401) refused++
+        }
+        repeat(512) { send() }   // fills to HOLD; none refused yet
+        assertEquals(0, refused)
+        send()                   // the 513th fails locally, exactly once
+        assertEquals(1, refused)
+        // Answering one request does NOT resume (hysteresis, not a cap).
+        val firstId = out.first { it.opt("method") == "event.action" }.getInt("id")
+        engine.feed(frame(JSONObject().put("jsonrpc", "2.0").put("id", firstId)
+            .put("result", JSONObject())))
+        send()
+        assertEquals(2, refused)
+        // Draining below RESUME (128) reopens the gate.
+        for (m in out.filter { it.opt("method") == "event.action" }.drop(1).take(400))
+            engine.feed(frame(JSONObject().put("jsonrpc", "2.0")
+                .put("id", m.getInt("id")).put("result", JSONObject())))
+        send()
+        assertEquals(2, refused) // accepted again
+    }
+
     // ------------------------------------------------------ close (SPEC 22.3)
 
     @Test

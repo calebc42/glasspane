@@ -626,8 +626,14 @@ internal fun RenderReorderableList(node: JSONObject, ctx: RenderCtx, m: Modifier
         if (key != null) JSONObject().put("key", key)
         else JSONObject().put("id", it?.optString("id").orEmpty())
     }
-    // Display order as authored indices; reset when the authored list changes.
-    var order by remember(itemsJson.toString()) {
+    // Display order as authored indices; reset when the authored list CHANGES
+    // by value. Two steps on purpose: JSONArray has no equals, so keying the
+    // state on the instance would reset the user's reorder on every re-push,
+    // while serializing on every recomposition burned a full toString each
+    // frame. The identity-keyed remember serializes once per accepted
+    // snapshot; the value-keyed remember resets only when content moved.
+    val itemsSig = remember(itemsJson) { itemsJson.toString() }
+    var order by remember(itemsSig) {
         mutableStateOf((0 until itemsJson.length()).toList())
     }
     val listState = rememberLazyListState()

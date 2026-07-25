@@ -218,10 +218,34 @@ class CompanionEngine(
     private var nextOutboundId = 0
     private val pending = HashMap<Int, (JSONObject?, JSONObject?) -> Unit>()
 
-    /** Send a Companion-originated request; integer ids per SPEC 7.2. */
+    // SPEC 22.3 (LD-13 bound half): outstanding-request count is a MUST-bound
+    // resource — `pending` grew without limit against a peer that stops
+    // answering. Emacs's kbd_buffer is the calibration: a fixed ring that
+    // holds off its source at half full and resumes at a quarter, because a
+    // single cap thrashes at the boundary (accept one, refuse one, accept
+    // one). Once HOLD is reached, new requests fail locally until the peer's
+    // answers drain the map below RESUME.
+    private var pendingHeld = false
+
+    private companion object {
+        const val PENDING_HOLD = 512
+        const val PENDING_RESUME = 128
+    }
+
+    /** Send a Companion-originated request; integer ids per SPEC 7.2. A
+     * request refused by the outstanding-request bound fails locally with a
+     * synthetic 1401 — the caller's callback always runs exactly once. */
     @Synchronized
     fun sendRequest(method: String, params: JSONObject,
                     callback: (JSONObject?, JSONObject?) -> Unit) {
+        if (pendingHeld && pending.size <= PENDING_RESUME) pendingHeld = false
+        if (pendingHeld || pending.size >= PENDING_HOLD) {
+            pendingHeld = true
+            callback(null, JSONObject()
+                .put("code", 1401).put("message", "Outstanding requests exhausted")
+                .put("data", JSONObject().put("kind", "overloaded")))
+            return
+        }
         val id = ++nextOutboundId
         pending[id] = callback
         emit(JSONObject().put("jsonrpc", "2.0").put("id", id)

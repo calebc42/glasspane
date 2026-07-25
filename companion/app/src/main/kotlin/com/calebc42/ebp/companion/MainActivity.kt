@@ -85,31 +85,58 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize()) {
                     androidx.compose.foundation.layout.Box(
                         Modifier.safeDrawingPadding()) {
-                    val shown by currentSpec.collectAsState()
-                    when (val s = shown) {
-                        null -> Text(
-                            "EBP Companion — waiting for Emacs on 127.0.0.1:8765",
-                            Modifier.padding(24.dp))
-                        else -> RenderNode(s.second, s.first, bridge)
+                    // Each overlay reads its own flow inside its own composable,
+                    // so opening a dialog or pie menu recomposes only that host
+                    // — not the surface tree. Reading all three here put them in
+                    // one recompose scope, and because every render composable
+                    // takes an (unstable) JSONObject, a dialog opening
+                    // re-executed the entire surface render.
+                    SurfaceHost(currentSpec, bridge)
+                    PieMenuHost(currentPieMenu, bridge)
+                    DialogHost(currentDialog, bridge)
                     }
-                    val pie by currentPieMenu.collectAsState()
-                    pie?.let { (id, spec) -> RenderPieMenu(id, spec, bridge) }
-                    val dialog by currentDialog.collectAsState()
-                    dialog?.let { (id, dspec) ->
-                        androidx.compose.ui.window.Dialog(
-                            // SPEC 18.1: a platform dismissal is a dismiss.
-                            onDismissRequest = { bridge.dialogDismiss(id) }) {
-                            Surface(
-                                shape = MaterialTheme.shapes.large,
-                                tonalElevation = 6.dp) {
-                                androidx.compose.foundation.layout.Column(
-                                    Modifier.padding(24.dp)) {
-                                    RenderDialogRoot(id, dspec, bridge)
-                                }
-                            }
-                        }
-                    }
-                    }
+                }
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun SurfaceHost(
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    bridge: DeviceBridge,
+) {
+    val shown by flow.collectAsState()
+    when (val s = shown) {
+        null -> Text(
+            "EBP Companion — waiting for Emacs on 127.0.0.1:8765",
+            Modifier.padding(24.dp))
+        else -> RenderNode(s.second, s.first, bridge)
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun PieMenuHost(
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    bridge: DeviceBridge,
+) {
+    val pie by flow.collectAsState()
+    pie?.let { (id, spec) -> RenderPieMenu(id, spec, bridge) }
+}
+
+@androidx.compose.runtime.Composable
+private fun DialogHost(
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    bridge: DeviceBridge,
+) {
+    val dialog by flow.collectAsState()
+    dialog?.let { (id, dspec) ->
+        androidx.compose.ui.window.Dialog(
+            // SPEC 18.1: a platform dismissal is a dismiss.
+            onDismissRequest = { bridge.dialogDismiss(id) }) {
+            Surface(shape = MaterialTheme.shapes.large, tonalElevation = 6.dp) {
+                androidx.compose.foundation.layout.Column(Modifier.padding(24.dp)) {
+                    RenderDialogRoot(id, dspec, bridge)
                 }
             }
         }

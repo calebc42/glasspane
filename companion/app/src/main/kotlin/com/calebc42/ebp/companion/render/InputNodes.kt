@@ -258,8 +258,10 @@ internal fun RenderEnumList(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     var showAdd by remember { mutableStateOf(false) }
 
     // SPEC 17.4 (audit I7): drop a retained selected value that the new options
-    // no longer offer, mirroring the tabs invalid-index reset.
-    val optSig = options.toString()
+    // no longer offer, mirroring the tabs invalid-index reset. Identity-keyed
+    // serialize (once per accepted snapshot), value-keyed effect — a bare
+    // toString here re-serialized the options on every recomposition.
+    val optSig = remember(options) { options.toString() }
     LaunchedEffect(optSig) {
         val pruned = selectedValues.filter { s -> optionValues.any { jsonValueEquals(s, it) } }
         if (pruned.size != selectedValues.size) selectedValues = pruned

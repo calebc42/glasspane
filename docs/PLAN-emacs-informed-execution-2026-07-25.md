@@ -47,7 +47,6 @@ Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `30857a5`, amendments t
 | §4-3 | **T1** — `EbpJson`/`EbpValue` strict one-pass parser replaces org.json at the boundary; both compensating scans deleted; **LD-8, LD-9** closed; **LD-20** `JsonEquality` type-tag gate, no `else` | `dceb22a` |
 | §4-5 | **A1–A5** = amendments **#92–96** (+ astral `edit.delta` golden row 36, contract `max_method_bytes: 128`); **A7** = **#97** (§24.2 floor). Companion #93 conformance: method-name gate before registry | ebp `30857a5`, `74a09d8` |
 | §4-4a | **T2** — ScalarPos/Utf16Pos through EditorSession + the four engine entry points, ONE surrogate-safe conversion pair; editorCommand/localEditorCaret convert+order (LD-4); `editorListener` wired → EditorMirror StateFlow → RenderEditor adopts on epoch + refused-edit snap-back (LD-5); edit.apply atomic + form-strict, cursor REQUIRED, peer caret validated pre-splice. Note: insdel's three-case adjust has no live slot (peer-dictated cursor, B2); the sender-side cursor choice is an **ebp.el follow-up** | `271c3df` |
-
 | audit | **T1/T2 audited against §4/§6/§19** — 9 defects fixed (Unicode-lax hex escapes, move-only `seq` unchecked, local edit from a superseded base, `toInt()` position truncation, `start+del` overflow closing the transport, frames stranded behind a fault, unvalidated `edit.complete` results, `ebp.el`'s line-anchored `Content-Length`, `validate.py`'s lone surrogates + missing unterminated-header cap); amendments **#98–#103**; 11 pre-existing defects confirmed + scheduled. Report: `docs/AUDIT-T1-T2-2026-07-25.md` | `7ed0f82`, `26b635f` |
 
 Baselines: **281 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames,
@@ -62,16 +61,11 @@ dialog editors counted/opened/closed, and validated annotation batches.
 
 **NEXT: T3** — (a) SurfaceStore per-`(surface, id)` epoch through `surfaceListener` into widget
 remember keys (LD-2); (b) `DialogContext` defaults layer with containment-test lookup (LD-3). The
-override chain (c) landed in `967ab1e`.
-
-**NEXT (in order): T3** (epoch + defaults layer; the override chain c) is already in — remaining:
-(a) SurfaceStore per-(surface,id) epoch through `surfaceListener` into widget remember keys, closing
-LD-2; (b) `DialogContext` defaults layer with containment-test lookup, closing LD-3). Then the rest
-of Tier 2 (LD-13 bound
-half, LD-14 split-then-amortize per §5.2, LD-11 image cache, LD-10/LD-17 contract-driven validator
-types + `builtinsFromProfiles`, recompose-scope split, the two serialize-to-compare fixes, §19.5
-companion half, LD-6 pendingEditors pruning), then **A6** (P2/P3 batch incl. §5.1 constants — both
-are §25 restricting rows), then **A8** research items.
+override chain (c) landed in `967ab1e`. Then the rest of Tier 2 — LD-13's bound half, LD-14
+split-then-amortize per §5.2, LD-11 image cache, LD-10/LD-17 contract-driven validator types +
+`builtinsFromProfiles`, the recompose-scope split, the two serialize-to-compare fixes — then **A6**
+(the P2/P3 amendment batch incl. §5.1's constants, both §25 restricting rows), then **A8**'s
+research items. (§19.5's companion half and LD-6 came forward into the audit-backlog atom.)
 
 **Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the
 checklist wants it on hardware too), an inbound-`edit.apply`-while-the-editor-is-shown smoke (the

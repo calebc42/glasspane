@@ -419,6 +419,107 @@ the READY guard; optional roots wait."
                          "app:demo" :spec '(:t "card")))
           (should (equal jetpacs-shell--snackbar "kept")))))))
 
+(ert-deftest jetpacs-floor-gate-features ()
+  "SPEC 10.2 mandates gating nodes, builtins AND features; 17.2 makes an
+unadvertised image URI form content-invalid and 17.7 does the same for a
+registered toolbar identifier."
+  (jetpacs-floor-test--with-client
+      (client :profiles '(:app (:node_types ["text" "image" "editor" "column"]
+                                :builtins []
+                                :features ["image.https" "toolbar.org"])))
+    (let ((sent nil))
+      (jetpacs-floor-test--recording-push sent
+        ;; An advertised form passes.
+        (should (= (jetpacs-shell-push
+                    "app:demo"
+                    :spec '(:t "image" :url "https://example.com/a.png"))
+                   42))
+        ;; data: is NOT advertised here -> refused before the send.
+        (should-error (jetpacs-shell-push
+                       "app:demo"
+                       :spec '(:t "image" :url "data:image/png;base64,AAAA")))
+        ;; A registered toolbar identifier must be advertised...
+        (should (= (jetpacs-shell-push
+                    "app:demo"
+                    :spec '(:t "editor" :id "e" :toolbar "org"))
+                   42))
+        (should-error (jetpacs-shell-push
+                       "app:demo"
+                       :spec '(:t "editor" :id "e" :toolbar "markdown")))
+        ;; ...while an INLINE ToolbarItem array needs no feature.
+        (should (= (jetpacs-shell-push
+                    "app:demo"
+                    :spec '(:t "editor" :id "e"
+                            :toolbar [(:label "B" :snippet "**")]))
+                   42))
+        (should (= (length sent) 3))))))
+
+(ert-deftest jetpacs-floor-gate-notification-meta-descriptors ()
+  "18.5 action descriptors live under the OPAQUE `:meta' key, so the
+generic walker cannot see them — yet that is the only place 18.5 puts a
+descriptor, i.e. exactly where amendment #85's wake gate matters."
+  (jetpacs-floor-test--with-client
+      (client :granted ["surfaces.notification"]
+              :profiles '(:notification (:node_types ["text"]
+                                         :builtins [] :features [])))
+    (let ((sent nil)
+          (spec '(:t nil :body (:t "text" :text "hi")
+                  :meta (:actions [(:label "Snooze"
+                                    :on_tap (:action "a.snooze"
+                                             :when_offline "wake"
+                                             :ttl_s 60))]))))
+      (jetpacs-floor-test--recording-push sent
+        ;; offline.wake ungranted -> the buried descriptor must be caught.
+        (should-error (jetpacs-shell-push "notification:n1" :spec spec))
+        (should-not sent)))))
+
+(ert-deftest jetpacs-floor-stale-spec-strip-validation ()
+  "13.5 stripping can destroy the 13.4 shape; shipping the result makes
+the Companion 1201 the ENTIRE request, discarding the valid primary spec."
+  (jetpacs-floor-test--with-client
+      (client :granted ["surfaces.widget"]
+              :profiles '(:app (:node_types ["text" "text_input" "column"]
+                                :builtins [] :features [])
+                          :widget (:node_types ["text" "text_input"]
+                                   :builtins [] :features [])))
+    (let ((sent nil))
+      (jetpacs-floor-test--recording-push sent
+        ;; A widget stale_spec whose body is wholly stateful loses its
+        ;; REQUIRED `body' to the strip.
+        (should-error
+         (jetpacs-shell-push
+          "widget:w1"
+          :spec '(:title "T" :body (:t "text" :text "b"))
+          :stale-spec '(:title "T" :body (:t "text_input" :id "ti"))))
+        ;; A multi-view stale_spec whose initial view is wholly stateful
+        ;; ends up naming a view that no longer exists.
+        (let ((views (make-hash-table :test 'equal)))
+          (puthash "list" '(:t "text_input" :id "ti") views)
+          (should-error
+           (jetpacs-shell-push
+            "app:demo"
+            :spec (jetpacs-multi-view `(("list" . ,(jetpacs-text "l"))) "list")
+            :stale-spec (list :views views :initial_view "list"))))
+        (should-not sent)))))
+
+(ert-deftest jetpacs-floor-view-switched-allowlisted ()
+  "SPEC 14.2/24.2: Emacs core conformance includes the generated
+`view.switched' action.  Unregistered, ebp answers every tab tap
+`rejected \"action not allowlisted\"' and the phone shows an error."
+  (jetpacs-floor-test--with-client (client)
+    (should (gethash "view.switched" (ebp-client-actions client)))
+    (let (seen)
+      (let ((jetpacs-shell-view-change-functions
+             (list (lambda (s v) (setq seen (cons s v))))))
+        (should (equal (ebp-client--handle-event-action
+                        client (jetpacs-floor-test--event
+                                (make-string 32 ?f)
+                                :action "view.switched"
+                                :args '(:view "detail")))
+                       '(:status "accepted"))))
+      (should (equal seen '("app:demo" . "detail")))
+      (should (equal (jetpacs-shell-current-view "app:demo") "detail")))))
+
 (ert-deftest jetpacs-floor-connect-injects-seams ()
   "`jetpacs-connect' owns the state fan-out and barrier seams and
 attaches the client it dials."

@@ -228,6 +228,40 @@ text property, so this never marks the whole buffer tappable."
       (keymapp (get-char-property pos 'keymap))
       (keymapp (get-char-property pos 'local-map))))
 
+;; --- The exposure table (SPEC 23.1 argument validation) --------------------
+;;
+;; A tap descriptor names a buffer and an offset, and both come back over
+;; the wire.  23.1 puts that data outside the trust boundary: "Emacs MUST
+;; validate action arguments ... before use."  Without a record of what was
+;; actually rendered, `emacs.buffer.act' would run whatever command lives
+;; at any offset of any live buffer — reaching Customize's [Apply and Save],
+;; a package-menu install button, or an eww link in a buffer the user never
+;; put on the phone.  So every emitted (BUFFER . POS) is recorded, and a tap
+;; is honored only if it was genuinely offered.
+
+(defvar jetpacs-buffer--exposed (make-hash-table :test #'equal)
+  "Map of BUFFER-NAME -> hash of exposed POS -> t, for the live render.
+Rebuilt per `jetpacs-buffer--render-region'; a tap for an unrecorded
+\(buffer, pos) is refused.")
+
+(defun jetpacs-buffer--expose (buffer-name pos)
+  "Record that POS in BUFFER-NAME was emitted as a tap target."
+  (let ((tbl (or (gethash buffer-name jetpacs-buffer--exposed)
+                 (puthash buffer-name (make-hash-table :test #'eql)
+                          jetpacs-buffer--exposed))))
+    (puthash pos t tbl)))
+
+(defun jetpacs-buffer-exposed-p (buffer-name pos)
+  "Non-nil when POS in BUFFER-NAME was emitted by the last render."
+  (when-let* ((tbl (gethash buffer-name jetpacs-buffer--exposed)))
+    (gethash pos tbl)))
+
+(defun jetpacs-buffer-forget-exposed (&optional buffer-name)
+  "Drop the exposure record for BUFFER-NAME, or all of it."
+  (if buffer-name
+      (remhash buffer-name jetpacs-buffer--exposed)
+    (clrhash jetpacs-buffer--exposed)))
+
 (defun jetpacs-buffer--span-action (pos buffer-name)
   "The tap ActionDescriptor for the run starting at POS, or nil.
 The skin override wins; otherwise an actionable region gets the generic
@@ -237,6 +271,7 @@ The skin override wins; otherwise an actionable region gets the generic
                (funcall jetpacs-buffer-span-action-function pos buffer-name)
              (error nil)))
       (when (jetpacs-buffer--actionable-p pos)
+        (jetpacs-buffer--expose buffer-name pos)
         (jetpacs-action "emacs.buffer.act"
                         :args (list :buffer buffer-name :pos pos)))))
 
@@ -275,6 +310,7 @@ next line, since modes differ on which carries `invisible'."
 
 (defun jetpacs-buffer--fold-span (pos buffer-name text)
   "A tappable affordance span toggling the fold at heading position POS."
+  (jetpacs-buffer--expose buffer-name pos)
   (jetpacs-span text
                 :on-tap (jetpacs-action
                          "jetpacs.buffer.fold"
@@ -550,6 +586,9 @@ containing that position as the scroll target (`:scroll_here')."
          (count 0)
          (truncated nil)
          nodes)
+    ;; This render supersedes the last one for this buffer: only offsets
+    ;; emitted below stay tappable (SPEC 23.1).
+    (jetpacs-buffer-forget-exposed buffer-name)
     (ignore-errors (font-lock-ensure beg end))
     (save-excursion
       (goto-char beg)
@@ -818,29 +857,39 @@ bounded local work, so the effect runs synchronously and only the push
 
 ;; --- The two Tier-0 actions (registered through the JC-0 shim) --------------
 
-;; Both effects run SYNCHRONOUSLY so `accepted' names a completed effect
-;; (SPEC 14.4); a signalling effect reaches the JC-0 shim's condition-case
-;; and answers `rejected', which is the honest outcome.  Only the re-push
-;; is deferred.
+(defun jetpacs-buffer--tap-status (args params effect)
+  "Validate a tap and run EFFECT, returning its SPEC 14.4 status.
+Three gates, in the order 14.1/14.5/23.1 require:
+- unresolvable arguments are permanently invalid -> `rejected' (14.1);
+- an event created against a snapshot older than the surface's live
+  floor named an offset that may since have moved -> `stale' (14.5),
+  which the Companion may re-present, unlike terminal `rejected';
+- an offset this Emacs never actually emitted as a tap target is
+  outside the trust boundary -> `rejected' (23.1).
+EFFECT runs synchronously so `accepted' names a completed effect (14.4);
+a signalling effect reaches the JC-0 shim and answers `rejected'."
+  (let ((buffer (plist-get args :buffer))
+        (pos (plist-get args :pos)))
+    (cond
+     ((not (and (stringp buffer) (numberp pos) (get-buffer buffer)))
+      'rejected)
+     ((jetpacs-event-stale-p params) 'stale)
+     ((not (jetpacs-buffer-exposed-p buffer pos))
+      (message "jetpacs-buffer: refused a tap at an offset never rendered")
+      'rejected)
+     (t
+      (funcall effect buffer pos)
+      (jetpacs-buffer--defer-refresh (plist-get params :surface))
+      'accepted))))
+
 (jetpacs-defaction "emacs.buffer.act"
   (lambda (args params)
-    (let ((buffer (plist-get args :buffer))
-          (pos (plist-get args :pos)))
-      (if (not (and (stringp buffer) (numberp pos) (get-buffer buffer)))
-          'rejected                      ; unresolvable args (SPEC 14.1)
-        (jetpacs-buffer-invoke-at buffer pos)
-        (jetpacs-buffer--defer-refresh (plist-get params :surface))
-        'accepted))))
+    (jetpacs-buffer--tap-status args params #'jetpacs-buffer-invoke-at)))
 
 (jetpacs-defaction "jetpacs.buffer.fold"
   (lambda (args params)
-    (let ((buffer (plist-get args :buffer))
-          (pos (plist-get args :pos)))
-      (if (not (and (stringp buffer) (numberp pos) (get-buffer buffer)))
-          'rejected
-        (jetpacs-buffer-toggle-fold-at buffer pos)
-        (jetpacs-buffer--defer-refresh (plist-get params :surface))
-        'accepted))))
+    (jetpacs-buffer--tap-status args params
+                                #'jetpacs-buffer-toggle-fold-at)))
 
 ;; --- Fold dispatch ------------------------------------------------------------
 

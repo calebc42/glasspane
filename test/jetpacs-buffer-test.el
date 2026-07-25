@@ -268,7 +268,10 @@ accept is explicitly non-conforming), with only the re-push deferred."
         (fundamental-mode)
         (erase-buffer)
         (insert-text-button "go" 'action (lambda (_) (setq pressed t)))
-        (insert "\n"))
+        (insert "\n")
+        ;; Render first: only offsets this Emacs actually emitted are
+        ;; tappable (SPEC 23.1), and the button sits at pos 1.
+        (jetpacs-buffer-render (current-buffer)))
       (cl-letf (((symbol-function 'run-at-time)
                  (lambda (_time _repeat fn &rest _) (push fn deferred)))
                 (jetpacs-buffer-refresh-function
@@ -283,6 +286,54 @@ accept is explicitly non-conforming), with only the re-push deferred."
         (should-not refreshed)
         (funcall (car deferred))
         (should (equal refreshed "app:demo"))))))
+
+(ert-deftest jetpacs-buffer-tap-must-have-been-rendered ()
+  "SPEC 23.1: a tap naming a buffer/offset this Emacs never emitted is
+outside the trust boundary and is refused — otherwise a Companion could
+drive any command in any live buffer (Customize's [Apply and Save], a
+package-menu install button, an eww link) that the user never sent."
+  (with-current-buffer (get-buffer-create "*jc1-unexposed*")
+    (fundamental-mode)
+    (erase-buffer)
+    (insert-text-button "danger" 'action #'ignore)
+    (insert "\n"))
+  (jetpacs-buffer-forget-exposed)
+  (let ((act (gethash "emacs.buffer.act" jetpacs-action-handlers)))
+    ;; Never rendered -> refused even though the button really is there.
+    (should (eq (funcall act '(:buffer "*jc1-unexposed*" :pos 1)
+                         '(:surface "app:demo"))
+                'rejected))
+    ;; After a render the same tap is honored...
+    (jetpacs-buffer-render "*jc1-unexposed*")
+    (should (jetpacs-buffer-exposed-p "*jc1-unexposed*" 1))
+    ;; ...but an offset the render did not expose still is not.
+    (should-not (jetpacs-buffer-exposed-p "*jc1-unexposed*" 999))
+    (should (eq (funcall act '(:buffer "*jc1-unexposed*" :pos 999)
+                         '(:surface "app:demo"))
+                'rejected))))
+
+(ert-deftest jetpacs-buffer-tap-stale-revision ()
+  "SPEC 14.5: an event created against a snapshot below the surface's
+live floor named an offset that may have moved -> `stale', which the
+Companion may re-present, not terminal `rejected'."
+  (let ((client (ebp-client-create
+                 :receipt-file (make-temp-file "jc1-stale"))))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (puthash "app:demo" 9 (ebp-client-revisions client))
+          (with-current-buffer (get-buffer-create "*jc1-stale*")
+            (fundamental-mode)
+            (erase-buffer)
+            (insert-text-button "go" 'action #'ignore)
+            (insert "\n")
+            (jetpacs-buffer-render (current-buffer)))
+          (should (eq (funcall (gethash "emacs.buffer.act"
+                                        jetpacs-action-handlers)
+                               '(:buffer "*jc1-stale*" :pos 1)
+                               '(:surface "app:demo" :revision_seen 3))
+                      'stale)))
+      (jetpacs-detach))))
 
 (provide 'jetpacs-buffer-test)
 ;;; jetpacs-buffer-test.el ends here

@@ -186,6 +186,50 @@ target for the message."
          (error "jetpacs: builtin %S is not advertised for %s (SPEC 10.2)"
                 builtin what))))))
 
+(defun jetpacs-shell--meta-descriptors (spec)
+  "Every ActionDescriptor hiding inside SPEC's `:meta' (SPEC 18.5).
+`jetpacs--opaque-members' skips `:meta' because a chart point's `meta'
+is opaque application data — but a `notification:*' SurfaceSpec puts its
+18.5 metadata under the SAME key, and that metadata carries
+`actions[].on_tap' descriptors.  The generic walker is therefore blind
+to exactly the descriptors amendment #85 exists to gate, so the gates
+call this to reach them."
+  (let (found)
+    (seq-doseq (entry (or (plist-get (plist-get spec :meta) :actions) []))
+      (when-let* ((tap (plist-get entry :on_tap)))
+        (push tap found)))
+    found))
+
+(defun jetpacs-shell--check-features (spec allowed what)
+  "GATE 1c, SPEC 10.2: every constraining feature in SPEC is advertised.
+10.2 mandates gating nodes, builtins, AND features; the SPEC names
+exactly two constraining feature families — `image.https'/`image.data'
+\(17.2) and `toolbar.<identifier>' (17.7).  There is no feature registry
+to enumerate beyond them (see the audit's SPEC finding 9), so this
+gate is deliberately keyed to those two."
+  (jetpacs-shell--walk-plists
+   spec
+   (lambda (p)
+     (pcase (plist-get p :t)
+       ("image"
+        (let* ((url (plist-get p :url))
+               (need (and (stringp url)
+                          (if (string-prefix-p "data:" url)
+                              "image.data"
+                            "image.https"))))
+          (when (and need (not (member need allowed)))
+            (error "jetpacs: image URI form needs the unadvertised \
+feature %S for %s (SPEC 17.2)" need what))))
+       ("editor"
+        (let ((toolbar (plist-get p :toolbar)))
+          ;; An inline ToolbarItem array is a vector and needs no feature;
+          ;; only a REGISTERED identifier (a string) does.
+          (when (stringp toolbar)
+            (let ((need (concat "toolbar." toolbar)))
+              (unless (member need allowed)
+                (error "jetpacs: editor toolbar %S needs the unadvertised \
+feature %S for %s (SPEC 17.7)" toolbar need what))))))))))
+
 (defun jetpacs-shell--strip-stateful (value)
   "A copy of VALUE with every stateful node and editor removed (SPEC 13.5).
 Opaque members pass through untouched; a member whose node was stripped
@@ -217,6 +261,35 @@ is omitted; stripped children vanish from their sequences."
     (delq nil (mapcar #'jetpacs-shell--strip-stateful value)))
    (t value)))
 
+(defun jetpacs-shell--validate-stripped (original stripped)
+  "STRIPPED (the 13.5 strip of ORIGINAL) if it is still a valid
+SurfaceSpec, else signal; nil when nothing survived.
+Stripping removes members and hash entries, so it can quietly destroy
+the SurfaceSpec's own required shape (SPEC 13.4): a widget losing its
+REQUIRED `body', or a multi-view whose `initial_view' now names no
+surviving view.  Either ships content-invalid, and per 13.2 the
+Companion rejects the ENTIRE request — discarding the valid primary
+`spec' with it and leaving the previous snapshot.  A sender MUST is
+loud, so this signals rather than sanitizing further."
+  (cond
+   ((null stripped)
+    ;; A wholly-stateful stale root strips to nothing; say so rather than
+    ;; silently pushing with no stale view at all.
+    (display-warning
+     'jetpacs "stale_spec was entirely stateful (SPEC 13.5); dropped"
+     :warning)
+    nil)
+   ((and (plist-member original :body) (null (plist-get stripped :body)))
+    (error "jetpacs: stale_spec lost its REQUIRED `body' to the 13.5 \
+stateful strip (SPEC 13.4)"))
+   ((and (plist-get stripped :views)
+         (not (gethash (plist-get stripped :initial_view)
+                       (plist-get stripped :views))))
+    (error "jetpacs: stale_spec `initial_view' %S names no surviving view \
+after the 13.5 stateful strip (SPEC 13.4)"
+           (plist-get stripped :initial_view)))
+   (t stripped)))
+
 ;;;; The gates
 
 (defun jetpacs-shell--gate-spec (client surface spec stale-spec)
@@ -232,12 +305,16 @@ Signals; never sanitizes (a sender MUST is loud)."
     ;; jsonrpc decodes arrays as vectors; jetpacs-check-node-types uses
     ;; `member', so the coercion is mandatory.
     (let ((types (append (plist-get profile :node_types) nil))
-          (builtins (append (plist-get profile :builtins) nil)))
-      (jetpacs-check-node-types spec types what)
-      (jetpacs-shell--check-builtins spec builtins what)
-      (when stale-spec
-        (jetpacs-check-node-types stale-spec types what)
-        (jetpacs-shell--check-builtins stale-spec builtins what)))))
+          (builtins (append (plist-get profile :builtins) nil))
+          (features (append (plist-get profile :features) nil)))
+      (dolist (s (delq nil (list spec stale-spec)))
+        (jetpacs-check-node-types s types what)
+        (jetpacs-shell--check-builtins s builtins what)
+        (jetpacs-shell--check-features s features what)
+        ;; 18.5 notification actions are invisible to the generic walker.
+        (dolist (desc (jetpacs-shell--meta-descriptors s))
+          (jetpacs-shell--check-builtins desc builtins what)
+          (jetpacs-shell--check-features desc features what))))))
 
 (defun jetpacs-shell--gate-capability (client surface)
   "GATE 3: a non-app namespace needs its granted surface capability."
@@ -257,26 +334,34 @@ Amendment #85: a `wake' descriptor without this session's
 `offline.wake' grant is 1201 content-invalid and voids the surface —
 refuse before pushing.  Amendment #84: a synchronized editor whose
 document text exceeds `max_editor_bytes' must not be presented."
-  (let ((wake-granted (seq-contains-p (ebp-client-granted client)
-                                      "offline.wake"))
-        (max-bytes (plist-get (ebp-client-limits client)
-                              :max_editor_bytes)))
-    (jetpacs-shell--walk-plists
-     spec
-     (lambda (p)
-       (when (and (not wake-granted)
-                  (equal (plist-get p :when_offline) "wake"))
-         (error "jetpacs: `wake' descriptor without the offline.wake \
+  (let* ((wake-granted (seq-contains-p (ebp-client-granted client)
+                                       "offline.wake"))
+         (max-bytes (plist-get (ebp-client-limits client)
+                               :max_editor_bytes))
+         (check
+          (lambda (p)
+            (when (and (not wake-granted)
+                       (equal (plist-get p :when_offline) "wake"))
+              (error "jetpacs: `wake' descriptor without the offline.wake \
 grant (SPEC 14.1, amendment #85)"))
-       (when (and max-bytes
-                  (equal (plist-get p :t) "editor")
-                  (plist-get p :document)
-                  (stringp (plist-get p :value))
-                  (> (string-bytes (json-serialize (plist-get p :value)))
-                     max-bytes))
-         (error "jetpacs: editor %S document exceeds max_editor_bytes \
+            (when (and max-bytes
+                       (equal (plist-get p :t) "editor")
+                       (plist-get p :document)
+                       (stringp (plist-get p :value))
+                       (> (string-bytes
+                           (condition-case nil
+                               (json-serialize (plist-get p :value))
+                             (error (make-string (1+ max-bytes) ?x))))
+                          max-bytes))
+              (error "jetpacs: editor %S document exceeds max_editor_bytes \
 (SPEC 19, amendment #84)"
-                (plist-get p :id)))))))
+                     (plist-get p :id))))))
+    (jetpacs-shell--walk-plists spec check)
+    ;; 18.5 notification action descriptors are opaque to the walker, and
+    ;; they are the ONLY place 18.5 puts a descriptor — i.e. exactly where
+    ;; the #85 wake gate matters most.
+    (dolist (desc (jetpacs-shell--meta-descriptors spec))
+      (jetpacs-shell--walk-plists desc check))))
 
 ;;;; The push
 
@@ -329,15 +414,10 @@ a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
                             (not (plist-member stale-spec :views)))
                   (error "jetpacs: stale_spec must be the same variant \
 as spec (SPEC 13.4/13.5)"))
-                (let ((stripped (jetpacs-shell--strip-stateful stale-spec)))
-                  ;; A wholly-stateful stale root strips to nothing; say so
-                  ;; rather than silently pushing without a stale view.
-                  (unless stripped
-                    (display-warning
-                     'jetpacs
-                     "stale_spec was entirely stateful (SPEC 13.5); dropped"
-                     :warning))
-                  (setq stale-spec stripped)))
+                (setq stale-spec
+                      (jetpacs-shell--validate-stripped
+                       stale-spec
+                       (jetpacs-shell--strip-stateful stale-spec))))
               ;; GATE 2 second half: current_view only for multi-view.
               (unless (plist-member spec :views)
                 (setq current-view nil))
@@ -401,6 +481,35 @@ required surface pushes ahead of replay."
             (jetpacs-shell-push surface)
           (error (message "jetpacs: reconnect push of %s failed: %s"
                           surface (error-message-string err))))))))
+
+;;;; view.switched (SPEC 14.2 / 24.2)
+
+(defvar jetpacs-shell-view-change-functions nil
+  "Abnormal hook run with (SURFACE VIEW) after a local view switch.")
+
+(defvar jetpacs-shell--current-view (make-hash-table :test #'equal)
+  "Map of SURFACE -> the view the Companion last reported showing.")
+
+(defun jetpacs-shell-current-view (surface)
+  "The view SURFACE is currently showing, per the Companion's report."
+  (gethash (jetpacs-shell--resolve-surface surface)
+           jetpacs-shell--current-view))
+
+;; SPEC 14.2: the `view.switch' builtin switches locally and, while READY,
+;; reports `view.switched'.  "Emacs core conformance includes the generated
+;; `view.switched' action and MUST allowlist its {view} arguments and
+;; surface context" — without this registration ebp answers every tab tap
+;; `rejected "action not allowlisted"' and the phone shows an error.
+(jetpacs-defaction "view.switched"
+  (lambda (args params)
+    (let ((view (plist-get args :view))
+          (surface (plist-get params :surface)))
+      (if (not (and (stringp view) (stringp surface)))
+          'rejected
+        (puthash surface view jetpacs-shell--current-view)
+        (run-hook-with-args 'jetpacs-shell-view-change-functions
+                            surface view)
+        'accepted))))
 
 ;;;; Seams
 

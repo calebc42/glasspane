@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,7 +77,14 @@ class MainActivity : ComponentActivity() {
             // scheme following the system when no theme is set.
             val themePayload by theme.collectAsState()
             EbpTheme(themePayload) {
+                // The Surface paints edge-to-edge (the theme reaches under
+                // the system bars) but CONTENT stays inside the safe-drawing
+                // insets: without this the first row of any surface — a nav
+                // toolbar, a status row — lands under the status bar, where
+                // it is half-hidden and taps race the notification shade.
                 Surface(Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Box(
+                        Modifier.safeDrawingPadding()) {
                     val shown by currentSpec.collectAsState()
                     when (val s = shown) {
                         null -> Text(
@@ -100,6 +108,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

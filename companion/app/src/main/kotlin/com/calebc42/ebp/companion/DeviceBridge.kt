@@ -22,7 +22,9 @@ import kotlin.concurrent.thread
 
 class DeviceBridge(
     private val appContext: android.content.Context,
-    private val onSurfaceChanged: (JSONObject?) -> Unit,
+    /** SPEC 14.4: the shown surface's ID travels with its spec, so an
+     * event names the surface the action actually occurred in. */
+    private val onSurfaceChanged: (String, JSONObject?) -> Unit,
     /** SPEC 15.1: storage failure and queue exhaustion MUST reach the
      * user as a visible diagnostic. */
     private val onQueueProblem: (String) -> Unit = {},
@@ -258,7 +260,8 @@ class DeviceBridge(
                     if (spec != null) Notifications.postSurface(appContext, surface, spec)
                     else Notifications.cancelSurface(appContext, surface)
                 }
-                surface.startsWith("app:") -> onSurfaceChanged(resolveView(surface))
+                surface.startsWith("app:") ->
+                    onSurfaceChanged(surface, resolveView(surface))
             }
         }
         // SPEC 14.2: host-platform builtins. Settings is a stub until the app

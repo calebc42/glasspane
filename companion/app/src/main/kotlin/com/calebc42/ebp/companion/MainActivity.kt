@@ -24,7 +24,10 @@ import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
 
-    private val currentSpec = MutableStateFlow<JSONObject?>(null)
+    // SPEC 14.4: the shown surface's ID travels with its spec so a tap
+    // names the surface it actually occurred in.  This activity still
+    // shows one app surface at a time (last accepted wins).
+    private val currentSpec = MutableStateFlow<Pair<String, JSONObject>?>(null)
     private val currentDialog = MutableStateFlow<Pair<String, JSONObject>?>(null)
     // SPEC 18.4: the accepted theme payload ({dark, colors, syntax}) to mirror,
     // or null for the native scheme (dark = follow-system, amendment #36).
@@ -42,7 +45,9 @@ class MainActivity : ComponentActivity() {
         }
         bridge = DeviceBridge(
             applicationContext,
-            onSurfaceChanged = { spec -> currentSpec.value = spec },
+            onSurfaceChanged = { surface, spec ->
+                currentSpec.value = if (spec != null) surface to spec else null
+            },
             onQueueProblem = { message ->
                 runOnUiThread {
                     android.widget.Toast.makeText(
@@ -72,12 +77,12 @@ class MainActivity : ComponentActivity() {
             val themePayload by theme.collectAsState()
             EbpTheme(themePayload) {
                 Surface(Modifier.fillMaxSize()) {
-                    val spec by currentSpec.collectAsState()
-                    when (val s = spec) {
+                    val shown by currentSpec.collectAsState()
+                    when (val s = shown) {
                         null -> Text(
                             "EBP Companion — waiting for Emacs on 127.0.0.1:8765",
                             Modifier.padding(24.dp))
-                        else -> RenderNode(s, "app:main", bridge)
+                        else -> RenderNode(s.second, s.first, bridge)
                     }
                     val pie by currentPieMenu.collectAsState()
                     pie?.let { (id, spec) -> RenderPieMenu(id, spec, bridge) }

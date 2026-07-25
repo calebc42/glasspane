@@ -48,7 +48,15 @@ Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `30857a5`, amendments t
 | §4-5 | **A1–A5** = amendments **#92–96** (+ astral `edit.delta` golden row 36, contract `max_method_bytes: 128`); **A7** = **#97** (§24.2 floor). Companion #93 conformance: method-name gate before registry | ebp `30857a5`, `74a09d8` |
 | §4-4a | **T2** — ScalarPos/Utf16Pos through EditorSession + the four engine entry points, ONE surrogate-safe conversion pair; editorCommand/localEditorCaret convert+order (LD-4); `editorListener` wired → EditorMirror StateFlow → RenderEditor adopts on epoch + refused-edit snap-back (LD-5); edit.apply atomic + form-strict, cursor REQUIRED, peer caret validated pre-splice. Note: insdel's three-case adjust has no live slot (peer-dictated cursor, B2); the sender-side cursor choice is an **ebp.el follow-up** | `271c3df` |
 
-Baselines: **274 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames)**.
+| audit | **T1/T2 audited against §4/§6/§19** — 9 defects fixed (Unicode-lax hex escapes, move-only `seq` unchecked, local edit from a superseded base, `toInt()` position truncation, `start+del` overflow closing the transport, frames stranded behind a fault, unvalidated `edit.complete` results, `ebp.el`'s line-anchored `Content-Length`, `validate.py`'s lone surrogates + missing unterminated-header cap); amendments **#98–#103**; 11 pre-existing defects confirmed + scheduled. Report: `docs/AUDIT-T1-T2-2026-07-25.md` | `7ed0f82`, `26b635f` |
+
+Baselines: **281 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames,
+17 wire fixtures)**. Spec through **amendment #103**.
+
+**Feed the audit's §3 backlog into the next passes:** the five P1 editor-lifecycle defects
+(phantom sessions from action `args`, no session after reconnection, two surfaces sharing one
+`(document, editor_id)`, LD-6 `pendingEditors`, `key`-based presentation identity) are all in the
+editor lifecycle — do them as one atom *before* T3, since T3's epoch work touches the same seam.
 
 **NEXT (in order): T3** (epoch + defaults layer; the override chain c) is already in — remaining:
 (a) SurfaceStore per-(surface,id) epoch through `surfaceListener` into widget remember keys, closing

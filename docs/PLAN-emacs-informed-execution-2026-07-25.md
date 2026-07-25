@@ -49,7 +49,7 @@ Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `3c73d75`, amendments t
 | §4-4a | **T2** — ScalarPos/Utf16Pos through EditorSession + the four engine entry points, ONE surrogate-safe conversion pair; editorCommand/localEditorCaret convert+order (LD-4); `editorListener` wired → EditorMirror StateFlow → RenderEditor adopts on epoch + refused-edit snap-back (LD-5); edit.apply atomic + form-strict, cursor REQUIRED, peer caret validated pre-splice. Note: insdel's three-case adjust has no live slot (peer-dictated cursor, B2); the sender-side cursor choice is an **ebp.el follow-up** | `271c3df` |
 | audit | **T1/T2 audited against §4/§6/§19** — 9 defects fixed (Unicode-lax hex escapes, move-only `seq` unchecked, local edit from a superseded base, `toInt()` position truncation, `start+del` overflow closing the transport, frames stranded behind a fault, unvalidated `edit.complete` results, `ebp.el`'s line-anchored `Content-Length`, `validate.py`'s lone surrogates + missing unterminated-header cap); amendments **#98–#103**; 11 pre-existing defects confirmed + scheduled. Report: `docs/AUDIT-T1-T2-2026-07-25.md` | `7ed0f82`, `26b635f` |
 
-Baselines: **290 wire / 20 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames,
+Baselines: **293 wire / 24 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames,
 17 wire fixtures)**. Spec through **amendment #105**.
 
 **Audit backlog CLEARED** (`691b052`, spec `3c73d75`, amendments **#104-#105**): all 11 §3
@@ -59,9 +59,18 @@ lifecycle is now: node-position-only collection gated on the target profile, ses
 SYNCING-removal together, `(document, identity)` exclusivity, no drafts for synchronized editors,
 dialog editors counted/opened/closed, and validated annotation batches.
 
-**NEXT: T3** — (a) SurfaceStore per-`(surface, id)` epoch through `surfaceListener` into widget
-remember keys (LD-2); (b) `DialogContext` defaults layer with containment-test lookup (LD-3). The
-override chain (c) landed in `967ab1e`. Then the rest of Tier 2 — LD-13's bound half, LD-14
+**T3 DONE** (`d95e402`) — (a) the epoch: SurfaceStore stamps a per-`(surface, id)` generation in
+ONE place inside `update()`, by comparing what the display shows before and after the snapshot, so
+an erased draft or a moved authored value reseeds the widget while an in-progress edit (and an
+acknowledged draft) does not; published on the bridge, collected at the render root, folded into
+every stateful widget's remember key (LD-2). (b) the defaults layer: the engine keeps the dialog
+statefuls it validated and `DialogContext` resolves user-then-authored through a **containment
+test**, so a deliberately-cleared field is not restored and an untouched `checkbox` ships boolean
+`true` rather than the string `""` (LD-3); extracted as pure `captureValue()`, with
+`authoredValueOf` now the single definition shared by both layers. The override chain (c) landed
+in `967ab1e`. **All three Tier-1 architectural items (T1, T2, T3) are complete.**
+
+**NEXT:** the rest of Tier 2 — LD-13's bound half, LD-14
 split-then-amortize per §5.2, LD-11 image cache, LD-10/LD-17 contract-driven validator types +
 `builtinsFromProfiles`, the recompose-scope split, the two serialize-to-compare fixes — then **A6**
 (the P2/P3 amendment batch incl. §5.1's constants, both §25 restricting rows), then **A8**'s

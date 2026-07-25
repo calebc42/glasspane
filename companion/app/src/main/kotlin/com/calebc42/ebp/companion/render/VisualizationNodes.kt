@@ -127,8 +127,14 @@ internal fun RenderChart(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 val idx = if (maxLen <= 1) 0
                     else ((off.x / size.width.toFloat()) * (maxLen - 1)).roundToInt()
                         .coerceIn(0, s0.points.size - 1)
-                // SPEC 17.5: return the COMPLETE authored point object.
-                ctx.action(onPointTap, s0.points.getOrNull(idx))
+                // SPEC 17.5/14.3 (amendment #114): the COMPLETE authored
+                // point object as `value`, AND the resolved ordinal `index`.
+                // The echoed point is not an identity — §17.5 does not require
+                // authored points to be distinct and §4.3 makes 1 and 1.0
+                // equal, so without the index a duplicate point is
+                // unresolvable by any comparator.
+                ctx.actionInjecting(onPointTap, JSONObject().put("index", idx),
+                    s0.points.getOrNull(idx))
             }
         }
     }

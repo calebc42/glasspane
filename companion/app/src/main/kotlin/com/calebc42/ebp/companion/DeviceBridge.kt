@@ -195,10 +195,11 @@ class DeviceBridge(
 
     /** SPEC 14.3: a multi-member hook (on_reorder from/to/order, on_add_row/
      * col index, swipe direction) injects a member object beside args. */
-    fun actionInjecting(surface: String, descriptor: JSONObject?, injected: JSONObject) {
+    fun actionInjecting(surface: String, descriptor: JSONObject?, injected: JSONObject,
+                        value: Any? = null) {
         descriptor ?: return
         dispatchExecutor.execute {
-            engine?.dispatchAction(surface, descriptor, null, injected) { _, error ->
+            engine?.dispatchAction(surface, descriptor, value, injected) { _, error ->
                 error?.let { onQueueProblem(it.optString("message", "queue error")) }
             }
         }

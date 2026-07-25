@@ -52,7 +52,7 @@ private val INJECTED_MEMBERS: Map<String, Set<String>> = mapOf(
     "on_pick" to setOf("value"),
     "on_day_tap" to setOf("value"),
     "on_month_change" to setOf("value"),
-    "on_point_tap" to setOf("value"),
+    "on_point_tap" to setOf("value", "index"),
     "on_reorder" to setOf("from", "to", "order"),
     "on_add_row" to setOf("index"),
     "on_add_col" to setOf("index"),

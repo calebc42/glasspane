@@ -179,8 +179,9 @@ class RenderCtx(
     }
 
     /** §14.3 multi-member hooks (on_reorder, on_add_row/col, swipe sides). */
-    fun actionInjecting(descriptor: JSONObject?, injected: JSONObject) =
-        bridge.actionInjecting(surface, descriptor, injected)
+    fun actionInjecting(descriptor: JSONObject?, injected: JSONObject,
+                        value: Any? = null) =
+        bridge.actionInjecting(surface, descriptor, injected, value)
 
     /** §14.6 an app-surface password on_submit — the secret rides `fields`,
      * never `args` and never a retained draft. (In a dialog the secret is

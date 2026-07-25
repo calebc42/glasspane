@@ -83,6 +83,24 @@ class EbpJsonTest {
     }
 
     @Test
+    fun hexEscapeDigitsAreAsciiOnly() {
+        // RFC 8259 HEXDIG is ASCII. Character.digit is Unicode-aware and
+        // maps 372 further code points onto 0..15 — every fullwidth and
+        // Indic/Arabic decimal block plus fullwidth A-F — so these escapes
+        // decoded to real characters the sender never encoded, including a
+        // bare quote and (spelled fullwidth) a whole surrogate pair.
+        rejects("\"\\u\uFF10\uFF10\uFF14\uFF11\"")   // fullwidth 0041 -> was "A"
+        rejects("\"\\u\u0660\u0660\u0664\u0661\"")   // Arabic-Indic 0041
+        rejects("\"\\u\uFF10\uFF10\uFF12\uFF12\"")   // fullwidth 0022 -> was a quote
+        rejects("\"\\u00\uFF21\uFF11\"")             // fullwidth A1 in the tail
+        rejects("\"\\uD83\uFF24\\uDE0\uFF10\"")      // fullwidth-spelled pair
+        // ASCII hex in both cases still works.
+        assertEquals(EbpValue.EStr("A"), EbpJson.parse("\"\\u0041\""))
+        assertEquals(EbpValue.EStr("\u00ab"), EbpJson.parse("\"\\u00AB\""))
+        assertEquals(EbpValue.EStr("\u00ab"), EbpJson.parse("\"\\u00ab\""))
+    }
+
+    @Test
     fun duplicateMembersAreInvalidRequestInParse() {
         rejects("""{"a":1,"a":2}""", InvalidRequest::class.java)
         // Semantic comparison after escape decoding, like the reference scanner.

@@ -320,6 +320,63 @@ class EditorTest {
     }
 
     @Test
+    fun moveOnlyApplyRequiresSeqAndStalesOnMismatch() {
+        // SPEC 19.4 (amendment #98): the move-only form carries `seq`
+        // (REQUIRED in contract.json) and "succeeds only at the current
+        // sequence". Unchecked, a caret computed against a superseded
+        // document was reported `applied`.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "abcde")
+        engine.localEditorEdit("doc:1", "body", ScalarPos(0), 0, "X") // seq -> 1
+        // Absent seq is structural.
+        engine.feed(frame(request("m1", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("cursor", 2))))
+        assertEquals(-32602, response(out, "m1").getJSONObject("error").getInt("code"))
+        // A stale seq is a typed stale, and the caret does NOT move.
+        engine.feed(frame(request("m2", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 0).put("cursor", 2))))
+        assertEquals("stale", response(out, "m2").getJSONObject("result").getString("status"))
+        assertEquals(1, response(out, "m2").getJSONObject("result").getInt("seq"))
+        assertEquals(1, s.cursor) // still where the local edit left it
+        // At the current sequence it applies.
+        engine.feed(frame(request("m3", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 1).put("cursor", 2))))
+        assertEquals("applied", response(out, "m3").getJSONObject("result").getString("status"))
+        assertEquals(2, s.cursor)
+        assertEquals("Xabcde", s.shadow) // move-only never changes text
+    }
+
+    @Test
+    fun localEditFromASupersededBaseIsRefused() {
+        // SPEC 19.3 (amendment #100): a view keeps its own copy of the text.
+        // An inbound apply moves the shadow; a keystroke the view derived
+        // from the OLD text is expressed in the old document's coordinates.
+        // `len` is computed from the shadow, so the length equation cannot
+        // catch it — only the base check stands between a racing keystroke
+        // and silent corruption.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "hello")
+        val viewText = s.shadow // what the view is showing
+        applyText(engine, "a1", s.sessionId, 1, 0, 0, "XXX", 8)
+        assertEquals("XXXhello", s.shadow) // shadow moved; view still "hello"
+        // The view's keystroke, derived from "hello", is refused whole.
+        assertFalse(engine.localEditorEdit("doc:1", "body",
+            ScalarPos(5), 0, "!", base = viewText))
+        assertEquals("XXXhello", s.shadow)
+        assertEquals(1L, s.seq)
+        assertTrue(out.method("edit.delta").isEmpty())
+        // Derived from the CURRENT shadow, the same keystroke applies.
+        assertTrue(engine.localEditorEdit("doc:1", "body",
+            ScalarPos(8), 0, "!", base = s.shadow))
+        assertEquals("XXXhello!", s.shadow)
+    }
+
+    @Test
     fun mixedApplyFormIsInvalidParams() {
         // SPEC 19.4: move-only omits ALL of start/del/text/len; a message
         // with only some of them is neither form. The old dispatch keyed on

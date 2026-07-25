@@ -1151,6 +1151,12 @@ class CompanionEngine(
             .put("session", s.sessionId).put("seq", 0).put("text", seed)
             .put("cursor", s.cursor).put("sel_start", s.selStart)
             .put("sel_end", s.selEnd)))
+        // The seed is the new authoritative text for the display too: a
+        // reopened (document, editor_id) — same node, later session — would
+        // otherwise leave a view still holding the PREVIOUS session's text,
+        // with nothing to reconcile it against (the amendment-#100 base gate
+        // would then refuse every keystroke). Publishing here reseeds it.
+        editorListener?.invoke(s)
         return s
     }
 
@@ -1158,10 +1164,22 @@ class CompanionEngine(
      * seq, and mirrors as an edit.delta. Read-only unless OPEN and READY. */
     @Synchronized
     fun localEditorEdit(document: String, editorId: String,
-                        start: ScalarPos, del: Int, text: String): Boolean {
+                        start: ScalarPos, del: Int, text: String,
+                        base: String? = null): Boolean {
         val s = editors[document to editorId] ?: return false
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY)
             return false
+        // SPEC 19.3 (amendment #100): a local edit derived from a document
+        // state that is no longer the shadow MUST NOT be applied. On a
+        // Companion whose editing surface is a separate view (every Compose /
+        // UIKit / web renderer), an inbound edit.apply moves the shadow while
+        // the view still holds the old text; the splice the view then derives
+        // is expressed in the OLD document's coordinates, and the length
+        // equation cannot catch it — `len` is computed from the shadow, so it
+        // is self-satisfying and only the bounds check stands between a stale
+        // keystroke and silent corruption. BASE is the view's pre-edit text;
+        // a mismatch refuses the edit, and the host re-presents the shadow.
+        if (base != null && base != s.shadow) return false
         // SPEC 19.4 (amendment #84): a local edit that would carry the
         // document past max_editor_bytes is refused as if read-only.
         if (s.spliceJcsBytes(start, del, text) >
@@ -1285,6 +1303,17 @@ class CompanionEngine(
         if (hasSplice == 0) {
             val cursor = (params.opt("cursor") as? Number)?.toInt()
                 ?: return respondError(id, -32602, "Invalid params", "invalid-params")
+            // SPEC 19.4 (amendment #98): the move-only form carries `seq`
+            // (REQUIRED for edit.apply in contract.json) and "succeeds only
+            // at the current sequence" — an unchecked move let a caret
+            // computed against a superseded document be reported `applied`,
+            // so Emacs believed a position the document no longer has.
+            val moveSeq = (params.opt("seq") as? Number)?.toLong()
+                ?: return respondError(id, -32602, "Invalid params", "invalid-params")
+            if (params.has("sel_start") != params.has("sel_end"))
+                return respondError(id, -32602, "Invalid params", "invalid-params")
+            if (moveSeq != s.seq)
+                return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
             val selStart = (params.opt("sel_start") as? Number)?.toInt()
             val selEnd = (params.opt("sel_end") as? Number)?.toInt()
             if (!s.setCaret(ScalarPos(cursor),

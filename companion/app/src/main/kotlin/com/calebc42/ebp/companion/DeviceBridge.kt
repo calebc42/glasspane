@@ -242,13 +242,17 @@ class DeviceBridge(
     }
 
     /** SPEC 19.3: a synchronized editor's local edit -> shadow + edit.delta.
-     * A refused edit (no OPEN session in READY, or past max_editor_bytes —
-     * "as if the editor were read-only", SPEC 19.4) publishes the unchanged
-     * shadow so the field snaps back instead of silently diverging. */
-    fun editorEdit(document: String, editorId: String, start: ScalarPos, del: Int, text: String) {
+     * BASE is the view's pre-edit text: the engine refuses a splice derived
+     * from a superseded document (amendment #100), which is what makes a
+     * keystroke racing an inbound edit.apply safe. Any refusal — stale base,
+     * no OPEN session in READY, or past max_editor_bytes ("as if the editor
+     * were read-only", SPEC 19.4) — publishes the unchanged shadow so the
+     * field snaps back instead of silently diverging. */
+    fun editorEdit(document: String, editorId: String, start: ScalarPos, del: Int,
+                   text: String, base: String) {
         dispatchExecutor.execute {
             val e = engine ?: return@execute
-            if (!e.localEditorEdit(document, editorId, start, del, text))
+            if (!e.localEditorEdit(document, editorId, start, del, text, base))
                 e.withEditor(document, editorId) { publishMirror(it) }
         }
     }
@@ -398,6 +402,10 @@ class DeviceBridge(
             // best-effort — a throw here must not skip clearLiveSession and
             // socket.close(), which would leak the FD and park a dead engine.
             runCatching { engine.close("transport closed") }
+            // SPEC 19: transport loss closes every editor session, so no
+            // mirror outlives the connection that produced it (also keeps
+            // the map bounded — entries are per (document, editor_id)).
+            _editorMirrors.value = emptyMap()
             // Atomic compare-and-clear: only if a newer connection has not
             // already superseded this one in the slot (SPEC 5.2 newest-wins).
             CompanionStores.clearLiveSession(engine)

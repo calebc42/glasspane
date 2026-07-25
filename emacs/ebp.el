@@ -117,6 +117,27 @@ is refused before the recursive parser can exhaust the stack (SPEC 4.5)."
       (setq i (1+ i)))
     over))
 
+(defun ebp--check-numbers (value)
+  "Signal `ebp-parse-error' if VALUE carries a number SPEC 4.2 forbids.
+Amendment #99: an integral literal outside the safe range, or a literal
+that overflowed to an infinity, cannot be carried by this data model, so
+it is refused during decoding on the same terms as the 4.5 depth limit.
+Emacs reads oversized integers as bignums and overflowing literals as
+infinities, so both survive `json-parse-string' silently otherwise.  A
+literal that underflowed to zero decodes AS zero and is accepted.
+VALUE is walked structurally: alist conses and array lists alike."
+  (cond
+   ((integerp value)
+    (when (or (> value ebp-max-safe-integer)
+              (< value (- ebp-max-safe-integer)))
+      (signal 'ebp-parse-error (list "integer out of range"))))
+   ((floatp value)
+    (when (or (isnan value) (= value 1.0e+INF) (= value -1.0e+INF))
+      (signal 'ebp-parse-error (list "number out of range"))))
+   ((consp value)
+    (ebp--check-numbers (car value))
+    (ebp--check-numbers (cdr value)))))
+
 (defun ebp--json-serialize (value)
   "Serialize VALUE (alists/plists per `json-serialize') to a JSON string."
   (json-serialize value :null-object :null :false-object :false))
@@ -239,6 +260,8 @@ no duplicate member names."
         (signal 'ebp-invalid-request (list "batch arrays are prohibited")))
       (when (ebp--duplicate-members-p text)
         (signal 'ebp-invalid-request (list "duplicate member names")))
+      ;; SPEC 4.2 (amendment #99): numbers this data model cannot carry.
+      (ebp--check-numbers value)
       value)))
 
 (defun ebp-decoder-feed (decoder bytes)

@@ -390,8 +390,10 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         if (new.text != old) {
             if (document.isNotEmpty()) {
                 val (start, del, ins) = EditorSession.diff(old, new.text)
+                // `old` is the base this splice is expressed against; the
+                // engine refuses it if the shadow has moved since (#100).
                 if (del > 0 || ins.isNotEmpty())
-                    ctx.bridge.editorEdit(document, id, start, del, ins)
+                    ctx.bridge.editorEdit(document, id, start, del, ins, old)
             } else {
                 ctx.state(id, new.text) // local editor: state.changed
             }

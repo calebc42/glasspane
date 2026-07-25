@@ -227,8 +227,20 @@ object EbpJson {
             if (at + 4 > s.length) throw WireParseError("unterminated string")
             var v = 0
             for (k in at until at + 4) {
-                val d = Character.digit(s[k], 16)
-                if (d < 0) throw WireParseError("invalid escape")
+                // RFC 8259 HEXDIG is ASCII-only. Character.digit is
+                // UNICODE-aware: it maps 372 other code points (every
+                // fullwidth and Indic/Arabic decimal digit block, plus
+                // fullwidth A-F) onto 0..15, so "０FF10FF12FF12" —
+                // fullwidth digits — decoded to a bare U+0022 quote, and a
+                // fullwidth-spelled surrogate pair reached the pairing logic
+                // below. This is the org.json class of laxity in the parser
+                // written to close it: content the sender never encoded.
+                val d = when (val ch = s[k]) {
+                    in '0'..'9' -> ch - '0'
+                    in 'a'..'f' -> ch - 'a' + 10
+                    in 'A'..'F' -> ch - 'A' + 10
+                    else -> throw WireParseError("invalid escape")
+                }
                 v = (v shl 4) or d
             }
             return v.toChar()
@@ -273,8 +285,13 @@ object EbpJson {
                 EbpValue.EInt(v)
             } else {
                 val v = text.toDouble()
-                // A literal like 1e999 overflows binary64: not representable,
-                // not conformant, refused — never Infinity (SPEC 4.2).
+                // SPEC 4.2: a literal that overflows binary64 is refused —
+                // the only value it could take is an infinity, which "is not
+                // a JSON value and MUST NOT be transmitted". A literal that
+                // UNDERFLOWS to zero is deliberately accepted as 0.0: the
+                // sender violated the same sentence, but zero IS a
+                // representable EBP value, so there is something conformant
+                // to hand downstream. Asymmetric on purpose (amendment #99).
                 if (!v.isFinite()) throw WireParseError("number out of range")
                 EbpValue.ENum(v)
             }

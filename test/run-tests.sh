@@ -34,6 +34,12 @@ emacs -Q --batch -L emacs \
   -f batch-byte-compile emacs/jetpacs-widgets.el
 rm -f emacs/jetpacs-widgets.elc
 
+# And for the JC-0 application-framework floor (docs/SPEC-JC-0-floor.md).
+emacs -Q --batch -L emacs \
+  --eval '(setq byte-compile-error-on-warn t)' \
+  -f batch-byte-compile emacs/jetpacs-async.el
+rm -f emacs/jetpacs-async.elc
+
 emacs -Q --batch -L emacs -l test/ebp-wire-test.el \
   -f ert-run-tests-batch-and-exit
 

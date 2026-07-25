@@ -11,14 +11,38 @@ package com.calebc42.ebp.companion
 import com.calebc42.ebp.wire.CompanionEngine
 import com.calebc42.ebp.wire.CompanionConfig
 import com.calebc42.ebp.wire.EbpAuth
+import com.calebc42.ebp.wire.EditorSession
+import com.calebc42.ebp.wire.ScalarPos
 import com.calebc42.ebp.wire.SessionState
+import com.calebc42.ebp.wire.Utf16Pos
+import com.calebc42.ebp.wire.utf16PosIn
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONObject
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import kotlin.concurrent.thread
+
+/**
+ * T2/LD-5: the display's copy of one synchronized editor — the shadow text
+ * with the caret in Compose's UTF-16 domain, stamped with the session `seq`
+ * and a bridge-local `epoch` (each publication bumps it, so adoption keys on
+ * epoch and never replays). Published on every inbound `edit.apply` and on
+ * every refused local edit (the snap-back): the shadow is the one text
+ * authority, and the field follows it.
+ */
+data class EditorMirror(
+    val text: String,
+    val cursorU: Int,
+    val selStartU: Int,
+    val selEndU: Int,
+    val seq: Long,
+    val epoch: Long,
+)
 
 class DeviceBridge(
     private val appContext: android.content.Context,
@@ -193,16 +217,50 @@ class DeviceBridge(
         dispatchExecutor.execute { engine?.publishState(surface, id, value) }
     }
 
-    /** SPEC 19.3: a synchronized editor's local edit -> shadow + edit.delta. */
-    fun editorEdit(document: String, editorId: String, start: Int, del: Int, text: String) {
-        dispatchExecutor.execute { engine?.localEditorEdit(document, editorId, start, del, text) }
+    // T2/LD-5: the editor mirrors, keyed (document, editor_id). RenderEditor
+    // collects this and adopts on epoch change; see EditorMirror above.
+    private val mirrorEpoch = AtomicLong(0)
+    private val _editorMirrors =
+        MutableStateFlow<Map<Pair<String, String>, EditorMirror>>(emptyMap())
+    val editorMirrors: StateFlow<Map<Pair<String, String>, EditorMirror>>
+        get() = _editorMirrors
+
+    /** Publish S as the display's text authority. Caret converts scalar ->
+     * UTF-16 against the shadow through the one named conversion pair.
+     * Called under the engine monitor (editorListener) or inside a
+     * withEditor block — session reads are never torn. */
+    private fun publishMirror(s: EditorSession) {
+        val text = s.shadow
+        val m = EditorMirror(
+            text,
+            utf16PosIn(text, ScalarPos(s.cursor)).v,
+            utf16PosIn(text, ScalarPos(s.selStart)).v,
+            utf16PosIn(text, ScalarPos(s.selEnd)).v,
+            s.seq, mirrorEpoch.incrementAndGet())
+        _editorMirrors.value =
+            _editorMirrors.value + ((s.document to s.editorId) to m)
     }
 
-    /** SPEC 17.7: a toolbar `command` -> non-durable edit.command event.action. */
+    /** SPEC 19.3: a synchronized editor's local edit -> shadow + edit.delta.
+     * A refused edit (no OPEN session in READY, or past max_editor_bytes —
+     * "as if the editor were read-only", SPEC 19.4) publishes the unchanged
+     * shadow so the field snaps back instead of silently diverging. */
+    fun editorEdit(document: String, editorId: String, start: ScalarPos, del: Int, text: String) {
+        dispatchExecutor.execute {
+            val e = engine ?: return@execute
+            if (!e.localEditorEdit(document, editorId, start, del, text))
+                e.withEditor(document, editorId) { publishMirror(it) }
+        }
+    }
+
+    /** SPEC 17.7: a toolbar `command` -> non-durable edit.command
+     * event.action. Positions are Compose UTF-16; the engine converts to
+     * scalars against the shadow (LD-4). */
     fun editorCommand(surface: String, document: String, editorId: String,
                       command: String, cursor: Int, selStart: Int, selEnd: Int) {
         dispatchExecutor.execute {
-            engine?.editorCommand(surface, document, editorId, command, cursor, selStart, selEnd)
+            engine?.editorCommand(surface, document, editorId, command,
+                Utf16Pos(cursor), Utf16Pos(selStart), Utf16Pos(selEnd))
         }
     }
 
@@ -307,6 +365,11 @@ class DeviceBridge(
             Notifications.scheduleReminders(appContext, owner, newSet, priorSet)
         }
         engine.dialogListener = { id, spec -> onDialogChanged(id, spec) }
+        // SPEC 19.4 (T2/LD-5): every inbound edit.apply republishes the
+        // shadow, so the on-screen text follows it — before this, s.shadow
+        // moved and the display did not, and the next keystroke diffed
+        // against a stale base. Fires under the engine monitor.
+        engine.editorListener = { s -> publishMirror(s) }
         // SPEC 18.1: an oversized submit keeps the dialog up; tell the user to
         // shorten the input (password erasure in the renderer is a follow-on).
         engine.dialogOverflowListener = { onToast("Input too large — please shorten it") }

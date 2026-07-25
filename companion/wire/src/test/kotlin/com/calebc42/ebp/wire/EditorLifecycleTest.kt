@@ -133,7 +133,7 @@ class EditorLifecycleTest {
     fun completionRoundTripReplacesPrefix() {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out)
-        val s = engine.openEditor("doc:1", "body", "pri", cursor = 3)
+        val s = engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
         var got: Pair<String, JSONArray>? = null
         engine.requestCompletion("doc:1", "body") { prefix, cands -> got = prefix to cands }
         // The Companion sent edit.complete as a request; answer it.

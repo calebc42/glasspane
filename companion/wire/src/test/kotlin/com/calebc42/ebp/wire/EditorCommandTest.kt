@@ -56,9 +56,9 @@ class EditorCommandTest {
         engine.feed(frame(request("s1", "surface.update", JSONObject()
             .put("surface", "app:main").put("revision", 7)
             .put("spec", JSONObject().put("t", "text").put("text", "x")))))
-        engine.openEditor("doc.org", "ed1", "hello world", cursor = 3)
+        engine.openEditor("doc.org", "ed1", "hello world", cursor = ScalarPos(3))
         val ok = engine.editorCommand("app:main", "doc.org", "ed1",
-            "org-todo", cursor = 5, selStart = 2, selEnd = 5)
+            "org-todo", cursor = Utf16Pos(5), selStart = Utf16Pos(2), selEnd = Utf16Pos(5))
         assertTrue(ok)
         val ev = out.last { it.opt("method") == "event.action" }.getJSONObject("params")
         assertEquals("edit.command", ev.getString("action"))
@@ -78,6 +78,37 @@ class EditorCommandTest {
     }
 
     @Test
+    fun astralCommandConvertsUtf16ToScalars() {
+        // LD-4: ten emoji with the caret at the end used to go on the wire
+        // as cursor 20 against a 10-scalar document, and a backward drag as
+        // sel_start > sel_end — two MUST violations on one line
+        // (SPEC.md 2590: convert before sending; 2640: ordering).
+        val out = mutableListOf<JSONObject>()
+        val engine = readyEngine(out)
+        engine.feed(frame(request("s1", "surface.update", JSONObject()
+            .put("surface", "app:main").put("revision", 1)
+            .put("spec", JSONObject().put("t", "text").put("text", "x")))))
+        engine.openEditor("doc.org", "ed1", "😀".repeat(10)) // 10 scalars, 20 units
+        // Caret at the very end, whole document selected backward.
+        assertTrue(engine.editorCommand("app:main", "doc.org", "ed1",
+            "org-todo", Utf16Pos(20), Utf16Pos(20), Utf16Pos(0)))
+        val a1 = out.last { it.opt("method") == "event.action" }
+            .getJSONObject("params").getJSONObject("args")
+        assertEquals(10, a1.getInt("cursor"))
+        assertEquals(0, a1.getInt("sel_start"))
+        assertEquals(10, a1.getInt("sel_end"))
+        // A caret landing INSIDE an astral pair (unit 3) backs off to the
+        // character's own position — a splice boundary is never mid-scalar.
+        assertTrue(engine.editorCommand("app:main", "doc.org", "ed1",
+            "org-todo", Utf16Pos(3), Utf16Pos(3), Utf16Pos(3)))
+        val a2 = out.last { it.opt("method") == "event.action" }
+            .getJSONObject("params").getJSONObject("args")
+        assertEquals(1, a2.getInt("cursor"))
+        assertEquals(1, a2.getInt("sel_start"))
+        assertEquals(1, a2.getInt("sel_end"))
+    }
+
+    @Test
     fun commandOnUnknownEditorIsANoOp() {
         val out = mutableListOf<JSONObject>()
         val engine = readyEngine(out)
@@ -86,7 +117,7 @@ class EditorCommandTest {
             .put("spec", JSONObject().put("t", "text").put("text", "x")))))
         val before = out.size
         val ok = engine.editorCommand("app:main", "nope.org", "ed9",
-            "org-todo", 0, 0, 0)
+            "org-todo", Utf16Pos(0), Utf16Pos(0), Utf16Pos(0))
         assertFalse(ok)
         assertEquals(before, out.size) // nothing emitted, nothing queued
     }

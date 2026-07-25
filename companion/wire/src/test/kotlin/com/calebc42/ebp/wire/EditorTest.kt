@@ -59,16 +59,16 @@ class EditorTest {
     fun spliceScalarBoundsAndLength() {
         val s = EditorSession("d", "e", "sess")
         s.shadow = "hello"
-        assertTrue(s.splice(2, 1, "X", 5))     // hel -> heXlo
+        assertTrue(s.splice(ScalarPos(2), 1, "X", 5))     // hel -> heXlo
         assertEquals("heXlo", s.shadow)
-        assertFalse(s.splice(0, 10, "", -5))   // del past end
-        assertFalse(s.splice(0, 0, "z", 99))   // wrong len
+        assertFalse(s.splice(ScalarPos(0), 10, "", -5))   // del past end
+        assertFalse(s.splice(ScalarPos(0), 0, "z", 99))   // wrong len
         // Astral characters count as one scalar each.
         s.shadow = "a😀b" // a😀b : 3 scalars, 4 UTF-16 units
         assertEquals(3, s.scalarLength())
-        assertTrue(s.splice(2, 1, "", 2))       // delete b -> a😀
+        assertTrue(s.splice(ScalarPos(2), 1, "", 2))       // delete b -> a😀
         assertEquals("a😀", s.shadow)
-        assertTrue(s.splice(1, 1, "!", 2))      // replace the emoji
+        assertTrue(s.splice(ScalarPos(1), 1, "!", 2))      // replace the emoji
         assertEquals("a!", s.shadow)
     }
 
@@ -76,15 +76,15 @@ class EditorTest {
     fun diffReducesToMinimalScalarSplice() {
         // Pure prefix/suffix trimming: insertion, deletion, replacement, and
         // the astral-safe path a synchronized field relies on.
-        assertEquals(Triple(5, 0, "a"), EditorSession.diff("org: ", "org: a"))
-        assertEquals(Triple(3, 2, ""), EditorSession.diff("abcde", "abc"))
-        assertEquals(Triple(1, 3, "X"), EditorSession.diff("abcde", "aXe"))
+        assertEquals(Splice(ScalarPos(5), 0, "a"), EditorSession.diff("org: ", "org: a"))
+        assertEquals(Splice(ScalarPos(3), 2, ""), EditorSession.diff("abcde", "abc"))
+        assertEquals(Splice(ScalarPos(1), 3, "X"), EditorSession.diff("abcde", "aXe"))
         // No change: prefix consumes all, yielding an empty no-op splice at
         // the end (onValueChange's del>0||insert guard drops it before send).
-        assertEquals(Triple(4, 0, ""), EditorSession.diff("same", "same"))
+        assertEquals(Splice(ScalarPos(4), 0, ""), EditorSession.diff("same", "same"))
         // An astral char is one scalar; a replacement around it counts whole.
-        assertEquals(Triple(1, 1, "!"), EditorSession.diff("a😀b", "a!b"))
-        assertEquals(Triple(0, 0, "😀"), EditorSession.diff("xy", "😀xy"))
+        assertEquals(Splice(ScalarPos(1), 1, "!"), EditorSession.diff("a😀b", "a!b"))
+        assertEquals(Splice(ScalarPos(0), 0, "😀"), EditorSession.diff("xy", "😀xy"))
         // The diff, applied to a shadow equal to `old`, yields `new` — the
         // invariant that keeps a live field and the Companion shadow in step.
         val s = EditorSession("d", "e", "sess"); s.shadow = "hello world"
@@ -98,14 +98,14 @@ class EditorTest {
     fun openEmitsSeedAndLocalEditMirrors() {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out)
-        val s = engine.openEditor("doc:1", "body", "abc", cursor = 3)
+        val s = engine.openEditor("doc:1", "body", "abc", cursor = ScalarPos(3))
         val open = out.method("edit.open").single().getJSONObject("params")
         assertEquals("abc", open.getString("text"))
         assertEquals(0, open.getInt("seq"))
         assertEquals(3, open.getInt("cursor"))
         assertEquals(s.sessionId, open.getString("session"))
         // A local edit advances seq and mirrors an edit.delta.
-        assertTrue(engine.localEditorEdit("doc:1", "body", 3, 0, "d"))
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(3), 0, "d"))
         val delta = out.method("edit.delta").single().getJSONObject("params")
         assertEquals(1, delta.getInt("seq"))
         assertEquals(3, delta.getInt("start"))
@@ -122,7 +122,10 @@ class EditorTest {
         engine.feed(frame(request(id, "edit.apply", JSONObject()
             .put("document", document).put("editor_id", editorId)
             .put("session", session).put("seq", seq).put("start", start)
-            .put("del", del).put("text", text).put("len", len).put("cursor", start + text.length))))
+            .put("del", del).put("text", text).put("len", len)
+            // The wire cursor is a SCALAR position (SPEC 19.1) — counting
+            // text.length here would be the exact LD-4 UTF-16 mixup.
+            .put("cursor", start + text.codePointCount(0, text.length)))))
 
     @Test
     fun applyAppliesAtNextSeqAndStalesOtherwise() {
@@ -153,7 +156,7 @@ class EditorTest {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out)
         val s = engine.openEditor("doc:1", "body", "abc")
-        engine.localEditorEdit("doc:1", "body", 0, 0, "X") // seq -> 1
+        engine.localEditorEdit("doc:1", "body", ScalarPos(0), 0, "X") // seq -> 1
         applyText(engine, "a1", s.sessionId, 1, 3, 0, "Y", 5)
         assertEquals("stale", response(out, "a1").getJSONObject("result").getString("status"))
         assertEquals("Xabc", s.shadow)
@@ -198,7 +201,7 @@ class EditorTest {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out)
         val s = engine.openEditor("doc:1", "body", "hello")
-        engine.localEditorEdit("doc:1", "body", 5, 0, " world") // seq -> 1
+        engine.localEditorEdit("doc:1", "body", ScalarPos(5), 0, " world") // seq -> 1
         val old = s.sessionId
         engine.feed(frame(request("y1", "edit.resync", JSONObject()
             .put("document", "doc:1").put("editor_id", "body").put("session", old))))
@@ -221,7 +224,7 @@ class EditorTest {
         val seen = mutableListOf<Pair<String, Long>>()
         engine.annotationListener = { kind, _, p -> seen.add(kind to p.getLong("seq")) }
         val s = engine.openEditor("doc:1", "body", "abc")
-        engine.localEditorEdit("doc:1", "body", 0, 0, "x") // seq -> 1
+        engine.localEditorEdit("doc:1", "body", ScalarPos(0), 0, "x") // seq -> 1
         fun annot(method: String, session: String, seq: Long) =
             engine.feed(frame(notification(method, JSONObject()
                 .put("editor_id", "body").put("session", session).put("seq", seq)
@@ -247,7 +250,7 @@ class EditorTest {
         // A post-close apply for the old session is stale; and READY-gated
         // emitters no longer fire.
         assertEquals(EditorSession.State.CLOSED, s.state)
-        assertFalse(engine.localEditorEdit("doc:1", "body", 0, 0, "x"))
+        assertFalse(engine.localEditorEdit("doc:1", "body", ScalarPos(0), 0, "x"))
     }
 
     @Test
@@ -259,6 +262,115 @@ class EditorTest {
             .put("seq", 1).put("start", 0).put("del", 0).put("text", "x").put("len", 1)
             .put("cursor", 1))))
         assertEquals(-32601, response(out, "a1").getJSONObject("error").getInt("code"))
+    }
+
+    // ------------------------------------- T2: peer caret + typed positions
+
+    @Test
+    fun textApplyRequiresCursor() {
+        // SPEC 19.4 (LD-5): `cursor` is REQUIRED on every text-changing
+        // apply; its absence is structural (-32602), and nothing changes.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "abc")
+        engine.feed(frame(request("a1", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 1).put("start", 3)
+            .put("del", 0).put("text", "d").put("len", 4))))
+        assertEquals(-32602, response(out, "a1").getJSONObject("error").getInt("code"))
+        assertEquals("abc", s.shadow)
+        assertEquals(0L, s.seq)
+    }
+
+    @Test
+    fun textApplyValidatesPeerCaretAtomically() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "abc")
+        // An out-of-range peer cursor fails a gate: typed stale, text AND
+        // caret untouched (the old path spliced first, then discarded the
+        // failed setCaret and answered "applied").
+        engine.feed(frame(request("a1", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 1).put("start", 3)
+            .put("del", 0).put("text", "d").put("len", 4).put("cursor", 9))))
+        assertEquals("stale", response(out, "a1").getJSONObject("result").getString("status"))
+        assertEquals("abc", s.shadow)
+        assertEquals(0L, s.seq)
+        assertEquals(0, s.cursor)
+        // An unpaired selection is structural: -32602, nothing changes.
+        engine.feed(frame(request("a2", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 1).put("start", 3)
+            .put("del", 0).put("text", "d").put("len", 4)
+            .put("cursor", 4).put("sel_start", 0))))
+        assertEquals(-32602, response(out, "a2").getJSONObject("error").getInt("code"))
+        assertEquals("abc", s.shadow)
+        // A valid apply adopts the peer's cursor AND selection together.
+        engine.feed(frame(request("a3", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 1).put("start", 3)
+            .put("del", 0).put("text", "d").put("len", 4)
+            .put("cursor", 4).put("sel_start", 1).put("sel_end", 4))))
+        assertEquals("applied", response(out, "a3").getJSONObject("result").getString("status"))
+        assertEquals("abcd", s.shadow)
+        assertEquals(4, s.cursor)
+        assertEquals(1, s.selStart)
+        assertEquals(4, s.selEnd)
+    }
+
+    @Test
+    fun mixedApplyFormIsInvalidParams() {
+        // SPEC 19.4: move-only omits ALL of start/del/text/len; a message
+        // with only some of them is neither form. The old dispatch keyed on
+        // `start` alone, so {del: 2} silently became a move-only apply.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "abc")
+        engine.feed(frame(request("a1", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 1)
+            .put("del", 2).put("cursor", 0))))
+        assertEquals(-32602, response(out, "a1").getJSONObject("error").getInt("code"))
+        assertEquals("abc", s.shadow)
+    }
+
+    @Test
+    fun astralApplyCountsScalarsNotUtf16Units() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "abc")
+        // Inserting one astral scalar: len 4, peer cursor 4 — SCALARS.
+        applyText(engine, "a1", s.sessionId, 1, 3, 0, "😀", 4)
+        assertEquals("applied", response(out, "a1").getJSONObject("result").getString("status"))
+        assertEquals("abc😀", s.shadow)
+        assertEquals(4, s.cursor)
+        // A UTF-16-counting peer says cursor 5 against the 4-scalar doc:
+        // gate fails, typed stale, nothing changes — the wire catches the
+        // miscounting endpoint instead of silently absorbing it.
+        engine.feed(frame(request("a2", "edit.apply", JSONObject()
+            .put("document", "doc:1").put("editor_id", "body")
+            .put("session", s.sessionId).put("seq", 2).put("start", 4)
+            .put("del", 0).put("text", "!").put("len", 5).put("cursor", 6))))
+        assertEquals("stale", response(out, "a2").getJSONObject("result").getString("status"))
+        assertEquals("abc😀", s.shadow)
+    }
+
+    @Test
+    fun caretReportConvertsUtf16AndOrders() {
+        // T2/LD-4: localEditorCaret takes Compose UTF-16 offsets; the wire
+        // carries scalars, ordered, never splitting a surrogate pair.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.openEditor("doc:1", "body", "😀😀😀") // 3 scalars, 6 units
+        // Backward drag: active end at unit 2 (inside scalar 1's span is
+        // unit 3 — unit 2 is the boundary), anchor at unit 6.
+        engine.localEditorCaret("doc:1", "body", Utf16Pos(2),
+            Utf16Pos(6), Utf16Pos(2))
+        val caret = out.method("edit.caret").single().getJSONObject("params")
+        assertEquals(1, caret.getInt("cursor"))
+        assertEquals(1, caret.getInt("sel_start"))
+        assertEquals(3, caret.getInt("sel_end"))
     }
 
     // -------------------------------- max_editor_bytes (SPEC 19.4, #84, LD-15)
@@ -290,10 +402,10 @@ class EditorTest {
         engine.openEditor("doc:1", "body", "a".repeat(65_500))
         // SPEC 19.4 (amendment #84): refused as if read-only — no splice, no
         // edit.delta on the wire.
-        assertFalse(engine.localEditorEdit("doc:1", "body", 0, 0, "b".repeat(100)))
+        assertFalse(engine.localEditorEdit("doc:1", "body", ScalarPos(0), 0, "b".repeat(100)))
         assertTrue(out.method("edit.delta").isEmpty())
         // A non-growing local edit still works.
-        assertTrue(engine.localEditorEdit("doc:1", "body", 0, 100, ""))
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(0), 100, ""))
     }
 
     @Test

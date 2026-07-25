@@ -1141,10 +1141,10 @@ class CompanionEngine(
      * READY (the surface-node lifecycle wiring is a later atom). */
     @Synchronized
     fun openEditor(document: String, editorId: String, seed: String,
-                   cursor: Int = 0): EditorSession {
+                   cursor: ScalarPos = ScalarPos(0)): EditorSession {
         val s = EditorSession(document, editorId, EbpAuth.generateNonce())
         s.shadow = seed
-        s.setCaret(cursor.coerceIn(0, s.scalarLength()), null, null)
+        s.setCaret(ScalarPos(cursor.v.coerceIn(0, s.scalarLength())), null, null)
         editors[document to editorId] = s
         emit(notification("edit.open", JSONObject()
             .put("document", document).put("editor_id", editorId)
@@ -1158,7 +1158,7 @@ class CompanionEngine(
      * seq, and mirrors as an edit.delta. Read-only unless OPEN and READY. */
     @Synchronized
     fun localEditorEdit(document: String, editorId: String,
-                        start: Int, del: Int, text: String): Boolean {
+                        start: ScalarPos, del: Int, text: String): Boolean {
         val s = editors[document to editorId] ?: return false
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY)
             return false
@@ -1172,21 +1172,43 @@ class CompanionEngine(
         emit(notification("edit.delta", JSONObject()
             .put("document", document).put("editor_id", editorId)
             .put("session", s.sessionId).put("seq", s.seq)
-            .put("start", start).put("del", del).put("text", text).put("len", len)))
+            .put("start", start.v).put("del", del).put("text", text).put("len", len)))
         return true
     }
 
-    /** SPEC 19.3: best-effort caret context; throttled at the source. */
+    /** SPEC 19.3: best-effort caret context; throttled at the source.
+     * T2/LD-4: takes Compose UTF-16 positions and converts against the
+     * shadow — the one text authority — clamped, ordered, never splitting a
+     * surrogate pair; the wire carries scalars only. */
     @Synchronized
-    fun localEditorCaret(document: String, editorId: String, cursor: Int,
-                         selStart: Int? = null, selEnd: Int? = null) {
+    fun localEditorCaret(document: String, editorId: String, cursor: Utf16Pos,
+                         selStart: Utf16Pos? = null, selEnd: Utf16Pos? = null) {
         val s = editors[document to editorId] ?: return
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return
-        if (!s.setCaret(cursor, selStart, selEnd)) return
+        val (c, lo, hi) = scalarCaret(s.shadow, cursor, selStart, selEnd) ?: return
+        if (!s.setCaret(c, lo, hi)) return
         val p = JSONObject().put("document", document).put("editor_id", editorId)
             .put("session", s.sessionId).put("seq", s.seq).put("cursor", s.cursor)
-        if (selStart != null) p.put("sel_start", s.selStart).put("sel_end", s.selEnd)
+        if (lo != null) p.put("sel_start", s.selStart).put("sel_end", s.selEnd)
         emit(notification("edit.caret", p))
+    }
+
+    /** SPEC 19.1/19.3 (LD-4): convert a Compose caret to the scalar domain
+     * against TEXT — sel pair ordered (a backward drag arrives reversed),
+     * cursor snapped to an end when a pair is present (lo when it falls
+     * before the selection, else hi). Null only for a half-present pair. */
+    private fun scalarCaret(text: String, cursor: Utf16Pos, selStart: Utf16Pos?,
+                            selEnd: Utf16Pos?): Triple<ScalarPos, ScalarPos?, ScalarPos?>? {
+        if ((selStart == null) != (selEnd == null)) return null
+        val c = scalarPosIn(text, cursor)
+        if (selStart == null || selEnd == null) return Triple(c, null, null)
+        val a = scalarPosIn(text, selStart).v
+        val b = scalarPosIn(text, selEnd).v
+        val lo = minOf(a, b)
+        val hi = maxOf(a, b)
+        val snapped = if (c.v != lo && c.v != hi)
+            ScalarPos(if (c.v < lo) lo else hi) else c
+        return Triple(snapped, ScalarPos(lo), ScalarPos(hi))
     }
 
     /**
@@ -1198,10 +1220,19 @@ class CompanionEngine(
      */
     @Synchronized
     fun editorCommand(surface: String, document: String, editorId: String,
-                      command: String, cursor: Int, selStart: Int, selEnd: Int): Boolean {
+                      command: String, cursor: Utf16Pos,
+                      selStart: Utf16Pos, selEnd: Utf16Pos): Boolean {
         val s = editors[document to editorId] ?: return false
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return false
         val revision = surfaces.revisionOf(surface) ?: return false
+        // SPEC 19.1 / SPEC.md 2590+2640 (LD-4): Compose UTF-16 positions are
+        // converted to scalars against the shadow BEFORE they reach the wire,
+        // and the pair is ordered — ten emoji with the caret at the end is
+        // cursor 10, never 20, and a backward drag never emits
+        // sel_start > sel_end. This was the one editor path bypassing
+        // EditorSession's conversions.
+        val (c, lo, hi) = scalarCaret(s.shadow, cursor, selStart, selEnd)
+            ?: return false
         val params = JSONObject()
             .put("event_id", EbpAuth.generateNonce())
             .put("action", "edit.command")
@@ -1211,8 +1242,8 @@ class CompanionEngine(
             .put("args", JSONObject()
                 .put("command", command).put("document", document)
                 .put("editor_id", editorId).put("session", s.sessionId)
-                .put("seq", s.seq).put("cursor", cursor)
-                .put("sel_start", selStart).put("sel_end", selEnd))
+                .put("seq", s.seq).put("cursor", c.v)
+                .put("sel_start", lo!!.v).put("sel_end", hi!!.v))
         if (params.toString().toByteArray(Charsets.UTF_8).size >
             config.limits.getLong("max_event_bytes")) return false
         sendRequest("event.action", params) { _, _ -> }
@@ -1247,13 +1278,17 @@ class CompanionEngine(
         // editor-stale (a later request, not a silently-ignored notification).
         if (s == null || s.state == EditorSession.State.CLOSED || s.sessionId != session)
             return editorStale(id)
-        // SPEC 19.4: the move-only form omits the splice and keeps seq.
-        if (!params.has("start")) {
+        // SPEC 19.4: the move-only form omits ALL of start/del/text/len and
+        // keeps seq; the text form carries all four. A message with only
+        // some of them is neither form — structurally invalid.
+        val hasSplice = listOf("start", "del", "text", "len").count(params::has)
+        if (hasSplice == 0) {
             val cursor = (params.opt("cursor") as? Number)?.toInt()
                 ?: return respondError(id, -32602, "Invalid params", "invalid-params")
             val selStart = (params.opt("sel_start") as? Number)?.toInt()
             val selEnd = (params.opt("sel_end") as? Number)?.toInt()
-            if (!s.setCaret(cursor, selStart, selEnd))
+            if (!s.setCaret(ScalarPos(cursor),
+                    selStart?.let(::ScalarPos), selEnd?.let(::ScalarPos)))
                 return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
             editorListener?.invoke(s)
             return respondResult(id, JSONObject().put("status", "applied").put("seq", s.seq))
@@ -1265,6 +1300,16 @@ class CompanionEngine(
         val len = (params.opt("len") as? Number)?.toInt()
         if (seq == null || start == null || del == null || text == null || len == null)
             return respondError(id, -32602, "Invalid params", "invalid-params")
+        // SPEC 19.4 (LD-5): `cursor` is REQUIRED on every text-changing
+        // apply — the peer dictates the post-splice caret — and selection
+        // members are paired-or-omitted. Structural absence is -32602, like
+        // any other missing required member.
+        val cursor = (params.opt("cursor") as? Number)?.toInt()
+            ?: return respondError(id, -32602, "Invalid params", "invalid-params")
+        val selStart = (params.opt("sel_start") as? Number)?.toInt()
+        val selEnd = (params.opt("sel_end") as? Number)?.toInt()
+        if (params.has("sel_start") != params.has("sel_end"))
+            return respondError(id, -32602, "Invalid params", "invalid-params")
         // SPEC 19.4: apply only at seq+1 with a valid splice; otherwise a
         // typed stale result leaves this (winning) session OPEN.
         if (seq != s.seq + 1)
@@ -1273,19 +1318,20 @@ class CompanionEngine(
         // document past max_editor_bytes is 1201 editor-too-large, text
         // unchanged. Only a splice that would otherwise be valid can be
         // too large — a range- or length-invalid one is stale, as before.
-        val grown = s.spliceJcsBytes(start, del, text)
+        val grown = s.spliceJcsBytes(ScalarPos(start), del, text)
         if (grown >= 0 &&
             len == s.scalarLength() - del + text.codePointCount(0, text.length) &&
             grown > config.limits.optLong("max_editor_bytes", Long.MAX_VALUE))
             return respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("reason", "editor-too-large"))
-        if (!s.splice(start, del, text, len))
+        // SPEC 19.4 (LD-5): the splice AND the peer's post-state caret are
+        // validated together, atomically — a failed gate changes nothing.
+        // The old path spliced, then silently discarded a failed setCaret
+        // and answered "applied" over a half-updated session.
+        if (!s.spliceRemote(ScalarPos(start), del, text, len, ScalarPos(cursor),
+                selStart?.let(::ScalarPos), selEnd?.let(::ScalarPos)))
             return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
         s.seq = seq
-        (params.opt("cursor") as? Number)?.toInt()?.let {
-            s.setCaret(it, (params.opt("sel_start") as? Number)?.toInt(),
-                (params.opt("sel_end") as? Number)?.toInt())
-        }
         editorListener?.invoke(s)
         respondResult(id, JSONObject().put("status", "applied").put("seq", s.seq))
     }
@@ -1353,8 +1399,16 @@ class CompanionEngine(
         val from = s.shadow.offsetByCodePoints(0, start)
         val to = s.shadow.offsetByCodePoints(0, atCursor)
         if (s.shadow.substring(from, to) != prefix) return false
-        return localEditorEdit(document, editorId, start, prefixLen, insert)
+        return localEditorEdit(document, editorId, ScalarPos(start), prefixLen, insert)
     }
+
+    /** T2/LD-5: run F over a live editor session under the engine monitor —
+     * the host's one safe read path for shadow/caret state (the mirror it
+     * publishes to the display, and the snap-back after a refused edit). */
+    @Synchronized
+    fun <T> withEditor(document: String, editorId: String,
+                       f: (EditorSession) -> T): T? =
+        editors[document to editorId]?.let(f)
 
     private fun handleAnnotation(method: String, params: JSONObject) {
         if ("editor.sync" !in granted) return

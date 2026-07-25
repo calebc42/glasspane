@@ -33,6 +33,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -351,6 +352,24 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         key = "ed:${ctx.surface}:$id") {
         mutableStateOf(TextFieldValue(node.optString("value")))
     }
+    // T2/LD-5: the engine shadow is the text authority for a synchronized
+    // editor. Adopt every mirror publication — an inbound edit.apply, or the
+    // snap-back after a refused local edit — keyed on epoch so adoption
+    // happens exactly once per publication. The caret arrives peer-dictated
+    // (SPEC 19.4 requires cursor on every text-changing apply), already
+    // converted to UTF-16 against the mirrored text.
+    if (document.isNotEmpty()) {
+        val mirrors by ctx.bridge.editorMirrors.collectAsState()
+        val mirror = mirrors[document to id]
+        LaunchedEffect(mirror?.epoch) {
+            mirror?.let {
+                value = TextFieldValue(it.text,
+                    if (it.selStartU != it.selEndU)
+                        androidx.compose.ui.text.TextRange(it.selStartU, it.selEndU)
+                    else androidx.compose.ui.text.TextRange(it.cursorU))
+            }
+        }
+    }
     // SPEC 18.4/17.4: a `syntax` language recolours the field in place via an
     // identity VisualTransformation (never changes the character count, so the
     // cursor/selection/IME behave exactly as on a plain field).
@@ -391,9 +410,12 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 onValueChange = commit,
                 dispatch = { ctx.action(it) },
                 onCommand = { command ->
+                    // T2/LD-4: cursor is the ACTIVE selection end (where the
+                    // caret is); a backward drag has start > end and the
+                    // engine orders the pair during scalar conversion.
                     if (document.isNotEmpty())
                         ctx.editorCommand(document, id, command,
-                            value.selection.start, value.selection.start, value.selection.end)
+                            value.selection.end, value.selection.start, value.selection.end)
                 },
                 localDate = ::localDateStamp,
                 localTime = ::localTimeStamp)

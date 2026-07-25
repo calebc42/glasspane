@@ -37,6 +37,7 @@ class TriggerTest {
         .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
         .put("max_capture_fields", 64).put("max_trigger_responses", 4)
         .put("max_triggers", 3).put("max_device_report_bytes", 8192)
+        .put("max_rich_spans", 4096).put("max_table_cells", 4096)
 
     private fun report() = JSONObject()
         .put("caps", JSONArray()).put("trigger_caps", JSONArray(listOf("vibrate")))

@@ -27,6 +27,20 @@ class EditorSession(
         shadow.offsetByCodePoints(0, scalarIndex)
 
     /**
+     * SPEC 4.5 (amendment #84): the document's JCS-serialized UTF-8 size
+     * after a prospective splice, or -1 when the range is invalid (splice()
+     * refuses that case itself). Escapes are per-character, so fragment
+     * arithmetic is exact: whole document minus removed range plus insert.
+     */
+    fun spliceJcsBytes(start: Int, del: Int, text: String): Long {
+        val n = scalarLength()
+        if (start < 0 || del < 0 || start + del > n) return -1
+        val removed = shadow.substring(offset(start), offset(start + del))
+        return jcsUtf8Bytes(shadow) - (jcsUtf8Bytes(removed) - 2) +
+            (jcsUtf8Bytes(text) - 2)
+    }
+
+    /**
      * SPEC 19.3: validate a half-open scalar splice against the length
      * equation and bounds, then apply it atomically. Returns false (leaving
      * the shadow untouched) for any out-of-range or wrong-length splice.
@@ -45,6 +59,35 @@ class EditorSession(
     }
 
     companion object {
+        /**
+         * SPEC 4.5 (amendment #84): `max_editor_bytes` measures the UTF-8
+         * length of the JCS-serialized document text — the form both endpoints
+         * compute identically (ebp.el uses `string-bytes (json-serialize
+         * text)`). Two enclosing quotes; `"` `\` and the five short escapes
+         * are 2 bytes; any other C0 control is 6 (\u00XX); everything else
+         * its plain UTF-8 length. Matches Emacs 30.1 json_out_string, not
+         * org.json's quote() (which also escapes `/` after `<`).
+         */
+        fun jcsUtf8Bytes(text: String): Long {
+            var bytes = 2L
+            var i = 0
+            while (i < text.length) {
+                val cp = text.codePointAt(i)
+                bytes += when {
+                    cp == '"'.code || cp == '\\'.code -> 2L
+                    cp == 0x08 || cp == 0x09 || cp == 0x0A ||
+                        cp == 0x0C || cp == 0x0D -> 2L
+                    cp < 0x20 -> 6L
+                    cp < 0x80 -> 1L
+                    cp < 0x800 -> 2L
+                    cp < 0x10000 -> 3L
+                    else -> 4L
+                }
+                i += Character.charCount(cp)
+            }
+            return bytes
+        }
+
         /**
          * SPEC 19.3: reduce an old→new text change to the single half-open
          * scalar splice (start, del, insert) that produces it, by trimming the

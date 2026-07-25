@@ -42,6 +42,17 @@ class SyntaxHighlightTest {
     }
 
     @Test
+    fun highlightingDoesNotStopAtTwentyThousandChars() {
+        // LD-7: the tokenizers silently stopped at a 20,000-char cap, leaving
+        // the tail of any larger document permanently unstyled. With
+        // max_editor_bytes at the 65536 floor bounding every synchronized
+        // document, the whole text is tokenized.
+        val src = "x".repeat(20_100) + "\n;; tail comment\n(defun tail ())\n"
+        val spans = highlightSpans("elisp", src, c)
+        assertTrue(spans.any { it.start > 20_000 })
+    }
+
+    @Test
     fun emacsSyntaxColorsOverlaysFgAndKeepsFallback() {
         val fallback = SyntaxColors.forBackground(dark = false)
         val payload = JSONObject()

@@ -109,19 +109,22 @@ fun emacsSyntaxColors(syntax: JSONObject?, fallback: SyntaxColors): SyntaxColors
 
 /**
  * Best-effort span styles for [src] in [language] — the one tokenizer entry
- * point. Capped at [maxChars] so a large file can't lag every keystroke; any
- * tokeniser hiccup falls back to no styles rather than crashing the field.
+ * point. Uncapped: every tokenizer is one linear pass, and `max_editor_bytes`
+ * at the 65536 floor bounds every synchronized document, so highlighting the
+ * whole text is what jit-lock's never-stop-fontifying discipline asks for
+ * (LD-7 removed the silent 20,000-char stop). Any tokenizer hiccup falls
+ * back to no styles rather than crashing the field.
  */
 fun highlightSpans(
-    language: String, src: String, colors: SyntaxColors, maxChars: Int = 20_000,
+    language: String, src: String, colors: SyntaxColors,
 ): List<AnnotatedString.Range<SpanStyle>> = runCatching {
     when (language.lowercase()) {
-        "elisp", "emacs-lisp", "lisp" -> highlightElisp(src, colors, maxChars)
-        "org" -> highlightOrg(src, colors, maxChars)
-        "python", "py" -> highlightCode(src, colors, pythonKeywords, "#", true, maxChars)
-        "rust", "rs" -> highlightCode(src, colors, rustKeywords, "//", false, maxChars)
-        "shell", "sh", "bash" -> highlightCode(src, colors, shellKeywords, "#", true, maxChars)
-        "c", "cpp" -> highlightCode(src, colors, cKeywords, "//", false, maxChars)
+        "elisp", "emacs-lisp", "lisp" -> highlightElisp(src, colors)
+        "org" -> highlightOrg(src, colors)
+        "python", "py" -> highlightCode(src, colors, pythonKeywords, "#", true)
+        "rust", "rs" -> highlightCode(src, colors, rustKeywords, "//", false)
+        "shell", "sh", "bash" -> highlightCode(src, colors, shellKeywords, "#", true)
+        "c", "cpp" -> highlightCode(src, colors, cKeywords, "//", false)
         else -> null
     }?.spanStyles ?: emptyList()
 }.getOrElse { emptyList() }
@@ -132,10 +135,9 @@ fun highlightSpans(
 class SyntaxTransformation(
     private val language: String,
     private val colors: SyntaxColors,
-    private val maxChars: Int = 20_000,
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val spans = highlightSpans(language, text.text, colors, maxChars)
+        val spans = highlightSpans(language, text.text, colors)
         val styled = if (spans.isEmpty()) AnnotatedString(text.text)
             else AnnotatedString(text.text, spanStyles = spans)
         return TransformedText(styled, OffsetMapping.Identity)
@@ -170,10 +172,10 @@ private val elispKeywords = setOf(
     "require", "provide", "declare-function", "add-hook", "remove-hook",
     "mapcar", "mapc", "mapconcat", "cl-remove-if", "cl-remove-if-not")
 
-fun highlightElisp(src: String, c: SyntaxColors, maxChars: Int = 20_000): AnnotatedString =
+fun highlightElisp(src: String, c: SyntaxColors): AnnotatedString =
     buildAnnotatedString {
         append(src)
-        val n = minOf(src.length, maxChars)
+        val n = src.length
         var i = 0
         var depth = 0
         while (i < n) {
@@ -287,10 +289,10 @@ private fun isIdentChar(ch: Char): Boolean = ch.isLetterOrDigit() || ch == '_'
  * a lifetime, not a string). */
 fun highlightCode(
     src: String, c: SyntaxColors, keywords: Set<String>,
-    lineComment: String, singleQuoteStrings: Boolean, maxChars: Int = 20_000,
+    lineComment: String, singleQuoteStrings: Boolean,
 ): AnnotatedString = buildAnnotatedString {
     append(src)
-    val n = minOf(src.length, maxChars)
+    val n = src.length
     var i = 0
     while (i < n) {
         val ch = src[i]
@@ -348,10 +350,10 @@ private val orgItalicRe = Regex("""(?<![\w/])/(\S(?:[^/\n]*\S)?)/(?![\w/])""")
 private val orgCodeRe = Regex("""(?<![\w~])~([^~\n]+)~(?![\w~])""")
 private val orgVerbatimRe = Regex("""(?<![\w=])=([^=\n]+)=(?![\w=])""")
 
-fun highlightOrg(src: String, c: SyntaxColors, maxChars: Int = 40_000): AnnotatedString =
+fun highlightOrg(src: String, c: SyntaxColors): AnnotatedString =
     buildAnnotatedString {
         append(src)
-        val n = minOf(src.length, maxChars)
+        val n = src.length
         var lineStart = 0
         while (lineStart < n) {
             var lineEnd = src.indexOf('\n', lineStart)

@@ -23,6 +23,7 @@ class ToastTest {
         .put("max_surfaces", 16).put("max_surface_ids", 1024)
         .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
         .put("max_capture_fields", 64)
+        .put("max_rich_spans", 4096).put("max_table_cells", 4096)
 
     private fun frame(msg: JSONObject) = encodeFrame(msg.toString())
 

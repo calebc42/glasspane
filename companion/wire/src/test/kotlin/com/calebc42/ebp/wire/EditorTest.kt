@@ -26,6 +26,7 @@ class EditorTest {
         .put("max_surfaces", 16).put("max_surface_ids", 1024)
         .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
         .put("max_capture_fields", 64).put("max_editor_sessions", 8)
+        .put("max_editor_bytes", 65_536)
 
     private fun frame(msg: JSONObject) = encodeFrame(msg.toString())
 
@@ -258,5 +259,61 @@ class EditorTest {
             .put("seq", 1).put("start", 0).put("del", 0).put("text", "x").put("len", 1)
             .put("cursor", 1))))
         assertEquals(-32601, response(out, "a1").getJSONObject("error").getInt("code"))
+    }
+
+    // -------------------------------- max_editor_bytes (SPEC 19.4, #84, LD-15)
+
+    @Test
+    fun applyPastEditorBytesIsTooLargeAndChangesNothing() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        // JCS-serialized size = length + 2 quotes for plain ASCII.
+        val seed = "a".repeat(65_500)
+        val s = engine.openEditor("doc:1", "body", seed)
+        // +100 would reach 65_602 > 65_536: 1201 editor-too-large, text and
+        // seq untouched — not a stale, not an applied.
+        applyText(engine, "a1", s.sessionId, 1, 0, 0, "b".repeat(100), 65_600)
+        val err = response(out, "a1").getJSONObject("error")
+        assertEquals(1201, err.getInt("code"))
+        assertEquals("editor-too-large", err.getJSONObject("data").getString("reason"))
+        assertEquals(seed, s.shadow)
+        assertEquals(0L, s.seq)
+        // The session is still healthy: a shrinking apply at seq 1 succeeds.
+        applyText(engine, "a2", s.sessionId, 1, 0, 100, "", 65_400)
+        assertEquals("applied", response(out, "a2").getJSONObject("result").getString("status"))
+    }
+
+    @Test
+    fun localEditPastEditorBytesRefusedAsReadOnly() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.openEditor("doc:1", "body", "a".repeat(65_500))
+        // SPEC 19.4 (amendment #84): refused as if read-only — no splice, no
+        // edit.delta on the wire.
+        assertFalse(engine.localEditorEdit("doc:1", "body", 0, 0, "b".repeat(100)))
+        assertTrue(out.method("edit.delta").isEmpty())
+        // A non-growing local edit still works.
+        assertTrue(engine.localEditorEdit("doc:1", "body", 0, 100, ""))
+    }
+
+    @Test
+    fun advertisingEditorSyncRequiresMaxEditorBytes() {
+        // SPEC 4.5 (amendment #84): max_editor_bytes is REQUIRED when
+        // editor.sync is advertised — a host that omits it must not construct.
+        val bare = JSONObject()
+            .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
+            .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
+            .put("max_surfaces", 16).put("max_surface_ids", 1024)
+            .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
+            .put("max_capture_fields", 64).put("max_editor_sessions", 8)
+        val failed = runCatching {
+            CompanionEngine(CompanionConfig(
+                serverName = "kat", serverVersion = "1",
+                pairings = mapOf(katPid to katToken),
+                supportedCapabilities = setOf("editor.sync"),
+                surfaceProfiles = JSONObject(),
+                limits = bare, nonceSource = { katSn })) { }
+        }.isFailure
+        assertTrue(failed)
     }
 }

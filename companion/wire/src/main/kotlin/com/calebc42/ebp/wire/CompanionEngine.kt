@@ -42,6 +42,8 @@ class CompanionEngine(
         config.limits.optLong("max_capture_fields", 64),
         config.limits.optLong("max_chart_points", Long.MAX_VALUE),
         config.limits.optLong("max_canvas_ops", Long.MAX_VALUE),
+        config.limits.optLong("max_rich_spans", Long.MAX_VALUE),
+        config.limits.optLong("max_table_cells", Long.MAX_VALUE),
         nodeTypesFromProfiles(config.surfaceProfiles, "app"),
         nodeTypesFromProfiles(config.surfaceProfiles, "notification")),
     /** Shared across connections AND restarts: the SPEC 15 durable queue. */
@@ -1137,6 +1139,10 @@ class CompanionEngine(
         val s = editors[document to editorId] ?: return false
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY)
             return false
+        // SPEC 19.4 (amendment #84): a local edit that would carry the
+        // document past max_editor_bytes is refused as if read-only.
+        if (s.spliceJcsBytes(start, del, text) >
+            config.limits.optLong("max_editor_bytes", Long.MAX_VALUE)) return false
         val len = s.scalarLength() - del + text.codePointCount(0, text.length)
         if (!s.splice(start, del, text, len)) return false
         s.seq += 1
@@ -1238,7 +1244,19 @@ class CompanionEngine(
             return respondError(id, -32602, "Invalid params", "invalid-params")
         // SPEC 19.4: apply only at seq+1 with a valid splice; otherwise a
         // typed stale result leaves this (winning) session OPEN.
-        if (seq != s.seq + 1 || !s.splice(start, del, text, len))
+        if (seq != s.seq + 1)
+            return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+        // SPEC 19.4 (amendment #84): an inbound apply that would carry the
+        // document past max_editor_bytes is 1201 editor-too-large, text
+        // unchanged. Only a splice that would otherwise be valid can be
+        // too large — a range- or length-invalid one is stale, as before.
+        val grown = s.spliceJcsBytes(start, del, text)
+        if (grown >= 0 &&
+            len == s.scalarLength() - del + text.codePointCount(0, text.length) &&
+            grown > config.limits.optLong("max_editor_bytes", Long.MAX_VALUE))
+            return respondError(id, 1201, "Invalid content", "content-invalid",
+                JSONObject().put("reason", "editor-too-large"))
+        if (!s.splice(start, del, text, len))
             return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
         s.seq = seq
         (params.opt("cursor") as? Number)?.toInt()?.let {
@@ -1415,6 +1433,8 @@ class CompanionEngine(
                 spec, maxCaptureFields = config.limits.optLong("max_capture_fields", 64),
                 maxChartPoints = config.limits.optLong("max_chart_points", Long.MAX_VALUE),
                 maxCanvasOps = config.limits.optLong("max_canvas_ops", Long.MAX_VALUE),
+                maxRichSpans = config.limits.optLong("max_rich_spans", Long.MAX_VALUE),
+                maxTableCells = config.limits.optLong("max_table_cells", Long.MAX_VALUE),
                 // SPEC 17.1: a dialog spec is gated to the dialog profile's
                 // advertised node_types — an app-only type (chart/editor/
                 // scaffold) degrades instead of rendering + dispatching here.
@@ -1601,6 +1621,21 @@ class CompanionEngine(
         }
         require(l.getLong("max_surfaces") <= l.getLong("max_surface_ids")) {
             "max_surfaces exceeds max_surface_ids"
+        }
+        // SPEC 4.5: conditional limits are REQUIRED the moment the capability
+        // or node type they bound is advertised — a host that advertises
+        // editor.sync/rich_text/table without them ships a non-conforming
+        // welcome (amendment #84; LD-15/LD-22).
+        if ("editor.sync" in config.supportedCapabilities) {
+            floor("max_editor_bytes", 65_536)
+            require(l.getLong("max_editor_bytes") <= l.getLong("max_frame_bytes") - 4096) {
+                "max_editor_bytes exceeds max_frame_bytes - 4096"
+            }
+        }
+        for (target in config.surfaceProfiles.keySet()) {
+            val types = nodeTypesFromProfiles(config.surfaceProfiles, target) ?: continue
+            if ("rich_text" in types) floor("max_rich_spans", 1)
+            if ("table" in types) floor("max_table_cells", 1)
         }
         // SPEC 4.5: the actual server strings must fit the 128-octet bound
         // the reservation reserves for them (SPEC 10.2).

@@ -71,6 +71,8 @@ object SpecValidator {
         val maxCaptureFields: Long,
         val maxChartPoints: Long,
         val maxCanvasOps: Long,
+        val maxRichSpans: Long,
+        val maxTableCells: Long,
         // SPEC 17.1: a node type absent from the TARGET profile's advertised
         // node_types is treated as unsupported (§16.2 degrade), even though it
         // is a known contract type. null = allow all (unit tests / golden corpus).
@@ -80,6 +82,10 @@ object SpecValidator {
         val statefuls = mutableMapOf<String, JSONObject>()
         val captureRefs = mutableListOf<Pair<String, List<String>>>()
         var nodeCount = 0
+        // SPEC 4.5: max_rich_spans / max_table_cells are AGGREGATE counts
+        // across one SurfaceSpec or dialog document, like max_chart_points.
+        var richSpans = 0L
+        var tableCells = 0L
     }
 
     /** Validate one SurfaceSpec; returns the stateful nodes by ID. The chart/
@@ -91,10 +97,13 @@ object SpecValidator {
         maxCaptureFields: Long = 64,
         maxChartPoints: Long = Long.MAX_VALUE,
         maxCanvasOps: Long = Long.MAX_VALUE,
+        maxRichSpans: Long = Long.MAX_VALUE,
+        maxTableCells: Long = Long.MAX_VALUE,
         advertisedTypes: Set<String>? = null,
     ): Map<String, JSONObject> {
         if (spec !is JSONObject) throw ContentInvalid(path, "spec must be an object")
-        val ctx = Ctx(maxCaptureFields, maxChartPoints, maxCanvasOps, advertisedTypes)
+        val ctx = Ctx(maxCaptureFields, maxChartPoints, maxCanvasOps,
+            maxRichSpans, maxTableCells, advertisedTypes)
         if (spec.has("views")) {
             val views = spec.optJSONObject("views")
                 ?: throw ContentInvalid("$path.views", "views must be an object")
@@ -149,8 +158,15 @@ object SpecValidator {
     }
 
     /** SPEC 13.5: `stale_spec` carries no stateful node and no editor. */
-    fun validateStaleSpec(staleSpec: Any?, primaryIsMultiView: Boolean) {
-        val statefuls = validateSurfaceSpec(staleSpec, "stale_spec")
+    fun validateStaleSpec(staleSpec: Any?, primaryIsMultiView: Boolean,
+                          maxCaptureFields: Long = 64,
+                          maxChartPoints: Long = Long.MAX_VALUE,
+                          maxCanvasOps: Long = Long.MAX_VALUE,
+                          maxRichSpans: Long = Long.MAX_VALUE,
+                          maxTableCells: Long = Long.MAX_VALUE) {
+        val statefuls = validateSurfaceSpec(staleSpec, "stale_spec",
+            maxCaptureFields, maxChartPoints, maxCanvasOps,
+            maxRichSpans, maxTableCells)
         if (statefuls.isNotEmpty())
             throw ContentInvalid("stale_spec", "stateful nodes are prohibited in stale_spec")
         if ((staleSpec as JSONObject).has("views") != primaryIsMultiView)
@@ -170,7 +186,9 @@ object SpecValidator {
                                  maxCaptureFields: Long = 64,
                                  advertisedTypes: Set<String>? = null,
                                  maxChartPoints: Long = Long.MAX_VALUE,
-                                 maxCanvasOps: Long = Long.MAX_VALUE) {
+                                 maxCanvasOps: Long = Long.MAX_VALUE,
+                                 maxRichSpans: Long = Long.MAX_VALUE,
+                                 maxTableCells: Long = Long.MAX_VALUE) {
         if (spec !is JSONObject) throw ContentInvalid(path, "must be an object")
         if (spec.has("views")) throw ContentInvalid(path, "multi-view prohibited")
         for (k in spec.keySet()) if (k != "body" && k != "meta")
@@ -181,6 +199,7 @@ object SpecValidator {
         // SPEC 17.1: gate the body to the notification profile's node_types.
         validateSurfaceSpec(body, "$path.body", maxCaptureFields,
             maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
+            maxRichSpans = maxRichSpans, maxTableCells = maxTableCells,
             advertisedTypes = advertisedTypes)
         if (spec.has("meta")) {
             val meta = spec.opt("meta") as? JSONObject
@@ -499,7 +518,7 @@ object SpecValidator {
                 }
             }
             "text" -> validatePositiveInt(node, "max_lines", path)
-            "rich_text" -> validateSpans(node.opt("spans"), "$path.spans")
+            "rich_text" -> validateSpans(node.opt("spans"), "$path.spans", ctx)
             "empty_state" ->
                 // SPEC 17.2: action_label and on_tap together or both absent.
                 if (node.has("action_label") != node.has("on_tap"))
@@ -546,7 +565,7 @@ object SpecValidator {
                         "image url must be https or a supported base64 data:image")
             }
             "tabs" -> validateTabs(node, path)
-            "table" -> validateTable(node, path)
+            "table" -> validateTable(node, path, ctx)
             "chart" -> validateChart(node, path, ctx)
             "canvas" -> validateCanvas(node, path, ctx)
             "month_grid" -> validateMonthGrid(node, path)
@@ -600,10 +619,15 @@ object SpecValidator {
             throw ContentInvalid("$path.$member", "must be an integer $lo..$hi")
     }
 
-    /** SPEC 17.2: a RichSpan MUST contain text: string. */
-    private fun validateSpans(spans: Any?, path: String) {
+    /** SPEC 17.2: a RichSpan MUST contain text: string. Every RichSpan in the
+     * document — rich_text spans and table-cell spans alike — spends the
+     * SPEC 4.5 aggregate max_rich_spans allowance. */
+    private fun validateSpans(spans: Any?, path: String, ctx: Ctx) {
         val arr = spans as? JSONArray
             ?: throw ContentInvalid(path, "must be an array of spans")
+        ctx.richSpans += arr.length()
+        if (ctx.richSpans > ctx.maxRichSpans)
+            throw ContentInvalid(path, "exceeds max_rich_spans")
         for (i in 0 until arr.length()) {
             val span = arr.optJSONObject(i)
                 ?: throw ContentInvalid("$path[$i]", "must be a span object")
@@ -637,7 +661,7 @@ object SpecValidator {
 
     /** SPEC 17.3: an unknown TableRow kind is invalid; data/header cells MUST
      * contain spans (RichSpan[]); aligns entries are start|center|end. */
-    private fun validateTable(node: JSONObject, path: String) {
+    private fun validateTable(node: JSONObject, path: String, ctx: Ctx) {
         val rows = node.optJSONArray("rows")
             ?: throw ContentInvalid("$path.rows", "rows must be an array")
         for (i in 0 until rows.length()) {
@@ -648,10 +672,15 @@ object SpecValidator {
                 "data", "header" -> {
                     val cells = row.optJSONArray("cells")
                         ?: throw ContentInvalid("$path.rows[$i].cells", "must be an array")
+                    // SPEC 4.5: max_table_cells is an aggregate count across
+                    // the document, spent by data and header cells.
+                    ctx.tableCells += cells.length()
+                    if (ctx.tableCells > ctx.maxTableCells)
+                        throw ContentInvalid("$path.rows[$i].cells", "exceeds max_table_cells")
                     for (j in 0 until cells.length()) {
                         val cell = cells.optJSONObject(j)
                             ?: throw ContentInvalid("$path.rows[$i].cells[$j]", "must be a cell object")
-                        validateSpans(cell.opt("spans"), "$path.rows[$i].cells[$j].spans")
+                        validateSpans(cell.opt("spans"), "$path.rows[$i].cells[$j].spans", ctx)
                     }
                 }
                 else -> throw ContentInvalid("$path.rows[$i].kind", "unknown table row kind")

@@ -84,7 +84,14 @@ class DeviceBridge(
             .put("max_image_pixels",
                 com.calebc42.ebp.companion.render.ImageLoader.MAX_IMAGE_PIXELS)
             // SPEC 4.5/17.5: REQUIRED whenever chart/canvas are advertised.
-            .put("max_chart_points", 4096).put("max_canvas_ops", 4096),
+            .put("max_chart_points", 4096).put("max_canvas_ops", 4096)
+            // SPEC 4.5: REQUIRED whenever rich_text/table are advertised —
+            // aggregate counts across one SurfaceSpec or dialog (LD-22).
+            .put("max_rich_spans", 4096).put("max_table_cells", 4096)
+            // SPEC 4.5 (amendment #84): REQUIRED when editor.sync is granted.
+            // Declared at the floor: it is what keeps every editor path
+            // (shadow rebuild, diff, highlight, relayout) comfortably linear.
+            .put("max_editor_bytes", 65_536),
         // SPEC 20.1/20.2: advertise the device report and the platform executor.
         deviceReport = AppCapabilities.deviceReport(),
         capabilityHandler = AppCapabilities.handler(appContext, 65_536),

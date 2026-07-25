@@ -37,7 +37,8 @@ rm -f emacs/jetpacs-widgets.elc
 # And for the JC-0 application-framework floor (docs/SPEC-JC-0-floor.md)
 # plus the JC-1 Tier-0 buffer renderer.
 for f in jetpacs-async jetpacs-surfaces jetpacs-shell jetpacs-buffer \
-         jetpacs-results jetpacs-tablist; do
+         jetpacs-results jetpacs-tablist \
+         jetpacs-sections jetpacs-comint; do
   emacs -Q --batch -L emacs \
     --eval '(setq byte-compile-error-on-warn t)' \
     -f batch-byte-compile "emacs/$f.el"
@@ -62,4 +63,8 @@ emacs -Q --batch -L emacs -l test/jetpacs-buffer-test.el \
 
 # JC-2 results/tablist skins exit gate.
 emacs -Q --batch -L emacs -l test/jetpacs-results-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JC-3a/3c sections + comint skins exit gate.
+emacs -Q --batch -L emacs -l test/jetpacs-sections-test.el \
   -f ert-run-tests-batch-and-exit

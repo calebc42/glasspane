@@ -350,20 +350,6 @@ surface), never svg (SPEC 17.2 rejects active formats before decode)."
 
 ;; --- The emitter -------------------------------------------------------------
 
-(defun jetpacs-hypertext--spend-spans (spans)
-  "Cap SPANS against the shared SPEC 4.5 span budget and spend it down.
-Returns the (possibly capped) spans.  `max_rich_spans' is an AGGREGATE
-count across one SurfaceSpec, so every rich_text and table this document
-emits draws on the same allowance."
-  (let ((budget jetpacs-buffer-budget))
-    (if (not (and budget (integerp (car budget))))
-        spans
-      (let ((left (car budget)))
-        (when (> (length spans) left)
-          (setq spans (jetpacs-buffer-cap-spans spans (max 1 left))))
-        (setcar budget (max 0 (- left (length spans))))
-        spans))))
-
 (defun jetpacs-hypertext--paragraph (seg)
   "A paragraph body node from SEG's :spans (preferred) or :text.
 Degrades to a flattened Core `text' when `rich_text' is unadvertised
@@ -372,7 +358,7 @@ Degrades to a flattened Core `text' when `rich_text' is unadvertised
         (text (plist-get seg :text)))
     (cond
      ((and spans (> (length spans) 0))
-      (setq spans (jetpacs-hypertext--spend-spans spans))
+      (setq spans (jetpacs-buffer-spend-spans spans))
       (if (jetpacs-node-advertised-p "rich_text")
           (jetpacs-rich-text spans)
         (jetpacs-buffer-spans->text spans)))

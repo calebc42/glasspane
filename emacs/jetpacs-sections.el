@@ -12,11 +12,24 @@
 ;;
 ;; Under Tier 0 these buffers already render acceptably.  What this
 ;; substrate adds: the section TREE becomes real `collapsible' cards —
-;; folding is instant and client-side, no round trip — with Emacs's own
-;; fold state mirrored at render time, and a long-press on any header
-;; offering that section's OWN key bindings, so the phone gets magit's
-;; per-section verbs without one command name ever crossing the wire (the
-;; wire carries keys and positions; the buffer's keymaps decide meaning).
+;; folding is instant and client-side, no round trip — and a long-press
+;; on any header offers that section's OWN key bindings, so the phone
+;; gets magit's per-section verbs without one command name ever crossing
+;; the wire (the wire carries keys and positions; the buffer's keymaps
+;; decide meaning).
+;;
+;; FOLD STATE IS DEVICE-LOCAL, deliberately.  Emacs's `hidden' bit seeds
+;; the FIRST snapshot of a card and nothing after it: SPEC 17.3 makes
+;; `collapsible.collapsed' seed-only for a presentation identity, so
+;; local expansion survives a repeated authored value — and since the
+;; card id is deliberately stable across refreshes (that is what keeps
+;; fold state attached to the same section), a changed `hidden' bit has
+;; no effect on a card the device has already seen.  That is the right
+;; trade: folding stays instant and round-trip-free, and the phone's
+;; view of a long magit-status is not yanked around by an unrelated
+;; refresh in Emacs.  The alternative — folding `hidden' into the id —
+;; would mint a new identity on every toggle and discard all other
+;; device-local state for that card along with it.
 ;;
 ;; The library is third-party (NonGNU ELPA): nothing here requires it.
 ;; Reading the tree uses `slot-value' (eieio is built-in), and registration
@@ -61,6 +74,27 @@ Past the budget, remaining sections still render their headers (the tree
 stays navigable) but bodies are elided with a note."
   :type 'integer :group 'jetpacs)
 
+(defcustom jetpacs-sections-max-sections 300
+  "Cap on the number of section CARDS one render emits.
+`jetpacs-sections-max-lines' bounds body lines only — a card's header,
+its `collapsible' wrapper and its `rich_text' are nodes too, and a
+`magit-log' with thousands of commits is thousands of sections whose
+bodies are one line each.  Without this the line budget is never reached
+while the node count sails past SPEC 4.5's ceiling and the whole push is
+refused."
+  :type 'integer :group 'jetpacs)
+
+(defvar jetpacs-sections--ids nil
+  "Per-render table of emitted card ids, or nil outside a render.
+SPEC 16.1 requires node ids to be unique within one update and answers a
+duplicate with `1201 content-invalid' for the WHOLE spec.  Two magit
+sections can share one: `magit-section-ident' repeats across taxy and
+forge groupings, and the positional fallback repeats whenever two
+sections share a `start' marker.")
+
+(defvar jetpacs-sections--cards 0
+  "Cards emitted so far in this render (see `jetpacs-sections-max-sections').")
+
 (defconst jetpacs-sections--menu-denylist
   '(self-insert-command digit-argument negative-argument universal-argument
     undefined ignore keyboard-quit keyboard-escape-quit
@@ -93,14 +127,37 @@ name at the call site draws an unknown-slot warning."
   (jetpacs-sections--slot sec 'hidden))
 
 (defun jetpacs-sections--id (sec)
-  "A stable collapsible id for SEC: its ident path, hashed.
+  "A stable collapsible id for SEC: its ident path, hashed, deduplicated.
 `magit-section-ident' is the library's own stable identity (it survives a
 refresh, which keeps client-side fold state attached to the same
-section).  Falls back to the start position."
-  (or (condition-case nil
-          (md5 (format "%S" (magit-section-ident sec)))
-        (error nil))
-      (format "sec-%s" (jetpacs-sections--pos sec 'start))))
+section).  Falls back to the start position.
+
+Neither source is guaranteed unique — the ident repeats across taxy and
+forge groupings, and two sections sharing a `start' marker produce the
+same fallback — so a collision within one render is suffixed.  SPEC 16.1
+answers a duplicate id with `1201' for the entire update, so this is not
+a cosmetic concern: one repeat costs the whole surface.
+
+The suffix only moves the SECOND and later claimants, so the first
+occurrence keeps the stable id and its device-local fold state."
+  (let ((base (or (condition-case nil
+                      (md5 (format "%S" (magit-section-ident sec)))
+                    (error nil))
+                  (format "sec-%s" (jetpacs-sections--pos sec 'start)))))
+    (if (null jetpacs-sections--ids)
+        base                            ; offline / direct call: no render
+      (let ((n (gethash base jetpacs-sections--ids)))
+        (cond
+         ((null n) (puthash base 1 jetpacs-sections--ids) base)
+         (t
+          ;; Step past any suffixed name already taken, so a synthesized
+          ;; id can never collide with a real one either.
+          (let ((try (format "%s-%d" base n)))
+            (while (gethash try jetpacs-sections--ids)
+              (setq n (1+ n) try (format "%s-%d" base n)))
+            (puthash base (1+ n) jetpacs-sections--ids)
+            (puthash try t jetpacs-sections--ids)
+            try)))))))
 
 ;; --- Span surgery (format 6: spans are PLISTS) -------------------------------
 
@@ -137,7 +194,7 @@ be refused."
          (let* ((args (plist-get tap :args))
                 (pos (plist-get args :pos))
                 (copy (copy-sequence sp)))
-           (when (numberp pos)
+           (when (integerp pos)
              (jetpacs-buffer-expose name pos "sections.visit"))
            (plist-put copy :on_tap
                       (jetpacs-action "sections.visit" :args args))))))
@@ -156,11 +213,15 @@ the verbs it actually offers."
     (jetpacs-buffer-line-spans bol eol name)))
 
 (defun jetpacs-sections--rich (spans)
-  "SPANS as a `rich_text' node, or a Core `text' when unadvertised (16.2)."
-  (if (jetpacs-node-advertised-p "rich_text")
-      (jetpacs-rich-text spans)
-    (jetpacs-text (mapconcat (lambda (s) (or (plist-get s :text) "")) spans "")
-                  :style "mono")))
+  "SPANS as a `rich_text' node, or a Core `text' when unadvertised (16.2).
+Draws on the shared SPEC 4.5 span allowance: `max_rich_spans' is an
+aggregate across one SurfaceSpec, and this skin builds its spans outside
+`jetpacs-buffer--render-region', so nothing else would debit them."
+  (let ((spans (jetpacs-buffer-spend-spans spans)))
+    (if (jetpacs-node-advertised-p "rich_text")
+        (jetpacs-rich-text spans)
+      (jetpacs-text (mapconcat (lambda (s) (or (plist-get s :text) "")) spans "")
+                    :style "mono"))))
 
 (defun jetpacs-sections--header-node (sec name)
   "The always-visible header node for SEC: its heading line's own spans
@@ -221,22 +282,28 @@ interleaved with child sections, in buffer order."
     nodes))
 
 (defun jetpacs-sections--card (sec name start header children)
-  "A collapsible card for SEC, or a Core fallback when unadvertised (16.2).
-Exposes START under `sections.menu' for the long-press."
-  (jetpacs-buffer-expose name start "sections.menu")
-  (let ((menu (jetpacs-action "sections.menu"
-                              :args (list :buffer name :pos start))))
-    (if (jetpacs-node-advertised-p "collapsible")
-        (apply #'jetpacs-collapsible
-               (jetpacs-sections--id sec) header
-               (append children
-                       (list :collapsed (if (jetpacs-sections--hidden-p sec)
-                                            t :json-false)
-                             :on-long-tap menu)))
+  "A collapsible card for SEC, or a Core fallback when unadvertised (16.2)."
+  (if (not (jetpacs-node-advertised-p "collapsible"))
       ;; Core: header, then the children inline — folding is the
       ;; Companion's affordance and there is no Core equivalent, so the
-      ;; content simply shows.
-      (apply #'jetpacs-column header children))))
+      ;; content simply shows.  NO `sections.menu' exposure here: this
+      ;; path emits no long-tap, and SPEC 23.1 records authorize what the
+      ;; document actually offers, never an affordance that is absent
+      ;; from it.
+      (apply #'jetpacs-column header children)
+    (jetpacs-buffer-expose name start "sections.menu")
+    (apply #'jetpacs-collapsible
+           (jetpacs-sections--id sec) header
+           (append children
+                   (list :collapsed
+                         ;; Seeds the FIRST snapshot only (SPEC 17.3);
+                         ;; fold is device-local thereafter — see the
+                         ;; commentary.
+                         (if (jetpacs-sections--hidden-p sec) t :json-false)
+                         :on-long-tap
+                         (jetpacs-action "sections.menu"
+                                         :args (list :buffer name
+                                                     :pos start)))))))
 
 (defun jetpacs-sections--emit (sec name budget)
   "Section SEC as a list of nodes.
@@ -253,11 +320,22 @@ transparent — only its children show."
      ;; so a push racing `magit-refresh' sees nil markers.  Without this
      ;; the arithmetic below signals and takes the entire surface down.
      ((null start) nil)
+     ;; SPEC 4.5: past the card cap the tree stops entirely.  Emitting
+     ;; headers-only would still be one node per section, which is the
+     ;; thing the cap exists to bound.
+     ((>= jetpacs-sections--cards jetpacs-sections-max-sections)
+      (when (= jetpacs-sections--cards jetpacs-sections-max-sections)
+        (cl-incf jetpacs-sections--cards)   ; latch: one note per render
+        (list (jetpacs-text
+               (format "… more sections in Emacs (showing first %d)"
+                       jetpacs-sections-max-sections)
+               :style "caption"))))
      ((null end)
       (list (jetpacs-sections--rich
              (list (jetpacs-span "… section still loading" :mono t)))))
      ;; Heading + revealed content -> a collapsible card.
      ((and content (< content end))
+      (cl-incf jetpacs-sections--cards)
       (list (jetpacs-sections--card
              sec name start
              (jetpacs-sections--header-node sec name)
@@ -268,6 +346,7 @@ transparent — only its children show."
      ;; the real body.
      ((and content (jetpacs-sections--slot sec 'washer))
       (progn
+        (cl-incf jetpacs-sections--cards)
         (jetpacs-buffer-expose name start "jetpacs.buffer.fold")
         (list (jetpacs-sections--card
                sec name start
@@ -297,20 +376,34 @@ cards.  Falls through to Tier 0 when the buffer has no section root."
         ;; folded away (`hidden' mirrors into :collapsed instead) — an
         ;; invisibility spec of nil makes `invisible' props inert for the
         ;; walk without touching buffer state.
-        (let ((buffer-invisibility-spec nil)
-              (budget (cons jetpacs-sections-max-lines nil))
-              (name (buffer-name buf)))
+        (let ((budget (cons jetpacs-sections-max-lines nil))
+              (name (buffer-name buf))
+              ;; SPEC 16.1 uniqueness and the SPEC 4.5 card cap are both
+              ;; per-render state.
+              (jetpacs-sections--ids (make-hash-table :test #'equal))
+              (jetpacs-sections--cards 0))
           ;; This render supersedes the last one's tap targets.
           (jetpacs-buffer-forget-exposed name)
-          ;; The tree is third-party eieio read through `slot-value': an
-          ;; unbound slot, a missing slot on an exotic section class, or a
-          ;; mid-refresh nil marker must cost this SKIN, never the push.
-          (or (condition-case err
-                  (jetpacs-sections--emit root name budget)
-                (error
-                 (message "jetpacs-sections: tree walk failed (%s); \
+          (or (jetpacs-buffer-with-budget
+                ;; The scanner must see the whole tree, including bodies
+                ;; Emacs has folded away (`hidden' seeds :collapsed
+                ;; instead) — an invisibility spec of nil makes
+                ;; `invisible' props inert for the walk without touching
+                ;; buffer state.  Scoped to the WALK only: the Tier-0
+                ;; fallback below must NOT run under it, or a fallback
+                ;; render paints every folded body inline while still
+                ;; drawing the fold affordance.
+                (let ((buffer-invisibility-spec nil))
+                  ;; The tree is third-party eieio read through
+                  ;; `slot-value': an unbound slot, a missing slot on an
+                  ;; exotic section class, or a mid-refresh nil marker
+                  ;; must cost this SKIN, never the push.
+                  (condition-case err
+                      (jetpacs-sections--emit root name budget)
+                    (error
+                     (message "jetpacs-sections: tree walk failed (%s); \
 falling back to Tier 0" (jetpacs--error-label err))
-                 nil))
+                     nil))))
               (jetpacs-buffer-render buf)))))))
 
 ;; --- Visiting the thing at a row ---------------------------------------------
@@ -365,7 +458,10 @@ would turn a wedge into a silent lie."
            (buf (jetpacs-sections--section-buffer name))
            (jetpacs-results--event-surface (plist-get params :surface)))
       (cond
-       ((not (and buf (numberp pos))) 'rejected)
+       ;; `integerp', not `numberp': a float clears the type gate and
+       ;; then misses `jetpacs-buffer-exposed-p''s `eql' hash, so it
+       ;; would be refused for the wrong reason.
+       ((not (and buf (integerp pos))) 'rejected)
        ((not (jetpacs-buffer-exposed-p name pos "sections.visit")) 'rejected)
        ((jetpacs-event-stale-p params) 'stale)
        (t
@@ -449,6 +545,20 @@ command" key))
                           key (jetpacs--error-label err))))))))
   (jetpacs-sections--refresh params))
 
+(defvar jetpacs-sections--dialog-seq 0
+  "Monotonic counter making each `sections.menu' dialog id fresh.")
+
+(defun jetpacs-sections--dialog-id (buf pos)
+  "A FRESH SPEC 18.1 dialog id for the menu at POS in BUF.
+Deriving the id from (buffer, pos) alone made it deterministic, so a
+second long-press on the same header while the first dialog was still
+outstanding reused the id — and 18.1 says a second outstanding request
+with the same `dialog_id' MUST receive `1201 content-invalid'.  Which is
+exactly what an impatient double-press does."
+  (format "sections-%s-%d"
+          (abs (sxhash (list (buffer-name buf) pos)))
+          (cl-incf jetpacs-sections--dialog-seq)))
+
 (defun jetpacs-sections--show-menu (buf pos params)
   "Offer the section menu at POS in BUF as an EBP dialog.
 `completing-read' is NOT an option here: the poc called it inside the
@@ -466,7 +576,7 @@ in a callback."
     (when (and client cands)
       (ebp-client-dialog-show
        client
-       (format "sections-%s" (abs (sxhash (list (buffer-name buf) pos))))
+       (jetpacs-sections--dialog-id buf pos)
        (apply #'jetpacs-column
               (jetpacs-text "Section action" :style "title")
               (mapcar (lambda (c)
@@ -485,7 +595,10 @@ in a callback."
            (pos (plist-get args :pos))
            (buf (jetpacs-sections--section-buffer name)))
       (cond
-       ((not (and buf (numberp pos))) 'rejected)
+       ;; `integerp', not `numberp': a float clears the type gate and
+       ;; then misses `jetpacs-buffer-exposed-p''s `eql' hash, so it
+       ;; would be refused for the wrong reason.
+       ((not (and buf (integerp pos))) 'rejected)
        ((not (jetpacs-buffer-exposed-p name pos "sections.menu")) 'rejected)
        ;; The dialog needs the capability; without it there is no
        ;; non-blocking way to ask, so say so rather than hang.

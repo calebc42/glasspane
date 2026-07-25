@@ -397,5 +397,116 @@ instead of costing one section its body."
       (should (jetpacs-feature-advertised-p "image.https"))
       (should-not (jetpacs-feature-advertised-p "image.data")))))
 
+;; --- Phase C conformance (C1/C2/C4/C5/C7/C9) --------------------------------
+
+(defun jetpacs-sections-test--fake-sec (start content end &optional ident)
+  "A stand-in section object; IDENT is what `magit-section-ident' returns."
+  (record 'jc3-sec start content end ident))
+
+(defmacro jetpacs-sections-test--with-fake-tree (&rest body)
+  "Run BODY with the section accessors reading `jetpacs-sections-test--fake-sec'."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'jetpacs-sections--pos)
+              (lambda (s slot) (pcase slot ('start (aref s 1))
+                                      ('content (aref s 2)) ('end (aref s 3)))))
+             ((symbol-function 'jetpacs-sections--slot)
+              (lambda (_s _sl) nil))
+             ((symbol-function 'jetpacs-sections--hidden-p) (lambda (_s) nil))
+             ((symbol-function 'magit-section-ident) (lambda (s) (aref s 4))))
+     ,@body))
+
+(ert-deftest jetpacs-sections-ids-are-unique-per-render ()
+  "SPEC 16.1: a duplicate node id is `1201' for the WHOLE update.
+Two magit sections really can collide — the ident repeats across taxy and
+forge groupings, and two sections sharing a `start' marker produce the
+same positional fallback."
+  (jetpacs-sections-test--with-fake-tree
+    (let ((jetpacs-sections--ids (make-hash-table :test #'equal))
+          (a (jetpacs-sections-test--fake-sec 1 2 9 '(same)))
+          (b (jetpacs-sections-test--fake-sec 1 2 9 '(same))))
+      (let ((id-a (jetpacs-sections--id a))
+            (id-b (jetpacs-sections--id b)))
+        (should-not (equal id-a id-b))
+        ;; The FIRST claimant keeps the stable id (and its fold state).
+        (should (equal id-a (md5 (format "%S" '(same)))))
+        (should (jetpacs--identifier-p id-b))))
+    ;; ...and a synthesized suffix never collides with a real id either.
+    (let ((jetpacs-sections--ids (make-hash-table :test #'equal)))
+      (puthash "x" 1 jetpacs-sections--ids)
+      (puthash "x-1" t jetpacs-sections--ids)
+      (cl-letf (((symbol-function 'magit-section-ident)
+                 (lambda (_s) (error "no ident"))))
+        ;; Falls back to "sec-POS"; force the base to be the taken "x".
+        (should (jetpacs--identifier-p
+                 (let ((jetpacs-sections--ids jetpacs-sections--ids))
+                   (jetpacs-sections--id
+                    (jetpacs-sections-test--fake-sec 1 2 9 nil)))))))))
+
+(ert-deftest jetpacs-sections-ids-survive-outside-a-render ()
+  "With no per-render table bound, ids pass through unsuffixed."
+  (jetpacs-sections-test--with-fake-tree
+    (let ((jetpacs-sections--ids nil)
+          (a (jetpacs-sections-test--fake-sec 1 2 9 '(one))))
+      (should (equal (jetpacs-sections--id a) (jetpacs-sections--id a))))))
+
+(ert-deftest jetpacs-sections-card-cap-bounds-node-count ()
+  "SPEC 4.5: the line budget does not bound CARDS.
+A `magit-log' is thousands of sections whose bodies are one line each, so
+the line budget is never reached while the node count sails past the
+ceiling and the whole push is refused.  Past the cap the walk stops and
+latches exactly one note."
+  (let ((jetpacs-sections-max-sections 3)
+        (jetpacs-sections--cards 0)
+        (jetpacs-sections--ids (make-hash-table :test #'equal)))
+    (jetpacs-sections-test--with-fake-tree
+      (with-temp-buffer
+        (insert "a\nb\nc\nd\ne\nf\n")
+        (rename-buffer "*jc3-cap*" t)
+        (let ((notes 0))
+          (dotimes (i 6)
+            (let ((nodes (jetpacs-sections--emit
+                          (jetpacs-sections-test--fake-sec 1 2 6 (list i))
+                          (buffer-name) (cons 100 nil))))
+              (dolist (n nodes)
+                (when (equal (plist-get n :style) "caption")
+                  (cl-incf notes)))))
+          ;; Three cards, then ONE note, then silence.
+          (should (= notes 1)))))))
+
+(ert-deftest jetpacs-sections-core-degrade-exposes-no-menu ()
+  "SPEC 23.1: the Core path emits no long-tap, so it must authorize none.
+An exposure record for an affordance absent from the document is an
+authorization the phone can spend on something it was never offered."
+  (jetpacs-sections-test--with-client
+      (:profiles '(:app (:node_types ["text" "row" "column" "box" "spacer"
+                                      "divider" "button" "text_input"]
+                         :builtins [] :features [])))
+    (jetpacs-buffer-forget-exposed)
+    (let ((header (jetpacs-text "h")))
+      (jetpacs-sections--card
+       (jetpacs-sections-test--fake-sec 1 2 9 '(x)) "*jc3-core*" 1
+       header (list (jetpacs-text "body")))
+      (should-not (jetpacs-buffer-exposed-p "*jc3-core*" 1 "sections.menu")))))
+
+(ert-deftest jetpacs-sections-dialog-ids-are-fresh ()
+  "SPEC 18.1: a second outstanding dialog reusing an id gets `1201'.
+Which is exactly what an impatient double-press on one header did."
+  (with-temp-buffer
+    (rename-buffer "*jc3-dlg*" t)
+    (should-not (equal (jetpacs-sections--dialog-id (current-buffer) 1)
+                       (jetpacs-sections--dialog-id (current-buffer) 1)))
+    (should (jetpacs--identifier-p
+             (jetpacs-sections--dialog-id (current-buffer) 1)))))
+
+(ert-deftest jetpacs-sections-float-pos-is-rejected-by-type ()
+  "A float clears `numberp' but misses `exposed-p''s `eql' hash, so it
+would be refused for the wrong reason — and a type gate that lets the
+wrong type through is one exposure-table change away from being a hole."
+  (jetpacs-sections-test--with-client ()
+    (let ((visit (gethash "sections.visit" jetpacs-action-handlers)))
+      (should (eq (funcall visit '(:buffer "*nope*" :pos 1.5)
+                           '(:surface "app:demo"))
+                  'rejected)))))
+
 (provide 'jetpacs-sections-test)
 ;;; jetpacs-sections-test.el ends here

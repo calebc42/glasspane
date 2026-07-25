@@ -637,6 +637,24 @@ span rather than being appended past the budget."
   "The canonical serialized size of NODE in octets."
   (string-bytes (jetpacs-node->canonical-json node)))
 
+(defun jetpacs-buffer-spend-spans (spans)
+  "Cap SPANS against the shared SPEC 4.5 span budget and spend it down.
+Returns the (possibly capped) spans, unchanged when no budget is bound.
+
+`max_rich_spans' is an AGGREGATE across one SurfaceSpec, not a per-node
+cap, so every Tier-1 skin that builds `rich_text' outside
+`jetpacs-buffer--render-region' has to draw on the same allowance —
+otherwise each region starts from the full limit and the spec sails past
+it.  Bind the budget with `jetpacs-buffer-with-budget' around the build."
+  (let ((budget jetpacs-buffer-budget))
+    (if (not (and budget (integerp (car budget))))
+        spans
+      (let ((left (car budget)))
+        (when (> (length spans) left)
+          (setq spans (jetpacs-buffer-cap-spans spans (max 1 left))))
+        (setcar budget (max 0 (- left (length spans))))
+        spans))))
+
 (defun jetpacs-buffer-spans->text (spans)
   "Flatten SPANS into one Core `text' node — the non-`rich_text' fallback.
 Per-span styling and tap actions cannot survive: SPEC 17.2's `text' node

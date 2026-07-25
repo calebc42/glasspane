@@ -35,10 +35,12 @@ emacs -Q --batch -L emacs \
 rm -f emacs/jetpacs-widgets.elc
 
 # And for the JC-0 application-framework floor (docs/SPEC-JC-0-floor.md).
-emacs -Q --batch -L emacs \
-  --eval '(setq byte-compile-error-on-warn t)' \
-  -f batch-byte-compile emacs/jetpacs-async.el
-rm -f emacs/jetpacs-async.elc
+for f in jetpacs-async jetpacs-surfaces jetpacs-shell; do
+  emacs -Q --batch -L emacs \
+    --eval '(setq byte-compile-error-on-warn t)' \
+    -f batch-byte-compile "emacs/$f.el"
+  rm -f "emacs/$f.elc"
+done
 
 emacs -Q --batch -L emacs -l test/ebp-wire-test.el \
   -f ert-run-tests-batch-and-exit
@@ -46,4 +48,8 @@ emacs -Q --batch -L emacs -l test/ebp-wire-test.el \
 # Application-layer builder suite (jetpacs-widgets; requires ebp, so it is
 # absent from the delineation guard above).
 emacs -Q --batch -L emacs -l test/jetpacs-widgets-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JC-0 floor exit gate (docs/SPEC-JC-0-floor.md section 7).
+emacs -Q --batch -L emacs -l test/jetpacs-floor-test.el \
   -f ert-run-tests-batch-and-exit

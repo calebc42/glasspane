@@ -411,6 +411,52 @@ class SurfaceStoreTest {
     }
 
     @Test
+    fun draftsAndRecordsPersistToSeparateFiles() {
+        // LD-14: a keystroke writes only drafts, leaving the records file
+        // (specs + tombstones) untouched.
+        val dir = java.nio.file.Files.createTempDirectory("ebp").toFile()
+            .also { it.deleteOnExit() }
+        val recFile = File(dir, "ebp-surfaces.json")
+        val draftsFile = File(dir, "ebp-surfaces-drafts.json")
+        val s = SurfaceStore(16, 1024, backing = FileSurfaceBacking(recFile))
+        s.update("app:main", 1, inputSpec("authored"), null, null, null)
+        assertTrue(recFile.exists())
+        val recordsMtime = recFile.lastModified()
+        // Type into the field: only the drafts file is (re)written.
+        Thread.sleep(10)
+        s.putDraft("app:main", "title", "typed")
+        assertTrue(draftsFile.exists())
+        assertEquals("records file untouched by a draft write",
+            recordsMtime, recFile.lastModified())
+        // And it round-trips: a fresh store reads both files.
+        val s2 = SurfaceStore(16, 1024, backing = FileSurfaceBacking(recFile))
+        assertEquals("typed", s2.currentValue("app:main", "title"))
+    }
+
+    @Test
+    fun aPreSplitCombinedFileStillLoads() {
+        // LD-14 backward compat: a records file written by the old combined
+        // format carries its own `drafts` array; read those until the next
+        // draft write moves them to the split file.
+        val dir = java.nio.file.Files.createTempDirectory("ebp").toFile()
+            .also { it.deleteOnExit() }
+        val recFile = File(dir, "ebp-surfaces.json")
+        // Hand-write the pre-split shape: records AND drafts in one object.
+        recFile.writeText("""
+            {"records":[{"surface":"app:main","revision":4,"present":true,
+              "spec":{"t":"column","children":[{"t":"text_input","id":"title",
+              "value":"authored"}]}}],
+             "drafts":[{"surface":"app:main","id":"title","value":"legacy"}]}
+        """.trimIndent())
+        val s = SurfaceStore(16, 1024, backing = FileSurfaceBacking(recFile))
+        assertEquals("legacy", s.currentValue("app:main", "title"))
+        // The next draft write splits them out; the record file loses drafts.
+        s.putDraft("app:main", "title", "fresh")
+        val s2 = SurfaceStore(16, 1024, backing = FileSurfaceBacking(recFile))
+        assertEquals("fresh", s2.currentValue("app:main", "title"))
+    }
+
+    @Test
     fun injectedMemberConflictRejects() {
         // SPEC 14.3: a remote descriptor on a value-producing hook must not
         // author the injected member; on hooks that inject nothing it may.

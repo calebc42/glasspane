@@ -29,29 +29,41 @@ data class SurfaceState(val records: List<PersistedRecord>, val drafts: List<Per
 
 interface SurfaceBacking {
     fun load(): SurfaceState
-    /** Atomically and durably replace the whole state; throws on failure. */
-    fun replace(state: SurfaceState)
+    /** LD-14: records and drafts persist SEPARATELY. A keystroke touches only
+     * drafts, so it re-serializes no spec and no tombstone — the dominant
+     * cost was rebuilding every present spec plus up to `max_surface_ids`
+     * (4096) tombstones on every draft write. Each is its own atomic,
+     * durable replace; throws on failure. */
+    fun replaceRecords(records: List<PersistedRecord>)
+    fun replaceDrafts(drafts: List<PersistedDraft>)
 }
 
 class MemorySurfaceBacking : SurfaceBacking {
-    private var state = SurfaceState(emptyList(), emptyList())
-    override fun load(): SurfaceState = state
-    override fun replace(state: SurfaceState) { this.state = state }
+    private var records = emptyList<PersistedRecord>()
+    private var drafts = emptyList<PersistedDraft>()
+    override fun load(): SurfaceState = SurfaceState(records, drafts)
+    override fun replaceRecords(records: List<PersistedRecord>) { this.records = records }
+    override fun replaceDrafts(drafts: List<PersistedDraft>) { this.drafts = drafts }
 }
 
 /**
- * JSON file with write-to-temp, fsync, atomic-rename replacement — the
- * kill-matrix witness for surfaces and input_state, exactly as
- * [FileQueueStore] is for the durable queue.
+ * Two JSON files, each with write-to-temp, fsync, atomic-rename replacement —
+ * the kill-matrix witness for surfaces and input_state, exactly as
+ * [FileQueueStore] is for the durable queue. LD-14: records (specs +
+ * tombstones) and drafts live in SEPARATE files so a keystroke re-serializes
+ * only the drafts. [draftsFile] defaults to a `-drafts` sibling of the
+ * records file, so existing callers pass one path and get the split.
  */
-class FileSurfaceBacking(private val file: File) : SurfaceBacking {
+class FileSurfaceBacking(
+    private val file: File,
+    private val draftsFile: File =
+        File(file.parentFile, file.nameWithoutExtension + "-drafts." +
+            (file.extension.ifEmpty { "json" })),
+) : SurfaceBacking {
 
     override fun load(): SurfaceState {
-        if (!file.exists()) return SurfaceState(emptyList(), emptyList())
-        val text = file.readText(Charsets.UTF_8)
-        if (text.isBlank()) return SurfaceState(emptyList(), emptyList())
-        val root = JSONObject(text)
-        val records = root.getJSONArray("records").let { a ->
+        val root = readObject(file)
+        val records = root?.optJSONArray("records")?.let { a ->
             (0 until a.length()).map { i ->
                 val o = a.getJSONObject(i)
                 PersistedRecord(
@@ -62,46 +74,63 @@ class FileSurfaceBacking(private val file: File) : SurfaceBacking {
                     currentView = if (o.has("current_view")) o.getString("current_view") else null,
                 )
             }
-        }
-        val drafts = root.getJSONArray("drafts").let { a ->
+        } ?: emptyList()
+        // Drafts come from the split file. Backward compat: a records file
+        // written by the pre-split format carries its own `drafts` array;
+        // read those until the next draft write moves them across.
+        val draftsRoot = readObject(draftsFile) ?: root
+        val drafts = draftsRoot?.optJSONArray("drafts")?.let { a ->
             (0 until a.length()).map { i ->
                 val o = a.getJSONObject(i)
                 val raw = o.get("value")
                 PersistedDraft(o.getString("surface"), o.getString("id"),
                     if (raw == JSONObject.NULL) null else raw)
             }
-        }
+        } ?: emptyList()
         return SurfaceState(records, drafts)
     }
 
-    override fun replace(state: SurfaceState) {
-        val records = JSONArray()
-        for (r in state.records) {
+    override fun replaceRecords(records: List<PersistedRecord>) {
+        val arr = JSONArray()
+        for (r in records) {
             val o = JSONObject().put("surface", r.surface)
                 .put("revision", r.revision).put("present", r.present)
             if (r.spec != null) o.put("spec", r.spec)
             if (r.currentView != null) o.put("current_view", r.currentView)
-            records.put(o)
+            arr.put(o)
         }
-        val drafts = JSONArray()
-        for (d in state.drafts)
-            drafts.put(JSONObject().put("surface", d.surface).put("id", d.id)
+        writeAtomic(file, JSONObject().put("records", arr))
+    }
+
+    override fun replaceDrafts(drafts: List<PersistedDraft>) {
+        val arr = JSONArray()
+        for (d in drafts)
+            arr.put(JSONObject().put("surface", d.surface).put("id", d.id)
                 .put("value", d.value ?: JSONObject.NULL))
-        val root = JSONObject().put("records", records).put("drafts", drafts)
-        val temp = File(file.parentFile, file.name + ".tmp")
+        writeAtomic(draftsFile, JSONObject().put("drafts", arr))
+    }
+
+    private fun readObject(f: File): JSONObject? {
+        if (!f.exists()) return null
+        val text = f.readText(Charsets.UTF_8)
+        return if (text.isBlank()) null else JSONObject(text)
+    }
+
+    private fun writeAtomic(target: File, root: JSONObject) {
+        val temp = File(target.parentFile, target.name + ".tmp")
         FileOutputStream(temp).use { out ->
             out.write(root.toString().toByteArray(Charsets.UTF_8))
             out.fd.sync()
         }
-        if (!temp.renameTo(file)) {
+        if (!temp.renameTo(target)) {
             temp.delete()
-            throw java.io.IOException("atomic replace failed for $file")
+            throw java.io.IOException("atomic replace failed for $target")
         }
         // Directory fsync for the rename's own durability (best-effort; the
         // JVM cannot demand it portably), as in FileQueueStore.
         runCatching {
             java.nio.channels.FileChannel.open(
-                file.parentFile.toPath(),
+                target.parentFile.toPath(),
                 java.nio.file.StandardOpenOption.READ).use { it.force(true) }
         }
     }

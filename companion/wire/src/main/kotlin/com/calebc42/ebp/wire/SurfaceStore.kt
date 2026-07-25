@@ -75,14 +75,26 @@ class SurfaceStore(
      * reconnect regardless. Called on every accepted mutation, so a draft
      * is durable before any later durable event (SPEC 15.1 ordering).
      */
-    private fun persist() {
+    private fun persistRecords() {
         runCatching {
-            val recs = records.map { (surface, r) ->
+            backing.replaceRecords(records.map { (surface, r) ->
                 PersistedRecord(surface, r.revision, r.present, r.spec, r.currentView)
-            }
-            val drs = drafts.map { (k, v) -> PersistedDraft(k.first, k.second, v) }
-            backing.replace(SurfaceState(recs, drs))
+            })
         }
+    }
+
+    private fun persistDrafts() {
+        runCatching {
+            backing.replaceDrafts(drafts.map { (k, v) -> PersistedDraft(k.first, k.second, v) })
+        }
+    }
+
+    /** LD-14: an update or remove touches both files. The order is
+     * drafts-then-records so a §15.1 reader that saw the new records also
+     * sees the reconciled drafts, never a draft the new spec has dropped. */
+    private fun persist() {
+        persistDrafts()
+        persistRecords()
     }
 
     fun isValidSurfaceId(id: String): Boolean =
@@ -108,7 +120,7 @@ class SurfaceStore(
         val views = r.spec?.optJSONObject("views") ?: return false
         if (!views.has(view)) return false
         r.currentView = view
-        persist()
+        persistRecords() // view choice is record state, no draft touched
         return true
     }
 
@@ -288,8 +300,10 @@ class SurfaceStore(
         if (node.optBoolean("password")) return // SPEC 14.6: never retained
         drafts[surface to id] = value
         // SPEC 15.1: the input_state snapshot is durable no later than any
-        // event created from this interaction.
-        persist()
+        // event created from this interaction. LD-14: only drafts.json is
+        // rewritten — a keystroke no longer re-serializes every spec and
+        // every tombstone.
+        persistDrafts()
     }
 
     fun draft(surface: String, id: String): Any? = drafts[surface to id]

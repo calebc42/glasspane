@@ -212,6 +212,56 @@ class WireConformanceTest {
             sessionStep(SessionState.CONNECTED, SessionEvent.CLOSE))
     }
 
+    // ----------------------------------------------- decoder scaling (LD-21)
+
+    @Test
+    fun largeBodyInEightKiBChunksDecodesOnce() {
+        // LD-21: one spec-legal large frame arriving in 8 KiB transport reads
+        // (DeviceBridge's read size). The old decoder re-copied and re-scanned
+        // every pending byte per read and re-parsed the header until the body
+        // completed — measured 229 ms / 1.08 GB of memory traffic for a 4 MiB
+        // body on a desktop. State now lives on the decoder: header parsed
+        // once, scan resumes at the watermark, reads append in place.
+        val payload = "x".repeat(4_000_000)
+        val msg = JSONObject().put("jsonrpc", "2.0").put("method", "log.debug")
+            .put("params", JSONObject().put("m", payload))
+        val encoded = encodeFrame(msg.toString())
+        val d = FrameDecoder()
+        val out = mutableListOf<JSONObject>()
+        var i = 0
+        while (i < encoded.size) {
+            val n = minOf(8192, encoded.size - i)
+            d.feed(encoded.copyOfRange(i, i + n)) { out.add(it) }
+            i += n
+        }
+        d.finish()
+        assertEquals(1, out.size)
+        assertEquals(payload, out[0].getJSONObject("params").getString("m"))
+    }
+
+    @Test
+    fun pipelinedFramesDecodeInOrderAtEverySplitPoint() {
+        // Two pipelined frames split at every byte boundary — including
+        // inside the CRLFCRLF terminator and mid-body — decode identically.
+        val a = encodeFrame(JSONObject().put("jsonrpc", "2.0")
+            .put("method", "log.debug")
+            .put("params", JSONObject().put("m", "first")).toString())
+        val b = encodeFrame(JSONObject().put("jsonrpc", "2.0")
+            .put("method", "log.debug")
+            .put("params", JSONObject().put("m", "second")).toString())
+        val joined = a + b
+        for (cut in 1 until joined.size) {
+            val d = FrameDecoder()
+            val out = mutableListOf<JSONObject>()
+            d.feed(joined.copyOfRange(0, cut)) { out.add(it) }
+            d.feed(joined.copyOfRange(cut, joined.size)) { out.add(it) }
+            d.finish()
+            assertEquals("cut at $cut", 2, out.size)
+            assertEquals("first", out[0].getJSONObject("params").getString("m"))
+            assertEquals("second", out[1].getJSONObject("params").getString("m"))
+        }
+    }
+
     // ------------------------------------------------------- json equality --
 
     /** Structural JSON equality: objects unordered, arrays ordered. */

@@ -14,7 +14,10 @@ import com.calebc42.ebp.wire.ImageGuards
 import java.io.InputStream
 import java.net.InetAddress
 import java.net.URL
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 object ImageLoader {
@@ -34,17 +37,28 @@ object ImageLoader {
     private const val CONNECT_TIMEOUT_MS = 8_000
     private const val READ_TIMEOUT_MS = 8_000
 
+    /** LD-12 crash-closer: at most three concurrent fetch/decodes, so N
+     * individually-legal images cannot ask for N × 64 MiB of decoded memory
+     * at once (each is per-image capped; nothing bounded the sum). */
+    private val gate = Semaphore(permits = 3)
+
     /** Load [url] under [limits], or null on any guard failure. Off the main
      * thread — the caller composes a placeholder while this runs. */
     suspend fun load(url: String, limits: Limits): Bitmap? = withContext(Dispatchers.IO) {
-        try {
-            when {
-                ImageGuards.isHttps(url) -> loadHttps(url, limits)
-                url.startsWith("data:", ignoreCase = true) -> loadData(url, limits)
-                else -> null // SPEC 17.2: no implicit form
+        gate.withPermit {
+            try {
+                when {
+                    ImageGuards.isHttps(url) -> loadHttps(url, limits)
+                    url.startsWith("data:", ignoreCase = true) -> loadData(url, limits)
+                    else -> null // SPEC 17.2: no implicit form
+                }
+            } catch (ce: CancellationException) {
+                throw ce // leaving composition cancels the load; propagate
+            } catch (t: Throwable) {
+                // LD-12: OutOfMemoryError is an Error — `catch (Exception)`
+                // let a decode OOM escape the loader and kill the process.
+                null // never surface response content or a crash
             }
-        } catch (e: Exception) {
-            null // never surface response content or a crash
         }
     }
 

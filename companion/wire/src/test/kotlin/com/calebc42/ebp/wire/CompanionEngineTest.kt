@@ -477,4 +477,48 @@ class CompanionEngineTest {
         // The default config still fits with the worst case now counted.
         engineWithLimits(limits())
     }
+
+    // ------------------------------------------------------ close (SPEC 22.3)
+
+    @Test
+    fun closeFailsOutstandingRequestsLocally() {
+        // SPEC 22.3 (LD-13): "Outstanding requests fail locally" — a callback
+        // parked in `pending` when the transport dies is invoked once with a
+        // synthetic terminal error, never left waiting forever.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello()))
+        engine.feed(frame(auth()))
+        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        var got: JSONObject? = null
+        engine.sendRequest("event.action", JSONObject().put("k", "v")) { _, err -> got = err }
+        assertTrue(got == null)
+        engine.close("transport closed")
+        assertNotNull(got)
+        assertEquals("connection-closed", got!!.getJSONObject("data").getString("kind"))
+    }
+
+    @Test
+    fun closeSurvivesAThrowingHostListener() {
+        // LD-18: a throwing host callout during teardown must not abort the
+        // rest of close() — pending still drains and the engine still reaches
+        // CLOSED (serve()'s finally has no retry, and the firing detach runs
+        // before any callout can throw).
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out, supported = setOf("theme", "surfaces.dialog"))
+        engine.feed(frame(hello(listOf("theme", "surfaces.dialog"))))
+        engine.feed(frame(auth()))
+        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        engine.dialogListener = { _, spec ->
+            if (spec == null) throw RuntimeException("host UI died")
+        }
+        engine.feed(frame(request("d1", "dialog.show", JSONObject()
+            .put("dialog_id", "dlg")
+            .put("spec", JSONObject().put("t", "text").put("text", "x")))))
+        var got: JSONObject? = null
+        engine.sendRequest("event.action", JSONObject()) { _, err -> got = err }
+        engine.close("transport closed")
+        assertEquals(SessionState.CLOSED, engine.state)
+        assertNotNull(got)
+    }
 }

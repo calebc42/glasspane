@@ -331,8 +331,10 @@ class DeviceBridge(
             // transport loss: SPEC 10.1, any state may close
         } finally {
             // SPEC 15.3: the engine releases its in-flight marker so the
-            // next session's replay is never wedged (review P0).
-            engine.close("transport closed")
+            // next session's replay is never wedged (review P0). LD-18:
+            // best-effort — a throw here must not skip clearLiveSession and
+            // socket.close(), which would leak the FD and park a dead engine.
+            runCatching { engine.close("transport closed") }
             // Atomic compare-and-clear: only if a newer connection has not
             // already superseded this one in the slot (SPEC 5.2 newest-wins).
             CompanionStores.clearLiveSession(engine)

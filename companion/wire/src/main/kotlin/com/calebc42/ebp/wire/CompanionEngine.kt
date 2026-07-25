@@ -124,24 +124,41 @@ class CompanionEngine(
     fun close(reason: String) {
         state = SessionState.CLOSED
         closeReason = reason
+        // LD-18: leave the device-lifetime slot FIRST — a throw from any
+        // host callout below must never park a dead engine in the firing
+        // service's AtomicReference for the connection's afterlife.
+        firing.detach(this)
         // P0 (review): the in-flight marker is connection state. If this
         // engine's request dies with the connection, the record MUST
         // return to plain queued so the next session's replay can move
         // (SPEC 15.3: events without a permanent result remain queued).
         queue.clearInFlight(myInFlightSeq)
         myInFlightSeq = null
+        // SPEC 22.3 (LD-13): outstanding requests fail locally — every
+        // pending callback gets one synthetic terminal error, so no caller
+        // waits forever on a response the dead transport will never carry.
+        if (pending.isNotEmpty()) {
+            val callbacks = pending.values.toList()
+            pending.clear()
+            val err = JSONObject()
+                .put("code", -32603).put("message", "Connection closed")
+                .put("data", JSONObject().put("kind", "connection-closed"))
+            callbacks.forEach { cb -> runCatching { cb(null, err) } }
+        }
         // SPEC 18.1: on transport loss every outstanding dialog is
         // dismissed locally; its request dies with the connection.
+        // LD-18: callouts are best-effort — a throwing host listener must
+        // not abort the rest of teardown (serve()'s finally has no retry).
         if (dialogs.isNotEmpty()) {
             val ids = dialogs.keys.toList()
             dialogs.clear()
-            ids.forEach { dialogListener?.invoke(it, null) }
+            ids.forEach { runCatching { dialogListener?.invoke(it, null) } }
         }
         // SPEC 18.3: pie menus are ephemeral to the session — dismiss all.
         if (pieMenus.isNotEmpty()) {
             val ids = pieMenus.keys.toList()
             pieMenus.clear()
-            ids.forEach { pieMenuListener?.invoke(it, null) }
+            ids.forEach { runCatching { pieMenuListener?.invoke(it, null) } }
         }
         // SPEC 19: transport loss closes all editor sessions locally; the
         // session IDs are dead and new sessions are created after reconnect.
@@ -149,8 +166,6 @@ class CompanionEngine(
         editors.clear()
         surfaceEditors.clear()
         pendingEditors.clear()
-        // SPEC 5.2: stop being the firing service's live session (if still it).
-        firing.detach(this)
     }
 
     /** The queue_seq this engine's connection put in flight, if any. */

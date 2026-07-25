@@ -40,7 +40,21 @@ class InvalidRequest(message: String) : Exception(message)
  * messages come back in wire order. Errors are thrown as the taxonomy above.
  */
 class FrameDecoder {
-    private var buffer = ByteArray(0)
+    // LD-21: the naive shape — reallocate-and-copy every pending byte on each
+    // read, rescan for the terminator from index 0, re-parse the header until
+    // the body completes — is O(n²) per frame: measured 229 ms and 1.08 GB of
+    // memory traffic for ONE spec-legal 4 MiB body arriving in 8 KiB reads.
+    // Emacs's discipline, both halves: carry parse state on the connection
+    // (jsonrpc.el stores `expected-bytes`, so the header regexp runs once)
+    // and never rescan consumed input (read_process_output's fixed buffer
+    // carries over only the undecoded remainder). Indices below are absolute
+    // positions in `buffer`; `offset` is the current frame's first byte.
+    private var buffer = ByteArray(8192)
+    private var size = 0       // valid bytes in buffer
+    private var offset = 0     // consumed bytes — the current frame starts here
+    private var scanned = 0    // no terminator STARTS before this index
+    private var expected = -1  // declared body length, once the header parsed
+    private var bodyStart = -1 // absolute index of the body's first byte
 
     fun feed(bytes: ByteArray): List<JSONObject> =
         mutableListOf<JSONObject>().also { feed(bytes, it::add) }
@@ -53,35 +67,63 @@ class FrameDecoder {
      * can answer the bad frame per SPEC 6.2 and keep the earlier work.
      */
     fun feed(bytes: ByteArray, consumer: (JSONObject) -> Unit) {
-        buffer += bytes
+        append(bytes)
         while (true) {
-            val term = indexOfTerminator(buffer)
-            if (term < 0) {
-                // SPEC 6.2: the header section may not exceed 8,192 octets.
-                if (buffer.size > WireLimits.MAX_HEADER_OCTETS)
+            if (expected < 0) {
+                val term = indexOfTerminator(maxOf(offset, scanned))
+                if (term < 0) {
+                    scanned = maxOf(offset, size - 3)
+                    // SPEC 6.2: the header section may not exceed 8,192 octets.
+                    if (size - offset > WireLimits.MAX_HEADER_OCTETS)
+                        throw FrameClose("header section too large")
+                    return
+                }
+                if (term - offset + 4 > WireLimits.MAX_HEADER_OCTETS)
                     throw FrameClose("header section too large")
-                return
+                expected = parseHeader(
+                    String(buffer, offset, term - offset, StandardCharsets.ISO_8859_1))
+                bodyStart = term + 4
             }
-            if (term + 4 > WireLimits.MAX_HEADER_OCTETS)
-                throw FrameClose("header section too large")
-            val length = parseHeader(String(buffer, 0, term, StandardCharsets.ISO_8859_1))
-            val bodyStart = term + 4
-            val bodyEnd = bodyStart + length
-            if (buffer.size < bodyEnd) return // retain partial data
-            val body = buffer.copyOfRange(bodyStart, bodyEnd)
-            buffer = buffer.copyOfRange(bodyEnd, buffer.size)
+            if (size - bodyStart < expected) return // retain partial data
+            val body = buffer.copyOfRange(bodyStart, bodyStart + expected)
+            offset = bodyStart + expected
+            scanned = offset
+            expected = -1
+            bodyStart = -1
+            compact()
             consumer(parseBody(body))
         }
     }
 
     /** SPEC 6.2: EOF mid-frame terminates the session. */
     fun finish() {
-        if (buffer.isNotEmpty())
-            throw FrameIncomplete("stream ended with ${buffer.size} pending octets")
+        if (size - offset > 0)
+            throw FrameIncomplete("stream ended with ${size - offset} pending octets")
     }
 
-    private fun indexOfTerminator(buf: ByteArray): Int {
-        for (i in 0..buf.size - 4) {
+    private fun append(bytes: ByteArray) {
+        if (size + bytes.size > buffer.size)
+            buffer = buffer.copyOf(maxOf(buffer.size * 2, size + bytes.size))
+        System.arraycopy(bytes, 0, buffer, size, bytes.size)
+        size += bytes.size
+    }
+
+    /** Reclaim consumed space between frames (never while a header/body is
+     * mid-parse — `bodyStart` is absolute). */
+    private fun compact() {
+        if (offset == size) {
+            offset = 0; size = 0; scanned = 0
+        } else if (offset > 65_536) {
+            System.arraycopy(buffer, offset, buffer, 0, size - offset)
+            size -= offset
+            scanned -= offset
+            offset = 0
+        }
+    }
+
+    private fun indexOfTerminator(from: Int): Int {
+        val buf = buffer
+        for (i in from..size - 4) {
             if (buf[i] == CR && buf[i + 1] == LF && buf[i + 2] == CR && buf[i + 3] == LF)
                 return i
         }

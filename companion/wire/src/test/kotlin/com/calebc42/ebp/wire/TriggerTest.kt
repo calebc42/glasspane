@@ -85,6 +85,22 @@ class TriggerTest {
     // ---------------------------------------------------------- dispatch
 
     @Test
+    fun rescheduleThrowAfterCommitStillClaimsTheSet() {
+        // LD-16: the set is durably committed and armed BEFORE the host's
+        // alarm-reschedule callout runs. A throw there must not be reported
+        // as -32603 "Storage failed" (Emacs would believe the PRIOR set is
+        // in force while the new one is live) and must not skip the listener.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        var listened = 0
+        engine.triggerListener = { _, _ -> listened++ }
+        engine.firing.onTimeScheduleChanged = { throw IllegalStateException("alarm host down") }
+        set(engine, "s1", trig("boot-hi", "boot"))
+        assertEquals(1, count(out, "s1"))
+        assertEquals(1, listened)
+    }
+
+    @Test
     fun acceptedSetReturnsCount() {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out)

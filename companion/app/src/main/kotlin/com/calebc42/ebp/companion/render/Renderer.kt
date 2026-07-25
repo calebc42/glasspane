@@ -75,8 +75,40 @@ class RenderCtx(
     fun child(node: JSONObject?, index: Int): RenderCtx =
         RenderCtx(surface, bridge, dialog, identityPath(path, node, index))
 
-    fun action(descriptor: JSONObject?, value: Any? = null) =
+    fun action(descriptor: JSONObject?, value: Any? = null) {
+        // SPEC 18.1 (T3c, closes LD-1): inside a dialog the dialog.submit /
+        // dialog.dismiss builtins complete the outstanding request instead of
+        // dispatching remotely — resolved HERE, in the one ordinary dispatch
+        // chain (command_remapping's shape: an override is an ordinary
+        // binding), so every dispatch site is correct without knowing about
+        // dialogs. Before this, only the five button-shaped sites rebound;
+        // a text_input Done key, an empty_state tap, a section_header
+        // trailing action, or any on_tap inside a dialog document fell into
+        // the engine's when with no dialog.submit arm and hung Emacs forever.
+        val d = dialog
+        if (d != null && descriptor != null && descriptor.has("builtin")) {
+            when (descriptor.optString("builtin")) {
+                "dialog.submit" -> {
+                    val fields = JSONObject()
+                    descriptor.optJSONArray("capture_fields")?.let { capture ->
+                        for (i in 0 until capture.length()) {
+                            val fieldId = capture.getString(i)
+                            fields.put(fieldId, d.fields[fieldId] ?: "")
+                        }
+                    }
+                    d.bridge.dialogSubmit(d.dialogId,
+                        if (descriptor.has("value")) descriptor.opt("value") else null,
+                        fields)
+                    return
+                }
+                "dialog.dismiss" -> {
+                    d.bridge.dialogDismiss(d.dialogId)
+                    return
+                }
+            }
+        }
         bridge.action(surface, descriptor, value)
+    }
 
     /** §14.3 multi-member hooks (on_reorder, on_add_row/col, swipe sides). */
     fun actionInjecting(descriptor: JSONObject?, injected: JSONObject) =
@@ -522,27 +554,9 @@ fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
 
 // ------------------------------------------------------------ actions
 
+// The dialog rebinding lives in RenderCtx.action (T3c) — button sites are
+// plain dispatches like every other descriptor site.
 fun onButton(onTap: JSONObject?, ctx: RenderCtx) {
     onTap ?: return
-    val dialog = ctx.dialog
-    // SPEC 18.1: inside a dialog, dialog.submit/dismiss builtins complete
-    // the outstanding request rather than dispatching a remote action.
-    if (dialog != null && onTap.has("builtin")) {
-        when (onTap.optString("builtin")) {
-            "dialog.submit" -> {
-                val fields = JSONObject()
-                onTap.optJSONArray("capture_fields")?.let { capture ->
-                    for (i in 0 until capture.length()) {
-                        val fieldId = capture.getString(i)
-                        fields.put(fieldId, dialog.fields[fieldId] ?: "")
-                    }
-                }
-                dialog.bridge.dialogSubmit(dialog.dialogId,
-                    if (onTap.has("value")) onTap.opt("value") else null, fields)
-            }
-            "dialog.dismiss" -> dialog.bridge.dialogDismiss(dialog.dialogId)
-        }
-        return
-    }
     ctx.action(onTap)
 }

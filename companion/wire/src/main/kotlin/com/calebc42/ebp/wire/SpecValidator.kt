@@ -260,8 +260,13 @@ object SpecValidator {
         // would validate but throw at tap time.
         if (onTap.has("builtin"))
             throw ContentInvalid("$path.on_tap", "notification action must be a remote action, not a builtin")
+        // LD-19: identifiers carry the SPEC 4.4/4.5 128-octet bound, not
+        // just the grammar — this is the node-id check applied to the two
+        // sites that missed it (icon here, input.key below).
         if (a.has("icon") && (a.opt("icon") !is String ||
-                !IDENTIFIER.matches(a.getString("icon"))))
+                !IDENTIFIER.matches(a.getString("icon")) ||
+                a.getString("icon").toByteArray(Charsets.UTF_8).size >
+                    WireLimits.MAX_IDENTIFIER_OCTETS))
             throw ContentInvalid("$path.icon", "must be an identifier")
         val dismiss = a.opt("dismiss")
         if (a.has("dismiss") && dismiss !is Boolean)
@@ -275,7 +280,9 @@ object SpecValidator {
             if (input.has("hint") && input.opt("hint") !is String)
                 throw ContentInvalid("$path.input.hint", "must be a string")
             if (input.has("key") && (input.opt("key") !is String ||
-                    !IDENTIFIER.matches(input.getString("key"))))
+                    !IDENTIFIER.matches(input.getString("key")) ||
+                    input.getString("key").toByteArray(Charsets.UTF_8).size >
+                        WireLimits.MAX_IDENTIFIER_OCTETS))
                 throw ContentInvalid("$path.input.key", "must be an identifier")
         }
         // SPEC 18.5: when input or dismiss:true is present, on_tap MUST be

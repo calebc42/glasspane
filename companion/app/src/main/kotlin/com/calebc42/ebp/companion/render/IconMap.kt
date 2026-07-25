@@ -86,17 +86,22 @@ object IconMap {
         cache["help_outline"] = Icons.Outlined.HelpOutline
     }
 
-    fun get(name: String): ImageVector = cache.getOrPut(name) {
+    fun get(name: String): ImageVector = cache[name] ?: run {
         val pascal = name.split('_').joinToString("") { part ->
             part.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         }
-        resolve("androidx.compose.material.icons.outlined.${pascal}Kt",
+        val resolved = resolve("androidx.compose.material.icons.outlined.${pascal}Kt",
             "get$pascal", Icons.Outlined)
             ?: resolve("androidx.compose.material.icons.automirrored.outlined.${pascal}Kt",
                 "get$pascal", Icons.AutoMirrored.Outlined)
             ?: resolve("androidx.compose.material.icons.filled.${pascal}Kt",
                 "get$pascal", Icons.Filled)
-            ?: Icons.Outlined.HelpOutline // SPEC 17.2: harmless placeholder
+        // LD-19: cache only a RESOLVED vector. The success set is finite (the
+        // material catalog), so the map is bounded by construction; getOrPut
+        // of the placeholder grew one entry per distinct unknown wire string
+        // for the process lifetime.
+        if (resolved != null) { cache[name] = resolved; resolved }
+        else Icons.Outlined.HelpOutline // SPEC 17.2: harmless placeholder
     }
 
     private fun resolve(className: String, methodName: String, receiver: Any): ImageVector? =

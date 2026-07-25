@@ -138,7 +138,12 @@ class TriggerFiringService(
         val count = synchronized(this) {
             store.replace(identity, entries).also { runtime.armBaselines(identity) }
         }
-        onTimeScheduleChanged?.invoke()
+        // LD-16: the set is already durably committed and armed — a throw
+        // from the host's alarm-reschedule callout must not travel back into
+        // handleTriggersSet's catch and be reported as "Storage failed",
+        // leaving Emacs believing the PRIOR set is in force while the new
+        // one is live (SPEC 21.1). Cold-start re-arm recovers alarms anyway.
+        runCatching { onTimeScheduleChanged?.invoke() }
         return count
     }
 

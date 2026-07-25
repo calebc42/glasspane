@@ -63,6 +63,34 @@ class SpecLimitsTest {
     }
 
     @Test
+    fun identifierOctetBoundAppliesToActionIconAndInputKey() {
+        // LD-19: the SPEC 4.4/4.5 128-octet identifier bound applied to the
+        // two sites that had only the grammar check — a notification action's
+        // icon and its inline-reply input.key (both feed process-lifetime
+        // maps keyed on the wire string).
+        val longId = "a".repeat(WireLimits.MAX_IDENTIFIER_OCTETS + 1)
+        val remote = JSONObject().put("action", "demo.act")
+        fun notif(action: JSONObject) = JSONObject()
+            .put("body", JSONObject().put("t", "text").put("text", "x"))
+            .put("meta", JSONObject().put("actions", JSONArray().put(action)))
+        val iconErr = runCatching {
+            SpecValidator.validateNotificationSpec(notif(JSONObject()
+                .put("label", "L").put("on_tap", remote).put("icon", longId)))
+        }.exceptionOrNull()
+        assertTrue(iconErr is ContentInvalid)
+        val keyErr = runCatching {
+            SpecValidator.validateNotificationSpec(notif(JSONObject()
+                .put("label", "L").put("on_tap", remote)
+                .put("input", JSONObject().put("key", longId))))
+        }.exceptionOrNull()
+        assertTrue(keyErr is ContentInvalid)
+        // Exactly at the bound stays legal.
+        SpecValidator.validateNotificationSpec(notif(JSONObject()
+            .put("label", "L").put("on_tap", remote)
+            .put("icon", "a".repeat(WireLimits.MAX_IDENTIFIER_OCTETS))))
+    }
+
+    @Test
     fun tableCellSpansSpendTheRichSpanAllowance() {
         // Every RichSpan in the document spends max_rich_spans — table cells
         // hold RichSpan[] too, and a "rich_text only" count would let a table

@@ -231,6 +231,13 @@ logged: amendment #74 puts sensitive trigger data in `args'."
             :error)
            'rejected))
       (quit 'rejected)
+      ;; A handler that deliberately signals a typed EBP error (notably
+      ;; `1500 event-retry', the only way to say "not now, redeliver")
+      ;; must reach the endpoint: `jsonrpc-error' derives from `error',
+      ;; so the clause below would otherwise swallow it and answer
+      ;; `rejected' — which SPEC 14.4 makes PERMANENT, deleting the
+      ;; Companion's durable record.
+      (jsonrpc-error (signal (car err) (cdr err)))
       (error
        (message "jetpacs: action %s failed: %s"
                 (plist-get params :action) (error-message-string err))

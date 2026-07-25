@@ -190,6 +190,25 @@ that advertises only the Core Node Set the renderer must emit Core
                          nil)))
       (should (= (length spans) 6)))))
 
+(ert-deftest jetpacs-buffer-non-scalar-bytes-are-serializable ()
+  "SPEC 4.1: every emitted string must be Unicode scalar values.
+Emacs holds an undecodable octet as a raw-byte char (#x3FFF80..) which
+`json-serialize' rejects outright, so any non-UTF-8 buffer would
+otherwise take down the whole render — and the Core-`text' fallback
+hits the same serializer, so it is no escape."
+  (with-current-buffer (get-buffer-create "*jc1-bytes-raw*")
+    (fundamental-mode)
+    (erase-buffer)
+    (insert "caf" (string-to-multibyte "\310\311") "\n")
+    ;; Precondition: the fixture really does hold non-scalar chars.
+    (should (cl-some (lambda (c) (>= c #x3FFF80))
+                     (append (buffer-string) nil)))
+    (let* ((nodes (jetpacs-buffer-render (current-buffer)))
+           (span (aref (plist-get (car nodes) :spans) 0)))
+      ;; The guarantee: the whole tree serializes.
+      (should (jetpacs-node->canonical-json (vconcat nodes)))
+      (should (equal (plist-get span :text) "caf\uFFFD\uFFFD")))))
+
 (ert-deftest jetpacs-buffer-line-cap-note ()
   (let ((jetpacs-buffer-max-lines 3))
     (with-current-buffer (get-buffer-create "*jc1-cap*")
@@ -232,9 +251,9 @@ that advertises only the Core Node Set the renderer must emit Core
                      "rich_text")))))
 
 (ert-deftest jetpacs-buffer-actions-honor-d2 ()
-  "The tap actions validate and answer now, deferring the effect
-\(decision D2): rejected for an unresolvable buffer; accepted with the
-effect and refresh running only from the captured continuation."
+  "SPEC 14.4 + decision D2: rejected for an unresolvable buffer;
+`accepted' only once the effect has ACTUALLY RUN (a volatile-callback
+accept is explicitly non-conforming), with only the re-push deferred."
   (let ((act (gethash "emacs.buffer.act" jetpacs-action-handlers))
         (fold (gethash "jetpacs.buffer.fold" jetpacs-action-handlers)))
     (should (functionp act))
@@ -257,11 +276,12 @@ effect and refresh running only from the captured continuation."
         (should (eq (funcall act '(:buffer "*jc1-act*" :pos 1)
                             '(:surface "app:demo"))
                     'accepted))
+        ;; The effect ran BEFORE accepted was returned (SPEC 14.4)...
+        (should pressed)
+        ;; ...and only the re-push was deferred.
         (should (= (length deferred) 1))
-        (should-not pressed)
         (should-not refreshed)
         (funcall (car deferred))
-        (should pressed)
         (should (equal refreshed "app:demo"))))))
 
 (provide 'jetpacs-buffer-test)

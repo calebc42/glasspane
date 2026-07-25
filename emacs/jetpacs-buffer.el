@@ -282,6 +282,19 @@ next line, since modes differ on which carries `invisible'."
 
 ;; --- Region -> spans --------------------------------------------------------
 
+(defun jetpacs-buffer--scalar-text (s)
+  "S with every non-scalar char replaced by U+FFFD (SPEC 4.1).
+Emacs stores an undecodable octet as a raw-byte char in
+#x3FFF80..#x3FFFFF, and a lone surrogate as #xD800..#xDFFF; neither is a
+Unicode scalar value, and `json-serialize' signals `wrong-type-argument'
+on both.  Any buffer that is not valid UTF-8 — a latin-1 source, a
+binary, a truncated log, a mid-stream broken sequence in
+*compilation* — would otherwise take down the whole render."
+  (if (string-match-p "[\x3FFF80-\x3FFFFF\xD800-\xDFFF]" s)
+      (replace-regexp-in-string "[\x3FFF80-\x3FFFFF\xD800-\xDFFF]" "�"
+                                s t t)
+    s))
+
 (defun jetpacs-buffer--expand-tabs (text col)
   "Expand TABs in TEXT to spaces given the starting column COL.
 Returns (EXPANDED-TEXT . END-COL).  Text with no TAB is returned as-is,
@@ -335,6 +348,7 @@ display spec render nothing."
                    ((and (consp disp) (eq (car disp) 'space))
                     (make-string (jetpacs-buffer--space-width disp c) ?\s))
                    (t (substring-no-properties str i next))))
+             (raw (and raw (jetpacs-buffer--scalar-text raw)))
              (face (or (get-text-property i 'face str)
                        (get-text-property i 'font-lock-face str)))
              (style (jetpacs-buffer--span-style face)))
@@ -410,7 +424,9 @@ the start of each actionable property run."
                     (setq text (make-string w ?\s) col (+ col w))))
                  (t
                   (let ((exp (jetpacs-buffer--expand-tabs
-                              (buffer-substring-no-properties pos next) col)))
+                              (jetpacs-buffer--scalar-text
+                               (buffer-substring-no-properties pos next))
+                              col)))
                     (setq text (car exp) col (cdr exp)))))
                 (when (and (stringp text) (not (string-empty-p text)))
                   (push (apply #'jetpacs-span text
@@ -703,13 +719,15 @@ through a desktop `read-string' prompt — this runs from the tap's
 dispatch extent.  A JC-4 dialog bridge will re-route it to the phone."
   (pcase hit
     (`(button . ,w) (widget-apply-action w) t)
-    (`(field . ,w)
-     (let* ((old (widget-field-value-get w))
-            (tag (or (widget-get w :tag) "Edit field"))
-            (new (read-string (format "%s: " tag) old)))
-       (unless (equal new old)
-         (widget-field-value-set w new))
-       t))))
+    (`(field . ,_w)
+     ;; Editing a field needs a value from the user, and the effect now
+     ;; runs INSIDE the jsonrpc dispatch extent (see
+     ;; `jetpacs-buffer--defer-refresh'), where a `read-string' would
+     ;; wedge the connection — on a headless daemon, permanently.  Until
+     ;; the JC-4 dialog bridge can carry the prompt to the phone, a field
+     ;; tap is refused rather than answered with a lie or a hang.
+     (error "jetpacs: editing a widget field needs the dialog bridge \
+(JC-4); tap refused"))))
 
 (defun jetpacs-buffer-call-shimmed (cmd &optional on-error)
   "Run command CMD with window-display and input-event shims.
@@ -786,27 +804,32 @@ the jsonrpc dispatch extent (decision D2)."
       (error (message "jetpacs-buffer: refresh failed: %s"
                       (error-message-string err))))))
 
-(defun jetpacs-buffer--defer-tap (effect surface)
-  "Run EFFECT then a refresh of SURFACE from a zero-delay continuation.
-Decision D2: an action handler returns its status immediately; the
-buffer effect — which may navigate, prompt on the desktop, or mutate —
-runs outside the jsonrpc dispatch extent."
-  (run-at-time 0 nil
-               (lambda ()
-                 (ignore-errors (funcall effect))
-                 (jetpacs-buffer--refresh surface))))
+(defun jetpacs-buffer--defer-refresh (surface)
+  "Re-push SURFACE from a zero-delay continuation.
+Only the REFRESH is deferred.  The tap's effect itself must already
+have run: SPEC 14.4 says \"Returning `accepted' merely because a
+volatile callback was scheduled is not conforming\" — Emacs dying
+before the timer fired would leave a committed receipt (so redelivery
+answers `duplicate') and no effect, losing the user's intent silently.
+Decision D2 bans blocking on the USER inside the dispatch extent, not
+bounded local work, so the effect runs synchronously and only the push
+— which needs the mutated buffer — is deferred."
+  (run-at-time 0 nil (lambda () (jetpacs-buffer--refresh surface))))
 
 ;; --- The two Tier-0 actions (registered through the JC-0 shim) --------------
 
+;; Both effects run SYNCHRONOUSLY so `accepted' names a completed effect
+;; (SPEC 14.4); a signalling effect reaches the JC-0 shim's condition-case
+;; and answers `rejected', which is the honest outcome.  Only the re-push
+;; is deferred.
 (jetpacs-defaction "emacs.buffer.act"
   (lambda (args params)
     (let ((buffer (plist-get args :buffer))
           (pos (plist-get args :pos)))
       (if (not (and (stringp buffer) (numberp pos) (get-buffer buffer)))
           'rejected                      ; unresolvable args (SPEC 14.1)
-        (jetpacs-buffer--defer-tap
-         (lambda () (jetpacs-buffer-invoke-at buffer pos))
-         (plist-get params :surface))
+        (jetpacs-buffer-invoke-at buffer pos)
+        (jetpacs-buffer--defer-refresh (plist-get params :surface))
         'accepted))))
 
 (jetpacs-defaction "jetpacs.buffer.fold"
@@ -815,9 +838,8 @@ runs outside the jsonrpc dispatch extent."
           (pos (plist-get args :pos)))
       (if (not (and (stringp buffer) (numberp pos) (get-buffer buffer)))
           'rejected
-        (jetpacs-buffer--defer-tap
-         (lambda () (jetpacs-buffer-toggle-fold-at buffer pos))
-         (plist-get params :surface))
+        (jetpacs-buffer-toggle-fold-at buffer pos)
+        (jetpacs-buffer--defer-refresh (plist-get params :surface))
         'accepted))))
 
 ;; --- Fold dispatch ------------------------------------------------------------

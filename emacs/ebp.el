@@ -1387,12 +1387,23 @@ CONFIG is `ebp-client-create' config.  Returns the client.  Transport,
 framing, and id bookkeeping are core jsonrpc.el's; reconnection policy
 stays with the caller for now."
   (let* ((client (apply #'ebp-client-create config))
-         ;; :coding binary — jsonrpc.el 1.0.25 never sets the process
-         ;; coding system, and Content-Length counts octets; never let an
-         ;; ambient `coding-system-for-read' reinterpret the stream.
+         ;; Pin the coding system: jsonrpc.el 1.0.25 never sets one, so an
+         ;; ambient `coding-system-for-read' (or `undecided' auto-detection
+         ;; picking a non-UTF-8 charset, or DOS eol conversion mangling the
+         ;; \r\n header terminator) would corrupt framing.
+         ;;
+         ;; It MUST be utf-8-unix, NOT binary, even though Content-Length
+         ;; counts octets: jsonrpc.el's process buffer is MULTIBYTE and
+         ;; `jsonrpc--process-filter' sizes the body with `position-bytes'.
+         ;; Under binary the filter inserts a unibyte string, every octet
+         ;; >= 0x80 becomes a raw-byte char of 2 internal bytes,
+         ;; `position-bytes' over-counts, and the body is truncated — the
+         ;; frame is then silently dropped as invalid JSON.  Verified on
+         ;; 30.1: a framed body carrying "café" dispatches under
+         ;; utf-8-unix and vanishes under binary.
          (proc (make-network-process
                 :name "ebp" :host host :service port :noquery t
-                :coding 'binary))
+                :coding 'utf-8-unix))
          (conn (make-instance
                 'ebp--connection
                 :name "ebp" :process proc

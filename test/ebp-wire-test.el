@@ -842,6 +842,52 @@ data.kind event-retry surviving jsonrpc.el's reply path."
 
 ;;;; Endpoint gaps closed after amendments #67-86 (2026-07-24)
 
+(ert-deftest ebp-test-live-socket-carries-non-ascii ()
+  "The live connection must decode a non-ASCII body.
+`ebp-connect' pins `:coding utf-8-unix'.  `binary' looks right (SPEC 6
+counts OCTETS) but is wrong here: jsonrpc.el's process buffer is
+multibyte and `jsonrpc--process-filter' sizes the body with
+`position-bytes', so a unibyte insert makes every octet >= 0x80 a
+2-internal-byte raw char, the length arithmetic over-counts, and the
+frame is silently dropped.  Every other wire test is ASCII-only, so
+this is the only guard on that regression."
+  (dolist (probe '((utf-8-unix . t) (binary . nil)))
+    (let* ((coding (car probe))
+           (expect (cdr probe))
+           (got nil)
+           (server
+            (make-network-process
+             :name "ebp-coding-server" :server t :host "127.0.0.1"
+             :service t :coding 'binary :noquery t
+             :filter
+             (lambda (conn _bytes)
+               (let* ((body (encode-coding-string
+                             "{\"jsonrpc\":\"2.0\",\"method\":\"probe.note\",\
+\"params\":{\"text\":\"café\"}}"
+                             'utf-8))
+                      (frame (concat (format "Content-Length: %d\r\n\r\n"
+                                             (length body))
+                                     body)))
+                 (process-send-string conn frame)))))
+           (port (cadr (process-contact server)))
+           (proc (make-network-process
+                  :name "ebp-coding-client" :host "127.0.0.1" :service port
+                  :noquery t :coding coding))
+           (conn (make-instance 'jsonrpc-process-connection
+                                :name "ebp-coding" :process proc
+                                :notification-dispatcher
+                                (lambda (_c m p) (push (list m p) got)))))
+      (unwind-protect
+          (progn
+            (process-send-string proc "hi")
+            (dotimes (_ 30) (accept-process-output nil 0.05))
+            (if expect
+                (should (equal got '((probe.note (:text "café")))))
+              ;; Pin the failure mode too, so the comment above stays true.
+              (should-not got)))
+        (ignore-errors (jsonrpc-shutdown conn))
+        (ignore-errors (delete-process server))))))
+
 (ert-deftest ebp-test-request-id-integer ()
   "SPEC 7.2 / amendments #34+#80: ids are strings or safe integers."
   (should (ebp-valid-request-id-p 1))

@@ -60,7 +60,41 @@ class DialogContext(
     // each stateful node's logical value, not a stringified one.
     val fields: SnapshotStateMap<String, Any?>,
     val bridge: DeviceBridge,
-)
+    /** T3/LD-3: the authored values the engine computed while validating this
+     * dialog's spec — the layer UNDER the user's edits. */
+    val defaults: JSONObject? = null,
+) {
+    /**
+     * SPEC 14.1: the logical value of a stateful node at occurrence time —
+     * the user's dialog-local edit when there is one, else the authored
+     * default.
+     *
+     * The lookup is a CONTAINMENT test, not `?:`, and that distinction is the
+     * whole point: a field the user deliberately cleared holds an empty
+     * string, `false`, or `0`, and an elvis would treat those exactly like a
+     * field never touched. The old capture had no defaults layer at all and
+     * substituted `""`, so an untouched `checkbox` authored `checked: true`
+     * shipped the STRING `""` where §14.1 requires boolean `true` — the wrong
+     * JSON type, silently, for the commonest dialog shape there is.
+     *
+     * Emacs's `swap_in_symval_forwarding` is the model: fall back to the
+     * default cell, with an explicit `found` bit deciding which layer answers
+     * rather than the value's own emptiness.
+     */
+    fun capture(id: String): Any? = captureValue(id, fields, defaults)
+}
+
+/** The two-layer lookup of [DialogContext.capture], as pure logic so the
+ * layering rule is testable without a live bridge. */
+fun captureValue(id: String, fields: Map<String, Any?>, defaults: JSONObject?): Any? = when {
+    fields.containsKey(id) -> fields[id]
+    defaults?.has(id) == true -> defaults.get(id).takeIf { it != JSONObject.NULL }
+    // Neither layer has it. §14.1 makes an unresolvable capture a
+    // document-level error the Companion already refused at validation, so
+    // reaching here means the spec and this map disagree — surface null
+    // rather than inventing a value of the wrong type.
+    else -> null
+}
 
 /**
  * Everything a node render needs beside the node itself: the surface, the
@@ -72,9 +106,22 @@ class RenderCtx(
     val bridge: DeviceBridge,
     val dialog: DialogContext? = null,
     val path: String = "",
+    /** T3/LD-2: display generations for this surface's stateful nodes. */
+    val epochs: Map<Pair<String, String>, Long> = emptyMap(),
 ) {
     fun child(node: JSONObject?, index: Int): RenderCtx =
-        RenderCtx(surface, bridge, dialog, identityPath(path, node, index))
+        RenderCtx(surface, bridge, dialog, identityPath(path, node, index), epochs)
+
+    /**
+     * T3/LD-2: the generation of the value this node's widget should show.
+     * Used as a `remember` key so a value decided by a SNAPSHOT reseeds the
+     * widget — an erased draft, a moved authored value — while a value the
+     * user is still editing does not. Without it the seeding lambda ran once
+     * per `(surface, id)` and no later snapshot ever reached the widget, so
+     * the field could keep displaying text the store had already discarded
+     * while `capture_fields` submitted the store's value.
+     */
+    fun epochOf(id: String): Long = epochs[surface to id] ?: 0L
 
     fun action(descriptor: JSONObject?, value: Any? = null) {
         // SPEC 18.1 (T3c, closes LD-1): inside a dialog the dialog.submit /
@@ -94,7 +141,9 @@ class RenderCtx(
                     descriptor.optJSONArray("capture_fields")?.let { capture ->
                         for (i in 0 until capture.length()) {
                             val fieldId = capture.getString(i)
-                            fields.put(fieldId, d.fields[fieldId] ?: "")
+                            // T3/LD-3: user layer, then authored layer.
+                            fields.put(fieldId,
+                                d.capture(fieldId) ?: JSONObject.NULL)
                         }
                     }
                     d.bridge.dialogSubmit(d.dialogId,
@@ -138,15 +187,22 @@ class RenderCtx(
 @Composable
 fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
                dialog: DialogContext? = null) {
-    RenderNode(node, RenderCtx(surface, bridge, dialog))
+    // T3/LD-2: collected once at the root and carried down the tree, so a
+    // stateful widget reads its generation without each one subscribing.
+    val epochs by bridge.inputEpochs.collectAsState()
+    RenderNode(node, RenderCtx(surface, bridge, dialog, epochs = epochs))
 }
 
 /** Root of a dialog's node tree: owns the local field map (SPEC 18.1). */
 @Composable
 fun RenderDialogRoot(dialogId: String, spec: JSONObject, bridge: DeviceBridge) {
     val fields = remember(dialogId) { mutableStateMapOf<String, Any?>() }
+    // T3/LD-3: the authored layer, computed by the engine while it validated
+    // this spec — read once per presented dialog, so the two layers can never
+    // disagree about which nodes are stateful.
+    val defaults = remember(dialogId) { bridge.dialogDefaults(dialogId) }
     RenderNode(spec, RenderCtx("dialog:$dialogId", bridge,
-        DialogContext(dialogId, fields, bridge)))
+        DialogContext(dialogId, fields, bridge, defaults)))
 }
 
 @Composable
@@ -266,7 +322,8 @@ private fun RenderTextInput(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     var value by if (password)
         remember(id) { mutableStateOf("") } // never seeded, never saved
     else
-        rememberSaveable(ctx.surface, id, key = "ti:${ctx.surface}:$id") {
+        rememberSaveable(ctx.surface, id, ctx.epochOf(id),
+            key = "ti:${ctx.surface}:$id") {
             mutableStateOf(node.optString("value"))
         }
     // SPEC 18.4/17.4: a `syntax` language recolours the field in place; a
@@ -348,8 +405,8 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // selection/caret for ${selection}, placements, line ops, and edit.command.
     // SPEC 16.1/13.6: the draft keys on the wire address (surface+id), not the
     // key-first path — changing only a `key` keeps a compatible draft.
-    var value by rememberSaveable(ctx.surface, id, stateSaver = TextFieldValue.Saver,
-        key = "ed:${ctx.surface}:$id") {
+    var value by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
+        stateSaver = TextFieldValue.Saver, key = "ed:${ctx.surface}:$id") {
         mutableStateOf(TextFieldValue(node.optString("value")))
     }
     // T2/LD-5: the engine shadow is the text authority for a synchronized

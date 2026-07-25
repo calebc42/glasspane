@@ -42,6 +42,11 @@ class SurfaceStore(
 
     private val records = LinkedHashMap<String, Record>()
     private val drafts = HashMap<Pair<String, String>, Any?>()
+    // T3/LD-2: display generations — see [inputEpoch]. Deliberately NOT
+    // persisted: a process restart rebuilds every widget from the durable
+    // draft or authored value anyway, so there is nothing stale to supersede.
+    private val epochs = HashMap<Pair<String, String>, Long>()
+    private var epochClock = 0L
 
     init {
         // SPEC 10.4/13.1: the store outlives connections AND process death.
@@ -197,12 +202,27 @@ class SurfaceStore(
         }
         // SPEC 13.6: the pre-update node types decide draft compatibility.
         val oldStatefuls = next.statefuls
+        // T3/LD-2: what the display is showing right now, before this
+        // snapshot is applied — the draft when the user has one, else the
+        // authored value.
+        val shownBefore = (oldStatefuls.keys + statefuls.keys)
+            .associateWith { currentValue(surface, it) }
         next.revision = revision
         next.present = true
         next.spec = spec
         next.statefuls = statefuls
         records[surface] = next
         reconcileDrafts(surface, oldStatefuls, statefuls, reset)
+        // T3/LD-2: THE stamping point. A node whose displayed value is not
+        // what it was, when the user did not change it, has been decided by
+        // this snapshot — its widget must reseed. This catches both shapes at
+        // once: an erased draft (the authored value now governs) and a moved
+        // authored value with no draft standing. A surviving draft compares
+        // equal to itself, so a user's in-progress edit never reseeds.
+        for ((id, before) in shownBefore) {
+            if (!jsonValueEquals(before, currentValue(surface, id)))
+                epochs[surface to id] = ++epochClock
+        }
         persist()
         return SurfaceResult("applied", revision, true)
     }
@@ -276,6 +296,32 @@ class SurfaceStore(
 
     fun hasDraft(surface: String, id: String): Boolean = (surface to id) in drafts
 
+    /**
+     * T3/LD-2: the generation of the value a stateful node's DISPLAY should be
+     * showing. It changes only when a snapshot — not the user — decided that
+     * value: a draft the user typed was erased under §13.6 (`reset_input_ids`,
+     * an incompatible or acknowledged value, a reused ID), or the authored
+     * value moved while no draft stood.
+     *
+     * This exists because the store is authoritative for `capture_fields`
+     * (§14.1) and the welcome `input_state` (§15.1) while the editing widget
+     * keeps its own copy. Keyed on `(surface, id)` alone, that copy is
+     * invariant across revisions: its seeding lambda runs once and no later
+     * snapshot ever reseeds it. So Emacs could push `value: "Untitled"` with
+     * `reset_input_ids: ["title"]`, the store would erase the draft, and the
+     * field would still read what the user typed — while a `capture_fields`
+     * button submitted "Untitled". The value on screen and the value on the
+     * wire were two different values, with nothing to reconcile them.
+     *
+     * The epoch is that reconciliation point, and like Emacs's `make_current`
+     * it is stamped in exactly ONE place: [update], below.
+     */
+    fun inputEpoch(surface: String, id: String): Long = epochs[surface to id] ?: 0L
+
+    /** Every `(surface, id)` whose epoch is non-zero, for the host's snapshot
+     * of display generations. */
+    fun inputEpochs(): Map<Pair<String, String>, Long> = epochs.toMap()
+
     private fun reconcileDrafts(surface: String, oldStatefuls: Map<String, JSONObject>,
                                 newStatefuls: Map<String, JSONObject>, reset: Set<String>) {
         val stale = drafts.keys.filter { (s, id) ->
@@ -330,13 +376,21 @@ class SurfaceStore(
             else -> false
         }
 
-    private fun authoredValue(node: JSONObject): Any? = when (node.getString("t")) {
-        "text_input", "editor" -> node.opt("value") ?: ""
-        "checkbox", "switch" -> node.opt("checked") ?: false
-        "enum_list" ->
-            node.opt("value") ?: if (node.optBoolean("multi_select")) JSONArray() else null
-        "slider" -> node.opt("value")
-            ?: node.optJSONArray("values")?.get(0) ?: node.opt("min") ?: 0
-        else -> null
+    companion object {
+        /** SPEC 14.1: the authored/default logical value of a stateful node —
+         * the value in force before the user touches it. Shared with the
+         * dialog defaults layer (T3/LD-3), which has no draft store of its
+         * own, so both layers resolve a default the same way. */
+        fun authoredValueOf(node: JSONObject): Any? = when (node.getString("t")) {
+            "text_input", "editor" -> node.opt("value") ?: ""
+            "checkbox", "switch" -> node.opt("checked") ?: false
+            "enum_list" ->
+                node.opt("value") ?: if (node.optBoolean("multi_select")) JSONArray() else null
+            "slider" -> node.opt("value")
+                ?: node.optJSONArray("values")?.get(0) ?: node.opt("min") ?: 0
+            else -> null
+        }
     }
+
+    private fun authoredValue(node: JSONObject): Any? = authoredValueOf(node)
 }

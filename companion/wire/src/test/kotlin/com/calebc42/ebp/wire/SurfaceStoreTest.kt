@@ -425,6 +425,54 @@ class SurfaceStoreTest {
                 .put("args", JSONObject().put("value", 1))),
             null, null, null).status)
     }
+
+    // ------------------------------------------- T3/LD-2: display epochs
+
+    @Test
+    fun theEpochMovesOnlyWhenASnapshotDecidesTheValue() {
+        val s = store()
+        update(s, "app:main", 1, inputSpec("Untitled"))
+        val base = s.inputEpoch("app:main", "title")
+
+        // The USER typing does not move it — their value is already on screen.
+        s.putDraft("app:main", "title", "reject me")
+        assertEquals(base, s.inputEpoch("app:main", "title"))
+
+        // A snapshot that leaves the draft standing does not move it either:
+        // §13.6 keeps the draft, so the displayed value is unchanged.
+        update(s, "app:main", 2, inputSpec("Untitled"))
+        assertEquals("reject me", s.currentValue("app:main", "title"))
+        assertEquals(base, s.inputEpoch("app:main", "title"))
+
+        // reset_input_ids erases the draft: the authored value now governs,
+        // so the display must reseed. THIS is the LD-2 repro — before the
+        // epoch, the widget kept showing "reject me" while capture_fields
+        // submitted "Untitled".
+        update(s, "app:main", 3, inputSpec("Untitled"),
+            resetIds = JSONArray().put("title"))
+        assertEquals("Untitled", s.currentValue("app:main", "title"))
+        val afterReset = s.inputEpoch("app:main", "title")
+        assertTrue(afterReset > base)
+
+        // A moved authored value with no draft standing also reseeds.
+        update(s, "app:main", 4, inputSpec("Renamed"))
+        assertTrue(s.inputEpoch("app:main", "title") > afterReset)
+    }
+
+    @Test
+    fun anAcknowledgedDraftDoesNotReseedTheDisplay() {
+        // §13.6: a snapshot whose authored value EQUALS the draft erases it
+        // as acknowledged. The displayed text does not change, so the epoch
+        // must not move — the widget is already showing the right value.
+        val s = store()
+        update(s, "app:main", 1, inputSpec("Untitled"))
+        s.putDraft("app:main", "title", "typed")
+        val before = s.inputEpoch("app:main", "title")
+        update(s, "app:main", 2, inputSpec("typed"))
+        assertFalse(s.hasDraft("app:main", "title"))
+        assertEquals("typed", s.currentValue("app:main", "title"))
+        assertEquals(before, s.inputEpoch("app:main", "title"))
+    }
 }
 
 class VocabularyDriftTest {
@@ -453,4 +501,5 @@ class VocabularyDriftTest {
         val actions = contract.getJSONObject("actions").getJSONObject("schema")
         assertEquals(actions.keySet(), ACTION_SCHEMA.keys)
     }
+
 }

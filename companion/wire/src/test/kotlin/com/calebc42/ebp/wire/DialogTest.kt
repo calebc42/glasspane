@@ -42,7 +42,7 @@ class DialogTest {
                     .put("builtins", JSONArray()).put("features", JSONArray()))
                 .put("dialog", JSONObject()
                     .put("node_types", JSONArray(listOf("text", "column",
-                        "button", "text_input")))
+                        "button", "text_input", "checkbox", "switch")))
                     .put("builtins", JSONArray(listOf("dialog.submit", "dialog.dismiss")))
                     .put("features", JSONArray())),
             limits = limits(), nonceSource = { katSn })) { bytes ->
@@ -67,6 +67,32 @@ class DialogTest {
 
     private fun responseFor(out: List<JSONObject>, reqId: String) =
         out.lastOrNull { it.opt("id") == reqId }
+
+    @Test
+    fun dialogDefaultsCarryEachStatefulNodesLogicalValue() {
+        // T3/LD-3: the engine computes these while validating the spec and
+        // used to discard them, leaving capture_fields with nothing to fall
+        // back to for a field the user never touched.
+        val out = mutableListOf<JSONObject>()
+        val presented = mutableListOf<Pair<String, JSONObject?>>()
+        val engine = readyEngine(out, presented)
+        val spec = JSONObject().put("t", "column").put("children", JSONArray()
+            .put(JSONObject().put("t", "text_input").put("id", "name")
+                .put("value", "Untitled"))
+            .put(JSONObject().put("t", "checkbox").put("id", "agree")
+                .put("checked", true))
+            .put(JSONObject().put("t", "switch").put("id", "off")))
+        engine.feed(frame(request("d1", "dialog.show", JSONObject()
+            .put("dialog_id", "rename").put("spec", spec))))
+        val d = engine.dialogDefaults("rename")!!
+        // Types are the node's LOGICAL types, not strings.
+        assertEquals("Untitled", d.getString("name"))
+        assertEquals(true, d.getBoolean("agree"))
+        assertEquals(false, d.getBoolean("off")) // omitted `checked` is false
+        // They are released with the dialog.
+        engine.completeDialogDismiss("rename")
+        assertNull(engine.dialogDefaults("rename"))
+    }
 
     @Test
     fun showIsHeldThenSubmitCompletesIt() {

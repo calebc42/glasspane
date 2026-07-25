@@ -217,6 +217,15 @@ class DeviceBridge(
         dispatchExecutor.execute { engine?.publishState(surface, id, value) }
     }
 
+    // T3/LD-2: display generations for stateful nodes, keyed (surface, id).
+    // Republished with every accepted snapshot; a widget's remember key
+    // carries its epoch, so a value the SNAPSHOT decided reseeds the widget
+    // while a value the user is still editing does not.
+    private val _inputEpochs =
+        MutableStateFlow<Map<Pair<String, String>, Long>>(emptyMap())
+    val inputEpochs: StateFlow<Map<Pair<String, String>, Long>>
+        get() = _inputEpochs
+
     // T2/LD-5: the editor mirrors, keyed (document, editor_id). RenderEditor
     // collects this and adopts on epoch change; see EditorMirror above.
     private val mirrorEpoch = AtomicLong(0)
@@ -273,6 +282,11 @@ class DeviceBridge(
         dispatchExecutor.execute { engine?.completeDialogSubmit(dialogId, value, fields) }
     }
 
+    /** SPEC 14.1/18.1 (T3/LD-3): the authored values the engine computed for
+     * this dialog's stateful nodes, so an untouched field captures its
+     * logical value. Read once when the dialog is presented. */
+    fun dialogDefaults(dialogId: String): JSONObject? = engine?.dialogDefaults(dialogId)
+
     /** SPEC 18.1: dialog.dismiss builtin / platform dismissal. */
     fun dialogDismiss(dialogId: String) {
         dispatchExecutor.execute { engine?.completeDialogDismiss(dialogId) }
@@ -321,6 +335,9 @@ class DeviceBridge(
         // current live session through this slot; a drop with no session is lost.
         CompanionStores.setLiveSession(engine)
         engine.surfaceListener = { surface ->
+            // T3/LD-2: publish display generations before the spec, so the
+            // recomposition this push triggers already sees the new epoch.
+            _inputEpochs.value = store.inputEpochs()
             when {
                 // SPEC 18.5: a notification:* surface is a system notification;
                 // its removal (tombstone -> null spec) cancels it.

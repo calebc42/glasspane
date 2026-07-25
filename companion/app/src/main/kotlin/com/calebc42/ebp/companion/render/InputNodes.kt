@@ -182,7 +182,8 @@ internal fun RenderMenu(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 internal fun RenderCheckbox(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val id = node.optString("id")
     val enabled = node.optBoolean("enabled", true)
-    var checked by rememberSaveable(ctx.surface, id, key = "in:${ctx.surface}:$id") {
+    var checked by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
+        key = "in:${ctx.surface}:$id") {
         mutableStateOf(node.optBoolean("checked", false))
     }
     val onChange = node.optJSONObject("on_change")
@@ -202,7 +203,8 @@ internal fun RenderCheckbox(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 internal fun RenderSwitch(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val id = node.optString("id")
     val enabled = node.optBoolean("enabled", true)
-    var checked by rememberSaveable(ctx.surface, id, key = "in:${ctx.surface}:$id") {
+    var checked by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
+        key = "in:${ctx.surface}:$id") {
         mutableStateOf(node.optBoolean("checked", false))
     }
     val onChange = node.optJSONObject("on_change")
@@ -248,9 +250,11 @@ internal fun RenderEnumList(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // key-first presentation path — changing only a `key` keeps the draft.
     // Selection is retained by VALUE, not index, so a same-identity re-push that
     // reorders/changes options never re-points a stale index at a new value.
-    var selectedValues by remember(ctx.surface, id) { mutableStateOf(seedValues()) }
-    var added by remember(ctx.surface, id) { mutableStateOf(listOf<String>()) }
-    var selectedAdded by remember(ctx.surface, id) { mutableStateOf(setOf<String>()) }
+    var selectedValues by remember(ctx.surface, id, ctx.epochOf(id)) {
+        mutableStateOf(seedValues())
+    }
+    var added by remember(ctx.surface, id, ctx.epochOf(id)) { mutableStateOf(listOf<String>()) }
+    var selectedAdded by remember(ctx.surface, id, ctx.epochOf(id)) { mutableStateOf(setOf<String>()) }
     var showAdd by remember { mutableStateOf(false) }
 
     // SPEC 17.4 (audit I7): drop a retained selected value that the new options
@@ -360,7 +364,7 @@ internal fun RenderSlider(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 if (jsonValueEquals(values.get(i), v)) return i
             return 0
         }
-        var index by remember(ctx.surface, id) { mutableIntStateOf(seedIndex()) }
+        var index by remember(ctx.surface, id, ctx.epochOf(id)) { mutableIntStateOf(seedIndex()) }
         Slider(
             value = index.toFloat(),
             onValueChange = { index = it.toInt().coerceIn(0, n - 1) },
@@ -376,7 +380,7 @@ internal fun RenderSlider(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     } else {
         val min = node.optDouble("min", 0.0).toFloat()
         val max = node.optDouble("max", 1.0).toFloat()
-        var pos by remember(ctx.surface, id) {
+        var pos by remember(ctx.surface, id, ctx.epochOf(id)) {
             mutableFloatStateOf(node.optDouble("value", min.toDouble()).toFloat())
         }
         Slider(

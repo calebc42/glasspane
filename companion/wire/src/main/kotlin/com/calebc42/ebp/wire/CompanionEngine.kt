@@ -172,6 +172,7 @@ class CompanionEngine(
             val ids = dialogs.keys.toList()
             dialogs.clear()
             dialogEditors.clear() // sessions die with the connection anyway
+            dialogDefaults.clear()
             ids.forEach { runCatching { dialogListener?.invoke(it, null) } }
         }
         // SPEC 18.3: pie menus are ephemeral to the session — dismiss all.
@@ -705,6 +706,16 @@ class CompanionEngine(
     // SPEC 19: the same, for editors presented in an outstanding dialog. A
     // dialog's sessions live exactly as long as the dialog does.
     private val dialogEditors = HashMap<String, MutableMap<String, String>>()
+    // T3/LD-3: the authored value of each stateful node in an outstanding
+    // dialog — the layer under the user's dialog-local edits. Dialog state is
+    // dialog-local (SPEC 18.1), so nothing else holds these.
+    private val dialogDefaults = HashMap<String, JSONObject>()
+
+    /** SPEC 14.1/18.1 (T3/LD-3): the authored values for an outstanding
+     * dialog's stateful nodes, so `capture_fields` can resolve a field the
+     * user never touched to its LOGICAL value instead of inventing one. */
+    @Synchronized
+    fun dialogDefaults(dialogId: String): JSONObject? = dialogDefaults[dialogId]
 
     /** SPEC 19/4.5: distinct synchronized-editor identities presented right
      * now, across accepted surface AND dialog documents. */
@@ -882,6 +893,7 @@ class CompanionEngine(
                 val entry = dialogs.entries.find { it.value == cancelId } ?: return
                 dialogs.remove(entry.key)
                 closeDialogEditors(entry.key)
+                dialogDefaults.remove(entry.key)
                 respondError(entry.value, 1301, "Request was cancelled",
                     "request-cancelled")
                 dialogListener?.invoke(entry.key, null)
@@ -1777,8 +1789,9 @@ class CompanionEngine(
         // SPEC 18.1: exceeding max_dialogs is 1401; existing dialogs stand.
         if (dialogs.size >= config.limits.optLong("max_dialogs", 4))
             return respondError(id, 1401, "Too many dialogs", "overloaded")
+        val statefuls: Map<String, JSONObject>
         try {
-            SpecValidator.validateSurfaceSpec(
+            statefuls = SpecValidator.validateSurfaceSpec(
                 spec, maxCaptureFields = config.limits.optLong("max_capture_fields", 64),
                 maxChartPoints = config.limits.optLong("max_chart_points", Long.MAX_VALUE),
                 maxCanvasOps = config.limits.optLong("max_canvas_ops", Long.MAX_VALUE),
@@ -1820,6 +1833,17 @@ class CompanionEngine(
         }
         // SPEC 18.1: held outstanding — no reply until a builtin or cancel.
         dialogs[dialogId] = id
+        // T3/LD-3: keep the authored defaults this validation just computed.
+        // They were discarded, so `capture_fields` had nothing to fall back
+        // to and invented `""` for any field the user had not touched — an
+        // untouched `checkbox` authored `checked: true` shipped the STRING ""
+        // where §14.1 requires the node's logical value, boolean `true`.
+        // Dialog state is dialog-local (§18.1), so this is the only place the
+        // authored layer exists; the store's `currentValue` covers surfaces.
+        dialogDefaults[dialogId] = JSONObject().also { d ->
+            for ((nodeId, node) in statefuls)
+                d.put(nodeId, SurfaceStore.authoredValueOf(node) ?: JSONObject.NULL)
+        }
         if (dialogEditorNodes.isNotEmpty()) {
             val map = LinkedHashMap<String, String>()
             for ((identity, node) in dialogEditorNodes) {
@@ -1856,6 +1880,7 @@ class CompanionEngine(
         }
         dialogs.remove(dialogId)
         closeDialogEditors(dialogId)
+        dialogDefaults.remove(dialogId)
         respondResult(reqId, result)
         dialogListener?.invoke(dialogId, null)
     }
@@ -1865,6 +1890,7 @@ class CompanionEngine(
     fun completeDialogDismiss(dialogId: String) {
         val reqId = dialogs.remove(dialogId) ?: return
         closeDialogEditors(dialogId)
+        dialogDefaults.remove(dialogId)
         respondResult(reqId, JSONObject().put("status", "dismissed"))
         dialogListener?.invoke(dialogId, null)
     }

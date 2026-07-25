@@ -55,12 +55,16 @@ ebp.el ✅ ── jetpacs-widgets.el ✅
         ├─ JC-1 buffer      (dispatch registry + --line-spans + -render Tier-0 + -call-shimmed + -refresh)
         │     ├─ JC-2 results ─ tablist          (need buffer + surfaces + tabulated-list)
         │     │        └─ JC-3a sections         (needs results)
-        │     ├─ JC-3b hypertext                 (needs buffer + config; image-resolver rebuild)
+        │     ├─ JC-3b hypertext                 (needs buffer only; image-resolver rebuild)
         │     └─ JC-3c comint                    (needs buffer)
         ├─ JC-4 dialog  (REBUILD of minibuffer)  (ebp-client-dialog-show)
         ├─ JC-5 completion (REBUILD direction, PORT harvester)
         └─ JC-6 declarative view (OPTIONAL): lint(format-6) → source → spec (needs shell)
-config (jetpacs-root; image cache) — small prereq for JC-3b hypertext
+~~config (jetpacs-root; image cache) — small prereq for JC-3b hypertext~~
+  RESOLVED at JC-3b: the disk cache existed solely to mint `file://` URIs, which
+  format 6 forbids outright — so it is DELETED, not ported, and `jetpacs-config.el`
+  drops out of the DAG entirely (its remaining contents are deployment-only,
+  deferred until an app ships).
 build-contract.el → RETIRE;   build-bundle.el → defer to a U-phase deploy step
 ```
 
@@ -215,7 +219,13 @@ visit seam (armed stepper, boundary clamps); live smoke on `occur`/`grep`.
   (`assq-delete-all 'on_tap` → fresh plist minus `:on_tap`; `alist-get`→`plist-get`;
   `setf (alist-get …)`→`plist-put`). Three action `:args` alist→plist.
   `jetpacs-collapsible` is signature-compatible.
-- **hypertext** (needs buffer + `config` for the image cache): PORT the two-phase
+- **hypertext** (needs buffer only — the `config` image cache is deleted, see the
+  DAG note; DONE 2026-07-25, `emacs/jetpacs-hypertext.el` + 21-test exit gate; the
+  resolver settled the design decision as a cascade — https passthrough under
+  `image.https`, data-URI inline under `image.data` bounded by the three per-image
+  limits + frame headroom with PNG/JPEG header-sniffed pixel counts, caption
+  otherwise; the "wrap in `(apply #'jetpacs-hypertext …)`" line below is WRONG —
+  the renderer seam wants a LIST, a vector nests as one malformed child): PORT the two-phase
   scan→model→emit substrate + DOM-table pass + nav allowlist verbatim; rewrite the
   emitter's builder calls; `jetpacs-markup`→`(jetpacs-text … :style "mono" :syntax S)`
   with `S` a string; `jetpacs-surface :padding`→`with-attrs`; `jetpacs-table-row`

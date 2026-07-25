@@ -274,10 +274,40 @@ ACTION defaults to \"emacs.buffer.act\"."
     (and (member (or action "emacs.buffer.act") verbs) t)))
 
 (defun jetpacs-buffer-forget-exposed (&optional buffer-name)
-  "Drop the exposure record for BUFFER-NAME, or all of it."
+  "Drop the exposure record for BUFFER-NAME, or all of it.
+Clears whole-buffer records (`jetpacs-buffer-expose-buffer') too."
   (if buffer-name
       (remhash buffer-name jetpacs-buffer-exposed)
     (clrhash jetpacs-buffer-exposed)))
+
+(defconst jetpacs-buffer--whole-buffer-key :whole-buffer
+  "Sentinel position key for whole-buffer exposure records.
+A keyword can never collide with a real buffer position, and the inner
+table's `eql' test compares keywords by identity.")
+
+(defun jetpacs-buffer-expose-buffer (buffer-name action)
+  "Record that BUFFER-NAME as a whole was presented with ACTION affordances.
+The whole-buffer twin of `jetpacs-buffer-expose', for actions that
+address a buffer rather than an offset in it — document navigation, a
+REPL send, a table re-sort.  Position records cannot serve here: a
+buffer whose render exposes no positions (a plain shell transcript, a
+nav toolbar) would leave the table empty for exactly the common case.
+SPEC 23.1 still wants the gate: \"did this Emacs present this buffer
+with this affordance to this Companion\", not merely \"does such a
+buffer exist\".  Cleared by `jetpacs-buffer-forget-exposed' like any
+position record, so each render supersedes the last."
+  (let ((tbl (or (gethash buffer-name jetpacs-buffer-exposed)
+                 (puthash buffer-name (make-hash-table :test #'eql)
+                          jetpacs-buffer-exposed))))
+    (let ((verbs (gethash jetpacs-buffer--whole-buffer-key tbl)))
+      (unless (member action verbs)
+        (puthash jetpacs-buffer--whole-buffer-key (cons action verbs) tbl)))))
+
+(defun jetpacs-buffer-exposed-buffer-p (buffer-name action)
+  "Non-nil when BUFFER-NAME was presented with ACTION affordances."
+  (when-let* ((tbl (gethash buffer-name jetpacs-buffer-exposed))
+              (verbs (gethash jetpacs-buffer--whole-buffer-key tbl)))
+    (and (member action verbs) t)))
 
 (defun jetpacs-buffer--span-action (pos buffer-name)
   "The tap ActionDescriptor for the run starting at POS, or nil.

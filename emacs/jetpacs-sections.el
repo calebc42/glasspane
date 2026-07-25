@@ -64,6 +64,7 @@
 
 ;; The magit-section library, never required from core:
 (declare-function magit-section-ident "ext:magit-section" (section))
+(declare-function magit-section-hidden "ext:magit-section" (section))
 (defvar magit-root-section)
 
 ;; --- Configuration -----------------------------------------------------------
@@ -95,12 +96,25 @@ sections share a `start' marker.")
 (defvar jetpacs-sections--cards 0
   "Cards emitted so far in this render (see `jetpacs-sections-max-sections').")
 
-(defconst jetpacs-sections--menu-denylist
-  '(self-insert-command digit-argument negative-argument universal-argument
+(defcustom jetpacs-sections-menu-denylist
+  '(;; Not verbs at all — keymap noise.
+    self-insert-command digit-argument negative-argument universal-argument
     undefined ignore keyboard-quit keyboard-escape-quit
     mouse-drag-region mouse-set-point mouse-set-region
-    magit-mouse-toggle-section)
-  "Commands never offered in the section context menu.")
+    magit-mouse-toggle-section
+    ;; Destructive, and NOT offerable over the wire.  A dialog button
+    ;; carries no SPEC 14.1 `confirm' — `jetpacs-dialog-submit' has no
+    ;; such member — so a mis-tap on a phone would discard uncommitted
+    ;; work or move a branch with nothing standing in the way.  Staging,
+    ;; unstaging and committing are all still offered; these three want a
+    ;; desktop.  Remove them here if you disagree; that is your call to
+    ;; make, not this file's.
+    magit-discard magit-reset-quickly magit-reset
+    magit-reset-hard magit-reset-soft magit-reset-mixed
+    magit-branch-delete magit-tag-delete magit-remote-remove
+    magit-stash-drop magit-stash-clear)
+  "Commands never offered in the section context menu."
+  :type '(repeat function) :group 'jetpacs)
 
 ;; --- Reading the tree --------------------------------------------------------
 
@@ -123,8 +137,15 @@ name at the call site draws an unknown-slot warning."
   (slot-value sec slot))
 
 (defun jetpacs-sections--hidden-p (sec)
-  "Whether SEC is folded in Emacs."
-  (jetpacs-sections--slot sec 'hidden))
+  "Whether SEC is folded in Emacs.
+Prefers the library's own accessor, which is what
+`jetpacs-buffer--fold-state' already uses for the same question — two
+modules reading one piece of state two different ways is a drift waiting
+to happen, and the accessor is the supported API.  Falls back to the raw
+slot for a section object built by something that does not define it."
+  (if (fboundp 'magit-section-hidden)
+      (magit-section-hidden sec)
+    (jetpacs-sections--slot sec 'hidden)))
 
 (defun jetpacs-sections--id (sec)
   "A stable collapsible id for SEC: its ident path, hashed, deduplicated.
@@ -245,11 +266,16 @@ and stops."
               (eol (min (line-end-position) end)))
           (cond
            ((<= (car budget) 0)
-            (push (jetpacs-text
-                   (format "… %d more line(s) in Emacs"
-                           (count-lines (point) end))
-                   :style "caption")
-                  nodes)
+            ;; Latched in the budget's `cdr': this branch is reached once
+            ;; per REMAINING SECTION, so a large `magit-status' otherwise
+            ;; emits one elision caption per section all the way down.
+            (unless (cdr budget)
+              (setcdr budget t)
+              (push (jetpacs-text
+                     (format "… %d more line(s) in Emacs"
+                             (count-lines (point) end))
+                     :style "caption")
+                    nodes))
             (goto-char end))
            (t
             (when (< bol eol)
@@ -284,13 +310,16 @@ interleaved with child sections, in buffer order."
 (defun jetpacs-sections--card (sec name start header children)
   "A collapsible card for SEC, or a Core fallback when unadvertised (16.2)."
   (if (not (jetpacs-node-advertised-p "collapsible"))
-      ;; Core: header, then the children inline — folding is the
-      ;; Companion's affordance and there is no Core equivalent, so the
-      ;; content simply shows.  NO `sections.menu' exposure here: this
-      ;; path emits no long-tap, and SPEC 23.1 records authorize what the
-      ;; document actually offers, never an affordance that is absent
-      ;; from it.
-      (apply #'jetpacs-column header children)
+      ;; Core: no `collapsible', so there is no fold affordance to give.
+      ;; A section Emacs has FOLDED renders header-only — showing its body
+      ;; would put content on the phone that the user has explicitly
+      ;; collapsed, and with no way to re-collapse it.  NO `sections.menu'
+      ;; exposure on this path either: it emits no long-tap, and SPEC 23.1
+      ;; records authorize what the document actually offers, never an
+      ;; affordance absent from it.
+      (if (jetpacs-sections--hidden-p sec)
+          header
+        (apply #'jetpacs-column header children))
     (jetpacs-buffer-expose name start "sections.menu")
     (apply #'jetpacs-collapsible
            (jetpacs-sections--id sec) header
@@ -369,6 +398,15 @@ transparent — only its children show."
   "Tier 0.5 renderer for magit-section buffers: the tree as collapsible
 cards.  Falls through to Tier 0 when the buffer has no section root."
   (with-current-buffer buf
+    ;; Section markers address the whole buffer; a narrowed accessible
+    ;; portion would put them out of range and truncate the tree.
+    (save-restriction
+      (widen)
+      (jetpacs-sections--render-1 buf))))
+
+(defun jetpacs-sections--render-1 (buf)
+  "The body of `jetpacs-sections-render', run widened."
+  (with-current-buffer buf
     (let ((root (jetpacs-sections--root)))
       (if (or (null root) (< (buffer-size) 1))
           (jetpacs-buffer-render buf)
@@ -419,34 +457,21 @@ falling back to Tier 0" (jetpacs--error-label err))
 
 (defun jetpacs-sections--visit (buf pos)
   "Follow the thing at POS in section buffer BUF.
-Runs the region's own RET command under `jetpacs-buffer-call-shimmed'; a
-command that leaves the buffer shows its destination in the region view
-and returns non-nil, one that acts in place returns nil.  SIGNALS when
-the command itself failed.
+Returns non-nil when the command left the buffer (its destination is
+shown in the region view), nil when it acted in place — stage, unstage,
+toggle — and SIGNALS when the command itself failed.
 
-The ON-ERROR thunk is load-bearing.  `jetpacs-buffer-call-shimmed'
-swallows the error and still returns `(current-buffer) . (point)', so a
-command that blew up is indistinguishable from one that acted in place —
-and the handler would answer `accepted' for a visit that never happened.
-That got sharper with the Phase A prompt ban: a command reaching
-`find-file-noselect' (large-file confirm, unsafe locals, TRAMP auth) now
-SIGNALS `inhibited-interaction' instead of hanging, and swallowing it
-would turn a wedge into a silent lie."
-  (with-current-buffer buf
-    (goto-char (min (max (point-min) (truncate pos)) (point-max)))
-    (let ((cmd (jetpacs-results--visit-command (point))))
-      (when (commandp cmd)
-        (let* ((failed nil)
-               (dest (jetpacs-buffer-call-shimmed
-                      cmd (lambda (err) (setq failed err))))
-               (dest-buf (car dest)))
-          (when failed (signal (car failed) (cdr failed)))
-          (when (and dest-buf (not (eq dest-buf buf)))
-            (pcase-let ((`(,beg ,end ,label ,point)
-                         (jetpacs-results--region-around dest-buf (cdr dest))))
-              (funcall jetpacs-results-visit-region-function
-                       (buffer-name dest-buf) beg end label point))
-            t))))))
+The shimmed replay itself lives in `jetpacs-results-follow': it is the
+same operation the results skin performs, down to the ON-ERROR thunk that
+keeps a signalling command from reading as \"acted in place\", and one
+implementation means a fix to that reasoning lands once rather than
+twice."
+  (when-let* ((dest (jetpacs-results-follow buf pos)))
+    (pcase-let ((`(,beg ,end ,label ,point)
+                 (jetpacs-results-region-around (car dest) (cdr dest))))
+      (funcall jetpacs-results-visit-region-function
+               (buffer-name (car dest)) beg end label point))
+    t))
 
 (jetpacs-defaction "sections.visit"
   ;; BUFFER must be a live magit-section buffer, POS a row this render
@@ -456,14 +481,19 @@ would turn a wedge into a silent lie."
     (let* ((name (plist-get args :buffer))
            (pos (plist-get args :pos))
            (buf (jetpacs-sections--section-buffer name))
-           (jetpacs-results--event-surface (plist-get params :surface)))
+           (jetpacs-results-event-surface (plist-get params :surface)))
       (cond
        ;; `integerp', not `numberp': a float clears the type gate and
        ;; then misses `jetpacs-buffer-exposed-p''s `eql' hash, so it
        ;; would be refused for the wrong reason.
        ((not (and buf (integerp pos))) 'rejected)
-       ((not (jetpacs-buffer-exposed-p name pos "sections.visit")) 'rejected)
+       ;; 14.1 -> 14.5 -> 23.1, matching `jetpacs-buffer--tap-status'.
+       ;; Stale FIRST is the better answer as well as the house order: a
+       ;; magit refresh moves every offset, so an event tapped against the
+       ;; previous snapshot deserves re-presentable `stale' rather than
+       ;; terminal `rejected' from the exposure gate it now misses.
        ((jetpacs-event-stale-p params) 'stale)
+       ((not (jetpacs-buffer-exposed-p name pos "sections.visit")) 'rejected)
        (t
         ;; Synchronous, so `accepted' names a completed effect (14.4).
         ;; A command that acted in place (stage/toggle) shows nothing new
@@ -484,27 +514,45 @@ would turn a wedge into a silent lie."
         (setq s (substring s (length prefix)))))
     (capitalize (string-replace "-" " " s))))
 
-(defun jetpacs-sections--menu-candidates (pos)
-  "The section menu at POS: an alist of (LABEL . KEY-STRING).
-Single keys from the region's own keymap (the section's verbs), plus the
-fold toggle.  Key description strings are what get replayed — commands
-are resolved by the buffer's own keymaps at dispatch time."
-  (let ((km (or (get-char-property pos 'keymap)
-                (get-char-property pos 'local-map)))
-        cands)
-    (when (keymapp km)
-      (map-keymap
-       (lambda (event binding)
-         (when (and (commandp binding)
-                    (not (memq binding jetpacs-sections--menu-denylist))
-                    (or (and (integerp event) (< 31 event 127))
-                        (memq event '(return tab))))
-           (let ((key (key-description (vector event))))
+(defun jetpacs-sections--map-candidates (km cands)
+  "Collect offerable single-key bindings from keymap KM into CANDS."
+  (when (keymapp km)
+    (map-keymap
+     (lambda (event binding)
+       (when (and (commandp binding)
+                  (not (memq binding jetpacs-sections-menu-denylist))
+                  (or (and (integerp event) (< 31 event 127))
+                      (memq event '(return tab))))
+         (let ((key (key-description (vector event))))
+           ;; A text-property map SHADOWS the mode map, so a key already
+           ;; claimed by a nearer keymap keeps its nearer meaning.
+           (unless (rassoc key cands)
              (push (cons (format "%s (%s)"
                                  (jetpacs-sections--menu-label binding) key)
                          key)
-                   cands))))
-       km))
+                   cands)))))
+     km))
+  cands)
+
+(defun jetpacs-sections--menu-candidates (pos)
+  "The section menu at POS: an alist of (LABEL . KEY-STRING).
+
+Reads the region's own text-property keymap FIRST and the major mode's
+map second, nearest-wins.  The mode map is where magit actually puts its
+verbs — `s' stage, `u' unstage, `c' commit are mode-level, not
+per-section — so reading only text-property maps left almost every
+section offering nothing but the fold toggle, and the substrate's promise
+of \"that section's own key bindings\" unmet.
+
+Key description strings are what get replayed; commands are resolved by
+the buffer's own keymaps at dispatch time, and re-derived from THIS
+function before anything runs (SPEC 23.2), so what is offerable here is
+exactly what is replayable."
+  (let ((cands (jetpacs-sections--map-candidates
+                (or (get-char-property pos 'keymap)
+                    (get-char-property pos 'local-map))
+                nil)))
+    (setq cands (jetpacs-sections--map-candidates (current-local-map) cands))
     (nreverse (cons (cons "Toggle fold (TAB)" "TAB") cands))))
 
 (defun jetpacs-sections--replay-key (buf pos key params)
@@ -531,7 +579,7 @@ current keymap can be reached."
         (message "jetpacs-sections: refused %S — not a candidate at this \
 section (SPEC 23.2)" key))
        ((not (and (commandp binding)
-                  (not (memq binding jetpacs-sections--menu-denylist))))
+                  (not (memq binding jetpacs-sections-menu-denylist))))
         (message "jetpacs-sections: refused %S — resolves to no offerable \
 command" key))
        (t
@@ -579,10 +627,16 @@ in a callback."
        (jetpacs-sections--dialog-id buf pos)
        (apply #'jetpacs-column
               (jetpacs-text "Section action" :style "title")
-              (mapcar (lambda (c)
-                        (jetpacs-button (car c)
-                                        (jetpacs-dialog-submit :value (cdr c))))
-                      cands))
+              (append
+               (mapcar (lambda (c)
+                         (jetpacs-button (car c)
+                                         (jetpacs-dialog-submit :value (cdr c))))
+                       cands)
+               ;; SPEC 18.1 gives the platform its own dismissal, but a
+               ;; picker that offers no way out reads as a trap — and on a
+               ;; device whose back gesture is ambiguous inside a dialog,
+               ;; it can be one.
+               (list (jetpacs-button "Cancel" (jetpacs-dialog-dismiss)))))
        :callback
        (lambda (status result _error)
          (when (and (equal status "submitted") (stringp (plist-get result :value)))
@@ -599,6 +653,7 @@ in a callback."
        ;; then misses `jetpacs-buffer-exposed-p''s `eql' hash, so it
        ;; would be refused for the wrong reason.
        ((not (and buf (integerp pos))) 'rejected)
+       ((jetpacs-event-stale-p params) 'stale)
        ((not (jetpacs-buffer-exposed-p name pos "sections.menu")) 'rejected)
        ;; The dialog needs the capability; without it there is no
        ;; non-blocking way to ask, so say so rather than hang.

@@ -29,7 +29,7 @@
 (defun jetpacs-results-test--occur-like ()
   "A buffer shaped like `occur' output: three rows carrying `occur-target'.
 Each marker points into a real SOURCE buffer — a locus whose target is
-the results buffer itself is not a jump, and `jetpacs-results--follow'
+the results buffer itself is not a jump, and `jetpacs-results-follow'
 correctly refuses it."
   (let ((src (jetpacs-results-test--source))
         ;; `inhibit-read-only' around EVERYTHING: on reuse the buffer is

@@ -482,11 +482,94 @@ authorization the phone can spend on something it was never offered."
                                       "divider" "button" "text_input"]
                          :builtins [] :features [])))
     (jetpacs-buffer-forget-exposed)
-    (let ((header (jetpacs-text "h")))
-      (jetpacs-sections--card
-       (jetpacs-sections-test--fake-sec 1 2 9 '(x)) "*jc3-core*" 1
-       header (list (jetpacs-text "body")))
-      (should-not (jetpacs-buffer-exposed-p "*jc3-core*" 1 "sections.menu")))))
+    (jetpacs-sections-test--with-fake-tree
+      (let ((header (jetpacs-text "h")))
+        (jetpacs-sections--card
+         (jetpacs-sections-test--fake-sec 1 2 9 '(x)) "*jc3-core*" 1
+         header (list (jetpacs-text "body")))
+        (should-not
+         (jetpacs-buffer-exposed-p "*jc3-core*" 1 "sections.menu"))))))
+
+(ert-deftest jetpacs-sections-core-degrade-hides-folded-bodies ()
+  "C13: with no `collapsible', a FOLDED section renders header-only.
+Showing its body would put content on the phone that the user has
+explicitly collapsed in Emacs — and on the Core path there is no fold
+affordance to re-collapse it with."
+  (jetpacs-sections-test--with-client
+      (:profiles '(:app (:node_types ["text" "row" "column" "box" "spacer"
+                                      "divider" "button" "text_input"]
+                         :builtins [] :features [])))
+    (let ((header (jetpacs-text "h"))
+          (body (list (jetpacs-text "secret body"))))
+      (cl-letf (((symbol-function 'jetpacs-sections--hidden-p) (lambda (_s) t)))
+        (let ((node (jetpacs-sections--card
+                     (jetpacs-sections-test--fake-sec 1 2 9 '(x))
+                     "*jc3-fold*" 1 header body)))
+          (should (equal node header))
+          (should-not (string-match-p
+                       "secret body"
+                       (jetpacs-node->canonical-json node)))))
+      ;; ...and an UNfolded one still shows its content.
+      (cl-letf (((symbol-function 'jetpacs-sections--hidden-p) (lambda (_s) nil)))
+        (should (string-match-p
+                 "secret body"
+                 (jetpacs-node->canonical-json
+                  (jetpacs-sections--card
+                   (jetpacs-sections-test--fake-sec 1 2 9 '(x))
+                   "*jc3-fold*" 1 header body))))))))
+
+(ert-deftest jetpacs-sections-elision-note-is-latched ()
+  "C3: one elision caption per RENDER, not per remaining section.
+The spent-budget branch is reached once per section, so a large
+`magit-status' otherwise trails a caption after every one of them."
+  (with-temp-buffer
+    (insert "a\nb\nc\nd\n")
+    (rename-buffer "*jc3-elide*" t)
+    (let ((budget (cons 0 nil))
+          (notes 0))
+      (dotimes (_ 3)
+        (dolist (n (jetpacs-sections--body-lines
+                    (point-min) (point-max) (buffer-name) budget))
+          (when (equal (plist-get n :style) "caption")
+            (cl-incf notes))))
+      (should (= notes 1)))))
+
+(ert-deftest jetpacs-sections-menu-reads-the-mode-map ()
+  "C16: magit's verbs are MODE-level, so a text-property-only scan found
+almost nothing and the menu offered just the fold toggle.  A nearer
+keymap still shadows the mode's binding for the same key."
+  (with-temp-buffer
+    (insert "row\n")
+    (let ((mode-map (make-sparse-keymap))
+          (near-map (make-sparse-keymap)))
+      (define-key mode-map (kbd "s") #'jetpacs-sections-test--safe)
+      (define-key mode-map (kbd "z") #'jetpacs-sections-test--safe)
+      (define-key near-map (kbd "s") #'jetpacs-sections-test--danger)
+      (use-local-map mode-map)
+      (put-text-property (point-min) 4 'keymap near-map)
+      (goto-char (point-min))
+      (let ((cands (jetpacs-sections--menu-candidates (point-min))))
+        ;; The mode-level `z' is now reachable at all...
+        (should (rassoc "z" cands))
+        ;; ...and `s' appears exactly once, from the NEARER map.
+        (should (= 1 (cl-count "s" cands :key #'cdr :test #'equal)))
+        (should (rassoc "TAB" cands)))))
+  ;; A denylisted command is not offered even when bound AND callable.
+  ;; (Naming a real magit command here would prove nothing: magit is not
+  ;; loaded in the suite, so `commandp' would reject it before the
+  ;; denylist was ever consulted.)
+  (with-temp-buffer
+    (insert "row\n")
+    (let ((km (make-sparse-keymap))
+          (jetpacs-sections-menu-denylist
+           (cons 'jetpacs-sections-test--danger
+                 jetpacs-sections-menu-denylist)))
+      (define-key km (kbd "k") #'jetpacs-sections-test--danger)
+      (define-key km (kbd "j") #'jetpacs-sections-test--safe)
+      (use-local-map km)
+      (let ((cands (jetpacs-sections--menu-candidates (point-min))))
+        (should (rassoc "j" cands))          ; the control
+        (should-not (rassoc "k" cands))))))
 
 (ert-deftest jetpacs-sections-dialog-ids-are-fresh ()
   "SPEC 18.1: a second outstanding dialog reusing an id gets `1201'.

@@ -71,7 +71,7 @@ in the header still reflects the true total."
 A plist (:buffer NAME :beg B :end E :label L :point P).  Rendered by
 `jetpacs-results-region-nodes', which a host root includes.")
 
-(defvar jetpacs-results--event-surface nil
+(defvar jetpacs-results-event-surface nil
   "The surface the in-flight visit/step event came from, or nil.
 Bound by the actions around their effect.  An action handler runs
 OUTSIDE any `with-jetpacs-owner', so a zero-arg re-push would resolve to
@@ -247,7 +247,7 @@ Returns a list of nodes, per the `jetpacs-render-buffer' contract."
 (defun jetpacs-results-show-region (name beg end label &optional point)
   "Record the slice [BEG, END) of buffer NAME and re-push (the default seam).
 LABEL heads the slice; POINT's line is the scroll target.  Re-pushes the
-surface the event came from (`jetpacs-results--event-surface'), not the
+surface the event came from (`jetpacs-results-event-surface'), not the
 ambient default: a handler runs outside any owner scope, so a zero-arg
 push would refresh the wrong surface under decision D1."
   (setq jetpacs-results--region
@@ -258,7 +258,7 @@ push would refresh the wrong surface under decision D1."
   ;; failure, and a signal here would escape after the jump already
   ;; landed, answering `rejected' for an effect that happened and leaving
   ;; the stepper armed on a view that never opened.
-  (let ((surface jetpacs-results--event-surface))
+  (let ((surface jetpacs-results-event-surface))
     (run-at-time 0 nil
                  (lambda ()
                    (when (functionp jetpacs-buffer-refresh-function)
@@ -279,7 +279,7 @@ A host root includes this to show where a `results.visit' landed."
      (jetpacs-buffer-render-region buf (plist-get r :beg) (plist-get r :end)
                                    (plist-get r :point)))))
 
-(defun jetpacs-results--region-around (buf pos)
+(defun jetpacs-results-region-around (buf pos)
   "Return (BEG END LABEL POINT) framing POS in BUF for the region view."
   (with-current-buffer buf
     (save-excursion
@@ -294,7 +294,7 @@ A host root includes this to show where a `results.visit' landed."
 
 ;; --- Visiting a locus --------------------------------------------------------
 
-(defun jetpacs-results--visit-command (pos)
+(defun jetpacs-results-visit-command (pos)
   "The visit command for the locus at POS: text-prop keymap, else major map."
   (let ((km (or (get-char-property pos 'keymap)
                 (get-char-property pos 'local-map))))
@@ -308,7 +308,7 @@ A host root includes this to show where a `results.visit' landed."
                    (lookup-key maj [return])
                    (lookup-key maj [mouse-2])))))))
 
-(defun jetpacs-results--follow (buf pos)
+(defun jetpacs-results-follow (buf pos)
   "Follow the locus at POS in results BUF; return (DEST-BUF . DEST-POS) or nil.
 Runs the row's own goto command through `jetpacs-buffer-call-shimmed', so
 nothing pops a desktop window and a stale input event cannot hijack the
@@ -319,7 +319,7 @@ thunk a failed goto is indistinguishable from having stayed put, and the
 handler answers `accepted' for a visit that never happened."
   (with-current-buffer buf
     (goto-char (min (max (point-min) pos) (point-max)))
-    (let ((cmd (jetpacs-results--visit-command (point))))
+    (let ((cmd (jetpacs-results-visit-command (point))))
       (when (commandp cmd)
         (let* ((failed nil)
                (dest (jetpacs-buffer-call-shimmed
@@ -331,7 +331,7 @@ handler answers `accepted' for a visit that never happened."
 (defun jetpacs-results--show (dest index count nav-extra)
   "Open DEST (a (BUFFER . POS) pair) in the region view; arm the stepper."
   (pcase-let ((`(,beg ,end ,label ,point)
-               (jetpacs-results--region-around (car dest) (cdr dest))))
+               (jetpacs-results-region-around (car dest) (cdr dest))))
     (setq jetpacs-results--nav
           (append (list :index index :count count :dest (buffer-name (car dest)))
                   nav-extra))
@@ -347,7 +347,7 @@ handler answers `accepted' for a visit that never happened."
          (index (max 0 (min index (1- count))))
          (pos (car (nth index loci)))
          (dest (and pos (ignore-errors
-                          (jetpacs-results--follow results-buf pos)))))
+                          (jetpacs-results-follow results-buf pos)))))
     (when dest
       (jetpacs-results--show dest index count
                              (list :kind 'buffer
@@ -391,7 +391,7 @@ handler answers `accepted' for a visit that never happened."
     (let ((buf-name (plist-get args :buffer))
           (pos (plist-get args :pos))
           (index (plist-get args :index))
-          (jetpacs-results--event-surface (plist-get params :surface)))
+          (jetpacs-results-event-surface (plist-get params :surface)))
       (cond
        ((and (stringp buf-name) (numberp pos))
         (let ((buf (get-buffer buf-name)))
@@ -430,7 +430,7 @@ handler answers `accepted' for a visit that never happened."
   (lambda (args params)
     (let* ((nav jetpacs-results--nav)
            (dir (plist-get args :dir))
-           (jetpacs-results--event-surface (plist-get params :surface)))
+           (jetpacs-results-event-surface (plist-get params :surface)))
       (if (not (and nav (numberp dir) (memq dir '(-1 1))))
           'rejected
         (let ((target (+ (plist-get nav :index) dir)))

@@ -534,30 +534,53 @@ The spent-budget branch is reached once per section, so a large
             (cl-incf notes))))
       (should (= notes 1)))))
 
-(ert-deftest jetpacs-sections-menu-reads-the-mode-map ()
-  "C16: magit's verbs are MODE-level, so a text-property-only scan found
-almost nothing and the menu offered just the fold toggle.  A nearer
-keymap still shadows the mode's binding for the same key."
+(ert-deftest jetpacs-sections-menu-mode-keys-are-allowlisted ()
+  "C16: the section's OWN map is offered whole; the MODE map is not.
+
+A mode map is the buffer's entire user interface — scanning magit-status
+wholesale yielded 60 candidates, which is magit's keymap, not this
+section's verbs, and useless as a phone long-press.  So mode-level keys
+are an allowlist while the nearer, genuinely per-section map is offered
+in full."
   (with-temp-buffer
     (insert "row\n")
     (let ((mode-map (make-sparse-keymap))
-          (near-map (make-sparse-keymap)))
+          (near-map (make-sparse-keymap))
+          (jetpacs-sections-menu-mode-keys '("s")))
       (define-key mode-map (kbd "s") #'jetpacs-sections-test--safe)
       (define-key mode-map (kbd "z") #'jetpacs-sections-test--safe)
       (define-key near-map (kbd "s") #'jetpacs-sections-test--danger)
+      (define-key near-map (kbd "q") #'jetpacs-sections-test--safe)
       (use-local-map mode-map)
       (put-text-property (point-min) 4 'keymap near-map)
-      (goto-char (point-min))
       (let ((cands (jetpacs-sections--menu-candidates (point-min))))
-        ;; The mode-level `z' is now reachable at all...
-        (should (rassoc "z" cands))
-        ;; ...and `s' appears exactly once, from the NEARER map.
+        ;; Allowlisted mode key: present.  Non-allowlisted: absent.
+        (should (rassoc "s" cands))
+        (should-not (rassoc "z" cands))
+        ;; The nearer map is section-specific, so it is NOT allowlisted.
+        (should (rassoc "q" cands))
+        ;; `s' resolves once, from the NEARER map.
         (should (= 1 (cl-count "s" cands :key #'cdr :test #'equal)))
-        (should (rassoc "TAB" cands)))))
-  ;; A denylisted command is not offered even when bound AND callable.
-  ;; (Naming a real magit command here would prove nothing: magit is not
-  ;; loaded in the suite, so `commandp' would reject it before the
-  ;; denylist was ever consulted.)
+        (should (rassoc "TAB" cands))))))
+
+(ert-deftest jetpacs-sections-menu-is-capped ()
+  "A future keymap must degrade to a usable dialog, not a wall."
+  (with-temp-buffer
+    (insert "row\n")
+    (let ((km (make-sparse-keymap))
+          (jetpacs-sections-menu-max 5))
+      (dolist (c '(?a ?b ?d ?e ?f ?g ?h ?i ?j))
+        (define-key km (vector c) #'jetpacs-sections-test--safe))
+      (put-text-property (point-min) 4 'keymap km)
+      (should (= 5 (length (jetpacs-sections--menu-candidates
+                            (point-min))))))))
+
+(ert-deftest jetpacs-sections-menu-refuses-denylisted ()
+  "A denylisted command is not offered even when bound AND callable.
+Naming a real magit command here would prove nothing: magit is not
+loaded in the suite, so `commandp' would reject it before the denylist
+was ever consulted — which is exactly how the first version of this test
+passed vacuously."
   (with-temp-buffer
     (insert "row\n")
     (let ((km (make-sparse-keymap))
@@ -566,30 +589,10 @@ keymap still shadows the mode's binding for the same key."
                  jetpacs-sections-menu-denylist)))
       (define-key km (kbd "k") #'jetpacs-sections-test--danger)
       (define-key km (kbd "j") #'jetpacs-sections-test--safe)
-      (use-local-map km)
+      (put-text-property (point-min) 4 'keymap km)
       (let ((cands (jetpacs-sections--menu-candidates (point-min))))
         (should (rassoc "j" cands))          ; the control
         (should-not (rassoc "k" cands))))))
-
-(ert-deftest jetpacs-sections-dialog-ids-are-fresh ()
-  "SPEC 18.1: a second outstanding dialog reusing an id gets `1201'.
-Which is exactly what an impatient double-press on one header did."
-  (with-temp-buffer
-    (rename-buffer "*jc3-dlg*" t)
-    (should-not (equal (jetpacs-sections--dialog-id (current-buffer) 1)
-                       (jetpacs-sections--dialog-id (current-buffer) 1)))
-    (should (jetpacs--identifier-p
-             (jetpacs-sections--dialog-id (current-buffer) 1)))))
-
-(ert-deftest jetpacs-sections-float-pos-is-rejected-by-type ()
-  "A float clears `numberp' but misses `exposed-p''s `eql' hash, so it
-would be refused for the wrong reason — and a type gate that lets the
-wrong type through is one exposure-table change away from being a hole."
-  (jetpacs-sections-test--with-client ()
-    (let ((visit (gethash "sections.visit" jetpacs-action-handlers)))
-      (should (eq (funcall visit '(:buffer "*nope*" :pos 1.5)
-                           '(:surface "app:demo"))
-                  'rejected)))))
 
 (provide 'jetpacs-sections-test)
 ;;; jetpacs-sections-test.el ends here

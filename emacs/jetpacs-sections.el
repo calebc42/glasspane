@@ -104,15 +104,16 @@ sections share a `start' marker.")
     magit-mouse-toggle-section
     ;; Destructive, and NOT offerable over the wire.  A dialog button
     ;; carries no SPEC 14.1 `confirm' — `jetpacs-dialog-submit' has no
-    ;; such member — so a mis-tap on a phone would discard uncommitted
-    ;; work or move a branch with nothing standing in the way.  Staging,
-    ;; unstaging and committing are all still offered; these three want a
-    ;; desktop.  Remove them here if you disagree; that is your call to
-    ;; make, not this file's.
-    magit-discard magit-reset-quickly magit-reset
-    magit-reset-hard magit-reset-soft magit-reset-mixed
+    ;; such member — so a mis-tap on a phone would delete a branch or
+    ;; move a ref with nothing standing in the way.  Symbols verified
+    ;; against live magit: `k' is `magit-delete-thing', NOT
+    ;; `magit-discard', and `x' is `magit-reset-quickly'.
+    magit-delete-thing magit-discard
+    magit-reset magit-reset-quickly
+    magit-reset-hard magit-reset-soft magit-reset-mixed magit-reset-index
     magit-branch-delete magit-tag-delete magit-remote-remove
-    magit-stash-drop magit-stash-clear)
+    magit-stash-drop magit-stash-clear
+    magit-file-delete magit-revert magit-revert-no-commit)
   "Commands never offered in the section context menu."
   :type '(repeat function) :group 'jetpacs)
 
@@ -514,7 +515,31 @@ twice."
         (setq s (substring s (length prefix)))))
     (capitalize (string-replace "-" " " s))))
 
-(defun jetpacs-sections--map-candidates (km cands)
+(defcustom jetpacs-sections-menu-mode-keys '("s" "u" "c" "RET")
+  "Keys offered from the MAJOR MODE's map in the section menu.
+
+An allowlist, not a denylist, and that inversion is the whole point.  A
+section's own text-property keymap is small and genuinely per-section, so
+everything offerable in it is offered.  A mode map is the buffer's ENTIRE
+user interface — scanning magit-status wholesale yields 60 candidates,
+which is magit's keymap, not \"this section's verbs\", and no use at all
+as a phone long-press.
+
+The default is the handful that conventionally act on the thing at point
+\(stage, unstage, commit, visit in magit).  Keys, not commands, so this
+stays framework-generic: forge, kubernetes.el and taxy consumers bind
+their own commands to the same keys.  Add to it freely — but note that
+whatever is offerable here becomes replayable (SPEC 23.2 re-derives from
+this same function), so `jetpacs-sections-menu-denylist' still applies."
+  :type '(repeat string) :group 'jetpacs)
+
+(defcustom jetpacs-sections-menu-max 16
+  "Cap on entries in one section menu.
+A backstop: a future keymap should degrade to a usable dialog, never a
+scrolling wall of buttons."
+  :type 'integer :group 'jetpacs)
+
+(defun jetpacs-sections--map-candidates (km cands &optional only-keys)
   "Collect offerable single-key bindings from keymap KM into CANDS."
   (when (keymapp km)
     (map-keymap
@@ -524,13 +549,15 @@ twice."
                   (or (and (integerp event) (< 31 event 127))
                       (memq event '(return tab))))
          (let ((key (key-description (vector event))))
-           ;; A text-property map SHADOWS the mode map, so a key already
-           ;; claimed by a nearer keymap keeps its nearer meaning.
-           (unless (rassoc key cands)
-             (push (cons (format "%s (%s)"
-                                 (jetpacs-sections--menu-label binding) key)
-                         key)
-                   cands)))))
+           (when (or (null only-keys) (member key only-keys))
+             ;; A text-property map SHADOWS the mode map, so a key
+             ;; already claimed by a nearer keymap keeps its nearer
+             ;; meaning.
+             (unless (rassoc key cands)
+               (push (cons (format "%s (%s)"
+                                   (jetpacs-sections--menu-label binding) key)
+                           key)
+                     cands))))))
      km))
   cands)
 
@@ -552,8 +579,12 @@ exactly what is replayable."
                 (or (get-char-property pos 'keymap)
                     (get-char-property pos 'local-map))
                 nil)))
-    (setq cands (jetpacs-sections--map-candidates (current-local-map) cands))
-    (nreverse (cons (cons "Toggle fold (TAB)" "TAB") cands))))
+    (setq cands (jetpacs-sections--map-candidates
+                 (current-local-map) cands jetpacs-sections-menu-mode-keys))
+    (let ((all (nreverse (cons (cons "Toggle fold (TAB)" "TAB") cands))))
+      (if (<= (length all) jetpacs-sections-menu-max)
+          all
+        (seq-take all jetpacs-sections-menu-max)))))
 
 (defun jetpacs-sections--replay-key (buf pos key params)
   "Replay KEY at POS in BUF, then re-push.  Runs from a continuation.

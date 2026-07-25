@@ -145,6 +145,19 @@ be refused."
 
 ;; --- Emitting nodes ----------------------------------------------------------
 
+(defun jetpacs-sections--spans (bol eol name)
+  "Tier-0 spans for [BOL, EOL) WITHOUT their automatic exposure records.
+`jetpacs-buffer--line-spans' exposes every actionable position for
+`emacs.buffer.act'.  This substrate STRIPS those taps on headers and
+RE-POINTS them at `sections.visit' on body lines, so letting the default
+records stand would leave the phone able to synthesize `emacs.buffer.act'
+at any section position and reach `jetpacs-buffer-invoke-at' — which runs
+the command UNSHIMMED, popping a desktop window (SPEC 23.1/23.2).  The
+walk therefore writes to a throwaway table, and this file exposes only
+the verbs it actually offers."
+  (let ((jetpacs-buffer-exposed (make-hash-table :test #'equal)))
+    (jetpacs-buffer--line-spans bol eol name)))
+
 (defun jetpacs-sections--rich (spans)
   "SPANS as a `rich_text' node, or a Core `text' when unadvertised (16.2)."
   (if (jetpacs-node-advertised-p "rich_text")
@@ -158,7 +171,7 @@ be refused."
   (let* ((start (jetpacs-sections--pos sec 'start))
          (spans (save-excursion
                   (goto-char start)
-                  (jetpacs-buffer--line-spans start (line-end-position) name))))
+                  (jetpacs-sections--spans start (line-end-position) name))))
     (jetpacs-sections--rich (or (jetpacs-sections--strip-taps spans)
                                 (list (jetpacs-span " "))))))
 
@@ -182,7 +195,7 @@ and stops."
             (goto-char end))
            (t
             (when (< bol eol)
-              (let ((spans (jetpacs-buffer--line-spans bol eol name)))
+              (let ((spans (jetpacs-sections--spans bol eol name)))
                 (when spans
                   (push (jetpacs-sections--rich
                          (jetpacs-sections--retarget-taps spans name))
@@ -197,7 +210,7 @@ interleaved with child sections, in buffer order."
   (let ((end (or (jetpacs-sections--pos sec 'end) begin))
         (pos begin)
         nodes)
-    (dolist (child (slot-value sec 'children))
+    (dolist (child (jetpacs-sections--slot sec 'children))
       (let ((cstart (jetpacs-sections--pos child 'start))
             (cend (jetpacs-sections--pos child 'end)))
         (when (and cstart (> cstart pos))
@@ -237,10 +250,17 @@ transparent — only its children show."
   (let* ((start (jetpacs-sections--pos sec 'start))
          (content (jetpacs-sections--pos sec 'content))
          (end (jetpacs-sections--pos sec 'end))
-         (children (slot-value sec 'children)))
+         (children (jetpacs-sections--slot sec 'children)))
     (cond
+     ;; magit leaves `end' unset while a section body is being inserted,
+     ;; so a push racing `magit-refresh' sees nil markers.  Without this
+     ;; the arithmetic below signals and takes the entire surface down.
+     ((null start) nil)
+     ((null end)
+      (list (jetpacs-sections--rich
+             (list (jetpacs-span "… section still loading" :mono t)))))
      ;; Heading + revealed content -> a collapsible card.
-     ((and content end (< content end))
+     ((and content (< content end))
       (list (jetpacs-sections--card
              sec name start
              (jetpacs-sections--header-node sec name)
@@ -285,7 +305,15 @@ cards.  Falls through to Tier 0 when the buffer has no section root."
               (name (buffer-name buf)))
           ;; This render supersedes the last one's tap targets.
           (jetpacs-buffer-forget-exposed name)
-          (or (jetpacs-sections--emit root name budget)
+          ;; The tree is third-party eieio read through `slot-value': an
+          ;; unbound slot, a missing slot on an exotic section class, or a
+          ;; mid-refresh nil marker must cost this SKIN, never the push.
+          (or (condition-case err
+                  (jetpacs-sections--emit root name budget)
+                (error
+                 (message "jetpacs-sections: tree walk failed (%s); \
+falling back to Tier 0" (jetpacs--error-label err))
+                 nil))
               (jetpacs-buffer-render buf)))))))
 
 ;; --- Visiting the thing at a row ---------------------------------------------
@@ -388,15 +416,41 @@ are resolved by the buffer's own keymaps at dispatch time."
     (nreverse (cons (cons "Toggle fold (TAB)" "TAB") cands))))
 
 (defun jetpacs-sections--replay-key (buf pos key params)
-  "Replay KEY at POS in BUF, then re-push.  Runs from a continuation."
-  (condition-case err
-      (with-current-buffer buf
-        (goto-char (min (max (point-min) (truncate pos)) (point-max)))
-        (let ((last-input-event nil)
-              (last-nonmenu-event nil))
-          (execute-kbd-macro (kbd key))))
-    (error (message "jetpacs-sections: %s failed: %s"
-                    key (jetpacs--error-label err))))
+  "Replay KEY at POS in BUF, then re-push.  Runs from a continuation.
+
+KEY arrives OVER THE WIRE (the dialog\'s submitted value), so SPEC 23.2 —
+\"MUST NOT pass unvalidated action or command names to an ambient command
+dispatcher\" — applies with full force: a bare `(execute-kbd-macro (kbd
+KEY))' would let a Companion send magit\'s `x' (reset), `C-x C-f', or
+`M-x'.  The poc was safe only incidentally, because its choice came from
+a LOCAL `completing-read' and never from the wire.
+
+KEY is therefore re-validated at replay time against the candidates
+derived FRESH at POS, and the binding it resolves to is re-checked for
+`commandp' and against the denylist.  Nothing outside that section\'s own
+current keymap can be reached."
+  (with-current-buffer buf
+    (goto-char (min (max (point-min) (truncate pos)) (point-max)))
+    (let* ((cands (jetpacs-sections--menu-candidates (point)))
+           (member (rassoc key cands))
+           (binding (and member (key-binding (kbd key) t))))
+      (cond
+       ((null member)
+        (message "jetpacs-sections: refused %S — not a candidate at this \
+section (SPEC 23.2)" key))
+       ((not (and (commandp binding)
+                  (not (memq binding jetpacs-sections--menu-denylist))))
+        (message "jetpacs-sections: refused %S — resolves to no offerable \
+command" key))
+       (t
+        (condition-case err
+            (let ((last-input-event nil)
+                  (last-nonmenu-event nil))
+              ;; The KEY (not the command) is replayed, so magit prefixes
+              ;; and transients behave as they do under the user\'s hands.
+              (execute-kbd-macro (kbd key)))
+          (error (message "jetpacs-sections: %s failed: %s"
+                          key (jetpacs--error-label err))))))))
   (jetpacs-sections--refresh params))
 
 (defun jetpacs-sections--show-menu (buf pos params)

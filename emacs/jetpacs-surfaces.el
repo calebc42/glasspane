@@ -339,6 +339,22 @@ first and degrade when the answer is no.  With no client attached
       (and (member type (append (plist-get profile :node_types) nil)) t)
     t))
 
+(defun jetpacs-feature-advertised-p (feature &optional target)
+  "Non-nil when the live welcome advertises FEATURE for TARGET (SPEC 22.4).
+The feature twin of `jetpacs-node-advertised-p'.  SPEC 22.4 registers the
+constraining names; the two a renderer must ask about are `image.https'
+and `image.data' (17.2), since an image URI form the client did not
+advertise is a sender MUST violation — `jetpacs-shell--check-features'
+SIGNALS on one, refusing the whole surface, so a builder has to ask HERE
+and degrade to a caption instead of emitting and hoping.
+
+With no client attached the gate does not run either (it needs a live
+profile), so offline renders and tests assume the richer form."
+  (if-let* ((client (jetpacs-client))
+            (profile (plist-get (ebp-client-profiles client) (or target :app))))
+      (and (member feature (append (plist-get profile :features) nil)) t)
+    t))
+
 (defun jetpacs--default-surface ()
   "The current owner's surface (decision D1), or the shell default."
   (if jetpacs-current-owner

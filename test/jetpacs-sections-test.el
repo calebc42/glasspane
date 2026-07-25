@@ -304,5 +304,98 @@ value member and the handler reads args."
                          '(:buffer "*jc3-comint*") '(:surface "app:demo"))
                 'rejected))))
 
+;; --- Regression: the three P1s found reviewing JC-3a ------------------------
+
+(defvar jetpacs-sections-test--ran nil)
+(defun jetpacs-sections-test--danger () (interactive)
+  (setq jetpacs-sections-test--ran 'danger))
+(defun jetpacs-sections-test--safe () (interactive)
+  (setq jetpacs-sections-test--ran 'safe))
+
+(ert-deftest jetpacs-sections-header-tap-leaves-no-act-exposure ()
+  "Stripping a header tap must not leave its position exposed (SPEC 23.1).
+The Tier-0 span builder exposes every actionable position for
+`emacs.buffer.act'.  This substrate strips the tap on headers, so a
+surviving record would let the phone synthesize `emacs.buffer.act' there
+and reach `jetpacs-buffer-invoke-at' UNSHIMMED — a desktop window it
+cannot see.  The keymap is on the HEADER line here on purpose: the
+original fixture put it only on the body, so no record was ever written
+and the leak was invisible."
+  (with-temp-buffer
+    (let ((km (make-sparse-keymap)))
+      (define-key km (kbd "RET") #'jetpacs-sections-test--safe)
+      (insert "Actionable heading\n")
+      (put-text-property (point-min) 19 'keymap km))
+    (rename-buffer "*jc3-hdr*" t)
+    (jetpacs-buffer-forget-exposed)
+    (jetpacs-sections--strip-taps
+     (jetpacs-sections--spans (point-min) 19 (buffer-name)))
+    (should-not (jetpacs-buffer-exposed-p
+                 (buffer-name) 1 "emacs.buffer.act"))))
+
+(ert-deftest jetpacs-sections-retarget-exposes-only-the-new-verb ()
+  "A retargeted tap authorizes `sections.visit' and NOTHING else.
+Both verbs exposed would leave the unshimmed path reachable alongside the
+shimmed one, which defeats the point of retargeting."
+  (with-temp-buffer
+    (let ((km (make-sparse-keymap)))
+      (define-key km (kbd "RET") #'jetpacs-sections-test--safe)
+      (insert "Body row\n")
+      (put-text-property (point-min) 9 'keymap km))
+    (rename-buffer "*jc3-retarget*" t)
+    (jetpacs-buffer-forget-exposed)
+    (jetpacs-sections--retarget-taps
+     (jetpacs-sections--spans (point-min) 9 (buffer-name)) (buffer-name))
+    (should (jetpacs-buffer-exposed-p (buffer-name) 1 "sections.visit"))
+    (should-not (jetpacs-buffer-exposed-p
+                 (buffer-name) 1 "emacs.buffer.act"))))
+
+(ert-deftest jetpacs-sections-replay-key-refuses-wire-invented-keys ()
+  "A key off the wire that is not a CURRENT candidate must not run.
+`--replay-key' receives the dialog's submitted value, so SPEC 23.2's ban
+on handing unvalidated names to an ambient dispatcher applies: a bare
+`execute-kbd-macro' would let a Companion send magit's `x' (reset) or
+`C-x C-f'.  Here `x' is bound in the buffer but never offered."
+  (with-temp-buffer
+    (insert "line\n")
+    (let ((km (make-sparse-keymap)))
+      (define-key km (kbd "x") #'jetpacs-sections-test--danger)
+      (use-local-map km))
+    (setq jetpacs-sections-test--ran nil)
+    (cl-letf (((symbol-function 'jetpacs-sections--menu-candidates)
+               (lambda (_pos) '(("Safe" . "RET")))))
+      (jetpacs-sections--replay-key (current-buffer) 1 "x" nil))
+    (should-not jetpacs-sections-test--ran)))
+
+(ert-deftest jetpacs-sections-tolerates-nil-markers ()
+  "A section mid-`magit-refresh' has an unset `end'; that must not signal.
+Any push racing a refresh would otherwise take the whole surface down
+instead of costing one section its body."
+  (let ((sec (record 'jc3-sec)))
+    (cl-letf (((symbol-function 'jetpacs-sections--pos)
+               (lambda (_s slot) (pcase slot ('start 1) ('content 2)
+                                        (_ nil))))
+              ((symbol-function 'jetpacs-sections--hidden-p) (lambda (_s) nil))
+              ((symbol-function 'jetpacs-sections--slot) (lambda (_s _sl) nil))
+              ((symbol-function 'jetpacs-sections--id) (lambda (_s) "id")))
+      (with-temp-buffer
+        (insert "a\n")
+        (rename-buffer "*jc3-nil*" t)
+        (should (jetpacs-sections--emit sec (buffer-name) (list 10)))))))
+
+(ert-deftest jetpacs-feature-advertised-p-offline-and-gated ()
+  "The 22.4 feature twin: absent from the profile means NOT advertised."
+  (should (jetpacs-feature-advertised-p "image.data"))   ; offline: richer form
+  ;; A real struct, not a fake record: `ebp-client-profiles' is a
+  ;; `cl-defstruct' accessor that indexes the record directly, so letf-ing
+  ;; the symbol does not intercept the call site.
+  (let ((client (ebp-client-create
+                 :receipt-file (make-temp-file "jetpacs-sections-receipts"))))
+    (setf (ebp-client-state client) 'ready
+          (ebp-client-profiles client) '(:app (:features ["image.https"])))
+    (cl-letf (((symbol-function 'jetpacs-client) (lambda () client)))
+      (should (jetpacs-feature-advertised-p "image.https"))
+      (should-not (jetpacs-feature-advertised-p "image.data")))))
+
 (provide 'jetpacs-sections-test)
 ;;; jetpacs-sections-test.el ends here

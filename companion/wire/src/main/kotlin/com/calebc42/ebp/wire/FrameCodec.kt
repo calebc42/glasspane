@@ -4,9 +4,7 @@
 // chunk-size independence, verified by the same goldens/wire corpus.
 package com.calebc42.ebp.wire
 
-import org.json.JSONException
 import org.json.JSONObject
-import org.json.JSONTokener
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -164,7 +162,10 @@ class FrameDecoder {
         return length.toInt()
     }
 
-    /** SPEC 6.2 + 4.1: strict UTF-8, valid single JSON object, no duplicates. */
+    /** SPEC 6.2 + 4.1: strict UTF-8, then the strict one-pass parser (T1).
+     * Grammar, duplicate members, depth <= 64, surrogate pairing, integer
+     * range, and finiteness are all enforced IN-PARSE by EbpJson — the two
+     * compensating full-text re-scans this method used to run are gone. */
     private fun parseBody(body: ByteArray): JSONObject {
         val text = try {
             StandardCharsets.UTF_8.newDecoder()
@@ -174,53 +175,10 @@ class FrameDecoder {
         } catch (_: CharacterCodingException) {
             throw WireParseError("invalid UTF-8")
         }
-        // SPEC 4.5/23.5: reject an over-deep body BEFORE the recursive parser
-        // can exhaust the stack — enforcement precedes expensive decoding.
-        if (exceedsDepthLimit(text)) throw WireParseError("nesting depth exceeds 64")
-        val tokener = JSONTokener(text)
-        val value = try {
-            tokener.nextValue()
-        } catch (_: JSONException) {
-            // The reference org.json throws on duplicate keys during parse;
-            // Android's implementation does not. Classify uniformly with our
-            // own scanner so both platforms reject per SPEC 4.1.
-            if (runCatching { hasDuplicateMembers(text) }.getOrDefault(false))
-                throw InvalidRequest("duplicate member names")
-            throw WireParseError("invalid JSON")
-        }
-        if (tokener.nextClean().code != 0) throw WireParseError("trailing data after message")
-        if (value !is JSONObject)
+        val value = EbpJson.parse(text)
+        if (value !is EbpValue.EObj)
             throw InvalidRequest("top-level value is not a single message object")
-        if (hasDuplicateMembers(text)) throw InvalidRequest("duplicate member names")
-        return value
-    }
-
-    /**
-     * SPEC 4.5: a JSON body nests at most 64 containers. One linear scan
-     * (skipping string contents and escapes) so the check runs in constant
-     * stack — the recursive parser would otherwise overflow on a hostile
-     * body. Returns true once nesting passes the limit.
-     */
-    private fun exceedsDepthLimit(text: String): Boolean {
-        var depth = 0
-        var inString = false
-        var escaped = false
-        for (c in text) {
-            if (inString) {
-                when {
-                    escaped -> escaped = false
-                    c == '\\' -> escaped = true
-                    c == '"' -> inString = false
-                }
-                continue
-            }
-            when (c) {
-                '"' -> inString = true
-                '{', '[' -> if (++depth > WireLimits.MAX_JSON_DEPTH) return true
-                '}', ']' -> depth--
-            }
-        }
-        return false
+        return EbpJson.toOrgJson(value) as JSONObject
     }
 }
 

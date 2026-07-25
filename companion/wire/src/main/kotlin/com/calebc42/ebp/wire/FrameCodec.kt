@@ -20,6 +20,12 @@ object WireLimits {
     const val MAX_IDENTIFIER_OCTETS = 128
     const val MAX_REQUEST_ID_OCTETS = 64
     const val MAX_METHOD_OCTETS = 128
+    // SPEC 4.5 (amendment #108): node nesting depth in one document. Far
+    // below max_json_depth because a node level costs ~2 JSON containers and
+    // host ENCODERS cap lower than receivers accept — Emacs's json-serialize
+    // stops at 50 containers with no override, so a document nested to the
+    // JSON limit is unemittable by a conforming Emacs endpoint.
+    const val MAX_NODE_DEPTH = 20
 }
 
 /** SPEC 6.2: conditions that force connection closure. */

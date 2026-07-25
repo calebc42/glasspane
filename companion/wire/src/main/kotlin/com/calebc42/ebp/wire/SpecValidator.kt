@@ -90,6 +90,8 @@ object SpecValidator {
         // across one SurfaceSpec or dialog document, like max_chart_points.
         var richSpans = 0L
         var tableCells = 0L
+        // SPEC 4.5/16.1 (amendment #108): node nesting depth.
+        var nodeDepth = 0
     }
 
     /** Validate one SurfaceSpec; returns the stateful nodes by ID. The chart/
@@ -376,6 +378,14 @@ object SpecValidator {
         // before descending so an over-limit tree rejects, not renders.
         if (++ctx.nodeCount > WireLimits.MAX_NODES_PER_SNAPSHOT)
             throw ContentInvalid(path, "exceeds max_nodes_per_snapshot")
+        // SPEC 4.5/16.1 (amendment #108): and at most 20 levels deep — the
+        // receiver's JSON-container limit is not a budget a sender can spend,
+        // because host encoders cap well below it.
+        if (++ctx.nodeDepth > WireLimits.MAX_NODE_DEPTH) {
+            ctx.nodeDepth--
+            throw ContentInvalid(path, "node-depth")
+        }
+        try {
         validateNode(node, path, ctx)
         // SPEC 16.2: unknown node types degrade — their subtrees are scanned
         // for nested known nodes but not held to per-type structural rules.
@@ -417,6 +427,7 @@ object SpecValidator {
                 else -> walkValue(child, "$path.$key", ctx)
             }
         }
+        } finally { ctx.nodeDepth-- }
     }
 
     private fun isInt(v: Any?): Long? {

@@ -32,6 +32,29 @@ class SpecValidatorCompletenessTest {
         }
     }
 
+    // ------------------------------ A6/#108: node nesting depth (SPEC 4.5)
+
+    @Test
+    fun nodeNestingDepthIsBounded() {
+        // The 4.5 JSON-container limit is a RECEIVER acceptance bound, not a
+        // budget a sender may spend: host encoders cap well below it (Emacs's
+        // json-serialize stops at 50 containers with no override), so a
+        // document nested to the JSON limit is unemittable by a conforming
+        // Emacs endpoint and its reply would be lost, not refused.
+        fun nest(levels: Int): JSONObject {
+            var n = node("text", "text" to "leaf")
+            repeat(levels - 1) { n = node("column", "children" to JSONArray().put(n)) }
+            return n
+        }
+        accepts(nest(20))
+        rejects(nest(21), "node-depth")
+        // Depth is per PATH, not a running total: many shallow siblings are
+        // fine even though the node count is high.
+        val wide = JSONArray()
+        repeat(50) { wide.put(nest(19)) }
+        accepts(node("column", "children" to wide))
+    }
+
     // ------------------------------------- LD-10: contract field-type checks
 
     @Test

@@ -70,11 +70,23 @@ test**, so a deliberately-cleared field is not restored and an untouched `checkb
 `authoredValueOf` now the single definition shared by both layers. The override chain (c) landed
 in `967ab1e`. **All three Tier-1 architectural items (T1, T2, T3) are complete.**
 
-**NEXT:** the rest of Tier 2 — LD-13's bound half, LD-14
-split-then-amortize per §5.2, LD-11 image cache, LD-10/LD-17 contract-driven validator types +
-`builtinsFromProfiles`, the recompose-scope split, the two serialize-to-compare fixes — then **A6**
-(the P2/P3 amendment batch incl. §5.1's constants, both §25 restricting rows), then **A8**'s
-research items. (§19.5's companion half and LD-6 came forward into the audit-backlog atom.)
+**Tier 2 DONE** (`029f990`, `a06d77c`, `0a63fe6`, `f3314df`): LD-13 bound half (kbd_buffer
+hysteresis: hold at 512 outstanding, resume below 128, refusals fail locally with 1401); the two
+serialize-to-compare fixes + the MainActivity recompose-scope split (SurfaceHost/PieMenuHost/
+DialogHost); LD-14 records/drafts file split (a keystroke re-serializes no spec or tombstone —
+the load-bearing §5.2 half; the idle-timer amortization is deferred, see below); LD-11 image cache
+(LRU byte budget from memoryClass + in-flight coalescing + clear() revocation seam, completing
+LD-12's retained-bytes bound); LD-10 contract-driven scalar type checks (FIELD_TYPES projected from
+contract.json, boolean/string/identifier/dp coercion closed) + LD-17 builtin-context gate
+(builtinsFromProfiles). Baselines **298 wire / 24 app / 203 elisp**.
+
+**Deferred, small, noted:** (a) LD-14's idle-timer draft amortization — needs a scheduler seam in
+the pure wire library and §15.1-barrier integration, and per the review buys nothing for an
+on_change field; the tombstone-re-serialization cost (the dominant one) is already gone. (b) The
+image-cache `clear()` awaits an app-side forget-pairing path, which is not wired yet.
+
+**NEXT:** **A6** — the P2/P3 amendment batch (incl. §5.1's `max_node_depth`/`max_send_header_bytes`
+constants, both §25 restricting rows), then **A8**'s research items.
 
 **Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the
 checklist wants it on hardware too), an inbound-`edit.apply`-while-the-editor-is-shown smoke (the

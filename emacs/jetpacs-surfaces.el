@@ -312,7 +312,11 @@ logged: amendment #74 puts sensitive trigger data in `args'."
         (format "action %s tried to prompt the local user (%s) inside the \
 dispatch extent; answering rejected.  Handlers MUST NOT block (decision D2) \
 — route the question to the phone with a dialog instead"
-                (plist-get params :action) (car (cdr err)))
+                (plist-get params :action)
+                ;; Emacs's own `inhibit-interaction' signal carries no
+                ;; datum; only the stubs in `jetpacs--blocking-readers'
+                ;; name themselves.
+                (or (car (cdr err)) "a minibuffer prompt"))
         :error)
        'rejected)
       (error

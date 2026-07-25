@@ -546,6 +546,11 @@ class VocabularyDriftTest {
         assertEquals(universal, UNIVERSAL_NODE_ATTRIBUTES)
         val actions = contract.getJSONObject("actions").getJSONObject("schema")
         assertEquals(actions.keySet(), ACTION_SCHEMA.keys)
+        // LD-10: the projected field types match the contract exactly.
+        val fieldTypes = contract.getJSONObject("field_types")
+        assertEquals(fieldTypes.keySet(), FIELD_TYPES.keys)
+        for (name in fieldTypes.keySet())
+            assertEquals("$name type", fieldTypes.getString(name), FIELD_TYPES.getValue(name))
     }
 
 }

@@ -16,6 +16,8 @@ class SpecValidatorCompletenessTest {
     private fun node(t: String, vararg kv: Pair<String, Any?>) =
         JSONObject().put("t", t).apply { kv.forEach { put(it.first, it.second) } }
 
+    private fun remote() = JSONObject().put("action", "demo.act")
+
     private fun accepts(spec: JSONObject) {
         SpecValidator.validateSurfaceSpec(spec)
     }
@@ -28,6 +30,55 @@ class SpecValidatorCompletenessTest {
             assertTrue("${e.reason} @ ${e.path} !~ $fragment",
                 e.reason.contains(fragment) || e.path.contains(fragment))
         }
+    }
+
+    // ------------------------------------- LD-10: contract field-type checks
+
+    @Test
+    fun scalarMembersAreTypeCheckedNotCoerced() {
+        // The org.json accessors coerced silently. Each of these was ACCEPTED
+        // and rendered with the wrong meaning; now the document is refused.
+        // A disabled node that rendered enabled (optBoolean default trap):
+        rejects(node("button", "label" to "x", "on_tap" to remote(),
+            "enabled" to 0), "enabled must be a boolean")
+        // A password field flagged with the STRING "true":
+        rejects(node("text_input", "id" to "p", "password" to "true"),
+            "password must be a boolean")
+        // An object coerced into a heading string:
+        rejects(node("section_header", "title" to JSONObject().put("secret", "x")),
+            "title must be a string")
+        // A dp attribute given a string (spacing is a column dp member):
+        rejects(node("column", "children" to JSONArray(), "spacing" to "5"),
+            "spacing must be a finite number")
+        // The logical values still pass.
+        accepts(node("button", "label" to "x", "on_tap" to remote(), "enabled" to false))
+        accepts(node("text_input", "id" to "p", "password" to true))
+        accepts(node("section_header", "title" to "Heading"))
+    }
+
+    // --------------------------------------- LD-17: builtin-context gate (14.2)
+
+    @Test
+    fun aBuiltinOutsideTheTargetProfileRejectsTheDocument() {
+        val dialogBuiltins = setOf("dialog.submit", "dialog.dismiss")
+        // clipboard.copy is a real builtin but not advertised for a dialog —
+        // invalid context, so the whole document is refused (not degraded).
+        val spec = node("button", "label" to "Copy",
+            "on_tap" to JSONObject().put("builtin", "clipboard.copy"))
+        try {
+            SpecValidator.validateSurfaceSpec(spec,
+                advertisedTypes = setOf("button", "column"),
+                advertisedBuiltins = dialogBuiltins)
+            fail("accepted a builtin outside the target profile")
+        } catch (e: ContentInvalid) {
+            assertTrue(e.reason.contains("not valid in this context"))
+        }
+        // An advertised builtin in the same target is accepted.
+        SpecValidator.validateSurfaceSpec(
+            node("button", "label" to "OK",
+                "on_tap" to JSONObject().put("builtin", "dialog.submit")),
+            advertisedTypes = setOf("button", "column"),
+            advertisedBuiltins = dialogBuiltins)
     }
 
     // ------------------------------------------------------- content (17.2)
@@ -77,7 +128,10 @@ class SpecValidatorCompletenessTest {
         rejects(tabs(JSONArray().put(JSONObject().put("icon", "star")),
             JSONArray().put(child)), "label")
         rejects(tabs(JSONArray().put(item), JSONArray().put(child), 1), "index")
-        rejects(tabs(JSONArray().put(item), JSONArray().put(child), -1), "index")
+        // A negative `initial` is caught by the LD-10 field-type check
+        // (contract non-negative-integer) before the tabs range rule.
+        rejects(tabs(JSONArray().put(item), JSONArray().put(child), -1),
+            "non-negative integer")
         accepts(tabs(JSONArray().put(item), JSONArray().put(child), 0))
     }
 

@@ -36,6 +36,13 @@ for name, row in contract["actions"]["schema"].items():
         f"{kt_set(row['optional'])}),"
     )
 
+# LD-10: the contract's flat member-name -> value-type map, so the validator
+# type-checks against the contract instead of hand-duplicating two rows.
+field_type_rows = [
+    f"    \"{name}\" to \"{t}\","
+    for name, t in sorted(contract["field_types"].items())
+]
+
 body = f"""// SPDX-License-Identifier: GPL-3.0-or-later
 // GENERATED from ebp/contract.json (format {contract["contract_format"]},
 // spec {contract["spec_version"]}) by tools/gen-vocabulary.py — DO NOT EDIT.
@@ -67,6 +74,12 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(
 {chr(10).join(action_rows)}
+)
+
+/** SPEC 4/16-17: each member name's contract value type. LD-10 drives the
+ * validator's scalar type-checks off this instead of coercing accessors. */
+val FIELD_TYPES: Map<String, String> = mapOf(
+{chr(10).join(field_type_rows)}
 )
 """
 

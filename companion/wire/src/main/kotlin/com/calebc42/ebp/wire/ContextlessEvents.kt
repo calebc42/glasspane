@@ -16,6 +16,14 @@ fun nodeTypesFromProfiles(profiles: JSONObject, target: String): Set<String>? {
     return buildSet { for (i in 0 until arr.length()) arr.optString(i)?.let(::add) }
 }
 
+/** SPEC 14.2 (LD-17): the advertised builtins for a target from
+ * surface_profiles, or null when the profile is absent (allow all — the
+ * counterpart of [nodeTypesFromProfiles] for the builtin-context gate). */
+fun builtinsFromProfiles(profiles: JSONObject, target: String): Set<String>? {
+    val arr = profiles.optJSONObject(target)?.optJSONArray("builtins") ?: return null
+    return buildSet { for (i in 0 until arr.length()) arr.optString(i)?.let(::add) }
+}
+
 /**
  * The live-session duties a context-less event needs only when a connection
  * exists: deliver a `drop` event live, and wake + advance the pump after a

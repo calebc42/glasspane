@@ -45,7 +45,9 @@ class CompanionEngine(
         config.limits.optLong("max_rich_spans", Long.MAX_VALUE),
         config.limits.optLong("max_table_cells", Long.MAX_VALUE),
         nodeTypesFromProfiles(config.surfaceProfiles, "app"),
-        nodeTypesFromProfiles(config.surfaceProfiles, "notification")),
+        nodeTypesFromProfiles(config.surfaceProfiles, "notification"),
+        builtinsFromProfiles(config.surfaceProfiles, "app"),
+        builtinsFromProfiles(config.surfaceProfiles, "notification")),
     /** Shared across connections AND restarts: the SPEC 15 durable queue. */
     val queue: DurableQueue = DurableQueue(
         MemoryQueueStore(),
@@ -1824,7 +1826,11 @@ class CompanionEngine(
                 // SPEC 17.1: a dialog spec is gated to the dialog profile's
                 // advertised node_types — an app-only type (chart/editor/
                 // scaffold) degrades instead of rendering + dispatching here.
-                advertisedTypes = nodeTypesFromProfiles(config.surfaceProfiles, "dialog"))
+                advertisedTypes = nodeTypesFromProfiles(config.surfaceProfiles, "dialog"),
+                // SPEC 14.2 (LD-17): a builtin outside the dialog profile's
+                // advertised set is an invalid context here — e.g. a
+                // clipboard.copy in a dialog rejects the document.
+                advertisedBuiltins = builtinsFromProfiles(config.surfaceProfiles, "dialog"))
         } catch (e: ContentInvalid) {
             return respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("path", e.path).put("reason", e.reason))

@@ -77,6 +77,10 @@ object SpecValidator {
         // node_types is treated as unsupported (§16.2 degrade), even though it
         // is a known contract type. null = allow all (unit tests / golden corpus).
         val advertisedTypes: Set<String>?,
+        // SPEC 14.2 (LD-17): a builtin absent from the target's advertised
+        // builtins is an INVALID CONTEXT — unlike a node type it does not
+        // degrade, it rejects the containing document. null = allow all.
+        val advertisedBuiltins: Set<String>? = null,
     ) {
         val ids = mutableSetOf<String>()
         val statefuls = mutableMapOf<String, JSONObject>()
@@ -100,10 +104,11 @@ object SpecValidator {
         maxRichSpans: Long = Long.MAX_VALUE,
         maxTableCells: Long = Long.MAX_VALUE,
         advertisedTypes: Set<String>? = null,
+        advertisedBuiltins: Set<String>? = null,
     ): Map<String, JSONObject> {
         if (spec !is JSONObject) throw ContentInvalid(path, "spec must be an object")
         val ctx = Ctx(maxCaptureFields, maxChartPoints, maxCanvasOps,
-            maxRichSpans, maxTableCells, advertisedTypes)
+            maxRichSpans, maxTableCells, advertisedTypes, advertisedBuiltins)
         if (spec.has("views")) {
             val views = spec.optJSONObject("views")
                 ?: throw ContentInvalid("$path.views", "views must be an object")
@@ -185,6 +190,7 @@ object SpecValidator {
     fun validateNotificationSpec(spec: Any?, path: String = "spec",
                                  maxCaptureFields: Long = 64,
                                  advertisedTypes: Set<String>? = null,
+                                 advertisedBuiltins: Set<String>? = null,
                                  maxChartPoints: Long = Long.MAX_VALUE,
                                  maxCanvasOps: Long = Long.MAX_VALUE,
                                  maxRichSpans: Long = Long.MAX_VALUE,
@@ -200,7 +206,7 @@ object SpecValidator {
         validateSurfaceSpec(body, "$path.body", maxCaptureFields,
             maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
             maxRichSpans = maxRichSpans, maxTableCells = maxTableCells,
-            advertisedTypes = advertisedTypes)
+            advertisedTypes = advertisedTypes, advertisedBuiltins = advertisedBuiltins)
         if (spec.has("meta")) {
             val meta = spec.opt("meta") as? JSONObject
                 ?: throw ContentInvalid("$path.meta", "must be an object")
@@ -411,6 +417,37 @@ object SpecValidator {
         }
     }
 
+    private fun isInt(v: Any?): Long? {
+        val n = (v as? Number)?.toDouble() ?: return null
+        return if (n == Math.floor(n) && !n.isInfinite()) n.toLong() else null
+    }
+
+    /** LD-10: enforce the contract FIELD_TYPES for the scalar categories.
+     * Complex types (node/array/object/enum/varies-per-node) return without
+     * a check — their dedicated validators run separately. */
+    private fun checkScalarFieldType(t: String, member: String, v: Any?, path: String) {
+        val p = "$path.$member"
+        fun bad(want: String): Nothing = throw ContentInvalid(p, "$member must be $want")
+        when (FIELD_TYPES[member]) {
+            "boolean" -> if (v !is Boolean) bad("a boolean")
+            "string", "yyyy-mm" -> if (v !is String) bad("a string")
+            "identifier" -> if (v !is String || !IDENTIFIER.matches(v) ||
+                    v.toByteArray(Charsets.UTF_8).size > WireLimits.MAX_IDENTIFIER_OCTETS)
+                bad("an identifier")
+            "color" -> if (v !is String) bad("a color string")
+            "string-or-number" -> if (v !is String && v !is Number) bad("a string or number")
+            "dp", "number" -> if (v !is Number || (v).toDouble().isInfinite() ||
+                    (v).toDouble().isNaN()) bad("a finite number")
+            "non-negative-integer" -> if ((isInt(v) ?: -1) < 0) bad("a non-negative integer")
+            "positive-integer" -> if ((isInt(v) ?: 0) < 1) bad("a positive integer")
+            "integer-1-12" -> if (isInt(v).let { it == null || it < 1 || it > 12 })
+                bad("an integer 1..12")
+            "integer-1-31" -> if (isInt(v).let { it == null || it < 1 || it > 31 })
+                bad("an integer 1..31")
+            else -> Unit // enum, font-weight, varies-per-node, and complex types
+        }
+    }
+
     private fun validateNode(node: JSONObject, path: String, ctx: Ctx) {
         val t = node.opt("t") as? String
             ?: throw ContentInvalid(path, "node discriminator t must be a string")
@@ -430,6 +467,18 @@ object SpecValidator {
         for (req in row.required)
             if (!node.has(req))
                 throw ContentInvalid(path, "$t missing required $req")
+        // LD-10: type-check each type-specific member against the contract's
+        // FIELD_TYPES, for the coercion-prone SCALAR categories. The org.json
+        // accessors coerce silently — `optBoolean("enabled", true)` returned
+        // the DEFAULT for `enabled: 0`, rendering a disabled node enabled;
+        // `optString("title", "")` turned `title: {...}` into a heading of
+        // the object's JSON text; `optBoolean("password", ...)` accepted the
+        // string "true". Scoped to members this node's schema lists (so
+        // richer-grammar universal attrs are untouched) and to scalar types
+        // (enum has §16.3 fallback semantics, and node/array/object/
+        // varies-per-node members have dedicated validators below).
+        for (member in row.required + row.optional)
+            if (node.has(member)) checkScalarFieldType(t, member, node.get(member), path)
         when (t) {
             "text_input" -> {
                 val value = node.opt("value")
@@ -969,6 +1018,12 @@ object SpecValidator {
             // SPEC 14.2: an unknown builtin rejects the containing document.
             row = ACTION_SCHEMA[name]
                 ?: throw ContentInvalid("$path.builtin", "unknown builtin $name")
+            // SPEC 14.2 (LD-17): a builtin not advertised for THIS target is an
+            // invalid context and rejects the document — a builtin does not
+            // degrade the way an unadvertised node type does. Emacs MUST NOT
+            // emit one absent from surface_profiles.<target>.builtins.
+            if (ctx.advertisedBuiltins != null && name !in ctx.advertisedBuiltins)
+                throw ContentInvalid("$path.builtin", "builtin $name not valid in this context")
         }
         // SPEC 14.1: capture_fields is an array of distinct widget IDs no
         // longer than max_capture_fields; each is resolved against the

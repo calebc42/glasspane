@@ -27,6 +27,10 @@ class SurfaceStore(
     // unadvertised-but-known type degrades. null = allow all (in-memory tests).
     private val appNodeTypes: Set<String>? = null,
     private val notificationNodeTypes: Set<String>? = null,
+    // SPEC 14.2 (LD-17): the advertised builtins per target, for the
+    // invalid-context gate. null = allow all.
+    private val appBuiltins: Set<String>? = null,
+    private val notificationBuiltins: Set<String>? = null,
     /** SPEC 13.1/15.1: durable surface histories + input_state. In-memory
      * by default; DeviceBridge wires a file so both survive process death. */
     private val backing: SurfaceBacking = MemorySurfaceBacking(),
@@ -60,7 +64,8 @@ class SurfaceStore(
                         maxCaptureFields = maxCaptureFields,
                         maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
                         maxRichSpans = maxRichSpans, maxTableCells = maxTableCells,
-                        advertisedTypes = appNodeTypes)
+                        advertisedTypes = appNodeTypes,
+                        advertisedBuiltins = appBuiltins)
                 }.getOrNull() ?: continue
             else emptyMap()
             records[r.surface] = Record(r.revision, r.present, r.spec, r.currentView, statefuls)
@@ -155,6 +160,7 @@ class SurfaceStore(
             // SPEC 13.4/18.5: {body: Node, meta?}, no views, no drafts.
             SpecValidator.validateNotificationSpec(spec, maxCaptureFields = maxCaptureFields,
                 advertisedTypes = notificationNodeTypes,
+                advertisedBuiltins = notificationBuiltins,
                 maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
                 maxRichSpans = maxRichSpans, maxTableCells = maxTableCells)
             if (currentView != null)
@@ -164,6 +170,7 @@ class SurfaceStore(
             staleSpec?.let {
                 SpecValidator.validateNotificationSpec(it, "stale_spec", maxCaptureFields,
                     advertisedTypes = notificationNodeTypes,
+                    advertisedBuiltins = notificationBuiltins,
                     maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
                     maxRichSpans = maxRichSpans, maxTableCells = maxTableCells)
             }
@@ -175,7 +182,7 @@ class SurfaceStore(
                 spec, maxCaptureFields = maxCaptureFields,
                 maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
                 maxRichSpans = maxRichSpans, maxTableCells = maxTableCells,
-                advertisedTypes = appNodeTypes)
+                advertisedTypes = appNodeTypes, advertisedBuiltins = appBuiltins)
             reset = resetIds?.let { SpecValidator.validateResetIds(it, statefuls) }
                 ?: emptySet()
             staleSpec?.let { SpecValidator.validateStaleSpec(it, spec.has("views"),

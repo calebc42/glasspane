@@ -239,28 +239,34 @@ text property, so this never marks the whole buffer tappable."
 ;; put on the phone.  So every emitted (BUFFER . POS) is recorded, and a tap
 ;; is honored only if it was genuinely offered.
 
-(defvar jetpacs-buffer--exposed (make-hash-table :test #'equal)
+(defvar jetpacs-buffer-exposed (make-hash-table :test #'equal)
   "Map of BUFFER-NAME -> hash of exposed POS -> t, for the live render.
 Rebuilt per `jetpacs-buffer--render-region'; a tap for an unrecorded
 \(buffer, pos) is refused.")
 
-(defun jetpacs-buffer--expose (buffer-name pos)
-  "Record that POS in BUFFER-NAME was emitted as a tap target."
-  (let ((tbl (or (gethash buffer-name jetpacs-buffer--exposed)
+(defun jetpacs-buffer-expose (buffer-name pos)
+  "Record that POS in BUFFER-NAME was emitted as a tap target.
+Public API: a Tier-1 skin (JC-2's results/tablist) builds its own rows
+instead of walking through `jetpacs-buffer--render-region', so it MUST
+record each position it makes tappable — otherwise the SPEC 23.1
+validation in `jetpacs-buffer--tap-status' refuses every one of its taps.
+Call `jetpacs-buffer-forget-exposed' for the buffer first, so a re-render
+supersedes the previous set."
+  (let ((tbl (or (gethash buffer-name jetpacs-buffer-exposed)
                  (puthash buffer-name (make-hash-table :test #'eql)
-                          jetpacs-buffer--exposed))))
+                          jetpacs-buffer-exposed))))
     (puthash pos t tbl)))
 
 (defun jetpacs-buffer-exposed-p (buffer-name pos)
   "Non-nil when POS in BUFFER-NAME was emitted by the last render."
-  (when-let* ((tbl (gethash buffer-name jetpacs-buffer--exposed)))
+  (when-let* ((tbl (gethash buffer-name jetpacs-buffer-exposed)))
     (gethash pos tbl)))
 
 (defun jetpacs-buffer-forget-exposed (&optional buffer-name)
   "Drop the exposure record for BUFFER-NAME, or all of it."
   (if buffer-name
-      (remhash buffer-name jetpacs-buffer--exposed)
-    (clrhash jetpacs-buffer--exposed)))
+      (remhash buffer-name jetpacs-buffer-exposed)
+    (clrhash jetpacs-buffer-exposed)))
 
 (defun jetpacs-buffer--span-action (pos buffer-name)
   "The tap ActionDescriptor for the run starting at POS, or nil.
@@ -271,7 +277,7 @@ The skin override wins; otherwise an actionable region gets the generic
                (funcall jetpacs-buffer-span-action-function pos buffer-name)
              (error nil)))
       (when (jetpacs-buffer--actionable-p pos)
-        (jetpacs-buffer--expose buffer-name pos)
+        (jetpacs-buffer-expose buffer-name pos)
         (jetpacs-action "emacs.buffer.act"
                         :args (list :buffer buffer-name :pos pos)))))
 
@@ -310,7 +316,7 @@ next line, since modes differ on which carries `invisible'."
 
 (defun jetpacs-buffer--fold-span (pos buffer-name text)
   "A tappable affordance span toggling the fold at heading position POS."
-  (jetpacs-buffer--expose buffer-name pos)
+  (jetpacs-buffer-expose buffer-name pos)
   (jetpacs-span text
                 :on-tap (jetpacs-action
                          "jetpacs.buffer.fold"
@@ -549,19 +555,6 @@ span rather than being appended past the budget."
   "The canonical serialized size of NODE in octets."
   (string-bytes (jetpacs-node->canonical-json node)))
 
-(defun jetpacs-buffer--rich-text-advertised-p ()
-  "Non-nil when the live `app' profile advertises `rich_text' (SPEC 16.2).
-`rich_text' is OPTIONAL — the Core Node Set is only `text', `row',
-`column', `box', `spacer', `divider', `button', `text_input' — so a
-Companion need not support it, and SPEC 16.2 forbids Emacs emitting an
-unadvertised type.  With no client attached (offline renders, tests)
-assume the richer form."
-  (if-let* ((client (jetpacs-client))
-            (profile (plist-get (ebp-client-profiles client) :app)))
-      (and (member "rich_text" (append (plist-get profile :node_types) nil))
-           t)
-    t))
-
 (defun jetpacs-buffer--spans->text (spans)
   "Flatten SPANS into one Core `text' node — the non-`rich_text' fallback.
 Per-span styling and tap actions cannot survive: SPEC 17.2's `text' node
@@ -593,7 +586,7 @@ containing that position as the scroll target (`:scroll_here')."
          (spans-left (car budgets))     ; SPEC 4.5: aggregate, spent down
          (bytes-left (cdr budgets))
          (exhausted nil)
-         (rich-ok (jetpacs-buffer--rich-text-advertised-p))
+         (rich-ok (jetpacs-node-advertised-p "rich_text"))
          (pt-line (and jetpacs-line-numbers (line-number-at-pos (point))))
          (num-fmt (and jetpacs-line-numbers
                        (format "%%%dd " (length (number-to-string

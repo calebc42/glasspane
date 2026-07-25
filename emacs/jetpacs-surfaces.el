@@ -326,6 +326,19 @@ floor, so a failed push cannot make a surface permanently stale."
 
 ;;;; State (the SPEC 14.6 fan-out; ebp owns the store and reconciliation)
 
+(defun jetpacs-node-advertised-p (type &optional target)
+  "Non-nil when the live welcome advertises node TYPE for TARGET (SPEC 16.2).
+TARGET defaults to `:app'.  Only the Core Node Set — `text', `row',
+`column', `box', `spacer', `divider', `button', `text_input' — is
+guaranteed; everything else is OPTIONAL and a sender MUST NOT emit an
+unadvertised type, so a renderer that wants an optional node must ask
+first and degrade when the answer is no.  With no client attached
+\(offline renders, tests) assume the richer form."
+  (if-let* ((client (jetpacs-client))
+            (profile (plist-get (ebp-client-profiles client) (or target :app))))
+      (and (member type (append (plist-get profile :node_types) nil)) t)
+    t))
+
 (defun jetpacs--default-surface ()
   "The current owner's surface (decision D1), or the shell default."
   (if jetpacs-current-owner

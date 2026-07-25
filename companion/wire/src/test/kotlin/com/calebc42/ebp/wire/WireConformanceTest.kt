@@ -157,12 +157,18 @@ class WireConformanceTest {
 
     @Test
     fun duplicateMemberScan() {
-        assertTrue(hasDuplicateMembers("""{"a":1,"a":2}"""))
-        // Semantic comparison: a is "a".
-        assertTrue(hasDuplicateMembers("""{"a":1,"\u0061":2}"""))
-        assertFalse(hasDuplicateMembers("""{"a":1,"b":{"a":2}}"""))
-        assertFalse(hasDuplicateMembers("""{"a":[{"x":1},{"x":2}]}"""))
-        assertFalse(hasDuplicateMembers("""{"a":"a","b":"a"}"""))
+        // SPEC 4.1, now enforced IN-PARSE by EbpJson. The post-hoc text
+        // scanner this used to drive was deleted with the T1 audit: it had
+        // been dead in production since the strict parser landed, and its
+        // helpers threw raw JVM exceptions outside the frame taxonomy.
+        fun dup(text: String): Boolean =
+            runCatching { EbpJson.parse(text) }.exceptionOrNull() is InvalidRequest
+        assertTrue(dup("""{"a":1,"a":2}"""))
+        // Semantic comparison after escape decoding: \u0061 is "a".
+        assertTrue(dup("""{"a":1,"\u0061":2}"""))
+        assertFalse(dup("""{"a":1,"b":{"a":2}}"""))
+        assertFalse(dup("""{"a":[{"x":1},{"x":2}]}"""))
+        assertFalse(dup("""{"a":"a","b":"a"}"""))
     }
 
     @Test

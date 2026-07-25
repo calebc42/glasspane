@@ -231,6 +231,13 @@ class SurfaceStore(
 
     private fun presentCount(): Long = records.values.count { it.present }.toLong()
 
+    /** SPEC 13.5/19: the present surfaces, in acceptance order. The store
+     * outlives a connection, so this is what a fresh session must reconcile
+     * against — a reconnect that receives no `surface.update` still has
+     * present snapshots, and their synchronized editors still need sessions. */
+    fun presentSurfaces(): List<String> =
+        records.entries.filter { it.value.present }.map { it.key }
+
     // -------------------------------------------------- welcome reporting
 
     /** SPEC 10.2: both present snapshots and tombstones are reported. */

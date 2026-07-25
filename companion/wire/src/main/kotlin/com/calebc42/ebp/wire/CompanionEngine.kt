@@ -171,6 +171,7 @@ class CompanionEngine(
         if (dialogs.isNotEmpty()) {
             val ids = dialogs.keys.toList()
             dialogs.clear()
+            dialogEditors.clear() // sessions die with the connection anyway
             ids.forEach { runCatching { dialogListener?.invoke(it, null) } }
         }
         // SPEC 18.3: pie menus are ephemeral to the session — dismiss all.
@@ -184,7 +185,6 @@ class CompanionEngine(
         editors.values.forEach { it.state = EditorSession.State.CLOSED }
         editors.clear()
         surfaceEditors.clear()
-        pendingEditors.clear()
     }
 
     /** The queue_seq this engine's connection put in flight, if any. */
@@ -287,7 +287,19 @@ class CompanionEngine(
     fun dispatchAction(surface: String, descriptor: JSONObject, hookValue: Any?,
                        injected: JSONObject? = null,
                        extraFields: JSONObject? = null,
+                       /** The id of the node whose hook fired, when the host
+                        * knows it. Required for a synchronized `editor`'s
+                        * hooks so the §19 read-only rule can be enforced. */
+                       sourceId: String? = null,
                        callback: ((String?, JSONObject?) -> Unit)? = null) {
+        // SPEC 19: "A synchronized editor MUST become read-only whenever the
+        // connection is not READY. It MUST NOT create an offline input draft,
+        // delta, save, completion, or editor command." Its every other path
+        // is READY-gated in this class; a hook owned by the editor node —
+        // `on_save`, `on_enter` — reaches the DURABLE queue through the
+        // generic dispatch, so it is gated here rather than in the renderer.
+        if (sourceId != null && state != SessionState.READY &&
+            surfaceEditors[surface]?.containsKey(sourceId) == true) return
         if (descriptor.has("builtin")) return executeBuiltin(surface, descriptor)
         val revision = surfaces.revisionOf(surface) ?: return
         val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
@@ -470,10 +482,10 @@ class CompanionEngine(
                             ?: JSONObject.NULL)))
                 }
                 syncingDirty.clear()
-                // SPEC 19: open editor sessions accepted during SYNCING.
-                val pend = pendingEditors.toList()
-                pendingEditors.clear()
-                for ((doc, eid, seed) in pend) openEditor(doc, eid, seed)
+                // SPEC 19: every synchronized editor on a present surface
+                // gets a session now — including ones this connection never
+                // saw an update for (a reconnect over cached snapshots).
+                openPresentEditors()
                 // SPEC 15.3: only after that flush may events flow.
                 pumpAdvance()
             }
@@ -623,8 +635,7 @@ class CompanionEngine(
         // spec's — and reject before applying if it exceeds the limit.
         val newEditors = if ("editor.sync" in granted) scanSyncedEditors(spec)
             else emptyMap()
-        val othersEditorCount = surfaceEditors.entries
-            .filter { it.key != surface }.sumOf { it.value.size }
+        val othersEditorCount = editorIdentityCount(excludingSurface = surface)
         if (othersEditorCount + newEditors.size >
             config.limits.optLong("max_editor_sessions", 8))
             return respondError(id, 1201, "Invalid content", "content-invalid",
@@ -641,6 +652,23 @@ class CompanionEngine(
                 return respondError(id, 1201, "Invalid content", "content-invalid",
                     JSONObject().put("path", "spec.$eid.value")
                         .put("reason", "editor-too-large"))
+        // SPEC 19 (amendment #104): a synchronized editor session is keyed by
+        // (document, presentation identity), so only ONE surface may present
+        // a given tuple. Silently accepting a second surface's claim
+        // overwrote the first surface's session with no `edit.close`: Emacs
+        // then got `editor-stale` for a session it was never told had died,
+        // `edit.resync` could not recover it (§19.4 forbids creating a
+        // session there), and removing EITHER surface closed the survivor.
+        for ((identity, node) in newEditors) {
+            val document = node.getString("document")
+            val owner = surfaceEditors.entries.firstOrNull { (s, map) ->
+                s != surface && map[identity] == document
+            }?.key
+            if (owner != null)
+                return respondError(id, 1201, "Invalid content", "content-invalid",
+                    JSONObject().put("path", "spec.$identity")
+                        .put("reason", "editor-duplicate"))
+        }
         try {
             val result = surfaces.update(
                 surface, revision, spec,
@@ -661,51 +689,140 @@ class CompanionEngine(
         }
     }
 
-    // Per-surface synchronized editors: surface -> (editor_id -> document).
-    private val surfaceEditors = HashMap<String, MutableMap<String, String>>()
-    // Editors accepted during SYNCING, opened on entering READY (SPEC 19).
-    private val pendingEditors = ArrayList<Triple<String, String, String>>()
+    /** SPEC 16/17: members whose value is an ARRAY of child nodes. `tabs.items`
+     * is deliberately absent — those are TabItem label objects, not nodes. */
+    private val NODE_ARRAY_MEMBERS = setOf("children", "items")
 
-    /** SPEC 17.4/19: an `editor` node with a `document` is synchronized;
-     * its editor_id is the node id. Walks the spec (all views). */
-    private fun scanSyncedEditors(spec: JSONObject): Map<String, JSONObject> {
+    /** SPEC 13.4/17: members whose value is a single child node — the
+     * scaffold slots and the envelope/decoration slots. */
+    private val NODE_SLOT_MEMBERS = setOf(
+        "top_bar", "body", "bottom_bar", "fab", "floating_toolbar", "drawer",
+        "header", "trailing", "empty")
+
+    // Per-surface synchronized editors: surface -> (identity -> document),
+    // where identity is the SPEC 16.1 presentation identity (key else id).
+    private val surfaceEditors = HashMap<String, MutableMap<String, String>>()
+    // SPEC 19: the same, for editors presented in an outstanding dialog. A
+    // dialog's sessions live exactly as long as the dialog does.
+    private val dialogEditors = HashMap<String, MutableMap<String, String>>()
+
+    /** SPEC 19/4.5: distinct synchronized-editor identities presented right
+     * now, across accepted surface AND dialog documents. */
+    private fun editorIdentityCount(excludingSurface: String? = null): Long =
+        surfaceEditors.entries.filter { it.key != excludingSurface }
+            .sumOf { it.value.size }.toLong() +
+            dialogEditors.values.sumOf { it.size }.toLong()
+
+    /** SPEC 18.1/19: an outstanding dialog's editor sessions close with it. */
+    private fun closeDialogEditors(dialogId: String) {
+        dialogEditors.remove(dialogId)?.forEach { (identity, document) ->
+            closeEditor(document, identity)
+        }
+    }
+
+    /**
+     * SPEC 17.4/19: an `editor` node with a `document` is synchronized. The
+     * key is its SPEC 16.1 presentation identity — `key` when present, else
+     * `id` — because §19 preserves a session across surface replacements by
+     * that identity, and closes when it changes.
+     *
+     * Only NODE POSITIONS count. The old walk recursed into every JSON object
+     * in the spec, so an `{"t":"editor", …}` buried in an action's free-form
+     * `args` (which §14.1 leaves opaque) opened a real session for a node that
+     * does not exist — and, because the map was keyed last-write-wins over
+     * unspecified member order, could shadow a real editor's identity. It also
+     * ignored the target profile, so a build that does not advertise `editor`
+     * still opened sessions for nodes §17.1 degrades and never renders.
+     */
+    private fun scanSyncedEditors(spec: JSONObject,
+                                  target: String = "app"): Map<String, JSONObject> {
         val out = LinkedHashMap<String, JSONObject>()
-        fun walk(v: Any?) {
-            when (v) {
-                is JSONArray -> for (i in 0 until v.length()) walk(v.get(i))
-                is JSONObject -> {
-                    if (v.opt("t") == "editor" && v.opt("document") is String &&
-                        v.opt("id") is String)
-                        out[v.getString("id")] = v
-                    for (k in v.keySet()) walk(v.get(k))
+        val advertised = nodeTypesFromProfiles(config.surfaceProfiles, target)
+        if (advertised != null && "editor" !in advertised) return out
+        fun visit(node: JSONObject) {
+            if (node.opt("t") == "editor" && node.opt("document") is String) {
+                val identity = (node.opt("key") as? String)
+                    ?: (node.opt("id") as? String)
+                if (identity != null) out[identity] = node
+            }
+            // Descend only where §16/§17 place child NODES: the children
+            // array, the §13.4 scaffold/envelope slots, and multi-view roots.
+            for (key in node.keySet()) {
+                when (val child = node.get(key)) {
+                    is JSONArray ->
+                        if (key in NODE_ARRAY_MEMBERS)
+                            for (i in 0 until child.length())
+                                (child.opt(i) as? JSONObject)
+                                    ?.takeIf { it.opt("t") is String }?.let(::visit)
+                    is JSONObject ->
+                        if (key in NODE_SLOT_MEMBERS && child.opt("t") is String)
+                            visit(child)
+                    else -> Unit
                 }
             }
         }
-        walk(spec)
+        val views = spec.optJSONObject("views")
+        if (views != null) for (name in views.keySet())
+            (views.opt(name) as? JSONObject)?.takeIf { it.opt("t") is String }?.let(::visit)
+        else if (spec.opt("t") is String) visit(spec)
         return out
     }
 
-    /** SPEC 19: open sessions for newly present synchronized editors (or
-     * queue them until READY), and close those removed or whose document
-     * changed. Same document+editor_id preserves the session. */
+    /** SPEC 19: open sessions for newly present synchronized editors, and
+     * close those removed or whose document or presentation identity changed.
+     * The same identity and document preserve the session. During `SYNCING`
+     * the mapping is only RECORDED — §19 makes opening wait for `READY`,
+     * where [openPresentEditors] opens everything recorded. */
     private fun reconcileEditors(surface: String, newEditors: Map<String, JSONObject>) {
         val prev = surfaceEditors[surface] ?: emptyMap()
         val next = LinkedHashMap<String, String>()
-        for ((editorId, node) in newEditors) {
+        for ((identity, node) in newEditors) {
             val document = node.getString("document")
-            next[editorId] = document
-            val existed = prev[editorId]
+            next[identity] = document
+            val existed = prev[identity]
             if (existed == document) continue // identity preserved
-            if (existed != null) closeEditor(existed, editorId) // document changed
-            val seed = node.optString("value", "")
-            if (state == SessionState.READY) openEditor(document, editorId, seed)
-            else pendingEditors.add(Triple(document, editorId, seed))
+            if (existed != null) closeEditor(existed, identity) // document changed
+            if (state == SessionState.READY)
+                openEditor(document, identity, node.optString("value", ""))
         }
         // Editors that vanished from this surface close.
-        for ((editorId, document) in prev)
-            if (editorId !in next) closeEditor(document, editorId)
+        for ((identity, document) in prev)
+            if (identity !in next) closeEditor(document, identity)
         if (next.isEmpty()) surfaceEditors.remove(surface)
         else surfaceEditors[surface] = next
+    }
+
+    /**
+     * SPEC 19: on entering `READY`, every synchronized editor on a PRESENT
+     * surface gets a session. Rebuilt from the SurfaceStore rather than from
+     * connection-local state, which is what makes a reconnection correct: the
+     * store outlives the connection, so a fresh session that receives no
+     * `surface.update` (legal — the cached snapshot is unchanged and still
+     * rendered per §13.5) previously opened NOTHING, leaving every rendered
+     * editor permanently read-only with no diagnostic. This also replaces the
+     * old `pendingEditors` list, which was appended to but never pruned, so a
+     * SYNCING-accepted editor whose surface was then removed still opened on
+     * READY and left a session no close path could reach.
+     */
+    private fun openPresentEditors() {
+        surfaceEditors.clear()
+        for (surface in surfaces.presentSurfaces()) {
+            if (surfaces.namespace(surface) != "app") continue
+            val spec = surfaces.spec(surface) ?: continue
+            val found = runCatching { scanSyncedEditors(spec) }.getOrNull() ?: continue
+            if (found.isEmpty()) continue
+            val map = LinkedHashMap<String, String>()
+            for ((identity, node) in found) {
+                val document = node.getString("document")
+                // One session per (document, identity) — a second surface
+                // claiming the same tuple is refused at acceptance, so this
+                // can only be a stale record.
+                if (editors.containsKey(document to identity)) continue
+                map[identity] = document
+                openEditor(document, identity, node.optString("value", ""))
+            }
+            if (map.isNotEmpty()) surfaceEditors[surface] = map
+        }
     }
 
     private fun closeSurfaceEditors(surface: String) {
@@ -764,6 +881,7 @@ class CompanionEngine(
                 val cancelId = params.opt("id")
                 val entry = dialogs.entries.find { it.value == cancelId } ?: return
                 dialogs.remove(entry.key)
+                closeDialogEditors(entry.key)
                 respondError(entry.value, 1301, "Request was cancelled",
                     "request-cancelled")
                 dialogListener?.invoke(entry.key, null)
@@ -1526,7 +1644,54 @@ class CompanionEngine(
         // SPEC 19.5: discard an annotation whose session or seq does not
         // match the current state (latest-wins, never delays text sync).
         if (s.editorId != eid || s.seq != seq) return
+        // SPEC 19.5/19.1: ranges MUST fit the synchronized text, and
+        // `fontify.show` runs MUST additionally be sorted and non-
+        // overlapping. Unvalidated, negative-length, out-of-range, unsorted
+        // and overlapping ranges reached host rendering code, where an
+        // off-by-one peer throws at layout instead of being refused here.
+        // The whole batch is rejected — never partially applied — because a
+        // prefix of a bad batch is not what the peer described.
+        if (!annotationBatchValid(method, params, s.scalarLength())) {
+            // SPEC 8/22.3: a notification has no id to answer, so the refusal
+            // is a diagnostic rather than a silent drop.
+            emit(notification("log.error", JSONObject().put("code", 1201)
+                .put("message", "Invalid annotation batch")
+                .put("data", JSONObject().put("kind", "content-invalid")
+                    .put("path", method).put("reason", "annotation-invalid"))))
+            return
+        }
         annotationListener?.invoke(method, eid, params)
+    }
+
+    private val DIAGNOSTIC_SEVERITIES = setOf("error", "warning", "info", "hint")
+
+    /** SPEC 19.5: the shape and range rules for one annotation batch. */
+    private fun annotationBatchValid(method: String, params: JSONObject, len: Int): Boolean {
+        when (method) {
+            "eldoc.show" -> return params.opt("text") is String
+            "diagnostics.show", "fontify.show" -> Unit
+            else -> return false
+        }
+        val member = if (method == "fontify.show") "runs" else "diagnostics"
+        val arr = params.opt(member) as? JSONArray ?: return false
+        var prevEnd = -1
+        for (i in 0 until arr.length()) {
+            val e = arr.optJSONObject(i) ?: return false
+            val start = (e.opt("start") as? Number)?.toLong() ?: return false
+            val end = (e.opt("end") as? Number)?.toLong() ?: return false
+            // Half-open, non-negative length, inside the synchronized text.
+            if (start < 0 || end < start || end > len) return false
+            if (method == "fontify.show") {
+                if (e.opt("role") !is String) return false
+                // Sorted and non-overlapping, in one pass.
+                if (start < prevEnd) return false
+                prevEnd = end.toInt()
+            } else {
+                if (e.opt("severity") !in DIAGNOSTIC_SEVERITIES) return false
+                if (e.opt("message") !is String) return false
+            }
+        }
+        return true
     }
 
     // ------------------------------------------------------- themes (18.4)
@@ -1627,8 +1792,43 @@ class CompanionEngine(
             return respondError(id, 1201, "Invalid content", "content-invalid",
                 JSONObject().put("path", e.path).put("reason", e.reason))
         }
+        // SPEC 19: the editor-session count is over "accepted surface OR
+        // DIALOG documents", and a synchronized editor presented in a dialog
+        // is presented in READY like any other — so it is counted, size-
+        // checked, and OPENED. Before this a dialog's editor was rendered as
+        // synchronized and never synchronized: no session, no edit.open, and
+        // `editor-session-limit` could never fire from a dialog at all.
+        val dialogEditorNodes = if ("editor.sync" in granted)
+            scanSyncedEditors(spec, "dialog") else emptyMap()
+        if (dialogEditorNodes.isNotEmpty()) {
+            val others = editorIdentityCount()
+            if (others + dialogEditorNodes.size >
+                config.limits.optLong("max_editor_sessions", 8))
+                return respondError(id, 1201, "Invalid content", "content-invalid",
+                    JSONObject().put("reason", "editor-session-limit"))
+            val maxBytes = config.limits.optLong("max_editor_bytes", Long.MAX_VALUE)
+            for ((identity, node) in dialogEditorNodes) {
+                if (EditorSession.jcsUtf8Bytes(node.optString("value")) > maxBytes)
+                    return respondError(id, 1201, "Invalid content", "content-invalid",
+                        JSONObject().put("path", "spec.$identity")
+                            .put("reason", "editor-too-large"))
+                if (editors.containsKey(node.getString("document") to identity))
+                    return respondError(id, 1201, "Invalid content", "content-invalid",
+                        JSONObject().put("path", "spec.$identity")
+                            .put("reason", "editor-duplicate"))
+            }
+        }
         // SPEC 18.1: held outstanding — no reply until a builtin or cancel.
         dialogs[dialogId] = id
+        if (dialogEditorNodes.isNotEmpty()) {
+            val map = LinkedHashMap<String, String>()
+            for ((identity, node) in dialogEditorNodes) {
+                val document = node.getString("document")
+                map[identity] = document
+                openEditor(document, identity, node.optString("value", ""))
+            }
+            dialogEditors[dialogId] = map
+        }
         dialogListener?.invoke(dialogId, spec)
     }
 
@@ -1655,6 +1855,7 @@ class CompanionEngine(
             return
         }
         dialogs.remove(dialogId)
+        closeDialogEditors(dialogId)
         respondResult(reqId, result)
         dialogListener?.invoke(dialogId, null)
     }
@@ -1663,6 +1864,7 @@ class CompanionEngine(
     @Synchronized
     fun completeDialogDismiss(dialogId: String) {
         val reqId = dialogs.remove(dialogId) ?: return
+        closeDialogEditors(dialogId)
         respondResult(reqId, JSONObject().put("status", "dismissed"))
         dialogListener?.invoke(dialogId, null)
     }

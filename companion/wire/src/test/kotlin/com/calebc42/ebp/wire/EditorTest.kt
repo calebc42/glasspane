@@ -264,6 +264,63 @@ class EditorTest {
         assertEquals(-32601, response(out, "a1").getJSONObject("error").getInt("code"))
     }
 
+    // ---------------------------------- §19.5 annotation validation (audit)
+
+    @Test
+    fun annotationBatchesAreRangeCheckedAndRejectedWhole() {
+        // Audit §3.9 / SPEC 19.5+19.1: ranges MUST fit the synchronized text
+        // and fontify runs MUST be sorted and non-overlapping. Unvalidated,
+        // negative-length and out-of-range ranges reached host rendering,
+        // where an off-by-one peer throws at layout instead of being refused.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "hello") // 5 scalars
+        var delivered = 0
+        engine.annotationListener = { _, _, _ -> delivered++ }
+        fun diagnostics(vararg entries: JSONObject) =
+            engine.feed(frame(JSONObject().put("jsonrpc", "2.0")
+                .put("method", "diagnostics.show").put("params", JSONObject()
+                    .put("editor_id", "body").put("session", s.sessionId)
+                    .put("seq", 0).put("diagnostics", JSONArray(entries.toList())))))
+        fun diag(start: Int, end: Int, sev: String = "error") = JSONObject()
+            .put("start", start).put("end", end).put("severity", sev)
+            .put("message", "m")
+        // Out of range, negative length, and an unknown severity are refused.
+        diagnostics(diag(0, 900))
+        diagnostics(diag(4, 2))
+        diagnostics(diag(-1, 3))
+        diagnostics(diag(0, 3, "kaboom"))
+        assertEquals(0, delivered)
+        assertEquals(4, out.method("log.error").size)
+        // A whole batch is refused when ANY entry is bad — never partially.
+        diagnostics(diag(0, 2), diag(0, 900))
+        assertEquals(0, delivered)
+        // A conforming batch is delivered.
+        diagnostics(diag(0, 2), diag(2, 5))
+        assertEquals(1, delivered)
+    }
+
+    @Test
+    fun fontifyRunsMustBeSortedAndNonOverlapping() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "hello")
+        var delivered = 0
+        engine.annotationListener = { _, _, _ -> delivered++ }
+        fun runs(vararg entries: JSONObject) =
+            engine.feed(frame(JSONObject().put("jsonrpc", "2.0")
+                .put("method", "fontify.show").put("params", JSONObject()
+                    .put("editor_id", "body").put("session", s.sessionId)
+                    .put("seq", 0).put("runs", JSONArray(entries.toList())))))
+        fun run(start: Int, end: Int) = JSONObject()
+            .put("start", start).put("end", end).put("role", "keyword")
+        runs(run(3, 5), run(0, 2))  // unsorted
+        runs(run(0, 3), run(2, 5))  // overlapping
+        assertEquals(0, delivered)
+        runs(run(0, 2), run(2, 5))  // sorted, touching but not overlapping
+        assertEquals(1, delivered)
+    }
+
     // ------------------------------------- T2: peer caret + typed positions
 
     @Test

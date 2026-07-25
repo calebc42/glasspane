@@ -587,7 +587,14 @@ object SpecValidator {
             }
         }
         if (t in STATEFUL_NODE_TYPES) {
-            val isStateful = t != "editor" || node.optBoolean("publish_state")
+            // SPEC 13.6: "a local `editor` draft requires publish_state: true
+            // and no `document` in both snapshots. A synchronized editor never
+            // participates in draft reconciliation." Registering a
+            // synchronized editor as stateful let publishState write a
+            // DURABLE draft for it (persisted, and reportable in the next
+            // welcome's input_state) — the offline draft §19 forbids.
+            val isStateful = t != "editor" ||
+                (node.optBoolean("publish_state") && !node.has("document"))
             if (isStateful) {
                 val id = node.opt("id") as? String
                     ?: throw ContentInvalid(path, "$t requires an id")

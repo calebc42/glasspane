@@ -34,15 +34,19 @@ class EditorLifecycleTest {
         val engine = CompanionEngine(CompanionConfig(
             serverName = "kat", serverVersion = "1",
             pairings = mapOf(katPid to katToken),
-            supportedCapabilities = setOf("editor.sync"),
+            supportedCapabilities = setOf("editor.sync", "surfaces.dialog"),
             surfaceProfiles = JSONObject().put("app", JSONObject()
                 .put("node_types", JSONArray(listOf("text", "column", "editor")))
-                .put("builtins", JSONArray()).put("features", JSONArray())),
+                .put("builtins", JSONArray()).put("features", JSONArray()))
+                .put("dialog", JSONObject()
+                    .put("node_types", JSONArray(listOf("text", "column", "editor")))
+                    .put("builtins", JSONArray()).put("features", JSONArray())),
             limits = limits(maxEditors), nonceSource = { katSn })) { bytes ->
             FrameDecoder().let { d -> d.feed(bytes) { out.add(it) } }
         }
         engine.feed(frame(request("h1", "session.hello",
-            EbpAuth.helloParams("t", "1", katPid, katCn, listOf("editor.sync")))))
+            EbpAuth.helloParams("t", "1", katPid, katCn,
+                listOf("editor.sync", "surfaces.dialog")))))
         engine.feed(frame(request("h2", "auth.response",
             EbpAuth.authParams(katPid, katCn, katSn, katToken))))
         if (toReady) engine.feed(frame(request("r1", "session.ready", JSONObject())))
@@ -152,5 +156,169 @@ class EditorLifecycleTest {
         // A stale selection (cursor moved) is discarded without changing text.
         assertFalse(engine.selectCompletion("doc:1", "body", s.sessionId, 99,
             0, "x", "y"))
+    }
+
+    // ------------------------------- audit §3: lifecycle conformance (P1 1-5)
+
+    @Test
+    fun anEditorInsideActionArgsOpensNothing() {
+        // Audit §3.1: the scan walked EVERY JSON object in a spec, so an
+        // editor-shaped object inside an action's free-form `args` (§14.1
+        // leaves args opaque) opened a real session for a node that does not
+        // exist — burning a max_editor_sessions slot for the connection, and
+        // able to shadow a real editor's identity via member order.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        val node = JSONObject().put("t", "text").put("text", "go")
+            .put("on_tap", JSONObject().put("action", "demo.go")
+                .put("args", JSONObject().put("t", "editor")
+                    .put("id", "ghost").put("document", "doc:ghost")))
+        push(engine, out, "app:main", 1, node)
+        assertTrue(out.method("edit.open").isEmpty())
+    }
+
+    @Test
+    fun aReconnectOverCachedSurfacesOpensSessions() {
+        // Audit §3.2: sessions only ever opened from surface.update, so a
+        // reconnect that receives none — legal, the cached snapshot is
+        // unchanged and still rendered per §13.5 — opened NOTHING and left
+        // every rendered editor permanently read-only with no diagnostic.
+        val out = mutableListOf<JSONObject>()
+        val store = SurfaceStore(16, 1024)
+        fun connect(): CompanionEngine {
+            val e = CompanionEngine(CompanionConfig(
+                serverName = "kat", serverVersion = "1",
+                pairings = mapOf(katPid to katToken),
+                supportedCapabilities = setOf("editor.sync", "surfaces.dialog"),
+                surfaceProfiles = JSONObject().put("app", JSONObject()
+                    .put("node_types", JSONArray(listOf("text", "column", "editor")))
+                    .put("builtins", JSONArray()).put("features", JSONArray())),
+                limits = limits(), nonceSource = { katSn }), store) { bytes ->
+                FrameDecoder().let { d -> d.feed(bytes) { out.add(it) } }
+            }
+            e.feed(frame(request("h1", "session.hello",
+                EbpAuth.helloParams("t", "1", katPid, katCn,
+                listOf("editor.sync", "surfaces.dialog")))))
+            e.feed(frame(request("h2", "auth.response",
+                EbpAuth.authParams(katPid, katCn, katSn, katToken))))
+            return e
+        }
+        val first = connect()
+        first.feed(frame(request("r1", "session.ready", JSONObject())))
+        push(first, out, "app:main", 1, editorNode("body", "doc:1", "hello"))
+        assertEquals(1, out.method("edit.open").size)
+        first.close("transport closed")
+        // Second connection: no surface.update at all, just session.ready.
+        out.clear()
+        val second = connect()
+        second.feed(frame(request("r1", "session.ready", JSONObject())))
+        val reopened = out.method("edit.open").single().getJSONObject("params")
+        assertEquals("doc:1", reopened.getString("document"))
+        assertEquals("hello", reopened.getString("text"))
+        // ...and it is a live session, not a bare notification.
+        assertTrue(second.localEditorEdit("doc:1", "body", ScalarPos(5), 0, "!"))
+    }
+
+    @Test
+    fun aSecondSurfaceClaimingTheSameEditorIsRefused() {
+        // Audit §3.3 (amendment #104): the second claim silently overwrote
+        // the first surface's session with NO edit.close — Emacs then got
+        // editor-stale for a session it was never told died, edit.resync
+        // could not recover it, and removing either surface closed the
+        // survivor.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        push(engine, out, "app:a", 1, editorNode("body", "doc:1", "A"))
+        val session = out.method("edit.open").single()
+            .getJSONObject("params").getString("session")
+        val refused = push(engine, out, "app:b", 1, editorNode("body", "doc:1", "B"))
+        assertEquals("editor-duplicate",
+            refused.getJSONObject("error").getJSONObject("data").getString("reason"))
+        // The original session is untouched: still one open, none closed.
+        assertEquals(1, out.method("edit.open").size)
+        assertTrue(out.method("edit.close").isEmpty())
+        assertEquals(session, out.method("edit.open").single()
+            .getJSONObject("params").getString("session"))
+    }
+
+    @Test
+    fun anEditorRemovedDuringSyncingNeverOpens() {
+        // Audit §3.4 (LD-6): pendingEditors was appended to but never pruned,
+        // so an editor accepted during SYNCING and then removed still opened
+        // on READY — a session no close path could reach, invisible to the
+        // max_editor_sessions count.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out, toReady = false)
+        push(engine, out, "app:main", 1, editorNode("body", "doc:1", "seed"))
+        assertTrue(out.method("edit.open").isEmpty()) // waits for READY
+        engine.feed(frame(request("x1", "surface.remove", JSONObject()
+            .put("surface", "app:main").put("revision", 2))))
+        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        assertTrue(out.method("edit.open").isEmpty())
+    }
+
+    @Test
+    fun aDialogEditorIsCountedOpenedAndClosedWithTheDialog() {
+        // Audit §3.8: §19 counts identities across "accepted surface OR
+        // DIALOG documents", but handleDialogShow had no count, no limit
+        // check, and never opened sessions — so a dialog's editor rendered
+        // as synchronized and was never synchronized, and the limit could
+        // never fire from a dialog at all.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out, maxEditors = 1)
+        engine.feed(frame(request("d1", "dialog.show", JSONObject()
+            .put("dialog_id", "dlg").put("spec", editorNode("body", "doc:2", "hi")))))
+        // The dialog's editor got a real session.
+        val open = out.method("edit.open").single().getJSONObject("params")
+        assertEquals("doc:2", open.getString("document"))
+        // It counts: a surface editor now exceeds max_editor_sessions of 1.
+        val refused = push(engine, out, "app:main", 1, editorNode("other", "doc:3"))
+        assertEquals("editor-session-limit",
+            refused.getJSONObject("error").getJSONObject("data").getString("reason"))
+        // Completing the dialog closes its session and frees the slot.
+        engine.completeDialogDismiss("dlg")
+        assertEquals(1, out.method("edit.close").size)
+        val accepted = push(engine, out, "app:main", 2, editorNode("other", "doc:3"))
+        assertEquals("applied", accepted.getJSONObject("result").getString("status"))
+    }
+
+    @Test
+    fun aSynchronizedEditorNeverBecomesADraft() {
+        // Audit §3.7 / SPEC 13.6: "a local editor draft requires
+        // publish_state: true and no document ... A synchronized editor never
+        // participates in draft reconciliation." Registering it as stateful
+        // let publishState write a DURABLE draft — the offline draft §19
+        // forbids, reportable in the next welcome's input_state.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        push(engine, out, "app:main", 1, editorNode("body", "doc:1", "seed")
+            .put("publish_state", true))
+        engine.publishState("app:main", "body", "typed offline")
+        assertFalse(engine.surfaces.hasDraft("app:main", "body"))
+        // A LOCAL editor (publish_state, no document) still drafts normally.
+        push(engine, out, "app:local", 1, JSONObject().put("t", "editor")
+            .put("id", "note").put("publish_state", true))
+        engine.publishState("app:local", "note", "kept")
+        assertTrue(engine.surfaces.hasDraft("app:local", "note"))
+    }
+
+    @Test
+    fun aPresentationKeyChangeClosesAndReopens() {
+        // Audit §3.5: §16.1 makes `key` the presentation identity when
+        // present and §19 closes the session when identity changes, but the
+        // scan keyed on `id` alone — so a key change neither closed the old
+        // session nor opened a new one, leaving a live shadow on text the
+        // renderer had already replaced.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        push(engine, out, "app:main", 1,
+            editorNode("body", "doc:1", "A").put("key", "k1"))
+        assertEquals(1, out.method("edit.open").size)
+        push(engine, out, "app:main", 2,
+            editorNode("body", "doc:1", "B").put("key", "k2"))
+        assertEquals(1, out.method("edit.close").size)
+        assertEquals(2, out.method("edit.open").size)
+        assertEquals("B", out.method("edit.open").last()
+            .getJSONObject("params").getString("text"))
     }
 }

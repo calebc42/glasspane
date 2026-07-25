@@ -1336,7 +1336,8 @@ Nil until the welcome carried a device report (triggers granted)."
 report."
   (append (plist-get (ebp-client-device client) :state_types) nil))
 
-(cl-defun ebp-client-triggers-set (client triggers &key callback)
+(cl-defun ebp-client-triggers-set (client triggers &key callback
+                                          omitted-function)
   "Replace the pairing identity's trigger set (SPEC 21.1).  TRIGGERS is a
 vector of trigger plists — each `(:id ID :type TYPE)' plus optional
 `:params', `:when' (a vector of state predicates, flat AND), `:policy'
@@ -1348,26 +1349,42 @@ COUNT is the accepted total, ERROR the JSON-RPC error plist (1101
 `triggers-rejected', identifying the offending trigger).  An empty vector
 clears every registration; the whole set is validated before any change.
 
-SPEC 21.3 (amendment #75): every `when' predicate type that is not
+SPEC 21.3 (amendments #75, #90): every `when' predicate type that is not
 predicate-only MUST be advertised in `device.state_types'; `time.window'
-is predicate-only and always authorable.  Because Emacs MUST omit an
-entire trigger rather than install a weaker one, and this call
-atomically replaces the whole set, a violating set signals an error
-here instead of being sent."
-  (let ((advertised (ebp-client-device-state-types client)))
+is predicate-only and always authorable.  A trigger naming an
+unadvertised type is OMITTED — per trigger, so the remaining entries are
+still sent and the accepted `count' reflects only those — and never
+weakened by dropping the offending predicate.  Because `count' is the
+sole wire evidence of an omission, each one is surfaced: through
+OMITTED-FUNCTION when given, called with the list of omitted trigger
+plists, and otherwise as a `display-warning'."
+  (let* ((advertised (ebp-client-device-state-types client))
+         (kept '()) (omitted '()))
     (seq-doseq (trigger triggers)
-      (seq-doseq (pred (or (plist-get trigger :when) []))
-        (let ((type (plist-get pred :type)))
-          (unless (or (equal type "time.window")
-                      (member type advertised))
-            (error "ebp: trigger %S `when' type %S not in device.state_types \
-%S (SPEC 21.3)"
-                   (plist-get trigger :id) type advertised))))))
-  (ebp-client--request
-   client 'triggers.set
-   `(:triggers ,triggers)
-   (lambda (result error)
-     (when callback (funcall callback (and result (plist-get result :count)) error)))))
+      (if (seq-some (lambda (pred)
+                      (let ((type (plist-get pred :type)))
+                        (not (or (equal type "time.window")
+                                 (member type advertised)))))
+                    (or (plist-get trigger :when) []))
+          (push trigger omitted)
+        (push trigger kept)))
+    (setq kept (nreverse kept) omitted (nreverse omitted))
+    (when omitted
+      (if omitted-function
+          (funcall omitted-function omitted)
+        (display-warning
+         'ebp
+         (format "omitted %d trigger(s) whose `when' names a type absent \
+from device.state_types %S (SPEC 21.3): %S"
+                 (length omitted) advertised
+                 (mapcar (lambda (tr) (plist-get tr :id)) omitted))
+         :warning)))
+    (ebp-client--request
+     client 'triggers.set
+     `(:triggers ,(vconcat kept))
+     (lambda (result error)
+       (when callback
+         (funcall callback (and result (plist-get result :count)) error))))))
 
 ;;;; Pie menus (SPEC 18.3), the client half
 

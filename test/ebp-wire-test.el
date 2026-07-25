@@ -957,8 +957,10 @@ locally with a synthetic 1201 editor-too-large; nothing reaches the wire."
       (should (= (plist-get (cdar sent) :len) 7)))))
 
 (ert-deftest ebp-test-triggers-set-when-gate ()
-  "SPEC 21.3 / amendment #75: a `when' type must be advertised in
-device.state_types; predicate-only time.window is always authorable."
+  "SPEC 21.3 (amendments #75, #90): a `when' type must be advertised in
+device.state_types; predicate-only time.window is always authorable; an
+offending trigger is OMITTED per trigger — the rest are still sent — and
+the omission is surfaced, never silent."
   (let* ((sent nil)
          (client (ebp-client-create
                   :receipt-file (make-temp-file "ebp-test-receipts"))))
@@ -967,18 +969,35 @@ device.state_types; predicate-only time.window is always authorable."
     (cl-letf (((symbol-function 'ebp-client--request)
                (lambda (_c method params _cb &optional _t)
                  (push (cons method params) sent))))
-      ;; Advertised and predicate-only types pass.
+      ;; Advertised and predicate-only types pass untouched.
       (ebp-client-triggers-set
        client (vector '(:id "t1" :type "battery.level"
                         :when [(:type "screen" :state "off")
                                (:type "time.window" :after "22:00")])))
-      (should (= (length sent) 1))
-      ;; An unadvertised type refuses the whole set locally.
-      (should-error
-       (ebp-client-triggers-set
-        client (vector '(:id "t2" :type "battery.level"
-                         :when [(:type "power")]))))
-      (should (= (length sent) 1)))))
+      (should (= (length (plist-get (cdar sent) :triggers)) 1))
+      ;; An unadvertised type omits ONLY that trigger; the rest still go,
+      ;; and the omission reaches the caller.
+      (let (told)
+        (ebp-client-triggers-set
+         client
+         (vector '(:id "keep" :type "battery.level")
+                 '(:id "drop" :type "battery.level" :when [(:type "power")]))
+         :omitted-function (lambda (om) (setq told om)))
+        (let ((triggers (plist-get (cdar sent) :triggers)))
+          (should (= (length triggers) 1))
+          (should (equal (plist-get (aref triggers 0) :id) "keep")))
+        (should (= (length told) 1))
+        (should (equal (plist-get (car told) :id) "drop")))
+      ;; With no :omitted-function the omission still surfaces (a warning),
+      ;; never a silent drop.
+      (let ((warned nil))
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _) (setq warned t))))
+          (ebp-client-triggers-set
+           client (vector '(:id "d" :type "battery.level"
+                            :when [(:type "power")]))))
+        (should warned)
+        (should (= (length (plist-get (cdar sent) :triggers)) 0))))))
 
 (ert-deftest ebp-test-forget-pairing ()
   "SPEC 9.1 / amendment #72: local pairing removal erases the receipt

@@ -22,9 +22,10 @@
 ;; neither) and two structural changes:
 ;;
 ;; - Emission is bounded by the LIVE welcome budgets, not just the line
-;;   cap (plan section 2.5-5): a line's spans are truncated to
-;;   `max_rich_spans', and the whole render stops before the node total
-;;   would crowd `max_frame_bytes'.
+;;   cap (plan section 2.5-5): `max_rich_spans' is spent down as the
+;;   SPEC 4.5 AGGREGATE across the whole SurfaceSpec (not a per-node
+;;   cap, which would sail past it), and the render stops before the
+;;   node total would crowd `max_frame_bytes'.
 ;; - Decision D2: the two tap actions validate and return a status
 ;;   immediately, then run the buffer effect (which may prompt on the
 ;;   desktop, e.g. a widget field edit) from a `run-at-time' 0
@@ -456,11 +457,12 @@ except on point's own line, which shows its absolute number undimmed."
 
 (defun jetpacs-buffer--budgets ()
   "The live welcome budgets as (MAX-SPANS . MAX-BYTES), members nil-able.
-MAX-SPANS bounds one rich_text's span count (`max_rich_spans');
-MAX-BYTES is the remaining whole-surface byte budget derived from
-`max_frame_bytes' minus `jetpacs-buffer--frame-headroom'.  Both nil when
-no client is attached (offline renders and tests bound only by the line
-cap)."
+MAX-SPANS is `max_rich_spans', which SPEC 4.5 defines as an AGGREGATE
+count across one SurfaceSpec — not a per-node cap — so the walk spends
+it down across every line.  MAX-BYTES is the whole-surface byte budget
+derived from `max_frame_bytes' minus `jetpacs-buffer--frame-headroom'.
+Both nil when no client is attached (offline renders and tests are
+bound only by the line cap)."
   (if-let* ((client (jetpacs-client))
             (limits (ebp-client-limits client)))
       (cons (plist-get limits :max_rich_spans)
@@ -469,24 +471,49 @@ cap)."
     (cons nil nil)))
 
 (defun jetpacs-buffer--cap-spans (spans max-spans)
-  "SPANS truncated to MAX-SPANS members, an ellipsis span marking the cut."
-  (if (or (null max-spans) (<= (length spans) max-spans))
-      spans
-    (append (seq-take spans (max 1 (1- max-spans)))
-            (list (jetpacs-span "…")))))
+  "SPANS truncated to exactly MAX-SPANS members, an ellipsis marking the cut.
+The result never exceeds MAX-SPANS: the ellipsis replaces the last kept
+span rather than being appended past the budget."
+  (cond
+   ((or (null max-spans) (<= (length spans) max-spans)) spans)
+   ((<= max-spans 1) (list (jetpacs-span "…")))
+   (t (append (seq-take spans (1- max-spans)) (list (jetpacs-span "…"))))))
 
 (defun jetpacs-buffer--node-bytes (node)
   "The canonical serialized size of NODE in octets."
   (string-bytes (jetpacs-node->canonical-json node)))
 
+(defun jetpacs-buffer--rich-text-advertised-p ()
+  "Non-nil when the live `app' profile advertises `rich_text' (SPEC 16.2).
+`rich_text' is OPTIONAL — the Core Node Set is only `text', `row',
+`column', `box', `spacer', `divider', `button', `text_input' — so a
+Companion need not support it, and SPEC 16.2 forbids Emacs emitting an
+unadvertised type.  With no client attached (offline renders, tests)
+assume the richer form."
+  (if-let* ((client (jetpacs-client))
+            (profile (plist-get (ebp-client-profiles client) :app)))
+      (and (member "rich_text" (append (plist-get profile :node_types) nil))
+           t)
+    t))
+
+(defun jetpacs-buffer--spans->text (spans)
+  "Flatten SPANS into one Core `text' node — the non-`rich_text' fallback.
+Per-span styling and tap actions cannot survive: SPEC 17.2's `text' node
+carries neither.  The content does, which beats the alternative — the
+16.2 sender gate refusing the entire buffer surface."
+  (jetpacs-text (mapconcat (lambda (s) (or (plist-get s :text) "")) spans "")
+                :style (if jetpacs-buffer-monospace "mono" "body")))
+
 ;; --- Region -> nodes --------------------------------------------------------
 
 (defun jetpacs-buffer--render-region (beg end buffer-name &optional mark-pos)
   "Return a list of `rich_text' nodes for [BEG, END) of the current buffer.
-One node per line; blank lines keep their vertical space.  Capped at
-`jetpacs-buffer-max-lines', at `max_rich_spans' spans per line, and at
-the frame byte budget — truncation appends a visible note rather than
-over-emitting (plan 2.5-5).  MARK-POS, when non-nil, flags the line
+One node per line; blank lines keep their vertical space.  Bounded by
+`jetpacs-buffer-max-lines', by the SPEC 4.5 aggregate `max_rich_spans'
+across the whole spec, and by the frame byte budget — exceeding any of
+them stops the walk and appends a visible note rather than over-emitting
+(plan 2.5-5; 4.5 \"A sender MUST respect reported limits and MUST NOT
+rely on receiver truncation\").  MARK-POS, when non-nil, flags the line
 containing that position as the scroll target (`:scroll_here')."
   (let* ((jetpacs-buffer--default-fg-hex
           (jetpacs-buffer--color-hex
@@ -495,15 +522,17 @@ containing that position as the scroll target (`:scroll_here')."
           (jetpacs-buffer--color-hex
            (face-attribute 'default :background nil t)))
          (budgets (jetpacs-buffer--budgets))
-         (max-spans (car budgets))
+         (spans-left (car budgets))     ; SPEC 4.5: aggregate, spent down
          (bytes-left (cdr budgets))
+         (exhausted nil)
+         (rich-ok (jetpacs-buffer--rich-text-advertised-p))
          (pt-line (and jetpacs-line-numbers (line-number-at-pos (point))))
          (num-fmt (and jetpacs-line-numbers
                        (format "%%%dd " (length (number-to-string
                                                  (line-number-at-pos end))))))
          (ln (and jetpacs-line-numbers (line-number-at-pos beg)))
          (count 0)
-         (cut-by-bytes nil)
+         (truncated nil)
          nodes)
     (ignore-errors (font-lock-ensure beg end))
     (save-excursion
@@ -550,26 +579,40 @@ containing that position as the scroll target (`:scroll_here')."
                     (setq spans (cons (jetpacs-buffer--line-number-span
                                        ln pt-line num-fmt)
                                       spans)))
-                  (setq spans (jetpacs-buffer--cap-spans spans max-spans))
-                  (setq node
-                        (if (and mark-pos (>= mark-pos bol) (<= mark-pos eol))
-                            (jetpacs-with-attrs (jetpacs-rich-text spans)
-                                                :scroll_here t)
-                          (jetpacs-rich-text spans)))))))
+                  ;; SPEC 4.5: `max_rich_spans' is an AGGREGATE count
+                  ;; across one SurfaceSpec, so spend it down across
+                  ;; lines — a per-line cap would sail past it.
+                  (when spans-left
+                    (when (> (length spans) spans-left)
+                      (setq spans (jetpacs-buffer--cap-spans spans spans-left)
+                            exhausted t))
+                    (setq spans-left (- spans-left (length spans))))
+                  (let ((line (if rich-ok
+                                  (jetpacs-rich-text spans)
+                                (jetpacs-buffer--spans->text spans))))
+                    (setq node
+                          (if (and mark-pos (>= mark-pos bol)
+                                   (<= mark-pos eol))
+                              (jetpacs-with-attrs line :scroll_here t)
+                            line)))))))
             (when node
               ;; The byte budget stops the walk BEFORE over-emitting.
               (when bytes-left
                 (let ((size (jetpacs-buffer--node-bytes node)))
                   (when (> size bytes-left)
-                    (setq cut-by-bytes t)
+                    (setq truncated t)
                     (cl-return-from walk))
                   (setq bytes-left (- bytes-left size))))
               (push node nodes)
-              (setq count (1+ count))))
+              (setq count (1+ count))
+              ;; The aggregate span budget is spent: stop here.
+              (when (or exhausted (and spans-left (<= spans-left 0)))
+                (setq truncated t)
+                (cl-return-from walk))))
           (when ln (setq ln (1+ ln)))
           (forward-line 1))))
-    (when cut-by-bytes
-      (push (jetpacs-text "… output truncated (frame budget)"
+    (when truncated
+      (push (jetpacs-text "… output truncated (surface budget)"
                           :style "caption")
             nodes))
     (nreverse nodes)))

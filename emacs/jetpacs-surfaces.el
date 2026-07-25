@@ -296,36 +296,50 @@ indexes into the snapshot it was tapped against."
 
 ;;;; State (the SPEC 14.6 fan-out; ebp owns the store and reconciliation)
 
-(defun jetpacs-on-state-change (id fn)
-  "Call FN with the new value whenever stateful node ID publishes.
-Keyed by bare widget id (decision Q5; app ids are already namespaced).
-ebp has already stored the value and applied the SPEC 14.6 reset
-reconciliation before FN runs; read the store with `jetpacs-ui-state'."
-  (puthash id fn jetpacs--state-handlers))
-
-(defun jetpacs-on-state-change-clear (prefix)
-  "Drop every state subscription whose id starts with PREFIX."
-  (let (dead)
-    (maphash (lambda (id _fn)
-               (when (string-prefix-p prefix id) (push id dead)))
-             jetpacs--state-handlers)
-    (dolist (id dead) (remhash id jetpacs--state-handlers))))
-
-(defun jetpacs--on-state-changed (_client _surface _revision id value)
-  "The `:state-changed-function' hook body: fan out to subscribers.
-One broken callback must not break the connection — this runs inside
-the jsonrpc dispatch extent."
-  (when-let* ((fn (gethash id jetpacs--state-handlers)))
-    (condition-case err
-        (funcall fn value)
-      (error (message "jetpacs: state handler for %s failed: %s"
-                      id (error-message-string err))))))
-
 (defun jetpacs--default-surface ()
   "The current owner's surface (decision D1), or the shell default."
   (if jetpacs-current-owner
       (concat "app:" jetpacs-current-owner)
     (or (bound-and-true-p jetpacs-shell-surface-id) "app:main")))
+
+(defun jetpacs-on-state-change (id fn &optional surface)
+  "Call FN with the new value whenever stateful node ID publishes.
+Keyed by (SURFACE . ID), matching SPEC 14.6, which scopes input state to
+a surface AND an id — and matching ebp's own `input-values' store.
+SURFACE defaults to the current owner's surface (decision D1).
+
+\(This revises the JC-0 spec's open question Q5, which chose bare-id
+keying on the rationale that app ids are already namespaced.  That
+rationale predates decision D1: now that every owner gets its own
+surface, two apps each using a widget id like \"title\" are distinct
+\(surface, id) pairs, and bare-id keying would silently let the second
+subscriber clobber the first and then fire on the wrong app's edits.)
+
+ebp has already stored the value and applied the 14.6 reset
+reconciliation before FN runs; read the store with `jetpacs-ui-state'."
+  (puthash (cons (or surface (jetpacs--default-surface)) id)
+           fn jetpacs--state-handlers))
+
+(defun jetpacs-on-state-change-clear (prefix &optional surface)
+  "Drop every state subscription whose id starts with PREFIX.
+Restricted to SURFACE when given, otherwise across every surface."
+  (let (dead)
+    (maphash (lambda (key _fn)
+               (when (and (string-prefix-p prefix (cdr key))
+                          (or (null surface) (equal (car key) surface)))
+                 (push key dead)))
+             jetpacs--state-handlers)
+    (dolist (key dead) (remhash key jetpacs--state-handlers))))
+
+(defun jetpacs--on-state-changed (_client surface _revision id value)
+  "The `:state-changed-function' hook body: fan out to subscribers.
+One broken callback must not break the connection — this runs inside
+the jsonrpc dispatch extent."
+  (when-let* ((fn (gethash (cons surface id) jetpacs--state-handlers)))
+    (condition-case err
+        (funcall fn value)
+      (error (message "jetpacs: state handler for %s failed: %s"
+                      id (error-message-string err))))))
 
 (defun jetpacs-ui-state (id &optional surface)
   "The latest reconciled value for stateful node ID — read-through only.

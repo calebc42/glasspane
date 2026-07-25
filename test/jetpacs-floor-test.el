@@ -181,8 +181,9 @@ per-client; attach must replay or every event answers rejected."
 (ert-deftest jetpacs-floor-state-fanout ()
   (jetpacs-floor-test--with-client (client)
     (let (got)
-      (jetpacs-on-state-change "title" (lambda (v) (push v got)))
-      (jetpacs-on-state-change "doomed" (lambda (_v) (error "bad handler")))
+      (jetpacs-on-state-change "title" (lambda (v) (push v got)) "app:demo")
+      (jetpacs-on-state-change "doomed" (lambda (_v) (error "bad handler"))
+                               "app:demo")
       (jetpacs--on-state-changed client "app:demo" 7 "title" "draft")
       ;; A broken sibling callback must not break the fan-out.
       (jetpacs--on-state-changed client "app:demo" 7 "doomed" "x")
@@ -191,6 +192,29 @@ per-client; attach must replay or every event answers rejected."
       (jetpacs-on-state-change-clear "ti")
       (jetpacs--on-state-changed client "app:demo" 9 "title" "draft3")
       (should (equal got '("draft2" "draft"))))))
+
+(ert-deftest jetpacs-floor-state-keyed-by-surface ()
+  "SPEC 14.6 scopes input state to (surface, id).  Under decision D1
+every owner has its own surface, so the same widget id in two apps must
+NOT collide — the bug bare-id keying would have caused."
+  (jetpacs-floor-test--with-client (client)
+    (let (a b)
+      ;; Both apps use the widget id "title"; each subscribes in its own
+      ;; owner scope, so the surface is implied.
+      (with-jetpacs-owner "appa"
+        (jetpacs-on-state-change "title" (lambda (v) (push v a))))
+      (with-jetpacs-owner "appb"
+        (jetpacs-on-state-change "title" (lambda (v) (push v b))))
+      (jetpacs--on-state-changed client "app:appa" 1 "title" "from-a")
+      (jetpacs--on-state-changed client "app:appb" 1 "title" "from-b")
+      (should (equal a '("from-a")))
+      (should (equal b '("from-b")))
+      ;; A clear scoped to one surface leaves the other subscribed.
+      (jetpacs-on-state-change-clear "title" "app:appa")
+      (jetpacs--on-state-changed client "app:appa" 2 "title" "again-a")
+      (jetpacs--on-state-changed client "app:appb" 2 "title" "again-b")
+      (should (equal a '("from-a")))
+      (should (equal b '("again-b" "from-b"))))))
 
 ;;;; The push gates
 

@@ -77,8 +77,33 @@ color, underline), TAB expansion, a blank line, and a tappable button."
            (vconcat (jetpacs-buffer-render (jetpacs-buffer-test--fixture)))
            'app)))
 
+(defun jetpacs-buffer-test--count-spans (nodes)
+  "Total spans across every rich_text node in NODES."
+  (apply #'+ (mapcar (lambda (n) (length (append (plist-get n :spans) nil)))
+                     nodes)))
+
+(ert-deftest jetpacs-buffer-span-budget-is-aggregate ()
+  "SPEC 4.5: `max_rich_spans' is an AGGREGATE count across one
+SurfaceSpec, not a per-node cap.  Many small lines, each well under the
+limit, must still not sail past it in total."
+  (jetpacs-buffer-test--with-client '(:max_rich_spans 10)
+    (with-current-buffer (get-buffer-create "*jc1-aggregate*")
+      (fundamental-mode)
+      (erase-buffer)
+      ;; 30 lines x 1 span each = 30 spans aggregate, far over the 10 cap,
+      ;; yet every individual line is within it.
+      (dotimes (i 30) (insert (format "line %d\n" i)))
+      (let* ((nodes (jetpacs-buffer-render (current-buffer)))
+             (line-nodes (seq-filter
+                          (lambda (n) (equal (plist-get n :t) "rich_text"))
+                          nodes)))
+        (should (<= (jetpacs-buffer-test--count-spans line-nodes) 10))
+        (should (< (length line-nodes) 30))
+        (should (string-match-p "truncated"
+                                (plist-get (car (last nodes)) :text)))))))
+
 (ert-deftest jetpacs-buffer-span-cap ()
-  "Plan 2.5-5: a line's spans truncate to the welcome max_rich_spans."
+  "A single line over the whole budget truncates with an ellipsis span."
   (jetpacs-buffer-test--with-client '(:max_rich_spans 4)
     (with-current-buffer (get-buffer-create "*jc1-spans*")
       (fundamental-mode)
@@ -91,8 +116,11 @@ color, underline), TAB expansion, a blank line, and a tappable button."
       (insert "\n")
       (let* ((nodes (jetpacs-buffer-render (current-buffer)))
              (spans (append (plist-get (car nodes) :spans) nil)))
-        (should (= (length nodes) 1))
-        (should (<= (length spans) 4))
+        ;; The line, then the truncation caption the budget stop appends.
+        (should (= (length nodes) 2))
+        (should (equal (plist-get (nth 1 nodes) :t) "text"))
+        ;; Exactly the budget, ellipsis last — never budget+1.
+        (should (= (length spans) 4))
         (should (equal (plist-get (car (last spans)) :text) "…"))))))
 
 (ert-deftest jetpacs-buffer-byte-budget ()
@@ -113,6 +141,37 @@ appends a visible truncation note instead of over-emitting."
         (should (equal (plist-get last-node :t) "text"))
         (should (string-match-p "truncated" (plist-get last-node :text)))
         (should (<= total 1052))))))
+
+(ert-deftest jetpacs-buffer-degrades-without-rich-text ()
+  "SPEC 16.2: `rich_text' is OPTIONAL, not Core.  Against a Companion
+that advertises only the Core Node Set the renderer must emit Core
+`text' lines — not an unadvertised type the sender gate would refuse."
+  (let ((client (ebp-client-create
+                 :receipt-file (make-temp-file "jc1-core"))))
+    (setf (ebp-client-limits client) '(:max_frame_bytes 4194304)
+          (ebp-client-profiles client)
+          '(:app (:node_types ["text" "row" "column" "box" "spacer"
+                               "divider" "button" "text_input"]
+                  :builtins [] :features [])))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (with-current-buffer (get-buffer-create "*jc1-core*")
+            (fundamental-mode)
+            (erase-buffer)
+            (insert (propertize "styled" 'face '(:weight bold)))
+            (insert " plain\n")
+            (let* ((nodes (jetpacs-buffer-render (current-buffer)))
+                   (node (car nodes)))
+              (should (equal (plist-get node :t) "text"))
+              (should (equal (plist-get node :text) "styled plain"))
+              ;; The whole tree must clear the live Core-only gate.
+              (should (jetpacs-check-node-types
+                       (vconcat nodes)
+                       '("text" "row" "column" "box" "spacer" "divider"
+                         "button" "text_input")
+                       "app")))))
+      (jetpacs-detach))))
 
 (ert-deftest jetpacs-buffer-unbounded-without-client ()
   "With no client attached, only the line cap applies (offline render)."

@@ -50,7 +50,7 @@ Landed on `llm-poc-2 slop-fork/main` (submodule `ebp` at `3c73d75`, amendments t
 | audit | **T1/T2 audited against §4/§6/§19** — 9 defects fixed (Unicode-lax hex escapes, move-only `seq` unchecked, local edit from a superseded base, `toInt()` position truncation, `start+del` overflow closing the transport, frames stranded behind a fault, unvalidated `edit.complete` results, `ebp.el`'s line-anchored `Content-Length`, `validate.py`'s lone surrogates + missing unterminated-header cap); amendments **#98–#103**; 11 pre-existing defects confirmed + scheduled. Report: `docs/AUDIT-T1-T2-2026-07-25.md` | `7ed0f82`, `26b635f` |
 
 Baselines: **293 wire / 24 app Kotlin; 203 elisp across 8 suites; validate.py green (37 frames,
-17 wire fixtures)**. Spec through **amendment #105**.
+17 wire fixtures)**. Spec through **amendment #107**.
 
 **Audit backlog CLEARED** (`691b052`, spec `3c73d75`, amendments **#104-#105**): all 11 §3
 items resolved except the one P3 ordering nit (§3.10), each with a regression test. The editor
@@ -85,7 +85,7 @@ the pure wire library and §15.1-barrier integration, and per the review buys no
 on_change field; the tombstone-re-serialization cost (the dominant one) is already gone. (b) The
 image-cache `clear()` awaits an app-side forget-pairing path, which is not wired yet.
 
-**T3 + Tier-2 AUDITED** (`e4f686a`, spec `10c2016`, amendments **#106-#107**): 7 defects fixed.
+**T3 + Tier-2 AUDITED** (`e4f686a`, spec `f4290c0`, amendments **#106-#107**): 7 defects fixed.
 The load-bearing ones: the LD-13 refusal fired synchronously and §15.3's pump read it as a PEER
 error, pausing the durable queue and forging `blocked_by` (the pump is single-flight, now exempt —
 #106); T3's epoch was ineffective twice over — every widget seeded from the node's authored value

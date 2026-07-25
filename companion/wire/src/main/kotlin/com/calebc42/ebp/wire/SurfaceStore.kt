@@ -12,6 +12,10 @@ private val SURFACE_ID = Regex("(app|notification|widget):[A-Za-z0-9][A-Za-z0-9.
 
 data class SurfaceResult(val status: String, val revision: Long, val present: Boolean)
 
+/** T3/LD-2: the value a stateful node's widget should display, and the
+ * generation that value belongs to. See [SurfaceStore.inputDisplays]. */
+data class InputDisplay(val epoch: Long, val value: Any?)
+
 class SurfaceStore(
     private val maxSurfaces: Long,
     private val maxSurfaceIds: Long,
@@ -58,19 +62,59 @@ class SurfaceStore(
         // spec no longer validates is dropped rather than crashing startup.
         val state = backing.load()
         for (r in state.records) {
-            val statefuls = if (r.present && r.spec != null)
-                runCatching {
-                    SpecValidator.validateSurfaceSpec(r.spec,
-                        maxCaptureFields = maxCaptureFields,
-                        maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
-                        maxRichSpans = maxRichSpans, maxTableCells = maxTableCells,
-                        advertisedTypes = appNodeTypes,
-                        advertisedBuiltins = appBuiltins)
-                }.getOrNull() ?: continue
-            else emptyMap()
-            records[r.surface] = Record(r.revision, r.present, r.spec, r.currentView, statefuls)
+            var present = r.present
+            var spec = r.spec
+            var currentView = r.currentView
+            val statefuls = if (r.present && r.spec != null) {
+                // SPEC 13.4: the namespace decides the variant, on RELOAD too.
+                // Re-validating a notification spec ({body, meta?}) with the
+                // app-surface validator failed every time, so every present
+                // notification was dropped on every restart.
+                val revalidated = runCatching {
+                    if (namespace(r.surface) == "notification") {
+                        SpecValidator.validateNotificationSpec(r.spec,
+                            maxCaptureFields = maxCaptureFields,
+                            advertisedTypes = notificationNodeTypes,
+                            advertisedBuiltins = notificationBuiltins,
+                            maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
+                            maxRichSpans = maxRichSpans, maxTableCells = maxTableCells)
+                        emptyMap()
+                    } else {
+                        SpecValidator.validateSurfaceSpec(r.spec,
+                            maxCaptureFields = maxCaptureFields,
+                            maxChartPoints = maxChartPoints, maxCanvasOps = maxCanvasOps,
+                            maxRichSpans = maxRichSpans, maxTableCells = maxTableCells,
+                            advertisedTypes = appNodeTypes,
+                            advertisedBuiltins = appBuiltins)
+                    }
+                }.getOrNull()
+                if (revalidated == null) {
+                    // SPEC 13.1: "MUST retain each tombstone revision floor
+                    // until pairing revocation and MUST NOT reclaim it." A
+                    // spec this build can no longer validate — because the
+                    // validator legitimately tightened between versions —
+                    // MUST NOT be rendered or dispatched, but DROPPING the
+                    // record reclaimed its floor, so a delayed older
+                    // `surface.update` would then be answered `applied`
+                    // instead of `stale`. Retain the history as a tombstone:
+                    // not present, floor intact, and Emacs re-pushes.
+                    present = false
+                    spec = null
+                    currentView = null
+                    emptyMap()
+                } else revalidated
+            } else emptyMap()
+            records[r.surface] = Record(r.revision, present, spec, currentView, statefuls)
         }
-        for (d in state.drafts) drafts[d.surface to d.id] = d.value
+        // SPEC 10.2/13.6: a draft belongs to a stateful node of a PRESENT
+        // surface. The two files persist independently, so a reload can carry
+        // a draft whose node the loaded spec does not have; keeping it would
+        // publish a phantom in the welcome `input_state`.
+        for (d in state.drafts) {
+            val rec = records[d.surface] ?: continue
+            if (!rec.present || !rec.statefuls.containsKey(d.id)) continue
+            drafts[d.surface to d.id] = d.value
+        }
     }
 
     /**
@@ -185,9 +229,14 @@ class SurfaceStore(
                 advertisedTypes = appNodeTypes, advertisedBuiltins = appBuiltins)
             reset = resetIds?.let { SpecValidator.validateResetIds(it, statefuls) }
                 ?: emptySet()
+            // SPEC 13.5/14.2/17.1: a stale_spec is RENDERED while
+            // disconnected, so it is held to the same per-target gates as the
+            // live spec — an unadvertised builtin inside it is the same
+            // invalid context, and an unadvertised node type must degrade
+            // rather than be held to its per-type schema.
             staleSpec?.let { SpecValidator.validateStaleSpec(it, spec.has("views"),
                 maxCaptureFields, maxChartPoints, maxCanvasOps,
-                maxRichSpans, maxTableCells) }
+                maxRichSpans, maxTableCells, appNodeTypes, appBuiltins) }
             isMultiView = spec.has("views")
             if (currentView != null) {
                 if (!isMultiView || !spec.getJSONObject("views").has(currentView))
@@ -342,6 +391,32 @@ class SurfaceStore(
     /** Every `(surface, id)` whose epoch is non-zero, for the host's snapshot
      * of display generations. */
     fun inputEpochs(): Map<Pair<String, String>, Long> = epochs.toMap()
+
+    /**
+     * T3/LD-2: what every stateful node of every PRESENT surface should be
+     * displaying, and which generation that is.
+     *
+     * The epoch alone is not enough. A widget that seeds from the node's
+     * AUTHORED value shows the wrong thing whenever it is disposed and
+     * recomposed while a draft stands — a view switch, a `collapsible`
+     * folding, a `lazy_column` recycling the row — because no snapshot
+     * changed, so no epoch moves, and the widget silently reverts to the
+     * authored value while the store (and therefore `capture_fields` and
+     * `input_state`) still holds the user's. Publishing the value makes the
+     * store the seed authority in every case, and the epoch says only WHEN
+     * to re-seed.
+     */
+    fun inputDisplays(): Map<Pair<String, String>, InputDisplay> {
+        val out = HashMap<Pair<String, String>, InputDisplay>()
+        for ((surface, r) in records) {
+            if (!r.present) continue
+            for (id in r.statefuls.keys) {
+                val key = surface to id
+                out[key] = InputDisplay(epochs[key] ?: 0L, currentValue(surface, id))
+            }
+        }
+        return out
+    }
 
     private fun reconcileDrafts(surface: String, oldStatefuls: Map<String, JSONObject>,
                                 newStatefuls: Map<String, JSONObject>, reset: Set<String>) {

@@ -168,10 +168,12 @@ object SpecValidator {
                           maxChartPoints: Long = Long.MAX_VALUE,
                           maxCanvasOps: Long = Long.MAX_VALUE,
                           maxRichSpans: Long = Long.MAX_VALUE,
-                          maxTableCells: Long = Long.MAX_VALUE) {
+                          maxTableCells: Long = Long.MAX_VALUE,
+                          advertisedTypes: Set<String>? = null,
+                          advertisedBuiltins: Set<String>? = null) {
         val statefuls = validateSurfaceSpec(staleSpec, "stale_spec",
             maxCaptureFields, maxChartPoints, maxCanvasOps,
-            maxRichSpans, maxTableCells)
+            maxRichSpans, maxTableCells, advertisedTypes, advertisedBuiltins)
         if (statefuls.isNotEmpty())
             throw ContentInvalid("stale_spec", "stateful nodes are prohibited in stale_spec")
         if ((staleSpec as JSONObject).has("views") != primaryIsMultiView)

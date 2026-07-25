@@ -457,6 +457,58 @@ class SurfaceStoreTest {
     }
 
     @Test
+    fun aSpecThisBuildCanNoLongerValidateKeepsItsRevisionFloor() {
+        // SPEC 13.1: a revision floor MUST be retained until pairing
+        // revocation. The reload dropped the whole record when re-validation
+        // failed — which a validator that legitimately tightens between
+        // versions makes reachable — so the floor was reclaimed and a delayed
+        // older surface.update was answered "applied" instead of "stale".
+        val dir = java.nio.file.Files.createTempDirectory("ebp").toFile()
+            .also { it.deleteOnExit() }
+        val recFile = File(dir, "ebp-surfaces.json")
+        // A persisted spec this build rejects (`enabled` must be a boolean).
+        recFile.writeText("""
+            {"records":[{"surface":"app:main","revision":40,"present":true,
+              "spec":{"t":"button","label":"x","enabled":0,
+                      "on_tap":{"action":"a.b"}}}]}
+        """.trimIndent())
+        val s = SurfaceStore(16, 1024, backing = FileSurfaceBacking(recFile))
+        // Not rendered — but the history survives as a tombstone at its floor.
+        assertNull(s.spec("app:main"))
+        val snap = s.snapshot().getJSONObject("app:main")
+        assertEquals(40L, snap.getLong("revision"))
+        assertFalse(snap.getBoolean("present"))
+        // The floor holds: an older update is still stale, not applied.
+        assertEquals("stale", update(s, "app:main", 39).status)
+        assertEquals("applied", update(s, "app:main", 41).status)
+    }
+
+    @Test
+    fun aReloadedDraftForAMissingNodeIsNotPublished() {
+        // Records and drafts persist independently, so a reload can carry a
+        // draft whose node the loaded spec does not have. SPEC 10.2 maps
+        // present surfaces to their STATEFUL node ids; publishing a phantom
+        // hands Emacs a value for a widget that does not exist.
+        val dir = java.nio.file.Files.createTempDirectory("ebp").toFile()
+            .also { it.deleteOnExit() }
+        val recFile = File(dir, "ebp-surfaces.json")
+        val draftsFile = File(dir, "ebp-surfaces-drafts.json")
+        recFile.writeText("""
+            {"records":[{"surface":"app:main","revision":4,"present":true,
+              "spec":{"t":"column","children":[{"t":"text_input","id":"title",
+              "value":"authored"}]}}]}
+        """.trimIndent())
+        draftsFile.writeText("""
+            {"drafts":[{"surface":"app:main","id":"title","value":"kept"},
+                       {"surface":"app:main","id":"ghost","value":"phantom"}]}
+        """.trimIndent())
+        val s = SurfaceStore(16, 1024, backing = FileSurfaceBacking(recFile))
+        val reported = s.inputState().getJSONObject("app:main")
+        assertEquals("kept", reported.getString("title"))
+        assertFalse("a phantom draft was published", reported.has("ghost"))
+    }
+
+    @Test
     fun injectedMemberConflictRejects() {
         // SPEC 14.3: a remote descriptor on a value-producing hook must not
         // author the injected member; on hooks that inject nothing it may.
@@ -503,6 +555,29 @@ class SurfaceStoreTest {
         // A moved authored value with no draft standing also reseeds.
         update(s, "app:main", 4, inputSpec("Renamed"))
         assertTrue(s.inputEpoch("app:main", "title") > afterReset)
+    }
+
+    @Test
+    fun inputDisplaysCarryTheStoreValueNotTheAuthoredOne() {
+        // T3/LD-2: the epoch alone cannot fix a widget that seeds from the
+        // node's AUTHORED value — disposed and recomposed while a draft
+        // stands (a view switch, a fold, a recycled lazy row), it reverts to
+        // the authored value while the store still holds the user's, and NO
+        // epoch moves because nothing in the store changed. So the store
+        // publishes the value it holds, and that is what the widget seeds from.
+        val s = store()
+        update(s, "app:main", 1, inputSpec("Untitled"))
+        val seeded = s.inputDisplays()[("app:main" to "title")]!!
+        assertEquals("Untitled", seeded.value)
+        s.putDraft("app:main", "title", "typed")
+        val d = s.inputDisplays()[("app:main" to "title")]!!
+        assertEquals("typed", d.value)          // the draft, not "Untitled"
+        // The USER decided it, so the generation does NOT move — a widget
+        // mid-edit must not be reseeded out from under the person typing.
+        assertEquals(seeded.epoch, d.epoch)
+        // A tombstoned surface publishes nothing to display.
+        s.remove("app:main", 2)
+        assertNull(s.inputDisplays()[("app:main" to "title")])
     }
 
     @Test

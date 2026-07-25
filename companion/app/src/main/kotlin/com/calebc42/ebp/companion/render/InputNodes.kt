@@ -183,8 +183,8 @@ internal fun RenderCheckbox(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val id = node.optString("id")
     val enabled = node.optBoolean("enabled", true)
     var checked by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
-        key = "in:${ctx.surface}:$id") {
-        mutableStateOf(node.optBoolean("checked", false))
+        key = "in:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+        mutableStateOf(ctx.storeValue(id) as? Boolean ?: node.optBoolean("checked", false))
     }
     val onChange = node.optJSONObject("on_change")
     Row(verticalAlignment = Alignment.CenterVertically, modifier = m) {
@@ -204,8 +204,8 @@ internal fun RenderSwitch(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     val id = node.optString("id")
     val enabled = node.optBoolean("enabled", true)
     var checked by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
-        key = "in:${ctx.surface}:$id") {
-        mutableStateOf(node.optBoolean("checked", false))
+        key = "in:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+        mutableStateOf(ctx.storeValue(id) as? Boolean ?: node.optBoolean("checked", false))
     }
     val onChange = node.optJSONObject("on_change")
     Row(verticalAlignment = Alignment.CenterVertically, modifier = m) {
@@ -241,7 +241,9 @@ internal fun RenderEnumList(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // Seed selection from the authored value (§4.3 equality), keeping only
     // values that match an authored option.
     fun seedValues(): List<Any> {
-        val v = node.opt("value") ?: return emptyList()
+        // T3/LD-2: the store's value (the draft when one stands, else the
+        // authored value) — the node member is only the fallback.
+        val v = ctx.storeValue(id) ?: node.opt("value") ?: return emptyList()
         val wanted: List<Any> = if (v is JSONArray)
             (0 until v.length()).map { v.get(it) } else listOf(v)
         return wanted.filter { w -> optionValues.any { jsonValueEquals(w, it) } }
@@ -361,7 +363,7 @@ internal fun RenderSlider(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     if (values != null && values.length() >= 2) {
         val n = values.length()
         fun seedIndex(): Int {
-            val v = node.opt("value") as? Number ?: return 0
+            val v = (ctx.storeValue(id) ?: node.opt("value")) as? Number ?: return 0
             for (i in 0 until n)
                 if (jsonValueEquals(values.get(i), v)) return i
             return 0
@@ -383,7 +385,9 @@ internal fun RenderSlider(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         val min = node.optDouble("min", 0.0).toFloat()
         val max = node.optDouble("max", 1.0).toFloat()
         var pos by remember(ctx.surface, id, ctx.epochOf(id)) {
-            mutableFloatStateOf(node.optDouble("value", min.toDouble()).toFloat())
+            mutableFloatStateOf(
+                ((ctx.storeValue(id) as? Number)?.toFloat()
+                    ?: node.optDouble("value", min.toDouble()).toFloat()))
         }
         Slider(
             value = pos,

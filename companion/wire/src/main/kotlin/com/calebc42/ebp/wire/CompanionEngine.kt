@@ -84,6 +84,11 @@ class CompanionEngine(
     /** Re-entry marker for feed()'s post-fault drain: no new bytes. */
     private val EMPTY_CHUNK = ByteArray(0)
     private var pendingPairingId: String? = null
+
+    /** SPEC 9.1: the authenticated pairing identity, for host state that must
+     * be scoped to it (§17.2's image cache, §21.5's queued data). Null until
+     * `auth.response` verifies. */
+    val pairingIdentity: String? get() = pendingPairingId
     private var pendingClientNonce: String? = null
     private var pendingServerNonce: String? = null
 
@@ -236,12 +241,21 @@ class CompanionEngine(
 
     /** Send a Companion-originated request; integer ids per SPEC 7.2. A
      * request refused by the outstanding-request bound fails locally with a
-     * synthetic 1401 — the caller's callback always runs exactly once. */
+     * synthetic 1401 — the caller's callback always runs exactly once.
+     *
+     * [bounded] = false exempts a caller that carries its OWN bound. Only the
+     * durable-queue pump does: SPEC 15.3 lets exactly one delivery be in
+     * flight at a time (`queue.hasInFlight()`), so it can never be the
+     * resource this ceiling protects — while refusing it would be actively
+     * wrong, because `onPumpResult` reads any error as a PEER response and
+     * would pause the pump and report `blocked_by: "overloaded"` for an error
+     * the peer never sent, stalling durable delivery on our own load. */
     @Synchronized
     fun sendRequest(method: String, params: JSONObject,
+                    bounded: Boolean = true,
                     callback: (JSONObject?, JSONObject?) -> Unit) {
         if (pendingHeld && pending.size <= PENDING_RESUME) pendingHeld = false
-        if (pendingHeld || pending.size >= PENDING_HOLD) {
+        if (bounded && (pendingHeld || pending.size >= PENDING_HOLD)) {
             pendingHeld = true
             callback(null, JSONObject()
                 .put("code", 1401).put("message", "Outstanding requests exhausted")
@@ -574,7 +588,10 @@ class CompanionEngine(
                 val seq = d.record.getLong("queue_seq")
                 myInFlightSeq = seq
                 // SPEC 15.3: the stored record replays with its stored event_id.
-                sendRequest("event.action", d.record.getJSONObject("event")) { result, error ->
+                // SPEC 15.3: single-flight by construction, and a local
+                // refusal here would be misread as a peer error — exempt.
+                sendRequest("event.action", d.record.getJSONObject("event"),
+                    bounded = false) { result, error ->
                     onPumpResult(seq, result, error)
                 }
             }

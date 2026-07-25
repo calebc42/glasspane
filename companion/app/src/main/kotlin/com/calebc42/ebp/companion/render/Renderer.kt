@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.companion.DeviceBridge
 import com.calebc42.ebp.wire.EditorSession
+import com.calebc42.ebp.wire.InputDisplay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -106,22 +107,39 @@ class RenderCtx(
     val bridge: DeviceBridge,
     val dialog: DialogContext? = null,
     val path: String = "",
-    /** T3/LD-2: display generations for this surface's stateful nodes. */
-    val epochs: Map<Pair<String, String>, Long> = emptyMap(),
+    /** T3/LD-2: what each of this surface's stateful nodes should display,
+     * and the generation that value belongs to. */
+    val displays: Map<Pair<String, String>, InputDisplay> = emptyMap(),
 ) {
     fun child(node: JSONObject?, index: Int): RenderCtx =
-        RenderCtx(surface, bridge, dialog, identityPath(path, node, index), epochs)
+        RenderCtx(surface, bridge, dialog, identityPath(path, node, index), displays)
 
     /**
      * T3/LD-2: the generation of the value this node's widget should show.
-     * Used as a `remember` key so a value decided by a SNAPSHOT reseeds the
-     * widget — an erased draft, a moved authored value — while a value the
-     * user is still editing does not. Without it the seeding lambda ran once
-     * per `(surface, id)` and no later snapshot ever reached the widget, so
-     * the field could keep displaying text the store had already discarded
-     * while `capture_fields` submitted the store's value.
+     * It belongs in BOTH the `remember` inputs and the saveable `key`: the
+     * inputs make the seeding lambda re-run, and the key stops Compose
+     * restoring the value saved under the previous generation — a restore
+     * beats changed inputs, so an epoch carried only in the inputs is
+     * silently defeated wherever state is saved and restored (a recycled
+     * `lazy_column` row, a `HorizontalPager` page, process death).
      */
-    fun epochOf(id: String): Long = epochs[surface to id] ?: 0L
+    fun epochOf(id: String): Long = displays[surface to id]?.epoch ?: 0L
+
+    /**
+     * T3/LD-2: the value the STORE says this node holds — the draft when the
+     * user has one, else the authored value — or null when the store has no
+     * opinion (a dialog, or a node not in an accepted snapshot), in which
+     * case the caller falls back to the authored member.
+     *
+     * The store is the seed authority because it is what `capture_fields`
+     * (§14.1) and the welcome `input_state` (§15.1) read. Seeding from the
+     * node instead means a widget that is disposed and recomposed while a
+     * draft stands — a view switch, a fold, a recycled row — silently
+     * reverts to the authored value while the store still holds the user's,
+     * which is the LD-2 divergence by a route no epoch can detect, because
+     * nothing in the store changed.
+     */
+    fun storeValue(id: String): Any? = displays[surface to id]?.value
 
     fun action(descriptor: JSONObject?, value: Any? = null) {
         // SPEC 18.1 (T3c, closes LD-1): inside a dialog the dialog.submit /
@@ -188,9 +206,10 @@ class RenderCtx(
 fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
                dialog: DialogContext? = null) {
     // T3/LD-2: collected once at the root and carried down the tree, so a
-    // stateful widget reads its generation without each one subscribing.
-    val epochs by bridge.inputEpochs.collectAsState()
-    RenderNode(node, RenderCtx(surface, bridge, dialog, epochs = epochs))
+    // stateful widget reads its generation and its seed without each one
+    // subscribing.
+    val displays by bridge.inputDisplays.collectAsState()
+    RenderNode(node, RenderCtx(surface, bridge, dialog, displays = displays))
 }
 
 /** Root of a dialog's node tree: owns the local field map (SPEC 18.1). */
@@ -323,8 +342,8 @@ private fun RenderTextInput(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         remember(id) { mutableStateOf("") } // never seeded, never saved
     else
         rememberSaveable(ctx.surface, id, ctx.epochOf(id),
-            key = "ti:${ctx.surface}:$id") {
-            mutableStateOf(node.optString("value"))
+            key = "ti:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+            mutableStateOf(ctx.storeValue(id) as? String ?: node.optString("value"))
         }
     // SPEC 18.4/17.4: a `syntax` language recolours the field in place; a
     // password masks with dots instead (a syntax highlight on a secret is moot).
@@ -406,8 +425,10 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // SPEC 16.1/13.6: the draft keys on the wire address (surface+id), not the
     // key-first path — changing only a `key` keeps a compatible draft.
     var value by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
-        stateSaver = TextFieldValue.Saver, key = "ed:${ctx.surface}:$id") {
-        mutableStateOf(TextFieldValue(node.optString("value")))
+        stateSaver = TextFieldValue.Saver,
+        key = "ed:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+        mutableStateOf(TextFieldValue(
+            ctx.storeValue(id) as? String ?: node.optString("value")))
     }
     // T2/LD-5: the engine shadow is the text authority for a synchronized
     // editor. Adopt every mirror publication — an inbound edit.apply, or the

@@ -8,14 +8,17 @@
 // with onboarding). Not a secret and not a deployment configuration.
 package com.calebc42.ebp.companion
 
+import com.calebc42.ebp.companion.render.ImageCache
 import com.calebc42.ebp.wire.CompanionEngine
 import com.calebc42.ebp.wire.CompanionConfig
 import com.calebc42.ebp.wire.EbpAuth
 import com.calebc42.ebp.wire.EditorSession
+import com.calebc42.ebp.wire.InputDisplay
 import com.calebc42.ebp.wire.ScalarPos
 import com.calebc42.ebp.wire.SessionState
 import com.calebc42.ebp.wire.Utf16Pos
 import com.calebc42.ebp.wire.utf16PosIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
@@ -217,14 +220,19 @@ class DeviceBridge(
         dispatchExecutor.execute { engine?.publishState(surface, id, value) }
     }
 
+    // A tiny scope for the fire-and-forget cache bind (SPEC 17.2 identity
+    // scoping); the cache owns its own IO scope for the fetches themselves.
+    private val cacheScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
     // T3/LD-2: display generations for stateful nodes, keyed (surface, id).
     // Republished with every accepted snapshot; a widget's remember key
     // carries its epoch, so a value the SNAPSHOT decided reseeds the widget
     // while a value the user is still editing does not.
-    private val _inputEpochs =
-        MutableStateFlow<Map<Pair<String, String>, Long>>(emptyMap())
-    val inputEpochs: StateFlow<Map<Pair<String, String>, Long>>
-        get() = _inputEpochs
+    private val _inputDisplays =
+        MutableStateFlow<Map<Pair<String, String>, InputDisplay>>(emptyMap())
+    val inputDisplays: StateFlow<Map<Pair<String, String>, InputDisplay>>
+        get() = _inputDisplays
 
     // T2/LD-5: the editor mirrors, keyed (document, editor_id). RenderEditor
     // collects this and adopts on epoch change; see EditorMirror above.
@@ -335,9 +343,17 @@ class DeviceBridge(
         // current live session through this slot; a drop with no session is lost.
         CompanionStores.setLiveSession(engine)
         engine.surfaceListener = { surface ->
+            // SPEC 17.2/9.1: bind the image cache to THIS session's
+            // authenticated pairing identity before any image can render.
+            // A different identity erases what the previous one fetched —
+            // the §9.1 empty state partition, enforced rather than trusted
+            // to a revocation call that may never arrive.
+            engine.pairingIdentity?.let { id ->
+                cacheScope.launch { ImageCache.setIdentity(id) }
+            }
             // T3/LD-2: publish display generations before the spec, so the
             // recomposition this push triggers already sees the new epoch.
-            _inputEpochs.value = store.inputEpochs()
+            _inputDisplays.value = store.inputDisplays()
             when {
                 // SPEC 18.5: a notification:* surface is a system notification;
                 // its removal (tombstone -> null spec) cancels it.

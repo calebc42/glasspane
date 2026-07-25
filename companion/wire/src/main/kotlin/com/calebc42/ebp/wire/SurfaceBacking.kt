@@ -76,9 +76,16 @@ class FileSurfaceBacking(
             }
         } ?: emptyList()
         // Drafts come from the split file. Backward compat: a records file
-        // written by the pre-split format carries its own `drafts` array;
-        // read those until the next draft write moves them across.
-        val draftsRoot = readObject(draftsFile) ?: root
+        // written by the pre-split format carries its own `drafts` array.
+        // MIGRATE it immediately rather than reading it lazily — a
+        // records-only rewrite (a `view.switch`, say) drops the legacy array,
+        // so a lazy fallback loses every migrated draft the moment anything
+        // touches records before a draft is written.
+        val draftsRoot = readObject(draftsFile) ?: root?.also { legacy ->
+            if (legacy.optJSONArray("drafts") != null)
+                runCatching { writeAtomic(draftsFile, JSONObject()
+                    .put("drafts", legacy.getJSONArray("drafts"))) }
+        }
         val drafts = draftsRoot?.optJSONArray("drafts")?.let { a ->
             (0 until a.length()).map { i ->
                 val o = a.getJSONObject(i)

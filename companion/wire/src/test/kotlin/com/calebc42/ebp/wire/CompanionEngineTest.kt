@@ -559,6 +559,45 @@ class CompanionEngineTest {
         assertEquals(2, refused) // accepted again
     }
 
+    @Test
+    fun theDurablePumpIsExemptFromTheOutstandingRequestBound() {
+        // The bound's callback fires SYNCHRONOUSLY, and onPumpResult reads any
+        // error as a PEER response: an unexempted pump would pause itself and
+        // report blocked_by "overloaded" for an error the peer never sent,
+        // stalling SPEC 15.3 durable delivery on our own load. The pump is
+        // single-flight by construction, so it can never be the resource the
+        // ceiling protects.
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello()))
+        engine.feed(frame(auth()))
+        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        engine.feed(frame(request("s1", "surface.update", JSONObject()
+            .put("surface", "app:main").put("revision", 1)
+            .put("spec", JSONObject().put("t", "text").put("text", "x")))))
+        // Fill the outstanding-request ceiling with unanswered requests.
+        repeat(512) { engine.sendRequest("event.action", JSONObject()) { _, _ -> } }
+        // A durable event admitted now must still reach the wire.
+        val before = out.count { it.opt("method") == "event.action" }
+        engine.dispatchAction("app:main", JSONObject()
+            .put("action", "demo.act").put("when_offline", "queue")
+            .put("ttl_s", 3600), null)
+        assertEquals("the pump still delivered", before + 1,
+            out.count { it.opt("method") == "event.action" })
+        // Answer it, then admit another: the pump must still be running. An
+        // unexempted pump would have set pumpPaused on the synthetic error
+        // and this second event would never leave the queue.
+        val delivered = out.last { it.opt("method") == "event.action" }
+        engine.feed(frame(JSONObject().put("jsonrpc", "2.0")
+            .put("id", delivered.getInt("id"))
+            .put("result", JSONObject().put("status", "accepted"))))
+        engine.dispatchAction("app:main", JSONObject()
+            .put("action", "demo.act2").put("when_offline", "queue")
+            .put("ttl_s", 3600), null)
+        assertEquals("the pump was not paused by a local refusal", before + 2,
+            out.count { it.opt("method") == "event.action" })
+    }
+
     // ------------------------------------------------------ close (SPEC 22.3)
 
     @Test

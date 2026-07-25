@@ -19,6 +19,11 @@ fun isValidRequestId(id: Any?): Boolean = when (id) {
     else -> false
 }
 
+/** SPEC 11/4.5 (amendment #93): a method name is a §4.4 identifier of at
+ * most 128 octets — validated BEFORE any registry consult or allocation. */
+fun isValidMethodName(method: String): Boolean =
+    method.length in 1..WireLimits.MAX_METHOD_OCTETS && REQUEST_ID.matches(method)
+
 /**
  * Classify a parsed message per SPEC 7.1, or null when structurally invalid
  * (wrong version marker, id/result/error combinations that fit no class).

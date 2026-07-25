@@ -19,6 +19,7 @@ object WireLimits {
     const val MAX_CHILDREN_PER_NODE = 10_000
     const val MAX_IDENTIFIER_OCTETS = 128
     const val MAX_REQUEST_ID_OCTETS = 64
+    const val MAX_METHOD_OCTETS = 128
 }
 
 /** SPEC 6.2: conditions that force connection closure. */

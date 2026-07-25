@@ -411,6 +411,11 @@ class CompanionEngine(
             SessionState.CHALLENGED -> return handleAuth(id, params)
             else -> Unit
         }
+        // SPEC 11/4.5 (amendment #93): a method name that is not a §4.4
+        // identifier within 128 octets is -32601 WITHOUT consulting the
+        // registry — no allocation is keyed by an unvalidated name.
+        if (!isValidMethodName(method))
+            return respondError(id, -32601, "Method not found", "method-not-found")
         val spec = METHOD_REGISTRY[method]
             ?: return respondError(id, -32601, "Method not found", "method-not-found")
         if (spec.sender == Sender.COMPANION || !spec.isRequest)
@@ -710,6 +715,9 @@ class CompanionEngine(
         // Pre-auth (SPEC 10.1) and unknown/wrong-direction (SPEC 7.3)
         // notifications are logged and dropped; nothing is emitted.
         if (state == SessionState.CONNECTED || state == SessionState.CHALLENGED) return
+        // SPEC 11 (amendment #93): a non-identifier or over-long method name
+        // is dropped without consulting the registry.
+        if (!isValidMethodName(method)) return
         val spec = METHOD_REGISTRY[method] ?: return
         if (spec.sender == Sender.COMPANION || spec.isRequest) return
         // SPEC 10.1: a notification not legal in this session state is dropped

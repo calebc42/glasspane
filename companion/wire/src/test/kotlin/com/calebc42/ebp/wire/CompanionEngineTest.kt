@@ -478,6 +478,30 @@ class CompanionEngineTest {
         engineWithLimits(limits())
     }
 
+    // -------------------------------------- method-name bound (amendment #93)
+
+    @Test
+    fun methodNameGetsGrammarAndBoundBeforeTheRegistry() {
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out)
+        engine.feed(frame(hello()))
+        engine.feed(frame(auth()))
+        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        // Over-long (129+ octets) and non-identifier method names are -32601
+        // without consulting the registry (SPEC 11/4.5, amendment #93).
+        engine.feed(frame(request("m1", "x".repeat(200), JSONObject())))
+        assertEquals(-32601, out.last { it.opt("id") == "m1" }
+            .getJSONObject("error").getInt("code"))
+        engine.feed(frame(request("m2", "bad name!", JSONObject())))
+        assertEquals(-32601, out.last { it.opt("id") == "m2" }
+            .getJSONObject("error").getInt("code"))
+        // A malformed notification method is dropped silently.
+        val before = out.size
+        engine.feed(frame(JSONObject().put("jsonrpc", "2.0")
+            .put("method", "y".repeat(200)).put("params", JSONObject())))
+        assertEquals(before, out.size)
+    }
+
     // ------------------------------------------------------ close (SPEC 22.3)
 
     @Test

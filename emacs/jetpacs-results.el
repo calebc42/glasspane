@@ -48,7 +48,6 @@
 (require 'subr-x)
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)   ; jetpacs-defaction / jetpacs-client
-(require 'jetpacs-shell)      ; the push seam for the region view
 (require 'jetpacs-buffer)     ; jetpacs-render-buffer-register, exposure table
 
 ;; --- Configuration and host seam --------------------------------------------
@@ -113,7 +112,7 @@ A list of plists (:file PATH :line N :text STRING).  Cards tap
   "Non-nil when BUF is live and one of `jetpacs-results-modes'."
   (and (buffer-live-p buf)
        (with-current-buffer buf
-         (apply #'derived-mode-p jetpacs-results-modes))))
+         (derived-mode-p jetpacs-results-modes))))
 
 ;; --- Reading the loci --------------------------------------------------------
 
@@ -144,21 +143,35 @@ start first, then the first non-blank char."
                    (point))))
           (and (> p bol) (jump-at p) p))))))
 
-(defun jetpacs-results--loci (buf)
+(defun jetpacs-results--loci (buf &optional limit)
   "Collect (POS . TEXT) for each locus row of results buffer BUF.
-Walking the printed buffer respects the mode's current ordering."
+Walking the printed buffer respects the mode's current ordering.  Stops
+after LIMIT loci (default `jetpacs-results-max-loci'): the scan bound and
+the render cap MUST be the same number, or the stepper reports a count
+covering loci that were never rendered — and so were never exposed, so
+stepping into them is refused (SPEC 23.1).  It also keeps an enormous
+grep buffer from being walked whole inside the dispatch extent."
   (with-current-buffer buf
     (save-excursion
       (goto-char (point-min))
-      (let (loci)
-        (while (not (eobp))
+      (let ((limit (or limit jetpacs-results-max-loci))
+            (n 0)
+            loci)
+        (while (and (not (eobp)) (< n limit))
           (let* ((bol (line-beginning-position))
                  (eol (line-end-position))
                  (pos (and (> eol bol) (jetpacs-results--locus-pos bol eol))))
             (when pos
-              (push (cons pos (string-trim
-                               (buffer-substring-no-properties bol eol)))
-                    loci)))
+              ;; SPEC 4.1: a results line is arbitrary buffer text and may
+              ;; hold undecodable octets (a grep over a latin-1 or binary
+              ;; file), which are not Unicode scalar values and which
+              ;; `json-serialize' rejects outright — taking the whole push
+              ;; down.  Same sanitizer the Tier-0 renderer uses.
+              (push (cons pos (jetpacs-buffer--scalar-text
+                               (string-trim
+                                (buffer-substring-no-properties bol eol))))
+                    loci)
+              (setq n (1+ n))))
           (forward-line 1))
         (nreverse loci)))))
 
@@ -175,7 +188,7 @@ poc returned 0, silently visiting a different row than the user tapped."
 Records POS in the exposure table: this skin builds its own rows instead
 of walking the Tier-0 renderer, so nothing else would make POS a
 legitimate tap target (SPEC 23.1)."
-  (jetpacs-buffer-expose name pos)
+  (jetpacs-buffer-expose name pos "results.visit")
   (let* ((label (if (string-empty-p text) " " text))
          (action (jetpacs-action "results.visit"
                                  :args (list :buffer name :pos pos)))
@@ -199,12 +212,14 @@ legitimate tap target (SPEC 23.1)."
 Returns a list of nodes, per the `jetpacs-render-buffer' contract."
   (with-current-buffer buf
     (let* ((name (buffer-name buf))
-           (loci (jetpacs-results--loci buf))
-           (total (length loci))
-           (shown (if (> total jetpacs-results-max-loci)
-                      (cl-subseq loci 0 jetpacs-results-max-loci)
-                    loci)))
-      (if (null loci)
+           ;; Scan one past the cap so "showing N of M+" is honest without
+           ;; walking a huge buffer to the end.
+           (probe (jetpacs-results--loci buf (1+ jetpacs-results-max-loci)))
+           (capped (> (length probe) jetpacs-results-max-loci))
+           (shown (if capped (cl-subseq probe 0 jetpacs-results-max-loci)
+                    probe))
+           (total (length shown)))
+      (if (null shown)
           ;; No parsed loci — the mode may be mid-run (an empty *grep*) or
           ;; nothing matched.  Fall back to faithful Tier 0 text so the
           ;; buffer is never blank.
@@ -214,14 +229,14 @@ Returns a list of nodes, per the `jetpacs-render-buffer' contract."
         (jetpacs-buffer-forget-exposed name)
         (append
          (list (jetpacs-text
-                (format "%d result%s" total (if (= total 1) "" "s"))
+                (format "%d result%s%s" total (if (= total 1) "" "s")
+                        (if capped "+" ""))
                 :style "caption"))
          (mapcar (lambda (l) (jetpacs-results--card name (car l) (cdr l)))
                  shown)
-         (when (> total (length shown))
+         (when capped
            (list (jetpacs-text
-                  (format "Showing %d of %d — narrow the search."
-                          (length shown) total)
+                  (format "Showing the first %d — narrow the search." total)
                   :style "caption"))))))))
 
 (dolist (mode jetpacs-results-modes)
@@ -237,7 +252,21 @@ ambient default: a handler runs outside any owner scope, so a zero-arg
 push would refresh the wrong surface under decision D1."
   (setq jetpacs-results--region
         (list :buffer name :beg beg :end end :label label :point point))
-  (jetpacs-shell-push jetpacs-results--event-surface))
+  ;; Re-push through JC-1's seam (which `jetpacs-shell' wires to
+  ;; `jetpacs-shell-push'), so this module needs no dependency on the
+  ;; shell — and DEFER it: `jetpacs-shell-push' SIGNALS on any gate
+  ;; failure, and a signal here would escape after the jump already
+  ;; landed, answering `rejected' for an effect that happened and leaving
+  ;; the stepper armed on a view that never opened.
+  (let ((surface jetpacs-results--event-surface))
+    (run-at-time 0 nil
+                 (lambda ()
+                   (when (functionp jetpacs-buffer-refresh-function)
+                     (condition-case err
+                         (funcall jetpacs-buffer-refresh-function surface)
+                       (error
+                        (message "jetpacs-results: region push failed: %s"
+                                 (jetpacs--error-label err)))))))))
 
 (defun jetpacs-results-region-nodes ()
   "Nodes for the last visited region, or nil when none is armed.
@@ -363,7 +392,8 @@ jump.  Returns nil when the command never left the results buffer."
            ;; SPEC 23.1: only a buffer this Emacs actually rendered as a
            ;; results list, at an offset it actually offered.
            ((not (jetpacs-results--buffer-p buf)) 'rejected)
-           ((not (jetpacs-buffer-exposed-p buf-name pos)) 'rejected)
+           ((not (jetpacs-buffer-exposed-p buf-name pos "results.visit"))
+            'rejected)
            ((jetpacs-event-stale-p params) 'stale)
            (t
             (let* ((loci (jetpacs-results--loci buf))

@@ -240,27 +240,38 @@ text property, so this never marks the whole buffer tappable."
 ;; is honored only if it was genuinely offered.
 
 (defvar jetpacs-buffer-exposed (make-hash-table :test #'equal)
-  "Map of BUFFER-NAME -> hash of exposed POS -> t, for the live render.
-Rebuilt per `jetpacs-buffer--render-region'; a tap for an unrecorded
-\(buffer, pos) is refused.")
+  "Map of BUFFER-NAME -> hash of exposed POS -> list of action names.
+Rebuilt per render; a tap for an unrecorded (buffer, pos, action) is
+refused.  The ACTION is part of the record on purpose: a position offered
+as a `results.visit' locus must NOT thereby authorize `emacs.buffer.act',
+which runs the same goto command UNSHIMMED — popping a desktop window and
+able to reach a prompt that would wedge the jsonrpc dispatch extent.  One
+record authorizes one verb.")
 
-(defun jetpacs-buffer-expose (buffer-name pos)
-  "Record that POS in BUFFER-NAME was emitted as a tap target.
+(defun jetpacs-buffer-expose (buffer-name pos &optional action)
+  "Record that POS in BUFFER-NAME was emitted as a target for ACTION.
+ACTION defaults to \"emacs.buffer.act\"; pass the action name a skin
+actually put in the descriptor, so the record authorizes that verb only.
 Public API: a Tier-1 skin (JC-2's results/tablist) builds its own rows
 instead of walking through `jetpacs-buffer--render-region', so it MUST
 record each position it makes tappable — otherwise the SPEC 23.1
 validation in `jetpacs-buffer--tap-status' refuses every one of its taps.
 Call `jetpacs-buffer-forget-exposed' for the buffer first, so a re-render
 supersedes the previous set."
-  (let ((tbl (or (gethash buffer-name jetpacs-buffer-exposed)
-                 (puthash buffer-name (make-hash-table :test #'eql)
-                          jetpacs-buffer-exposed))))
-    (puthash pos t tbl)))
+  (let* ((action (or action "emacs.buffer.act"))
+         (tbl (or (gethash buffer-name jetpacs-buffer-exposed)
+                  (puthash buffer-name (make-hash-table :test #'eql)
+                           jetpacs-buffer-exposed)))
+         (verbs (gethash pos tbl)))
+    (unless (member action verbs)
+      (puthash pos (cons action verbs) tbl))))
 
-(defun jetpacs-buffer-exposed-p (buffer-name pos)
-  "Non-nil when POS in BUFFER-NAME was emitted by the last render."
-  (when-let* ((tbl (gethash buffer-name jetpacs-buffer-exposed)))
-    (gethash pos tbl)))
+(defun jetpacs-buffer-exposed-p (buffer-name pos &optional action)
+  "Non-nil when POS in BUFFER-NAME was emitted for ACTION by the last render.
+ACTION defaults to \"emacs.buffer.act\"."
+  (when-let* ((tbl (gethash buffer-name jetpacs-buffer-exposed))
+              (verbs (gethash pos tbl)))
+    (and (member (or action "emacs.buffer.act") verbs) t)))
 
 (defun jetpacs-buffer-forget-exposed (&optional buffer-name)
   "Drop the exposure record for BUFFER-NAME, or all of it."
@@ -316,7 +327,7 @@ next line, since modes differ on which carries `invisible'."
 
 (defun jetpacs-buffer--fold-span (pos buffer-name text)
   "A tappable affordance span toggling the fold at heading position POS."
-  (jetpacs-buffer-expose buffer-name pos)
+  (jetpacs-buffer-expose buffer-name pos "jetpacs.buffer.fold")
   (jetpacs-span text
                 :on-tap (jetpacs-action
                          "jetpacs.buffer.fold"
@@ -888,8 +899,9 @@ a signalling effect reaches the JC-0 shim and answers `rejected'."
      ((not (and (stringp buffer) (numberp pos) (get-buffer buffer)))
       'rejected)
      ((jetpacs-event-stale-p params) 'stale)
-     ((not (jetpacs-buffer-exposed-p buffer pos))
-      (message "jetpacs-buffer: refused a tap at an offset never rendered")
+     ((not (jetpacs-buffer-exposed-p buffer pos (plist-get params :action)))
+      (message "jetpacs-buffer: refused a tap at an offset never offered \
+for this action")
       'rejected)
      (t
       (funcall effect buffer pos)

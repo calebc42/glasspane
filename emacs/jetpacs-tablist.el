@@ -133,7 +133,7 @@ chrome, and a Core-only Companion is better served by the rows alone."
   "Generic row card: first column as title, the rest as a caption.
 Records POS in the exposure table — this skin bypasses the Tier-0 walk,
 so nothing else would make POS a legitimate `emacs.buffer.act' target."
-  (jetpacs-buffer-expose buf-name pos)
+  (jetpacs-buffer-expose buf-name pos "emacs.buffer.act")
   (let* ((cols (mapcar #'jetpacs-tablist-col-string (append entry nil)))
          (title (or (car cols) ""))
          (rest (string-join (cl-remove-if #'string-empty-p (cdr cols))

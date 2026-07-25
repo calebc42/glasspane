@@ -120,9 +120,16 @@ correctly refuses it."
         (should (numberp (plist-get args :pos)))
         ;; Offline default flipped to drop; nothing here opts into queueing.
         (should-not (plist-get tap :when_offline))
-        ;; SPEC 23.1: the skin records its own tap targets.
+        ;; SPEC 23.1: the skin records its own tap targets — for ITS verb
+        ;; only.  A locus must not thereby authorize `emacs.buffer.act',
+        ;; which would run the same goto UNSHIMMED (desktop window, and a
+        ;; prompt could wedge the dispatch extent).
         (should (jetpacs-buffer-exposed-p "*jc2-occur*"
-                                          (plist-get args :pos))))
+                                          (plist-get args :pos)
+                                          "results.visit"))
+        (should-not (jetpacs-buffer-exposed-p "*jc2-occur*"
+                                              (plist-get args :pos)
+                                              "emacs.buffer.act")))
       ;; The whole tree must clear the live gate.
       (should (jetpacs-check-node-types
                (vconcat nodes)
@@ -135,10 +142,18 @@ correctly refuses it."
   (jetpacs-results-test--with-client jetpacs-results-test--full
     (let ((jetpacs-results-max-loci 2))
       (let ((nodes (jetpacs-results-render (jetpacs-results-test--occur-like))))
-        ;; caption + 2 cards + the "showing N of M" note
+        ;; caption + 2 cards + the truncation note
         (should (= (length nodes) 4))
-        (should (string-match-p "Showing 2 of 3"
-                                (plist-get (car (last nodes)) :text)))))))
+        ;; The count is marked approximate: the scan stops at the cap, so
+        ;; the true total is unknown without walking the whole buffer.
+        (should (equal (plist-get (car nodes) :text) "2 results+"))
+        (should (string-match-p "first 2"
+                                (plist-get (car (last nodes)) :text)))
+        ;; The stepper's count must not exceed what was rendered AND
+        ;; exposed: stepping into an unexposed locus would be refused.
+        (should (= (length (jetpacs-results--loci
+                            (get-buffer "*jc2-occur*")))
+                   2))))))
 
 (ert-deftest jetpacs-results-render-degrades-to-core ()
   "SPEC 16.2: card/rich_text/icon are OPTIONAL; a Core-only Companion
@@ -308,8 +323,14 @@ visit of a different row."
       ;; without the exposure this skin's every tap would be refused.
       (with-current-buffer buf
         (let ((rows (jetpacs-tablist--rows)))   ; needs the buffer current
+          ;; The tablist rows DO tap emacs.buffer.act, so that is the verb
+          ;; they authorize — and only that one.
           (should (jetpacs-buffer-exposed-p "*jc2-tablist*"
-                                            (nth 0 (car rows))))))
+                                            (nth 0 (car rows))
+                                            "emacs.buffer.act"))
+          (should-not (jetpacs-buffer-exposed-p "*jc2-tablist*"
+                                                (nth 0 (car rows))
+                                                "results.visit"))))
       (should (jetpacs-check-node-types
                (vconcat nodes)
                (append (plist-get (plist-get jetpacs-results-test--full :app)

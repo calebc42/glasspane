@@ -88,8 +88,13 @@
       (smoke-results--check
        "every rendered locus is exposed (SPEC 23.1)"
        (cl-every (lambda (l)
-                   (jetpacs-buffer-exposed-p (buffer-name smoke-results--occur)
-                                             (car l)))
+                   (and (jetpacs-buffer-exposed-p
+                         (buffer-name smoke-results--occur)
+                         (car l) "results.visit")
+                        ;; ...and ONLY for its own verb.
+                        (not (jetpacs-buffer-exposed-p
+                              (buffer-name smoke-results--occur)
+                              (car l) "emacs.buffer.act"))))
                  loci)))
 
     (princ "\n  -- 45s: tap a result card, then Next --\n")

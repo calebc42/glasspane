@@ -347,6 +347,41 @@ and the whole jetpacs-sync coupling (ebp.el owns the document mirror + staleness
 obarray-blowout guard; word fallback; session/seq-mismatch → ebp `1201`); live
 editor-completion smoke via the `:edit-complete-function` seam.
 
+**DONE + DEVICE-VERIFIED (2026-07-26).** `jetpacs-complete.el` is the port —
+pure Emacs, requires only cl-lib, no ebp/jetpacs dependency: its whole coupling
+is the calling convention.  What changed beyond the mechanical drift:
+- `kind` is dropped because SPEC 19.3 candidates are **closed objects** — a
+  conformant Companion must REJECT an unknown member, so the poc's `kind` would
+  have poisoned every reply carrying one, not merely gone unused.
+- The mode inference (`jetpacs-complete--mode-for`) calls `major-mode-remap`
+  directly (30.1 floor — it also honors `major-mode-remap-defaults`, which the
+  poc's hand-rolled alist lookup missed).  Matching the document id against
+  `auto-mode-alist` is our own naming convention, not SPEC 4.4 interpretation:
+  this side minted the id, and the shadow never visits anything.
+- `jetpacs-connect` installs the harvester as the client-wide default when the
+  caller supplied no `:edit-complete-function` (fboundp-soft, caller wins);
+  the JC-4b picker's borrow/restore composes above it unchanged.
+- A harvest error degrades to the EMPTY reply (a broken capf costs a missing
+  dropdown, never a `-32603`); the failure log carries the error SYMBOL only
+  (SPEC 23.3 — the datum here is buffer content).
+*Exit gate:* `test/jetpacs-complete-test.el` (9 tests): capf harvest incl.
+prefix=[BEG,cursor) with capf END past the cursor, blowout guard (synthetic
+obarray capf AND the real obarray at cursor 0), empty-prefix small-table kept,
+word fallback (multibyte row), annotation/insert/no-kind, cap + sole-candidate
+drop, shadow mode/reuse/setup-hook, and the seam through ebp's REAL
+`ebp-client--handle-edit-complete` (wire shape; disabled → empty reply; stale
+seq → 1201 with the harvester provably not consulted) + the connect default
+wiring.  ERT fixture lesson: **`(sym` is FUNCTION position** — the elisp capf
+predicate filters `defvar` needles there; complete after `(setq ` instead.
+*Device gate:* `test/smoke-complete.el` (Pixel Tablet, all 8 checks green) — an
+app-surface seeded editor, no dialog module loaded, so the harvester is the only
+possible answer source.  Hardware-only finding, by design not defect: **a fresh
+session opens at cursor 0** (`openEditor` default), so the render-time settle
+request harvests nothing (`prefix=nil n=0`) — the device keystroke is what arms
+the dropdown, because only its delta advances the live caret the engine stamps
+into `edit.complete`.  The tap's proof is mirror equality: the completed text
+can only arrive via the §19 delta.  Suite: **244 elisp / 10 suites**.
+
 ### JC-6 — declarative-view layer (OPTIONAL sub-track)
 `jetpacs-lint.el` re-pointed at format-6 — but keep only what the builders don't
 already subsume: the arbitrary-tree walk (`jetpacs-lint-spec`) for trees assembled

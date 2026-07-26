@@ -142,6 +142,32 @@ re-`jetpacs-defaction' takes effect without re-registering.")
   "Non-nil when the attached client is past the SPEC 10.3 barrier."
   (and jetpacs--client (eq (ebp-client-state jetpacs--client) 'ready)))
 
+(defun jetpacs-granted-p (capability &optional client)
+  "Non-nil when the session granted CAPABILITY (a SPEC 22.1 name string).
+CLIENT defaults to the attached client; with none the answer is nil —
+fail closed.  The granted set is the welcome's raw decoded VECTOR
+\(ebp.el keeps it unconverted), so `member' always misses; this is the
+one place that membership test is spelled (B1: shell, dialog and
+sections each hand-rolled it before).  A grant does not imply READY —
+callers gate sends on `jetpacs-connected-p' separately, and in that
+order: `granted' survives on a closed client struct and would lie."
+  (when-let* ((client (or client (jetpacs-client))))
+    (and (seq-contains-p (ebp-client-granted client) capability) t)))
+
+(defun jetpacs-scalar-text (s)
+  "S with every non-scalar char replaced by U+FFFD (SPEC 4.1).
+Emacs stores an undecodable octet as a raw-byte char in
+#x3FFF80..#x3FFFFF, and a lone surrogate as #xD800..#xDFFF; neither is a
+Unicode scalar value, and `json-serialize' signals `wrong-type-argument'
+on both.  Any user text that is not valid UTF-8 — a latin-1 kill, a
+binary buffer slice, a mid-stream broken sequence — would otherwise
+take down the whole push.  Promoted from the buffer renderer (JA-1) so
+non-renderer emitters (clip, toast) need no jetpacs-buffer edge."
+  (if (string-match-p "[\x3FFF80-\x3FFFFF\xD800-\xDFFF]" s)
+      (replace-regexp-in-string "[\x3FFF80-\x3FFFFF\xD800-\xDFFF]" "�"
+                                s t t)
+    s))
+
 (defun jetpacs-attach (client)
   "Adopt CLIENT as the single live client; returns CLIENT.
 Replays every `jetpacs-defaction' registration into CLIENT's SPEC 14
@@ -202,6 +228,11 @@ borrows the slot per prompt either way (it restores whatever it found)."
                        config)))
     (when (fboundp 'jetpacs-shell--on-ready)
       (push #'jetpacs-shell--on-ready (ebp-client-ready-functions client)))
+    ;; ready-functions run in list order = reverse push order, so theme
+    ;; pushed after shell runs BEFORE the shell drain: chrome is painted
+    ;; before content arrives.
+    (when (fboundp 'jetpacs-theme--on-ready)
+      (push #'jetpacs-theme--on-ready (ebp-client-ready-functions client)))
     (jetpacs-attach client)))
 
 ;;;; Actions (the SPEC 14 shim over `ebp-client-register-action')

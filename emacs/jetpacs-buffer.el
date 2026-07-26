@@ -406,18 +406,11 @@ next line, since modes differ on which carries `invisible'."
 
 ;; --- Region -> spans --------------------------------------------------------
 
-(defun jetpacs-buffer-scalar-text (s)
+(defalias 'jetpacs-buffer-scalar-text #'jetpacs-scalar-text
   "S with every non-scalar char replaced by U+FFFD (SPEC 4.1).
-Emacs stores an undecodable octet as a raw-byte char in
-#x3FFF80..#x3FFFFF, and a lone surrogate as #xD800..#xDFFF; neither is a
-Unicode scalar value, and `json-serialize' signals `wrong-type-argument'
-on both.  Any buffer that is not valid UTF-8 — a latin-1 source, a
-binary, a truncated log, a mid-stream broken sequence in
-*compilation* — would otherwise take down the whole render."
-  (if (string-match-p "[\x3FFF80-\x3FFFFF\xD800-\xDFFF]" s)
-      (replace-regexp-in-string "[\x3FFF80-\x3FFFFF\xD800-\xDFFF]" "�"
-                                s t t)
-    s))
+The body moved to `jetpacs-scalar-text' on the floor (JA-1) so
+non-renderer emitters can sanitize without a jetpacs-buffer edge; this
+alias keeps the renderer-local name every call site and test uses.")
 
 (defun jetpacs-buffer--expand-tabs (text col)
   "Expand TABs in TEXT to spaces given the starting column COL.

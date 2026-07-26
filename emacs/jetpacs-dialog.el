@@ -470,7 +470,7 @@ Needs the `editor.sync' capability granted AND `editor' advertised for
 the dialog target — a Companion that advertises neither still gets the
 JC-4a text stopgap rather than a spec violation."
   (when-let* ((client (jetpacs-client)))
-    (and (member "editor.sync" (append (ebp-client-granted client) nil))
+    (and (jetpacs-granted-p "editor.sync" client)
          (jetpacs-node-advertised-p "editor" :dialog))))
 
 (defun jetpacs-dialog--ask-picker (prompt collection predicate require-match

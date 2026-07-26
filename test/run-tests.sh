@@ -39,7 +39,7 @@ rm -f emacs/jetpacs-widgets.elc
 for f in jetpacs-async jetpacs-surfaces jetpacs-shell jetpacs-buffer \
          jetpacs-results jetpacs-tablist \
          jetpacs-sections jetpacs-comint jetpacs-hypertext \
-         jetpacs-dialog jetpacs-complete; do
+         jetpacs-dialog jetpacs-complete jetpacs-theme; do
   emacs -Q --batch -L emacs \
     --eval '(setq byte-compile-error-on-warn t)' \
     -f batch-byte-compile "emacs/$f.el"
@@ -80,6 +80,10 @@ emacs -Q --batch -L emacs -l test/jetpacs-dialog-test.el \
 
 # JC-5 completion harvester exit gate (the :edit-complete-function seam).
 emacs -Q --batch -L emacs -l test/jetpacs-complete-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JA-1 theme + modus exit gate (docs/PLAN-jetpacs-apps.md).
+emacs -Q --batch -L emacs -l test/jetpacs-theme-test.el \
   -f ert-run-tests-batch-and-exit
 
 # Phase A cross-file seams + the comint P1s.  Several of these regress by

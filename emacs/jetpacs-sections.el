@@ -688,10 +688,7 @@ in a callback."
        ((not (jetpacs-buffer-exposed-p name pos "sections.menu")) 'rejected)
        ;; The dialog needs the capability; without it there is no
        ;; non-blocking way to ask, so say so rather than hang.
-       ((not (and (jetpacs-client)
-                  (seq-contains-p (ebp-client-granted (jetpacs-client))
-                                  "surfaces.dialog")))
-        'rejected)
+       ((not (jetpacs-granted-p "surfaces.dialog")) 'rejected)
        (t
         ;; The dialog itself is a request; issuing it from a continuation
         ;; keeps this handler's reply prompt (D2).

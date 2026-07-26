@@ -383,8 +383,7 @@ Signals; never sanitizes (a sender MUST is loud)."
                 (:widget "surfaces.widget")
                 (:tile "surfaces.tile")
                 (_ nil))))
-    (when (and need
-               (not (seq-contains-p (ebp-client-granted client) need)))
+    (when (and need (not (jetpacs-granted-p need client)))
       (error "jetpacs: %s push requires the ungranted %S capability"
              surface need))))
 
@@ -395,10 +394,8 @@ Amendment #85: a `wake' descriptor without this session's
 refuse before pushing.  SPEC 19/17.4: a synchronized `editor' (one
 carrying `document') requires the `editor.sync' grant.  Amendment #84:
 its document text must not exceed `max_editor_bytes'."
-  (let* ((wake-granted (seq-contains-p (ebp-client-granted client)
-                                       "offline.wake"))
-         (editor-granted (seq-contains-p (ebp-client-granted client)
-                                         "editor.sync"))
+  (let* ((wake-granted (jetpacs-granted-p "offline.wake" client))
+         (editor-granted (jetpacs-granted-p "editor.sync" client))
          (max-bytes (plist-get (ebp-client-limits client)
                                :max_editor_bytes))
          (check

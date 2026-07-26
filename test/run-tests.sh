@@ -39,7 +39,8 @@ rm -f emacs/jetpacs-widgets.elc
 for f in jetpacs-async jetpacs-surfaces jetpacs-shell jetpacs-buffer \
          jetpacs-results jetpacs-tablist \
          jetpacs-sections jetpacs-comint jetpacs-hypertext \
-         jetpacs-dialog jetpacs-complete jetpacs-theme; do
+         jetpacs-dialog jetpacs-complete jetpacs-theme jetpacs-device \
+         jetpacs-clip; do
   emacs -Q --batch -L emacs \
     --eval '(setq byte-compile-error-on-warn t)' \
     -f batch-byte-compile "emacs/$f.el"
@@ -84,6 +85,14 @@ emacs -Q --batch -L emacs -l test/jetpacs-complete-test.el \
 
 # JA-1 theme + modus exit gate (docs/PLAN-jetpacs-apps.md).
 emacs -Q --batch -L emacs -l test/jetpacs-theme-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JA-1 reminders wrapper exit gate.
+emacs -Q --batch -L emacs -l test/jetpacs-device-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JA-1 clip view exit gate (golden: test/goldens/clip-view.golden).
+emacs -Q --batch -L emacs -l test/jetpacs-clip-test.el \
   -f ert-run-tests-batch-and-exit
 
 # Phase A cross-file seams + the comint P1s.  Several of these regress by

@@ -606,6 +606,20 @@ profile), so offline renders and tests assume the richer form."
       (and (member feature (append (plist-get profile :features) nil)) t)
     t))
 
+(defun jetpacs-builtin-advertised-p (builtin &optional target)
+  "Non-nil when the live welcome advertises BUILTIN for TARGET (SPEC 14.2).
+TARGET defaults to `:app'.  The builtin third of the advertised-p
+triple (B13): GATE 1b (`jetpacs-shell--check-builtins') SIGNALS on an
+unadvertised builtin and takes down the WHOLE push, so a builder that
+wants an optional builtin — `clipboard.copy', `share.send',
+`trigger.fire' — must ask here and degrade per-node instead of emitting
+and hoping.  With no client attached (offline renders, tests) assume
+the richer form, like the siblings."
+  (if-let* ((client (jetpacs-client))
+            (profile (plist-get (ebp-client-profiles client) (or target :app))))
+      (and (member builtin (append (plist-get profile :builtins) nil)) t)
+    t))
+
 (defun jetpacs--default-surface ()
   "The current owner's surface (decision D1), or the shell default."
   (if jetpacs-current-owner
@@ -685,6 +699,8 @@ array string, or a single string; anything else is discarded."
   (clrhash jetpacs--applied-revisions)
   (when (fboundp 'jetpacs-async-reset)
     (jetpacs-async-reset))
+  (when (fboundp 'jetpacs-device-reset)
+    (jetpacs-device-reset))
   (when (boundp 'jetpacs-shell--snackbar)
     (setq jetpacs-shell--snackbar nil)))
 

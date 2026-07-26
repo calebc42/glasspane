@@ -503,6 +503,53 @@ completion hook it borrowed."
           (should-not jetpacs-dialog--picker))
       (jetpacs-detach) (jetpacs-test-reset-state))))
 
+(ert-deftest jetpacs-dialog-picker-survives-the-closing-edit-close ()
+  "SPEC 18.1 closes a dialog's editor sessions BEFORE the submit
+response, and ebp fires `edit-change-functions' on that close with the
+session already removed — so the hook arrives with text nil.  The
+shadow must keep the last real text: without the guard the close wiped
+it at exactly the moment the picker read it and the prompt died on
+`stringp nil' with the user's answer already typed.
+
+Device-caught.  No stub had ever fired a close, which is precisely why
+five green unit tests missed it — this one drives ebp's REAL
+`ebp-client--handle-edit-close'."
+  (let ((client (jetpacs-dialog-test--picker-client))
+        (jetpacs-dialog-test--specs nil))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (cl-letf (((symbol-function 'ebp-client-dialog-show)
+                     (cl-function
+                      (lambda (c _id spec &key callback &allow-other-keys)
+                        (push spec jetpacs-dialog-test--specs)
+                        (let ((doc (plist-get
+                                    (jetpacs-dialog-test--find spec "editor")
+                                    :document)))
+                          ;; The user types...
+                          (puthash (cons doc "pick")
+                                   (list :session "S" :seq 1 :text "cand-4"
+                                         :cursor 6)
+                                   (ebp-client-editors c))
+                          (dolist (fn (ebp-client-edit-change-functions c))
+                            (funcall fn c doc "pick" "cand-4"))
+                          ;; ...then SPEC 18.1 closes the session before the
+                          ;; response, through ebp's real close handler.
+                          (ebp-client--handle-edit-close
+                           c (list :document doc :editor_id "pick"
+                                   :session "S")))
+                        (funcall callback "submitted" '(:value nil) nil)
+                        7))))
+            (let ((jetpacs--device-flow '(:surface "app:demo")))
+              ;; The answer survives the close and resolves top-match.
+              (should (equal (completing-read
+                              "Pick: "
+                              (cl-loop for i from 0 below 80
+                                       collect (format "cand-%02d" i))
+                              nil t)
+                             "cand-40")))))
+      (jetpacs-detach) (jetpacs-test-reset-state))))
+
 (ert-deftest jetpacs-dialog-picker-resolves-top-match ()
   "A typed prefix resolves RET-picks-top against the collection."
   (let ((client (jetpacs-dialog-test--picker-client))

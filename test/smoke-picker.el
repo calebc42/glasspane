@@ -40,8 +40,16 @@
     ("astral"
      ;; Astral candidates sharing a plain prefix, so typing ASCII narrows
      ;; to values whose completion arithmetic must be scalar-safe.
-     (list "clef-\U0001D11E-alpha" "clef-\U0001D11E-beta"
-           "clef-\U0001D11E-gamma" "other-one" "other-two"))
+     ;;
+     ;; PADDED past `jetpacs-dialog-enum-threshold' on purpose. A first
+     ;; version listed five candidates and silently took the enum fast
+     ;; path instead — the astral value still round-tripped, so the
+     ;; phase "passed" without ever exercising the picker. The
+     ;; edit.complete counter is what exposed it; keep this list large.
+     (append (list "clef-\U0001D11E-alpha" "clef-\U0001D11E-beta"
+                   "clef-\U0001D11E-gamma")
+             (cl-loop for i from 0 below 60
+                      collect (format "filler-%02d" i))))
     (_ (cl-loop for i from 0 below 80 collect (format "cand-%02d" i))))
   "Deliberately over `jetpacs-dialog-enum-threshold' so the PICKER runs,
 not the enum fast path.")
@@ -75,7 +83,12 @@ not the enum fast path.")
         (condition-case err
             (completing-read "Pick: " smoke-pk--collection nil t)
           (quit 'quit)
-          (error (list 'error (jetpacs--error-label err)))))
+          ;; The full error and a backtrace: a smoke is a diagnostic, and
+          ;; `jetpacs--error-label' deliberately drops the datum (SPEC 23.3)
+          ;; which is exactly what a failure here needs.
+          (error (message "PICKER-ERROR %S\n%s" err
+                          (with-output-to-string (backtrace)))
+                 (list 'error (jetpacs--error-label err)))))
   (message "ANSWERED"))
 
 (with-jetpacs-owner "pk"

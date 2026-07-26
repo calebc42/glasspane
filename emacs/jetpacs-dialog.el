@@ -499,7 +499,17 @@ instead, and the last shadow is what the user submitted."
          (config (ebp-client-config client))
          (prior-complete (plist-get config :edit-complete-function))
          (watch (lambda (_c doc eid text)
-                  (when (and (equal doc document) (equal eid editor-id))
+                  ;; A `stringp' check, not just an identity check, and it
+                  ;; is load-bearing: `edit.close' fires this SAME hook
+                  ;; after removing the session (ebp.el:1259-1264), so it
+                  ;; arrives with text nil — and SPEC 18.1 closes a
+                  ;; dialog's editor sessions BEFORE the submit response is
+                  ;; sent. Without the guard the close wipes the shadow at
+                  ;; exactly the moment the picker reads it, and the prompt
+                  ;; dies on `stringp nil' with the answer already typed.
+                  ;; Device-caught: no stub fires a close.
+                  (when (and (equal doc document) (equal eid editor-id)
+                             (stringp text))
                     (setq shadow text)))))
     (setf (ebp-client-config client)
           (plist-put (copy-sequence config) :edit-complete-function

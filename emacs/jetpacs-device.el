@@ -89,6 +89,10 @@ the rule — never the :title/:body values (SPEC 23.3)."
           (error "jetpacs: :on_tap args must not author :owner/:reminder_id — the Companion injects them (SPEC 18.6)")))
       (when (plist-member tap :capture_fields)
         (error "jetpacs: :capture_fields is surface/dialog-scoped; invalid in a reminder :on_tap (SPEC 14.5)"))
+      ;; SPEC 18.6 routes a tap through Section 14's normal pipeline using
+      ;; the AUTHORED offline policy, so 14.1's wake gate governs here —
+      ;; and this path never touches the shell's document gate.
+      (jetpacs--gate-descriptor-policy tap)
       (let ((action (plist-get tap :action)))
         (when (and (stringp action)
                    (not (gethash action jetpacs-action-handlers)))

@@ -736,9 +736,20 @@ guaranteed; everything else is OPTIONAL and a sender MUST NOT emit an
 unadvertised type, so a renderer that wants an optional node must ask
 first and degrade when the answer is no.  With no client attached
 \(offline renders, tests) assume the richer form."
-  (if-let* ((client (jetpacs-client))
-            (profile (plist-get (ebp-client-profiles client) (or target :app))))
-      (and (member type (append (plist-get profile :node_types) nil)) t)
+  (if-let* ((client (jetpacs-client)))
+      (if-let* ((profile (plist-get (ebp-client-profiles client)
+                                    (or target :app))))
+          (and (member type (append (plist-get profile :node_types) nil)) t)
+        ;; No profile for this target on a LIVE client.  For a
+        ;; CAPABILITY-GATED target that absence is the answer: SPEC 10.2
+        ;; carries a dialog/notification/widget/tile profile precisely
+        ;; when its capability was granted, so failing open would be
+        ;; guaranteed wrong in exactly the case the gate exists for.
+        ;; `app' is NOT negotiated (10.2: core session and app:* surfaces
+        ;; are not capabilities), so its absence means a malformed
+        ;; welcome, not a refusal — keep the richer-form tolerance there.
+        (null (jetpacs--capability-gated-target-p target)))
+    ;; No client at all — offline render or test: assume the richer form.
     t))
 
 (defun jetpacs-feature-advertised-p (feature &optional target)
@@ -752,10 +763,45 @@ and degrade to a caption instead of emitting and hoping.
 
 With no client attached the gate does not run either (it needs a live
 profile), so offline renders and tests assume the richer form."
-  (if-let* ((client (jetpacs-client))
-            (profile (plist-get (ebp-client-profiles client) (or target :app))))
-      (and (member feature (append (plist-get profile :features) nil)) t)
+  (if-let* ((client (jetpacs-client)))
+      (if-let* ((profile (plist-get (ebp-client-profiles client)
+                                    (or target :app))))
+          (and (member feature (append (plist-get profile :features) nil)) t)
+        ;; No profile for this target on a LIVE client.  For a
+        ;; CAPABILITY-GATED target that absence is the answer: SPEC 10.2
+        ;; carries a dialog/notification/widget/tile profile precisely
+        ;; when its capability was granted, so failing open would be
+        ;; guaranteed wrong in exactly the case the gate exists for.
+        ;; `app' is NOT negotiated (10.2: core session and app:* surfaces
+        ;; are not capabilities), so its absence means a malformed
+        ;; welcome, not a refusal — keep the richer-form tolerance there.
+        (null (jetpacs--capability-gated-target-p target)))
+    ;; No client at all — offline render or test: assume the richer form.
     t))
+
+(defun jetpacs--capability-gated-target-p (target)
+  "Non-nil when TARGET's profile appears only under a granted capability.
+SPEC 10.2/22.1: `dialog', `notification', `widget' and `tile' each ride
+a capability, so an absent profile for one of them is a NO.  `app' (and
+a nil TARGET, which means app) is core and always present in a
+conforming welcome."
+  (memq target '(:dialog :notification :widget :tile)))
+
+(defun jetpacs--gate-descriptor-policy (descriptor &optional client)
+  "Signal when DESCRIPTOR authors an offline policy this session lacks.
+SPEC 14.1 (amendment #85): a sender MUST NOT author `wake' without the
+`offline.wake' grant.  EVERY descriptor emitter must call this, not
+just the one that pushes documents: reminders, dialogs, triggers and
+notifications each reach the wire by their own path, and 14.1 binds the
+SENDER — the reference Companion checks only the policy vocabulary and
+`ttl_s', so an ungranted wake target is accepted, armed and signalled,
+which is precisely the outcome 14.1 forbids.  Nothing downstream saves
+us; this is the only gate."
+  (when (and descriptor
+             (equal (plist-get descriptor :when_offline) "wake")
+             (not (jetpacs-granted-p "offline.wake" client)))
+    (error "jetpacs: `wake' descriptor without the offline.wake grant \
+(SPEC 14.1, amendment #85)")))
 
 (defun jetpacs-builtin-advertised-p (builtin &optional target)
   "Non-nil when the live welcome advertises BUILTIN for TARGET (SPEC 14.2).
@@ -766,9 +812,20 @@ wants an optional builtin — `clipboard.copy', `share.send',
 `trigger.fire' — must ask here and degrade per-node instead of emitting
 and hoping.  With no client attached (offline renders, tests) assume
 the richer form, like the siblings."
-  (if-let* ((client (jetpacs-client))
-            (profile (plist-get (ebp-client-profiles client) (or target :app))))
-      (and (member builtin (append (plist-get profile :builtins) nil)) t)
+  (if-let* ((client (jetpacs-client)))
+      (if-let* ((profile (plist-get (ebp-client-profiles client)
+                                    (or target :app))))
+          (and (member builtin (append (plist-get profile :builtins) nil)) t)
+        ;; No profile for this target on a LIVE client.  For a
+        ;; CAPABILITY-GATED target that absence is the answer: SPEC 10.2
+        ;; carries a dialog/notification/widget/tile profile precisely
+        ;; when its capability was granted, so failing open would be
+        ;; guaranteed wrong in exactly the case the gate exists for.
+        ;; `app' is NOT negotiated (10.2: core session and app:* surfaces
+        ;; are not capabilities), so its absence means a malformed
+        ;; welcome, not a refusal — keep the richer-form tolerance there.
+        (null (jetpacs--capability-gated-target-p target)))
+    ;; No client at all — offline render or test: assume the richer form.
     t))
 
 (defun jetpacs--default-surface ()

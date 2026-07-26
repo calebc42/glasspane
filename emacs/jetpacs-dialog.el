@@ -92,7 +92,15 @@ D2 violation and MUST fail as one, not sneak out through a dialog."
        (not jetpacs--in-action-handler)
        (not inhibit-interaction)
        (not jetpacs-dialog--pending)
-       (jetpacs-connected-p)))
+       (jetpacs-connected-p)
+       ;; SPEC 10.2: dialog.show is capability-gated on surfaces.dialog.
+       ;; The node-advertisement gate cannot stand in for this — the
+       ;; welcome carries a `dialog' profile ONLY when the capability was
+       ;; granted, so advertisement is unanswerable in exactly the case
+       ;; that matters.  Ungated, an ungranted session sends dialog.show,
+       ;; earns -32601, and the caller's command aborts instead of
+       ;; prompting in a perfectly usable minibuffer.
+       (jetpacs-granted-p "surfaces.dialog")))
 
 (defun jetpacs-dialog--gate-spec (node)
   "Signal unless every node type in NODE is advertised for dialogs.
@@ -103,6 +111,10 @@ SPEC 18.1: every node in a dialog spec MUST be advertised by the
     (unless (jetpacs-node-advertised-p type :dialog)
       (error "jetpacs-dialog: node type %S is not advertised for dialogs \
 (SPEC 18.1/10.2)" type))
+    ;; SPEC 14.1: a dialog button's descriptor reaches the wire by this
+    ;; path, not the shell's, so the policy gate must run here too.
+    (dolist (key '(:on_tap :on_long_tap :on_change :on_submit :on_enter))
+      (jetpacs--gate-descriptor-policy (plist-get node key)))
     (mapc #'jetpacs-dialog--gate-spec (plist-get node :children))
     node))
 

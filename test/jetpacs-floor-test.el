@@ -824,5 +824,38 @@ attaches the client it dials."
       (should (= (hash-table-count jetpacs-async--cache) 0))
       (should-not jetpacs-async--push-timer))))
 
+
+;;;; Audit commit 2: the 14.1 policy gate and the fail-closed advertisement
+
+(ert-deftest jetpacs-floor-wake-gate-covers-every-emitter ()
+  "P1-4: the offline.wake gate lives on the FLOOR, so every descriptor
+emitter inherits it — not just the one that pushes documents."
+  (jetpacs-floor-test--with-client (client)
+    (let ((wake (jetpacs-action "a.b" :when-offline 'wake :ttl-s 60))
+          (queue (jetpacs-action "a.b" :when-offline 'queue :ttl-s 60)))
+      ;; Ungranted: wake refused, queue fine.
+      (should-error (jetpacs--gate-descriptor-policy wake))
+      (should-not (jetpacs--gate-descriptor-policy queue))
+      (should-not (jetpacs--gate-descriptor-policy nil))
+      ;; Granted: allowed.
+      (setf (ebp-client-granted client) ["theme" "offline.wake"])
+      (should-not (jetpacs--gate-descriptor-policy wake)))))
+
+(ert-deftest jetpacs-floor-advertised-p-fails-closed-on-a-live-client ()
+  "P1-5 chain: with NO client the predicates assume the richer form, but
+a LIVE client missing a target's profile is a NO — SPEC 10.2 includes
+that profile only when the capability was granted, so failing open would
+be guaranteed wrong in exactly the gating case."
+  ;; No client: open.
+  (should (jetpacs-node-advertised-p "editor" :dialog))
+  (should (jetpacs-builtin-advertised-p "clipboard.copy"))
+  (should (jetpacs-feature-advertised-p "image.https"))
+  (jetpacs-floor-test--with-client (client)
+    ;; Live client, app profile present, NO dialog profile.
+    (should (jetpacs-node-advertised-p "text" :app))
+    (should-not (jetpacs-node-advertised-p "text" :dialog))
+    (should-not (jetpacs-builtin-advertised-p "view.switch" :dialog))
+    (should-not (jetpacs-feature-advertised-p "image.https" :dialog))))
+
 (provide 'jetpacs-floor-test)
 ;;; jetpacs-floor-test.el ends here

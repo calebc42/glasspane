@@ -470,16 +470,14 @@ Amendment #85: a `wake' descriptor without this session's
 refuse before pushing.  SPEC 19/17.4: a synchronized `editor' (one
 carrying `document') requires the `editor.sync' grant.  Amendment #84:
 its document text must not exceed `max_editor_bytes'."
-  (let* ((wake-granted (jetpacs-granted-p "offline.wake" client))
-         (editor-granted (jetpacs-granted-p "editor.sync" client))
+  (let* ((editor-granted (jetpacs-granted-p "editor.sync" client))
          (max-bytes (plist-get (ebp-client-limits client)
                                :max_editor_bytes))
          (check
           (lambda (p)
-            (when (and (not wake-granted)
-                       (equal (plist-get p :when_offline) "wake"))
-              (error "jetpacs: `wake' descriptor without the offline.wake \
-grant (SPEC 14.1, amendment #85)"))
+            ;; One authority for the 14.1 policy gate: the floor helper
+            ;; every other descriptor emitter calls too.
+            (jetpacs--gate-descriptor-policy p client)
             (when (and (equal (plist-get p :t) "editor")
                        (plist-get p :document))
               ;; The grant check must NOT hang off max-bytes: that limit is

@@ -799,5 +799,43 @@ ESTABLISHED flow lands on the dialog seam with the flow's surface."
       (jetpacs-detach)
       (jetpacs-test-reset-state))))
 
+
+(ert-deftest jetpacs-dialog-bridge-requires-the-dialog-grant ()
+  "P1-5: dialog.show is capability-gated (SPEC 10.2 / method registry).
+Without surfaces.dialog the bridge must decline so the prompt falls
+through to a usable minibuffer, instead of sending, earning -32601, and
+aborting the caller's command."
+  (let ((client (jetpacs-dialog-test--client)))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (let ((jetpacs--device-flow '(:surface "app:demo")))
+            (should (jetpacs-dialog--bridge-p))
+            (setf (ebp-client-granted client) ["theme"])
+            (should-not (jetpacs-dialog--bridge-p))))
+      (jetpacs-detach)
+      (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-dialog-gate-spec-refuses-an-ungranted-wake ()
+  "P1-4: a dialog button's descriptor reaches the wire by the dialog
+path, so the 14.1 policy gate runs there too."
+  (let ((client (jetpacs-dialog-test--client)))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (let ((spec (jetpacs-column
+                       (jetpacs-button "Go" (jetpacs-action
+                                             "a.b" :when-offline 'wake
+                                             :ttl-s 60)))))
+            (should-error (jetpacs-dialog--gate-spec spec)))
+          (setf (ebp-client-granted client) ["surfaces.dialog" "offline.wake"])
+          (should (jetpacs-dialog--gate-spec
+                   (jetpacs-column
+                    (jetpacs-button "Go" (jetpacs-action
+                                          "a.b" :when-offline 'wake
+                                          :ttl-s 60))))))
+      (jetpacs-detach)
+      (jetpacs-test-reset-state))))
+
 (provide 'jetpacs-dialog-test)
 ;;; jetpacs-dialog-test.el ends here

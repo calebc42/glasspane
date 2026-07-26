@@ -237,5 +237,22 @@
   ;; have swept the device tables through the fboundp hook.
   (should-not (jetpacs-reminders "a")))
 
+
+(ert-deftest jetpacs-device-reminder-wake-needs-the-grant ()
+  "P1-4: SPEC 18.6 routes a tap through Section 14's pipeline with the
+AUTHORED policy, so 14.1's wake gate governs a reminder on_tap — a path
+the shell's document gate never sees."
+  (jetpacs-device-test--with (jetpacs-device-test--client)
+    (with-jetpacs-owner "agenda"
+      (jetpacs-defaction "agenda.open" (lambda (_a _p) 'accepted)))
+    (let ((r (list :id "m1" :title "Standup" :at_ms 1784700000000
+                   :on_tap (jetpacs-action "agenda.open"
+                                           :when-offline 'wake :ttl-s 3600))))
+      (should-error (jetpacs-reminders-set (list r) :owner "agenda"))
+      (should (= (length jetpacs-device-test--calls) 0))
+      (setf (ebp-client-granted client) ["reminders.owner" "offline.wake"])
+      (jetpacs-reminders-set (list r) :owner "agenda")
+      (should (= (length jetpacs-device-test--calls) 1)))))
+
 (provide 'jetpacs-device-test)
 ;;; jetpacs-device-test.el ends here

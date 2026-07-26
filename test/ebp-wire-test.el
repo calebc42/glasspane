@@ -1293,5 +1293,221 @@ drained (remaining 0)."
     (ebp-client--replay-settled client)
     (should (equal fired '((:remaining 0 :delivered 2))))))
 
+;;;; W10 — overload (SPEC 22.3, §24.6 item 14; docs/W10-overload-plan.md)
+
+(ert-deftest ebp-test-sender-ceiling-refuses-and-recovers ()
+  "SPEC 22.3 sender ceiling: hold at `ebp-overload-hold', sticky until
+`ebp-overload-resume', refusal concluded locally/synchronously/once with
+1401 and NOTHING on the wire, `queue.replay' exempt, decrement
+exactly-once.  The library calls are stubbed so the ceiling logic is
+what is under test; the loopback tests cover the live path."
+  (let ((client (ebp-client-create :receipt-file (make-temp-file "ebp-ovl")))
+        (sent '()) (refusals '()))
+    (cl-letf (((symbol-function 'jsonrpc-async-request)
+               (cl-function
+                (lambda (_conn method _params &key success-fn
+                               &allow-other-keys)
+                  (push (cons method success-fn) sent))))
+              ((symbol-function 'jsonrpc--next-request-id) (lambda (_c) 41)))
+      ;; Fill to the hold mark; every one goes to the library.
+      (dotimes (_ ebp-overload-hold)
+        (should (ebp-client--request client 'surface.update '(:x 1) #'ignore)))
+      (should (= (ebp-client-outstanding client) ebp-overload-hold))
+      (should (= (length sent) ebp-overload-hold))
+      ;; The next is refused: nil id, synchronous 1401, wire untouched.
+      (should-not (ebp-client--request
+                   client 'dialog.show '(:y 2)
+                   (lambda (r e) (push (cons r e) refusals))))
+      (should (equal refusals
+                     '((nil . (:code 1401
+                               :message "Outstanding requests exhausted"
+                               :data (:kind "overloaded"))))))
+      (should (= (length sent) ebp-overload-hold))
+      ;; Sticky: one answer arriving does not lift the hold ...
+      (funcall (cdr (car sent)) '(:ok t))
+      (should (= (ebp-client-outstanding client) (1- ebp-overload-hold)))
+      (should-not (ebp-client--request client 'dialog.show '(:y 3)
+                                       (lambda (r e)
+                                         (push (cons r e) refusals))))
+      (should (= (length refusals) 2))
+      ;; ... but queue.replay is exempt even while held (§22.3's
+      ;; single-flight clause: refusing it forges blocked_by).
+      (should (ebp-client--request client 'queue.replay '(:z 1) #'ignore))
+      (should (= (length sent) (1+ ebp-overload-hold)))
+      ;; Exactly-once: a duplicate conclusion cannot double-decrement.
+      (funcall (cdr (car sent)) '(:ok t))
+      (funcall (cdr (car sent)) '(:ok t))
+      (should (= (ebp-client-outstanding client) (1- ebp-overload-hold)))
+      ;; Drain to the resume mark: the hold lifts and requests flow.
+      (while (> (ebp-client-outstanding client) ebp-overload-resume)
+        (funcall (cdr (pop sent)) '(:ok t)))
+      (should (ebp-client--request client 'dialog.show '(:y 4) #'ignore))
+      (should-not (ebp-client-outstanding-held client)))))
+
+(ert-deftest ebp-test-sender-ceiling-close-fails-locally ()
+  "SPEC 22.3: on close, outstanding requests fail LOCALLY — jsonrpc's
+sentinel errors every continuation, our callbacks conclude, the counter
+returns to zero.  Live loopback; the companion swallows surface.update."
+  (let ((concluded '()))
+    (ebp-test--with-companion
+        (server client
+                (let ((kat (ebp-test--kat-script)))
+                  (lambda (msg send)
+                    ;; Handshake conforms; surface.update never answers.
+                    (unless (equal (alist-get 'method msg) "surface.update")
+                      (funcall kat msg send)))))
+      (should (ebp-test--wait
+               (lambda () (eq (ebp-client-state client) 'ready))))
+      (dotimes (i 3)
+        (ebp-client--request client 'surface.update (list :n i)
+                             (lambda (_r e) (push e concluded))))
+      (should (= (ebp-client-outstanding client) 3))
+      ;; Kill OUR transport; the sentinel must conclude all three.
+      (delete-process (ebp-client-process client))
+      (should (ebp-test--wait (lambda () (= (length concluded) 3))))
+      (should (= (ebp-client-outstanding client) 0))
+      (should (cl-every (lambda (e) (plist-get e :code)) concluded)))))
+
+(ert-deftest ebp-test-inbound-flood-bounded-in-order ()
+  "§24.6 item 14, intent class: a one-blob flood of `state.changed' is
+dispatched completely, exactly once, in wire order — the parsed queue
+drains faster than it grows, which IS the bounded behavior; and the
+reader is running (unpaused) when the storm has passed."
+  (let ((got '()))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :after-ready
+                 (lambda (send)
+                   ;; A 400-notification burst; the loopback socket
+                   ;; coalesces them into few large reads.
+                   (dotimes (i 400)
+                     (funcall send
+                              (list :jsonrpc "2.0"
+                                    :method "state.changed"
+                                    :params (list :surface "app:main"
+                                                  :revision_seen 1
+                                                  :id "field"
+                                                  :value i))))))
+                :state-changed-function
+                (lambda (_c _s _rev _id value) (push value got)))
+      (should (ebp-test--wait (lambda () (= (length got) 400)) 15))
+      (should (equal (nreverse got) (number-sequence 0 399)))
+      (should-not (ebp-client-inbound-paused client))
+      (should-not (ebp-client-overloaded client)))))
+
+(ert-deftest ebp-test-inbound-pause-resume-and-in-send-guard ()
+  "The backpressure lever against a REAL connection: high-water pauses
+the reader (stop-process), the drain side resumes it at the low-water
+mark, and the A8 §1.5 invariant holds — no pause is ever taken inside a
+send, and any send resumes a paused reader first."
+  (ebp-test--with-companion
+      (server client (ebp-test--kat-script))
+    (should (ebp-test--wait (lambda () (eq (ebp-client-state client) 'ready))))
+    (let ((proc (ebp-client-process client)))
+      ;; High-water with a synthetic backlog: the reader stops.
+      (cl-letf (((symbol-function 'ebp-client--backlog)
+                 (lambda (_c) ebp-overload-hold)))
+        (ebp-client--inbound-check client))
+      (should (ebp-client-inbound-paused client))
+      (should (eq (process-status proc) 'stop))
+      ;; Dispatch with the backlog still high: stays paused.
+      (cl-letf (((symbol-function 'ebp-client--backlog)
+                 (lambda (_c) (1+ ebp-overload-resume))))
+        (ebp--with-dispatch client nil))
+      (should (ebp-client-inbound-paused client))
+      ;; Dispatch at the low-water mark: resumes.
+      (cl-letf (((symbol-function 'ebp-client--backlog)
+                 (lambda (_c) ebp-overload-resume)))
+        (ebp--with-dispatch client nil))
+      (should-not (ebp-client-inbound-paused client))
+      (should (eq (process-status proc) 'open))
+      ;; Inside a send, the pause is refused outright.
+      (let ((ebp--in-send t))
+        (cl-letf (((symbol-function 'ebp-client--backlog)
+                   (lambda (_c) (* 2 ebp-overload-hold))))
+          (ebp-client--inbound-check client)))
+      (should-not (ebp-client-inbound-paused client))
+      ;; A send through the connection resumes a paused reader FIRST.
+      (setf (ebp-client-inbound-paused client) t)
+      (stop-process proc)
+      (ebp-client-notify client 'log.error '(:code 1400 :message "x"))
+      (should-not (ebp-client-inbound-paused client))
+      (should (eq (process-status proc) 'open)))))
+
+(ert-deftest ebp-test-inbound-exhaustion-1401-then-close ()
+  "SPEC 22.3 exhaustion: one `log.error' 1401 reaches the peer, the
+connection closes, and the latch makes a second report impossible.
+Driven twice — once via the backlog trigger, once via dispatch depth."
+  ;; Backlog past EXHAUST (only reachable while sends kept pausing
+  ;; forbidden): report + close.
+  (ebp-test--with-companion
+      (server client (ebp-test--kat-script))
+    (should (ebp-test--wait (lambda () (eq (ebp-client-state client) 'ready))))
+    (cl-letf (((symbol-function 'ebp-client--backlog)
+               (lambda (_c) ebp-overload-exhaust)))
+      (ebp-client--inbound-check client))
+    (should (eq (ebp-client-state client) 'closed))
+    (should (equal (car (ebp-client-close-reason client)) 'overloaded))
+    (should (ebp-test--wait
+             (lambda ()
+               (cl-find-if
+                (lambda (m) (and (equal (alist-get 'method m) "log.error")
+                                 (eql (alist-get 'code (alist-get 'params m))
+                                      1401)))
+                (funcall (plist-get server :received))))))
+    ;; The latch: a second trigger neither reports nor errors.
+    (ebp-client--overload-close client 'again)
+    (should (= 1 (cl-count-if
+                  (lambda (m) (equal (alist-get 'method m) "log.error"))
+                  (funcall (plist-get server :received))))))
+  ;; Depth past the #124 bound at dispatch entry: same terminal shape.
+  (ebp-test--with-companion
+      (server client (ebp-test--kat-script))
+    (should (ebp-test--wait (lambda () (eq (ebp-client-state client) 'ready))))
+    (let ((ebp--dispatch-depth ebp-max-dispatch-depth))
+      (should-error
+       (ebp-client--notification-dispatcher client nil 'state.changed nil)))
+    (should (eq (ebp-client-state client) 'closed))
+    (should (equal (ebp-client-close-reason client)
+                   '(overloaded dispatch-depth)))))
+
+(ert-deftest ebp-test-ordered-stream-flood-in-order ()
+  "§24.6 item 14, ordered class: a one-blob editor stream (open + 200
+deltas) mirrors to exactly the in-order concatenation, with no resync —
+no gap was ever observed, so none may be invented under load."
+  (let ((final nil))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :after-ready
+                 (lambda (send)
+                   (funcall send '(:jsonrpc "2.0" :method "edit.open"
+                                   :params (:document "doc:w10" :editor_id "e"
+                                            :session "S" :seq 0 :text ""
+                                            :cursor 0)))
+                   (dotimes (i 200)
+                     (funcall send
+                              (list :jsonrpc "2.0" :method "edit.delta"
+                                    :params
+                                    (list :document "doc:w10" :editor_id "e"
+                                          :session "S" :seq (1+ i)
+                                          :start i :del 0
+                                          :text (format "%c" (+ ?a (% i 26)))
+                                          :len (1+ i))))))))
+      (should (ebp-test--wait
+               (lambda ()
+                 (let ((text (ebp-client-editor-text client "doc:w10" "e")))
+                   (and text (= (length text) 200) (setq final text))))
+               15))
+      (should (equal final
+                     (apply #'concat
+                            (cl-loop for i below 200
+                                     collect (format "%c" (+ ?a (% i 26)))))))
+      ;; No resync was provoked: the stream had no gap.
+      (should-not (cl-find-if
+                   (lambda (m) (equal (alist-get 'method m) "edit.resync"))
+                   (funcall (plist-get server :received)))))))
+
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

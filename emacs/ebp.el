@@ -510,7 +510,8 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
 ;; on the connection and this override re-attaches it.
 
 (defclass ebp--connection (jsonrpc-process-connection)
-  ((ebp-error-data :initform nil :accessor ebp--connection-error-data)))
+  ((ebp-error-data :initform nil :accessor ebp--connection-error-data)
+   (ebp-client :initform nil :accessor ebp--connection-client)))
 
 (cl-defmethod jsonrpc-convert-to-endpoint ((conn ebp--connection)
                                            _message subtype)
@@ -521,6 +522,23 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
         (when-let* ((err (plist-get converted :error)))
           (plist-put err :data data))))
     converted))
+
+;; SPEC 22.3 / amendment #124 (W10): every outbound write — request,
+;; notification, or reply; they all funnel through this generic — resumes
+;; a paused reader FIRST and stakes the in-send claim the pause path
+;; consults.  This is the A8 §1.5 invariant in code: reading may pause
+;; only while nothing of ours is in flight, because our re-entrant
+;; reading inside a blocked send is what unwedges a Companion whose
+;; single reader thread is blocked writing to us.
+(defvar ebp--in-send)                   ; defined with the overload section
+
+(cl-defmethod jsonrpc-connection-send :around ((conn ebp--connection)
+                                               &rest _args
+                                               &key &allow-other-keys)
+  (when-let* ((client (ebp--connection-client conn)))
+    (ebp-client--inbound-resume client))
+  (let ((ebp--in-send t))
+    (cl-call-next-method)))
 
 (defun ebp-client--error (client code message kind &rest extra)
   "Signal a SPEC 8 error whose `data.kind' survives the reply path."
@@ -583,7 +601,16 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; backlog drained (remaining 0) in READY — the application's seam for
   ;; refreshing views that replayed events just mutated.
   after-replay-functions
-  close-reason)
+  close-reason
+  ;; SPEC 22.3 (W10, docs/W10-overload-plan.md): the Emacs endpoint's own
+  ;; bounds.  `process' is ours — `ebp-connect' creates it — so the
+  ;; inbound half can stop/continue reading without touching jsonrpc
+  ;; internals.
+  process
+  (outstanding 0)  ; requests in flight (the sender-side ceiling)
+  outstanding-held ; sticky refusal latch until <= `ebp-overload-resume'
+  inbound-paused   ; reading stopped for transport backpressure
+  overloaded)      ; 1401 sent, close in progress — the rate-limit latch
 
 (defun ebp-client-create (&rest config)
   "Create a client engine in `connected'.  CONFIG is the struct's config
@@ -728,6 +755,116 @@ for user-paced methods; using 60" secs)
          60)
         (t secs)))
 
+;;;; Overload (SPEC 22.3), the Emacs endpoint's own bounds — W10
+
+;; docs/W10-overload-plan.md is the design record; RESEARCH-A8 §1/§7 the
+;; fact base.  Amendment #125: these bounds are not relaxed by renting
+;; jsonrpc.el — its queues are our queues.  The inbound half's shaping
+;; constraint (A8 §1.5): pausing the reader while one of our sends is in
+;; flight can convert overload into deadlock, so a pause is never taken
+;; inside a send and every send path resumes reading first (the :around
+;; method on `jsonrpc-connection-send' above).
+
+(defconst ebp-overload-hold 512
+  "SPEC 22.3 high-water mark: refuse/pause at this much queued work.
+Mirrors the Companion's `PENDING_HOLD' so both ends share one figure.")
+
+(defconst ebp-overload-resume 128
+  "SPEC 22.3 low-water mark: resume below this.  Twin of `PENDING_RESUME'.")
+
+(defconst ebp-overload-exhaust 2048
+  "SPEC 22.3 exhaustion: a parsed backlog this deep is reachable only by
+growth during sends, where pausing is forbidden (A8 §1.5) — capacity is
+declared exhausted: one `log.error' 1401, then close.")
+
+(defconst ebp-max-dispatch-depth 32
+  "Bound on re-entrant dispatch depth (SPEC 22.3 via amendment #124).
+Each level is an inbound message dispatched from inside a blocked send
+that is itself inside such a dispatch (A8 §1.4: nesting unbounded,
+completion LIFO); past this the stack itself is the exhausted resource.")
+
+(defvar ebp--in-send nil
+  "Non-nil while `jsonrpc-connection-send' is on the stack for an ebp
+connection.  The pause path consults it: never stop reading inside a
+send (amendment #124: state a send claimed stays claimed).")
+
+(defvar ebp--in-filter nil
+  "Non-nil while our process-filter wrapper is on the stack.
+The backlog check runs only at the OUTERMOST exit — jsonrpc.el's filter
+can be re-entered (bug#60088's shape), and an inner exit would measure a
+queue the outer invocation is still filling.")
+
+(defvar ebp--dispatch-depth 0
+  "Current re-entrant inbound dispatch depth (SPEC 22.3, amendment #124).")
+
+(defun ebp-client--backlog (client)
+  "Parsed-but-undispatched inbound messages for CLIENT.
+jsonrpc.el's filter drains its `jsonrpc-mqueue' process property into
+0-delay timers at every invocation's end (emacs-30.1 jsonrpc.el:770-812),
+so the parsed-message queue LIVES in `timer-list': ours are exactly the
+timers whose args lead with our connection object."
+  (let ((conn (ebp-client-connection client)) (n 0))
+    (dolist (tm timer-list n)
+      (when (eq (car-safe (timer--args tm)) conn)
+        (setq n (1+ n))))))
+
+(defun ebp-client--inbound-pause (client)
+  "Stop reading — §22.3's transport backpressure — never inside a send."
+  (let ((proc (ebp-client-process client)))
+    (when (and proc (not ebp--in-send)
+               (not (ebp-client-inbound-paused client))
+               (process-live-p proc))
+      (setf (ebp-client-inbound-paused client) t)
+      (stop-process proc))))
+
+(defun ebp-client--inbound-resume (client)
+  "Resume reading.  The send path calls this FIRST (A8 §1.5 invariant)."
+  (let ((proc (ebp-client-process client)))
+    (when (and proc (ebp-client-inbound-paused client))
+      (setf (ebp-client-inbound-paused client) nil)
+      (when (process-live-p proc)
+        (continue-process proc)))))
+
+(defun ebp-client--inbound-check (client)
+  "At the outermost filter exit: pause at HOLD, close past EXHAUST."
+  (unless (ebp-client-overloaded client)
+    (let ((backlog (ebp-client--backlog client)))
+      (cond
+       ((>= backlog ebp-overload-exhaust)
+        (ebp-client--overload-close client 'inbound-backlog))
+       ((>= backlog ebp-overload-hold)
+        (ebp-client--inbound-pause client))))))
+
+(defun ebp-client--overload-close (client why)
+  "SPEC 22.3: capacity exhausted — one `log.error' 1401, then close.
+The once-per-connection latch IS the required rate limit: the close
+that MUST follow the report makes a second report impossible."
+  (unless (ebp-client-overloaded client)
+    (setf (ebp-client-overloaded client) t)
+    (ignore-errors
+      (ebp-client-notify client 'log.error
+                         (list :code 1401
+                               :message "Inbound processing capacity exhausted"
+                               :data (list :kind "overloaded"))))
+    (message "ebp: overloaded (%s); closing" why)
+    (ebp-client-close client (list 'overloaded why))))
+
+(defmacro ebp--with-dispatch (client &rest body)
+  "Run BODY as one depth-bounded inbound dispatch (SPEC 22.3, #124).
+Past `ebp-max-dispatch-depth' the client is overload-closed and BODY
+never runs — the 1401 signal concludes a request cheaply; from a
+notification's bare dispatch it lands in the timer, which swallows it.
+Doubles as a drain point: a paused reader resumes at the low-water mark."
+  (declare (indent 1))
+  `(let ((ebp--dispatch-depth (1+ ebp--dispatch-depth)))
+     (when (> ebp--dispatch-depth ebp-max-dispatch-depth)
+       (ebp-client--overload-close ,client 'dispatch-depth)
+       (jsonrpc-error :code 1401 :message "Overloaded"))
+     (when (and (ebp-client-inbound-paused ,client)
+                (<= (ebp-client--backlog ,client) ebp-overload-resume))
+       (ebp-client--inbound-resume ,client))
+     ,@body))
+
 (defun ebp-client--request (client method params callback &optional timeout)
   "Send a request through jsonrpc.el; ids are the library's integers.
 CALLBACK receives (RESULT ERROR); exactly one is non-nil except for the
@@ -742,26 +879,59 @@ matching \"ignore any later response\" half.
 
 Returns the request's wire ID, usable with `ebp-client-abandon' when the
 CALLER abandons before any deadline (a local `keyboard-quit' out of a
-synchronous wait, for instance)."
-  (let* ((conn (ebp-client-connection client))
-         (secs (cond ((eq timeout 'none) nil)
-                     ((numberp timeout) timeout)
-                     (t ebp-request-timeout)))
-         ;; emacs-30.1 jsonrpc.el:882 takes (cl-incf (jsonrpc--next-request-id
-         ;; conn)) for every non-deferred request, and `jsonrpc-async-request'
-         ;; returns nil — this is the only way to learn the id we must cancel.
-         ;; We never pass :deferred, and the counter only ever increases, so
-         ;; SPEC 7.1's "MUST NOT reuse the id" holds structurally.
-         (id (1+ (jsonrpc--next-request-id conn))))
-    (jsonrpc-async-request
-     conn method params
-     :timeout secs
-     :success-fn (lambda (result) (funcall callback result nil))
-     :error-fn (lambda (error) (funcall callback nil (or error '(:code -32603))))
-     :timeout-fn (lambda ()
-                   (ebp-client--cancel client id)
-                   (funcall callback nil '(:code -32000 :message "timeout"))))
-    id))
+synchronous wait, for instance) — or nil when the SPEC 22.3 sender
+ceiling refused the request: hold at `ebp-overload-hold' outstanding,
+resume at `ebp-overload-resume' (sticky hysteresis, the Companion's
+twin), concluding the refused CALLBACK locally, synchronously, and
+exactly once with `1401 overloaded' — self-inflicted load never closes
+the connection and never touches the wire.  `queue.replay' is exempt:
+the §15.3 replay is single-flight, so it cannot be the resource the
+ceiling protects, while refusing it would stall durable delivery on our
+own load (§22.3's forged-`blocked_by' clause)."
+  (when (and (ebp-client-outstanding-held client)
+             (<= (ebp-client-outstanding client) ebp-overload-resume))
+    (setf (ebp-client-outstanding-held client) nil))
+  (if (and (not (eq method 'queue.replay))
+           (or (ebp-client-outstanding-held client)
+               (>= (ebp-client-outstanding client) ebp-overload-hold)))
+      (progn
+        (setf (ebp-client-outstanding-held client) t)
+        (funcall callback nil '(:code 1401
+                                :message "Outstanding requests exhausted"
+                                :data (:kind "overloaded")))
+        nil)
+    (let* ((conn (ebp-client-connection client))
+           (secs (cond ((eq timeout 'none) nil)
+                       ((numberp timeout) timeout)
+                       (t ebp-request-timeout)))
+           ;; emacs-30.1 jsonrpc.el:882 takes (cl-incf (jsonrpc--next-request-id
+           ;; conn)) for every non-deferred request, and `jsonrpc-async-request'
+           ;; returns nil — this is the only way to learn the id we must cancel.
+           ;; We never pass :deferred, and the counter only ever increases, so
+           ;; SPEC 7.1's "MUST NOT reuse the id" holds structurally.
+           (id (1+ (jsonrpc--next-request-id conn)))
+           (done nil)
+           (finish
+            (lambda (result error)
+              ;; Decrement exactly once, whichever way the request
+              ;; concludes (answer, close-fails-locally, timeout); the
+              ;; callback then runs as one depth-bounded dispatch —
+              ;; continuations nest inside sends exactly like handlers.
+              (unless done
+                (setq done t)
+                (cl-decf (ebp-client-outstanding client)))
+              (ebp--with-dispatch client
+                (funcall callback result error)))))
+      (cl-incf (ebp-client-outstanding client))
+      (jsonrpc-async-request
+       conn method params
+       :timeout secs
+       :success-fn (lambda (result) (funcall finish result nil))
+       :error-fn (lambda (error) (funcall finish nil (or error '(:code -32603))))
+       :timeout-fn (lambda ()
+                     (ebp-client--cancel client id)
+                     (funcall finish nil '(:code -32000 :message "timeout"))))
+      id)))
 
 (defun ebp-client-abandon (client id)
   "Announce local abandonment of outstanding request ID (SPEC 7.1/7.5).
@@ -974,16 +1144,17 @@ Before authentication the Companion is untrusted: every request fails
 closed with 1200, even a known or wrong-direction one (SPEC 10.1).
 Afterwards an unknown request receives -32601; the library never sends
 either error itself."
-  ;; SPEC 10.1: pre-auth, a structurally valid request other than the
-  ;; handshake reply MUST receive 1200 not-authenticated — and the client
-  ;; never receives the handshake methods, so every inbound request does.
-  (unless (ebp-client--authenticated-p client)
-    (ebp-client--error client 1200 "Not authenticated" "not-authenticated"))
-  (let ((handler (gethash (symbol-name method) (ebp-client-handlers client))))
-    (if handler
-        (ebp-client--serializable client (funcall handler client params))
-      (ebp-client--error client -32601 "Method not found"
-                         "method-not-found"))))
+  (ebp--with-dispatch client
+    ;; SPEC 10.1: pre-auth, a structurally valid request other than the
+    ;; handshake reply MUST receive 1200 not-authenticated — and the client
+    ;; never receives the handshake methods, so every inbound request does.
+    (unless (ebp-client--authenticated-p client)
+      (ebp-client--error client 1200 "Not authenticated" "not-authenticated"))
+    (let ((handler (gethash (symbol-name method) (ebp-client-handlers client))))
+      (if handler
+          (ebp-client--serializable client (funcall handler client params))
+        (ebp-client--error client -32601 "Method not found"
+                           "method-not-found")))))
 
 (defun ebp-client--serializable (client result)
   "SPEC 7.1: return RESULT, or signal -32603 if it cannot be serialized.
@@ -1011,13 +1182,14 @@ on the reply path; leaving a request outstanding costs the session."
 Before authentication all notifications are logged locally and dropped
 without `log.error' (SPEC 10.1); afterwards an unknown notification is
 logged and ignored (SPEC 7.3)."
-  (cond
-   ((not (ebp-client--authenticated-p client))
-    (message "ebp: pre-auth notification %s dropped" method))
-   ((gethash (symbol-name method) (ebp-client-handlers client))
-    (funcall (gethash (symbol-name method) (ebp-client-handlers client))
-             client params))
-   (t (message "ebp: unknown notification %s ignored" method))))
+  (ebp--with-dispatch client
+    (cond
+     ((not (ebp-client--authenticated-p client))
+      (message "ebp: pre-auth notification %s dropped" method))
+     ((gethash (symbol-name method) (ebp-client-handlers client))
+      (funcall (gethash (symbol-name method) (ebp-client-handlers client))
+               client params))
+     (t (message "ebp: unknown notification %s ignored" method)))))
 
 ;;;; Actions and events (SPEC 14), the Emacs endpoint half
 
@@ -1306,21 +1478,38 @@ the wire shape."
                          :message "resulting document exceeds max_editor_bytes"
                          :data (:kind "content-invalid"
                                 :reason "editor-too-large"))))
-          (ebp-client--request
-           client 'edit.apply
-           (list :document document :editor_id editor-id
-                 :session (plist-get ed :session)
-                 :seq (1+ (plist-get ed :seq)) :start start :del del
-                 :text text :len (length new) :cursor (+ start (length text)))
-           (lambda (result error)
-             (when (and (null error)
-                        (equal (plist-get result :status) "applied"))
-               (setf (plist-get ed :text) new
-                     (plist-get ed :seq) (plist-get result :seq))
-               (ebp-client--editor-changed client document editor-id))
-             (when callback
-               (funcall callback (and result (plist-get result :status))
-                        error)))))))))
+          (let ((session (plist-get ed :session))
+                (seq-at-send (plist-get ed :seq)))
+            (ebp-client--request
+             client 'edit.apply
+             (list :document document :editor_id editor-id
+                   :session session
+                   :seq (1+ seq-at-send) :start start :del del
+                   :text text :len (length new) :cursor (+ start (length text)))
+             (lambda (result error)
+               (when (and (null error)
+                          (equal (plist-get result :status) "applied"))
+                 ;; A8 H2 (candidate R1): the mirror may have moved while
+                 ;; our send blocked — a re-entrant `edit.open' reseeded
+                 ;; it, `edit.close' removed it, a delta advanced it.
+                 ;; Adopt the pre-send splice only into the SAME live
+                 ;; entry at the SAME session and seq; any other live
+                 ;; state is a stale view of our own making, and resync
+                 ;; is its recovery (SPEC 19.4).
+                 (let ((live (gethash (cons document editor-id)
+                                      (ebp-client-editors client))))
+                   (cond
+                    ((and (eq live ed)
+                          (equal (plist-get live :session) session)
+                          (= (plist-get live :seq) seq-at-send))
+                     (setf (plist-get ed :text) new
+                           (plist-get ed :seq) (plist-get result :seq))
+                     (ebp-client--editor-changed client document editor-id))
+                    (live
+                     (ebp-client-edit-resync client document editor-id)))))
+               (when callback
+                 (funcall callback (and result (plist-get result :status))
+                          error))))))))))
 
 (defun ebp-client-edit-resync (client document editor-id)
   "SPEC 19.4: recover a stale local view — the Companion returns full
@@ -1629,7 +1818,24 @@ stays with the caller for now."
                 :on-shutdown
                 (lambda (_c)
                   (ebp-client-close client '(shutdown))))))
-    (setf (ebp-client-connection client) conn)
+    (setf (ebp-client-connection client) conn
+          (ebp-client-process client) proc
+          (ebp--connection-client conn) client)
+    ;; SPEC 22.3 inbound bound (W10): jsonrpc.el installed its filter on
+    ;; OUR process in `initialize-instance'; wrap it so the outermost
+    ;; exit — the admission point, and the only code of ours that runs
+    ;; while a flood is starving the timer drain — measures the parsed
+    ;; backlog and applies backpressure.  Public process API only;
+    ;; jsonrpc.el itself stays rented unmodified.
+    (add-function :around (process-filter proc)
+                  (lambda (orig p string)
+                    (let ((outermost (not ebp--in-filter))
+                          (ebp--in-filter t))
+                      (unwind-protect
+                          (funcall orig p string)
+                        (when outermost
+                          (ebp-client--inbound-check client)))))
+                  '((name . ebp-overload)))
     (ebp-client-start client)
     client))
 

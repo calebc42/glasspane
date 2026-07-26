@@ -212,8 +212,36 @@ handler's deferred effect push fired before READY and `jetpacs-shell-push`'s gat
 silently — Emacs state right, device stale until the user's next tap, whose event then carried the
 OLD `revision_seen`. Refused pushes with a registered builder now queue and `jetpacs-shell--on-ready`
 drains them; fully disconnected pushes still drop (the barrier owns those). Floor suite 27,
-**211 elisp**. **NEXT: §1.7's R1-for-H2 and R3 (the §22.2 "in transmission" amendment), then
-§7-a; the parity track proceeds separately at JC-4 (dialog rebuild).**
+**211 elisp**.
+
+**W10 COMPLETE (2026-07-26)** — the whole A8 follow-up batch landed as the REWRITE-PLAN's W10
+rung (design record `docs/W10-overload-plan.md`): **R3 + 7-a = amendments #124-125** in the
+contract repo (`beedc3b`, spec now **#125**: §22.2 handoff-is-the-boundary + "in transmission";
+§7.4 send-not-atomic; §22.3 re-entrant depth + the §23.5-parallel not-relaxed-by-§6.2 sentence);
+**7-b** = the sender ceiling in `ebp-client--request` (512/128 sticky twin of LD-13, local
+synchronous 1401 exactly once, `queue.replay` exempt per the ratified single-flight clause,
+decrement rides the exactly-once conclusion, close-fails-locally rides jsonrpc's sentinel);
+**7-c** = the inbound bound under the §1.5 invariant — *reading pauses only while nothing of
+ours is in flight*: a `jsonrpc-connection-send :around` on `ebp--connection` resumes a paused
+reader before EVERY outbound write (requests, notifications, replies all funnel through it) and
+stakes the in-send claim; the pause lever is `stop-process` on OUR process, triggered at the
+outermost exit of an `add-function` wrapper around the process filter; the backlog metric counts
+the timer-hosted parsed queue (jsonrpc's filter drains `jsonrpc-mqueue` into 0-delay timers, so
+ours are the `timer-list` entries whose args lead with our connection — public API throughout,
+jsonrpc.el still rented unmodified); exhaustion (backlog ≥ 2048, or dispatch depth > 32 via the
+new `ebp--with-dispatch` guard on both dispatchers and every continuation) = one `log.error
+1401` then close, the latch being the rate limit. **R1-for-H2** landed with it:
+`ebp-client-edit-apply`'s callback re-fetches the mirror entry and adopts the pre-send splice
+only into the same live object at the same session and seq — anything else live resyncs (19.4).
+Gates: 6 new wire tests = §24.6 item 14 per class over the live loopback (intent flood 400
+ordered/exactly-once; ordered-stream flood 200 deltas, no invented resync; ceiling
+refuse/recover/exempt; close-fails-locally; pause/resume + in-send guard against a real
+stopped process; both exhaustion triggers observed as `log.error` at the peer). **45 wire-elisp
+/ 250 elisp / 10 suites green.** No device smoke by design: the seam is Emacs-side, the
+Companion cannot be made to flood on cue, and its half was device-proven at RA-1.
+**NEXT: R2 (notification-deferral guard) and R4 (own outbound queue, the only H3 fix) remain
+open candidates — take them up only if H3's reverse-order replies bite in practice; the parity
+track is at JC-5 done, next W10↔app-tier integration questions live in the parity plan.**
 
 **Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the
 checklist wants it on hardware too), an inbound-`edit.apply`-while-the-editor-is-shown smoke (the

@@ -725,3 +725,54 @@ Tier-1 app is a config on top").
   The frame is corrected: "apps" are CONFIGS; the launcher exists to show
   package authors that a Tier-1 skin is cheap, not to serve daily
   multi-app use.
+
+---
+
+## 8. Audit ratifications (Caleb, 2026-07-26) — R1, R2, R3
+
+The `docs/AUDIT-ja1-ja2-2026-07-26.md` fix order was gated on three calls.
+
+**R1 — naming/reservation: `jetpacs.*` APPROVED.**  Base reserves the
+`jetpacs.` prefix; `clip`/`theme` become `jetpacs.clip`/`jetpacs.theme` and
+their actions `jetpacs-clip.refresh`/`jetpacs-theme.modus-toggle`.  Amendment
+#134 carries the wire-level policy.  `jetpacs--claim` must additionally warn on
+a same-owner claim from a DIFFERENT defining file (today it is silent, so two
+packages picking one owner overwrite each other by load order).
+
+**R2 — clip and theme BOTH STAY IN BASE.**  Caleb's reasoning, which REFINES
+the §7 framing and is now the governing statement of it:
+
+> Base Jetpacs is vanilla Emacs **optimized for mobile use**.  The kill ring is
+> built-in; a mobile-shaped way to reach it is base.  Modus is built-in, is what
+> a fresh Emacs install now themes with, and 5.0 exposes a PUBLIC theme-building
+> API — so the theme surface inherits all of that work and will only grow.
+> Aesthetics are a first-class concern (the ricing audience is real).
+
+Consequences: no MOVE, no SPLIT.  The audit's clip privacy defects and theme
+defects are mandatory ANYWAY and are unaffected.  The seams the audit wanted for
+a split (`jetpacs-theme-mode` `off`, `jetpacs-theme-payload-function`, a
+hook-free home for `jetpacs-modus-*`) still land — reframed from *enabling a
+split* to **enabling a Tier-1 to build on modus 5.0's public API without
+fighting base for the palette**, which is the stronger reason.
+
+**R3 — amendment #126: OPTION B (delete the Kotlin reads).**  Decided on the
+merits rather than deferred:
+- `meta` is not a concept, it is a synonym collision.  The poc mapped it to
+  `preprocessor` (a registered role); the Companion reads it for ORG TAGS
+  (`tag`, also registered).  One unregistered name serving two purposes both
+  already covered is drift, not vocabulary — registering it would bless the
+  confusion permanently and still leave `SyntaxHighlight.kt:385` non-conforming
+  until it read `tag`.
+- `paren` should NOT map to `operator` (the audit's suggestion): parens are
+  delimiters, not operators.  Delete the read and keep the Companion's STATIC
+  rainbow — which is what JA-1's theme module already argued for when it
+  deliberately omitted the role ("one color destroys the depth cue"), and which
+  is the better aesthetic outcome under R2's ricing concern.
+- Option B is a pure Kotlin change: no protocol growth, no contract edit, no
+  golden regeneration, and it makes two already-registered-but-dead roles
+  (`tag`, `preprocessor`) live.  `jetpacs-theme.el`'s `:meta` duplicate dies
+  either way — it is deleted in the same commit as the Kotlin change.
+- **Amendment #127 lands regardless and is the real cure**: `validate.py`
+  ignores `theme_roles` and `syntax_roles` entirely, which is the mechanical
+  reason this drift survived three rungs.  Pin the vocabulary in the validator
+  and the golden corpus, and this class cannot recur.

@@ -844,6 +844,23 @@ array string, or a single string; anything else is discarded."
      ((stringp value) (list value))
      (t nil))))
 
+(defvar jetpacs-teardown-functions nil
+  "Abnormal hook run with (OWNER) at the end of `jetpacs-teardown-owner'.
+The attachment point for module-private per-owner state (reminders
+bookkeeping, chrome stacks, future registries) — the rewrite's answer
+to the poc's fboundp ladder.  Runs after every core registry is swept,
+so a hook observing the owner's claims sees them already gone.  Each fn
+runs isolated: one failure logs its error SYMBOL and the rest still run.
+Lives on the floor (not the shell) so subscribers need no shell edge.")
+
+(defun jetpacs--owners ()
+  "Every owner id with a live registration (interactive completion)."
+  (let (owners)
+    (maphash (lambda (_k owner)
+               (cl-pushnew owner owners :test #'equal))
+             jetpacs--registrations)
+    owners))
+
 (defun jetpacs-test-reset-state ()
   "Reset floor state for tests and teardown."
   (clrhash jetpacs--state-handlers)
@@ -853,7 +870,22 @@ array string, or a single string; anything else is discarded."
   (when (fboundp 'jetpacs-device-reset)
     (jetpacs-device-reset))
   (when (boundp 'jetpacs-shell--snackbar)
-    (setq jetpacs-shell--snackbar nil)))
+    (setq jetpacs-shell--snackbar nil))
+  ;; Shell tables (boundp-guarded: surfaces loads without shell).  Never
+  ;; clear `jetpacs-action-handlers'/`jetpacs--registrations' wholesale —
+  ;; the ownerless core registration \"view.switched\" must survive.
+  (when (boundp 'jetpacs-shell--roots)
+    (setq jetpacs-shell--roots nil))
+  (when (boundp 'jetpacs-shell--repush-pending)
+    (setq jetpacs-shell--repush-pending nil))
+  (when (boundp 'jetpacs-shell--pending-removals)
+    (setq jetpacs-shell--pending-removals nil))
+  (when (and (boundp 'jetpacs-shell--repush-timer)
+             (timerp jetpacs-shell--repush-timer))
+    (cancel-timer jetpacs-shell--repush-timer)
+    (setq jetpacs-shell--repush-timer nil))
+  (when (boundp 'jetpacs-shell--current-view)
+    (clrhash jetpacs-shell--current-view)))
 
 (provide 'jetpacs-surfaces)
 ;;; jetpacs-surfaces.el ends here

@@ -137,8 +137,84 @@ next Section 10.3 barrier."
     (setq jetpacs-shell--repush-pending
           (delete surface jetpacs-shell--repush-pending))
     (if (jetpacs-connected-p)
-        (ebp-client-surface-remove (jetpacs-client) surface)
+        (jetpacs-shell--send-remove surface)
       (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal))))
+
+(defun jetpacs-shell--send-remove (surface)
+  "Send SURFACE's tombstone with loss-proofing; returns the revision.
+The bare send this replaces passed NO callback, so a tombstone the W10
+sender ceiling refused — concluded locally and synchronously with 1401,
+never touching the wire — was silently LOST, and the surface sat
+present against `max_surfaces' until revocation.  Any error (refusal,
+timeout, transport loss) now requeues the removal for the next SPEC
+10.3 barrier; `cl-pushnew' makes the synchronous-refusal push during
+this very call harmless."
+  (ebp-client-surface-remove
+   (jetpacs-client) surface
+   :callback
+   (lambda (_status error)
+     (when error
+       (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal)
+       (message "jetpacs: surface.remove of %s failed (code %s, %s); queued for the next barrier"
+                surface (plist-get error :code)
+                (or (plist-get (plist-get error :data) :kind) "?"))))))
+
+(defvar jetpacs-shell--current-view)    ; defined with the view machinery
+
+(defun jetpacs-shell--owner-surfaces (owner)
+  "OWNER's D1 primary surface plus every surface claimed under it."
+  (cl-remove-duplicates
+   (cons (jetpacs-shell-surface-for owner)
+         (jetpacs--owned-names "surface" owner))
+   :test #'equal))
+
+(defun jetpacs-teardown-owner (owner)
+  "Tear down everything attributed to OWNER (G5); returns OWNER.
+The live-reload verb: under D1 every redefinition without this leaves a
+visible orphaned surface on the device.  Sweeps, in load-bearing order
+— local registries FIRST, wire LAST, so a debounced repush firing
+re-entrantly inside a blocked send finds no root and no-ops instead of
+resurrecting the surface above its tombstone: actions (the dispatch
+shim then rejects racing events), async loaders (a late settle is
+inert), then per surface: state subscriptions before the wire call,
+the tombstone itself, then the applied-revision and current-view
+residue.  Wire failures requeue for the next barrier and never signal;
+a second call is an idempotent cheap no-op.
+
+Scope notes: registrations made OUTSIDE `with-jetpacs-owner' carry no
+attribution and are not swept.  Tombstones persist until revocation
+(SPEC 13.3) — which is why a surface the client cannot know about
+(never pushed, no revision floor) gets a local unclaim only, never a
+gratuitous permanent tombstone.  An in-flight bridged dialog is NOT
+cancelled: it is unattributed single-flight, and its continuation
+degrades safely (a rootless push returns nil, its re-armed actions are
+already gone).  ebp's input-draft mirror keeps the removed surface's
+drafts until the Companion republishes — pass `:reset-input-ids' on a
+re-registering push when that matters."
+  (interactive (list (completing-read "Tear down owner: "
+                                      (jetpacs--owners) nil t)))
+  (unless (jetpacs--valid-owner-p owner)
+    (error "jetpacs: invalid owner %S (a D1 owner name, not a surface id)"
+           owner))
+  (dolist (name (jetpacs--owned-names "action" owner))
+    (jetpacs-undefaction name))
+  (jetpacs-async-clear-owner owner)
+  (let ((client (jetpacs-client)))
+    (dolist (surface (jetpacs-shell--owner-surfaces owner))
+      (jetpacs-on-state-change-clear "" surface)
+      (if (or (alist-get surface jetpacs-shell--roots nil nil #'equal)
+              (and client
+                   (gethash surface (ebp-client-revisions client))))
+          (jetpacs-shell-remove-root surface)
+        (jetpacs--unclaim "surface" surface))
+      (remhash surface jetpacs--applied-revisions)
+      (remhash surface jetpacs-shell--current-view)))
+  (dolist (fn jetpacs-teardown-functions)
+    (condition-case err
+        (funcall fn owner)
+      (error (message "jetpacs: teardown hook failed: %s"
+                      (jetpacs--error-label err)))))
+  owner)
 
 (defun jetpacs-shell--schedule-repush (surface)
   "Debounce a repush of SURFACE after a registry mutation (0.5 s idle).
@@ -603,7 +679,10 @@ required surface pushes ahead of replay."
       (setq jetpacs-shell--pending-removals nil)
       (dolist (surface pending)
         (condition-case err
-            (ebp-client-surface-remove (jetpacs-client) surface)
+            ;; The callback path catches async/local-1401 conclusions
+            ;; the bare send silently lost; this condition-case still
+            ;; catches synchronous SIGNALS.
+            (jetpacs-shell--send-remove surface)
           (error
            (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal)
            (message "jetpacs: deferred removal of %s failed: %s"

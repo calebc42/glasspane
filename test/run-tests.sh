@@ -95,6 +95,11 @@ emacs -Q --batch -L emacs -l test/jetpacs-device-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-clip-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-2 teardown exit gate (selector mandatory: the loopback harness file
+# defines its own suite too).
+emacs -Q --batch -L emacs -l test/ebp-wire-test.el -l test/jetpacs-teardown-test.el \
+  --eval '(ert-run-tests-batch-and-exit "^jetpacs-teardown-")'
+
 # Phase A cross-file seams + the comint P1s.  Several of these regress by
 # HANGING rather than failing (a prompt reached inside a dispatch extent),
 # so this suite is the one that must never be skipped.

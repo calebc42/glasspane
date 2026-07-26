@@ -169,5 +169,16 @@ mirror is session-local — never use it to skip a clear."
   "Clear OWNER's reminder set on the device (an empty replace-set)."
   (jetpacs-reminders-set nil :owner owner :callback callback))
 
+(defun jetpacs-device--on-teardown (owner)
+  "Sweep OWNER's local reminder bookkeeping (JA-2 teardown hook).
+LOCAL only, deliberately: the device's reminder sets are durable by
+design and survive an owner teardown — clearing them there is a
+product decision the caller makes explicitly via
+`jetpacs-reminders-clear' BEFORE tearing down, not a side effect."
+  (remhash owner jetpacs-device--reminder-sets)
+  (remhash owner jetpacs-device--reminders-gen))
+
+(add-hook 'jetpacs-teardown-functions #'jetpacs-device--on-teardown)
+
 (provide 'jetpacs-device)
 ;;; jetpacs-device.el ends here

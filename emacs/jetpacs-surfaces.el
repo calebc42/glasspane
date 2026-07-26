@@ -185,7 +185,17 @@ refused (`jetpacs-shell--on-ready').  Pushed after create, it runs
 AHEAD of the caller's :ready-function — the drained effects predate
 READY, so they belong before whatever the application does there.
 Adding it post-connect is safe: READY needs round trips that cannot
-complete before this function returns."
+complete before this function returns.
+
+When `jetpacs-complete' is loaded and CONFIG carries no
+`:edit-complete-function', the JC-5 buffer harvester
+`jetpacs-complete-edit-complete' becomes the client-wide completion
+answer.  An explicit caller value wins, and `jetpacs-dialog''s picker
+borrows the slot per prompt either way (it restores whatever it found)."
+  (when (fboundp 'jetpacs-complete-edit-complete)
+    (unless (plist-member config :edit-complete-function)
+      (setq config (append config (list :edit-complete-function
+                                        #'jetpacs-complete-edit-complete)))))
   (let ((client (apply #'ebp-connect host port
                        :state-changed-function #'jetpacs--on-state-changed
                        :before-replay-function #'jetpacs--before-replay

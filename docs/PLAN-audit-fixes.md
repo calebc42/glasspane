@@ -252,15 +252,28 @@ fighting base for the palette.
       (E1); a refused push re-asserting `current_view` (E1/E3); org tag color
       on device (K).
 
+### E5 demotion (Caleb, 2026-07-26)
+
+E5 (clip privacy) moves to the TAIL of the plan, after S and before the
+device gate.  Rationale: on Android the KEYBOARD (Gboard et al.) already
+carries its own device-wide clipboard history, so much of the
+kill-ring-privacy hardening duplicates exposure the platform has
+anyway.  When E5 does land, the load-bearing piece is
+**no-push-at-registration** — that one is a correctness defect
+independent of privacy (a bare `require` during a live session ships
+the whole kill ring and seizes the tablet screen), and the cheap
+non-privacy riders (`:key` on entries, the byte-cap-on-the-NODE test,
+the debounce test) ride along.
+
 ## 3. Session batching (usage-limit aware)
 
 Each elisp commit is sized to land inside one session comfortably; nothing
 shares state across commits except E1→E2 and K→(E6 tail, C).
 
-- **Session A**: E1 then E2 (the dependency pair; largest batch).
+- **Session A**: E1 then E2 (the dependency pair; largest batch). DONE 2026-07-26.
 - **Session B**: E3 + E4 (independent; both mostly floor/ebp).
-- **Session C**: E5 + E6 (the two apps).
-- **Session D**: K + C + T + S (cross-artifact sweep), then D on the device.
+- **Session C**: E6 (theme seams), then K + C + T + S (cross-artifact sweep).
+- **Session D**: E5 (demoted — see above), then the device gate.
 
 If a session must shrink: land E1 alone (the unpushable-surface trap is the
 worst live defect remaining), then E3 (the lost-confirmation reproduction).

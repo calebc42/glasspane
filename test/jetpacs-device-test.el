@@ -217,7 +217,8 @@
                    (funcall callback nil
                             '(:code 1401
                               :message "Outstanding requests exhausted"
-                              :data (:kind "overloaded")))
+                              :data (:kind "overloaded")
+                              :ebp-local t))
                    nil)))
         (should-not
          (jetpacs-reminders-set
@@ -253,6 +254,19 @@ the shell's document gate never sees."
       (setf (ebp-client-granted client) ["reminders.owner" "offline.wake"])
       (jetpacs-reminders-set (list r) :owner "agenda")
       (should (= (length jetpacs-device-test--calls) 1)))))
+
+
+(ert-deftest jetpacs-device-ungranted-set-does-not-burn-a-generation ()
+  "E3 rider: the grant check runs BEFORE the generation bump — an error
+after the bump orphans an in-flight set's confirmation (the gen guard
+rejects it as stale while reporting success)."
+  (jetpacs-device-test--with (jetpacs-device-test--client)
+    (setf (ebp-client-granted client) ["theme"])   ; no reminders.owner
+    (dotimes (_ 3)
+      (should-error (jetpacs-reminders-set
+                     (list (list :id "m1" :title "T" :at_ms 1))
+                     :owner "agenda")))
+    (should (= 0 (gethash "agenda" jetpacs-device--reminders-gen 0)))))
 
 (provide 'jetpacs-device-test)
 ;;; jetpacs-device-test.el ends here

@@ -109,10 +109,14 @@
                                 (when callback (funcall callback "applied" nil))
                                 1))))
         (should (equal (jetpacs-teardown-owner "alpha") "alpha"))
+        (should (equal (jetpacs-teardown-owner "alpha") "alpha"))
         (should (equal (jetpacs-teardown-owner "alpha") "alpha")))
       (should-not (jetpacs--owned-names "action" "alpha"))
       (should-not (jetpacs--owned-names "surface" "alpha"))
-      (should (>= (length removed) 1)))))
+      ;; EXACTLY one: the audit measured three calls = three sends,
+      ;; because the claimed revision survives a removal (13.3 keeps
+      ;; tombstones) and ">= 1" could not see the re-fire.
+      (should (= (length removed) 1)))))
 
 (ert-deftest jetpacs-teardown-never-pushed-owner-sends-no-tombstone ()
   "H5: a surface the client cannot know about gets no permanent

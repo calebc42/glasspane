@@ -899,9 +899,14 @@ own load (§22.3's forged-`blocked_by' clause)."
                (>= (ebp-client-outstanding client) ebp-overload-hold)))
       (progn
         (setf (ebp-client-outstanding-held client) t)
+        ;; :ebp-local marks this as OUR synthetic refusal — callback-only,
+        ;; never serialized.  A peer's 1401 is byte-identical otherwise
+        ;; (1401 is a MANDATORY response code for max_dialogs), and the
+        ;; will-retry semantics belong ONLY to the local ceiling.
         (funcall callback nil '(:code 1401
                                 :message "Outstanding requests exhausted"
-                                :data (:kind "overloaded")))
+                                :data (:kind "overloaded")
+                                :ebp-local t))
         nil)
     (let* ((conn (ebp-client-connection client))
            (secs (cond ((eq timeout 'none) nil)
@@ -1196,7 +1201,10 @@ ignore it — the enforced cadence is the local replay backoff)."
   (apply #'ebp-client--error client 1500
          (or message "Event not accepted yet; retry")
          "event-retry"
-         (when after-s (list :retry_after_s after-s))))
+         ;; SPEC 4.2: *_s members are INTEGER seconds; a float here is a
+         ;; content-invalid frame.  Ceiling, floored at 1 — advising a
+         ;; zero-second retry defeats the point of asking.
+         (when after-s (list :retry_after_s (max 1 (ceiling after-s))))))
 
 ;;;; Dispatchers (SPEC 7.3) — ours because the library is fail-open
 

@@ -80,6 +80,8 @@ the rule — never the :title/:body values (SPEC 23.3)."
       (error (concat "jetpacs: reminder :at_ms must be a non-negative "
                      "INTEGER of epoch millis — floats reject the whole "
                      "set on the wire; use (round (* 1000 (float-time)))")))
+    ;; The SPEC 4.2 ceiling too: an over-2^53 integer is content-invalid.
+    (jetpacs--check-integer at-ms ":at_ms" 0 nil)
     (when tap
       (jetpacs--check-descriptor tap ":on_tap")
       (unless (plist-member tap :action)
@@ -136,10 +138,14 @@ gated on `jetpacs-connected-p'."
           (push n normalized))))
     (let* ((client (jetpacs-client-or-error))
            (vec (vconcat (nreverse normalized)))
-           (gen (cl-incf (gethash owner jetpacs-device--reminders-gen 0))))
+           ;; The grant check runs BEFORE the generation bump: an error
+           ;; between bump and send would orphan an IN-FLIGHT set's
+           ;; confirmation (the gen guard would reject it as stale).
+           (gen (progn
+                  (unless (jetpacs-granted-p "reminders.owner" client)
+                    (error "jetpacs: reminders.set requires the ungranted \"reminders.owner\" capability"))
+                  (cl-incf (gethash owner jetpacs-device--reminders-gen 0)))))
       (puthash owner gen jetpacs-device--reminders-gen)
-      (unless (jetpacs-granted-p "reminders.owner" client)
-        (error "jetpacs: reminders.set requires the ungranted \"reminders.owner\" capability"))
       (ebp-client-reminders-set
        client owner vec
        :callback
@@ -179,8 +185,11 @@ LOCAL only, deliberately: the device's reminder sets are durable by
 design and survive an owner teardown — clearing them there is a
 product decision the caller makes explicitly via
 `jetpacs-reminders-clear' BEFORE tearing down, not a side effect."
-  (remhash owner jetpacs-device--reminder-sets)
-  (remhash owner jetpacs-device--reminders-gen))
+  ;; The GENERATION counter deliberately survives: it is monotonic per
+  ;; owner for the SESSION, not per set — resetting it on re-registration
+  ;; let a stale in-flight confirmation overwrite a newer one while the
+  ;; guard reported success.
+  (remhash owner jetpacs-device--reminder-sets))
 
 (add-hook 'jetpacs-teardown-functions #'jetpacs-device--on-teardown)
 

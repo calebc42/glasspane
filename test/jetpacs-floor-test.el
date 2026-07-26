@@ -592,7 +592,14 @@ the READY guard; optional roots wait."
 (ert-deftest jetpacs-floor-refused-p-shape ()
   (should (jetpacs-refused-p '(:code 1401
                                :message "Outstanding requests exhausted"
-                               :data (:kind "overloaded"))))
+                               :data (:kind "overloaded")
+                               :ebp-local t)))
+  ;; E3: a PEER'S 1401 is byte-identical except the tag — 1401 is a
+  ;; MANDATORY response code (max_dialogs), and will-retry semantics
+  ;; belong only to the local ceiling.  Untagged is NOT refused.
+  (should-not (jetpacs-refused-p '(:code 1401
+                                   :message "Outstanding requests exhausted"
+                                   :data (:kind "overloaded"))))
   (should-not (jetpacs-refused-p nil))
   (should-not (jetpacs-refused-p '(:code 1201 :data (:kind "content-invalid"))))
   (should-not (jetpacs-refused-p '(:code 1401 :data (:kind "something-else"))))
@@ -1254,6 +1261,73 @@ push — the one-slot global did exactly that."
         (jetpacs-shell-push "app:aa")
         (should (equal sent '(("app:aa" . "a-saved")
                               ("app:bb" . nil))))))))
+
+
+;;;; E3: W10 / refusal hygiene
+
+(ert-deftest jetpacs-floor-refused-push-keeps-snackbar-skips-hook ()
+  "A refusal concluded synchronously inside the send: the frame never
+left, so the user's queued feedback is REQUEUED for the B8 retry — the
+audit reproduced it being destroyed — and the after-push hook (whose
+contract is a successful send) does not run."
+  (jetpacs-floor-test--with-client
+      (client :profiles '(:app (:node_types ["text" "scaffold" "column"]
+                                :builtins [] :features [])))
+    (let ((hook-ran nil)
+          (jetpacs-shell-after-push-hook jetpacs-shell-after-push-hook))
+      (add-hook 'jetpacs-shell-after-push-hook (lambda () (setq hook-ran t)))
+      (with-jetpacs-owner "grocy"
+        (jetpacs-shell-define-root
+         "grocy" (lambda () '(:t "scaffold" :body (:t "text" :text "r")))))
+      (jetpacs-shell-notify "saved" "grocy")
+      (setf (ebp-client-outstanding client) ebp-overload-hold)
+      (jetpacs-shell-push "app:grocy")
+      (should (equal (gethash "app:grocy" jetpacs-shell--snackbars) "saved"))
+      (should-not hook-ran)
+      ;; And the count advanced for the backoff.
+      (should (= 1 (gethash "app:grocy" jetpacs-shell--refusal-counts))))))
+
+(ert-deftest jetpacs-floor-refusal-backoff-caps ()
+  "The B8 retry is counted and CAPPED: pre-fix the loop was unbounded
+and backoff-free against a session whose ceiling stayed held."
+  (jetpacs-floor-test--with-client (client)
+    (let ((scheduled 0) (timers 0))
+      (cl-letf (((symbol-function 'jetpacs-shell--schedule-repush)
+                 (lambda (_s) (cl-incf scheduled)))
+                ((symbol-function 'run-at-time)
+                 (lambda (&rest _) (cl-incf timers) nil)))
+        ;; First refusal: the normal debounce.
+        (jetpacs-shell--note-refusal "app:x")
+        (should (= scheduled 1))
+        ;; Later ones: deferred with growing delay.
+        (jetpacs-shell--note-refusal "app:x")
+        (should (= timers 1))
+        ;; Past the cap: nothing scheduled at all.
+        (puthash "app:x" jetpacs-shell-refusal-max-retries
+                 jetpacs-shell--refusal-counts)
+        (let ((s scheduled) (tm timers))
+          (jetpacs-shell--note-refusal "app:x")
+          (should (= scheduled s))
+          (should (= timers tm)))))))
+
+(ert-deftest jetpacs-floor-send-remove-drops-permanent-errors ()
+  "A -32601/1201 answer to surface.remove will only re-fail: requeueing
+it re-sends at every 10.3 barrier forever.  Transient errors requeue."
+  (jetpacs-floor-test--with-client (client)
+    (setq jetpacs-shell--pending-removals nil)
+    (cl-letf (((symbol-function 'ebp-client-surface-remove)
+               (cl-function (lambda (_c _s &key callback)
+                              (funcall callback nil '(:code -32601))
+                              1))))
+      (jetpacs-shell--send-remove "app:gone"))
+    (should-not (member "app:gone" jetpacs-shell--pending-removals))
+    (cl-letf (((symbol-function 'ebp-client-surface-remove)
+               (cl-function (lambda (_c _s &key callback)
+                              (funcall callback nil '(:code -32603))
+                              1))))
+      (jetpacs-shell--send-remove "app:flaky"))
+    (should (member "app:flaky" jetpacs-shell--pending-removals))
+    (setq jetpacs-shell--pending-removals nil)))
 
 (provide 'jetpacs-floor-test)
 ;;; jetpacs-floor-test.el ends here

@@ -61,11 +61,46 @@ let owner A's queued confirmation drain into owner B's push.")
 (defvar jetpacs-shell--repush-pending nil
   "Surfaces awaiting the debounced registry repush.")
 
+(defvar jetpacs-shell--refusal-counts (make-hash-table :test #'equal)
+  "SURFACE -> consecutive W10-refused pushes; reset on any success.")
+
+(defcustom jetpacs-shell-refusal-max-retries 8
+  "Consecutive refusal-driven repushes per surface before giving up.
+The ceiling clears as in-flight requests conclude, so a bounded retry
+almost always lands; past the cap the surface waits for the next
+natural push or the reconnect barrier instead of hammering a loaded
+session."
+  :type 'natnum :group 'jetpacs)
+
+(defun jetpacs-shell--note-refusal (surface)
+  "Record one refusal for SURFACE; schedule the backed-off repush.
+First refusal repushes on the normal debounce; later ones double the
+delay (capped at 30 s); past `jetpacs-shell-refusal-max-retries' stop —
+pre-fix this loop was unbounded AND backoff-free."
+  (let ((n (1+ (gethash surface jetpacs-shell--refusal-counts 0))))
+    (puthash surface n jetpacs-shell--refusal-counts)
+    (cond
+     ((> n jetpacs-shell-refusal-max-retries)
+      (message "jetpacs: %s refused %d times; waiting for a natural push"
+               surface (1- n))
+      nil)
+     ((= n 1) (jetpacs-shell--schedule-repush surface))
+     (t (run-at-time (min 30.0 (* 0.5 (expt 2.0 (1- n)))) nil
+                     #'jetpacs-shell--schedule-repush surface)))))
+
 (defvar jetpacs-shell--pending-removals nil
   "Surfaces whose tombstone could not be sent while disconnected.
 Flushed at the next Section 10.3 barrier; without this a removal made
 offline is lost and the surface stays present forever (SPEC 4.5
 `max_surfaces').")
+
+(defvar jetpacs-shell--tombstoned (make-hash-table :test #'equal)
+  "Surfaces whose SPEC 13.3 tombstone this session already issued.
+`jetpacs-teardown-owner''s send-guard reads it: the claimed REVISION
+survives in the client after a removal (13.3 keeps tombstones), so
+\"root or revision\" re-fired the tombstone on every later teardown of
+the same owner — measured, three calls was three sends.  A
+re-registration (`jetpacs-shell-define-root') clears the mark.")
 
 (defvar jetpacs-shell--repush-timer nil
   "The idle timer draining `jetpacs-shell--repush-pending'.")
@@ -136,6 +171,7 @@ names `app:<owner>').  REQUIRED roots are re-pushed on reconnect before
 schedules a debounced repush on a live session.  Returns SURFACE."
   (let ((surface (jetpacs-shell--resolve-surface surface)))
     (jetpacs--claim "surface" surface)
+    (remhash surface jetpacs-shell--tombstoned)
     (setf (alist-get surface jetpacs-shell--roots nil nil #'equal)
           (list :builder builder :owner jetpacs-current-owner
                 :required required :stale-after-s stale-after-s
@@ -157,6 +193,7 @@ next Section 10.3 barrier."
           (delete surface jetpacs-shell--repush-pending))
     (remhash surface jetpacs-shell--current-view)
     (remhash surface jetpacs-shell--unasserted-view)
+    (puthash surface t jetpacs-shell--tombstoned)
     (if (jetpacs-connected-p)
         (jetpacs-shell--send-remove surface)
       (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal))))
@@ -175,10 +212,19 @@ this very call harmless."
    :callback
    (lambda (_status error)
      (when error
-       (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal)
-       (message "jetpacs: surface.remove of %s failed (code %s, %s); queued for the next barrier"
-                surface (plist-get error :code)
-                (or (plist-get (plist-get error :data) :kind) "?"))))))
+       ;; Discriminate: a PERMANENT protocol answer (-32601 unknown
+       ;; method, 1201 content-invalid) will only re-fail — requeueing
+       ;; re-sends it at every 10.3 barrier forever.  Everything else
+       ;; (the local W10 refusal, timeouts, transport loss) is transient
+       ;; and the barrier retry is exactly right.
+       (if (memql (plist-get error :code) '(-32601 1201))
+           (message "jetpacs: surface.remove of %s permanently refused \
+(code %s); dropping the tombstone" surface (plist-get error :code))
+         (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal)
+         (message "jetpacs: surface.remove of %s failed (code %s, %s); \
+queued for the next barrier"
+                  surface (plist-get error :code)
+                  (or (plist-get (plist-get error :data) :kind) "?")))))))
 
 (defun jetpacs-shell--owner-surfaces (owner)
   "OWNER's D1 primary surface plus every surface claimed under it."
@@ -226,9 +272,10 @@ re-registering push when that matters."
         (client (jetpacs-client)))
     (dolist (surface jetpacs-teardown-surfaces)
       (jetpacs-on-state-change-clear "" surface)
-      (if (or (alist-get surface jetpacs-shell--roots nil nil #'equal)
-              (and client
-                   (gethash surface (ebp-client-revisions client))))
+      (if (and (not (gethash surface jetpacs-shell--tombstoned))
+               (or (alist-get surface jetpacs-shell--roots nil nil #'equal)
+                   (and client
+                        (gethash surface (ebp-client-revisions client)))))
           (jetpacs-shell-remove-root surface)
         (jetpacs--unclaim "surface" surface))
       (remhash surface jetpacs--applied-revisions)
@@ -762,6 +809,7 @@ a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
       (let ((client (jetpacs-client-or-error))
             (snack (prog1 (gethash surface jetpacs-shell--snackbars)
                      (remhash surface jetpacs-shell--snackbars)))
+            (refused nil)
             (revision nil))
         (unwind-protect
             (let* ((spec (or spec (jetpacs-shell--build surface entry)))
@@ -831,24 +879,39 @@ spec (SPEC 13.4)" current-view)))
                        ;; B8: a W10 sender-ceiling refusal is transient
                        ;; and never reached the wire — a surface with a
                        ;; registered root retries via the debounced
-                       ;; repush (the same machinery the READY drain
-                       ;; uses); a rootless :spec push stays dropped.
-                       (when (and (jetpacs-refused-p error)
-                                  (alist-get surface jetpacs-shell--roots
-                                             nil nil #'equal))
-                         (jetpacs-shell--schedule-repush surface))
+                       ;; repush, now counted and BACKED OFF per surface
+                       ;; (pre-fix: unbounded and backoff-free); a
+                       ;; rootless :spec push stays dropped.  Any other
+                       ;; conclusion resets the count.
+                       (if (jetpacs-refused-p error)
+                           (progn
+                             (setq refused t)
+                             (when (alist-get surface jetpacs-shell--roots
+                                              nil nil #'equal)
+                               (jetpacs-shell--note-refusal surface)))
+                         (remhash surface jetpacs-shell--refusal-counts))
                        (funcall (or callback
                                     #'jetpacs-shell--push-callback)
                                 status error))))
-              ;; The push is on the wire: drain the slot, degrading to a
-              ;; gated toast when no scaffold slot could carry it (an
-              ;; ungranted Companion just loses the feedback — stale
-              ;; feedback later would be worse).
-              (when snack
-                (unless (equal (plist-get spec :t) "scaffold")
-                  (ignore-errors (jetpacs-toast snack)))
-                (setq snack nil))
-              (jetpacs-shell--run-isolated 'jetpacs-shell-after-push-hook)
+              ;; A W10 refusal concluded SYNCHRONOUSLY inside the send:
+              ;; the frame never left, so the injected snackbar shipped
+              ;; nowhere — requeue the user's feedback for the B8 retry
+              ;; and SKIP the after-push hook (its contract is "after a
+              ;; successful send", and the async generation sweep riding
+              ;; it would retire loaders whose render never displayed).
+              (if refused
+                  (when snack
+                    (puthash surface snack jetpacs-shell--snackbars)
+                    (setq snack nil))
+                ;; The push is on the wire: drain the slot, degrading to
+                ;; a gated toast when no scaffold slot could carry it (an
+                ;; ungranted Companion just loses the feedback — stale
+                ;; feedback later would be worse).
+                (when snack
+                  (unless (equal (plist-get spec :t) "scaffold")
+                    (ignore-errors (jetpacs-toast snack)))
+                  (setq snack nil))
+                (jetpacs-shell--run-isolated 'jetpacs-shell-after-push-hook))
               revision)
           ;; A failed push showed nothing: the feedback must survive.
           (when snack

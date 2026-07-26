@@ -246,6 +246,12 @@ predicate in the callback is the uniform detection — the wrappers' nil
 return is redundant with it, never double-handle."
   (and (eql (plist-get error :code) 1401)
        (equal (plist-get (plist-get error :data) :kind) "overloaded")
+       ;; The tag is the discriminator: 1401 is a MANDATORY response
+       ;; code (a Companion MUST answer it when max_dialogs would be
+       ;; exceeded), and a peer's arrives byte-identical to ebp's
+       ;; synthetic plist.  Treating a peer refusal as will-retry made
+       ;; an unbounded repush loop against a loaded Companion.
+       (plist-get error :ebp-local)
        t))
 
 ;; ---- Durable admission (B9): the ratified handler convention ----
@@ -1073,6 +1079,10 @@ the one being fixed.")
     (jetpacs-device-reset))
   (when (boundp 'jetpacs-shell--snackbars)
     (clrhash jetpacs-shell--snackbars))
+  (when (boundp 'jetpacs-shell--refusal-counts)
+    (clrhash jetpacs-shell--refusal-counts))
+  (when (boundp 'jetpacs-shell--tombstoned)
+    (clrhash jetpacs-shell--tombstoned))
   ;; Shell tables (boundp-guarded: surfaces loads without shell).  Never
   ;; clear `jetpacs-action-handlers'/`jetpacs--registrations' wholesale —
   ;; the ownerless core registration \"view.switched\" must survive.

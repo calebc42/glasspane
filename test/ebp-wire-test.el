@@ -1321,7 +1321,8 @@ what is under test; the loopback tests cover the live path."
       (should (equal refusals
                      '((nil . (:code 1401
                                :message "Outstanding requests exhausted"
-                               :data (:kind "overloaded"))))))
+                               :data (:kind "overloaded")
+                               :ebp-local t)))))
       (should (= (length sent) ebp-overload-hold))
       ;; Sticky: one answer arriving does not lift the hold ...
       (funcall (cdr (car sent)) '(:ok t))

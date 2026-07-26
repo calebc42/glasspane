@@ -288,6 +288,15 @@ with an `accept-process-output` pump keyed off the callback. Gate every spec thr
    improves on the poc's 4000-char plain-text cards.
 
 **Rung split (consequence of decision 1):**
+**JC-4a DONE + DEVICE-VERIFIED** (`f3feced`, `660e34d`, 2026-07-26): `jetpacs-dialog.el` (11 advised
+prompts), the floor's `jetpacs-flow-continue`/`jetpacs-device-flow-p` marker, ebp.el's
+`ebp-client-abandon` + request-id return (C-g out of a bridged prompt now cancels the dialog per
+SPEC 7.5/18.1), and the DialogHost scroll prerequisite. 17-test exit gate + 4 device phases
+(yn/string/enum/scroll). **The prerequisite needed more than `verticalScroll`:** a Compose Dialog
+measures content with UNBOUNDED height, so the scroll never engaged and the window was clipped —
+`heightIn(max = 80% screen)` is what makes it work, and only the device could show that. Baselines
+228 elisp / 9 suites.
+
 - **JC-4a — the prompt floor, no picker:** `jetpacs-dialog.el` with the advised
   simple prompts (`y-or-n-p`/`yes-or-no-p`/`read-string`/`read-from-minibuffer`/
   `read-passwd`/`read-char`/`read-char-choice`/…), the sync-over-async pump, the

@@ -261,9 +261,46 @@ free-text add → `:allow-add`) inside a `column`, submit via
 `(jetpacs-dialog-submit :capture-fields '("pick"))`. Bridge sync-return-over-async
 with an `accept-process-output` pump keyed off the callback. Gate every spec through
 `(jetpacs-check-node-types spec advertised "dialog")`.
-**Design decisions to settle here:** large/dynamic collections (paginate via a new
-`dialog_id` vs. serve through the editor/capf path) and context-buffer cards (drop,
-or render as `text` — cards are layout, forbidden in dialogs).
+**Design decisions — DECIDED (Caleb, 2026-07-25):**
+1. **Large/dynamic collections: the capf/editor picker.** Live per-keystroke narrowing
+   via a dialog-hosted synchronized editor + `edit.complete`, NOT sequential
+   narrowing dialogs. Fact base at decision time: the wire side already exists in
+   full — `edit.complete` is a registered Companion→Emacs request with an engine
+   send path (`CompanionEngine.kt:1631`), dialog editors are engine-legal, counted
+   against `max_editor_sessions`, opened/closed on dialog lifecycle, and gated on
+   `editor.sync` (`:1861,:751-772`), and ebp.el answers from
+   `:edit-complete-function` with session/seq staleness (`ebp.el:1249`). What JC-4b
+   builds: (a) `editor` added to `DIALOG_NODE_TYPES` + pin test + render-in-Dialog
+   verification (advertisement change, no spec amendment — profiles are per-target
+   Companion advertisements under §10.2); (b) the Compose completion dropdown over
+   the existing engine seam (debounced per keystroke, top-N, tap inserts via the
+   normal local-edit delta path); (c) the per-prompt completion source in
+   jetpacs-dialog.el — during a picker prompt, `:edit-complete-function` resolves
+   from the COLLECTION via `completion-boundaries`/`all-completions` (the JC-5
+   buffer harvester is NOT a prerequisite; it later plugs into the same dropdown
+   for real editors). Conclusion path: editor + OK (`dialog.submit`); a
+   synchronized editor is never a stateful field, so Emacs reads the chosen value
+   from the MIRROR at conclusion, with RET-picks-top resolved Emacs-side.
+2. **Context-buffer cards: budgeted `rich_text` inside the dialog.** Keep the poc's
+   recording seams (`display-buffer` advice + `temp-buffer-show-hook`, gated on the
+   device-flow marker), render as `section_header` + `rich_text` through the Tier-0
+   span builder under a byte budget — both types ARE in the dialog profile, so v2
+   improves on the poc's 4000-char plain-text cards.
+
+**Rung split (consequence of decision 1):**
+- **JC-4a — the prompt floor, no picker:** `jetpacs-dialog.el` with the advised
+  simple prompts (`y-or-n-p`/`yes-or-no-p`/`read-string`/`read-from-minibuffer`/
+  `read-passwd`/`read-char`/`read-char-choice`/…), the sync-over-async pump, the
+  device-flow marker that survives `run-at-time` continuations (D2 makes the poc's
+  `jetpacs--in-action-handler` gate always-false at prompt time), context cards per
+  decision 2, and small closed collections as native `enum_list` (multi →
+  `:multi-select`, non-require-match → `:allow-add`).
+- **JC-4b — the capf picker:** items (a)-(c) above + device smokes (type-to-narrow,
+  tap-candidate, astral-in-candidate).
+- **Prerequisite (device half, either rung):** `DialogHost` wraps dialog content in
+  a plain `Column` with no `verticalScroll` (`MainActivity.kt:139`) — content below
+  the fold is unreachable. One-line fix + smoke; §18.1 forbids `lazy_column` NODES
+  in dialog specs, not the host container scrolling.
 *Exit gate:* dialog-builder goldens (byte-match + `check-profile 'dialog`); round-trip
 ERT with a stubbed `ebp-client-dialog-show` (`y-or-n-p`→t/nil, `read-string`→`fields.in`,
 `completing-read`→`fields.pick`, dismissed→`keyboard-quit`, timeout); assert no

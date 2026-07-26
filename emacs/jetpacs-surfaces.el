@@ -301,6 +301,62 @@ that value.  Only the error symbol is safe to print."
   "Non-nil inside an action handler (nil in an async continuation)."
   jetpacs--in-action-handler)
 
+(defvar jetpacs--dispatch-params nil
+  "The current `event.action' params, bound for the dispatch extent.
+Lets floor seams (`jetpacs-flow-continue') capture the event's context
+without every handler hand-threading it — the JC-2 lesson generalized:
+anything a continuation needs from the event must be CAPTURED at
+dispatch time, because the dynamic extent is gone when the timer fires.")
+
+(defvar jetpacs--device-flow nil
+  "Non-nil inside a device-originated continuation (decision D2/JC-4).
+Carries a plist (:surface S) captured from the originating event.  An
+action handler itself is NOT a device-flow extent for prompting — the
+no-prompts regime governs there; this marker exists precisely because
+D2 moves user interaction into `run-at-time' continuations, where
+`jetpacs-in-action-p' is nil and nothing else says the work was started
+from the device.")
+
+(defun jetpacs-device-flow-p ()
+  "Non-nil inside a device-originated continuation.
+This is the gate prompt bridging keys on: nil on desktop-initiated
+code paths, so advised prompts fall through to the real minibuffer."
+  (and jetpacs--device-flow t))
+
+(defun jetpacs-flow-surface ()
+  "The originating surface of the current device flow, or nil.
+Inside an action handler, the event's surface; inside a
+`jetpacs-flow-continue' continuation, the surface captured when the
+flow began.  Dialog and global events have none (SPEC 14.4)."
+  (or (plist-get jetpacs--device-flow :surface)
+      (and jetpacs--in-action-handler
+           (plist-get jetpacs--dispatch-params :surface))))
+
+(defun jetpacs-flow-continue (fn)
+  "Run FN soon, outside any dispatch extent, keeping the flow identity.
+THE way an action handler schedules its D2 effect: called inside a
+handler it captures the event's device-flow identity (surface included)
+so the continuation still knows it is device-originated — which is what
+lets a prompt raised there bridge to a Companion dialog instead of a
+minibuffer nobody is looking at.  Called inside an existing flow
+continuation it inherits that identity, so chains keep it.  Called
+anywhere else FN runs unmarked: a plain deferral.
+
+The continuation runs from a timer, therefore OUTSIDE
+`jetpacs-with-no-prompts' — that regime binds dynamically and ends with
+the handler (its through-timers guarantee covers only timers pumped
+INSIDE the extent).  That boundary is the design, not a leak: D2 bans
+blocking the DISPATCH, and the continuation is where interaction is
+allowed to resume."
+  (let ((flow (or jetpacs--device-flow
+                  (and jetpacs--in-action-handler
+                       (list :surface
+                             (plist-get jetpacs--dispatch-params :surface))))))
+    (run-at-time 0 nil
+                 (lambda ()
+                   (let ((jetpacs--device-flow flow))
+                     (funcall fn))))))
+
 (defun jetpacs--dispatch (client params fn)
   "Run FN for one `event.action' and derive its SPEC 14.4 status.
 FN is called with (ARGS PARAMS) and MUST return `accepted', `stale', or
@@ -314,6 +370,9 @@ logged: amendment #74 puts sensitive trigger data in `args'."
   (ignore client)
   (let ((args (plist-get params :args))
         (jetpacs--in-action-handler t)
+        ;; Event context for floor seams (`jetpacs-flow-continue');
+        ;; never logged — amendment #74 puts sensitive data in `args'.
+        (jetpacs--dispatch-params params)
         ;; Pin prompt redirection back to the built-ins: ivy/consult
         ;; reroute prompts to a keyboard UI the phone cannot drive.  A
         ;; conforming handler never prompts inside the dispatch extent

@@ -38,7 +38,8 @@ rm -f emacs/jetpacs-widgets.elc
 # plus the JC-1 Tier-0 buffer renderer.
 for f in jetpacs-async jetpacs-surfaces jetpacs-shell jetpacs-buffer \
          jetpacs-results jetpacs-tablist \
-         jetpacs-sections jetpacs-comint jetpacs-hypertext; do
+         jetpacs-sections jetpacs-comint jetpacs-hypertext \
+         jetpacs-dialog; do
   emacs -Q --batch -L emacs \
     --eval '(setq byte-compile-error-on-warn t)' \
     -f batch-byte-compile "emacs/$f.el"
@@ -71,6 +72,10 @@ emacs -Q --batch -L emacs -l test/jetpacs-sections-test.el \
 
 # JC-3b hypertext skin exit gate (golden + image resolver + nav).
 emacs -Q --batch -L emacs -l test/jetpacs-hypertext-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JC-4a prompt floor exit gate (advice gating, dialog specs, conclusions).
+emacs -Q --batch -L emacs -l test/jetpacs-dialog-test.el \
   -f ert-run-tests-batch-and-exit
 
 # Phase A cross-file seams + the comint P1s.  Several of these regress by

@@ -9,6 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -135,7 +137,15 @@ private fun DialogHost(
             // SPEC 18.1: a platform dismissal is a dismiss.
             onDismissRequest = { bridge.dialogDismiss(id) }) {
             Surface(shape = MaterialTheme.shapes.large, tonalElevation = 6.dp) {
-                androidx.compose.foundation.layout.Column(Modifier.padding(24.dp)) {
+                // The HOST container scrolls. SPEC 18.1 forbids lazy_column
+                // NODES in a dialog spec, not the window scrolling — and
+                // without this, any dialog taller than the window (a long
+                // enum_list picker, stacked context cards) has UNREACHABLE
+                // content below the fold. JC-4 prerequisite.
+                androidx.compose.foundation.layout.Column(
+                    Modifier
+                        .padding(24.dp)
+                        .verticalScroll(rememberScrollState())) {
                     RenderDialogRoot(id, dspec, bridge)
                 }
             }

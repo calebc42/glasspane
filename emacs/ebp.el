@@ -738,7 +738,11 @@ all, or nil for `ebp-request-timeout'.  EBP itself defines no deadline
 (SPEC 7.1); every one of these is a purely local choice, and expiry is
 ABANDONMENT — so it sends `rpc.cancel' before treating the request as
 concluded, and jsonrpc.el's own removal of the continuation supplies the
-matching \"ignore any later response\" half."
+matching \"ignore any later response\" half.
+
+Returns the request's wire ID, usable with `ebp-client-abandon' when the
+CALLER abandons before any deadline (a local `keyboard-quit' out of a
+synchronous wait, for instance)."
   (let* ((conn (ebp-client-connection client))
          (secs (cond ((eq timeout 'none) nil)
                      ((numberp timeout) timeout)
@@ -756,7 +760,21 @@ matching \"ignore any later response\" half."
      :error-fn (lambda (error) (funcall callback nil (or error '(:code -32603))))
      :timeout-fn (lambda ()
                    (ebp-client--cancel client id)
-                   (funcall callback nil '(:code -32000 :message "timeout"))))))
+                   (funcall callback nil '(:code -32000 :message "timeout"))))
+    id))
+
+(defun ebp-client-abandon (client id)
+  "Announce local abandonment of outstanding request ID (SPEC 7.1/7.5).
+The public face of the expiry path's `rpc.cancel', for when the CALLER
+gives up before any local deadline — canonically a `keyboard-quit' out
+of a synchronous wait over an async request, e.g. a bridged prompt
+dialog, which SPEC 18.1 then concludes with error 1301 and dismisses on
+the device.
+
+Send-only: jsonrpc.el still holds the continuation, so the request's
+callback WILL fire when the peer answers (normally with 1301).  A
+caller that abandons must arrange for its callback to no-op afterwards."
+  (ebp-client--cancel client id))
 
 (defun ebp-client-notify (client method params)
   "Send a notification (SPEC 7.1)."

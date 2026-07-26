@@ -179,11 +179,19 @@ CONFIG is `ebp-client-create' config; this wrapper owns
 `jetpacs-on-state-change') and `:before-replay-function'
 \(`jetpacs--before-replay': the applied-revision seed, then the SPEC
 10.3 step-3 required-root push when `jetpacs-shell' is loaded); a
-caller value for either is shadowed.  Everything else passes through."
+caller value for either is shadowed.  Everything else passes through.
+When `jetpacs-shell' is loaded, a ready hook drains the pushes SYNCING
+refused (`jetpacs-shell--on-ready').  Pushed after create, it runs
+AHEAD of the caller's :ready-function — the drained effects predate
+READY, so they belong before whatever the application does there.
+Adding it post-connect is safe: READY needs round trips that cannot
+complete before this function returns."
   (let ((client (apply #'ebp-connect host port
                        :state-changed-function #'jetpacs--on-state-changed
                        :before-replay-function #'jetpacs--before-replay
                        config)))
+    (when (fboundp 'jetpacs-shell--on-ready)
+      (push #'jetpacs-shell--on-ready (ebp-client-ready-functions client)))
     (jetpacs-attach client)))
 
 ;;;; Actions (the SPEC 14 shim over `ebp-client-register-action')

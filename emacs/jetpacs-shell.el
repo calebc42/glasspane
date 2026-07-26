@@ -156,6 +156,21 @@ registrations."
                  (setq jetpacs-shell--repush-pending nil)
                  (dolist (s surfaces) (jetpacs-shell-push s)))))))))
 
+(defun jetpacs-shell--on-ready (_client)
+  "Drain pushes that SYNCING refused, now that the session is READY.
+Installed by `jetpacs-connect'.  Replayed events conclude before
+`session.ready' (SPEC 10.3 step 4 precedes step 5), so every effect
+push a replayed handler deferred has already been queued by the time
+this runs; each drained push re-renders the CURRENT state through the
+registered builder, so collapsed duplicates are harmless."
+  (let ((surfaces (nreverse jetpacs-shell--repush-pending)))
+    (setq jetpacs-shell--repush-pending nil)
+    (dolist (s surfaces)
+      (condition-case err
+          (jetpacs-shell-push s)
+        (error (message "jetpacs: READY drain push of %s failed: %s"
+                        s (jetpacs--error-label err)))))))
+
 (defun jetpacs-shell--drop-pending (surface)
   "Forget SURFACE's queued repush; stop the timer once nothing is queued.
 Per surface: an explicit push of one owner's surface satisfies only its
@@ -463,7 +478,25 @@ a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
     (jetpacs-shell--drop-pending surface)
     (cond
      ((and (null entry) (null spec)) nil)      ; nothing registered
-     ((not (or jetpacs-shell--in-barrier (jetpacs-connected-p))) nil)
+     ((not (or jetpacs-shell--in-barrier (jetpacs-connected-p)))
+      ;; Refused, but not always forgotten.  During SYNCING this is the
+      ;; replay window: a replayed event's handler accepts and defers its
+      ;; re-push per D2, the deferral fires before READY, and dropping it
+      ;; here leaves the device showing the pre-event snapshot until the
+      ;; user's NEXT interaction — Emacs state right, display stale.
+      ;; Found by smoke-a8-coldstart on hardware.  Queue it for the READY
+      ;; drain (`jetpacs-shell--on-ready') whenever a builder is
+      ;; registered — the drain re-renders CURRENT state through it, so a
+      ;; one-off :spec's exact payload is not retained and does not need
+      ;; to be (the builder's fresh render is the D2 contract).  A pure
+      ;; :spec push with NO registered root has nothing to re-render and
+      ;; stays dropped, as do fully DISCONNECTED pushes: the barrier's
+      ;; required-root push is the designed reconnect path.
+      (when (and entry
+                 (jetpacs-client)
+                 (eq (ebp-client-state (jetpacs-client)) 'syncing))
+        (cl-pushnew surface jetpacs-shell--repush-pending :test #'equal))
+      nil)
      (t
       (let ((client (jetpacs-client-or-error))
             (snack (prog1 jetpacs-shell--snackbar

@@ -258,6 +258,51 @@ handler indexed an 18-revision-old snapshot."
                    '(:status "accepted")))
     (jetpacs-undefaction "a8.visit")))
 
+(ert-deftest jetpacs-floor-syncing-push-drains-at-ready ()
+  "A replayed handler's deferred re-push must survive the SYNCING gate.
+SPEC 10.3 step 4 delivers replayed events while the session is still
+SYNCING; a D2 handler accepts and defers its re-push, the deferral
+fires before READY, and `jetpacs-shell-push''s gate refuses it.
+Dropping it silently left the device on the pre-event snapshot until
+the user's NEXT tap — caught on hardware by smoke-a8-coldstart.  The
+refused push now queues in `jetpacs-shell--repush-pending' and
+`jetpacs-shell--on-ready' drains it."
+  (jetpacs-floor-test--with-client (client)
+    (let ((pushed '()))
+      (cl-letf (((symbol-function 'ebp-client-surface-update)
+                 (cl-function
+                  (lambda (_client surface _spec &key &allow-other-keys)
+                    (push surface pushed)
+                    7))))
+        (with-jetpacs-owner "a8drain"
+          (jetpacs-shell-define-root "a8drain"
+                                     (lambda ()
+                                       (jetpacs-text "drain me"))))
+        ;; The replay window: authenticated but not yet READY.
+        (setf (ebp-client-state client) 'syncing)
+        (should-not (jetpacs-shell-push "app:a8drain"))
+        (should-not pushed)
+        (should (member "app:a8drain" jetpacs-shell--repush-pending))
+        ;; A one-off :spec push refused in SYNCING requeues the SURFACE,
+        ;; not the payload — the drain re-renders through the registered
+        ;; builder — and dedupes rather than queueing twice.
+        (should-not (jetpacs-shell-push "app:a8drain"
+                                        :spec '(:t "text" :text "x")))
+        (should (= 1 (cl-count "app:a8drain" jetpacs-shell--repush-pending
+                               :test #'equal)))
+        ;; READY: the drain pushes through the registered builder.
+        (setf (ebp-client-state client) 'ready)
+        (jetpacs-shell--on-ready client)
+        (should (equal pushed '("app:a8drain")))
+        (should-not jetpacs-shell--repush-pending)
+        ;; Fully disconnected pushes stay dropped (the barrier owns those).
+        (setf (ebp-client-state client) 'closed)
+        (should-not (jetpacs-shell-push "app:a8drain"))
+        (should-not jetpacs-shell--repush-pending))
+      ;; Bare unclaim: `remove-root' would queue a tombstone for a
+      ;; surface no later floor test ever flushes.
+      (jetpacs--unclaim "surface" "app:a8drain"))))
+
 (ert-deftest jetpacs-floor-state-fanout ()
   (jetpacs-floor-test--with-client (client)
     (let (got)

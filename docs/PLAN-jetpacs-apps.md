@@ -152,6 +152,17 @@ existing convention: an ERT suite that runs offline, plus a device smoke script
 in `test/`.
 
 ### JA-1 — Device coherence *(no dependencies; ships standalone)*
+**DONE + DEVICE-VERIFIED 2026-07-26** (c08dec1 theme+granted-p, 2f8d6eb
+reminders+clip, 421399e device gate: theme mirror 7/7 — ready-hook push,
+visible vivendi chrome, device toggle round trip with zero manual sends,
+#36 native return; reminder tap 9/9 — real alarm at at_ms, Companion-injected
+owner/reminder_id, the SPEC 14.4 omit rule witnessed live; clip 6/6 — offline
+copy with NO session on the wire, 4096-byte cap proven in-band via
+clipboard.read).  `modus.toggle` ships; heading-monochrome-under-operandi is
+flagged for Caleb's eye (theme open-choice 2).  Two runner lessons recorded in
+the gate commit: adb `forward --remove` does not sever established TCP, and
+MainActivity does not restore the persisted surface on cold start (B18,
+now witnessed).
 
 **Lands:** `jetpacs-granted-p` (G1). `jetpacs-theme.el` rebuild-lite —
 extraction ports verbatim, wire half rewritten onto `ebp-client-theme-set` with
@@ -178,6 +189,22 @@ and its `on_tap` dispatches back into Emacs; `clipboard.copy` lands in another
 Android app while the socket is down.
 
 ### JA-2 — The app-tier floor *(forced by every rung below)*
+**CODE COMPLETE 2026-07-26** (11c0af8 utilities+flow, 7a7dfdc teardown,
+42febe4 buffer host+chrome; 345 elisp / 16 suites).  Landed exactly as
+briefed with the integration corrections: `jetpacs-flow-begin` (the name),
+`jetpacs-refused-p`, `jetpacs-buffer-funcall-shimmed`; B9 ratified as the
+floor commentary block (synchronous-when-cheap / durable-home / else
+`jetpacs-retry-later` → 1500 with the load-bearing forced queue.replay);
+teardown's local-first sweep order + the `jetpacs-shell--send-remove` W10
+loss-proofing (the refused-tombstone test drives ebp's real held branch);
+chrome representation A (one multi_view; back = the view.switch builtin;
+13.4 background-refresh omission pinned by the suite); the C7 drill adapter
+(minted id, deferred push, repeat-drill replace-top for free).
+**Still open on this rung: the device smokes** (smoke-stack, smoke-navigate,
+smoke-flow-begin, smoke-teardown, smoke-ja2-toast, smoke-ja2-retry-durable)
+**and the post-build adversarial review over the JA-1+JA-2 diff.**
+The §22.2/15.3 `retry_after_s` ratification amendment is flagged for Caleb
+(the wire carries it as a SPEC-8 advisory extra meanwhile).
 
 **Lands:** `jetpacs-teardown-owner` (G5), body taken from
 `jetpacs-app-unregister` but clearing state **per surface**, not by id prefix.

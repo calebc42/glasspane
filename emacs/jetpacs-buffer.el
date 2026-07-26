@@ -597,9 +597,14 @@ limit — so a spec containing two rendered regions, or a spec plus its
 budget.  Bind with `jetpacs-buffer-with-budget' around a build.")
 
 (defmacro jetpacs-buffer-with-budget (&rest body)
-  "Run BODY sharing ONE SPEC 4.5 render budget across every region."
+  "Run BODY sharing ONE SPEC 4.5 render budget across every region.
+IDEMPOTENT: an inner use joins the allowance already in force rather
+than granting a fresh one.  SPEC 4.5 counts these aggregates across one
+SurfaceSpec, and several skins wrap their own render — nesting that
+reset the budget let one snapshot carry N times the limit."
   (declare (indent 0))
-  `(let ((jetpacs-buffer-budget (jetpacs-buffer-budgets)))
+  `(let ((jetpacs-buffer-budget (or jetpacs-buffer-budget
+                                    (jetpacs-buffer-budgets))))
      ,@body))
 
 (defun jetpacs-buffer-budgets ()
@@ -623,7 +628,11 @@ The result never exceeds MAX-SPANS: the ellipsis replaces the last kept
 span rather than being appended past the budget."
   (cond
    ((or (null max-spans) (<= (length spans) max-spans)) spans)
-   ((<= max-spans 1) (list (jetpacs-span "…")))
+   ;; A spent budget yields NOTHING: the Companion rejects on a strict
+   ;; `>', so emitting one courtesy ellipsis past the cap 1201s the whole
+   ;; surface for the sake of a glyph.
+   ((<= max-spans 0) nil)
+   ((= max-spans 1) (list (jetpacs-span "…")))
    (t (append (seq-take spans (1- max-spans)) (list (jetpacs-span "…"))))))
 
 (defun jetpacs-buffer-node-bytes (node)
@@ -644,7 +653,9 @@ it.  Bind the budget with `jetpacs-buffer-with-budget' around the build."
         spans
       (let ((left (car budget)))
         (when (> (length spans) left)
-          (setq spans (jetpacs-buffer-cap-spans spans (max 1 left))))
+          ;; No `(max 1 left)': see `jetpacs-buffer-cap-spans' — one span
+          ;; over the aggregate is a refused surface, not a rounding.
+          (setq spans (jetpacs-buffer-cap-spans spans left)))
         (setcar budget (max 0 (- left (length spans))))
         spans))))
 

@@ -72,6 +72,12 @@ offline is lost and the surface stays present forever (SPEC 4.5
   "Non-nil during the SPEC 10.3 step-3 required-root push, where the
 session is still `syncing' and the READY guard must not apply.")
 
+(defconst jetpacs-shell--frame-headroom 2048
+  "Octets GATE 5 reserves from `max_frame_bytes' for the envelope.")
+
+(defconst jetpacs-shell--max-node-depth 20
+  "SPEC 4.5 fixed `max_node_depth' (contract limits.fixed).")
+
 (defconst jetpacs-shell--stateful-types
   '("text_input" "checkbox" "switch" "enum_list" "slider" "editor")
   "Node types `jetpacs-shell--strip-stateful' removes from a stale_spec.
@@ -452,6 +458,82 @@ Signals; never sanitizes (a sender MUST is loud)."
           (jetpacs-shell--check-builtins desc builtins what)
           (jetpacs-shell--check-features desc features what))))))
 
+(defconst jetpacs-shell--aggregate-limits
+  '((:max_rich_spans "rich_text" . :spans)
+    (:max_table_cells "table_row" . :cells)
+    (:max_chart_points "chart" . :series)
+    (:max_canvas_ops "canvas" . :ops))
+  "Welcome limit -> (NODE-TYPE . CHILD-MEMBER) for GATE 5's aggregate walk.
+SPEC 4.5: these are counts across ONE SurfaceSpec, not per node.")
+
+(defun jetpacs-shell--count-aggregates (spec)
+  "Aggregate counts and the deepest node path in SPEC, as one plist.
+Keys are the `jetpacs-shell--aggregate-limits' limit names plus
+`:depth'.  One walk: GATE 5 runs on every push, and a traversal per
+limit would cost more than the gate saves."
+  (let ((counts (list :depth 0)))
+    (cl-labels
+        ((bump (key n)
+           (setq counts (plist-put counts key (+ n (or (plist-get counts key)
+                                                       0)))))
+         (walk (node depth)
+           (cond
+            ((vectorp node) (mapc (lambda (v) (walk v depth)) node))
+            ((and (consp node) (keywordp (car node)))
+             (when (> depth (plist-get counts :depth))
+               (setq counts (plist-put counts :depth depth)))
+             (let ((type (plist-get node :t)))
+               (pcase-dolist (`(,limit ,want . ,member)
+                              jetpacs-shell--aggregate-limits)
+                 (when (equal type want)
+                   (bump limit
+                         (if (equal type "chart")
+                             ;; A chart's aggregate is POINTS, across series.
+                             (apply #'+ 0
+                                    (mapcar
+                                     (lambda (se)
+                                       (length (append (plist-get se :points)
+                                                       nil)))
+                                     (append (plist-get node member) nil)))
+                           (length (append (plist-get node member) nil)))))))
+             (let ((p node))
+               (while p
+                 (let ((k (pop p)) (v (pop p)))
+                   (unless (memq k jetpacs--opaque-members)
+                     (walk v (if (memq k '(:children :body :views))
+                                 (1+ depth) depth)))))))
+            ((consp node) (mapc (lambda (v) (walk v depth)) node))
+            ((hash-table-p node)
+             (maphash (lambda (_k v) (walk v (1+ depth))) node)))))
+      (walk spec 1))
+    counts))
+
+(defun jetpacs-shell--gate-size (client spec stale-spec)
+  "GATE 5: SPEC 4.5 SIZE — the sender MUST respect the reported limits.
+`max_frame_bytes', the four aggregate counts, and the fixed 20-level
+`max_node_depth'.  Nothing else in the sender measured any of these: the
+renderer budgets its own spans and bytes, but a spec assembled by any
+other builder — a chrome stack, a skin, a third-party Tier-1 — reached
+the socket unmeasured.  Over-frame is worse than a 1201: SPEC 6.2 makes
+it a `1400 frame-too-large' and a CLOSED connection."
+  (let ((limits (ebp-client-limits client)))
+    (dolist (s (delq nil (list spec stale-spec)))
+      (when-let* ((frame (plist-get limits :max_frame_bytes)))
+        (let ((bytes (string-bytes (jetpacs-node->canonical-json s))))
+          (when (> bytes (- frame jetpacs-shell--frame-headroom))
+            (error "jetpacs: spec is %d octets, over max_frame_bytes %d (SPEC 4.5)"
+                   bytes frame))))
+      (let ((counts (jetpacs-shell--count-aggregates s)))
+        (when (> (plist-get counts :depth) jetpacs-shell--max-node-depth)
+          (error "jetpacs: node depth %d exceeds max_node_depth %d (SPEC 4.5)"
+                 (plist-get counts :depth) jetpacs-shell--max-node-depth))
+        (pcase-dolist (`(,limit . ,_) jetpacs-shell--aggregate-limits)
+          (when-let* ((cap (plist-get limits limit))
+                      (n (plist-get counts limit)))
+            (when (> n cap)
+              (error "jetpacs: %d exceeds %s %d (SPEC 4.5 aggregate)"
+                     n (substring (symbol-name limit) 1) cap))))))))
+
 (defun jetpacs-shell--gate-capability (client surface)
   "GATE 3: a non-app namespace needs its granted surface capability."
   (let ((need (pcase (jetpacs-shell--surface-target surface)
@@ -605,6 +687,7 @@ spec (SPEC 13.4)" current-view)))
               (jetpacs-shell--gate-spec client surface spec stale-spec)
               (jetpacs-shell--gate-capability client surface)
               (jetpacs-shell--gate-amendments client spec)
+              (jetpacs-shell--gate-size client spec stale-spec)
               (when stale-spec
                 (jetpacs-shell--gate-amendments client stale-spec))
               ;; Snackbar rides the scaffold slot when the root is one —

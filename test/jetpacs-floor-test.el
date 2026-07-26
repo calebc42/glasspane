@@ -17,6 +17,7 @@
 (require 'jetpacs-async)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
+(require 'jetpacs-buffer)
 
 (defconst jetpacs-floor-test--core-types
   ["text" "row" "column" "box" "spacer" "divider" "button" "text_input"]
@@ -856,6 +857,92 @@ be guaranteed wrong in exactly the gating case."
     (should-not (jetpacs-node-advertised-p "text" :dialog))
     (should-not (jetpacs-builtin-advertised-p "view.switch" :dialog))
     (should-not (jetpacs-feature-advertised-p "image.https" :dialog))))
+
+
+;;;; Audit commit 3: SPEC 4.5 size (GATE 5) and the shared render budget
+
+(defun jetpacs-floor-test--gate-error (thunk)
+  "The error MESSAGE from THUNK, or nil.  A `should-error' alone is a
+vacuous pass here: a stub client with no connection signals from the
+send too, so the assertion must name WHICH gate fired."
+  (condition-case err (progn (funcall thunk) nil)
+    (error (error-message-string err))))
+
+(ert-deftest jetpacs-floor-gate-size-frame-bytes ()
+  "P1-3: nothing measured the spec against max_frame_bytes.  Over-frame
+is worse than a 1201 — SPEC 6.2 makes it 1400 and a CLOSED connection."
+  (jetpacs-floor-test--with-client
+      (client :limits '(:max_frame_bytes 4096))
+    (let ((msg (jetpacs-floor-test--gate-error
+                (lambda ()
+                  (jetpacs-shell-push
+                   "app:demo" :spec (jetpacs-text (make-string 5000 ?x)))))))
+      (should (string-match-p "max_frame_bytes" msg)))
+    ;; A small spec clears GATE 5 and reaches the send.
+    (cl-letf (((symbol-function 'ebp-client-surface-update)
+               (cl-function (lambda (&rest _) 1))))
+      (should (= 1 (jetpacs-shell-push "app:demo"
+                                       :spec (jetpacs-text "small")))))))
+
+(ert-deftest jetpacs-floor-gate-size-aggregates-and-depth ()
+  "The four SPEC 4.5 aggregates are counted across the WHOLE spec, and
+the fixed 20-level node depth is enforced — neither was measured before."
+  (jetpacs-floor-test--with-client
+      (client :profiles '(:app (:node_types ["text" "column" "rich_text"]
+                                :builtins [] :features []))
+              :limits '(:max_frame_bytes 4194304 :max_rich_spans 4))
+    ;; Two rich_text nodes of 3 spans each = 6 > 4.  Each node alone is
+    ;; under the cap — the AGGREGATE is the whole point.
+    (let ((msg (jetpacs-floor-test--gate-error
+                (lambda ()
+                  (jetpacs-shell-push
+                   "app:demo"
+                   :spec (jetpacs-column
+                          (jetpacs-rich-text (list (jetpacs-span "a")
+                                                   (jetpacs-span "b")
+                                                   (jetpacs-span "c")))
+                          (jetpacs-rich-text (list (jetpacs-span "d")
+                                                   (jetpacs-span "e")
+                                                   (jetpacs-span "f")))))))))
+      (should (string-match-p "max_rich_spans" msg)))
+    ;; 25 nested columns blow the fixed depth cap.
+    (let* ((deep (jetpacs-text "leaf"))
+           (_ (dotimes (_i 25) (setq deep (jetpacs-column deep))))
+           (msg (jetpacs-floor-test--gate-error
+                 (lambda () (jetpacs-shell-push "app:demo" :spec deep)))))
+      (should (string-match-p "max_node_depth" msg)))))
+
+(ert-deftest jetpacs-floor-render-budget-is-idempotent ()
+  "P1-2: SPEC 4.5 counts across ONE SurfaceSpec, so a nested budget wrap
+must JOIN the allowance in force, not grant a fresh one — the chrome
+stack puts N screens in one spec."
+  (jetpacs-floor-test--with-client
+      (client :limits '(:max_frame_bytes 4194304 :max_rich_spans 6))
+    (jetpacs-buffer-with-budget
+      (should (= (car jetpacs-buffer-budget) 6))
+      (jetpacs-buffer-spend-spans (list (jetpacs-span "a")
+                                        (jetpacs-span "b")
+                                        (jetpacs-span "c")
+                                        (jetpacs-span "d")))
+      (should (= (car jetpacs-buffer-budget) 2))
+      ;; The nested wrap does NOT reset to 6.
+      (jetpacs-buffer-with-budget
+        (should (= (car jetpacs-buffer-budget) 2))))))
+
+(ert-deftest jetpacs-floor-cap-spans-spends-to-nothing ()
+  "A spent budget yields NOTHING: the Companion rejects on a strict `>',
+so one courtesy ellipsis past the cap 1201s the whole surface."
+  (should (equal (jetpacs-buffer-cap-spans (list (jetpacs-span "a")) 0) nil))
+  (should (= 1 (length (jetpacs-buffer-cap-spans
+                        (list (jetpacs-span "a") (jetpacs-span "b")) 1))))
+  (jetpacs-floor-test--with-client
+      (client :limits '(:max_frame_bytes 4194304 :max_rich_spans 1))
+    (jetpacs-buffer-with-budget
+      (jetpacs-buffer-spend-spans (list (jetpacs-span "a")))
+      (should (= (car jetpacs-buffer-budget) 0))
+      ;; Budget spent: the next region emits no spans at all.
+      (should (null (jetpacs-buffer-spend-spans
+                     (list (jetpacs-span "b") (jetpacs-span "c"))))))))
 
 (provide 'jetpacs-floor-test)
 ;;; jetpacs-floor-test.el ends here

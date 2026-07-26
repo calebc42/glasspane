@@ -108,14 +108,15 @@ never the whole push."
   (let ((stack (gethash surface jetpacs-chrome--stacks)))
     (unless stack
       (error "jetpacs-chrome: no chrome stack for %s" surface))
-    (let (views prev-id)
+    (jetpacs-buffer-with-budget
+     (let (views prev-id)
       (dolist (entry (reverse stack))
         (push (cons (car entry)
                     (funcall (cdr entry)
                              (and prev-id (jetpacs-view-switch prev-id))))
               views)
         (setq prev-id (car entry)))
-      (jetpacs-multi-view (nreverse views) (caar stack)))))
+      (jetpacs-multi-view (nreverse views) (caar stack))))))
 
 (cl-defun jetpacs-chrome-define-root (surface-or-owner id builder
                                                        &key required)
@@ -223,11 +224,13 @@ mutated would answer rejected for an effect that happened."
     (jetpacs-chrome--stack-insert
      surface id
      (lambda (back)
-       (jetpacs-buffer-with-budget
-         (jetpacs-chrome-screen
-          label
-          (apply #'jetpacs-column (funcall builder))
-          :back back))))
+       ;; No budget wrap HERE: `jetpacs-chrome--build' wraps the whole
+       ;; multi_view once, because SPEC 4.5 counts across the SurfaceSpec
+       ;; and the stack puts N screens in one.
+       (jetpacs-chrome-screen
+        label
+        (apply #'jetpacs-column (funcall builder))
+        :back back)))
     (run-at-time 0 nil
                  (lambda ()
                    (condition-case err

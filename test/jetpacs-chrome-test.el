@@ -262,5 +262,168 @@ snapshot still carries every view with initial_view at the stack top."
       (jetpacs-teardown-owner "filesapp")
       (should-not (jetpacs-chrome-stack "filesapp")))))
 
+
+;;;; E1a: the poison transaction
+
+(defun jetpacs-chrome-test--gate-error (thunk)
+  "THUNK's error message, or nil — the assertion must name WHICH gate
+fired: a bare `should-error' here can pass on an unrelated signal."
+  (condition-case err (progn (funcall thunk) nil)
+    (error (error-message-string err))))
+
+(defmacro jetpacs-chrome-test--clean-repush (&rest body)
+  "Run BODY, then drop the repush queue and timer the tests arm."
+  (declare (indent 0))
+  `(unwind-protect (progn ,@body)
+     (setq jetpacs-shell--repush-pending nil)
+     (when (timerp jetpacs-shell--repush-timer)
+       (cancel-timer jetpacs-shell--repush-timer)
+       (setq jetpacs-shell--repush-timer nil))))
+
+(ert-deftest jetpacs-chrome-push-screen-rolls-back-on-gate-failure ()
+  "Transactional push: a screen the gates refuse never enters the model.
+Pre-fix the mutated stack was KEPT, `jetpacs-chrome--build' rebuilt the
+poisoned entry on every later push, and the surface was unpushable for
+the process lifetime."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--clean-repush
+      (jetpacs-chrome-test--recording recs
+        (with-jetpacs-owner "filesapp"
+          (jetpacs-chrome-define-root "filesapp" "hub"
+                                      (lambda (_back)
+                                        (jetpacs-chrome-screen
+                                         "Hub" (jetpacs-text "hub")))))
+        (should (= 42 (jetpacs-shell-push "app:filesapp")))
+        ;; The bad screen: an unadvertised node type trips GATE 1.
+        (let ((msg (jetpacs-chrome-test--gate-error
+                    (lambda ()
+                      (jetpacs-chrome-push-screen
+                       "app:filesapp" "bad"
+                       (lambda (_back) (jetpacs-progress :value 0.5)))))))
+          (should (string-match-p "not advertised" msg)))
+        ;; Rolled back: the model never held the refused screen…
+        (should (equal (jetpacs-chrome-stack "app:filesapp") '("hub")))
+        ;; …the consumed repush entry was restored…
+        (should (member "app:filesapp" jetpacs-shell--repush-pending))
+        ;; …and the surface is still pushable.
+        (should (= 42 (jetpacs-shell-push "app:filesapp")))))))
+
+(ert-deftest jetpacs-chrome-reentrant-rollback-restores-the-old-builder ()
+  "The `setcdr' sharing trap: replacing an EXISTING id mutated a cons
+shared with the saved stack, so a rollback restored the shape but kept
+the poisoned builder.  The replace branch must CONS fresh."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--clean-repush
+      (jetpacs-chrome-test--recording recs
+        (with-jetpacs-owner "filesapp"
+          (jetpacs-chrome-define-root "filesapp" "hub"
+                                      (lambda (_back)
+                                        (jetpacs-chrome-screen
+                                         "Hub" (jetpacs-text "hub")))))
+        (jetpacs-chrome-push-screen "app:filesapp" "detail"
+                                    (lambda (back)
+                                      (jetpacs-chrome-screen
+                                       "Detail" (jetpacs-text "ok")
+                                       :back back)))
+        ;; Re-entrant push of the SAME id with a gate-failing builder.
+        (should (jetpacs-chrome-test--gate-error
+                 (lambda ()
+                   (jetpacs-chrome-push-screen
+                    "app:filesapp" "detail"
+                    (lambda (_back) (jetpacs-progress :value 0.1))))))
+        (should (equal (jetpacs-chrome-stack "app:filesapp")
+                       '("detail" "hub")))
+        ;; The OLD builder survived the rollback: pushable, and the wire
+        ;; carries the good detail screen.
+        (should (= 42 (jetpacs-shell-push "app:filesapp")))
+        (should (string-match-p "\"ok\""
+                                (jetpacs-node->canonical-json
+                                 (cadr (car recs)))))))))
+
+(ert-deftest jetpacs-chrome-pop-commits-even-when-the-push-fails ()
+  "The other half of the design rule: a REMOVAL can only shrink the
+stack, so it commits unconditionally — the push loss is logged and
+requeued, never signalled."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--clean-repush
+      (jetpacs-chrome-test--recording recs
+        (with-jetpacs-owner "filesapp"
+          (jetpacs-chrome-define-root "filesapp" "hub"
+                                      (lambda (_back)
+                                        (jetpacs-chrome-screen
+                                         "Hub" (jetpacs-text "hub")))))
+        (jetpacs-chrome-push-screen "app:filesapp" "detail"
+                                    (lambda (back)
+                                      (jetpacs-chrome-screen
+                                       "Detail" (jetpacs-text "d")
+                                       :back back)))
+        ;; Make the NEXT push fail regardless of stack content.
+        (cl-letf (((symbol-function 'jetpacs-shell-push)
+                   (lambda (&rest _) (error "gate says no"))))
+          (should-not (jetpacs-chrome-pop-screen "app:filesapp")))
+        ;; The pop COMMITTED and queued the re-render.
+        (should (equal (jetpacs-chrome-stack "app:filesapp") '("hub")))
+        (should (member "app:filesapp" jetpacs-shell--repush-pending))))))
+
+(ert-deftest jetpacs-chrome-drill-failure-does-not-poison-the-stack ()
+  "Deferring the drill's push dodged the rejected-flattening but NOT the
+poison: the failed entry stayed and every later push of the surface
+signalled.  The deferred failure must roll the insert back."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--clean-repush
+      (jetpacs-chrome-test--recording recs
+        (with-jetpacs-owner "filesapp"
+          (jetpacs-chrome-define-root "filesapp" "hub"
+                                      (lambda (_back)
+                                        (jetpacs-chrome-screen
+                                         "Hub" (jetpacs-text "hub")))))
+        (should (jetpacs-chrome--drill
+                 "app:filesapp"
+                 (lambda () (list (jetpacs-progress :value 0.2)))
+                 "*bad buffer*"))
+        ;; Drain the deferred push (run-at-time 0).
+        (cl-loop repeat 20
+                 until (= 1 (length (jetpacs-chrome-stack "app:filesapp")))
+                 do (accept-process-output nil 0.02))
+        (should (equal (jetpacs-chrome-stack "app:filesapp") '("hub")))
+        (should (member "app:filesapp" jetpacs-shell--repush-pending))
+        (should (= 42 (jetpacs-shell-push "app:filesapp")))))))
+
+(ert-deftest jetpacs-chrome-repush-drain-is-isolated-per-surface ()
+  "One owner's gate failure must not drop every other owner's queued
+re-render: the debounce drain isolates per surface, like the READY
+drain always has."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--clean-repush
+      (jetpacs-chrome-test--recording recs
+        (with-jetpacs-owner "bad"
+          (jetpacs-shell-define-root "bad"
+                                     (lambda () (jetpacs-progress :value 1))))
+        (with-jetpacs-owner "good"
+          (jetpacs-shell-define-root "good" (lambda () (jetpacs-text "g"))))
+        (setq recs nil)
+        (jetpacs-shell--schedule-repush "app:bad")
+        (jetpacs-shell--schedule-repush "app:good")
+        ;; Fire the debounce deterministically.
+        (let ((timer jetpacs-shell--repush-timer))
+          (should (timerp timer))
+          (funcall (timer--function timer)))
+        (should (equal (mapcar #'car recs) '("app:good")))))))
+
+(ert-deftest jetpacs-chrome-async-flush-is-isolated-per-owner ()
+  "The async settle drain has the same obligation as the repush drain."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--clean-repush
+      (jetpacs-chrome-test--recording recs
+        (with-jetpacs-owner "bad"
+          (jetpacs-shell-define-root "bad"
+                                     (lambda () (jetpacs-progress :value 1))))
+        (with-jetpacs-owner "good"
+          (jetpacs-shell-define-root "good" (lambda () (jetpacs-text "g"))))
+        (setq recs nil)
+        (setq jetpacs-async--pending-owners '("good" "bad"))
+        (jetpacs-async--flush-push)
+        (should (equal (mapcar #'car recs) '("app:good")))))))
+
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

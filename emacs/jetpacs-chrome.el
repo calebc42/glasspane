@@ -136,17 +136,61 @@ re-binds it around every build.  Returns the surface id."
 An ID already on the stack TRUNCATES to that entry and replaces its
 builder — re-entrant navigation; without this `jetpacs-multi-view'
 signals a duplicate view id and the surface degrades to the error
-screen.  Pure stack mutation: no push."
+screen.  Pure stack mutation: no push.
+
+Returns a nullary UNDO thunk restoring the prior stack.  Two rules make
+the undo exact.  (a) The replace branch CONSES a fresh entry instead of
+`setcdr'-ing the found one in place: that cons is SHARED with the saved
+stack, so an in-place replace would survive any restore of it and a
+rolled-back entry would keep poisoning every later build.  (b) The undo
+restores only while the stored stack is still `eq' to the one this
+insert produced — a deferred rollback must never discard a navigation
+that happened in between."
   (let ((stack (gethash surface jetpacs-chrome--stacks)))
     (unless stack
       (error "jetpacs-chrome: no chrome stack for %s" surface))
     (jetpacs--check-identifier id "screen id")
-    (let ((tail (cl-member id stack :key #'car :test #'equal)))
-      (if tail
-          (progn (setcdr (car tail) builder)
-                 (puthash surface tail jetpacs-chrome--stacks))
-        (puthash surface (cons (cons id builder) stack)
-                 jetpacs-chrome--stacks)))))
+    (let* ((tail (cl-member id stack :key #'car :test #'equal))
+           (new (cons (cons id builder) (if tail (cdr tail) stack))))
+      (puthash surface new jetpacs-chrome--stacks)
+      (lambda ()
+        (when (eq new (gethash surface jetpacs-chrome--stacks))
+          (puthash surface stack jetpacs-chrome--stacks))))))
+
+(defun jetpacs-chrome--push-or-undo (surface view undo)
+  "Push SURFACE forcing VIEW; a signalling push runs UNDO and re-raises.
+The transactional half of the kit's design rule: the reply must
+describe the MODEL mutation, and an ADDITION is committed only if the
+surface stays renderable — `jetpacs-chrome--build' rebuilds the whole
+stack on every push, so an entry that failed a gate would otherwise
+refuse every later push of the surface for the process lifetime."
+  (condition-case err
+      (jetpacs-shell-push surface :current-view view)
+    (error
+     (funcall undo)
+     ;; `jetpacs-shell-push' consumed SURFACE's queued repush entry
+     ;; (--drop-pending) BEFORE the gate signalled; without this line a
+     ;; rolled-back navigation also silently costs an unrelated pending
+     ;; re-render.  No-op while disconnected, which is correct.
+     (jetpacs-shell--schedule-repush surface)
+     (signal (car err) (cdr err)))))
+
+(defun jetpacs-chrome--push-quietly (surface view)
+  "Push SURFACE forcing VIEW; a signalling push logs and returns nil.
+The commit-unconditionally half of the design rule: a REMOVAL (pop,
+reset) can only shrink the stack, so it cannot make the surface less
+renderable than it was — the mutation is kept, the presentation loss is
+logged, and the requeued push renders the truncated stack."
+  (condition-case err
+      (jetpacs-shell-push surface :current-view view)
+    (error
+     (jetpacs-shell--schedule-repush surface)
+     ;; VIEW and SURFACE are app-minted wire ids already on the wire —
+     ;; naming them is not a SPEC 23.3 exposure, and a bare error label
+     ;; alone ("error") locates nothing.
+     (message "jetpacs-chrome: push of %s (view %s) failed: %s"
+              surface view (jetpacs--error-label err))
+     nil)))
 
 (defun jetpacs-chrome-push-screen (surface-or-owner id builder)
   "Push screen ID onto SURFACE's stack and navigate to it.
@@ -157,12 +201,21 @@ handler pass (plist-get params :surface): the wire names the surface the
 user actually tapped, which is not necessarily this owner's primary one.
 \(`jetpacs--dispatch' binds the registering owner now, so the zero-arg
 default is no longer simply wrong — it is merely a different surface.)
-Returns the claimed revision, or nil (disconnected, or the W10 ceiling
-refused) — nil is NOT failure: the stack mutation is kept and the next
-successful push renders it.  Never retry-loop on nil."
-  (let ((surface (jetpacs-shell--resolve-surface surface-or-owner)))
-    (jetpacs-chrome--stack-insert surface id builder)
-    (jetpacs-shell-push surface :current-view id)))
+
+TRANSACTIONAL: a push the gates refuse rolls the stack back and
+re-signals, so a screen that cannot render never enters the model — an
+entry that failed a gate would otherwise refuse EVERY later push of the
+surface (`jetpacs-chrome--build' rebuilds the stack each time).  A
+deferred caller (`jetpacs-flow-continue') must wrap in `condition-case'
+or the re-signal dies in a timer.  Returns the claimed revision, or nil
+while disconnected — nil is NOT failure: the mutation is kept and the
+next successful push renders it.  Never retry-loop on nil.  (The W10
+sender ceiling does NOT yield nil here: `ebp-client--surface-request'
+claims and returns the revision before the ceiling can refuse; the
+refused frame is retried by the B8 repush.)"
+  (let* ((surface (jetpacs-shell--resolve-surface surface-or-owner))
+         (undo (jetpacs-chrome--stack-insert surface id builder)))
+    (jetpacs-chrome--push-or-undo surface id undo)))
 
 (defun jetpacs-chrome-pop-screen (surface-or-owner)
   "Pop SURFACE's stack and navigate to the screen below (Emacs-side
@@ -172,7 +225,7 @@ calls this).  At the root: idempotent no-op returning nil."
          (stack (gethash surface jetpacs-chrome--stacks)))
     (when (cdr stack)
       (puthash surface (cdr stack) jetpacs-chrome--stacks)
-      (jetpacs-shell-push surface :current-view (caar (cdr stack))))))
+      (jetpacs-chrome--push-quietly surface (caar (cdr stack))))))
 
 (defun jetpacs-chrome-reset-screens (surface-or-owner)
   "Truncate SURFACE's stack to its root and navigate there.
@@ -183,7 +236,7 @@ doubles as a hub refresh."
     (when stack
       (let ((root (last stack)))
         (puthash surface root jetpacs-chrome--stacks)
-        (jetpacs-shell-push surface :current-view (caar root))))))
+        (jetpacs-chrome--push-quietly surface (caar root))))))
 
 (defun jetpacs-chrome-stack (surface-or-owner)
   "SURFACE's screen ids, top first, or nil (read-only)."
@@ -222,23 +275,31 @@ truncate-and-replace gives repeat-drill replace-top semantics for free.
 The presenting push is DEFERRED: `jetpacs-shell-push' signals on gate
 failure, and a synchronous signal inside a handler after the stack
 mutated would answer rejected for an effect that happened."
-  (let ((id (jetpacs-wire-id "drill" label)))
-    (jetpacs-chrome--stack-insert
-     surface id
-     (lambda (back)
-       ;; No budget wrap HERE: `jetpacs-chrome--build' wraps the whole
-       ;; multi_view once, because SPEC 4.5 counts across the SurfaceSpec
-       ;; and the stack puts N screens in one.
-       (jetpacs-chrome-screen
-        label
-        (apply #'jetpacs-column (funcall builder))
-        :back back)))
+  (let* ((id (jetpacs-wire-id "drill" label))
+         (undo (jetpacs-chrome--stack-insert
+                surface id
+                (lambda (back)
+                  ;; No budget wrap HERE: `jetpacs-chrome--build' wraps the
+                  ;; whole multi_view once, because SPEC 4.5 counts across
+                  ;; the SurfaceSpec and the stack puts N screens in one.
+                  (jetpacs-chrome-screen
+                   label
+                   (apply #'jetpacs-column (funcall builder))
+                   :back back)))))
     (run-at-time 0 nil
                  (lambda ()
                    (condition-case err
                        (jetpacs-shell-push surface :current-view id)
-                     (error (message "jetpacs-chrome: drill push failed: %s"
-                                     (jetpacs--error-label err))))))
+                     (error
+                      ;; Deferring dodged the rejected-flattening; it does
+                      ;; NOT dodge the poison — the failed entry would be
+                      ;; rebuilt by every later push.  Roll it back (the
+                      ;; undo no-ops if navigation moved the stack since)
+                      ;; and let the requeued push render the prior state.
+                      (funcall undo)
+                      (jetpacs-shell--schedule-repush surface)
+                      (message "jetpacs-chrome: drill push of %s (view %s) \
+failed: %s" surface id (jetpacs--error-label err))))))
     t))
 
 (defvar jetpacs-navigate-drill-function)

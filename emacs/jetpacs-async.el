@@ -48,6 +48,7 @@
 ;; so this file byte-compiles clean and can load before them.
 (defvar jetpacs-current-owner)                 ; jetpacs-surfaces.el
 (declare-function jetpacs-shell-push "jetpacs-shell" (&optional owner))
+(declare-function jetpacs--error-label "jetpacs-surfaces" (err))
 
 (cl-defstruct (jetpacs-async--entry (:constructor jetpacs-async--entry-make)
                                     (:copier nil))
@@ -106,8 +107,13 @@ reported rather than silently dropped."
              'jetpacs-async
              "completion outside `with-jetpacs-owner': no surface to re-render"
              :warning)
-          ;; The shell no-ops for an owner with no live root.
-          (jetpacs-shell-push owner))))))
+          ;; The shell no-ops for an owner with no live root.  Isolated
+          ;; per owner (the drain-discipline of `jetpacs-shell--on-ready'):
+          ;; one owner's gate failure must not starve the rest.
+          (condition-case err
+              (jetpacs-shell-push owner)
+            (error (message "jetpacs-async: repush of %s failed: %s"
+                            owner (jetpacs--error-label err)))))))))
 
 ;; --- The loader ------------------------------------------------------------
 

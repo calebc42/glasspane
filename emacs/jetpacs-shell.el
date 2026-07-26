@@ -236,7 +236,14 @@ registrations."
                (setq jetpacs-shell--repush-timer nil)
                (let ((surfaces (nreverse jetpacs-shell--repush-pending)))
                  (setq jetpacs-shell--repush-pending nil)
-                 (dolist (s surfaces) (jetpacs-shell-push s)))))))))
+                 (dolist (s surfaces)
+                   ;; Isolated per surface, matching `--on-ready': one
+                   ;; owner's gate failure must not drop every OTHER
+                   ;; owner's queued re-render on the floor.
+                   (condition-case err
+                       (jetpacs-shell-push s)
+                     (error (message "jetpacs: repush of %s failed: %s"
+                                     s (jetpacs--error-label err))))))))))))
 
 (defun jetpacs-shell--on-ready (_client)
   "Drain pushes that SYNCING refused, now that the session is READY.

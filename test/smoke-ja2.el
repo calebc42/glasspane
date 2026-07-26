@@ -57,11 +57,16 @@
       (let ((surface (plist-get params :surface)))
         (jetpacs-flow-continue
          (lambda ()
-           (jetpacs-chrome-push-screen
-            surface "detail"
-            (lambda (back)
-              (jetpacs-chrome-screen "Detail" (jetpacs-text "drilled")
-                                     :back back)))))
+           ;; Deferred caller: the transactional re-signal would die in a
+           ;; timer — wrap, as push-screen's docstring now requires.
+           (condition-case err
+               (jetpacs-chrome-push-screen
+                surface "detail"
+                (lambda (back)
+                  (jetpacs-chrome-screen "Detail" (jetpacs-text "drilled")
+                                         :back back)))
+             (error (message "smoke-ja2: drill push failed: %s"
+                             (jetpacs--error-label err))))))
         'accepted))))
 
 ;; P5/P6 second owner.

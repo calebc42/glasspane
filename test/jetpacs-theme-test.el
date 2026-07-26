@@ -311,5 +311,99 @@ refusal is a clean rejected, not a no-prompts warning."
                        (jetpacs-theme--blend "#c080ff" "#101418" 0.22)))
         (should (equal (plist-get colors :tertiary) "#66d9ef"))))))
 
+
+;;;; E6: off, the payload seam, synchronous READY, and the wiring pins
+
+(ert-deftest jetpacs-theme-off-emits-nothing ()
+  "Mode `off': base NEVER touches theme.set — no frame, no clear.
+Pre-fix, merely loading this file made the default mode clear a
+Tier-1's persisted palette 0.2 s after every READY."
+  (jetpacs-theme-test--attached (jetpacs-theme-test--client)
+    (let ((sent 0)
+          (jetpacs-theme-mode 'off))
+      (cl-letf (((symbol-function 'ebp-client-theme-set)
+                 (lambda (&rest _) (cl-incf sent))))
+        (jetpacs-theme--send-now)
+        (jetpacs-theme--push-mode)
+        (should-not (timerp jetpacs-theme--timer))
+        (jetpacs-theme--on-ready client)
+        (should (= sent 0))))))
+
+(ert-deftest jetpacs-theme-payload-function-wins ()
+  "An explicit `jetpacs-theme-payload-function' beats the mode matrix —
+base's machinery becomes the Tier-1's transport, not its competitor.
+A nil return means nothing-to-push."
+  (jetpacs-theme-test--attached (jetpacs-theme-test--client)
+    (let ((captured nil)
+          (jetpacs-theme-mode 'mirror)
+          (jetpacs-theme-payload-function
+           (lambda () '(:colors null :syntax null :dark t))))
+      (cl-letf (((symbol-function 'ebp-client-theme-set)
+                 (lambda (_c &rest args) (setq captured args))))
+        (jetpacs-theme--send-now)
+        (should (equal captured '(:colors null :syntax null :dark t)))
+        (setq captured :unset
+              jetpacs-theme-payload-function (lambda () nil))
+        (jetpacs-theme--send-now)
+        (should (eq captured :unset))))))
+
+(ert-deftest jetpacs-theme-ready-sends-synchronously ()
+  "The READY paint is NOT debounced: the debounce exists for
+load-theme's disable+enable pair, and deferring the FIRST frame was a
+0.2 s wrong-palette flash on every pairing."
+  (jetpacs-theme-test--attached (jetpacs-theme-test--client)
+    (let ((sent 0)
+          (jetpacs-theme-mode 'system))
+      (cl-letf (((symbol-function 'ebp-client-theme-set)
+                 (lambda (&rest _) (cl-incf sent))))
+        (jetpacs-theme--on-ready client)
+        ;; Sent NOW — no timer armed, nothing pending.
+        (should (= sent 1))
+        (should-not (timerp jetpacs-theme--timer))))))
+
+(ert-deftest jetpacs-theme-debounce-regate-blocks-a-changed-session ()
+  "The inner re-gate: the timer body re-checks grant and connection,
+because both can change in 0.2 s.  The audit measured this guard
+replaceable by (when t ...) with every theme test green — this is the
+missing witness."
+  (jetpacs-theme-test--attached (jetpacs-theme-test--client)
+    (let ((sent 0)
+          (jetpacs-theme-mode 'system))
+      (cl-letf (((symbol-function 'ebp-client-theme-set)
+                 (lambda (&rest _) (cl-incf sent))))
+        (jetpacs-theme--push-mode)
+        (should (timerp jetpacs-theme--timer))
+        ;; The session loses the grant before the timer fires.  Cancel
+        ;; the REAL timer and drive its function by hand — funcalling
+        ;; alone leaves the scheduled object queued, and it would fire
+        ;; 0.2 s later inside a LATER test's drain loop (measured: it
+        ;; polluted the burst test two tests down).
+        (setf (ebp-client-granted client) ["editor.sync"])
+        (let ((tm jetpacs-theme--timer))
+          (cancel-timer tm)
+          (funcall (timer--function tm)))
+        (should (= sent 0))))))
+
+(ert-deftest jetpacs-theme-wiring-is-pinned ()
+  "The audit deleted BOTH load-time wirings with the suite green: the
+enable/disable-theme hooks and the ready-hook install.  Pin all three."
+  (should (memq #'jetpacs-theme--on-theme-change enable-theme-functions))
+  (should (memq #'jetpacs-theme--on-theme-change disable-theme-functions))
+  (let ((client (jetpacs-theme-test--client)))
+    (jetpacs--install-ready-hooks client)
+    (should (memq #'jetpacs-theme--on-ready
+                  (ebp-client-ready-functions client)))))
+
+(ert-deftest jetpacs-theme-modus-module-is-hook-free ()
+  "`jetpacs-modus' is the JA-10 substrate: requiring it must observably
+change NOTHING — a Tier-1 loads it for the queries, not the machinery."
+  (let ((enable-theme-functions nil)
+        (disable-theme-functions nil)
+        (jetpacs-teardown-functions nil))
+    (load "jetpacs-modus" nil t)   ; re-load from load-path, fresh
+    (should-not enable-theme-functions)
+    (should-not disable-theme-functions)
+    (should-not jetpacs-teardown-functions)))
+
 (provide 'jetpacs-theme-test)
 ;;; jetpacs-theme-test.el ends here

@@ -353,14 +353,21 @@ borrows the slot per prompt either way (it restores whatever it found)."
                        :state-changed-function #'jetpacs--on-state-changed
                        :before-replay-function #'jetpacs--before-replay
                        config)))
-    (when (fboundp 'jetpacs-shell--on-ready)
-      (push #'jetpacs-shell--on-ready (ebp-client-ready-functions client)))
-    ;; ready-functions run in list order = reverse push order, so theme
-    ;; pushed after shell runs BEFORE the shell drain: chrome is painted
-    ;; before content arrives.
-    (when (fboundp 'jetpacs-theme--on-ready)
-      (push #'jetpacs-theme--on-ready (ebp-client-ready-functions client)))
+    (jetpacs--install-ready-hooks client)
     (jetpacs-attach client)))
+
+(defun jetpacs--install-ready-hooks (client)
+  "Install the per-client READY hooks the loaded modules provide.
+Named (rather than inline in `jetpacs-connect') so a suite can pin the
+wiring — the audit found both theme wirings deletable with every test
+green.  ready-functions run in list order = reverse push order, so
+theme pushed after shell runs BEFORE the shell drain: chrome is painted
+before content arrives — and `jetpacs-theme--on-ready' sends its first
+frame synchronously, which is what makes that ordering true."
+  (when (fboundp 'jetpacs-shell--on-ready)
+    (push #'jetpacs-shell--on-ready (ebp-client-ready-functions client)))
+  (when (fboundp 'jetpacs-theme--on-ready)
+    (push #'jetpacs-theme--on-ready (ebp-client-ready-functions client))))
 
 ;;;; Actions (the SPEC 14 shim over `ebp-client-register-action')
 

@@ -40,6 +40,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'jetpacs-modus)
 (require 'ebp)
 (require 'jetpacs-surfaces)
 
@@ -72,6 +73,11 @@
 `mirror' — the active Emacs theme's palette and syntax colors, polarity
            forced from the theme's own background, following every
            `load-theme'.
+`off'    — base NEVER touches `theme.set': no READY frame, no
+           `load-theme' follow, no clear.  The mode for a session where
+           a Tier-1 owns the palette — pre-fix, merely LOADING this
+           file made the default `system' mode CLEAR a Tier-1's
+           persisted mirror 0.2 s after every READY.
 
 Every push is a complete replacement, so the three non-mirror modes
 also clear any mirrored palette the Companion had persisted.  Setting
@@ -81,12 +87,14 @@ reconnect."
   :type '(choice (const :tag "Follow the device" system)
                  (const :tag "Native, forced light" light)
                  (const :tag "Native, forced dark" dark)
-                 (const :tag "Mirror the Emacs theme" mirror))
+                 (const :tag "Mirror the Emacs theme" mirror)
+                 (const :tag "Off — never touch theme.set" off))
   :set (lambda (sym val)
          (set-default sym val)
          ;; Live apply (guarded: :set also runs while this file loads,
          ;; before the functions below exist).
-         (when (and (featurep 'jetpacs-theme) (jetpacs-connected-p))
+         (when (and (featurep 'jetpacs-theme) (jetpacs-connected-p)
+                    (not (eq val 'off)))
            (jetpacs-theme--push-mode))))
 
 ;;;; Color plumbing (ported verbatim; the JC-1 tty lesson lives in --rgb)
@@ -186,49 +194,6 @@ symbol, which the `stringp' guard drops."
                            (modus-themes-get-color-value key nil theme)
                          (modus-themes-get-color-value key :with-overrides)))))
     (and (stringp value) (jetpacs-theme--hex value))))
-
-;;;; Modus queries (version-adaptive; public — JA-10's screen substrate)
-
-(defun jetpacs-modus-available-p ()
-  "Non-nil when the built-in modus themes are installed in this Emacs."
-  (and (seq-some (lambda (theme)
-                   (string-prefix-p "modus-" (symbol-name theme)))
-                 (custom-available-themes))
-       t))
-
-(defun jetpacs-modus--ensure ()
-  "Load the modus-themes library without enabling a theme; non-nil on success.
-The library lives in the themes directory rather than on `load-path', so
-`require-theme' is the reliable loader; a plain `require' covers the
-on-load-path case, and `featurep' the case where a modus theme is
-already active."
-  (or (featurep 'modus-themes)
-      (require 'modus-themes nil t)
-      (and (ignore-errors (require-theme 'modus-themes t))
-           (featurep 'modus-themes))))
-
-(defun jetpacs-modus-themes ()
-  "Selectable modus themes: the stock set, plus derivatives where supported."
-  (cond ((fboundp 'modus-themes-get-all-known-themes)
-         (modus-themes-get-all-known-themes))
-        ((boundp 'modus-themes-items) modus-themes-items)))
-
-(defun jetpacs-modus-current ()
-  "The active modus theme symbol, or nil."
-  (if (fboundp 'modus-themes-get-current-theme)
-      (modus-themes-get-current-theme)
-    (let ((known (jetpacs-modus-themes)))
-      (seq-find (lambda (theme) (memq theme known)) custom-enabled-themes))))
-
-(defun jetpacs-modus-dark-p (theme)
-  "Non-nil when THEME reads as a dark modus theme.
-Prefer the theme's own `:background-mode' property (set by 4.4's stock
-themes and the 5.0 registry); fall back to the stock naming, where
-every `vivendi' is dark and every `operandi' light."
-  (let ((props (get theme 'theme-properties)))
-    (if (plist-member props :background-mode)
-        (eq (plist-get props :background-mode) 'dark)
-      (and (string-match-p "vivendi" (symbol-name theme)) t))))
 
 ;;;; Palette construction
 
@@ -455,14 +420,39 @@ nil when the frame is colorless — the caller must not push nil."
 (defvar jetpacs-theme--timer nil
   "Debounce timer for automatic pushes, or nil.")
 
+(defvar jetpacs-theme-payload-function nil
+  "When non-nil, a nullary function returning `ebp-client-theme-set' args.
+The EXPLICIT payload seam: a Tier-1 that computes its own palette (say,
+from modus 5.0's theme-building API) sets this and base's machinery —
+the READY paint, the `load-theme' follow, the debounce, the grant gate —
+becomes its transport instead of its competitor.  A nil return means
+\"nothing to push\" and the send is skipped, same as the mirror's own
+unresolvable-frame case.")
+
+(defun jetpacs-theme--send-now ()
+  "Send the current mode's frame immediately; the gated, final send.
+Every automatic path funnels here: mode `off' emits NOTHING (not even a
+clear), an explicit `jetpacs-theme-payload-function' wins over the mode
+matrix, and the gate re-checks connection and grant at send time — the
+connection can die, or be replaced by a session that did not grant
+theme, between the decision to push and the push."
+  (when (and (not (eq jetpacs-theme-mode 'off))
+             (jetpacs-connected-p) (jetpacs-granted-p "theme"))
+    (when-let* ((args (if jetpacs-theme-payload-function
+                          (funcall jetpacs-theme-payload-function)
+                        (jetpacs-theme--frame-args))))
+      (condition-case err
+          (apply #'ebp-client-theme-set (jetpacs-client) args)
+        (error (message "jetpacs-theme: push failed: %s"
+                        (jetpacs--error-label err)))))))
+
 (defun jetpacs-theme--push-mode (&rest _)
-  "Debounced push of the current mode's frame, gated on the theme grant.
-Debounced because `load-theme' fires disable+enable back to back;
-re-gated inside the timer because the connection can die — or be
-replaced by a session that did not grant theme — in 0.2 s.  The send is
-wrapped so a timer error logs the error SYMBOL only (SPEC 23.3), never
-the datum."
-  (when (and (jetpacs-connected-p) (jetpacs-granted-p "theme"))
+  "Debounced push of the current mode's frame.
+The debounce exists for `load-theme', which fires disable+enable back
+to back; `jetpacs-theme--send-now' re-gates inside the timer because
+the session can change in 0.2 s.  Mode `off' arms nothing."
+  (when (and (not (eq jetpacs-theme-mode 'off))
+             (jetpacs-connected-p) (jetpacs-granted-p "theme"))
     (when (timerp jetpacs-theme--timer)
       (cancel-timer jetpacs-theme--timer))
     (setq jetpacs-theme--timer
@@ -470,12 +460,7 @@ the datum."
            0.2 nil
            (lambda ()
              (setq jetpacs-theme--timer nil)
-             (when (and (jetpacs-connected-p) (jetpacs-granted-p "theme"))
-               (when-let* ((args (jetpacs-theme--frame-args)))
-                 (condition-case err
-                     (apply #'ebp-client-theme-set (jetpacs-client) args)
-                   (error (message "jetpacs-theme: push failed: %s"
-                                   (jetpacs--error-label err)))))))))))
+             (jetpacs-theme--send-now))))))
 
 (defun jetpacs-theme-send ()
   "Push the active Emacs theme's palette to the Companion, once.
@@ -514,26 +499,27 @@ one `eq' here per `load-theme' and nothing else."
 (defun jetpacs-theme--on-ready (_client)
   "Per-client READY hook: paint the chrome for the configured mode.
 Wired by `jetpacs-connect' under `fboundp' — READY fires after the
-welcome absorbed the grant set, so the gate inside the push is
-answerable.  Replaces the poc's global connect hook, which the rewrite
-never had: ready-functions are per-client state, the same reason
-`jetpacs-attach' replays action registrations."
-  (jetpacs-theme--push-mode))
+welcome absorbed the grant set, so the gate inside the send is
+answerable.  SYNCHRONOUS, not debounced: the debounce exists for
+`load-theme''s disable+enable pair, and deferring the FIRST frame was a
+0.2 s wrong-palette flash on every pairing — the ordering comment in
+the shell (\"chrome is painted before content arrives\") was not
+actually delivered until this sent inline."
+  (jetpacs-theme--send-now))
+
+(defun jetpacs-theme--on-teardown (owner)
+  "Cancel the pending debounce when the theme owner is torn down."
+  (when (equal owner "jetpacs.theme")
+    (when (timerp jetpacs-theme--timer)
+      (cancel-timer jetpacs-theme--timer)
+      (setq jetpacs-theme--timer nil))))
+
+(add-hook 'jetpacs-teardown-functions #'jetpacs-theme--on-teardown)
 
 (add-hook 'enable-theme-functions #'jetpacs-theme--on-theme-change)
 (add-hook 'disable-theme-functions #'jetpacs-theme--on-theme-change)
 
 ;;;; modus.toggle — the one device-facing verb of this rung
-
-(defun jetpacs-modus-toggle ()
-  "Toggle between the two `modus-themes-to-toggle' themes.
-The desktop face of the `modus.toggle' action; interactively, 4.x's
-`completing-read' fallback (when the toggle pair isn't two themes) is
-fine — there is a user at the keyboard."
-  (interactive)
-  (if (and (jetpacs-modus--ensure) (fboundp 'modus-themes-toggle))
-      (modus-themes-toggle)
-    (message "Jetpacs: modus themes are not available in this Emacs")))
 
 (with-jetpacs-owner "jetpacs.theme"
   (jetpacs-defaction "jetpacs.theme.modus-toggle"

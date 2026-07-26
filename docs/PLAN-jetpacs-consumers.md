@@ -304,8 +304,20 @@ measures content with UNBOUNDED height, so the scroll never engaged and the wind
   `jetpacs--in-action-handler` gate always-false at prompt time), context cards per
   decision 2, and small closed collections as native `enum_list` (multi →
   `:multi-select`, non-require-match → `:allow-add`).
-- **JC-4b — the capf picker:** items (a)-(c) above + device smokes (type-to-narrow,
-  tap-candidate, astral-in-candidate).
+- **JC-4b — the capf picker: CODE DONE (`83d0892`), DEVICE GATE PENDING (`bf2fe89`).**
+  All three items landed: (a) `editor` in `DIALOG_NODE_TYPES` (+pin test);
+  (b) the completion dropdown in `RenderEditor` — 180 ms settle so a typing burst
+  costs one round trip per pause, plain clickable rows rather than a floating
+  menu (a popup anchored inside a scrolling dialog drifts off its field), gated
+  on §17.4's `complete` flag; (c) the per-prompt collection-backed completion
+  source in `jetpacs-dialog.el`, with the JC-4a stopgap kept as the fallback for
+  a Companion that cannot host a dialog editor. `requestCompletion` now hands the
+  (session, seq, cursor) it issued against back to `selectCompletion`, because
+  re-reading them at tap time compares the engine's state with itself and always
+  passes. 6 picker tests drive ebp's real `edit.complete` handler; 234 elisp + both
+  Kotlin suites green. **`test/smoke-picker.el` is written but UNRUN — the tablet is
+  credential-locked (gotcha #2: a locked device drops the session, symptom is a
+  failed READY check with the app alive).**
 - **Prerequisite (device half, either rung):** `DialogHost` wraps dialog content in
   a plain `Column` with no `verticalScroll` (`MainActivity.kt:139`) — content below
   the fold is unreachable. One-line fix + smoke; §18.1 forbids `lazy_column` NODES

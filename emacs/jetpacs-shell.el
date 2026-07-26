@@ -322,7 +322,13 @@ repush or async flush carries no ambient owner of its own."
       (let ((jetpacs-current-owner
              (or (plist-get plist :owner)
                  (and (not jetpacs--in-action-handler)
-                      jetpacs-current-owner))))
+                      jetpacs-current-owner)))
+            ;; ONE claim table per document (SPEC 16.1 scopes id
+            ;; uniqueness to the COMPLETE surface document): every minter
+            ;; below this build — chrome screens, sections, comint —
+            ;; joins it, so two renders of one buffer in one document
+            ;; route around each other instead of shipping a duplicate.
+            (jetpacs-node-id-claims (make-hash-table :test #'equal)))
         (funcall (plist-get plist :builder)))
     (error
      (jetpacs-shell--error-spec surface
@@ -567,6 +573,24 @@ it a `1400 frame-too-large' and a CLOSED connection."
               (error "jetpacs: %d exceeds %s %d (SPEC 4.5 aggregate)"
                      n (substring (symbol-name limit) 1) cap))))))))
 
+(defun jetpacs-shell--gate-ids (spec stale-spec)
+  "GATE 1d: SPEC 16.1 — no duplicate node id within one document.
+SPEC and STALE-SPEC are checked SEPARATELY: the Companion validates
+each with its own id set.  The claim table makes MINTED ids unique by
+construction; this catches the literal authored duplicate (two screens
+both hard-coding \"search\") that nothing else can, in every builder —
+chrome degrades its screens first, so for a chrome document this is the
+backstop, and for a plain root it is the only floor.  A duplicate is a
+1201 for the ENTIRE update, and 13.2 then retains the old snapshot: the
+sender MUST is loud."
+  (dolist (s (delq nil (list spec stale-spec)))
+    (let ((ids (jetpacs--collect-node-ids s nil))
+          (seen (make-hash-table :test #'equal)))
+      (dolist (id ids)
+        (when (gethash id seen)
+          (signal 'jetpacs-duplicate-node-id (list id)))
+        (puthash id t seen)))))
+
 (defun jetpacs-shell--gate-capability (client surface)
   "GATE 3: a non-app namespace needs its granted surface capability."
   (let ((need (pcase (jetpacs-shell--surface-target surface)
@@ -655,6 +679,10 @@ Zero-arg re-renders the current owner's surface (decision D1), else
 and `jetpacs-buffer-refresh-function' depend on.  SURFACE-OR-OWNER is a
 surface id (with a colon) or a bare owner (`app:<owner>').
 
+:RESET-INPUT-IDS must name ids as EMITTED — resolve an authored base
+through `jetpacs-claimed-node-id' when a document build may have
+suffixed it, or the reset names a ghost and the push 1201s.
+
 :SPEC overrides the registered builder for one push.  The four runtime
 gates run in order (see the Commentary); a gate failure signals — the
 SPEC 16.2/10.2 sender MUSTs are loud, never sanitized.  On any failure
@@ -730,6 +758,7 @@ spec (SPEC 13.4)" current-view)))
               (jetpacs-shell--gate-capability client surface)
               (jetpacs-shell--gate-amendments client spec)
               (jetpacs-shell--gate-size client spec stale-spec)
+              (jetpacs-shell--gate-ids spec stale-spec)
               (when stale-spec
                 (jetpacs-shell--gate-amendments client stale-spec))
               ;; Snackbar rides the scaffold slot when the root is one —

@@ -85,13 +85,10 @@ while the node count sails past SPEC 4.5's ceiling and the whole push is
 refused."
   :type 'integer :group 'jetpacs)
 
-(defvar jetpacs-sections--ids nil
-  "Per-render table of emitted card ids, or nil outside a render.
-SPEC 16.1 requires node ids to be unique within one update and answers a
-duplicate with `1201 content-invalid' for the WHOLE spec.  Two magit
-sections can share one: `magit-section-ident' repeats across taxy and
-forge groupings, and the positional fallback repeats whenever two
-sections share a `start' marker.")
+;; The per-render id table this module used to own is now the floor's
+;; `jetpacs-node-id-claims' (SPEC 16.1 scopes uniqueness to the whole
+;; DOCUMENT, and chrome puts N renders in one) — the suffix algorithm
+;; moved to `jetpacs-claim-node-id' unchanged, plus a 4.4 length clamp.
 
 (defvar jetpacs-sections--cards 0
   "Cards emitted so far in this render (see `jetpacs-sections-max-sections').")
@@ -166,20 +163,7 @@ occurrence keeps the stable id and its device-local fold state."
                       (md5 (format "%S" (magit-section-ident sec)))
                     (error nil))
                   (format "sec-%s" (jetpacs-sections--pos sec 'start)))))
-    (if (null jetpacs-sections--ids)
-        base                            ; offline / direct call: no render
-      (let ((n (gethash base jetpacs-sections--ids)))
-        (cond
-         ((null n) (puthash base 1 jetpacs-sections--ids) base)
-         (t
-          ;; Step past any suffixed name already taken, so a synthesized
-          ;; id can never collide with a real one either.
-          (let ((try (format "%s-%d" base n)))
-            (while (gethash try jetpacs-sections--ids)
-              (setq n (1+ n) try (format "%s-%d" base n)))
-            (puthash base (1+ n) jetpacs-sections--ids)
-            (puthash try t jetpacs-sections--ids)
-            try)))))))
+    (jetpacs-claim-node-id base)))
 
 ;; --- Span surgery (format 6: spans are PLISTS) -------------------------------
 
@@ -417,9 +401,15 @@ cards.  Falls through to Tier 0 when the buffer has no section root."
         ;; walk without touching buffer state.
         (let ((budget (cons jetpacs-sections-max-lines nil))
               (name (buffer-name buf))
-              ;; SPEC 16.1 uniqueness and the SPEC 4.5 card cap are both
-              ;; per-render state.
-              (jetpacs-sections--ids (make-hash-table :test #'equal))
+              ;; SPEC 16.1 uniqueness is DOCUMENT state: join the table
+              ;; in force (the shell binds one around every root build) —
+              ;; a fresh one here would re-create the one-buffer-per-
+              ;; surface assumption chrome broke.  Standalone renders get
+              ;; their own, exactly as before.  The card cap stays
+              ;; per-render.
+              (jetpacs-node-id-claims
+               (or jetpacs-node-id-claims
+                   (make-hash-table :test #'equal)))
               (jetpacs-sections--cards 0))
           ;; This render supersedes the last one's tap targets.
           (jetpacs-buffer-forget-exposed name)

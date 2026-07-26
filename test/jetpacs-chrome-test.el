@@ -792,5 +792,120 @@ debt."
       (should (equal (plist-get (car (cddr (car recs))) :current-view)
                      "detail")))))
 
+
+;;;; E1c: SPEC 16.1 — one document, unique node ids
+
+(ert-deftest jetpacs-chrome-minted-ids-route-around-each-other ()
+  "Two screens minting the same base in one document: the FIRST keeps
+the stable id (its SPEC 13.6 draft survives), only the duplicate moves.
+Pre-fix the duplicate shipped, the Companion answered 1201 for the
+whole update, and 13.2 froze the surface on the old snapshot."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        (jetpacs-chrome-define-root
+         "filesapp" "hub"
+         (lambda (_b) (jetpacs-column
+                       (jetpacs-text-input
+                        (jetpacs-claim-node-id "field")
+                        :hint "hub")))))
+      (should (= 42 (jetpacs-chrome-push-screen
+                     "app:filesapp" "detail"
+                     (lambda (back)
+                       (jetpacs-chrome-screen
+                        "D" (jetpacs-text-input
+                             (jetpacs-claim-node-id "field")
+                             :hint "drill")
+                        :back back)))))
+      (let ((ids (sort (jetpacs--collect-node-ids (cadr (car recs)) nil)
+                       #'string<)))
+        (should (equal ids '("field" "field-1")))))))
+
+(ert-deftest jetpacs-chrome-literal-id-collision-costs-the-screen ()
+  "A LITERAL authored id repeated across screens is a screen failure,
+not a surface failure: the colliding screen degrades to its error card
+and the first claimant ships untouched."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        (jetpacs-chrome-define-root
+         "filesapp" "hub"
+         (lambda (_b) (jetpacs-column
+                       (jetpacs-text-input "search" :hint "hub")))))
+      (should (= 42 (jetpacs-chrome-push-screen
+                     "app:filesapp" "detail"
+                     (lambda (back)
+                       (jetpacs-chrome-screen
+                        "D" (jetpacs-text-input "search" :hint "dup")
+                        :back back)))))
+      ;; Hub keeps its input; the detail view is the card.
+      (should (string-match-p "\"search\""
+                              (jetpacs-chrome-test--view-json recs "hub")))
+      (should (string-match-p "failed to build"
+                              (jetpacs-chrome-test--view-json recs "detail")))
+      ;; And the assembled document carries the id exactly once.
+      (should (= 1 (cl-count "search"
+                             (jetpacs--collect-node-ids (cadr (car recs)) nil)
+                             :test #'equal))))))
+
+(ert-deftest jetpacs-chrome-gate-1d-is-the-non-chrome-floor ()
+  "GATE 1d: a plain root builder shipping a literal duplicate is caught
+at the push — the sender MUST is loud, typed, and names no user data."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "plain"
+        (jetpacs-shell-define-root
+         "plain" (lambda () (jetpacs-column
+                             (jetpacs-text-input "dup" :hint "a")
+                             (jetpacs-text-input "dup" :hint "b")))))
+      (should-error (jetpacs-shell-push "app:plain")
+                    :type 'jetpacs-duplicate-node-id))))
+
+(ert-deftest jetpacs-chrome-claim-node-id-properties ()
+  "The promoted minter's three hard properties: identity outside a
+document build; the 4.4 length clamp (a 128-char base suffixes to a
+VALID identifier, not a 130-char reject); and t-normalization (a seeded
+name stores t, and a real base equal to one must not reach
+(format \"%s-%d\" base t))."
+  (let ((jetpacs-node-id-claims nil))
+    (should (equal (jetpacs-claim-node-id "free") "free")))
+  (let ((jetpacs-node-id-claims (make-hash-table :test #'equal))
+        (long (make-string 128 ?a)))
+    (should (equal (jetpacs-claim-node-id long) long))
+    (let ((second (jetpacs-claim-node-id long)))
+      (should (jetpacs--identifier-p second))
+      (should (<= (length second) 128))
+      (should (string-suffix-p "-1" second))))
+  (let ((jetpacs-node-id-claims (make-hash-table :test #'equal)))
+    (puthash "seeded" t jetpacs-node-id-claims)
+    (should (equal (jetpacs-claim-node-id "seeded") "seeded-1"))))
+
+(ert-deftest jetpacs-chrome-earlier-literal-seeds-later-mints ()
+  "A later screen's MINT routes around an earlier screen's LITERAL: the
+root's ids are seeded into the claim table, so the drill's minted base
+suffixes instead of colliding into a card."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        (jetpacs-chrome-define-root
+         "filesapp" "hub"
+         (lambda (_b) (jetpacs-column
+                       (jetpacs-text-input "comint-x" :hint "literal")))))
+      (should (= 42 (jetpacs-chrome-push-screen
+                     "app:filesapp" "detail"
+                     (lambda (back)
+                       (jetpacs-chrome-screen
+                        "D" (jetpacs-text-input
+                             (jetpacs-claim-node-id "comint-x")
+                             :hint "minted")
+                        :back back)))))
+      ;; NOT a card — the mint moved aside.
+      (should-not (string-match-p "failed to build"
+                                  (jetpacs-chrome-test--view-json
+                                   recs "detail")))
+      (let ((ids (sort (jetpacs--collect-node-ids (cadr (car recs)) nil)
+                       #'string<)))
+        (should (equal ids '("comint-x" "comint-x-1")))))))
+
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

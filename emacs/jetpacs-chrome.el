@@ -147,6 +147,29 @@ assembled spec; this is the same check run earlier, per screen."
       (jetpacs-shell--gate-spec client surface node nil))
     (jetpacs-shell--gate-amendments client node)))
 
+(defun jetpacs-chrome--claim-screen-ids (node seen)
+  "Check NODE's ids against SEEN (prior screens) and record them.
+Signals `jetpacs-duplicate-node-id' when NODE repeats an id an earlier
+screen emitted, or repeats one within itself — SPEC 16.1 scopes
+uniqueness to the whole document and the Companion answers a duplicate
+with 1201 for the ENTIRE update.  On success the ids are added to SEEN
+and SEEDED into `jetpacs-node-id-claims' (as t, never clobbering a
+minter's count), so a LATER screen's minted id routes around an earlier
+screen's literal.  Minted ids are already unique by construction — the
+signal here means a LITERAL authored id collided, and the caller turns
+it into that screen's error card."
+  (let ((ids (jetpacs--collect-node-ids node nil))
+        (mine (make-hash-table :test #'equal)))
+    (dolist (id ids)
+      (when (or (gethash id seen) (gethash id mine))
+        (signal 'jetpacs-duplicate-node-id (list id)))
+      (puthash id t mine))
+    (dolist (id ids)
+      (puthash id t seen)
+      (when jetpacs-node-id-claims
+        (unless (gethash id jetpacs-node-id-claims)
+          (puthash id t jetpacs-node-id-claims))))))
+
 (defun jetpacs-chrome--build (surface)
   "The registered root builder: the stack as one multi_view.
 Walks bottom-first so each screen's BACK targets the one below it;
@@ -164,7 +187,8 @@ together, on every rebuild."
     (unless stack
       (error "jetpacs-chrome: no chrome stack for %s" surface))
     (jetpacs-buffer-with-budget
-     (let (views prev-id)
+     (let ((seen (make-hash-table :test #'equal))
+           views prev-id)
       (dolist (entry (reverse stack))
         (let* ((id (car entry))
                (back (and prev-id (jetpacs-view-switch prev-id)))
@@ -175,6 +199,7 @@ together, on every rebuild."
                (node (condition-case err
                          (let ((n (funcall (cdr entry) back)))
                            (jetpacs-chrome--gate-view surface n)
+                           (jetpacs-chrome--claim-screen-ids n seen)
                            n)
                        (error (setq fail err) nil))))
           (unless (or fail (jetpacs--root-node-p node))

@@ -1601,6 +1601,94 @@ and NOT node-type discriminators: §14.1 action `args', §17.5 chart-point
 `meta', and a `dialog.submit' `value'.  These never contain nodes, so the
 node-type scan does not descend into them.")
 
+(define-error 'jetpacs-duplicate-node-id
+  "Duplicate node id in one document (SPEC 16.1)")
+
+(defvar jetpacs-node-id-claims nil
+  "Document-wide table of claimed node ids, or nil outside a document build.
+SPEC 16.1 makes an authored node `id' unique across the COMPLETE surface
+document, and `jetpacs-chrome--build' composes N independently-built
+screen subtrees into ONE multi_view.  Whatever performs that composition
+binds this (the shell binds it around every root build); minters call
+`jetpacs-claim-node-id'.  Outside a binding the claim is the identity
+function, so a single-subtree render emits byte-identical ids to before
+— which is what keeps live SPEC 13.6 input drafts and device-local fold
+state attached.")
+
+(defun jetpacs--suffixed-id (base n)
+  "BASE with suffix -N, truncated so the result is a SPEC 4.4 identifier.
+`jetpacs-wire-id' can already return exactly 128 chars, so appending
+without truncating would produce an id `jetpacs--check-identifier'
+rejects — costing the screen at build time."
+  (let ((suffix (format "-%d" n)))
+    (concat (substring base 0 (min (length base) (- 128 (length suffix))))
+            suffix)))
+
+(defun jetpacs-claim-node-id (base)
+  "Claim BASE as a node id in the current document; return the id to emit.
+BASE when free, else BASE with the lowest free `-N' suffix.  The FIRST
+claimant keeps the stable id — so its draft and fold state survive — and
+only the DUPLICATE moves; SPEC 16.1 answers a duplicate with `1201' for
+the entire update, so the alternative is losing the whole surface.
+Identity outside a `jetpacs-node-id-claims' binding."
+  (if (null jetpacs-node-id-claims)
+      base
+    (let ((n (gethash base jetpacs-node-id-claims)))
+      (if (null n)
+          (progn (puthash base 1 jetpacs-node-id-claims) base)
+        ;; A SEEDED or synthesized name stores t, not a count; a real
+        ;; base equal to one would otherwise reach
+        ;; (format "%s-%d" base t) and signal.
+        (let* ((n (if (integerp n) n 1))
+               (try (jetpacs--suffixed-id base n)))
+          (while (gethash try jetpacs-node-id-claims)
+            (setq n (1+ n) try (jetpacs--suffixed-id base n)))
+          (puthash base (1+ n) jetpacs-node-id-claims)
+          (puthash try t jetpacs-node-id-claims)
+          try)))))
+
+(defun jetpacs-claimed-node-id (base)
+  "The id BASE actually emitted under in this document, when knowable.
+BASE itself when it was claimed (the first claimant keeps the stable
+name) or when no document build is in flight; nil when BASE was never
+claimed.  `:reset-input-ids' MUST be resolved through this — passing an
+authored base the claim table suffixed would 1201 the push."
+  (if (null jetpacs-node-id-claims)
+      base
+    (and (gethash base jetpacs-node-id-claims) base)))
+
+(defun jetpacs--collect-node-ids (value acc)
+  "Accumulate every TYPED node's `:id' in VALUE into ACC (a list).
+Only plists carrying a string `:t' contribute: a `trigger.fire' builtin
+descriptor also has an `:id' (`jetpacs-trigger-fire') and it is a
+trigger identity, not a node identity — the Companion reads `id' only
+inside its node walk, so collecting descriptor ids here would
+false-positive.  Same `jetpacs--opaque-members' discipline as
+`jetpacs--collect-node-types'; alist cells (a multi_view's views)
+descend through their cdr."
+  (cond
+   ((vectorp value)
+    (let ((a acc))
+      (mapc (lambda (v) (setq a (jetpacs--collect-node-ids v a))) value) a))
+   ((hash-table-p value)
+    (let ((a acc))
+      (maphash (lambda (_k v) (setq a (jetpacs--collect-node-ids v a)))
+               value)
+      a))
+   ((and (consp value) (keywordp (car value)))
+    (let ((p value) (a acc)
+          (typed (stringp (plist-get value :t))))
+      (while p
+        (let ((k (pop p)) (v (pop p)))
+          (when (and typed (eq k :id) (stringp v)) (push v a))
+          (unless (memq k jetpacs--opaque-members)
+            (setq a (jetpacs--collect-node-ids v a)))))
+      a))
+   ((consp value)
+    (let ((a (jetpacs--collect-node-ids (car value) acc)))
+      (jetpacs--collect-node-ids (cdr value) a)))
+   (t acc)))
+
 (defun jetpacs--collect-node-types (value acc)
   "Accumulate every node-type `:t' discriminator in VALUE into ACC (a list).
 Descends into node/vector/hash/list structure but NOT into opaque data

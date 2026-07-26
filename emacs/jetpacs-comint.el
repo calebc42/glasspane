@@ -128,7 +128,11 @@ drafts survive the refactor."
               ;; problem.
               (list (jetpacs-with-attrs
                      (jetpacs-text-input
-                      (jetpacs-comint--input-id name)
+                      ;; The claim can SUFFIX this when the same buffer is
+                      ;; rendered twice in one document (a hub view plus a
+                      ;; drill) — the first claimant keeps the stable id
+                      ;; and its SPEC 13.6 draft.
+                      (jetpacs-claim-node-id (jetpacs-comint--input-id name))
                       :hint "Input — Enter sends"
                       :single-line t :monospace t :clear-on-submit t
                       :on-submit (jetpacs-action "comint.send"

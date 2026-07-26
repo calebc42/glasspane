@@ -47,7 +47,10 @@ dispatch-extent safe); DEFER the presenting push (`jetpacs-shell-push'
 SIGNALS on gate failure, and a signal after the stack mutated would
 answer rejected for an effect that happened); own the back affordance;
 and wrap its root assembly in `jetpacs-buffer-with-budget' so the drill
-body and the chrome share one SPEC 4.5 allowance.  The chrome kit wires
+body and the chrome share one SPEC 4.5 allowance.  Emit node ids
+through `jetpacs-claim-node-id' — SPEC 16.1 scopes id uniqueness to the
+whole DOCUMENT, and a screen stack rendered as one multi_view puts N
+independently-built subtrees in one.  The chrome kit wires
 this under `with-eval-after-load'; the navigator never names it.")
 
 (defun jetpacs-navigate--screen-builder (name)

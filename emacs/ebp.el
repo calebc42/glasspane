@@ -1333,13 +1333,25 @@ state under a fresh session at seq 0."
            (max revision (ebp-client--surface-floor client surface))
            (ebp-client-revisions client)))
 
-(defun ebp-client--surface-request (client method surface params callback)
+(defun ebp-client--surface-request (client method surface params callback
+                                           &optional on-claim)
   "Send a revisioned surface request and absorb the result floor.
 Returns the revision used.  CALLBACK, when given, receives (STATUS ERROR)
-where STATUS is \"applied\" or \"stale\" (SPEC 13.2: stale is benign)."
+where STATUS is \"applied\" or \"stale\" (SPEC 13.2: stale is benign).
+
+ON-CLAIM, when given, is called with the claimed revision after the
+revision is claimed and BEFORE the request reaches the wire.  Anything a
+racing inbound frame may consult MUST be recorded there rather than after
+the send returns: `process-send-string' is not atomic with respect to our
+own state.  A frame large enough to fill the socket buffer blocks in
+`send_process', which spins in `wait_reading_process_output', which runs
+timers — and jsonrpc.el dispatches from timers, so an inbound
+notification can be handled re-entrantly INSIDE this send.  See
+docs/RESEARCH-A8-2026-07-25.md."
   (let ((revision (1+ (ebp-client--surface-floor client surface))))
     ;; Claim the revision at send time so a second push in flight is newer.
     (puthash surface revision (ebp-client-revisions client))
+    (when on-claim (funcall on-claim revision))
     (ebp-client--request
      client method
      (append `(:surface ,surface :revision ,revision) params)
@@ -1357,19 +1369,24 @@ where STATUS is \"applied\" or \"stale\" (SPEC 13.2: stale is benign)."
   "Push a complete snapshot for SURFACE (SPEC 13.2); returns its revision.
 SPEC is the SurfaceSpec value.  What the spec contains is the
 application's business (REWRITE-PLAN boundary); this owns the revisions."
-  (let ((revision
-         (ebp-client--surface-request
-          client 'surface.update surface
-          `(:spec ,spec
-            ,@(when stale-after-s `(:stale_after_s ,stale-after-s))
-            ,@(when stale-spec `(:stale_spec ,stale-spec))
-            ,@(when current-view `(:current_view ,current-view))
-            ,@(when reset-input-ids
-                `(:reset_input_ids ,(vconcat reset-input-ids))))
-          callback)))
-    ;; P1 #2: this side's reset history reconciles racing state.changed.
-    (ebp-client--record-reset-ids client surface revision reset-input-ids)
-    revision))
+  (ebp-client--surface-request
+   client 'surface.update surface
+   `(:spec ,spec
+     ,@(when stale-after-s `(:stale_after_s ,stale-after-s))
+     ,@(when stale-spec `(:stale_spec ,stale-spec))
+     ,@(when current-view `(:current_view ,current-view))
+     ,@(when reset-input-ids
+         `(:reset_input_ids ,(vconcat reset-input-ids))))
+   callback
+   ;; P1 #2: this side's reset history reconciles racing state.changed —
+   ;; and it MUST be recorded before the snapshot reaches the wire, not
+   ;; after the send returns.  A snapshot big enough to block the socket
+   ;; lets an inbound `state.changed' dispatch re-entrantly inside this
+   ;; send (see `ebp-client--surface-request'); recorded afterwards,
+   ;; `ebp-client--state-reset-p' would not yet see this revision's reset
+   ;; and would adopt a draft this very snapshot supersedes.
+   (lambda (revision)
+     (ebp-client--record-reset-ids client surface revision reset-input-ids))))
 
 (cl-defun ebp-client-surface-remove (client surface &key callback)
   "Tombstone SURFACE at a fresh revision (SPEC 13.3); returns the revision."

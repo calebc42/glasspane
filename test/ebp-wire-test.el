@@ -776,6 +776,92 @@ reset at a higher revision supersedes; a later report reinstates."
       (should (equal (ebp-client-input-value client "app:main" "title")
                      "reinstated")))))
 
+(ert-deftest ebp-test-reset-history-precedes-the-send ()
+  "A8/H1: a send is NOT atomic with respect to our own state.
+`process-send-string' on a frame large enough to fill the socket buffer
+blocks in `send_process', which spins in `wait_reading_process_output'
+\(emacs-30.1 src/process.c:6851), which runs `timer_check'
+\(src/process.c:5434) — and jsonrpc.el dispatches inbound messages from
+timers (jsonrpc.el:804-811).  So an inbound `state.changed' can be
+handled re-entrantly INSIDE our own `surface.update' send, with
+`jsonrpc--in-process-filter' nil, which is why the bug#60088 guard does
+not cover it.
+
+The reset history must therefore be recorded before the frame reaches
+the wire.  Recorded after the send returns, the racing report finds no
+reset for this revision and adopts a draft the snapshot supersedes
+\(SPEC 14.6 / P1 #2).  See docs/RESEARCH-A8-2026-07-25.md."
+  (let* ((client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts")))
+         (raced nil))
+    ;; The Companion has already reported a floor of 41, so the push below
+    ;; claims 42 and its `reset_input_ids' supersedes any report against 41.
+    (puthash "app:main" 41 (ebp-client-revisions client))
+    (cl-letf (((symbol-function 'ebp-client--request)
+               (lambda (c _method _params _callback &optional _timeout)
+                 ;; The re-entrant dispatch, at the only moment it can
+                 ;; occur: inside the send, before it has returned.
+                 (setq raced t)
+                 (ebp-client--handle-state-changed
+                  c '(:surface "app:main" :revision_seen 41
+                      :id "title" :value "raced-and-lost")))))
+      (should (equal (ebp-client-surface-update
+                      client "app:main" '(:t "text_input" :id "title")
+                      :reset-input-ids '("title"))
+                     42)))
+    (should raced)
+    (should-not (ebp-client-input-value client "app:main" "title"))
+    ;; The reset is recorded once, against the revision actually sent.
+    (should (equal (gethash "app:main" (ebp-client-reset-history client))
+                   '((42 "title"))))))
+
+(ert-deftest ebp-test-transport-coding-is-pinned ()
+  "A8/3-c: `ebp-connect' pins `:coding utf-8-unix' and MUST keep doing so.
+Left unpinned, `undecided' latches `undecided-dos', which strips the CR
+from the `\\r\\n\\r\\n' terminator; jsonrpc.el's header search
+\(emacs-30.1 jsonrpc.el:740-744) matches a literal CRLF, so it never
+fires.  There is no error, no close, and no diagnostic — the connection
+simply never dispatches again, which is exactly the unbounded stall
+amendment #91 ruled out as a conforming alternative.
+
+Pairs with `ebp-test-live-socket-carries-non-ascii', which guards the
+other half (`binary' over-counts a non-ASCII body via `position-bytes')."
+  (dolist (probe '((utf-8-unix . t) (undecided . nil)))
+    (let* ((coding (car probe))
+           (expect (cdr probe))
+           (got nil)
+           (server
+            (make-network-process
+             :name "ebp-pin-server" :server t :host "127.0.0.1"
+             :service t :coding 'binary :noquery t
+             :filter
+             (lambda (conn _bytes)
+               (let ((body "{\"jsonrpc\":\"2.0\",\"method\":\"probe.note\",\
+\"params\":{\"n\":1}}"))
+                 (process-send-string
+                  conn (concat (format "Content-Length: %d\r\n\r\n"
+                                       (string-bytes body))
+                               body))))))
+           (port (cadr (process-contact server)))
+           (proc (make-network-process
+                  :name "ebp-pin-client" :host "127.0.0.1" :service port
+                  :noquery t :coding coding))
+           (conn (make-instance 'jsonrpc-process-connection
+                                :name "ebp-pin" :process proc
+                                :notification-dispatcher
+                                (lambda (_c m p) (push (list m p) got)))))
+      (unwind-protect
+          (progn
+            (process-send-string proc "hi")
+            (dotimes (_ 30) (accept-process-output nil 0.05))
+            (if expect
+                (should (equal got '((probe.note (:n 1)))))
+              ;; Pin the failure mode too, so the docstring stays true.
+              (should (eq (car (process-coding-system proc)) 'undecided-dos))
+              (should-not got)))
+        (ignore-errors (delete-process proc))
+        (ignore-errors (delete-process server))))))
+
 ;;;; W6: replay retries with bounded backoff (SPEC 10.3/15.3)
 
 (ert-deftest ebp-test-replay-retry-until-drained ()

@@ -315,9 +315,17 @@ measures content with UNBOUNDED height, so the scroll never engaged and the wind
   (session, seq, cursor) it issued against back to `selectCompletion`, because
   re-reading them at tap time compares the engine's state with itself and always
   passes. 6 picker tests drive ebp's real `edit.complete` handler; 234 elisp + both
-  Kotlin suites green. **`test/smoke-picker.el` is written but UNRUN — the tablet is
-  credential-locked (gotcha #2: a locked device drops the session, symptom is a
-  failed READY check with the app alive).**
+  Kotlin suites green. **DEVICE-VERIFIED** (`4bfcb18`): both phases green — typing produced one
+  `edit.complete`, Emacs answered from the collection, the device rendered the
+  candidates, and the tap returned the candidate through the MIRROR. The device
+  caught a bug five green unit tests missed: SPEC 18.1 closes a dialog's editor
+  sessions BEFORE the submit response, and ebp fires `edit-change-functions` on
+  that close with the session gone, so the shadow was wiped to nil exactly when
+  the picker read it (`stringp nil`, answer already typed). The watch now takes
+  strings only; the regression drives ebp's real close handler. Also caught a
+  VACUOUS pass: the astral phase's 5 candidates fell under the enum threshold and
+  never used the picker at all — only the "Emacs answered edit.complete" counter
+  exposed it. **JC-4 (a+b) COMPLETE.**
 - **Prerequisite (device half, either rung):** `DialogHost` wraps dialog content in
   a plain `Column` with no `verticalScroll` (`MainActivity.kt:139`) — content below
   the fold is unreachable. One-line fix + smoke; §18.1 forbids `lazy_column` NODES

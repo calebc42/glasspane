@@ -875,37 +875,100 @@ dispatch extent.  A JC-4 dialog bridge will re-route it to the phone."
      (error "jetpacs: editing a widget field needs the dialog bridge \
 (JC-4); tap refused"))))
 
+(defvar jetpacs-buffer--displayed nil
+  "The last live buffer a shimmed `display-buffer' was asked to show.
+Bound to nil per shimmed run by `jetpacs-buffer--with-nav-shims', so a
+thunk that itself runs a shimmed call cannot clobber an outer capture.")
+
+(defmacro jetpacs-buffer--with-nav-shims (&rest body)
+  "Run BODY inside the window-display shims; capture, never display.
+The pop/switch family becomes `set-buffer' (faithful — their real
+contract makes the buffer current).  `display-buffer' is RECORD-ONLY:
+its real contract does NOT select, so a `set-buffer' shim would
+silently redirect the command's own subsequent buffer-local work; it
+records into `jetpacs-buffer--displayed' and returns the selected
+window (a live one — callers do (select-window (display-buffer …)))."
+  (declare (indent 0) (debug t))
+  `(save-window-excursion
+     (let ((jetpacs-buffer--displayed nil))
+       (cl-letf (((symbol-function 'pop-to-buffer)
+                  (lambda (b &rest _)
+                    (set-buffer (get-buffer b)) (current-buffer)))
+                 ((symbol-function 'pop-to-buffer-same-window)
+                  (lambda (b &rest _)
+                    (set-buffer (get-buffer b)) (current-buffer)))
+                 ((symbol-function 'switch-to-buffer)
+                  (lambda (b &rest _)
+                    (set-buffer (get-buffer b)) (current-buffer)))
+                 ((symbol-function 'switch-to-buffer-other-window)
+                  (lambda (b &rest _)
+                    (set-buffer (get-buffer b)) (current-buffer)))
+                 ((symbol-function 'display-buffer)
+                  (lambda (b &rest _)
+                    (when-let* ((buf (get-buffer b)))
+                      (setq jetpacs-buffer--displayed buf))
+                    (selected-window))))
+         ,@body))))
+
 (defun jetpacs-buffer-call-shimmed (cmd &optional on-error)
   "Run command CMD with window-display and input-event shims.
-Returns (BUF . POS): the buffer made current and point after CMD.
-Buffer-display functions are neutered so nothing pops a desktop window;
-the triggering input event is cleared so event-driven goto commands
-navigate to point rather than a stale pending event; `this-command' and
-`last-command' are pinned so repeat-style commands never extend stale
-state.  Errors are swallowed — unless ON-ERROR is a function, called
-with the error.  Call with the origin buffer current and point placed."
-  (let (dest-buf dest-pos)
-    (save-window-excursion
-      (cl-letf (((symbol-function 'pop-to-buffer)
-                 (lambda (b &rest _)
-                   (set-buffer (get-buffer b)) (current-buffer)))
-                ((symbol-function 'pop-to-buffer-same-window)
-                 (lambda (b &rest _)
-                   (set-buffer (get-buffer b)) (current-buffer)))
-                ((symbol-function 'switch-to-buffer)
-                 (lambda (b &rest _)
-                   (set-buffer (get-buffer b)) (current-buffer)))
-                ((symbol-function 'switch-to-buffer-other-window)
-                 (lambda (b &rest _)
-                   (set-buffer (get-buffer b)) (current-buffer))))
-        (condition-case err
-            (let ((last-input-event nil)
-                  (last-nonmenu-event nil)
-                  (this-command cmd)
-                  (last-command 'jetpacs-buffer-call-shimmed))
-              (call-interactively cmd))
-          (error (when on-error (funcall on-error err)) nil))
+Returns (BUF . POS): the buffer made current and point after CMD —
+or, when CMD never changed the current buffer but DID `display-buffer'
+one (the `project-list-buffers' shape), that displayed buffer and its
+point.  Buffer-display functions are neutered so nothing pops a
+desktop window; the triggering input event is cleared so event-driven
+goto commands navigate to point rather than a stale pending event;
+`this-command'/`last-command' are pinned so repeat-style commands never
+extend stale state.  Errors are swallowed — unless ON-ERROR is a
+function, called with the error.  Call with the origin buffer current."
+  (let ((origin (current-buffer)) dest-buf dest-pos)
+    (jetpacs-buffer--with-nav-shims
+      (condition-case err
+          (let ((last-input-event nil)
+                (last-nonmenu-event nil)
+                (this-command cmd)
+                (last-command 'jetpacs-buffer-call-shimmed))
+            (call-interactively cmd))
+        (error (when on-error (funcall on-error err)) nil))
+      (if (and (eq (current-buffer) origin)
+               (buffer-live-p jetpacs-buffer--displayed))
+          (setq dest-buf jetpacs-buffer--displayed
+                dest-pos (with-current-buffer jetpacs-buffer--displayed
+                           (point)))
         (setq dest-buf (current-buffer) dest-pos (point))))
+    (cons dest-buf dest-pos)))
+
+(defun jetpacs-buffer-funcall-shimmed (thunk &optional on-error)
+  "Run nullary THUNK under the shims and capture where it went (B4).
+The thunk sibling of `jetpacs-buffer-call-shimmed', which requires a
+COMMAND (`call-interactively' signals on a plain lambda — the exact gap
+this closes).  Returns (BUF . POS).  Destination precedence, first
+match wins: the buffer THUNK left current (when it differs from the
+entry buffer); the buffer it `display-buffer'ed; its RETURN VALUE when
+that is a live buffer or the name of one (the poc consumer contract —
+thunks returning \"*compilation*\" and friends); else the entry buffer.
+`this-command' is NOT pinned — a thunk wanting command semantics wraps
+`call-interactively' itself.  Errors are swallowed; ON-ERROR, when a
+function, receives the error.  Call with the origin buffer current."
+  (let ((origin (current-buffer)) ret dest-buf dest-pos)
+    (jetpacs-buffer--with-nav-shims
+      (setq ret (condition-case err
+                    (let ((last-input-event nil)
+                          (last-nonmenu-event nil))
+                      (funcall thunk))
+                  (error (when (functionp on-error) (funcall on-error err))
+                         nil)))
+      (let ((returned (cond ((bufferp ret) (and (buffer-live-p ret) ret))
+                            ((stringp ret) (get-buffer ret)))))
+        (cond
+         ((not (eq (current-buffer) origin))
+          (setq dest-buf (current-buffer) dest-pos (point)))
+         ((buffer-live-p jetpacs-buffer--displayed)
+          (setq dest-buf jetpacs-buffer--displayed))
+         (returned (setq dest-buf returned))
+         (t (setq dest-buf origin dest-pos (point))))
+        (unless dest-pos
+          (setq dest-pos (with-current-buffer dest-buf (point))))))
     (cons dest-buf dest-pos)))
 
 (defun jetpacs-buffer-invoke-at (buffer-name pos)

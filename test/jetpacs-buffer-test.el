@@ -337,5 +337,64 @@ Companion may re-present, not terminal `rejected'."
                       'stale)))
       (jetpacs-detach))))
 
+;;;; JA-2c: the thunk primitive + the display-buffer shim (B4)
+
+(ert-deftest jetpacs-buffer-funcall-shimmed-captures-switch ()
+  (with-current-buffer (get-buffer-create "*nav-origin*")
+    (let ((ret (jetpacs-buffer-funcall-shimmed
+                (lambda () (switch-to-buffer (get-buffer-create "*nav-dest*"))))))
+      (should (eq (car ret) (get-buffer "*nav-dest*")))
+      (should (integerp (cdr ret))))))
+
+(ert-deftest jetpacs-buffer-funcall-shimmed-display-buffer-is-record-only ()
+  (with-current-buffer (get-buffer-create "*nav-origin*")
+    (let (seen-cur win)
+      (let ((ret (jetpacs-buffer-funcall-shimmed
+                  (lambda ()
+                    (setq win (display-buffer (get-buffer-create "*nav-disp*")))
+                    (setq seen-cur (current-buffer))
+                    nil))))
+        ;; Recorded, not selected: precedence (b) fires, the thunk's own
+        ;; current buffer never moved, and the shim returned a live window.
+        (should (eq (car ret) (get-buffer "*nav-disp*")))
+        (should (eq seen-cur (get-buffer "*nav-origin*")))
+        (should (window-live-p win))))))
+
+(ert-deftest jetpacs-buffer-funcall-shimmed-return-value-fallback ()
+  (get-buffer-create "*nav-ret*")
+  (with-current-buffer (get-buffer-create "*nav-origin*")
+    (should (eq (car (jetpacs-buffer-funcall-shimmed (lambda () "*nav-ret*")))
+                (get-buffer "*nav-ret*")))
+    (should (eq (car (jetpacs-buffer-funcall-shimmed
+                      (lambda () (get-buffer "*nav-ret*"))))
+                (get-buffer "*nav-ret*")))))
+
+(ert-deftest jetpacs-buffer-funcall-shimmed-plain-lambda-and-errors ()
+  (with-current-buffer (get-buffer-create "*nav-origin*")
+    ;; The B4 point: a plain non-interactive closure runs.
+    (let ((ran nil))
+      (jetpacs-buffer-funcall-shimmed (lambda () (setq ran t)))
+      (should ran))
+    (let (caught)
+      (let ((ret (jetpacs-buffer-funcall-shimmed
+                  (lambda () (error "boom"))
+                  (lambda (err) (setq caught err)))))
+        (should (eq (car caught) 'error))
+        (should (eq (car ret) (get-buffer "*nav-origin*")))))))
+
+(ert-deftest jetpacs-buffer-call-shimmed-display-buffer-capture ()
+  (with-current-buffer (get-buffer-create "*nav-origin*")
+    ;; The project-list-buffers shape: display only, never current.
+    (let ((cmd (lambda () (interactive)
+                 (display-buffer (get-buffer-create "*nav-cmd-disp*")))))
+      (should (eq (car (jetpacs-buffer-call-shimmed cmd))
+                  (get-buffer "*nav-cmd-disp*"))))
+    ;; A current-buffer change WINS over a recorded display.
+    (let ((cmd (lambda () (interactive)
+                 (display-buffer (get-buffer-create "*nav-aux*"))
+                 (switch-to-buffer (get-buffer-create "*nav-main*")))))
+      (should (eq (car (jetpacs-buffer-call-shimmed cmd))
+                  (get-buffer "*nav-main*"))))))
+
 (provide 'jetpacs-buffer-test)
 ;;; jetpacs-buffer-test.el ends here

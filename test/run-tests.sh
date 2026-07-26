@@ -40,7 +40,7 @@ for f in jetpacs-async jetpacs-surfaces jetpacs-shell jetpacs-buffer \
          jetpacs-results jetpacs-tablist \
          jetpacs-sections jetpacs-comint jetpacs-hypertext \
          jetpacs-dialog jetpacs-complete jetpacs-theme jetpacs-device \
-         jetpacs-clip; do
+         jetpacs-clip jetpacs-navigate jetpacs-chrome; do
   emacs -Q --batch -L emacs \
     --eval '(setq byte-compile-error-on-warn t)' \
     -f batch-byte-compile "emacs/$f.el"
@@ -99,6 +99,14 @@ emacs -Q --batch -L emacs -l test/jetpacs-clip-test.el \
 # defines its own suite too).
 emacs -Q --batch -L emacs -l test/ebp-wire-test.el -l test/jetpacs-teardown-test.el \
   --eval '(ert-run-tests-batch-and-exit "^jetpacs-teardown-")'
+
+# JA-2 buffer-view host exit gate.
+emacs -Q --batch -L emacs -l test/jetpacs-navigate-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JA-2 chrome kit exit gate.
+emacs -Q --batch -L emacs -l test/jetpacs-chrome-test.el \
+  -f ert-run-tests-batch-and-exit
 
 # Phase A cross-file seams + the comint P1s.  Several of these regress by
 # HANGING rather than failing (a prompt reached inside a dispatch extent),

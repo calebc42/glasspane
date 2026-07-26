@@ -120,11 +120,31 @@ checkable definitions (Emacs 30.1 has NO constant-time helper, so §9.3 would be
 `string=`); the `data:` base64 profile pinned; `on_point_tap` now injects the ordinal index §17.5
 already resolved and threw away. Baselines **303 wire / 24 app / 203 elisp**.
 
-**A6 REMAINING: the five P3 entries** — negative-golden role dimension (`manifest.json` has no role
-column while §24.2/§6.2 scope duties per role), a §24.6 vector for §4.3 equality with
-differently-spelled operands, §21.5's durability scope for transition-driven triggers,
-`device.trigger_unavailable` permission identifiers resolving against `device.permissions`, and
-§23.2's no-remote-evaluation list omitting *interpretation* sinks. Then **A8**'s research items.
+**A6 AUDITED, then COMPLETE.** The audit of batches 1-2 found three defects A6 introduced *into
+itself* (`5d25f58`, amendments **#116-#117**: §17.7's rewrite swallowed into an Informative
+blockquote by one missing blank line, that same rewrite shipped with no §25 changelog row, and
+#108's new §7.1 rule contradicting §18.1) and six implementation gaps behind ratified prose
+(`a77e1f7`, amendment **#118**). The security one first: `handleAuth` verified with
+`token != null && verifyClientProof(...)`, so an UNKNOWN pairing id short-circuited before any
+HMAC ran — §9.2 requires equivalent work against a fixed dummy key precisely so response TIMING
+cannot separate the two, and the identifier comparisons used `String.equals`, which returns at the
+first differing character. Then ebp.el's whole share of #112 (`capability.invoke` under the 60 s
+floor, abandonment writing nothing to the peer, an errored `queue.replay` CLOSING the connection
+instead of proceeding to `session.ready` with the backlog intact), §7.1's -32603
+serialization rule unimplemented in both twins, `parseDataImage` calling `.trim()` where §17.2
+forbids stripping whitespace in place of rejection while the accept-time gate never looked past
+the header (→ #118), and `WireLimits` pinned to `contract.limits.fixed` by a drift test in both
+directions — which is how `max_send_header_bytes` had reached the contract with no Kotlin constant
+behind it at all.
+
+**A6's five P3 entries then landed** (`5da3c3a`, amendments **#119-#123**; spec now at **#123**):
+the Golden role dimension with `roles` on the eight Companion-scoped fixtures and all three
+runners taught the key; a §24.6 vector for §4.3 equality plus three goldens valid ONLY under it
+and a real `spec_equal` in validate.py (every host primitive fails differently — `internal_equal`
+gates on XTYPE and compares float REPRESENTATIONS, Python's `==` equates `true` and `1`); §21.5's
+durability scoped to occurrences the Companion OBSERVED; `trigger_unavailable` identifiers
+required to resolve against the `permissions` snapshot; and §23.2 extended from execution sinks to
+*interpretation* sinks. Baselines **311 wire / 24 app / 206 elisp**. **NEXT: A8's research items.**
 
 **Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the
 checklist wants it on hardware too), an inbound-`edit.apply`-while-the-editor-is-shown smoke (the

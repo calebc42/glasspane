@@ -79,6 +79,18 @@ class WireConformanceTest {
         assertTrue("adversarial set truncated?", fixtures.length() >= 10)
         for (f in 0 until fixtures.length()) {
             val fx = fixtures.getJSONObject(f)
+            // SPEC 24.5: a Golden names the role or roles its expectation is
+            // normative for; absent, both. SPEC 6.2 scopes several receiver
+            // duties by role — but the Companion is never the excused one,
+            // because §24.1 grants it no delegation clause. So every
+            // expectation in this manifest is normative for this runner, and
+            // a roles list saying otherwise would describe a different
+            // protocol rather than let this suite off.
+            fx.optJSONArray("roles")?.let { roles ->
+                val named = (0 until roles.length()).map { roles.getString(it) }
+                assertTrue("${fx.getString("file")}: the Companion role is " +
+                    "never excused from a receiver duty", "companion" in named)
+            }
             val bytes = wireDir.resolve(fx.getString("file")).readBytes()
             for ((label, chunks) in chunkings(bytes)) {
                 val (messages, error) = runFixture(chunks)

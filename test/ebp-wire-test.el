@@ -110,6 +110,20 @@ Alists compare as unordered member sets; lists as ordered arrays."
     ((ebp-frame-close ebp-frame-incomplete ebp-parse-error ebp-invalid-request)
      (cons nil (car err)))))
 
+(defconst ebp-test--claims-strict-framing t
+  "Non-nil when this endpoint owes every SPEC 6.2 receiver duty itself.
+
+SPEC 24.5 lets a Golden scope its expectation to a role, because SPEC 6.2
+scopes several receiver duties by role and an Emacs endpoint MAY elect the
+delegation clause — in which case a duplicate-member or over-deep body it
+handed to a host library is silently accepted instead of refused, and the
+manifest's expectation is unproducible.  This endpoint does NOT elect it:
+`ebp-make-decoder' is our own framing and JSON-model receiver, not
+jsonrpc.el's, so we are held to the Companion-strength expectation on every
+fixture.  A fork that delegates flips this to nil and gets SPEC 24.5's
+excused-role obligation instead — a bounded terminal reaction — rather than
+skipping the vector.")
+
 (ert-deftest ebp-test-wire-goldens ()
   "Every ebp/goldens/wire fixture behaves per its manifest entry, at
 whole, 1-octet, and 7-octet transport-read chunk sizes."
@@ -131,9 +145,16 @@ whole, 1-octet, and 7-octet transport-read chunk sizes."
                   (should (= (length msgs) (length expected)))
                   (cl-loop for m in msgs for e in expected
                            do (should (ebp-test--json-equal m e))))
-              (let ((want (cdr (assoc (alist-get 'expect_error fx)
-                                      ebp-test--error-map))))
-                (should (eq err want))))))))))
+              (let* ((want (cdr (assoc (alist-get 'expect_error fx)
+                                       ebp-test--error-map)))
+                     (roles (append (alist-get 'roles fx) nil))
+                     (normative (or (null roles) (member "emacs" roles))))
+                (if (or normative ebp-test--claims-strict-framing)
+                    (should (eq err want))
+                  ;; SPEC 24.5: an excused role still owes a bounded terminal
+                  ;; reaction — the stream left synchronized or closed, and no
+                  ;; application effect. Never a skipped vector.
+                  (should (or err (<= (length msgs) 1))))))))))))
 
 (ert-deftest ebp-test-utf8-byte-count-fixture ()
   "SPEC 24.6 item 1: the UTF-8 fixture's Content-Length differs from its

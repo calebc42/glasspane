@@ -187,8 +187,16 @@ production handlers index a stale snapshot. Verified live; logged as `[P3] [unve
 coding-pin regression test. **A candidate fix was REFUTED and deliberately not implemented**:
 `coding-system-for-read/-write` do NOT override `:coding` (`process.c:3227-3240` — it is an `else
 if`), so that "fix" would have been dead code with a false comment. Baselines **311 wire / 24 app /
-208 elisp**, validate.py green. **NEXT: §5.2's C1 (the app-layer P1), then §1.7's R1-for-H2 and R3,
-then §7-a.**
+208 elisp**, validate.py green.
+
+**A8's C1 CLOSED** (`d11300e`, 2026-07-25, Caleb's go-ahead): `jetpacs--applied-revisions` seeds
+from the welcome floors at the §10.3 step-3 barrier — replace-not-max (a wiped Companion's floors
+legitimately fall), tombstone floors included, via the new named `jetpacs--before-replay` that
+`jetpacs-connect` installs (seed first, then the shell's step-3 pushes). Reproduced pre-fix
+(`accepted` for a replayed event 18 revisions behind the floor), `stale` post. Floor suite 24 → 26;
+**210 elisp** total. Deferred to device time: the full cold-start choreography (queue offline, kill,
+restart, replay). **NEXT: §1.7's R1-for-H2 and R3 (the §22.2 "in transmission" amendment), then
+§7-a; the parity track proceeds separately at JC-4 (dialog rebuild).**
 
 **Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the
 checklist wants it on hardware too), an inbound-`edit.apply`-while-the-editor-is-shown smoke (the

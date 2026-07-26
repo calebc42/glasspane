@@ -80,17 +80,21 @@
 
 (defun jetpacs-start (&optional attempt)
   "Dial the Companion on this device and land on the hub.
-Retries twice at 2 s — at boot the Companion's listener may bind after
-Emacs starts."
+Retries for ~45 s at 3 s intervals: at boot — and after the Companion
+is opened by hand — the listener can bind well after Emacs starts, and
+a 4 s window (the first cut) lost that race whenever the app came up
+second.  After the last attempt it says exactly what to do, instead of
+an error nobody is watching for."
   (interactive)
   (condition-case err
       (jetpacs--start-1)
     (error
-     (if (>= (or attempt 0) 2)
-         (signal (car err) (cdr err))
-       (run-at-time 2 nil #'jetpacs-start (1+ (or attempt 0)))
-       (message "jetpacs: connect failed (%s); retrying…"
-                (jetpacs--error-label err))))))
+     (if (>= (or attempt 0) 15)
+         (message "jetpacs: Companion not reachable — open the EBP \
+Companion app, then M-x jetpacs-start")
+       (run-at-time 3 nil #'jetpacs-start (1+ (or attempt 0)))
+       (when (zerop (or attempt 0))
+         (message "jetpacs: Companion not up yet; retrying for 45 s…"))))))
 
 (defun jetpacs--start-1 ()
   (jetpacs-connect

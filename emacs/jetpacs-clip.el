@@ -187,9 +187,11 @@ kill-new).  Behaviorally invisible to a disconnected desktop Emacs."
   (jetpacs-shell-define-root jetpacs-clip-owner #'jetpacs-clip--view)
   (jetpacs-defaction "jetpacs.clip.refresh"
     (lambda (_args params)
-      ;; D1: the originating surface, never a zero-arg push — inside a
-      ;; dispatch extent the owner binding is nil and zero-arg resolves
-      ;; to the shell default, clobbering another owner.  D2: the
+      ;; D1: the ORIGINATING surface.  `jetpacs--dispatch' does bind
+      ;; this action's owner now, so a zero-arg push would resolve
+      ;; correctly — but the wire names the surface the user actually
+      ;; tapped, and honouring it is what makes one owner's view
+      ;; refreshable from more than one of its surfaces.  D2: the
       ;; re-push is the deferred refresh; the status returns now.
       (let ((surface (or (plist-get params :surface)
                          (concat "app:" jetpacs-clip-owner))))

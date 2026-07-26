@@ -93,6 +93,8 @@ illegal owner fails at registration time, never as a push-time 1201."
               jetpacs-current-owner))
      ,@body))
 
+(defvar jetpacs--in-action-handler)     ; the dispatch marker, defined below
+
 (defun jetpacs--claim (kind name)
   "Attribute KIND:NAME to `jetpacs-current-owner'; returns NAME.
 A different-owner clash warns, or errors under
@@ -105,7 +107,13 @@ No-op (no record) when no owner is bound."
     (let* ((key (cons kind name))
            (prior (gethash key jetpacs--registrations))
            (prior-site (gethash key jetpacs--claim-sites))
-           (site (or load-file-name buffer-file-name)))
+           ;; `buffer-file-name' follows `current-buffer', so a claim made
+           ;; from inside a handler running `with-current-buffer' on a
+           ;; file would record THAT file as the defining site and warn
+           ;; spuriously on the next legitimate reload.  A dispatch has no
+           ;; meaningful defining file; record none.
+           (site (unless jetpacs--in-action-handler
+                   (or load-file-name buffer-file-name))))
       (cond
        ;; A different owner: the pre-existing clash.
        ((and prior (not (equal prior jetpacs-current-owner)))
@@ -505,10 +513,20 @@ allowed to resume."
   (let ((flow (or jetpacs--device-flow
                   (and jetpacs--in-action-handler
                        (list :surface
-                             (plist-get jetpacs--dispatch-params :surface))))))
+                             (plist-get jetpacs--dispatch-params :surface)
+                             :owner jetpacs-current-owner)))))
     (run-at-time 0 nil
                  (lambda ()
-                   (let ((jetpacs--device-flow flow))
+                   (let ((jetpacs--device-flow flow)
+                         ;; The OWNER rides the flow too, or D1 dies at the
+                         ;; timer boundary: the dispatch binding ends with
+                         ;; the extent, and the D2 deferred re-push — the
+                         ;; whole point of this seam — would resolve to the
+                         ;; shell default.  That is the reachable case, not
+                         ;; a corner: a SPEC 14.4 surfaceless event
+                         ;; (reminder/trigger/shortcut/pie) has no
+                         ;; `:surface' to fall back on either.
+                         (jetpacs-current-owner (plist-get flow :owner)))
                      (funcall fn))))))
 
 ;;;; Flow entry (JA-2/B3): ESTABLISHING a device flow, not inheriting one
@@ -549,7 +567,8 @@ restore the prior marker; nothing to clear, nothing to leak."
                            resolved)))
       (error "jetpacs: a device flow for %S is already established; refusing nested flow for %S"
              (plist-get jetpacs--device-flow :surface) resolved))
-    (let ((jetpacs--device-flow (list :surface resolved)))
+    (let* ((flow (list :surface resolved :owner jetpacs-current-owner))
+           (jetpacs--device-flow flow))
       (funcall thunk))))
 
 (defmacro with-jetpacs-flow (surface &rest body)
@@ -581,10 +600,13 @@ pumps, a second flow's prompt falls through to the real minibuffer.
 Returns the timer."
   (unless (functionp fn)
     (error "jetpacs-flow-begin: FN must be a function, got %S" fn))
-  (let ((resolved (jetpacs--flow-resolve-surface surface)))
+  (let ((resolved (jetpacs--flow-resolve-surface surface))
+        (owner jetpacs-current-owner))
     (run-at-time 0 nil
                  (lambda ()
-                   (let ((jetpacs--device-flow (list :surface resolved)))
+                   (let ((jetpacs--device-flow
+                          (list :surface resolved :owner owner))
+                         (jetpacs-current-owner owner))
                      (funcall fn))))))
 
 (defun jetpacs--dispatch (client params fn)
@@ -600,6 +622,17 @@ logged: amendment #74 puts sensitive trigger data in `args'."
   (ignore client)
   (let ((args (plist-get params :args))
         (jetpacs--in-action-handler t)
+        ;; D1: the handler runs under the owner that REGISTERED it.  A
+        ;; plain `let', not `with-jetpacs-owner': that macro errors on
+        ;; nil, and nil is the common case (most base actions register
+        ;; ownerless), and an error here would be caught below and
+        ;; answered a PERMANENT `rejected' — a registry oddity turned
+        ;; into event loss.  Unconditional, never `or'-inherited: a
+        ;; re-entrant dispatch (the dialog pump, an async loader inside
+        ;; a builder) would otherwise run this handler under whatever
+        ;; owner happened to be on the stack.
+        (jetpacs-current-owner
+         (jetpacs--owner-of "action" (plist-get params :action)))
         ;; Event context for floor seams (`jetpacs-flow-continue');
         ;; never logged — amendment #74 puts sensitive data in `args'.
         (jetpacs--dispatch-params params)
@@ -907,7 +940,14 @@ One broken callback must not break the connection — this runs inside
 the jsonrpc dispatch extent."
   (when-let* ((fn (gethash (cons surface id) jetpacs--state-handlers)))
     (condition-case err
-        (funcall fn value)
+        ;; D1, symmetric with `jetpacs--dispatch': this is the OTHER
+        ;; device-event entry point into application code, in the same
+        ;; jsonrpc extent.  Without this an app gets its owner on a tap
+        ;; and loses it on a text edit — worse than a uniform nil,
+        ;; because handlers written against the repaired action path
+        ;; would silently misroute here.
+        (let ((jetpacs-current-owner (jetpacs--owner-of "surface" surface)))
+          (funcall fn value))
       ;; The datum here is the user's input value — never log it (23.3).
       (error (message "jetpacs: state handler for %s failed: %s"
                       id (jetpacs--error-label err))))))

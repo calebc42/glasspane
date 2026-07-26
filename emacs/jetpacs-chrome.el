@@ -153,8 +153,10 @@ screen.  Pure stack mutation: no push."
 ID is a SPEC 4.4 identifier, validated BEFORE any mutation — mint
 dynamic ids from buffer names/paths through `jetpacs-wire-id'.  The
 only navigation-forcing push shape (`:current-view').  From an action
-handler pass (plist-get params :surface): the owner binding is nil in
-a dispatch extent and the default would clobber another owner (D1).
+handler pass (plist-get params :surface): the wire names the surface the
+user actually tapped, which is not necessarily this owner's primary one.
+\(`jetpacs--dispatch' binds the registering owner now, so the zero-arg
+default is no longer simply wrong — it is merely a different surface.)
 Returns the claimed revision, or nil (disconnected, or the W10 ceiling
 refused) — nil is NOT failure: the stack mutation is kept and the next
 successful push renders it.  Never retry-loop on nil."

@@ -288,8 +288,17 @@ builder runs under its registered owner, so `jetpacs-ui-state' and any
 other owner-scoped lookup resolve to the surface being built — a
 repush or async flush carries no ambient owner of its own."
   (condition-case err
-      (let ((jetpacs-current-owner (or (plist-get plist :owner)
-                                       jetpacs-current-owner)))
+      ;; The inherit is for a DESKTOP Lisp caller pushing from inside its
+      ;; own `with-jetpacs-owner'.  It must NOT cross a dispatch: with the
+      ;; owner now bound there, building an OWNERLESS root from inside an
+      ;; owned handler would run the builder under the handler's owner,
+      ;; and a zero-arg `jetpacs-shell-push' or `jetpacs-ui-state' inside
+      ;; it would silently read and write another surface's SPEC 14.6
+      ;; input store.
+      (let ((jetpacs-current-owner
+             (or (plist-get plist :owner)
+                 (and (not jetpacs--in-action-handler)
+                      jetpacs-current-owner))))
         (funcall (plist-get plist :builder)))
     (error
      (jetpacs-shell--error-spec surface

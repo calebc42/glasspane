@@ -73,10 +73,12 @@ A plist (:buffer NAME :beg B :end E :label L :point P).  Rendered by
 
 (defvar jetpacs-results-event-surface nil
   "The surface the in-flight visit/step event came from, or nil.
-Bound by the actions around their effect.  An action handler runs
-OUTSIDE any `with-jetpacs-owner', so a zero-arg re-push would resolve to
-`jetpacs-shell-surface-id' and update a surface the user is not looking
-at — under decision D1 every owner has its own.")
+Bound by the actions around their effect.  These actions register
+OWNERLESS, so `jetpacs--dispatch' binds no owner for them and a zero-arg
+re-push still resolves to `jetpacs-shell-surface-id' — a surface the
+user is not looking at.  (The dispatch DOES bind the registering owner
+now, but only for an action claimed under `with-jetpacs-owner'; an
+ownerless one like these has nothing to recover.)")
 
 (defvar jetpacs-results-visit-region-function
   #'jetpacs-results-show-region

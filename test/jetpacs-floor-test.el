@@ -997,5 +997,110 @@ and D1 makes it a permanent wire identifier."
     (dolist (o base-owners)
       (should (string-prefix-p jetpacs-reserved-owner-prefix o)))))
 
+
+;;;; E2a: D1 — the owner reaches the handler, its continuation, and state
+
+(ert-deftest jetpacs-floor-dispatch-binds-the-action-owner ()
+  "D1 root cause: a handler runs under the owner that REGISTERED it.
+Without this every owner-derived default collapses to the shell default
+inside a dispatch — which is exactly where SPEC 14.4 omits the surface
+context and the default is all there is."
+  (jetpacs-floor-test--with-client (client)
+    (let ((owner :unset) (surface :unset))
+      (with-jetpacs-owner "acme.app"
+        (jetpacs-defaction "acme.app.tap"
+                           (lambda (_a _p)
+                             (setq owner jetpacs-current-owner
+                                   surface (jetpacs--default-surface))
+                             'accepted)))
+      (should (equal (ebp-client--handle-event-action
+                      client (jetpacs-floor-test--event
+                              (make-string 32 ?1) :action "acme.app.tap"))
+                     '(:status "accepted")))
+      (should (equal owner "acme.app"))
+      (should (equal surface "app:acme.app"))
+      (jetpacs-undefaction "acme.app.tap"))))
+
+(ert-deftest jetpacs-floor-dispatch-owner-is-never-inherited ()
+  "Unconditional, never `or'-inherited.  A re-entrant dispatch — the
+dialog pump, an async loader inside a builder — would otherwise run an
+OWNERLESS handler under whatever owner happened to be on the stack."
+  (jetpacs-floor-test--with-client (client)
+    (let ((owner :unset))
+      (jetpacs-defaction "bare.tap"          ; registered with NO owner
+                         (lambda (_a _p)
+                           (setq owner jetpacs-current-owner)
+                           'accepted))
+      (with-jetpacs-owner "pumping.app"
+        (jetpacs--dispatch client '(:action "bare.tap" :surface "app:demo")
+                           (gethash "bare.tap" jetpacs-action-handlers)))
+      (should (eq owner nil))
+      (jetpacs-undefaction "bare.tap"))))
+
+(ert-deftest jetpacs-floor-flow-continuation-keeps-the-owner ()
+  "D1 must survive the timer boundary.  The dispatch binding ends with
+the extent, and `jetpacs-flow-continue' is where the D2 deferred
+re-push actually happens — so without the owner riding the flow the
+work lands on the shell default.  Driven from a SURFACELESS event (SPEC
+14.4 reminder/trigger/shortcut/pie), where there is no `:surface' to
+fall back on either."
+  (jetpacs-floor-test--with-client (client)
+    (let ((in-handler :unset) (in-continuation :unset))
+      (with-jetpacs-owner "org.agenda"
+        (jetpacs-defaction "org.agenda.open"
+                           (lambda (_a _p)
+                             (setq in-handler jetpacs-current-owner)
+                             (jetpacs-flow-continue
+                              (lambda ()
+                                (setq in-continuation
+                                      (jetpacs--default-surface))))
+                             'accepted)))
+      (jetpacs--dispatch client '(:action "org.agenda.open")
+                         (gethash "org.agenda.open" jetpacs-action-handlers))
+      (should (equal in-handler "org.agenda"))
+      (cl-loop repeat 20 until (not (eq in-continuation :unset))
+               do (accept-process-output nil 0.02))
+      (should (equal in-continuation "app:org.agenda"))
+      (jetpacs-undefaction "org.agenda.open"))))
+
+(ert-deftest jetpacs-floor-build-does-not-inherit-across-a-dispatch ()
+  "The containment the dispatch binding makes necessary: an OWNERLESS
+root's builder must NOT run under the handler's owner, or a zero-arg
+push or `jetpacs-ui-state' inside it silently reads and writes another
+surface's SPEC 14.6 input store."
+  (jetpacs-floor-test--with-client (client)
+    (let ((build-owner :unset))
+      (jetpacs-shell-define-root "app:main"     ; no with-jetpacs-owner
+                                 (lambda ()
+                                   (setq build-owner jetpacs-current-owner)
+                                   (jetpacs-text "hi")))
+      (with-jetpacs-owner "acme"
+        (jetpacs-defaction "acme.tap"
+                           (lambda (_a _p)
+                             (jetpacs-shell--build
+                              "app:main"
+                              (alist-get "app:main" jetpacs-shell--roots
+                                         nil nil #'equal))
+                             'accepted)))
+      (jetpacs--dispatch client '(:action "acme.tap" :surface "app:demo")
+                         (gethash "acme.tap" jetpacs-action-handlers))
+      (should (eq build-owner nil))
+      (jetpacs-undefaction "acme.tap"))))
+
+(ert-deftest jetpacs-floor-state-change-binds-the-surface-owner ()
+  "The OTHER device-event entry point, in the same jsonrpc extent.
+Without this an app gets its owner on a tap and loses it on a text
+edit — worse than a uniform nil, because a handler written against the
+repaired action path would silently misroute here."
+  (jetpacs-floor-test--with-client (client)
+    (let ((owner :unset))
+      (with-jetpacs-owner "d1app"
+        (jetpacs-shell-define-root "app:d1app" (lambda () (jetpacs-text "x")))
+        (jetpacs-on-state-change "field"
+                                 (lambda (_v) (setq owner jetpacs-current-owner))
+                                 "app:d1app"))
+      (jetpacs--on-state-changed client "app:d1app" 1 "field" "typed")
+      (should (equal owner "d1app")))))
+
 (provide 'jetpacs-floor-test)
 ;;; jetpacs-floor-test.el ends here

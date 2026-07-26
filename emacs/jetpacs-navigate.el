@@ -53,6 +53,37 @@ whole DOCUMENT, and a screen stack rendered as one multi_view puts N
 independently-built subtrees in one.  The chrome kit wires
 this under `with-eval-after-load'; the navigator never names it.")
 
+(defvar jetpacs-navigate--drill-hosts (make-hash-table :test #'equal)
+  "SURFACE id -> its drill host, overriding the global seam.
+A Tier-1 that owns its surface's navigation registers here
+\(`jetpacs-navigate-register-drill-host'); the chrome kit claims each
+chrome surface at `jetpacs-chrome-define-root'.  Per-surface beats the
+global, so one app's custom host and another's chrome stack coexist —
+the single global was require-order roulette.")
+
+(defun jetpacs-navigate-register-drill-host (surface fn)
+  "Register FN as SURFACE's drill host; returns SURFACE.
+FN has the `jetpacs-navigate-drill-function' contract.  Claimed under
+the current owner (`jetpacs--claim'), so a cross-owner registration
+warns exactly as a surface claim does, and `jetpacs-teardown-owner'
+sweeps it with the rest of the owner's state."
+  (jetpacs--claim "drill-host" surface)
+  (puthash surface fn jetpacs-navigate--drill-hosts)
+  surface)
+
+(defun jetpacs-navigate-drill-host (surface)
+  "SURFACE's drill host: its registration, else the global seam."
+  (or (gethash surface jetpacs-navigate--drill-hosts)
+      jetpacs-navigate-drill-function))
+
+(defun jetpacs-navigate--on-teardown (_owner)
+  "Drop the drill hosts of every surface the teardown swept."
+  (dolist (surface jetpacs-teardown-surfaces)
+    (remhash surface jetpacs-navigate--drill-hosts)
+    (jetpacs--unclaim "drill-host" surface)))
+
+(add-hook 'jetpacs-teardown-functions #'jetpacs-navigate--on-teardown)
+
 (defun jetpacs-navigate--screen-builder (name)
   "A nullary builder closing over buffer NAME (never the object —
 that would pin a dead buffer).  Re-resolves liveness at every build, so
@@ -99,16 +130,27 @@ answer into rejected."
               (message "jetpacs-navigate: no target surface (ownerless \
 handler of a surfaceless event); refusing to guess")
               nil)
-          (if (and (functionp jetpacs-navigate-drill-function)
-                   (funcall jetpacs-navigate-drill-function
-                            target
-                            (jetpacs-navigate--screen-builder
-                             (buffer-name buf))
-                            (or label (buffer-name buf))))
-              target
-            (jetpacs-shell-notify "No navigation host")
-            (message "jetpacs-navigate: no drill host for this surface")
-            nil))))))
+          (let ((host (jetpacs-navigate-drill-host target)))
+            (if (and (functionp host)
+                     ;; The seam promises this function NEVER signals: a
+                     ;; broken host must not turn a handler's answer into
+                     ;; a permanent rejected.  The host's own contract
+                     ;; says the same, but the promise cannot depend on
+                     ;; every implementation keeping it.
+                     (condition-case err
+                         (funcall host
+                                  target
+                                  (jetpacs-navigate--screen-builder
+                                   (buffer-name buf))
+                                  (or label (buffer-name buf)))
+                       (error
+                        (message "jetpacs-navigate: drill host failed: %s"
+                                 (jetpacs--error-label err))
+                        nil)))
+                target
+              (jetpacs-shell-notify "No navigation host")
+              (message "jetpacs-navigate: no drill host for this surface")
+              nil)))))))
 
 (defun jetpacs-navigate-thunk (thunk &optional surface label)
   "Run THUNK, capture the buffer it went to, and drill into it.
@@ -157,7 +199,9 @@ of a surfaceless event); refusing to guess")
 ;; The tablist seam: 1-arg calls conform via the &optional params.
 (defvar jetpacs-tablist-view-buffer-function)
 (with-eval-after-load 'jetpacs-tablist
-  (setq jetpacs-tablist-view-buffer-function #'jetpacs-navigate-buffer))
+  ;; Sentinel-guarded: a Tier-1's own viewer must survive require order.
+  (unless jetpacs-tablist-view-buffer-function
+    (setq jetpacs-tablist-view-buffer-function #'jetpacs-navigate-buffer)))
 
 (provide 'jetpacs-navigate)
 ;;; jetpacs-navigate.el ends here

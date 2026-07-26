@@ -48,9 +48,11 @@ Large lists (a full MELPA package menu is thousands of rows) are capped
 with a trailing note; skins narrow with filters rather than paging."
   :type 'integer :group 'jetpacs)
 
-(defvar jetpacs-tablist-view-buffer-function
-  (lambda (name) (message "jetpacs: no host to view buffer %s" name))
-  "Function of a buffer name that navigates the companion to that buffer.")
+(defvar jetpacs-tablist-view-buffer-function nil
+  "Function of a buffer name that navigates the companion to that buffer.
+nil (the default) is the SENTINEL the navigate module's seam seizure
+tests for — a lambda default would make \='unset\=' indistinguishable
+from a Tier-1's registration, and the seizure would clobber it.")
 
 ;; --- Per-mode skin hooks -----------------------------------------------------
 

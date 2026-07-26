@@ -184,5 +184,85 @@ reminder tap that used to drill into another owner's screen."
     (should (eq status 'accepted))
     (should (equal drilled '("app:mail")))))
 
+
+;;;; E2d: the per-surface drill-host registry
+
+(ert-deftest jetpacs-navigate-per-surface-host-beats-the-global ()
+  "A Tier-1's registered host wins over the global seam for ITS surface;
+other surfaces still route to the global."
+  (let ((global nil) (custom nil))
+    (unwind-protect
+        (let ((jetpacs-navigate-drill-function
+               (lambda (s _b _l) (push s global) t)))
+          (with-jetpacs-owner "notes2"
+            (jetpacs-navigate-register-drill-host
+             "app:notes2" (lambda (s _b _l) (push s custom) t)))
+          (should (equal (jetpacs-navigate-buffer "*scratch*" "app:notes2")
+                         "app:notes2"))
+          (should (equal (jetpacs-navigate-buffer "*scratch*" "app:other")
+                         "app:other"))
+          (should (equal custom '("app:notes2")))
+          (should (equal global '("app:other"))))
+      (remhash "app:notes2" jetpacs-navigate--drill-hosts)
+      (jetpacs--unclaim "drill-host" "app:notes2")
+      (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-navigate-survives-a-signalling-host ()
+  "The navigator's own contract: it NEVER signals.  A broken host is
+caught, logged by SYMBOL, and degrades to the documented snackbar —
+inside a handler this is the difference between a snackbar and a
+permanent SPEC 14.4 rejected."
+  (let ((notified nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _) (push text notified))))
+          (let ((jetpacs-navigate-drill-function
+                 (lambda (&rest _) (error "host exploded: /secret/path"))))
+            (should-not (jetpacs-navigate-buffer "*scratch*" "app:x"))
+            (should (member "No navigation host" notified))))
+      (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-navigate-chrome-claim-spares-a-tier1-host ()
+  "Re-evaluating a chrome root (the documented live-reload path) must
+not clobber a Tier-1's registered host — the claim takes the slot only
+when it is free or already chrome's."
+  (require 'jetpacs-chrome)
+  (let ((custom (lambda (_s _b _l) t)))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "notes2"
+            (jetpacs-chrome-define-root "notes2" "hub"
+                                        (lambda (_b) (jetpacs-text "h"))))
+          ;; Chrome claimed the fresh slot.
+          (should (eq (gethash "app:notes2" jetpacs-navigate--drill-hosts)
+                      #'jetpacs-chrome--drill))
+          ;; The Tier-1 takes over…
+          (with-jetpacs-owner "notes2"
+            (jetpacs-navigate-register-drill-host "app:notes2" custom))
+          ;; …and survives the chrome root's re-evaluation.
+          (with-jetpacs-owner "notes2"
+            (jetpacs-chrome-define-root "notes2" "hub"
+                                        (lambda (_b) (jetpacs-text "h"))))
+          (should (eq (gethash "app:notes2" jetpacs-navigate--drill-hosts)
+                      custom)))
+      (remhash "app:notes2" jetpacs-navigate--drill-hosts)
+      (clrhash jetpacs-chrome--stacks)
+      (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-navigate-teardown-sweeps-the-drill-host ()
+  "The registry rides the owner teardown like every other owner state."
+  (unwind-protect
+      (progn
+        (with-jetpacs-owner "notes2"
+          (jetpacs-navigate-register-drill-host
+           "app:notes2" (lambda (_s _b _l) t)))
+        (should (gethash "app:notes2" jetpacs-navigate--drill-hosts))
+        (cl-letf (((symbol-function 'ebp-client-surface-remove)
+                   (cl-function (lambda (&rest _) 1))))
+          (jetpacs-teardown-owner "notes2"))
+        (should-not (gethash "app:notes2" jetpacs-navigate--drill-hosts)))
+    (remhash "app:notes2" jetpacs-navigate--drill-hosts)
+    (jetpacs-test-reset-state)))
+
 (provide 'jetpacs-navigate-test)
 ;;; jetpacs-navigate-test.el ends here

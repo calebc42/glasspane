@@ -247,6 +247,7 @@ re-binds it around every build.  Returns the surface id."
     (jetpacs-shell-define-root surface
                                (lambda () (jetpacs-chrome--build surface))
                                :required required)
+    (jetpacs-chrome--claim-drill-host surface)
     surface))
 
 (defun jetpacs-chrome--stack-insert (surface id builder)
@@ -441,8 +442,29 @@ failed: %s" surface id (jetpacs--error-label err))))))
     t))
 
 (defvar jetpacs-navigate-drill-function)
+(declare-function jetpacs-navigate-register-drill-host "jetpacs-navigate"
+                  (surface fn))
+(declare-function jetpacs-navigate-drill-host "jetpacs-navigate" (surface))
+(defvar jetpacs-navigate--drill-hosts)
+
+(defun jetpacs-chrome--claim-drill-host (surface)
+  "Claim SURFACE's drill host for the chrome stack — ONLY when the slot
+is free or already chrome's.  Re-evaluating a chrome root (the
+documented live-reload path) must not clobber a Tier-1's registered
+host: the guard is what makes per-surface registration deterministic
+under re-evaluation, not just under require order."
+  (when (fboundp 'jetpacs-navigate-register-drill-host)
+    (let ((cur (gethash surface jetpacs-navigate--drill-hosts)))
+      (when (or (null cur) (eq cur #'jetpacs-chrome--drill))
+        (jetpacs-navigate-register-drill-host
+         surface #'jetpacs-chrome--drill)))))
+
 (with-eval-after-load 'jetpacs-navigate
-  (setq jetpacs-navigate-drill-function #'jetpacs-chrome--drill))
+  ;; The GLOBAL seam stays as the backfill for chrome roots defined
+  ;; before navigate loaded — sentinel-guarded so a Tier-1's own global
+  ;; host survives require order.
+  (unless jetpacs-navigate-drill-function
+    (setq jetpacs-navigate-drill-function #'jetpacs-chrome--drill)))
 
 (defun jetpacs-chrome--on-teardown (_owner)
   "Drop the stack of every surface the teardown swept — stacks ONLY:

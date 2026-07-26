@@ -136,5 +136,53 @@ carrying the eagerly-captured D1 surface; the flow marker rides."
   (should (eq jetpacs-tablist-view-buffer-function
               #'jetpacs-navigate-buffer)))
 
+
+;;;; E2c: refuse rather than guess
+
+(ert-deftest jetpacs-navigate-ownerless-surfaceless-refuses ()
+  "An OWNERLESS handler of a SPEC 14.4 surfaceless event has no honest
+target: `app:main' would be a guess about which owner's screen to
+seize.  The navigator refuses (nil, snackbar) and the handler's own
+answer stands — asserted AFTER the dispatch returns, never inside it."
+  (let ((drilled nil) (status nil) (notified nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _) (push text notified))))
+          (let ((jetpacs-navigate-drill-function
+                 (lambda (&rest args) (push args drilled) t)))
+            (jetpacs-defaction "bare.show"
+                               (lambda (_a _p)
+                                 (jetpacs-navigate-buffer "*scratch*")
+                                 'accepted))
+            (setq status (jetpacs--dispatch
+                          nil '(:action "bare.show")
+                          (gethash "bare.show" jetpacs-action-handlers)))))
+      (jetpacs-undefaction "bare.show")
+      (jetpacs-test-reset-state))
+    (should (eq status 'accepted))
+    (should (null drilled))
+    (should (member "No target surface" notified))))
+
+(ert-deftest jetpacs-navigate-owned-handler-resolves-its-own-surface ()
+  "With E2a binding the registering owner across the dispatch, an OWNED
+handler's surfaceless drill lands on its own surface — the mail
+reminder tap that used to drill into another owner's screen."
+  (let ((drilled nil) (status nil))
+    (unwind-protect
+        (let ((jetpacs-navigate-drill-function
+               (lambda (surface _b _l) (push surface drilled) t)))
+          (with-jetpacs-owner "mail"
+            (jetpacs-defaction "mail.show"
+                               (lambda (_a _p)
+                                 (jetpacs-navigate-buffer "*scratch*")
+                                 'accepted)))
+          (setq status (jetpacs--dispatch
+                        nil '(:action "mail.show")
+                        (gethash "mail.show" jetpacs-action-handlers))))
+      (jetpacs-undefaction "mail.show")
+      (jetpacs-test-reset-state))
+    (should (eq status 'accepted))
+    (should (equal drilled '("app:mail")))))
+
 (provide 'jetpacs-navigate-test)
 ;;; jetpacs-navigate-test.el ends here

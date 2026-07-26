@@ -66,6 +66,23 @@ the `jetpacs-render-buffer' dispatch seam, which also rewrites the SPEC
       (list (jetpacs-text (format "Buffer %s no longer exists" name)
                           :style "caption")))))
 
+(defun jetpacs-navigate--target (surface)
+  "Resolve the drill target, or nil when guessing would misroute.
+Order: an explicit SURFACE; the flow surface (answers both inside a
+handler and its continuation); the owner default when an owner is bound
+\(E2a binds the registering owner across the dispatch AND the flow, so
+an owned action's drill lands on its own surface); else the shell
+default — but ONLY outside device-originated work.  Inside a dispatch
+or flow with nothing resolved, the caller is an OWNERLESS action
+handling a SPEC 14.4 surfaceless event: `app:main' would be a guess
+about which owner's screen to seize, and the honest answer is refusal —
+register under `with-jetpacs-owner' to give the default something to
+stand on."
+  (or surface (jetpacs-flow-surface)
+      (and jetpacs-current-owner (jetpacs--default-surface))
+      (and (not (or (jetpacs-in-action-p) (jetpacs-device-flow-p)))
+           (jetpacs--default-surface))))
+
 (defun jetpacs-navigate-buffer (buffer-or-name &optional surface label)
   "Present BUFFER-OR-NAME as a drill-in on SURFACE; the tablist seam.
 SURFACE defaults to the device-flow surface, else the owner default
@@ -75,18 +92,23 @@ answer into rejected."
   (let ((buf (get-buffer buffer-or-name)))
     (if (null buf)
         (progn (message "jetpacs-navigate: no such buffer") nil)
-      (let ((target (or surface (jetpacs-flow-surface)
-                        (jetpacs--default-surface))))
-        (if (and (functionp jetpacs-navigate-drill-function)
-                 (funcall jetpacs-navigate-drill-function
-                          target
-                          (jetpacs-navigate--screen-builder
-                           (buffer-name buf))
-                          (or label (buffer-name buf))))
-            target
-          (jetpacs-shell-notify "No navigation host")
-          (message "jetpacs-navigate: no drill host for this surface")
-          nil)))))
+      (let ((target (jetpacs-navigate--target surface)))
+        (if (null target)
+            (progn
+              (jetpacs-shell-notify "No target surface")
+              (message "jetpacs-navigate: no target surface (ownerless \
+handler of a surfaceless event); refusing to guess")
+              nil)
+          (if (and (functionp jetpacs-navigate-drill-function)
+                   (funcall jetpacs-navigate-drill-function
+                            target
+                            (jetpacs-navigate--screen-builder
+                             (buffer-name buf))
+                            (or label (buffer-name buf))))
+              target
+            (jetpacs-shell-notify "No navigation host")
+            (message "jetpacs-navigate: no drill host for this surface")
+            nil))))))
 
 (defun jetpacs-navigate-thunk (thunk &optional surface label)
   "Run THUNK, capture the buffer it went to, and drill into it.
@@ -99,8 +121,7 @@ handler answers its own `accepted'; elsewhere it runs synchronously.
 A thunk that goes nowhere snackbars \"Nothing to show\"; a thunk error
 logs and snackbars its error SYMBOL only (SPEC 23.3 — the poc
 snackbarred the full message; that is not ported)."
-  (let* ((target (or surface (jetpacs-flow-surface)
-                     (jetpacs--default-surface)))
+  (let* ((target (jetpacs-navigate--target surface))
          (work
           (lambda ()
             (let* ((caught nil)
@@ -123,9 +144,15 @@ snackbarred the full message; that is not ported)."
                 (jetpacs-shell-notify "Nothing to show")
                 nil)
                (t (jetpacs-navigate-buffer (car dest) target label)))))))
-    (if (jetpacs-in-action-p)
-        (progn (jetpacs-flow-continue work) target)
-      (funcall work))))
+    (cond
+     ((null target)
+      (jetpacs-shell-notify "No target surface")
+      (message "jetpacs-navigate: no target surface (ownerless handler \
+of a surfaceless event); refusing to guess")
+      nil)
+     ((jetpacs-in-action-p)
+      (jetpacs-flow-continue work) target)
+     (t (funcall work)))))
 
 ;; The tablist seam: 1-arg calls conform via the &optional params.
 (defvar jetpacs-tablist-view-buffer-function)

@@ -1344,6 +1344,35 @@ what is under test; the loopback tests cover the live path."
       (should (ebp-client--request client 'dialog.show '(:y 4) #'ignore))
       (should-not (ebp-client-outstanding-held client)))))
 
+(ert-deftest ebp-test-sender-ceiling-rolls-back-a-signalling-send ()
+  "A send that SIGNALS must not burn an outstanding slot.
+No continuation is registered and no callback ever runs, so without the
+rollback the claim is permanent and repeated failures walk the client to
+`ebp-overload-hold' on requests that never reached the wire.  The signal
+must still escape: `jetpacs-shell-push' and the sections/results skins
+all catch it by design.  Found by the app-tier verdict pass (B12)
+against the W10 ceiling."
+  (let ((client (ebp-client-create :receipt-file (make-temp-file "ebp-ovl"))))
+    (cl-letf (((symbol-function 'jsonrpc--next-request-id) (lambda (_c) 7))
+              ((symbol-function 'jsonrpc-async-request)
+               (lambda (&rest _) (error "unserializable param"))))
+      (dotimes (_ 50)
+        (should-error (ebp-client--request client 'surface.update
+                                           '(:bad "\xff") #'ignore)))
+      (should (= (ebp-client-outstanding client) 0))
+      (should-not (ebp-client-outstanding-held client)))
+    ;; And a healthy request afterwards still claims and releases normally.
+    (let (fire)
+      (cl-letf (((symbol-function 'jsonrpc--next-request-id) (lambda (_c) 7))
+                ((symbol-function 'jsonrpc-async-request)
+                 (cl-function (lambda (_c _m _p &key success-fn
+                                          &allow-other-keys)
+                                (setq fire success-fn)))))
+        (ebp-client--request client 'surface.update '(:ok t) #'ignore)
+        (should (= (ebp-client-outstanding client) 1))
+        (funcall fire '(:status "applied"))
+        (should (= (ebp-client-outstanding client) 0))))))
+
 (ert-deftest ebp-test-sender-ceiling-close-fails-locally ()
   "SPEC 22.3: on close, outstanding requests fail LOCALLY — jsonrpc's
 sentinel errors every continuation, our callbacks conclude, the counter

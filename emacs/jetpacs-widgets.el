@@ -1549,10 +1549,17 @@ as a single list."
 The AUTHORITATIVE set for a connection is its welcome `surface_profiles'.")
 
 (defconst jetpacs-dialog-node-types
-  (append '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
+  (append '("text" "row" "column" "box" "spacer" "divider" "button" "text_input"
+            "editor")
           jetpacs-content-node-types jetpacs-input-node-types)
-  "The reference companion's advertised `dialog' node_types (26; no editor/
-scaffold/layout/viz).")
+  "The reference companion's advertised `dialog' node_types (27; no
+scaffold/layout/viz).
+`editor' is in the set because JC-4b added it to the Companion's
+`DIALOG_NODE_TYPES' (NodeSupport.kt) so a dialog could host the capf
+picker.  This constant is the REFERENCE union used by
+`jetpacs-check-profile'; the runtime SPEC 16.2 gate reads the live
+welcome instead (`jetpacs-node-advertised-p'), which is why the picker
+worked on device while this constant disagreed.")
 
 (defconst jetpacs-notification-node-types
   '("text" "row" "column" "box" "spacer" "divider")

@@ -602,7 +602,7 @@
   "jetpacs-check-profile / -node-types gate emitted types to the target (§16.2)."
   ;; reference set sizes + exact membership (app == the 39 node types)
   (should (= (length jetpacs-app-node-types) 39))
-  (should (= (length jetpacs-dialog-node-types) 26))
+  (should (= (length jetpacs-dialog-node-types) 27))
   (should (= (length jetpacs-notification-node-types) 6))
   (should (equal (sort (copy-sequence jetpacs-app-node-types) #'string<)
                  (sort (copy-sequence jetpacs-node-types) #'string<)))
@@ -621,8 +621,15 @@
   (should-error (jetpacs-check-profile (jetpacs-chart nil) 'notification))
   (should-error (jetpacs-check-profile (jetpacs-button "x" (jetpacs-action "a.b"))
                                        'notification))
-  ;; dialog (26) forbids editor/scaffold/layout/viz
-  (should-error (jetpacs-check-profile (jetpacs-editor "e") 'dialog))
+  ;; dialog (27) forbids scaffold/layout/viz.  `editor' IS advertised:
+  ;; JC-4b added it to the Companion's DIALOG_NODE_TYPES so a dialog could
+  ;; host the capf picker, and this reference constant lagged that change
+  ;; until the app-tier verdict pass caught the drift (B14).  The picker
+  ;; still worked on device because the runtime SPEC 16.2 gate reads the
+  ;; LIVE welcome; only this reference union disagreed — which is exactly
+  ;; the class of drift a pin test exists to catch, so it now pins the
+  ;; agreeing direction.
+  (should (jetpacs-check-profile (jetpacs-editor "e" :document "doc:x") 'dialog))
   (should-error (jetpacs-check-profile (jetpacs-tabs (list (jetpacs-tab-item "A"))
                                                      (list (jetpacs-text "1")))
                                        'dialog))

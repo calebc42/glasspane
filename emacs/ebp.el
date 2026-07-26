@@ -923,14 +923,29 @@ own load (§22.3's forged-`blocked_by' clause)."
               (ebp--with-dispatch client
                 (funcall callback result error)))))
       (cl-incf (ebp-client-outstanding client))
-      (jsonrpc-async-request
-       conn method params
-       :timeout secs
-       :success-fn (lambda (result) (funcall finish result nil))
-       :error-fn (lambda (error) (funcall finish nil (or error '(:code -32603))))
-       :timeout-fn (lambda ()
-                     (ebp-client--cancel client id)
-                     (funcall finish nil '(:code -32000 :message "timeout"))))
+      (condition-case err
+          (jsonrpc-async-request
+           conn method params
+           :timeout secs
+           :success-fn (lambda (result) (funcall finish result nil))
+           :error-fn (lambda (error)
+                       (funcall finish nil (or error '(:code -32603))))
+           :timeout-fn (lambda ()
+                         (ebp-client--cancel client id)
+                         (funcall finish nil '(:code -32000 :message "timeout"))))
+        (error
+         ;; The send SIGNALLED, so no continuation was registered and no
+         ;; callback will ever run — without this rollback the claim above
+         ;; is permanent and the session walks toward `ebp-overload-hold'
+         ;; on requests that never existed.  Reachable today: a param that
+         ;; `json-serialize' refuses (a raw-byte string, a non-finite
+         ;; float) signals out of `jsonrpc-connection-send', and callers
+         ;; like `jetpacs-shell-push' catch that by design.  The signal
+         ;; must still reach them, so re-raise after the rollback.
+         (unless done
+           (setq done t)
+           (cl-decf (ebp-client-outstanding client)))
+         (signal (car err) (cdr err))))
       id)))
 
 (defun ebp-client-abandon (client id)

@@ -144,7 +144,51 @@ and a real `spec_equal` in validate.py (every host primitive fails differently �
 gates on XTYPE and compares float REPRESENTATIONS, Python's `==` equates `true` and `1`); §21.5's
 durability scoped to occurrences the Companion OBSERVED; `trigger_unavailable` identifiers
 required to resolve against the `permissions` snapshot; and §23.2 extended from execution sinks to
-*interpretation* sinks. Baselines **311 wire / 24 app / 206 elisp**. **NEXT: A8's research items.**
+*interpretation* sinks. Baselines **311 wire / 24 app / 206 elisp**.
+
+**A8 COMPLETE — report at `docs/RESEARCH-A8-2026-07-25.md`.** A8 is a *research* phase, so no
+amendment was drafted and the spec stays at **#123**. Five investigations (the three A8 items plus
+the two §7 flagged for a second pass), each re-verified by the main session against the same primary
+sources. Verdicts: **A8-1 CONFIRMED** (a blocking `process-send-string` spins in
+`wait_reading_process_output`, which runs `timer_check`, and jsonrpc.el dispatches from timers — so
+our handlers run inside our own half-written frame; reproduced through the real stack, 6/6 inbound
+notifications dispatched mid-send with the bug#60088 guard nil, since that guard covers filter→send
+and this is send→filter). **Byte interleaving is IMPOSSIBLE** (`write_queue` is strict FIFO) — the
+hazard is re-entrant Lisp, not wire corruption. It is reachable **by design**: `DeviceBridge`'s reader
+thread runs `engine.feed()` synchronously, so the Companion stops reading while it validates, and its
+single-reader §7.4 ordering guarantee is precisely what creates the Emacs endpoint's exposure. Note
+the remedy constraint: Emacs reading *inside* its blocked send is what unwedges the Companion, so the
+re-entrancy IS the deadlock-avoidance mechanism. **A8-2 mechanism CONFIRMED but deployment premise
+REFUTED** — `integer-width` does *not* bound the JSON literal path (it gates `make_bignum_bits`, and
+literals go through `make_bignum_str`), and standalone-compiled mini-gmp is exactly quadratic (4 M
+digits = 45.3 s), but the APK in use ships real libgmp, so impact collapses to one live `validate.py`
+crash. **A8-3 REFUTED as stated** — the Content-Length hypothesis dies because `json-serialize`
+returns a UNIBYTE string, so `string-bytes` *is* the octet count regardless of coding system; the real
+hazard is bare `undecided` latching `-dos`, eating the CR and hanging forever, which our existing pin
+already closes. **§19.5's §5.3 premise is STALE** (the Companion validator landed in `691b052`; the
+path is dead and double-closed) and **§13.2/§24.2 is REFUTED** (stale absorption works and is already
+tested).
+
+**Two findings nobody had on the list.** (1) **§22.3 is discharged on the Companion and nowhere on
+the Emacs side** — `ebp-client` has no outstanding-request ceiling, no inbound bound, no `1401`; all
+three queues §22.3 names are delegated to jsonrpc.el unbounded. §23.5's "not relaxed by Section 6.2"
+sentence is the precedent for the fix. Not fixed here: the inbound half is blocked on the deadlock
+question above. (2) **A NEW P1 in the app layer** — `jetpacs--applied-revisions`
+(`jetpacs-surfaces.el:409`) is written only on `applied` and **never seeded from the welcome**, so
+after a cold start `jetpacs-event-stale-p` returns nil (= not stale) for every replayed event and four
+production handlers index a stale snapshot. Verified live; logged as `[P3] [unverified]` at
+`AUDIT-full-spec-RAW.md:1993` and that rating is too low. **Not fixed — app-layer track.**
+
+**Three implementation gaps behind ratified prose were closed** (each reproduced before fixing):
+`ebp-client-surface-update` now records `reset_input_ids` BEFORE the send via a new `on-claim` hook
+(§14.6/P1 #2 — a re-entrant `state.changed` was adopting a draft the snapshot supersedes);
+`validate.py` catches `ValueError` not `json.JSONDecodeError` (the latter is a SUBCLASS, so a
+5000-digit literal crashed the reference validator where §4.2 requires a Parse Error); plus the
+coding-pin regression test. **A candidate fix was REFUTED and deliberately not implemented**:
+`coding-system-for-read/-write` do NOT override `:coding` (`process.c:3227-3240` — it is an `else
+if`), so that "fix" would have been dead code with a false comment. Baselines **311 wire / 24 app /
+208 elisp**, validate.py green. **NEXT: §5.2's C1 (the app-layer P1), then §1.7's R1-for-H2 and R3,
+then §7-a.**
 
 **Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the
 checklist wants it on hardware too), an inbound-`edit.apply`-while-the-editor-is-shown smoke (the

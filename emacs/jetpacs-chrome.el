@@ -98,24 +98,99 @@ bug this port fixes."
 
 ;;;; The per-surface screen stack (representation A: one multi_view)
 
+(defun jetpacs-chrome--error-screen (surface id back err)
+  "A Core-Node-Set stand-in for screen ID whose builder failed with ERR.
+ERR is a signal object or a bare error SYMBOL.  Core Node Set ONLY:
+SPEC 16.2 makes `text', `column' and `button' types every `app' profile
+MUST carry (SPEC 10.2), and every builder called here is total for
+these arguments — the degrade path must not be able to fail the gate it
+exists to survive.  Keeps BACK whenever a screen is below: the broken
+screen is normally the one just pushed, hence on display, and
+`view.switch' is companion-local — the one escape that does not need
+the crashed Emacs side to answer.  The finished card is run through the
+per-view gate and retried WITHOUT the button if it fails: SPEC.md
+requires `view.switch' of every conforming app profile, but GATE 1
+checks the LIVE one, and the degrade path must not out-fail the failure
+it degrades.  SPEC 23.3: the body is the error SYMBOL, never
+`error-message-string' — that embeds the offending datum, and SPEC 13.2
+has the Companion PERSIST this text on the device."
+  (let ((card (lambda (b)
+                (apply #'jetpacs-column
+                       (append
+                        (list (jetpacs-text
+                               (format "Screen %s failed to build" id)
+                               :style "title")
+                              (jetpacs-text (jetpacs--error-label err)
+                                            :style "body"))
+                        (when b (list (jetpacs-button "Back" b)))
+                        (list :spacing 8))))))
+    (or (ignore-errors
+          (let ((n (funcall card back)))
+            (jetpacs-chrome--gate-view surface n)
+            n))
+        (funcall card nil))))
+
+(defun jetpacs-chrome--gate-view (surface node)
+  "Signal when NODE uses what SURFACE's LIVE session does not allow.
+A per-view pre-run of the shell's GATE 1 (node types, builtins,
+features) and GATE 4 (the ratified amendments — an ungranted `wake'
+descriptor or synchronized editor), so the failure costs its own screen
+instead of making the whole surface unpushable for the process
+lifetime.  No client (offline render, tests) is a no-op; a missing
+profile skips only GATE 1 — `--gate-spec' would signal its own
+\='no profile\=' error for every view, strictly worse than one
+push-level failure.  The authority remains the shell's gates on the
+assembled spec; this is the same check run earlier, per screen."
+  (when-let* ((client (jetpacs-client)))
+    (when (plist-get (ebp-client-profiles client)
+                     (jetpacs-shell--surface-target surface))
+      (jetpacs-shell--gate-spec client surface node nil))
+    (jetpacs-shell--gate-amendments client node)))
+
 (defun jetpacs-chrome--build (surface)
   "The registered root builder: the stack as one multi_view.
 Walks bottom-first so each screen's BACK targets the one below it;
 `initial_view' is the stack TOP, so SPEC 13.4's new-surface and
 vanished-view fallbacks land where Emacs believes the user is.  Signals
-on an empty/missing stack — the shell degrades that to its error spec,
-never the whole push."
+on an empty/missing stack — the shell degrades that to its error spec.
+
+A screen whose builder signals, returns a non-node, or emits what the
+session does not allow costs ITS OWN view and nothing else.  Degrading
+the whole spec instead would drop `views', which nils `current_view' at
+the shell's GATE 2 and makes the Companion clear the retained view
+\(SPEC 13.4): the back affordance and the navigation state would die
+together, on every rebuild."
   (let ((stack (gethash surface jetpacs-chrome--stacks)))
     (unless stack
       (error "jetpacs-chrome: no chrome stack for %s" surface))
     (jetpacs-buffer-with-budget
      (let (views prev-id)
       (dolist (entry (reverse stack))
-        (push (cons (car entry)
-                    (funcall (cdr entry)
-                             (and prev-id (jetpacs-view-switch prev-id))))
-              views)
-        (setq prev-id (car entry)))
+        (let* ((id (car entry))
+               (back (and prev-id (jetpacs-view-switch prev-id)))
+               (budget jetpacs-buffer-budget)
+               (spans (car-safe budget))
+               (bytes (cdr-safe budget))
+               (fail nil)
+               (node (condition-case err
+                         (let ((n (funcall (cdr entry) back)))
+                           (jetpacs-chrome--gate-view surface n)
+                           n)
+                       (error (setq fail err) nil))))
+          (unless (or fail (jetpacs--root-node-p node))
+            (setq fail 'wrong-type-argument))
+          (when fail
+            ;; The dead screen SPENT budget it never ships; hand it back,
+            ;; or one broken screen silently truncates the healthy ones
+            ;; built after it (SPEC 4.5 counts per SurfaceSpec).
+            (when (consp budget)
+              (setcar budget spans)
+              (setcdr budget bytes))
+            (message "jetpacs-chrome: screen %s failed to build: %s"
+                     id (jetpacs--error-label fail))
+            (setq node (jetpacs-chrome--error-screen surface id back fail)))
+          (push (cons id node) views)
+          (setq prev-id id)))
       (jetpacs-multi-view (nreverse views) (caar stack))))))
 
 (cl-defun jetpacs-chrome-define-root (surface-or-owner id builder

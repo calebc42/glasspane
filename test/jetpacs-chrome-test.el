@@ -265,6 +265,17 @@ snapshot still carries every view with initial_view at the stack top."
 
 ;;;; E1a: the poison transaction
 
+(defun jetpacs-chrome-test--deep (n)
+  "N nested columns — deep enough to trip GATE 5's max_node_depth.
+The E1a poison vector must be one the per-view gate does NOT pre-run
+\(E1b degrades GATE 1/4 failures to an error card before the push):
+GATE 5 runs only on the assembled spec, so a too-deep screen still
+reaches the push-level signal — the residual the transaction exists
+for."
+  (let ((node (jetpacs-text "leaf")))
+    (dotimes (_ n) (setq node (jetpacs-column node)))
+    node))
+
 (defun jetpacs-chrome-test--gate-error (thunk)
   "THUNK's error message, or nil — the assertion must name WHICH gate
 fired: a bare `should-error' here can pass on an unrelated signal."
@@ -294,13 +305,15 @@ the process lifetime."
                                         (jetpacs-chrome-screen
                                          "Hub" (jetpacs-text "hub")))))
         (should (= 42 (jetpacs-shell-push "app:filesapp")))
-        ;; The bad screen: an unadvertised node type trips GATE 1.
+        ;; The bad screen: 25 nested columns trip GATE 5's depth cap on
+        ;; the ASSEMBLED spec — the failure class the per-view gate does
+        ;; not pre-run, so it reaches the push-level signal.
         (let ((msg (jetpacs-chrome-test--gate-error
                     (lambda ()
                       (jetpacs-chrome-push-screen
                        "app:filesapp" "bad"
-                       (lambda (_back) (jetpacs-progress :value 0.5)))))))
-          (should (string-match-p "not advertised" msg)))
+                       (lambda (_back) (jetpacs-chrome-test--deep 25)))))))
+          (should (string-match-p "max_node_depth" msg)))
         ;; Rolled back: the model never held the refused screen…
         (should (equal (jetpacs-chrome-stack "app:filesapp") '("hub")))
         ;; …the consumed repush entry was restored…
@@ -330,7 +343,7 @@ the poisoned builder.  The replace branch must CONS fresh."
                  (lambda ()
                    (jetpacs-chrome-push-screen
                     "app:filesapp" "detail"
-                    (lambda (_back) (jetpacs-progress :value 0.1))))))
+                    (lambda (_back) (jetpacs-chrome-test--deep 25))))))
         (should (equal (jetpacs-chrome-stack "app:filesapp")
                        '("detail" "hub")))
         ;; The OLD builder survived the rollback: pushable, and the wire
@@ -379,7 +392,7 @@ signalled.  The deferred failure must roll the insert back."
                                          "Hub" (jetpacs-text "hub")))))
         (should (jetpacs-chrome--drill
                  "app:filesapp"
-                 (lambda () (list (jetpacs-progress :value 0.2)))
+                 (lambda () (list (jetpacs-chrome-test--deep 25)))
                  "*bad buffer*"))
         ;; Drain the deferred push (run-at-time 0).
         (cl-loop repeat 20
@@ -424,6 +437,166 @@ drain always has."
         (setq jetpacs-async--pending-owners '("good" "bad"))
         (jetpacs-async--flush-push)
         (should (equal (mapcar #'car recs) '("app:good")))))))
+
+
+;;;; E1b: a broken screen costs its own view
+
+(defun jetpacs-chrome-test--view-json (recs view-id)
+  "The canonical JSON of VIEW-ID's node in the newest recorded push."
+  (let* ((spec (cadr (car recs)))
+         (views (plist-get spec :views)))
+    (jetpacs-node->canonical-json (gethash view-id views))))
+
+(ert-deftest jetpacs-chrome-broken-screen-costs-its-own-view ()
+  "One signalling builder costs its view — never the multi_view.
+Pre-fix the whole spec degraded to a bare column: GATE 2 nils
+`current_view', the Companion clears the retained view, and the back
+affordance and navigation state died together on every rebuild.  The
+card carries the error SYMBOL only: `error-message-string' embeds the
+offending datum and SPEC 13.2 persists this text on the device."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        (jetpacs-chrome-define-root "filesapp" "hub"
+                                    (lambda (_back)
+                                      (jetpacs-chrome-screen
+                                       "Hub" (jetpacs-text "hub-alive")))))
+      (jetpacs-chrome-push-screen
+       "app:filesapp" "detail"
+       (lambda (_back) (error "boom: /home/secret/passwords.org")))
+      (let* ((spec (cadr (car recs)))
+             (keys (car (cddr (car recs)))))
+        ;; Still a multi_view; navigation forced to the broken screen.
+        (should (plist-member spec :views))
+        (should (equal (plist-get keys :current-view) "detail"))
+        ;; The healthy screen is untouched…
+        (should (string-match-p "hub-alive"
+                                (jetpacs-chrome-test--view-json recs "hub")))
+        ;; …the broken one is the card, WITH its back escape…
+        (let ((card (jetpacs-chrome-test--view-json recs "detail")))
+          (should (string-match-p "failed to build" card))
+          (should (string-match-p "view.switch" card))
+          ;; …and the secret never reached the wire (SPEC 23.3/13.2).
+          (should-not (string-match-p "passwords" card))
+          (should-not (string-match-p "passwords"
+                                      (jetpacs-node->canonical-json spec))))))))
+
+(ert-deftest jetpacs-chrome-non-node-builder-degrades-the-same-way ()
+  "A builder that RETURNS garbage (nil, a string) is the same failure
+class as one that signals — `jetpacs-multi-view' would signal on it
+after the loop, collapsing the whole spec."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        (jetpacs-chrome-define-root "filesapp" "hub"
+                                    (lambda (_back)
+                                      (jetpacs-chrome-screen
+                                       "Hub" (jetpacs-text "hub-alive")))))
+      (jetpacs-chrome-push-screen "app:filesapp" "detail"
+                                  (lambda (_back) nil))
+      (should (plist-member (cadr (car recs)) :views))
+      (should (string-match-p "failed to build"
+                              (jetpacs-chrome-test--view-json recs "detail"))))))
+
+(ert-deftest jetpacs-chrome-dead-screen-refunds-its-budget ()
+  "A screen that spends SPEC 4.5 budget and then dies refunds it —
+nothing it spent ships, and without the refund a broken screen silently
+truncates every healthy screen built after it."
+  (jetpacs-chrome-test--with
+      (jetpacs-chrome-test--client
+       `(:app (:node_types ["text" "row" "column" "box" "spacer" "divider"
+                            "button" "text_input" "rich_text"]
+               :builtins ["view.switch"] :features [])))
+    (setf (ebp-client-limits client)
+          '(:max_frame_bytes 4194304 :max_rich_spans 200))
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        ;; The ROOT (built first, bottom-first walk) spends 150 spans and
+        ;; dies; the pushed screen then asks for 120.
+        (jetpacs-chrome-define-root
+         "filesapp" "hub"
+         (lambda (_back)
+           (jetpacs-buffer-spend-spans
+            (cl-loop repeat 150 collect (jetpacs-span "x")))
+           (error "hub died after spending"))))
+      (jetpacs-chrome-push-screen
+       "app:filesapp" "detail"
+       (lambda (_back)
+         (jetpacs-column
+          (jetpacs-rich-text
+           (jetpacs-buffer-spend-spans
+            (cl-loop repeat 120 collect (jetpacs-span "y")))))))
+      (let ((detail (jetpacs-chrome-test--view-json recs "detail")))
+        ;; All 120 spans shipped: the dead root's 150 were refunded.
+        (should (= 120 (cl-count ?y detail)))))))
+
+(ert-deftest jetpacs-chrome-unadvertised-type-costs-its-own-view ()
+  "The per-view GATE 1 pre-run: an unadvertised node type is the MOST
+likely screen failure in practice (every skin pre-checks
+`jetpacs-node-advertised-p' because of it), and it does not signal in
+the builder — it would signal in GATE 1 on the ASSEMBLED spec, after
+E1a rolls back, leaving a healthy surface but a dead navigation.
+Pre-running the gate per view turns it into that screen's error card."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        (jetpacs-chrome-define-root "filesapp" "hub"
+                                    (lambda (_back)
+                                      (jetpacs-chrome-screen
+                                       "Hub" (jetpacs-text "hub-alive")))))
+      ;; "progress" is not in the fixture profile.
+      (should (= 42 (jetpacs-chrome-push-screen
+                     "app:filesapp" "detail"
+                     (lambda (_back) (jetpacs-progress :value 0.5)))))
+      (should (string-match-p "failed to build"
+                              (jetpacs-chrome-test--view-json recs "detail")))
+      (should (string-match-p "hub-alive"
+                              (jetpacs-chrome-test--view-json recs "hub"))))))
+
+(ert-deftest jetpacs-chrome-ungranted-editor-costs-its-own-view ()
+  "The per-view GATE 4 pre-run: a synchronized editor without the
+`editor.sync' grant passes GATE 1 (the TYPE is advertised) and would
+poison the surface at the push-level amendment gate."
+  (jetpacs-chrome-test--with
+      (jetpacs-chrome-test--client
+       `(:app (:node_types ["text" "row" "column" "box" "spacer" "divider"
+                            "button" "text_input" "editor"]
+               :builtins ["view.switch"] :features [])))
+    (setf (ebp-client-granted client) ["theme"])   ; no editor.sync
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        (jetpacs-chrome-define-root "filesapp" "hub"
+                                    (lambda (_back)
+                                      (jetpacs-chrome-screen
+                                       "Hub" (jetpacs-text "hub-alive")))))
+      (should (= 42 (jetpacs-chrome-push-screen
+                     "app:filesapp" "detail"
+                     (lambda (_back)
+                       (jetpacs-column
+                        (jetpacs-editor "ed1" :document "doc1"))))))
+      (should (string-match-p "failed to build"
+                              (jetpacs-chrome-test--view-json recs "detail"))))))
+
+(ert-deftest jetpacs-chrome-error-card-drops-back-when-unadvertised ()
+  "The degrade path must not out-fail the failure it degrades: against
+a (nonconforming) profile without the `view.switch' builtin, the card
+retries WITHOUT its Back button rather than tripping GATE 1 itself."
+  (jetpacs-chrome-test--with
+      (jetpacs-chrome-test--client
+       `(:app (:node_types ,jetpacs-chrome-test--types
+               :builtins [] :features [])))
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "filesapp"
+        (jetpacs-chrome-define-root "filesapp" "hub"
+                                    (lambda (_back)
+                                      (jetpacs-column
+                                       (jetpacs-text "hub-alive")))))
+      (should (= 42 (jetpacs-chrome-push-screen
+                     "app:filesapp" "detail"
+                     (lambda (_back) (error "boom")))))
+      (let ((card (jetpacs-chrome-test--view-json recs "detail")))
+        (should (string-match-p "failed to build" card))
+        (should-not (string-match-p "view.switch" card))))))
 
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

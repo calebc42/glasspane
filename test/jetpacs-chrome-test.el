@@ -598,5 +598,79 @@ retries WITHOUT its Back button rather than tripping GATE 1 itself."
         (should (string-match-p "failed to build" card))
         (should-not (string-match-p "view.switch" card))))))
 
+
+;;;; E1e: the teardown sweep list
+
+(ert-deftest jetpacs-chrome-teardown-sweeps-secondary-stacks ()
+  "The hook reads the PRE-SWEEP surface list.  Recomputing after the
+sweep sees only the D1 primary — the secondary's stack survived, pinned
+builder closures, and answered a later drill with false success."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "notes"
+        (jetpacs-chrome-define-root "notes" "hub"
+                                    (lambda (_b) (jetpacs-column
+                                                  (jetpacs-text "hub"))))
+        (jetpacs-chrome-define-root "app:notes-detail" "d"
+                                    (lambda (_b) (jetpacs-column
+                                                  (jetpacs-text "d")))))
+      (should (gethash "app:notes-detail" jetpacs-chrome--stacks))
+      ;; The stub client has no jsonrpc connection: absorb the tombstones.
+      (cl-letf (((symbol-function 'ebp-client-surface-remove)
+                 (cl-function (lambda (&rest _) 1))))
+        (jetpacs-teardown-owner "notes"))
+      ;; BOTH stacks swept — primary and secondary.
+      (should-not (gethash "app:notes" jetpacs-chrome--stacks))
+      (should-not (gethash "app:notes-detail" jetpacs-chrome--stacks))
+      ;; And the published list is not leaked past the extent.
+      (should-not jetpacs-teardown-surfaces))))
+
+(ert-deftest jetpacs-chrome-drill-refuses-a-stackless-surface ()
+  "The drill seam promises it never signals: a torn-down (or simply
+non-chrome) surface answers nil so the navigator runs its documented
+degrade, instead of turning a handler's answer into a permanent
+rejected."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (should-not (jetpacs-chrome--drill
+                 "app:nochrome"
+                 (lambda () (list (jetpacs-text "x")))
+                 "*probe*"))))
+
+(ert-deftest jetpacs-chrome-push-screen-signals-on-a-torn-down-surface ()
+  "Owning the E1e delta: push-screen on a torn-down SECONDARY surface
+now signals `no chrome stack', matching what the primary always did —
+the divergence WAS the bug.  Callers pushing across a live-reload
+teardown must use a nil-tolerant path (the drill seam)."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (with-jetpacs-owner "notes"
+        (jetpacs-chrome-define-root "notes" "hub"
+                                    (lambda (_b) (jetpacs-column
+                                                  (jetpacs-text "hub"))))
+        (jetpacs-chrome-define-root "app:notes-detail" "d"
+                                    (lambda (_b) (jetpacs-column
+                                                  (jetpacs-text "d")))))
+      (cl-letf (((symbol-function 'ebp-client-surface-remove)
+                 (cl-function (lambda (&rest _) 1))))
+        (jetpacs-teardown-owner "notes"))
+      (should-error (jetpacs-chrome-push-screen "app:notes-detail" "later"
+                                                #'ignore)))))
+
+(ert-deftest jetpacs-chrome-buffer-local-hook-spares-global-subscribers ()
+  "`run-hook-wrapped', not `dolist': a buffer-local `add-hook' puts `t'
+in the hook value, and (funcall t owner) — swallowed by the isolation —
+would silently drop every GLOBAL subscriber after it.
+The hook is LET-BOUND, never setq'd: a setq in a test wipes the module
+subscribers for the rest of the batch."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (let ((global-ran nil)
+          (jetpacs-teardown-functions jetpacs-teardown-functions))
+      (add-hook 'jetpacs-teardown-functions
+                (lambda (_o) (setq global-ran t)))
+      (with-temp-buffer
+        (add-hook 'jetpacs-teardown-functions #'ignore nil t)
+        (jetpacs-teardown-owner "alpha"))
+      (should global-ran))))
+
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

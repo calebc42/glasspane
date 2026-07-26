@@ -984,9 +984,27 @@ array string, or a single string; anything else is discarded."
 The attachment point for module-private per-owner state (reminders
 bookkeeping, chrome stacks, future registries) — the rewrite's answer
 to the poc's fboundp ladder.  Runs after every core registry is swept,
-so a hook observing the owner's claims sees them already gone.  Each fn
-runs isolated: one failure logs its error SYMBOL and the rest still run.
-Lives on the floor (not the shell) so subscribers need no shell edge.")
+so a hook observing the owner's claims sees them already gone.  The
+surfaces it swept are in `jetpacs-teardown-surfaces'; a per-surface
+subscriber MUST read that, never recompute.  Each fn runs isolated: one
+failure logs its error SYMBOL and the rest still run.  Lives on the
+floor (not the shell) so subscribers need no shell edge.")
+
+(defvar jetpacs-teardown-surfaces nil
+  "The surfaces the in-progress `jetpacs-teardown-owner' is sweeping.
+Bound around the WHOLE sweep — the registry pass and
+`jetpacs-teardown-functions' alike — to the list computed ONCE, BEFORE
+anything is unclaimed.  A hook cannot recompute this: by the time the
+hooks run the owner's surface claims are gone, so
+`jetpacs-shell--owner-surfaces' then answers only the D1 primary and a
+per-surface subscriber silently leaks every secondary surface (the
+JA-2 chrome stale-stack bug).  Read it synchronously inside the hook;
+a deferred read sees nil.  Context rides a dynamic variable rather
+than a second hook argument because (OWNER) is the hook's PUBLIC
+arity: a two-argument call signals `wrong-number-of-arguments' in
+every existing subscriber, and the hook loop isolates errors — so the
+break would be SILENT and would stop every module's sweep, not just
+the one being fixed.")
 
 (defun jetpacs--owners ()
   "Every owner id with a live registration (interactive completion)."

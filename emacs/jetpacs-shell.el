@@ -205,8 +205,13 @@ re-registering push when that matters."
   (dolist (name (jetpacs--owned-names "action" owner))
     (jetpacs-undefaction name))
   (jetpacs-async-clear-owner owner)
-  (let ((client (jetpacs-client)))
-    (dolist (surface (jetpacs-shell--owner-surfaces owner))
+  ;; The surface list is computed ONCE, before the sweep, and published
+  ;; to the hooks in `jetpacs-teardown-surfaces' — the sweep itself
+  ;; unclaims as it goes, so any later recomputation sees only the D1
+  ;; primary.
+  (let ((jetpacs-teardown-surfaces (jetpacs-shell--owner-surfaces owner))
+        (client (jetpacs-client)))
+    (dolist (surface jetpacs-teardown-surfaces)
       (jetpacs-on-state-change-clear "" surface)
       (if (or (alist-get surface jetpacs-shell--roots nil nil #'equal)
               (and client
@@ -214,12 +219,18 @@ re-registering push when that matters."
           (jetpacs-shell-remove-root surface)
         (jetpacs--unclaim "surface" surface))
       (remhash surface jetpacs--applied-revisions)
-      (remhash surface jetpacs-shell--current-view)))
-  (dolist (fn jetpacs-teardown-functions)
-    (condition-case err
-        (funcall fn owner)
-      (error (message "jetpacs: teardown hook failed: %s"
-                      (jetpacs--error-label err)))))
+      (remhash surface jetpacs-shell--current-view))
+    ;; `run-hook-wrapped', not `dolist': a buffer-local `add-hook' puts
+    ;; `t' in the value, and `(funcall t owner)' would be swallowed by
+    ;; the isolation below — silently dropping every GLOBAL subscriber.
+    (run-hook-wrapped
+     'jetpacs-teardown-functions
+     (lambda (fn)
+       (condition-case err
+           (funcall fn owner)
+         (error (message "jetpacs: teardown hook failed: %s"
+                         (jetpacs--error-label err))))
+       nil)))
   owner)
 
 (defun jetpacs-shell--schedule-repush (surface)

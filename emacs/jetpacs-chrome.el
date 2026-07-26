@@ -350,6 +350,19 @@ truncate-and-replace gives repeat-drill replace-top semantics for free.
 The presenting push is DEFERRED: `jetpacs-shell-push' signals on gate
 failure, and a synchronous signal inside a handler after the stack
 mutated would answer rejected for an effect that happened."
+  (if (null (gethash surface jetpacs-chrome--stacks))
+      ;; A stackless surface — torn down, or never chrome's.  This is an
+      ;; already-live signal for the PRIMARY surface after any teardown;
+      ;; the corrected sweep extends it to secondaries.  The seam
+      ;; contract says the host never signals: refuse with nil and let
+      ;; the navigator run its documented degrade.
+      (progn (message "jetpacs-chrome: no chrome stack for %s; drill \
+refused" surface)
+             nil)
+    (jetpacs-chrome--drill-1 surface builder label)))
+
+(defun jetpacs-chrome--drill-1 (surface builder label)
+  "The live half of `jetpacs-chrome--drill' — SURFACE has a stack."
   (let* ((id (jetpacs-wire-id "drill" label))
          (undo (jetpacs-chrome--stack-insert
                 surface id
@@ -381,11 +394,15 @@ failed: %s" surface id (jetpacs--error-label err))))))
 (with-eval-after-load 'jetpacs-navigate
   (setq jetpacs-navigate-drill-function #'jetpacs-chrome--drill))
 
-(defun jetpacs-chrome--on-teardown (owner)
-  "Drop OWNER's stacks (JA-2 teardown hook) — stacks ONLY:
+(defun jetpacs-chrome--on-teardown (_owner)
+  "Drop the stack of every surface the teardown swept — stacks ONLY:
 `jetpacs-teardown-owner' already tombstones via remove-root, so calling
-`jetpacs-chrome-remove' here would double-tombstone."
-  (dolist (surface (jetpacs-shell--owner-surfaces owner))
+`jetpacs-chrome-remove' here would double-tombstone.  Reads
+`jetpacs-teardown-surfaces', NOT `jetpacs-shell--owner-surfaces': the
+owner's claims are gone by now and recomputing sees only the D1
+primary, leaking every secondary surface's stack — the leaked stack
+pins builder closures and answers a later drill with false success."
+  (dolist (surface jetpacs-teardown-surfaces)
     (remhash surface jetpacs-chrome--stacks)))
 
 (add-hook 'jetpacs-teardown-functions #'jetpacs-chrome--on-teardown)

@@ -50,7 +50,7 @@
    (jetpacs-with-attrs
     (jetpacs-box (list (jetpacs-text "container tone" :style "body")))
     :padding 12)
-   (jetpacs-button "Toggle" (jetpacs-action "modus.toggle"))))
+   (jetpacs-button "Toggle" (jetpacs-action "jetpacs.theme.modus-toggle"))))
 
 (with-jetpacs-owner "tm"
   (jetpacs-shell-define-root "tm" #'smoke-tm--builder))

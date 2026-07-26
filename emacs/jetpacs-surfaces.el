@@ -56,6 +56,23 @@ registration win — the live-coding default."
 (defvar jetpacs--registrations (make-hash-table :test #'equal)
   "Map of (KIND . NAME) -> owner id, the attribution registry.")
 
+(defvar jetpacs--claim-sites (make-hash-table :test #'equal)
+  "Map of (KIND . NAME) -> the file that last claimed it.
+Same-owner re-registration must stay SILENT for live coding (Caleb
+re-evaluates a module constantly) while a second PACKAGE claiming the
+same name must be loud.  The owner alone cannot tell those apart — two
+authors who both pick a plausible owner collide silently and load order
+decides the winner — so the defining file is the discriminator.")
+
+(defconst jetpacs-reserved-owner-prefix "jetpacs."
+  "Owner-name prefix RESERVED for base Jetpacs (audit R1, 2026-07-26).
+Base owns `jetpacs.clip', `jetpacs.theme' and any future base surface;
+a Tier-1 app MUST choose its own namespace.  Unqualified names are left
+free precisely because a package author will reach for one, and under
+D1 an owner is a permanent wire identifier — SPEC 13.5 keys the
+device's persisted snapshot by surface id, so a collision is not a
+local shadowing but two packages fighting over one device surface.")
+
 (defun jetpacs--valid-owner-p (owner)
   "Non-nil when OWNER can name the surface `app:<owner>' (decision D1).
 A SPEC 4.4 name component without `:' or `/' (so an owner is never
@@ -86,8 +103,12 @@ No-op (no record) when no owner is bound."
       (error "jetpacs: invalid owner %S (want a SPEC 4.4 name, no `:'/`/')"
              jetpacs-current-owner))
     (let* ((key (cons kind name))
-           (prior (gethash key jetpacs--registrations)))
-      (when (and prior (not (equal prior jetpacs-current-owner)))
+           (prior (gethash key jetpacs--registrations))
+           (prior-site (gethash key jetpacs--claim-sites))
+           (site (or load-file-name buffer-file-name)))
+      (cond
+       ;; A different owner: the pre-existing clash.
+       ((and prior (not (equal prior jetpacs-current-owner)))
         (if jetpacs-strict-namespaces
             (error "jetpacs: %s %S already owned by %S (claiming as %S)"
                    kind name prior jetpacs-current-owner)
@@ -96,7 +117,23 @@ No-op (no record) when no owner is bound."
            (format "%s %S re-registered by %S (was %S)"
                    kind name jetpacs-current-owner prior)
            :warning)))
-      (puthash key jetpacs-current-owner jetpacs--registrations)))
+       ;; SAME owner, DIFFERENT file: two packages picked one name.  This
+       ;; was silent, and silence is the wrong default — the loser simply
+       ;; stops working and load order decides which.  Re-evaluating the
+       ;; SAME file stays silent, which is the live-coding case that
+       ;; motivated the original silence.
+       ((and prior site prior-site (not (equal site prior-site)))
+        (if jetpacs-strict-namespaces
+            (error "jetpacs: %s %S claimed as %S by %s, already claimed by %s"
+                   kind name jetpacs-current-owner site prior-site)
+          (display-warning
+           'jetpacs
+           (format "%s %S claimed as owner %S by %s — already claimed by %s; one of them will silently stop working (owner names are permanent wire identifiers; `%s' is reserved for base)"
+                   kind name jetpacs-current-owner site prior-site
+                   jetpacs-reserved-owner-prefix)
+           :warning))))
+      (puthash key jetpacs-current-owner jetpacs--registrations)
+      (when site (puthash key site jetpacs--claim-sites))))
   name)
 
 (defun jetpacs--owner-of (kind name)
@@ -114,7 +151,8 @@ No-op (no record) when no owner is bound."
 
 (defun jetpacs--unclaim (kind name)
   "Drop the attribution record for KIND:NAME."
-  (remhash (cons kind name) jetpacs--registrations))
+  (remhash (cons kind name) jetpacs--registrations)
+  (remhash (cons kind name) jetpacs--claim-sites))
 
 ;;;; The client handle (single-client floor, decision Q1)
 

@@ -132,7 +132,7 @@
            (view (jetpacs-clip--view)))
       (should (equal (plist-get view :t) "scaffold"))
       (should (equal (plist-get (plist-get view :on_refresh) :action)
-                     "clip.refresh"))
+                     "jetpacs.clip.refresh"))
       (jetpacs-check-profile view 'app)
       ;; GATE 1b over the Companion's real advertisement: no signal.
       (jetpacs-shell--check-builtins
@@ -169,17 +169,17 @@
       (cl-letf (((symbol-function 'jetpacs-shell-push)
                  (lambda (surface &rest _) (push surface pushed) 1)))
         (let ((status (jetpacs--dispatch
-                       client '(:action "clip.refresh" :surface "app:clip")
-                       (gethash "clip.refresh" jetpacs-action-handlers))))
+                       client '(:action "jetpacs.clip.refresh" :surface "app:jetpacs.clip")
+                       (gethash "jetpacs.clip.refresh" jetpacs-action-handlers))))
           (should (eq status 'accepted))
           ;; D2: nothing pushed inside the extent.
           (should (null pushed)))
         (cl-loop repeat 10 do (accept-process-output nil 0.05))
-        (should (equal pushed '("app:clip")))
+        (should (equal pushed '("app:jetpacs.clip")))
         ;; The originating surface wins, not the owner's.
-        (jetpacs--dispatch client '(:action "clip.refresh"
+        (jetpacs--dispatch client '(:action "jetpacs.clip.refresh"
                                     :surface "app:other")
-                           (gethash "clip.refresh" jetpacs-action-handlers))
+                           (gethash "jetpacs.clip.refresh" jetpacs-action-handlers))
         (cl-loop repeat 10 do (accept-process-output nil 0.05))
         (should (equal (car pushed) "app:other"))))))
 

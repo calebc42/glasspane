@@ -6,7 +6,7 @@
 ;; The color plumbing runs pure; the modus tests load a REAL modus theme
 ;; in batch (the palette path is display-free — that asymmetry is itself
 ;; part of the design); the send tests capture at `ebp-client-notify';
-;; and modus.toggle is driven through ebp's REAL
+;; and the modus toggle is driven through ebp's REAL
 ;; `ebp-client--handle-event-action', so the 14.4 status contract and
 ;; the D2 no-prompt property are the live ones.
 
@@ -220,19 +220,19 @@ syntax roles."
           (jetpacs-theme--on-theme-change)
           (should-not jetpacs-theme--timer))))))
 
-;;;; modus.toggle through the real dispatch
+;;;; jetpacs.theme.modus-toggle through the real dispatch
 
 (ert-deftest jetpacs-theme/modus-toggle-real-dispatch ()
   (jetpacs-theme-test--with-modus 'modus-operandi
     (jetpacs-theme-test--attached (jetpacs-theme-test--client)
       ;; jetpacs-attach replayed the load-time registration.
-      (should (gethash "modus.toggle" (ebp-client-actions client)))
+      (should (gethash "jetpacs.theme.modus-toggle" (ebp-client-actions client)))
       (unwind-protect
           (let ((modus-themes-to-toggle '(modus-operandi modus-vivendi)))
             (let ((result (ebp-client--handle-event-action
                            client
                            (list :event_id (make-string 32 ?a)
-                                 :action "modus.toggle"
+                                 :action "jetpacs.theme.modus-toggle"
                                  :occurred_at_ms 1784700000000))))
               (should (equal (plist-get result :status) "accepted"))
               (should (eq (jetpacs-modus-current) 'modus-vivendi))))
@@ -251,7 +251,7 @@ refusal is a clean rejected, not a no-prompts warning."
             (let ((result (ebp-client--handle-event-action
                            client
                            (list :event_id (make-string 32 ?b)
-                                 :action "modus.toggle"
+                                 :action "jetpacs.theme.modus-toggle"
                                  :occurred_at_ms 1784700000000))))
               (should (equal (plist-get result :status) "rejected"))
               (should (= prompted 0)))))))))

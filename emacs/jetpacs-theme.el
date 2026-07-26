@@ -535,8 +535,8 @@ fine — there is a user at the keyboard."
       (modus-themes-toggle)
     (message "Jetpacs: modus themes are not available in this Emacs")))
 
-(with-jetpacs-owner "theme"
-  (jetpacs-defaction "modus.toggle"
+(with-jetpacs-owner "jetpacs.theme"
+  (jetpacs-defaction "jetpacs.theme.modus-toggle"
     (lambda (_args _params)
       ;; The length-2 pre-check keeps 4.4's completing-read fallback out
       ;; of the dispatch extent (D2): with any other toggle set,

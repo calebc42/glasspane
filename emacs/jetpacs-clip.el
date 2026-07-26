@@ -61,9 +61,13 @@ for this view.  Turn this off and use \\[jetpacs-clip-show] if that
 bites."
   :type 'boolean)
 
-(defconst jetpacs-clip-owner "clip"
-  "The owner string; also the surface name (app:clip).  Permanent —
-renaming would orphan the device's cached surface.")
+(defconst jetpacs-clip-owner "jetpacs.clip"
+  "The owner string; also the surface name (app:jetpacs.clip).
+PERMANENT: SPEC 13.5 persists the device snapshot keyed by surface id,
+so a later rename orphans whatever the device already cached.  The
+`jetpacs.' prefix is RESERVED for base (audit R1): a third-party Tier-1
+must pick its own namespace, and base must never squat an unqualified
+name a package author would reach for.")
 
 (defvar jetpacs-clip--refresh-timer nil)
 
@@ -142,7 +146,7 @@ OS clipboard and PUSH onto the ring inside a builder (the write-ban)."
                                   :style "caption")
                     (mapcar (lambda (k) (jetpacs-clip--entry-card k copy-ok))
                             kills))))
-     :on-refresh (jetpacs-action "clip.refresh"))))
+     :on-refresh (jetpacs-action "jetpacs.clip.refresh"))))
 
 ;;;; Refresh: device pull + desktop kills
 
@@ -179,9 +183,9 @@ kill-new).  Behaviorally invisible to a disconnected desktop Emacs."
 
 ;;;; Registration
 
-(with-jetpacs-owner "clip"
-  (jetpacs-shell-define-root "clip" #'jetpacs-clip--view)
-  (jetpacs-defaction "clip.refresh"
+(with-jetpacs-owner "jetpacs.clip"
+  (jetpacs-shell-define-root jetpacs-clip-owner #'jetpacs-clip--view)
+  (jetpacs-defaction "jetpacs.clip.refresh"
     (lambda (_args params)
       ;; D1: the originating surface, never a zero-arg push — inside a
       ;; dispatch extent the owner binding is nil and zero-arg resolves
@@ -205,7 +209,7 @@ kill-new).  Behaviorally invisible to a disconnected desktop Emacs."
   (when (timerp jetpacs-clip--refresh-timer)
     (cancel-timer jetpacs-clip--refresh-timer)
     (setq jetpacs-clip--refresh-timer nil))
-  (ignore-errors (jetpacs-shell-remove-root "clip"))
+  (ignore-errors (jetpacs-shell-remove-root jetpacs-clip-owner))
   nil)
 
 (provide 'jetpacs-clip)

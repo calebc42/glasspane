@@ -944,5 +944,58 @@ so one courtesy ellipsis past the cap 1201s the whole surface."
       (should (null (jetpacs-buffer-spend-spans
                      (list (jetpacs-span "b") (jetpacs-span "c"))))))))
 
+
+;;;; Audit P1-6: the reserved namespace and the silent same-owner clash
+
+(ert-deftest jetpacs-floor-claim-warns-on-same-owner-different-file ()
+  "P1-6: two packages that pick the SAME owner collided in silence and
+load order decided the winner.  Same-owner re-registration from the
+same FILE stays silent (live coding); from a different file it is loud."
+  (clrhash jetpacs--registrations)
+  (clrhash jetpacs--claim-sites)
+  (let ((warnings '()))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (_type msg &rest _) (push msg warnings))))
+      ;; Package A claims it.
+      (let ((load-file-name "/pkg-a/clip.el"))
+        (with-jetpacs-owner "clip" (jetpacs--claim "action" "clip.refresh")))
+      (should (null warnings))
+      ;; The SAME file re-evaluated: silent (the live-coding case).
+      (let ((load-file-name "/pkg-a/clip.el"))
+        (with-jetpacs-owner "clip" (jetpacs--claim "action" "clip.refresh")))
+      (should (null warnings))
+      ;; Package B, same owner, DIFFERENT file: loud.
+      (let ((load-file-name "/pkg-b/clip.el"))
+        (with-jetpacs-owner "clip" (jetpacs--claim "action" "clip.refresh")))
+      (should (= (length warnings) 1))
+      (should (string-match-p "pkg-a" (car warnings)))
+      (should (string-match-p "pkg-b" (car warnings))))
+    ;; Under strict namespaces it is an error, not a warning.
+    (let ((jetpacs-strict-namespaces t)
+          (load-file-name "/pkg-c/clip.el"))
+      (should-error (with-jetpacs-owner "clip"
+                      (jetpacs--claim "action" "clip.refresh")))))
+  (clrhash jetpacs--registrations)
+  (clrhash jetpacs--claim-sites))
+
+(ert-deftest jetpacs-floor-base-owners-use-the-reserved-prefix ()
+  "R1: base reserves `jetpacs.' and must actually USE it — an
+unqualified base owner squats a name a Tier-1 author would reach for,
+and D1 makes it a permanent wire identifier."
+  (require 'jetpacs-clip)
+  (require 'jetpacs-theme)
+  (should (string-prefix-p jetpacs-reserved-owner-prefix jetpacs-clip-owner))
+  ;; Every owner a base module registered carries the prefix.
+  (let (base-owners)
+    (maphash (lambda (key owner)
+               (when (member (cdr key) '("app:jetpacs.clip" "app:jetpacs.theme"
+                                         "jetpacs.clip.refresh"
+                                         "jetpacs.theme.modus-toggle"))
+                 (push owner base-owners)))
+             jetpacs--registrations)
+    (should base-owners)
+    (dolist (o base-owners)
+      (should (string-prefix-p jetpacs-reserved-owner-prefix o)))))
+
 (provide 'jetpacs-floor-test)
 ;;; jetpacs-floor-test.el ends here

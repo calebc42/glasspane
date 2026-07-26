@@ -43,9 +43,16 @@ object NodeSupport {
         "text_input", "scaffold", "editor") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES +
         LAYOUT_NODE_TYPES + VIZ_NODE_TYPES
 
+    /** SPEC 18.1/19 (JC-4b): `editor` IS advertised for dialogs. The engine
+     * already opened, counted, size-checked and closed a dialog's editor
+     * sessions with the dialog; only the profile withheld the type, so a
+     * dialog-hosted synchronized editor degraded instead of rendering. It is
+     * what a completing-read picker is built from: a field whose keystrokes
+     * flow through §19 and whose `edit.complete` results Emacs answers from
+     * the collection being completed. */
     val DIALOG_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",
-        "text_input") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES
+        "text_input", "editor") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES
 
     val NOTIFICATION_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider")

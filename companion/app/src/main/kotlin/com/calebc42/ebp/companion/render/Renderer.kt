@@ -11,6 +11,7 @@ package com.calebc42.ebp.companion.render
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -476,8 +477,29 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             } else {
                 ctx.state(id, new.text) // local editor: state.changed
             }
+            // SPEC 19.3 (JC-4b): the offer described the text as it WAS; drop
+            // it the moment the text moves, so no stale candidate is tappable
+            // even in the window before the next answer arrives.
+            if (document.isNotEmpty()) ctx.bridge.clearCompletions(document, id)
         }
         value = new
+    }
+    // SPEC 19.3 (JC-4b): ask for completions once the text settles. Keyed on
+    // the text so it re-arms per keystroke, and the delay coalesces a typing
+    // burst into ONE request — §22.2 conflation, and what makes a
+    // type-to-narrow picker cost a round trip per pause rather than per key.
+    // SPEC 17.4: `complete` is the node's own request for completion, so it
+    // gates both the round trips and the dropdown. Without it every
+    // synchronized editor would pay for completions it never asked for.
+    val wantsCompletion = node.optBoolean("complete", false)
+    val offers by ctx.bridge.completionOffers.collectAsState()
+    val offer = if (wantsCompletion) offers[document to id] else null
+    if (wantsCompletion && document.isNotEmpty() && !readOnly && enabled) {
+        LaunchedEffect(document, id, value.text) {
+            if (value.text.isEmpty()) return@LaunchedEffect
+            kotlinx.coroutines.delay(180)
+            ctx.bridge.editorComplete(document, id)
+        }
     }
     Column(modifier = m) {
         // SPEC 17.7: the toolbar rail above the field. `command` is valid only
@@ -509,8 +531,34 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             onValueChange = commit,
             minLines = 3,
             modifier = Modifier.fillMaxWidth())
+        // SPEC 19.3 (JC-4b): the candidate list. Plain rows rather than a
+        // floating DropdownMenu: this must work inside a dialog whose host
+        // container scrolls, and a popup anchored to a field inside a
+        // scrolling column drifts away from it.
+        offer?.candidates?.take(MAX_VISIBLE_COMPLETIONS)?.forEach { cand ->
+            Row(
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        ctx.bridge.editorSelectCompletion(
+                            document, id, offer, cand.insert)
+                    }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Text(cand.label, style = MaterialTheme.typography.bodyMedium)
+                cand.annotation?.let {
+                    Spacer(Modifier.width(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
+
+/** How many candidates one editor shows. Emacs decides what to send; this
+ * bounds what a phone-sized surface renders from it. */
+private const val MAX_VISIBLE_COMPLETIONS = 12
 
 /** SPEC 17.7 `${date}`: local `YYYY-MM-DD Day`. */
 private fun localDateStamp(): String {

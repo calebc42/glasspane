@@ -47,6 +47,28 @@ data class EditorMirror(
     val epoch: Long,
 )
 
+/** SPEC 19.3: one candidate. `insert` is already defaulted to `label`. */
+data class CompletionCandidate(
+    val label: String,
+    val annotation: String?,
+    val insert: String,
+)
+
+/**
+ * SPEC 19.3 (JC-4b): one answered `edit.complete`, with the editor state it
+ * was ISSUED against. Selecting a candidate hands that state back so the
+ * engine can refuse a tap whose caret has since moved — validating against
+ * the engine's current state instead would compare it with itself.
+ */
+data class CompletionOffer(
+    val prefix: String,
+    val candidates: List<CompletionCandidate>,
+    val session: String,
+    val seq: Long,
+    val cursor: Int,
+    val epoch: Long,
+)
+
 class DeviceBridge(
     private val appContext: android.content.Context,
     /** SPEC 14.4: the shown surface's ID travels with its spec, so an
@@ -257,6 +279,61 @@ class DeviceBridge(
             s.seq, mirrorEpoch.incrementAndGet())
         _editorMirrors.value =
             _editorMirrors.value + ((s.document to s.editorId) to m)
+    }
+
+    // SPEC 19.3 (JC-4b): completion offers, keyed (document, editor_id).
+    // RenderEditor collects this and shows a dropdown; an offer is REPLACED
+    // by the next one and cleared when its editor's text moves, so a stale
+    // candidate list can never be tapped.
+    private val offerEpoch = AtomicLong(0)
+    private val _completionOffers =
+        MutableStateFlow<Map<Pair<String, String>, CompletionOffer>>(emptyMap())
+    val completionOffers: StateFlow<Map<Pair<String, String>, CompletionOffer>>
+        get() = _completionOffers
+
+    /** SPEC 19.3: ask Emacs to complete at the caret. The (session, seq,
+     * cursor) the request was issued against ride along so a later selection
+     * is validated against THAT state, not against whatever the engine holds
+     * when the user finally taps. */
+    fun editorComplete(document: String, editorId: String) {
+        dispatchExecutor.execute {
+            engine?.requestCompletion(document, editorId) {
+                prefix, cands, session, seq, cursor ->
+                val list = (0 until cands.length()).mapNotNull { i ->
+                    cands.optJSONObject(i)?.let { c ->
+                        CompletionCandidate(
+                            c.optString("label"),
+                            c.optString("annotation").takeIf { it.isNotEmpty() },
+                            // SPEC 19.3: `insert` defaults to `label`.
+                            c.optString("insert").takeIf { it.isNotEmpty() }
+                                ?: c.optString("label"))
+                    }
+                }
+                _completionOffers.value = _completionOffers.value +
+                    ((document to editorId) to CompletionOffer(
+                        prefix, list, session, seq, cursor,
+                        offerEpoch.incrementAndGet()))
+            }
+        }
+    }
+
+    /** SPEC 19.3: accept a candidate — a local edit replacing the prefix.
+     * The engine refuses a selection whose session/seq/cursor have moved,
+     * so a stale tap is a no-op rather than a wrong edit (SPEC 19.2). */
+    fun editorSelectCompletion(document: String, editorId: String,
+                               offer: CompletionOffer, insert: String) {
+        clearCompletions(document, editorId)
+        dispatchExecutor.execute {
+            val e = engine ?: return@execute
+            if (!e.selectCompletion(document, editorId, offer.session, offer.seq,
+                    offer.cursor, offer.prefix, insert))
+                e.withEditor(document, editorId) { publishMirror(it) }
+        }
+    }
+
+    /** Drop any offer for this editor: the caret moved, or one was taken. */
+    fun clearCompletions(document: String, editorId: String) {
+        _completionOffers.value = _completionOffers.value - (document to editorId)
     }
 
     /** SPEC 19.3: a synchronized editor's local edit -> shadow + edit.delta.

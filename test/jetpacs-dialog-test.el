@@ -348,6 +348,189 @@ survives."
                            :multi_select)
                 t))))
 
+;;;; The JC-4b capf picker
+
+(defconst jetpacs-dialog-test--picker-types
+  (vconcat jetpacs-dialog-test--dialog-types ["editor"])
+  "The dialog profile once JC-4b advertises `editor' for dialogs.")
+
+(defun jetpacs-dialog-test--picker-client ()
+  "A client whose dialog profile hosts editors and grants editor.sync."
+  (let ((client (jetpacs-dialog-test--client)))
+    (setf (ebp-client-granted client) ["surfaces.dialog" "editor.sync"]
+          (ebp-client-profiles client)
+          `(:app (:node_types ,jetpacs-dialog-test--picker-types
+                  :builtins ["view.switch"] :features [])
+            :dialog (:node_types ,jetpacs-dialog-test--picker-types
+                     :builtins ["dialog.submit" "dialog.dismiss"]
+                     :features [])))
+    client))
+
+(ert-deftest jetpacs-dialog-picker-availability-gate ()
+  "The picker needs BOTH editor.sync granted and `editor' advertised for
+dialogs; otherwise the JC-4a text stopgap runs, never a spec violation."
+  (let ((client (jetpacs-dialog-test--client)))   ; no editor.sync, no editor
+    (unwind-protect
+        (progn (jetpacs-attach client)
+               (should-not (jetpacs-dialog--picker-available-p)))
+      (jetpacs-detach) (jetpacs-test-reset-state)))
+  (let ((client (jetpacs-dialog-test--picker-client)))
+    (unwind-protect
+        (progn (jetpacs-attach client)
+               (should (jetpacs-dialog--picker-available-p))
+               ;; Capability without advertisement is still a no.
+               (setf (ebp-client-profiles client)
+                     `(:dialog (:node_types ,jetpacs-dialog-test--dialog-types
+                                :builtins [] :features [])))
+               (should-not (jetpacs-dialog--picker-available-p)))
+      (jetpacs-detach) (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-dialog-picker-completes-from-the-collection ()
+  "`edit.complete' is answered from the COLLECTION being completed.
+Driven through ebp's real `ebp-client--handle-edit-complete', so the
+session/seq gate and the result shape are the live ones, not a mock's."
+  (let ((client (jetpacs-dialog-test--picker-client)))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          ;; Stand in for the dialog's live editor session.
+          (puthash (cons "doc:p" "pick")
+                   (list :session "S1" :seq 3 :text "ca" :cursor 2)
+                   (ebp-client-editors client))
+          (setf (ebp-client-config client)
+                (plist-put (ebp-client-config client)
+                           :edit-complete-function
+                           #'jetpacs-dialog--complete))
+          (let ((jetpacs-dialog--picker
+                 '(:document "doc:p" :editor-id "pick"
+                   :collection ("cabbage" "cactus" "cat" "dog")
+                   :predicate nil)))
+            (let ((result (ebp-client--handle-edit-complete
+                           client '(:document "doc:p" :editor_id "pick"
+                                    :session "S1" :seq 3 :cursor 2))))
+              (should (equal (plist-get result :prefix) "ca"))
+              (should (equal (mapcar (lambda (c) (plist-get c :label))
+                                     (append (plist-get result :candidates) nil))
+                             '("cabbage" "cactus" "cat")))))
+          ;; A request for a DIFFERENT editor than the live picker's gets
+          ;; nothing — the hook is client-wide, the picker is not.
+          (let ((jetpacs-dialog--picker
+                 '(:document "doc:other" :editor-id "pick"
+                   :collection ("cat") :predicate nil)))
+            (should (equal (plist-get (ebp-client--handle-edit-complete
+                                       client '(:document "doc:p"
+                                                :editor_id "pick"
+                                                :session "S1" :seq 3 :cursor 2))
+                                      :candidates)
+                           [])))
+          ;; A stale seq is refused by ebp before the hook is consulted.
+          (should-error (ebp-client--handle-edit-complete
+                         client '(:document "doc:p" :editor_id "pick"
+                                  :session "S1" :seq 99 :cursor 2))))
+      (jetpacs-detach) (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-dialog-picker-candidate-count-is-bounded ()
+  "A huge collection answers at most `jetpacs-dialog-picker-candidates'."
+  (let ((jetpacs-dialog--picker
+         (list :document "d" :editor-id "e"
+               :collection (cl-loop for i from 0 below 500
+                                    collect (format "cand-%03d" i))
+               :predicate nil))
+        (jetpacs-dialog-picker-candidates 12))
+    (let ((r (jetpacs-dialog--complete "d" "e" "cand-" 5)))
+      (should (equal (car r) "cand-"))
+      (should (= (length (cdr r)) 12)))))
+
+(ert-deftest jetpacs-dialog-picker-uses-completion-boundaries ()
+  "The replaced prefix is the completion FIELD, not the whole input.
+A file-name table completes one path component, so tapping a candidate
+must replace only that component — the boundary decides where the
+prefix starts, and getting it wrong rewrites the whole path."
+  (let* ((table (lambda (str pred action)
+                  (if (eq (car-safe action) 'boundaries)
+                      (let ((slash (1+ (or (cl-position ?/ str :from-end t) -1))))
+                        `(boundaries ,slash . ,(length (cdr action))))
+                    (complete-with-action
+                     action '("src/alpha.el" "src/beta.el") str pred))))
+         (jetpacs-dialog--picker (list :document "d" :editor-id "e"
+                                       :collection table :predicate nil)))
+    (let ((r (jetpacs-dialog--complete "d" "e" "src/al" 6)))
+      ;; The prefix is "al", not "src/al".
+      (should (equal (car r) "al")))))
+
+(ert-deftest jetpacs-dialog-picker-round-trip-and-restore ()
+  "The picker reads the MIRROR, not `capture_fields' — a synchronized
+editor is never a stateful node — and restores the client-wide
+completion hook it borrowed."
+  (let ((client (jetpacs-dialog-test--picker-client))
+        (jetpacs-dialog-test--specs nil))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (setf (ebp-client-config client)
+                (plist-put (ebp-client-config client)
+                           :edit-complete-function 'app-hook))
+          (cl-letf (((symbol-function 'ebp-client-dialog-show)
+                     (cl-function
+                      (lambda (c _id spec &key callback &allow-other-keys)
+                        (push spec jetpacs-dialog-test--specs)
+                        ;; The device types "cact": edit.delta reaches the
+                        ;; mirror hooks, which is how the picker shadows it.
+                        (let ((doc (plist-get
+                                    (jetpacs-dialog-test--find spec "editor")
+                                    :document)))
+                          (dolist (fn (ebp-client-edit-change-functions c))
+                            (funcall fn c doc "pick" "cact")))
+                        (funcall callback "submitted" '(:value nil) nil)
+                        7))))
+            (let ((jetpacs--device-flow '(:surface "app:demo")))
+              (should (equal (completing-read
+                              "Pick: "
+                              (cl-loop for i from 0 below 80
+                                       collect (format "cand-%02d" i))
+                              nil nil)
+                             "cact"))))
+          ;; The spec hosted a synchronized editor asking for completion.
+          (let ((ed (jetpacs-dialog-test--find
+                     (car jetpacs-dialog-test--specs) "editor")))
+            (should ed)
+            (should (string-prefix-p "doc:jpick-" (plist-get ed :document)))
+            (should (eq (plist-get ed :complete) t)))
+          ;; Borrowed state is given back.
+          (should (eq (plist-get (ebp-client-config client)
+                                 :edit-complete-function)
+                      'app-hook))
+          (should-not jetpacs-dialog--picker))
+      (jetpacs-detach) (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-dialog-picker-resolves-top-match ()
+  "A typed prefix resolves RET-picks-top against the collection."
+  (let ((client (jetpacs-dialog-test--picker-client))
+        (jetpacs-dialog-test--specs nil))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (cl-letf (((symbol-function 'ebp-client-dialog-show)
+                     (cl-function
+                      (lambda (c _id spec &key callback &allow-other-keys)
+                        (push spec jetpacs-dialog-test--specs)
+                        (let ((doc (plist-get
+                                    (jetpacs-dialog-test--find spec "editor")
+                                    :document)))
+                          (dolist (fn (ebp-client-edit-change-functions c))
+                            (funcall fn c doc "pick" "cand-1")))
+                        (funcall callback "submitted" '(:value nil) nil)
+                        7))))
+            (let ((jetpacs--device-flow '(:surface "app:demo")))
+              ;; "cand-1" is not an exact completion; the top match wins.
+              (should (equal (completing-read
+                              "Pick: "
+                              (cl-loop for i from 0 below 80
+                                       collect (format "cand-%02d" i))
+                              nil t)
+                             "cand-10")))))
+      (jetpacs-detach) (jetpacs-test-reset-state))))
+
 (ert-deftest jetpacs-dialog-completing-read-large-uses-stopgap ()
   "Over the threshold the 4a stopgap runs: a text dialog resolved
 RET-picks-top.  JC-4b replaces this with the live capf picker."

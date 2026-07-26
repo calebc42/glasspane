@@ -22,12 +22,16 @@
 ;;
 ;; The decisions this file implements (Caleb, 2026-07-25, recorded in
 ;; the plan's JC-4 section):
-;; - Large/dynamic collections get the capf/editor picker in JC-4b.
-;;   Until then `completing-read' has two behaviors: a closed
-;;   collection at or under `jetpacs-dialog-enum-threshold' renders as
-;;   a native `enum_list' (multi -> :multi-select, non-require-match ->
-;;   :allow-add); anything larger or dynamic falls back to a text
-;;   dialog with top-match resolution — the 4a stopgap 4b replaces.
+;; - `completing-read' has three behaviors.  A closed collection at or
+;;   under `jetpacs-dialog-enum-threshold' renders as a native
+;;   `enum_list' (multi -> :multi-select, non-require-match ->
+;;   :allow-add).  Anything larger or dynamic takes the JC-4b capf
+;;   PICKER: a dialog-hosted synchronized `editor' whose keystrokes flow
+;;   through SPEC 19 and whose `edit.complete' requests this module
+;;   answers from the collection being completed.  A Companion that
+;;   cannot host a dialog editor (no `editor.sync', or `editor' not
+;;   advertised for dialogs) still gets the JC-4a text stopgap — one
+;;   round trip per attempt, same RET-picks-top resolution.
 ;; - Context-buffer cards render INSIDE the dialog as budgeted
 ;;   `section_header' + Tier-0 spans (both dialog-profile types),
 ;;   stripped of interactive attributes: context is evidence, not
@@ -412,7 +416,129 @@ one button each; nil offers a one-character field."
       (jetpacs-dialog--ask-char prompt (append chars nil))
     (apply orig prompt chars args)))
 
-;;;; completing-read: the enum fast path + the 4a stopgap
+;;;; The capf picker (JC-4b): a dialog-hosted synchronized editor
+
+(defcustom jetpacs-dialog-picker-candidates 12
+  "Candidates offered per `edit.complete' answer in a picker."
+  :type 'natnum)
+
+(defvar jetpacs-dialog--picker-counter 0
+  "Monotonic counter for picker DOCUMENT ids.
+Separate from `jetpacs-dialog--counter' on purpose: that one belongs to
+`jetpacs-dialog--ask', which increments it itself, so deriving a
+document name from it made two functions authorities for one number and
+they disagreed the moment anything else opened a dialog first.")
+
+(defvar jetpacs-dialog--picker nil
+  "The live picker's completion source, or nil.
+A plist (:document D :editor-id E :collection C :predicate P).  Bound
+for one prompt: `jetpacs-dialog--complete' reads it to answer
+`edit.complete' from the collection being completed, so no state has to
+be threaded through ebp.el's client-wide hook.")
+
+(defun jetpacs-dialog--complete (document editor-id text cursor)
+  "Answer `edit.complete' for the live picker (SPEC 19.3).
+Called by ebp.el with (DOCUMENT EDITOR-ID TEXT CURSOR) — no client, the
+`:edit-complete-function' contract.
+Returns (PREFIX . CANDIDATES) where PREFIX is the text the candidates
+replace — `completion-boundaries' decides where it starts, which is what
+makes a file-name table complete one path component instead of the whole
+path.  CURSOR is a scalar offset; Emacs characters are scalar values,
+so it indexes TEXT directly."
+  (if (not (and jetpacs-dialog--picker
+                (equal document (plist-get jetpacs-dialog--picker :document))
+                (equal editor-id (plist-get jetpacs-dialog--picker :editor-id))))
+      (cons "" nil)
+    (let* ((collection (plist-get jetpacs-dialog--picker :collection))
+           (predicate (plist-get jetpacs-dialog--picker :predicate))
+           (input (substring text 0 (min (or cursor (length text))
+                                         (length text))))
+           (bounds (ignore-errors
+                     (completion-boundaries input collection predicate "")))
+           (start (or (car bounds) 0))
+           (prefix (substring input start))
+           (cands (ignore-errors
+                    (all-completions input collection predicate))))
+      (cons prefix
+            (mapcar (lambda (c) (list :label c))
+                    (seq-take (sort (or cands nil) #'string<)
+                              jetpacs-dialog-picker-candidates))))))
+
+(defun jetpacs-dialog--picker-available-p ()
+  "Non-nil when a dialog can host a synchronized editor.
+Needs the `editor.sync' capability granted AND `editor' advertised for
+the dialog target — a Companion that advertises neither still gets the
+JC-4a text stopgap rather than a spec violation."
+  (when-let* ((client (jetpacs-client)))
+    (and (member "editor.sync" (append (ebp-client-granted client) nil))
+         (jetpacs-node-advertised-p "editor" :dialog))))
+
+(defun jetpacs-dialog--ask-picker (prompt collection predicate require-match
+                                          initial default)
+  "Bridge a large/dynamic COLLECTION as a live capf picker.
+The dialog hosts a synchronized `editor' whose keystrokes flow through
+SPEC 19; each pause asks Emacs for completions, which
+`jetpacs-dialog--complete' answers from COLLECTION.  A tapped candidate
+is a local edit replacing the completion prefix.
+
+The picked value comes from the MIRROR, not from `capture_fields': a
+synchronized editor is never a stateful node (SPEC 19), so
+`dialog.submit' cannot capture it.  SPEC 18.1 closes a dialog's editor
+sessions BEFORE the submit response is sent, so the mirror entry is
+already gone by then — the text is shadowed on every `edit.delta'
+instead, and the last shadow is what the user submitted."
+  (let* ((client (jetpacs-client-or-error))
+         (document (format "doc:jpick-%d" (cl-incf jetpacs-dialog--picker-counter)))
+         (editor-id "pick")
+         (shadow (or initial ""))
+         (jetpacs-dialog--picker
+          (list :document document :editor-id editor-id
+                :collection collection :predicate predicate))
+         ;; ebp.el's completion hook is client-wide; bind it for this
+         ;; prompt only and restore whatever the application had.
+         (config (ebp-client-config client))
+         (prior-complete (plist-get config :edit-complete-function))
+         (watch (lambda (_c doc eid text)
+                  (when (and (equal doc document) (equal eid editor-id))
+                    (setq shadow text)))))
+    (setf (ebp-client-config client)
+          (plist-put (copy-sequence config) :edit-complete-function
+                     #'jetpacs-dialog--complete))
+    (push watch (ebp-client-edit-change-functions client))
+    (unwind-protect
+        (let ((answer nil))
+          (while (not answer)
+            (let* ((conclusion
+                    (jetpacs-dialog--ask
+                     (jetpacs-dialog--frame
+                      prompt
+                      (jetpacs-editor
+                       editor-id :document document :value shadow
+                       :complete t :chromeless t)
+                      (jetpacs-with-attrs (jetpacs-spacer) :height 8)
+                      (jetpacs-button "OK" (jetpacs-dialog-submit)))))
+                   (status (car conclusion))
+                   (typed (string-trim shadow)))
+              (unless (equal status "submitted") (keyboard-quit))
+              (cond
+               ((string-empty-p typed)
+                (setq answer (or default "")))
+               ;; RET-picks-top, exactly as at the minibuffer: an exact
+               ;; completion wins, else the top match.
+               ((jetpacs-dialog--top-match typed collection predicate)
+                (setq answer (jetpacs-dialog--top-match
+                              typed collection predicate)))
+               ((not require-match) (setq answer typed))
+               (t (setq prompt (format "%s (no match for %S)" prompt typed))))))
+          answer)
+      (setq jetpacs-dialog--picker nil)
+      (setf (ebp-client-edit-change-functions client)
+            (delq watch (ebp-client-edit-change-functions client)))
+      (setf (ebp-client-config client)
+            (plist-put (ebp-client-config client) :edit-complete-function
+                       prior-complete)))))
+
+;;;; completing-read: the enum fast path, then the picker
 
 (defun jetpacs-dialog--static-candidates (collection predicate)
   "COLLECTION's candidates when it is closed and static, else nil."
@@ -467,28 +593,31 @@ complete in fields (file names).  nil when nothing matches."
             (cond ((and (stringp v) (not (string-empty-p v))) v)
                   (default default)
                   (t "")))
-        ;; JC-4a stopgap for large/dynamic collections (JC-4b replaces
-        ;; this with the live capf picker): a text dialog resolved
-        ;; RET-picks-top, re-asking while require-match is unsatisfied.
-        (let ((caption (if candidates
-                           (format "%d candidates — type to match"
-                                   (length candidates))
-                         "type to match; picker lands with JC-4b"))
-              (answer nil))
-          (while (not answer)
-            (let ((s (jetpacs-dialog--ask-string
-                      prompt initial
-                      (concat prompt caption))))
-              (cond
-               ((string-empty-p s)
-                (setq answer (or default "")))
-               ((jetpacs-dialog--top-match s collection predicate)
-                (setq answer (jetpacs-dialog--top-match
-                              s collection predicate)))
-               ((not require-match) (setq answer s))
-               (t (setq initial s
-                        caption (format "no match for %S" s))))))
-          answer)))))
+        ;; Large or dynamic: the JC-4b capf picker when the Companion can
+        ;; host a dialog editor, else the JC-4a text stopgap (same
+        ;; RET-picks-top resolution, one round trip per attempt).
+        (if (jetpacs-dialog--picker-available-p)
+            (jetpacs-dialog--ask-picker prompt collection predicate
+                                        require-match initial default)
+          (let ((caption (if candidates
+                             (format "%d candidates — type to match"
+                                     (length candidates))
+                           "type to match"))
+                (answer nil))
+            (while (not answer)
+              (let ((s (jetpacs-dialog--ask-string
+                        prompt initial
+                        (concat prompt caption))))
+                (cond
+                 ((string-empty-p s)
+                  (setq answer (or default "")))
+                 ((jetpacs-dialog--top-match s collection predicate)
+                  (setq answer (jetpacs-dialog--top-match
+                                s collection predicate)))
+                 ((not require-match) (setq answer s))
+                 (t (setq initial s
+                          caption (format "no match for %S" s))))))
+            answer))))))
 
 (defun jetpacs-dialog--completing-read-multiple
     (orig prompt collection &optional predicate require-match initial

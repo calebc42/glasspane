@@ -1618,11 +1618,17 @@ class CompanionEngine(
     }
 
     /** SPEC 19.3: ask Emacs to complete at the current cursor. The result's
-     * {prefix, candidates} reach CALLBACK; candidate selection is a later
-     * local edit via [selectCompletion]. Non-durable, session-scoped. */
+     * {prefix, candidates} reach CALLBACK together with the (session, seq,
+     * cursor) the request was ISSUED against — a UI offering candidates must
+     * hand those back to [selectCompletion] so its staleness check is real.
+     * Re-reading them at selection time would compare the engine's state
+     * with itself and always pass, which is exactly the race (the caret
+     * moved while the user read the list) the check exists to catch.
+     * Candidate selection is a later local edit via [selectCompletion].
+     * Non-durable, session-scoped. */
     @Synchronized
     fun requestCompletion(document: String, editorId: String,
-                          callback: (String, JSONArray) -> Unit) {
+                          callback: (String, JSONArray, String, Long, Int) -> Unit) {
         val s = editors[document to editorId] ?: return
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return
         val atSession = s.sessionId
@@ -1655,7 +1661,7 @@ class CompanionEngine(
                         if (k != "label" && k != "annotation" && k != "insert")
                             return@sendRequest
                 }
-                callback(prefix, cands)
+                callback(prefix, cands, atSession, atSeq, atCursor)
             }
         }
     }

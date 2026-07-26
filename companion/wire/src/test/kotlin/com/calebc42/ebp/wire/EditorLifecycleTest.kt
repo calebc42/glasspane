@@ -139,7 +139,8 @@ class EditorLifecycleTest {
         val engine = engine(out)
         val s = engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
         var got: Pair<String, JSONArray>? = null
-        engine.requestCompletion("doc:1", "body") { prefix, cands -> got = prefix to cands }
+        engine.requestCompletion("doc:1", "body") { prefix, cands, _, _, _ ->
+            got = prefix to cands }
         // The Companion sent edit.complete as a request; answer it.
         val req = out.method("edit.complete").single()
         engine.feed(encodeFrame(JSONObject().put("jsonrpc", "2.0")

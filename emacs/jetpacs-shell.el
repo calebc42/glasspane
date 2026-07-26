@@ -112,6 +112,11 @@ owner and maps to `app:<owner>'."
     (prefix (error "jetpacs: unknown surface namespace %S (SPEC 13.1)"
                    prefix))))
 
+;; Defined with the view machinery at the end of the file; declared here
+;; because the registry, the push path and teardown all sweep them.
+(defvar jetpacs-shell--current-view)
+(defvar jetpacs-shell--unasserted-view)
+
 ;;;; Root registry
 
 (cl-defun jetpacs-shell-define-root (surface builder &key required
@@ -142,6 +147,8 @@ next Section 10.3 barrier."
     (jetpacs--unclaim "surface" surface)
     (setq jetpacs-shell--repush-pending
           (delete surface jetpacs-shell--repush-pending))
+    (remhash surface jetpacs-shell--current-view)
+    (remhash surface jetpacs-shell--unasserted-view)
     (if (jetpacs-connected-p)
         (jetpacs-shell--send-remove surface)
       (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal))))
@@ -164,8 +171,6 @@ this very call harmless."
        (message "jetpacs: surface.remove of %s failed (code %s, %s); queued for the next barrier"
                 surface (plist-get error :code)
                 (or (plist-get (plist-get error :data) :kind) "?"))))))
-
-(defvar jetpacs-shell--current-view)    ; defined with the view machinery
 
 (defun jetpacs-shell--owner-surfaces (owner)
   "OWNER's D1 primary surface plus every surface claimed under it."
@@ -219,7 +224,8 @@ re-registering push when that matters."
           (jetpacs-shell-remove-root surface)
         (jetpacs--unclaim "surface" surface))
       (remhash surface jetpacs--applied-revisions)
-      (remhash surface jetpacs-shell--current-view))
+      (remhash surface jetpacs-shell--current-view)
+      (remhash surface jetpacs-shell--unasserted-view))
     ;; `run-hook-wrapped', not `dolist': a buffer-local `add-hook' puts
     ;; `t' in the value, and `(funcall t owner)' would be swallowed by
     ;; the isolation below — silently dropping every GLOBAL subscriber.
@@ -675,6 +681,15 @@ a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
       (when (and entry
                  (jetpacs-client)
                  (eq (ebp-client-state (jetpacs-client)) 'syncing))
+        ;; SPEC 10.3 step 4: this push never reached the wire either, and
+        ;; the READY drain re-pushes with NO view — so a REPLAYED
+        ;; handler's deferred navigation is owed for exactly the reason a
+        ;; B8 refusal is.  Recorded UNVALIDATED on purpose: the spec is
+        ;; not built here, and `jetpacs-shell--claim-view' re-checks the
+        ;; name against the drain's own `views' and drops it if gone.
+        (when (and current-view
+                   (eq (jetpacs-shell--surface-target surface) :app))
+          (puthash surface current-view jetpacs-shell--unasserted-view))
         (cl-pushnew surface jetpacs-shell--repush-pending :test #'equal))
       nil)
      (t
@@ -724,6 +739,13 @@ spec (SPEC 13.4)" current-view)))
               ;; builtins, so injecting post-gate is sound.)
               (when (and snack (equal (plist-get spec :t) "scaffold"))
                 (setq spec (append spec (list :snackbar snack))))
+              ;; Re-assert a navigation the W10 ceiling refused, and
+              ;; record the view this snapshot will leave the surface on —
+              ;; BEFORE the send, because a refusal concludes its callback
+              ;; INSIDE it (with `revision' still nil), and the
+              ;; reconciliation below compares against this belief.
+              (setq current-view
+                    (jetpacs-shell--claim-view surface spec current-view))
               ;; Send; the update result arrives async, the revision now.
               (jetpacs--claim "surface" surface)
               (setq revision
@@ -737,6 +759,8 @@ spec (SPEC 13.4)" current-view)))
                      (lambda (status error)
                        (jetpacs-shell--confirm-applied
                         surface revision status error)
+                       (jetpacs-shell--view-result
+                        surface current-view status error)
                        ;; B8: a W10 sender-ceiling refusal is transient
                        ;; and never reached the wire — a surface with a
                        ;; registered root retries via the debounced
@@ -781,6 +805,14 @@ The Companion re-shows a snackbar only when its text changes."
 The barrier flag bypasses the READY guard: SPEC 10.3 step 3 orders
 required surface pushes ahead of replay."
   (let ((jetpacs-shell--in-barrier t))
+    ;; A navigation owed from the PREVIOUS session is unknowable-stale:
+    ;; Companion-local `view.switch' while not READY is never reported,
+    ;; so offline drift is invisible here, and the standing decision
+    ;; (chrome Commentary) is that the drift is benign — never force
+    ;; `current_view' on reconnect.  Runs at 10.3 step 3, BEFORE replay
+    ;; delivers events, so a SYNCING-window debt recorded during step 4
+    ;; is never wiped by this.
+    (clrhash jetpacs-shell--unasserted-view)
     ;; Tombstones first: a surface removed while disconnected must be
     ;; retired before the session decides what is present (SPEC 13.3).
     (let ((pending jetpacs-shell--pending-removals))
@@ -808,12 +840,91 @@ required surface pushes ahead of replay."
   "Abnormal hook run with (SURFACE VIEW) after a local view switch.")
 
 (defvar jetpacs-shell--current-view (make-hash-table :test #'equal)
-  "Map of SURFACE -> the view the Companion last reported showing.")
+  "Map of SURFACE -> the view Emacs believes the Companion is showing.
+Written by `jetpacs-shell--record-view' from two authorities: the push
+path, which knows what SPEC 13.4 makes the Companion select, and the
+Companion's own `view.switched'.  Before this was written by the push
+path too, the public accessor LIED after every Emacs-driven navigation
+— `view.switched' is generated only by the `view.switch' builtin.")
+
+(defvar jetpacs-shell--unasserted-view (make-hash-table :test #'equal)
+  "Map of SURFACE -> a `current_view' a refused push never delivered.
+A B8 refusal concludes locally and never touches the wire, and a
+SYNCING-window push is dropped before the wire too — in both the
+navigation is still OWED: the next push for that surface re-asserts it
+once.  Safety comes from consumption order, not from an entry always
+matching the belief: `jetpacs-shell--claim-view' adopts the owed entry
+BEFORE `--record-view' runs for that push, so the debt is consumed by
+the surface's next push before any newer belief can invalidate it, and
+`--record-view' drops the entry on any CHANGE of belief (a later push,
+a Companion `view.switched') — a SYNCING-owed entry has no belief
+behind it at all, which is fine for the same reason."
+  )
 
 (defun jetpacs-shell-current-view (surface)
-  "The view SURFACE is currently showing, per the Companion's report."
+  "The view SURFACE is showing: the Companion's last report, else the
+view SPEC 13.4 makes its last accepted snapshot select.  Optimistic — a
+push refused before it reached the wire is believed until its retry
+lands (`jetpacs-shell--unasserted-view' is that debt)."
   (gethash (jetpacs-shell--resolve-surface surface)
            jetpacs-shell--current-view))
+
+(defun jetpacs-shell--record-view (surface view)
+  "Record VIEW as SURFACE's believed current view; nil means none.
+The single authority.  A CHANGE of value invalidates any unasserted
+navigation, which is what stops a refused view yanking the user back
+after they have moved on."
+  (if view
+      (puthash surface view jetpacs-shell--current-view)
+    (remhash surface jetpacs-shell--current-view))
+  (unless (equal view (gethash surface jetpacs-shell--unasserted-view))
+    (remhash surface jetpacs-shell--unasserted-view)))
+
+(defun jetpacs-shell--view-after-push (surface spec current-view)
+  "The view SPEC leaves SURFACE showing once accepted (SPEC 13.4), or nil.
+Deterministic at send time: 13.4 gives the Companion exactly three
+reasons to change views and all three are decided here.  A snapshot
+with no `views' leaves no current view at all — the Companion clears
+what it retained."
+  (let ((views (plist-get spec :views)))
+    (cond
+     ((not (hash-table-p views)) nil)
+     (current-view current-view)
+     (t (let ((held (gethash surface jetpacs-shell--current-view)))
+          (if (and held (gethash held views))
+              held
+            (plist-get spec :initial_view)))))))
+
+(defun jetpacs-shell--claim-view (surface spec current-view)
+  "Adopt SURFACE's owed navigation into CURRENT-VIEW; record the result.
+Returns the `current_view' to send.  Never signals: an owed view this
+SPEC no longer contains is void intent, not an error — only a
+CALLER-supplied name is a loud 13.4 violation."
+  (let ((owed (gethash surface jetpacs-shell--unasserted-view))
+        (views (plist-get spec :views)))
+    (unless current-view
+      (if (and owed (hash-table-p views) (gethash owed views))
+          (setq current-view owed)
+        (remhash surface jetpacs-shell--unasserted-view))))
+  (jetpacs-shell--record-view
+   surface (jetpacs-shell--view-after-push surface spec current-view))
+  current-view)
+
+(defun jetpacs-shell--view-result (surface view status error)
+  "Reconcile SURFACE's owed-navigation slot with one push result.
+VIEW is the `current_view' this push carried, nil for none.  Only a B8
+refusal leaves the navigation owed — it provably never reached the
+wire.  Everything else settles the debt: an `applied' is confirmation,
+and a 1201/timeout would only re-fail, so keeping the debt would make
+every later BACKGROUND refresh navigation-forcing (SPEC 13.4's
+SHOULD-omit)."
+  (when view
+    (if (jetpacs-refused-p error)
+        (when (equal view (gethash surface jetpacs-shell--current-view))
+          (puthash surface view jetpacs-shell--unasserted-view))
+      (when (equal view (gethash surface jetpacs-shell--unasserted-view))
+        (remhash surface jetpacs-shell--unasserted-view))))
+  status)
 
 ;; SPEC 14.2: the `view.switch' builtin switches locally and, while READY,
 ;; reports `view.switched'.  "Emacs core conformance includes the generated
@@ -826,7 +937,7 @@ required surface pushes ahead of replay."
           (surface (plist-get params :surface)))
       (if (not (and (stringp view) (stringp surface)))
           'rejected
-        (puthash surface view jetpacs-shell--current-view)
+        (jetpacs-shell--record-view surface view)
         (run-hook-with-args 'jetpacs-shell-view-change-functions
                             surface view)
         'accepted))))

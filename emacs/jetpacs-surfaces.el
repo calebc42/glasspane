@@ -1038,7 +1038,9 @@ the one being fixed.")
     (cancel-timer jetpacs-shell--repush-timer)
     (setq jetpacs-shell--repush-timer nil))
   (when (boundp 'jetpacs-shell--current-view)
-    (clrhash jetpacs-shell--current-view)))
+    (clrhash jetpacs-shell--current-view))
+  (when (boundp 'jetpacs-shell--unasserted-view)
+    (clrhash jetpacs-shell--unasserted-view)))
 
 (provide 'jetpacs-surfaces)
 ;;; jetpacs-surfaces.el ends here

@@ -672,5 +672,125 @@ subscribers for the rest of the batch."
         (jetpacs-teardown-owner "alpha"))
       (should global-ran))))
 
+
+;;;; E1d: current_view — the belief and the debt
+
+(defun jetpacs-chrome-test--nav-fixture ()
+  "A hub root + one pushed detail screen under the recording stub."
+  (with-jetpacs-owner "filesapp"
+    (jetpacs-chrome-define-root "filesapp" "hub"
+                                (lambda (_b) (jetpacs-column
+                                              (jetpacs-text "hub"))))))
+
+(ert-deftest jetpacs-chrome-current-view-accessor-no-longer-lies ()
+  "`jetpacs-shell-current-view' is written by the PUSH path now, not
+only by `view.switched' — which the Companion generates only for the
+`view.switch' builtin, so after every Emacs-driven navigation the
+public accessor answered a stale view."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-chrome-test--nav-fixture)
+      (jetpacs-chrome-push-screen "app:filesapp" "detail"
+                                  (lambda (back)
+                                    (jetpacs-chrome-screen
+                                     "D" (jetpacs-text "d") :back back)))
+      (should (equal (jetpacs-shell-current-view "filesapp") "detail"))
+      ;; A background refresh still OMITS current_view on the wire
+      ;; (SPEC 13.4) and does not disturb the belief.
+      (jetpacs-shell-push "app:filesapp")
+      (should-not (plist-get (car (cddr (car recs))) :current-view))
+      (should (equal (jetpacs-shell-current-view "filesapp") "detail")))))
+
+(ert-deftest jetpacs-chrome-refused-navigation-is-reasserted ()
+  "A W10-refused navigation is OWED, not lost: the next push for that
+surface re-asserts the exact view once.  Drives ebp's REAL held branch
+— the refusal concludes synchronously inside the send."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-chrome-test--nav-fixture))
+    ;; REAL send path, ceiling held: the push is refused locally.
+    (setf (ebp-client-outstanding client) ebp-overload-hold)
+    (jetpacs-chrome-push-screen "app:filesapp" "detail"
+                                (lambda (back)
+                                  (jetpacs-chrome-screen
+                                   "D" (jetpacs-text "d") :back back)))
+    (should (equal (gethash "app:filesapp" jetpacs-shell--unasserted-view)
+                   "detail"))
+    ;; The ceiling clears; a PLAIN push (any retry path) re-asserts it.
+    (setf (ebp-client-outstanding client) 0)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-shell-push "app:filesapp")
+      (should (equal (plist-get (car (cddr (car recs))) :current-view)
+                     "detail")))))
+
+(ert-deftest jetpacs-chrome-two-refused-views-latest-wins ()
+  "One slot, latest write wins: refusing X then Y leaves only Y owed —
+X must not resurrect and yank the user backwards."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-chrome-test--nav-fixture))
+    (setf (ebp-client-outstanding client) ebp-overload-hold)
+    (jetpacs-chrome-push-screen "app:filesapp" "d1"
+                                (lambda (back)
+                                  (jetpacs-chrome-screen
+                                   "1" (jetpacs-text "1") :back back)))
+    (jetpacs-chrome-push-screen "app:filesapp" "d2"
+                                (lambda (back)
+                                  (jetpacs-chrome-screen
+                                   "2" (jetpacs-text "2") :back back)))
+    (should (equal (gethash "app:filesapp" jetpacs-shell--unasserted-view)
+                   "d2"))
+    (setf (ebp-client-outstanding client) 0)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-shell-push "app:filesapp")
+      (should (equal (plist-get (car (cddr (car recs))) :current-view)
+                     "d2")))))
+
+(ert-deftest jetpacs-chrome-device-back-cancels-the-owed-view ()
+  "The Companion's own word is newer than the debt: a `view.switched'
+after a refused navigation cancels it — re-asserting would yank the
+user off the screen they chose."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-chrome-test--nav-fixture))
+    (setf (ebp-client-outstanding client) ebp-overload-hold)
+    (jetpacs-chrome-push-screen "app:filesapp" "detail"
+                                (lambda (back)
+                                  (jetpacs-chrome-screen
+                                   "D" (jetpacs-text "d") :back back)))
+    (should (gethash "app:filesapp" jetpacs-shell--unasserted-view))
+    ;; The user taps back on the device.
+    (jetpacs--dispatch client '(:action "view.switched"
+                                :args (:view "hub")
+                                :surface "app:filesapp")
+                       (gethash "view.switched" jetpacs-action-handlers))
+    (should-not (gethash "app:filesapp" jetpacs-shell--unasserted-view))
+    (setf (ebp-client-outstanding client) 0)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-shell-push "app:filesapp")
+      (should-not (plist-get (car (cddr (car recs))) :current-view)))))
+
+(ert-deftest jetpacs-chrome-syncing-push-owes-its-view ()
+  "The SECOND refusal site: a push during the SYNCING replay window is
+dropped before the wire too, and the READY drain re-pushes with no
+view — a replayed handler's deferred navigation must ride the same
+debt."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-chrome-test--nav-fixture))
+    (setf (ebp-client-state client) 'syncing)
+    (jetpacs-chrome-push-screen "app:filesapp" "detail"
+                                (lambda (back)
+                                  (jetpacs-chrome-screen
+                                   "D" (jetpacs-text "d") :back back)))
+    (should (equal (gethash "app:filesapp" jetpacs-shell--unasserted-view)
+                   "detail"))
+    (should (member "app:filesapp" jetpacs-shell--repush-pending))
+    (setf (ebp-client-state client) 'ready)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-shell--on-ready client)
+      (should (equal (plist-get (car (cddr (car recs))) :current-view)
+                     "detail")))))
+
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

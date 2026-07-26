@@ -662,3 +662,66 @@ filter that is now stale — so the bridge's own warnings toast themselves to th
 device. Both are direct violations of "desktop Emacs must remain untouched
 unless in a device flow"; fix them on the way through JA-3 rather than carrying
 them.
+
+---
+
+## 7. Decision outcomes — RATIFIED (Caleb, 2026-07-26)
+
+**The organizing principle Caleb articulated across D-1/D-8/D-9/D-10/D-11,
+now standing policy for this plan:** base Jetpacs is a MOBILE EMACS, not an
+approximation — any built-in Emacs feature is in base scope (support may be
+deferred for thoughtfulness, never retired) — while OPINIONATED experiences
+live as Tier-1 apps ("installing Jetpacs is installing vanilla Emacs; a
+Tier-1 app is a config on top").
+
+- **D-1 — REAL editing: YES**, scoped as *authoring and drafting* (indentation
+  maintenance, auto-bullets on RET, WYSIWYG-leaning), with deep editing left
+  to desktop.  The property-drawer abstraction model is the exemplar.  NEW
+  DIRECTION beyond the poc: a **block-based editor** — metadata/properties/
+  elements stay plain-text org underneath, abstracted by the renderer.  Per
+  D-8's extension, this lands as a **Tier-1 app**, not base (it aligns with
+  the existing jetpacs-orgseq architecture: blocks = ID'd headlines).  Ladder
+  impact: JA-6 still ships the plain editor; G4 stays deferred but its
+  successor shape may be per-block editors rather than one whole-buffer sync.
+- **D-2 — the llm-poc does not ship to others; the hand-rewrite WILL.**
+  demo/app-store/pack stay unported here but are PRESERVED on slop-fork/
+  poc-v1 for the rewrite to draw on.  Nothing deleted from history.
+- **D-3 — composer: wanted, revisit much later.**  JC-6 stays NO-GO for this
+  poc; source/spec/lint-remainder reclassified retire→**defer-long**.
+  Audience ordering ratified: (1) Caleb, (2) Emacs users wanting quick
+  capture + org-agenda on the phone, (3/4) other-PKM converts before
+  mobile-IDE power users.  NOTE: this ordering argues for the org rungs
+  (JA-4/JA-5 + capture) ahead of JA-3's general-client work — proposed
+  reorder, not yet ratified.
+- **D-4 — RATIFIED as recommended:** opaque per-owner heading-ref tokens;
+  never absolute paths on the wire; one commit with glasspane's alist→plist.
+- **D-5 — REVERSED: capture-template management from the tablet is IN.**
+  Caleb rates it a core use-case for PKM converts.  The 646-line builder
+  reschedules after JA-4 (capture-run substrate) + JA-10 (settings engine).
+- **D-6 — RATIFIED as recommended:** keep eval; refuse reload on
+  device-originated saves; desktop saves are init.el-equivalent trust.
+- **D-7 — RATIFIED as recommended:** explicit `jetpacs-triggers-commit`;
+  never implicit pushes; clearing happens via an explicit empty commit.
+- **D-8 — one FAITHFUL renderer at base; re-flowed/block experiences are
+  Tier-1.**  org-rich stays deferred as Tier-1 raw material.
+- **D-9 — PARTIALLY REVERSED: the pie menu's PLUMBING is retained.**
+  Caleb judges radial menus the best phone interaction model but neither of
+  us the right builder — the wire/Companion SPEC 18.3 machinery (already
+  built in W7) and the `presentation.pie-menu` grant stay; the poc's
+  Emacs-side keymap-pie registry stays unported; implementation belongs to a
+  future Tier-1.
+- **D-10 — git is NOT base.**  Emacs ships no git binary and base Jetpacs
+  will not open the door to bundling arbitrary binaries; a git workflow is a
+  Tier-1 (own APK signing + Termux) story.  Ladder impact: JA-7 RESCOPES —
+  the transient→dialog layer STAYS base (transient is built-in Emacs), while
+  magit/with-editor/git specifics move to the Tier-1 exemplar; base keeps
+  only a fail-open guard so a with-editor buffer can never hang Emacs.
+- **D-11 — REVERSED on both:** SQL stays (built-in; exploring the app's own
+  SQLite — including ebp's receipts store — is a real use); org-habit is
+  absolutely in scope with the org rungs.  Package-browser's mutating
+  actions are likewise legitimate base scope (package.el is built-in);
+  deferral is about sequencing, not scope.
+- **D-12 — app switching stays as-is** (Emacs-side launcher, no Kotlin).
+  The frame is corrected: "apps" are CONFIGS; the launcher exists to show
+  package authors that a Tier-1 skin is cheap, not to serve daily
+  multi-app use.

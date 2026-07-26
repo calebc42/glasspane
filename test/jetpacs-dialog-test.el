@@ -660,5 +660,144 @@ waits; it declines and falls through to the original function."
     (let ((jetpacs-dialog--pending "jprompt-1"))
       (should-not (jetpacs-dialog--bridge-p)))))
 
+;;;; Flow entry (JA-2/B3): establishing a device flow
+
+(ert-deftest jetpacs-flow-with-jetpacs-flow-binds-and-restores ()
+  (should-not (jetpacs-device-flow-p))
+  (should (= 42 (with-jetpacs-flow "app:demo"
+                  (should (jetpacs-device-flow-p))
+                  (should (equal (jetpacs-flow-surface) "app:demo"))
+                  42)))
+  (should-not (jetpacs-device-flow-p)))
+
+(ert-deftest jetpacs-flow-owner-and-default-resolution ()
+  (with-jetpacs-flow "demo"
+    (should (equal (jetpacs-flow-surface) "app:demo")))
+  (with-jetpacs-owner "demo"
+    (with-jetpacs-flow nil
+      (should (equal (jetpacs-flow-surface) "app:demo"))))
+  ;; Ownerless nil: the shell default (shell is loaded by this suite).
+  (with-jetpacs-flow nil
+    (should (equal (jetpacs-flow-surface) "app:main"))))
+
+(ert-deftest jetpacs-flow-rejects-invalid-surfaces ()
+  (should-error (with-jetpacs-flow "no spaces" (ignore)))
+  (should-error (with-jetpacs-flow "bogus:x" (ignore)))
+  (should-error (with-jetpacs-flow "app:" (ignore)))
+  (should-error (with-jetpacs-flow 42 (ignore)))
+  ;; flow-begin validates EAGERLY on the caller's stack — no pumping.
+  (should-error (jetpacs-flow-begin "app:" #'ignore))
+  (should-error (jetpacs-flow-begin "app:demo" "not-a-fn"))
+  (should-not (jetpacs-device-flow-p)))
+
+(ert-deftest jetpacs-flow-marker-cleared-on-error-and-quit ()
+  (should-error (with-jetpacs-flow "app:demo" (error "boom")))
+  (should-not (jetpacs-device-flow-p))
+  (should (jetpacs-dialog-test--quits
+            (with-jetpacs-flow "app:demo" (keyboard-quit))))
+  (should-not (jetpacs-device-flow-p)))
+
+(ert-deftest jetpacs-flow-nested-same-ok-different-refused ()
+  (with-jetpacs-flow "app:demo"
+    ;; Same surface (either spelling): idempotent.
+    (with-jetpacs-flow "app:demo"
+      (should (equal (jetpacs-flow-surface) "app:demo")))
+    (with-jetpacs-flow "demo"
+      (should (equal (jetpacs-flow-surface) "app:demo")))
+    ;; A different surface refuses; the outer flow survives.
+    (should-error (with-jetpacs-flow "app:other" (ignore)))
+    (should (equal (jetpacs-flow-surface) "app:demo"))))
+
+(ert-deftest jetpacs-flow-begin-marks-from-a-bare-timer ()
+  (let ((seen :unset) (surface :unset))
+    (jetpacs-flow-begin "app:demo"
+                        (lambda ()
+                          (setq seen (jetpacs-device-flow-p)
+                                surface (jetpacs-flow-surface))))
+    ;; The caller stays unmarked — the flow is deferred.
+    (should-not (jetpacs-device-flow-p))
+    (dotimes (_ 20) (accept-process-output nil 0.01))
+    (should (eq seen t))
+    (should (equal surface "app:demo"))
+    (should-not (jetpacs-device-flow-p))))
+
+(ert-deftest jetpacs-flow-begin-chains-through-flow-continue ()
+  (let ((chained :unset))
+    (jetpacs-flow-begin "app:demo"
+                        (lambda ()
+                          (jetpacs-flow-continue
+                           (lambda ()
+                             (setq chained (jetpacs-flow-surface))))))
+    (dotimes (_ 30) (accept-process-output nil 0.01))
+    (should (equal chained "app:demo"))))
+
+(ert-deftest jetpacs-flow-does-not-unlock-dispatch-extent ()
+  "A flow begun INSIDE a handler cannot unlock prompts there: the
+no-prompts regime and the in-action test still win (D2)."
+  (let ((client (jetpacs-dialog-test--client))
+        (bridged :unset))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (with-jetpacs-owner "demo"
+            (jetpacs-defaction "demo.flowbegun"
+              (lambda (_a _p)
+                (with-jetpacs-flow "app:demo"
+                  (setq bridged (jetpacs-dialog--bridge-p))
+                  (y-or-n-p "Really? "))
+                'accepted)))
+          (let ((reply (ebp-client--handle-event-action
+                        client
+                        (list :event_id (make-string 32 ?c)
+                              :action "demo.flowbegun" :args nil
+                              :surface "app:demo" :revision_seen 1
+                              :occurred_at_ms 1785000000000))))
+            (should (equal (plist-get reply :status) "rejected")))
+          (should-not bridged))
+      (jetpacs-detach)
+      (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-flow-bridges-prompt-to-dialog ()
+  "Both entry points reach the JC-4a bridge: a prompt raised inside an
+ESTABLISHED flow lands on the dialog seam with the flow's surface."
+  (let ((client (jetpacs-dialog-test--client))
+        (jetpacs-dialog-test--specs nil)
+        (jetpacs-dialog-test--conclusion '("submitted" (:value t) nil))
+        (answer :unset) (fsurf :unset))
+    (unwind-protect
+        (cl-letf (((symbol-function 'ebp-client-dialog-show)
+                   (cl-function
+                    (lambda (_client _id spec &key callback
+                             &allow-other-keys)
+                      (push spec jetpacs-dialog-test--specs)
+                      (when callback
+                        (apply callback jetpacs-dialog-test--conclusion))
+                      42))))
+          (jetpacs-attach client)
+          ;; with-jetpacs-flow from a bare timer.
+          (run-at-time 0 nil
+                       (lambda ()
+                         (with-jetpacs-flow "app:demo"
+                           (setq answer (y-or-n-p "Push? ")
+                                 fsurf (jetpacs-flow-surface)))))
+          (let ((deadline (+ (float-time) 3)))
+            (while (and (eq answer :unset) (< (float-time) deadline))
+              (accept-process-output nil 0.05)))
+          (should (eq answer t))
+          (should (equal fsurf "app:demo"))
+          (should (= 1 (length jetpacs-dialog-test--specs)))
+          ;; jetpacs-flow-begin reaches the same bridge.
+          (setq answer :unset)
+          (jetpacs-flow-begin "app:demo"
+                              (lambda ()
+                                (setq answer (y-or-n-p "Push? "))))
+          (let ((deadline (+ (float-time) 3)))
+            (while (and (eq answer :unset) (< (float-time) deadline))
+              (accept-process-output nil 0.05)))
+          (should (eq answer t))
+          (should (= 2 (length jetpacs-dialog-test--specs))))
+      (jetpacs-detach)
+      (jetpacs-test-reset-state))))
+
 (provide 'jetpacs-dialog-test)
 ;;; jetpacs-dialog-test.el ends here

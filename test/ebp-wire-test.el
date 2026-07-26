@@ -1538,5 +1538,45 @@ no gap was ever observed, so none may be invented under load."
                    (lambda (m) (equal (alist-get 'method m) "edit.resync"))
                    (funcall (plist-get server :received)))))))
 
+(ert-deftest ebp-test-event-action-handler-event-retry ()
+  "JA-2/B9: `ebp-client-event-retry' concludes the dispatch with a 1500
+whose data.kind and advisory retry_after_s SURVIVE jsonrpc.el's
+data-dropping reply path (the connection stash), commits no receipt (a
+redelivered id runs the handler again), and forces the SPEC 15.3
+queue.replay that unpauses the Companion's pump."
+  (let ((runs 0))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :after-ready
+                 (lambda (send)
+                   (ebp-test--send-event send 500 (make-string 32 ?f))
+                   (ebp-test--send-event send 501 (make-string 32 ?f))))
+                :replay-retry-delay 0.15)
+      (ebp-client-register-action
+       client "demo.count"
+       (lambda (c _p) (cl-incf runs) (ebp-client-event-retry c 1)))
+      (should (ebp-test--wait
+               (lambda () (ebp-test--response-for server 501))))
+      (dolist (id '(500 501))
+        (let* ((resp (ebp-test--response-for server id))
+               (err (alist-get 'error resp)))
+          (should err)
+          (should (equal (alist-get 'code err) 1500))
+          (should (equal (alist-get 'kind (alist-get 'data err))
+                         "event-retry"))
+          (should (equal (alist-get 'retry_after_s (alist-get 'data err)) 1))))
+      ;; No receipt was committed: the SAME id ran the handler twice.
+      (should (= runs 2))
+      ;; The forced queue.replay followed (the barrier already sent one).
+      (should (ebp-test--wait
+               (lambda ()
+                 (>= (cl-count-if
+                      (lambda (m) (equal (alist-get 'method m)
+                                         "queue.replay"))
+                      (funcall (plist-get server :received)))
+                     2))
+               20)))))
+
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

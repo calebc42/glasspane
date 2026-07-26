@@ -520,8 +520,11 @@ the READY guard; optional roots wait."
         (should (equal (mapcar #'car sent) '("app:grocy")))))))
 
 (ert-deftest jetpacs-floor-snackbar-scaffold-and-requeue ()
+  ;; The toast degrade now rides the GATED jetpacs-toast (JA-2/B7), so
+  ;; the fixture must grant presentation.toast for the degrade branch.
   (jetpacs-floor-test--with-client
-      (client :profiles '(:app (:node_types ["text" "scaffold" "column"]
+      (client :granted ["theme" "presentation.toast"]
+              :profiles '(:app (:node_types ["text" "scaffold" "column"]
                                 :builtins [] :features [])))
     (let ((sent nil) (toasts nil))
       (cl-letf (((symbol-function 'ebp-client-toast)
@@ -542,7 +545,108 @@ the READY guard; optional roots wait."
           (jetpacs-shell-notify "kept")
           (should-error (jetpacs-shell-push
                          "app:demo" :spec '(:t "card")))
-          (should (equal jetpacs-shell--snackbar "kept")))))))
+          (should (equal jetpacs-shell--snackbar "kept"))))))
+  ;; Ungranted: the degrade drops silently and the push still succeeds.
+  (jetpacs-floor-test--with-client
+      (client :profiles '(:app (:node_types ["text" "scaffold" "column"]
+                                :builtins [] :features [])))
+    (let ((sent nil) (toasts nil))
+      (cl-letf (((symbol-function 'ebp-client-toast)
+                 (lambda (_c text &rest _) (push text toasts))))
+        (jetpacs-floor-test--recording-push sent
+          (jetpacs-shell-notify "dropped")
+          (jetpacs-shell-push "app:demo" :spec '(:t "text" :text "t"))
+          (should (= (length sent) 1))
+          (should-not toasts)
+          (should-not jetpacs-shell--snackbar))))))
+
+;;;; JA-2a utilities: toast gate, refused-p, retry-later (B7/B8/B9)
+
+(ert-deftest jetpacs-floor-toast-gate-and-sanitize ()
+  (jetpacs-floor-test--with-client (client)
+    (let ((spy nil))
+      (cl-letf (((symbol-function 'ebp-client-toast)
+                 (cl-function (lambda (_c text &key duration-s)
+                                (push (list text duration-s) spy)))))
+        ;; Ungranted: silent no-op.
+        (should-not (jetpacs-toast "hi"))
+        (should-not spy)
+        (setf (ebp-client-granted client) ["theme" "presentation.toast"])
+        (should (jetpacs-toast "hi" :duration-s 3))
+        (should (equal (car spy) '("hi" 3)))
+        ;; toast.show is R-only.
+        (setf (ebp-client-state client) 'syncing)
+        (should-not (jetpacs-toast "hi"))
+        (setf (ebp-client-state client) 'ready)
+        ;; Raw bytes sanitized on the way out.
+        (jetpacs-toast (concat "a" (string #x3FFF80)))
+        (should (equal (caar spy) "a�"))
+        ;; Validation is loud even when it would be gated off.
+        (should-error (jetpacs-toast "x" :duration-s 0))
+        (should-error (jetpacs-toast "x" :duration-s 11))
+        (should-error (jetpacs-toast 42)))))
+  ;; Detached: nil, no error.
+  (should-not (jetpacs-toast "hi")))
+
+(ert-deftest jetpacs-floor-refused-p-shape ()
+  (should (jetpacs-refused-p '(:code 1401
+                               :message "Outstanding requests exhausted"
+                               :data (:kind "overloaded"))))
+  (should-not (jetpacs-refused-p nil))
+  (should-not (jetpacs-refused-p '(:code 1201 :data (:kind "content-invalid"))))
+  (should-not (jetpacs-refused-p '(:code 1401 :data (:kind "something-else"))))
+  (should-not (jetpacs-refused-p '(:code 1401))))
+
+(ert-deftest jetpacs-floor-refused-push-requeues ()
+  "A W10-refused push with a registered root schedules the debounced
+repush; the confirmed floor never rises.  Drives ebp's REAL held branch
+— no stubs on any ebp function."
+  (jetpacs-floor-test--with-client (client)
+    (with-jetpacs-owner "grocy"
+      (jetpacs-shell-define-root "grocy"
+                                 (lambda () '(:t "text" :text "r"))))
+    (setf (ebp-client-outstanding client) ebp-overload-hold)
+    (let ((captured :none))
+      (with-jetpacs-owner "grocy"
+        (jetpacs-shell-push "grocy"
+                            :callback (lambda (_status error)
+                                        (setq captured error))))
+      ;; The refusal concluded synchronously.
+      (should (jetpacs-refused-p captured))
+      (should (member "app:grocy" jetpacs-shell--repush-pending))
+      (should (timerp jetpacs-shell--repush-timer))
+      (should-not (gethash "app:grocy" jetpacs--applied-revisions)))))
+
+(ert-deftest jetpacs-floor-retry-later-answers-1500-not-accepted ()
+  (jetpacs-floor-test--with-client (client)
+    (let ((runs 0))
+      (with-jetpacs-owner "demo"
+        (jetpacs-defaction "demo.later"
+          (lambda (_a _p) (cl-incf runs) (jetpacs-retry-later 30))))
+      (unwind-protect
+          (let ((eid (make-string 32 ?e)))
+            (should-error
+             (ebp-client--handle-event-action
+              client (jetpacs-floor-test--event eid :action "demo.later"))
+             :type 'jsonrpc-error)
+            ;; No receipt: not accepted, so the same id runs AGAIN.
+            (should-not (gethash eid (ebp-client-receipts client)))
+            (should-error
+             (ebp-client--handle-event-action
+              client (jetpacs-floor-test--event eid :action "demo.later"))
+             :type 'jsonrpc-error)
+            (should (= runs 2))
+            ;; The SPEC 15.3 replay was forced.
+            (should (timerp (ebp-client-replay-retry-timer client))))
+        (when-let* ((tm (ebp-client-replay-retry-timer client)))
+          (cancel-timer tm))))))
+
+(ert-deftest jetpacs-floor-retry-later-outside-handler ()
+  "Outside a dispatch it is a plain error, never a wire-shaped one."
+  (should (eq 'ok (condition-case _err
+                      (jetpacs-retry-later)
+                    (jsonrpc-error (ert-fail "signalled jsonrpc-error"))
+                    (error 'ok)))))
 
 (ert-deftest jetpacs-floor-gate-features ()
   "SPEC 10.2 mandates gating nodes, builtins AND features; 17.2 makes an

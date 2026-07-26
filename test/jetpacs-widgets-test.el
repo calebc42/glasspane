@@ -886,5 +886,45 @@ When a 40th type appears, this fails -- a reminder to add its constructor."
                          (alist-get 'universal_node_attributes
                                     (jetpacs-test--contract))))))
 
+;;;; The wire-id minter (JA-2/B5)
+
+(ert-deftest jetpacs-widgets/wire-id-valid-for-hostile-names ()
+  (dolist (name '("*shell*" "*ielm*" "*Async Shell Command*" "shell<2>"
+                  " *hidden*" "«weird»" "/ssh:host:/e/x.el" ""))
+    (let ((id (jetpacs-wire-id "files" name)))
+      (should (jetpacs--identifier-p id))
+      (should (<= (length id) 128)))))
+
+(ert-deftest jetpacs-widgets/wire-id-golden-and-comint-compatible ()
+  "Byte-compatibility with the pre-promotion comint minter: live SPEC
+13.6 drafts key on these exact ids."
+  (should (equal (jetpacs-wire-id "comint" "*shell*")
+                 (concat "comint-c-shell--"
+                         (substring (sha1 "*shell*") 0 8))))
+  (require (quote jetpacs-comint))
+  (should (equal (jetpacs-comint--input-id "*shell*")
+                 (jetpacs-wire-id "comint" "*shell*")))
+  ;; The plan's exit-gate name class round-trips.
+  (let ((id (jetpacs-wire-id "witheditor" "*shell /ssh:host:*")))
+    (should (string-prefix-p "witheditor-c-shell-/ssh:host:-" id))
+    (should (string-suffix-p (substring (sha1 "*shell /ssh:host:*") 0 8)
+                             id))))
+
+(ert-deftest jetpacs-widgets/wire-id-collisions-and-stability ()
+  ;; Sanitize-lossiness kept apart by the hash of the ORIGINAL.
+  (should-not (equal (jetpacs-wire-id "x" "*shell*")
+                     (jetpacs-wire-id "x" "-shell-")))
+  (should (equal (jetpacs-wire-id "x" "*shell*")
+                 (jetpacs-wire-id "x" "*shell*")))
+  (should-not (equal (jetpacs-wire-id "files" "n")
+                     (jetpacs-wire-id "hosts" "n"))))
+
+(ert-deftest jetpacs-widgets/wire-id-ceiling-and-bad-prefix ()
+  (should (jetpacs--identifier-p
+           (jetpacs-wire-id "witheditor" (make-string 400 ?*))))
+  (should-error (jetpacs-wire-id "has space" "n"))
+  (should-error (jetpacs-wire-id (make-string 101 ?p) "n"))
+  (should-error (jetpacs-wire-id "p" 42)))
+
 (provide 'jetpacs-widgets-test)
 ;;; jetpacs-widgets-test.el ends here

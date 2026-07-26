@@ -1127,10 +1127,12 @@ disposition, so the application may refresh views they mutated."
       (dolist (fn (ebp-client-after-replay-functions client))
         (funcall fn client summary)))))
 
-(defun ebp-client--force-replay-retry (client)
+(defun ebp-client--force-replay-retry (client &optional delay)
   "SPEC 15.3: after answering 1500 event-retry, Emacs SHOULD call
 `queue.replay' again with bounded backoff — the pump is paused until it
-does.  Forces one retry cycle even when the last summary was clean."
+does.  Forces one retry cycle even when the last summary was clean.
+DELAY overrides the first attempt's delay; it is IGNORED when a retry
+timer is already pending (the guard below) — the earlier schedule wins."
   (unless (ebp-client-replay-retry-timer client)
     (setf (ebp-client-replay-summary client)
           (plist-put (copy-sequence (or (ebp-client-replay-summary client)
@@ -1139,7 +1141,32 @@ does.  Forces one retry cycle even when the last summary was clean."
                                             (ebp-client-replay-summary client)
                                             :remaining)
                                            1))))
-    (ebp-client--schedule-replay-retry client nil)))
+    (ebp-client--schedule-replay-retry client delay)))
+
+(defun ebp-client-event-retry (client &optional after-s message)
+  "Answer the in-flight `event.action' with `1500 event-retry' (SPEC 14.4).
+DOES NOT RETURN — signals, concluding the dispatch without a receipt:
+the Companion RETAINS its durable record and stays the owner, its pump
+pauses (SPEC 15.3), and this schedules the `queue.replay' that unpauses
+it — first attempt after AFTER-S seconds when given, else the bounded
+backoff default.  Without that replay the pump would stay paused until
+an unrelated retry fired: the silent-divergence class this seam closes.
+
+MESSAGE, when given, MUST carry no user content (SPEC 23.3).
+`:retry_after_s' rides the error data as an ADVISORY extra member (SPEC
+8 permits extras; 15.3 defines no such field, so the Companion may
+ignore it — the enforced cadence is the local replay backoff)."
+  (when after-s
+    (unless (and (numberp after-s) (> after-s 0))
+      (error "ebp-client-event-retry: AFTER-S must be a positive number")))
+  (when message
+    (unless (stringp message)
+      (error "ebp-client-event-retry: MESSAGE must be a string")))
+  (ebp-client--force-replay-retry client after-s)
+  (apply #'ebp-client--error client 1500
+         (or message "Event not accepted yet; retry")
+         "event-retry"
+         (when after-s (list :retry_after_s after-s))))
 
 ;;;; Dispatchers (SPEC 7.3) — ours because the library is fail-open
 

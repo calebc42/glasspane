@@ -59,14 +59,11 @@ guaranteed, and a sha1 of the ORIGINAL name is appended because
 sanitizing is lossy: `*shell*' and `-shell-' would otherwise collide,
 and a collision cross-seeds SPEC 13.6 input drafts between two REPLs.
 
-STABLE across renders on purpose (see `jetpacs-comint-render')."
-  (let* ((safe (replace-regexp-in-string "[^A-Za-z0-9._:/-]" "-" name))
-         (head (if (string-match-p "\\`[A-Za-z0-9]" safe) safe
-                 (concat "c" safe)))
-         (hash (substring (sha1 name) 0 8))
-         ;; 128-char ceiling, with room kept for the prefix and the hash.
-         (stem (substring head 0 (min (length head) 100))))
-    (format "comint-%s-%s" stem hash)))
+STABLE across renders on purpose (see `jetpacs-comint-render').
+The algorithm was promoted to `jetpacs-wire-id' (B5); this delegation
+is byte-identical to the original for every NAME, so live SPEC 13.6
+drafts survive the refactor."
+  (jetpacs-wire-id "comint" name))
 
 (defun jetpacs-comint--refresh (params)
   "Re-push the surface the event came from, deferred (SPEC 14.4/D1)."

@@ -168,6 +168,81 @@ non-renderer emitters (clip, toast) need no jetpacs-buffer edge."
                                 s t t)
     s))
 
+(cl-defun jetpacs-toast (text &key duration-s)
+  "Best-effort device toast (SPEC 18.2); returns t when sent, nil when not.
+Gated on READY — `toast.show' is legal ONLY in R — and on the
+`presentation.toast' grant; gated off it is a silent no-op (B7: a toast
+is never load-bearing, and SPEC 18.2 makes it MUST-NOT-be the sole
+report of a durable failure).  Validation is unconditional even when
+gated off: a bad DURATION-S is a programmer error and must be loud.
+A notification on the wire, so the W10 sender ceiling never refuses it."
+  (unless (stringp text)
+    (error "jetpacs-toast: TEXT must be a string, got %S" text))
+  (when duration-s
+    (unless (and (integerp duration-s) (<= 1 duration-s 10))
+      (error "jetpacs-toast: :duration-s must be an integer 1..10 (SPEC 18.2)")))
+  (when (and (jetpacs-connected-p)
+             (jetpacs-granted-p "presentation.toast"))
+    (ebp-client-toast (jetpacs-client)
+                      (jetpacs-scalar-text (substring-no-properties text))
+                      :duration-s duration-s)
+    t))
+
+(defun jetpacs-refused-p (error)
+  "Non-nil when ERROR is the local W10 sender-ceiling refusal (B8).
+In this implementation pair, a 1401 {kind overloaded} callback error
+means ebp concluded the callback LOCALLY and SYNCHRONOUSLY — the
+request never reached the wire, and the condition is transient (the
+hold clears as in-flight requests conclude).  For a shell push with a
+registered root, refused IS will-retry (the push callback requeues);
+for the other request wrappers the caller owns the retry, and this
+predicate in the callback is the uniform detection — the wrappers' nil
+return is redundant with it, never double-handle."
+  (and (eql (plist-get error :code) 1401)
+       (equal (plist-get (plist-get error :data) :kind) "overloaded")
+       t))
+
+;; ---- Durable admission (B9): the ratified handler convention ----
+;;
+;; `accepted' names a DURABLE COMMITMENT (SPEC 14.4): ebp commits the
+;; EventId receipt before the reply leaves, and the Companion deletes
+;; its durable record on receiving it.  Therefore:
+;;   1. CHEAP EFFECT -> run it synchronously in the handler, return
+;;      `accepted'.  The crash window between effect and receipt means
+;;      redelivery reruns the effect: handlers SHOULD be idempotent.
+;;   2. DURABLE WORK ITEM -> when the effect's own home is durable (a
+;;      file, a sqlite row), commit it synchronously — file writes with
+;;      `write-region-inhibit-fsync' bound nil, mirroring ebp's receipt
+;;      path; Emacs 30 defaults it t and an un-fsynced record is not a
+;;      14.4 commitment — then `accepted'.
+;;   3. NOT NOW (expensive, locked, needs network) ->
+;;      (jetpacs-retry-later SECONDS): 1500 event-retry, the Companion's
+;;      durable queue stays the owner.  NEVER `accepted' + run-at-time —
+;;      that deletes the record and loses the work on any crash; 14.4
+;;      names the volatile-callback pattern non-conforming.
+;;   4. INTERACTION continuations are NOT durable effects: `accepted' +
+;;      `jetpacs-flow-continue' stays correct when the deferred thing is
+;;      UI whose loss the user can re-tap; a dialog answer that produces
+;;      a durable effect is admitted by the dialog's OWN event, rules 1-3.
+;;   5. `stale'/`rejected' are PERMANENT (the record is deleted) — never
+;;      use them for "not now".
+;;   6. The deferred refresh stays the D2 norm, carrying the event's
+;;      surface (D1).
+;; For a drop-policy event, 1500 MAY simply lose the occurrence (14.4:
+;; in-session retry is only MAY) — drop actions must be cheap or
+;; loss-tolerant.
+
+(defun jetpacs-retry-later (&optional seconds)
+  "Conclude the in-flight action with `1500 event-retry' (B9 rule 3).
+DOES NOT RETURN — signals through the dispatch so the Companion keeps
+its durable record and redelivers; the SPEC 15.3 replay that unpauses
+its pump is scheduled here, after SECONDS when given.  Only meaningful
+inside an action handler; elsewhere it signals a plain error.  Takes no
+message on purpose: free text in app hands is a SPEC 23.3 footgun."
+  (unless (jetpacs-in-action-p)
+    (error "jetpacs-retry-later: only meaningful inside an action handler"))
+  (ebp-client-event-retry (jetpacs-client-or-error) seconds))
+
 (defun jetpacs-attach (client)
   "Adopt CLIENT as the single live client; returns CLIENT.
 Replays every `jetpacs-defaction' registration into CLIENT's SPEC 14
@@ -396,6 +471,82 @@ allowed to resume."
     (run-at-time 0 nil
                  (lambda ()
                    (let ((jetpacs--device-flow flow))
+                     (funcall fn))))))
+
+;;;; Flow entry (JA-2/B3): ESTABLISHING a device flow, not inheriting one
+
+(defun jetpacs--flow-resolve-surface (surface)
+  "Resolve SURFACE to a full surface id, or signal (shape-only, D1).
+nil is the current owner's default; an ownerless string is a D1 owner
+name resolving to app:<owner>; a colon form must name one of the four
+SPEC 13.1 namespaces with a non-empty name and fit the 4.4 grammar.
+Deliberately NO liveness/grant check: a flow legitimately starts before
+its surface's first push and while disconnected — the dialog bridge
+gates on `jetpacs-connected-p' separately, so an offline flow simply
+does not bridge."
+  (cond
+   ((null surface) (jetpacs--default-surface))
+   ((not (stringp surface))
+    (error "jetpacs: invalid flow surface %S (SPEC 13.1)" surface))
+   ((not (string-search ":" surface))
+    (unless (jetpacs--valid-owner-p surface)
+      (error "jetpacs: invalid flow owner %S (D1)" surface))
+    (concat "app:" surface))
+   ((and (string-match-p "\\`\\(app\\|notification\\|widget\\|tile\\):." surface)
+         (string-match-p "\\`[A-Za-z0-9][A-Za-z0-9._:/-]*\\'" surface)
+         (<= (string-bytes surface) 128))
+    surface)
+   (t (error "jetpacs: invalid flow surface %S (SPEC 13.1)" surface))))
+
+(defun jetpacs--call-with-flow (surface thunk)
+  "Run THUNK inside a fresh device flow for SURFACE (see `with-jetpacs-flow').
+Re-entrancy follows the dialog pump's single-flight precedent: wrapping
+the SAME resolved surface is idempotent; a DIFFERENT surface refuses —
+a silent override would re-route a chain's D1 re-pushes mid-flight.
+The dynamic let is the entire unwind story: error, quit, and throw all
+restore the prior marker; nothing to clear, nothing to leak."
+  (let ((resolved (jetpacs--flow-resolve-surface surface)))
+    (when (and jetpacs--device-flow
+               (not (equal (plist-get jetpacs--device-flow :surface)
+                           resolved)))
+      (error "jetpacs: a device flow for %S is already established; refusing nested flow for %S"
+             (plist-get jetpacs--device-flow :surface) resolved))
+    (let ((jetpacs--device-flow (list :surface resolved)))
+      (funcall thunk))))
+
+(defmacro with-jetpacs-flow (surface &rest body)
+  "Run BODY inside a fresh device flow for SURFACE; return BODY's value.
+Inside BODY, `jetpacs-device-flow-p' is true and prompts bridge to the
+device per `jetpacs-dialog--bridge-p'.  Two constraints: (a) this does
+NOT override the dispatch no-prompts regime — inside a handler the
+in-action and inhibit-interaction tests still win, so a flow begun
+there cannot unlock prompts in the extent (use `jetpacs-flow-continue'
+for the event's own identity); (b) SYNCHRONOUS, so only for a clean
+stack (a bare timer, a user command) — from process filters/sentinels
+or ebp callbacks use `jetpacs-flow-begin', because a bridged prompt
+pumps `accept-process-output' and would re-enter the jsonrpc filter."
+  (declare (indent 1) (debug (form body)))
+  `(jetpacs--call-with-flow ,surface (lambda () ,@body)))
+
+(defun jetpacs-flow-begin (surface fn)
+  "Run FN soon from a bare timer inside a FRESH device flow for SURFACE.
+The establishing sibling of `jetpacs-flow-continue' (which only
+inherits): with-editor buffers, transient callbacks, and anything else
+arriving on a process callback's stack has no dispatch to inherit from
+— this is how such code gets a device flow at all.  Validation is
+EAGER (a bad surface signals on the caller's stack, not as a swallowed
+timer message); FN runs outside any dispatch extent, exactly where the
+dialog bridge is allowed to engage.  No nesting check: FN runs later
+on a fresh stack, so a call from inside an existing flow deliberately
+starts a NEW chain.  Keep flows serial — while one bridged prompt
+pumps, a second flow's prompt falls through to the real minibuffer.
+Returns the timer."
+  (unless (functionp fn)
+    (error "jetpacs-flow-begin: FN must be a function, got %S" fn))
+  (let ((resolved (jetpacs--flow-resolve-surface surface)))
+    (run-at-time 0 nil
+                 (lambda ()
+                   (let ((jetpacs--device-flow (list :surface resolved)))
                      (funcall fn))))))
 
 (defun jetpacs--dispatch (client params fn)

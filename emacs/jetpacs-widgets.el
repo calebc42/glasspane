@@ -94,6 +94,36 @@ Returns S."
     (error "jetpacs: %s %S is not a valid identifier (SPEC 4.4)" what s))
   s)
 
+(defun jetpacs-wire-id (prefix name)
+  "A stable SPEC 4.4 identifier \"PREFIX-STEM-HASH\" for arbitrary NAME.
+The B5 minter: buffer names, file paths, and host labels are routinely
+INVALID identifiers (`*shell*', `*git-commit*', paths with spaces), and
+a raw name signals inside a builder and takes the whole render down.
+Out-of-charset chars collapse to `-', a leading alnum is guaranteed,
+and a sha1 of the ORIGINAL name is appended because sanitizing is
+lossy: `*shell*' and `-shell-' must not collide — a collision
+cross-seeds SPEC 13.6 input drafts.  The readable stem keeps the id
+debuggable; the result is always at most 128 chars.
+
+STABLE across renders and sessions on purpose (draft preservation);
+byte-identical to the JC-3c comint minter for PREFIX \"comint\", so live
+comint drafts survive the promotion.  Callers: comint input rows, and
+the coming files editor ids / witheditor state ids / hosts buffers."
+  (jetpacs--check-identifier prefix "wire-id prefix")
+  (when (> (length prefix) 100)
+    (error "jetpacs: wire-id prefix longer than 100 chars"))
+  (unless (stringp name)
+    (error "jetpacs: wire-id NAME must be a string, got %S" name))
+  (let* ((safe (replace-regexp-in-string "[^A-Za-z0-9._:/-]" "-" name))
+         (head (if (string-match-p "\\`[A-Za-z0-9]" safe) safe
+                 (concat "c" safe)))
+         (hash (substring (sha1 name) 0 8))
+         ;; 128-char ceiling with room for the prefix, two dashes, and
+         ;; the hash: prefix + 1 + min(100, 118-prefix) + 1 + 8 <= 128.
+         (stem (substring head 0 (min (length head) 100
+                                      (max 0 (- 118 (length prefix)))))))
+    (format "%s-%s-%s" prefix stem hash)))
+
 (defun jetpacs--require-string (s what)
   "Signal an error unless S is a string; WHAT names the field.  Returns S."
   (unless (stringp s)

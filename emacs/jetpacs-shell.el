@@ -553,14 +553,25 @@ spec (SPEC 13.4)" current-view)))
                      (lambda (status error)
                        (jetpacs-shell--confirm-applied
                         surface revision status error)
+                       ;; B8: a W10 sender-ceiling refusal is transient
+                       ;; and never reached the wire — a surface with a
+                       ;; registered root retries via the debounced
+                       ;; repush (the same machinery the READY drain
+                       ;; uses); a rootless :spec push stays dropped.
+                       (when (and (jetpacs-refused-p error)
+                                  (alist-get surface jetpacs-shell--roots
+                                             nil nil #'equal))
+                         (jetpacs-shell--schedule-repush surface))
                        (funcall (or callback
                                     #'jetpacs-shell--push-callback)
                                 status error))))
               ;; The push is on the wire: drain the slot, degrading to a
-              ;; toast when no scaffold slot could carry it.
+              ;; gated toast when no scaffold slot could carry it (an
+              ;; ungranted Companion just loses the feedback — stale
+              ;; feedback later would be worse).
               (when snack
                 (unless (equal (plist-get spec :t) "scaffold")
-                  (ignore-errors (ebp-client-toast client snack)))
+                  (ignore-errors (jetpacs-toast snack)))
                 (setq snack nil))
               (run-hooks 'jetpacs-shell-after-push-hook)
               revision)

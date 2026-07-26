@@ -270,10 +270,16 @@ the debounce test) ride along.
 Each elisp commit is sized to land inside one session comfortably; nothing
 shares state across commits except E1→E2 and K→(E6 tail, C).
 
-- **Session A**: E1 then E2 (the dependency pair; largest batch). DONE 2026-07-26.
-- **Session B**: E3 + E4 (independent; both mostly floor/ebp).
-- **Session C**: E6 (theme seams), then K + C + T + S (cross-artifact sweep).
-- **Session D**: E5 (demoted — see above), then the device gate.
+- **Session A**: E1 then E2. DONE 2026-07-26.
+- **Session B**: E3 DONE; **E4 remains** (the only open elisp commit).
+- **Session C**: E6 DONE; K DONE (APK rebuilt+installed); C DONE (submodule
+  d48075d, both rail halves verified to bite).  **T and S remain.**
+- **Session D**: **DEVICE GATE PASSED 2026-07-26** on the new APK:
+  smoke-theme-mirror 6/6 (synchronous READY paint, renamed toggle through the
+  :any-surface gate) and smoke-ja2 16/16 — including "delivered three times
+  (1500 x2 then accepted)", the P1-1 pump cycle on hardware.  E5 (demoted)
+  remains.  After E4 lands, ONE connect-smoke re-run (it wraps the process
+  filter); no full gate needed.
 
 If a session must shrink: land E1 alone (the unpushable-surface trap is the
 worst live defect remaining), then E3 (the lost-confirmation reproduction).

@@ -91,17 +91,17 @@ carrying the eagerly-captured D1 surface; the flow marker rides."
 
 (ert-deftest jetpacs-navigate-thunk-nothing-to-show ()
   (jetpacs-navigate-test--with-drill rec
-    (setq jetpacs-shell--snackbar nil)
+    (clrhash jetpacs-shell--snackbars)
     (jetpacs-navigate-thunk #'ignore "app:demo")
     (should (null rec))
-    (should (equal jetpacs-shell--snackbar "Nothing to show"))))
+    (should (equal (gethash "app:demo" jetpacs-shell--snackbars) "Nothing to show"))))
 
 (ert-deftest jetpacs-navigate-no-drill-host ()
   (get-buffer-create "*nav-host*")
   (let ((jetpacs-navigate-drill-function nil))
-    (setq jetpacs-shell--snackbar nil)
+    (clrhash jetpacs-shell--snackbars)
     (should-not (jetpacs-navigate-buffer "*nav-host*" "app:demo"))
-    (should (equal jetpacs-shell--snackbar "No navigation host")))
+    (should (equal (gethash "app:demo" jetpacs-shell--snackbars) "No navigation host")))
   (should-not (jetpacs-navigate-buffer "*no such buffer*")))
 
 (ert-deftest jetpacs-navigate-dead-buffer-screen ()
@@ -122,14 +122,17 @@ carrying the eagerly-captured D1 surface; the flow marker rides."
       (cl-letf (((symbol-function 'message)
                  (lambda (fmt &rest args)
                    (push (apply #'format fmt args) logged))))
-        (setq jetpacs-shell--snackbar nil)
+        (clrhash jetpacs-shell--snackbars)
         (jetpacs-navigate-thunk (lambda () (error "SECRET-PAYLOAD"))
                                 "app:demo"))
       (should-not (cl-some (lambda (s) (string-match-p "SECRET-PAYLOAD" s))
                            logged))
-      (should-not (and jetpacs-shell--snackbar
-                       (string-match-p "SECRET-PAYLOAD"
-                                       jetpacs-shell--snackbar)))
+      ;; POSITIVE assertion (the audit's P3: negatives alone pass with
+      ;; the snackbar deleted): the user-facing feedback exists, on the
+      ;; thunk's own surface, and carries only the error SYMBOL.
+      (let ((snack (gethash "app:demo" jetpacs-shell--snackbars)))
+        (should (equal snack "Failed: error"))
+        (should-not (string-match-p "SECRET-PAYLOAD" snack)))
       (should (cl-some (lambda (s) (string-match-p "error" s)) logged)))))
 
 (ert-deftest jetpacs-navigate-tablist-seam-wired ()

@@ -53,8 +53,10 @@ generation sweep.")
 (defvar jetpacs-shell-refresh-hook nil
   "Normal hook run before a cache-bypassing push; drop memo caches here.")
 
-(defvar jetpacs-shell--snackbar nil
-  "One-slot queued snackbar text for the next push; latest wins.")
+(defvar jetpacs-shell--snackbars (make-hash-table :test #'equal)
+  "SURFACE id -> queued snackbar text for its next push; latest wins.
+Keyed by surface because D1 gives every owner its own: one global slot
+let owner A's queued confirmation drain into owner B's push.")
 
 (defvar jetpacs-shell--repush-pending nil
   "Surfaces awaiting the debounced registry repush.")
@@ -758,8 +760,8 @@ a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
       nil)
      (t
       (let ((client (jetpacs-client-or-error))
-            (snack (prog1 jetpacs-shell--snackbar
-                     (setq jetpacs-shell--snackbar nil)))
+            (snack (prog1 (gethash surface jetpacs-shell--snackbars)
+                     (remhash surface jetpacs-shell--snackbars)))
             (revision nil))
         (unwind-protect
             (let* ((spec (or spec (jetpacs-shell--build surface entry)))
@@ -846,22 +848,41 @@ spec (SPEC 13.4)" current-view)))
                 (unless (equal (plist-get spec :t) "scaffold")
                   (ignore-errors (jetpacs-toast snack)))
                 (setq snack nil))
-              (run-hooks 'jetpacs-shell-after-push-hook)
+              (jetpacs-shell--run-isolated 'jetpacs-shell-after-push-hook)
               revision)
           ;; A failed push showed nothing: the feedback must survive.
           (when snack
-            (setq jetpacs-shell--snackbar
-                  (or jetpacs-shell--snackbar snack)))))))))
+            (unless (gethash surface jetpacs-shell--snackbars)
+              (puthash surface snack jetpacs-shell--snackbars)))))))))
+
+(defun jetpacs-shell--run-isolated (hook &rest args)
+  "Run HOOK's functions with ARGS, each isolated; log failures by SYMBOL.
+Isolation is not optional on any hook reachable from inside the jsonrpc
+dispatch extent: the effect is already committed when the hook runs —
+for the push hooks the frame is ON THE WIRE — and an escaping signal
+answers `rejected', which SPEC 14.4 makes PERMANENT.  `run-hook-wrapped'
+handles the buffer-local `t' marker a bare dolist would funcall."
+  (apply #'run-hook-wrapped hook
+         (lambda (fn &rest a)
+           (condition-case err (apply fn a)
+             (error (message "jetpacs: %s hook failed: %s"
+                             hook (jetpacs--error-label err))))
+           nil)
+         args))
 
 (defun jetpacs-shell-refresh (&rest _)
   "Run `jetpacs-shell-refresh-hook', then push.  Hook-safe arity."
-  (run-hooks 'jetpacs-shell-refresh-hook)
+  (jetpacs-shell--run-isolated 'jetpacs-shell-refresh-hook)
   (jetpacs-shell-push))
 
-(defun jetpacs-shell-notify (text)
-  "Queue TEXT as the next push's snackbar.  One slot; latest wins.
-The Companion re-shows a snackbar only when its text changes."
-  (setq jetpacs-shell--snackbar text))
+(defun jetpacs-shell-notify (text &optional surface-or-owner)
+  "Queue TEXT as SURFACE-OR-OWNER's next-push snackbar; latest wins.
+SURFACE-OR-OWNER defaults through `jetpacs-shell--resolve-surface' —
+with the dispatch binding the acting owner (E2a), a handler's feedback
+lands on that owner's surface without naming it.  The Companion
+re-shows a snackbar only when its text changes."
+  (puthash (jetpacs-shell--resolve-surface surface-or-owner)
+           text jetpacs-shell--snackbars))
 
 ;;;; Reconnect (SPEC 10.3 step 3, installed by `jetpacs-connect')
 
@@ -1003,8 +1024,8 @@ SHOULD-omit)."
       (if (not (and (stringp view) (stringp surface)))
           'rejected
         (jetpacs-shell--record-view surface view)
-        (run-hook-with-args 'jetpacs-shell-view-change-functions
-                            surface view)
+        (jetpacs-shell--run-isolated 'jetpacs-shell-view-change-functions
+                                     surface view)
         'accepted))))
 
 ;;;; Seams

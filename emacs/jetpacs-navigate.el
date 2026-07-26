@@ -148,7 +148,7 @@ handler of a surfaceless event); refusing to guess")
                                  (jetpacs--error-label err))
                         nil)))
                 target
-              (jetpacs-shell-notify "No navigation host")
+              (jetpacs-shell-notify "No navigation host" target)
               (message "jetpacs-navigate: no drill host for this surface")
               nil)))))))
 
@@ -162,7 +162,13 @@ prompt, and the flow marker lets a prompting thunk bridge — and the
 handler answers its own `accepted'; elsewhere it runs synchronously.
 A thunk that goes nowhere snackbars \"Nothing to show\"; a thunk error
 logs and snackbars its error SYMBOL only (SPEC 23.3 — the poc
-snackbarred the full message; that is not ported)."
+snackbarred the full message; that is not ported).
+
+THUNK must be UI-ONLY work: display a buffer, run a read-only command.
+The handler answers `accepted' BEFORE the thunk runs, and B9 makes
+`accepted' a durable commitment — a thunk that performs the event's
+durable effect turns a later failure into silent loss.  Durable work
+belongs in the handler (synchronous, or `jetpacs-retry-later')."
   (let* ((target (jetpacs-navigate--target surface))
          (work
           (lambda ()
@@ -177,13 +183,14 @@ snackbarred the full message; that is not ported)."
                 (message "jetpacs-navigate: thunk failed: %s"
                          (jetpacs--error-label caught))
                 (jetpacs-shell-notify
-                 (format "Failed: %s" (jetpacs--error-label caught)))
+                 (format "Failed: %s" (jetpacs--error-label caught))
+                 target)
                 nil)
                ;; The temp-buffer origin makes "stayed put" unambiguous:
                ;; only a thunk that went nowhere can land there (and the
                ;; temp buffer is dead by now, hence the liveness test).
                (temp-origin-p
-                (jetpacs-shell-notify "Nothing to show")
+                (jetpacs-shell-notify "Nothing to show" target)
                 nil)
                (t (jetpacs-navigate-buffer (car dest) target label)))))))
     (cond

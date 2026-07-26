@@ -1071,8 +1071,8 @@ the one being fixed.")
     (jetpacs-async-reset))
   (when (fboundp 'jetpacs-device-reset)
     (jetpacs-device-reset))
-  (when (boundp 'jetpacs-shell--snackbar)
-    (setq jetpacs-shell--snackbar nil))
+  (when (boundp 'jetpacs-shell--snackbars)
+    (clrhash jetpacs-shell--snackbars))
   ;; Shell tables (boundp-guarded: surfaces loads without shell).  Never
   ;; clear `jetpacs-action-handlers'/`jetpacs--registrations' wholesale —
   ;; the ownerless core registration \"view.switched\" must survive.

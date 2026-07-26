@@ -532,21 +532,21 @@ the READY guard; optional roots wait."
                  (lambda (_c text &rest _) (push text toasts))))
         (jetpacs-floor-test--recording-push sent
           ;; A scaffold root carries the snackbar inline; the slot drains.
-          (jetpacs-shell-notify "saved")
+          (jetpacs-shell-notify "saved" "app:demo")
           (jetpacs-shell-push
            "app:demo" :spec '(:t "scaffold" :body (:t "text" :text "b")))
           (should (equal (plist-get (nth 1 (car sent)) :snackbar) "saved"))
-          (should-not jetpacs-shell--snackbar)
+          (should-not (gethash "app:demo" jetpacs-shell--snackbars))
           (should-not toasts)
           ;; A non-scaffold root degrades to a toast.
-          (jetpacs-shell-notify "toasted")
+          (jetpacs-shell-notify "toasted" "app:demo")
           (jetpacs-shell-push "app:demo" :spec '(:t "text" :text "t"))
           (should (equal toasts '("toasted")))
           ;; A failed push requeues the snackbar for the next one.
-          (jetpacs-shell-notify "kept")
+          (jetpacs-shell-notify "kept" "app:demo")
           (should-error (jetpacs-shell-push
                          "app:demo" :spec '(:t "card")))
-          (should (equal jetpacs-shell--snackbar "kept"))))))
+          (should (equal (gethash "app:demo" jetpacs-shell--snackbars) "kept"))))))
   ;; Ungranted: the degrade drops silently and the push still succeeds.
   (jetpacs-floor-test--with-client
       (client :profiles '(:app (:node_types ["text" "scaffold" "column"]
@@ -555,11 +555,11 @@ the READY guard; optional roots wait."
       (cl-letf (((symbol-function 'ebp-client-toast)
                  (lambda (_c text &rest _) (push text toasts))))
         (jetpacs-floor-test--recording-push sent
-          (jetpacs-shell-notify "dropped")
+          (jetpacs-shell-notify "dropped" "app:demo")
           (jetpacs-shell-push "app:demo" :spec '(:t "text" :text "t"))
           (should (= (length sent) 1))
           (should-not toasts)
-          (should-not jetpacs-shell--snackbar))))))
+          (should-not (gethash "app:demo" jetpacs-shell--snackbars)))))))
 
 ;;;; JA-2a utilities: toast gate, refused-p, retry-later (B7/B8/B9)
 
@@ -1177,6 +1177,83 @@ gate would reject every one."
                      (gethash "acme.global" jetpacs-action-handlers))
                     'rejected)))
       (jetpacs-undefaction "acme.global"))))
+
+
+;;;; E2e: hook isolation and the per-surface snackbar
+
+(ert-deftest jetpacs-floor-after-push-hook-is-isolated ()
+  "The push hooks run with the effect ALREADY COMMITTED — the frame is
+on the wire — so a subscriber's signal escaping into the dispatch would
+answer a permanent SPEC 14.4 rejected for a push that happened.  One
+broken subscriber logs its SYMBOL; the rest still run; the reply stands."
+  (jetpacs-floor-test--with-client (client)
+    (let ((later nil) (sent nil) (status nil)
+          (jetpacs-shell-after-push-hook jetpacs-shell-after-push-hook))
+      (add-hook 'jetpacs-shell-after-push-hook
+                (lambda () (error "subscriber exploded")))
+      (add-hook 'jetpacs-shell-after-push-hook
+                (lambda () (setq later t)) t)
+      (with-jetpacs-owner "demo"
+        (jetpacs-shell-define-root "demo" (lambda () (jetpacs-text "x")))
+        (jetpacs-defaction "demo.push"
+                           (lambda (_a _p)
+                             (jetpacs-shell-push "app:demo")
+                             'accepted)))
+      (cl-letf (((symbol-function 'ebp-client-surface-update)
+                 (cl-function (lambda (_c surface &rest _)
+                                (push surface sent) 7))))
+        (setq status (jetpacs--dispatch
+                      client '(:action "demo.push" :surface "app:demo")
+                      (gethash "demo.push" jetpacs-action-handlers))))
+      (should (eq status 'accepted))
+      (should later)
+      (should (equal sent '("app:demo")))
+      (jetpacs-undefaction "demo.push"))))
+
+(ert-deftest jetpacs-floor-view-switched-subscribers-are-isolated ()
+  "A view switch ALREADY HAPPENED on the device when the subscribers
+run; one Tier-1 subscriber's signal must not delete the durable record
+for it."
+  (jetpacs-floor-test--with-client (client)
+    (let ((later nil) (status nil)
+          (jetpacs-shell-view-change-functions
+           jetpacs-shell-view-change-functions))
+      (add-hook 'jetpacs-shell-view-change-functions
+                (lambda (_s _v) (error "subscriber exploded")))
+      (add-hook 'jetpacs-shell-view-change-functions
+                (lambda (_s _v) (setq later t)) t)
+      (setq status (jetpacs--dispatch
+                    client '(:action "view.switched"
+                             :args (:view "hub") :surface "app:demo")
+                    (gethash "view.switched" jetpacs-action-handlers)))
+      (should (eq status 'accepted))
+      (should later))))
+
+(ert-deftest jetpacs-floor-snackbar-does-not-cross-owners ()
+  "D1: owner A's queued confirmation must never drain into owner B's
+push — the one-slot global did exactly that."
+  (jetpacs-floor-test--with-client
+      (client :profiles '(:app (:node_types ["text" "scaffold" "column"]
+                                :builtins [] :features [])))
+    (let ((sent nil))
+      (with-jetpacs-owner "aa"
+        (jetpacs-shell-define-root
+         "aa" (lambda () '(:t "scaffold" :body (:t "text" :text "a")))))
+      (with-jetpacs-owner "bb"
+        (jetpacs-shell-define-root
+         "bb" (lambda () '(:t "scaffold" :body (:t "text" :text "b")))))
+      (jetpacs-shell-notify "a-saved" "aa")
+      (cl-letf (((symbol-function 'ebp-client-surface-update)
+                 (cl-function (lambda (_c surface spec &rest _)
+                                (push (cons surface
+                                            (plist-get spec :snackbar))
+                                      sent)
+                                7))))
+        ;; B's push carries NO snackbar; A's still does.
+        (jetpacs-shell-push "app:bb")
+        (jetpacs-shell-push "app:aa")
+        (should (equal sent '(("app:aa" . "a-saved")
+                              ("app:bb" . nil))))))))
 
 (provide 'jetpacs-floor-test)
 ;;; jetpacs-floor-test.el ends here

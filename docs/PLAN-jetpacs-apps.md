@@ -200,9 +200,13 @@ loss-proofing (the refused-tombstone test drives ebp's real held branch);
 chrome representation A (one multi_view; back = the view.switch builtin;
 13.4 background-refresh omission pinned by the suite); the C7 drill adapter
 (minted id, deferred push, repeat-drill replace-top for free).
-**Still open on this rung: the device smokes** (smoke-stack, smoke-navigate,
-smoke-flow-begin, smoke-teardown, smoke-ja2-toast, smoke-ja2-retry-durable)
-**and the post-build adversarial review over the JA-1+JA-2 diff.**
+**DEVICE GATE DONE 2026-07-26** (c2e5fdb, one consolidated `smoke-ja2.el`, 16/16):
+toast, stack drill + companion-local back (revision unmoved), navigate drill,
+flow-begin bridging with no dispatch in the trace, teardown with the tombstone
+applied and the survivor untouched, and the B9 retry-durable loop — same
+event_id across three deliveries, record deleted on accepted.  **JA-2
+COMPLETE.  Still open: the adversarial review over the JA-1+JA-2 diff
+(deferred for usage, Caleb 2026-07-26).**
 The §22.2/15.3 `retry_after_s` ratification amendment is flagged for Caleb
 (the wire carries it as a SPEC-8 advisory extra meanwhile).
 

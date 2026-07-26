@@ -596,7 +596,8 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; SPEC 15.3: the latest replay summary and the bounded-backoff timer
   ;; that retries while `remaining' is nonzero.
   replay-summary
-  replay-retry-timer
+  replay-retry-timer   ; PENDING retry, nil once it fires (see #--schedule)
+  replay-in-flight     ; a queue.replay request awaiting its answer
   ;; Called with (client summary) when a replay pass settles with the
   ;; backlog drained (remaining 0) in READY — the application's seam for
   ;; refreshing views that replayed events just mutated.
@@ -668,7 +669,9 @@ For a notification the return value is ignored."
     (setf (ebp-client-state client) 'closed
           (ebp-client-close-reason client) reason)
     (when-let* ((timer (ebp-client-replay-retry-timer client)))
-      (cancel-timer timer))
+      (cancel-timer timer)
+      (setf (ebp-client-replay-retry-timer client) nil))
+    (setf (ebp-client-replay-in-flight client) nil)
     (when-let* ((db (ebp-client-receipt-db client)))
       (ignore-errors (sqlite-close db))
       (setf (ebp-client-receipt-db client) nil))
@@ -1092,6 +1095,11 @@ capped at 60 s."
          (remaining (and summary (plist-get summary :remaining))))
     (when (and remaining (> remaining 0)
                (eq (ebp-client-state client) 'ready))
+      ;; Never leave a predecessor running: two live retry timers would
+      ;; double the replay rate and defeat the bounded backoff.
+      (when-let* ((live (ebp-client-replay-retry-timer client)))
+        (cancel-timer live)
+        (setf (ebp-client-replay-retry-timer client) nil))
       (let ((next (or delay
                       (plist-get (ebp-client-config client)
                                  :replay-retry-delay)
@@ -1100,20 +1108,36 @@ capped at 60 s."
               (run-at-time
                next nil
                (lambda ()
+                 ;; The slot means PENDING, not "ever scheduled".  Clear
+                 ;; it the instant this timer fires: a fired timer left in
+                 ;; the slot makes every later force-retry read "one is
+                 ;; already coming" forever, and the Companion's pump —
+                 ;; unpaused ONLY by queue.replay — stalls for the session.
+                 (setf (ebp-client-replay-retry-timer client) nil)
                  (when (eq (ebp-client-state client) 'ready)
-                   (ebp-client--request
-                    client 'queue.replay ebp--empty-object
-                    (lambda (result error)
-                      (if error
-                          ;; SPEC 15.3: bounded backoff continues even
-                          ;; across an errored retry (1600 and friends).
-                          (ebp-client--schedule-replay-retry
-                           client (min ebp-replay-retry-max (* 2 next)))
-                        (setf (ebp-client-replay-summary client) result)
-                        (ebp-client--schedule-replay-retry
-                         client (min ebp-replay-retry-max (* 2 next)))
-                        (ebp-client--replay-settled client)))
-                    300)))))))))
+                   (setf (ebp-client-replay-in-flight client) t)
+                   (condition-case _err
+                       (ebp-client--request
+                        client 'queue.replay ebp--empty-object
+                        (lambda (result error)
+                          (setf (ebp-client-replay-in-flight client) nil)
+                          (if error
+                              ;; SPEC 15.3: bounded backoff continues even
+                              ;; across an errored retry (1600 and friends).
+                              (ebp-client--schedule-replay-retry
+                               client (min ebp-replay-retry-max (* 2 next)))
+                            (setf (ebp-client-replay-summary client) result)
+                            (ebp-client--schedule-replay-retry
+                             client (min ebp-replay-retry-max (* 2 next)))
+                            (ebp-client--replay-settled client)))
+                        300)
+                     ;; A send that SIGNALS registers no continuation, so
+                     ;; the callback above never runs — clear the claim
+                     ;; here or the same stall returns by another door.
+                     (error
+                      (setf (ebp-client-replay-in-flight client) nil)
+                      (ebp-client--schedule-replay-retry
+                       client (min ebp-replay-retry-max (* 2 next)))))))))))))
 
 (defun ebp-client--replay-settled (client)
   "Run the `:after-replay-function' hooks when the backlog is drained.
@@ -1131,9 +1155,15 @@ disposition, so the application may refresh views they mutated."
   "SPEC 15.3: after answering 1500 event-retry, Emacs SHOULD call
 `queue.replay' again with bounded backoff — the pump is paused until it
 does.  Forces one retry cycle even when the last summary was clean.
-DELAY overrides the first attempt's delay; it is IGNORED when a retry
-timer is already pending (the guard below) — the earlier schedule wins."
-  (unless (ebp-client-replay-retry-timer client)
+DELAY overrides the first attempt's delay; it is IGNORED when a replay
+is already PENDING (a live timer) or IN FLIGHT (a request awaiting its
+answer) — the earlier schedule wins.  Both halves of that guard are
+load-bearing: without the in-flight half a 1500 answered while a replay
+is on the wire would schedule a redundant second one, and without the
+timer being cleared when it fires the guard would mean \"ever
+scheduled\" and every later retry would silently do nothing."
+  (unless (or (ebp-client-replay-retry-timer client)
+              (ebp-client-replay-in-flight client))
     (setf (ebp-client-replay-summary client)
           (plist-put (copy-sequence (or (ebp-client-replay-summary client)
                                         '(:remaining 0)))

@@ -1578,5 +1578,79 @@ queue.replay that unpauses the Companion's pump."
                      2))
                20)))))
 
+(ert-deftest ebp-test-force-replay-retry-survives-a-drained-cycle ()
+  "P1-1 regression: the retry slot means PENDING, not ever-scheduled.
+Drive a full cycle to drain (remaining 0, so nothing reschedules), then
+force again — a SECOND queue.replay must go out.  Against the pre-fix
+code the fired timer stays in the slot forever, the guard reads it as
+\"one is already coming\", and the Companion's pump — unpaused only by
+queue.replay — stalls for the rest of the session."
+  (let ((replays 0)
+        (client (ebp-client-create
+                 :receipt-file (make-temp-file "ebp-retry-receipts")
+                 :replay-retry-delay 0.05)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'ebp-client--request)
+                   (lambda (_c method _p callback &optional _t)
+                     (when (eq method 'queue.replay)
+                       (cl-incf replays)
+                       ;; A CLEAN summary: the cycle drains and the
+                       ;; recursive schedule declines to re-arm.
+                       (funcall callback '(:remaining 0 :delivered 1) nil))
+                     7)))
+          (setf (ebp-client-state client) 'ready)
+          (ebp-client--force-replay-retry client 0.05)
+          (should (timerp (ebp-client-replay-retry-timer client)))
+          (let ((deadline (+ (float-time) 3)))
+            (while (and (= replays 0) (< (float-time) deadline))
+              (accept-process-output nil 0.02)))
+          (should (= replays 1))
+          ;; The cycle is over: nothing pending, nothing in flight.
+          (should-not (ebp-client-replay-retry-timer client))
+          (should-not (ebp-client-replay-in-flight client))
+          ;; THE ASSERTION: a later 1500 still gets a replay behind it.
+          (ebp-client--force-replay-retry client 0.05)
+          (let ((deadline (+ (float-time) 3)))
+            (while (and (= replays 1) (< (float-time) deadline))
+              (accept-process-output nil 0.02)))
+          (should (= replays 2)))
+      (when-let* ((tm (ebp-client-replay-retry-timer client)))
+        (cancel-timer tm))
+      (ebp-client-close client 'test-done))))
+
+(ert-deftest ebp-test-force-replay-retry-is-single-flight ()
+  "The other half of the guard: while a replay is PENDING or IN FLIGHT,
+a second 1500 must not stack a redundant one."
+  (let ((replays 0) (held nil)
+        (client (ebp-client-create
+                 :receipt-file (make-temp-file "ebp-retry-receipts2")
+                 :replay-retry-delay 0.05)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'ebp-client--request)
+                   (lambda (_c method _p callback &optional _t)
+                     (when (eq method 'queue.replay)
+                       (cl-incf replays)
+                       (setq held callback))   ; never conclude: in flight
+                     7)))
+          (setf (ebp-client-state client) 'ready)
+          (ebp-client--force-replay-retry client 0.05)
+          ;; PENDING: a second force is a no-op.
+          (ebp-client--force-replay-retry client 0.05)
+          (let ((deadline (+ (float-time) 3)))
+            (while (and (= replays 0) (< (float-time) deadline))
+              (accept-process-output nil 0.02)))
+          (should (= replays 1))
+          (should (ebp-client-replay-in-flight client))
+          ;; IN FLIGHT: still a no-op.
+          (ebp-client--force-replay-retry client 0.05)
+          (should-not (ebp-client-replay-retry-timer client))
+          (should (= replays 1))
+          ;; Concluding it releases the claim.
+          (funcall held '(:remaining 0) nil)
+          (should-not (ebp-client-replay-in-flight client)))
+      (when-let* ((tm (ebp-client-replay-retry-timer client)))
+        (cancel-timer tm))
+      (ebp-client-close client 'test-done))))
+
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

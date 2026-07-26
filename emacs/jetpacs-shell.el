@@ -78,6 +78,12 @@ session is still `syncing' and the READY guard must not apply.")
 (defconst jetpacs-shell--max-node-depth 20
   "SPEC 4.5 fixed `max_node_depth' (contract limits.fixed).")
 
+(defconst jetpacs-shell--max-nodes 10000
+  "SPEC 4.5 fixed `max_nodes_per_snapshot' (contract limits.fixed).")
+
+(defconst jetpacs-shell--max-children 10000
+  "SPEC 4.5 fixed `max_children_per_node' (contract limits.fixed).")
+
 (defconst jetpacs-shell--stateful-types
   '("text_input" "checkbox" "switch" "enum_list" "slider" "editor")
   "Node types `jetpacs-shell--strip-stateful' removes from a stale_spec.
@@ -506,45 +512,66 @@ Signals; never sanitizes (a sender MUST is loud)."
 SPEC 4.5: these are counts across ONE SurfaceSpec, not per node.")
 
 (defun jetpacs-shell--count-aggregates (spec)
-  "Aggregate counts and the deepest node path in SPEC, as one plist.
-Keys are the `jetpacs-shell--aggregate-limits' limit names plus
-`:depth'.  One walk: GATE 5 runs on every push, and a traversal per
-limit would cost more than the gate saves."
-  (let ((counts (list :depth 0)))
+  "Aggregate counts, node totals, and the deepest node path in SPEC.
+One plist: the `jetpacs-shell--aggregate-limits' keys plus `:depth',
+`:nodes' and `:max-children'.  One walk — GATE 5 runs on every push.
+Depth matches the Companion's validator: every TYPED node reached from
+ANY non-opaque member is one level deeper than the node that carries it
+— `:children' has no special status (a scaffold's `top_bar', a card's
+content, a box in a box all nest), and non-node plists (descriptors,
+spans) add no depth."
+  (let ((counts (list :depth 0 :nodes 0 :max-children 0)))
     (cl-labels
         ((bump (key n)
-           (setq counts (plist-put counts key (+ n (or (plist-get counts key)
-                                                       0)))))
-         (walk (node depth)
+           (setq counts (plist-put counts key
+                                   (+ n (or (plist-get counts key) 0)))))
+         (walk (value depth)
            (cond
-            ((vectorp node) (mapc (lambda (v) (walk v depth)) node))
-            ((and (consp node) (keywordp (car node)))
-             (when (> depth (plist-get counts :depth))
-               (setq counts (plist-put counts :depth depth)))
-             (let ((type (plist-get node :t)))
-               (pcase-dolist (`(,limit ,want . ,member)
-                              jetpacs-shell--aggregate-limits)
-                 (when (equal type want)
-                   (bump limit
-                         (if (equal type "chart")
-                             ;; A chart's aggregate is POINTS, across series.
-                             (apply #'+ 0
-                                    (mapcar
-                                     (lambda (se)
-                                       (length (append (plist-get se :points)
-                                                       nil)))
-                                     (append (plist-get node member) nil)))
-                           (length (append (plist-get node member) nil)))))))
-             (let ((p node))
-               (while p
-                 (let ((k (pop p)) (v (pop p)))
-                   (unless (memq k jetpacs--opaque-members)
-                     (walk v (if (memq k '(:children :body :views))
-                                 (1+ depth) depth)))))))
-            ((consp node) (mapc (lambda (v) (walk v depth)) node))
-            ((hash-table-p node)
-             (maphash (lambda (_k v) (walk v (1+ depth))) node)))))
-      (walk spec 1))
+            ((vectorp value)
+             (mapc (lambda (v) (walk v depth)) value))
+            ((hash-table-p value)
+             (maphash (lambda (_k v) (walk v depth)) value))
+            ((and (consp value) (keywordp (car value)))
+             (let* ((type (plist-get value :t))
+                    (typed (stringp type))
+                    (d (if typed (1+ depth) depth)))
+               (when typed
+                 (bump :nodes 1)
+                 (when (> d (plist-get counts :depth))
+                   (setq counts (plist-put counts :depth d)))
+                 (let ((kids (plist-get value :children)))
+                   (when (and (vectorp kids)
+                              (> (length kids)
+                                 (plist-get counts :max-children)))
+                     (setq counts (plist-put counts :max-children
+                                             (length kids)))))
+                 (pcase-dolist (`(,limit ,want . ,member)
+                                jetpacs-shell--aggregate-limits)
+                   (when (equal type want)
+                     (bump limit
+                           (if (equal type "chart")
+                               ;; A chart's aggregate is POINTS, across
+                               ;; series.
+                               (apply #'+ 0
+                                      (mapcar
+                                       (lambda (se)
+                                         (length (append
+                                                  (plist-get se :points)
+                                                  nil)))
+                                       (append (plist-get value member)
+                                               nil)))
+                             (let ((v (plist-get value member)))
+                               (if (vectorp v) (length v)
+                                 (length (append v nil)))))))))
+               (let ((p value))
+                 (while p
+                   (let ((k (pop p)) (v (pop p)))
+                     (unless (memq k jetpacs--opaque-members)
+                       (walk v d)))))))
+            ((consp value)
+             (walk (car value) depth)
+             (walk (cdr value) depth)))))
+      (walk spec 0))
     counts))
 
 (defun jetpacs-shell--gate-size (client spec stale-spec)
@@ -566,6 +593,15 @@ it a `1400 frame-too-large' and a CLOSED connection."
         (when (> (plist-get counts :depth) jetpacs-shell--max-node-depth)
           (error "jetpacs: node depth %d exceeds max_node_depth %d (SPEC 4.5)"
                  (plist-get counts :depth) jetpacs-shell--max-node-depth))
+        ;; Children BEFORE nodes: the caps are equal, so any children
+        ;; breach is also a nodes breach — the specific diagnosis wins.
+        (when (> (plist-get counts :max-children) jetpacs-shell--max-children)
+          (error "jetpacs: %d children exceed max_children_per_node %d (SPEC 4.5)"
+                 (plist-get counts :max-children)
+                 jetpacs-shell--max-children))
+        (when (> (plist-get counts :nodes) jetpacs-shell--max-nodes)
+          (error "jetpacs: %d nodes exceed max_nodes_per_snapshot %d (SPEC 4.5)"
+                 (plist-get counts :nodes) jetpacs-shell--max-nodes))
         (pcase-dolist (`(,limit . ,_) jetpacs-shell--aggregate-limits)
           (when-let* ((cap (plist-get limits limit))
                       (n (plist-get counts limit)))

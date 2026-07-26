@@ -39,6 +39,24 @@
 (require 'jetpacs-buffer)
 (require 'jetpacs-shell)
 
+(defcustom jetpacs-chrome-max-screens 3
+  "Screens one surface's stack renders (SPEC 22.3 bounds module work).
+Every push re-renders EVERY screen — font-lock and a full render per
+rendered-buffer screen — so an unbounded stack makes each refresh
+O(depth) heavy work before one frame leaves.  The ROOT is pinned (it is
+the registered fallback); eviction removes the screen ABOVE it, and the
+lowest surviving screen back-targets the root.
+
+Default 3, NOT the audit's 8, for a measured reason: `--build' renders
+bottom-first so the ROOT spends the shared SPEC 4.5 budget first, and
+the TOP screen — the one the user is looking at — gets the leftovers.
+A two-pass top-first render would fix that but inverts the claim order
+`jetpacs-claim-node-id' depends on (the first claimant keeps the stable
+id, and today that is the root's literal, which later mints route
+around).  Until that lands, a small bound is what keeps the starvation
+bounded too."
+  :type 'natnum :group 'jetpacs)
+
 (defvar jetpacs-chrome--stacks (make-hash-table :test #'equal)
   "SURFACE id -> screen stack, a list of (ID . BUILDER), TOP FIRST.
 BUILDER takes one argument BACK — a `view.switch' descriptor, or nil at
@@ -251,7 +269,14 @@ that happened in between."
       (error "jetpacs-chrome: no chrome stack for %s" surface))
     (jetpacs--check-identifier id "screen id")
     (let* ((tail (cl-member id stack :key #'car :test #'equal))
-           (new (cons (cons id builder) (if tail (cdr tail) stack))))
+           (new (cons (cons id builder) (if tail (cdr tail) stack)))
+           ;; The bound applies HERE, before the single puthash, so the
+           ;; undo thunk's `eq' guard sees the same object it stored — an
+           ;; eviction done as a second write would defeat every rollback.
+           (new (if (> (length new) jetpacs-chrome-max-screens)
+                    (append (seq-take new (1- jetpacs-chrome-max-screens))
+                            (last new))
+                  new)))
       (puthash surface new jetpacs-chrome--stacks)
       (lambda ()
         (when (eq new (gethash surface jetpacs-chrome--stacks))

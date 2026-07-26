@@ -907,5 +907,78 @@ suffixes instead of colliding into a card."
                        #'string<)))
         (should (equal ids '("comint-x" "comint-x-1")))))))
 
+
+;;;; E1f: the stack bound and the fixed-limit gates
+
+(ert-deftest jetpacs-chrome-stack-is-bounded-root-pinned ()
+  "SPEC 22.3: the stack renders at most `jetpacs-chrome-max-screens'
+screens.  The ROOT is pinned — it is the registered fallback — and the
+lowest surviving screen back-targets it.  The bound applies inside
+`--stack-insert' BEFORE the single puthash, so the E1a undo thunk's
+`eq' guard still matches: a failed push after an eviction still rolls
+back."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--clean-repush
+      (jetpacs-chrome-test--recording recs
+        (jetpacs-chrome-test--nav-fixture)
+        (dotimes (i 5)
+          (jetpacs-chrome-push-screen
+           "app:filesapp" (format "s%d" (1+ i))
+           (lambda (back)
+             (jetpacs-chrome-screen "S" (jetpacs-text "s") :back back))))
+        ;; Newest two plus the pinned root.
+        (should (equal (jetpacs-chrome-stack "app:filesapp")
+                       '("s5" "s4" "hub")))
+        ;; The lowest surviving screen back-targets the ROOT, and the
+        ;; root keeps no back arrow.
+        (let* ((spec (cadr (car recs)))
+               (views (plist-get spec :views))
+               (json4 (jetpacs-node->canonical-json (gethash "s4" views)))
+               (jsonh (jetpacs-node->canonical-json (gethash "hub" views))))
+          (should (string-match-p "\"view\":\"hub\"" json4))
+          (should-not (string-match-p "arrow_back" jsonh)))
+        ;; Eviction did not defeat the transaction: a refused push still
+        ;; rolls back to exactly this stack.
+        (should-error (jetpacs-chrome-push-screen
+                       "app:filesapp" "bad"
+                       (lambda (_b) (jetpacs-chrome-test--deep 25))))
+        (should (equal (jetpacs-chrome-stack "app:filesapp")
+                       '("s5" "s4" "hub")))))))
+
+(ert-deftest jetpacs-chrome-gate-counts-nodes-and-children ()
+  "The two fixed SPEC 4.5 limits nothing counted: total nodes per
+snapshot and children per node.  Both are hard Companion rejects."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      ;; 10001 children under one column: the children cap fires.
+      (let* ((kids (cl-loop repeat 10001 collect (jetpacs-text "x")))
+             (spec (apply #'jetpacs-column kids))
+             (msg (jetpacs-chrome-test--gate-error
+                   (lambda () (jetpacs-shell-push "app:demo" :spec spec)))))
+        (should (string-match-p "max_children_per_node" msg)))
+      ;; Two columns of 5001 each: children pass, the node TOTAL fires.
+      (let* ((spec (jetpacs-column
+                    (apply #'jetpacs-column
+                           (cl-loop repeat 5001 collect (jetpacs-text "x")))
+                    (apply #'jetpacs-column
+                           (cl-loop repeat 5001 collect (jetpacs-text "x")))))
+             (msg (jetpacs-chrome-test--gate-error
+                   (lambda () (jetpacs-shell-push "app:demo" :spec spec)))))
+        (should (string-match-p "max_nodes_per_snapshot" msg))))))
+
+(ert-deftest jetpacs-chrome-depth-counts-every-nesting-member ()
+  "Depth matches the Companion's validator: a typed node reached from
+ANY member is one level deeper — `:children' has no special status.
+Pre-fix, 25 box-in-box nestings through a non-children member measured
+depth 1 and sailed past the gate straight into a 1201."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (let ((deep '(:t "text" :text "leaf")))
+        (dotimes (_ 25)
+          (setq deep (list :t "box" :item deep)))
+        (let ((msg (jetpacs-chrome-test--gate-error
+                    (lambda () (jetpacs-shell-push "app:demo" :spec deep)))))
+          (should (string-match-p "max_node_depth" msg)))))))
+
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

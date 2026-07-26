@@ -201,6 +201,21 @@ fighting base for the palette.
 - [ ] Regenerate the `theme.set` golden with the full role set + ≥3 syntax
       roles.
 
+### Filed during E1 (new, not in the audit)
+
+- **dialog.show is knowingly ungated for size** — `jetpacs-shell--gate-size`
+  is reusable as-is (client + spec), but neither `jetpacs-dialog--ask` nor
+  `jetpacs-sections--show-menu` calls it, and `jetpacs-dialog--gate-spec`
+  recurses through `:children` only (the E1f gate walks every non-opaque
+  member).  Land with the first dialog-touching commit.
+- **Two-pass top-first chrome render** — the E1f depth-bound default is 3, not
+  the audit's 8, because bottom-first rendering starves the TOP screen of the
+  shared budget; the two-pass fix inverts `jetpacs-claim-node-id` claim order
+  (root-literal-first is what the E1c seed semantics pin), so it needs its own
+  design pass.
+- **`jetpacs-shell--build`'s error spec ships `error-message-string`** —
+  prescribed by SPEC-JC-0-floor.md:193; E4/S doc+code amendment.
+
 ### T — tests (audit §3(h) + §6 test P3s not landed in E1–E6)
 
 - [ ] The navigate×chrome integration file in `run-tests.sh`: assert the live

@@ -4,7 +4,9 @@
 // redirect-scheme rule — the pure predicates behind the loader.
 package com.calebc42.ebp.wire
 
+import java.io.File
 import java.net.InetAddress
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -98,5 +100,78 @@ class ImageGuardsTest {
         assertFalse(ImageGuards.isValidImageUrl("file:///etc/passwd"))
         assertFalse(ImageGuards.isValidImageUrl("data:image/svg+xml;base64,PHN2Zy8+"))
         assertFalse(ImageGuards.isValidImageUrl("data:text/html;base64,PGgxPg=="))
+    }
+
+    @Test
+    fun base64ProfileIsTheContractsAndIsNeverSanitized() {
+        // SPEC 17.2 (amendment #114) pins the encoding in
+        // contract.limits.image_data_encoding: standard RFC 4648 alphabet,
+        // padding required, whitespace forbidden.
+        val contract = JSONObject(
+            File(System.getProperty("ebp.dir")
+                ?: error("ebp.dir system property not set"), "contract.json")
+                .readText())
+        val enc = contract.getJSONObject("image_data_encoding")
+        assertEquals("rfc4648-standard", enc.getString("alphabet"))
+        assertEquals("required", enc.getString("padding"))
+        assertEquals("forbidden", enc.getString("whitespace"))
+
+        assertTrue(ImageGuards.isStrictBase64("aGVsbG8h"))     // 8 chars, no pad
+        assertTrue(ImageGuards.isStrictBase64("aGk="))          // one pad char
+        assertTrue(ImageGuards.isStrictBase64("YQ=="))          // two pad chars
+        // Padding is REQUIRED: java.util.Base64's basic decoder would take
+        // this happily, which is exactly why the profile is checked first.
+        assertFalse(ImageGuards.isStrictBase64("YQ"))
+        assertFalse(ImageGuards.isStrictBase64("aGk"))
+        // base64url is a different alphabet, not a tolerated variant.
+        assertFalse(ImageGuards.isStrictBase64("a-b_cdef"))
+        // Whitespace anywhere is a rejection, never something to strip:
+        // leading, trailing, interior, and the 76-column wrap that Emacs's
+        // `base64-encode-string' emits unless its NO-LINE-BREAK arg is set.
+        assertFalse(ImageGuards.isStrictBase64(" aGVsbG8h"))
+        assertFalse(ImageGuards.isStrictBase64("aGVsbG8h "))
+        assertFalse(ImageGuards.isStrictBase64("aGVs bG8h"))
+        assertFalse(ImageGuards.isStrictBase64("aGVs\nbG8h"))
+        assertFalse(ImageGuards.isStrictBase64("aGVsbG8h\n"))
+        assertFalse(ImageGuards.isStrictBase64(""))
+        assertFalse(ImageGuards.isStrictBase64("===="))
+        // '=' outside the final quantum is not padding.
+        assertFalse(ImageGuards.isStrictBase64("aG=k"))
+    }
+
+    @Test
+    fun dataUrlWhitespaceIsRejectedNotTrimmed() {
+        // The decoder used to call .trim(), so a payload with surrounding
+        // whitespace decoded to bytes the sender never authorized and the
+        // accepted length differed from the transmitted one — SPEC 17.2's
+        // "MUST NOT strip or normalize whitespace in place of rejection".
+        val body =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        assertNotNull(ImageGuards.parseDataImage("data:image/png;base64,$body", 4096))
+        assertNull(ImageGuards.parseDataImage("data:image/png;base64, $body", 4096))
+        assertNull(ImageGuards.parseDataImage("data:image/png;base64,$body\n", 4096))
+        assertNull(ImageGuards.parseDataImage(
+            "data:image/png;base64," + body.chunked(76).joinToString("\n"), 4096))
+    }
+
+    @Test
+    fun acceptTimeGateInspectsThePayloadNotJustTheHeader() {
+        // SPEC 17.2: the payload is part of the URI form, so a data: URL that
+        // could never decode is content-invalid at surface.update — not a
+        // silent blank at render time, after Emacs was told "applied" and the
+        // revision floor advanced past a spec that does not work.
+        assertTrue(ImageGuards.isValidImageUrl("data:image/png;base64,iVBORw0K"))
+        assertFalse(ImageGuards.isValidImageUrl("data:image/png;base64,***"))
+        assertFalse(ImageGuards.isValidImageUrl("data:image/png;base64,"))
+        assertFalse(ImageGuards.isValidImageUrl("data:image/png;base64,iVBO Rw0K"))
+        assertFalse(ImageGuards.isValidImageUrl("data:image/png;base64,iVBORw0"))
+
+        // And it lands as ContentInvalid through the validator, at the path.
+        val spec = JSONObject("""{"t":"image","url":"data:image/png;base64,**"}""")
+        val err = try {
+            SpecValidator.validateSurfaceSpec(spec); null
+        } catch (e: ContentInvalid) { e }
+        assertNotNull(err)
+        assertEquals("spec.url", err!!.path)
     }
 }

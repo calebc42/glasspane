@@ -15,6 +15,12 @@ data class ToolbarEdit(val text: String, val selStart: Int, val selEnd: Int) {
     }
 }
 
+// SPEC 17.7: the heading forms — one-or-more (demote) and two-or-more
+// (promote) `*` FOLLOWED BY A SPACE. The space matters: without it a line
+// like `*bold* text` is treated as an outline heading and corrupted.
+private val HEADING_1PLUS = Regex("""^\*+ """)
+private val HEADING_2PLUS = Regex("""^\*\*+ """)
+
 object ToolbarEdits {
 
     /** The rendered snippet: substituted text plus where the position tokens
@@ -176,16 +182,24 @@ object ToolbarEdits {
         return start to end
     }
 
-    /** SPEC 17.7 promote: −1 outline step — two-or-more `*` loses one, else a
-     * 2+-space indent loses two, else unchanged. */
+    /** SPEC 17.7 promote: −1 outline step — two-or-more `*` FOLLOWED BY A
+     * SPACE loses one, else a 2+-space indent loses two (but a `*` bullet is
+     * never de-indented to column 0), else unchanged. */
     private fun promote(edit: ToolbarEdit): ToolbarEdit {
         val text = edit.text
         val cursor = edit.selStart.coerceIn(0, text.length)
         val (ls, le) = lineBounds(text, cursor)
         val line = text.substring(ls, le)
+        // The heading form requires the following space, and an indented `*`
+        // bullet MUST NOT reach column 0: there it would BECOME a heading,
+        // which demote cannot undo, so the pair would not be inverse.
         val newLine = when {
-            line.startsWith("**") -> line.removePrefix("*")
-            line.startsWith("  ") -> line.substring(2)
+            HEADING_2PLUS.containsMatchIn(line) -> line.removePrefix("*")
+            line.startsWith("  ") -> {
+                val indent = line.length - line.trimStart().length
+                if (indent == 2 && line.trimStart().startsWith("*")) return edit
+                line.substring(2)
+            }
             else -> return edit
         }
         val shift = newLine.length - line.length
@@ -200,12 +214,20 @@ object ToolbarEdits {
         val cursor = edit.selStart.coerceIn(0, text.length)
         val (ls, le) = lineBounds(text, cursor)
         val line = text.substring(ls, le)
+        // SPEC 17.7: unordered bullets are `-`, `+`, AND `*` — promote can
+        // de-indent any of them, so demote must be able to restore each. Each
+        // marker must be FOLLOWED BY A SPACE, or emphasis like `*bold* text`
+        // is misread as a bullet and silently indented.
         val opensList = line.trimStart().let {
-            it.startsWith("-") || it.matches(Regex("""\d+[.)].*"""))
+            it.startsWith("- ") || it.startsWith("+ ") || it.startsWith("* ") ||
+                it.matches(Regex("""\d+[.)] .*"""))
         }
         val newLine = when {
-            line.startsWith("*") -> "*$line"
+            HEADING_1PLUS.containsMatchIn(line) -> "*$line"
             opensList -> "  $line"
+            // Any other already-indented line: promote de-indents it, so
+            // demote re-indents it, keeping the pair inverse.
+            line.startsWith(" ") -> "  $line"
             else -> return edit
         }
         val shift = newLine.length - line.length

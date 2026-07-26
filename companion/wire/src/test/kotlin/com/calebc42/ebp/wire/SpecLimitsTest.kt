@@ -10,6 +10,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class SpecLimitsTest {
 
@@ -101,5 +102,49 @@ class SpecLimitsTest {
         }.exceptionOrNull()
         assertTrue(err is ContentInvalid)
         SpecValidator.validateSurfaceSpec(doc, maxRichSpans = 6)
+    }
+
+    @Test
+    fun wireLimitsAreExactlyContractLimitsFixed() {
+        // SPEC 4.5 / 24.1: `contract.limits.fixed` is the machine-readable
+        // form of the §4.5 table, and validate.py reads its constants FROM
+        // that object — so the Python reference cannot drift. The Kotlin side
+        // hardcodes them, which is the whole reason this test exists: it makes
+        // the second copy of the fact provably equal to the first, and makes a
+        // NEW contract constant fail here rather than sit silently unenforced
+        // (which is how max_send_header_bytes reached the contract with no
+        // Kotlin constant behind it at all).
+        val contract = JSONObject(
+            File(System.getProperty("ebp.dir")
+                ?: error("ebp.dir system property not set"), "contract.json")
+                .readText())
+        val fixed = contract.getJSONObject("limits").getJSONObject("fixed")
+        val implemented = mapOf(
+            "max_header_bytes" to WireLimits.MAX_HEADER_OCTETS,
+            "max_body_bytes" to WireLimits.MAX_BODY_OCTETS,
+            "max_json_depth" to WireLimits.MAX_JSON_DEPTH,
+            "max_nodes_per_snapshot" to WireLimits.MAX_NODES_PER_SNAPSHOT,
+            "max_children_per_node" to WireLimits.MAX_CHILDREN_PER_NODE,
+            "max_identifier_bytes" to WireLimits.MAX_IDENTIFIER_OCTETS,
+            "max_request_id_bytes" to WireLimits.MAX_REQUEST_ID_OCTETS,
+            "max_method_bytes" to WireLimits.MAX_METHOD_OCTETS,
+            "max_send_header_bytes" to WireLimits.MAX_SEND_HEADER_OCTETS,
+            "max_node_depth" to WireLimits.MAX_NODE_DEPTH,
+        )
+        assertEquals(fixed.keySet().toSortedSet(), implemented.keys.toSortedSet())
+        for ((key, value) in implemented)
+            assertEquals("limits.fixed.$key", fixed.getInt(key).toLong(), value.toLong())
+    }
+
+    @Test
+    fun emittedHeaderSectionStaysInsideTheSenderAllowance() {
+        // SPEC 4.5: 8,192 is a RECEIVER rejection threshold; a sender may only
+        // rely on 128 being accepted. Even the widest legal Content-Length
+        // line is nowhere near it, and encodeFrame now says so out loud.
+        val frame = encodeFrame("{\"jsonrpc\":\"2.0\"}")
+        val headerEnd = String(frame, Charsets.US_ASCII).indexOf("\r\n\r\n") + 4
+        assertTrue(headerEnd <= WireLimits.MAX_SEND_HEADER_OCTETS)
+        val widest = "Content-Length: ${WireLimits.MAX_BODY_OCTETS}\r\n\r\n"
+        assertTrue(widest.length <= WireLimits.MAX_SEND_HEADER_OCTETS)
     }
 }

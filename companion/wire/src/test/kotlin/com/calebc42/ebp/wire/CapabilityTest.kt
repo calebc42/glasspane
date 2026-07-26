@@ -131,6 +131,38 @@ class CapabilityTest {
     }
 
     @Test
+    fun unserializableResultIsAnsweredNotDropped() {
+        // SPEC 7.1: "A responder that computes a result but cannot serialize
+        // the response body MUST answer the request with -32603
+        // internal-error; it MUST NOT leave the request unanswered." The
+        // result is host-supplied, so its shape is not the engine's to trust
+        // — this one nests past what org.json's recursive encoder can walk.
+        // Before the guard the encoder's failure escaped out of feed(), and
+        // Emacs was left holding an id that never concluded (and which SPEC
+        // 7.2 then forbids it from ever reusing).
+        val deep = JSONObject()
+        var cur = deep
+        repeat(60_000) {
+            val next = JSONObject()
+            cur.put("n", next)
+            cur = next
+        }
+        val out = mutableListOf<JSONObject>()
+        val engine = engine(out, handler = CapabilityHandler { _, _ ->
+            CapabilityOutcome.Ok(deep)
+        })
+        invoke(engine, "c1", "clipboard.read", JSONObject())
+        assertEquals(-32603, errorOf(out, "c1").getInt("code"))
+        assertEquals("internal-error",
+            errorOf(out, "c1").getJSONObject("data").getString("kind"))
+        // The session survives: a fresh invocation is answered normally.
+        val out2 = mutableListOf<JSONObject>()
+        val engine2 = engine(out2)
+        invoke(engine2, "c2", "clipboard.read", JSONObject())
+        assertEquals("hi", response(out2, "c2").getJSONObject("result").getString("text"))
+    }
+
+    @Test
     fun ungrantedModuleIsMethodNotFound() {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out, grant = false)

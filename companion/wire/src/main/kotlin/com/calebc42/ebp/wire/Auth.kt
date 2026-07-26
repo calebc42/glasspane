@@ -45,6 +45,25 @@ object EbpAuth {
                     clientNonce: String, serverNonce: String): String =
         hmacSha256(token, "EBP/2 companion:$pairingId:$serverNonce:$clientNonce").toHex()
 
+    /**
+     * SPEC 9.2: the fixed dummy key the unknown-pairing-ID path verifies
+     * against, so that branch does the same HMAC-SHA256 work as a known ID.
+     * Its value is irrelevant — only that it is fixed, and that no proof an
+     * attacker can produce matches against it.
+     */
+    val DUMMY_PROOF_KEY: ByteArray = ByteArray(16)
+
+    /**
+     * SPEC 9.3: compare two fixed-length ASCII identifiers without leaking
+     * how many leading characters matched. Both operands are fixed-length by
+     * grammar (SPEC 4.4), so a length difference carries nothing secret.
+     */
+    fun constantTimeEquals(a: String?, b: String?): Boolean {
+        if (a == null || b == null) return a == null && b == null
+        return MessageDigest.isEqual(
+            a.toByteArray(Charsets.UTF_8), b.toByteArray(Charsets.UTF_8))
+    }
+
     /** SPEC 9.3: constant-time comparison; malformed proofs never match. */
     fun verifyClientProof(proof: String, token: ByteArray, pairingId: String,
                           clientNonce: String, serverNonce: String): Boolean =

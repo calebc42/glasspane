@@ -152,4 +152,29 @@ class ToolbarEditsTest {
         assert(ToolbarEdits.needsInput("\${input:X}"))
         assert(!ToolbarEdits.needsInput("\${cursor}"))
     }
+
+    @Test
+    fun promoteAndDemoteAreInverse() {
+        // SPEC 17.7 (A6): "Within one line these two operations MUST be
+        // inverse." The old rules were not: an INDENTED `*` bullet promoted
+        // to column 0 became a heading, which demote then turned into `**`.
+        fun promote(t: String) = ToolbarEdits.lineOp("promote", caret(t, t.length))!!.text
+        fun demote(t: String) = ToolbarEdits.lineOp("demote", caret(t, t.length))!!.text
+        // The bullet that used to be destroyed: promote leaves it alone,
+        // because de-indenting it to column 0 would manufacture a heading.
+        assertEquals("  * sub item", promote("  * sub item"))
+        // Emphasis is not an outline heading — the `*` form needs a space.
+        assertEquals("*bold* text", promote("*bold* text"))
+        assertEquals("*bold* text", demote("*bold* text"))
+        // Round-trips, both directions, for each line shape §17.7 names.
+        for (line in listOf("** head", "*** head", "  - bullet", "  + bullet",
+                            "  1. ordered", "  2) ordered", "   indented")) {
+            assertEquals("promote∘demote on '" + line + "'",
+                line, promote(demote(line)))
+        }
+        for (line in listOf("** head", "  - bullet", "  + bullet", "    deep")) {
+            assertEquals("demote∘promote on '" + line + "'",
+                line, demote(promote(line)))
+        }
+    }
 }

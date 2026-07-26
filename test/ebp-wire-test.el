@@ -788,6 +788,127 @@ client retries with backoff until `remaining' drains (SPEC 15.3)."
                       (funcall (plist-get server :received)))))
         (should (= replays 2))))))
 
+(ert-deftest ebp-test-errored-replay-still-reaches-ready ()
+  "SPEC 10.3 (amendment #112): a replay concludes for the barrier on ANY
+result, ANY JSON-RPC error, or local abandonment — and in every case
+Emacs MUST proceed to `session.ready'.  An error here used to close the
+connection, stranding a durable backlog behind a transport that never
+came back and leaving SYNCING as the terminal state."
+  (let ((ready nil))
+    (ebp-test--with-companion
+        (server client
+                (lambda (msg send)
+                  (let* ((method (alist-get 'method msg))
+                         (id (alist-get 'id msg))
+                         (reply (lambda (result)
+                                  (funcall send `(:jsonrpc "2.0" :id ,id
+                                                  :result ,result)))))
+                    (pcase method
+                      ("session.hello"
+                       (funcall reply `(:server_nonce ,ebp-test--kat-sn)))
+                      ("auth.response"
+                       (funcall reply (ebp-test--welcome-result)))
+                      ("queue.replay"
+                       ;; SPEC 15.3's 1600 backlog-unavailable: transient,
+                       ;; and the events stay durable on the Companion.
+                       (funcall send `(:jsonrpc "2.0" :id ,id
+                                       :error (:code 1600
+                                               :message "backlog unavailable"
+                                               :data (:kind "event-retry")))))
+                      ("session.ready" (funcall reply ebp--empty-object)))))
+                :replay-retry-delay 0.15
+                :ready-function (lambda (_c) (setq ready t)))
+      (should (ebp-test--wait (lambda () ready)))
+      (should (eq (ebp-client-state client) 'ready))
+      (let ((methods (mapcar (lambda (m) (alist-get 'method m))
+                             (funcall (plist-get server :received)))))
+        ;; The errored replay is followed by session.ready — and by exactly
+        ;; one replay before READY, never a second (SPEC 10.3).
+        (should (equal (seq-take methods 4)
+                       '("session.hello" "auth.response"
+                         "queue.replay" "session.ready"))))
+      ;; Nothing is known about `remaining' after an error, so SPEC 15.3's
+      ;; retry must still run rather than assume a drained backlog.
+      (should (ebp-test--wait
+               (lambda ()
+                 (> (cl-count-if
+                     (lambda (m) (equal (alist-get 'method m) "queue.replay"))
+                     (funcall (plist-get server :received)))
+                    1)))))))
+
+(ert-deftest ebp-test-abandoned-request-is-cancelled-on-the-wire ()
+  "SPEC 7.1/7.5 (amendment #112): a requester that stops waiting MUST send
+`rpc.cancel' for that id before treating the request as concluded.
+jsonrpc.el's timeout deletes the continuation and writes NOTHING to the
+peer, so without this the Companion holds the request outstanding
+forever and the id never concludes for SPEC 7.2."
+  (let ((ready nil) (answered 'pending))
+    (ebp-test--with-companion
+        (server client
+                ;; A companion that completes the handshake and then never
+                ;; answers surface.update.
+                (lambda (msg send)
+                  (let* ((method (alist-get 'method msg))
+                         (id (alist-get 'id msg))
+                         (reply (lambda (result)
+                                  (funcall send `(:jsonrpc "2.0" :id ,id
+                                                  :result ,result)))))
+                    (pcase method
+                      ("session.hello"
+                       (funcall reply `(:server_nonce ,ebp-test--kat-sn)))
+                      ("auth.response"
+                       (funcall reply (ebp-test--welcome-result)))
+                      ("queue.replay"
+                       (funcall reply '(:delivered 0 :rejected 0 :expired 0
+                                        :remaining 0 :blocked_by :null)))
+                      ("session.ready" (funcall reply ebp--empty-object)))))
+                :ready-function (lambda (_c) (setq ready t)))
+      (should (ebp-test--wait (lambda () ready)))
+      (let ((ebp-request-timeout 0.3))
+        (ebp-client-surface-update
+         client "main" '(:type "text" :text "hi")
+         :callback (lambda (status error)
+                     (setq answered (list status error)))))
+      ;; The local deadline expires: the callback sees the abandonment...
+      (should (ebp-test--wait (lambda () (not (eq answered 'pending)))))
+      (should (equal (plist-get (nth 1 answered) :code) -32000))
+      ;; ...and the peer is told, with the id of the very request abandoned.
+      (should (ebp-test--wait
+               (lambda ()
+                 (cl-find-if
+                  (lambda (m) (equal (alist-get 'method m) "rpc.cancel"))
+                  (funcall (plist-get server :received))))))
+      (let* ((received (funcall (plist-get server :received)))
+             (update (cl-find-if
+                      (lambda (m) (equal (alist-get 'method m) "surface.update"))
+                      received))
+             (cancel (cl-find-if
+                      (lambda (m) (equal (alist-get 'method m) "rpc.cancel"))
+                      received)))
+        (should (equal (alist-get 'id (alist-get 'params cancel))
+                       (alist-get 'id update)))
+        ;; SPEC 7.5: a cancellation is a notification, never a request.
+        (should-not (alist-get 'id cancel))))))
+
+(ert-deftest ebp-test-user-paced-timeout-floor ()
+  "SPEC 7.1 (amendment #112): a requester MUST NOT apply a deadline under
+60 seconds to the methods a responder holds pending user interaction —
+`dialog.show' (SPEC 18.1) and `capability.invoke' (SPEC 20.2) — and
+SHOULD apply none.  jsonrpc.el's 10 s default silently discards the
+eventual answer, which for a dialog carrying `capture_fields' means a
+submitted password is transmitted and then dropped."
+  ;; No configured ceiling means no deadline at all, the SHOULD.
+  (should (null (ebp-client--user-paced-timeout nil)))
+  ;; A ceiling at or above the floor is honoured verbatim.
+  (should (= 3600 (ebp-client--user-paced-timeout 3600)))
+  (should (= 60 (ebp-client--user-paced-timeout 60)))
+  ;; Anything under it is raised, not obeyed.
+  (should (= 60 (ebp-client--user-paced-timeout 10)))
+  (should (= 60 (ebp-client--user-paced-timeout 0.5)))
+  ;; The defaults ship as "no deadline" for both user-paced methods.
+  (should (null ebp-dialog-timeout))
+  (should (null ebp-capability-timeout)))
+
 (ert-deftest ebp-test-barrier-seam-and-kind-carrying-errors ()
   "SPEC 10.3 step 3: :before-replay-function pushes surfaces before the
 replay on the wire; SPEC 8: a receipt-commit failure answers 1500 with

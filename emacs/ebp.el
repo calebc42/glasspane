@@ -47,11 +47,31 @@ A connection's :replay-retry-delay config overrides it."
   "Ceiling in seconds for the replay retry backoff (SPEC 15.3)."
   :type 'number)
 
-(defcustom ebp-dialog-timeout 3600
+(defcustom ebp-request-timeout 10
+  "Seconds before Emacs abandons an ordinary request (SPEC 7.1).
+EBP defines no protocol-level deadline; this is a purely local choice,
+and expiry sends `rpc.cancel' before the request is treated as
+concluded.  nil waits forever.  It does NOT govern the methods the
+Companion holds open pending user interaction — see
+`ebp-dialog-timeout' and `ebp-capability-timeout', which carry SPEC
+7.1's 60-second floor."
+  :type '(choice (const :tag "No deadline" nil) number))
+
+(defcustom ebp-dialog-timeout nil
   "Seconds a `dialog.show' request waits before giving up (SPEC 18.1).
-The protocol holds a dialog open with no timeout; this is only the
-client-side ceiling on how long Emacs keeps the request outstanding."
-  :type 'number)
+The protocol holds a dialog open with no timeout and SPEC 7.1 SHOULDs
+that Emacs apply none either — nil, the default.  A number is a local
+ceiling and MUST NOT be under 60; a smaller one is raised to the floor.
+Abandonment sends `rpc.cancel', so the Companion dismisses the dialog
+rather than waiting on a reader that has left."
+  :type '(choice (const :tag "No deadline" nil) number))
+
+(defcustom ebp-capability-timeout nil
+  "Seconds a `capability.invoke' request waits before giving up.
+SPEC 20.2 lets the Companion hold the invocation while the user answers
+a runtime permission prompt, which no deadline can predict, so SPEC 7.1
+SHOULDs none — nil, the default.  A number MUST NOT be under 60."
+  :type '(choice (const :tag "No deadline" nil) number))
 
 (defcustom ebp-log-events nil
   "When non-nil, log full JSON-RPC message bodies to the connection's
@@ -683,19 +703,60 @@ partition it before reusing this."
       (ebp-client-close client (list 'illegal-transition
                                      (ebp-client-state client) event)))))
 
+(defun ebp-client--cancel (client id)
+  "SPEC 7.1/7.5: announce local abandonment of outstanding request ID.
+jsonrpc.el's timeout deletes the continuation, logs, and writes NOTHING
+to the peer (emacs-30.1 jsonrpc.el:891-896), so without this the
+responder holds the request outstanding forever and the id — which SPEC
+7.2 forbids reusing until the request has concluded — never concludes.
+`rpc.cancel' is legal only after authentication; before that SPEC 9
+closes the transport instead of appending a frame."
+  (when (memq (ebp-client-state client) '(syncing ready))
+    (ignore-errors (ebp-client-notify client 'rpc.cancel (list :id id)))))
+
+(defun ebp-client--user-paced-timeout (secs)
+  "SPEC 7.1: clamp SECS for a method the responder holds pending user
+interaction (`dialog.show' SPEC 18.1, `capability.invoke' SPEC 20.2).
+nil means no deadline, which the spec SHOULDs; anything under the
+60-second floor is raised to it rather than silently honoured."
+  (cond ((null secs) nil)
+        ((< secs 60)
+         (display-warning
+          'ebp (format "request timeout %ss is below SPEC 7.1's 60 s floor \
+for user-paced methods; using 60" secs)
+          :warning)
+         60)
+        (t secs)))
+
 (defun ebp-client--request (client method params callback &optional timeout)
   "Send a request through jsonrpc.el; ids are the library's integers.
 CALLBACK receives (RESULT ERROR); exactly one is non-nil except for the
-{} result, where both may be nil — check ERROR, not RESULT.  TIMEOUT
-overrides jsonrpc.el's 10 s default (SPEC 10.3 step 4: a replay must be
-allowed to run to a stable stop)."
-  (jsonrpc-async-request
-   (ebp-client-connection client) method params
-   :timeout (or timeout jsonrpc-default-request-timeout)
-   :success-fn (lambda (result) (funcall callback result nil))
-   :error-fn (lambda (error) (funcall callback nil (or error '(:code -32603))))
-   :timeout-fn (lambda ()
-                 (funcall callback nil '(:code -32000 :message "timeout")))))
+{} result, where both may be nil — check ERROR, not RESULT.
+
+TIMEOUT is a number of seconds, the symbol `none' for no deadline at
+all, or nil for `ebp-request-timeout'.  EBP itself defines no deadline
+(SPEC 7.1); every one of these is a purely local choice, and expiry is
+ABANDONMENT — so it sends `rpc.cancel' before treating the request as
+concluded, and jsonrpc.el's own removal of the continuation supplies the
+matching \"ignore any later response\" half."
+  (let* ((conn (ebp-client-connection client))
+         (secs (cond ((eq timeout 'none) nil)
+                     ((numberp timeout) timeout)
+                     (t ebp-request-timeout)))
+         ;; emacs-30.1 jsonrpc.el:882 takes (cl-incf (jsonrpc--next-request-id
+         ;; conn)) for every non-deferred request, and `jsonrpc-async-request'
+         ;; returns nil — this is the only way to learn the id we must cancel.
+         ;; We never pass :deferred, and the counter only ever increases, so
+         ;; SPEC 7.1's "MUST NOT reuse the id" holds structurally.
+         (id (1+ (jsonrpc--next-request-id conn))))
+    (jsonrpc-async-request
+     conn method params
+     :timeout secs
+     :success-fn (lambda (result) (funcall callback result nil))
+     :error-fn (lambda (error) (funcall callback nil (or error '(:code -32603))))
+     :timeout-fn (lambda ()
+                   (ebp-client--cancel client id)
+                   (funcall callback nil '(:code -32000 :message "timeout"))))))
 
 (defun ebp-client-notify (client method params)
   "Send a notification (SPEC 7.1)."
@@ -738,6 +799,25 @@ allowed to run to a stable stop)."
   '(:server_proof :protocol :server :granted :surface_profiles :surfaces
     :queued_events :limits)
   "SPEC 10.2: members the welcome result MUST contain.")
+
+(defun ebp-client--send-ready (client replay-errored)
+  "SPEC 10.3 step 5: leave SYNCING once the replay barrier has concluded.
+REPLAY-ERRORED non-nil means step 4 ended without a summary, so nothing
+is known about `remaining' — force one SPEC 15.3 retry cycle in READY
+rather than assume the backlog is drained."
+  (ebp-client--request
+   client 'session.ready ebp--empty-object
+   (lambda (_result error)
+     (if error
+         (ebp-client-close client (list 'ready-failed error))
+       (ebp-client--step client 'ready-confirmed)
+       (dolist (fn (ebp-client-ready-functions client))
+         (funcall fn client))
+       ;; SPEC 15.3: retry with bounded backoff while remaining.
+       (if replay-errored
+           (ebp-client--force-replay-retry client)
+         (ebp-client--schedule-replay-retry client nil)
+         (ebp-client--replay-settled client))))))
 
 (defun ebp-client--on-welcome (client server-nonce result error)
   "Verify and absorb the welcome (SPEC 9.3, 10.2), then run the
@@ -782,25 +862,22 @@ synchronization barrier (SPEC 10.3)."
                                :before-replay-function)))
       (funcall fn client))
     ;; Step 4: replay concludes before session.ready — and SPEC 10.3: a
-    ;; replay blocked by a transient error HAS concluded for the barrier.
+    ;; replay concludes for the barrier on ANY result, ANY JSON-RPC error,
+    ;; or local abandonment.  An error must not close the connection: the
+    ;; backlog is durable, FIFO survives, and SPEC 15.3 retries it in READY.
+    ;; A replay may make one round trip per retained event up to
+    ;; max_queued_events, so the local deadline must be generous and must
+    ;; not be the only thing that ends SYNCING.
     (ebp-client--request
      client 'queue.replay ebp--empty-object
      (lambda (result error)
        (if error
-           (ebp-client-close client (list 'replay-failed error))
-         (setf (ebp-client-replay-summary client) result)
-         ;; Step 5.
-         (ebp-client--request
-          client 'session.ready ebp--empty-object
-          (lambda (_result error)
-            (if error
-                (ebp-client-close client (list 'ready-failed error))
-              (ebp-client--step client 'ready-confirmed)
-              (dolist (fn (ebp-client-ready-functions client))
-                (funcall fn client))
-              ;; SPEC 15.3: retry with bounded backoff while remaining.
-              (ebp-client--schedule-replay-retry client nil)
-              (ebp-client--replay-settled client))))))
+           (display-warning
+            'ebp (format "queue.replay concluded with error %S; proceeding \
+to session.ready and retrying in READY (SPEC 10.3)" error)
+            :warning)
+         (setf (ebp-client-replay-summary client) result))
+       (ebp-client--send-ready client (and error t)))
      300))))
 
 (defun ebp-client--schedule-replay-retry (client delay)
@@ -886,9 +963,30 @@ either error itself."
     (ebp-client--error client 1200 "Not authenticated" "not-authenticated"))
   (let ((handler (gethash (symbol-name method) (ebp-client-handlers client))))
     (if handler
-        (funcall handler client params)
+        (ebp-client--serializable client (funcall handler client params))
       (ebp-client--error client -32601 "Method not found"
                          "method-not-found"))))
+
+(defun ebp-client--serializable (client result)
+  "SPEC 7.1: return RESULT, or signal -32603 if it cannot be serialized.
+A responder that computes a result it cannot serialize MUST answer with
+`-32603 internal-error' and MUST NOT leave the request unanswered — but
+jsonrpc.el runs the handler inside a `condition-case' and then calls
+`jsonrpc--reply' OUTSIDE it (emacs-30.1 jsonrpc.el:300-317), so a reply
+body that `json-serialize' refuses escapes through the process filter
+and the Companion waits forever on a request it will never see answered.
+Emacs's own encoder is the strictest party here: `json-serialize'
+signals past 50 nested containers (src/json.c), well inside what a
+handler may legitimately build.  Serializing twice costs a small string
+on the reply path; leaving a request outstanding costs the session."
+  (condition-case err
+      (progn (ebp--json-serialize result) result)
+    (error
+     ;; The message is the encoder's own ("Maximum JSON serialization depth
+     ;; exceeded"), never the value — SPEC 23.2 keeps document content out
+     ;; of diagnostics.
+     (ebp-client--error client -32603 "Internal error" "internal-error"
+                        :reason (error-message-string err)))))
 
 (defun ebp-client--notification-dispatcher (client _conn method params)
   "Gate an inbound notification on session state, then dispatch (SPEC 7.3/10.1).
@@ -1346,7 +1444,10 @@ outcome MUST NOT be auto-retried (SPEC 20.2)."
    client 'capability.invoke
    `(:cap ,cap ,@(when args `(:args ,args)))
    (lambda (result error)
-     (when callback (funcall callback result error)))))
+     (when callback (funcall callback result error)))
+   ;; SPEC 20.2: the Companion may hold this while the OS asks the user for
+   ;; a runtime permission — SPEC 7.1 forbids a deadline under 60 s here.
+   (or (ebp-client--user-paced-timeout ebp-capability-timeout) 'none)))
 
 ;;;; Device triggers (SPEC 21), the client half
 
@@ -1448,8 +1549,10 @@ into a dialog is an application concern above this boundary."
        (funcall callback (and result (plist-get result :status))
                 result error)))
    ;; SPEC 18.1: a dialog is held until the user acts — there is no
-   ;; protocol timeout; use a long client-side one, overridable.
-   ebp-dialog-timeout))
+   ;; protocol timeout, and SPEC 7.1 SHOULDs no local one either.  A
+   ;; configured ceiling is floored at 60 s; expiry sends `rpc.cancel',
+   ;; which SPEC 18.1 concludes with 1301 and dismisses the dialog.
+   (or (ebp-client--user-paced-timeout ebp-dialog-timeout) 'none)))
 
 ;;;; TCP transport (SPEC 5.2): jsonrpc-process-connection, unmodified
 

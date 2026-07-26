@@ -26,6 +26,10 @@ object WireLimits {
     // stops at 50 containers with no override, so a document nested to the
     // JSON limit is unemittable by a conforming Emacs endpoint.
     const val MAX_NODE_DEPTH = 20
+    // SPEC 4.5 (amendment #113): the header section a SENDER may rely on a
+    // peer accepting. The 8,192 figure above is a receiver rejection
+    // threshold, not a sender allowance.
+    const val MAX_SEND_HEADER_OCTETS = 128
 }
 
 /** SPEC 6.2: conditions that force connection closure. */
@@ -194,5 +198,13 @@ fun encodeFrame(jsonText: String): ByteArray {
     val body = jsonText.toByteArray(StandardCharsets.UTF_8)
     if (body.size > WireLimits.MAX_BODY_OCTETS)
         throw FrameClose("body exceeds max_frame_bytes")
-    return "Content-Length: ${body.size}\r\n\r\n".toByteArray(StandardCharsets.US_ASCII) + body
+    val header = "Content-Length: ${body.size}\r\n\r\n"
+        .toByteArray(StandardCharsets.US_ASCII)
+    // SPEC 4.5/6.1: a sender MUST NOT rely on a peer accepting a header
+    // section longer than the 128-octet figure. The one mandatory line is far
+    // inside it; this holds the line if a transport profile ever adds a field.
+    check(header.size <= WireLimits.MAX_SEND_HEADER_OCTETS) {
+        "header section exceeds max_send_header_bytes"
+    }
+    return header + body
 }

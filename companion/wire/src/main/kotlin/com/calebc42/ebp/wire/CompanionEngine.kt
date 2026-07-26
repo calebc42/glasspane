@@ -1995,10 +1995,24 @@ class CompanionEngine(
             return close("malformed auth.response")
         }
         // SPEC 9.3: well-formed but reused, mismatched, or incorrect -> 1203.
+        // SPEC 9.2: an unknown pairing ID MUST be verified "with work
+        // equivalent to the known-ID path — an HMAC-SHA256 computation
+        // against a fixed dummy key and a constant-time comparison — so
+        // neither the failure stage, the error code, nor response TIMING
+        // distinguishes an unknown pairing ID from an incorrect proof."
+        // Short-circuiting on `token != null` skipped the HMAC entirely and
+        // separated the two branches by exactly one HMAC of timing, on a
+        // loopback transport where the attacker's clock is the local one.
         val token = config.pairings[pendingPairingId]
-        val ok = pid == pendingPairingId && cn == pendingClientNonce &&
-            sn == pendingServerNonce && token != null &&
-            EbpAuth.verifyClientProof(proof, token, pid, cn, sn)
+        val keyed = token ?: EbpAuth.DUMMY_PROOF_KEY
+        val proofOk = EbpAuth.verifyClientProof(proof, keyed, pid, cn, sn)
+        // Fixed-length hex identifiers compare without early exit too (§9.3
+        // applies the same rule to this path); `&` not `&&` so no branch is
+        // skipped once a mismatch is known.
+        val ok = EbpAuth.constantTimeEquals(pid, pendingPairingId) and
+            EbpAuth.constantTimeEquals(cn, pendingClientNonce) and
+            EbpAuth.constantTimeEquals(sn, pendingServerNonce) and
+            (token != null) and proofOk
         if (!ok) {
             respondError(id, 1203, "Authentication failed", "auth-failed")
             return close("auth failed")
@@ -2146,8 +2160,38 @@ class CompanionEngine(
 
     // -------------------------------------------------------------- output
 
-    private fun respondResult(id: Any, result: JSONObject) =
-        emit(JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result))
+    private fun respondResult(id: Any, result: JSONObject) {
+        // SPEC 7.1: "A responder that computes a result but cannot serialize
+        // the response body MUST answer the request with -32603
+        // internal-error; it MUST NOT leave the request unanswered." Every
+        // result here is host-supplied (a capability outcome, a device
+        // sample), so the shape is not ours to trust: org.json's toString()
+        // swallows its own JSONException and hands back null, and a
+        // pathologically nested object overflows the recursive encoder. Both
+        // used to escape as a thrown frame out of feed(), which answers
+        // nothing and leaves Emacs holding an id that never concludes.
+        val body = serializeReply(
+            JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result))
+        if (body == null) {
+            // The error body is small, fixed, and built from constants — it
+            // serializes on a stack that has already unwound.
+            respondError(id, -32603, "Internal error", "internal-error")
+            return
+        }
+        sink(encodeFrame(body))
+    }
+
+    /** null when the body cannot be encoded — org.json returns null from
+     * `toString()` on its own JSONException, and overflows the stack rather
+     * than throwing on a deeply nested value. */
+    private fun serializeReply(msg: JSONObject): String? =
+        try {
+            msg.toString()
+        } catch (e: Exception) {
+            null
+        } catch (e: StackOverflowError) {
+            null
+        }
 
     private fun respondError(id: Any, code: Int, message: String, kind: String,
                              data: JSONObject = JSONObject()) {

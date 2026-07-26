@@ -96,6 +96,38 @@ object ImageGuards {
     data class DataImage(val mediaType: String, val bytes: ByteArray)
 
     /**
+     * SPEC 17.2 (amendment #114), pinned in `contract.image_data_encoding`:
+     * the standard RFC 4648 alphabet, padding REQUIRED, whitespace FORBIDDEN.
+     * A Companion "MUST reject a payload containing a character outside that
+     * alphabet and MUST NOT strip or normalize whitespace in place of
+     * rejection" — so this is a predicate, never a sanitizer, and the caller
+     * passes the payload through untouched.
+     *
+     * `java.util.Base64.getDecoder()` is not sufficient on its own: it accepts
+     * a final quantum with the padding omitted, which this profile forbids.
+     * `-` and `_` fall outside the alphabet, so base64url is refused here too.
+     * The same rule governs `icon_png` (SPEC 20.3).
+     */
+    fun isStrictBase64(s: String): Boolean {
+        if (s.isEmpty() || s.length % 4 != 0) return false
+        // At most two '=', only in the final quantum, and never before data.
+        val pad = when {
+            s.endsWith("==") -> 2
+            s.endsWith("=") -> 1
+            else -> 0
+        }
+        val body = s.length - pad
+        if (body == 0) return false
+        for (i in 0 until body) {
+            val c = s[i]
+            val ok = (c in 'A'..'Z') || (c in 'a'..'z') || (c in '0'..'9') ||
+                c == '+' || c == '/'
+            if (!ok) return false
+        }
+        return true
+    }
+
+    /**
      * SPEC 17.2 `image.data`: parse and validate a base64 `data:image/...` URL.
      * Returns null unless it is `data:<supported-image-type>;base64,<b64>`, the
      * base64 decodes, and the decoded size is within [maxBytes]. The media type
@@ -114,10 +146,15 @@ object ImageGuards {
         val mediaType = parts[0]
         if (mediaType !in SUPPORTED_MEDIA_TYPES) return null
         val b64 = url.substring(comma + 1)
+        // SPEC 17.2: reject the payload on any character outside the profile
+        // rather than trimming it into shape — a decoder that silently drops
+        // surrounding whitespace accepts bytes the sender never authorized,
+        // and makes the accepted length differ from the transmitted one.
+        if (!isStrictBase64(b64)) return null
         // A cheap upper bound before allocating: base64 is 4 chars per 3 bytes.
         if (b64.length.toLong() / 4 * 3 > maxBytes + 3) return null
         val bytes = try {
-            java.util.Base64.getDecoder().decode(b64.trim())
+            java.util.Base64.getDecoder().decode(b64)
         } catch (e: IllegalArgumentException) { return null }
         if (bytes.size.toLong() > maxBytes) return null
         return DataImage(mediaType, bytes)
@@ -133,6 +170,15 @@ object ImageGuards {
         if (comma < 0) return false
         val header = url.substring(5, comma).lowercase()
         val parts = header.split(';')
-        return parts.size == 2 && parts[1] == "base64" && parts[0] in SUPPORTED_MEDIA_TYPES
+        if (parts.size != 2 || parts[1] != "base64" ||
+            parts[0] !in SUPPORTED_MEDIA_TYPES) return false
+        // SPEC 17.2: the payload is part of the URI FORM, so it is judged at
+        // accept time with everything else. Checking only the header let a
+        // spec through `surface.update` that could never render — Emacs was
+        // told "applied", the revision floor advanced, and the failure showed
+        // up as a blank image with no error to bind it to. This is a scan of
+        // the payload, not a decode: no allocation, no limit enforcement
+        // (SPEC 17.2's byte and pixel limits stay with the loader).
+        return isStrictBase64(url.substring(comma + 1))
     }
 }

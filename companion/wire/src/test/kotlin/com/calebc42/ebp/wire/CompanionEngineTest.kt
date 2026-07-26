@@ -150,6 +150,42 @@ class CompanionEngineTest {
     }
 
     @Test
+    fun unknownPairingIdIsIndistinguishableFromWrongProof() {
+        // SPEC 9.2: an unknown pairing ID MUST be verified "with work
+        // equivalent to the known-ID path — an HMAC-SHA256 computation
+        // against a fixed dummy key and a constant-time comparison", so
+        // neither the failure stage, the error code, nor response timing
+        // separates the two. The observable half of that is testable: both
+        // paths emit the SAME error frame and reach the same state.
+        val unknownPid = "9f9e9d9c9b9a99989796959493929190"
+        val someToken = EbpAuth.decodePairingToken("Dw4NDAsKCQgHBgUEAwIBAA")
+
+        val unknownOut = mutableListOf<JSONObject>()
+        val e1 = engine(unknownOut)
+        e1.feed(frame(request("h1", "session.hello", EbpAuth.helloParams(
+            "test-client", "0.0.1", unknownPid, katCn, listOf("theme")))))
+        // A proof that is internally consistent — just for a pairing this
+        // Companion has never heard of. Reaching 1203 here REQUIRES the dummy
+        // HMAC to run: there is no real token to key it with.
+        e1.feed(frame(request("h2", "auth.response",
+            EbpAuth.authParams(unknownPid, katCn, katSn, someToken))))
+
+        val wrongOut = mutableListOf<JSONObject>()
+        val e2 = engine(wrongOut)
+        e2.feed(frame(hello()))
+        e2.feed(frame(request("h2", "auth.response",
+            EbpAuth.authParams(katPid, katCn, katSn, someToken))))
+
+        // Same challenge shape on the way in, same rejection on the way out.
+        assertEquals(unknownOut.size, wrongOut.size)
+        assertEquals(unknownOut.first().toString(), wrongOut.first().toString())
+        assertEquals(unknownOut.last().toString(), wrongOut.last().toString())
+        assertEquals(1203, unknownOut.last().getJSONObject("error").getInt("code"))
+        assertEquals(SessionState.CLOSED, e1.state)
+        assertEquals(SessionState.CLOSED, e2.state)
+    }
+
+    @Test
     fun malformedAuthIsInvalidParamsThenClose() {
         val out = mutableListOf<JSONObject>()
         val engine = engine(out)

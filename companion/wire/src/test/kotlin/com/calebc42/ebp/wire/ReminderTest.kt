@@ -110,6 +110,11 @@ class ReminderTest {
         // A queue on_tap without ttl_s.
         assertEquals("queue requires ttl_s", reason(reminder("x", 1,
             JSONObject().put("action", "a.b").put("when_offline", "queue"))))
+        // SPEC 14.5/18.6 (#133): capture_fields is surface/dialog-scoped —
+        // a reminder tap has no input state to capture from.
+        assertEquals("capture_fields is surface/dialog-scoped", reason(reminder("x", 1,
+            JSONObject().put("action", "a.b")
+                .put("capture_fields", org.json.JSONArray().put("note")))))
     }
 
     @Test

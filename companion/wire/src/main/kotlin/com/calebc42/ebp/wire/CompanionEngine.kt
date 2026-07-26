@@ -1160,6 +1160,10 @@ class CompanionEngine(
             val policy = onTap.optString("when_offline", OFFLINE_DEFAULT)
             if ((policy == "queue" || policy == "wake") && !onTap.has("ttl_s"))
                 throw ContentInvalid("on_tap", "$policy requires ttl_s")
+            // SPEC 14.5/18.6: capture_fields is surface/dialog-scoped — a
+            // reminder tap has no input state to capture from (#133).
+            if (onTap.has("capture_fields"))
+                throw ContentInvalid("on_tap", "capture_fields is surface/dialog-scoped")
             // SPEC 18.6: the injected members must not be authored.
             onTap.optJSONObject("args")?.let { a ->
                 if (a.has("owner") || a.has("reminder_id"))

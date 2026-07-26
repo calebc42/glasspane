@@ -6,8 +6,11 @@
 // overlays them so the editor reads like the user's real Emacs theme. Format-6
 // drift from poc-v1: `syntax` roles map to SyntaxStyle OBJECTS
 // ({fg, bg, font_weight, italic, underline}), not bare colors — emacsSyntaxColors
-// reads each role's `fg`. Roles are an open set (the contract fixes no
-// syntax_roles); unknown roles are ignored.
+// reads each role's `fg`. The contract FIXES the syntax_roles set (15 names,
+// contract.json); SPEC 18.4 requires unknown roles to be IGNORED, which is why
+// this file reads only registered names: `tag` drives org tags, `preprocessor`
+// drives meta lines, and the paren rainbow is deliberately STATIC — one
+// overlay color would destroy the depth cue (amendment #126, option B).
 package com.calebc42.ebp.companion.render
 
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -33,6 +36,7 @@ data class SyntaxColors(
     val number: Color,
     val link: Color,
     val meta: Color,
+    val tag: Color,
     val todo: Color,
     val done: Color,
     val heading: List<Color>,
@@ -45,6 +49,7 @@ data class SyntaxColors(
                 keyword = Color(0xFF81A1C1), function = Color(0xFF88C0D0),
                 constant = Color(0xFFB48EAD), number = Color(0xFFB48EAD),
                 link = Color(0xFF88C0D0), meta = Color(0xFF7B88A1),
+                tag = Color(0xFF8FBCBB),
                 todo = Color(0xFFBF616A), done = Color(0xFFA3BE8C),
                 heading = listOf(
                     Color(0xFF88C0D0), Color(0xFF81A1C1), Color(0xFFB48EAD),
@@ -57,6 +62,7 @@ data class SyntaxColors(
                 keyword = Color(0xFF3B5B8C), function = Color(0xFF2E6E7E),
                 constant = Color(0xFF8A4B82), number = Color(0xFF8A4B82),
                 link = Color(0xFF2E6E7E), meta = Color(0xFF5E6B82),
+                tag = Color(0xFF3F7A6E),
                 todo = Color(0xFFA01F2C), done = Color(0xFF4F6F3F),
                 heading = listOf(
                     Color(0xFF2E6E7E), Color(0xFF3B5B8C), Color(0xFF8A4B82),
@@ -86,13 +92,14 @@ private fun JSONObject.syntaxFg(role: String): Color? {
 }
 
 /** SyntaxColors from a pushed §18.4 `syntax` map, holes filled from [fallback].
- * heading/paren stay the rainbow default unless the map names them. */
+ * REGISTERED roles only (SPEC 18.4 requires ignoring the rest): `tag` styles
+ * org tags, `preprocessor` styles meta/table lines, and the paren rainbow is
+ * never overlaid — one uniform color would destroy the depth cue (#126 B). */
 fun emacsSyntaxColors(syntax: JSONObject?, fallback: SyntaxColors): SyntaxColors {
     val s = syntax ?: return fallback
     fun one(role: String, base: Color) = s.syntaxFg(role) ?: base
-    // A single "heading"/"paren" fg recolours the whole rainbow uniformly.
+    // A single "heading" fg recolours the whole heading rainbow uniformly.
     val heading = s.syntaxFg("heading")?.let { listOf(it) } ?: fallback.heading
-    val paren = s.syntaxFg("paren")?.let { listOf(it) } ?: fallback.paren
     return SyntaxColors(
         comment = one("comment", fallback.comment),
         string = one("string", fallback.string),
@@ -101,10 +108,11 @@ fun emacsSyntaxColors(syntax: JSONObject?, fallback: SyntaxColors): SyntaxColors
         constant = one("constant", fallback.constant),
         number = one("number", fallback.number),
         link = one("link", fallback.link),
-        meta = one("meta", fallback.meta),
+        meta = one("preprocessor", fallback.meta),
+        tag = one("tag", fallback.tag),
         todo = one("todo", fallback.todo),
         done = one("done", fallback.done),
-        heading = heading, paren = paren)
+        heading = heading, paren = fallback.paren)
 }
 
 /**
@@ -382,7 +390,7 @@ private fun AnnotatedString.Builder.styleOrgLine(line: String, base: Int, c: Syn
             val title = m.groupValues[2]
             orgTodoRe.find(title)?.let { span(base + titleStart, it.range, SpanStyle(color = c.todo, fontWeight = FontWeight.Bold)) }
             orgDoneRe.find(title)?.let { span(base + titleStart, it.range, SpanStyle(color = c.done, fontWeight = FontWeight.Bold)) }
-            orgTagsRe.find(line)?.let { span(base, it.groups[1]!!.range, SpanStyle(color = c.meta)) }
+            orgTagsRe.find(line)?.let { span(base, it.groups[1]!!.range, SpanStyle(color = c.tag)) }
             return
         }
         trimmed.startsWith("# ") -> {

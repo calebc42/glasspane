@@ -24,10 +24,11 @@
 ;;   syntaxFg reads only fg, and a JSON array in a role slot is ignored
 ;;   outright, so the poc's heading/paren VECTORS are dead wire:
 ;;   heading is emitted as ONE style, paren not at all.
-;; - `:meta' is emitted as a duplicate of `:preprocessor': the contract
-;;   names the role `preprocessor', but the live Companion still reads
-;;   "meta" (SyntaxHighlight.kt); 18.4 makes unknown roles ignorable, so
-;;   the duplicate is safe everywhere and dies with the Kotlin fix.
+;; - Every emitted role is a REGISTERED contract syntax role.  The
+;;   `:meta' compat duplicate of `:preprocessor' died with amendment
+;;   #126 option B: the Companion now reads `preprocessor' (meta lines)
+;;   and `tag' (org tags) and ignores unregistered names, as 18.4
+;;   requires of every conforming receiver.
 ;; - The poc's global `jetpacs-connected-hook' is gone; the re-push on
 ;;   reconnect rides a per-client ready hook that `jetpacs-connect'
 ;;   wires under `fboundp', like the shell drain.
@@ -331,7 +332,6 @@ compacts away there."
        (:number . ,(jetpacs-theme--style (jetpacs-theme--modus 'constant)))
        (:operator . ,(jetpacs-theme--style (jetpacs-theme--modus 'operator)))
        (:preprocessor . ,pre)
-       (:meta . ,pre)
        (:heading . ,(jetpacs-theme--style
                      (jetpacs-theme--modus 'fg-heading-1)))
        (:link . ,(jetpacs-theme--style (jetpacs-theme--modus 'fg-link)))
@@ -374,7 +374,6 @@ compacts away there."
                       (jetpacs-theme--face-color
                        :foreground 'font-lock-operator-face)))
        (:preprocessor . ,pre)
-       (:meta . ,pre)
        (:heading . ,(jetpacs-theme--style
                      (jetpacs-theme--face-color :foreground 'outline-1)))
        (:link . ,(jetpacs-theme--style

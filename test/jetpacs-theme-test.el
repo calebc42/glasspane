@@ -107,9 +107,11 @@ expectations, so a modus version bump cannot silently break the suite."
                                                     :with-overrides)))))))
 
 (ert-deftest jetpacs-theme/modus-syntax-styles-are-objects ()
-  "Syntax values are SyntaxStyle plists — never vectors; :meta duplicates
-:preprocessor; :paren is not emitted; keys (minus :meta) are contract
-syntax roles."
+  "Syntax values are SyntaxStyle plists — never vectors; EVERY key is a
+contract syntax role (the #126 carve-out for :meta is gone — the pin
+now catches exactly the drift class it was built for); :paren is never
+emitted (the Companion's rainbow is deliberately static); :preprocessor
+and :tag both ship (they drive meta lines and org tags)."
   (jetpacs-theme-test--with-modus 'modus-operandi
     (let ((syn (jetpacs-theme--syntax)))
       (should syn)
@@ -117,10 +119,11 @@ syntax roles."
                (should (consp v))
                (should (string-match-p "\\`#[0-9a-f]\\{6\\}\\'"
                                        (plist-get v :fg)))
-               (unless (eq k :meta)
-                 (should (member (substring (symbol-name k) 1)
-                                 jetpacs-syntax-roles))))
-      (should (equal (plist-get syn :meta) (plist-get syn :preprocessor)))
+               (should (member (substring (symbol-name k) 1)
+                               jetpacs-syntax-roles)))
+      (should-not (plist-member syn :meta))
+      (should (plist-get syn :preprocessor))
+      (should (plist-get syn :tag))
       (should (consp (plist-get syn :heading)))
       (should-not (vectorp (plist-get syn :heading)))
       (should-not (plist-member syn :paren)))))

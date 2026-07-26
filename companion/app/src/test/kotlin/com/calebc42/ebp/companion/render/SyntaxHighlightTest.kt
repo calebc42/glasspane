@@ -75,4 +75,37 @@ class SyntaxHighlightTest {
             SyntaxColors.forBackground(dark = true))
         assertTrue(merged.heading.all { it == Color(0xFF123456) })
     }
+
+    // Amendment #126 option B: registered roles only.
+    @Test
+    fun tagDrivesOrgTagsAndPreprocessorDrivesMetaLines() {
+        val fallback = SyntaxColors.forBackground(dark = true)
+        val merged = emacsSyntaxColors(
+            JSONObject()
+                .put("tag", JSONObject().put("fg", "#caa6df"))
+                .put("preprocessor", JSONObject().put("fg", "#ff7f9f")),
+            fallback)
+        assertEquals(Color(0xFFCAA6DF), merged.tag)
+        assertEquals(Color(0xFFFF7F9F), merged.meta)
+        // The live Emacs payload: an org :work: tag renders in the TAG
+        // color, not the preprocessor pink.
+        val spans = highlightSpans("org", "* Heading :work:", merged)
+        assertTrue(spans.any { it.item.color == merged.tag })
+        assertTrue(spans.none { it.item.color == Color(0xFFFF7F9F) })
+    }
+
+    @Test
+    fun unregisteredMetaAndParenAreIgnored() {
+        val fallback = SyntaxColors.forBackground(dark = false)
+        val merged = emacsSyntaxColors(
+            JSONObject()
+                .put("meta", JSONObject().put("fg", "#111111"))
+                .put("paren", JSONObject().put("fg", "#222222")),
+            fallback)
+        // SPEC 18.4: unknown roles MUST be ignored — meta keeps the
+        // static value and the paren rainbow keeps its depth cue.
+        assertEquals(fallback.meta, merged.meta)
+        assertEquals(fallback.paren, merged.paren)
+        assertTrue(merged.paren.size > 1)
+    }
 }

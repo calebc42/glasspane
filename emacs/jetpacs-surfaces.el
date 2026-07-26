@@ -176,15 +176,13 @@ the action staging table survives — it is load-time state that
   "Dial the Companion, attach the client, and return it.
 CONFIG is `ebp-client-create' config; this wrapper owns
 `:state-changed-function' (the jetpacs state fan-out — subscribe with
-`jetpacs-on-state-change') and `:before-replay-function' (the SPEC 10.3
-step-3 required-root push, when `jetpacs-shell' is loaded); a caller
-value for either is shadowed.  Everything else passes through."
+`jetpacs-on-state-change') and `:before-replay-function'
+\(`jetpacs--before-replay': the applied-revision seed, then the SPEC
+10.3 step-3 required-root push when `jetpacs-shell' is loaded); a
+caller value for either is shadowed.  Everything else passes through."
   (let ((client (apply #'ebp-connect host port
                        :state-changed-function #'jetpacs--on-state-changed
-                       :before-replay-function
-                       (lambda (c)
-                         (when (fboundp 'jetpacs-shell--before-replay)
-                           (jetpacs-shell--before-replay c)))
+                       :before-replay-function #'jetpacs--before-replay
                        config)))
     (jetpacs-attach client)))
 
@@ -411,7 +409,45 @@ future client."
 `ebp-client-revisions' cannot serve: it claims `floor + 1' at SEND time
 so a second in-flight push is newer, and never rolls back when a push
 fails — one refused update would otherwise leave every later tap looking
-stale forever.  `jetpacs-shell' records confirmations here.")
+stale forever.  `jetpacs-shell' records confirmations here, and
+`jetpacs--seed-applied-revisions' seeds it from every welcome.")
+
+(defun jetpacs--seed-applied-revisions (client)
+  "Adopt CLIENT's welcome-reported floors as confirmed-applied revisions.
+A welcome floor IS a confirmed apply: SPEC 13.1 lets the Companion
+report a revision only after durably committing the snapshot or
+tombstone it belongs to.  Without this seed the table starts empty
+after a process restart, `jetpacs-event-stale-p' answers \"not stale\"
+for a surface it has no entry for, and every event replayed from the
+durable queue — queued against a snapshot revisions old — dispatches
+as fresh, so handlers index into the wrong rows
+(docs/RESEARCH-A8-2026-07-25.md section 5.2).
+
+REPLACES the table rather than folding `max' over it: the Companion is
+the authority on what it has applied, and after a pairing wipe or
+reinstall its floors legitimately FALL — a surviving in-memory entry
+above the reported floor would mark every replayed event stale against
+a snapshot history that no longer exists.  Tombstone floors
+(`:present' nil) seed too: an event queued before a removal was
+outrun by it just as surely as by a later snapshot."
+  (clrhash jetpacs--applied-revisions)
+  (cl-loop for (key entry) on (ebp-client-surfaces client) by #'cddr
+           for revision = (plist-get entry :revision)
+           when (integerp revision)
+           do (puthash (substring (symbol-name key) 1) revision
+                       jetpacs--applied-revisions)))
+
+(defun jetpacs--before-replay (client)
+  "The SPEC 10.3 step-3 barrier work `jetpacs-connect' installs.
+Ordering is the point: `queue.replay' (step 4) delivers retained
+`event.action' requests while the session is still SYNCING, so
+everything a replayed handler consults must be in place before this
+function returns — the applied-revision seed first, then the shell's
+tombstone flush and required-root pushes when `jetpacs-shell' is
+loaded."
+  (jetpacs--seed-applied-revisions client)
+  (when (fboundp 'jetpacs-shell--before-replay)
+    (jetpacs-shell--before-replay client)))
 
 (defun jetpacs-event-stale-p (params)
   "Non-nil when PARAMS' event was created against an outdated snapshot.
@@ -538,6 +574,7 @@ array string, or a single string; anything else is discarded."
 (defun jetpacs-test-reset-state ()
   "Reset floor state for tests and teardown."
   (clrhash jetpacs--state-handlers)
+  (clrhash jetpacs--applied-revisions)
   (when (fboundp 'jetpacs-async-reset)
     (jetpacs-async-reset))
   (when (boundp 'jetpacs-shell--snackbar)

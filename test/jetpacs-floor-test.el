@@ -190,6 +190,74 @@ make every later tap on that surface stale forever."
     ;; A dialog event has no surface/revision context: never stale.
     (should-not (jetpacs-event-stale-p '(:dialog_id "d1")))))
 
+(ert-deftest jetpacs-floor-applied-revisions-seed-from-welcome ()
+  "A8 P1 (RESEARCH-A8 5.2): welcome floors ARE confirmed applies.
+The table is in-memory and was written only on an `applied' result, so
+after a process restart it was empty, `jetpacs-event-stale-p' answered
+\"not stale\" for every surface, and each event replayed from the
+durable queue dispatched against a snapshot revisions old.  The seed
+adopts the welcome floors; the Companion is the authority, so seeding
+REPLACES — a leftover entry above a legitimately fallen floor (pairing
+wipe) must not survive."
+  (jetpacs-floor-test--with-client (client)
+    (setf (ebp-client-surfaces client)
+          '(:app:demo (:revision 60 :present t)
+            :app:gone (:revision 7 :present nil)
+            :app:junk (:revision "x" :present t)))
+    ;; The cold-start hole, pinned: before the seed nothing is stale,
+    ;; even 18 revisions behind the floor the Companion reported.
+    (puthash "app:zombie" 99 jetpacs--applied-revisions)
+    (should-not (jetpacs-event-stale-p
+                 '(:surface "app:demo" :revision_seen 42)))
+    (jetpacs--seed-applied-revisions client)
+    ;; Below the floor -> stale; at the floor -> fresh.
+    (should (jetpacs-event-stale-p
+             '(:surface "app:demo" :revision_seen 42)))
+    (should-not (jetpacs-event-stale-p
+                 '(:surface "app:demo" :revision_seen 60)))
+    ;; A tombstone floor participates: the removal outran the event.
+    (should (jetpacs-event-stale-p
+             '(:surface "app:gone" :revision_seen 3)))
+    ;; Replace-not-max: the prior session's leftover is gone.
+    (should-not (gethash "app:zombie" jetpacs--applied-revisions))
+    ;; A malformed floor seeds nothing rather than poisoning stale-p.
+    (should-not (gethash "app:junk" jetpacs--applied-revisions))
+    ;; A surface the Companion never reported stays not-stale.
+    (should-not (jetpacs-event-stale-p
+                 '(:surface "app:new" :revision_seen 0)))))
+
+(ert-deftest jetpacs-floor-replayed-event-against-old-snapshot-is-stale ()
+  "A8 P1 end to end: the barrier seed reaches a real replayed dispatch.
+`jetpacs--before-replay' is what `jetpacs-connect' installs; SPEC 10.3
+runs it at step 3, before `queue.replay' (step 4) delivers retained
+events, so a handler that opts into `jetpacs-event-stale-p' must see
+the seeded floors by then.  Without the seed the first event — queued
+against revision 42 before the restart — dispatched `accepted' and the
+handler indexed an 18-revision-old snapshot."
+  (jetpacs-floor-test--with-client (client)
+    (setf (ebp-client-surfaces client) '(:app:demo (:revision 60 :present t)))
+    (jetpacs--before-replay client)
+    (with-jetpacs-owner "demo"
+      (jetpacs-defaction "a8.visit"
+                         (lambda (_args params)
+                           (if (jetpacs-event-stale-p params)
+                               'stale
+                             'accepted))))
+    ;; The replayed event, queued against the pre-restart snapshot.
+    ;; Event ids are the SPEC 4.4 hex grammar — fillers must be hex digits.
+    (should (equal (ebp-client--handle-event-action
+                    client (jetpacs-floor-test--event
+                            (make-string 32 ?d)
+                            :action "a8.visit" :revision_seen 42))
+                   '(:status "stale")))
+    ;; An event against the current floor dispatches normally.
+    (should (equal (ebp-client--handle-event-action
+                    client (jetpacs-floor-test--event
+                            (make-string 32 ?e)
+                            :action "a8.visit" :revision_seen 60))
+                   '(:status "accepted")))
+    (jetpacs-undefaction "a8.visit")))
+
 (ert-deftest jetpacs-floor-state-fanout ()
   (jetpacs-floor-test--with-client (client)
     (let (got)

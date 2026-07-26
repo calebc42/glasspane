@@ -189,13 +189,30 @@ coding-pin regression test. **A candidate fix was REFUTED and deliberately not i
 if`), so that "fix" would have been dead code with a false comment. Baselines **311 wire / 24 app /
 208 elisp**, validate.py green.
 
+**A8 DEVICE DEBT CLEARED** (`8db3260`, Pixel Tablet, 2026-07-25): all three deferrals verified on
+hardware. `smoke-a8-editor.el` covers the inbound-`edit.apply`-while-shown adoption (the dump reads
+`start-a𝄞b` after the apply) AND LD-4's astral case on real hardware in one choreography — a device
+keystroke after an astral apply produces a scalar-positioned `edit.delta` landing exactly on
+`start-a𝄞bx`, which a leaked UTF-16 index could not do. `smoke-a8-dialog-done.el` closes LD-1 with a
+dialog that has NO OK button, so only the IME Done path can conclude it (`submitted`,
+`fields.name = "hi"`). `smoke-a8-coldstart.el` covers the C1 choreography below. Harness traps
+recorded in the commit: `ebp-client-edit-apply`'s callback takes (STATUS ERROR) with STATUS a
+STRING, and uiautomator XML-escapes astral chars (`&#119070;`) so a correct display reads as a
+failure unless unescaped.
+
 **A8's C1 CLOSED** (`d11300e`, 2026-07-25, Caleb's go-ahead): `jetpacs--applied-revisions` seeds
 from the welcome floors at the §10.3 step-3 barrier — replace-not-max (a wiped Companion's floors
 legitimately fall), tombstone floors included, via the new named `jetpacs--before-replay` that
 `jetpacs-connect` installs (seed first, then the shell's step-3 pushes). Reproduced pre-fix
 (`accepted` for a replayed event 18 revisions behind the floor), `stale` post. Floor suite 24 → 26;
 **210 elisp** total. Deferred to device time: the full cold-start choreography (queue offline, kill,
-restart, replay). **NEXT: §1.7's R1-for-H2 and R3 (the §22.2 "in transmission" amendment), then
+restart, replay). **The device pass also caught a FOURTH barrier-window bug** (`6f500ca`), the kind unit tests
+structurally cannot see: SPEC 10.3 step 4 delivers replayed events while still SYNCING, so a D2
+handler's deferred effect push fired before READY and `jetpacs-shell-push`'s gate dropped it
+silently — Emacs state right, device stale until the user's next tap, whose event then carried the
+OLD `revision_seen`. Refused pushes with a registered builder now queue and `jetpacs-shell--on-ready`
+drains them; fully disconnected pushes still drop (the barrier owns those). Floor suite 27,
+**211 elisp**. **NEXT: §1.7's R1-for-H2 and R3 (the §22.2 "in transmission" amendment), then
 §7-a; the parity track proceeds separately at JC-4 (dialog rebuild).**
 
 **Deferred to device time:** LD-4's astral on-device check (unit-covered in `271c3df`; the

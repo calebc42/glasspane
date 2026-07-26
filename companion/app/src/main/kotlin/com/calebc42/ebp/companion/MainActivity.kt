@@ -7,10 +7,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -142,10 +144,21 @@ private fun DialogHost(
                 // without this, any dialog taller than the window (a long
                 // enum_list picker, stacked context cards) has UNREACHABLE
                 // content below the fold. JC-4 prerequisite.
+                //
+                // heightIn is what makes verticalScroll work AT ALL here:
+                // a Dialog measures its content with UNBOUNDED height, so a
+                // scrolling column believes it has infinite room, never
+                // scrolls, and the window is simply clipped by the screen.
+                // Capping the height gives the scroll something to overflow.
+                // A cap rather than fillMaxHeight so a short dialog still
+                // wraps its content instead of always filling the screen.
+                val maxDialogHeight =
+                    (LocalConfiguration.current.screenHeightDp * 0.8f).dp
                 androidx.compose.foundation.layout.Column(
                     Modifier
-                        .padding(24.dp)
-                        .verticalScroll(rememberScrollState())) {
+                        .heightIn(max = maxDialogHeight)
+                        .verticalScroll(rememberScrollState())
+                        .padding(24.dp)) {
                     RenderDialogRoot(id, dspec, bridge)
                 }
             }

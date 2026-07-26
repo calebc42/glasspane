@@ -176,12 +176,20 @@
           (should (null pushed)))
         (cl-loop repeat 10 do (accept-process-output nil 0.05))
         (should (equal pushed '("app:jetpacs.clip")))
-        ;; The originating surface wins, not the owner's.
-        (jetpacs--dispatch client '(:action "jetpacs.clip.refresh"
-                                    :surface "app:other")
-                           (gethash "jetpacs.clip.refresh" jetpacs-action-handlers))
+        ;; E2b: a FOREIGN surface on the wire is rejected before the
+        ;; handler runs (SPEC 14.4 / D1) — pre-fix this dispatched and
+        ;; pushed app:other, running another owner's root builder from
+        ;; clip's action.
+        (let ((warning-minimum-log-level :emergency))
+          (should (eq (jetpacs--dispatch
+                       client '(:action "jetpacs.clip.refresh"
+                                :surface "app:other")
+                       (gethash "jetpacs.clip.refresh"
+                                jetpacs-action-handlers))
+                      'rejected)))
         (cl-loop repeat 10 do (accept-process-output nil 0.05))
-        (should (equal (car pushed) "app:other"))))))
+        ;; No second push happened.
+        (should (equal pushed '("app:jetpacs.clip")))))))
 
 (ert-deftest jetpacs-clip-kill-advice-gating ()
   (let ((scheduled 0))

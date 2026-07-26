@@ -609,7 +609,9 @@ Returns the timer."
                          (jetpacs-current-owner owner))
                      (funcall fn))))))
 
-(defun jetpacs--dispatch (client params fn)
+(defvar jetpacs--any-surface-actions)   ; the global-verb table, defined below
+
+(cl-defun jetpacs--dispatch (client params fn)
   "Run FN for one `event.action' and derive its SPEC 14.4 status.
 FN is called with (ARGS PARAMS) and MUST return `accepted', `stale', or
 `rejected'; any other return answers `rejected' with a loud warning
@@ -645,6 +647,30 @@ logged: amendment #74 puts sensitive trigger data in `args'."
         (read-file-name-function #'read-file-name-default)
         (read-buffer-function nil)
         (disabled-command-function nil))
+    ;; D1 surface-context validation (SPEC 14.4: "Emacs MUST validate
+    ;; the ... surface context ... before invoking application
+    ;; behavior").  Scope: OWNED actions only — an owned action acts on
+    ;; its owner's surfaces unless it declared :any-surface.  Ownerless
+    ;; actions are deliberately not gated here: their handlers thread the
+    ;; wire surface into paths that already degrade (a rootless push
+    ;; no-ops), and a rooted-surface bound would reject REPLAYED durable
+    ;; events for non-required roots at the barrier, which is worse than
+    ;; the ghost it prevents.
+    (let ((event-surface (plist-get params :surface)))
+      (when (and jetpacs-current-owner
+                 (stringp event-surface)
+                 (not (gethash (plist-get params :action)
+                               jetpacs--any-surface-actions))
+                 (not (jetpacs-owned-surface-p event-surface
+                                               jetpacs-current-owner)))
+        (display-warning
+         'jetpacs
+         (format "action %s (owner %S) refused for foreign surface %S \
+(SPEC 14.4 / D1)"
+                 (plist-get params :action) jetpacs-current-owner
+                 event-surface)
+         :warning)
+        (cl-return-from jetpacs--dispatch 'rejected)))
     (condition-case err
         (pcase (jetpacs-with-no-prompts (funcall fn args params))
           ((and status (or 'accepted 'stale 'rejected)) status)
@@ -698,7 +724,20 @@ Looks the handler up at dispatch time so live-coded redefinitions win."
           (jetpacs--dispatch client params fn)
         'rejected))))
 
-(defun jetpacs-defaction (name fn)
+(defvar jetpacs--any-surface-actions (make-hash-table :test #'equal)
+  "Action names registered with :any-surface — D1 GLOBAL VERBS.
+An owned action is otherwise scoped to its owner's surfaces at
+dispatch; a global verb (base's `jetpacs.theme.modus-toggle': owned,
+owns ZERO surfaces, any surface may render its button) declares the
+exception EXPLICITLY rather than having the gate infer it.")
+
+(defun jetpacs-owned-surface-p (surface owner)
+  "Non-nil when SURFACE is OWNER's D1 primary or claimed under it."
+  (and (stringp surface) (stringp owner)
+       (or (equal surface (concat "app:" owner))
+           (and (member surface (jetpacs--owned-names "surface" owner)) t))))
+
+(cl-defun jetpacs-defaction (name fn &key any-surface)
   "Register FN as the handler for the remote action NAME; returns NAME.
 A function, not a macro: FN is a value, `(lambda (args params) ...)'.
 ARGS is the event's `:args' plist (jsonrpc decode: nested keyword
@@ -712,7 +751,13 @@ MUST return `accepted' only once the effect is durable.
 
 Registers into the global staging table and, when a client is attached,
 into its live allowlist; `jetpacs-attach' replays the table into every
-future client."
+future client.
+
+When registered under `with-jetpacs-owner', the dispatch REJECTS an
+event whose wire surface is not the owner's (SPEC 14.4 validates the
+surface context BEFORE invoking behavior).  ANY-SURFACE non-nil
+declares a GLOBAL VERB exempt from that scope — for an owner-attributed
+action whose button any surface may legitimately render."
   (unless (and (stringp name) (string-search "." name)
                (string-match-p "\\`[A-Za-z0-9][A-Za-z0-9._:/-]*\\'" name)
                (<= (string-bytes name) 128))
@@ -722,6 +767,9 @@ future client."
     (error "jetpacs: action %s handler must be a function" name))
   (jetpacs--claim "action" name)
   (puthash name fn jetpacs-action-handlers)
+  (if any-surface
+      (puthash name t jetpacs--any-surface-actions)
+    (remhash name jetpacs--any-surface-actions))
   (when jetpacs--client
     (ebp-client-register-action jetpacs--client name
                                 (jetpacs--action-shim name)))
@@ -730,6 +778,7 @@ future client."
 (defun jetpacs-undefaction (name)
   "Remove the action NAME from the staging table and any live client."
   (remhash name jetpacs-action-handlers)
+  (remhash name jetpacs--any-surface-actions)
   (when jetpacs--client
     (remhash name (ebp-client-actions jetpacs--client)))
   (jetpacs--unclaim "action" name))

@@ -554,7 +554,11 @@ fine — there is a user at the keyboard."
             (progn (modus-themes-toggle) 'accepted)
           (error (message "jetpacs-theme: modus.toggle failed: %s"
                           (jetpacs--error-label err))
-                 'rejected))))))
+                 'rejected))))
+    ;; A GLOBAL VERB: theme owns no surface, and ANY surface may render
+    ;; its button — without this the dispatch's D1 scope would reject
+    ;; every real tap (a surface event always carries `surface').
+    :any-surface t))
 
 (provide 'jetpacs-theme)
 ;;; jetpacs-theme.el ends here

@@ -1015,7 +1015,8 @@ context and the default is all there is."
                              'accepted)))
       (should (equal (ebp-client--handle-event-action
                       client (jetpacs-floor-test--event
-                              (make-string 32 ?1) :action "acme.app.tap"))
+                              (make-string 32 ?1) :action "acme.app.tap"
+                              :surface "app:acme.app"))
                      '(:status "accepted")))
       (should (equal owner "acme.app"))
       (should (equal surface "app:acme.app"))
@@ -1082,7 +1083,7 @@ surface's SPEC 14.6 input store."
                               (alist-get "app:main" jetpacs-shell--roots
                                          nil nil #'equal))
                              'accepted)))
-      (jetpacs--dispatch client '(:action "acme.tap" :surface "app:demo")
+      (jetpacs--dispatch client '(:action "acme.tap" :surface "app:acme")
                          (gethash "acme.tap" jetpacs-action-handlers))
       (should (eq build-owner nil))
       (jetpacs-undefaction "acme.tap"))))
@@ -1101,6 +1102,81 @@ repaired action path would silently misroute here."
                                  "app:d1app"))
       (jetpacs--on-state-changed client "app:d1app" 1 "field" "typed")
       (should (equal owner "d1app")))))
+
+
+;;;; E2b: the D1 surface-context gate
+
+(ert-deftest jetpacs-floor-owned-action-rejects-a-foreign-surface ()
+  "SPEC 14.4: the surface context is validated BEFORE behavior.  An
+owned action tapped from a surface its owner does not hold is rejected
+with the handler NEVER invoked — pre-fix a nonconforming peer could run
+any owner's root builder from any other owner's action."
+  (jetpacs-floor-test--with-client (client)
+    (let ((runs 0))
+      (with-jetpacs-owner "acme"
+        (jetpacs-defaction "acme.tap"
+                           (lambda (_a _p) (cl-incf runs) 'accepted)))
+      (let ((warning-minimum-log-level :emergency))
+        (should (eq (jetpacs--dispatch
+                     client '(:action "acme.tap" :surface "app:other")
+                     (gethash "acme.tap" jetpacs-action-handlers))
+                    'rejected)))
+      (should (= runs 0))
+      ;; The owner's own surface passes…
+      (should (eq (jetpacs--dispatch
+                   client '(:action "acme.tap" :surface "app:acme")
+                   (gethash "acme.tap" jetpacs-action-handlers))
+                  'accepted))
+      ;; …and so does a SURFACELESS SPEC 14.4 event (reminder/trigger).
+      (should (eq (jetpacs--dispatch
+                   client '(:action "acme.tap")
+                   (gethash "acme.tap" jetpacs-action-handlers))
+                  'accepted))
+      (should (= runs 2))
+      (jetpacs-undefaction "acme.tap"))))
+
+(ert-deftest jetpacs-floor-owned-secondary-surface-passes-the-gate ()
+  "The scope is the owner's SURFACES, plural: a secondary surface
+claimed under the owner is as much theirs as the D1 primary."
+  (jetpacs-floor-test--with-client (client)
+    (let ((runs 0))
+      (with-jetpacs-owner "acme"
+        (jetpacs--claim "surface" "app:acme-detail")
+        (jetpacs-defaction "acme.tap"
+                           (lambda (_a _p) (cl-incf runs) 'accepted)))
+      (should (eq (jetpacs--dispatch
+                   client '(:action "acme.tap" :surface "app:acme-detail")
+                   (gethash "acme.tap" jetpacs-action-handlers))
+                  'accepted))
+      (should (= runs 1))
+      (jetpacs--unclaim "surface" "app:acme-detail")
+      (jetpacs-undefaction "acme.tap"))))
+
+(ert-deftest jetpacs-floor-global-verb-passes-from-any-surface ()
+  "An owned action registered :any-surface is a GLOBAL VERB: base's
+theme toggle owns ZERO surfaces and any surface may render its button —
+a real tap always carries that surface, so without the exemption the
+gate would reject every one."
+  (jetpacs-floor-test--with-client (client)
+    (let ((runs 0))
+      (with-jetpacs-owner "acme"
+        (jetpacs-defaction "acme.global"
+                           (lambda (_a _p) (cl-incf runs) 'accepted)
+                           :any-surface t))
+      (should (eq (jetpacs--dispatch
+                   client '(:action "acme.global" :surface "app:anything")
+                   (gethash "acme.global" jetpacs-action-handlers))
+                  'accepted))
+      (should (= runs 1))
+      ;; Re-registration WITHOUT the flag rescopes it.
+      (with-jetpacs-owner "acme"
+        (jetpacs-defaction "acme.global" (lambda (_a _p) 'accepted)))
+      (let ((warning-minimum-log-level :emergency))
+        (should (eq (jetpacs--dispatch
+                     client '(:action "acme.global" :surface "app:anything")
+                     (gethash "acme.global" jetpacs-action-handlers))
+                    'rejected)))
+      (jetpacs-undefaction "acme.global"))))
 
 (provide 'jetpacs-floor-test)
 ;;; jetpacs-floor-test.el ends here

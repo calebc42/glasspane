@@ -75,7 +75,7 @@ Deliberately not `count-lines' — the poc counted every fileless
 buffer's lines on every render."
   (with-current-buffer buf
     (if buffer-file-name
-        (abbreviate-file-name buffer-file-name)
+        (jetpacs-scalar-text (abbreviate-file-name buffer-file-name))
       (format "%s · %s chars"
               (string-remove-suffix "-mode" (symbol-name major-mode))
               (buffer-size)))))
@@ -94,9 +94,16 @@ buffer's lines on every render."
      (let ((name (buffer-name buf)))
        (jetpacs-buffer-expose-buffer name "jetpacs.emacs.view")
        (jetpacs-chrome-row
-        (if (and (buffer-file-name buf) (buffer-modified-p buf))
-            (concat "● " name)
-          name)
+        ;; SPEC 4.1: a buffer or file name can hold a raw-byte char
+        ;; (#x3FFF80..#x3FFFFF) that `json-serialize' refuses.  The hub is
+        ;; the REGISTERED ROOT, so an unsanitized name does not degrade to
+        ;; one error card — it makes the whole surface unpushable for as
+        ;; long as that buffer lives, and the user cannot reach the list to
+        ;; kill it.  Every sibling emitter sanitizes; this one must too.
+        (jetpacs-scalar-text
+         (if (and (buffer-file-name buf) (buffer-modified-p buf))
+             (concat "● " name)
+           name))
         :subtitle (jetpacs-emacs-ui--buffer-subtitle buf)
         :on-tap (jetpacs-action "jetpacs.emacs.view"
                                 :args (list :buffer name))
@@ -135,7 +142,8 @@ below us in the same document), so the view verb is re-exposed here."
   (let ((buf (get-buffer name)))
     (if (not buf)
         (jetpacs-chrome-screen
-         name (jetpacs-empty-state "Buffer is gone") :back back)
+         (jetpacs-scalar-text name)
+         (jetpacs-empty-state :title "Buffer is gone") :back back)
       (let ((body
              (apply #'jetpacs-column
                     (if (equal name (jetpacs-results-region-buffer))
@@ -156,7 +164,7 @@ below us in the same document), so the view verb is re-exposed here."
         (jetpacs-buffer-expose-buffer name "jetpacs.emacs.imenu")
         (jetpacs-buffer-expose-buffer name "jetpacs.emacs.palette")
         (jetpacs-chrome-screen
-         name body
+         (jetpacs-scalar-text name) body
          :back back
          :actions (list (jetpacs-icon-button
                          "toc" (jetpacs-action "jetpacs.emacs.imenu"
@@ -184,32 +192,67 @@ below us in the same document), so the view verb is re-exposed here."
   "Lines of *Messages* the tail screen shows."
   :type 'natnum :group 'jetpacs)
 
+(defcustom jetpacs-emacs-ui-copy-max-bytes 4096
+  "Byte cap on the *Messages* \"Copy all\" payload.
+The rendered tail is already bounded by the SPEC 4.5 budget; this
+descriptor is NOT (it is a second copy of the same text, invisible to
+that accounting), so it carries its own bound."
+  :type 'natnum :group 'jetpacs)
+
+(defun jetpacs-emacs-ui--messages-copy-text (buf)
+  "The clipboard payload for BUF's tail: sanitized and byte-capped."
+  (let* ((raw (with-current-buffer buf
+                (buffer-substring-no-properties
+                 (save-excursion
+                   (goto-char (point-max))
+                   (forward-line (- jetpacs-emacs-ui-messages-lines))
+                   (point))
+                 (point-max))))
+         (clean (jetpacs-scalar-text raw)))
+    (if (<= (string-bytes clean) jetpacs-emacs-ui-copy-max-bytes)
+        clean
+      ;; Trim by CHARACTERS until the byte cap holds — a byte-wise
+      ;; substring would split a multibyte char and reintroduce exactly
+      ;; the unserializable value the sanitize just removed.
+      (let ((n (length clean)))
+        (while (and (> n 0)
+                    (> (string-bytes (substring clean 0 n))
+                       jetpacs-emacs-ui-copy-max-bytes))
+          (setq n (/ (* n 9) 10)))
+        (substring clean 0 n)))))
+
 (defun jetpacs-emacs-ui--messages-screen (back)
   "The *Messages* tail over `jetpacs-buffer-render-tail'."
   (let ((buf (get-buffer "*Messages*")))
     (jetpacs-chrome-screen
      "*Messages*"
      (if (not buf)
-         (jetpacs-empty-state "No messages yet")
+         (jetpacs-empty-state :title "No messages yet")
        (apply #'jetpacs-column
         (append
-        (list (jetpacs-row
-               (jetpacs-with-attrs
-                (jetpacs-text (format "Last %d lines"
-                                      jetpacs-emacs-ui-messages-lines)
-                              :style "caption")
-                :weight 1)
-               (jetpacs-button
-                "Copy all"
-                (jetpacs-clipboard-copy
-                 (with-current-buffer buf
-                   (buffer-substring-no-properties
-                    (save-excursion
-                      (goto-char (point-max))
-                      (forward-line (- jetpacs-emacs-ui-messages-lines))
-                      (point))
-                    (point-max)))))
-               :align "center"))
+        (list (apply
+               #'jetpacs-row
+               (append
+                (list (jetpacs-with-attrs
+                       (jetpacs-text (format "Last %d lines"
+                                             jetpacs-emacs-ui-messages-lines)
+                                     :style "caption")
+                       :weight 1))
+                ;; The copy affordance rides three disciplines the
+                ;; `jetpacs-clip' exemplar established and this screen
+                ;; must not skip: only offer it when the Companion
+                ;; ADVERTISES the builtin (B13); sanitize (SPEC 4.1 —
+                ;; *Messages* is the buffer most likely to carry a raw
+                ;; octet, echoed from any process line); and CAP the
+                ;; payload, which is otherwise a second full copy of the
+                ;; tail riding invisibly past the SPEC 4.5 accounting
+                ;; that only counts the rendered nodes.
+                (when (jetpacs-builtin-advertised-p "clipboard.copy")
+                  (list (jetpacs-button
+                         "Copy all"
+                         (jetpacs-clipboard-copy
+                          (jetpacs-emacs-ui--messages-copy-text buf)))))
+                (list :align "center"))))
          (jetpacs-buffer-render-tail buf jetpacs-emacs-ui-messages-lines))))
      :back back)))
 

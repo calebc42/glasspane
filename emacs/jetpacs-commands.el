@@ -92,6 +92,18 @@ True when SYMBOL is a command (`commandp'), does not carry a non-nil
 PREDICATE over `obarray' (the device M-x), and as the visibility
 test for any other surface that suggests commands."
   (and (commandp symbol)
+       ;; TOTAL over what `commandp' accepts, not just over symbols.
+       ;; `commandp' is true for anonymous lambdas, closures and keyboard
+       ;; macros, and the JA-3 consolidation feeds this predicate RAW
+       ;; KEYMAP BINDINGS (jetpacs-keymap's extraction and mining,
+       ;; jetpacs-sections' menu and its 23.2 replay gate) — where
+       ;; anonymous commands are routine: stock `compilation-mode''s
+       ;; menu binds one, so `grep-mode' alone made the palette signal
+       ;; `wrong-type-argument symbolp' inside its flow timer.  Nil is
+       ;; the honest answer: an anonymous command has no name to match a
+       ;; regexp against and no property cell to carry
+       ;; `jetpacs-unsupported', so nothing here can vouch for it.
+       (symbolp symbol)
        (not (get symbol 'jetpacs-unsupported))
        (let ((name (symbol-name symbol)))
          (not (seq-some (lambda (entry)

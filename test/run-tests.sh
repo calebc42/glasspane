@@ -102,6 +102,12 @@ emacs -Q --batch -L emacs -l test/jetpacs-navigate-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-chrome-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-4 exit gate: the org engine — refs/tokens (D-4), resolve guards,
+# the cache key, mutations, and (from O2/O3) the query grammar and
+# capture primitives.
+emacs -Q --batch -L emacs -l test/jetpacs-org-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-3b exit gate: binding extraction (incl. the minor-mode-map poc-bug
 # regression), menu-bar mining over the :filter/:enable/:visible fixture,
 # and suppressed-commands unreachability.

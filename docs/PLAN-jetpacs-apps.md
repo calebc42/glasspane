@@ -304,26 +304,44 @@ M-x, invoke a palette entry from a mode with no registered skin.
 `all-completions` + sort over the whole obarray on *every* bridged
 `completing-read`.
 
-### JA-4 — Org engine *(port)*
+### JA-4 — Org engine *(port)* — **DONE 2026-07-27**
 
-**Lands:** the extraction engine (cache, heading refs, the org-ql-subset
-interpreter over a pluggable accessor, the vulpea note arm, mutations) and the
-shared primitives (headless capture-run, LOGBOOK parser, planning-cookie
-surgery, TBLFM resolver). New alongside: a root allowlist and remote-file-name
-rejection on `resolve-ref`, a SPEC 23.2 allowlist on the `(read q)` sexp arm of
-`parse-query`, and a lock guard on the idle `save-buffer`. The heading-ref
-alist→plist migration lands **in the same commit as glasspane**, which nests the
-ref under `(ref . …)` at five sites and reads it as an alist at four more.
+**Landed** (`jetpacs-org.el`, commits JA-4a/b/c + the gate): the extraction
+engine (cache, heading refs, the grammar interpreter over a pluggable accessor,
+the vulpea note arm, mutations) and the shared primitives (headless
+capture-run, LOGBOOK parser, planning-cookie surgery, TBLFM resolver). New
+alongside, as planned: the `jetpacs-org-roots` allowlist with remote-name
+rejection BEFORE any stat on `resolve-ref`, the SPEC 23.2 allowlist
+(throwaway-obarray read + vet/normalize/re-home, depth/node caps) on the sexp
+arm of `parse-query`, and supersession/lock guards on the debounced save.
+Twelve poc defects fixed at port, each with a mutation-verified regression
+test; the org-ql dispatch arm was DROPPED (untested semantic fork + the RCE
+hand-off — full org-ql would re-enter as a separately vetted entry point).
 
-**Why here:** it is the org API the entire app tier stands on, it is UI-free,
-and it ports nearly verbatim. Nothing else in the rewrite can read or mutate org.
+**D-4 amendment (ratified, Caleb, 2026-07-27):** the "same commit as
+glasspane" clause is amended — glasspane migrates ONCE, at its own port rung.
+Exploration proved it cannot load against the rewrite at all yet (12 of 18
+core requires missing; all 156 `jetpacs-action` calls fail build-time plist
+validation; ~100 handler-side alist reads; 17 actions missing `:ttl-s`), so
+the clause's premise ("touching glasspane anyway") was false. JA-4 landed
+plist- and token-native with NO legacy alist arm; build-time `:args`
+validation guarantees glasspane can never half-migrate. D-4's intent —
+opaque per-owner tokens, never absolute paths on the wire, a single
+migration — is fully preserved. The wire shape: refs stay Emacs-side
+plists; `jetpacs-org-ref-tokens`/`jetpacs-org-token-ref` mint opaque
+`"o<nonce>-<counter>"` strings into a flat (owner,set)-keyed table with a
+replace sweep + owner-teardown sweep; token miss → `stale`, content drift →
+`stale`, policy refusal → `rejected` (SPEC 14.5-honest).
 
-**Size:** ~730 port + ~120 new; plus a glasspane migration commit.
-
-**Exit gate:** ERT — the query grammar against fixture org files (sexp,
-`todo:`/`tags:` tokens, free text), the mtime+date cache key, `capture-run`'s
-filled-copy binding and `:immediate-finish`. Smoke — run a query from the
-device, toggle a TODO and confirm the log note flushed, capture into a template.
+**Exit gate: GREEN.** ERT (`jetpacs-org-test.el`, 41 tests; suite total 498
+across 20 files) — grammar over fixture files (sexp, `todo:`/`tags:`/
+`priority:` tokens, free text, hostile-vet family, obarray cleanliness),
+the full-resolution mtime cache key, `capture-run`'s filled-copy binding
+and `:immediate-finish` via a real `org-capture`. Device smoke
+(`test/smoke-ja4.el`, 13/13): query tap → count from a token-minted set;
+TODO toggle through a token with the `- State` LOGBOOK line re-read from
+disk; capture from a tap landing in the file; a swept pre-re-mint token
+answering `stale`; teardown sweeping the live set.
 
 ### JA-5 — Org on screen
 
@@ -520,7 +538,9 @@ and G3 guarantees hand-written tile specs).
 re-validate at every entry point forever, and `jetpacs-results` deliberately
 avoids exactly this. The token costs a per-owner ref table plus migrating
 glasspane's nine heading-ref sites — which you are touching anyway for the
-alist→plist change, so do both in one commit.
+alist→plist change, so do both in one commit. *(The one-commit clause was
+amended at JA-4 — see the JA-4 entry: glasspane migrates once, at its own
+port rung; the "touching anyway" premise did not survive exploration.)*
 
 **D-5 — Do you want to *manage* `org-capture-templates` from the tablet?**
 *Recommendation: no.* 646 lines of screen for a config edited a few times a
@@ -734,8 +754,12 @@ Tier-1 app is a config on top").
   (JA-4/JA-5 + capture) ahead of JA-3's general-client work — proposed
   reorder, **DECLINED (Caleb, 2026-07-27): JA-3 first, ladder order
   stands.**  The org rungs follow it.
-- **D-4 — RATIFIED as recommended:** opaque per-owner heading-ref tokens;
-  never absolute paths on the wire; one commit with glasspane's alist→plist.
+- **D-4 — RATIFIED as recommended,** then the one-commit clause **AMENDED
+  (Caleb, 2026-07-27)** at JA-4: opaque per-owner heading-ref tokens, never
+  absolute paths on the wire — but glasspane migrates ONCE at its own port
+  rung, not alongside JA-4 (it cannot load against the rewrite: 12/18
+  requires missing, 156 action calls failing plist validation, ~100 alist
+  reads, 17 missing `:ttl-s`).  Tokens landed at JA-4 with no legacy arm.
 - **D-5 — REVERSED: capture-template management from the tablet is IN.**
   Caleb rates it a core use-case for PKM converts.  The 646-line builder
   reschedules after JA-4 (capture-run substrate) + JA-10 (settings engine).

@@ -1,5 +1,53 @@
+# Byte-compiled elisp. The test runner compiles guarded modules and deletes
+# the .elc itself, but a stray one from an interactive session must never
+# ship — a stale .elc silently shadows the .el it was built from.
 *.elc
+
+# Gradle / Kotlin build state. `build/` and `.gradle/` carry no leading
+# slash on purpose: the Gradle root is `companion/`, not the repo root, so
+# these must match at any depth.
 .gradle/
 build/
 .kotlin/
+
+# Local SDK path and signing material — machine-specific or secret, never
+# committed.
 local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# Built Android artifacts. The APK is produced by `:app:assembleDebug` and
+# installed over adb; it is never a source artifact.
+*.apk
+*.aab
+*.aar
+*.ap_
+*.dex
+*.class
+
+# Android Studio / IntelliJ.
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Emacs droppings. The lock files are the live hazard: `.#name` is a
+# DANGLING SYMLINK (user@host:pid), so it is not merely noise — committing
+# one puts a broken link in the tree. This covers this repo's own trees
+# (emacs/, test/, docs/); the `ebp` submodule is a separate repo and needs
+# the same rule of its own.
+*~
+\#*\#
+.\#*
+
+# Python bytecode from tools/ (gen-vocabulary.py) and the submodule's
+# validate.py.
+__pycache__/
+*.py[cod]
+
+# Logs and OS files.
+*.log
+.DS_Store
+Thumbs.db

@@ -372,5 +372,192 @@ daemon."
                       '("x" "y" "z")))
        (should (equal (jetpacs-org-entry-typed-value "MISSING" 'text) ""))))))
 
+;;;; The query grammar (O2)
+
+(defconst jetpacs-org-test--agenda
+  "* TODO Pay the bill :money:\nSCHEDULED: <2026-08-01 Sat>\nelectric company\n* NEXT Call Alice :work:\n* DONE Old chore :money:\nCLOSED: [2026-07-01 Wed]\n* Plain notes\nnothing actionable\n* TODO [#A] Urgent thing :work:\n"
+  "Decoy-laden: every clause below matches SOME entry; only the
+conjunction picks exactly one — an accidentally-OR interpreter fails.")
+
+(defmacro jetpacs-org-test--with-agenda (var &rest body)
+  (declare (indent 1))
+  `(jetpacs-org-test--with-fixture ,var jetpacs-org-test--agenda
+     (let ((org-agenda-files (list ,var))
+           (org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE"))))
+       ,@body)))
+
+(defun jetpacs-org-test--titles (tree)
+  "Run TREE end-to-end through the REAL entry point; titles returned."
+  (jetpacs-org-query "ja4-test" tree
+                     (lambda () (nth 4 (org-heading-components)))))
+
+(ert-deftest jetpacs-org-grammar-sexp-conjunction ()
+  "Exit gate G1 (sexp): decoys match single clauses; the conjunction
+picks exactly one entry."
+  (jetpacs-org-test--with-agenda f
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query
+                     "(and (todo \"TODO\") (tags \"money\"))"))
+                   '("Pay the bill")))
+    ;; OR spans; NOT excludes.
+    (should (= 2 (length (jetpacs-org-test--titles
+                          (jetpacs-org-parse-query
+                           "(and (todo) (tags \"work\"))")))))
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query
+                     "(and (tags \"money\") (not (done)))"))
+                   '("Pay the bill")))))
+
+(ert-deftest jetpacs-org-grammar-tokens ()
+  "Exit gate G1 (tokens) incl. `priority:' — present in the grammar,
+omitted by the plan's gate text."
+  (jetpacs-org-test--with-agenda f
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query "todo:TODO tags:work"))
+                   '("Urgent thing")))
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query "priority:A"))
+                   '("Urgent thing")))
+    (jetpacs-org-cache-invalidate)
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query "todo:TODO,NEXT tags:work"))
+                   '("Call Alice" "Urgent thing")))))
+
+(ert-deftest jetpacs-org-grammar-freetext ()
+  "Exit gate G1 (free text): quoted phrase + bare word, body haystack."
+  (jetpacs-org-test--with-agenda f
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query "\"electric company\""))
+                   '("Pay the bill")))
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query "nothing"))
+                   '("Plain notes")))))
+
+(ert-deftest jetpacs-org-grammar-planning-window ()
+  "The :on/:from/:to plist arm over scheduled stamps."
+  (jetpacs-org-test--with-agenda f
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query
+                     "(scheduled :on \"2026-08-01\")"))
+                   '("Pay the bill")))
+    (jetpacs-org-cache-invalidate)
+    (should-not (jetpacs-org-test--titles
+                 (jetpacs-org-parse-query
+                  "(scheduled :from \"2026-09-01\")")))))
+
+(ert-deftest jetpacs-org-query-vet-rejects-hostile-input ()
+  "Defect 4 (SPEC 23.2): the rejects family, each through the REAL
+`jetpacs-org-parse-query'."
+  (dolist (q '("(delete-file \"/etc/passwd\")"     ; unknown head
+               "(todo #[257 \"x\" [] 2])"          ; byte-code object
+               "(todo #s(hash-table))"             ; record form
+               "(priority > 1.5)"                  ; float
+               "(scheduled :evil 1)"               ; stray keyword
+               "(and (todo \"A\")) (tags \"b\")"   ; trailing 2nd form
+               "'(and #1=(todo \"x\") #1#)"))     ; cycle labels (read-circle nil)
+    (should-error (jetpacs-org-parse-query q) :type 'user-error))
+  ;; A #1=-prefixed string never reaches the reader at all: the sexp
+  ;; gate requires a leading paren, so it tokenizes into an inert regexp
+  ;; query — assert the SAFE routing rather than a refusal.
+  (should (eq (car (jetpacs-org-parse-query "#1=(and . #1#)")) 'and))
+  ;; Depth and node caps.
+  (should-error (jetpacs-org-parse-query
+                 (concat (make-string 12 ?\() "todo \"x\""
+                         (make-string 12 ?\))))
+                :type 'user-error)
+  (should-error (jetpacs-org-parse-query
+                 (format "(and %s)"
+                         (mapconcat (lambda (_) "(todo \"x\")")
+                                    (number-sequence 1 100) " ")))
+                :type 'user-error))
+
+(ert-deftest jetpacs-org-query-vet-is-obarray-clean ()
+  "Defect 4, the measured half: a hostile query's symbols never reach
+the global obarray — even when the query is REFUSED."
+  (should-not (intern-soft "ja4-gpzz-never-interned"))
+  (condition-case nil
+      (jetpacs-org-parse-query "(and (ja4-gpzz-never-interned 1))")
+    (user-error nil))
+  (should-not (intern-soft "ja4-gpzz-never-interned"))
+  ;; And an ACCEPTED query's argument symbols become strings, not interns.
+  (should-not (intern-soft "ja4-gpzz-arg-sym"))
+  (should (equal (jetpacs-org-parse-query "(todo ja4-gpzz-arg-sym)")
+                 '(todo "ja4-gpzz-arg-sym")))
+  (should-not (intern-soft "ja4-gpzz-arg-sym")))
+
+(ert-deftest jetpacs-org-query-vet-normalizes-like-the-poc ()
+  "Quote unwrapping, literal preservation, bare-symbol stringification."
+  (should (equal (jetpacs-org-parse-query "'(todo TODO)")
+                 '(todo "TODO")))
+  (should (equal (jetpacs-org-parse-query "(priority > \"B\")")
+                 '(priority > "B")))
+  (should (equal (jetpacs-org-parse-query "(scheduled :from today :to 7)")
+                 '(scheduled :from today :to 7)))
+  ;; Re-homed heads are the CANONICAL symbols (eq, not just equal).
+  (should (eq (car (jetpacs-org-parse-query "(todo \"X\")")) 'todo)))
+
+(ert-deftest jetpacs-org-priority-comparator-inverts ()
+  "org urgency runs A > B > C: the comparator flips against the chars."
+  (jetpacs-org-test--with-agenda f
+    ;; "higher than B" must return the #A entry.
+    (should (equal (jetpacs-org-test--titles
+                    (jetpacs-org-parse-query "(priority > \"B\")"))
+                   '("Urgent thing")))))
+
+;;;; The note accessor (synthetic vulpea — CI has no vulpea)
+
+(cl-defstruct (jetpacs-org-test-note (:constructor jetpacs-org-test-note))
+  todo closed tags priority title level properties deadline scheduled
+  path outline-path)
+
+(defmacro jetpacs-org-test--as-vulpea (&rest body)
+  "Route the vulpea accessors at the synthetic struct for BODY."
+  `(cl-letf (((symbol-function 'vulpea-note-todo)
+              #'jetpacs-org-test-note-todo)
+             ((symbol-function 'vulpea-note-closed)
+              #'jetpacs-org-test-note-closed)
+             ((symbol-function 'vulpea-note-tags)
+              #'jetpacs-org-test-note-tags)
+             ((symbol-function 'vulpea-note-priority)
+              #'jetpacs-org-test-note-priority)
+             ((symbol-function 'vulpea-note-title)
+              #'jetpacs-org-test-note-title)
+             ((symbol-function 'vulpea-note-level)
+              #'jetpacs-org-test-note-level)
+             ((symbol-function 'vulpea-note-properties)
+              #'jetpacs-org-test-note-properties)
+             ((symbol-function 'vulpea-note-deadline)
+              #'jetpacs-org-test-note-deadline)
+             ((symbol-function 'vulpea-note-scheduled)
+              #'jetpacs-org-test-note-scheduled))
+     ,@body))
+
+(ert-deftest jetpacs-org-note-accessor-semantics ()
+  "The vulpea arm's documented approximations, on a synthetic note:
+done-ness falls back to DONE/CLOSED; priority coerces; properties match
+case-insensitively; regexp searches title+properties, NOT the body."
+  (jetpacs-org-test--as-vulpea
+    (let ((note (jetpacs-org-test-note
+                 :todo "DONE" :closed nil :tags '("work")
+                 :priority "B" :title "Call Bob" :level 1
+                 :properties '(("STYLE" . "habit") ("KIND" . "call")))))
+      (should (jetpacs-org-note-matches-p '(done) note))
+      (should (jetpacs-org-note-matches-p '(priority "B") note))
+      (should (jetpacs-org-note-matches-p '(property "kind" "call") note))
+      (should (jetpacs-org-note-matches-p '(habit) note))
+      ;; Title+properties haystack: hits the title...
+      (should (jetpacs-org-note-matches-p '(regexp "Bob") note))
+      ;; ...and never a body (none indexed).
+      (should-not (jetpacs-org-note-matches-p '(regexp "body-text") note)))
+    ;; CLOSED-stamp done-ness without a done keyword.
+    (should (jetpacs-org-note-matches-p
+             '(done) (jetpacs-org-test-note :closed "[2026-07-01]")))))
+
+(ert-deftest jetpacs-org-note-query-routing ()
+  (should (jetpacs-org-note-query-supported-p
+           '(and (todo "X") (not (tags "y")))))
+  (should-not (jetpacs-org-note-query-supported-p '(and (clocked))))
+  (should (jetpacs-org-note-query-supported-p nil)))
+
 (provide 'jetpacs-org-test)
 ;;; jetpacs-org-test.el ends here

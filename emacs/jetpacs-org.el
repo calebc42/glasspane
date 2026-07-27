@@ -468,6 +468,376 @@ TYPE is one of `text', `checkbox', `date', `enum', `number', `list'."
        (and val (split-string val "[, \t]+" t)))
       (_ (or val "")))))
 
+;;;; Query parser — the wire-facing grammar (O2)
+
+(defconst jetpacs-org-ql-literals '(today nil t < <= > >= =)
+  "Symbols with grammar meaning that vetting must not stringify.")
+
+(defconst jetpacs-org-note-query-terms
+  '(and or not todo done tags priority heading regexp property level
+        scheduled deadline habit)
+  "The head symbols of the built-in query grammar.
+Doubles as the SPEC 23.2 allowlist for the sexp arm: a wire query may
+name these heads and nothing else.")
+
+(defconst jetpacs-org--query-max-depth 8)
+(defconst jetpacs-org--query-max-nodes 128)
+
+(defun jetpacs-org--read-query (q)
+  "Read exactly ONE form from wire string Q, obarray-safely.
+The read runs under a THROWAWAY obarray (the ebp.el E4b move): a bare
+`read' on a wire string interns every distinct symbol in every query
+ever sent into the global obarray, permanently — measured, not
+theoretical.  `read-circle' is nil so #1=#1# dies as a reader error
+instead of looping the interpreter.  Trailing content after the form is
+refused: a smuggled second form must never parse as
+accepted-and-ignored."
+  (let* ((obarray (obarray-make))
+         (read-circle nil)
+         (parse (condition-case nil
+                    (read-from-string q)
+                  (error (user-error "Malformed query"))))
+         (rest (string-trim (substring q (cdr parse)))))
+    (unless (string-empty-p rest)
+      (user-error "Malformed query (trailing content)"))
+    (car parse)))
+
+(defun jetpacs-org--vet-query (form)
+  "Vet, normalize and RE-HOME sexp query FORM in one walk.
+Output invariant: only globally interned allowlisted symbols
+\(`jetpacs-org-note-query-terms' heads, `jetpacs-org-ql-literals',
+the :on/:from/:to keywords), fresh strings, and integers — so the
+throwaway-obarray symbols from `jetpacs-org--read-query' die here, and
+the interpreter's fallthrough becomes an internal invariant.  Vetted by
+NAME, replaced by the canonical global symbol.  `quote' wrappers are
+unwrapped (the reader minted them from \\='(...) input); bare symbols
+in argument position become strings, exactly as the poc normalizer
+did.
+Everything else — floats, vectors, records, byte-code objects (the
+reader will happily mint one from #[...]), hash-table forms, stray
+keywords — is refused outright, and cap violations never echo the
+query (it is user data)."
+  (let ((nodes 0))
+    (cl-labels
+        ((vet (x depth head-position)
+           (when (> depth jetpacs-org--query-max-depth)
+             (user-error "Query too deep"))
+           (when (> (cl-incf nodes) jetpacs-org--query-max-nodes)
+             (user-error "Query too large"))
+           (cond
+            ((consp x)
+             ;; Unwrap 'FORM before treating the car as a head.
+             (if (and (symbolp (car x))
+                      (equal (symbol-name (car x)) "quote")
+                      (consp (cdr x)))
+                 (vet (cadr x) depth head-position)
+               (unless (and (symbolp (car x)) (proper-list-p x))
+                 (user-error "Malformed query clause"))
+               (let* ((name (symbol-name (car x)))
+                      (head (cl-find name jetpacs-org-note-query-terms
+                                     :key #'symbol-name :test #'equal)))
+                 (unless head
+                   (user-error "Unsupported query term"))
+                 (cons head
+                       (mapcar (lambda (a) (vet a (1+ depth) nil))
+                               (cdr x))))))
+            ((stringp x) x)
+            ((integerp x) x)
+            ((symbolp x)
+             (let ((name (symbol-name x)))
+               (cond
+                ((member name '(":on" ":from" ":to")) (intern name))
+                ((cl-find name jetpacs-org-ql-literals
+                          :key #'symbol-name :test #'equal))
+                ((string-prefix-p ":" name)
+                 (user-error "Unsupported query keyword"))
+                ;; nil reads as the global nil (special), handled by the
+                ;; literals branch above; any other symbol is data.
+                (t name))))
+            (t (user-error "Unsupported query value")))))
+      (vet form 0 t))))
+
+(defun jetpacs-org--query-tokens (q)
+  "Split query Q on whitespace, keeping \"quoted phrases\" whole."
+  (let ((pos 0) (tokens nil))
+    (while (string-match "\"\\([^\"]*\\)\"\\|\\S-+" q pos)
+      (push (or (match-string 1 q) (match-string 0 q)) tokens)
+      (setq pos (match-end 0)))
+    (nreverse tokens)))
+
+(defun jetpacs-org-parse-query (query)
+  "Parse the search QUERY string into a vetted query sexp, or nil if empty.
+Accepts three input shapes:
+- a query sexp:    (and (todo \"TODO\") (tags \"work\"))
+- filter tokens:   todo:TODO,NEXT tags:work priority:A
+- free text:       \"exact phrase\" or bare words
+The sexp arm is wire-hardened (SPEC 23.2): obarray-safe read, head and
+leaf allowlists, depth/size caps — see `jetpacs-org--vet-query'.  The
+token and free-text arms never touch the reader.  Signals `user-error'
+on anything malformed."
+  (let ((q (string-trim (or query ""))))
+    (cond
+     ((string-empty-p q) nil)
+     ((string-match-p "\\`'?(" q)
+      (jetpacs-org--vet-query (jetpacs-org--read-query q)))
+     (t
+      (let ((clauses
+             (mapcar
+              (lambda (tok)
+                (cond
+                 ((string-prefix-p "todo:" tok)
+                  `(todo ,@(split-string (substring tok 5) "," t)))
+                 ((string-prefix-p "tags:" tok)
+                  `(tags ,@(split-string (substring tok 5) "," t)))
+                 ((string-prefix-p "priority:" tok)
+                  `(priority ,@(split-string (substring tok 9) "," t)))
+                 (t `(regexp ,(regexp-quote tok)))))
+              (jetpacs-org--query-tokens q))))
+        (if (cdr clauses) `(and ,@clauses) (car clauses)))))))
+
+;;;; The query interpreter
+
+(defun jetpacs-org--planning-day (spec)
+  "Resolve a query date SPEC to an absolute day number."
+  (cond
+   ((eq spec 'today) (time-to-days (current-time)))
+   ((integerp spec) (+ (time-to-days (current-time)) spec))
+   ((stringp spec) (time-to-days (org-time-string-to-time spec)))
+   (t (user-error "Unsupported query date %S" spec))))
+
+(defun jetpacs-org--planning-match-spec (stamp args)
+  "Match raw planning STAMP string against ARGS plist (:on / :from / :to).
+Empty ARGS means mere presence of the stamp."
+  (and (stringp stamp) (not (string-empty-p stamp))
+       (let ((day (time-to-days (org-time-string-to-time stamp)))
+             (on (plist-get args :on))
+             (from (plist-get args :from))
+             (to (plist-get args :to)))
+         (and (or (not on) (equal day (jetpacs-org--planning-day on)))
+              (or (not from) (>= day (jetpacs-org--planning-day from)))
+              (or (not to) (<= day (jetpacs-org--planning-day to)))))))
+
+(defun jetpacs-org--entry-priority ()
+  "The priority character of the heading at point, or nil."
+  (save-excursion (org-back-to-heading t) (nth 3 (org-heading-components))))
+
+(defun jetpacs-org--matches-p (tree get)
+  "Non-nil when the entry read through accessor GET matches query TREE.
+The ONE interpreter of the built-in grammar.  GET is
+\(funcall GET WHAT &rest ARGS) with WHAT one of:
+  todo / done / tags / priority / title / level / property NAME /
+  planning WHICH / habit / regexp-match RE.
+The fallthrough is an INTERNAL invariant: `jetpacs-org--vet-query'
+admits only interpretable heads, so an unsupported term here means a
+caller bypassed `jetpacs-org-parse-query' with a hand-built tree."
+  (pcase tree
+    (`(and . ,cs) (cl-every (lambda (c) (jetpacs-org--matches-p c get)) cs))
+    (`(or . ,cs) (and (cl-some (lambda (c) (jetpacs-org--matches-p c get)) cs) t))
+    (`(not ,c) (not (jetpacs-org--matches-p c get)))
+    (`(todo . ,kws)
+     (let ((st (funcall get 'todo)))
+       (and st (if kws (and (member st kws) t)
+                 (not (funcall get 'done))))))
+    (`(done) (and (funcall get 'done) t))
+    (`(tags . ,tags)
+     (let ((have (funcall get 'tags)))
+       (if tags (and (cl-some (lambda (tg) (member tg have)) tags) t)
+         (and have t))))
+    (`(priority ,(and op (pred symbolp)) ,val)
+     (let ((pr (funcall get 'priority))
+           (want (if (stringp val) (string-to-char val) val)))
+       ;; org urgency runs A > B > C — the higher priority is the
+       ;; smaller character, so the comparator flips against the chars.
+       (and pr (pcase op
+                 ('< (> pr want)) ('<= (>= pr want))
+                 ('> (< pr want)) ('>= (<= pr want))
+                 ('= (= pr want))
+                 (_ (user-error "Unsupported priority comparator %s" op))))))
+    (`(priority . ,ps)
+     (let ((pr (funcall get 'priority)))
+       (if ps (and pr (member (char-to-string pr) ps) t)
+         (and pr t))))
+    (`(heading . ,texts)
+     (let ((hl (or (funcall get 'title) ""))
+           (case-fold-search t))
+       (cl-every (lambda (s) (string-match-p (regexp-quote s) hl)) texts)))
+    (`(regexp . ,res)
+     (cl-every (lambda (re) (funcall get 'regexp-match re)) res))
+    (`(property ,name . ,val)
+     (let ((v (funcall get 'property name)))
+       (if val (equal v (car val)) (and v t))))
+    (`(level ,n) (eql (funcall get 'level) n))
+    (`(level ,n ,m) (let ((l (funcall get 'level))) (and l (<= n l m))))
+    (`(scheduled . ,args)
+     (jetpacs-org--planning-match-spec (funcall get 'planning "SCHEDULED") args))
+    (`(deadline . ,args)
+     (jetpacs-org--planning-match-spec (funcall get 'planning "DEADLINE") args))
+    (`(habit) (and (funcall get 'habit) t))
+    (_ (user-error "Unsupported query term %S" tree))))
+
+(defun jetpacs-org--point-get (what &rest args)
+  "The grammar accessor over the org entry AT POINT."
+  (pcase what
+    ('todo (org-get-todo-state))
+    ('done (let ((st (org-get-todo-state)))
+             (and st (member st org-done-keywords) t)))
+    ('tags (org-get-tags nil t))
+    ('priority (jetpacs-org--entry-priority))
+    ('title (nth 4 (org-heading-components)))
+    ('level (org-current-level))
+    ('property (org-entry-get (point) (car args)))
+    ('planning (org-entry-get (point) (car args)))
+    ;; `org-is-habit-p' tests only the STYLE=habit property; repeater
+    ;; validity is enforced later by `org-habit-parse-todo'.
+    ('habit (and (fboundp 'org-is-habit-p) (org-is-habit-p)))
+    ('regexp-match
+     ;; The point haystack is the entry's body up to the next heading.
+     (let ((end (save-excursion (outline-next-heading) (point)))
+           (case-fold-search t))
+       (save-excursion (re-search-forward (car args) end t))))))
+
+;; The vulpea arm is OPTIONAL: never required at load, entered only when
+;; a caller hands us a note, gated by `jetpacs-org-vulpea-available-p'.
+;; The "ext:" pseudo-file keeps `byte-compile-error-on-warn' honest
+;; without vulpea on the load path (the sections/magit-section shape).
+(declare-function vulpea-note-todo "ext:vulpea-note" (note))
+(declare-function vulpea-note-closed "ext:vulpea-note" (note))
+(declare-function vulpea-note-tags "ext:vulpea-note" (note))
+(declare-function vulpea-note-priority "ext:vulpea-note" (note))
+(declare-function vulpea-note-title "ext:vulpea-note" (note))
+(declare-function vulpea-note-level "ext:vulpea-note" (note))
+(declare-function vulpea-note-properties "ext:vulpea-note" (note))
+(declare-function vulpea-note-deadline "ext:vulpea-note" (note))
+(declare-function vulpea-note-scheduled "ext:vulpea-note" (note))
+(declare-function vulpea-note-path "ext:vulpea-note" (note))
+(declare-function vulpea-note-outline-path "ext:vulpea-note" (note))
+(declare-function vulpea-db-query "ext:vulpea-db" (&optional pred))
+(declare-function vulpea-db-query-by-directory "ext:vulpea-db" (dir &optional level))
+
+(defun jetpacs-org--note-get (note what &rest args)
+  "The grammar accessor over a `vulpea-note' NOTE (index only, no visit)."
+  (pcase what
+    ('todo (vulpea-note-todo note))
+    ;; The index carries no per-file DONE keyword set: done-ness is a
+    ;; global done keyword (falling back to the near-universal \"DONE\"
+    ;; in a headless scan) or a CLOSED stamp.
+    ('done (let ((s (vulpea-note-todo note)))
+             (or (and s (member s (or org-done-keywords '("DONE"))) t)
+                 (and (vulpea-note-closed note) t))))
+    ('tags (vulpea-note-tags note))
+    ;; vulpea priority may be a char (org's native form) or a string.
+    ('priority (let ((p (vulpea-note-priority note)))
+                 (cond ((null p) nil)
+                       ((characterp p) p)
+                       ((and (stringp p) (> (length p) 0)) (aref p 0))
+                       (t (let ((s (format "%s" p)))
+                            (and (> (length s) 0) (aref s 0)))))))
+    ('title (vulpea-note-title note))
+    ('level (vulpea-note-level note))
+    ;; vulpea indexes drawer keys upper-cased; match case-insensitively.
+    ('property (cdr (assoc-string (car args) (vulpea-note-properties note) t)))
+    ('planning (let ((s (if (equal (car args) "DEADLINE")
+                            (vulpea-note-deadline note)
+                          (vulpea-note-scheduled note))))
+                 (and (stringp s) s)))
+    ('habit (equal "habit"
+                   (cdr (assoc-string "STYLE" (vulpea-note-properties note) t))))
+    ('regexp-match
+     ;; The index haystack is title + properties — the body is not
+     ;; indexed.  SEMANTIC DIFFERENCE from the point accessor, by design.
+     (let ((hay (concat (or (vulpea-note-title note) "") " "
+                        (mapconcat #'cdr (vulpea-note-properties note) " ")))
+           (case-fold-search t))
+       (string-match-p (car args) hay)))))
+
+(defun jetpacs-org-entry-matches-p (tree)
+  "Non-nil when the org entry at point matches query sexp TREE."
+  (jetpacs-org--matches-p tree #'jetpacs-org--point-get))
+
+(defun jetpacs-org-note-matches-p (tree note)
+  "Non-nil when `vulpea-note' NOTE matches query sexp TREE.
+The same grammar as `jetpacs-org-entry-matches-p', evaluated entirely
+off the vulpea index (no file visit); the `regexp' term searches
+title + properties here (the body is not indexed)."
+  (jetpacs-org--matches-p
+   tree (lambda (what &rest args) (apply #'jetpacs-org--note-get note what args))))
+
+(defun jetpacs-org-note-query-supported-p (tree)
+  "Non-nil when query sexp TREE uses only index-evaluable terms.
+Empty (nil) TREE — no filter — is trivially supported."
+  (pcase tree
+    ('nil t)
+    (`(and . ,cs) (cl-every #'jetpacs-org-note-query-supported-p cs))
+    (`(or . ,cs) (cl-every #'jetpacs-org-note-query-supported-p cs))
+    (`(not ,c) (jetpacs-org-note-query-supported-p c))
+    (`(,head . ,_) (and (memq head jetpacs-org-note-query-terms) t))
+    (_ nil)))
+
+;;;; High-level query
+
+(defun jetpacs-org--run-query (tree action)
+  "Run vetted query TREE over the agenda files, calling ACTION at matches."
+  (let (items)
+    (org-map-entries
+     (lambda ()
+       (when (jetpacs-org-entry-matches-p tree)
+         (push (funcall action) items)))
+     nil 'agenda)
+    (nreverse items)))
+
+(defun jetpacs-org-query (namespace tree action)
+  "Run query sexp TREE over the agenda files, calling ACTION at matches.
+Results are cached under NAMESPACE.  ALWAYS the built-in interpreter:
+the poc dispatched to `org-ql-select' when installed, which meant (a) a
+permanently untested semantic fork whose results silently changed when
+a package appeared, and (b) an arbitrary-code hand-off — org-ql
+COMPILES query sexps.  If full org-ql is ever wanted, it enters as a
+new, separately vetted entry point, never as an fboundp fork here."
+  (when tree
+    (jetpacs-org-with-cache namespace (format "%S" tree)
+      (jetpacs-org--run-query tree action))))
+
+;;;; Vulpea note index (optional engine)
+
+(defun jetpacs-org-vulpea-available-p ()
+  "Non-nil when the vulpea note index is loadable on this Emacs.
+vulpea is never required at load; callers gate their index reads here.
+Probing DOES load vulpea when present."
+  (and (require 'vulpea nil t) (fboundp 'vulpea-db-query) t))
+
+(defun jetpacs-org-vulpea-source-notes (source)
+  "The `vulpea-note' records backing SOURCE, a scope plist.
+SOURCE is one of:
+  (:dir D)               -> the file-level notes of vault directory D;
+  (:file F :heading H)   -> the id'd headings directly under H in F;
+  (:file F)              -> the id'd level-1 headings of F.
+Headings must already carry `:ID:' properties for the index to see
+them.  Callers gate on `jetpacs-org-vulpea-available-p'."
+  (let ((dir (plist-get source :dir))
+        (file (plist-get source :file))
+        (heading (plist-get source :heading)))
+    (cond
+     (dir (vulpea-db-query-by-directory (directory-file-name dir) 0))
+     (file
+      (let ((want (expand-file-name file)))
+        (vulpea-db-query
+         (lambda (n)
+           (and (equal (expand-file-name (vulpea-note-path n)) want)
+                (if heading
+                    (equal (vulpea-note-outline-path n) (list heading))
+                  (= (vulpea-note-level n) 1)))))))
+     (t (user-error "Source needs :dir or :file: %S" source)))))
+
+(defun jetpacs-org-vulpea-query (source &optional tree)
+  "Notes of SOURCE matching query sexp TREE, off the vulpea index.
+A nil TREE admits every note of the scope.  TREE must stay inside
+`jetpacs-org-note-query-terms' — check
+`jetpacs-org-note-query-supported-p' first."
+  (let ((notes (jetpacs-org-vulpea-source-notes source)))
+    (if tree
+        (cl-remove-if-not (lambda (n) (jetpacs-org-note-matches-p tree n)) notes)
+      notes)))
+
 ;;;; Reset (the test seam; wired into `jetpacs-test-reset-state')
 
 (defun jetpacs-org-reset ()

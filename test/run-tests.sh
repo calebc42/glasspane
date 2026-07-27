@@ -28,23 +28,17 @@ emacs -Q --batch -L emacs \
   -f batch-byte-compile emacs/ebp.el
 rm -f emacs/ebp.elc
 
-# Same guard for the application-layer widget builders.
-emacs -Q --batch -L emacs \
-  --eval '(setq byte-compile-error-on-warn t)' \
-  -f batch-byte-compile emacs/jetpacs-widgets.el
-rm -f emacs/jetpacs-widgets.elc
-
-# And for the JC-0 application-framework floor (docs/SPEC-JC-0-floor.md)
-# plus the JC-1 Tier-0 buffer renderer.
-for f in jetpacs-async jetpacs-surfaces jetpacs-shell jetpacs-buffer \
-         jetpacs-results jetpacs-tablist \
-         jetpacs-sections jetpacs-comint jetpacs-hypertext \
-         jetpacs-dialog jetpacs-complete jetpacs-theme jetpacs-device \
-         jetpacs-clip jetpacs-navigate jetpacs-chrome; do
+# Same guard for EVERY application-layer module. A glob, not a list: the
+# previous hand-kept 16-name list silently omitted jetpacs-modus.el, and a
+# module added later would have been unguarded by default — the exact
+# docstring-quote bug class this guard exists for would then reach a device.
+# ebp.el compiles twice (here and above); two seconds buys never maintaining
+# the list again.
+for f in emacs/*.el; do
   emacs -Q --batch -L emacs \
     --eval '(setq byte-compile-error-on-warn t)' \
-    -f batch-byte-compile "emacs/$f.el"
-  rm -f "emacs/$f.elc"
+    -f batch-byte-compile "$f"
+  rm -f "${f%.el}.elc"
 done
 
 emacs -Q --batch -L emacs -l test/ebp-wire-test.el \
@@ -106,6 +100,18 @@ emacs -Q --batch -L emacs -l test/jetpacs-navigate-test.el \
 
 # JA-2 chrome kit exit gate.
 emacs -Q --batch -L emacs -l test/jetpacs-chrome-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JA-3b exit gate: binding extraction (incl. the minor-mode-map poc-bug
+# regression), menu-bar mining over the :filter/:enable/:visible fixture,
+# and suppressed-commands unreachability.
+emacs -Q --batch -L emacs -l test/jetpacs-keymap-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# JA-3c/3d exit gate: imenu flatten (both index shapes), the 23.1
+# exposure gates on the buffer-addressed actions, the static-candidates
+# obarray guard, and the message->toast bridge's gates.
+emacs -Q --batch -L emacs -l test/jetpacs-emacs-ui-test.el \
   -f ert-run-tests-batch-and-exit
 
 # Cross-module seam wiring (AUDIT-ja1-ja2 3(h)): the ONLY process that

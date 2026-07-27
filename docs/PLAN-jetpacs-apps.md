@@ -236,6 +236,46 @@ a bare timer. Smoke — define two owners, tear one down, assert its surface is
 tombstoned and the other is untouched; navigate to an arbitrary buffer and back.
 
 ### JA-3 — The general Emacs client
+**CODE COMPLETE + GATED 2026-07-27** (447 elisp / 19 suites green; every
+new guard mutation-verified).  Landed: `jetpacs-commands.el` (port; its
+defaults absorbed the keymap-noise halves of both hand-rolled denylists —
+sections keeps its destructive-magit SAFETY residue, consulted via
+`jetpacs-command-visible-p` at BOTH sites incl. the 23.2 replay);
+`jetpacs-keymap.el` (pure library — extraction + menu-bar mining +
+palette candidates; poc bug FIXED: `current-minor-mode-maps` returns
+plain keymaps, the poc destructured (VAR . MAP) and silently extracted
+ZERO minor-mode bindings — regression-pinned); `jetpacs-emacs-ui.el`
+(owner `jetpacs.emacs`, chrome hub + drilled screens with imenu/palette
+affordances, *Messages* tail over `jetpacs-buffer-render-tail`, imenu
+extends `jetpacs-results-show-region` via new public
+`jetpacs-results-region-buffer`/`-clear-region`, M-x over the bridged
+obarray picker); `jetpacs-echo.el` (JA-3d: OFF by default, explicit
+install, device-flow-gated, throttled latest-wins, re-entrancy-proof).
+Prereq fixed: `jetpacs-dialog--static-candidates` obarrayp guard (no
+more whole-obarray enumerate+sort per bridged completing-read).
+run-tests.sh byte-compile guard is now a GLOB over emacs/*.el.
+
+**PORT LESSON (device-caught, then ERT-pinned): `execute-kbd-macro` runs
+the command loop against the SELECTED WINDOW's buffer.**  On the device
+the viewed buffer is never in a window, so the poc's palette self-inserted
+the key into *scratch* and clobbered current-buffer; it only ever worked
+on a desktop because the viewed buffer was also the selected window.  The
+palette now resolves the binding in the buffer and runs the COMMAND under
+`jetpacs-buffer-call-shimmed`.
+
+**Device smoke (`test/smoke-ja3.el`, runner-driven)**: list ✓ drill ✓
+palette-on-unskinned-mode ✓ (enum dialog → selection → execution
+witnessed on hardware).  M-x: the icon opens the bridged picker dialog on
+the device ✓, but the full type-and-submit round trip is
+DRIVER-LIMITED, not witnessed — adb text injection raced the Compose
+dialog's render/focus across three attempts.  Every link is proven
+elsewhere (the same bridge carried the palette; the JC-4a text dialog is
+device-verified by smoke-dialog-prompts; execution is `call-shimmed`,
+ERT-pinned), so this is recorded as a runner gap, not a code gap: re-run
+P3 by hand — tap M-x, type emacs-version, OK, expect "GNU Emacs" in
+*Messages*.  **Adversarial review of the JA-3 diff: OPEN (the JA-1/JA-2
+precedent — reviewed as its own audit pass).**
+
 
 **Lands:** `jetpacs-emacs-ui.el`'s buffer list + drill-in (rebuild),
 live-refresh watch (rebuild-lite), *Messages* tail (rebuild-lite, over
@@ -692,7 +732,8 @@ Tier-1 app is a config on top").
   capture + org-agenda on the phone, (3/4) other-PKM converts before
   mobile-IDE power users.  NOTE: this ordering argues for the org rungs
   (JA-4/JA-5 + capture) ahead of JA-3's general-client work — proposed
-  reorder, not yet ratified.
+  reorder, **DECLINED (Caleb, 2026-07-27): JA-3 first, ladder order
+  stands.**  The org rungs follow it.
 - **D-4 — RATIFIED as recommended:** opaque per-owner heading-ref tokens;
   never absolute paths on the wire; one commit with glasspane's alist→plist.
 - **D-5 — REVERSED: capture-template management from the tablet is IN.**

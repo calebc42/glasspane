@@ -59,6 +59,7 @@
 (require 'eieio)                ; slot-value on section objects (built-in)
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
+(require 'jetpacs-commands)     ; jetpacs-command-visible-p (JA-3a)
 (require 'jetpacs-buffer)       ; line spans, dispatch registry, exposure
 (require 'jetpacs-results)      ; the region-view seam + RET resolution
 
@@ -94,10 +95,8 @@ refused."
   "Cards emitted so far in this render (see `jetpacs-sections-max-sections').")
 
 (defcustom jetpacs-sections-menu-denylist
-  '(;; Not verbs at all — keymap noise.
-    self-insert-command digit-argument negative-argument universal-argument
-    undefined ignore keyboard-quit keyboard-escape-quit
-    mouse-drag-region mouse-set-point mouse-set-region
+  '(;; Not covered by `jetpacs-suppressed-commands' (its `\\=`mouse-'
+    ;; regexp misses this magit-prefixed mouse command).
     magit-mouse-toggle-section
     ;; Destructive, and NOT offerable over the wire.  A dialog button
     ;; carries no SPEC 14.1 `confirm' — `jetpacs-dialog-submit' has no
@@ -111,7 +110,15 @@ refused."
     magit-branch-delete magit-tag-delete magit-remote-remove
     magit-stash-drop magit-stash-clear
     magit-file-delete magit-revert magit-revert-no-commit)
-  "Commands never offered in the section context menu."
+  "Commands never offered in the section context menu.
+This list is the SECTIONS-LOCAL residue after the JA-3a consolidation:
+generic keymap noise (self-insert, argument readers, quit and mouse
+commands) moved to `jetpacs-suppressed-commands', consulted here
+through `jetpacs-command-visible-p'.  What stays is semantically
+different — a no-confirm-affordance SAFETY list.  `magit-discard' is
+rightly unofferable from a long-press menu, where a mis-tap is one
+finger-slip away, yet remains runnable from the device M-x, where
+require-match means the user typed it in full."
   :type '(repeat function) :group 'jetpacs)
 
 ;; --- Reading the tree --------------------------------------------------------
@@ -534,7 +541,7 @@ scrolling wall of buttons."
   (when (keymapp km)
     (map-keymap
      (lambda (event binding)
-       (when (and (commandp binding)
+       (when (and (jetpacs-command-visible-p binding)
                   (not (memq binding jetpacs-sections-menu-denylist))
                   (or (and (integerp event) (< 31 event 127))
                       (memq event '(return tab))))
@@ -599,7 +606,7 @@ current keymap can be reached."
        ((null member)
         (message "jetpacs-sections: refused %S — not a candidate at this \
 section (SPEC 23.2)" key))
-       ((not (and (commandp binding)
+       ((not (and (jetpacs-command-visible-p binding)
                   (not (memq binding jetpacs-sections-menu-denylist))))
         (message "jetpacs-sections: refused %S — resolves to no offerable \
 command" key))

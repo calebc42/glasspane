@@ -281,6 +281,20 @@ A host root includes this to show where a `results.visit' landed."
      (jetpacs-buffer-render-region buf (plist-get r :beg) (plist-get r :end)
                                    (plist-get r :point)))))
 
+(defun jetpacs-results-region-buffer ()
+  "The buffer NAME the armed region view addresses, or nil.
+A host presenting several buffers (the JA-3 chrome stack) shows the
+region nodes only on the screen of the buffer they belong to; without
+this reader it would have to reach for the private variable."
+  (plist-get jetpacs-results--region :buffer))
+
+(defun jetpacs-results-clear-region ()
+  "Disarm the region view; the next render shows the whole buffer.
+Public because the region is shared state: the imenu navigation (JA-3)
+arms it through `jetpacs-results-show-region' and needs a sanctioned
+way to dismiss it without reaching for the private variable."
+  (setq jetpacs-results--region nil))
+
 (defun jetpacs-results-region-around (buf pos)
   "Return (BEG END LABEL POINT) framing POS in BUF for the region view."
   (with-current-buffer buf

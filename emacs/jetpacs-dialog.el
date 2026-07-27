@@ -563,8 +563,15 @@ instead, and the last shadow is what the user submitted."
 ;;;; completing-read: the enum fast path, then the picker
 
 (defun jetpacs-dialog--static-candidates (collection predicate)
-  "COLLECTION's candidates when it is closed and static, else nil."
-  (unless (functionp collection)
+  "COLLECTION's candidates when it is closed and static, else nil.
+An obarray is treated as dynamic even though `all-completions' accepts
+it: enumerating one means running PREDICATE over every interned symbol
+(~50k at the 30.1 floor) and sorting thousands of names, only for the
+enum-threshold test to discard the list — and the JA-3 M-x runner hands
+this exact shape to every bridged `completing-read'.  Obarray prompts
+take the picker or the type-to-match stopgap instead, both of which run
+`all-completions' with the typed input as a bounded prefix."
+  (unless (or (functionp collection) (obarrayp collection))
     (ignore-errors
       (sort (all-completions "" collection predicate) #'string<))))
 

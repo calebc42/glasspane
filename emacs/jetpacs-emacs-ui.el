@@ -366,8 +366,12 @@ unrunnable from this picker, not merely unsuggested."
           ;; binding in the buffer, then run the COMMAND under the JA-2
           ;; shims, which keep the buffer current and capture any jump.
           (with-current-buffer buf
+            ;; Run the command the row LABELLED.  Re-resolving the key
+            ;; description here let the two diverge — char-property
+            ;; keymaps that extraction never walked, and any rebinding
+            ;; between render and tap.
             (let ((cmd (pcase target
-                         (`(key . ,desc) (key-binding (kbd desc)))
+                         (`(key ,cmd . ,_desc) cmd)
                          (`(command . ,cmd) cmd))))
               (if (not (commandp cmd))
                   (message "jetpacs-emacs-ui: %S no longer runs anything"

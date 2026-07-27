@@ -173,6 +173,85 @@ predicate governs every candidate surface."
                                        (current-buffer))))))
         (put plain 'jetpacs-unsupported nil)))))
 
+;;;; Shadowing: label must equal effect (the destructive diff-mode bug)
+
+(ert-deftest jetpacs-keymap-never-labels-a-key-it-does-not-run ()
+  "THE invariant: every offered row's key really runs its command in
+that buffer.  Checked against stock `diff-mode', whose map nils out
+M-q/M-r/M-A/M-R/M-W/M-g to let the global M-<foo> bindings through —
+resurrecting those parent bindings offered `M-q · quit-window' for a
+key that runs `fill-paragraph', silently reflowing a patch."
+  (require 'diff-mode)
+  (with-temp-buffer
+    (diff-mode)
+    (let ((rows (jetpacs-keymap-extract-bindings (current-buffer))))
+      ;; Not vacuous: the mode really does offer rows.
+      (should (> (length rows) 10))
+      (dolist (row rows)
+        (let ((desc (nth 0 row)) (cmd (nth 1 row)))
+          ;; Labelled command == what the key runs, and it is live.
+          (should (eq cmd (key-binding (kbd desc))))
+          (should (commandp cmd))))
+      ;; And specifically: the unbound keys are not offered at all.
+      (dolist (dead '("M-q" "M-r" "M-A" "M-R" "M-W" "M-g"))
+        (should-not (assoc dead rows))))))
+
+(ert-deftest jetpacs-keymap-a-nearer-unbind-blocks-a-farther-command ()
+  "An explicit nil in a nearer map CLAIMS the key: nothing farther may
+be offered under it, even though `map-keymap' hands us the parent's
+binding for the same event."
+  (let* ((parent (make-sparse-keymap))
+         (child (make-sparse-keymap))
+         (cmd (jetpacs-keymap-test--cmd "jetpacs-keymap-test-shadowed")))
+    (define-key parent (kbd "u") cmd)
+    (set-keymap-parent child parent)
+    (define-key child (kbd "u") nil)     ; the deliberate unbind
+    (with-temp-buffer
+      (use-local-map child)
+      ;; The unbind lets the GLOBAL binding through — Emacs resolves `u'
+      ;; to self-insert-command here, NOT to the parent's command.
+      (should-not (eq cmd (key-binding (kbd "u"))))
+      ;; So the palette must not offer the parent's command under it.
+      (let ((row (assoc "u" (jetpacs-keymap-extract-bindings
+                             (current-buffer)))))
+        (should-not (and row (eq (nth 1 row) cmd)))))))
+
+(ert-deftest jetpacs-keymap-a-filtered-nearer-binding-still-claims-its-key ()
+  "A nearer binding the palette FILTERS OUT (denylisted) must still
+block a farther map's row — otherwise the denylist is bypassed and the
+row runs the very command the list exists to keep out."
+  (let* ((parent (make-sparse-keymap))
+         (child (make-sparse-keymap))
+         (cmd (jetpacs-keymap-test--cmd "jetpacs-keymap-test-farther")))
+    (define-key parent (kbd "n") cmd)
+    (set-keymap-parent child parent)
+    (define-key child (kbd "n") #'undo)  ; in jetpacs-keymap-denylist
+    (with-temp-buffer
+      (use-local-map child)
+      (let ((rows (jetpacs-keymap-extract-bindings (current-buffer))))
+        ;; Neither the denylisted command nor the farther one is offered.
+        (should-not (assoc "n" rows))))))
+
+(ert-deftest jetpacs-keymap-a-prefix-map-claims-its-bare-key ()
+  "A prefix keymap claims the bare key: a farther map's command must
+not be offered under it (the key resolves to a keymap, so the row
+would be dead)."
+  (let* ((parent (make-sparse-keymap))
+         (child (make-sparse-keymap))
+         (sub (make-sparse-keymap))
+         (cmd (jetpacs-keymap-test--cmd "jetpacs-keymap-test-prefixed"))
+         (leaf (jetpacs-keymap-test--cmd "jetpacs-keymap-test-leaf")))
+    (define-key parent (kbd "t") cmd)
+    (set-keymap-parent child parent)
+    (define-key sub (kbd "x") leaf)
+    (define-key child (kbd "t") sub)     ; t is now a PREFIX here
+    (with-temp-buffer
+      (use-local-map child)
+      (let ((rows (jetpacs-keymap-extract-bindings (current-buffer))))
+        (should-not (assoc "t" rows))
+        ;; The leaf under the prefix is still offered.
+        (should (assoc "t x" rows))))))
+
 (ert-deftest jetpacs-keymap-palette-candidates-shape ()
   "Key rows lead (with the key · label display), menu rows follow;
 targets discriminate (key . DESC) from (command . SYMBOL)."
@@ -185,7 +264,9 @@ targets discriminate (key . DESC) from (command . SYMBOL)."
              (key-row (seq-find (lambda (c) (eq (cadr c) 'key)) cands))
              (cmd-row (seq-find (lambda (c) (eq (cadr c) 'command)) cands)))
         (should key-row)
-        (should (equal (cddr key-row) "p"))
+        ;; (key COMMAND . KEY-DESC): the command is what executes.
+        (should (eq (car (cddr key-row)) cmd))
+        (should (equal (cdr (cddr key-row)) "p"))
         (should (string-match-p "\\`p  ·  " (car key-row)))
         (should cmd-row)
         ;; Key rows come before menu rows.

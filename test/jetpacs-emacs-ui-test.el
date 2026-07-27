@@ -129,7 +129,8 @@ caught on hardware and pinned here)."
     ;; The display string must be the one the candidates really mint.
     (let* ((cands (jetpacs-keymap-palette-candidates
                    (get-buffer "*ja3-palette*")))
-           (row (seq-find (lambda (c) (equal (cddr c) "T")) cands)))
+           ;; target is (key COMMAND . KEY-DESC) since the shadowing fix.
+           (row (seq-find (lambda (c) (equal (cdr (cddr c)) "T")) cands)))
       (should row)
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (&rest _) (car row))))

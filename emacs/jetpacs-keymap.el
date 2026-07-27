@@ -113,31 +113,57 @@ cons event types."
 (defun jetpacs-keymap--walk-keymap (keymap prefix-keys)
   "Walk KEYMAP and return a list of (KEY-VEC . COMMAND) pairs.
 PREFIX-KEYS is a key vector prepended to each binding (for recursive
-descent into prefix keymaps).  Only leaf (commandp) bindings are
-returned; prefix keymaps recurse to a depth of 4 events."
+descent into prefix keymaps).  Leaf (commandp) bindings carry their
+command; a key the map CLAIMS without offering a command — an explicit
+unbind, or a prefix keymap — is emitted as (KEY-VEC . nil), a claim
+sentinel.
+
+The sentinels are load-bearing, not bookkeeping.  `map-keymap' walks a
+map's PARENT as well, child entries first, so a mode that shadows an
+inherited binding with an explicit nil (`diff-mode' nils out
+\\`M-q'/\\`M-r'/\\`M-A'/\\`M-R'/\\`M-W'/\\`M-g' precisely to let the global
+\\`M-<foo>' bindings through) hands us the nil AND then the parent's
+real command for the same event.  Dropping the nil silently — what this
+did before — resurrected the parent binding under a key Emacs resolves
+elsewhere, and the palette then labelled a row \\='M-q · quit-window\\='
+that ran `fill-paragraph', reflowing and destroying a patch buffer.
+First definition per event wins, at each level, which is how Emacs
+itself resolves the key."
   (let (out)
     (cl-labels
         ((walk (km prefix)
            (when (keymapp km)
-             (map-keymap
-              (lambda (event def)
-                (let* ((key-vec (vconcat prefix (vector event)))
-                       ;; Unwrap menu-item forms to the real definition.
-                       (def (if (and (consp def) (eq (car def) 'menu-item))
-                                (nth 2 def)
-                              def))
-                       ;; Resolve for the keymapp test only; STORE the
-                       ;; original symbol so symbol-name works downstream.
-                       (resolved (if (and (symbolp def) (fboundp def))
-                                     (indirect-function def)
-                                   def)))
-                  (cond
-                   ((not (jetpacs-keymap--key-printable-p key-vec)) nil)
-                   ((and (keymapp resolved) (< (length key-vec) 4))
-                    (walk resolved key-vec))
-                   ((commandp def)
-                    (push (cons key-vec def) out)))))
-              km))))
+             ;; Per-LEVEL claim set: `map-keymap' yields this map's own
+             ;; entries before its parent's, so first-wins here is
+             ;; exactly the shadowing rule.
+             (let ((claimed (make-hash-table :test #'eql)))
+               (map-keymap
+                (lambda (event def)
+                  (unless (gethash event claimed)
+                    (puthash event t claimed)
+                    (let* ((key-vec (vconcat prefix (vector event)))
+                           ;; Unwrap menu-item forms to the real definition.
+                           (def (if (and (consp def) (eq (car def) 'menu-item))
+                                    (nth 2 def)
+                                  def))
+                           ;; Resolve for the keymapp test only; STORE the
+                           ;; original symbol so symbol-name works downstream.
+                           (resolved (if (and (symbolp def) (fboundp def))
+                                         (indirect-function def)
+                                       def)))
+                      (cond
+                       ((not (jetpacs-keymap--key-printable-p key-vec)) nil)
+                       ((and (keymapp resolved) (< (length key-vec) 4))
+                        ;; A prefix map claims the bare key too: nothing
+                        ;; farther may offer a command under it.
+                        (push (cons key-vec nil) out)
+                        (walk resolved key-vec))
+                       ((commandp def)
+                        (push (cons key-vec def) out))
+                       ;; An explicit unbind, or anything else this map
+                       ;; defines that we will not offer: CLAIM the key.
+                       (t (push (cons key-vec nil) out))))))
+                km)))))
       (walk keymap prefix-keys))
     (nreverse out)))
 
@@ -159,13 +185,27 @@ Emacs resolves the key."
                         (let* ((key-vec (car pair))
                                (cmd (cdr pair))
                                (desc (key-description key-vec)))
-                          (unless (or (gethash desc seen)
-                                      (not (jetpacs-keymap--offerable-p cmd))
-                                      (string-prefix-p "menu-bar" desc)
-                                      (string-prefix-p "<" desc))
+                          (unless (gethash desc seen)
+                            ;; CLAIM the key before deciding whether to
+                            ;; offer it.  A nearer map that binds a key
+                            ;; must block a farther map's row for that
+                            ;; key even when we offer nothing ourselves —
+                            ;; an explicit unbind, a prefix map, or a
+                            ;; command the palette filters out.  Claiming
+                            ;; only on acceptance is what let a farther
+                            ;; command be offered under a shadowed key.
                             (puthash desc t seen)
-                            (push (list desc cmd source) result)
-                            (setq count (1+ count)))))))))
+                            (when (and cmd
+                                       (jetpacs-keymap--offerable-p cmd)
+                                       (not (string-prefix-p "menu-bar" desc))
+                                       (not (string-prefix-p "<" desc))
+                                       ;; The invariant, enforced rather
+                                       ;; than assumed: a row may only
+                                       ;; claim a key that really runs
+                                       ;; its command in THIS buffer.
+                                       (eq cmd (key-binding key-vec)))
+                              (push (list desc cmd source) result)
+                              (setq count (1+ count))))))))))
         ;; `current-minor-mode-maps' returns plain KEYMAPS (poc bug #1
         ;; destructured them as (VAR . MAP) and extracted nothing).
         (dolist (km (current-minor-mode-maps))
@@ -308,18 +348,25 @@ one exists."
 
 (defun jetpacs-keymap-palette-candidates (buf)
   "Alist of (DISPLAY . TARGET) for BUF's key bindings and menu items.
-TARGET is (key . KEY-DESC) for a keybinding or (command . SYMBOL) for a
-menu-derived entry.  Keybindings come first (they carry the shortcut),
-then the human-labeled menu entries.  Recomputed per call BY DESIGN:
-menu :enable/:visible/:filter predicates are contextual, and at the
-extraction caps this costs milliseconds."
+TARGET is (key COMMAND . KEY-DESC) for a keybinding or (command . SYMBOL)
+for a menu-derived entry.  Keybindings come first (they carry the
+shortcut), then the human-labeled menu entries.  Recomputed per call BY
+DESIGN: menu :enable/:visible/:filter predicates are contextual, and at
+the extraction caps this costs milliseconds.
+
+A key row carries the COMMAND, not just its key description, and the
+key survives only as display sugar.  Executing the command we LABELLED
+makes label and effect identical by construction; re-resolving the
+description at tap time — what this did before — reintroduces every way
+the two can diverge, including char-property keymaps that extraction
+never walked and any binding that changed between render and tap."
   (with-current-buffer buf
     (append
      (mapcar (lambda (b)
                (pcase-let ((`(,key ,cmd ,_source) b))
                  (cons (format "%s  ·  %s" key
                                (jetpacs-keymap-command-label cmd))
-                       (cons 'key key))))
+                       (cons 'key (cons cmd key)))))
              (jetpacs-keymap-extract-bindings buf))
      (jetpacs-keymap-menu-candidates buf))))
 

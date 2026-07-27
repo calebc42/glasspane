@@ -838,6 +838,313 @@ A nil TREE admits every note of the scope.  TREE must stay inside
         (cl-remove-if-not (lambda (n) (jetpacs-org-note-matches-p tree n)) notes)
       notes)))
 
+;;;; Shared org primitives (O3)
+;; Timestamp field extractors, headless capture, the LOGBOOK parser,
+;; planning-repeater surgery, and the #+TBLFM resolver — opinion-free
+;; org machinery any Tier-1 can lean on.  Nothing here knows about
+;; agendas or PKM.  (The outline model and `file.add-heading' are
+;; deliberately absent: JA-5.)
+
+(defun jetpacs-org-ts-date (ts)
+  "Return the YYYY-MM-DD date inside org timestamp string TS, or nil."
+  (when (and (stringp ts)
+             (string-match "\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)" ts))
+    (match-string 1 ts)))
+
+(defun jetpacs-org-ts-time (ts)
+  "Return the HH:MM time inside org timestamp string TS, or nil."
+  (when (and (stringp ts)
+             (string-match "\\([0-9]\\{1,2\\}:[0-9]\\{2\\}\\)" ts))
+    (match-string 1 ts)))
+
+(defun jetpacs-org-ts-repeater (ts)
+  "Return the repeater cookie (e.g. \"+1w\", \".+2d\") inside TS, or nil.
+Repeaters only — delay cookies (-1d) deliberately do not match."
+  (when (and (stringp ts)
+             (string-match "\\([.+]?\\+[0-9]+[hdwmy]\\)" ts))
+    (match-string 1 ts)))
+
+(defun jetpacs-org-clocked-in-p (pos)
+  "Whether the heading at POS in the current buffer is the clocked task."
+  (and (bound-and-true-p org-clock-hd-marker)
+       (marker-buffer org-clock-hd-marker)
+       (eq (marker-buffer org-clock-hd-marker) (current-buffer))
+       (save-excursion
+         (goto-char pos)
+         (= (line-beginning-position)
+            (save-excursion (goto-char org-clock-hd-marker)
+                            (line-beginning-position))))))
+
+;;;; Headless capture
+;; D-5 (reversed): `jetpacs-org-capture-run' is the SUBSTRATE the
+;; rescheduled template-builder rung will stand on — the API here is a
+;; consumer contract, not an implementation detail.  The poc carried a
+;; byte-identical second copy of the prompts extractor 1,750 lines away;
+;; ONE survives (D-5's dedupe, executed).
+
+(defun jetpacs-org-capture-prompts (template-string)
+  "Return the ordered field names to collect for TEMPLATE-STRING.
+Each `%^{NAME}' or `%^{NAME|default}' contributes NAME (the default is
+dropped from the label but honoured at fill time).  A `%?' body
+position adds a leading \"Headline\" field.  Duplicates are removed."
+  (let (prompts (start 0))
+    (while (string-match "%\\^{\\([^}]+\\)}" template-string start)
+      ;; Capture the match BEFORE `split-string' runs — it calls
+      ;; `string-match' internally and would clobber the match data,
+      ;; leaving `match-end' wrong and the loop spinning forever.
+      (let ((spec (match-string 1 template-string))
+            (end (match-end 0)))
+        (push (string-trim (car (split-string spec "|"))) prompts)
+        (setq start end)))
+    (setq prompts (nreverse prompts))
+    (delete-dups
+     (if (string-match-p "%\\?" template-string)
+         (cons "Headline" prompts)
+       prompts))))
+
+(defun jetpacs-org-capture-templates ()
+  "The capture templates as plists (:key :description :prompts).
+PROMPTS is a vector of field-name strings.  Plist-native — the poc's
+alist projection was a poc-wire shape; JA-5 builds its own nodes from
+this."
+  (mapcar (lambda (tmpl)
+            (let ((key (nth 0 tmpl))
+                  (desc (nth 1 tmpl))
+                  (template-string (nth 4 tmpl)))
+              (list :key key
+                    :description desc
+                    :prompts (vconcat
+                              (jetpacs-org-capture-prompts
+                               (if (stringp template-string)
+                                   template-string
+                                 ""))))))
+          org-capture-templates))
+
+(defun jetpacs-org-capture-fill (tmpl values)
+  "Fill org capture TMPL string from VALUES (NAME -> user input alist).
+VALUES is STRING-keyed (`assoc') — deliberately outside the alist->
+plist migration; the keys are the human field names the prompts
+extractor produced.  `%?' becomes the Headline value; each
+`%^{NAME|default}' becomes the user value for NAME, else its default,
+else empty.  Any other interactive escape that survives (`%^t', `%^g',
+a valueless `%^{…}') is then stripped, so `org-capture' can never block
+on a minibuffer prompt — which on the phone would hang behind the
+bridge."
+  (let ((headline (or (cdr (assoc "Headline" values)) "")))
+    ;; %? — free-form body position.
+    (setq tmpl (replace-regexp-in-string "%\\?" headline tmpl t t))
+    ;; %^{NAME|default} — scan the template's own tokens so NAME always
+    ;; matches what `jetpacs-org-capture-prompts' produced.
+    (setq tmpl (replace-regexp-in-string
+                "%\\^{\\([^}]*\\)}"
+                (lambda (m)
+                  ;; M is the whole \"%^{…}\" match; parse it directly —
+                  ;; match-data is unreliable inside this callback.
+                  (let* ((spec (substring m 3 -1))
+                         (bar (string-search "|" spec))
+                         (name (string-trim
+                                (if bar (substring spec 0 bar) spec)))
+                         (default (and bar (substring spec (1+ bar))))
+                         (val (cdr (assoc name values))))
+                    (cond ((and (stringp val) (not (string-empty-p val)))
+                           val)
+                          ((stringp default) default)
+                          (t ""))))
+                tmpl t t))
+    ;; Neutralise any remaining caret (interactive) escapes; leave plain
+    ;; ones like %U %t %i %a for org to expand non-interactively.
+    (replace-regexp-in-string "%\\^.?" "" tmpl t t)))
+
+(defun jetpacs-org-capture-run (template-key values &optional extra-body)
+  "Run capture for TEMPLATE-KEY with VALUES alist (NAME -> user input).
+EXTRA-BODY, when non-empty, is appended below the filled template — the
+carrier for text shared from another app.  An unknown TEMPLATE-KEY
+SIGNALS: the poc silently no-opped, which read as a capture that
+vanished."
+  (let ((entry (assoc template-key org-capture-templates)))
+    (unless entry
+      (user-error "No capture template %S" template-key))
+    (let* ((tmpl (nth 4 entry))
+           (filled (if (stringp tmpl)
+                       (jetpacs-org-capture-fill tmpl values)
+                     tmpl))
+           (filled (if (and (stringp filled)
+                            (stringp extra-body)
+                            (not (string-empty-p (string-trim extra-body))))
+                       (concat filled "\n" (string-trim extra-body))
+                     filled))
+           (new-entry (copy-sequence entry))
+           ;; `plist-put' on a COPIED tail, never `append': org reads
+           ;; :immediate-finish with `plist-get', which returns the FIRST
+           ;; occurrence — the poc APPENDED, so a template carrying its
+           ;; own `:immediate-finish nil' won and the capture buffer
+           ;; waited forever for a C-c C-c nobody can press.
+           (props (plist-put (copy-sequence (nthcdr 5 entry))
+                             :immediate-finish t)))
+      (setcar (nthcdr 4 new-entry) filled)
+      (setcdr (nthcdr 4 new-entry) props)
+      ;; `org-capture-entry' short-circuits template selection inside
+      ;; `org-capture', so binding it to the FILLED copy is what makes
+      ;; the pre-filled template the one that actually runs.  (Binding
+      ;; the original re-ran the raw %^{…} prompts and double-asked the
+      ;; user through the bridge.)
+      (let ((org-capture-entry new-entry))
+        ;; Safety net: if any escape slips through, never let
+        ;; `org-capture' block forever on a minibuffer the phone can't
+        ;; answer — `with-timeout' fires even inside a synchronous read.
+        (with-timeout (30 (message "jetpacs-org: capture timed out (a \
+prompt was left unanswered)"))
+          (org-capture))))))
+
+;;;; The LOGBOOK parser
+
+(defun jetpacs-org-parse-logbook (text)
+  "Parse LOGBOOK drawer TEXT into a list of entry plists.
+Clock lines yield (:type clock :start … [:end :duration | :active]);
+notes (:type note :timestamp :content); state changes (:type state :to
+[:from] :timestamp :has-note :content).  Keywords match
+case-insensitively — explicitly, like org-element, never via the
+ambient `case-fold-search'."
+  (let ((case-fold-search t)
+        (lines (split-string text "\n" t "[ \t]+"))
+        entries current-entry)
+    (dolist (line lines)
+      (cond
+       ((string-match "^CLOCK: \\[\\(.*?\\)\\]--\\[\\(.*?\\)\\] =>[ \t]+\\(.*\\)$" line)
+        (when current-entry (push current-entry entries))
+        (setq current-entry (list :type 'clock :start (match-string 1 line)
+                                  :end (match-string 2 line)
+                                  :duration (match-string 3 line))))
+       ((string-match "^CLOCK: \\[\\(.*?\\)\\]$" line)
+        (when current-entry (push current-entry entries))
+        (setq current-entry (list :type 'clock :start (match-string 1 line)
+                                  :active t)))
+       ((string-match "^- Note taken on \\(\\[.*?\\]\\) \\\\\\\\$" line)
+        (when current-entry (push current-entry entries))
+        (setq current-entry (list :type 'note :timestamp (match-string 1 line)
+                                  :content "")))
+       ((string-match "^- State \"\\(.*?\\)\"[ \t]+from \"\\(.*?\\)\"[ \t]+\\(\\[.*?\\]\\)\\(\\(?: \\\\\\\\\\)?\\)$" line)
+        (when current-entry (push current-entry entries))
+        (setq current-entry (list :type 'state :to (match-string 1 line)
+                                  :from (match-string 2 line)
+                                  :timestamp (match-string 3 line)
+                                  :has-note (not (string-empty-p (match-string 4 line)))
+                                  :content "")))
+       ((string-match "^- State \"\\(.*?\\)\"[ \t]+\\(\\[.*?\\]\\)\\(\\(?: \\\\\\\\\\)?\\)$" line)
+        (when current-entry (push current-entry entries))
+        (setq current-entry (list :type 'state :to (match-string 1 line)
+                                  :timestamp (match-string 2 line)
+                                  :has-note (not (string-empty-p (match-string 3 line)))
+                                  :content "")))
+       (t
+        ;; Continuation line.  `:content' is ABSENT on both clock shapes
+        ;; — the poc read nil and concat'd a spurious leading newline.
+        (when current-entry
+          (let ((content (or (plist-get current-entry :content) "")))
+            (setq current-entry
+                  (plist-put current-entry :content
+                             (if (string-empty-p content)
+                                 line
+                               (concat content "\n" line)))))))))
+    (when current-entry (push current-entry entries))
+    (nreverse entries)))
+
+(defun jetpacs-org-logbook-entries (pos)
+  "Return structured logbook entries for heading at POS, or nil.
+Drawer delimiters match case-insensitively (\":logbook:\" is valid
+org), explicitly rather than via ambient `case-fold-search'."
+  (save-excursion
+    (goto-char pos)
+    (let ((case-fold-search t)
+          (end (save-excursion (org-end-of-meta-data t) (point))))
+      (goto-char pos)
+      (when (re-search-forward "^[ \t]*:LOGBOOK:[ \t]*$" end t)
+        (let ((start (match-end 0)))
+          (when (re-search-forward "^[ \t]*:END:[ \t]*$" end t)
+            (jetpacs-org-parse-logbook
+             (buffer-substring-no-properties start
+                                             (match-beginning 0)))))))))
+
+;;;; Planning-repeater surgery
+
+(defun jetpacs-org-set-repeater (type repeater)
+  "Rewrite the repeater cookie on the TYPE planning timestamp at point.
+TYPE is \"SCHEDULED\" or \"DEADLINE\"; REPEATER like \"+1w\" (nil
+removes).  A heading without a TYPE timestamp is a no-op — and so is an
+UNTERMINATED one: the poc's `search-forward' had no NOERROR arg, so a
+timestamp missing its closer signalled `search-failed' out of the
+function instead of declining."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((bound (save-excursion (outline-next-heading) (point))))
+      (when (re-search-forward (concat type ":[ \t]*\\([<[]\\)") bound t)
+        (let* ((beg (match-beginning 1))
+               (close (if (equal (match-string 1) "<") ">" "]"))
+               (end (progn (goto-char beg)
+                           (search-forward close bound t))))
+          (when end
+            (let* ((ts (buffer-substring-no-properties beg end))
+                   (stripped (replace-regexp-in-string
+                              "[ \t]+[.+]?\\+[0-9]+[hdwmy]" "" ts))
+                   (new (if repeater
+                            (concat (substring stripped 0 -1) " " repeater
+                                    (substring stripped -1))
+                          stripped)))
+              (delete-region beg end)
+              (goto-char beg)
+              (insert new))))))))
+
+;;;; The #+TBLFM resolver
+
+(defun jetpacs-org-table-field-formula ()
+  "The #+TBLFM entry (LHS . RHS) computing the field at point, or nil.
+Field formulas (@R$C, with @< / @> resolved to concrete rows) win over
+column formulas ($C), mirroring org's own recalculation.  Point must be
+inside a table.  The LHS comes back exactly as written in the #+TBLFM
+line, so callers can `assoc' it in `org-table-get-stored-formulas'
+output to update the formula in place.  Formulas keyed by field name
+are not resolved — those cells stay value-editable."
+  (org-table-analyze)
+  (let* ((line (count-lines org-table-current-begin-pos
+                            (line-beginning-position)))
+         (dline (org-table-line-to-dline line))
+         (col (org-table-current-column))
+         (stored (org-table-get-stored-formulas t))
+         (norm (lambda (kv)
+                 (or (ignore-errors
+                       (org-table-formula-handle-first/last-rc (car kv)))
+                     (car kv)))))
+    (when (and dline col (> col 0))
+      (or (cl-find (format "@%d$%d" dline col) stored :key norm :test #'equal)
+          (cl-find (format "$%d" col) stored :key norm :test #'equal)))))
+
+;;;; The clock formatter and the file-save seam
+
+(defun jetpacs-org-format-clock-time (start end)
+  "Human line for a clock span: same-day collapses to one date."
+  (condition-case nil
+      (let ((s-date (substring start 0 10))
+            (s-time (substring start -5))
+            (e-date (substring end 0 10))
+            (e-time (substring end -5)))
+        (if (equal s-date e-date)
+            (format "%s, %s to %s" s-date s-time e-time)
+          (format "%s %s to %s %s" s-date s-time e-date e-time)))
+    (error (format "%s to %s" start end))))
+
+(defun jetpacs-org--default-file-save (_buffer)
+  "Invalidate the org memo and schedule a save for the current buffer.
+The default `jetpacs-org-file-save-function'."
+  (jetpacs-org-cache-invalidate)
+  (jetpacs-org-defer-save))
+
+(defvar jetpacs-org-file-save-function #'jetpacs-org--default-file-save
+  "Function called, with the just-mutated org BUFFER current, to persist it.
+Apps rebind it to their own mutation tail — e.g. a synchronous save
+plus a note-index refresh — so a generic core mutation keeps their
+memo/index coherent.  (The poc's `file.add-heading' consumer of this
+seam is JA-5's; the seam itself is engine machinery.)")
+
 ;;;; Reset (the test seam; wired into `jetpacs-test-reset-state')
 
 (defun jetpacs-org-reset ()

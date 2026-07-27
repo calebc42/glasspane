@@ -559,5 +559,160 @@ case-insensitively; regexp searches title+properties, NOT the body."
   (should-not (jetpacs-org-note-query-supported-p '(and (clocked))))
   (should (jetpacs-org-note-query-supported-p nil)))
 
+;;;; Shared primitives (O3)
+
+(ert-deftest jetpacs-org-ts-extractors ()
+  (should (equal (jetpacs-org-ts-date "<2026-08-01 Sat 14:30 +1w>")
+                 "2026-08-01"))
+  (should (equal (jetpacs-org-ts-time "<2026-08-01 Sat 14:30 +1w>")
+                 "14:30"))
+  (should (equal (jetpacs-org-ts-repeater "<2026-08-01 Sat .+2d>") ".+2d"))
+  ;; Delay cookies deliberately do not match.
+  (should-not (jetpacs-org-ts-repeater "<2026-08-01 Sat -1d>"))
+  (should-not (jetpacs-org-ts-date nil)))
+
+(ert-deftest jetpacs-org-capture-prompts-schema ()
+  "Exit-gate: the ONE extractor (D-5 dedupe) — %? adds Headline,
+defaults drop from labels, duplicates collapse."
+  (should (equal (jetpacs-org-capture-prompts
+                  "* %^{Title|untitled} %? %^{Title} %^{Tag}")
+                 '("Headline" "Title" "Tag")))
+  (should (equal (jetpacs-org-capture-prompts "* plain") '())))
+
+(ert-deftest jetpacs-org-capture-fill-precedence ()
+  "User value > template default > empty; leftover carets stripped."
+  (should (equal (jetpacs-org-capture-fill
+                  "* %^{Title|dflt} %?\n%^t %^{Empty}"
+                  '(("Title" . "mine") ("Headline" . "H")))
+                 "* mine H\n ")))
+
+(ert-deftest jetpacs-org-capture-run-real ()
+  "Exit-gate G3: a REAL org-capture run into a temp target — user
+values land, no residue, no lingering capture buffer, and the
+filled-copy binding holds (defaults would show if the ORIGINAL entry
+re-ran its prompts)."
+  (jetpacs-org-test--with-fixture target "* Inbox\n"
+    (let ((org-capture-templates
+           `(("t" "Task" entry (file+headline ,target "Inbox")
+              "* TODO %^{Title|default-title}\n%?"
+              :immediate-finish nil))))   ; the defect-1 shape, on purpose
+      (jetpacs-org-capture-run "t" '(("Title" . "user-title")
+                                     ("Headline" . "the body line")))
+      (with-temp-buffer
+        (insert-file-contents target)
+        (let ((text (buffer-string)))
+          (should (string-search "* TODO user-title" text))
+          (should (string-search "the body line" text))
+          (should-not (string-search "default-title" text))
+          (should-not (string-search "%^" text))))
+      ;; :immediate-finish t WON over the template own nil — no capture
+      ;; buffer is waiting for a C-c C-c.
+      (should-not (cl-find-if (lambda (b)
+                                (string-prefix-p "CAPTURE-" (buffer-name b)))
+                              (buffer-list))))))
+
+(ert-deftest jetpacs-org-capture-run-unknown-key-signals ()
+  "The poc silently no-opped an unknown key — a capture that vanished."
+  (let ((org-capture-templates (list (list "t" "Task" 'entry '(file "/dev/null") "x"))))
+    (should-error (jetpacs-org-capture-run "zz" nil) :type 'user-error)))
+
+(ert-deftest jetpacs-org-capture-templates-plist-shape ()
+  (let ((org-capture-templates
+         (list (list "t" "Task" 'entry '(file "x.org") "* %^{Who} %?"))))
+    (let ((one (car (jetpacs-org-capture-templates))))
+      (should (equal (plist-get one :key) "t"))
+      (should (equal (plist-get one :description) "Task"))
+      (should (equal (append (plist-get one :prompts) nil)
+                     '("Headline" "Who"))))))
+
+(ert-deftest jetpacs-org-parse-logbook-shapes ()
+  "The five recognisers, in file order."
+  (let ((entries (jetpacs-org-parse-logbook
+                  (concat "CLOCK: [2026-07-01 Wed 10:00]--[2026-07-01 Wed 11:00] =>  1:00\n"
+                          "CLOCK: [2026-07-27 Mon 09:00]\n"
+                          "- Note taken on [2026-07-02 Thu 12:00] \\\\\n"
+                          "  the note body\n"
+                          "- State \"DONE\"       from \"TODO\"       [2026-07-03 Fri]\n"))))
+    (should (= (length entries) 4))
+    (should (equal (plist-get (nth 0 entries) :duration) "1:00"))
+    (should (plist-get (nth 1 entries) :active))
+    (should (equal (plist-get (nth 2 entries) :content) "the note body"))
+    (let ((state (nth 3 entries)))
+      (should (equal (plist-get state :to) "DONE"))
+      (should (equal (plist-get state :from) "TODO"))
+      (should-not (plist-get state :has-note)))))
+
+(ert-deftest jetpacs-org-parse-logbook-clock-continuation ()
+  "Defect 7: a continuation under a CLOCK entry (no :content) must not
+grow a spurious leading newline off a nil."
+  (let ((entries (jetpacs-org-parse-logbook
+                  "CLOCK: [2026-07-27 Mon 09:00]\nstray continuation\n")))
+    (should (= (length entries) 1))
+    (should (equal (plist-get (car entries) :content)
+                   "stray continuation"))))
+
+(ert-deftest jetpacs-org-logbook-entries-reads-the-drawer ()
+  (jetpacs-org-test--with-fixture f
+      "* TODO H\n:LOGBOOK:\n- State \"DONE\" [2026-07-01 Tue]\n:END:\nBody.\n"
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-with-wide-buffer
+       (let ((entries (jetpacs-org-logbook-entries (point-min))))
+         (should (= (length entries) 1))
+         (should (equal (plist-get (car entries) :to) "DONE")))))))
+
+(ert-deftest jetpacs-org-set-repeater-roundtrip-and-unterminated ()
+  "Add, replace, remove — and defect 6: an unterminated timestamp is a
+NO-OP, byte-identical buffer, instead of search-failed escaping."
+  (jetpacs-org-test--with-fixture f
+      "* TODO H\nSCHEDULED: <2026-08-01 Sat>\n* Broken\nSCHEDULED: <2026-08-01\n"
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-with-wide-buffer
+       (goto-char (point-min))
+       (jetpacs-org-set-repeater "SCHEDULED" "+1w")
+       (should (save-excursion (goto-char (point-min))
+                               (search-forward "<2026-08-01 Sat +1w>" nil t)))
+       (goto-char (point-min))
+       (jetpacs-org-set-repeater "SCHEDULED" ".+2d")
+       (should (save-excursion (goto-char (point-min))
+                               (search-forward "<2026-08-01 Sat .+2d>" nil t)))
+       (goto-char (point-min))
+       (jetpacs-org-set-repeater "SCHEDULED" nil)
+       (should-not (save-excursion (goto-char (point-min))
+                                   (search-forward "+2d" nil t)))
+       ;; The unterminated heading: no signal, no change.
+       (search-forward "* Broken")
+       (let ((before (buffer-string)))
+         (jetpacs-org-set-repeater "SCHEDULED" "+1w")
+         (should (equal (buffer-string) before))))
+      (set-buffer-modified-p nil))))
+
+(ert-deftest jetpacs-org-tblfm-field-over-column ()
+  "Field formulas (@R$C) beat column formulas ($C), mirroring org."
+  (jetpacs-org-test--with-fixture f
+      "| a | b |\n|---+---|\n| 1 | 2 |\n| 3 | 4 |\n#+TBLFM: @3$2=@3$1*2::$2=$1+1\n"
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-with-wide-buffer
+       (goto-char (point-min))
+       (search-forward "| 3 | 4")
+       (backward-char 1)
+       (should (equal (car (jetpacs-org-table-field-formula)) "@3$2"))
+       (goto-char (point-min))
+       (search-forward "| 1 | 2")
+       (backward-char 1)
+       (should (equal (car (jetpacs-org-table-field-formula)) "$2"))))))
+
+(ert-deftest jetpacs-org-format-clock-time-shapes ()
+  (should (equal (jetpacs-org-format-clock-time
+                  "2026-07-01 Wed 10:00" "2026-07-01 Wed 11:30")
+                 "2026-07-01, 10:00 to 11:30"))
+  (should (equal (jetpacs-org-format-clock-time
+                  "2026-07-01 Wed 23:30" "2026-07-02 Thu 00:15")
+                 "2026-07-01 23:30 to 2026-07-02 00:15"))
+  ;; The degraded arm never signals.
+  (should (stringp (jetpacs-org-format-clock-time "x" "y"))))
+
 (provide 'jetpacs-org-test)
 ;;; jetpacs-org-test.el ends here

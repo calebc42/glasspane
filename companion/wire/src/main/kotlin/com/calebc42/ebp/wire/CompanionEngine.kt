@@ -961,12 +961,17 @@ class CompanionEngine(
 
     private fun handlePieMenuShow(params: JSONObject) {
         if ("presentation.pie-menu" !in granted) return
-        val menuId = params.opt("menu_id") as? String ?: return
+        val menuId = params.opt("menu_id") as? String
+            ?: return reportPieMenuInvalid("menu_id")
         // SPEC 4.4/18.3: menu_id MUST be a valid identifier, not any string.
-        if (!identifier.matches(menuId)) return
-        val categories = params.optJSONArray("categories") ?: return
-        // SPEC 18.3: an invalid menu is dropped, not partially shown.
-        if (!validPieCategories(categories)) return
+        if (!identifier.matches(menuId)) return reportPieMenuInvalid("menu_id")
+        val categories = params.optJSONArray("categories")
+            ?: return reportPieMenuInvalid("categories")
+        // SPEC 18.3: an invalid menu is dropped, not partially shown — and
+        // (amendment #132) the drop is REPORTED. A silent discard left an
+        // authoring error with no diagnostic anywhere on either side, so a
+        // Tier-1 author's first invalid menu produced nothing at all.
+        if (!validPieCategories(categories)) return reportPieMenuInvalid("categories")
         // SPEC 18.3: a new id over the limit is dropped with a diagnostic;
         // replacing an existing id stays legal at the limit.
         if (!pieMenus.containsKey(menuId) &&
@@ -982,6 +987,17 @@ class CompanionEngine(
         val present = JSONObject().put("categories", categories)
         (params.opt("center_label") as? String)?.let { present.put("center_label", it) }
         pieMenuListener?.invoke(menuId, present)
+    }
+
+    /** SPEC 18.3 (amendment #132): report a discarded-as-invalid pie menu.
+     * `path` names the offending member. Returns Unit so the call sites can
+     * `return` it directly from the drop point. */
+    private fun reportPieMenuInvalid(path: String) {
+        emit(notification("log.error", JSONObject().put("code", 1201)
+            .put("message", "Invalid pie menu")
+            .put("data", JSONObject().put("kind", "content-invalid")
+                .put("reason", "pie-menu-invalid")
+                .put("path", path))))
     }
 
     private fun handlePieMenuDismiss(params: JSONObject) {

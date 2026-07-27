@@ -152,6 +152,35 @@ class PieMenuTest {
         repeat(11) { many.put(leaf("x")) }
         show(engine, "d", many)
         assertTrue(presented.isEmpty())
+        // SPEC 18.3 (amendment #132): each drop is REPORTED, not silent — an
+        // author's invalid menu previously produced nothing on either side.
+        val invalid = out.filter {
+            it.optString("method") == "log.error" &&
+                it.optJSONObject("params")?.optJSONObject("data")
+                    ?.optString("reason") == "pie-menu-invalid"
+        }
+        assertEquals(4, invalid.size)
+        val params = invalid.first().getJSONObject("params")
+        assertEquals(1201, params.getInt("code"))
+        assertEquals("content-invalid", params.getJSONObject("data").getString("kind"))
+        // data.path names the offending member.
+        assertEquals("categories", params.getJSONObject("data").getString("path"))
+    }
+
+    @Test
+    fun aMalformedMenuIdIsReportedNotJustDropped() {
+        val out = mutableListOf<JSONObject>()
+        val presented = mutableListOf<Pair<String, JSONObject?>>()
+        val engine = engine(out, presented)
+        show(engine, "has space", JSONArray().put(leaf("x")))
+        assertTrue(presented.isEmpty())
+        val invalid = out.single {
+            it.optString("method") == "log.error" &&
+                it.optJSONObject("params")?.optJSONObject("data")
+                    ?.optString("reason") == "pie-menu-invalid"
+        }
+        assertEquals("menu_id",
+            invalid.getJSONObject("params").getJSONObject("data").getString("path"))
     }
 
     @Test

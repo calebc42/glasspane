@@ -159,6 +159,31 @@ class SurfaceStoreTest {
         } catch (e: ContentInvalid) { assertTrue(e.path.contains("stale_spec")) }
     }
 
+    @Test
+    fun theWelcomeReportsTheCurrentViewOfAMultiViewAppSurface() {
+        // SPEC 10.2 (amendment #129): view.switched is when_offline "drop", so
+        // without this the device's view after an offline navigation is
+        // unrecoverable at the 10.3 barrier.
+        val s = store()
+        val spec = JSONObject()
+            .put("views", JSONObject()
+                .put("list", textSpec("l")).put("detail", textSpec("d")))
+            .put("initial_view", "list")
+        assertEquals("applied", s.update("app:m", 1, spec, null, null, null).status)
+        // Initially the welcome reports initial_view.
+        assertEquals("list", s.snapshot().getJSONObject("app:m").getString("current_view"))
+        // A local navigation is reflected.
+        assertTrue(s.switchView("app:m", "detail"))
+        assertEquals("detail", s.snapshot().getJSONObject("app:m").getString("current_view"))
+        // A single-root surface has no view to report (#128 clears it), and
+        // the member must then be ABSENT rather than null.
+        assertEquals("applied", update(s, "app:single", 1).status)
+        assertFalse(s.snapshot().getJSONObject("app:single").has("current_view"))
+        // Leaving the multi-view shape clears it on the reporting path too.
+        assertEquals("applied", update(s, "app:m", 2).status)
+        assertFalse(s.snapshot().getJSONObject("app:m").has("current_view"))
+    }
+
     // ------------------------------------------------------ drafts (13.6)
 
     @Test

@@ -105,6 +105,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "elevation" to "dp",
     "enabled" to "boolean",
     "fab" to "node",
+    "fg" to "color",
     "fill" to "varies-per-node",
     "floating_toolbar" to "node",
     "font_weight" to "font-weight",

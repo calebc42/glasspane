@@ -331,9 +331,19 @@ class SurfaceStore(
     /** SPEC 10.2: both present snapshots and tombstones are reported. */
     fun snapshot(): JSONObject {
         val out = JSONObject()
-        for ((id, record) in records)
-            out.put(id, JSONObject()
-                .put("revision", record.revision).put("present", record.present))
+        for ((id, record) in records) {
+            val entry = JSONObject()
+                .put("revision", record.revision).put("present", record.present)
+            // SPEC 10.2 (amendment #129): a present multi-view app surface also
+            // reports the view the user is actually on. `view.switched` is
+            // when_offline "drop", so a navigation performed while Emacs was
+            // disconnected is otherwise unrecoverable at the 10.3 barrier.
+            // currentView is null for a single-root snapshot (#128 clears it),
+            // so this is present exactly when the spec requires it.
+            if (record.present && id.startsWith("app:"))
+                record.currentView?.let { entry.put("current_view", it) }
+            out.put(id, entry)
+        }
         return out
     }
 

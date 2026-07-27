@@ -24,9 +24,11 @@ gates any commit below.**
 **Commit-3 residue** (deliberately deferred, land in E1): the node counter on
 the budget cons; the chrome stack depth bound.
 
-**Suite baseline: 358 tests / 16 suites.**  Trust no mutation result from a
-harness reporting fewer (the teardown suite runs only under its selector —
-audit §3(h) baseline note).
+**Suite baseline: 422 tests / 16 suites** (2026-07-27, after E4's +9).  Trust
+no mutation result from a harness reporting fewer (the teardown suite runs
+only under its selector — audit §3(h) baseline note).  The 358 figure this
+line carried until E4 was stale by 55 tests: it predated work that landed
+without updating it, so re-measure rather than trusting the number here.
 
 ## 1. Shape of the remainder
 
@@ -116,21 +118,63 @@ The multi-view machinery still holds N documents with one document's habits.
       gen bump; stop `remhash`ing the gen counter on teardown (monotonic, not
       per-set); `:at_ms` ceiling via `jetpacs--check-integer`.
 
-### E4 — redaction + exposure (audit commit 7) — P2(d) — independent
+### E4 — redaction + exposure (audit commit 7) — P2(d) — **DONE 2026-07-27**
 
-- [ ] `advice-add 'jsonrpc--warn :around`: fixed redacted string unless
+- [x] `advice-add 'jsonrpc--warn :around`: fixed redacted string unless
       `ebp-log-events` (30.1's jsonrpc writes the raw frame body to
       *Warnings* — reproduced with a secret).  Ship with the §24.6 item 12
-      test.
-- [ ] Obarray isolation: bind a throwaway `obarray` around the decode in the
+      test.  `ebp--jsonrpc-warn-redact`, scoped by `ebp--in-filter` so other
+      jsonrpc.el consumers in the session (eglot) keep their diagnostics —
+      a second test pins that scoping.  Redacting at `jsonrpc--warn` covers
+      BOTH sinks: it calls `jsonrpc--message` (→ *Messages*) before
+      `display-warning` (→ *Warnings*).
+- [x] Obarray isolation: bind a throwaway `obarray` around the decode in the
       existing process-filter wrapper, remap dispatch names after (SPEC 23.5 /
       amendment A2; measured 20k interned symbols surviving GC).  §24.6 item 4
-      test.
-- [ ] Commit buffer exposure records only after the node survives both
+      test.  Shape: `(let ((obarray (obarray-make))) …)` around the rented
+      filter, then `ebp--isolate-parsed-messages` at the wrapper's exit
+      re-homes each parsed message onto the global obarray via `intern-soft`
+      (a name interned nowhere else is peer-invented and is DELIBERATELY left
+      on the dying throwaway) and swaps an unregistered method name for
+      `ebp--unknown-method-sentinel`, so jsonrpc.el's pre-dispatch `intern`
+      of it never reaches the global pool.  Timers cannot fire inside the
+      filter's synchronous extent, so the queue is stable when we walk it.
+      Known residue, accepted + commented: jsonrpc.el's bug#60088 re-entry
+      reschedule would re-run the filter outside the wrapper, but that path
+      needs `accept-process-output` inside our own filter extent, which no
+      ebp code performs.
+- [x] Commit buffer exposure records only after the node survives both
       budgets (today a discarded node's bindings stay armed and unshimmed).
-- [ ] Scope the exposure table per document (surface + render generation),
+      Implemented as *suppress-then-re-derive*: `jetpacs-buffer--defer-exposure`
+      silences `jetpacs-buffer-expose` during the line build, and
+      `jetpacs-buffer--expose-node-taps` reads the SHIPPED spans of the
+      committed node.  This also closes the span-cap half the audit did not
+      name — a tap the SPEC 4.5 ellipsis replaced is no longer authorized —
+      and it leaves the public `jetpacs-buffer-line-spans` exposure-for-free
+      contract intact for skins calling it outside the walk.
+- [x] Scope the exposure table per document (surface + render generation),
       not per buffer render — chrome makes one document hold N renders.
-- [ ] P3 rider: length-bound `jetpacs-toast` TEXT (the one uncapped text path).
+      `jetpacs-buffer--exposure-document` is bound by
+      `jetpacs-buffer-with-budget` (which already delimits exactly one
+      SurfaceSpec and is already idempotent under nesting), and the NAMED
+      `jetpacs-buffer-forget-exposed` supersedes a buffer only the first time
+      per document.  The no-arg form stays an unconditional reset — it is the
+      teardown/test verb, never a render step.
+- [x] P3 rider: length-bound `jetpacs-toast` TEXT (the one uncapped text path).
+      `jetpacs-toast-max-chars` (300) + a reusable `jetpacs-truncate-text`
+      following the `jetpacs-buffer-cap-spans` rule (the ellipsis REPLACES the
+      tail, so the result never exceeds the bound).
+
+**Mutation-verified** (each guard reverted individually, test must fail):
+redaction advice removed → item-12 test fails; throwaway obarray removed →
+growth test fails; `--defer-exposure` forced nil → both exposure tests fail;
+document scoping disabled → scope test fails; toast cap unwired → bound test
+fails.  Two tests did NOT bite on the first attempt and were rewritten — the
+GATE 5 lesson recurring: the document test first used two DIFFERENT buffers
+(`forget-exposed` is per-buffer, so they never collided) and the budget test
+counted nodes (the trailing `… output truncated` caption inflates the count by
+one, masking exactly the one leaked line).  Both now assert SET EQUALITY of
+authorized vs shipped `(pos . action)` pairs, which is immune to both.
 
 ### E5 — clip privacy (audit commit 8, shaped by R2: stays base) — P2(d)
 
@@ -271,7 +315,9 @@ Each elisp commit is sized to land inside one session comfortably; nothing
 shares state across commits except E1→E2 and K→(E6 tail, C).
 
 - **Session A**: E1 then E2. DONE 2026-07-26.
-- **Session B**: E3 DONE; **E4 remains** (the only open elisp commit).
+- **Session B**: E3 DONE; **E4 DONE 2026-07-27** — all elisp commits are now
+  landed.  Still owed for E4: the ONE connect-smoke device re-run below (it
+  wraps the process filter), and the S-commit prose for amendment #136.
 - **Session C**: E6 DONE; K DONE (APK rebuilt+installed); C DONE (submodule
   d48075d, both rail halves verified to bite).  **T and S remain.**
 - **Session D**: **DEVICE GATE PASSED 2026-07-26** on the new APK:

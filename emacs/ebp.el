@@ -852,6 +852,98 @@ that MUST follow the report makes a second report impossible."
     (message "ebp: overloaded (%s); closing" why)
     (ebp-client-close client (list 'overloaded why))))
 
+;;;; Rented-library sink redaction and decode isolation (SPEC 23.3/23.5)
+
+(defun ebp--jsonrpc-warn-redact (orig format &rest args)
+  "Redact `jsonrpc--warn' while our process filter is on the stack.
+jsonrpc.el's only payload-carrying warn site is the in-filter decode
+failure (emacs-30.1 jsonrpc.el:768: \"Invalid JSON: %s %s\" with the
+whole `buffer-string'), which writes the raw frame body — a volatile
+password value, an auth proof — to *Warnings* AND *Messages*.  SPEC 23.3
+names both as forbidden sinks, and disabling the events buffer
+\(`ebp-connect') does not cover them.  Gating on `ebp--in-filter' keeps
+this advice inert for every other jsonrpc.el consumer in the session
+\(eglot's warnings pass through untouched)."
+  (if (or ebp-log-events (not ebp--in-filter))
+      (apply orig format args)
+    (funcall orig "%s"
+             "ebp: jsonrpc diagnostic redacted (SPEC 23.3; set `ebp-log-events' to t to include frame bodies)")))
+
+(unless (advice-member-p #'ebp--jsonrpc-warn-redact 'jsonrpc--warn)
+  (advice-add 'jsonrpc--warn :around #'ebp--jsonrpc-warn-redact))
+
+(defconst ebp--unknown-method-sentinel "ebp.unknown-method"
+  "Replacement for an inbound method name no handler is registered for.
+jsonrpc.el `intern's the method name before any dispatch check
+\(emacs-30.1 jsonrpc.el:305,320 — the exact behavior SPEC 23.5's note
+names), so a peer's choice of names would grow the global obarray for
+the life of the process.  Substituting this sentinel BEFORE dispatch
+keeps the growth at one symbol; behavior is unchanged because the
+dispatchers answer any unregistered method with -32601 (requests) or a
+logged ignore (notifications) either way — the substitution reaches
+exactly the messages already bound for those arms.")
+;; Pre-intern it so the first hostile frame allocates nothing.
+(intern ebp--unknown-method-sentinel)
+
+(defun ebp--remap-decoded (tree)
+  "Re-home symbols in decoded TREE onto the global obarray, in place.
+The decode ran under a throwaway `obarray' (see `ebp-connect'), so every
+member-name keyword it interned is invisible to `plist-get' against our
+source-literal keywords.  Any symbol whose name is already globally
+interned — the envelope keys, every contract member name our code
+mentions — is replaced by its global twin; a name interned nowhere else
+is peer-invented, and KEEPING the throwaway symbol is the point: it dies
+with the message (SPEC 23.5).  Idempotent, so re-walking an
+already-remapped message is safe."
+  (cond
+   ((consp tree)
+    (let ((cell tree))
+      (while (consp cell)
+        (let ((head (car cell)))
+          (cond
+           ((symbolp head)
+            (let ((global (and head (intern-soft (symbol-name head)))))
+              (when (and global (not (eq global head)))
+                (setcar cell global))))
+           ((or (consp head) (vectorp head))
+            (ebp--remap-decoded head))))
+        (setq cell (cdr cell))))
+    tree)
+   ((vectorp tree)
+    (dotimes (i (length tree))
+      (let ((el (aref tree i)))
+        (cond
+         ((symbolp el)
+          (let ((global (and el (intern-soft (symbol-name el)))))
+            (when (and global (not (eq global el)))
+              (aset tree i global))))
+         ((or (consp el) (vectorp el))
+          (ebp--remap-decoded el)))))
+    tree)
+   (t tree)))
+
+(defun ebp--isolate-parsed-messages (client)
+  "Remap the parsed-but-undispatched inbound queue for CLIENT.
+Runs at the filter wrapper's exit, after the decode that ran under a
+throwaway `obarray' and before any dispatch timer can fire (timers
+cannot run inside a process filter's synchronous extent).  jsonrpc.el
+drained its mqueue into 0-delay timers, so the queue to walk is exactly
+`ebp-client--backlog's: timers whose args lead with our connection.
+Each message gets (a) its keyword tree re-homed onto the global obarray
+and (b) an unregistered method name replaced by the sentinel, so
+jsonrpc.el's pre-dispatch `intern' of it never reaches the global
+obarray (SPEC 23.5)."
+  (let ((conn (ebp-client-connection client)))
+    (dolist (tm timer-list)
+      (when (eq (car-safe (timer--args tm)) conn)
+        (let ((msg (cadr (timer--args tm))))
+          (when (consp msg)
+            (ebp--remap-decoded msg)
+            (let ((method (plist-get msg :method)))
+              (when (and (stringp method)
+                         (not (gethash method (ebp-client-handlers client))))
+                (plist-put msg :method ebp--unknown-method-sentinel)))))))))
+
 (defmacro ebp--with-dispatch (client &rest body)
   "Run BODY as one depth-bounded inbound dispatch (SPEC 22.3, #124).
 Past `ebp-max-dispatch-depth' the client is overload-closed and BODY
@@ -1907,12 +1999,27 @@ stays with the caller for now."
     ;; while a flood is starving the timer drain — measures the parsed
     ;; backlog and applies backpressure.  Public process API only;
     ;; jsonrpc.el itself stays rented unmodified.
+    ;;
+    ;; SPEC 23.5 decode isolation rides the same seam: the rented filter
+    ;; parses with `:object-type' plist, interning every peer-supplied
+    ;; member name, so the parse runs under a THROWAWAY obarray (fresh
+    ;; per invocation — a partial frame's names die with the chunk that
+    ;; completes it) and the exit remaps the parsed queue onto the global
+    ;; obarray where a global twin exists (`ebp--isolate-parsed-messages';
+    ;; also the unknown-method sentinel).  `ebp--in-filter' additionally
+    ;; scopes the `jsonrpc--warn' redaction (SPEC 23.3).  Known residue,
+    ;; accepted: jsonrpc.el's bug#60088 re-entry reschedule would re-run
+    ;; the filter OUTSIDE this wrapper, but that path needs
+    ;; `accept-process-output' inside our own filter extent, which no ebp
+    ;; code performs.
     (add-function :around (process-filter proc)
                   (lambda (orig p string)
                     (let ((outermost (not ebp--in-filter))
                           (ebp--in-filter t))
                       (unwind-protect
-                          (funcall orig p string)
+                          (let ((obarray (obarray-make)))
+                            (funcall orig p string))
+                        (ebp--isolate-parsed-messages client)
                         (when outermost
                           (ebp-client--inbound-check client)))))
                   '((name . ebp-overload)))

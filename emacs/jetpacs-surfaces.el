@@ -214,6 +214,29 @@ non-renderer emitters (clip, toast) need no jetpacs-buffer edge."
                                 s t t)
     s))
 
+(defcustom jetpacs-toast-max-chars 300
+  "Character ceiling for `jetpacs-toast' TEXT (SPEC 18.2).
+A toast is transient presentation with no scroll and no action, so a
+long string is unreadable on the device however it is delivered.  The
+wire imposes no `toast.show' limit of its own — `text' is the one
+uncapped text path in this layer, and every sibling emitter caps — so
+the bound is ours: it keeps a stray `buffer-string' or a backtrace out
+of a frame that only `max_frame_bytes' would otherwise refuse, taking
+the whole send with it."
+  :type 'natnum :group 'jetpacs)
+
+(defun jetpacs-truncate-text (s max-chars)
+  "S truncated to MAX-CHARS characters, an ellipsis marking the cut.
+The ellipsis replaces the tail rather than being appended past the
+bound, so the result never exceeds MAX-CHARS (the `jetpacs-buffer-cap-spans'
+rule).  A nil or non-positive MAX-CHARS means no bound."
+  (if (or (not (natnump max-chars)) (zerop max-chars)
+          (<= (length s) max-chars))
+      s
+    (if (< max-chars 2)
+        (substring s 0 max-chars)
+      (concat (substring s 0 (1- max-chars)) "…"))))
+
 (cl-defun jetpacs-toast (text &key duration-s)
   "Best-effort device toast (SPEC 18.2); returns t when sent, nil when not.
 Gated on READY — `toast.show' is legal ONLY in R — and on the
@@ -230,7 +253,9 @@ A notification on the wire, so the W10 sender ceiling never refuses it."
   (when (and (jetpacs-connected-p)
              (jetpacs-granted-p "presentation.toast"))
     (ebp-client-toast (jetpacs-client)
-                      (jetpacs-scalar-text (substring-no-properties text))
+                      (jetpacs-truncate-text
+                       (jetpacs-scalar-text (substring-no-properties text))
+                       jetpacs-toast-max-chars)
                       :duration-s duration-s)
     t))
 

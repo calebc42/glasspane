@@ -1653,5 +1653,129 @@ a second 1500 must not stack a redundant one."
         (cancel-timer tm))
       (ebp-client-close client 'test-done))))
 
+;;;; SPEC 23.3 / 23.5 — rented-library sinks and decode interning
+;;
+;; SPEC 24.6 item 12 (proof and volatile state excluded from logs) and item 4
+;; (unknown-request/notification handling) over the LIVE jsonrpc.el path.
+;; Both defects were invisible to the offline reference decoder: they live in
+;; the rented library, so only a real connection exercises them.
+
+(defconst ebp-test--secret "SUPERSECRET-PASSWORD-VALUE-9d41"
+  "A distinctive volatile value planted in an undecodable frame body.")
+
+(defun ebp-test--sink-text ()
+  "The concatenated text of both SPEC 23.3 log sinks."
+  (concat (with-current-buffer (get-buffer-create "*Messages*") (buffer-string))
+          (if-let* ((w (get-buffer "*Warnings*")))
+              (with-current-buffer w (buffer-string))
+            "")))
+
+(ert-deftest ebp-test-jsonrpc-warn-redacts-frame-bodies ()
+  "SPEC 23.3/24.6-12: an undecodable frame body never reaches a log sink.
+emacs-30.1 jsonrpc.el:768 warns with the whole `buffer-string', so a
+volatile password in a truncated frame lands in *Warnings* AND
+*Messages* unless `ebp--jsonrpc-warn-redact' intercepts it."
+  (let ((inhibit-message t))
+    ;; Both sinks start clean so the assertion cannot pass on staleness.
+    (when-let* ((w (get-buffer "*Warnings*"))) (kill-buffer w))
+    (with-current-buffer (get-buffer-create "*Messages*")
+      (let ((inhibit-read-only t)) (erase-buffer)))
+    (ebp-test--with-companion
+        (server client (ebp-test--kat-script))
+      (should (ebp-test--wait
+               (lambda () (eq (ebp-client-state client) 'ready))))
+      ;; Drive the decode failure through the client's real filter — the
+      ;; wrapper, and therefore the redaction, is installed on it.
+      (let ((body (format "{\"jsonrpc\":\"2.0\",\"params\":{\"password\":\"%s\"}"
+                          ebp-test--secret)))
+        (funcall (process-filter (ebp-client-process client))
+                 (ebp-client-process client)
+                 (ebp-encode-frame body)))
+      (let ((sinks (ebp-test--sink-text)))
+        ;; The point of the test: the secret is absent from both sinks.
+        (should-not (string-search ebp-test--secret sinks))
+        ;; ...and absent because we redacted, not because nothing warned.
+        (should (string-search "jsonrpc diagnostic redacted" sinks))))))
+
+(ert-deftest ebp-test-jsonrpc-warn-redaction-is-scoped ()
+  "The advice is inert outside our filter — other jsonrpc.el consumers
+\(eglot) keep their diagnostics.  Guards against a global gag."
+  (let ((inhibit-message t))
+    (when-let* ((w (get-buffer "*Warnings*"))) (kill-buffer w))
+    (let ((ebp--in-filter nil))
+      (jsonrpc--warn "unrelated consumer message %s" "PASSTHROUGH-TOKEN"))
+    (should (string-search "PASSTHROUGH-TOKEN" (ebp-test--sink-text)))))
+
+(ert-deftest ebp-test-decode-does-not-grow-the-global-obarray ()
+  "SPEC 23.5: peer-supplied member and method names must not grow a
+process-global pool.  jsonrpc.el parses `:object-type' plist and
+`intern's the method before dispatch (emacs-30.1 jsonrpc.el:305,320) —
+the note's exact failure.  Measured at the 30.1 floor before the fix:
+one frame of 400 invented names grew the obarray by 400 and they
+survived GC."
+  (let ((inhibit-message t))
+    (ebp-test--with-companion
+        (server client (ebp-test--kat-script))
+      (should (ebp-test--wait
+               (lambda () (eq (ebp-client-state client) 'ready))))
+      (let* ((count-atoms (lambda ()
+                            (let ((n 0)) (mapatoms (lambda (_) (setq n (1+ n)))) n)))
+             (before (funcall count-atoms))
+             (members (mapconcat
+                       (lambda (i) (format "\"ebp-peer-invented-%d\":%d" i i))
+                       (number-sequence 1 400) ","))
+             (frame (ebp-encode-frame
+                     (format "{\"jsonrpc\":\"2.0\",\"method\":\"ebp.peer.invented.method\",\"params\":{%s}}"
+                             members))))
+        (funcall (process-filter (ebp-client-process client))
+                 (ebp-client-process client) frame)
+        (garbage-collect)
+        (let ((grew (- (funcall count-atoms) before)))
+          ;; 400 invented members + 1 invented method name. The sentinel is
+          ;; pre-interned, so the conforming growth is 0; allow a small
+          ;; margin for unrelated symbols Emacs interns during the run.
+          (should (< grew 50))
+          ;; Prove the frame really was decoded — a test that grew nothing
+          ;; because nothing was parsed would pass vacuously.
+          (should (string-search "ebp-peer-invented-1"
+                                 (format "%S" (ebp-decoder-feed
+                                               (ebp-make-decoder) frame)))))))))
+
+(ert-deftest ebp-test-unknown-method-still-dispatches-correctly ()
+  "SPEC 24.6 item 4: the obarray substitution must not change behavior —
+an unknown REQUEST still answers -32601 and an unknown NOTIFICATION is
+still ignored, over the live path with the sentinel in place."
+  (let ((inhibit-message t)
+        (replies '()))
+    (ebp-test--with-companion
+        (server client
+         (lambda (msg send)
+           (funcall (ebp-test--kat-script) msg send)))
+      (should (ebp-test--wait
+               (lambda () (eq (ebp-client-state client) 'ready))))
+      (let ((conn (ebp-client-connection client)))
+        ;; An unknown REQUEST: the dispatcher must answer -32601, not
+        ;; signal or hang, even though the method name was replaced.
+        (should (eq :method-not-found
+                    (condition-case err
+                        (progn (ebp-client--request-dispatcher
+                                client conn 'totally.unknown.method nil)
+                               :no-error)
+                      (jsonrpc-error
+                       (if (eq (alist-get 'jsonrpc-error-code (cdr err))
+                               -32601)
+                           :method-not-found
+                         :wrong-code)))))
+        ;; An unknown NOTIFICATION is ignored: no signal, no reply. (It
+        ;; returns `message's string, so assert the absence of a signal
+        ;; rather than a nil value.)
+        (should (eq :ignored
+                    (condition-case nil
+                        (progn (ebp-client--notification-dispatcher
+                                client conn 'totally.unknown.notification nil)
+                               :ignored)
+                      (error :signalled))))
+        (ignore replies)))))
+
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

@@ -396,5 +396,148 @@ Companion may re-present, not terminal `rejected'."
       (should (eq (car (jetpacs-buffer-call-shimmed cmd))
                   (get-buffer "*nav-main*"))))))
 
+;;;; E4 — SPEC 23.1 exposure: commit point and authority scope
+
+(defun jetpacs-buffer-test--fill (name lines)
+  "A buffer NAME of LINES tappable button lines."
+  (with-current-buffer (get-buffer-create name)
+    (fundamental-mode)
+    (erase-buffer)
+    (dotimes (i lines)
+      (insert-text-button (format "row-%d" i) 'action #'ignore)
+      (insert "\n"))
+    (current-buffer)))
+
+(defun jetpacs-buffer-test--shipped-taps (nodes)
+  "The (POS . ACTION) pairs NODES actually put on the wire, sorted."
+  (let (out)
+    (dolist (node nodes)
+      (let ((spans (plist-get node :spans)))
+        (when (or (vectorp spans) (consp spans))
+          (mapc (lambda (s)
+                  (when-let* ((d (plist-get s :on_tap))
+                              (a (plist-get d :action))
+                              (p (plist-get (plist-get d :args) :pos)))
+                    (push (cons p a) out)))
+                spans))))
+    (sort out (lambda (x y) (< (car x) (car y))))))
+
+(defun jetpacs-buffer-test--authorized-taps (name)
+  "The (POS . ACTION) pairs currently authorized for NAME, sorted."
+  (let (out)
+    (maphash (lambda (pos verbs)
+               (when (numberp pos)
+                 (dolist (v verbs) (push (cons pos v) out))))
+             (or (gethash name jetpacs-buffer-exposed)
+                 (make-hash-table :test #'eql)))
+    (sort out (lambda (x y) (< (car x) (car y))))))
+
+(ert-deftest jetpacs-buffer-exposure-waits-for-the-byte-budget ()
+  "SPEC 23.1/4.5: a node the byte budget discards must leave its bindings
+UNARMED.  Recording at span-build time authorized offsets that never
+reached the wire, and `emacs.buffer.act' runs those bindings unshimmed.
+
+The invariant is set equality — authorized == shipped — which is immune
+to the trailing `… output truncated' caption node inflating a count."
+  (let ((name "*e4-budget*"))
+    (jetpacs-buffer-test--fill name 40)
+    (jetpacs-buffer-forget-exposed)
+    (let* ((jetpacs-buffer-budget (cons nil 400))
+           (nodes (with-current-buffer name
+                    (jetpacs-buffer--render-region
+                     (point-min) (point-max) name))))
+      ;; The walk really did discard a built node — otherwise vacuous.
+      (should (< (length nodes) 40))
+      (should (equal (jetpacs-buffer-test--shipped-taps nodes)
+                     (jetpacs-buffer-test--authorized-taps name))))))
+
+(ert-deftest jetpacs-buffer-exposure-matches-what-shipped-under-the-span-cap ()
+  "A span the SPEC 4.5 cap replaced with the ellipsis took its `on_tap'
+with it, so its offset must not stay authorized.  Uses a buffer whose
+lines carry SEVERAL spans each, so the cap genuinely fires mid-line."
+  (let ((name "*e4-cap*"))
+    (with-current-buffer (get-buffer-create name)
+      (fundamental-mode)
+      (erase-buffer)
+      ;; Several buttons per line => several tappable spans per line, so
+      ;; an aggregate budget lands inside a line rather than between two.
+      (dotimes (i 6)
+        (dotimes (j 4)
+          (insert-text-button (format "b%d-%d" i j) 'action #'ignore)
+          (insert " "))
+        (insert "\n")))
+    (jetpacs-buffer-forget-exposed)
+    (let* ((jetpacs-buffer-budget (cons 5 nil))
+           (nodes (with-current-buffer name
+                    (jetpacs-buffer--render-region
+                     (point-min) (point-max) name))))
+      (should (equal (jetpacs-buffer-test--shipped-taps nodes)
+                     (jetpacs-buffer-test--authorized-taps name))))))
+
+(ert-deftest jetpacs-buffer-exposure-scope-is-the-document ()
+  "SPEC 23.1: authority is scoped to one SurfaceSpec.  `chrome' renders N
+screens into one `multi_view'; a later screen must not forget an earlier
+screen's records while that screen is still live under the back arrow."
+  (let ((name "*e4-doc*") top-pos deep-pos)
+    (jetpacs-buffer-test--fill name 20)
+    ;; The drill shape: two screens of ONE document showing DIFFERENT
+    ;; regions of the SAME buffer.  Two different buffers would not
+    ;; reproduce it — `forget-exposed' is per-buffer, so they never
+    ;; collide, and the test would pass with the scoping removed.
+    ;; Exposures are recorded at RUN starts, which for these lines is the
+    ;; line beginning — not an arbitrary offset inside the button.
+    (with-current-buffer name
+      (save-excursion
+        (goto-char (point-min))
+        (setq top-pos (line-beginning-position))
+        (forward-line 14)
+        (setq deep-pos (line-beginning-position))))
+    (jetpacs-buffer-forget-exposed)
+    (jetpacs-buffer-with-budget
+      (with-current-buffer name
+        (save-excursion
+          ;; Screen 1: the top of the buffer.
+          (goto-char (point-min))
+          (jetpacs-buffer--render-region
+           (point-min) (line-end-position 5) name)
+          ;; Screen 2: a drill to a lower region, still one document.
+          (goto-char (point-min))
+          (forward-line 14)
+          (jetpacs-buffer--render-region
+           (line-beginning-position) (point-max) name))))
+    ;; The drill's own affordance works...
+    (should (jetpacs-buffer-exposed-p name deep-pos))
+    ;; ...and screen 1's, still visible under the back arrow, survived it.
+    (should (jetpacs-buffer-exposed-p name top-pos))
+    ;; A NEW document still supersedes: records do not accumulate forever.
+    (jetpacs-buffer-with-budget
+      (with-current-buffer name
+        (save-excursion
+          (goto-char (point-min))
+          (forward-line 14)
+          (jetpacs-buffer--render-region
+           (line-beginning-position) (point-max) name))))
+    (should (jetpacs-buffer-exposed-p name deep-pos))
+    (should-not (jetpacs-buffer-exposed-p name top-pos))))
+
+(ert-deftest jetpacs-buffer-toast-text-is-bounded ()
+  "SPEC 18.2 P3 rider: `jetpacs-toast' caps TEXT — the one uncapped text
+path.  The ellipsis replaces the tail, so the result never exceeds the
+bound."
+  (should (= 300 (length (jetpacs-truncate-text (make-string 5000 ?x) 300))))
+  (should (string-suffix-p "…" (jetpacs-truncate-text (make-string 5000 ?x) 300)))
+  (should (equal "hi" (jetpacs-truncate-text "hi" 300)))
+  ;; A zero bound disables the cap rather than truncating to nothing.
+  (should (= 5000 (length (jetpacs-truncate-text (make-string 5000 ?x) 0))))
+  ;; The cap is WIRED into jetpacs-toast, not merely available.
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'jetpacs-connected-p) (lambda () t))
+              ((symbol-function 'jetpacs-granted-p) (lambda (&rest _) t))
+              ((symbol-function 'jetpacs-client) (lambda () 'stub))
+              ((symbol-function 'ebp-client-toast)
+               (lambda (_c text &rest _) (setq sent text))))
+      (jetpacs-toast (make-string 5000 ?x))
+      (should (= jetpacs-toast-max-chars (length sent))))))
+
 (provide 'jetpacs-buffer-test)
 ;;; jetpacs-buffer-test.el ends here

@@ -248,6 +248,27 @@ which runs the same goto command UNSHIMMED — popping a desktop window and
 able to reach a prompt that would wedge the jsonrpc dispatch extent.  One
 record authorizes one verb.")
 
+(defvar jetpacs-buffer--defer-exposure nil
+  "Non-nil while a node is being BUILT but has not yet survived its budgets.
+`jetpacs-buffer-expose' records nothing under this flag; the generic walk
+re-derives the exposures from the node it actually ships
+\(`jetpacs-buffer--expose-node-taps').  The SPEC 4.5 byte budget can
+discard a fully-built node, and the span cap can drop a tap off the tail
+of one that survives — recording at span-build time armed the binding
+for a position that never reached the wire, which
+`jetpacs-buffer-invoke-at' would then run UNSHIMMED (SPEC 23.1).")
+
+(defvar jetpacs-buffer--exposure-document nil
+  "Buffers already superseded in the current document, or nil outside one.
+Exposure authority is scoped to a DOCUMENT — one SurfaceSpec — but
+`jetpacs-buffer--render-region' runs once per screen and `chrome' puts N
+screens in one `multi_view'.  Clearing per render let a later screen
+forget the records of an earlier one that is still live under the back
+arrow, so a tap the user can still see was answered `rejected'.  Bound
+by `jetpacs-buffer-with-budget', which already delimits exactly one
+SurfaceSpec; the first clear per buffer in a document wins and the rest
+accumulate.")
+
 (defun jetpacs-buffer-expose (buffer-name pos &optional action)
   "Record that POS in BUFFER-NAME was emitted as a target for ACTION.
 ACTION defaults to \"emacs.buffer.act\"; pass the action name a skin
@@ -258,13 +279,33 @@ record each position it makes tappable — otherwise the SPEC 23.1
 validation in `jetpacs-buffer--tap-status' refuses every one of its taps.
 Call `jetpacs-buffer-forget-exposed' for the buffer first, so a re-render
 supersedes the previous set."
-  (let* ((action (or action "emacs.buffer.act"))
-         (tbl (or (gethash buffer-name jetpacs-buffer-exposed)
-                  (puthash buffer-name (make-hash-table :test #'eql)
-                           jetpacs-buffer-exposed)))
-         (verbs (gethash pos tbl)))
-    (unless (member action verbs)
-      (puthash pos (cons action verbs) tbl))))
+  (unless jetpacs-buffer--defer-exposure
+    (let* ((action (or action "emacs.buffer.act"))
+           (tbl (or (gethash buffer-name jetpacs-buffer-exposed)
+                    (puthash buffer-name (make-hash-table :test #'eql)
+                             jetpacs-buffer-exposed)))
+           (verbs (gethash pos tbl)))
+      (unless (member action verbs)
+        (puthash pos (cons action verbs) tbl)))))
+
+(defun jetpacs-buffer--expose-node-taps (node buffer-name)
+  "Record an exposure for every tap NODE actually ships (SPEC 23.1).
+Called once NODE has survived the span cap and the byte budget, so the
+record set is exactly what reached the wire.  Reads the shipped spans
+rather than replaying what the builder attempted: a span the SPEC 4.5
+cap replaced with the ellipsis took its `on_tap' with it, and must not
+stay authorized.  Nodes with no spans (`divider', the `text' fallback)
+carry no taps and record nothing."
+  (let ((spans (plist-get node :spans))
+        (jetpacs-buffer--defer-exposure nil))
+    (when (or (vectorp spans) (consp spans))
+      (mapc (lambda (span)
+              (when-let* ((desc (plist-get span :on_tap))
+                          (act (plist-get desc :action))
+                          (pos (plist-get (plist-get desc :args) :pos)))
+                (when (numberp pos)
+                  (jetpacs-buffer-expose buffer-name pos act))))
+            spans))))
 
 (defun jetpacs-buffer-exposed-p (buffer-name pos &optional action)
   "Non-nil when POS in BUFFER-NAME was emitted for ACTION by the last render.
@@ -275,10 +316,23 @@ ACTION defaults to \"emacs.buffer.act\"."
 
 (defun jetpacs-buffer-forget-exposed (&optional buffer-name)
   "Drop the exposure record for BUFFER-NAME, or all of it.
-Clears whole-buffer records (`jetpacs-buffer-expose-buffer') too."
-  (if buffer-name
-      (remhash buffer-name jetpacs-buffer-exposed)
-    (clrhash jetpacs-buffer-exposed)))
+Clears whole-buffer records (`jetpacs-buffer-expose-buffer') too.
+
+Inside a document (`jetpacs-buffer--exposure-document', bound by
+`jetpacs-buffer-with-budget') the named form supersedes a buffer's
+records only the FIRST time it is called for that buffer: the remaining
+screens of one `multi_view' render into the same document and must add
+to its authority, not replace it.  The no-argument form is an
+unconditional reset — it is the teardown/test verb, never a render step."
+  (cond
+   ((null buffer-name) (clrhash jetpacs-buffer-exposed))
+   ((and jetpacs-buffer--exposure-document
+         (gethash buffer-name jetpacs-buffer--exposure-document))
+    nil)
+   (t
+    (when jetpacs-buffer--exposure-document
+      (puthash buffer-name t jetpacs-buffer--exposure-document))
+    (remhash buffer-name jetpacs-buffer-exposed))))
 
 (defconst jetpacs-buffer--whole-buffer-key :whole-buffer
   "Sentinel position key for whole-buffer exposure records.
@@ -603,8 +657,15 @@ than granting a fresh one.  SPEC 4.5 counts these aggregates across one
 SurfaceSpec, and several skins wrap their own render — nesting that
 reset the budget let one snapshot carry N times the limit."
   (declare (indent 0))
-  `(let ((jetpacs-buffer-budget (or jetpacs-buffer-budget
-                                    (jetpacs-buffer-budgets))))
+  `(let* ((outer jetpacs-buffer-budget)
+          (jetpacs-buffer-budget (or outer (jetpacs-buffer-budgets)))
+          ;; The same nesting rule for exposure scope (SPEC 23.1): this
+          ;; macro delimits one SurfaceSpec, which is exactly one
+          ;; document, so an inner use joins the document already in
+          ;; force rather than starting a new authority scope.
+          (jetpacs-buffer--exposure-document
+           (or jetpacs-buffer--exposure-document
+               (and (null outer) (make-hash-table :test #'equal)))))
      ,@body))
 
 (defun jetpacs-buffer-budgets ()
@@ -709,6 +770,10 @@ containing that position as the scroll target (`:scroll_here')."
         (while (and (< (point) end) (< count jetpacs-buffer-max-lines))
           (let* ((bol (line-beginning-position))
                  (eol (min end (line-end-position)))
+                 ;; SPEC 23.1: build without recording.  The exposures are
+                 ;; taken from the node below, once it has survived both
+                 ;; budgets — see `jetpacs-buffer--defer-exposure'.
+                 (jetpacs-buffer--defer-exposure t)
                  (node nil))
             (cond
              ;; A page break (^L alone on the line) renders as a divider.
@@ -771,6 +836,10 @@ containing that position as the scroll target (`:scroll_here')."
                     (setq truncated t)
                     (cl-return-from walk))
                   (setq bytes-left (- bytes-left size))))
+              ;; The node is committed: NOW authorize exactly the taps it
+              ;; ships (SPEC 23.1).  Above this point a `cl-return-from'
+              ;; discards the node, and its bindings stay unarmed.
+              (jetpacs-buffer--expose-node-taps node buffer-name)
               (push node nodes)
               (setq count (1+ count))
               ;; The aggregate span budget is spent: stop here.

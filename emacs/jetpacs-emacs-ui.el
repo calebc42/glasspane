@@ -49,6 +49,10 @@
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
 (require 'jetpacs-navigate)
+;; A HARD dependency, not an optional one: every prompting flow below
+;; states that its prompt reaches the device, and that is only true
+;; with the dialog advice installed.
+(require 'jetpacs-dialog)
 
 (defconst jetpacs-emacs-ui-owner "jetpacs.emacs"
   "The base owner of the general-client surface (R1: base's prefix).")
@@ -88,10 +92,16 @@ buffer's lines on every render."
             jetpacs-emacs-ui-max-buffers))
 
 (defun jetpacs-emacs-ui--hub-rows ()
-  "The hub's rows; records a SPEC 23.1 exposure per listed buffer."
+  "The hub's rows; records a SPEC 23.1 exposure per listed buffer.
+Each buffer's records are dropped and re-made, so `authorized' tracks
+`offered' rather than accumulating: without this a buffer that scrolls
+past `jetpacs-emacs-ui-max-buffers', or is killed and its name reused,
+keeps an authority nothing on screen still grants — the whole-buffer
+analogue of the span rule `jetpacs-buffer--expose-node-taps' enforces."
   (mapcar
    (lambda (buf)
      (let ((name (buffer-name buf)))
+       (jetpacs-buffer-forget-exposed name)
        (jetpacs-buffer-expose-buffer name "jetpacs.emacs.view")
        (jetpacs-chrome-row
         ;; SPEC 4.1: a buffer or file name can hold a raw-byte char
@@ -110,18 +120,50 @@ buffer's lines on every render."
         :key (jetpacs-wire-id "buf" name))))
    (jetpacs-emacs-ui--listed-buffers)))
 
+(defun jetpacs-emacs-ui--charge-rows (rows)
+  "ROWS trimmed to what the shared SPEC 4.5 byte budget can carry.
+The Tier-0 walk spends the byte budget honestly, but rows built OUTSIDE
+it — this hub — were invisible to that accounting, so a drilled screen
+below believed it owned the whole frame and the finished document blew
+`max_frame_bytes'.  Nothing on the wire then renders at all: the gate
+refuses the SurfaceSpec, so an over-long buffer list took the surface
+down rather than truncating itself."
+  (let ((left (cdr-safe jetpacs-buffer-budget))
+        (kept nil)
+        (dropped 0))
+    (dolist (row rows)
+      (cond
+       ((null left) (push row kept))
+       ((> left 0)
+        (let ((size (jetpacs-buffer-node-bytes row)))
+          (if (> size left)
+              (setq dropped (1+ dropped) left 0)
+            (setq left (- left size))
+            (push row kept))))
+       (t (setq dropped (1+ dropped)))))
+    (when (and (consp jetpacs-buffer-budget) (cdr jetpacs-buffer-budget))
+      (setcdr jetpacs-buffer-budget (max 0 left)))
+    (nreverse
+     (if (zerop dropped)
+         kept
+       (cons (jetpacs-text (format "… %d more buffer(s) (surface budget)"
+                                   dropped)
+                           :style "caption")
+             kept)))))
+
 (defun jetpacs-emacs-ui--hub-screen (back)
   "The root screen: Messages row, then every offerable buffer."
   (jetpacs-chrome-screen
    "Buffers"
    (apply #'jetpacs-lazy-column
-          (cons (jetpacs-chrome-row
-                       "*Messages*"
-                       :subtitle "the echo-area log"
-                       :icon "description"
-                 :on-tap (jetpacs-action "jetpacs.emacs.messages")
-                 :key "row-messages")
-                (jetpacs-emacs-ui--hub-rows)))
+          (jetpacs-emacs-ui--charge-rows
+           (cons (jetpacs-chrome-row
+                  "*Messages*"
+                  :subtitle "the echo-area log"
+                  :icon "description"
+                  :on-tap (jetpacs-action "jetpacs.emacs.messages")
+                  :key "row-messages")
+                 (jetpacs-emacs-ui--hub-rows))))
    :back back
    :actions (list (jetpacs-icon-button
                    "terminal" (jetpacs-action "jetpacs.emacs.mx")
@@ -256,6 +298,31 @@ that accounting), so it carries its own bound."
          (jetpacs-buffer-render-tail buf jetpacs-emacs-ui-messages-lines))))
      :back back)))
 
+(defun jetpacs-emacs-ui--with-prompting (fn)
+  "Run FN only if a prompt raised now would reach the device.
+Every flow here exists to ASK something.  Without a bridge the dialog
+advice falls through to the real minibuffer — on a daemon or an
+unattended desktop that is a prompt nobody can answer, with the device
+already told `accepted'.  Refusing loudly beats wedging silently.
+
+Also re-checked after the fact by each flow's own liveness guards: the
+device round trip inside a prompt can take minutes, and a buffer named
+before it may be gone after."
+  (if (not (jetpacs-dialog-can-bridge-p))
+      (jetpacs-shell-notify
+       (if jetpacs-dialog--pending
+           "Busy — finish the open dialog first"
+         "Dialogs are not available in this session")
+       jetpacs-emacs-ui-owner)
+    (condition-case err
+        (funcall fn)
+      ;; SPEC 23.3: the SYMBOL only — a flow error must not put document
+      ;; text on the wire, and it must not die unreported in a timer.
+      (error (message "jetpacs-emacs-ui: flow failed: %s"
+                      (jetpacs--error-label err))
+             (jetpacs-shell-notify "That did not work"
+                                   jetpacs-emacs-ui-owner)))))
+
 ;; --- imenu -------------------------------------------------------------------
 
 (defun jetpacs-emacs-ui-imenu-flatten (index)
@@ -301,7 +368,7 @@ dereference to integers."
 (defun jetpacs-emacs-ui--imenu-flow (name)
   "The in-flow imenu picker for buffer NAME; prompts bridge from here."
   (let* ((buf (get-buffer name))
-         (flat (and buf
+         (flat (and (buffer-live-p buf)
                     (with-current-buffer buf
                       (jetpacs-emacs-ui-imenu-flatten
                        (condition-case nil
@@ -311,7 +378,12 @@ dereference to integers."
         (jetpacs-shell-notify "No imenu entries here"
                               jetpacs-emacs-ui-owner)
       (let ((choice (completing-read "Section: " flat nil t)))
-        (when-let* ((pos (cdr (assoc choice flat))))
+        ;; The prompt was a device round trip — minutes, potentially.
+        ;; Re-resolve: the buffer captured before it may be gone, and
+        ;; `with-current-buffer' on a killed object signals.
+        (setq buf (get-buffer name))
+        (when-let* (((buffer-live-p buf))
+                    (pos (cdr (assoc choice flat))))
           ;; The slice runs to the next flattened entry, or the end.
           (let* ((next (car (sort (delq nil
                                         (mapcar (lambda (c)
@@ -331,20 +403,44 @@ dereference to integers."
 (defun jetpacs-emacs-ui--mx-flow ()
   "The in-flow M-x: bridged picker over `obarray', shimmed execution.
 `jetpacs-command-visible-p' + require-match make a suppressed command
-unrunnable from this picker, not merely unsuggested."
+unrunnable from this picker, not merely unsuggested.
+
+The ORIGIN buffer is explicit.  `jetpacs-buffer-call-shimmed' runs the
+command in whatever buffer is current and its docstring says so, but a
+`jetpacs-flow-continue' timer inherits whatever buffer the pump
+happened to be in — so M-x ran somewhere arbitrary and the \"follow it
+there\" check compared against that accident.  On a drilled screen the
+origin is the buffer on screen, which is what the user means by
+\"here\"; on the hub no buffer is named, so a scratch origin makes
+`stayed put' detectable without mutating a real buffer by accident."
   (let* ((choice (completing-read "M-x " obarray
                                   #'jetpacs-command-visible-p t))
-         (cmd (intern-soft choice)))
+         (cmd (intern-soft choice))
+         (top (jetpacs-emacs-ui--top-buffer))
+         (origin (and top (get-buffer top))))
     (when (commandp cmd)
-      (let ((landed (jetpacs-buffer-call-shimmed
+      (let* ((failed nil)
+             (run (lambda ()
+                    (jetpacs-buffer-call-shimmed
                      cmd
                      (lambda (err)
+                       (setq failed t)
                        (jetpacs-shell-notify
-                        (format "M-x %s: %s" choice (car err))
+                        (format "M-x %s: %s" choice
+                                (jetpacs--error-label err))
                         jetpacs-emacs-ui-owner)))))
-        ;; If the command went somewhere, follow it there.
-        (when-let* ((buf (car-safe landed)))
-          (when (and (buffer-live-p buf)
+             (landed (if (buffer-live-p origin)
+                         (with-current-buffer origin (funcall run))
+                       (with-temp-buffer (funcall run)))))
+        ;; Follow the command only when it actually went somewhere ELSE.
+        ;; `call-shimmed' always reports a buffer — it returns the origin
+        ;; when the command stayed put — so an unconditional drill sent
+        ;; the user to a screen for the buffer they were already on, or
+        ;; for a temp buffer that no longer exists.
+        (let ((buf (car-safe landed)))
+          (when (and (not failed)
+                     (buffer-live-p buf)
+                     (not (eq buf origin))
                      (not (string-prefix-p " " (buffer-name buf))))
             (jetpacs-navigate-buffer buf jetpacs-emacs-ui--surface)))))))
 
@@ -393,6 +489,17 @@ unrunnable from this picker, not merely unsuggested."
   "Seconds between change polls of the viewed buffer."
   :type 'number :group 'jetpacs)
 
+(defcustom jetpacs-emacs-ui-live-max-failures 3
+  "Consecutive failed live pushes before the watch gives up.
+The tick re-read after a push absorbs what the push logged
+SYNCHRONOUSLY, but `surface.update' concludes asynchronously — a
+failure logged from its callback lands in *Messages* after the
+snapshot, and when *Messages* is the watched buffer that is a 1 Hz
+self-sustaining loop.  A bound is the honest guard: the tick trick
+cannot see a message that has not been written yet."
+  :type 'natnum :group 'jetpacs)
+
+(defvar jetpacs-emacs-ui--live-failures 0)
 (defvar jetpacs-emacs-ui--live-timer nil)
 (defvar jetpacs-emacs-ui--live-buffer nil)
 (defvar jetpacs-emacs-ui--live-tick nil)
@@ -407,7 +514,8 @@ unrunnable from this picker, not merely unsuggested."
     (cancel-timer jetpacs-emacs-ui--live-timer))
   (setq jetpacs-emacs-ui--live-timer nil
         jetpacs-emacs-ui--live-buffer nil
-        jetpacs-emacs-ui--live-tick nil))
+        jetpacs-emacs-ui--live-tick nil
+        jetpacs-emacs-ui--live-failures 0))
 
 (defun jetpacs-emacs-ui--live-poll ()
   "Push when the watched buffer changed; stop when no longer relevant."
@@ -422,9 +530,17 @@ unrunnable from this picker, not merely unsuggested."
       (let ((tick (buffer-chars-modified-tick buf)))
         (when (and jetpacs-emacs-ui--live-tick
                    (/= tick jetpacs-emacs-ui--live-tick))
-          (condition-case nil
-              (jetpacs-shell-push jetpacs-emacs-ui-owner)
-            (error nil))
+          (if (condition-case nil
+                  (progn (jetpacs-shell-push jetpacs-emacs-ui-owner) t)
+                (error nil))
+              (setq jetpacs-emacs-ui--live-failures 0)
+            (setq jetpacs-emacs-ui--live-failures
+                  (1+ jetpacs-emacs-ui--live-failures))
+            (when (>= jetpacs-emacs-ui--live-failures
+                      jetpacs-emacs-ui-live-max-failures)
+              (message "jetpacs-emacs-ui: live refresh stopped after %d \
+failed pushes" jetpacs-emacs-ui--live-failures)
+              (jetpacs-emacs-ui--live-stop)))
           ;; Re-read AFTER the push: rendering *Messages* logs into
           ;; *Messages*, and reading the tick first would turn that
           ;; self-append into an endless refresh loop.
@@ -487,7 +603,9 @@ offered (SPEC 23.1)")
 
   (jetpacs-defaction "jetpacs.emacs.mx"
     (lambda (_args _params)
-      (jetpacs-flow-continue #'jetpacs-emacs-ui--mx-flow)
+      (jetpacs-flow-continue
+       (lambda ()
+         (jetpacs-emacs-ui--with-prompting #'jetpacs-emacs-ui--mx-flow)))
       'accepted))
 
   (jetpacs-defaction "jetpacs.emacs.imenu"
@@ -499,14 +617,23 @@ offered (SPEC 23.1)")
          ((not (jetpacs-buffer-exposed-buffer-p name "jetpacs.emacs.imenu"))
           'rejected)
          (t (jetpacs-flow-continue
-             (lambda () (jetpacs-emacs-ui--imenu-flow name)))
+             (lambda ()
+               (jetpacs-emacs-ui--with-prompting
+                (lambda () (jetpacs-emacs-ui--imenu-flow name)))))
             'accepted)))))
 
   (jetpacs-defaction "jetpacs.emacs.imenu-clear"
     (lambda (_args _params)
-      (jetpacs-results-clear-region)
-      (jetpacs-buffer-defer-refresh jetpacs-emacs-ui--surface)
-      'accepted))
+      ;; The region view is SHARED state (results, sections and this
+      ;; module all arm it).  Clear it only when it addresses the buffer
+      ;; on our own top screen — otherwise this affordance silently
+      ;; discards a grep/xref slice another surface is presenting.
+      (let ((top (jetpacs-emacs-ui--top-buffer)))
+        (if (and top (equal top (jetpacs-results-region-buffer)))
+            (progn (jetpacs-results-clear-region)
+                   (jetpacs-buffer-defer-refresh jetpacs-emacs-ui--surface)
+                   'accepted)
+          'stale))))
 
   (jetpacs-defaction "jetpacs.emacs.palette"
     (lambda (args params)
@@ -517,10 +644,61 @@ offered (SPEC 23.1)")
          ((not (jetpacs-buffer-exposed-buffer-p name "jetpacs.emacs.palette"))
           'rejected)
          (t (jetpacs-flow-continue
-             (lambda () (jetpacs-emacs-ui--palette-flow name)))
+             (lambda ()
+               (jetpacs-emacs-ui--with-prompting
+                (lambda () (jetpacs-emacs-ui--palette-flow name)))))
             'accepted))))))
 
 ;; --- Teardown ----------------------------------------------------------------
+
+(defun jetpacs-emacs-ui--on-kill-buffer ()
+  "Revoke a dying buffer's SPEC 23.1 authority and forget its screen.
+A record must not outlive the thing it authorized: buffer NAMES are
+reused (`*grep*', `*shell*'), so a stale grant would silently authorize
+a verb on a DIFFERENT buffer that happens to take the name."
+  (when-let* ((name (buffer-name)))
+    (jetpacs-buffer-forget-exposed name)
+    (let (dead)
+      (maphash (lambda (id b) (when (equal b name) (push id dead)))
+               jetpacs-emacs-ui--screens)
+      ;; Keep an id the chrome stack still holds: the screen degrades to
+      ;; its own "Buffer is gone" card, which is the honest render.
+      (let ((live (jetpacs-chrome-stack jetpacs-emacs-ui-owner)))
+        (dolist (id dead)
+          (unless (member id live)
+            (remhash id jetpacs-emacs-ui--screens)))))))
+
+(add-hook 'kill-buffer-hook #'jetpacs-emacs-ui--on-kill-buffer)
+
+(defun jetpacs-emacs-ui-visit-region (name beg end label &optional point)
+  "Arm the region view for NAME and DRILL to that buffer's screen.
+The default seam only arms the region and re-pushes the CURRENT
+surface, which shows the slice solely if a screen for the destination
+buffer already happens to be on the stack — so a `results.visit' from
+the general client landed nowhere at all.  Pushing the destination's
+screen is what makes the tap mean something.
+
+The push is DEFERRED because the seam runs inside the `results.visit'
+dispatch extent, where `jetpacs-chrome-push-screen' signalling would
+answer `rejected' for a jump that already happened."
+  (jetpacs-results-show-region name beg end label point)
+  (jetpacs-buffer-expose-buffer name "jetpacs.emacs.view")
+  (run-at-time
+   0 nil
+   (lambda ()
+     (unless (equal (jetpacs-emacs-ui--top-buffer) name)
+       (jetpacs-emacs-ui--push-buffer-screen name)))))
+
+;; Claim the seam only when it is still the DEFAULT — the "free or
+;; already ours" guard `jetpacs-chrome--claim-drill-host' uses.  A bare
+;; `unless' cannot work here: unlike the nil-sentinel seams, this one
+;; ships pointing at `jetpacs-results-show-region', so an unguarded
+;; claim would clobber a Tier-1's own visitor by load order.
+(when (memq jetpacs-results-visit-region-function
+            (list #'jetpacs-results-show-region
+                  #'jetpacs-emacs-ui-visit-region))
+  (setq jetpacs-results-visit-region-function
+        #'jetpacs-emacs-ui-visit-region))
 
 (defun jetpacs-emacs-ui--on-teardown (owner)
   "Sweep this module's watch and screen registry with its owner."
@@ -535,6 +713,7 @@ offered (SPEC 23.1)")
   (remove-hook 'jetpacs-shell-after-push-hook
                #'jetpacs-emacs-ui--reconcile-live-watch)
   (remove-hook 'jetpacs-teardown-functions #'jetpacs-emacs-ui--on-teardown)
+  (remove-hook 'kill-buffer-hook #'jetpacs-emacs-ui--on-kill-buffer)
   (jetpacs-emacs-ui--live-stop)
   (ignore-errors (jetpacs-teardown-owner jetpacs-emacs-ui-owner))
   nil)

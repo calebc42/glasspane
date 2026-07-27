@@ -611,14 +611,22 @@ section (SPEC 23.2)" key))
         (message "jetpacs-sections: refused %S — resolves to no offerable \
 command" key))
        (t
-        (condition-case err
-            (let ((last-input-event nil)
-                  (last-nonmenu-event nil))
-              ;; The KEY (not the command) is replayed, so magit prefixes
-              ;; and transients behave as they do under the user\'s hands.
-              (execute-kbd-macro (kbd key)))
-          (error (message "jetpacs-sections: %s failed: %s"
-                          key (jetpacs--error-label err))))))))
+        ;; Run the COMMAND the gate above validated, not the key.
+        ;; `execute-kbd-macro' spins a command loop against the SELECTED
+        ;; WINDOW's buffer, and on the device this buffer is in no window
+        ;; — so the offered verb never ran and the key self-inserted
+        ;; somewhere else.  Worse here than in the palette: the gate
+        ;; resolves the binding with BUF current, while the replay
+        ;; re-resolved it against a different buffer, so the command the
+        ;; denylist cleared and the command that ran were two separate
+        ;; lookups.  A destructive-magit entry could therefore be refused
+        ;; on inspection and reached in fact.  One lookup, one command,
+        ;; run under the nav shims with BUF current.
+        (jetpacs-buffer-call-shimmed
+         binding
+         (lambda (err)
+           (message "jetpacs-sections: %s failed: %s"
+                    key (jetpacs--error-label err))))))))
   (jetpacs-sections--refresh params))
 
 (defvar jetpacs-sections--dialog-seq 0

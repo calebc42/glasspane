@@ -231,3 +231,133 @@ worst a loop."
 
 (provide 'jetpacs-emacs-ui-test)
 ;;; jetpacs-emacs-ui-test.el ends here
+
+;;;; Adversarial-review remediation (2026-07-27)
+
+(ert-deftest jetpacs-emacs-ui-prompting-flows-refuse-without-a-bridge ()
+  "A flow whose whole purpose is to ASK must not raise a prompt it
+cannot route: with no bridge the advice falls through to the REAL
+minibuffer, and on a daemon that is a wedge nobody can answer while the
+device has already been told `accepted'."
+  (let ((notified nil) (prompted nil))
+    (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p) (lambda () nil))
+              ((symbol-function 'jetpacs-shell-notify)
+               (lambda (text &rest _) (setq notified text)))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _) (setq prompted t) "")))
+      (jetpacs-emacs-ui--with-prompting #'jetpacs-emacs-ui--mx-flow)
+      (should-not prompted)
+      (should notified))))
+
+(ert-deftest jetpacs-emacs-ui-prompting-flow-errors-are-reported-not-lost ()
+  "A flow error must reach the user and carry the SYMBOL only (23.3),
+never die unreported in a timer."
+  (let ((notified nil) (logged '()))
+    (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p) (lambda () t))
+              ((symbol-function 'jetpacs-shell-notify)
+               (lambda (text &rest _) (setq notified text)))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) logged))))
+      (jetpacs-emacs-ui--with-prompting
+       (lambda () (error "SECRET-DOCUMENT-TEXT")))
+      (should notified)
+      (should-not (cl-some (lambda (l) (string-match-p "SECRET" l)) logged)))))
+
+(ert-deftest jetpacs-emacs-ui-hub-exposure-tracks-what-is-offered ()
+  "Authorized == offered: a buffer that stops being listed loses its
+grant, and a killed buffer's grant dies with it (names get reused)."
+  (jetpacs-buffer-forget-exposed)
+  (let ((gone (get-buffer-create "*ja3-transient*")))
+    (with-current-buffer gone (fundamental-mode))
+    (jetpacs-emacs-ui--hub-rows)
+    (should (jetpacs-buffer-exposed-buffer-p
+             "*ja3-transient*" "jetpacs.emacs.view"))
+    ;; Killing it revokes the grant, so a later buffer of the same name
+    ;; cannot inherit authority nothing on screen ever granted it.
+    (kill-buffer gone)
+    (should-not (jetpacs-buffer-exposed-buffer-p
+                 "*ja3-transient*" "jetpacs.emacs.view")))
+  (jetpacs-buffer-forget-exposed))
+
+(ert-deftest jetpacs-emacs-ui-hub-charges-the-shared-byte-budget ()
+  "Hub rows are charged against the SPEC 4.5 byte budget and truncate
+with a caption — rows built outside the Tier-0 walk were invisible to
+that accounting, so a drilled screen below believed it owned the whole
+frame and the finished document blew max_frame_bytes (which refuses the
+WHOLE spec, rendering nothing at all).
+
+Drives `--hub-screen', not `--charge-rows': asserting the helper alone
+passes with the helper UNWIRED, which is the whole failure mode."
+  (dotimes (i 30)
+    (with-current-buffer (get-buffer-create (format "*ja3-bulk-%d*" i))
+      (fundamental-mode)))
+  (unwind-protect
+      (let* ((jetpacs-buffer-budget (cons nil 400))
+             (screen (jetpacs-emacs-ui--hub-screen nil))
+             (json (jetpacs-node->canonical-json screen)))
+        ;; The budget was spent down rather than left untouched...
+        (should (< (cdr jetpacs-buffer-budget) 400))
+        ;; ...the screen says it truncated...
+        (should (string-search "surface budget" json))
+        ;; ...and the result fits the budget it was given, which is the
+        ;; property that keeps the whole document pushable.
+        (should (< (string-bytes json) 4000))
+        ;; Not vacuous: unbudgeted, the same hub is much bigger.
+        (let* ((jetpacs-buffer-budget nil)
+               (full (jetpacs-node->canonical-json
+                      (jetpacs-emacs-ui--hub-screen nil))))
+          (should (> (string-bytes full) (string-bytes json)))))
+    (dotimes (i 30) (kill-buffer (format "*ja3-bulk-%d*" i)))
+    (jetpacs-buffer-forget-exposed)))
+
+(ert-deftest jetpacs-emacs-ui-live-watch-gives-up-on-repeated-failure ()
+  "The tick re-read absorbs only what a push logs SYNCHRONOUSLY;
+surface.update concludes asynchronously, so a failure logged from its
+callback lands after the snapshot — a 1 Hz self-sustaining loop when
+*Messages* is the watched buffer.  A consecutive-failure bound is the
+guard that does not depend on seeing the future."
+  (with-current-buffer (get-buffer-create "*ja3-watch*") (fundamental-mode))
+  (unwind-protect
+      (cl-letf (((symbol-function 'jetpacs-connected-p) (lambda () t))
+                ((symbol-function 'jetpacs-emacs-ui--top-buffer)
+                 (lambda () "*ja3-watch*"))
+                ((symbol-function 'jetpacs-shell-push)
+                 (lambda (&rest _) (error "push refused"))))
+        (setq jetpacs-emacs-ui--live-buffer "*ja3-watch*"
+              jetpacs-emacs-ui--live-tick 0
+              jetpacs-emacs-ui--live-failures 0
+              jetpacs-emacs-ui--live-timer 'fake)
+        (let ((inhibit-message t))
+          (dotimes (_ jetpacs-emacs-ui-live-max-failures)
+            (with-current-buffer "*ja3-watch*" (insert "x"))
+            (jetpacs-emacs-ui--live-poll)))
+        ;; Gave up rather than retrying forever.
+        (should (null jetpacs-emacs-ui--live-timer))
+        (should (null jetpacs-emacs-ui--live-buffer)))
+    (jetpacs-emacs-ui--live-stop)))
+
+(ert-deftest jetpacs-emacs-ui-visit-region-drills-to-the-destination ()
+  "`results.visit' must land somewhere: the default seam only armed the
+region and re-pushed the CURRENT surface, so the slice showed solely if
+a screen for the destination already happened to be on the stack."
+  (should (eq jetpacs-results-visit-region-function
+              #'jetpacs-emacs-ui-visit-region))
+  (with-current-buffer (get-buffer-create "*ja3-dest*")
+    (fundamental-mode) (erase-buffer) (insert "one\ntwo\nthree\n"))
+  (jetpacs-buffer-forget-exposed)
+  (let ((pushed nil))
+    (cl-letf (((symbol-function 'jetpacs-emacs-ui--push-buffer-screen)
+               (lambda (name) (setq pushed name)))
+              ((symbol-function 'jetpacs-emacs-ui--top-buffer) (lambda () nil)))
+      (jetpacs-emacs-ui-visit-region "*ja3-dest*" 1 5 "hit" 1)
+      ;; The region is armed for the destination...
+      (should (equal (jetpacs-results-region-buffer) "*ja3-dest*"))
+      ;; ...the destination is authorized for the view verb...
+      (should (jetpacs-buffer-exposed-buffer-p
+               "*ja3-dest*" "jetpacs.emacs.view"))
+      ;; ...and the drill is DEFERRED (the seam runs inside dispatch).
+      (should-not pushed)
+      (dotimes (_ 3) (accept-process-output nil 0.01))
+      (should (equal pushed "*ja3-dest*"))))
+  (jetpacs-results-clear-region)
+  (jetpacs-buffer-forget-exposed))

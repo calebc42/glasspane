@@ -747,5 +747,20 @@ desktop behavior is untouched."
 
 (jetpacs-dialog-install)
 
+(defun jetpacs-dialog-can-bridge-p ()
+  "Non-nil when a prompt raised right now would reach the device.
+The public form of `jetpacs-dialog--bridge-p', for a caller that is
+about to prompt DELIBERATELY (a device flow whose whole purpose is to
+ask).  Such a caller must not raise a prompt it cannot route: with no
+bridge the advice falls through to the real minibuffer, and on a
+headless or unattended Emacs that is a wedge nobody can answer — the
+device sees the action accepted and then nothing, forever.
+
+Ordinary code has no business calling this.  A command that merely
+MIGHT prompt should just prompt: the advice bridges when it can and
+uses the minibuffer when it cannot, which is the right behavior for a
+user sitting at the desktop."
+  (jetpacs-dialog--bridge-p))
+
 (provide 'jetpacs-dialog)
 ;;; jetpacs-dialog.el ends here

@@ -696,82 +696,14 @@ caller bypassed `jetpacs-org-parse-query' with a hand-built tree."
            (case-fold-search t))
        (save-excursion (re-search-forward (car args) end t))))))
 
-;; The vulpea arm is OPTIONAL: never required at load, entered only when
-;; a caller hands us a note, gated by `jetpacs-org-vulpea-available-p'.
-;; The "ext:" pseudo-file keeps `byte-compile-error-on-warn' honest
-;; without vulpea on the load path (the sections/magit-section shape).
-(declare-function vulpea-note-todo "ext:vulpea-note" (note))
-(declare-function vulpea-note-closed "ext:vulpea-note" (note))
-(declare-function vulpea-note-tags "ext:vulpea-note" (note))
-(declare-function vulpea-note-priority "ext:vulpea-note" (note))
-(declare-function vulpea-note-title "ext:vulpea-note" (note))
-(declare-function vulpea-note-level "ext:vulpea-note" (note))
-(declare-function vulpea-note-properties "ext:vulpea-note" (note))
-(declare-function vulpea-note-deadline "ext:vulpea-note" (note))
-(declare-function vulpea-note-scheduled "ext:vulpea-note" (note))
-(declare-function vulpea-note-path "ext:vulpea-note" (note))
-(declare-function vulpea-note-outline-path "ext:vulpea-note" (note))
-(declare-function vulpea-db-query "ext:vulpea-db" (&optional pred))
-(declare-function vulpea-db-query-by-directory "ext:vulpea-db" (dir &optional level))
-
-(defun jetpacs-org--note-get (note what &rest args)
-  "The grammar accessor over a `vulpea-note' NOTE (index only, no visit)."
-  (pcase what
-    ('todo (vulpea-note-todo note))
-    ;; The index carries no per-file DONE keyword set: done-ness is a
-    ;; global done keyword (falling back to the near-universal \"DONE\"
-    ;; in a headless scan) or a CLOSED stamp.
-    ('done (let ((s (vulpea-note-todo note)))
-             (or (and s (member s (or org-done-keywords '("DONE"))) t)
-                 (and (vulpea-note-closed note) t))))
-    ('tags (vulpea-note-tags note))
-    ;; vulpea priority may be a char (org's native form) or a string.
-    ('priority (let ((p (vulpea-note-priority note)))
-                 (cond ((null p) nil)
-                       ((characterp p) p)
-                       ((and (stringp p) (> (length p) 0)) (aref p 0))
-                       (t (let ((s (format "%s" p)))
-                            (and (> (length s) 0) (aref s 0)))))))
-    ('title (vulpea-note-title note))
-    ('level (vulpea-note-level note))
-    ;; vulpea indexes drawer keys upper-cased; match case-insensitively.
-    ('property (cdr (assoc-string (car args) (vulpea-note-properties note) t)))
-    ('planning (let ((s (if (equal (car args) "DEADLINE")
-                            (vulpea-note-deadline note)
-                          (vulpea-note-scheduled note))))
-                 (and (stringp s) s)))
-    ('habit (equal "habit"
-                   (cdr (assoc-string "STYLE" (vulpea-note-properties note) t))))
-    ('regexp-match
-     ;; The index haystack is title + properties — the body is not
-     ;; indexed.  SEMANTIC DIFFERENCE from the point accessor, by design.
-     (let ((hay (concat (or (vulpea-note-title note) "") " "
-                        (mapconcat #'cdr (vulpea-note-properties note) " ")))
-           (case-fold-search t))
-       (string-match-p (car args) hay)))))
-
 (defun jetpacs-org-entry-matches-p (tree)
   "Non-nil when the org entry at point matches query sexp TREE."
   (jetpacs-org--matches-p tree #'jetpacs-org--point-get))
 
-(defun jetpacs-org-note-matches-p (tree note)
-  "Non-nil when `vulpea-note' NOTE matches query sexp TREE.
-The same grammar as `jetpacs-org-entry-matches-p', evaluated entirely
-off the vulpea index (no file visit); the `regexp' term searches
-title + properties here (the body is not indexed)."
-  (jetpacs-org--matches-p
-   tree (lambda (what &rest args) (apply #'jetpacs-org--note-get note what args))))
-
-(defun jetpacs-org-note-query-supported-p (tree)
-  "Non-nil when query sexp TREE uses only index-evaluable terms.
-Empty (nil) TREE — no filter — is trivially supported."
-  (pcase tree
-    ('nil t)
-    (`(and . ,cs) (cl-every #'jetpacs-org-note-query-supported-p cs))
-    (`(or . ,cs) (cl-every #'jetpacs-org-note-query-supported-p cs))
-    (`(not ,c) (jetpacs-org-note-query-supported-p c))
-    (`(,head . ,_) (and (memq head jetpacs-org-note-query-terms) t))
-    (_ nil)))
+;; The vulpea note-index arm lives in jetpacs-org-vulpea.el (Tier-1
+;; staging, NEVER required by base): base is vanilla Emacs, vulpea is
+;; not built-in.  Base keeps only the seam it plugs into — the
+;; accessor-pluggable `jetpacs-org--matches-p' above.
 
 ;;;; High-level query
 
@@ -796,47 +728,6 @@ new, separately vetted entry point, never as an fboundp fork here."
   (when tree
     (jetpacs-org-with-cache namespace (format "%S" tree)
       (jetpacs-org--run-query tree action))))
-
-;;;; Vulpea note index (optional engine)
-
-(defun jetpacs-org-vulpea-available-p ()
-  "Non-nil when the vulpea note index is loadable on this Emacs.
-vulpea is never required at load; callers gate their index reads here.
-Probing DOES load vulpea when present."
-  (and (require 'vulpea nil t) (fboundp 'vulpea-db-query) t))
-
-(defun jetpacs-org-vulpea-source-notes (source)
-  "The `vulpea-note' records backing SOURCE, a scope plist.
-SOURCE is one of:
-  (:dir D)               -> the file-level notes of vault directory D;
-  (:file F :heading H)   -> the id'd headings directly under H in F;
-  (:file F)              -> the id'd level-1 headings of F.
-Headings must already carry `:ID:' properties for the index to see
-them.  Callers gate on `jetpacs-org-vulpea-available-p'."
-  (let ((dir (plist-get source :dir))
-        (file (plist-get source :file))
-        (heading (plist-get source :heading)))
-    (cond
-     (dir (vulpea-db-query-by-directory (directory-file-name dir) 0))
-     (file
-      (let ((want (expand-file-name file)))
-        (vulpea-db-query
-         (lambda (n)
-           (and (equal (expand-file-name (vulpea-note-path n)) want)
-                (if heading
-                    (equal (vulpea-note-outline-path n) (list heading))
-                  (= (vulpea-note-level n) 1)))))))
-     (t (user-error "Source needs :dir or :file: %S" source)))))
-
-(defun jetpacs-org-vulpea-query (source &optional tree)
-  "Notes of SOURCE matching query sexp TREE, off the vulpea index.
-A nil TREE admits every note of the scope.  TREE must stay inside
-`jetpacs-org-note-query-terms' — check
-`jetpacs-org-note-query-supported-p' first."
-  (let ((notes (jetpacs-org-vulpea-source-notes source)))
-    (if tree
-        (cl-remove-if-not (lambda (n) (jetpacs-org-note-matches-p tree n)) notes)
-      notes)))
 
 ;;;; Shared org primitives (O3)
 ;; Timestamp field extractors, headless capture, the LOGBOOK parser,

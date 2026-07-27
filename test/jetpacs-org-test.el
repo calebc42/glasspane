@@ -504,61 +504,6 @@ the global obarray — even when the query is REFUSED."
                     (jetpacs-org-parse-query "(priority > \"B\")"))
                    '("Urgent thing")))))
 
-;;;; The note accessor (synthetic vulpea — CI has no vulpea)
-
-(cl-defstruct (jetpacs-org-test-note (:constructor jetpacs-org-test-note))
-  todo closed tags priority title level properties deadline scheduled
-  path outline-path)
-
-(defmacro jetpacs-org-test--as-vulpea (&rest body)
-  "Route the vulpea accessors at the synthetic struct for BODY."
-  `(cl-letf (((symbol-function 'vulpea-note-todo)
-              #'jetpacs-org-test-note-todo)
-             ((symbol-function 'vulpea-note-closed)
-              #'jetpacs-org-test-note-closed)
-             ((symbol-function 'vulpea-note-tags)
-              #'jetpacs-org-test-note-tags)
-             ((symbol-function 'vulpea-note-priority)
-              #'jetpacs-org-test-note-priority)
-             ((symbol-function 'vulpea-note-title)
-              #'jetpacs-org-test-note-title)
-             ((symbol-function 'vulpea-note-level)
-              #'jetpacs-org-test-note-level)
-             ((symbol-function 'vulpea-note-properties)
-              #'jetpacs-org-test-note-properties)
-             ((symbol-function 'vulpea-note-deadline)
-              #'jetpacs-org-test-note-deadline)
-             ((symbol-function 'vulpea-note-scheduled)
-              #'jetpacs-org-test-note-scheduled))
-     ,@body))
-
-(ert-deftest jetpacs-org-note-accessor-semantics ()
-  "The vulpea arm's documented approximations, on a synthetic note:
-done-ness falls back to DONE/CLOSED; priority coerces; properties match
-case-insensitively; regexp searches title+properties, NOT the body."
-  (jetpacs-org-test--as-vulpea
-    (let ((note (jetpacs-org-test-note
-                 :todo "DONE" :closed nil :tags '("work")
-                 :priority "B" :title "Call Bob" :level 1
-                 :properties '(("STYLE" . "habit") ("KIND" . "call")))))
-      (should (jetpacs-org-note-matches-p '(done) note))
-      (should (jetpacs-org-note-matches-p '(priority "B") note))
-      (should (jetpacs-org-note-matches-p '(property "kind" "call") note))
-      (should (jetpacs-org-note-matches-p '(habit) note))
-      ;; Title+properties haystack: hits the title...
-      (should (jetpacs-org-note-matches-p '(regexp "Bob") note))
-      ;; ...and never a body (none indexed).
-      (should-not (jetpacs-org-note-matches-p '(regexp "body-text") note)))
-    ;; CLOSED-stamp done-ness without a done keyword.
-    (should (jetpacs-org-note-matches-p
-             '(done) (jetpacs-org-test-note :closed "[2026-07-01]")))))
-
-(ert-deftest jetpacs-org-note-query-routing ()
-  (should (jetpacs-org-note-query-supported-p
-           '(and (todo "X") (not (tags "y")))))
-  (should-not (jetpacs-org-note-query-supported-p '(and (clocked))))
-  (should (jetpacs-org-note-query-supported-p nil)))
-
 ;;;; Shared primitives (O3)
 
 (ert-deftest jetpacs-org-ts-extractors ()

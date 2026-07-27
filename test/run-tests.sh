@@ -108,6 +108,11 @@ emacs -Q --batch -L emacs -l test/jetpacs-chrome-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-org-test.el \
   -f ert-run-tests-batch-and-exit
 
+# Vulpea arm (Tier-1 staging — jetpacs-org-vulpea.el, never required by
+# base): synthetic-struct accessor semantics + index-evaluable routing.
+emacs -Q --batch -L emacs -l test/jetpacs-org-vulpea-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-3b exit gate: binding extraction (incl. the minor-mode-map poc-bug
 # regression), menu-bar mining over the :filter/:enable/:visible fixture,
 # and suppressed-commands unreachability.

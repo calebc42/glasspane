@@ -318,6 +318,17 @@ Twelve poc defects fixed at port, each with a mutation-verified regression
 test; the org-ql dispatch arm was DROPPED (untested semantic fork + the RCE
 hand-off — full org-ql would re-enter as a separately vetted entry point).
 
+**Post-gate boundary fix (ratified, Caleb, 2026-07-27): the vulpea arm is
+NOT base.** Under the R2 frame (base = vanilla Emacs optimized for mobile)
+vulpea is a third-party package, so the note-index engine arm — the ext:
+stubs, the note accessor, `note-matches-p`/`note-query-supported-p`, and
+the three `jetpacs-org-vulpea-*` entry points — moved to
+`jetpacs-org-vulpea.el` (Tier-1 staging; never required by any base
+module; migrates to the app repo when its Tier-1 rung lands). Base keeps
+only the seam: the accessor-pluggable interpreter, of which the vulpea
+accessor is the first above-base consumer. Same logic that dropped the
+org-ql fork and kept git out of base (D-10).
+
 **D-4 amendment (ratified, Caleb, 2026-07-27):** the "same commit as
 glasspane" clause is amended — glasspane migrates ONCE, at its own port rung.
 Exploration proved it cannot load against the rewrite at all yet (12 of 18

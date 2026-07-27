@@ -293,7 +293,7 @@ fighting base for the palette.
 test; deleting device's `add-hook` fails both teardown tests; dropping the
 `:ebp-local` tag fails the ceiling test.  Suite now **427 / 17**.
 
-### S — SPEC prose (#127–#136 as ratified; #126 needs no text under option B)
+### S — SPEC prose (#127–#136 as ratified; #126 needs no text under option B) — **DONE 2026-07-27** (ebp 7e55993)
 
 - [ ] #127 syntax-style pinning; #128 variant transition; #129 welcome
       current view; #130 the 1401 discriminator (write ebp's `:ebp-local`
@@ -305,16 +305,54 @@ test; deleting device's `add-hook` fails both teardown tests; dropping the
       unhandled handler signal is silently a permanent `rejected` (E3/E2
       soften this with `jetpacs-commit-or-retry` at the floor, quit → 1500).
 
-### D — device gate (last, after K's APK)
+### D — device gate (last, after K's APK) — **PASSED 2026-07-27**
 
-- [ ] Re-run smoke-ja2 + theme-mirror + clip smokes against the new APK.
-      Note the owner rename: the tablet holds orphaned `app:clip`/`app:theme`
-      snapshots from JA-1 — remove them via Companion settings or reinstall.
-- [ ] The P1-1 rider from audit commit 1: a SECOND "Retry me" tap in
-      smoke-ja2 P6 (the drained-then-retry cycle on real hardware).
-- [ ] New smoke moments: drill to depth 3+ under a small `max_rich_spans`
-      (E1); a refused push re-asserting `current_view` (E1/E3); org tag color
-      on device (K).
+Re-run on the Pixel Tablet against an APK carrying E4 + the #129/#132
+conformance fixes.
+
+- [x] **The E4 gate the plan actually required**: `smoke-device` (connect)
+      PASS — `state=ready push=applied`. E4 wraps the process filter with a
+      throwaway `obarray` and a post-pass over the parsed queue, so a live
+      socket is the only thing that proves the rented decode still works;
+      it does.
+- [x] **`smoke-ja2` 16/16 PASS**, including the P1-1 pump cycle on hardware
+      ("delivered three times (1500 x2 then accepted)", same `event_id`, no
+      4th delivery). Driven by marker-watching taps — see the gotcha below.
+- [x] **`smoke-theme-mirror` 6/6 PASS** (ready-hook mirror, modus.toggle
+      round trip, `mode 'system` native clear).
+- [x] **NEW `test/smoke-amend-129-132.el`** — the two amendments that landed
+      with no device coverage. #129 is verified the only way that means
+      anything: push a multi-view surface, drive it to `detail`, **DISCONNECT**,
+      reconnect, and read `current_view` out of the second WELCOME (the
+      offline-recovery case the amendment exists for). #132 sends an invalid
+      `pie_menu.show` and asserts the `1201` / `pie-menu-invalid` /
+      `data.path` shape. Both PASS.
+- [ ] Deferred, unchanged from 2026-07-26: the E1 drill-depth-under-small-
+      `max_rich_spans` moment and the E1/E3 refused-push `current_view`
+      re-assertion. Neither is touched by this session's diff.
+
+**RUNNER GOTCHAS (cost real time this session)**
+
+1. **The tap-driven smokes are not self-driving.** `smoke-ja2` and
+   `smoke-theme-mirror` print `P*-TAP-*` markers and BLOCK waiting for a
+   runner. Run them bare and they do not "fail" — `theme-mirror` reports 2
+   failures for the untapped phases and `ja2` simply times out. Neither is a
+   regression; both pass once tapped. Watch the marker in the output file,
+   dump `uiautomator`, tap by *bounds centre*.
+2. **Tap by the label the SOURCE names, not the label you assume.** The ja2
+   hub row is `Open detail` (not "Row one"); the retry button is `Retry me`;
+   the back affordance is a `content-desc`, not text. A wrong label silently
+   stalls the smoke at its marker.
+3. **`pie_menu.show` issued from inside `:ready-function` races the barrier.**
+   It is READY-only, and a notify sent from within the ready callback can
+   reach the engine before the device's own transition completes — the engine
+   then drops it as a STATE violation, which is correctly *not* reported as
+   `content-invalid`. Send from the body after waiting on a ready flag. This
+   cost three failed runs that looked like an amendment bug and were not.
+4. **Use a fresh surface id in a new smoke.** The device persists revisions
+   per surface; a fresh client restarts its own revision sequence at 1, so
+   re-using `app:main` gets `stale`. `smoke-amend-129-132` mints
+   `app:amend<random>`.
 
 ### E5 demotion (Caleb, 2026-07-26)
 

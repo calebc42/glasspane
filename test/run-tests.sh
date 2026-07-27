@@ -108,6 +108,15 @@ emacs -Q --batch -L emacs -l test/jetpacs-navigate-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-chrome-test.el \
   -f ert-run-tests-batch-and-exit
 
+# Cross-module seam wiring (AUDIT-ja1-ja2 3(h)): the ONLY process that
+# loads the application layer together.  A seam that exists only when two
+# modules are both loaded — chrome publishing itself as the navigator's
+# drill host, device adding its teardown sweep — is tested by no other
+# suite, so deleting it is green everywhere else.  Selector-scoped: the
+# loopback harness file defines its own suite too.
+emacs -Q --batch -L emacs -l test/ebp-wire-test.el -l test/jetpacs-integration-test.el \
+  --eval '(ert-run-tests-batch-and-exit "^jetpacs-integration-")'
+
 # Phase A cross-file seams + the comint P1s.  Several of these regress by
 # HANGING rather than failing (a prompt reached inside a dispatch extent),
 # so this suite is the one that must never be skipped.

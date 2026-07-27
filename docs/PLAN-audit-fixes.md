@@ -24,7 +24,7 @@ gates any commit below.**
 **Commit-3 residue** (deliberately deferred, land in E1): the node counter on
 the budget cons; the chrome stack depth bound.
 
-**Suite baseline: 422 tests / 16 suites** (2026-07-27, after E4's +9).  Trust
+**Suite baseline: 427 tests / 17 suites** (2026-07-27, after E4 +9 and T +5).  Trust
 no mutation result from a harness reporting fewer (the teardown suite runs
 only under its selector — audit §3(h) baseline note).  The 358 figure this
 line carried until E4 was stale by 55 tests: it predated work that landed
@@ -225,24 +225,25 @@ fighting base for the palette.
       pin-test carve-out `(unless (eq k :meta) …)`, and the vacuous
       `(equal nil nil)` meta assertion.
 
-### K — Kotlin (R3 = option B) — needs APK rebuild
+### K — Kotlin (R3 = option B) — **DONE** (session C, APK rebuilt+installed)
 
-- [ ] Delete the `meta` and `paren` reads in `SyntaxHighlight.kt`; add a `tag`
+- [x] Delete the `meta` and `paren` reads in `SyntaxHighlight.kt`; add a `tag`
       field to `SyntaxColors` + `emacsSyntaxColors` and use it for org tags at
       `styleOrgLine` (today a `:work:` tag renders in the preprocessor pink,
       not its lavender); read `preprocessor` directly.
-- [ ] Correct the false "the contract fixes no syntax_roles" comment.
-- [ ] `validateReminder` rejects `capture_fields` (#133's receiver half).
+- [x] Correct the false "the contract fixes no syntax_roles" comment.
+- [x] `validateReminder` rejects `capture_fields` (verified 2026-07-27 at
+      `CompanionEngine.kt:1165`, citing #133) (#133's receiver half).
 
-### C — contract + validator (amendments #127, #135) — after K for the golden
+### C — contract + validator (amendments #127, #135) — **DONE** (session C, submodule d48075d)
 
-- [ ] `syntax_style` schema (`fg bg font_weight italic underline`); `fg` into
+- [x] `syntax_style` schema (`fg bg font_weight italic underline`); `fg` into
       `field_types`; the app multi-view variant into `surface_spec_variants`.
-- [ ] `validate.py` walks `theme_roles`/`syntax_roles`/`SyntaxStyle` and the
+- [x] `validate.py` walks `theme_roles`/`syntax_roles`/`SyntaxStyle` and the
       variants — **the highest-leverage item in this plan**: these are the
       only contract sections the validator ignores, and that blindness is
       mechanically why the `meta` drift survived three rungs.
-- [ ] Regenerate the `theme.set` golden with the full role set + ≥3 syntax
+- [x] Regenerate the `theme.set` golden with the full role set + ≥3 syntax
       roles.
 
 ### Filed during E1 (new, not in the audit)
@@ -260,18 +261,37 @@ fighting base for the palette.
 - **`jetpacs-shell--build`'s error spec ships `error-message-string`** —
   prescribed by SPEC-JC-0-floor.md:193; E4/S doc+code amendment.
 
-### T — tests (audit §3(h) + §6 test P3s not landed in E1–E6)
+### T — tests (audit §3(h) + §6 test P3s not landed in E1–E6) — **DONE 2026-07-27**
 
-- [ ] The navigate×chrome integration file in `run-tests.sh`: assert the live
+- [x] The navigate×chrome integration file in `run-tests.sh`: assert the live
       seam wiring `(eq jetpacs-navigate-drill-function #'jetpacs-chrome--drill)`
       and the stackless-surface nil — today the entire drill feature can die
-      with green CI.
-- [ ] Mutation-resistant replacements: wire-id prefix-length term actually
-      exercised (>100-char prefix); `navigate-thunk-error-snackbar` asserts
-      the snackbar POSITIVELY; teardown `(= removed 1)` not `>=`; a stub-free
-      `jetpacs-device-w10-nil-id` driving the real `ebp-overload-hold`;
-      `jetpacs-teardown-functions` coverage for device (deleting the hook add
-      is green today).
+      with green CI.  Landed as `test/jetpacs-integration-test.el`, deliberately
+      scoped WIDER than the drill seam: it is the one process that requires the
+      application layer TOGETHER, which is the structural fix for §3(h) rather
+      than a patch for its one visible symptom.  Requires chrome BEFORE
+      navigate on purpose — that exercises the `with-eval-after-load` backfill
+      branch no other suite reaches.
+- [x] Mutation-resistant replacements.  Three of the five were **already
+      landed** in E1–E6 and were verified rather than rewritten: the wire-id
+      prefix-length term (`jetpacs-widgets/wire-id-ceiling-and-bad-prefix`
+      errors on a 101-char prefix), the POSITIVE snackbar assertion in
+      `jetpacs-navigate-thunk-error-redaction`, and teardown's
+      `(= (length removed) 1)`.  The two real gaps are now closed in the
+      integration file: `jetpacs-teardown-functions` coverage for device
+      (confirmed by mutation that deleting the `add-hook` was green across
+      device/teardown/phase-a), and a stub-free W10 ceiling test — the device
+      suite's version stubs `ebp-client--request` wholesale and feeds the
+      callback a hand-written 1401, so it asserts that `jetpacs-reminders-set`
+      READS a refusal, never that ebp PRODUCES one.  The new one drives a real
+      loopback companion that simply never answers `reminders.set`, so
+      outstanding accumulates over a real socket and the ceiling does its own
+      work; it also pins the `:ebp-local` discriminator and that the refused
+      request never reached the wire.
+
+**Mutation-verified**: deleting chrome's `with-eval-after-load` fails the seam
+test; deleting device's `add-hook` fails both teardown tests; dropping the
+`:ebp-local` tag fails the ceiling test.  Suite now **427 / 17**.
 
 ### S — SPEC prose (#127–#136 as ratified; #126 needs no text under option B)
 

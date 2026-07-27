@@ -356,6 +356,15 @@ answering `stale`; teardown sweeping the live set.
 
 ### JA-5 — Org on screen
 
+> **Order amended (Caleb ratified, 2026-07-27): JA-6 Files lands BEFORE
+> this rung.** Navigation before rendering — a user must be able to reach
+> their org files before the skin renders them.  Neither rung depends on
+> the other technically (JA-5 needs JA-4 + JA-2; JA-6 needs the floor +
+> JC-2 skins + dialogs — all done), so this is a product-order call: the
+> file browser and plain editor give JA-5 a real entry point the day it
+> lands, JA-6's sandbox guard reuses JA-4's fresh remote-before-stat
+> pattern, and an editable init.el speeds up every rung after it.
+
 **Lands:** the render skin (rebuild-lite): data: URIs replacing `file://`, LaTeX
 compile moved onto `jetpacs-async`, SPEC 23.1 exposure records **and checks**
 for the three skin-minted verbs plus the buffer-addressed ones, and the whole
@@ -377,6 +386,9 @@ tables, rules, images and LaTeX; span-budget accounting under a synthetic
 a repeater, use the toolbar to insert a src block.
 
 ### JA-6 — Files
+
+> **Order amended (Caleb ratified, 2026-07-27): this rung lands before
+> JA-5 — it is the NEXT rung.**  Rationale at the JA-5 entry.
 
 **Lands:** the sandbox guard (with `file-remote-p` rejected **before** any
 stat), the /sdcard probe, the grep scanner behind a `text_input` `:on-submit`

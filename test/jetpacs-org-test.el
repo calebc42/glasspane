@@ -413,6 +413,150 @@ daemon."
         (should (equal (buffer-string) "* Replaced\n")))
       (with-current-buffer buf (set-buffer-modified-p nil)))))
 
+;;;; D2 / file guards (JA-4 audit Batch 3: P1-5, P1-6, relative roots)
+
+(ert-deftest jetpacs-org-query-skips-a-vanished-agenda-file ()
+  "JA-4 audit P1-5: the `agenda' scope marched every configured entry
+through `org-check-agenda-file', which MESSAGES the absolute path and
+blocks on `read-char-exclusive' when the file is missing.  The query
+scope is now the existence-filtered explicit list; an EMPTY set refuses
+with the distinct `no-agenda-files' status instead of silently scanning
+whatever buffer was current (a nil `org-map-entries' scope means
+exactly that)."
+  (jetpacs-org-test--with-fixture f "* TODO Alive\nbody\n"
+    (let ((missing (concat (file-name-directory f) "ja4-vanished.org"))
+          (org-directory (file-name-directory f))
+          (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (inhibit-message t))
+      (let ((org-agenda-files (list f missing)))
+        (should (equal (jetpacs-with-no-prompts
+                        (jetpacs-org-query
+                         "ja4t" '(todo "TODO")
+                         (lambda () (nth 4 (org-heading-components)))))
+                       '("Alive"))))
+      (jetpacs-org-cache-invalidate)
+      ;; Nothing left after the filter: a status, never a buffer scan.
+      (let* ((org-agenda-files (list missing))
+             (err (should-error
+                   (jetpacs-with-no-prompts
+                    (jetpacs-org-query "ja4t" '(todo "TODO") #'ignore))
+                   :type 'jetpacs-org-refused)))
+        (should (equal (cdr err) '(no-agenda-files)))))))
+
+(ert-deftest jetpacs-org-resolve-opens-quietly-when-the-file-drifted ()
+  "JA-4 audit P1-6, the open sites: with a live buffer whose file
+changed on disk, `find-file-noselect' without NOWARN asks whether to
+reread — `yes-or-no-p' inside the dispatch extent.  Resolution opens
+quietly and answers from the buffer it has."
+  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+    (let ((ref (jetpacs-org-test--ref-to f "First heading")))
+      ;; Drift the disk behind the visiting buffer's back.
+      (with-temp-file f (insert jetpacs-org-test--two-headings "* Late\n"))
+      (set-file-times f (time-add (current-time) 2))
+      (let ((m (jetpacs-with-no-prompts (jetpacs-org-resolve-ref ref))))
+        (should (markerp m))
+        (set-marker m nil)))))
+
+(ert-deftest jetpacs-org-mutation-answers-drift-as-a-status ()
+  "JA-4 audit P1-6, supersession: the first buffer modification against
+a drifted file raises `ask-user-about-supersession-threat'.  Under the
+clamp that is a `jetpacs-org-refused' STATUS (`file-drifted') the
+handler answers `rejected' — not a question, and not a raw
+`inhibited-interaction'.  The disk content must genuinely DIFFER: in
+30.1 `userlock--check-content-unchanged' silently absorbs a
+same-content mtime drift before the threat is ever raised."
+  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+    (let ((ref (jetpacs-org-test--ref-to f "First heading")))
+      (with-temp-file f (insert jetpacs-org-test--two-headings
+                                "* Drifted\n"))
+      (set-file-times f (time-add (current-time) 2))
+      (let ((err (should-error
+                  (jetpacs-with-no-prompts
+                   (jetpacs-org-set-property ref "ja4t" "MOOD" "x"))
+                  :type 'jetpacs-org-refused)))
+        (should (equal (cdr err) '(file-drifted)))))))
+
+(ert-deftest jetpacs-org-toggle-todo-refuses-the-catchup-repeater-prompt ()
+  "JA-4 audit P1-6, the repeater: `org-auto-repeat-maybe' asks
+`y-or-n-p' after ten catch-up shifts of a `++' repeater (emacs-30.1
+org.el, nshiftmax).  Under the clamp the toggle refuses as a status
+instead of hanging the extent on a question."
+  (jetpacs-org-test--with-fixture f
+      (format "* TODO H\nSCHEDULED: <%s ++1d>\n"
+              (format-time-string
+               "%Y-%m-%d %a"
+               (time-subtract (current-time) (days-to-time 30))))
+    (let ((ref (jetpacs-org-test--ref-to f "H"))
+          (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done nil)
+          (inhibit-message t))
+      (let ((err (should-error
+                  (jetpacs-with-no-prompts
+                   (jetpacs-org-toggle-todo ref "ja4t" "DONE"))
+                  :type 'jetpacs-org-refused)))
+        (should (equal (cdr err) '(needs-interactive)))))))
+
+(ert-deftest jetpacs-org-save-path-never-prompts ()
+  "JA-4 audit P1-6, the save arm: `basic-save-buffer' raises
+`yes-or-no-p' on a write-protected file; inside the deferred-save timer
+that must be a message-refusal — a signal must never escape a timer
+body, and a prompt wedges the daemon."
+  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+    (let ((ref (jetpacs-org-test--ref-to f "First heading"))
+          (modes (file-modes f))
+          (before (with-temp-buffer (insert-file-contents f)
+                                    (buffer-string)))
+          (inhibit-message t))
+      (unwind-protect
+          (progn
+            ;; The public mutation arms the ONE deferred-save timer.
+            (jetpacs-org-set-property ref "ja4t" "MOOD" "good")
+            (let* ((buf (find-buffer-visiting f))
+                   (tm (buffer-local-value 'jetpacs-org--save-timer buf)))
+              (should (timerp tm))
+              (set-file-modes f #o444)
+              ;; Batch never runs idle timers; fire the body BY HAND.
+              (jetpacs-with-no-prompts
+               (apply (timer--function tm) (timer--args tm)))
+              ;; Refused as a message: buffer still modified, disk
+              ;; untouched.
+              (should (buffer-modified-p buf))
+              (should (equal (with-temp-buffer (insert-file-contents f)
+                                               (buffer-string))
+                             before))))
+        (set-file-modes f modes)))))
+
+(ert-deftest jetpacs-org-relative-root-anchors-to-org-directory ()
+  "Batch-3 P2: a relative `jetpacs-org-roots' or agenda entry anchors
+to `org-directory' — matching `org-agenda-files's own expansion — never
+to the AMBIENT `default-directory' of whatever buffer the socket
+filter happened to have current."
+  (jetpacs-org-test--with-fixture f "* H\n"
+    (let* ((fixture-dir (file-name-directory f))
+           (decoy (file-name-as-directory
+                   (file-truename (make-temp-file "ja4-decoy" t)))))
+      (unwind-protect
+          (progn
+            ;; Anchored: the decoy default-directory must not matter.
+            (let ((org-directory fixture-dir)
+                  (jetpacs-org-roots '("."))
+                  (default-directory decoy))
+              (should (equal (jetpacs-org--check-file f) f)))
+            ;; And the anchor really is org-directory: point it at the
+            ;; decoy and the SAME file is refused.
+            (let ((org-directory decoy)
+                  (jetpacs-org-roots '("."))
+                  (default-directory fixture-dir))
+              (should-error (jetpacs-org--check-file f)
+                            :type 'jetpacs-org-refused))
+            ;; Agenda entries expand against org-directory too.
+            (let ((org-directory fixture-dir)
+                  (org-agenda-files (list (file-name-nondirectory f))))
+              (should (equal (jetpacs-org-agenda-files)
+                             (list (concat fixture-dir
+                                           (file-name-nondirectory f)))))))
+        (delete-directory decoy t)))))
+
 ;;;; Typed extraction
 
 (ert-deftest jetpacs-org-typed-values ()

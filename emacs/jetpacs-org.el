@@ -46,6 +46,32 @@
 (require 'org-id)                       ; org-id-locations / find-id-in-file
 (require 'org-capture)                  ; O3: templates, capture-run
 (require 'org-table)                    ; O3: org-table-current-begin-pos defvar
+;; Batch 3 (P1-6): loaded EAGERLY, never lazily.  `org-timestamp-change'
+;; autoloads org-clock (via `org-clock-update-time-maybe') in the middle
+;; of the first repeatered toggle, and org-clock.el's load runs the
+;; `org-logind-dbus-session-path' defvar D-Bus probe — whose wait loop
+;; pumps `read-event', which under `inhibit-interaction' signals a raw
+;; `inhibited-interaction' out of the mutation extent (measured on a
+;; system bus; the clamp cannot stub `read-event' without breaking that
+;; same D-Bus machinery).  Loading here runs the probe at module load,
+;; where interaction is legal.
+(require 'org-clock)
+;; Batch 3 (P1-6): the C modification guard calls the AUTOLOADED
+;; `userlock--ask-user-about-supersession-threat' (emacs-30.1
+;; src/filelock.c); if userlock.el loads lazily inside the clamp, its
+;; defuns CLOBBER the clamp's `ask-user-about-supersession-threat'
+;; rebind mid-extent and the stock batch branch errors ("Cannot resolve
+;; conflict in batch mode") instead of the D2 status.  With the library
+;; already loaded, `cl-letf' rebinds stick — and the wrapper's
+;; content-unchanged check still absorbs a same-content mtime drift
+;; before any question is asked.  `load', not `require': userlock.el
+;; is a no-provide preloadable library, and the fboundp gate skips the
+;; load when a dump already carries it (an autoload STUB does not
+;; count — it is exactly the hazard).
+(unless (and (fboundp 'userlock--ask-user-about-supersession-threat)
+             (not (autoloadp (symbol-function
+                              'userlock--ask-user-about-supersession-threat))))
+  (load "userlock" nil t))
 (require 'jetpacs-surfaces)             ; owner floor: teardown, current-owner
 
 (defgroup jetpacs-org nil
@@ -67,25 +93,49 @@ by string prefix — /org-evil does not sit under /org."
   :type '(repeat directory))
 
 (defun jetpacs-org-agenda-files ()
-  "`org-agenda-files' with remote entries dropped before anything stats.
-`org-agenda-files' itself calls `file-directory-p' on each raw entry
-\(emacs-30.1 lisp/org/org.el), so this reads the VARIABLE rather than
-calling the function: by the time the function returns, a remote entry
-has already been dialled.  JA-4 audit P1-7 — one /ssh: entry made every
+  "`org-agenda-files' entries anchored, with remote entries dropped.
+Each entry is expanded against `org-directory' FIRST — matching
+`org-agenda-files's own `(expand-file-name f org-directory)' semantics;
+reading the raw variable must not change where a relative entry points
+\(Batch-3 P2: it previously resolved against the AMBIENT
+`default-directory' at every consumer).  The expansion is pure string
+work, so a remote name minted by a remote `org-directory' is still
+caught by the `jetpacs-local-paths' filter that runs AFTERWARDS — the
+order is load-bearing.
+
+`org-agenda-files' the FUNCTION calls `file-directory-p' on each raw
+entry (emacs-30.1 lisp/org/org.el), so this reads the VARIABLE rather
+than calling it: by the time the function returns, a remote entry has
+already been dialled.  JA-4 audit P1-7 — one /ssh: entry made every
 resolve, every mint and every cache-key computation attempt a TRAMP
 connection inside the socket filter, with a 60-second timeout."
   (jetpacs-local-paths
-   (if (listp org-agenda-files) org-agenda-files
-     (ignore-errors (org-agenda-files)))))
+   (mapcar (lambda (entry)
+             ;; Guard the shape: `jetpacs-local-paths' tolerates (and
+             ;; drops) garbage entries, and "" must not silently become
+             ;; org-directory itself.
+             (if (and (stringp entry) (not (string-empty-p entry)))
+                 (expand-file-name entry org-directory)
+               entry))
+           (if (listp org-agenda-files) org-agenda-files
+             (ignore-errors (org-agenda-files))))))
 
 (defun jetpacs-org--roots ()
   "The effective allowlist, raw — `jetpacs-check-path' truenames it.
-nil `jetpacs-org-roots' derives the set from `org-directory' and the
-directories of the LOCAL agenda files."
-  (or jetpacs-org-roots
-      (delete-dups
-       (cons org-directory
-             (mapcar #'file-name-directory (jetpacs-org-agenda-files))))))
+Explicit `jetpacs-org-roots' entries anchor to `org-directory'
+\(Batch-3 P2: a relative entry previously resolved against the AMBIENT
+`default-directory' — whatever buffer the socket filter had current);
+nil derives the set from `org-directory' and the directories of the
+LOCAL agenda files, already absolute after the same anchoring."
+  (if jetpacs-org-roots
+      (mapcar (lambda (d)
+                (if (and (stringp d) (not (string-empty-p d)))
+                    (expand-file-name d org-directory)
+                  d))
+              jetpacs-org-roots)
+    (delete-dups
+     (cons (expand-file-name org-directory)
+           (mapcar #'file-name-directory (jetpacs-org-agenda-files))))))
 
 (defun jetpacs-org--check-file (file)
   "FILE validated against `jetpacs-org-roots', as a truename, or signal.
@@ -98,6 +148,45 @@ condition is JA-4 audit P1-10, deliberately not in this change."
       (jetpacs-check-path file (jetpacs-org--roots))
     (jetpacs-path-refused
      (signal 'jetpacs-org-refused (cdr err)))))
+
+;;;; The D2 IO clamp
+
+(defmacro jetpacs-org--with-clamped-io (&rest body)
+  "Run BODY with every interactive file-IO escape clamped (D2).
+Drift and every other would-be question become a STATUS — a
+`jetpacs-org-refused' signal carrying a one-symbol data list per the
+floor's 23.3 convention (`file-drifted', `needs-interactive') — never
+a prompt: these extents run inside the socket filter or a timer, where
+a prompt wedges a daemon with nobody to answer it.
+
+The variables silence what variables can: `query-about-changed-file'
+nil the changed-on-disk reread question in `find-file-noselect',
+`large-file-warning-threshold' nil the size confirmation,
+`enable-local-variables' :safe the unsafe-local-variable prompt.  The
+rebinds catch what variables cannot: supersession
+\(`ask-user-about-supersession-threat', raised by the FIRST buffer
+modification against a drifted file), the `y-or-n-p'/`yes-or-no-p'
+family (write-protected saves, `require-final-newline', the
+`org-auto-repeat-maybe' `++' catch-up question), and
+`read-char-exclusive' (`org-check-agenda-file' on a file that vanishes
+between the existence filter and the map — the filter/prepare race)."
+  (declare (indent 0) (debug t))
+  `(let ((query-about-changed-file nil)
+         (large-file-warning-threshold nil)
+         (enable-local-variables :safe))
+     (cl-letf (((symbol-function 'ask-user-about-supersession-threat)
+                (lambda (_fn)
+                  (signal 'jetpacs-org-refused (list 'file-drifted))))
+               ((symbol-function 'y-or-n-p)
+                (lambda (&rest _)
+                  (signal 'jetpacs-org-refused (list 'needs-interactive))))
+               ((symbol-function 'yes-or-no-p)
+                (lambda (&rest _)
+                  (signal 'jetpacs-org-refused (list 'needs-interactive))))
+               ((symbol-function 'read-char-exclusive)
+                (lambda (&rest _)
+                  (signal 'jetpacs-org-refused (list 'needs-interactive)))))
+       ,@body)))
 
 ;;;; Cache layer
 
@@ -208,7 +297,10 @@ readable — handler answer: `rejected') and `jetpacs-org-unresolved'
 when the heading is genuinely gone (content drift — handler answer:
 `stale', the Companion re-presents).  Resolution: id in the validated
 file, id via `org-id-locations' (the mapped file re-validated), trusted
-pos with a headline check, then a headline scan."
+pos with a headline check, then a headline scan.  Files open QUIETLY
+\(NOWARN, under `jetpacs-org--with-clamped-io'): a changed-on-disk
+question cannot reach the dispatch extent — resolution answers from
+the buffer it has."
   (let ((id (plist-get ref :id))
         (file (plist-get ref :file))
         (pos (plist-get ref :pos))
@@ -218,55 +310,56 @@ pos with a headline check, then a headline scan."
     ;; trusted-position path fails and the headline scan may resolve the
     ;; wrong heading among duplicate titles.
     (when (numberp pos) (setq pos (truncate pos)))
-    (let* ((true (and (stringp file) (not (string-empty-p file))
-                      (jetpacs-org--check-file file)))
-           (marker
-            (or
-             ;; 1. The stable id, in the ref's own (validated) file.
-             (and true (stringp id) (not (string-empty-p id))
-                  (jetpacs-org--find-in-file-by-id id true))
-             ;; 2. The id, wherever org-id last recorded it — with the
-             ;;    mapped file put through the SAME policy guards.
-             (and (stringp id) (not (string-empty-p id))
-                  (hash-table-p org-id-locations)
-                  (when-let* ((mapped (gethash id org-id-locations))
-                              (mapped-true
-                               (condition-case nil
-                                   (jetpacs-org--check-file mapped)
-                                 (jetpacs-org-refused nil))))
-                    (jetpacs-org--find-in-file-by-id id mapped-true)))
-             ;; 3. Trusted position, only while its headline still holds.
-             (and true
-                  (with-current-buffer (find-file-noselect true)
-                    (org-with-wide-buffer
-                     (when (and (integerp pos)
-                                (<= (point-min) pos (point-max)))
-                       (goto-char pos)
-                       (when (ignore-errors (org-back-to-heading t) t)
-                         (when (or (not (stringp headline))
-                                   (string-empty-p headline)
-                                   (equal (nth 4 (org-heading-components))
-                                          headline))
-                           (copy-marker (point))))))))
-             ;; 4. Headline scan — first match wins, ambiguous by
-             ;;    construction among duplicate titles.
-             (and true (stringp headline) (not (string-empty-p headline))
-                  (with-current-buffer (find-file-noselect true)
-                    (org-with-wide-buffer
-                     (goto-char (point-min))
-                     (catch 'found
-                       (while (re-search-forward org-heading-regexp nil t)
-                         (when (equal (nth 4 (org-heading-components))
-                                      headline)
-                           (throw 'found
-                                  (copy-marker
-                                   (line-beginning-position)))))
-                       nil)))))))
-      (or marker
-          ;; The SYMBOL path only: no filename, no headline text — the
-          ;; poc formatted the absolute path into this error and callers
-          ;; pushed it to a device snackbar.
-          (signal 'jetpacs-org-unresolved nil)))))
+    (jetpacs-org--with-clamped-io
+      (let* ((true (and (stringp file) (not (string-empty-p file))
+                        (jetpacs-org--check-file file)))
+             (marker
+              (or
+               ;; 1. The stable id, in the ref's own (validated) file.
+               (and true (stringp id) (not (string-empty-p id))
+                    (jetpacs-org--find-in-file-by-id id true))
+               ;; 2. The id, wherever org-id last recorded it — with the
+               ;;    mapped file put through the SAME policy guards.
+               (and (stringp id) (not (string-empty-p id))
+                    (hash-table-p org-id-locations)
+                    (when-let* ((mapped (gethash id org-id-locations))
+                                (mapped-true
+                                 (condition-case nil
+                                     (jetpacs-org--check-file mapped)
+                                   (jetpacs-org-refused nil))))
+                      (jetpacs-org--find-in-file-by-id id mapped-true)))
+               ;; 3. Trusted position, only while its headline holds.
+               (and true
+                    (with-current-buffer (find-file-noselect true t)
+                      (org-with-wide-buffer
+                       (when (and (integerp pos)
+                                  (<= (point-min) pos (point-max)))
+                         (goto-char pos)
+                         (when (ignore-errors (org-back-to-heading t) t)
+                           (when (or (not (stringp headline))
+                                     (string-empty-p headline)
+                                     (equal (nth 4 (org-heading-components))
+                                            headline))
+                             (copy-marker (point))))))))
+               ;; 4. Headline scan — first match wins, ambiguous by
+               ;;    construction among duplicate titles.
+               (and true (stringp headline) (not (string-empty-p headline))
+                    (with-current-buffer (find-file-noselect true t)
+                      (org-with-wide-buffer
+                       (goto-char (point-min))
+                       (catch 'found
+                         (while (re-search-forward org-heading-regexp nil t)
+                           (when (equal (nth 4 (org-heading-components))
+                                        headline)
+                             (throw 'found
+                                    (copy-marker
+                                     (line-beginning-position)))))
+                         nil)))))))
+        (or marker
+            ;; The SYMBOL path only: no filename, no headline text — the
+            ;; poc formatted the absolute path into this error and
+            ;; callers pushed it to a device snackbar.
+            (signal 'jetpacs-org-unresolved nil))))))
 
 ;;;; Wire tokens — the D-4 opaque per-owner replace-set table
 
@@ -361,10 +454,15 @@ poc armed a fresh timer per mutation — ten taps, ten timers, nine
 no-op wakeups all holding the buffer.")
 
 (defun jetpacs-org--save-now (buf)
-  "The deferred save body: save BUF, refusing loudly where the stock
-path would PROMPT — `basic-save-buffer' raises `yes-or-no-p' on
-supersession and `ask-user-about-lock' on a foreign lock, and a prompt
-inside a timer wedges a daemon with nobody to answer it."
+  "The deferred save body: save BUF, never prompting, never signalling.
+The stock path PROMPTS in four places — `yes-or-no-p' on supersession
+and on a WRITE-PROTECTED file, `ask-user-about-lock' on a foreign
+lock, and the `require-final-newline' question — and a prompt inside a
+timer wedges a daemon with nobody to answer it.  The two cheap cases
+are answered by inspection below; the save itself runs under
+`jetpacs-org--with-clamped-io', so anything that would still ask
+\(write-protected, final-newline, a drift landing after the modtime
+check) becomes a message-refusal — a signal must never escape a timer."
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (setq jetpacs-org--save-timer nil)
@@ -377,7 +475,11 @@ inside a timer wedges a daemon with nobody to answer it."
             (and lock (not (eq lock t))))
           (message "jetpacs-org: NOT saving %s — locked by another \
 process" (buffer-name buf)))
-         (t (save-buffer)))))))
+         (t (condition-case nil
+                (jetpacs-org--with-clamped-io (save-buffer))
+              (jetpacs-org-refused
+               (message "jetpacs-org: NOT saving %s — needs interactive \
+input" (buffer-name buf))))))))))
 
 (defun jetpacs-org-defer-save ()
   "Schedule ONE idle save for the current buffer."
@@ -390,17 +492,23 @@ process" (buffer-name buf)))
   "Resolve REF, run BODY at its heading widened, bust NAMESPACE, defer save.
 Widening is load-bearing: the poc mutated without it, and a narrowed
 buffer whose restriction excluded the marker silently edited the wrong
-position.  The marker is released after use."
+position.  The marker is released after use.  The WHOLE extent —
+resolve, BODY, invalidate, defer — runs under
+`jetpacs-org--with-clamped-io' (D2): supersession against a drifted
+file, the `++' repeater catch-up question, a changed-on-disk reread —
+every would-be prompt surfaces as `jetpacs-org-refused', a status the
+handler answers."
   (declare (indent 2))
-  `(let ((marker (jetpacs-org-resolve-ref ,ref)))
-     (unwind-protect
-         (with-current-buffer (marker-buffer marker)
-           (org-with-wide-buffer
-            (goto-char marker)
-            (prog1 (progn ,@body)
-              (jetpacs-org-cache-invalidate ,namespace)
-              (jetpacs-org-defer-save))))
-       (set-marker marker nil))))
+  `(jetpacs-org--with-clamped-io
+     (let ((marker (jetpacs-org-resolve-ref ,ref)))
+       (unwind-protect
+           (with-current-buffer (marker-buffer marker)
+             (org-with-wide-buffer
+              (goto-char marker)
+              (prog1 (progn ,@body)
+                (jetpacs-org-cache-invalidate ,namespace)
+                (jetpacs-org-defer-save))))
+         (set-marker marker nil)))))
 
 (defun jetpacs-org-set-property (ref namespace prop value)
   "Set PROP to VALUE on the heading at REF."
@@ -428,7 +536,11 @@ while `save-window-excursion' hides the damage and the LOGBOOK line is
 never written.  For those kinds the pending note is CANCELLED instead
 and the skip is surfaced — and recorded in
 `jetpacs-org-toggle-todo-cancelled-note' so JA-5's `capture_fields'
-note dialog can pick it up."
+note dialog can pick it up.  The note is only ONE of the interactive
+hazards on this path: `jetpacs-org-with-mutation' runs the whole
+toggle under `jetpacs-org--with-clamped-io', so the rest — the `++'
+repeater catch-up question, supersession, changed-on-disk — surface
+as `jetpacs-org-refused'."
   (setq jetpacs-org-toggle-todo-cancelled-note nil)
   (jetpacs-org-with-mutation ref namespace
     (org-todo state)
@@ -856,14 +968,44 @@ caller bypassed `jetpacs-org-parse-query' with a hand-built tree."
 
 ;;;; High-level query
 
+(defun jetpacs-org--query-files ()
+  "The explicit query scope: local agenda files that EXIST, or signal.
+Routes through `jetpacs-org-agenda-files' — the SAME P1-7 floor filter
+the roots and the cache stamp use — then drops entries whose files are
+gone (JA-4 audit P1-5: `org-check-agenda-file' messages the ABSOLUTE
+path and blocks on `read-char-exclusive' for a missing file).  An
+EMPTY result signals `jetpacs-org-refused' with the distinct data
+symbol `no-agenda-files' (vs the floor's `no-roots'): a nil scope
+handed to `org-map-entries' means the CURRENT BUFFER — whatever the
+socket filter happened to have current (sandbox drift).  Splitting
+this into a retryable `jetpacs-org-unavailable' is JA-4 audit P1-10
+\(Batch 4), deliberately not in this change.  Directory entries are NOT
+expanded to member files — the stamp already treats raw entries as
+files, and the query matches the module's own semantics, not the
+`org-agenda-files' function's."
+  (or (cl-remove-if-not #'file-exists-p (jetpacs-org-agenda-files))
+      (signal 'jetpacs-org-refused (list 'no-agenda-files))))
+
 (defun jetpacs-org--run-query (tree action)
-  "Run vetted query TREE over the agenda files, calling ACTION at matches."
-  (let (items)
-    (org-map-entries
-     (lambda ()
-       (when (jetpacs-org-entry-matches-p tree)
-         (push (funcall action) items)))
-     nil 'agenda)
+  "Run vetted query TREE over the agenda files, calling ACTION at matches.
+The scope is the EXPLICIT existence-filtered file list, never the
+`agenda' symbol — that re-reads configuration through the
+`org-agenda-files' FUNCTION (remote dialling, P1-7) and marches every
+raw entry through `org-check-agenda-file' (the missing-file prompt,
+P1-5)."
+  (let ((files (jetpacs-org--query-files))
+        ;; Belt and braces only: in 30.1 the `org-agenda-files' FUNCTION
+        ;; is the sole consumer of this variable — the existence filter
+        ;; above and the clamp's read-char-exclusive rebind are what
+        ;; actually close P1-5.
+        (org-agenda-skip-unavailable-files t)
+        items)
+    (jetpacs-org--with-clamped-io
+      (org-map-entries
+       (lambda ()
+         (when (jetpacs-org-entry-matches-p tree)
+           (push (funcall action) items)))
+       nil files))
     (nreverse items)))
 
 (defun jetpacs-org-query (namespace tree action)

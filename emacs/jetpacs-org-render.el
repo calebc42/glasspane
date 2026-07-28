@@ -561,6 +561,15 @@ cannot see."
          ((and (eq c ?\[) (jetpacs-org-render--checkbox-at pos))
           (jetpacs-action "jetpacs.org.checkbox"
                           :args (list :buffer buffer-name :pos pos)))
+         ;; Timestamp (active/inactive, planning or body): the one-shot
+         ;; editor — Orgro's third structured-edit gesture.
+         ((and (memq c '(?< ?\[))
+               (let ((n (char-after (1+ pos))))
+                 (and n (<= ?0 n ?9)))
+               (org-in-regexp org-ts-regexp-both)
+               (= (match-beginning 0) pos))
+          (jetpacs-action "jetpacs.org.timestamp"
+                          :args (list :buffer buffer-name :pos pos)))
          ;; Drawer header (or :END:) line: fold affordance.
          ((and (eq c ?:)
                (save-excursion

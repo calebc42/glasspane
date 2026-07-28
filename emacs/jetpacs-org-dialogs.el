@@ -197,11 +197,13 @@ the first's tokens anyway (the replace-set sweep).")
   "Fresh (VALUE . LABEL) candidates for REF's sheet.
 Rebuilt at dispatch time too — the submitted value must name a
 candidate the sheet WOULD offer now (SPEC 23.2).  Narrow/widen follow
-the buffer's live state.  Schedule/Deadline join at JA-5e."
+the buffer's live state."
   (ignore ref)
   (append
    '(("todo" . "Cycle TODO")
      ("set-todo" . "Set TODO…")
+     ("schedule" . "Schedule…")
+     ("deadline" . "Deadline…")
      ("priority" . "Priority…")
      ("tags" . "Set tags…")
      ("refile" . "Refile…"))
@@ -275,7 +277,23 @@ candidate list first (23.2)."
         (pcase value
           ("todo"
            (jetpacs-org-toggle-todo ref 'org nil)
+           (jetpacs-org-dialogs--maybe-log-note ref params)
            (jetpacs-org-dialogs--refresh params))
+          ((or "schedule" "deadline")
+           (let ((which (upcase value)))
+             (run-at-time 0 nil
+                          (lambda ()
+                            (jetpacs-org-dialogs--ts-open
+                             (list :kind 'planning :ref ref :which which)
+                             (condition-case nil
+                                 (let ((m (jetpacs-org-resolve-ref ref)))
+                                   (unwind-protect
+                                       (with-current-buffer (marker-buffer m)
+                                         (org-with-wide-buffer
+                                          (org-entry-get m which)))
+                                     (set-marker m nil)))
+                               (error nil))
+                             params)))))
           ("set-todo"
            (run-at-time 0 nil (lambda ()
                                 (jetpacs-org-dialogs--show-set-todo
@@ -360,12 +378,14 @@ reads chars with no prompt argument and would hang under a flow."
          (when (equal status "submitted")
            (let ((v (plist-get result :value)))
              (condition-case err
-                 (cond
-                  ((equal v "__none__")
-                   (jetpacs-org-toggle-todo ref 'org 'none))
-                  ;; 23.2: only a keyword the buffer defines NOW.
-                  ((member v (with-current-buffer buf org-todo-keywords-1))
-                   (jetpacs-org-toggle-todo ref 'org v)))
+                 (progn
+                   (cond
+                    ((equal v "__none__")
+                     (jetpacs-org-toggle-todo ref 'org 'none))
+                    ;; 23.2: only a keyword the buffer defines NOW.
+                    ((member v (with-current-buffer buf org-todo-keywords-1))
+                     (jetpacs-org-toggle-todo ref 'org v)))
+                   (jetpacs-org-dialogs--maybe-log-note ref params))
                (error (message "jetpacs-org-dialogs: set-todo failed: %s"
                                (jetpacs--error-label err))
                       (jetpacs-org-dialogs--notify "That did not work"
@@ -474,6 +494,369 @@ rest — and org's fast tag selection cannot bridge)."
                                                    params)))
              (jetpacs-org-dialogs--refresh params))))))))
 
+;;;; The timestamp editor (poc 2031-2266 rebuilt: one-shot dialogs, sessions)
+;;
+;; The poc kept a live satellite view with module-global state — one
+;; editor per Emacs, every keystroke a round trip.  Rebuilt as ONE
+;; `dialog.show' whose repeater fields ride `capture_fields' and whose
+;; date/time picks CANNOT (SPEC 17.4: `date_button'/`time_button' carry
+;; no id — they are not stateful nodes, and 14.1 rejects a non-stateful
+;; capture name), so a pick arrives as the remote `jetpacs.org.ts-pick'
+;; with the value injected (14.3), and the dialog is abandoned and
+;; RE-PRESENTED under a fresh id seeded from the session — the only
+;; conformant way to reflect a pick.  Sessions are the 23.1 record for
+;; that verb: `:sid' must name a live session AND the event's
+;; `:dialog_id' must be the session's current dialog.
+;;
+;; Delay cookies (-1d) are deliberately absent: the engine has no
+;; delay writer (only `jetpacs-org-set-repeater'), and they stay
+;; plain-text-editable — the Orgro two-tier line.  Habit min/max
+;; repeaters (+1w/2w) seed their leading part and round-trip the rest
+;; untouched only when the repeater fields are unedited.
+
+(defcustom jetpacs-org-ts-session-ttl 900
+  "Seconds an unconcluded timestamp session survives before sweeping."
+  :type 'integer :group 'jetpacs-org)
+
+(defvar jetpacs-org-dialogs--ts-sessions (make-hash-table :test #'equal)
+  "SID -> session plist (:target :date :time :rep-type :rep-n :rep-unit
+:dialog-id :request-id :params :created).")
+
+(defvar jetpacs-org-dialogs--ts-timer nil
+  "The session sweep timer, armed while sessions exist.")
+
+(defun jetpacs-org-dialogs--ts-sweep ()
+  "Drop sessions older than `jetpacs-org-ts-session-ttl'; re-arm if any."
+  (setq jetpacs-org-dialogs--ts-timer nil)
+  (let ((cutoff (- (float-time) jetpacs-org-ts-session-ttl))
+        dead)
+    (maphash (lambda (sid s)
+               (when (< (plist-get s :created) cutoff) (push sid dead)))
+             jetpacs-org-dialogs--ts-sessions)
+    (dolist (sid dead) (remhash sid jetpacs-org-dialogs--ts-sessions)))
+  (when (> (hash-table-count jetpacs-org-dialogs--ts-sessions) 0)
+    (setq jetpacs-org-dialogs--ts-timer
+          (run-at-time jetpacs-org-ts-session-ttl nil
+                       #'jetpacs-org-dialogs--ts-sweep))))
+
+(defun jetpacs-org-dialogs--ts-seed (stamp)
+  "Session fields seeded from org timestamp string STAMP (or nil).
+Repeaters split into type/count/unit; a habit's /max tail and any
+delay cookie are ignored (the leading repeater still seeds)."
+  (let* ((rep (and stamp (jetpacs-org-ts-repeater stamp)))
+         (parts (and rep
+                     (string-match
+                      "\\`\\(\\.\\+\\|\\+\\+\\|\\+\\)\\([0-9]+\\)\\([hdwmy]\\)"
+                      rep)
+                     (list (match-string 1 rep)
+                           (match-string 2 rep)
+                           (match-string 3 rep)))))
+    (list :date (or (and stamp (jetpacs-org-ts-date stamp))
+                    (format-time-string "%Y-%m-%d"))
+          :time (and stamp (jetpacs-org-ts-time stamp))
+          :rep-type (or (nth 0 parts) "none")
+          :rep-n (or (nth 1 parts) "1")
+          :rep-unit (or (nth 2 parts) "w"))))
+
+(defconst jetpacs-org-dialogs--ts-rep-types
+  '(("none" . "No repeat") ("+" . "+ every")
+    ("++" . "++ next from today") (".+" . ".+ next from done"))
+  "Repeater types with the poc's labels.")
+
+(defun jetpacs-org-dialogs--ts-preview (session)
+  "The stamp SESSION would write, for the preview line."
+  (let* ((target (plist-get session :target))
+         (bracket (if (eq (plist-get target :kind) 'body)
+                      (plist-get target :bracket)
+                    ?<))
+         (rep (jetpacs-org-dialogs--ts-rep session)))
+    (format "%c%s%s%s%c"
+            (if (eq bracket ?\[) ?\[ ?<)
+            (plist-get session :date)
+            (if (plist-get session :time)
+                (concat " " (plist-get session :time)) "")
+            (if rep (concat " " rep) "")
+            (if (eq bracket ?\[) ?\] ?>))))
+
+(defun jetpacs-org-dialogs--ts-rep (session)
+  "SESSION's repeater cookie string, or nil for none."
+  (let ((type (plist-get session :rep-type))
+        (n (plist-get session :rep-n)))
+    (when (and (member type '("+" "++" ".+"))
+               (stringp n) (string-match-p "\\`[0-9]+\\'" n)
+               (> (string-to-number n) 0))
+      (concat type n (plist-get session :rep-unit)))))
+
+(defun jetpacs-org-dialogs--ts-spec (sid session)
+  "The timestamp dialog spec for SESSION under SID."
+  (let ((target (plist-get session :target)))
+    (jetpacs-column
+     (jetpacs-text (pcase (plist-get target :kind)
+                     ('planning (capitalize
+                                 (downcase (plist-get target :which))))
+                     (_ "Timestamp"))
+                   :style "title")
+     (jetpacs-row
+      (jetpacs-date-button (or (plist-get session :date) "Pick date")
+                           (jetpacs-action "jetpacs.org.ts-pick"
+                                           :args (list :sid sid
+                                                       :field "date"))
+                           :value (plist-get session :date))
+      (jetpacs-time-button (or (plist-get session :time) "Add time")
+                           (jetpacs-action "jetpacs.org.ts-pick"
+                                           :args (list :sid sid
+                                                       :field "time"))
+                           :value (plist-get session :time)))
+     (jetpacs-enum-list "ts-rep-type"
+                        (mapcar (lambda (c)
+                                  (jetpacs-enum-option (cdr c) (car c)))
+                                jetpacs-org-dialogs--ts-rep-types)
+                        :value (plist-get session :rep-type))
+     (jetpacs-row
+      (jetpacs-text-input "ts-rep-n" :value (plist-get session :rep-n)
+                          :label "Every" :keyboard "number"
+                          :single-line t)
+      (jetpacs-enum-list "ts-rep-unit"
+                         (mapcar (lambda (u)
+                                   (jetpacs-enum-option (cdr u) (car u)))
+                                 '(("d" . "days") ("w" . "weeks")
+                                   ("m" . "months") ("y" . "years")))
+                         :value (plist-get session :rep-unit)))
+     (jetpacs-text (concat "Preview: "
+                           (jetpacs-org-dialogs--ts-preview session))
+                   :style "caption")
+     (jetpacs-button "Save"
+                     (jetpacs-dialog-submit
+                      :value "save"
+                      :capture-fields '("ts-rep-type" "ts-rep-n"
+                                        "ts-rep-unit"))
+                     :variant "text")
+     (jetpacs-button "Clear"
+                     (jetpacs-dialog-submit :value "clear")
+                     :variant "text")
+     (jetpacs-button "Cancel" (jetpacs-dialog-dismiss)))))
+
+(defun jetpacs-org-dialogs--ts-present (sid)
+  "Show (or RE-show under a fresh id) the dialog for session SID."
+  (when-let* ((client (jetpacs-client))
+              (session (gethash sid jetpacs-org-dialogs--ts-sessions)))
+    (let* ((dialog-id (jetpacs-org-dialogs--id "ts" nil sid))
+           (request-id
+            (ebp-client-dialog-show
+             client dialog-id
+             (jetpacs-org-dialogs--ts-spec sid session)
+             :callback
+             (lambda (status result _error)
+               (let ((live (gethash sid jetpacs-org-dialogs--ts-sessions)))
+                 ;; A superseded dialog (abandoned by a pick's
+                 ;; re-present) concludes too — only the session's
+                 ;; CURRENT dialog may conclude the session.
+                 (when (and live
+                            (equal (plist-get live :dialog-id) dialog-id))
+                   (remhash sid jetpacs-org-dialogs--ts-sessions)
+                   (when (equal status "submitted")
+                     (jetpacs-org-dialogs--ts-conclude
+                      live
+                      (plist-get result :value)
+                      (plist-get result :fields)))))))))
+      (when request-id
+        (puthash sid
+                 (plist-put (plist-put (copy-sequence session)
+                                       :dialog-id dialog-id)
+                            :request-id request-id)
+                 jetpacs-org-dialogs--ts-sessions)))))
+
+(defun jetpacs-org-dialogs--ts-open (target stamp params)
+  "Open a timestamp session for TARGET seeded from STAMP."
+  (let* ((sid (format "ts-%d" (cl-incf jetpacs-org-dialogs--seq)))
+         (session (append (list :target target :params params
+                                :created (float-time))
+                          (jetpacs-org-dialogs--ts-seed stamp))))
+    (puthash sid session jetpacs-org-dialogs--ts-sessions)
+    (unless (timerp jetpacs-org-dialogs--ts-timer)
+      (setq jetpacs-org-dialogs--ts-timer
+            (run-at-time jetpacs-org-ts-session-ttl nil
+                         #'jetpacs-org-dialogs--ts-sweep)))
+    (jetpacs-org-dialogs--ts-present sid)))
+
+(defun jetpacs-org-dialogs--ts-pick (args params)
+  "Store a date/time pick and re-present the session's dialog fresh."
+  (let* ((sid (plist-get args :sid))
+         (field (plist-get args :field))
+         (value (plist-get args :value))
+         (session (and (stringp sid)
+                       (gethash sid jetpacs-org-dialogs--ts-sessions))))
+    (cond
+     ((not (and (stringp sid) (member field '("date" "time"))))
+      'rejected)
+     ((null session) 'stale)
+     ;; The pick must come from the session's CURRENT dialog.
+     ((not (equal (plist-get params :dialog_id)
+                  (plist-get session :dialog-id)))
+      'stale)
+     ;; 23.1: the injected value is device data — shape-check it.
+     ((not (and (stringp value)
+                (string-match-p (if (equal field "date")
+                                    "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'"
+                                  "\\`[0-9]\\{2\\}:[0-9]\\{2\\}\\'")
+                                value)))
+      'rejected)
+     (t
+      (puthash sid
+               (plist-put (copy-sequence session)
+                          (if (equal field "date") :date :time) value)
+               jetpacs-org-dialogs--ts-sessions)
+      (let ((old-request (plist-get session :request-id)))
+        (run-at-time 0 nil
+                     (lambda ()
+                       (when-let* ((client (jetpacs-client)))
+                         (ignore-errors
+                           (ebp-client-abandon client old-request)))
+                       (jetpacs-org-dialogs--ts-present sid))))
+      'accepted))))
+
+(defun jetpacs-org-dialogs--ts-conclude (session value fields)
+  "Apply a submitted timestamp dialog: VALUE is \"save\" or \"clear\".
+FIELDS carries the captured repeater members keyed by node id."
+  (let* ((target (plist-get session :target))
+         (params (plist-get session :params))
+         (session (if fields
+                      (append (list :rep-type (plist-get fields :ts-rep-type)
+                                    :rep-n (plist-get fields :ts-rep-n)
+                                    :rep-unit (plist-get fields :ts-rep-unit))
+                              session)
+                    session)))
+    (condition-case err
+        (pcase (plist-get target :kind)
+          ('planning
+           (let ((ref (plist-get target :ref))
+                 (which (plist-get target :which)))
+             (pcase value
+               ("save"
+                (let ((rep (jetpacs-org-dialogs--ts-rep session))
+                      (datetime (concat (plist-get session :date)
+                                        (if (plist-get session :time)
+                                            (concat " "
+                                                    (plist-get session :time))
+                                          ""))))
+                  (jetpacs-org-set-planning ref 'org which datetime)
+                  ;; The two-step cookie write pinned at JA-4:
+                  ;; `org-add-planning-info' drops repeaters.
+                  (jetpacs-org-with-mutation ref 'org
+                    (jetpacs-org-set-repeater which rep))))
+               ("clear"
+                (jetpacs-org-set-planning ref 'org which nil)))))
+          ('body
+           (jetpacs-org-dialogs--ts-body-write target session value)))
+      (jetpacs-org-unresolved
+       (jetpacs-org-dialogs--notify "That heading is gone" params))
+      (error
+       (message "jetpacs-org-dialogs: timestamp %s failed: %s"
+                value (jetpacs--error-label err))
+       (jetpacs-org-dialogs--notify "That did not work" params)))
+    (jetpacs-org-dialogs--refresh params)))
+
+(defun jetpacs-org-dialogs--ts-body-write (target session value)
+  "Rewrite (or clear) the body stamp TARGET addresses.
+Re-verifies a stamp still BEGINS at the recorded position — the buffer
+may have moved under the dialog; a miss is a silent no-op plus a
+snackbar, the stale-tap ethic."
+  (let* ((name (plist-get target :buffer))
+         (pos (plist-get target :pos))
+         (buf (and (stringp name) (get-buffer name))))
+    (if (null buf)
+        (jetpacs-org-dialogs--notify "That buffer is gone"
+                                     (plist-get session :params))
+      (with-current-buffer buf
+        (org-with-wide-buffer
+         (goto-char (min (max (point-min) pos) (point-max)))
+         (if (not (and (memq (char-after pos) '(?< ?\[))
+                       (org-in-regexp org-ts-regexp-both)
+                       (= (match-beginning 0) pos)))
+             (jetpacs-org-dialogs--notify "That timestamp moved"
+                                          (plist-get session :params))
+           (let ((beg (match-beginning 0))
+                 (end (match-end 0)))
+             (pcase value
+               ("save"
+                (let* ((day (let ((system-time-locale "C"))
+                              (format-time-string
+                               "%a" (org-time-string-to-time
+                                     (plist-get session :date)))))
+                       (rep (jetpacs-org-dialogs--ts-rep session))
+                       (stamp (format "%c%s %s%s%s%c"
+                                      (plist-get target :bracket)
+                                      (plist-get session :date)
+                                      day
+                                      (if (plist-get session :time)
+                                          (concat " "
+                                                  (plist-get session :time))
+                                        "")
+                                      (if rep (concat " " rep) "")
+                                      (if (eq (plist-get target :bracket)
+                                              ?\[)
+                                          ?\] ?>))))
+                  (delete-region beg end)
+                  (goto-char beg)
+                  (insert stamp)))
+               ("clear"
+                (delete-region beg end)
+                (when (and (eq (char-before beg) ?\s)
+                           (memq (char-after beg) '(?\s ?\n nil)))
+                  (delete-char -1))))
+             (jetpacs-org-cache-invalidate)
+             (when buffer-file-name (jetpacs-org-defer-save)))))))))
+
+;;;; The log-note dialog (the base docstring's promised follow-up)
+
+(defun jetpacs-org-dialogs--maybe-log-note (ref params)
+  "When the last toggle cancelled a free-text note, ask for it.
+Reads `jetpacs-org-toggle-todo-cancelled-note' (the JA-5e engine seam)."
+  (when jetpacs-org-toggle-todo-cancelled-note
+    (setq jetpacs-org-toggle-todo-cancelled-note nil)
+    (run-at-time 0 nil
+                 (lambda ()
+                   (jetpacs-org-dialogs--show-log-note ref params)))))
+
+(defun jetpacs-org-dialogs--show-log-note (ref params)
+  "Offer a one-field note dialog for REF's just-changed state."
+  (when-let* ((client (jetpacs-client)))
+    (ebp-client-dialog-show
+     client
+     (jetpacs-org-dialogs--id "note" nil (plist-get ref :pos))
+     (jetpacs-column
+      (jetpacs-text "State change note" :style "title")
+      (jetpacs-text-input "org-note" :label "Note" :min-lines 3)
+      (jetpacs-button "Save"
+                      (jetpacs-dialog-submit
+                       :value "save" :capture-fields '("org-note"))
+                      :variant "text")
+      (jetpacs-button "Skip" (jetpacs-dialog-dismiss)))
+     :callback
+     (lambda (status result _error)
+       (when (and (equal status "submitted")
+                  (equal (plist-get result :value) "save"))
+         (let ((text (plist-get (plist-get result :fields) :org-note)))
+           (when (and (stringp text)
+                      (not (string-blank-p text)))
+             (condition-case err
+                 (jetpacs-org-with-mutation ref 'org
+                   ;; org's own drawer placement (creates LOGBOOK per
+                   ;; `org-log-into-drawer'); the format is the one
+                   ;; `jetpacs-org-parse-logbook' reads back.
+                   (goto-char (org-log-beginning t))
+                   (insert
+                    (format "- Note taken on %s \\\\\n  %s\n"
+                            (format-time-string (org-time-stamp-format t t))
+                            (replace-regexp-in-string
+                             "\n" "\n  "
+                             (jetpacs-scalar-text (string-trim text))))))
+               (error (message "jetpacs-org-dialogs: note failed: %s"
+                               (jetpacs--error-label err))
+                      (jetpacs-org-dialogs--notify "That did not work"
+                                                   params)))
+             (jetpacs-org-dialogs--refresh params))))))))
+
 ;;;; Refile — the one bridged command
 
 (defun jetpacs-org-dialogs--refile (ref params)
@@ -522,6 +905,46 @@ this module never sees."
   (jetpacs-org-dialogs--dialog-tap
    "jetpacs.org.heading" #'jetpacs-org-dialogs--show-sheet args params))
 
+(defun jetpacs-org-dialogs--stamp-at (buf pos)
+  "The (STAMP-STRING . BRACKET) beginning exactly at POS in BUF, or nil."
+  (with-current-buffer buf
+    (org-with-wide-buffer
+     (goto-char (min (max (point-min) pos) (point-max)))
+     (save-match-data
+       (when (and (memq (char-after pos) '(?< ?\[))
+                  (org-in-regexp org-ts-regexp-both)
+                  (= (match-beginning 0) pos))
+         (cons (buffer-substring-no-properties (match-beginning 0)
+                                               (match-end 0))
+               (char-after pos)))))))
+
+(defun jetpacs-org-dialogs--timestamp-action (args params)
+  "A tapped body/planning stamp opens the one-shot editor.
+The stamp must still BEGIN at the armed position (else `stale'); the
+editor addresses it as a body target and rewrites it literally in
+place — which serves planning-line stamps identically, the keyword
+staying untouched."
+  (let* ((name (plist-get args :buffer))
+         (pos (plist-get args :pos))
+         (buf (and (stringp name) (get-buffer name))))
+    (cond
+     ((not (and buf (integerp pos))) 'rejected)
+     ((jetpacs-event-stale-p params) 'stale)
+     ((not (jetpacs-buffer-exposed-p name pos "jetpacs.org.timestamp"))
+      'rejected)
+     ((not (jetpacs-granted-p "surfaces.dialog")) 'rejected)
+     (t
+      (let ((stamp (jetpacs-org-dialogs--stamp-at buf pos)))
+        (if (null stamp)
+            'stale
+          (run-at-time 0 nil
+                       (lambda ()
+                         (jetpacs-org-dialogs--ts-open
+                          (list :kind 'body :buffer name :pos pos
+                                :bracket (cdr stamp))
+                          (car stamp) params)))
+          'accepted))))))
+
 (defun jetpacs-org-dialogs--archive (args params)
   "Archive the subtree the TOKEN names; SPEC 14.4 status.
 Token miss (swept sheet, re-mint, stale device) → `stale'; a policy
@@ -565,19 +988,37 @@ completed archive — and the spent sheet is abandoned."
 (jetpacs-defaction "jetpacs.org.heading"
                    #'jetpacs-org-dialogs--heading-action)
 (jetpacs-defaction "jetpacs.org.archive" #'jetpacs-org-dialogs--archive)
+(jetpacs-defaction "jetpacs.org.timestamp"
+                   #'jetpacs-org-dialogs--timestamp-action)
+(jetpacs-defaction "jetpacs.org.ts-pick" #'jetpacs-org-dialogs--ts-pick)
 
-;;;; Reset / unload
+;;;; Reset / teardown / unload
 
 (defun jetpacs-org-dialogs-reset ()
   "Reset dialog-module state (the test seam)."
   (setq jetpacs-org-dialogs--seq 0
-        jetpacs-org-dialogs--sheet nil))
+        jetpacs-org-dialogs--sheet nil)
+  (clrhash jetpacs-org-dialogs--ts-sessions)
+  (when (timerp jetpacs-org-dialogs--ts-timer)
+    (cancel-timer jetpacs-org-dialogs--ts-timer))
+  (setq jetpacs-org-dialogs--ts-timer nil))
+
+(defun jetpacs-org-dialogs--on-teardown (owner)
+  "Tearing down the org owner sweeps the sessions its dialogs hold."
+  (when (equal owner jetpacs-org-dialogs-owner)
+    (jetpacs-org-dialogs-reset)))
+
+(add-hook 'jetpacs-teardown-functions #'jetpacs-org-dialogs--on-teardown)
 
 (defun jetpacs-org-dialogs-unload-function ()
-  "Unload hygiene: deregister the verbs."
+  "Unload hygiene: deregister the verbs and the teardown subscriber."
+  (remove-hook 'jetpacs-teardown-functions
+               #'jetpacs-org-dialogs--on-teardown)
   (jetpacs-undefaction "jetpacs.org.footnote")
   (jetpacs-undefaction "jetpacs.org.heading")
   (jetpacs-undefaction "jetpacs.org.archive")
+  (jetpacs-undefaction "jetpacs.org.timestamp")
+  (jetpacs-undefaction "jetpacs.org.ts-pick")
   (jetpacs-org-dialogs-reset)
   nil)
 

@@ -407,6 +407,14 @@ position.  The marker is released after use."
   (jetpacs-org-with-mutation ref namespace
     (org-entry-put (point) prop value)))
 
+(defvar jetpacs-org-toggle-todo-cancelled-note nil
+  "The `org-log-note-how' kind the last toggle CANCELLED, or nil.
+`jetpacs-org-toggle-todo' clears it on entry and sets it when it must
+cancel a pending free-text note (any kind outside time/state — those
+need interactive input this extent cannot host).  JA-5's dialog layer
+reads it to follow up with a `capture_fields' note dialog, closing the
+loop the cancel would otherwise silently drop.")
+
 (defun jetpacs-org-toggle-todo (ref namespace &optional state)
   "Set the TODO state at REF to STATE, or toggle if nil.
 Flushes org's state/repeat log note inline — `org-todo' queues it onto
@@ -418,8 +426,10 @@ branches on exactly that set) — every other kind pops a modal
 *Org Note* buffer waiting for a C-c C-c the device can never send,
 while `save-window-excursion' hides the damage and the LOGBOOK line is
 never written.  For those kinds the pending note is CANCELLED instead
-and the skip is surfaced; free-text notes arrive with JA-5's
-capture_fields dialog."
+and the skip is surfaced — and recorded in
+`jetpacs-org-toggle-todo-cancelled-note' so JA-5's `capture_fields'
+note dialog can pick it up."
+  (setq jetpacs-org-toggle-todo-cancelled-note nil)
   (jetpacs-org-with-mutation ref namespace
     (org-todo state)
     (when (bound-and-true-p org-log-setup)
@@ -433,9 +443,11 @@ capture_fields dialog."
         ;; desktop user's face for a device action they never took.
         (remove-hook 'post-command-hook 'org-add-log-note)
         (setq org-log-setup nil)
+        (setq jetpacs-org-toggle-todo-cancelled-note
+              (and (boundp 'org-log-note-how) org-log-note-how))
         (message "jetpacs-org: log note skipped — %S needs interactive \
-input (free-text notes arrive with the JA-5 dialog)"
-                 (and (boundp 'org-log-note-how) org-log-note-how))))))
+input (the JA-5 note dialog follows up)"
+                 jetpacs-org-toggle-todo-cancelled-note)))))
 
 (defun jetpacs-org-set-planning (ref namespace which date-str)
   "Set the WHICH planning stamp at REF to DATE-STR.

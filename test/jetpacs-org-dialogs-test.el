@@ -97,12 +97,13 @@
   (car jetpacs-org-dialogs-test--shown))
 
 (defun jetpacs-org-dialogs-test--descriptors (node)
-  "Every ActionDescriptor reachable in NODE (children + spans + on_tap)."
+  "Every ActionDescriptor reachable in NODE (on_tap + on_pick, deep)."
   (let (out)
     (cl-labels
         ((walk (n)
            (when (consp n)
-             (when-let* ((d (plist-get n :on_tap))) (push d out))
+             (dolist (hook '(:on_tap :on_pick))
+               (when-let* ((d (plist-get n hook))) (push d out)))
              (dolist (s (append (plist-get n :spans) nil))
                (when-let* ((d (plist-get s :on_tap))) (push d out)))
              (dolist (c (append (plist-get n :children) nil))
@@ -510,6 +511,250 @@ grant — and only then schedule the dialog."
                     (jetpacs-org-dialogs--heading-action
                      (list :buffer name :pos (float hpos))
                      jetpacs-org-dialogs-test--params)))))))
+
+;;;; The timestamp editor (JA-5e)
+
+(ert-deftest jetpacs-org-dialogs-ts-seed-shapes ()
+  "Seeding decodes date/time/repeater; a habit's /max tail and delay
+cookies are ignored; an absent stamp seeds today with no repeat."
+  (let ((s (jetpacs-org-dialogs--ts-seed "<2026-07-05 Sun 8:34 +1w>")))
+    (should (equal (plist-get s :date) "2026-07-05"))
+    (should (equal (plist-get s :time) "8:34"))
+    (should (equal (plist-get s :rep-type) "+"))
+    (should (equal (plist-get s :rep-n) "1"))
+    (should (equal (plist-get s :rep-unit) "w")))
+  (let ((s (jetpacs-org-dialogs--ts-seed "<2026-07-05 Sun .+2d/4d>")))
+    (should (equal (plist-get s :rep-type) ".+"))
+    (should (equal (plist-get s :rep-n) "2"))
+    (should (equal (plist-get s :rep-unit) "d")))
+  ;; A delay cookie alone never seeds a repeater (the extractor's
+  ;; deliberate exclusion).
+  (let ((s (jetpacs-org-dialogs--ts-seed "<2026-07-05 Sun -1d>")))
+    (should (equal (plist-get s :rep-type) "none")))
+  (let ((s (jetpacs-org-dialogs--ts-seed nil)))
+    (should (stringp (plist-get s :date)))
+    (should-not (plist-get s :time))
+    (should (equal (plist-get s :rep-type) "none"))))
+
+(ert-deftest jetpacs-org-dialogs-ts-spec-passes-dialog-profile ()
+  "The ts dialog is in-profile, its picks are drop-mode remote
+descriptors carrying :sid/:field, and the repeater fields are the
+capturable trio."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f
+        jetpacs-org-dialogs-test--sheet-fixture
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (ref (jetpacs-org-dialogs-test--ref buf "Parent")))
+        (jetpacs-org-dialogs--ts-open
+         (list :kind 'planning :ref ref :which "SCHEDULED")
+         "<2026-07-05 Sun +1w>" jetpacs-org-dialogs-test--params)
+        (let* ((shown (jetpacs-org-dialogs-test--last))
+               (spec (plist-get shown :spec)))
+          (should (jetpacs-check-profile spec 'dialog))
+          (let ((picks (seq-filter
+                        (lambda (d) (equal (plist-get d :action)
+                                           "jetpacs.org.ts-pick"))
+                        (jetpacs-org-dialogs-test--descriptors spec))))
+            (should (= 2 (length picks)))
+            (dolist (p picks)
+              (should (stringp (plist-get (plist-get p :args) :sid)))
+              (should (member (plist-get (plist-get p :args) :field)
+                              '("date" "time")))
+              (should-not (member (plist-get p :when_offline)
+                                  '("queue" "wake"))))))))))
+
+(ert-deftest jetpacs-org-dialogs-ts-pick-gates-and-represents ()
+  "A pick must name a live session AND its current dialog; a good pick
+stores the value, abandons the old dialog, and re-presents fresh."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f
+        jetpacs-org-dialogs-test--sheet-fixture
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (ref (jetpacs-org-dialogs-test--ref buf "Parent")))
+        (jetpacs-org-dialogs--ts-open
+         (list :kind 'planning :ref ref :which "SCHEDULED")
+         nil jetpacs-org-dialogs-test--params)
+        (let* ((sid (cl-loop for k being the hash-keys of
+                             jetpacs-org-dialogs--ts-sessions
+                             return k))
+               (session (gethash sid jetpacs-org-dialogs--ts-sessions))
+               (dialog-id (plist-get session :dialog-id))
+               (abandoned nil))
+          ;; Unknown session / wrong dialog / bad value shape.
+          (should (eq 'stale (jetpacs-org-dialogs--ts-pick
+                              '(:sid "ts-nope" :field "date"
+                                :value "2026-01-01")
+                              '(:dialog_id "x"))))
+          (should (eq 'stale (jetpacs-org-dialogs--ts-pick
+                              (list :sid sid :field "date"
+                                    :value "2026-01-01")
+                              '(:dialog_id "not-the-current-one"))))
+          (should (eq 'rejected (jetpacs-org-dialogs--ts-pick
+                                 (list :sid sid :field "date"
+                                       :value "not-a-date")
+                                 (list :dialog_id dialog-id))))
+          ;; The good pick: immediate-fire the deferred re-present.
+          (cl-letf (((symbol-function 'run-at-time)
+                     (lambda (_time _repeat fn &rest args)
+                       (apply fn args)))
+                    ((symbol-function 'ebp-client-abandon)
+                     (lambda (_c id) (push id abandoned))))
+            (should (eq 'accepted (jetpacs-org-dialogs--ts-pick
+                                   (list :sid sid :field "date"
+                                         :value "2026-08-01")
+                                   (list :dialog_id dialog-id)))))
+          (should (equal abandoned
+                         (list (plist-get session :request-id))))
+          (let ((fresh (gethash sid jetpacs-org-dialogs--ts-sessions)))
+            (should (equal (plist-get fresh :date) "2026-08-01"))
+            (should-not (equal (plist-get fresh :dialog-id) dialog-id)))
+          ;; Two dialogs shown: the original and the re-present.
+          (should (= 2 (length jetpacs-org-dialogs-test--shown))))))))
+
+(ert-deftest jetpacs-org-dialogs-ts-save-planning-and-repeater ()
+  "Save writes the planning line through the engine's two-step cookie
+surgery; the captured repeater fields override the seed; Clear removes."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f
+        jetpacs-org-dialogs-test--sheet-fixture
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (ref (jetpacs-org-dialogs-test--ref buf "Parent")))
+        (jetpacs-org-dialogs--ts-open
+         (list :kind 'planning :ref ref :which "SCHEDULED")
+         nil jetpacs-org-dialogs-test--params)
+        (let ((session (cl-loop for s being the hash-values of
+                                jetpacs-org-dialogs--ts-sessions
+                                return s)))
+          (jetpacs-org-dialogs--ts-conclude
+           (plist-put (copy-sequence session) :date "2026-08-02")
+           "save"
+           '(:ts-rep-type "+" :ts-rep-n "2" :ts-rep-unit "w")))
+        (with-current-buffer buf
+          (org-with-wide-buffer
+           (goto-char (point-min))
+           (should (re-search-forward
+                    "SCHEDULED: <2026-08-02 [A-Za-z]\\{3\\} \\+2w>"
+                    nil t))))
+        ;; Clear.
+        (jetpacs-org-dialogs--ts-open
+         (list :kind 'planning :ref ref :which "SCHEDULED")
+         nil jetpacs-org-dialogs-test--params)
+        (let ((session (cl-loop for s being the hash-values of
+                                jetpacs-org-dialogs--ts-sessions
+                                return s)))
+          (jetpacs-org-dialogs--ts-conclude session "clear" nil))
+        (with-current-buffer buf
+          (org-with-wide-buffer
+           (goto-char (point-min))
+           (should-not (search-forward "SCHEDULED:" nil t))))))))
+
+(ert-deftest jetpacs-org-dialogs-ts-body-rewrite-guarded ()
+  "A body stamp rewrites literally in place (bracket kept, day name
+recomputed); a stamp that MOVED is a no-op plus a snackbar."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f
+        "* H\nSee [2026-07-04 Sat] for details.\n"
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (name (buffer-name buf))
+             (pos (with-current-buffer buf
+                    (org-with-wide-buffer
+                     (goto-char (point-min))
+                     (search-forward "[2026")
+                     (match-beginning 0)))))
+        (let ((session (list :target (list :kind 'body :buffer name
+                                           :pos pos :bracket ?\[)
+                             :params jetpacs-org-dialogs-test--params
+                             :date "2026-12-25" :time "09:30"
+                             :rep-type "none" :rep-n "1" :rep-unit "w")))
+          (jetpacs-org-dialogs--ts-conclude session "save" nil)
+          (with-current-buffer buf
+            (org-with-wide-buffer
+             (goto-char (point-min))
+             (should (search-forward "[2026-12-25 Fri 09:30]" nil t))))
+          ;; Shift the buffer: the recorded position no longer holds a
+          ;; stamp — nothing is struck.
+          (with-current-buffer buf
+            (goto-char (point-min))
+            (insert "shift\n"))
+          (let ((before (with-current-buffer buf (buffer-string))))
+            (jetpacs-org-dialogs--ts-conclude session "save" nil)
+            (should (equal before
+                           (with-current-buffer buf (buffer-string))))))))))
+
+(ert-deftest jetpacs-org-dialogs-timestamp-tap-and-bare-keyword ()
+  "A rendered stamp is exposed for the timestamp verb and its handler
+accepts; a bare `SCHEDULED:' with no stamp exposes nothing (the
+malformed-planning trap from org_parser)."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f
+        "* H\nSCHEDULED: <2026-07-05 Sun>\nSCHEDULED: \nbody\n"
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (name (buffer-name buf)))
+        (jetpacs-org-render buf)
+        (let ((pos (with-current-buffer buf
+                     (org-with-wide-buffer
+                      (goto-char (point-min))
+                      (search-forward "<2026")
+                      (match-beginning 0)))))
+          (should (jetpacs-buffer-exposed-p
+                   name pos "jetpacs.org.timestamp"))
+          (should (eq 'accepted
+                      (jetpacs-org-dialogs--timestamp-action
+                       (list :buffer name :pos pos)
+                       jetpacs-org-dialogs-test--params))))
+        ;; The bare keyword line: no timestamp exposure anywhere on it.
+        (with-current-buffer buf
+          (org-with-wide-buffer
+           (goto-char (point-min))
+           (search-forward "SCHEDULED: \n")
+           (let ((bol (match-beginning 0)))
+             (cl-loop for p from bol below (+ bol 11)
+                      do (should-not
+                          (jetpacs-buffer-exposed-p
+                           name p "jetpacs.org.timestamp"))))))))))
+
+;;;; The log-note dialog (JA-5e)
+
+(ert-deftest jetpacs-org-dialogs-log-note-follows-a-cancelled-note ()
+  "A toggle that cancels a free-text note is followed by the note
+dialog; Save writes a LOGBOOK line `jetpacs-org-parse-logbook' reads
+back; dismissing keeps today's cancel."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f
+        jetpacs-org-dialogs-test--sheet-fixture
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (ref (jetpacs-org-dialogs-test--ref buf "Parent"))
+             (org-log-done 'note)
+             ;; The write lands wherever `org-log-beginning' says — the
+             ;; user's own config.  Configure the drawer so the engine
+             ;; parser assertion below applies (default nil = body).
+             (org-log-into-drawer t))
+        ;; Immediate-fire only the note dialog's deferral (no ts-open
+        ;; in this path, so no sweep-timer recursion).
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (_time _repeat fn &rest args) (apply fn args))))
+          (jetpacs-org-dialogs--sheet-dispatch
+           ref buf "todo" jetpacs-org-dialogs-test--params))
+        (let ((shown (jetpacs-org-dialogs-test--last)))
+          (should shown)
+          (should (jetpacs-check-profile (plist-get shown :spec) 'dialog))
+          (jetpacs-org-dialogs-test--submit
+           shown "save" '(:org-note "Finished on the tablet"))
+          (with-current-buffer buf
+            (org-with-wide-buffer
+             (goto-char (point-min))
+             (should (search-forward "- Note taken on [" nil t))
+             (should (search-forward "Finished on the tablet" nil t))
+             ;; The engine's parser reads the line back as a note.
+             (goto-char (point-min))
+             (search-forward "* DONE Parent")
+             (let ((entries (jetpacs-org-logbook-entries (point))))
+               (should (seq-find
+                        (lambda (e)
+                          (and (eq (plist-get e :type) 'note)
+                               (string-match-p "Finished on the tablet"
+                                               (plist-get e :content))))
+                        entries))))))))))
 
 (provide 'jetpacs-org-dialogs-test)
 ;;; jetpacs-org-dialogs-test.el ends here

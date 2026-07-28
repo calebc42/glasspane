@@ -494,12 +494,27 @@ TYPE is one of `text', `checkbox', `date', `enum', `number', `list'."
 (defconst jetpacs-org-note-query-terms
   '(and or not todo done tags priority heading regexp property level
         scheduled deadline habit)
-  "The head symbols of the built-in query grammar.
-Doubles as the SPEC 23.2 allowlist for the sexp arm: a wire query may
-name these heads and nothing else.")
+  "The head symbols of the built-in query grammar — the INTERPRETER'S
+coverage set (the vulpea arm checks its accessor against it).  This is
+NOT the wire allowlist: the sexp arm vets against
+`jetpacs-org--wire-query-terms', which drops `regexp'.")
+
+(defconst jetpacs-org--wire-query-terms
+  '(and or not todo done tags priority heading property level
+        scheduled deadline habit)
+  "The SPEC 23.2 sexp-arm allowlist: a wire query may name these heads
+and nothing else.  `regexp' is deliberately absent (JA-4 audit P1-2 /
+SPEC #137) — a wire (regexp …) hands the peer a raw regexp engine
+\(ReDoS at will); `heading' regexp-quotes and covers the use case, and
+the token arm mints its `regexp' clauses from canonical quoted material
+without passing through the vetter.")
 
 (defconst jetpacs-org--query-max-depth 8)
 (defconst jetpacs-org--query-max-nodes 128)
+(defconst jetpacs-org--query-max-chars 200
+  "Cap on a wire query string and on any single string leaf inside one.
+Matches `jetpacs-files-grep-max-query-chars' (SPEC #138 spirit): the
+peer gets a search box, not a buffer upload.")
 
 (defun jetpacs-org--read-query (q)
   "Read exactly ONE form from wire string Q, obarray-safely.
@@ -521,65 +536,160 @@ accepted-and-ignored."
     (car parse)))
 
 (defun jetpacs-org--vet-query (form)
-  "Vet, normalize and RE-HOME sexp query FORM in one walk.
-Output invariant: only globally interned allowlisted symbols
-\(`jetpacs-org-note-query-terms' heads, `jetpacs-org-ql-literals',
-the :on/:from/:to keywords), fresh strings, and integers — so the
-throwaway-obarray symbols from `jetpacs-org--read-query' die here, and
-the interpreter's fallthrough becomes an internal invariant.  Vetted by
-NAME, replaced by the canonical global symbol.  `quote' wrappers are
-unwrapped (the reader minted them from \\='(...) input); bare symbols
-in argument position become strings, exactly as the poc normalizer
-did.
+  "Vet, normalize and RE-HOME sexp query FORM in one schema-checked walk.
+Output invariant (enforced, not aspirational): heads are the canonical
+interned symbols of `jetpacs-org--wire-query-terms'; every string is a
+FRESH propertyless copy no longer than `jetpacs-org--query-max-chars'
+\(JA-4 audit P1-3 — the reader mints propertized strings from #(…) wire
+text, with throwaway symbols riding in the property list); every other
+atom is an integer or a canonical grammar literal (the comparators,
+`today', the :on/:from/:to keywords); and every clause carries
+schema-checked arity — so the throwaway-obarray symbols from
+`jetpacs-org--read-query' die here and the interpreter fallthroughs are
+internal invariants.  `quote' wrappers of the exact 2-element (quote X)
+shape are unwrapped (the reader minted them from \\='(...) input; the
+loose unwrap silently discarded trailing forms); bare symbols in string
+position become fresh strings, exactly as the poc normalizer did.
 Everything else — floats, vectors, records, byte-code objects (the
 reader will happily mint one from #[...]), hash-table forms, stray
-keywords — is refused outright, and cap violations never echo the
-query (it is user data)."
+keywords, a wire `regexp' head — is refused outright.  Arity and type
+violations refuse as \"Malformed HEAD clause\": the head symbol at
+most, NEVER the query text (23.3), and cap violations never echo the
+query either (it is user data)."
   (let ((nodes 0))
     (cl-labels
-        ((vet (x depth head-position)
+        ((visit (depth)
            (when (> depth jetpacs-org--query-max-depth)
              (user-error "Query too deep"))
            (when (> (cl-incf nodes) jetpacs-org--query-max-nodes)
+             (user-error "Query too large")))
+         (unq (x)
+           ;; Exact 2-element (quote X) only — the shape the reader
+           ;; mints from 'X.
+           (while (and (consp x) (symbolp (car x))
+                       (equal (symbol-name (car x)) "quote")
+                       (consp (cdr x)) (null (cddr x)))
+             (setq x (cadr x)))
+           x)
+         (bounded (s)
+           (when (> (length s) jetpacs-org--query-max-chars)
              (user-error "Query too large"))
+           ;; Fresh copy even for `symbol-name' output — that string is
+           ;; the symbol's OWN name storage, never to be shared.
+           (substring-no-properties s))
+         (bad (head)
+           (user-error "Malformed %s clause" head))
+         (str (x depth)
+           ;; A string-position leaf: fresh bounded string out.
+           (visit depth)
+           (setq x (unq x))
            (cond
-            ((consp x)
-             ;; Unwrap 'FORM before treating the car as a head.
-             (if (and (symbolp (car x))
-                      (equal (symbol-name (car x)) "quote")
-                      (consp (cdr x)))
-                 (vet (cadr x) depth head-position)
-               (unless (and (symbolp (car x)) (proper-list-p x))
-                 (user-error "Malformed query clause"))
-               (let* ((name (symbol-name (car x)))
-                      (head (cl-find name jetpacs-org-note-query-terms
-                                     :key #'symbol-name :test #'equal)))
-                 (unless head
-                   (user-error "Unsupported query term"))
-                 (cons head
-                       (mapcar (lambda (a) (vet a (1+ depth) nil))
-                               (cdr x))))))
-            ((stringp x) x)
-            ((integerp x) x)
-            ((symbolp x)
-             (let ((name (symbol-name x)))
-               (cond
-                ((member name '(":on" ":from" ":to")) (intern name))
-                ((cl-find name jetpacs-org-ql-literals
-                          :key #'symbol-name :test #'equal))
-                ((string-prefix-p ":" name)
-                 (user-error "Unsupported query keyword"))
-                ;; nil reads as the global nil (special), handled by the
-                ;; literals branch above; any other symbol is data.
-                (t name))))
-            (t (user-error "Unsupported query value")))))
-      (vet form 0 t))))
+            ((stringp x) (bounded x))
+            ((and (symbolp x) (string-prefix-p ":" (symbol-name x)))
+             (user-error "Unsupported query keyword"))
+            ((symbolp x) (bounded (symbol-name x)))
+            (t (user-error "Unsupported query value"))))
+         (int (x head depth)
+           (visit depth)
+           (unless (integerp x) (bad head))
+           x)
+         (clause (x depth)
+           (setq x (unq x))
+           (visit depth)
+           (unless (and (consp x) (symbolp (car x)) (proper-list-p x))
+             (user-error "Malformed query clause"))
+           (let* ((name (symbol-name (car x)))
+                  (head (cl-find name jetpacs-org--wire-query-terms
+                                 :key #'symbol-name :test #'equal))
+                  (args (cdr x))
+                  (n (length args)))
+             (unless head
+               (user-error "Unsupported query term"))
+             (cons
+              head
+              (pcase head
+                ((or 'and 'or)
+                 (unless (>= n 1) (bad head))
+                 (mapcar (lambda (a) (clause a (1+ depth))) args))
+                ('not
+                 (unless (= n 1) (bad head))
+                 (list (clause (car args) (1+ depth))))
+                ((or 'todo 'tags 'heading)
+                 (mapcar (lambda (a) (str a (1+ depth))) args))
+                ((or 'done 'habit)
+                 (when args (bad head))
+                 nil)
+                ('priority
+                 (let* ((cmps '("<" "<=" ">" ">=" "="))
+                        (op (and (= n 2) (symbolp (car args))
+                                 (car (member (symbol-name (car args))
+                                              cmps)))))
+                   (if op
+                       ;; (OP VAL): comparator + a string-or-int bound.
+                       (let ((val (cadr args)))
+                         (visit (1+ depth))
+                         (visit (1+ depth))
+                         (unless (or (stringp val) (integerp val))
+                           (bad head))
+                         (list (intern op)
+                               (if (stringp val) (bounded val) val)))
+                     ;; Member form: string leaves, no comparator names.
+                     (mapcar (lambda (a)
+                               (when (and (symbolp a)
+                                          (member (symbol-name a) cmps))
+                                 (bad head))
+                               (str a (1+ depth)))
+                             args))))
+                ('property
+                 (unless (<= 1 n 2) (bad head))
+                 (let ((pname (str (car args) (1+ depth))))
+                   ;; ALLTAGS/FILE/ITEM/… are path or derived data with
+                   ;; dedicated heads; refusing them loses nothing and
+                   ;; (property "FILE") would leak absolute paths.
+                   (when (member (upcase pname) org-special-properties)
+                     (user-error "Unsupported property name"))
+                   (cons pname
+                         (and (cdr args)
+                              (list (str (cadr args) (1+ depth)))))))
+                ('level
+                 (unless (<= 1 n 2) (bad head))
+                 (mapcar (lambda (a) (int a head (1+ depth))) args))
+                ((or 'scheduled 'deadline)
+                 (unless (cl-evenp n) (bad head))
+                 (let (out)
+                   (while args
+                     (let ((k (pop args)) (v (pop args)))
+                       (visit (1+ depth))
+                       (visit (1+ depth))
+                       (unless (and (symbolp k)
+                                    (member (symbol-name k)
+                                            '(":on" ":from" ":to")))
+                         (bad head))
+                       (push (intern (symbol-name k)) out)
+                       (push (cond
+                              ((integerp v) v)
+                              ((and (symbolp v)
+                                    (equal (symbol-name v) "today"))
+                               'today)
+                              ((and (stringp v)
+                                    (string-match-p
+                                     "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}"
+                                     v))
+                               (bounded v))
+                              (t (bad head)))
+                             out)))
+                   (nreverse out))))))))
+      (clause form 0))))
 
 (defun jetpacs-org--query-tokens (q)
-  "Split query Q on whitespace, keeping \"quoted phrases\" whole."
+  "Split query Q on whitespace, keeping \"quoted phrases\" whole.
+The empty quoted phrase (\"\") is DROPPED, not returned: downstream it
+minted a match-everything (regexp \"\") clause (JA-4 audit P1-4).  The
+\\\\S-+ arm can never produce an empty match."
   (let ((pos 0) (tokens nil))
     (while (string-match "\"\\([^\"]*\\)\"\\|\\S-+" q pos)
-      (push (or (match-string 1 q) (match-string 0 q)) tokens)
+      (let ((tok (or (match-string 1 q) (match-string 0 q))))
+        (unless (string-empty-p tok) (push tok tokens)))
       (setq pos (match-end 0)))
     (nreverse tokens)))
 
@@ -590,12 +700,19 @@ Accepts three input shapes:
 - filter tokens:   todo:TODO,NEXT tags:work priority:A
 - free text:       \"exact phrase\" or bare words
 The sexp arm is wire-hardened (SPEC 23.2): obarray-safe read, head and
-leaf allowlists, depth/size caps — see `jetpacs-org--vet-query'.  The
-token and free-text arms never touch the reader.  Signals `user-error'
-on anything malformed."
+leaf allowlists, arity/type schema, depth/size caps — see
+`jetpacs-org--vet-query'.  The token and free-text arms never touch the
+reader.  BOTH arms sit behind the `jetpacs-org--query-max-chars' length
+cap (JA-4 audit P1-4 — the caps previously governed the sexp arm only):
+an over-length QUERY refuses as \"Query too long\" before the reader or
+the tokenizer sees it.  Signals `user-error' on anything malformed.
+A query of nothing but empty phrases parses to nil (empty query), never
+to (regexp \"\") and never to a bare (and)."
   (let ((q (string-trim (or query ""))))
     (cond
      ((string-empty-p q) nil)
+     ((> (length q) jetpacs-org--query-max-chars)
+      (user-error "Query too long"))
      ((string-match-p "\\`'?(" q)
       (jetpacs-org--vet-query (jetpacs-org--read-query q)))
      (t
@@ -611,7 +728,12 @@ on anything malformed."
                   `(priority ,@(split-string (substring tok 9) "," t)))
                  (t `(regexp ,(regexp-quote tok)))))
               (jetpacs-org--query-tokens q))))
-        (if (cdr clauses) `(and ,@clauses) (car clauses)))))))
+        ;; Unreachable under the 200-char cap; pins the size invariant
+        ;; on this arm if the bound ever moves.
+        (when (> (length clauses) jetpacs-org--query-max-nodes)
+          (user-error "Query too large"))
+        (cond ((cdr clauses) `(and ,@clauses))
+              (t (car clauses))))))))
 
 ;;;; The query interpreter
 
@@ -621,7 +743,8 @@ on anything malformed."
    ((eq spec 'today) (time-to-days (current-time)))
    ((integerp spec) (+ (time-to-days (current-time)) spec))
    ((stringp spec) (time-to-days (org-time-string-to-time spec)))
-   (t (user-error "Unsupported query date %S" spec))))
+   ;; Unreachable for vetted input; never echo the spec (user data).
+   (t (user-error "Unsupported query date"))))
 
 (defun jetpacs-org--planning-match-spec (stamp args)
   "Match raw planning STAMP string against ARGS plist (:on / :from / :to).
@@ -670,7 +793,8 @@ caller bypassed `jetpacs-org-parse-query' with a hand-built tree."
                  ('< (> pr want)) ('<= (>= pr want))
                  ('> (< pr want)) ('>= (<= pr want))
                  ('= (= pr want))
-                 (_ (user-error "Unsupported priority comparator %s" op))))))
+                 ;; Unreachable for vetted input; no echo.
+                 (_ (user-error "Unsupported priority comparator"))))))
     (`(priority . ,ps)
      (let ((pr (funcall get 'priority)))
        (if ps (and pr (member (char-to-string pr) ps) t)
@@ -691,7 +815,14 @@ caller bypassed `jetpacs-org-parse-query' with a hand-built tree."
     (`(deadline . ,args)
      (jetpacs-org--planning-match-spec (funcall get 'planning "DEADLINE") args))
     (`(habit) (and (funcall get 'habit) t))
-    (_ (user-error "Unsupported query term %S" tree))))
+    ;; `error', not `user-error': only a hand-built tree that bypassed
+    ;; `jetpacs-org-parse-query' reaches here — an internal-invariant
+    ;; breach.  The head symbol (or the tree's type) only, never the
+    ;; tree itself: query material is user data.
+    (_ (error "jetpacs-org--matches-p: unsupported clause head %s"
+              (if (and (consp tree) (symbolp (car tree)))
+                  (car tree)
+                (type-of tree))))))
 
 (defun jetpacs-org--point-get (what &rest args)
   "The grammar accessor over the org entry AT POINT."

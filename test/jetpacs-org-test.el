@@ -554,6 +554,106 @@ the global obarray — even when the query is REFUSED."
   ;; Re-homed heads are the CANONICAL symbols (eq, not just equal).
   (should (eq (car (jetpacs-org-parse-query "(todo \"X\")")) 'todo)))
 
+(defun jetpacs-org-test--tree-canonical-p (x)
+  "Non-nil when every symbol in tree X is the canonical global intern
+and every string carries zero text properties over its whole length."
+  (cond
+   ((consp x) (and (jetpacs-org-test--tree-canonical-p (car x))
+                   (jetpacs-org-test--tree-canonical-p (cdr x))))
+   ((symbolp x) (eq x (intern-soft (symbol-name x))))
+   ((stringp x)
+    (cl-loop for i below (length x)
+             always (null (text-properties-at i x))))
+   (t t)))
+
+(ert-deftest jetpacs-org-query-vet-refuses-wire-regexp ()
+  "JA-4 audit P1-2 (SPEC #137): `regexp' is interpreter vocabulary, not
+wire vocabulary — a wire (regexp …) hands the peer a raw regexp engine
+\(ReDoS at will).  `heading' regexp-quotes and covers the use case, and
+the token arm still mints its own regexp clauses from quoted material."
+  (dolist (q '("(regexp \"x\")"
+               "(regexp \"\\\\(a*\\\\)*b\")"))
+    (let ((err (should-error (jetpacs-org-parse-query q)
+                             :type 'user-error)))
+      (should (equal (cadr err) "Unsupported query term"))))
+  ;; Positive control: free text still routes through the token arm.
+  (should (equal (jetpacs-org-parse-query "foo") '(regexp "foo"))))
+
+(ert-deftest jetpacs-org-query-vet-strips-text-properties ()
+  "JA-4 audit P1-3: the reader mints PROPERTIZED strings from #(…) wire
+text, with throwaway-obarray symbols riding in the property list; the
+vetter's output invariant promises fresh propertyless strings, so
+enforce it end to end through the public entry point."
+  (let ((tree (jetpacs-org-parse-query
+               "(todo #(\"x\" 0 1 (ja4-smug ja4-val)))")))
+    (should (equal tree '(todo "x")))
+    (should (jetpacs-org-test--tree-canonical-p tree)))
+  ;; Symbols in the output are the canonical global interns.
+  (should (jetpacs-org-test--tree-canonical-p
+           (jetpacs-org-parse-query
+            "(and (todo KW) (scheduled :from today))"))))
+
+(ert-deftest jetpacs-org-parse-query-caps-govern-both-arms ()
+  "JA-4 audit P1-4: the caps sat on the sexp arm only — the token arm
+had no length bound at all, and the empty quoted phrase minted a
+match-everything (regexp \"\") clause."
+  ;; Token arm: over-length refuses before tokenizing.
+  (let ((err (should-error (jetpacs-org-parse-query (make-string 201 ?a))
+                           :type 'user-error)))
+    (should (equal (cadr err) "Query too long")))
+  ;; Sexp arm: the SAME cap, before the reader runs.
+  (let ((err (should-error
+              (jetpacs-org-parse-query
+               (concat "(todo \"" (make-string 200 ?x) "\")"))
+              :type 'user-error)))
+    (should (equal (cadr err) "Query too long")))
+  ;; The empty quoted phrase never mints (regexp "") — nor a bare (and).
+  (should-not (jetpacs-org-parse-query "\"\""))
+  (should (equal (jetpacs-org-parse-query "\"\" x") '(regexp "x")))
+  ;; Real depth coverage: nesting ALONE trips the cap (the hostile-input
+  ;; test's paren tower dies as a malformed clause before depth counts).
+  (let ((err (should-error
+              (jetpacs-org-parse-query
+               (concat (apply #'concat (make-list 12 "(not "))
+                       "(todo \"x\")"
+                       (make-string 12 ?\))))
+              :type 'user-error)))
+    (should (equal (cadr err) "Query too deep"))))
+
+(ert-deftest jetpacs-org-query-vet-checks-arity-and-types ()
+  "The per-head arity/type schema, and its refusal wording: the head
+symbol at most, NEVER the query text (SPEC 23.3)."
+  (pcase-dolist (`(,q . ,msg)
+                 '(("(done \"x\")"  . "Malformed done clause")
+                   ("(not)"         . "Malformed not clause")
+                   ("(habit 1)"     . "Malformed habit clause")
+                   ("(level \"3\")" . "Malformed level clause")
+                   ("(and \"x\")"   . "Malformed query clause")))
+    (let ((err (should-error (jetpacs-org-parse-query q)
+                             :type 'user-error)))
+      (should (equal (cadr err) msg))))
+  (let ((err (should-error
+              (jetpacs-org-parse-query "(level 3 \"SNEAKPAYLOAD\")")
+              :type 'user-error)))
+    (should (equal (cadr err) "Malformed level clause"))
+    (should-not (string-search "SNEAKPAYLOAD" (format "%S" err)))))
+
+(ert-deftest jetpacs-org-query-vet-refuses-special-properties ()
+  "Every `org-special-properties' name is path/derived data with a
+dedicated grammar head; (property \"FILE\") would leak absolute paths
+through a grammar that promises path-free results."
+  (dolist (q '("(property \"FILE\")"
+               "(property \"file\")"
+               "(property \"TODO\" \"x\")"))
+    (let ((err (should-error (jetpacs-org-parse-query q)
+                             :type 'user-error)))
+      (should (equal (cadr err) "Unsupported property name"))))
+  ;; Ordinary properties still pass, with and without a value.
+  (should (equal (jetpacs-org-parse-query "(property \"MOOD\" \"good\")")
+                 '(property "MOOD" "good")))
+  (should (equal (jetpacs-org-parse-query "(property \"MOOD\")")
+                 '(property "MOOD"))))
+
 (ert-deftest jetpacs-org-priority-comparator-inverts ()
   "org urgency runs A > B > C: the comparator flips against the chars."
   (jetpacs-org-test--with-agenda f

@@ -354,7 +354,7 @@ TODO toggle through a token with the `- State` LOGBOOK line re-read from
 disk; capture from a tap landing in the file; a swept pre-re-mint token
 answering `stale`; teardown sweeping the live set.
 
-### JA-5 — Org on screen *(**CODE COMPLETE 2026-07-28; DEVICE GATE PENDING**)*
+### JA-5 — Org on screen *(**CODE + DEVICE GATE DONE 2026-07-28; one leg blocked on the JA-4 P1-6 batch**)*
 
 > **Order amended (Caleb ratified, 2026-07-27): JA-6 Files lands BEFORE
 > this rung.** Navigation before rendering — a user must be able to reach
@@ -388,13 +388,47 @@ prose/code split; `jetpacs-org-render-proportional-prose` opts out).
 Verbs registered OWNERLESS (the dead-tap lesson).  One poc bug fixed
 at port, regression-pinned both ways: the upgrade pass's first-char
 invisibility check silently skipped every caption-less standalone
-image (org hides the `[[` brackets).  ERT: 628 across 27 files, incl.
-the org_parser TRAP fixture rendered without a signal.  **Device gate:
-`test/smoke-ja5.el` written, PENDING hardware** (S1 render acceptance,
-checkbox+cookie, drawer fold, footnote drill, sheet→schedule with a
-repeater, confirmed archive, body-stamp edit, bridged add-heading, the
-files rendered⇄plain⇄toolbar path, habit done, teardown).  Adversarial
-review: docs/AUDIT-ja5-2026-07-28.md.
+image (org hides the `[[` brackets).  ERT: 647 across 27 files after
+the adversarial-review fix batch (2425629; docs/AUDIT-ja5-2026-07-28.md
+— 10 confirmed findings fixed incl. three P1s: the Schedule arm's
+upcase bug, the dialog-profile Copy gate, the unvalidated captured
+repeater unit), incl. the org_parser TRAP fixture rendered without a
+signal.
+
+**DEVICE GATE 2026-07-28, Pixel Tablet, runner-driven: 18/19 PASS.**
+S1 render acceptance (native table with numeric right-alignment, rule,
+data: image), S2 checkbox+cookie on disk, S3 the drawer fold arm via
+org-cycle, S4 footnote dialog (Copy correctly degraded by the live
+dialog profile) → definition drill on the tapped surface, S5 the full
+sheet → Schedule → the pick→RE-PRESENT round trip → `SCHEDULED:
+<picked-date +1w>` on disk through the capture trio and the cookie
+surgery, S6 the token+`:confirm` Archive into the `_archive` file, S7
+the body-stamp rewrite, S8 the bridged add-heading, F1 files opening
+`.org` RENDERED through the body seam (toggle pencil + FAB seams live),
+F2 the rendered⇄plain toggle, F3 the org toolbar's Src splice saved to
+disk, T teardown sweeping surface + sessions.  **H1 (habit Done) FAILS
+LOUDLY as designed: the deferred JA-4 audit P1-6** — the mutation
+spine's log-note flush prompts inside the no-prompts dispatch extent →
+`inhibited-interaction` → `rejected` + snackbar, disk untouched; the
+ERT twin passes because it runs outside the extent.  H1 re-runs when
+the P1-6 batch lands.
+
+**THE GATE FOUND AND FIXED TWO COMPANION DEFECTS** (5f3c2f7, b1b2731 —
+the JA-6 lesson recurring, sixth time: a wire member is not implemented
+because the validator accepts it): (1) EVERY remote descriptor inside a
+dialog was dead — `dispatchAction` resolved a revision for the
+renderer's `dialog:` pseudo-surface, got null, and silently returned;
+the dialog BUILTINS all worked, masking it.  Fixed with a real
+dialog-context dispatch (`dispatchDialogAction`: `dialog_id` INSTEAD of
+surface+revision per 14.4's exclusive contexts, capture from the
+dialog-LOCAL field layer, parked confirms resuming through the same
+fork) + wire pins.  (2) The toolbar `long_press` validator demanded
+label/icon on what SPEC 17.7 defines as a bare OP — every to-spec
+long-press 1201'd the whole push.  **Smoke-harness traps banked:** no
+`:wants` = no grants = every dialog handler silently rejected (run 1
+burned an hour); `pkill -f` matching its own launcher; roots slashless
++ `jetpacs-files-default-dir` into the fixture; a bare BACK with no IME
+exits the Activity and B18 (no surface restore) eats the run.
 
 **Lands:** the render skin (rebuild-lite): data: URIs replacing `file://`, LaTeX
 compile moved onto `jetpacs-async`, SPEC 23.1 exposure records **and checks**

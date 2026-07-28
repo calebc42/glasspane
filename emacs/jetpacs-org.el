@@ -66,36 +66,38 @@ nil derives the set from `org-directory' and the directories of
 by string prefix — /org-evil does not sit under /org."
   :type '(repeat directory))
 
+(defun jetpacs-org-agenda-files ()
+  "`org-agenda-files' with remote entries dropped before anything stats.
+`org-agenda-files' itself calls `file-directory-p' on each raw entry
+\(emacs-30.1 lisp/org/org.el), so this reads the VARIABLE rather than
+calling the function: by the time the function returns, a remote entry
+has already been dialled.  JA-4 audit P1-7 — one /ssh: entry made every
+resolve, every mint and every cache-key computation attempt a TRAMP
+connection inside the socket filter, with a 60-second timeout."
+  (jetpacs-local-paths
+   (if (listp org-agenda-files) org-agenda-files
+     (ignore-errors (org-agenda-files)))))
+
 (defun jetpacs-org--roots ()
-  "The effective allowlist, true-named."
-  (delq nil
-        (mapcar (lambda (d)
-                  (and (stringp d) (file-directory-p d)
-                       (file-truename d)))
-                (or jetpacs-org-roots
-                    (delete-dups
-                     (cons org-directory
-                           (mapcar #'file-name-directory
-                                   (ignore-errors (org-agenda-files)))))))))
+  "The effective allowlist, raw — `jetpacs-check-path' truenames it.
+nil `jetpacs-org-roots' derives the set from `org-directory' and the
+directories of the LOCAL agenda files."
+  (or jetpacs-org-roots
+      (delete-dups
+       (cons org-directory
+             (mapcar #'file-name-directory (jetpacs-org-agenda-files))))))
 
 (defun jetpacs-org--check-file (file)
-  "FILE validated against policy, returned as a truename, or signal.
-Guard order is load-bearing: `file-remote-p' inspects the NAME and runs
-first, because for a remote path the stat IS the connection —
-`file-truename' or `file-readable-p' on /ssh:host:… dials the host."
-  (unless (and (stringp file) (not (string-empty-p file))
-               (file-name-absolute-p file))
-    (signal 'jetpacs-org-refused (list 'not-absolute)))
-  (when (file-remote-p file)
-    (signal 'jetpacs-org-refused (list 'remote)))
-  (let ((true (file-truename file))
-        (roots (jetpacs-org--roots)))
-    (unless (cl-some (lambda (root) (file-in-directory-p true root)) roots)
-      ;; The symbol only — no path may ride an error toward the device.
-      (signal 'jetpacs-org-refused (list 'outside-roots)))
-    (unless (file-readable-p true)
-      (signal 'jetpacs-org-refused (list 'unreadable)))
-    true))
+  "FILE validated against `jetpacs-org-roots', as a truename, or signal.
+The guard itself is `jetpacs-check-path' on the floor (JA-6 shares it);
+this wrapper only supplies the org root set and re-signals in the
+module's own condition so handler authors keep one status map.  An empty
+root set stays a refusal here — splitting `no-roots' out as a retryable
+condition is JA-4 audit P1-10, deliberately not in this change."
+  (condition-case err
+      (jetpacs-check-path file (jetpacs-org--roots))
+    (jetpacs-path-refused
+     (signal 'jetpacs-org-refused (cdr err)))))
 
 ;;;; Cache layer
 
@@ -133,7 +135,11 @@ their native resolution and compare with `equal'."
                           (cons true
                                 (file-attribute-modification-time
                                  (file-attributes true))))))
-                    (ignore-errors (org-agenda-files))))))
+                    ;; Remote entries are dropped BEFORE these stats: this
+                    ;; runs on every cache-key computation, i.e. inside
+                    ;; every query, which made it the hottest TRAMP dialler
+                    ;; in the module (JA-4 audit P1-7).
+                    (jetpacs-org-agenda-files)))))
         (setq jetpacs-org--stamp-memo
               (cons (+ now jetpacs-org-stat-ttl) stamp))
         stamp))))

@@ -214,6 +214,71 @@ non-renderer emitters (clip, toast) need no jetpacs-buffer edge."
                                 s t t)
     s))
 
+;;;; The path sandbox (floor: every rung that opens a user file shares it)
+
+(define-error 'jetpacs-path-refused "jetpacs: path refused by policy")
+
+(defun jetpacs-local-paths (paths)
+  "PATHS with every remote name dropped, tested on the RAW strings.
+The filter runs BEFORE any caller stats, truenames, or opens a member,
+because for a remote name the stat IS the connection: `file-truename',
+`file-directory-p' or `file-readable-p' on /ssh:host:… dials the host,
+inside whatever extent the caller occupies.  `tramp-connection-timeout'
+is 60 seconds and a dispatch extent has no business waiting on one.
+
+Callers deriving a root or file set from user configuration MUST route
+it through here first (JA-4 audit P1-7: the guard below inspected the
+ref's own name correctly and then handed unfiltered configuration to
+`file-directory-p', so one remote agenda entry dialled TRAMP on every
+single resolve)."
+  (delq nil (mapcar (lambda (p)
+                      (and (stringp p) (not (string-empty-p p))
+                           (not (file-remote-p p)) p))
+                    paths)))
+
+(defun jetpacs-check-path (file roots)
+  "FILE validated against ROOTS, returned as a truename, or signal.
+Signals `jetpacs-path-refused' with a one-symbol data list — `not-absolute',
+`remote', `no-roots', `outside-roots' or `unreadable'.  The symbol travels
+alone ON PURPOSE: an error raised here is answered toward the device, and
+a path in its data is a §23.1 leak (`jetpacs--error-label' prints symbols).
+
+Guard order is load-bearing and is the whole point of this function:
+
+  1. absolute-string shape, on the raw argument;
+  2. `file-remote-p' on the RAW name — first, see `jetpacs-local-paths';
+  3. truename BOTH sides, so a symlink cannot straddle the boundary;
+  4. containment by `file-in-directory-p', which compares path COMPONENTS
+     — /home/u/org-evil does not sit under /home/u/org, which a string
+     prefix test would admit;
+  5. readability last, since it is the only stat that must touch the file.
+
+ROOTS is the caller's allowlist; an EMPTY root set refuses everything and
+says so distinctly (`no-roots'), because \"unconfigured\" and \"out of
+policy\" are different conditions and only the second is the caller's
+fault.  ROOTS is filtered and truenamed here — callers pass raw
+configuration.
+
+Promoted to the floor at JA-6: `jetpacs-org' had the only copy, and the
+files rung was about to grow a second one.  A guard that exists twice is
+a guard that is correct once."
+  (unless (and (stringp file) (not (string-empty-p file))
+               (file-name-absolute-p file))
+    (signal 'jetpacs-path-refused (list 'not-absolute)))
+  (when (file-remote-p file)
+    (signal 'jetpacs-path-refused (list 'remote)))
+  (let ((true (file-truename file))
+        (dirs (delq nil (mapcar (lambda (d)
+                                  (and (file-directory-p d) (file-truename d)))
+                                (jetpacs-local-paths roots)))))
+    (unless dirs
+      (signal 'jetpacs-path-refused (list 'no-roots)))
+    (unless (cl-some (lambda (root) (file-in-directory-p true root)) dirs)
+      (signal 'jetpacs-path-refused (list 'outside-roots)))
+    (unless (file-readable-p true)
+      (signal 'jetpacs-path-refused (list 'unreadable)))
+    true))
+
 (defcustom jetpacs-toast-max-chars 300
   "Character ceiling for `jetpacs-toast' TEXT (SPEC 18.2).
 A toast is transient presentation with no scroll and no action, so a

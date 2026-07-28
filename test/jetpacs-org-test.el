@@ -62,6 +62,61 @@ round-trip shape) still takes the trusted-position path."
         (should (markerp m))
         (set-marker m nil)))))
 
+(ert-deftest jetpacs-org-configuration-never-dials-a-remote-name ()
+  "JA-4 audit P1-7: the remote guard was applied to the ref's own name but
+NOT to the configuration the guard reads.  `org-agenda-files' calls
+`file-directory-p' on every raw entry, so one /ssh: entry dialled TRAMP
+on every resolve, every mint, and — via the cache stamp — every query,
+inside the socket filter against a 60s timeout.  No stat-family
+primitive may receive a remote NAME on any of the three hot paths."
+  (jetpacs-org-test--with-fixture f "* TODO H\n"
+    (let ((touched '()))
+      (cl-letf* ((watch (lambda (real)
+                          (lambda (&rest args)
+                            (when (and (stringp (car args))
+                                       (file-remote-p (car args)))
+                              (push (car args) touched))
+                            (apply real args))))
+                 ((symbol-function 'file-directory-p)
+                  (funcall watch (symbol-function 'file-directory-p)))
+                 ((symbol-function 'file-truename)
+                  (funcall watch (symbol-function 'file-truename)))
+                 ((symbol-function 'file-exists-p)
+                  (funcall watch (symbol-function 'file-exists-p)))
+                 ((symbol-function 'file-attributes)
+                  (funcall watch (symbol-function 'file-attributes)))
+                 ((symbol-function 'file-readable-p)
+                  (funcall watch (symbol-function 'file-readable-p))))
+        (let* ((org-directory (file-name-directory f))
+               (org-agenda-files (list f "/ssh:evil:/remote.org"))
+               ;; nil forces the DERIVED root set — the path that read
+               ;; configuration without filtering it.
+               (jetpacs-org-roots nil))
+          (jetpacs-org-cache-invalidate)
+          (jetpacs-org--files-stamp)      ; hot path 1: the cache key
+          (jetpacs-org--roots)            ; hot path 2: the allowlist
+          (jetpacs-org--check-file f)     ; hot path 3: every resolve/mint
+          (should (null touched)))))))
+
+(ert-deftest jetpacs-org-check-file-rides-the-floor-guard ()
+  "The sandbox itself lives on the floor (JA-6 shares it); this module
+supplies roots and re-signals in its own condition, so a handler written
+against the documented status map never sees `jetpacs-path-refused'."
+  (jetpacs-org-test--with-fixture f "* H\n"
+    (should (equal (jetpacs-org--check-file f) (file-truename f)))
+    (dolist (bad '("relative.org" "/ssh:evil:/x.org" "/etc/passwd"))
+      (should (eq 'jetpacs-org-refused
+                  (condition-case err
+                      (progn (jetpacs-org--check-file bad) :no-signal)
+                    (jetpacs-org-refused (car err))
+                    (jetpacs-path-refused (car err))))))
+    ;; An unconfigured root set is distinguishable from out-of-policy.
+    (should (eq 'no-roots
+                (let ((jetpacs-org-roots '("/nonexistent-root-xyz")))
+                  (condition-case err
+                      (progn (jetpacs-org--check-file f) :no-signal)
+                    (jetpacs-org-refused (cadr err))))))))
+
 (ert-deftest jetpacs-org-resolve-refuses-remote-before-any-stat ()
   "Defect 5: `file-remote-p' runs FIRST — the stat IS the connection.
 A remote ref is refused with ZERO stat-family calls."

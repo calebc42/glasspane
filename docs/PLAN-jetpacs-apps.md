@@ -354,7 +354,7 @@ TODO toggle through a token with the `- State` LOGBOOK line re-read from
 disk; capture from a tap landing in the file; a swept pre-re-mint token
 answering `stale`; teardown sweeping the live set.
 
-### JA-5 — Org on screen
+### JA-5 — Org on screen *(**CODE COMPLETE 2026-07-28; DEVICE GATE PENDING**)*
 
 > **Order amended (Caleb ratified, 2026-07-27): JA-6 Files lands BEFORE
 > this rung.** Navigation before rendering — a user must be able to reach
@@ -364,6 +364,37 @@ answering `stale`; teardown sweeping the live set.
 > file browser and plain editor give JA-5 a real entry point the day it
 > lands, JA-6's sandbox guard reuses JA-4's fresh remote-before-stat
 > pattern, and an editable init.el speeds up every rung after it.
+
+**CODE COMPLETE 2026-07-28** (2683d84 JA-5a … 53363ec JA-5h, nine
+commits; the plan was refreshed against the JA-6 landing and the
+vendored org_flutter/org_parser review before execution).  Landed
+beyond the paragraph below, as ratified: tappable timestamps (the
+one-shot pick→re-present editor — `date_button`/`time_button` are NOT
+capturable, so a pick abandons and re-presents under a fresh id from a
+session table that IS the verb's 23.1 record), the RICHER header sheet
+(native Set-TODO/Priority — org's own readers are promptless
+`read-char-exclusive` and hang under a flow; text-field tags; bridged
+Refile; token+`:confirm` Archive), the log-note loop the JA-4 toggle
+docstring promised, habits as its own sub-commit (owner `jetpacs.org`,
+one-canvas strip with the A2 op spend, durable Done with the P1-6
+prompt hazard answered loudly), drawer/block fold taps through
+`jetpacs.buffer.fold` (org-cycle toggles both — the affordance Tier-0's
+outline detection cannot see), and the JA-6 seam wiring (per-path
+rendered⇄plain, toolbar host, FAB, after-save — public names only).
+The outline SPLIT: extraction in base (JA-5a A3), the card view in
+Tier-1 staging `jetpacs-org-outline.el` (never required by base).
+Mono policy REVERSED to faithful all-mono (org_flutter has no
+prose/code split; `jetpacs-org-render-proportional-prose` opts out).
+Verbs registered OWNERLESS (the dead-tap lesson).  One poc bug fixed
+at port, regression-pinned both ways: the upgrade pass's first-char
+invisibility check silently skipped every caption-less standalone
+image (org hides the `[[` brackets).  ERT: 628 across 27 files, incl.
+the org_parser TRAP fixture rendered without a signal.  **Device gate:
+`test/smoke-ja5.el` written, PENDING hardware** (S1 render acceptance,
+checkbox+cookie, drawer fold, footnote drill, sheet→schedule with a
+repeater, confirmed archive, body-stamp edit, bridged add-heading, the
+files rendered⇄plain⇄toolbar path, habit done, teardown).  Adversarial
+review: docs/AUDIT-ja5-2026-07-28.md.
 
 **Lands:** the render skin (rebuild-lite): data: URIs replacing `file://`, LaTeX
 compile moved onto `jetpacs-async`, SPEC 23.1 exposure records **and checks**

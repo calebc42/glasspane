@@ -152,11 +152,13 @@ Raw — `jetpacs-check-path' filters and truenames it."
   (append jetpacs-files-roots
           (and-let* ((shared (jetpacs-files-shared-dir))) (list shared))))
 
-(defun jetpacs-files--check (path &optional require)
+(cl-defun jetpacs-files--check (path &optional (require 'readable))
   "PATH through the floor guard against the effective roots.
-REQUIRE as in `jetpacs-check-path' (default `readable')."
-  (jetpacs-check-path path (jetpacs-files--roots)
-                      :require (or require 'readable)))
+REQUIRE as in `jetpacs-check-path'; the default applies only when the
+argument is OMITTED — an explicit nil means containment-only, and an
+`(or ... \\='readable)' here once silently turned delete's nil into a
+readability stat."
+  (jetpacs-check-path path (jetpacs-files--roots) :require require))
 
 (defun jetpacs-files--current-dir ()
   "The directory the view shows — the cd state or the landing."
@@ -170,14 +172,37 @@ REQUIRE as in `jetpacs-check-path' (default `readable')."
 would alter cannot be carried in `:args' and round-tripped faithfully."
   (equal (jetpacs-scalar-text s) s))
 
+(defun jetpacs-files--entry-delete-button (path shown dirp)
+  "The trailing delete affordance for PATH (displayed as SHOWN).
+The descriptor carries SPEC 14.1 `:confirm', so the COMPANION shows the
+native confirmation before the event exists — the handler never
+prompts, and delete keeps working without the dialog capability.  DIRP
+changes the wording: directory deletion is recursive and the user
+confirms that, not a euphemism."
+  (jetpacs-icon-button
+   "delete"
+   (jetpacs-action "jetpacs.files.delete"
+                   :args (list :path path)
+                   :confirm (if dirp
+                                (format "Delete %s and everything in it?" shown)
+                              (format "Delete %s?" shown)))
+   :content-description "Delete"))
+
 (defun jetpacs-files--entry-row (path dirp)
   "One tappable card for PATH; DIRP non-nil renders the folder form.
-A wire-unsafe PATH renders inert: its name is shown (sanitized), but no
-action carries it — see the Commentary."
+Tap opens/enters; long-press raises the ops menu; the trailing button
+deletes (Companion-confirmed).  A wire-unsafe PATH renders inert: its
+name is shown (sanitized), but no action carries it — see the
+Commentary."
   (let* ((name (file-name-nondirectory (directory-file-name path)))
          (shown (jetpacs-scalar-text name))
          (safe (jetpacs-files--wire-safe-p path))
-         (key (jetpacs-wire-id "f" path)))
+         (key (jetpacs-wire-id "f" path))
+         (long-tap (and safe
+                        (jetpacs-action "jetpacs.files.menu"
+                                        :args (list :path path))))
+         (trash (and safe
+                     (jetpacs-files--entry-delete-button path shown dirp))))
     (if dirp
         (jetpacs-chrome-row shown
                             :icon "folder"
@@ -185,6 +210,8 @@ action carries it — see the Commentary."
                             :on-tap (and safe
                                          (jetpacs-action "jetpacs.files.cd"
                                                          :args (list :dir path)))
+                            :on-long-tap long-tap
+                            :trailing trash
                             :key key)
       (let ((size (or (file-attribute-size (file-attributes path)) 0)))
         (jetpacs-chrome-row shown
@@ -194,6 +221,8 @@ action carries it — see the Commentary."
                             :on-tap (and safe
                                          (jetpacs-action "jetpacs.files.open"
                                                          :args (list :path path)))
+                            :on-long-tap long-tap
+                            :trailing trash
                             :key key)))))
 
 (defun jetpacs-files--up-row (dir)
@@ -328,6 +357,11 @@ landing configuration never went through a handler."
 (defun jetpacs-files--screen (_back)
   "The chrome root screen builder."
   (jetpacs-chrome-screen "Files" (jetpacs-files--body)
+                         :actions (list (jetpacs-icon-button
+                                         "add"
+                                         (jetpacs-action "jetpacs.files.new")
+                                         :content-description
+                                         "New file or folder"))
                          :on-refresh (jetpacs-action "jetpacs.files.refresh")))
 
 ;;;; Content search (F2)
@@ -573,6 +607,206 @@ asking (back tapped, new query pushed) lets the sweep cancel the scan."
    :back back))
 
 
+;;;; The five ops (F3)
+;;
+;; Reaching them: DELETE is a trailing icon-button on every entry row
+;; whose descriptor carries SPEC 14.1 `:confirm' — the Companion shows
+;; the native confirmation BEFORE creating the event, so the handler
+;; never prompts and works without the dialog capability.  The other
+;; ops live behind long-press: `jetpacs.files.menu' raises a single
+;; 18.1 dialog (the `jetpacs-sections--show-menu' template) whose rows
+;; conclude with an op key; the callback re-enters through
+;; `jetpacs-flow-begin' — an ebp callback has no dispatch to inherit a
+;; flow from, and that seam exists for exactly this stack — and the op
+;; prompts (rename's new name, move's destination) bridge to the device
+;; from there.  DUPLICATE needs no prompt at all.  NEW rides a top-bar
+;; button on the browse screen and prompts the same way.
+;;
+;; Every op target goes through the guard's `absent' mode, which is
+;; what F1 built it for: exists-refusal (never clobber), containment on
+;; the RESOLVED name (a rename/move/create target smuggled through an
+;; in-root symlink is refused), and the reason symbol travels alone.
+
+(defvar jetpacs-files--dialog-seq 0
+  "Monotonic suffix for ops-menu dialog ids.
+The sections lesson: 18.1 answers a REUSED outstanding `dialog_id' with
+1201, and an impatient double long-press is exactly that.")
+
+(defun jetpacs-files--duplicate-name (path)
+  "A non-colliding \"NAME copy[.EXT]\" sibling path for PATH.
+Bumps to \"NAME copy 2\", \"NAME copy 3\", ... until the name is free."
+  (let* ((path (directory-file-name path))
+         (dir (file-name-directory path))
+         (base (file-name-nondirectory path))
+         (dir-p (file-directory-p path))
+         (stem (if dir-p base (file-name-sans-extension base)))
+         (ext (if dir-p "" (or (file-name-extension base t) "")))
+         (n 0) target)
+    (while (progn
+             (setq target (expand-file-name
+                           (format "%s copy%s%s" stem
+                                   (if (zerop n) "" (format " %d" (1+ n))) ext)
+                           dir))
+             (file-exists-p target))
+      (setq n (1+ n)))
+    target))
+
+(defun jetpacs-files--op-notify-refused (op reason surface)
+  "The one wording for a guard refusal, so tests can pin it."
+  (jetpacs-shell-notify (format "%s refused: %s" op reason) surface))
+
+(defun jetpacs-files--op-finish (surface)
+  "Re-push SURFACE after an op; already on a timer stack, so directly."
+  (condition-case err
+      (jetpacs-shell-push surface)
+    (error (message "jetpacs-files: op push failed: %s"
+                    (jetpacs--error-label err)))))
+
+(defun jetpacs-files--op-rename (path surface)
+  "Rename PATH within its directory; the new name is a bridged prompt.
+Runs inside a device flow."
+  (let* ((old (file-name-nondirectory (directory-file-name path)))
+         (new (string-trim
+               (condition-case nil
+                   (read-string (format "Rename %s to: " old) old)
+                 (quit "")))))
+    (cond
+     ((string-empty-p new)
+      (jetpacs-shell-notify "Rename cancelled" surface))
+     ((string-search "/" new)
+      (jetpacs-shell-notify "Name can't contain '/'" surface))
+     (t
+      (condition-case err
+          (let ((target (jetpacs-files--check
+                         (expand-file-name
+                          new (file-name-directory (directory-file-name path)))
+                         'absent)))
+            (rename-file path target)
+            (jetpacs-shell-notify (format "Renamed to %s" new) surface))
+        (jetpacs-path-refused
+         (jetpacs-files--op-notify-refused "Rename" (cadr err) surface))
+        (error (jetpacs-shell-notify
+                (format "Rename failed: %s" (jetpacs--error-label err))
+                surface))))))
+  (jetpacs-files--op-finish surface))
+
+(defun jetpacs-files--op-move (path surface)
+  "Move PATH into a destination directory; a bridged prompt names it.
+Runs inside a device flow."
+  (let* ((name (file-name-nondirectory (directory-file-name path)))
+         (src-dir (file-name-directory (directory-file-name path)))
+         (dest (string-trim
+                (condition-case nil
+                    (read-string (format "Move %s to directory: " name)
+                                 (abbreviate-file-name src-dir))
+                  (quit "")))))
+    (if (string-empty-p dest)
+        (jetpacs-shell-notify "Move cancelled" surface)
+      (condition-case err
+          (let* ((destdir (jetpacs-files--check (expand-file-name dest)
+                                                'directory))
+                 (target (jetpacs-files--check
+                          (expand-file-name name (file-name-as-directory destdir))
+                          'absent)))
+            (rename-file path target)
+            (jetpacs-shell-notify
+             (format "Moved to %s" (abbreviate-file-name destdir)) surface))
+        (jetpacs-path-refused
+         (jetpacs-files--op-notify-refused "Move" (cadr err) surface))
+        (error (jetpacs-shell-notify
+                (format "Move failed: %s" (jetpacs--error-label err))
+                surface)))))
+  (jetpacs-files--op-finish surface))
+
+(defun jetpacs-files--op-duplicate (path surface)
+  "Copy PATH beside itself under a fresh \"NAME copy\" name; no prompt."
+  (condition-case err
+      (let ((target (jetpacs-files--check (jetpacs-files--duplicate-name path)
+                                          'absent)))
+        (if (file-directory-p path)
+            (copy-directory path target)
+          (copy-file path target))
+        (jetpacs-shell-notify
+         (format "Duplicated to %s"
+                 (jetpacs-scalar-text
+                  (file-name-nondirectory (directory-file-name target))))
+         surface))
+    (jetpacs-path-refused
+     (jetpacs-files--op-notify-refused "Duplicate" (cadr err) surface))
+    (error (jetpacs-shell-notify
+            (format "Duplicate failed: %s" (jetpacs--error-label err))
+            surface)))
+  (jetpacs-files--op-finish surface))
+
+(defconst jetpacs-files--menu-ops
+  '(("rename"    "Rename"    jetpacs-files--op-rename)
+    ("move"      "Move"      jetpacs-files--op-move)
+    ("duplicate" "Duplicate" jetpacs-files--op-duplicate))
+  "The long-press menu: (KEY LABEL FN), FN of (PATH SURFACE) in a flow.
+Delete is deliberately absent — it has a better home (the row button
+with descriptor `:confirm') and must keep working without the dialog
+capability.")
+
+(defun jetpacs-files--ops-menu-show (path surface)
+  "Raise the single 18.1 ops dialog for PATH.
+Rows conclude via `jetpacs-dialog-submit'; the callback re-enters a
+fresh device flow (`jetpacs-flow-begin' — an ebp callback's stack has
+no dispatch to inherit from) and runs the op."
+  (when-let* ((client (jetpacs-client)))
+    (ebp-client-dialog-show
+     client
+     (format "files-%s-%d" (abs (sxhash path))
+             (cl-incf jetpacs-files--dialog-seq))
+     (apply #'jetpacs-column
+            (jetpacs-text (jetpacs-scalar-text
+                           (file-name-nondirectory (directory-file-name path)))
+                          :style "title")
+            (append
+             (mapcar (pcase-lambda (`(,key ,label ,_fn))
+                       (jetpacs-button label (jetpacs-dialog-submit :value key)))
+                     jetpacs-files--menu-ops)
+             (list (jetpacs-button "Cancel" (jetpacs-dialog-dismiss)))))
+     :callback
+     (lambda (status result _error)
+       (when-let* (((equal status "submitted"))
+                   (key (plist-get result :value))
+                   (op (nth 2 (assoc key jetpacs-files--menu-ops))))
+         (jetpacs-flow-begin surface (lambda () (funcall op path surface))))))))
+
+(defun jetpacs-files--op-new (dir surface)
+  "Create a file or folder in DIR; name and kind are bridged prompts.
+Runs inside a device flow."
+  (let ((name (string-trim
+               (condition-case nil
+                   (read-string (format "New in %s — name: "
+                                        (abbreviate-file-name dir)))
+                 (quit "")))))
+    (cond
+     ((string-empty-p name)
+      (jetpacs-shell-notify "Create cancelled" surface))
+     ;; Single segment only: traversal never even reaches the guard.
+     ((string-search "/" name)
+      (jetpacs-shell-notify "Name can't contain '/'" surface))
+     (t
+      (let ((kind (condition-case nil
+                      (completing-read "Create: " '("File" "Folder") nil t)
+                    (quit nil))))
+        (if (null kind)
+            (jetpacs-shell-notify "Create cancelled" surface)
+          (condition-case err
+              (let ((target (jetpacs-files--check (expand-file-name name dir)
+                                                  'absent)))
+                (if (equal kind "Folder")
+                    (make-directory target)
+                  (write-region "" nil target nil 'silent))
+                (jetpacs-shell-notify (format "Created %s" name) surface))
+            (jetpacs-path-refused
+             (jetpacs-files--op-notify-refused "Create" (cadr err) surface))
+            (error (jetpacs-shell-notify
+                    (format "Create failed: %s" (jetpacs--error-label err))
+                    surface))))))))
+  (jetpacs-files--op-finish surface))
+
 ;;;; Actions (decision D2: validate -> status now; effects that can
 ;;;; prompt or push run from the flow continuation)
 
@@ -651,6 +885,82 @@ asking (back tapped, new query pushed) lets the sweep cancel the scan."
     (lambda (_args params)
       (jetpacs-files--repush (jetpacs-files--event-surface params))
       'accepted))
+
+  (jetpacs-defaction "jetpacs.files.menu"
+    ;; Long-press: the ops dialog.  Gated on the dialog capability —
+    ;; without it there is no non-blocking way to offer the menu, so
+    ;; say so rather than hang (the sections precedent).
+    (lambda (args params)
+      (let ((surface (jetpacs-files--event-surface params)))
+        (cond
+         ((not (jetpacs-granted-p "surfaces.dialog"))
+          (jetpacs-shell-notify "Needs the dialog capability" surface)
+          'rejected)
+         (t
+          (condition-case err
+              (let ((true (jetpacs-files--check (plist-get args :path))))
+                ;; The dialog itself is a request; raising it from the
+                ;; continuation keeps this handler's reply prompt (D2).
+                (jetpacs-flow-continue
+                 (lambda () (jetpacs-files--ops-menu-show true surface)))
+                'accepted)
+            (jetpacs-path-refused
+             (jetpacs-files--op-notify-refused "Menu" (cadr err) surface)
+             'rejected)))))))
+
+  (jetpacs-defaction "jetpacs.files.delete"
+    ;; The Companion presented `:confirm' BEFORE creating this event
+    ;; (SPEC 14.1), so there is no prompt here — validate, act
+    ;; synchronously (14.4: `accepted' only once the effect is
+    ;; durable), defer only the re-push.  Containment-only guard: an
+    ;; unreadable-but-owned file is still the user's to delete.
+    (lambda (args params)
+      (let ((surface (jetpacs-files--event-surface params)))
+        (condition-case err
+            (let ((true (jetpacs-files--check (plist-get args :path) nil)))
+              (cond
+               ((not (file-exists-p true))
+                ;; The row the user confirmed no longer names anything:
+                ;; the snapshot is outdated, which is what stale MEANS.
+                'stale)
+               (t
+                (if (file-directory-p true)
+                    (delete-directory true t)
+                  (delete-file true))
+                (jetpacs-shell-notify
+                 (format "Deleted %s"
+                         (jetpacs-scalar-text
+                          (file-name-nondirectory (directory-file-name true))))
+                 surface)
+                (jetpacs-files--repush surface)
+                'accepted)))
+          (jetpacs-path-refused
+           (jetpacs-files--op-notify-refused "Delete" (cadr err) surface)
+           'rejected)
+          (error
+           (jetpacs-shell-notify
+            (format "Delete failed: %s" (jetpacs--error-label err)) surface)
+           'rejected)))))
+
+  (jetpacs-defaction "jetpacs.files.new"
+    ;; The top-bar "+": name and kind are bridged prompts, so the whole
+    ;; effect lives in the flow continuation (JC-4a), like open.
+    (lambda (_args params)
+      (let ((surface (jetpacs-files--event-surface params)))
+        (cond
+         ((not (jetpacs-granted-p "surfaces.dialog"))
+          (jetpacs-shell-notify "Needs the dialog capability" surface)
+          'rejected)
+         (t
+          (condition-case err
+              (let ((dir (jetpacs-files--check (jetpacs-files--current-dir)
+                                               'directory)))
+                (jetpacs-flow-continue
+                 (lambda () (jetpacs-files--op-new dir surface)))
+                'accepted)
+            (jetpacs-path-refused
+             (jetpacs-files--op-notify-refused "Create" (cadr err) surface)
+             'rejected)))))))
 
   (jetpacs-defaction "jetpacs.files.grep"
     ;; SPEC 14.3: `on_submit' injects the submitted text as `value'

@@ -329,13 +329,27 @@ never a `jetpacs-path-refused' a handler would answer to the device."
       ;; Root is the ceiling: no up-row, so exactly the four entries.
       (should (equal (jetpacs-files-test--card-titles cards)
                      '("adir" "zdir" "afile" "bfile")))
-      (should (equal (jetpacs-files-test--collect cards :action)
-                     '("jetpacs.files.cd" "jetpacs.files.cd"
-                       "jetpacs.files.open" "jetpacs.files.open")))
-      ;; Args carry the absolute paths.
+      (let ((actions (jetpacs-files-test--collect cards :action)))
+        ;; The tap verbs, in listing order (each row also carries the F3
+        ;; long-press menu and the trailing delete).
+        (should (equal (seq-filter (lambda (a)
+                                     (member a '("jetpacs.files.cd"
+                                                 "jetpacs.files.open")))
+                                   actions)
+                       '("jetpacs.files.cd" "jetpacs.files.cd"
+                         "jetpacs.files.open" "jetpacs.files.open")))
+        (should (= (seq-count (lambda (a) (equal a "jetpacs.files.menu"))
+                              actions)
+                   4))
+        (should (= (seq-count (lambda (a) (equal a "jetpacs.files.delete"))
+                              actions)
+                   4)))
+      ;; Args carry the absolute paths; every delete carries `:confirm'.
       (let ((args (jetpacs-files-test--collect cards :args)))
-        (should (equal (plist-get (nth 0 args) :dir) (concat root "adir")))
-        (should (equal (plist-get (nth 2 args) :path) (concat root "afile"))))
+        (should (member (list :dir (concat root "adir")) args))
+        (should (member (list :path (concat root "afile")) args)))
+      (should (= (seq-count #'stringp (jetpacs-files-test--collect cards :confirm))
+                 4))
       ;; Every row key is a minted SPEC 4.4 identifier.
       (dolist (key (jetpacs-files-test--collect cards :key))
         (should (jetpacs--identifier-p key))))))
@@ -728,6 +742,308 @@ the cards, with the snippet and an open tap on each hit."
                       (jetpacs-files-test--collect body :id)))
       (should (member "jetpacs.files.grep"
                       (jetpacs-files-test--collect body :action))))))
+
+;;;; The five ops (F3)
+
+(defmacro jetpacs-files-test--with-ops (bindings &rest body)
+  "BODY with notifications, pushes and the prompts stubbed.
+BINDINGS is a plist: :read-string and :completing-read are functions (or
+values) substituted for the real prompts.  Binds NOTES (newest first)
+and PUSHES in BODY's scope."
+  (declare (indent 1))
+  `(let ((notes '()) (pushes '()))
+     (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                (lambda (text &optional _s) (push text notes)))
+               ((symbol-function 'jetpacs-shell-push)
+                (lambda (surface &rest _) (push surface pushes) 1))
+               ((symbol-function 'read-string)
+                ,(or (plist-get bindings :read-string)
+                     '(lambda (&rest _) (error "read-string not expected"))))
+               ((symbol-function 'completing-read)
+                ,(or (plist-get bindings :completing-read)
+                     '(lambda (&rest _) (error "completing-read not expected")))))
+       (ignore notes pushes)
+       ,@body)))
+
+(ert-deftest jetpacs-files-duplicate-name-bumps ()
+  (jetpacs-files-test--with-tree root
+    (let ((f (jetpacs-files-test--touch (concat root "f.txt"))))
+      (should (equal (jetpacs-files--duplicate-name f)
+                     (concat root "f copy.txt")))
+      (jetpacs-files-test--touch (concat root "f copy.txt"))
+      (should (equal (jetpacs-files--duplicate-name f)
+                     (concat root "f copy 2.txt")))
+      (jetpacs-files-test--touch (concat root "f copy 2.txt"))
+      (should (equal (jetpacs-files--duplicate-name f)
+                     (concat root "f copy 3.txt"))))
+    (make-directory (concat root "d"))
+    (should (equal (jetpacs-files--duplicate-name (concat root "d"))
+                   (concat root "d copy")))))
+
+(ert-deftest jetpacs-files-op-rename-guards-and-renames ()
+  (jetpacs-files-test--with-tree root
+    (let ((f (jetpacs-files-test--touch (concat root "old.txt"))))
+      ;; Success.
+      (jetpacs-files-test--with-ops
+          (:read-string (lambda (&rest _) "new.txt"))
+        (jetpacs-files--op-rename f "app:jetpacs.files")
+        (should (equal (car notes) "Renamed to new.txt"))
+        (should (file-exists-p (concat root "new.txt")))
+        (should-not (file-exists-p f))
+        (should (equal pushes '("app:jetpacs.files"))))
+      ;; Exists-refusal: never clobber (the absent-mode guard).
+      (jetpacs-files-test--touch (concat root "taken.txt"))
+      (jetpacs-files-test--touch f)
+      (jetpacs-files-test--with-ops
+          (:read-string (lambda (&rest _) "taken.txt"))
+        (jetpacs-files--op-rename f "app:jetpacs.files")
+        (should (equal (car notes) "Rename refused: exists"))
+        (should (file-exists-p f)))
+      ;; Separators never even reach the guard.
+      (jetpacs-files-test--with-ops
+          (:read-string (lambda (&rest _) "sub/evil"))
+        (jetpacs-files--op-rename f "app:jetpacs.files")
+        (should (equal (car notes) "Name can't contain '/'")))
+      ;; C-g (rpc.cancel on device) is a clean cancel.
+      (jetpacs-files-test--with-ops
+          (:read-string (lambda (&rest _) (signal 'quit nil)))
+        (jetpacs-files--op-rename f "app:jetpacs.files")
+        (should (equal (car notes) "Rename cancelled"))
+        (should (file-exists-p f))))))
+
+(ert-deftest jetpacs-files-op-move-guards-and-moves ()
+  (jetpacs-files-test--with-tree root
+    (let ((f (jetpacs-files-test--touch (concat root "m.txt")))
+          (sub (concat root "sub/"))
+          (outside (file-name-as-directory
+                    (make-temp-file "jetpacs-move-out" t))))
+      (make-directory sub)
+      (unwind-protect
+          (progn
+            ;; Success.
+            (jetpacs-files-test--with-ops
+                (:read-string (lambda (&rest _) sub))
+              (jetpacs-files--op-move f "app:jetpacs.files")
+              (should (file-exists-p (concat sub "m.txt")))
+              (should-not (file-exists-p f))
+              (should (string-prefix-p "Moved to " (car notes))))
+            ;; No such destination.
+            (jetpacs-files-test--touch f)
+            (jetpacs-files-test--with-ops
+                (:read-string (lambda (&rest _) (concat root "missing/")))
+              (jetpacs-files--op-move f "app:jetpacs.files")
+              (should (equal (car notes) "Move refused: not-a-directory"))
+              (should (file-exists-p f)))
+            ;; Outside the roots.
+            (jetpacs-files-test--with-ops
+                (:read-string (lambda (&rest _) outside))
+              (jetpacs-files--op-move f "app:jetpacs.files")
+              (should (equal (car notes) "Move refused: outside-roots"))
+              (should (file-exists-p f)))
+            ;; Target exists.
+            (jetpacs-files-test--touch (concat sub "m.txt"))
+            (jetpacs-files-test--with-ops
+                (:read-string (lambda (&rest _) sub))
+              (jetpacs-files--op-move f "app:jetpacs.files")
+              (should (equal (car notes) "Move refused: exists"))
+              (should (file-exists-p f))))
+        (delete-directory outside t)))))
+
+(ert-deftest jetpacs-files-op-duplicate-copies ()
+  (jetpacs-files-test--with-tree root
+    (let ((f (concat root "f.txt")))
+      (write-region "content\n" nil f nil 'silent)
+      (jetpacs-files-test--with-ops nil
+        (jetpacs-files--op-duplicate f "app:jetpacs.files")
+        (should (equal (car notes) "Duplicated to f copy.txt"))
+        (should (file-exists-p (concat root "f copy.txt")))
+        (with-temp-buffer
+          (insert-file-contents (concat root "f copy.txt"))
+          (should (equal (buffer-string) "content\n")))))
+    (make-directory (concat root "d"))
+    (jetpacs-files-test--touch (concat root "d/child"))
+    (jetpacs-files-test--with-ops nil
+      (jetpacs-files--op-duplicate (concat root "d") "app:jetpacs.files")
+      (should (file-exists-p (concat root "d copy/child"))))))
+
+(ert-deftest jetpacs-files-op-new-creates ()
+  (jetpacs-files-test--with-tree root
+    ;; A file.
+    (jetpacs-files-test--with-ops
+        (:read-string (lambda (&rest _) "n.org")
+         :completing-read (lambda (&rest _) "File"))
+      (jetpacs-files--op-new root "app:jetpacs.files")
+      (should (equal (car notes) "Created n.org"))
+      (should (file-regular-p (concat root "n.org"))))
+    ;; A folder.
+    (jetpacs-files-test--with-ops
+        (:read-string (lambda (&rest _) "d")
+         :completing-read (lambda (&rest _) "Folder"))
+      (jetpacs-files--op-new root "app:jetpacs.files")
+      (should (file-directory-p (concat root "d"))))
+    ;; Traversal is refused before the guard even runs.
+    (jetpacs-files-test--with-ops
+        (:read-string (lambda (&rest _) "../evil"))
+      (jetpacs-files--op-new root "app:jetpacs.files")
+      (should (equal (car notes) "Name can't contain '/'")))
+    ;; Exists-refusal.
+    (jetpacs-files-test--with-ops
+        (:read-string (lambda (&rest _) "n.org")
+         :completing-read (lambda (&rest _) "File"))
+      (jetpacs-files--op-new root "app:jetpacs.files")
+      (should (equal (car notes) "Create refused: exists")))))
+
+(ert-deftest jetpacs-files-delete-action-confirmed-effect ()
+  "The handler never prompts — the Companion presented `:confirm'
+before the event existed — and the effect is synchronous (14.4)."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (let ((handler (gethash "jetpacs.files.delete" jetpacs-action-handlers))
+            (f (jetpacs-files-test--touch (concat root "f.txt")))
+            (notes '()) (pushed '()))
+        (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &optional _s) (push text notes)))
+                  ((symbol-function 'jetpacs-shell-push)
+                   (lambda (surface &rest _) (push surface pushed) 1)))
+          ;; A file: gone synchronously, push deferred.
+          (should (eq (jetpacs--dispatch
+                       client `(:action "jetpacs.files.delete"
+                                :surface "app:jetpacs.files"
+                                :args (:path ,f))
+                       handler)
+                      'accepted))
+          (should-not (file-exists-p f))
+          (should (equal (car notes) "Deleted f.txt"))
+          (should (null pushed))
+          (jetpacs-files-test--pump)
+          (should (equal pushed '("app:jetpacs.files")))
+          ;; Already gone: the snapshot is outdated — stale, not an error.
+          (should (eq (jetpacs--dispatch
+                       client `(:action "jetpacs.files.delete"
+                                :surface "app:jetpacs.files"
+                                :args (:path ,f))
+                       handler)
+                      'stale))
+          ;; A directory: recursive.
+          (make-directory (concat root "d"))
+          (jetpacs-files-test--touch (concat root "d/child"))
+          (should (eq (jetpacs--dispatch
+                       client `(:action "jetpacs.files.delete"
+                                :surface "app:jetpacs.files"
+                                :args (:path ,(concat root "d")))
+                       handler)
+                      'accepted))
+          (should-not (file-exists-p (concat root "d")))
+          ;; Out of policy.
+          (should (eq (jetpacs--dispatch
+                       client '(:action "jetpacs.files.delete"
+                                :surface "app:jetpacs.files"
+                                :args (:path "/etc/passwd"))
+                       handler)
+                      'rejected))
+          (should (equal (car notes) "Delete refused: outside-roots"))
+          (should (file-exists-p "/etc/passwd")))))))
+
+(ert-deftest jetpacs-files-menu-gates-shows-and-routes ()
+  "The menu: capability-gated, dialog deferred out of the extent, rows
+concluding with op keys, and the callback re-entering through a fresh
+flow to run the op."
+  (jetpacs-files-test--with-tree root
+    (let ((f (jetpacs-files-test--touch (concat root "old.txt"))))
+      (jetpacs-files-test--attached (jetpacs-files-test--client)
+        (let ((handler (gethash "jetpacs.files.menu" jetpacs-action-handlers))
+              (shown '()) (notes '()))
+          (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                     (lambda (text &optional _s) (push text notes)))
+                    ((symbol-function 'ebp-client-dialog-show)
+                     (cl-function
+                      (lambda (_client id spec &key callback &allow-other-keys)
+                        (push (list id spec callback) shown)))))
+            ;; No grant: rejected, loudly.
+            (should (eq (jetpacs--dispatch
+                         client `(:action "jetpacs.files.menu"
+                                  :surface "app:jetpacs.files"
+                                  :args (:path ,f))
+                         handler)
+                        'rejected))
+            (should (equal (car notes) "Needs the dialog capability"))
+            ;; Granted: accepted, and the dialog raised only after the
+            ;; extent (D2).
+            (setf (ebp-client-granted client) ["surfaces.dialog"])
+            (should (eq (jetpacs--dispatch
+                         client `(:action "jetpacs.files.menu"
+                                  :surface "app:jetpacs.files"
+                                  :args (:path ,f))
+                         handler)
+                        'accepted))
+            (should (null shown))
+            (jetpacs-files-test--pump)
+            (should (= (length shown) 1))
+            (pcase-let ((`(,id ,spec ,callback) (car shown)))
+              (should (string-prefix-p "files-" id))
+              (should (equal (jetpacs-files-test--collect spec :value)
+                             '("rename" "move" "duplicate")))
+              ;; Four buttons: three ops and a way out.
+              (should (= (seq-count (lambda (x) (equal x "button"))
+                                    (jetpacs-files-test--collect spec :t))
+                        4))
+              ;; The callback runs the op through a FRESH flow (an ebp
+              ;; callback's stack has no dispatch to inherit from).
+              (let ((flowed '()))
+                (cl-letf (((symbol-function 'jetpacs-flow-begin)
+                           (lambda (surface fn)
+                             (push surface flowed) (funcall fn)))
+                          ((symbol-function 'read-string)
+                           (lambda (&rest _) "renamed.txt"))
+                          ((symbol-function 'jetpacs-shell-push)
+                           (lambda (&rest _) 1)))
+                  (funcall callback "submitted" '(:value "rename") nil)
+                  (should (equal flowed '("app:jetpacs.files")))
+                  (should (file-exists-p (concat root "renamed.txt")))
+                  (should-not (file-exists-p f)))))
+            ;; Two menus never share a dialog id (the 18.1 reuse trap).
+            (jetpacs-files-test--pump)
+            (let ((jetpacs-files--dialog-seq jetpacs-files--dialog-seq))
+              (jetpacs-files--ops-menu-show f "app:jetpacs.files")
+              (jetpacs-files--ops-menu-show f "app:jetpacs.files")
+              (should (= (length shown) 3))
+              (should-not (equal (car (nth 0 shown)) (car (nth 1 shown)))))
+            ;; Out of policy: rejected before any dialog.
+            (should (eq (jetpacs--dispatch
+                         client '(:action "jetpacs.files.menu"
+                                  :surface "app:jetpacs.files"
+                                  :args (:path "/etc/passwd"))
+                         handler)
+                        'rejected))))))))
+
+(ert-deftest jetpacs-files-new-action-gates-and-defers ()
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (let ((handler (gethash "jetpacs.files.new" jetpacs-action-handlers))
+            (ran '()) (notes '()))
+        (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &optional _s) (push text notes)))
+                  ((symbol-function 'jetpacs-files--op-new)
+                   (lambda (dir surface) (push (cons dir surface) ran))))
+          ;; No grant: rejected.
+          (should (eq (jetpacs--dispatch
+                       client '(:action "jetpacs.files.new"
+                                :surface "app:jetpacs.files")
+                       handler)
+                      'rejected))
+          ;; Granted: accepted, op deferred with the validated dir.
+          (setf (ebp-client-granted client) ["surfaces.dialog"])
+          (should (eq (jetpacs--dispatch
+                       client '(:action "jetpacs.files.new"
+                                :surface "app:jetpacs.files")
+                       handler)
+                      'accepted))
+          (should (null ran))
+          (jetpacs-files-test--pump)
+          (should (equal ran
+                         (list (cons (jetpacs-check-path
+                                      root (list root) :require 'directory)
+                                     "app:jetpacs.files")))))))))
 
 (provide 'jetpacs-files-test)
 ;;; jetpacs-files-test.el ends here

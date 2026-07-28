@@ -385,7 +385,7 @@ tables, rules, images and LaTeX; span-budget accounting under a synthetic
 `max_rich_spans`. Smoke — tap a footnote, tap a heading → sheet → schedule with
 a repeater, use the toolbar to insert a src block.
 
-### JA-6 — Files *(in progress — F1+F2 landed 2026-07-27)*
+### JA-6 — Files *(in progress — F1+F2+F3 landed 2026-07-27)*
 
 > **Order amended (Caleb ratified, 2026-07-27): this rung lands before
 > JA-5 — it is the NEXT rung.**  Rationale at the JA-5 entry.
@@ -459,10 +459,50 @@ file without the `lexical-binding` cookie "kills" timer-closure code by
 void-variable death in the timer, not semantics — the first scan-mutant
 run failed by pump-timeout (4s, resolve never called); with the cookie
 the same mutants die in 20ms at the intended assertions. Check HOW a
-mutant fails, not just that it fails.** **Still to land: F3 the five
-ops (`absent`/`directory` modes are ready), F4 the plain editor (+ B11
+mutant fails, not just that it fails.**
+
+**F3 — the five ops (LANDED 2026-07-27).** The reach split honors the
+plan's letter with the machinery that exists: **delete** is a trailing
+icon-button on every entry row whose descriptor carries SPEC 14.1
+`:confirm` (dir wording says "and everything in it" — recursive
+deletion is confirmed, not euphemized), so the Companion natively
+confirms BEFORE the event exists, the handler never prompts, and delete
+keeps working without the dialog capability (its handler answers
+`stale` when the confirmed row no longer names anything — the snapshot
+is outdated, which is what stale means). **Rename / Move / Duplicate**
+live behind long-press: `jetpacs.files.menu` (gated on
+`surfaces.dialog`, the sections precedent) raises a single 18.1 dialog
+on the `jetpacs-sections--show-menu` template — rows conclude via
+`jetpacs-dialog-submit`, Cancel via dismiss, ids minted
+`files-<hash>-<seq>` (the sections double-press 1201 lesson) — and the
+callback re-enters through **`jetpacs-flow-begin`** (the JA-2 B3 seam,
+built for exactly this: an ebp callback's stack has no dispatch to
+inherit a flow from) so rename's and move's `read-string` prompts
+bridge to the device. Duplicate is promptless (`NAME copy`,
+`copy 2`, ... — the poc's bump algorithm ported). **New** rides a
+top-bar `+` (no FAB constructor exists; the hub's `:actions` slot
+does): flow-continued `read-string` name + `completing-read`
+File/Folder (2 options = the JC-4a enum fast path), single-segment
+names only. Every op target goes through the guard's `absent` mode —
+exists-refusal (never clobber), containment on the RESOLVED name — and
+refusal notifications carry the reason symbol in ONE pinned wording so
+tests and mutants can see which layer refused. **A real defect caught
+at write time by the stale-delete test: the module's `--check` wrapper
+used `(or require 'readable)`, which silently turned delete's explicit
+containment-only nil into a readability stat — a missing file answered
+`rejected` instead of `stale`; now a `cl-defun` optional default,
+which distinguishes omitted from explicit nil.** Exit gate +8 tests
+(38): the duplicate-name bump, each op's guard legs (exists / outside
+/ separator / quit-cancel) with exact refusal wording, delete through
+the real dispatch (synchronous effect, deferred push, stale-on-missing,
+recursive dir), the menu's gate/defer/rows/callback-through-flow-begin
+and dialog-id uniqueness, and new's gate + validated-dir handoff.
+8 more mutant runs killed (24 total) — the guard-bypass mutant is
+caught independently by rename, move, AND delete via their pinned
+refusal messages. **Still to land: F4 the plain editor (+ B11
 `max_event_bytes`), the app seams, the launcher, and the device smoke
-(browse /sdcard, search, edit init.el, restart, confirm).**
+(browse /sdcard, search, an op or two, edit init.el, restart,
+confirm).**
 
 **Lands:** the sandbox guard (with `file-remote-p` rejected **before** any
 stat), the /sdcard probe, the grep scanner behind a `text_input` `:on-submit`

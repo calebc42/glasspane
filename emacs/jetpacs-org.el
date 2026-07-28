@@ -739,8 +739,9 @@ new, separately vetted entry point, never as an fboundp fork here."
 ;; Timestamp field extractors, headless capture, the LOGBOOK parser,
 ;; planning-repeater surgery, and the #+TBLFM resolver — opinion-free
 ;; org machinery any Tier-1 can lean on.  Nothing here knows about
-;; agendas or PKM.  (The outline model and `file.add-heading' are
-;; deliberately absent: JA-5.)
+;; agendas or PKM.  (`file.add-heading' is deliberately absent — it
+;; lands with JA-5's dialog module.  The outline model landed at JA-5a,
+;; further down this file; its card VIEW is Tier-1 staging.)
 
 (defun jetpacs-org-ts-date (ts)
   "Return the YYYY-MM-DD date inside org timestamp string TS, or nil."
@@ -1112,6 +1113,130 @@ Apps rebind it to their own mutation tail — e.g. a synchronous save
 plus a note-index refresh — so a generic core mutation keeps their
 memo/index coherent.  (The poc's `file.add-heading' consumer of this
 seam is JA-5's; the seam itself is engine machinery.)")
+
+;;;; The outline model (JA-5a, amendment A3)
+;; Heading records as pure org data — no nodes, no verbs, no owner.
+;; Extraction is org fact and lives in base; the card list VIEW over
+;; these records is opinion and lives in Tier-1 staging
+;; (jetpacs-org-outline.el), per the ratified split.  Ported from
+;; poc-v1 jetpacs-org.el 2456-2589.
+
+(defcustom jetpacs-org-outline-max-headings 400
+  "Cap on heading records returned by one collection pass.
+Bounds very large files; `jetpacs-org-outline-cap' applies it."
+  :type 'integer)
+
+(defcustom jetpacs-org-outline-show-deadline t
+  "Include each heading's DEADLINE string in its outline record."
+  :type 'boolean)
+
+(defcustom jetpacs-org-outline-show-clocked nil
+  "Include each heading's clocked-minutes total in its outline record.
+Off by default: the totals only exist after an `org-clock-sum' pass,
+which a consumer must run itself — this switch just carries the value."
+  :type 'boolean)
+
+(defun jetpacs-org--outline-record (pos next)
+  "Build a record plist for the heading at POS, whose extent ends at NEXT.
+Members: :level :pos :line :props :todo :priority :title :tags :done
+:deadline :clocked :body :body-start.  :body-start maps the body text
+back to real buffer positions so a consumer can address interactive
+elements (checkboxes) inside it."
+  (save-excursion
+    (goto-char pos)
+    (let* ((comps (org-heading-components))
+           (level (or (nth 0 comps) 1))
+           (todo (nth 2 comps))
+           (priority (nth 3 comps))
+           (title (or (nth 4 comps) ""))
+           (tags (ignore-errors (org-get-tags pos t)))
+           (done (and todo (member todo org-done-keywords) t))
+           (deadline (and jetpacs-org-outline-show-deadline
+                          (ignore-errors (org-entry-get pos "DEADLINE"))))
+           (clocked (and jetpacs-org-outline-show-clocked
+                         (get-text-property pos :org-clock-minutes)))
+           (line (buffer-substring-no-properties
+                  (line-beginning-position) (line-end-position)))
+           (props (ignore-errors (org-entry-properties pos 'standard)))
+           (body-info
+            (progn
+              (goto-char pos)
+              ;; No FULL arg: skip only planning + PROPERTIES (a consumer
+              ;; shows those as their own affordances).  LOGBOOK and other
+              ;; drawers stay in :body, where a renderer folds them.
+              (ignore-errors (org-end-of-meta-data))
+              (let* ((b (min (point) next))
+                     (raw (buffer-substring-no-properties b next))
+                     (trimmed (string-trim-left raw "\\(?:[ \t]*[\n\r]\\)+"))
+                     (trim-count (- (length raw) (length trimmed))))
+                (list (string-trim-right trimmed) (+ b trim-count)))))
+           (body (car body-info))
+           (body-start (cadr body-info)))
+      (list :level level :pos pos :line line :props props
+            :todo todo :priority (and priority (char-to-string priority))
+            :title title :tags tags :done done
+            :deadline deadline :clocked clocked
+            :body body :body-start body-start))))
+
+(defun jetpacs-org-outline-collect (beg end include-first)
+  "Collect heading records between BEG and END of the current org buffer.
+INCLUDE-FIRST non-nil includes a heading sitting exactly at BEG (the
+subtree case).  Uncapped — apply `jetpacs-org-outline-cap' at the edge
+that renders."
+  (let (positions records)
+    (save-excursion
+      (goto-char beg)
+      (when (and include-first (org-at-heading-p))
+        (push (line-beginning-position) positions)
+        (end-of-line))                  ; don't re-match this heading below
+      (while (re-search-forward org-heading-regexp end t)
+        (push (line-beginning-position) positions)))
+    (setq positions (nreverse positions))
+    (cl-loop for cell on positions
+             for pos = (car cell)
+             for next = (or (cadr cell) end)
+             do (push (jetpacs-org--outline-record pos next) records))
+    (nreverse records)))
+
+(defun jetpacs-org-outline-tree (records)
+  "Nest flat RECORDS into a tree by :level; each node gains :children.
+Skipped levels nest under the nearest shallower ancestor."
+  (let* ((root (list :level 0 :children nil))
+         (stack (list root)))
+    (dolist (rec records)
+      (let ((node (append rec (list :children nil)))
+            (level (plist-get rec :level)))
+        (while (>= (plist-get (car stack) :level) level)
+          (pop stack))
+        (let ((parent (car stack)))
+          (plist-put parent :children
+                     (append (plist-get parent :children) (list node))))
+        (push node stack)))
+    (plist-get root :children)))
+
+(defun jetpacs-org-outline-cap (records)
+  "RECORDS truncated to `jetpacs-org-outline-max-headings'."
+  (seq-take records jetpacs-org-outline-max-headings))
+
+(defun jetpacs-org-file-toplevel-records (file)
+  "Capped level-1 heading records for org FILE, tagged :file and :buffer.
+FILE goes through the root allowlist first — signals
+`jetpacs-org-refused' outside `jetpacs-org-roots', exactly like every
+other engine entry point (the poc read any path handed to it).  The
+extra :file/:buffer members let a consumer mint a heading ref or a tap
+target from a record."
+  (let ((file (jetpacs-org--check-file file)))
+    (with-current-buffer (find-file-noselect file t)
+      (unless (derived-mode-p 'org-mode) (org-mode))
+      (org-with-wide-buffer
+       (let* ((buf (buffer-name))
+              (all (jetpacs-org-outline-collect (point-min) (point-max) nil))
+              (tops (cl-remove-if-not
+                     (lambda (r) (= (plist-get r :level) 1)) all)))
+         (mapcar (lambda (r)
+                   (setq r (plist-put (copy-sequence r) :file file))
+                   (plist-put r :buffer buf))
+                 (jetpacs-org-outline-cap tops)))))))
 
 ;;;; Reset (the test seam; wired into `jetpacs-test-reset-state')
 

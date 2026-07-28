@@ -539,5 +539,39 @@ bound."
       (jetpacs-toast (make-string 5000 ?x))
       (should (= jetpacs-toast-max-chars (length sent))))))
 
+;;;; Extra aggregate budgets (JA-5a, amendment A2)
+
+(ert-deftest jetpacs-buffer-spend-limit-aggregate ()
+  "`jetpacs-buffer-spend-limit' spends one shared per-spec allowance.
+A refused spend charges NOTHING, so a smaller later ask still fits."
+  (jetpacs-buffer-test--with-client '(:max_table_cells 10)
+    (jetpacs-buffer-with-budget
+      (should (jetpacs-buffer-spend-limit :max_table_cells 6))
+      (should-not (jetpacs-buffer-spend-limit :max_table_cells 5))
+      (should (jetpacs-buffer-spend-limit :max_table_cells 4))
+      (should-not (jetpacs-buffer-spend-limit :max_table_cells 1))
+      ;; Zero/negative asks are free no-ops even at zero remaining.
+      (should (jetpacs-buffer-spend-limit :max_table_cells 0)))))
+
+(ert-deftest jetpacs-buffer-spend-limit-joins-nested-budget ()
+  "An inner `jetpacs-buffer-with-budget' joins the outer allowance —
+same idempotence rule as spans/bytes, or two screens in one multi_view
+would each count their tables from zero and GATE 5 would refuse the
+whole push."
+  (jetpacs-buffer-test--with-client '(:max_table_cells 4)
+    (jetpacs-buffer-with-budget
+      (should (jetpacs-buffer-spend-limit :max_table_cells 3))
+      (jetpacs-buffer-with-budget
+        (should-not (jetpacs-buffer-spend-limit :max_table_cells 2))))))
+
+(ert-deftest jetpacs-buffer-spend-limit-unlimited-when-absent ()
+  "No client, or a welcome without the key, leaves the spend free —
+the push-time GATE 5 aggregate remains the authority."
+  (jetpacs-buffer-with-budget
+    (should (jetpacs-buffer-spend-limit :max_table_cells 10000)))
+  (jetpacs-buffer-test--with-client '(:max_rich_spans 10)
+    (jetpacs-buffer-with-budget
+      (should (jetpacs-buffer-spend-limit :max_table_cells 10000)))))
+
 (provide 'jetpacs-buffer-test)
 ;;; jetpacs-buffer-test.el ends here

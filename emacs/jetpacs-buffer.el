@@ -650,6 +650,16 @@ limit — so a spec containing two rendered regions, or a spec plus its
 `stale_spec', would each take a whole allowance and together blow the
 budget.  Bind with `jetpacs-buffer-with-budget' around a build.")
 
+(defvar jetpacs-buffer-extra-budget nil
+  "When non-nil, an alist (LIMIT-KEY . REMAINING) of extra 4.5 aggregates.
+The span/byte cons above covers `max_rich_spans' and the frame bytes;
+this carries the other per-SurfaceSpec aggregate counts a skin can
+emit against — `:max_table_cells', `:max_canvas_ops'.  Seeded by
+`jetpacs-buffer-with-budget' alongside the main budget and spent with
+`jetpacs-buffer-spend-limit'.  Without it, two screens in one
+multi_view each count their own tables from zero and the push-time
+GATE 5 aggregate refuses the whole surface (JA-5 A2).")
+
 (defmacro jetpacs-buffer-with-budget (&rest body)
   "Run BODY sharing ONE SPEC 4.5 render budget across every region.
 IDEMPOTENT: an inner use joins the allowance already in force rather
@@ -659,6 +669,11 @@ reset the budget let one snapshot carry N times the limit."
   (declare (indent 0))
   `(let* ((outer jetpacs-buffer-budget)
           (jetpacs-buffer-budget (or outer (jetpacs-buffer-budgets)))
+          ;; Same nesting rule for the extra aggregates: fresh only when
+          ;; the span/byte budget is fresh, so all three stay one scope.
+          (jetpacs-buffer-extra-budget
+           (or jetpacs-buffer-extra-budget
+               (and (null outer) (jetpacs-buffer--extra-budgets))))
           ;; The same nesting rule for exposure scope (SPEC 23.1): this
           ;; macro delimits one SurfaceSpec, which is exactly one
           ;; document, so an inner use joins the document already in
@@ -667,6 +682,18 @@ reset the budget let one snapshot carry N times the limit."
            (or jetpacs-buffer--exposure-document
                (and (null outer) (make-hash-table :test #'equal)))))
      ,@body))
+
+(defun jetpacs-buffer--extra-budgets ()
+  "Fresh extra-aggregate allowances from the live welcome, as an alist.
+Only keys the Companion actually advertises appear; an absent key means
+no sender-side spend (the push-time gate remains the authority)."
+  (when-let* ((client (jetpacs-client))
+              (limits (ebp-client-limits client)))
+    (let (extra)
+      (dolist (key '(:max_table_cells :max_canvas_ops))
+        (when-let* ((n (plist-get limits key)))
+          (push (cons key n) extra)))
+      extra)))
 
 (defun jetpacs-buffer-budgets ()
   "The live welcome budgets as (MAX-SPANS . MAX-BYTES), members nil-able.
@@ -719,6 +746,21 @@ it.  Bind the budget with `jetpacs-buffer-with-budget' around the build."
           (setq spans (jetpacs-buffer-cap-spans spans left)))
         (setcar budget (max 0 (- left (length spans))))
         spans))))
+
+(defun jetpacs-buffer-spend-limit (key n)
+  "Spend N units of the shared aggregate limit KEY; nil means overrun.
+KEY is a welcome `limits' keyword SPEC 4.5 counts per SurfaceSpec —
+`:max_table_cells', `:max_canvas_ops'.  Returns t and spends when N
+fits the remaining allowance; returns nil and spends NOTHING when it
+would not, so the caller truncates or degrades instead of walking the
+build into GATE 5's whole-push refusal.  With no allowance bound, or
+none advertised for KEY, the spend is free — the push-time gate stays
+the authority.  N <= 0 is a free no-op."
+  (let ((cell (assq key jetpacs-buffer-extra-budget)))
+    (cond
+     ((or (null cell) (<= n 0)) t)
+     ((> n (cdr cell)) nil)
+     (t (setcdr cell (- (cdr cell) n)) t))))
 
 (defun jetpacs-buffer-spans->text (spans)
   "Flatten SPANS into one Core `text' node — the non-`rich_text' fallback.

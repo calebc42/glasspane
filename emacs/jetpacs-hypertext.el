@@ -274,6 +274,21 @@ memory just to be refused."
             (insert-file-contents-literally file)
             (buffer-string)))))))
 
+;; Public aliases (JA-5 A1).  The org render skin is the second consumer
+;; of these byte-helpers — data: images and LaTeX PNGs need exactly the
+;; sniff/measure/fit/read pipeline above — which promotes them from
+;; module-private to a cross-module contract.  Same functions, public
+;; names; behavior stays documented on the canonical definitions.
+(defalias 'jetpacs-hypertext-decode-data-uri
+  #'jetpacs-hypertext--decode-data-uri)
+(defalias 'jetpacs-hypertext-sniff-type #'jetpacs-hypertext--sniff-type)
+(defalias 'jetpacs-hypertext-png-size #'jetpacs-hypertext--png-size)
+(defalias 'jetpacs-hypertext-jpeg-size #'jetpacs-hypertext--jpeg-size)
+(defalias 'jetpacs-hypertext-image-dimensions
+  #'jetpacs-hypertext--image-dimensions)
+(defalias 'jetpacs-hypertext-image-fits-p #'jetpacs-hypertext--image-fits-p)
+(defalias 'jetpacs-hypertext-file-bytes #'jetpacs-hypertext--file-bytes)
+
 (defun jetpacs-hypertext--image (seg)
   "Resolve image SEG per the module commentary's decision table.
 Returns a `jetpacs-image' node or the alt-text caption — never nil,

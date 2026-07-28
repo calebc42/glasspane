@@ -783,5 +783,81 @@ NO-OP, byte-identical buffer, instead of search-failed escaping."
   ;; The degraded arm never signals.
   (should (stringp (jetpacs-org-format-clock-time "x" "y"))))
 
+;;;; The outline model (JA-5a, amendment A3)
+
+(defconst jetpacs-org-test--outline-fixture
+  (concat "* One\nBody.\n"
+          "** TODO [#A] Sub :tag:\nDEADLINE: <2026-01-01 Thu>\nSub body.\n"
+          "* DONE Two\n"
+          "*** Skip\n")
+  "Two roots, a decorated child, and a SKIPPED level under Two.")
+
+(ert-deftest jetpacs-org-outline-collect-records-fields ()
+  "Collection walks every heading; records carry the decoded fields.
+`include-first' picks up a heading sitting exactly at BEG."
+  (jetpacs-org-test--with-fixture f jetpacs-org-test--outline-fixture
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-with-wide-buffer
+       (let ((recs (jetpacs-org-outline-collect (point-min) (point-max) nil)))
+         (should (= 4 (length recs)))
+         (let ((one (nth 0 recs)) (sub (nth 1 recs)) (two (nth 2 recs)))
+           (should (equal (plist-get one :title) "One"))
+           (should (= 1 (plist-get one :level)))
+           (should-not (plist-get one :todo))
+           (should (equal (plist-get sub :todo) "TODO"))
+           (should (equal (plist-get sub :priority) "A"))
+           (should (equal (plist-get sub :tags) '("tag")))
+           (should-not (plist-get sub :done))
+           (should (plist-get sub :deadline))
+           (should (string-match-p "Sub body" (plist-get sub :body)))
+           (should (equal (plist-get two :todo) "DONE"))
+           (should (plist-get two :done))))
+       ;; include-first from a heading's own bol.
+       (goto-char (point-min))
+       (search-forward "** TODO")
+       (let ((recs (jetpacs-org-outline-collect
+                    (line-beginning-position) (point-max) t)))
+         (should (equal (plist-get (car recs) :title) "Sub")))))))
+
+(ert-deftest jetpacs-org-outline-tree-nests-and-handles-skips ()
+  "Nesting follows :level; a skipped level (* -> ***) nests under the
+nearest shallower ancestor rather than being dropped."
+  (jetpacs-org-test--with-fixture f jetpacs-org-test--outline-fixture
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-with-wide-buffer
+       (let* ((recs (jetpacs-org-outline-collect (point-min) (point-max) nil))
+              (tree (jetpacs-org-outline-tree recs)))
+         (should (= 2 (length tree)))
+         (should (equal (plist-get (nth 0 tree) :title) "One"))
+         (should (equal (plist-get (car (plist-get (nth 0 tree) :children))
+                                   :title)
+                        "Sub"))
+         ;; "Skip" is level 3 directly under level-1 "Two".
+         (should (equal (plist-get (car (plist-get (nth 1 tree) :children))
+                                   :title)
+                        "Skip")))))))
+
+(ert-deftest jetpacs-org-outline-cap-truncates ()
+  (let ((jetpacs-org-outline-max-headings 2))
+    (should (= 2 (length (jetpacs-org-outline-cap '(a b c d)))))
+    (should (equal '(a) (jetpacs-org-outline-cap '(a))))))
+
+(ert-deftest jetpacs-org-file-toplevel-records-root-checked ()
+  "Top-level records come back tagged :file/:buffer and only level 1;
+a path outside `jetpacs-org-roots' is REFUSED, not read — the poc read
+any path handed to it."
+  (jetpacs-org-test--with-fixture f jetpacs-org-test--outline-fixture
+    (let ((tops (jetpacs-org-file-toplevel-records f)))
+      (should (= 2 (length tops)))
+      (should (cl-every (lambda (r) (= 1 (plist-get r :level))) tops))
+      (should (equal (plist-get (car tops) :file) f))
+      (should (stringp (plist-get (car tops) :buffer))))
+    ;; Outside the allowlist: refusal, before any read.
+    (let ((jetpacs-org-roots (list (make-temp-file "ja5-other" t))))
+      (should-error (jetpacs-org-file-toplevel-records f)
+                    :type 'jetpacs-org-refused))))
+
 (provide 'jetpacs-org-test)
 ;;; jetpacs-org-test.el ends here

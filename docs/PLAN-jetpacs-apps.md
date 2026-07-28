@@ -151,6 +151,16 @@ Rungs are strictly dependency-ordered. Each exit gate follows the rewrite's
 existing convention: an ERT suite that runs offline, plus a device smoke script
 in `test/`.
 
+**1.0 rescope (Caleb, 2026-07-28):** JA-7 (transient/git), JA-8 (project/hosts)
+and JA-9 (triggers) move **post-1.0**. The 1.0 release is the polished Emacs
+thin-client plus the polished org reader/editor: JA-1..JA-6 hardened (the open
+P1 batches), JA-10 settings, and a chrome polish pass that standardizes the
+naming and functional contract of the five chrome elements (drawer, top bar,
+bottom bar, floating toolbar, FAB — see `docs/CHROME-VOCABULARY.md`). Feature
+breadth returns after that bar is met. Dependency note: none of JA-7/8/9 is a
+prerequisite of JA-10; JA-10's package browser was already gated on D-11, not
+on JA-7.
+
 ### JA-1 — Device coherence *(no dependencies; ships standalone)*
 **DONE + DEVICE-VERIFIED 2026-07-26** (c08dec1 theme+granted-p, 2f8d6eb
 reminders+clip, 421399e device gate: theme mirror 7/7 — ready-hook push,
@@ -694,7 +704,7 @@ path-prefix-not-component, and remote-filename cases; grep bounds (hit cap, file
 cap, size cap, NUL binary guard). Smoke — browse `/sdcard`, edit init.el, save,
 restart Emacs, confirm the edit took.
 
-### JA-7 — git from the tablet
+### JA-7 — git from the tablet *(**DEFERRED post-1.0** — Caleb, 2026-07-28)*
 
 **Lands:** `jetpacs-transient.el` — layout reader (port) plus a **single**
 dialog whose infixes are stateful nodes and whose suffix buttons are
@@ -716,7 +726,7 @@ touch-usable.
 (0.7.x 4-slot group vectors and newer 3-slot roots). Smoke — `magit-commit` end
 to end from the tablet, including one prefix with an infix argument set.
 
-### JA-8 — Project and hosts
+### JA-8 — Project and hosts *(**DEFERRED post-1.0** — Caleb, 2026-07-28)*
 
 **Lands:** the project dashboard on JA-2's buffer host — grep, compile, shell,
 buffers, magit, each landing on a substrate the rewrite already finished.
@@ -733,7 +743,7 @@ pump runs the socket filter inside TRAMP's connection extent).
 compile, open magit-status and fold a section, ssh to a box and get a working
 shell.
 
-### JA-9 — Triggers
+### JA-9 — Triggers *(**DEFERRED post-1.0** — Caleb, 2026-07-28)*
 
 **Lands:** the registry and `jetpacs-deftrigger` (port), `:ttl-s` added and
 validated 1..604800, replace-set assembly emitting keyword plists, the
@@ -755,7 +765,7 @@ report from `ebp-client-triggers-set`; the durable work item survives a
 simulated crash between commit and effect. Smoke — arm a `time` trigger, kill
 Emacs, confirm it fires offline and replays on reconnect exactly once.
 
-### JA-10 — Settings and packages
+### JA-10 — Settings and packages *(**ACTIVE — next rung, 2026-07-28**)*
 
 **Lands:** the settings engine (rebuild-lite — the `condition-case` must
 re-signal `inhibited-interaction`, which is a child of `error`), the

@@ -728,23 +728,139 @@ to the pure Tier-0 render."
 (jetpacs-defaction "jetpacs.org.checkbox" #'jetpacs-org-render--checkbox)
 (jetpacs-defaction "jetpacs.org.widen" #'jetpacs-org-render--widen)
 
+;;;; The JA-6 files seams (rendered⇄plain, toolbar, FAB, after-save)
+;;
+;; JA-6's tap-to-open path builds the PLAIN editor screen and publishes
+;; five seams; the org experience claims `.org' paths through them,
+;; using only public names.  The per-path VIEW MODE decides which face
+;; a file shows: `rendered' (default — the body seam replaces the
+;; editor with this skin's output) or `plain' (the body function
+;; passes, files builds its own editor, which then picks up the org
+;; toolbar through the toolbar seam).  The actions seam contributes
+;; the toggle; the FAB seam the add-heading affordance; the after-save
+;; hook busts the org cache when a device-side save lands on a `.org'.
+;; Seam functions are PURE BUILDERS — they must never push (the JA-6
+;; audit names a pushing body function as unexplored territory).
+
+(defvar jetpacs-org-render--files-mode (make-hash-table :test #'equal)
+  "PATH -> `rendered' | `plain'.  Absent means `rendered' for org files.")
+
+(defun jetpacs-org-render--org-path-p (path)
+  (and (stringp path)
+       (string-suffix-p ".org" path t)))
+
+(defun jetpacs-org-render--files-rendered-p (path)
+  (and (jetpacs-org-render--org-path-p path)
+       (not (eq (gethash path jetpacs-org-render--files-mode) 'plain))))
+
+(defun jetpacs-org-render--files-body (path)
+  "The body seam: the rendered org view, or nil to pass to the editor."
+  (when (jetpacs-org-render--files-rendered-p path)
+    (let ((buf (find-file-noselect path t)))
+      (with-current-buffer buf
+        (unless (derived-mode-p 'org-mode) (org-mode)))
+      (apply #'jetpacs-column (jetpacs-org-render buf)))))
+
+(defun jetpacs-org-render--files-actions (path)
+  "The actions seam: the rendered⇄plain toggle icon for org paths."
+  (when (jetpacs-org-render--org-path-p path)
+    (list (jetpacs-icon-button
+           (if (jetpacs-org-render--files-rendered-p path)
+               "edit" "preview")
+           (jetpacs-action "jetpacs.org.view-mode"
+                           :args (list :path path))
+           :content-description
+           (if (jetpacs-org-render--files-rendered-p path)
+               "Edit as text" "Show rendered")))))
+
+(defun jetpacs-org-render--files-toolbar (path)
+  "The toolbar seam: the org toolbar on the plain editor."
+  (when (jetpacs-org-render--org-path-p path)
+    (jetpacs-org-toolbar)))
+
+(defun jetpacs-org-render--files-fab (path)
+  "The FAB seam: the add-heading affordance (mint + record atomic)."
+  (when (jetpacs-org-render--org-path-p path)
+    (jetpacs-icon-button
+     "post_add"
+     (jetpacs-org-add-heading-descriptor
+      (buffer-name (find-file-noselect path t)))
+     :content-description "Add heading")))
+
+(defun jetpacs-org-render--files-after-save (truename)
+  "The after-save hook: a device-side org save busts the engine memo."
+  (when (jetpacs-org-render--org-path-p truename)
+    (jetpacs-org-cache-invalidate)))
+
+(defun jetpacs-org-render--view-mode (args params)
+  "Flip the per-path view mode.  The worst a forged path can do is
+flip a bit for a file nobody shows — the screens re-derive everything
+from their own state on the deferred re-push."
+  (let ((path (plist-get args :path)))
+    (cond
+     ((not (jetpacs-org-render--org-path-p path)) 'rejected)
+     ((jetpacs-event-stale-p params) 'stale)
+     (t
+      (puthash path
+               (if (jetpacs-org-render--files-rendered-p path)
+                   'plain 'rendered)
+               jetpacs-org-render--files-mode)
+      (jetpacs-buffer-defer-refresh (plist-get params :surface))
+      'accepted))))
+
+(jetpacs-defaction "jetpacs.org.view-mode" #'jetpacs-org-render--view-mode)
+
+;; Compile-time declarations for the files seams (loaded lazily below).
+(defvar jetpacs-files-editor-toolbar-function)
+(defvar jetpacs-files-editor-fab-function)
+(declare-function jetpacs-org-toolbar "jetpacs-org-toolbar")
+
+(with-eval-after-load 'jetpacs-files
+  (require 'jetpacs-org-toolbar)
+  (add-hook 'jetpacs-files-editor-body-functions
+            #'jetpacs-org-render--files-body)
+  (add-hook 'jetpacs-files-editor-actions-functions
+            #'jetpacs-org-render--files-actions)
+  (add-hook 'jetpacs-files-after-save-hook
+            #'jetpacs-org-render--files-after-save)
+  ;; Single-function seams: claim politely, chaining any prior holder.
+  (let ((prev (bound-and-true-p jetpacs-files-editor-toolbar-function)))
+    (setq jetpacs-files-editor-toolbar-function
+          (lambda (path)
+            (or (jetpacs-org-render--files-toolbar path)
+                (and prev (funcall prev path))))))
+  (let ((prev (bound-and-true-p jetpacs-files-editor-fab-function)))
+    (setq jetpacs-files-editor-fab-function
+          (lambda (path)
+            (or (jetpacs-org-render--files-fab path)
+                (and prev (funcall prev path)))))))
+
 ;;;; Reset / unload
 
 (defun jetpacs-org-render-reset ()
-  "Reset render-module state: the LaTeX memo, queue and drain timer."
+  "Reset render-module state: LaTeX memo/queue/timer, view modes."
   (clrhash jetpacs-org-render--latex-memo)
   (setq jetpacs-org-render--latex-order nil
         jetpacs-org-render--latex-queue nil)
   (when (timerp jetpacs-org-render--latex-timer)
     (cancel-timer jetpacs-org-render--latex-timer))
-  (setq jetpacs-org-render--latex-timer nil))
+  (setq jetpacs-org-render--latex-timer nil)
+  (clrhash jetpacs-org-render--files-mode))
 
 (defun jetpacs-org-render-unload-function ()
-  "Unload hygiene: deregister the skin and the verbs."
+  "Unload hygiene: deregister the skin, the verbs and the seams."
   (setq jetpacs-render-buffer-functions
         (assq-delete-all 'org-mode jetpacs-render-buffer-functions))
   (jetpacs-undefaction "jetpacs.org.checkbox")
   (jetpacs-undefaction "jetpacs.org.widen")
+  (jetpacs-undefaction "jetpacs.org.view-mode")
+  (when (boundp 'jetpacs-files-editor-body-functions)
+    (remove-hook 'jetpacs-files-editor-body-functions
+                 #'jetpacs-org-render--files-body)
+    (remove-hook 'jetpacs-files-editor-actions-functions
+                 #'jetpacs-org-render--files-actions)
+    (remove-hook 'jetpacs-files-after-save-hook
+                 #'jetpacs-org-render--files-after-save))
   (jetpacs-org-render-reset)
   nil)
 

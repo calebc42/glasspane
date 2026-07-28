@@ -879,6 +879,71 @@ this module never sees."
      (jetpacs-org-dialogs--refresh params))
    params))
 
+;;;; add-heading (poc 2658-2680 rebuilt on the flow seam)
+
+(defun jetpacs-org-add-heading-descriptor (buffer-name)
+  "Mint the add-heading descriptor AND its 23.1 record, atomically.
+The one sanctioned way to offer the affordance (the files FAB seam and
+the Tier-1 outline view both call this), so a descriptor can never ship
+without its whole-buffer record.  Calls the buffer's supersession
+first, making the mint order-independent within one document —
+`jetpacs-buffer-forget-exposed' is first-clear-wins there."
+  (jetpacs-buffer-forget-exposed buffer-name)
+  (jetpacs-buffer-expose-buffer buffer-name "jetpacs.org.add-heading")
+  (jetpacs-action "jetpacs.org.add-heading"
+                  :args (list :buffer buffer-name)))
+
+(defun jetpacs-org-dialogs--add-heading-flow (buf params)
+  "The bridged prompt half: ask for a title, append `* TITLE'.
+The poc called `read-string' INSIDE the handler; here it runs from the
+flow continuation behind the can-bridge gate.  The title is scrubbed
+and newline-flattened — a multi-line title would smuggle structure."
+  (jetpacs-org-dialogs--with-prompting
+   (lambda ()
+     (let ((title (condition-case nil
+                      (read-string "New heading: ")
+                    (quit ""))))
+       (if (or (not (stringp title)) (string-blank-p title))
+           (jetpacs-org-dialogs--notify "Heading cancelled" params)
+         (with-current-buffer buf
+           (org-with-wide-buffer
+            (goto-char (point-max))
+            (unless (bolp) (insert "\n"))
+            (insert "* "
+                    (replace-regexp-in-string
+                     "[\n\r]+" " "
+                     (jetpacs-scalar-text (string-trim title)))
+                    "\n"))
+           ;; The seam the engine publishes for exactly this tail: apps
+           ;; rebind it for a synchronous save + index refresh.
+           (funcall jetpacs-org-file-save-function (current-buffer)))
+         (jetpacs-org-dialogs--notify "Heading added" params))
+       (jetpacs-org-dialogs--refresh params)))
+   params))
+
+(defun jetpacs-org-dialogs--add-heading (args params)
+  "Append a heading to the buffer the render offered the affordance on."
+  (let* ((name (plist-get args :buffer))
+         (buf (and (stringp name) (get-buffer name))))
+    (cond
+     ((not buf) 'rejected)
+     ((jetpacs-event-stale-p params) 'stale)
+     ((not (jetpacs-buffer-exposed-buffer-p name "jetpacs.org.add-heading"))
+      'rejected)
+     ;; The target must be a WRITABLE file inside the org roots —
+     ;; 23.1 on the effect, not just the addressing.
+     ((not (with-current-buffer buf
+             (and buffer-file-name
+                  (file-writable-p buffer-file-name)
+                  (condition-case nil
+                      (jetpacs-org--check-file buffer-file-name)
+                    (jetpacs-org-refused nil)))))
+      'rejected)
+     (t
+      (jetpacs-flow-continue
+       (lambda () (jetpacs-org-dialogs--add-heading-flow buf params)))
+      'accepted))))
+
 ;;;; The verbs
 
 (defun jetpacs-org-dialogs--dialog-tap (verb show args params)
@@ -991,6 +1056,8 @@ completed archive — and the spent sheet is abandoned."
 (jetpacs-defaction "jetpacs.org.timestamp"
                    #'jetpacs-org-dialogs--timestamp-action)
 (jetpacs-defaction "jetpacs.org.ts-pick" #'jetpacs-org-dialogs--ts-pick)
+(jetpacs-defaction "jetpacs.org.add-heading"
+                   #'jetpacs-org-dialogs--add-heading)
 
 ;;;; Reset / teardown / unload
 
@@ -1019,6 +1086,7 @@ completed archive — and the spent sheet is abandoned."
   (jetpacs-undefaction "jetpacs.org.archive")
   (jetpacs-undefaction "jetpacs.org.timestamp")
   (jetpacs-undefaction "jetpacs.org.ts-pick")
+  (jetpacs-undefaction "jetpacs.org.add-heading")
   (jetpacs-org-dialogs-reset)
   nil)
 

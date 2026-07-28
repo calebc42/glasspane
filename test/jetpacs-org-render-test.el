@@ -659,5 +659,97 @@ cleanup thunk — the drain never burns a tick on a view nobody shows."
         (should (= 0 (length jetpacs-org-render--latex-queue)))
         (should (= 0 (car compiles)))))))
 
+;;;; The toolbar port (JA-5f)
+
+(require 'jetpacs-org-toolbar)
+
+(ert-deftest jetpacs-org-toolbar-builds-and-shapes ()
+  "The toolbar builds (every item passing the §17.7 builder), carries
+no `:command' ops, one-level menus only, and op-plist long-presses."
+  (let ((items (jetpacs-org-toolbar)))
+    (should (< 10 (length items)))
+    (cl-labels
+        ((walk (item)
+           (should-not (plist-get item :command))
+           (when-let* ((lp (plist-get item :long_press)))
+             (should (plist-get lp :snippet)))
+           (dolist (sub (append (plist-get item :menu) nil))
+             (should-not (plist-get sub :menu))
+             (walk sub))))
+      (mapc #'walk items))))
+
+(ert-deftest jetpacs-org-toolbar-legal-on-plain-editor ()
+  "No `:command' ops means the plain (non-:document) editor accepts it."
+  (should (jetpacs-editor "tb-test" :value "x"
+                          :toolbar (jetpacs-org-toolbar))))
+
+;;;; The files seams (JA-5f)
+
+(require 'jetpacs-files)   ; fires the with-eval-after-load wiring
+
+(ert-deftest jetpacs-org-render-files-body-rendered-and-plain ()
+  "The body seam renders org files by default, passes in plain mode,
+ignores non-org paths — and never pushes during a build."
+  (jetpacs-org-render-test--with-file f "* H\nbody\n"
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-shell-push)
+                   (lambda (&rest _) (error "a seam builder pushed"))))
+          (let ((node (jetpacs-org-render--files-body f)))
+            (should node)
+            (should (equal (plist-get node :t) "column")))
+          (puthash f 'plain jetpacs-org-render--files-mode)
+          (should-not (jetpacs-org-render--files-body f))
+          (should-not (jetpacs-org-render--files-body "/tmp/x.txt")))
+      (clrhash jetpacs-org-render--files-mode))))
+
+(ert-deftest jetpacs-org-render-files-view-mode-toggle ()
+  "The actions seam offers the toggle; the verb flips the mode and
+rejects non-org paths."
+  (jetpacs-org-render-test--with-file f "* H\n"
+    (unwind-protect
+        (progn
+          (let ((actions (jetpacs-org-render--files-actions f)))
+            (should (= 1 (length actions)))
+            (should (equal (plist-get (car actions) :t) "icon_button"))
+            (should (equal (plist-get (plist-get (car actions) :on_tap)
+                                      :action)
+                           "jetpacs.org.view-mode")))
+          (should-not (jetpacs-org-render--files-actions "/tmp/x.txt"))
+          (should (eq 'accepted
+                      (jetpacs-org-render--view-mode
+                       (list :path f) '(:surface "app:jetpacs.files"))))
+          (should-not (jetpacs-org-render--files-rendered-p f))
+          (should (eq 'accepted
+                      (jetpacs-org-render--view-mode
+                       (list :path f) '(:surface "app:jetpacs.files"))))
+          (should (jetpacs-org-render--files-rendered-p f))
+          (should (eq 'rejected
+                      (jetpacs-org-render--view-mode
+                       '(:path "/etc/passwd.txt")
+                       '(:surface "app:jetpacs.files")))))
+      (clrhash jetpacs-org-render--files-mode))))
+
+(ert-deftest jetpacs-org-render-files-toolbar-and-fab-seams ()
+  "The chained single-function seams answer for org paths: the toolbar
+list and the FAB whose descriptor was minted WITH its record."
+  (jetpacs-org-render-test--with-file f "* H\n"
+    (should (jetpacs-org-render--files-toolbar f))
+    (should-not (jetpacs-org-render--files-toolbar "/tmp/x.py"))
+    (let ((fab (jetpacs-org-render--files-fab f)))
+      (should (equal (plist-get fab :t) "icon_button"))
+      (should (equal (plist-get (plist-get fab :on_tap) :action)
+                     "jetpacs.org.add-heading"))
+      (let ((name (buffer-name (find-buffer-visiting f))))
+        (should (jetpacs-buffer-exposed-buffer-p
+                 name "jetpacs.org.add-heading"))))))
+
+(ert-deftest jetpacs-org-render-files-after-save-busts-cache ()
+  (let ((busted 0))
+    (cl-letf (((symbol-function 'jetpacs-org-cache-invalidate)
+               (lambda (&rest _) (cl-incf busted))))
+      (jetpacs-org-render--files-after-save "/x/notes.org")
+      (jetpacs-org-render--files-after-save "/x/notes.txt")
+      (should (= 1 busted)))))
+
 (provide 'jetpacs-org-render-test)
 ;;; jetpacs-org-render-test.el ends here

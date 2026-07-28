@@ -756,5 +756,92 @@ back; dismissing keeps today's cancel."
                                                (plist-get e :content))))
                         entries))))))))))
 
+;;;; add-heading (JA-5f)
+
+(ert-deftest jetpacs-org-dialogs-add-heading-gates ()
+  "Unexposed, non-file and outside-roots buffers are rejected; the
+armed case defers to the flow and answers accepted."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f "* Existing\n"
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (name (buffer-name buf))
+             (flowed nil))
+        (cl-letf (((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (setq flowed fn))))
+          ;; Unexposed.
+          (jetpacs-buffer-forget-exposed)
+          (should (eq 'rejected
+                      (jetpacs-org-dialogs--add-heading
+                       (list :buffer name)
+                       jetpacs-org-dialogs-test--params)))
+          ;; A file outside the org roots.
+          (jetpacs-org-add-heading-descriptor name)
+          (let ((jetpacs-org-roots
+                 (list (file-name-as-directory
+                        (make-temp-file "ja5f-other" t)))))
+            (should (eq 'rejected
+                        (jetpacs-org-dialogs--add-heading
+                         (list :buffer name)
+                         jetpacs-org-dialogs-test--params))))
+          ;; Armed and in-root.
+          (jetpacs-org-add-heading-descriptor name)
+          (should (eq 'accepted
+                      (jetpacs-org-dialogs--add-heading
+                       (list :buffer name)
+                       jetpacs-org-dialogs-test--params)))
+          (should (functionp flowed)))))))
+
+(ert-deftest jetpacs-org-dialogs-add-heading-flow-inserts-and-saves ()
+  "The bridged prompt appends `* TITLE' at wide point-max (newlines
+flattened) and runs the engine's file-save seam; a blank or quit
+answer is a loud no-op."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f "* Existing\nbody"
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (saved nil)
+             (jetpacs-org-file-save-function
+              (lambda (b) (setq saved (buffer-name b)))))
+        (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                   (lambda () t))
+                  ((symbol-function 'read-string)
+                   (lambda (&rest _) "  Captured\non the go  ")))
+          (jetpacs-org-dialogs--add-heading-flow
+           buf jetpacs-org-dialogs-test--params))
+        (should (equal saved (buffer-name buf)))
+        (with-current-buffer buf
+          (org-with-wide-buffer
+           (goto-char (point-min))
+           (should (search-forward "* Captured on the go\n" nil t))))
+        ;; Cancelled: nothing inserted, nothing saved.
+        (setq saved nil)
+        (let ((before (with-current-buffer buf (buffer-string))))
+          (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                     (lambda () t))
+                    ((symbol-function 'read-string)
+                     (lambda (&rest _) (keyboard-quit))))
+            (jetpacs-org-dialogs--add-heading-flow
+             buf jetpacs-org-dialogs-test--params))
+          (should-not saved)
+          (should (equal before
+                         (with-current-buffer buf (buffer-string)))))))))
+
+(ert-deftest jetpacs-org-dialogs-add-heading-is-can-bridge-gated ()
+  "With no bridge the flow refuses loudly — never a desktop prompt."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f "* Existing\n"
+      (let* ((buf (jetpacs-org-dialogs-test--buffer f))
+             (notified nil)
+             (prompted nil))
+        (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                   (lambda () nil))
+                  ((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &optional _s) (push text notified)))
+                  ((symbol-function 'read-string)
+                   (lambda (&rest _) (setq prompted t) "X")))
+          (jetpacs-org-dialogs--add-heading-flow
+           buf jetpacs-org-dialogs-test--params)
+          (should-not prompted)
+          (should notified))))))
+
 (provide 'jetpacs-org-dialogs-test)
 ;;; jetpacs-org-dialogs-test.el ends here

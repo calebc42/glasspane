@@ -524,5 +524,210 @@ never a `jetpacs-path-refused' a handler would answer to the device."
           (jetpacs-files-test--pump)
           (should (equal pushed '("app:jetpacs.files"))))))))
 
+;;;; Content search (F2)
+
+(defun jetpacs-files-test--scan (dir query)
+  "Drive the chunked scan to completion; return the result plist."
+  (let (result)
+    (jetpacs-files--grep-start dir query (lambda (r) (setq result r)))
+    (cl-loop repeat 200 until result do (accept-process-output nil 0.02))
+    result))
+
+(ert-deftest jetpacs-files-grep-matches-literally ()
+  "The query is a LITERAL, never a regexp (#137: an exposed pattern
+grammar is received interpretation), and matching is case-insensitive
+with one hit per line."
+  (jetpacs-files-test--with-tree root
+    (let ((f (concat root "f.txt")))
+      (write-region "a.*b\naxxb\nTODO and todo\n" nil f nil 'silent)
+      (let ((hits (jetpacs-files--grep-file f ".*" 100)))
+        (should (= (length hits) 1))
+        (should (= (nth 1 (car hits)) 1)))
+      (let ((hits (jetpacs-files--grep-file f "todo" 100)))
+        (should (= (length hits) 1))
+        (should (= (nth 1 (car hits)) 3))))))
+
+(ert-deftest jetpacs-files-grep-nul-guard-skips-binaries ()
+  (jetpacs-files-test--with-tree root
+    (let ((bin (concat root "bin.dat"))
+          (txt (concat root "t.txt"))
+          (coding-system-for-write 'binary))
+      (write-region "head\0needle\n" nil bin nil 'silent)
+      (write-region "needle\n" nil txt nil 'silent)
+      (should-not (jetpacs-files--grep-file bin "needle" 100))
+      (should (= (length (jetpacs-files--grep-file txt "needle" 100)) 1)))))
+
+(ert-deftest jetpacs-files-grep-file-honours-hits-left ()
+  (jetpacs-files-test--with-tree root
+    (let ((f (concat root "f.txt")))
+      (write-region "n\nn\nn\nn\nn\n" nil f nil 'silent)
+      (should (= (length (jetpacs-files--grep-file f "n" 2)) 2))
+      (should-not (jetpacs-files--grep-file f "n" 0)))))
+
+(ert-deftest jetpacs-files-grep-scan-skips-what-it-must ()
+  "Excluded dirs, oversize files, backups, and anything behind a
+symlink — the guard validated the START directory, and a link out of
+the sandbox must not let the scan read what open would refuse."
+  (jetpacs-files-test--with-tree root
+    (let* ((outside (file-name-as-directory
+                     (make-temp-file "jetpacs-grep-out" t))))
+      (unwind-protect
+          (progn
+            (write-region "needle in plain\n" nil (concat root "plain.txt")
+                          nil 'silent)
+            (make-directory (concat root ".git"))
+            (write-region "needle in vcs\n" nil (concat root ".git/config")
+                          nil 'silent)
+            (write-region (concat (make-string 300 ?x) " needle\n") nil
+                          (concat root "big.txt") nil 'silent)
+            (write-region "needle in backup\n" nil (concat root "x.txt~")
+                          nil 'silent)
+            (write-region "needle outside\n" nil (concat outside "o.txt")
+                          nil 'silent)
+            (make-symbolic-link (directory-file-name outside)
+                                (concat root "ldir"))
+            (make-symbolic-link (concat outside "o.txt")
+                                (concat root "lfile.txt"))
+            (let* ((jetpacs-files-grep-max-file-bytes 100)
+                   (result (jetpacs-files-test--scan root "needle"))
+                   (files (mapcar #'car (plist-get result :hits))))
+              (should result)
+              (should (equal files (list (concat root "plain.txt"))))
+              (should-not (plist-get result :truncated))))
+        (delete-directory outside t)))))
+
+(ert-deftest jetpacs-files-grep-scan-caps-files-and-hits ()
+  (jetpacs-files-test--with-tree root
+    (dolist (n '("a" "b" "c"))
+      (write-region "needle\n" nil (concat root n ".txt") nil 'silent))
+    (let* ((jetpacs-files-grep-max-files 2)
+           (result (jetpacs-files-test--scan root "needle")))
+      (should (plist-get result :truncated))
+      (should (<= (length (plist-get result :hits)) 2)))
+    (write-region "n\nn\nn\nn\nn\n" nil (concat root "many.txt") nil 'silent)
+    (let* ((jetpacs-files-grep-max-hits 3)
+           (result (jetpacs-files-test--scan root "n")))
+      (should (plist-get result :truncated))
+      (should (= (length (plist-get result :hits)) 3)))))
+
+(ert-deftest jetpacs-files-grep-scan-is-async-and-cancellable ()
+  (jetpacs-files-test--with-tree root
+    (write-region "needle\n" nil (concat root "bfile.txt") nil 'silent)
+    (write-region "needle\n" nil (concat root "afile.txt") nil 'silent)
+    ;; Nothing resolves inside the caller's extent, and a cancelled scan
+    ;; never resolves at all.
+    (let* ((resolved nil)
+           (cancel (jetpacs-files--grep-start
+                    root "needle" (lambda (r) (setq resolved r)))))
+      (should-not resolved)
+      (funcall cancel)
+      (cl-loop repeat 20 do (accept-process-output nil 0.02))
+      (should-not resolved))
+    ;; Uncancelled: resolves once, hits sorted by file then line.
+    (let ((result (jetpacs-files-test--scan root "needle")))
+      (should result)
+      (should (equal (mapcar #'car (plist-get result :hits))
+                     (list (concat root "afile.txt")
+                           (concat root "bfile.txt")))))))
+
+(ert-deftest jetpacs-files-grep-action-validates-then-defers ()
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (let ((screens '()) (notes '()))
+        (cl-letf (((symbol-function 'jetpacs-chrome-push-screen)
+                   (lambda (surface id builder)
+                     (push (list surface id builder) screens) 1))
+                  ((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &optional _s) (push text notes))))
+          (let ((handler (gethash "jetpacs.files.grep" jetpacs-action-handlers)))
+            ;; Not a string / blank / oversize: rejected before any work.
+            (should (eq (jetpacs--dispatch
+                         client '(:action "jetpacs.files.grep"
+                                  :surface "app:jetpacs.files"
+                                  :args (:value 5))
+                         handler)
+                        'rejected))
+            (should (eq (jetpacs--dispatch
+                         client '(:action "jetpacs.files.grep"
+                                  :surface "app:jetpacs.files"
+                                  :args (:value "   "))
+                         handler)
+                        'rejected))
+            (let ((jetpacs-files-grep-max-query-chars 4))
+              (should (eq (jetpacs--dispatch
+                           client '(:action "jetpacs.files.grep"
+                                    :surface "app:jetpacs.files"
+                                    :args (:value "12345"))
+                           handler)
+                          'rejected))
+              (should (= (length notes) 1)))
+            ;; Valid: accepted, request recorded trimmed, the screen
+            ;; push deferred out of the extent (D2).
+            (should (eq (jetpacs--dispatch
+                         client '(:action "jetpacs.files.grep"
+                                  :surface "app:jetpacs.files"
+                                  :args (:value "  needle  "))
+                         handler)
+                        'accepted))
+            (should (equal (plist-get jetpacs-files--grep-request :query)
+                           "needle"))
+            (should (equal (plist-get jetpacs-files--grep-request :dir)
+                           (jetpacs-check-path root (list root)
+                                               :require 'directory)))
+            (should (null screens))
+            (jetpacs-files-test--pump)
+            (should (equal screens
+                           (list (list "app:jetpacs.files" "grep"
+                                       #'jetpacs-files--grep-screen))))
+            ;; A poisoned view state is refused at the handler, loudly.
+            (let* ((outside (file-name-as-directory
+                             (make-temp-file "jetpacs-grep-out2" t))))
+              (unwind-protect
+                  (let ((jetpacs-files--dir outside))
+                    (should (eq (jetpacs--dispatch
+                                 client '(:action "jetpacs.files.grep"
+                                          :surface "app:jetpacs.files"
+                                          :args (:value "needle"))
+                                 handler)
+                                'rejected))
+                    (should (= (length notes) 2)))
+                (delete-directory outside t)))))))))
+
+(ert-deftest jetpacs-files-grep-screen-pending-then-ready ()
+  "The results screen through the REAL async cache: first build starts
+the loader and shows progress; the completion makes a later build read
+the cards, with the snippet and an open tap on each hit."
+  (jetpacs-files-test--with-tree root
+    (write-region "the needle line\n" nil (concat root "f.txt") nil 'silent)
+    (unwind-protect
+        (let ((jetpacs-files--grep-request (list :query "needle" :dir root))
+              (jetpacs-current-owner jetpacs-files-owner))
+          (let ((first (jetpacs-files--grep-screen nil)))
+            (should (member "progress"
+                            (jetpacs-files-test--collect first :t))))
+          (let (ready)
+            (cl-loop repeat 200
+                     do (accept-process-output nil 0.02)
+                        (setq ready (jetpacs-files--grep-screen nil))
+                     until (member "jetpacs.files.open"
+                                   (jetpacs-files-test--collect ready :action)))
+            (should (member "jetpacs.files.open"
+                            (jetpacs-files-test--collect ready :action)))
+            (let ((texts (jetpacs-files-test--collect ready :text)))
+              (should (cl-some (lambda (s)
+                                 (string-match-p "1 matching line" s))
+                               texts))
+              (should (member "the needle line" texts))
+              (should (member "L1" texts)))))
+      (jetpacs-async-reset))))
+
+(ert-deftest jetpacs-files-body-carries-the-search-input ()
+  (jetpacs-files-test--with-tree root
+    (let ((body (jetpacs-files--body)))
+      (should (member "files-grep-input"
+                      (jetpacs-files-test--collect body :id)))
+      (should (member "jetpacs.files.grep"
+                      (jetpacs-files-test--collect body :action))))))
+
 (provide 'jetpacs-files-test)
 ;;; jetpacs-files-test.el ends here

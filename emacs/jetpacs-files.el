@@ -5,12 +5,18 @@
 
 ;;; Commentary:
 
-;; JA-6 F1 of docs/PLAN-jetpacs-apps.md: the files floor.  This phase
-;; lands the effective root set (configuration plus the /sdcard probe),
-;; the dired card skin with a row cap, and the three browse verbs —
-;; `jetpacs.files.cd', `jetpacs.files.open', `jetpacs.files.refresh'.
-;; Later JA-6 phases add the grep scanner (jetpacs-async), the five
-;; file ops, the plain value+on_save editor, and the launcher.
+;; JA-6 F1+F2 of docs/PLAN-jetpacs-apps.md: the files floor and the
+;; content search.  F1 lands the effective root set (configuration plus
+;; the /sdcard probe), the dired card skin with a row cap, and the three
+;; browse verbs — `jetpacs.files.cd', `jetpacs.files.open',
+;; `jetpacs.files.refresh'.  F2 lands `jetpacs.files.grep': a
+;; `text_input' `:on-submit' on the browse screen (no dialog, no D2
+;; exposure), a bounded CHUNKED scan running as a `jetpacs-async'
+;; loader, and a pushed results screen — leaving the results screen
+;; evicts the async entry, which CANCELS an in-flight scan; a new query
+;; is a new key, so supersession and teardown both come free from the
+;; async cache's sweep.  Later JA-6 phases add the five file ops, the
+;; plain value+on_save editor, and the launcher.
 ;;
 ;; The security shape, stated once: RENDERING IS NOT THE BOUNDARY,
 ;; ACTING IS.  Cards carry raw absolute paths in `:args' because a
@@ -41,6 +47,7 @@
 (require 'cl-lib)
 (require 'dired)
 (require 'jetpacs-widgets)
+(require 'jetpacs-async)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
 (require 'jetpacs-buffer)
@@ -294,7 +301,17 @@ landing configuration never went through a handler."
                (append
                 (list (jetpacs-text (jetpacs-scalar-text
                                      (abbreviate-file-name true))
-                                    :style "caption"))
+                                    :style "caption")
+                      ;; The F2 entry point: SPEC 14.3 injects the
+                      ;; submitted text as `value' into the action's
+                      ;; args — no dialog, no D2 exposure.  Stable id,
+                      ;; no clear-on-submit: 13.6 keeps the draft, so
+                      ;; refining a search is an edit, not a retype.
+                      (jetpacs-text-input
+                       (jetpacs-claim-node-id "files-grep-input")
+                       :hint "Search contents — Enter runs"
+                       :single-line t
+                       :on-submit (jetpacs-action "jetpacs.files.grep")))
                 (and shared (list shared))
                 cards)))
     (jetpacs-path-refused
@@ -312,6 +329,249 @@ landing configuration never went through a handler."
   "The chrome root screen builder."
   (jetpacs-chrome-screen "Files" (jetpacs-files--body)
                          :on-refresh (jetpacs-action "jetpacs.files.refresh")))
+
+;;;; Content search (F2)
+;;
+;; A pure-elisp scan: portable (no external grep on Android) and
+;; bounded four ways — hit cap, examined-file cap, per-file size cap,
+;; and a NUL-in-the-first-KiB binary guard — plus an exclude list for
+;; VCS/build trees.  The QUERY IS A LITERAL, never compiled into a
+;; regexp: SPEC amendment #137's lesson is that an exposed pattern
+;; grammar is received interpretation, and a C-level regexp match never
+;; yields to timers.  The walk is iterative and CHUNKED on timers (the
+;; poc enumerated the whole tree before its cap even started counting),
+;; and it NEVER crosses a symlink — the guard validated the start
+;; directory, and a link out of the sandbox must not let the scan read
+;; what `jetpacs.files.open' would refuse to open.
+
+(defcustom jetpacs-files-grep-max-hits 200
+  "Content search stops after this many matching lines."
+  :type 'integer :group 'jetpacs)
+
+(defcustom jetpacs-files-grep-max-files 2000
+  "Content search stops after examining this many files.
+Search from a subdirectory rather than a root to keep scans quick."
+  :type 'integer :group 'jetpacs)
+
+(defcustom jetpacs-files-grep-max-file-bytes (* 1024 1024)
+  "Files larger than this are skipped by the content search."
+  :type 'integer :group 'jetpacs)
+
+(defcustom jetpacs-files-grep-max-query-chars 200
+  "Ceiling on the submitted query's length.
+The query is peer content; its interpretation cost is bounded before
+any work happens (the SPEC #138 discipline), independent of the
+transport's own message limits."
+  :type 'integer :group 'jetpacs)
+
+(defcustom jetpacs-files-grep-exclude-dirs
+  '(".git" ".hg" ".svn" "node_modules" ".gradle" "build" "dist" "target")
+  "Directory names the content search never descends into."
+  :type '(repeat string) :group 'jetpacs)
+
+(defcustom jetpacs-files-grep-items-per-tick 25
+  "Queue items (files or directories) one timer tick processes.
+The chunk size trades scan latency against event-loop stalls; each tick
+ends by re-arming a short timer, so the socket filter and the dispatch
+pump keep breathing under a large tree."
+  :type 'integer :group 'jetpacs)
+
+(defvar jetpacs-files--grep-request nil
+  "The search the results screen shows: (:query Q :dir D), or nil.
+Written only by `jetpacs.files.grep' after the guard has passed.")
+
+(defun jetpacs-files--grep-file (file query hits-left)
+  "Matching lines of FILE for literal QUERY, at most HITS-LEFT.
+Case-insensitive, one hit per line, each hit (FILE LINE TEXT) with TEXT
+capped at 200 chars.  A NUL in the first KiB marks a binary: no line
+of it is worth showing, and its \"lines\" can be enormous."
+  (when (> hits-left 0)
+    (with-temp-buffer
+      (when (ignore-errors (insert-file-contents file) t)
+        (goto-char (point-min))
+        (unless (search-forward "\0" (min 1024 (point-max)) t)
+          (goto-char (point-min))
+          (let ((case-fold-search t)
+                (out '()))
+            (while (and (> hits-left 0) (search-forward query nil t))
+              (push (list file (line-number-at-pos)
+                          (buffer-substring-no-properties
+                           (line-beginning-position)
+                           (min (line-end-position)
+                                (+ (line-beginning-position) 200))))
+                    out)
+              (cl-decf hits-left)
+              (end-of-line))
+            (nreverse out)))))))
+
+(defun jetpacs-files--grep-start (dir query resolve)
+  "Begin the chunked scan of DIR for literal QUERY; RESOLVE gets the result.
+The `jetpacs-async' loader body: returns a cancel thunk, calls RESOLVE
+at most once with (:query Q :dir D :hits ((FILE LINE TEXT)...)
+:truncated BOOL), hits sorted by file then line.  Each tick processes
+`jetpacs-files-grep-items-per-tick' queue items and re-arms a short
+timer, so a large tree never wedges the event loop; the cancel thunk
+kills the timer, so an evicted entry (screen left, query superseded,
+owner torn down) stops paying immediately."
+  (let ((queue (ignore-errors
+                 (directory-files dir t directory-files-no-dot-files-regexp t)))
+        (files 0) (hits '()) (nhits 0)
+        (truncated nil) (timer nil) (dead nil))
+    (cl-labels
+        ((finish ()
+           (unless dead
+             (setq dead t)
+             (funcall resolve
+                      (list :query query :dir dir
+                            :hits (sort (nreverse hits)
+                                        (lambda (a b)
+                                          (if (equal (car a) (car b))
+                                              (< (cadr a) (cadr b))
+                                            (string< (car a) (car b)))))
+                            :truncated truncated))))
+         (step ()
+           (setq timer nil)
+           (unless dead
+             (let ((budget jetpacs-files-grep-items-per-tick))
+               (while (and queue (> budget 0) (not truncated))
+                 (cl-decf budget)
+                 (let ((path (pop queue)))
+                   (cond
+                    ;; Never cross a link — see the section comment.
+                    ((file-symlink-p path) nil)
+                    ((file-directory-p path)
+                     (unless (member (file-name-nondirectory
+                                      (directory-file-name path))
+                                     jetpacs-files-grep-exclude-dirs)
+                       (setq queue
+                             (nconc queue
+                                    (ignore-errors
+                                      (directory-files
+                                       path t
+                                       directory-files-no-dot-files-regexp t))))))
+                    (t
+                     (cl-incf files)
+                     (cond
+                      ((> files jetpacs-files-grep-max-files)
+                       (setq truncated t))
+                      ;; Backups and auto-saves are stale copies: they
+                      ;; double every hit.
+                      ((or (backup-file-name-p path)
+                           (auto-save-file-name-p
+                            (file-name-nondirectory path)))
+                       nil)
+                      ((not (let ((size (file-attribute-size
+                                         (file-attributes path))))
+                              (and size
+                                   (<= size jetpacs-files-grep-max-file-bytes))))
+                       nil)
+                      ((not (file-readable-p path)) nil)
+                      (t
+                       (dolist (hit (jetpacs-files--grep-file
+                                     path query
+                                     (- jetpacs-files-grep-max-hits nhits)))
+                         (push hit hits)
+                         (cl-incf nhits))
+                       (when (>= nhits jetpacs-files-grep-max-hits)
+                         (setq truncated t))))))))
+               (if (or truncated (null queue))
+                   (finish)
+                 (setq timer (run-at-time 0.01 nil #'step)))))))
+      (setq timer (run-at-time 0.01 nil #'step))
+      (lambda ()
+        (setq dead t)
+        (when (timerp timer)
+          (cancel-timer timer)
+          (setq timer nil))))))
+
+(defun jetpacs-files--grep-hit-card (dir hit)
+  "One result card for HIT (FILE LINE TEXT), relative to DIR.
+The tap re-enters through `jetpacs.files.open', so the sandbox guard
+runs again on arrival; a wire-unsafe FILE renders inert (F1's rule)."
+  (pcase-let* ((`(,file ,line ,text) hit)
+               (name (jetpacs-scalar-text (file-name-nondirectory file)))
+               (rel (file-name-directory (file-relative-name file dir)))
+               (safe (jetpacs-files--wire-safe-p file))
+               (snippet (jetpacs-scalar-text (string-trim text))))
+    (jetpacs-with-attrs
+     (jetpacs-card
+      (list (jetpacs-column
+             (apply #'jetpacs-row
+                    (append
+                     (list (jetpacs-with-attrs
+                            (apply #'jetpacs-column
+                                   (append
+                                    (list (jetpacs-text name))
+                                    (when (and rel (not (string-empty-p rel)))
+                                      (list (jetpacs-text
+                                             (jetpacs-scalar-text rel)
+                                             :style "caption")))
+                                    (list :spacing 2)))
+                            :weight 1))
+                     (list (jetpacs-text (format "L%d" line) :style "caption"))
+                     (list :align "center" :spacing 12)))
+             ;; 16.2: `rich_text' is not Core; degrade the mono snippet.
+             (if (jetpacs-node-advertised-p "rich_text")
+                 (jetpacs-rich-text (list (jetpacs-span snippet :mono t)))
+               (jetpacs-text snippet :style "caption"))
+             :spacing 4))
+      :on-tap (and safe
+                   (jetpacs-action "jetpacs.files.open"
+                                   :args (list :path file))))
+     :key (jetpacs-wire-id "g" (format "%s:%d" file line)))))
+
+(defun jetpacs-files--grep-cards (result)
+  "The results body for a finished scan RESULT."
+  (let ((query (plist-get result :query))
+        (dir (plist-get result :dir))
+        (hits (plist-get result :hits)))
+    (if (null hits)
+        (jetpacs-empty-state :icon "manage_search"
+                             :title "No matches"
+                             :caption (format "\"%s\" under %s"
+                                              (jetpacs-scalar-text query)
+                                              (jetpacs-scalar-text
+                                               (abbreviate-file-name dir))))
+      (apply #'jetpacs-lazy-column
+             (jetpacs-text (format "%d matching line%s%s"
+                                   (length hits)
+                                   (if (= (length hits) 1) "" "s")
+                                   (if (plist-get result :truncated)
+                                       " — stopped early, narrow the search"
+                                     ""))
+                           :style "caption")
+             (mapcar (lambda (hit) (jetpacs-files--grep-hit-card dir hit))
+                     hits)))))
+
+(defun jetpacs-files--grep-screen (back)
+  "Builder for the pushed search-results screen.
+Asks `jetpacs-async' for the scan keyed on (dir, query): the first build
+starts the loader and shows progress, the completion re-pushes the
+owner, the next build reads the cached result — and a build that stops
+asking (back tapped, new query pushed) lets the sweep cancel the scan."
+  (jetpacs-chrome-screen
+   "Search"
+   (let ((req jetpacs-files--grep-request))
+     (if (null req)
+         (jetpacs-empty-state :icon "info" :title "No search"
+                              :caption "Submit a search from the browser")
+       (let ((dir (plist-get req :dir))
+             (query (plist-get req :query)))
+         (pcase (jetpacs-async (list 'jetpacs-files-grep dir query)
+                               (lambda (resolve _reject)
+                                 (jetpacs-files--grep-start dir query resolve)))
+           (`(error . ,e)
+            (jetpacs-empty-state :icon "info" :title "Search failed"
+                                 :caption e))
+           (`(ready . ,result) (jetpacs-files--grep-cards result))
+           (_ (jetpacs-column
+               (jetpacs-progress)
+               (jetpacs-text (format "Searching for \"%s\"…"
+                                     (jetpacs-scalar-text query))
+                             :style "caption")
+               :spacing 8))))))
+   :back back))
+
 
 ;;;; Actions (decision D2: validate -> status now; effects that can
 ;;;; prompt or push run from the flow continuation)
@@ -390,7 +650,46 @@ landing configuration never went through a handler."
   (jetpacs-defaction "jetpacs.files.refresh"
     (lambda (_args params)
       (jetpacs-files--repush (jetpacs-files--event-surface params))
-      'accepted)))
+      'accepted))
+
+  (jetpacs-defaction "jetpacs.files.grep"
+    ;; SPEC 14.3: `on_submit' injects the submitted text as `value'
+    ;; into a copy of the descriptor's args, so the query arrives in
+    ;; ARGS.  The scan itself runs from the results screen's builder
+    ;; through `jetpacs-async' — this handler only validates, records
+    ;; the request, and defers the screen push.
+    (lambda (args params)
+      (let ((surface (jetpacs-files--event-surface params))
+            (query (plist-get args :value)))
+        (cond
+         ((not (stringp query)) 'rejected)
+         ((string-empty-p (string-trim query)) 'rejected)
+         ((> (length query) jetpacs-files-grep-max-query-chars)
+          (jetpacs-shell-notify "Search text too long" surface)
+          'rejected)
+         (t
+          (condition-case err
+              (let ((dir (jetpacs-files--check (jetpacs-files--current-dir)
+                                               'directory)))
+                (setq jetpacs-files--grep-request
+                      (list :query (substring-no-properties
+                                    (string-trim query))
+                            :dir dir))
+                (jetpacs-flow-continue
+                 (lambda ()
+                   ;; push-screen is TRANSACTIONAL and re-signals on a
+                   ;; refused push; a deferred caller must catch or the
+                   ;; signal dies in a timer (its own docstring's rule).
+                   (condition-case e2
+                       (jetpacs-chrome-push-screen
+                        surface "grep" #'jetpacs-files--grep-screen)
+                     (error (message "jetpacs-files: search push failed: %s"
+                                     (jetpacs--error-label e2))))))
+                'accepted)
+            (jetpacs-path-refused
+             (jetpacs-shell-notify (format "Folder refused: %s" (cadr err))
+                                   surface)
+             'rejected))))))))
 
 ;;;; Entry point and unload hygiene
 
@@ -401,9 +700,12 @@ landing configuration never went through a handler."
   (jetpacs-shell-push jetpacs-files-owner))
 
 (defun jetpacs-files-unload-function ()
-  "Unload hygiene: the skin registration and the owner's surfaces."
+  "Unload hygiene: the skin registration and the owner's surfaces.
+`jetpacs-teardown-owner' also clears the owner's async entries, which
+cancels any in-flight scan."
   (setq jetpacs-render-buffer-functions
         (assq-delete-all 'dired-mode jetpacs-render-buffer-functions))
+  (setq jetpacs-files--grep-request nil)
   (jetpacs-teardown-owner jetpacs-files-owner)
   nil)
 

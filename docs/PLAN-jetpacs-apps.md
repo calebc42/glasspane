@@ -385,7 +385,7 @@ tables, rules, images and LaTeX; span-budget accounting under a synthetic
 `max_rich_spans`. Smoke — tap a footnote, tap a heading → sheet → schedule with
 a repeater, use the toolbar to insert a src block.
 
-### JA-6 — Files *(in progress — F1 landed 2026-07-27)*
+### JA-6 — Files *(in progress — F1+F2 landed 2026-07-27)*
 
 > **Order amended (Caleb ratified, 2026-07-27): this rung lands before
 > JA-5 — it is the NEXT rung.**  Rationale at the JA-5 entry.
@@ -418,11 +418,51 @@ write config, remote-name-never-statted), the `absent` smuggle case
 verbs through the real `jetpacs--dispatch` (D1 foreign-surface
 rejection, D2 nothing-pushed-in-extent). All 8 mutants killed, each by
 its named test — the remote-order mutant takes ~50s to fail because it
-really does dial TRAMP. **Still to land: F2 grep (the bounds + NUL
-guard half of the exit gate), F3 the five ops (`absent`/`directory`
-modes are ready for them), F4 the plain editor (+ B11
+really does dial TRAMP.
+
+**F2 — the content search (LANDED 2026-07-27).** `jetpacs.files.grep`
+rides a `text_input` `:on-submit` on the browse screen (SPEC 14.3
+injects the submitted text as `value` into the args — no dialog, no D2
+exposure; stable id, no clear-on-submit so 13.6 keeps the draft for
+refinement). The handler only validates (query is a string, non-blank,
+≤ `jetpacs-files-grep-max-query-chars` — the #138 discipline: peer
+content's interpretation cost bounded before any work; current dir
+re-guarded) and defers a `jetpacs-chrome-push-screen` of the results
+screen. The scan itself is a **`jetpacs-async` loader** started by the
+results screen's builder, keyed on (dir, query) — which makes
+supersession, back-navigation, and teardown all free: an entry no build
+asks for is swept and its cancel thunk kills the in-flight scan
+(`jetpacs-teardown-owner` already routes through
+`jetpacs-async-clear-owner`). The scan is a pure-elisp iterative walk,
+CHUNKED on timers (`jetpacs-files-grep-items-per-tick`; the poc's
+`directory-files-recursively` enumerated the entire tree before its cap
+even started counting), bounded four ways (hit cap, examined-file cap,
+per-file size cap, NUL-in-first-KiB binary guard) plus the exclude-dirs
+list, skipping backups/auto-saves, and it **never crosses a symlink** —
+the guard validated the start directory, and a link out of the sandbox
+must not let grep read what open would refuse (a rewrite-driven
+tightening: the poc followed file symlinks). The query is matched as a
+LITERAL, never compiled to a regexp (#137: an exposed pattern grammar
+is received interpretation, and a C-level regexp match never yields).
+Hit cards degrade `rich_text`→`text` per 16.2, and taps re-enter
+through `jetpacs.files.open` so the guard runs again on arrival.
+DIVERGENCES from poc recorded: no `results.visit`/loci-stepper
+integration (taps open the file; the stepper can ride JA-8's project
+grep) and no browser re-entry card (the chrome stack IS the re-entry).
+Exit gate +9 tests (30 total): literal-not-regexp, NUL guard, both scan
+caps, the skip set (exclude/size/backup/symlink), async-and-cancellable
+(nothing resolves in the caller's extent; a cancelled scan never
+resolves), the verb's validation + deferred push, and the
+pending→ready screen through the REAL async cache. 8 more mutants
+killed (16 total). **MUTATION-HARNESS TRAP BANKED: a generated mutant
+file without the `lexical-binding` cookie "kills" timer-closure code by
+void-variable death in the timer, not semantics — the first scan-mutant
+run failed by pump-timeout (4s, resolve never called); with the cookie
+the same mutants die in 20ms at the intended assertions. Check HOW a
+mutant fails, not just that it fails.** **Still to land: F3 the five
+ops (`absent`/`directory` modes are ready), F4 the plain editor (+ B11
 `max_event_bytes`), the app seams, the launcher, and the device smoke
-(browse /sdcard, edit init.el, restart, confirm).**
+(browse /sdcard, search, edit init.el, restart, confirm).**
 
 **Lands:** the sandbox guard (with `file-remote-p` rejected **before** any
 stat), the /sdcard probe, the grep scanner behind a `text_input` `:on-submit`

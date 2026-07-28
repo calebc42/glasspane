@@ -1282,9 +1282,10 @@ ceiling; offline it is the custom ceiling alone."
                                handler)
                               'accepted))
                   ;; The whole content is replaced and the buffer is left
-                  ;; WIDENED — `erase-buffer' removes the restriction
-                  ;; (30.1 src/buffer.c), and after a full swap a
-                  ;; surviving narrowing would show a lie.
+                  ;; WIDENED — the write-first route refreshes the
+                  ;; visiting buffer via `revert-buffer', which widens,
+                  ;; and after a full swap a surviving narrowing would
+                  ;; show a lie.
                   (with-current-buffer buf
                     (should (equal (buffer-string) "v3 whole\n"))
                     (should (= (point-min) 1))
@@ -1412,6 +1413,325 @@ falls through to the plain editor."
              (screen (jetpacs-files--edit-screen nil)))
         (should (equal (jetpacs-files-test--collect screen :toolbar)
                        '("orgtb")))))))
+
+;;;; JA-6 P1 regressions (docs/AUDIT-ja6-2026-07-28.md)
+
+;; P1-1: destructive ops act on the LITERAL directory entry, with
+;; containment confirmed on BOTH sides (the truename AND the parent's
+;; truename plus the final component).  These drive the REAL
+;; dispatch/menu pipeline because that is where the truename
+;; substitution happened — direct op calls could not tell pre from
+;; post fix.
+
+(ert-deftest jetpacs-files-delete-unlinks-a-symlink-never-follows ()
+  "Delete acts on the entry the user confirmed: a symlink is UNLINKED,
+never followed (the truename route recursively deleted the link's
+TARGET tree); a dangling link is a deletable entry, not `stale'; and
+an out-of-sandbox entry pointing INTO a root is refused on the literal
+side rather than admitted through its truename."
+  (jetpacs-files-test--with-tree root
+    (let ((outside (file-name-as-directory
+                    (make-temp-file "jetpacs-del-out" t))))
+      (unwind-protect
+          (jetpacs-files-test--attached (jetpacs-files-test--client)
+            (let ((handler (gethash "jetpacs.files.delete"
+                                    jetpacs-action-handlers))
+                  (notes '()))
+              (make-directory (concat root "target"))
+              (jetpacs-files-test--touch (concat root "target/keep"))
+              (make-symbolic-link (concat root "target") (concat root "link"))
+              (jetpacs-files-test--touch (concat root "f"))
+              (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                         (lambda (text &optional _s) (push text notes)))
+                        ((symbol-function 'jetpacs-shell-push)
+                         (lambda (&rest _) 1)))
+                ;; A link row: the LINK goes; the target tree stays.
+                (should (eq (jetpacs--dispatch
+                             client `(:action "jetpacs.files.delete"
+                                      :surface "app:jetpacs.files"
+                                      :args (:path ,(concat root "link")))
+                             handler)
+                            'accepted))
+                (should-not (file-symlink-p (concat root "link")))
+                (should (file-exists-p (concat root "target/keep")))
+                ;; A dangling link still NAMES an entry: deletable.
+                (make-symbolic-link (concat root "missing")
+                                    (concat root "dangle"))
+                (should (eq (jetpacs--dispatch
+                             client `(:action "jetpacs.files.delete"
+                                      :surface "app:jetpacs.files"
+                                      :args (:path ,(concat root "dangle")))
+                             handler)
+                            'accepted))
+                (should-not (file-symlink-p (concat root "dangle")))
+                ;; The closed hole: an out-of-sandbox ENTRY whose
+                ;; truename points in must not unlink either side.
+                (make-symbolic-link (concat root "f")
+                                    (concat outside "link2"))
+                (should (eq (jetpacs--dispatch
+                             client `(:action "jetpacs.files.delete"
+                                      :surface "app:jetpacs.files"
+                                      :args (:path ,(concat outside "link2")))
+                             handler)
+                            'rejected))
+                (should (equal (car notes) "Delete refused: outside-roots"))
+                (should (file-exists-p (concat root "f")))
+                (should (file-symlink-p (concat outside "link2"))))))
+        (delete-directory outside t)))))
+
+(ert-deftest jetpacs-files-menu-ops-act-on-the-link-not-its-target ()
+  "The menu pipeline hands the ops the LITERAL entry: rename and move
+relocate the LINK itself (rename(2) semantics), and duplicate pins
+`copy-file''s native follow — a regular copy of the target's content."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (setf (ebp-client-granted client) ["surfaces.dialog"])
+      (let ((handler (gethash "jetpacs.files.menu" jetpacs-action-handlers))
+            (shown '()) (reply nil))
+        (make-directory (concat root "target"))
+        (jetpacs-files-test--touch (concat root "target/keep"))
+        (make-directory (concat root "sub"))
+        (write-region "payload\n" nil (concat root "f.txt") nil 'silent)
+        (make-symbolic-link (concat root "target") (concat root "linkr"))
+        (make-symbolic-link (concat root "target") (concat root "linkm"))
+        (make-symbolic-link (concat root "f.txt") (concat root "flink"))
+        (cl-letf (((symbol-function 'jetpacs-shell-notify) #'ignore)
+                  ((symbol-function 'jetpacs-shell-push) (lambda (&rest _) 1))
+                  ((symbol-function 'jetpacs-flow-begin)
+                   (lambda (_surface fn) (funcall fn)))
+                  ((symbol-function 'read-string) (lambda (&rest _) reply))
+                  ((symbol-function 'ebp-client-dialog-show)
+                   (cl-function
+                    (lambda (_client id spec &key callback &allow-other-keys)
+                      (push (list id spec callback) shown)))))
+          (cl-flet ((menu-round (path op answer)
+                      (setq reply answer)
+                      (should (eq (jetpacs--dispatch
+                                   client `(:action "jetpacs.files.menu"
+                                            :surface "app:jetpacs.files"
+                                            :args (:path ,path))
+                                   handler)
+                                  'accepted))
+                      (jetpacs-files-test--pump)
+                      (funcall (nth 2 (car shown)) "submitted"
+                               (list :value op) nil)))
+            ;; Rename: the LINK is renamed; the target tree untouched.
+            (menu-round (concat root "linkr") "rename" "link2")
+            (should (file-symlink-p (concat root "link2")))
+            (should-not (file-symlink-p (concat root "linkr")))
+            (should (file-exists-p (concat root "target/keep")))
+            ;; Move: the LINK relocates, still a link; target untouched.
+            (menu-round (concat root "linkm") "move" (concat root "sub/"))
+            (should (file-symlink-p (concat root "sub/linkm")))
+            (should-not (file-symlink-p (concat root "linkm")))
+            (should (file-exists-p (concat root "target/keep")))
+            ;; Duplicate: `copy-file' FOLLOWS the link (native — pinned):
+            ;; a REGULAR copy of the target's content, target untouched.
+            (menu-round (concat root "flink") "duplicate" nil)
+            (let ((copy (concat root "flink copy")))
+              (should (file-regular-p copy))
+              (should-not (file-symlink-p copy))
+              (with-temp-buffer
+                (insert-file-contents copy)
+                (should (equal (buffer-string) "payload\n"))))
+            (should (file-symlink-p (concat root "flink")))
+            (with-temp-buffer
+              (insert-file-contents (concat root "f.txt"))
+              (should (equal (buffer-string) "payload\n")))))))))
+
+;; P1-2: the file's own coding, captured at open, rides the save.
+
+(ert-deftest jetpacs-files-save-round-trips-the-files-own-coding ()
+  "An open-then-save round trip with the UNMODIFIED seed leaves the
+file's bytes untouched: utf-8-dos keeps its CRLFs and latin-1 keeps
+its single-byte é, instead of both silently converting to LF/UTF-8."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (let ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
+            (jetpacs-files--edit nil))
+        (cl-letf (((symbol-function 'jetpacs-shell-notify) #'ignore)
+                  ((symbol-function 'jetpacs-shell-push) (lambda (&rest _) 1))
+                  ((symbol-function 'jetpacs-chrome-push-screen)
+                   (lambda (&rest _) 1)))
+          (cl-flet ((round-trip-bytes (name coding content)
+                      (let ((f (concat root name)))
+                        (let ((coding-system-for-write coding))
+                          (write-region content nil f nil 'silent))
+                        (let ((true (file-truename f)))
+                          (should-not (jetpacs-files--edit-open
+                                       true "app:jetpacs.files"))
+                          (should (eq (jetpacs--dispatch
+                                       client
+                                       `(:action "jetpacs.files.save"
+                                         :surface "app:jetpacs.files"
+                                         :args (:path ,true
+                                                :mtime ,(plist-get
+                                                         jetpacs-files--edit
+                                                         :mtime)
+                                                :value ,(plist-get
+                                                         jetpacs-files--edit
+                                                         :seed)))
+                                       handler)
+                                      'accepted))
+                          (with-temp-buffer
+                            (set-buffer-multibyte nil)
+                            (insert-file-contents-literally true)
+                            (buffer-string))))))
+            (should (equal (round-trip-bytes "crlf.txt" 'utf-8-dos
+                                             "line one\nline two\n")
+                           "line one\r\nline two\r\n"))
+            (should (equal (round-trip-bytes "l1.txt" 'iso-latin-1 "café\n")
+                           (unibyte-string ?c ?a ?f #xE9 ?\n)))))))))
+
+;; P1-3: save refuses BEFORE mutating; never routes through
+;; `save-buffer''s interactive-recovery prompts.
+
+(ert-deftest jetpacs-files-save-refuses-unwritable-before-any-mutation ()
+  "A write-protected file: the save is REFUSED up front — disk
+unchanged, the visiting desktop buffer unchanged and unmodified —
+instead of clobbering the buffer and then failing to write it."
+  (skip-unless (not (zerop (user-uid))))   ; root writes anywhere
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (let* ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
+             (f (concat root "keep.txt"))
+             (notes '())
+             (jetpacs-files--edit nil))
+        (write-region "keep\n" nil f nil 'silent)
+        (let* ((true (file-truename f))
+               (buf (find-file-noselect true)))
+          (unwind-protect
+              (progn
+                (set-file-modes true #o444)
+                (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                           (lambda (text &optional _s) (push text notes)))
+                          ((symbol-function 'jetpacs-shell-push)
+                           (lambda (&rest _) 1)))
+                  (should (eq (jetpacs--dispatch
+                               client `(:action "jetpacs.files.save"
+                                        :surface "app:jetpacs.files"
+                                        :args (:path ,true
+                                               :mtime ,(jetpacs-files--mtime-stamp true)
+                                               :value "device\n"))
+                               handler)
+                              'rejected))
+                  (should (equal (car notes) "Save refused: unwritable"))
+                  (with-temp-buffer
+                    (insert-file-contents true)
+                    (should (equal (buffer-string) "keep\n")))
+                  (with-current-buffer buf
+                    (should (equal (buffer-string) "keep\n"))
+                    (should-not (buffer-modified-p)))))
+            (set-file-modes true #o644)
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf)))))))
+
+;; P1-4: non-regular files are dropped before ANY read — an open(2) on
+;; a FIFO blocks forever and no in-process timer can interrupt it.
+
+(ert-deftest jetpacs-files-grep-and-edit-open-drop-non-regular-files ()
+  "A FIFO under a root: the scan skips it (result well inside the
+wall-clock budget) and a tap refuses `not-a-file' without opening it.
+External watchdog writers UNBLOCK a regressed open so the test FAILS
+in bounded time instead of hanging the suite."
+  (skip-unless (executable-find "mkfifo"))
+  (jetpacs-files-test--with-tree root
+    (let ((pipe (concat root "pipe"))
+          (w1 nil) (w2 nil))
+      (call-process "mkfifo" nil nil nil pipe)
+      (skip-unless (and (file-exists-p pipe)
+                        (not (file-regular-p pipe))))
+      (write-region "needle\n" nil (concat root "a.txt") nil 'silent)
+      (unwind-protect
+          (progn
+            (setq w1 (start-process
+                      "jf-watchdog1" nil "sh" "-c"
+                      (format "sleep 8; : > %s"
+                              (shell-quote-argument pipe))))
+            (setq w2 (start-process
+                      "jf-watchdog2" nil "sh" "-c"
+                      (format "sleep 16; : > %s"
+                              (shell-quote-argument pipe))))
+            ;; The scan, pumped against the wall clock: a regression
+            ;; blocks until the watchdog writes (~8s), which fails the
+            ;; elapsed assertion rather than wedging ert.
+            (let ((result nil)
+                  (start (float-time))
+                  elapsed)
+              (jetpacs-files--grep-start root "needle"
+                                         (lambda (r) (setq result r)))
+              (while (and (not result) (< (- (float-time) start) 5))
+                (accept-process-output nil 0.02))
+              (setq elapsed (- (float-time) start))
+              (should result)
+              (should (< elapsed 5))
+              (should (equal (mapcar #'car (plist-get result :hits))
+                             (list (concat root "a.txt")))))
+            ;; The tap: refused outright — NEVER the buffer-host
+            ;; fallback, whose `find-file-noselect' blocks identically.
+            (let ((screens '()) (navigated '()) (notes '())
+                  (jetpacs-files--edit nil))
+              (cl-letf (((symbol-function 'jetpacs-chrome-push-screen)
+                         (lambda (&rest args) (push args screens) 1))
+                        ((symbol-function 'jetpacs-navigate-buffer)
+                         (lambda (buf &rest _) (push buf navigated)))
+                        ((symbol-function 'jetpacs-shell-notify)
+                         (lambda (text &optional _s) (push text notes))))
+                (should (eq (jetpacs-files--edit-open (file-truename pipe)
+                                                      "app:jetpacs.files")
+                            'not-a-file))
+                (should (equal notes '("Open refused: not-a-file")))
+                (should (null navigated))
+                (should (null screens)))))
+        (when (and w1 (process-live-p w1)) (delete-process w1))
+        (when (and w2 (process-live-p w2)) (delete-process w2))))))
+
+;; P1-5: the wire-safe gate at the remaining `:args' sites.
+
+(ert-deftest jetpacs-files-wire-unsafe-paths-never-reach-args ()
+  "A raw-byte directory name: the up-row and shared-row vanish rather
+than carry raw `:args' (which reach `json-serialize' and take the push
+down), the body still renders and serializes, and the editor never
+seeds from a wire-unsafe path — the read fallback hosts it."
+  (jetpacs-files-test--with-tree root
+    ;; The banked trap: (concat root (unibyte-string 255) ...) is
+    ;; UNIBYTE; the held canonical form must be its `file-truename'
+    ;; (multibyte, raw-byte char #x3FFFFF) or `jetpacs-files--wire-safe-p's
+    ;; char-class regexp cannot see the byte.
+    (make-directory (concat root (unibyte-string 255) "dir/sub") t)
+    (let ((bad-dir (file-truename (concat root (unibyte-string 255) "dir")))
+          (bad-sub (file-truename
+                    (concat root (unibyte-string 255) "dir/sub"))))
+      ;; Fixture sanity: the held form really is wire-unsafe.
+      (should-not (jetpacs-files--wire-safe-p bad-dir))
+      ;; (a) The up-row from inside the raw-byte tree: no row at all.
+      (should-not (jetpacs-files--up-row (file-name-as-directory bad-sub)))
+      ;; (b) The body still RENDERS (a real lazy_column, not a degrade)
+      ;; and the whole tree serializes.
+      (let ((jetpacs-files--dir (file-name-as-directory bad-sub)))
+        (let ((body (jetpacs-files--body)))
+          (should (equal (plist-get body :t) "lazy_column"))
+          (should (stringp (jetpacs-node->canonical-json body)))))
+      ;; (c) The shared-storage shortcut: silently absent.
+      (let ((jetpacs-files--dir nil)
+            (jetpacs-files--shared-dir (file-name-as-directory bad-dir)))
+        (should-not (jetpacs-files--shared-row)))
+      ;; (d) The editor: a wire-unsafe PATH never seeds the screen.
+      (make-directory (concat root (unibyte-string 255) "d") t)
+      (let ((raw-f (concat root (unibyte-string 255) "d/f.txt")))
+        (write-region "plain\n" nil raw-f nil 'silent)
+        (let ((bad-f (file-truename raw-f))
+              (screens '()) (navigated '())
+              (jetpacs-files--edit nil))
+          (cl-letf (((symbol-function 'jetpacs-chrome-push-screen)
+                     (lambda (&rest args) (push args screens) 1))
+                    ((symbol-function 'jetpacs-navigate-buffer)
+                     (lambda (buf &rest _) (push buf navigated)))
+                    ((symbol-function 'jetpacs-shell-notify) #'ignore))
+            (should (eq (jetpacs-files--edit-open bad-f "app:jetpacs.files")
+                        'unencodable))
+            (should (= (length navigated) 1))
+            (should (null screens))))))))
 
 (provide 'jetpacs-files-test)
 ;;; jetpacs-files-test.el ends here

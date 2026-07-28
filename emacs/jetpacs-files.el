@@ -127,10 +127,12 @@ one files surface under D1, so one variable is the whole state.")
   "Memoized `jetpacs-files-shared-dir' result, or the `unset' sentinel.")
 
 (defvar jetpacs-files--edit nil
-  "The file the editor screen shows: (:path TRUENAME :seed S :mtime T).
+  "The file the editor screen shows:
+\(:path TRUENAME :seed S :mtime T :coding C).  C is the coding system
+the file was READ with — the save writes it back in the same one.
 Written by `jetpacs-files--edit-open' after eligibility passed, and by
-a successful save (fresh seed and stamp).  The screen BUILDER reads
-only this — never the disk — so a browser re-push while editing
+a successful save (fresh seed and stamp, coding carried forward).  The
+screen BUILDER reads only this — never the disk — so a re-push while editing
 re-renders the same seed, and what actually shows is the Companion's
 SPEC 13.6 draft: the user's typing.")
 
@@ -281,9 +283,13 @@ Commentary."
 (defun jetpacs-files--up-row (dir)
   "The \"..\" card for DIR's parent, or nil at the sandbox ceiling.
 The parent must itself clear the guard — at a root's edge there is no
-up, which is what makes the ceiling FELT rather than an error."
+up, which is what makes the ceiling FELT rather than an error.  A
+parent the wire cannot carry gets no row either (the Commentary's
+`:args' rule): the row's whole point is its `:args', so unlike an
+entry row there is nothing honest to render inert — absence IS the
+ceiling behavior."
   (let ((parent (file-name-directory (directory-file-name dir))))
-    (when parent
+    (when (and parent (jetpacs-files--wire-safe-p parent))
       (condition-case nil
           (let ((true (jetpacs-files--check parent 'directory)))
             ;; "/" is its own parent; never offer a no-op up.
@@ -356,10 +362,12 @@ list of nodes per the `jetpacs-render-buffer-functions' contract."
 
 (defun jetpacs-files--shared-row ()
   "The landing shortcut card into shared storage, or nil.
-Only at the landing, only when the probe found something, and not when
-the landing already IS the shared tree."
+Only at the landing, only when the probe found something, not when
+the landing already IS the shared tree, and never for a path the wire
+cannot carry (the Commentary's `:args' rule)."
   (and-let* (((null jetpacs-files--dir))
              (shared (jetpacs-files-shared-dir))
+             ((jetpacs-files--wire-safe-p (directory-file-name shared)))
              ((not (file-equal-p shared (jetpacs-files--current-dir)))))
     (jetpacs-chrome-row "Shared storage"
                         :icon "sd_storage"
@@ -554,6 +562,12 @@ owner torn down) stops paying immediately."
                            (auto-save-file-name-p
                             (file-name-nondirectory path)))
                        nil)
+                      ;; A FIFO/socket/device blocks in open(2) FOREVER
+                      ;; inside a non-yielding tick — no timer can
+                      ;; interrupt it.  Symlinks were already dropped at
+                      ;; the top, so the follow in `file-regular-p' is
+                      ;; moot here.
+                      ((not (file-regular-p path)) nil)
                       ((not (let ((size (file-attribute-size
                                          (file-attributes path))))
                               (and size
@@ -734,35 +748,53 @@ desktop edits would otherwise look broken."
 (defun jetpacs-files--edit-open (true surface)
   "Open TRUE in the plain editor, or fall back to the read view.
 Runs in a flow continuation.  Returns the fallback reason symbol, or
-nil when the editor screen was pushed.  A file whose CONTENT the wire
-cannot carry byte-identically is never editable through it — the
-round-trip would corrupt exactly the bytes `jetpacs-scalar-text'
-replaces — and a NUL marks a binary whose \"text\" is not worth a
-seed."
+nil when the editor screen was pushed.  A non-regular file (FIFO,
+socket, device) is refused OUTRIGHT — both this read and the
+fallback's `find-file-noselect' would block in open(2) forever, and
+no in-process timer can interrupt that.  A PATH the wire cannot carry
+byte-identically never seeds the editor either (the Commentary's
+`:args' rule — the save descriptor would take the push down); the
+read fallback hosts it.  A file whose CONTENT the wire cannot carry
+is likewise never editable through it — the round-trip would corrupt
+exactly the bytes `jetpacs-scalar-text' replaces — and a NUL marks a
+binary whose \"text\" is not worth a seed.  The file's own coding is
+captured off the read and stored with the seed, so the save can write
+the file back in it."
   (let* ((cap (jetpacs-files--editor-cap))
          (size (or (file-attribute-size (file-attributes true)) 0))
          (buf (get-file-buffer true))
+         (coding nil)
          (reason
           (cond
+           ((not (file-regular-p true)) 'not-a-file)
+           ((not (jetpacs-files--wire-safe-p true)) 'unencodable)
            ((> size cap) 'oversize)
            ((and buf (buffer-modified-p buf)) 'desktop-modified)
            (t (let ((content (with-temp-buffer
                                (insert-file-contents true)
+                               (setq coding last-coding-system-used)
                                (buffer-string))))
                 (cond
                  ((string-search "\0" content) 'binary)
                  ((not (jetpacs-files--wire-safe-p content)) 'unencodable)
                  (t (setq jetpacs-files--edit
                           (list :path true :seed content
-                                :mtime (jetpacs-files--mtime-stamp true)))
+                                :mtime (jetpacs-files--mtime-stamp true)
+                                :coding coding))
                     nil)))))))
-    (if reason
-        (jetpacs-files--read-fallback true surface reason)
+    (cond
+     ;; NEVER the fallback for a non-regular file: its
+     ;; `find-file-noselect' is the same blocking open.
+     ((eq reason 'not-a-file)
+      (jetpacs-files--op-notify-refused "Open" 'not-a-file surface))
+     (reason
+      (jetpacs-files--read-fallback true surface reason))
+     (t
       (condition-case err
           (jetpacs-chrome-push-screen surface "edit"
                                       #'jetpacs-files--edit-screen)
         (error (message "jetpacs-files: edit push failed: %s"
-                        (jetpacs--error-label err)))))
+                        (jetpacs--error-label err))))))
     reason))
 
 (defun jetpacs-files--edit-screen (back)
@@ -815,6 +847,14 @@ seed."
 ;; what F1 built it for: exists-refusal (never clobber), containment on
 ;; the RESOLVED name (a rename/move/create target smuggled through an
 ;; in-root symlink is refused), and the reason symbol travels alone.
+;;
+;; Every op SOURCE goes through `jetpacs-files--check-op': containment
+;; confirmed on BOTH sides — the truename AND the literal entry — and
+;; the op then acts on the LITERAL directory entry, never the
+;; truename.  Acting on the truename once meant deleting a symlink row
+;; recursively wiped the link's TARGET tree; a link is unlinked,
+;; relocated, or content-copied (each primitive's native behavior),
+;; never followed.
 
 (defvar jetpacs-files--dialog-seq 0
   "Monotonic suffix for ops-menu dialog ids.
@@ -844,6 +884,25 @@ Bumps to \"NAME copy 2\", \"NAME copy 3\", ... until the name is free."
   "The one wording for a guard refusal, so tests can pin it."
   (jetpacs-shell-notify (format "%s refused: %s" op reason) surface))
 
+(cl-defun jetpacs-files--check-op (path &optional (require 'readable))
+  "PATH validated for a DESTRUCTIVE op; returns the literal act path.
+Containment is confirmed on BOTH sides: the full truename (via
+`jetpacs-files--check', REQUIRE as given — the straddle rule) AND the
+literal entry — the parent's truename plus the final component — so an
+op can neither follow a link out of the sandbox nor unlink an
+out-of-sandbox entry that points in.  The returned act path is the
+exact directory entry delete/rename/copy touch; links are handled
+natively (unlinked, relocated, content-copied), never followed.
+REQUIRE defaults like `jetpacs-files--check''s: only when OMITTED —
+an explicit nil is containment-only on both sides."
+  (jetpacs-files--check path require)
+  (let* ((dfn (directory-file-name (expand-file-name path)))
+         (parent (file-name-directory dfn)))
+    (when (null parent)                 ; "/" — never an op target
+      (signal 'jetpacs-path-refused (list 'outside-roots)))
+    (concat (file-name-as-directory (jetpacs-files--check parent nil))
+            (file-name-nondirectory dfn))))
+
 (defun jetpacs-files--op-finish (surface)
   "Re-push SURFACE after an op; already on a timer stack, so directly."
   (condition-case err
@@ -853,7 +912,9 @@ Bumps to \"NAME copy 2\", \"NAME copy 3\", ... until the name is free."
 
 (defun jetpacs-files--op-rename (path surface)
   "Rename PATH within its directory; the new name is a bridged prompt.
-Runs inside a device flow."
+Runs inside a device flow.  Acts on the LITERAL entry (re-validated at
+act time via `jetpacs-files--check-op'): a symlink is renamed as a
+link — rename(2) — never followed."
   (let* ((old (file-name-nondirectory (directory-file-name path)))
          (new (string-trim
                (condition-case nil
@@ -866,11 +927,11 @@ Runs inside a device flow."
       (jetpacs-shell-notify "Name can't contain '/'" surface))
      (t
       (condition-case err
-          (let ((target (jetpacs-files--check
-                         (expand-file-name
-                          new (file-name-directory (directory-file-name path)))
-                         'absent)))
-            (rename-file path target)
+          (let* ((src (jetpacs-files--check-op path))
+                 (target (jetpacs-files--check
+                          (expand-file-name new (file-name-directory src))
+                          'absent)))
+            (rename-file src target)
             (jetpacs-shell-notify (format "Renamed to %s" new) surface))
         (jetpacs-path-refused
          (jetpacs-files--op-notify-refused "Rename" (cadr err) surface))
@@ -881,7 +942,9 @@ Runs inside a device flow."
 
 (defun jetpacs-files--op-move (path surface)
   "Move PATH into a destination directory; a bridged prompt names it.
-Runs inside a device flow."
+Runs inside a device flow.  Acts on the LITERAL entry (re-validated at
+act time via `jetpacs-files--check-op'): a symlink relocates as a
+link, never followed."
   (let* ((name (file-name-nondirectory (directory-file-name path)))
          (src-dir (file-name-directory (directory-file-name path)))
          (dest (string-trim
@@ -892,12 +955,13 @@ Runs inside a device flow."
     (if (string-empty-p dest)
         (jetpacs-shell-notify "Move cancelled" surface)
       (condition-case err
-          (let* ((destdir (jetpacs-files--check (expand-file-name dest)
+          (let* ((src (jetpacs-files--check-op path))
+                 (destdir (jetpacs-files--check (expand-file-name dest)
                                                 'directory))
                  (target (jetpacs-files--check
                           (expand-file-name name (file-name-as-directory destdir))
                           'absent)))
-            (rename-file path target)
+            (rename-file src target)
             (jetpacs-shell-notify
              (format "Moved to %s" (abbreviate-file-name destdir)) surface))
         (jetpacs-path-refused
@@ -908,13 +972,17 @@ Runs inside a device flow."
   (jetpacs-files--op-finish surface))
 
 (defun jetpacs-files--op-duplicate (path surface)
-  "Copy PATH beside itself under a fresh \"NAME copy\" name; no prompt."
+  "Copy PATH beside itself under a fresh \"NAME copy\" name; no prompt.
+Acts on the LITERAL entry (re-validated at act time via
+`jetpacs-files--check-op'); for a file symlink, `copy-file' follows it
+natively — the copy is a REGULAR file with the target's content."
   (condition-case err
-      (let ((target (jetpacs-files--check (jetpacs-files--duplicate-name path)
-                                          'absent)))
-        (if (file-directory-p path)
-            (copy-directory path target)
-          (copy-file path target))
+      (let* ((src (jetpacs-files--check-op path))
+             (target (jetpacs-files--check (jetpacs-files--duplicate-name src)
+                                           'absent)))
+        (if (file-directory-p src)
+            (copy-directory src target)
+          (copy-file src target))
         (jetpacs-shell-notify
          (format "Duplicated to %s"
                  (jetpacs-scalar-text
@@ -1075,11 +1143,14 @@ Runs inside a device flow."
           'rejected)
          (t
           (condition-case err
-              (let ((true (jetpacs-files--check (plist-get args :path))))
+              ;; Both-sides validation, and the ACT path — the literal
+              ;; entry, not the truename — is what the menu's ops get:
+              ;; an op on a symlink row must touch the link itself.
+              (let ((act (jetpacs-files--check-op (plist-get args :path))))
                 ;; The dialog itself is a request; raising it from the
                 ;; continuation keeps this handler's reply prompt (D2).
                 (jetpacs-flow-continue
-                 (lambda () (jetpacs-files--ops-menu-show true surface)))
+                 (lambda () (jetpacs-files--ops-menu-show act surface)))
                 'accepted)
             (jetpacs-path-refused
              (jetpacs-files--op-notify-refused "Menu" (cadr err) surface)
@@ -1089,25 +1160,34 @@ Runs inside a device flow."
     ;; The Companion presented `:confirm' BEFORE creating this event
     ;; (SPEC 14.1), so there is no prompt here — validate, act
     ;; synchronously (14.4: `accepted' only once the effect is
-    ;; durable), defer only the re-push.  Containment-only guard: an
-    ;; unreadable-but-owned file is still the user's to delete.
+    ;; durable), defer only the re-push.  Containment-only guard (on
+    ;; BOTH sides — `jetpacs-files--check-op'): an unreadable-but-owned
+    ;; file is still the user's to delete, but the delete acts on the
+    ;; LITERAL entry — a symlink row is UNLINKED, never followed (the
+    ;; truename route once recursively wiped a link's target tree).
     (lambda (args params)
       (let ((surface (jetpacs-files--event-surface params)))
         (condition-case err
-            (let ((true (jetpacs-files--check (plist-get args :path) nil)))
+            (let ((act (jetpacs-files--check-op (plist-get args :path) nil)))
               (cond
-               ((not (file-exists-p true))
+               ((not (or (file-symlink-p act) (file-exists-p act)))
                 ;; The row the user confirmed no longer names anything:
                 ;; the snapshot is outdated, which is what stale MEANS.
+                ;; (A DANGLING link still names an entry — deletable.)
                 'stale)
                (t
-                (if (file-directory-p true)
-                    (delete-directory true t)
-                  (delete-file true))
+                (cond
+                 ;; The explicit symlink leg is mandatory, not just for
+                 ;; not-following: `delete-directory' RECURSIVE on a
+                 ;; link skips recursion and rmdirs under `files--force'
+                 ;; (30.1 files.el) — a silent no-op.
+                 ((file-symlink-p act) (delete-file act))
+                 ((file-directory-p act) (delete-directory act t))
+                 (t (delete-file act)))
                 (jetpacs-shell-notify
                  (format "Deleted %s"
                          (jetpacs-scalar-text
-                          (file-name-nondirectory (directory-file-name true))))
+                          (file-name-nondirectory (directory-file-name act))))
                  surface)
                 (jetpacs-files--repush surface)
                 'accepted)))
@@ -1143,8 +1223,9 @@ Runs inside a device flow."
     ;; SPEC 14.3: `on_save' injects the editor's full content as
     ;; `value' into a copy of the descriptor's args; the path and the
     ;; open-time mtime stamp ride the descriptor itself.  Containment-
-    ;; only guard: writability is the write's own error to report, and
-    ;; the stamp gate owns "is this still the file the user opened".
+    ;; only guard: the stamp gate owns "is this still the file the
+    ;; user opened", and writability is pre-checked as its own refusal
+    ;; leg — BEFORE anything mutates.
     (lambda (args params)
       (let ((surface (jetpacs-files--event-surface params))
             (value (plist-get args :value))
@@ -1165,6 +1246,15 @@ Runs inside a device flow."
                 (jetpacs-shell-notify "File changed on disk — not saved"
                                       surface)
                 'stale)
+               ((not (file-writable-p true))
+                ;; REFUSE BEFORE MUTATING anything.  The old buffer
+                ;; route reached `save-buffer''s interactive recovery
+                ;; (30.1 files.el `basic-save-buffer-2': "File %s is
+                ;; write-protected; try to save anyway?") AFTER the
+                ;; buffer was already replaced, leaving the desktop
+                ;; buffer holding the device's text as unsaved edits.
+                (jetpacs-files--op-notify-refused "Save" 'unwritable surface)
+                'rejected)
                (t
                 (let ((buf (get-file-buffer true)))
                   (if (and buf (buffer-modified-p buf))
@@ -1172,30 +1262,44 @@ Runs inside a device flow."
                         (jetpacs-shell-notify
                          "Unsaved desktop edits — not saved" surface)
                         'rejected)
-                    (if buf
-                        ;; Through the live buffer so modes, hooks and
-                        ;; the desktop frame all see the change
-                        ;; coherently.  No `widen' wrapper: `erase-buffer'
-                        ;; removes the restriction itself (30.1
-                        ;; src/buffer.c calls Fwiden), so a narrowed
-                        ;; buffer is replaced whole and left widened —
-                        ;; which is the honest end state once the entire
-                        ;; content has been swapped.
-                        (with-current-buffer buf
-                          (let ((inhibit-read-only t))
-                            (erase-buffer)
-                            (insert value))
-                          (let ((save-silently t))
-                            (save-buffer)))
+                    ;; THE WRITE COMES FIRST, and it is always
+                    ;; `write-region' — never `save-buffer', whose
+                    ;; recovery prompts signal `inhibited-interaction'
+                    ;; under the dispatch's no-prompt regime.  The
+                    ;; file's own coding (captured at open) rides the
+                    ;; write while the edit record is still current —
+                    ;; the mtime gate above already proved the file
+                    ;; unchanged since that open; nil keeps the
+                    ;; ambient behavior.
+                    (let ((coding-system-for-write
+                           (and (equal (plist-get jetpacs-files--edit :path)
+                                       true)
+                                (plist-get jetpacs-files--edit :coding))))
                       (write-region value nil true nil 'silent))
+                    ;; Only once the write is durable does a visiting
+                    ;; (already-unmodified) buffer get refreshed:
+                    ;; `revert-buffer' re-reads, widens, updates the
+                    ;; visited modtime and clears the modified flag.  A
+                    ;; refresh failure must NOT flip a durable
+                    ;; `accepted' (14.4 makes the answer permanent).
+                    (when buf
+                      (condition-case rerr
+                          (with-current-buffer buf
+                            (revert-buffer :ignore-auto :noconfirm
+                                           :preserve-modes))
+                        (error
+                         (message "jetpacs-files: buffer refresh failed: %s"
+                                  (jetpacs--error-label rerr)))))
                     ;; Effect durable -> accepted (14.4).  Keep the edit
-                    ;; state coherent for the NEXT save: a fresh stamp
-                    ;; (disk may differ from VALUE — save hooks
-                    ;; reformat), seed = what the device now shows.
+                    ;; state coherent for the NEXT save: a fresh stamp,
+                    ;; seed = what the device now shows, the coding
+                    ;; carried forward.
                     (when (equal (plist-get jetpacs-files--edit :path) true)
                       (setq jetpacs-files--edit
                             (list :path true :seed value
-                                  :mtime (jetpacs-files--mtime-stamp true))))
+                                  :mtime (jetpacs-files--mtime-stamp true)
+                                  :coding (plist-get jetpacs-files--edit
+                                                     :coding))))
                     ;; ISOLATED: the write is already durable, so a
                     ;; third-party seam subscriber that signals must not
                     ;; turn this into `rejected' — SPEC 14.4 makes that

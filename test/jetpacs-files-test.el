@@ -1363,5 +1363,55 @@ flipped an otherwise-perfect save to `rejected'.)"
               (insert-file-contents true)
               (should (equal (buffer-string) "new\n")))))))))
 
+;;;; The editor app seams (F5)
+
+(ert-deftest jetpacs-files-editor-seams-feed-the-screen ()
+  "All four seams reach their slots; a body seam that passes (nil)
+falls through to the plain editor."
+  (jetpacs-files-test--with-tree root
+    (let* ((f (jetpacs-files-test--touch (concat root "notes.org")))
+           (jetpacs-files--edit (list :path (file-truename f)
+                                      :seed "seed" :mtime "1.000000"))
+           (seen '()))
+      ;; Defaults: the plain editor, no actions, no fab, no toolbar.
+      (let ((screen (jetpacs-files--edit-screen nil)))
+        (should (member "editor" (jetpacs-files-test--collect screen :t)))
+        (should-not (jetpacs-files-test--collect screen :toolbar)))
+      ;; All four attached.
+      (let* ((jetpacs-files-editor-body-functions
+              (list (lambda (path) (push (cons 'body path) seen) nil)
+                    (lambda (_path) (jetpacs-text "org outline instead"))))
+             (jetpacs-files-editor-actions-functions
+              (list (lambda (_p) (list (jetpacs-icon-button
+                                        "toc" (jetpacs-action "demo.outline")
+                                        :content-description "Outline")))
+                    (lambda (_p) (list (jetpacs-icon-button
+                                        "language" (jetpacs-action "demo.render")
+                                        :content-description "Rendered")))))
+             (jetpacs-files-editor-toolbar-function (lambda (_p) "orgtb"))
+             (jetpacs-files-editor-fab-function
+              (lambda (_p) (jetpacs-icon-button
+                            "add" (jetpacs-action "demo.add")
+                            :content-description "Add heading")))
+             (screen (jetpacs-files--edit-screen nil)))
+        ;; The second body fn REPLACED the editor (first passed).
+        (should (equal (car seen) (cons 'body (file-truename f))))
+        (should (member "org outline instead"
+                        (jetpacs-files-test--collect screen :text)))
+        (should-not (member "editor" (jetpacs-files-test--collect screen :t)))
+        ;; Both action providers appended into the top bar.
+        (should (member "demo.outline"
+                        (jetpacs-files-test--collect screen :action)))
+        (should (member "demo.render"
+                        (jetpacs-files-test--collect screen :action)))
+        ;; The fab landed in the scaffold slot.
+        (should (member "demo.add"
+                        (jetpacs-files-test--collect screen :action))))
+      ;; Toolbar without a body override: rides the editor node.
+      (let* ((jetpacs-files-editor-toolbar-function (lambda (_p) "orgtb"))
+             (screen (jetpacs-files--edit-screen nil)))
+        (should (equal (jetpacs-files-test--collect screen :toolbar)
+                       '("orgtb")))))))
+
 (provide 'jetpacs-files-test)
 ;;; jetpacs-files-test.el ends here

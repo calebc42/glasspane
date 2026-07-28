@@ -385,7 +385,7 @@ tables, rules, images and LaTeX; span-budget accounting under a synthetic
 `max_rich_spans`. Smoke — tap a footnote, tap a heading → sheet → schedule with
 a repeater, use the toolbar to insert a src block.
 
-### JA-6 — Files *(in progress — F1+F2+F3 landed 2026-07-27)*
+### JA-6 — Files *(in progress — F1..F5 landed 2026-07-27; device smoke remains)*
 
 > **Order amended (Caleb ratified, 2026-07-27): this rung lands before
 > JA-5 — it is the NEXT rung.**  Rationale at the JA-5 entry.
@@ -543,9 +543,37 @@ a simplification.** **HARNESS TRAP: a lambda in a PARALLEL `let`
 cannot see its sibling binding — it compiles as a free dynamic
 reference and dies `void-variable` when the hook runs. That accident is
 what exposed defect (1); use `let*` for fixtures whose hooks close over
-recorder variables.** **Still to land: the remaining app seams, the
-launcher, and the device smoke (browse /sdcard, search, an op, edit
-init.el, restart, confirm).**
+recorder variables.**
+
+**F5 — the app seams + the launcher (LANDED 2026-07-27).** The four
+editor seams land under the poc's names so the org port recognizes its
+own extension points: `jetpacs-files-editor-body-functions` (first
+non-nil node REPLACES the plain editor — the seam JA-5's org render
+skin claims .org files through), `-actions-functions` (appended into
+the edit screen's top bar), `-toolbar-function` (rides `jetpacs-editor
+:toolbar`; a `:command` op still requires a synchronized `:document`,
+which the plain editor never has), and `-fab-function` (the scaffold
+slot). All four run inside the screen BUILDER, so a seam that signals
+costs that screen — the chrome error card — and nothing else: E1b is
+the containment, no extra isolation needed. **The launcher** is its own
+base module `jetpacs-launcher.el` (owner `jetpacs.launcher`, D-12:
+Emacs-side, "apps are configs"): its root lists every surface with a
+registered builder via the new public `jetpacs-shell-roots` reader
+(self excluded, sorted), and a row tap re-pushes that surface — which
+IS switching under the reference Companion's one-surface
+last-write-wins presentation. `jetpacs.launcher.open` guards
+MEMBERSHIP: a tapped row must still name a registered root, else
+`stale` — the wire does not get to nominate surfaces.
+`jetpacs.launcher.show` is a `:any-surface` global verb (the
+theme-toggle precedent) because `jetpacs-launcher-button` renders in
+OTHER owners' top bars; the files browser and the device-init hub both
+embed it (files via a `featurep` soft-couple). Exit gate: +1 seam test
+(all four slots + fall-through) and `test/jetpacs-launcher-test.el`
+(5 tests: registry read, row shape, membership stale-guard through the
+real dispatch, the `:any-surface` exemption, button shape). 5 more
+mutants killed (35 total for the rung). **Still to land: the device
+smoke — browse /sdcard, search, an op, edit init.el via the editor,
+restart, confirm the edit took, plus the launcher switch on hardware.**
 
 **Lands:** the sandbox guard (with `file-remote-p` rejected **before** any
 stat), the /sdcard probe, the grep scanner behind a `text_input` `:on-submit`

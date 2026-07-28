@@ -139,6 +139,37 @@ SPEC 13.6 draft: the user's typing.")
 The first JA-6 app seam: org affordances (cache invalidation, outline
 refresh) attach here rather than being wired into base.")
 
+;;;; The editor app seams
+;;
+;; Base renders a PLAIN editor; everything file-type-shaped lives above
+;; it, attached through these four seams (the poc's names, kept so the
+;; org port recognizes its own extension points).  All four run inside
+;; the screen BUILDER: a seam function that signals costs that screen —
+;; the chrome error card — and nothing else, which is the E1b
+;; containment and needs no extra isolation here.
+
+(defvar jetpacs-files-editor-body-functions nil
+  "Abnormal hook: functions of (PATH) that may REPLACE the editor body.
+Run until one returns a node, which becomes the edit screen's body in
+place of the plain editor — the seam the org render skin (JA-5) claims
+.org files through.  Returning nil passes.")
+
+(defvar jetpacs-files-editor-actions-functions nil
+  "Abnormal hook: functions of (PATH) returning top-bar action nodes.
+All results are appended into the edit screen's `:actions' slot — the
+poc used this for the HTML \"open rendered\" and org \"Outline\"
+buttons.")
+
+(defvar jetpacs-files-editor-toolbar-function nil
+  "Function of (PATH) returning the plain editor's `:toolbar', or nil.
+A registered toolbar id string or a list of `jetpacs-toolbar-item's;
+validation rides `jetpacs-editor' (a `:command' op still requires a
+synchronized `:document', which the plain editor never has).")
+
+(defvar jetpacs-files-editor-fab-function nil
+  "Function of (PATH) returning the edit screen's FAB node, or nil.
+The poc's org add-heading FAB attaches here.")
+
 ;;;; The effective root set (config + the /sdcard probe)
 
 (defun jetpacs-files--detect-shared-dir ()
@@ -376,14 +407,21 @@ landing configuration never went through a handler."
                           :title "Can't open folder"
                           :caption (format "error: %s" (jetpacs--error-label err))))))
 
+(declare-function jetpacs-launcher-button "jetpacs-launcher" ())
+
 (defun jetpacs-files--screen (_back)
   "The chrome root screen builder."
   (jetpacs-chrome-screen "Files" (jetpacs-files--body)
-                         :actions (list (jetpacs-icon-button
-                                         "add"
-                                         (jetpacs-action "jetpacs.files.new")
-                                         :content-description
-                                         "New file or folder"))
+                         :actions (append
+                                   (list (jetpacs-icon-button
+                                          "add"
+                                          (jetpacs-action "jetpacs.files.new")
+                                          :content-description
+                                          "New file or folder"))
+                                   ;; Soft coupling: the switcher rides
+                                   ;; along when its module is loaded.
+                                   (when (featurep 'jetpacs-launcher)
+                                     (list (jetpacs-launcher-button))))
                          :on-refresh (jetpacs-action "jetpacs.files.refresh")))
 
 ;;;; Content search (F2)
@@ -728,21 +766,35 @@ seed."
     reason))
 
 (defun jetpacs-files--edit-screen (back)
-  "Builder for the pushed editor screen."
+  "Builder for the pushed editor screen, the four app seams applied."
   (let ((req jetpacs-files--edit))
-    (jetpacs-chrome-screen
-     (if req
-         (jetpacs-scalar-text (file-name-nondirectory (plist-get req :path)))
-       "Edit")
-     (if (null req)
-         (jetpacs-empty-state :icon "info" :title "Nothing being edited")
-       (jetpacs-editor
-        (jetpacs-claim-node-id (jetpacs-wire-id "fedit" (plist-get req :path)))
-        :value (plist-get req :seed)
-        :on-save (jetpacs-action "jetpacs.files.save"
-                                 :args (list :path (plist-get req :path)
-                                             :mtime (plist-get req :mtime)))))
-     :back back)))
+    (if (null req)
+        (jetpacs-chrome-screen
+         "Edit" (jetpacs-empty-state :icon "info" :title "Nothing being edited")
+         :back back)
+      (let* ((path (plist-get req :path))
+             (body (or (run-hook-with-args-until-success
+                        'jetpacs-files-editor-body-functions path)
+                       (jetpacs-editor
+                        (jetpacs-claim-node-id (jetpacs-wire-id "fedit" path))
+                        :value (plist-get req :seed)
+                        :toolbar (and jetpacs-files-editor-toolbar-function
+                                      (funcall jetpacs-files-editor-toolbar-function
+                                               path))
+                        :on-save (jetpacs-action "jetpacs.files.save"
+                                                 :args (list :path path
+                                                             :mtime (plist-get req :mtime))))))
+             (actions (apply #'append
+                             (mapcar (lambda (f) (funcall f path))
+                                     jetpacs-files-editor-actions-functions)))
+             (fab (and jetpacs-files-editor-fab-function
+                       (funcall jetpacs-files-editor-fab-function path))))
+        (jetpacs-chrome-screen
+         (jetpacs-scalar-text (file-name-nondirectory path))
+         body
+         :actions actions
+         :fab fab
+         :back back)))))
 
 ;;;; The five ops (F3)
 ;;

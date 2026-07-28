@@ -30,6 +30,7 @@
 (require 'jetpacs-clip)
 (require 'jetpacs-device)
 (require 'jetpacs-files)
+(require 'jetpacs-launcher)
 
 ;; Mirror the device Emacs theme onto the chrome; `system'/`dark'/`off'
 ;; are the other choices (see `jetpacs-theme-mode').
@@ -59,7 +60,8 @@
                   :style "caption")
     :spacing 8)
    :actions (list (jetpacs-button
-                   "Theme" (jetpacs-action "jetpacs.theme.modus-toggle")))))
+                   "Theme" (jetpacs-action "jetpacs.theme.modus-toggle"))
+                  (jetpacs-launcher-button))))
 
 (with-jetpacs-owner "hub"
   (jetpacs-chrome-define-root "hub" "home" #'jetpacs-hub--screen

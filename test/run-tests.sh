@@ -133,6 +133,11 @@ emacs -Q --batch -L emacs -l test/jetpacs-emacs-ui-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-files-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-6 F5 launcher exit gate: the registry read, the open verb's
+# membership stale-guard, and show's :any-surface exemption.
+emacs -Q --batch -L emacs -l test/jetpacs-launcher-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # Cross-module seam wiring (AUDIT-ja1-ja2 3(h)): the ONLY process that
 # loads the application layer together.  A seam that exists only when two
 # modules are both loaded — chrome publishing itself as the navigator's

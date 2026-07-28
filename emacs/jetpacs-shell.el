@@ -179,6 +179,15 @@ schedules a debounced repush on a live session.  Returns SURFACE."
     (jetpacs-shell--schedule-repush surface)
     surface))
 
+(defun jetpacs-shell-roots ()
+  "Live root registrations as an alist of (SURFACE . OWNER), a copy.
+OWNER is the id recorded at registration (nil for an ownerless root).
+The launcher's read surface: everything with a registered builder is an
+app a user could switch to, and nothing else is."
+  (mapcar (lambda (entry)
+            (cons (car entry) (plist-get (cdr entry) :owner)))
+          jetpacs-shell--roots))
+
 (defun jetpacs-shell-remove-root (surface)
   "Unregister SURFACE's root and tombstone it (SPEC 13.3).
 A removal requested while disconnected is REMEMBERED, not dropped: the

@@ -69,6 +69,7 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-buffer)
 (require 'jetpacs-hypertext)
+(require 'jetpacs-async)
 
 ;;;; Options
 
@@ -265,9 +266,185 @@ swallow the blanks org-element folds into an element's :end."
           (let ((cap (string-trim (match-string-no-properties 1))))
             (unless (string-empty-p cap) cap)))))))
 
-(defun jetpacs-org-render--latex-node (_el)
-  "The LaTeX upgrade arm — lands at JA-5c; nil keeps the text render."
-  nil)
+;;;; Native upgrades: LaTeX environments (JA-5c)
+;;
+;; The poc compiled formulas SYNCHRONOUSLY inside the socket filter (15
+;; seconds per uncached fragment, N fragments per first push) and
+;; shipped file:// URIs.  Rebuilt: the upgrade arm asks `jetpacs-async'
+;; and splices a progress node while a `run-at-time' drain — off the
+;; jsonrpc dispatch extent — runs ONE `org-create-formula-image' per
+;; tick; the result ships as a data: URI.  The module MEMO, not the
+;; async table, is the durable cache: the async eviction sweep is a
+;; GLOBAL per-push generation sweep, so any other surface pushing twice
+;; between org renders evicts the entries — re-entry then re-reports
+;; pending for one frame and resolves from the memo without recompiling.
+;; Failures memoise too ('fail), so a machine without a TeX toolchain
+;; pays one attempt per fragment per session, not one per push.
+
+(defcustom jetpacs-org-render-latex-images t
+  "When non-nil, org LaTeX environments render as preview images.
+Uses org's own preview pipeline (`org-preview-latex-default-process',
+`org-format-latex-options' — scale and colors included), so what the
+phone shows is what \\[org-latex-preview] would show.  Only a process
+whose output is PNG qualifies — SVG is an active format SPEC 17.2
+rejects, and silently overriding the user's configured process is not
+this skin's call; a non-PNG process leaves the environment as styled
+text.  With no TeX toolchain the environment likewise stays text."
+  :type 'boolean :group 'jetpacs-org)
+
+(defcustom jetpacs-org-latex-memo-max 64
+  "Successful formula renders kept in the session memo (FIFO evicted).
+Failure markers are free — they carry no image bytes."
+  :type 'integer :group 'jetpacs-org)
+
+(defvar jetpacs-org-render--latex-memo (make-hash-table :test #'equal)
+  "KEY -> (DATA-URI . WIDTH-PX), or `fail'.  The durable formula cache.")
+
+(defvar jetpacs-org-render--latex-order nil
+  "Successful memo KEYs, oldest first — the FIFO eviction order.")
+
+(defvar jetpacs-org-render--latex-queue nil
+  "Pending compiles: (KEY FRAGMENT BUFFER RESOLVE REJECT), FIFO.")
+
+(defvar jetpacs-org-render--latex-timer nil
+  "The armed drain timer, or nil.")
+
+(defun jetpacs-org-render--latex-png-p ()
+  "Whether the configured preview process outputs PNG."
+  (equal (or (plist-get (cdr (assq org-preview-latex-default-process
+                                   org-preview-latex-process-alist))
+                        :image-output-type)
+             "png")
+         "png"))
+
+(defun jetpacs-org-render--latex-safe-options ()
+  "`org-format-latex-options', with colors a headless Emacs can resolve.
+org's pipeline resolves the symbol `default' through the default face,
+whose colors are \"unspecified\" in a batch or daemon session;
+`color-values' then returns nil and the render dies on a format error.
+Substitute concrete values only in that case — an explicit user color
+resolves everywhere and is honored untouched."
+  (let ((opts (copy-sequence org-format-latex-options)))
+    (cl-flet ((unresolvable-p (c) (not (and (stringp c) (color-values c)))))
+      (when (and (eq (plist-get opts :foreground) 'default)
+                 (unresolvable-p (face-attribute 'default :foreground nil)))
+        (setq opts (plist-put opts :foreground "Black")))
+      (when (and (eq (plist-get opts :background) 'default)
+                 (unresolvable-p (face-attribute 'default :background nil)))
+        (setq opts (plist-put opts :background "Transparent"))))
+    opts))
+
+(defun jetpacs-org-render--latex-key (fragment)
+  "The memo/async key for FRAGMENT under the current configuration."
+  (sha1 (format "%s|%s|%S" fragment
+                org-preview-latex-default-process
+                (jetpacs-org-render--latex-safe-options))))
+
+(defun jetpacs-org-render--latex-memoize (key value)
+  "Store VALUE for KEY in the memo, FIFO-evicting successful entries."
+  (when (consp value)
+    (setq jetpacs-org-render--latex-order
+          (nconc jetpacs-org-render--latex-order (list key)))
+    (while (> (length jetpacs-org-render--latex-order)
+              (max 1 jetpacs-org-latex-memo-max))
+      (remhash (pop jetpacs-org-render--latex-order)
+               jetpacs-org-render--latex-memo)))
+  (puthash key value jetpacs-org-render--latex-memo))
+
+(defun jetpacs-org-render--latex-compile (fragment buffer)
+  "Compile FRAGMENT via org's toolchain; (DATA-URI . WIDTH-PX) or `fail'.
+Runs from the drain timer, never the dispatch extent.  Bounded by a 15
+second timeout; the temp file never outlives the call; the encoded form
+must pass the same per-image fit gauntlet as any other image."
+  (condition-case nil
+      (with-timeout (15 'fail)
+        (let ((tmp (make-temp-file "jetpacs-latex" nil ".png")))
+          (unwind-protect
+              (progn
+                (org-create-formula-image
+                 fragment tmp (jetpacs-org-render--latex-safe-options)
+                 (and (buffer-live-p buffer) buffer)
+                 org-preview-latex-default-process)
+                (let* ((data (with-temp-buffer
+                               (set-buffer-multibyte nil)
+                               (insert-file-contents-literally tmp)
+                               (buffer-string)))
+                       (width (car (jetpacs-hypertext-png-size data))))
+                  (if (and width (jetpacs-hypertext-image-fits-p data))
+                      (cons (concat "data:image/png;base64,"
+                                    (base64-encode-string data t))
+                            width)
+                    'fail)))
+            (ignore-errors (delete-file tmp)))))
+    (error 'fail)))
+
+(defun jetpacs-org-render--latex-drain ()
+  "Compile ONE queued formula, settle its async entry, reschedule."
+  (setq jetpacs-org-render--latex-timer nil)
+  (pcase (pop jetpacs-org-render--latex-queue)
+    (`(,key ,fragment ,buffer ,resolve ,reject)
+     (let ((result (jetpacs-org-render--latex-compile fragment buffer)))
+       (jetpacs-org-render--latex-memoize key result)
+       (if (consp result)
+           (funcall resolve result)
+         ;; Symbol only — never the fragment or the compiler's output
+         ;; (SPEC 23.3).
+         (funcall reject "latex-failed")))))
+  (when jetpacs-org-render--latex-queue
+    (jetpacs-org-render--latex-arm)))
+
+(defun jetpacs-org-render--latex-arm ()
+  "Arm the drain timer unless it already is."
+  (unless (timerp jetpacs-org-render--latex-timer)
+    (setq jetpacs-org-render--latex-timer
+          (run-at-time 0 nil #'jetpacs-org-render--latex-drain))))
+
+(defun jetpacs-org-render--latex-loader (key fragment buffer)
+  "A `jetpacs-async' loader closure for FRAGMENT under KEY."
+  (lambda (resolve reject)
+    (let ((hit (gethash key jetpacs-org-render--latex-memo)))
+      (cond
+       ((consp hit) (funcall resolve hit))
+       ((eq hit 'fail) (funcall reject "latex-failed"))
+       (t
+        (setq jetpacs-org-render--latex-queue
+              (nconc jetpacs-org-render--latex-queue
+                     (list (list key fragment buffer resolve reject))))
+        (jetpacs-org-render--latex-arm)
+        ;; Cleanup thunk: an evicted entry dequeues its un-started
+        ;; compile.  Re-entry recompiles nothing — the memo answers.
+        (lambda ()
+          (setq jetpacs-org-render--latex-queue
+                (cl-delete key jetpacs-org-render--latex-queue
+                           :key #'car :test #'equal))))))))
+
+(defun jetpacs-org-render--latex-node (el)
+  "The node for latex-environment EL, or nil to keep the text render.
+Pending state splices a progress affordance; a failed compile a
+truthful caption; a ready formula the width-capped data: image (px≈dp
+at org's 140 dpi headless render; capped at 340 so an equation-numbered
+full-line environment still fits a phone)."
+  (when (and jetpacs-org-render-latex-images
+             (fboundp 'org-create-formula-image)
+             (jetpacs-node-advertised-p "image")
+             (jetpacs-feature-advertised-p "image.data")
+             (jetpacs-org-render--latex-png-p))
+    (let* ((fragment (org-element-property :value el))
+           (key (jetpacs-org-render--latex-key fragment))
+           (buffer (current-buffer)))
+      (pcase (jetpacs-async (list 'jetpacs-org-latex key)
+                            (jetpacs-org-render--latex-loader
+                             key fragment buffer))
+        (`(pending . ,_)
+         (if (jetpacs-node-advertised-p "progress")
+             (jetpacs-progress :variant "circular")
+           (jetpacs-text "… rendering formula" :style "caption")))
+        (`(error . ,_)
+         (jetpacs-text "[LaTeX failed]" :style "caption"))
+        (`(ready . ,img)
+         (jetpacs-with-attrs
+          (jetpacs-image (car img) :content-description "LaTeX formula")
+          :width (min (cdr img) 340)))))))
 
 (defun jetpacs-org-render--element-hidden-p (beg end)
   "Whether [BEG, END) is ENTIRELY invisible (inside a fold).
@@ -529,8 +706,13 @@ to the pure Tier-0 render."
 ;;;; Reset / unload
 
 (defun jetpacs-org-render-reset ()
-  "Reset render-module state (the test seam; LaTeX state joins at JA-5c)."
-  nil)
+  "Reset render-module state: the LaTeX memo, queue and drain timer."
+  (clrhash jetpacs-org-render--latex-memo)
+  (setq jetpacs-org-render--latex-order nil
+        jetpacs-org-render--latex-queue nil)
+  (when (timerp jetpacs-org-render--latex-timer)
+    (cancel-timer jetpacs-org-render--latex-timer))
+  (setq jetpacs-org-render--latex-timer nil))
 
 (defun jetpacs-org-render-unload-function ()
   "Unload hygiene: deregister the skin and the verbs."

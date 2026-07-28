@@ -529,5 +529,135 @@ the handler widens only what the render offered."
       (with-current-buffer buf
         (should-not (buffer-narrowed-p))))))
 
+;;;; LaTeX on jetpacs-async (JA-5c)
+
+(defconst jetpacs-org-render-test--latex-content
+  "before\n\\begin{equation}\ne = mc^2\n\\end{equation}\nafter\n"
+  "One LaTeX environment between two prose lines.")
+
+(defmacro jetpacs-org-render-test--with-latex-stub (counter &rest body)
+  "Stub `org-create-formula-image' to write the constant PNG; run BODY.
+COUNTER (a symbol) is bound to a counter cell incremented per compile."
+  (declare (indent 1))
+  `(let ((,counter (list 0)))
+     (cl-letf (((symbol-function 'org-create-formula-image)
+                (lambda (_string tofile _options _buffer &optional _type)
+                  (cl-incf (car ,counter))
+                  (let ((coding-system-for-write 'binary))
+                    (write-region jetpacs-org-render-test--png nil tofile))))
+               ;; Pin the process config so the png gate passes without
+               ;; a TeX toolchain installed.
+               ((symbol-value 'org-preview-latex-default-process) 'dvipng))
+       (unwind-protect
+           (progn ,@body)
+         (jetpacs-async-reset)
+         (jetpacs-org-render-reset)))))
+
+(ert-deftest jetpacs-org-render-latex-off-dispatch-extent-then-ready ()
+  "The render never compiles inline: the first pass splices a pending
+affordance and queues the compile; the drain (a timer in production)
+compiles ONCE; the re-render ships the width-capped data: image."
+  (jetpacs-org-render-test--with-latex-stub compiles
+    (jetpacs-org-render-test--with-file f
+        jetpacs-org-render-test--latex-content
+      (let* ((buf (jetpacs-org-render-test--buffer f))
+             (nodes (jetpacs-org-render buf)))
+        ;; Pending: no compile ran on the render stack.
+        (should (= 0 (car compiles)))
+        (should (= 1 (length jetpacs-org-render--latex-queue)))
+        (should-not (jetpacs-org-render-test--nodes-of nodes "image"))
+        ;; One drain tick = one compile.
+        (jetpacs-org-render--latex-drain)
+        (should (= 1 (car compiles)))
+        (let* ((nodes (jetpacs-org-render buf))
+               (imgs (jetpacs-org-render-test--nodes-of nodes "image")))
+          (should (= 1 (length imgs)))
+          (should (string-prefix-p "data:image/png;base64,"
+                                   (plist-get (car imgs) :url)))
+          ;; 1x1 fixture PNG: width 1, under the 340 cap.
+          (should (equal 1 (plist-get (car imgs) :width))))))))
+
+(ert-deftest jetpacs-org-render-latex-memo-survives-async-eviction ()
+  "The module memo, not the async table, is the durable cache: after a
+full async reset (the global eviction sweep's worst case) the loader
+answers from the memo without recompiling."
+  (jetpacs-org-render-test--with-latex-stub compiles
+    (jetpacs-org-render-test--with-file f
+        jetpacs-org-render-test--latex-content
+      (let ((buf (jetpacs-org-render-test--buffer f)))
+        (jetpacs-org-render buf)
+        (jetpacs-org-render--latex-drain)
+        (jetpacs-org-render buf)          ; ready
+        (should (= 1 (car compiles)))
+        ;; The sweep: async cache gone, memo intact.
+        (jetpacs-async-reset)
+        ;; First post-sweep render re-reports pending by the async
+        ;; contract, but the loader resolved synchronously from the
+        ;; memo — no queue entry, no compile.
+        (jetpacs-org-render buf)
+        (should (= 0 (length jetpacs-org-render--latex-queue)))
+        (should (= 1 (car compiles)))
+        (let ((nodes (jetpacs-org-render buf)))
+          (should (= 1 (length (jetpacs-org-render-test--nodes-of
+                                nodes "image")))))))))
+
+(ert-deftest jetpacs-org-render-latex-fail-memoised ()
+  "A failed compile memoises `fail': the environment renders a truthful
+caption and the toolchain is never re-run for that fragment."
+  (jetpacs-org-render-test--with-latex-stub compiles
+    (cl-letf (((symbol-function 'org-create-formula-image)
+               (lambda (&rest _)
+                 (cl-incf (car compiles))
+                 (error "no toolchain"))))
+      (jetpacs-org-render-test--with-file f
+          jetpacs-org-render-test--latex-content
+        (let ((buf (jetpacs-org-render-test--buffer f)))
+          (jetpacs-org-render buf)
+          (jetpacs-org-render--latex-drain)
+          (should (= 1 (car compiles)))
+          (let ((nodes (jetpacs-org-render buf)))
+            (should (seq-find (lambda (n)
+                                (equal (plist-get n :text) "[LaTeX failed]"))
+                              nodes)))
+          ;; Async swept, memo remembers the failure: no second attempt.
+          (jetpacs-async-reset)
+          (jetpacs-org-render buf)
+          (should (= 0 (length jetpacs-org-render--latex-queue)))
+          (should (= 1 (car compiles))))))))
+
+(ert-deftest jetpacs-org-render-latex-png-only-gate ()
+  "A non-PNG preview process leaves the environment as styled text —
+SVG is an active format SPEC 17.2 rejects, and the user's configured
+process is never silently overridden."
+  (jetpacs-org-render-test--with-latex-stub compiles
+    (let ((org-preview-latex-default-process 'dvisvgm))
+      (jetpacs-org-render-test--with-file f
+          jetpacs-org-render-test--latex-content
+        (let* ((buf (jetpacs-org-render-test--buffer f))
+               (nodes (jetpacs-org-render buf)))
+          (should (= 0 (car compiles)))
+          (should-not jetpacs-org-render--latex-queue)
+          (should-not (jetpacs-org-render-test--nodes-of nodes "image"))
+          (should (seq-find
+                   (lambda (n)
+                     (seq-find (lambda (s)
+                                 (string-match-p "\\\\begin{equation}"
+                                                 (or (plist-get s :text) "")))
+                               (append (plist-get n :spans) nil)))
+                   (jetpacs-org-render-test--nodes-of nodes "rich_text"))))))))
+
+(ert-deftest jetpacs-org-render-latex-eviction-cleanup-dequeues ()
+  "An evicted async entry dequeues its un-started compile via the
+cleanup thunk — the drain never burns a tick on a view nobody shows."
+  (jetpacs-org-render-test--with-latex-stub compiles
+    (jetpacs-org-render-test--with-file f
+        jetpacs-org-render-test--latex-content
+      (let ((buf (jetpacs-org-render-test--buffer f)))
+        (jetpacs-org-render buf)
+        (should (= 1 (length jetpacs-org-render--latex-queue)))
+        (jetpacs-async-reset)             ; sweep runs the cancel thunks
+        (should (= 0 (length jetpacs-org-render--latex-queue)))
+        (should (= 0 (car compiles)))))))
+
 (provide 'jetpacs-org-render-test)
 ;;; jetpacs-org-render-test.el ends here

@@ -236,12 +236,25 @@ single resolve)."
                            (not (file-remote-p p)) p))
                     paths)))
 
-(defun jetpacs-check-path (file roots)
+(cl-defun jetpacs-check-path (file roots &key (require 'readable))
   "FILE validated against ROOTS, returned as a truename, or signal.
 Signals `jetpacs-path-refused' with a one-symbol data list — `not-absolute',
-`remote', `no-roots', `outside-roots' or `unreadable'.  The symbol travels
-alone ON PURPOSE: an error raised here is answered toward the device, and
-a path in its data is a §23.1 leak (`jetpacs--error-label' prints symbols).
+`remote', `no-roots', `outside-roots', `unreadable', `not-a-directory' or
+`exists'.  The symbol travels alone ON PURPOSE: an error raised here is
+answered toward the device, and a path in its data is a §23.1 leak
+\(`jetpacs--error-label' prints symbols).
+
+REQUIRE selects the existence test applied AFTER containment, which is
+the only part that differs between callers:
+  `readable'  (default) an existing readable file or directory;
+  `directory' an accessible directory — the browse case;
+  `absent'    a path that does NOT exist — a rename/create TARGET, whose
+              parent must still be inside a root, which containment
+              already established because `file-truename' resolves the
+              existing prefix and keeps the new tail literal;
+  nil         containment only.
+Containment never varies: widening the sandbox is not something a caller
+should be able to ask for by passing a flag.
 
 Guard order is load-bearing and is the whole point of this function:
 
@@ -275,8 +288,15 @@ a guard that is correct once."
       (signal 'jetpacs-path-refused (list 'no-roots)))
     (unless (cl-some (lambda (root) (file-in-directory-p true root)) dirs)
       (signal 'jetpacs-path-refused (list 'outside-roots)))
-    (unless (file-readable-p true)
-      (signal 'jetpacs-path-refused (list 'unreadable)))
+    (pcase require
+      ('readable (unless (file-readable-p true)
+                   (signal 'jetpacs-path-refused (list 'unreadable))))
+      ('directory (unless (file-accessible-directory-p true)
+                    (signal 'jetpacs-path-refused (list 'not-a-directory))))
+      ('absent (when (file-exists-p true)
+                 (signal 'jetpacs-path-refused (list 'exists))))
+      ('nil nil)
+      (_ (error "jetpacs-check-path: unknown :require %S" require)))
     true))
 
 (defcustom jetpacs-toast-max-chars 300

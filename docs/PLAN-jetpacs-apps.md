@@ -385,10 +385,44 @@ tables, rules, images and LaTeX; span-budget accounting under a synthetic
 `max_rich_spans`. Smoke — tap a footnote, tap a heading → sheet → schedule with
 a repeater, use the toolbar to insert a src block.
 
-### JA-6 — Files
+### JA-6 — Files *(in progress — F1 landed 2026-07-27)*
 
 > **Order amended (Caleb ratified, 2026-07-27): this rung lands before
 > JA-5 — it is the NEXT rung.**  Rationale at the JA-5 entry.
+
+**F1 — the files floor (LANDED 2026-07-27).** `jetpacs-files.el`: the
+effective root set (`jetpacs-files-roots` + the /sdcard probe, which no
+longer mutates the defcustom — the widened sandbox lives in
+`jetpacs-files--roots` so it can be narrowed back), the dired card skin
+registered for `dired-mode` (dirs-first, up-row only while the parent
+clears the guard, row cap `jetpacs-files-max-rows` + bounded-walk cap
+`jetpacs-files-scan-cap` — the JC-2 lesson, the walk STOPS), and the
+three browse verbs `jetpacs.files.cd` / `.open` / `.refresh` (owner
+`jetpacs.files`, chrome root `browser`). `jetpacs-check-path` grew
+`:require` modes on the floor — `readable` (default) / `directory` /
+`absent` / nil — because the existence test is the only part that
+differs between callers; containment never varies by flag. Open on a
+directory routes to cd (keeps one directory from holding the same
+literal node keys in two views); open runs inside `jetpacs-flow-continue`
+so the large-file and changed-on-disk prompts bridge as device dialogs;
+device-originated opens apply only `:safe` file-local variables. A path
+that cannot round-trip the wire (`jetpacs-scalar-text` would alter it)
+renders as an INERT row — `:args` is walker-opaque and a raw byte there
+reaches `json-serialize` and takes down the whole push. Exit gate
+`test/jetpacs-files-test.el` (21 tests): the plan's guard cases driven
+DIRECTLY (symlink-inside-root, prefix-not-component with a SLASHLESS
+root — a slashed root makes prefix matching accidentally safe and the
+first mutant survived until the fixture matched how users actually
+write config, remote-name-never-statted), the `absent` smuggle case
+(create/rename target through an in-root symlink), both caps, and the
+verbs through the real `jetpacs--dispatch` (D1 foreign-surface
+rejection, D2 nothing-pushed-in-extent). All 8 mutants killed, each by
+its named test — the remote-order mutant takes ~50s to fail because it
+really does dial TRAMP. **Still to land: F2 grep (the bounds + NUL
+guard half of the exit gate), F3 the five ops (`absent`/`directory`
+modes are ready for them), F4 the plain editor (+ B11
+`max_event_bytes`), the app seams, the launcher, and the device smoke
+(browse /sdcard, edit init.el, restart, confirm).**
 
 **Lands:** the sandbox guard (with `file-remote-p` rejected **before** any
 stat), the /sdcard probe, the grep scanner behind a `text_input` `:on-submit`

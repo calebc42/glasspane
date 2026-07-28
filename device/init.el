@@ -29,6 +29,7 @@
 (require 'jetpacs-theme)
 (require 'jetpacs-clip)
 (require 'jetpacs-device)
+(require 'jetpacs-files)
 
 ;; Mirror the device Emacs theme onto the chrome; `system'/`dark'/`off'
 ;; are the other choices (see `jetpacs-theme-mode').
@@ -54,7 +55,7 @@
     (jetpacs-hub--row "Scratch" "lisp playground" "*scratch*")
     (jetpacs-hub--row "Messages" "the Emacs log" "*Messages*")
     (jetpacs-hub--row "Shell" "comint, with input" "*shell*")
-    (jetpacs-text "Kill ring: M-x jetpacs-clip-show   ·   home: M-x jetpacs-hub"
+    (jetpacs-text "Kill ring: M-x jetpacs-clip-show   ·   files: M-x jetpacs-files   ·   home: M-x jetpacs-hub"
                   :style "caption")
     :spacing 8)
    :actions (list (jetpacs-button

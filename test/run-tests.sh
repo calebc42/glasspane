@@ -125,6 +125,14 @@ emacs -Q --batch -L emacs -l test/jetpacs-keymap-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-emacs-ui-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-6 F1 exit gate: the floor guard's :require modes driven directly
+# (symlink-inside-root, path-prefix-not-component, remote-filename,
+# absent-target containment), the /sdcard probe, the dired card skin's
+# ordering and both caps, and the browse verbs' D1/D2 shape through the
+# real dispatch.
+emacs -Q --batch -L emacs -l test/jetpacs-files-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # Cross-module seam wiring (AUDIT-ja1-ja2 3(h)): the ONLY process that
 # loads the application layer together.  A seam that exists only when two
 # modules are both loaded — chrome publishing itself as the navigator's

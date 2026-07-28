@@ -40,6 +40,10 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-buffer)
 
+;; Only reached inside an `inferior-emacs-lisp-mode' buffer, where ielm
+;; is by definition loaded.
+(declare-function ielm-send-input "ielm" (&optional for-effect))
+
 (defcustom jetpacs-comint-tail-lines 200
   "Transcript lines rendered from the tail of a comint buffer."
   :type 'integer :group 'jetpacs)
@@ -192,10 +196,20 @@ branch: no echo wait, no re-entrancy, no timer pump.
 `jetpacs-with-no-prompts' is belt and braces over the rest of the input
 path — `comint-input-filter-functions' (shell-directory-tracker does
 TRAMP-capable file checks) and, under `comint-input-autoexpand',
-`comint-replace-by-expanded-history'."
+`comint-replace-by-expanded-history'.
+
+ielm gets its own branch because bare `comint-send-input' there only
+ECHOES: ielm evaluates in `ielm-send-input', whose let-bound
+`ielm-input' the mode's input sender fills — called without that
+binding, the sender drops the input into a void variable and no
+evaluation ever runs (ielm.el, Emacs 30.1).  The echo-loop binding
+still wraps it: `ielm-send-input' reaches `comint-send-input'
+underneath."
   (let ((comint-process-echoes nil))
     (jetpacs-with-no-prompts
-      (comint-send-input))))
+      (if (derived-mode-p 'inferior-emacs-lisp-mode)
+          (ielm-send-input)
+        (comint-send-input)))))
 
 (jetpacs-defaction "comint.send"
   ;; SPEC 14.3: `on_submit' injects the submitted text as `value' into a

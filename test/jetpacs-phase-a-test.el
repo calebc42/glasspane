@@ -335,5 +335,24 @@ must still return a status."
                 (delete-process proc))))
         (kill-buffer buf)))))
 
+(ert-deftest jetpacs-phase-a-send-input-evaluates-in-ielm ()
+  "Bare `comint-send-input' in ielm only ECHOES: the mode's input
+sender fills a let-bound `ielm-input' that call never establishes, so
+the input lands in a void binding and no evaluation runs (ielm.el,
+30.1).  The D2 wrapper must route through `ielm-send-input' — found on
+device: the hub's Eval tab echoed forms and never answered."
+  (require 'ielm)
+  (let ((buf (save-window-excursion (ielm) (current-buffer))))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char (point-max))
+          (insert "(+ 40 2)")
+          (jetpacs-comint--send-input)
+          (should (string-match-p "42" (buffer-string))))
+      (when-let* ((p (get-buffer-process buf)))
+        (set-process-query-on-exit-flag p nil)
+        (delete-process p))
+      (kill-buffer buf))))
+
 (provide 'jetpacs-phase-a-test)
 ;;; jetpacs-phase-a-test.el ends here

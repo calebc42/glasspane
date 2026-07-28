@@ -62,6 +62,18 @@ bounded too."
 BUILDER takes one argument BACK — a `view.switch' descriptor, or nil at
 the stack bottom — and returns a root Node.")
 
+(defvar jetpacs-chrome-dock-function nil
+  "Function (SURFACE) -> Node or nil: a DOCKED bottom bar for SURFACE.
+The docs/CHROME-VOCABULARY.md view switcher is chrome that persists —
+authored on one root screen it vanishes on every drill and every other
+surface.  When this is non-nil, `jetpacs-chrome--build' calls it once
+per build and injects the returned node as the `bottom_bar' of every
+stacked scaffold screen that does not author its own (a screen's own
+bar always wins).  Returning nil docks nothing for that surface; a
+signal or a non-node degrades the same way and never fails the build.
+Every descriptor the dock ships must be a GLOBAL VERB or scoped to the
+surfaces it appears on — it renders on every chrome surface.")
+
 ;;;; Composition
 
 (cl-defun jetpacs-chrome-screen (title body &key back actions fab drawer
@@ -121,6 +133,18 @@ bug this port fixes."
     (if key (jetpacs-with-attrs card :key key) card)))
 
 ;;;; The per-surface screen stack (representation A: one multi_view)
+
+(defun jetpacs-chrome--dock (surface)
+  "SURFACE's dock node from `jetpacs-chrome-dock-function', or nil.
+A signal or a non-node return degrades to nil — a broken dock builder
+must cost the dock, never every chrome surface in the process."
+  (when jetpacs-chrome-dock-function
+    (condition-case err
+        (let ((n (funcall jetpacs-chrome-dock-function surface)))
+          (and (jetpacs--root-node-p n) n))
+      (error (message "jetpacs-chrome: dock builder failed: %s"
+                      (jetpacs--error-label err))
+             nil))))
 
 (defun jetpacs-chrome--error-screen (surface id back err)
   "A Core-Node-Set stand-in for screen ID whose builder failed with ERR.
@@ -212,6 +236,7 @@ together, on every rebuild."
       (error "jetpacs-chrome: no chrome stack for %s" surface))
     (jetpacs-buffer-with-budget
      (let ((seen (make-hash-table :test #'equal))
+           (dock (jetpacs-chrome--dock surface))
            views prev-id)
       (dolist (entry (reverse stack))
         (let* ((id (car entry))
@@ -222,6 +247,13 @@ together, on every rebuild."
                (fail nil)
                (node (condition-case err
                          (let ((n (funcall (cdr entry) back)))
+                           ;; The dock joins BEFORE the gates so what is
+                           ;; checked is what ships; `append' copies, so
+                           ;; the builder's own node is never mutated.
+                           (when (and dock (jetpacs--root-node-p n)
+                                      (equal (plist-get n :t) "scaffold")
+                                      (not (plist-member n :bottom_bar)))
+                             (setq n (append n (list :bottom_bar dock))))
                            (jetpacs-chrome--gate-view surface n)
                            (jetpacs-chrome--claim-screen-ids n seen)
                            n)

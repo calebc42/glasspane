@@ -991,5 +991,58 @@ view switcher)."
     (should (equal (plist-get (plist-get screen :drawer) :text) "d"))
     (should (equal (plist-get (plist-get screen :bottom_bar) :text) "bb"))))
 
+(ert-deftest jetpacs-chrome-dock-rides-every-screen-and-defers-to-own ()
+  "The dock seam: `jetpacs-chrome-dock-function''s node becomes the
+`bottom_bar' of every stacked scaffold screen — the view switcher
+persists across drills — while a screen authoring its own bar wins."
+  (let ((jetpacs-chrome-dock-function (lambda (_s) (jetpacs-text "dock"))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "dockdemo"
+            (jetpacs-chrome-define-root "dockdemo" "root"
+                                        (lambda (back)
+                                          (jetpacs-chrome-screen
+                                           "R" (jetpacs-text "r") :back back))))
+          (jetpacs-chrome--stack-insert
+           "app:dockdemo" "own"
+           (lambda (back)
+             (jetpacs-chrome-screen "O" (jetpacs-text "o") :back back
+                                    :bottom-bar (jetpacs-text "mine"))))
+          (jetpacs-chrome--stack-insert
+           "app:dockdemo" "leaf"
+           (lambda (back)
+             (jetpacs-chrome-screen "L" (jetpacs-text "l") :back back)))
+          (let* ((mv (jetpacs-chrome--build "app:dockdemo"))
+                 (views (plist-get mv :views)))
+            (should (equal (plist-get (plist-get (gethash "root" views)
+                                                 :bottom_bar)
+                                      :text)
+                           "dock"))
+            (should (equal (plist-get (plist-get (gethash "leaf" views)
+                                                 :bottom_bar)
+                                      :text)
+                           "dock"))
+            (should (equal (plist-get (plist-get (gethash "own" views)
+                                                 :bottom_bar)
+                                      :text)
+                           "mine"))))
+      (jetpacs-chrome-remove "app:dockdemo"))))
+
+(ert-deftest jetpacs-chrome-dock-failure-degrades-to-no-dock ()
+  "A signalling dock builder costs the dock, never the surface."
+  (let ((jetpacs-chrome-dock-function (lambda (_s) (error "boom"))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "dockdemo2"
+            (jetpacs-chrome-define-root "dockdemo2" "root"
+                                        (lambda (back)
+                                          (jetpacs-chrome-screen
+                                           "R" (jetpacs-text "r") :back back))))
+          (let* ((mv (jetpacs-chrome--build "app:dockdemo2"))
+                 (views (plist-get mv :views)))
+            (should (gethash "root" views))
+            (should-not (plist-get (gethash "root" views) :bottom_bar))))
+      (jetpacs-chrome-remove "app:dockdemo2"))))
+
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

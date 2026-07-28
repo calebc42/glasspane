@@ -83,15 +83,35 @@
                    :variant (if selected "tonal" "text"))
    :weight 1))
 
-(defun jetpacs-hub--bottom-bar ()
-  (jetpacs-row
-   (jetpacs-hub--tab "Home" "home" (jetpacs-action "hub.home") t)
-   (jetpacs-hub--tab "Files" "folder_open"
-                     (jetpacs-action "jetpacs.launcher.open"
-                                     :args '(:surface "app:jetpacs.files")))
-   (jetpacs-hub--tab "Eval" "code"
-                     (jetpacs-action "hub.open" :args '(:buffer "*ielm*")))
-   :spacing 4))
+;; The Eval screen is the *ielm* drill on the hub stack; the B5 minter
+;; is stable across renders, so its id is computable here.
+(defvar jetpacs-hub--eval-screen (jetpacs-wire-id "drill" "*ielm*"))
+
+(defun jetpacs-hub--dock (surface)
+  "The persistent view switcher, injected into EVERY chrome screen.
+`jetpacs-chrome-dock-function' calls this once per surface build; the
+selected tab follows where the user actually is: the files surface, the
+hub's Eval drill, or the hub itself.  Every descriptor here is a global
+verb — the dock renders on every owner's surface."
+  (let ((sel (cond ((equal surface "app:jetpacs.files") 'files)
+                   ((not (equal surface "app:hub")) nil)
+                   ((equal (car (jetpacs-chrome-stack surface))
+                           jetpacs-hub--eval-screen)
+                    'eval)
+                   (t 'home))))
+    (jetpacs-row
+     (jetpacs-hub--tab "Home" "home"
+                       (jetpacs-action "hub.home") (eq sel 'home))
+     (jetpacs-hub--tab "Files" "folder_open"
+                       (jetpacs-action "jetpacs.launcher.open"
+                                       :args '(:surface "app:jetpacs.files"))
+                       (eq sel 'files))
+     (jetpacs-hub--tab "Eval" "code"
+                       (jetpacs-action "hub.open" :args '(:buffer "*ielm*"))
+                       (eq sel 'eval))
+     :spacing 4)))
+
+(setq jetpacs-chrome-dock-function #'jetpacs-hub--dock)
 
 (defun jetpacs-hub--screen (_back)
   (jetpacs-chrome-screen
@@ -104,16 +124,18 @@
                   :style "caption")
     :spacing 8)
    :actions (list (jetpacs-emacs-ui-mx-button))
-   :drawer (jetpacs-hub--drawer)
-   :bottom-bar (jetpacs-hub--bottom-bar)))
+   :drawer (jetpacs-hub--drawer)))
 
 (with-jetpacs-owner "hub"
   (jetpacs-chrome-define-root "hub" "home" #'jetpacs-hub--screen
                               :required t)
+  ;; Both hub verbs are GLOBAL (the dock renders them on every chrome
+  ;; surface) and target the HUB surface explicitly: tapping Eval from
+  ;; Files means "take me to the hub's Eval view", never "drill ielm
+  ;; onto the files stack".
   (jetpacs-defaction "hub.open"
-    (lambda (args params)
-      (let ((name (plist-get args :buffer))
-            (surface (plist-get params :surface)))
+    (lambda (args _params)
+      (let ((name (plist-get args :buffer)))
         (jetpacs-flow-continue
          (lambda ()
            (when (and (equal name "*shell*") (not (get-buffer name)))
@@ -121,16 +143,18 @@
            (when (and (equal name "*ielm*") (not (get-buffer name)))
              (save-window-excursion (ielm)))
            (condition-case err
-               (jetpacs-navigate-buffer name surface)
+               (jetpacs-navigate-buffer name "app:hub")
              (error (message "hub.open: %s" (jetpacs--error-label err))))))
-        'accepted)))
+        'accepted))
+    :any-surface t)
 
   (jetpacs-defaction "hub.home"
     ;; The view switcher's Home tab: back to the hub root.
     (lambda (_args _params)
       (jetpacs-flow-continue
        (lambda () (jetpacs-chrome-reset-screens "hub")))
-      'accepted)))
+      'accepted)
+    :any-surface t))
 
 ;;;; Connection
 

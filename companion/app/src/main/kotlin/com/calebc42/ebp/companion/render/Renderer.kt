@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
@@ -693,10 +694,20 @@ fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
                             }
                         }
                         bottomBar?.let {
+                            // A DOCKED bar, not a floating toolbar: the M3
+                            // navigation-bar container color makes it read as
+                            // a band flush with the screen edge, and it owns
+                            // the system navigation inset (a plain Surface,
+                            // unlike M3's NavigationBar, gets no automatic
+                            // inset — without it the items sit in the gesture
+                            // area).
                             androidx.compose.material3.Surface(
-                                tonalElevation = 2.dp,
+                                color = MaterialTheme.colorScheme.surfaceContainer,
                                 modifier = Modifier.fillMaxWidth()) {
-                                RenderNode(it, ctx.child(it, 4))
+                                Box(Modifier.navigationBarsPadding()
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)) {
+                                    RenderNode(it, ctx.child(it, 4))
+                                }
                             }
                         }
                     }

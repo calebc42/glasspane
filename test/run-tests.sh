@@ -133,6 +133,11 @@ emacs -Q --batch -L emacs -l test/jetpacs-org-dialogs-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-org-habits-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-5h: the Tier-1 outline STAGING view (never required by base) —
+# own-records cards, the cap/seam/empty body, the no-base-require pin.
+emacs -Q --batch -L emacs -l test/jetpacs-org-outline-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-3b exit gate: binding extraction (incl. the minor-mode-map poc-bug
 # regression), menu-bar mining over the :filter/:enable/:visible fixture,
 # and suppressed-commands unreachability.

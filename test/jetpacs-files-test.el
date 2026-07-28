@@ -468,29 +468,59 @@ never a `jetpacs-path-refused' a handler would answer to the device."
                           'rejected)))))))))
 
 (ert-deftest jetpacs-files-open-defers-the-prompting-effect ()
+  "F4 contract: an ELIGIBLE file opens the editor screen; a file the
+editor cannot host (here: binary) falls back to the buffer host.  Both
+effects run OUTSIDE the dispatch extent (D2)."
   (jetpacs-files-test--with-tree root
-    (let ((f (jetpacs-files-test--touch (concat root "f.txt"))))
+    (let ((f (concat root "f.txt"))
+          (bin (concat root "b.dat")))
+      (write-region "hello\n" nil f nil 'silent)
+      (let ((coding-system-for-write 'binary))
+        (write-region "x\0y" nil bin nil 'silent))
       (jetpacs-files-test--attached (jetpacs-files-test--client)
-        (let ((navigated '()) (opened-inside 'unset) (notes '()))
+        (let ((navigated '()) (screens '()) (notes '())
+              (jetpacs-files--edit nil))
           (cl-letf (((symbol-function 'jetpacs-navigate-buffer)
                      (lambda (buf surface &rest _)
                        (push (cons (buffer-file-name (get-buffer buf)) surface)
                              navigated)))
+                    ((symbol-function 'jetpacs-chrome-push-screen)
+                     (lambda (surface id builder)
+                       (push (list surface id builder) screens) 1))
                     ((symbol-function 'jetpacs-shell-notify)
                      (lambda (text &optional _s) (push text notes))))
+            ;; Eligible: the editor screen, seeded from disk.
             (should (eq (jetpacs--dispatch
                          client `(:action "jetpacs.files.open"
                                   :surface "app:jetpacs.files"
                                   :args (:path ,f))
                          (gethash "jetpacs.files.open" jetpacs-action-handlers))
                         'accepted))
-            ;; D2: the open (it can prompt) happened OUTSIDE the extent.
-            (setq opened-inside navigated)
+            ;; D2: nothing happened inside the extent.
+            (should (null screens))
+            (should (null navigated))
             (jetpacs-files-test--pump)
-            (should (null opened-inside))
+            (should (equal screens
+                           (list (list "app:jetpacs.files" "edit"
+                                       #'jetpacs-files--edit-screen))))
+            (should (null navigated))
+            (should (equal (plist-get jetpacs-files--edit :seed) "hello\n"))
+            (should (equal (plist-get jetpacs-files--edit :path)
+                           (file-truename f)))
+            (should (stringp (plist-get jetpacs-files--edit :mtime)))
+            ;; Binary: the read fallback, quietly.
+            (should (eq (jetpacs--dispatch
+                         client `(:action "jetpacs.files.open"
+                                  :surface "app:jetpacs.files"
+                                  :args (:path ,bin))
+                         (gethash "jetpacs.files.open" jetpacs-action-handlers))
+                        'accepted))
+            (jetpacs-files-test--pump)
             (should (equal navigated
-                           (list (cons (file-truename f)
+                           (list (cons (file-truename bin)
                                        "app:jetpacs.files"))))
+            (should (= (length screens) 1))
+            (should (null notes))
             ;; Outside the roots: rejected before any effect.
             (should (eq (jetpacs--dispatch
                          client '(:action "jetpacs.files.open"
@@ -1044,6 +1074,294 @@ flow to run the op."
                          (list (cons (jetpacs-check-path
                                       root (list root) :require 'directory)
                                      "app:jetpacs.files")))))))))
+
+;;;; The plain editor (F4) + B11
+
+(ert-deftest jetpacs-files-b11-and-the-editor-cap ()
+  "B11: the accessor reads the welcome limit; the cap derives from the
+TIGHTER of the event and frame bounds and never exceeds the custom
+ceiling; offline it is the custom ceiling alone."
+  ;; No client: accessor nil, cap = custom.
+  (should-not (jetpacs-max-event-bytes))
+  (let ((jetpacs-files-max-bytes 262144))
+    (should (= (jetpacs-files--editor-cap) 262144)))
+  ;; Attached: the declared limits drive the derivation.
+  (jetpacs-files-test--attached (jetpacs-files-test--client)
+    (setf (ebp-client-limits client) '(:max_event_bytes 300000))
+    (should (= (jetpacs-max-event-bytes) 300000))
+    (let ((jetpacs-files-max-bytes 262144))
+      ;; Event bound only: (300000 - 16384) / 4.
+      (should (= (jetpacs-files--editor-cap) 70904))
+      ;; The frame bound is TIGHTER here and must win.
+      (setf (ebp-client-limits client)
+            '(:max_event_bytes 300000 :max_frame_bytes 100000))
+      (should (= (jetpacs-files--editor-cap)
+                 (/ (- (cdr (jetpacs-buffer-budgets)) 16384) 4)))
+      ;; The custom ceiling always binds from above.
+      (let ((jetpacs-files-max-bytes 1000))
+        (should (= (jetpacs-files--editor-cap) 1000))))))
+
+(ert-deftest jetpacs-files-mtime-stamp-is-opaque-and-changes ()
+  (jetpacs-files-test--with-tree root
+    (should-not (jetpacs-files--mtime-stamp (concat root "missing")))
+    (let ((f (jetpacs-files-test--touch (concat root "f"))))
+      (let ((s1 (jetpacs-files--mtime-stamp f)))
+        (should (stringp s1))
+        (should (equal s1 (jetpacs-files--mtime-stamp f)))
+        (sleep-for 0.02)
+        (write-region "x" nil f nil 'silent)
+        (should-not (equal s1 (jetpacs-files--mtime-stamp f)))))))
+
+(ert-deftest jetpacs-files-edit-open-routes-by-eligibility ()
+  (jetpacs-files-test--with-tree root
+    (let ((f (concat root "f.txt"))
+          (raw (concat root "raw.txt"))
+          (screens '()) (navigated '()) (notes '())
+          (jetpacs-files--edit nil))
+      (write-region "hello\n" nil f nil 'silent)
+      (write-region "placeholder\n" nil raw nil 'silent)
+      (cl-letf (((symbol-function 'jetpacs-chrome-push-screen)
+                 (lambda (surface id builder)
+                   (push (list surface id builder) screens) 1))
+                ((symbol-function 'jetpacs-navigate-buffer)
+                 (lambda (buf _surface &rest _) (push buf navigated)))
+                ((symbol-function 'jetpacs-shell-notify)
+                 (lambda (text &optional _s) (push text notes))))
+        ;; Eligible.
+        (should-not (jetpacs-files--edit-open (file-truename f) "app:jetpacs.files"))
+        (should (= (length screens) 1))
+        (should (equal (plist-get jetpacs-files--edit :seed) "hello\n"))
+        ;; Oversize: told, and read-only.
+        (let ((jetpacs-files-max-bytes 4))
+          (should (eq (jetpacs-files--edit-open (file-truename f)
+                                                "app:jetpacs.files")
+                      'oversize)))
+        (should (equal (car notes) "Too large to edit here — read-only"))
+        (should (= (length navigated) 1))
+        ;; Unsaved desktop edits: told, and read-only.
+        (let ((buf (find-file-noselect (file-truename f))))
+          (unwind-protect
+              (progn
+                (with-current-buffer buf (goto-char (point-max)) (insert "z"))
+                (should (eq (jetpacs-files--edit-open (file-truename f)
+                                                      "app:jetpacs.files")
+                            'desktop-modified))
+                (should (equal (car notes)
+                               "Unsaved desktop edits — read-only")))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf)))
+        ;; Undecodable content: quietly read-only — the round-trip would
+        ;; corrupt exactly the bytes the wire cannot carry.  The
+        ;; raw-byte char is SYNTHESIZED rather than written to disk: on
+        ;; this platform coding detection resolves every stray octet to
+        ;; a real character (latin-1 wins, and even a forced utf-8 read
+        ;; of byte 200 yields U+00C8, not #x3FFFC8), so no fixture file
+        ;; reaches the branch through `insert-file-contents'.  Raw-byte
+        ;; chars do occur — a literal read, a buffer sliced from binary
+        ;; — and this pins the routing for when they do.
+        (let ((before (length notes)))
+          (cl-letf (((symbol-function 'insert-file-contents)
+                     (lambda (&rest _) (insert "caf" (string #x3FFFC8) "e\n")))
+                    ;; The fallback reads the file too; keep the stub off
+                    ;; its path so this leg tests ROUTING, not find-file.
+                    ((symbol-function 'find-file-noselect)
+                     (lambda (&rest _) (get-buffer-create "*f4-raw*"))))
+            (should (eq (jetpacs-files--edit-open (file-truename raw)
+                                                  "app:jetpacs.files")
+                        'unencodable)))
+          (should (= (length notes) before)))
+        (should (= (length screens) 1))))))
+
+(ert-deftest jetpacs-files-edit-screen-shape ()
+  (jetpacs-files-test--with-tree root
+    (let* ((f (jetpacs-files-test--touch (concat root "notes.org")))
+           (jetpacs-files--edit (list :path (file-truename f)
+                                      :seed "seed text"
+                                      :mtime "123.000000")))
+      (let ((screen (jetpacs-files--edit-screen nil)))
+        (should (member "notes.org" (jetpacs-files-test--collect screen :text)))
+        (should (equal (jetpacs-files-test--collect screen :value)
+                       '("seed text")))
+        (should (member "jetpacs.files.save"
+                        (jetpacs-files-test--collect screen :action)))
+        (let ((args (car (jetpacs-files-test--collect screen :args))))
+          (should (equal (plist-get args :path) (file-truename f)))
+          (should (equal (plist-get args :mtime) "123.000000")))
+        (should (cl-some (lambda (id) (string-prefix-p "fedit-" id))
+                         (jetpacs-files-test--collect screen :id)))))
+    (let ((jetpacs-files--edit nil))
+      (should (member "empty_state"
+                      (jetpacs-files-test--collect
+                       (jetpacs-files--edit-screen nil) :t))))))
+
+(ert-deftest jetpacs-files-save-guards-then-writes ()
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      ;; `let*', not `let': a lambda in a PARALLEL let cannot see its
+      ;; sibling binding, so `hooked' would compile as a free (dynamic)
+      ;; reference and signal `void-variable' when the hook runs — which
+      ;; is exactly how the isolation defect below was found.
+      (let* ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
+             (f (concat root "f.txt"))
+             (hooked '()) (notes '()) (pushed '())
+             (jetpacs-files--edit nil)
+             (jetpacs-files-after-save-hook
+              (list (lambda (path) (push path hooked)))))
+        (write-region "old\n" nil f nil 'silent)
+        (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &optional _s) (push text notes)))
+                  ((symbol-function 'jetpacs-shell-push)
+                   (lambda (surface &rest _) (push surface pushed) 1)))
+        (let ((true (file-truename f)))
+          (setq jetpacs-files--edit
+                (list :path true :seed "old\n"
+                      :mtime (jetpacs-files--mtime-stamp true)))
+          ;; Happy path, no visiting buffer.
+          (should (eq (jetpacs--dispatch
+                       client `(:action "jetpacs.files.save"
+                                :surface "app:jetpacs.files"
+                                :args (:path ,true
+                                       :mtime ,(jetpacs-files--mtime-stamp true)
+                                       :value "new\n"))
+                       handler)
+                      'accepted))
+          (with-temp-buffer
+            (insert-file-contents true)
+            (should (equal (buffer-string) "new\n")))
+          (should (equal (car notes) "Saved f.txt"))
+          (should (equal hooked (list true)))
+          ;; The edit state re-stamped for the NEXT save.
+          (should (equal (plist-get jetpacs-files--edit :seed) "new\n"))
+          (should (equal (plist-get jetpacs-files--edit :mtime)
+                         (jetpacs-files--mtime-stamp true)))
+          (should (null pushed))
+          (jetpacs-files-test--pump)
+          (should (equal pushed '("app:jetpacs.files")))
+          ;; Stale stamp: the disk moved on — nothing written.
+          (let ((old-stamp (jetpacs-files--mtime-stamp true)))
+            (sleep-for 0.02)
+            (write-region "external\n" nil true nil 'silent)
+            (should (eq (jetpacs--dispatch
+                         client `(:action "jetpacs.files.save"
+                                  :surface "app:jetpacs.files"
+                                  :args (:path ,true :mtime ,old-stamp
+                                         :value "clobber\n"))
+                         handler)
+                        'stale))
+            (should (equal (car notes) "File changed on disk — not saved"))
+            (with-temp-buffer
+              (insert-file-contents true)
+              (should (equal (buffer-string) "external\n"))))
+          ;; A modified visiting buffer refuses; an unmodified one is the
+          ;; save route — WIDENED, mode intact, buffer left unmodified.
+          (let ((buf (find-file-noselect true)))
+            (unwind-protect
+                (progn
+                  (with-current-buffer buf
+                    (goto-char (point-max)) (insert "local"))
+                  (should (eq (jetpacs--dispatch
+                               client `(:action "jetpacs.files.save"
+                                        :surface "app:jetpacs.files"
+                                        :args (:path ,true
+                                               :mtime ,(jetpacs-files--mtime-stamp true)
+                                               :value "v2\n"))
+                               handler)
+                              'rejected))
+                  (should (equal (car notes)
+                                 "Unsaved desktop edits — not saved"))
+                  (with-current-buffer buf
+                    (set-buffer-modified-p nil)
+                    (revert-buffer nil t)
+                    (narrow-to-region (point-min) (1+ (point-min))))
+                  (should (eq (jetpacs--dispatch
+                               client `(:action "jetpacs.files.save"
+                                        :surface "app:jetpacs.files"
+                                        :args (:path ,true
+                                               :mtime ,(jetpacs-files--mtime-stamp true)
+                                               :value "v3 whole\n"))
+                               handler)
+                              'accepted))
+                  ;; The whole content is replaced and the buffer is left
+                  ;; WIDENED — `erase-buffer' removes the restriction
+                  ;; (30.1 src/buffer.c), and after a full swap a
+                  ;; surviving narrowing would show a lie.
+                  (with-current-buffer buf
+                    (should (equal (buffer-string) "v3 whole\n"))
+                    (should (= (point-min) 1))
+                    (should (= (point-max) (1+ (buffer-size))))
+                    (should-not (buffer-modified-p)))
+                  (with-temp-buffer
+                    (insert-file-contents true)
+                    (should (equal (buffer-string) "v3 whole\n"))))
+              (with-current-buffer buf (set-buffer-modified-p nil))
+              (kill-buffer buf)))
+          ;; Oversize, wrong type, out of policy.
+          (let ((jetpacs-files-max-bytes 4))
+            (should (eq (jetpacs--dispatch
+                         client `(:action "jetpacs.files.save"
+                                  :surface "app:jetpacs.files"
+                                  :args (:path ,true
+                                         :mtime ,(jetpacs-files--mtime-stamp true)
+                                         :value "12345"))
+                         handler)
+                        'rejected))
+            (should (equal (car notes) "Save too large")))
+          (should (eq (jetpacs--dispatch
+                       client `(:action "jetpacs.files.save"
+                                :surface "app:jetpacs.files"
+                                :args (:path ,true :mtime "x" :value 5))
+                       handler)
+                      'rejected))
+          (should (eq (jetpacs--dispatch
+                       client '(:action "jetpacs.files.save"
+                                :surface "app:jetpacs.files"
+                                :args (:path "/etc/hostname" :mtime "x"
+                                       :value "v"))
+                       handler)
+                      'rejected))
+          (should (equal (car notes) "Save refused: outside-roots"))
+          ;; Saving the init file gets the honest instruction.
+          (let ((user-init-file true))
+            (should (eq (jetpacs--dispatch
+                         client `(:action "jetpacs.files.save"
+                                  :surface "app:jetpacs.files"
+                                  :args (:path ,true
+                                         :mtime ,(jetpacs-files--mtime-stamp true)
+                                         :value "init\n"))
+                         handler)
+                        'accepted))
+            (should (equal (car notes)
+                           "Saved init — restart Emacs to apply config changes")))))))))
+
+(ert-deftest jetpacs-files-save-survives-a-broken-seam ()
+  "A save whose after-save subscriber SIGNALS still answers `accepted'.
+The write is already durable when the seam runs; letting the signal
+escape would answer `rejected', which SPEC 14.4 makes PERMANENT — the
+Companion would re-deliver a save that already landed.  (This is how
+the defect was found: a test whose hook lambda died on a free variable
+flipped an otherwise-perfect save to `rejected'.)"
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (let* ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
+             (f (concat root "f.txt"))
+             (jetpacs-files--edit nil)
+             (jetpacs-files-after-save-hook
+              (list (lambda (_path) (error "seam exploded")))))
+        (write-region "old\n" nil f nil 'silent)
+        (cl-letf (((symbol-function 'jetpacs-shell-notify) #'ignore)
+                  ((symbol-function 'jetpacs-shell-push) (lambda (&rest _) 1)))
+          (let ((true (file-truename f)))
+            (should (eq (jetpacs--dispatch
+                         client `(:action "jetpacs.files.save"
+                                  :surface "app:jetpacs.files"
+                                  :args (:path ,true
+                                         :mtime ,(jetpacs-files--mtime-stamp true)
+                                         :value "new\n"))
+                         handler)
+                        'accepted))
+            (with-temp-buffer
+              (insert-file-contents true)
+              (should (equal (buffer-string) "new\n")))))))))
 
 (provide 'jetpacs-files-test)
 ;;; jetpacs-files-test.el ends here

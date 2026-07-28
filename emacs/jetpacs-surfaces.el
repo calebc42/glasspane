@@ -200,6 +200,18 @@ order: `granted' survives on a closed client struct and would lie."
   (when-let* ((client (or client (jetpacs-client))))
     (and (seq-contains-p (ebp-client-granted client) capability) t)))
 
+(defun jetpacs-max-event-bytes (&optional client)
+  "The session's declared `max_event_bytes', or nil with no client.
+B11: the largest `event.action' the Companion will CREATE — anything
+bigger dies device-side with only a local diagnostic, and Emacs never
+learns.  The welcome limit was previously read NOWHERE, so a seed that
+must round-trip as one event (an editor's `on_save', a submitted
+value) had no bound to size itself against; `jetpacs-buffer-budgets'
+is the PUSH bound and does not cover this.  SPEC 4.5 floors the value
+at 262144 on any conforming Companion."
+  (when-let* ((client (or client (jetpacs-client))))
+    (plist-get (ebp-client-limits client) :max_event_bytes)))
+
 (defun jetpacs-scalar-text (s)
   "S with every non-scalar char replaced by U+FFFD (SPEC 4.1).
 Emacs stores an undecodable octet as a raw-byte char in

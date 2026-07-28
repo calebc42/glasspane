@@ -499,10 +499,53 @@ recursive dir), the menu's gate/defer/rows/callback-through-flow-begin
 and dialog-id uniqueness, and new's gate + validated-dir handoff.
 8 more mutant runs killed (24 total) — the guard-bypass mutant is
 caught independently by rename, move, AND delete via their pinned
-refusal messages. **Still to land: F4 the plain editor (+ B11
-`max_event_bytes`), the app seams, the launcher, and the device smoke
-(browse /sdcard, search, an op or two, edit init.el, restart,
-confirm).**
+refusal messages.
+
+**F4 + B11 — the plain editor (LANDED 2026-07-27).** **B11 closed:**
+`jetpacs-max-event-bytes` on the floor — the welcome limit that was
+read NOWHERE. `jetpacs-files--editor-cap` derives the editable ceiling
+from the TIGHTER of it and `max_frame_bytes` (the seed rides the
+surface push and shares the frame with every other screen in the
+multi_view; the save must return as ONE event), minus headroom, over 4
+for JSON escaping — ~60 KiB on the minimum-conforming floor, scaling
+with a richer Companion, always under `jetpacs-files-max-bytes`, and
+offline the custom bound alone. D-1's `value`+`on_save` editor, NOT the
+synchronized §19 one (G4 stays deferred): the file seeds the node once,
+the device edits locally, and `jetpacs.files.save` carries the whole
+content back. An **mtime stamp** minted at open rides the descriptor
+and is re-checked at save — a file that changed underneath answers
+`stale` and is NOT clobbered. `jetpacs.files.open` now routes by
+eligibility: oversize / unsaved-desktop-edits / binary (NUL) /
+wire-unencodable content all fall back to the read-only buffer host,
+the first two saying why (a read view is simply what a binary gets).
+Save additionally refuses a modified visiting buffer, routes through a
+live buffer when one exists, and runs the new `jetpacs-files-after-save-hook`
+— **the first app seam**, where org affordances will attach.
+**TWO DEFECTS FOUND BY THE GATE, both real: (1) the after-save seam ran
+inside the write's `condition-case`, so a third-party subscriber that
+signalled flipped an already-durable save to `rejected` — SPEC 14.4
+makes that PERMANENT and the Companion would re-deliver a save that
+landed; now `jetpacs-shell--run-isolated`, whose docstring already
+stated exactly this rule (the JC-2 "rejected for an effect that
+happened" shape, third recurrence). (2) The module's `--check` wrapper
+`(or require 'readable)` turned an explicit nil into a stat — see F3.**
+Exit gate +6 tests (44): B11 + cap derivation across both bounds,
+stamp opacity, eligibility routing per reason, screen shape, the save
+matrix (happy / stale stamp / modified buffer / narrowed buffer /
+oversize / wrong type / out of policy / init-file wording), and a
+broken-seam regression. **Mutation notes: 6 more killed (30 total);
+m28 (drop the `widen` around the live-buffer save) SURVIVED and was
+verified EQUIVALENT, not a gap — `erase-buffer` removes the
+restriction itself (`Fwiden` in 30.1 `src/buffer.c:2447`), so the
+wrapper was dead code and is now deleted, with the test pinning the
+buffer is left widened. Reading the C source turned a "test gap" into
+a simplification.** **HARNESS TRAP: a lambda in a PARALLEL `let`
+cannot see its sibling binding — it compiles as a free dynamic
+reference and dies `void-variable` when the hook runs. That accident is
+what exposed defect (1); use `let*` for fixtures whose hooks close over
+recorder variables.** **Still to land: the remaining app seams, the
+launcher, and the device smoke (browse /sdcard, search, an op, edit
+init.el, restart, confirm).**
 
 **Lands:** the sandbox guard (with `file-remote-p` rejected **before** any
 stat), the /sdcard probe, the grep scanner behind a `text_input` `:on-submit`
@@ -627,7 +670,7 @@ consumers today and cost ~40 lines.
 | B8 | **1401-refused helper** (G10) | triggers (the *arming* push), device, package-browser | `ebp-client--request` returns nil under the sender ceiling. For triggers this is silent divergence on the durable path: Emacs believes the device is armed with the current registry when it is still running the last accepted set. |
 | B9 | **§14.4 durable-admission convention + `jetpacs-retry-later`** (G12) | triggers | `accepted` deletes the Companion's durable record. Scheduling the effect on a `run-at-time 0` timer and answering `accepted` is explicitly non-conforming and loses work on any crash. This needs a design decision (durable work item / synchronous effect / `1500 event-retry`), not a rewiring. |
 | B10 | **Welcome `input_state` fan-out + a regime for the state.changed extent** (new gap) | settings switches, and every future switch/slider/enum consumer | `ebp.el` merges welcome `input_state` into the store without calling `ebp-client-state-changed-functions`, and `jetpacs--on-state-changed` runs subscribers with neither `jetpacs-with-no-prompts` nor a device-flow marker — so a `yes-or-no-p` there goes to a real minibuffer from inside a process filter. |
-| B11 | **Expose `max_event_bytes`** | files.save | Unread anywhere in `ebp.el`. `jetpacs-buffer-budgets` returns the *push* bound, not the save bound. On a minimum-conforming Companion (`max_event_bytes` ≥ 262144) a 256 KB file cannot round-trip at all, and the Companion drops it with only a local diagnostic — Emacs never learns. |
+| B11 | ~~**Expose `max_event_bytes`**~~ **— CLOSED 2026-07-27 (JA-6 F4)** | files.save | Unread anywhere in `ebp.el`. `jetpacs-buffer-budgets` returns the *push* bound, not the save bound. On a minimum-conforming Companion (`max_event_bytes` ≥ 262144) a 256 KB file cannot round-trip at all, and the Companion drops it with only a local diagnostic — Emacs never learns. |
 | B12 | ~~**Outbound frame guard + an ebp defect fix**~~ **— defect FIXED 2026-07-26** | any raw `:args`/`:meta` payload | The W10 ceiling incremented `outstanding` immediately before `jsonrpc-connection-send` with no `condition-case`, so a non-serializable scalar signalled out of `jetpacs-shell-push` **and permanently burned an outstanding slot**, walking the session toward `ebp-overload-exhaust`. Fixed with a rollback-and-re-raise + regression test. The `max_frame_bytes` pre-check on `ebp-client-surface-update` remains open. |
 | B13 | **A builtin-advertisement predicate** | kill-ring (`clipboard.copy`) | The app layer has node and feature predicates only; GATE 1b *signals* on an unadvertised builtin, taking down the whole push. |
 | B14 | ~~**Fix the stale `jetpacs-dialog-node-types` constant**~~ **— FIXED 2026-07-26** | witheditor, transient, any dialog author | The Companion advertises `editor` for dialogs (JC-4b added it to `NodeSupport.DIALOG_NODE_TYPES`); the elisp reference set and its pin test still asserted the opposite, so `jetpacs-check-profile TREE 'dialog` wrongly rejected conforming dialogs. The picker worked on device only because the runtime gate reads the live welcome. Constant + pin test corrected (26→27). |

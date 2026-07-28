@@ -94,6 +94,15 @@ degrades silently."
                  (directory :tag "Explicit path"))
   :group 'jetpacs)
 
+(defcustom jetpacs-files-max-bytes (* 256 1024)
+  "Upper bound on files the plain editor will host, in bytes.
+The EFFECTIVE ceiling is usually lower: `jetpacs-files--editor-cap'
+derives it from the session's wire limits (the seed rides the surface
+push, and the save must come back as one event — B11).  This custom
+bound is the absolute ceiling a generous Companion cannot raise.
+Larger files open read-only through the buffer host."
+  :type 'integer :group 'jetpacs)
+
 (defcustom jetpacs-files-max-rows 300
   "Ceiling on entry rows one directory snapshot renders.
 Beyond it a caption reports how many entries were not shown.  The cap
@@ -116,6 +125,19 @@ one files surface under D1, so one variable is the whole state.")
 
 (defvar jetpacs-files--shared-dir 'unset
   "Memoized `jetpacs-files-shared-dir' result, or the `unset' sentinel.")
+
+(defvar jetpacs-files--edit nil
+  "The file the editor screen shows: (:path TRUENAME :seed S :mtime T).
+Written by `jetpacs-files--edit-open' after eligibility passed, and by
+a successful save (fresh seed and stamp).  The screen BUILDER reads
+only this — never the disk — so a browser re-push while editing
+re-renders the same seed, and what actually shows is the Companion's
+SPEC 13.6 draft: the user's typing.")
+
+(defvar jetpacs-files-after-save-hook nil
+  "Run with the saved truename after `jetpacs.files.save' lands on disk.
+The first JA-6 app seam: org affordances (cache invalidation, outline
+refresh) attach here rather than being wired into base.")
 
 ;;;; The effective root set (config + the /sdcard probe)
 
@@ -607,6 +629,121 @@ asking (back tapped, new query pushed) lets the sweep cancel the scan."
    :back back))
 
 
+;;;; The plain editor (F4)
+;;
+;; The `value'+`on_save' editor decision D-1 shipped this rung with:
+;; NOT the synchronized §19 editor (that is G4, explicitly deferred) —
+;; the whole file seeds the node once, the device edits locally, and a
+;; save comes back as ONE event carrying the full content.  Two wire
+;; bounds follow from that shape (`jetpacs-files--editor-cap'), and an
+;; mtime stamp rides the descriptor so a save over a file that changed
+;; underneath answers `stale' instead of clobbering it.  Files the
+;; editor cannot host honestly fall back to the read-only buffer host.
+
+(defun jetpacs-files--editor-cap ()
+  "Byte ceiling for a file the plain editor may host.
+Two wire bounds gate a local editor: the seed rides the surface push
+\(`max_frame_bytes', SHARED with every other screen in the multi_view),
+and the save must come back as ONE `event.action'
+\(`jetpacs-max-event-bytes' — B11; the Companion drops anything bigger
+with only a local diagnostic).  JSON escaping can double the content
+and the seed is not the frame's only tenant, so the ceiling is
+\(min of both bounds - headroom) / 4 — on the minimum-conforming floor
+\(262144) that is ~60 KiB, which covers the init.el use-case this rung
+exists for, and it scales with a richer Companion.  Always bounded by
+`jetpacs-files-max-bytes'; offline the custom cap alone (nothing can
+push anyway)."
+  (let* ((event (jetpacs-max-event-bytes))
+         (frame (cdr (jetpacs-buffer-budgets)))
+         (wire (cond ((and event frame) (min event frame))
+                     (event event)
+                     (frame frame))))
+    (if wire
+        (min jetpacs-files-max-bytes (max 1024 (/ (- wire 16384) 4)))
+      jetpacs-files-max-bytes)))
+
+(defun jetpacs-files--mtime-stamp (path)
+  "PATH's modification time as an opaque comparable string, or nil.
+Microsecond textual form, compared by `equal' only and never parsed —
+the same file state always yields the same string, and nil (the file
+is gone) can never equal a stamp."
+  (when-let* ((mt (file-attribute-modification-time
+                   (file-attributes path))))
+    (format-time-string "%s.%6N" mt)))
+
+(defun jetpacs-files--read-fallback (true surface reason)
+  "Show TRUE through the buffer host; explain REASON when it surprises.
+`binary' and `unencodable' stay quiet — a read view is simply what
+those files get — but a text file refused for size or for unsaved
+desktop edits would otherwise look broken."
+  (pcase reason
+    ('oversize
+     (jetpacs-shell-notify "Too large to edit here — read-only" surface))
+    ('desktop-modified
+     (jetpacs-shell-notify "Unsaved desktop edits — read-only" surface)))
+  (condition-case err
+      ;; Device-originated opens apply only :safe file-local variables —
+      ;; the desktop query UX has no device counterpart; an explicit nil
+      ;; stays nil.
+      (let* ((enable-local-variables (and enable-local-variables :safe))
+             (buf (find-file-noselect true)))
+        (jetpacs-navigate-buffer buf surface))
+    (error
+     (jetpacs-shell-notify "Could not open that file" surface)
+     (message "jetpacs-files: open failed: %s"
+              (jetpacs--error-label err)))))
+
+(defun jetpacs-files--edit-open (true surface)
+  "Open TRUE in the plain editor, or fall back to the read view.
+Runs in a flow continuation.  Returns the fallback reason symbol, or
+nil when the editor screen was pushed.  A file whose CONTENT the wire
+cannot carry byte-identically is never editable through it — the
+round-trip would corrupt exactly the bytes `jetpacs-scalar-text'
+replaces — and a NUL marks a binary whose \"text\" is not worth a
+seed."
+  (let* ((cap (jetpacs-files--editor-cap))
+         (size (or (file-attribute-size (file-attributes true)) 0))
+         (buf (get-file-buffer true))
+         (reason
+          (cond
+           ((> size cap) 'oversize)
+           ((and buf (buffer-modified-p buf)) 'desktop-modified)
+           (t (let ((content (with-temp-buffer
+                               (insert-file-contents true)
+                               (buffer-string))))
+                (cond
+                 ((string-search "\0" content) 'binary)
+                 ((not (jetpacs-files--wire-safe-p content)) 'unencodable)
+                 (t (setq jetpacs-files--edit
+                          (list :path true :seed content
+                                :mtime (jetpacs-files--mtime-stamp true)))
+                    nil)))))))
+    (if reason
+        (jetpacs-files--read-fallback true surface reason)
+      (condition-case err
+          (jetpacs-chrome-push-screen surface "edit"
+                                      #'jetpacs-files--edit-screen)
+        (error (message "jetpacs-files: edit push failed: %s"
+                        (jetpacs--error-label err)))))
+    reason))
+
+(defun jetpacs-files--edit-screen (back)
+  "Builder for the pushed editor screen."
+  (let ((req jetpacs-files--edit))
+    (jetpacs-chrome-screen
+     (if req
+         (jetpacs-scalar-text (file-name-nondirectory (plist-get req :path)))
+       "Edit")
+     (if (null req)
+         (jetpacs-empty-state :icon "info" :title "Nothing being edited")
+       (jetpacs-editor
+        (jetpacs-claim-node-id (jetpacs-wire-id "fedit" (plist-get req :path)))
+        :value (plist-get req :seed)
+        :on-save (jetpacs-action "jetpacs.files.save"
+                                 :args (list :path (plist-get req :path)
+                                             :mtime (plist-get req :mtime)))))
+     :back back)))
+
 ;;;; The five ops (F3)
 ;;
 ;; Reaching them: DELETE is a trailing icon-button on every entry row
@@ -857,24 +994,12 @@ Runs inside a device flow."
                   (progn
                     (setq jetpacs-files--dir (file-name-as-directory true))
                     (jetpacs-files--repush surface))
-                ;; Opening can PROMPT (large file, changed on disk), so
-                ;; the whole effect lives in the flow continuation where
-                ;; JC-4a bridges prompts to the device instead of a
-                ;; minibuffer nobody is looking at.
+                ;; The whole effect lives in the flow continuation:
+                ;; eligibility stats and reads the file, the read
+                ;; fallback can PROMPT (changed on disk), and JC-4a
+                ;; bridges prompts to the device only from there.
                 (jetpacs-flow-continue
-                 (lambda ()
-                   (condition-case e2
-                       ;; Device-originated opens apply only :safe
-                       ;; file-local variables — the desktop query UX has
-                       ;; no device counterpart; an explicit nil stays nil.
-                       (let* ((enable-local-variables
-                               (and enable-local-variables :safe))
-                              (buf (find-file-noselect true)))
-                         (jetpacs-navigate-buffer buf surface))
-                     (error
-                      (jetpacs-shell-notify "Could not open that file" surface)
-                      (message "jetpacs-files: open failed: %s"
-                               (jetpacs--error-label e2)))))))
+                 (lambda () (jetpacs-files--edit-open true surface))))
               'accepted)
           (jetpacs-path-refused
            (jetpacs-shell-notify (format "File refused: %s" (cadr err))
@@ -961,6 +1086,92 @@ Runs inside a device flow."
             (jetpacs-path-refused
              (jetpacs-files--op-notify-refused "Create" (cadr err) surface)
              'rejected)))))))
+
+  (jetpacs-defaction "jetpacs.files.save"
+    ;; SPEC 14.3: `on_save' injects the editor's full content as
+    ;; `value' into a copy of the descriptor's args; the path and the
+    ;; open-time mtime stamp ride the descriptor itself.  Containment-
+    ;; only guard: writability is the write's own error to report, and
+    ;; the stamp gate owns "is this still the file the user opened".
+    (lambda (args params)
+      (let ((surface (jetpacs-files--event-surface params))
+            (value (plist-get args :value))
+            (stamp (plist-get args :mtime)))
+        (condition-case err
+            (let ((true (jetpacs-files--check (plist-get args :path) nil)))
+              (cond
+               ((not (stringp value)) 'rejected)
+               ((> (string-bytes value) jetpacs-files-max-bytes)
+                ;; #138: the write is the interpretation; bound it even
+                ;; though a conforming Companion could not have sent it.
+                (jetpacs-shell-notify "Save too large" surface)
+                'rejected)
+               ((not (equal stamp (jetpacs-files--mtime-stamp true)))
+                ;; Changed — or vanished — on disk since the editor
+                ;; opened: the seed the user edited is outdated, and the
+                ;; newer state is NOT written over.
+                (jetpacs-shell-notify "File changed on disk — not saved"
+                                      surface)
+                'stale)
+               (t
+                (let ((buf (get-file-buffer true)))
+                  (if (and buf (buffer-modified-p buf))
+                      (progn
+                        (jetpacs-shell-notify
+                         "Unsaved desktop edits — not saved" surface)
+                        'rejected)
+                    (if buf
+                        ;; Through the live buffer so modes, hooks and
+                        ;; the desktop frame all see the change
+                        ;; coherently.  No `widen' wrapper: `erase-buffer'
+                        ;; removes the restriction itself (30.1
+                        ;; src/buffer.c calls Fwiden), so a narrowed
+                        ;; buffer is replaced whole and left widened —
+                        ;; which is the honest end state once the entire
+                        ;; content has been swapped.
+                        (with-current-buffer buf
+                          (let ((inhibit-read-only t))
+                            (erase-buffer)
+                            (insert value))
+                          (let ((save-silently t))
+                            (save-buffer)))
+                      (write-region value nil true nil 'silent))
+                    ;; Effect durable -> accepted (14.4).  Keep the edit
+                    ;; state coherent for the NEXT save: a fresh stamp
+                    ;; (disk may differ from VALUE — save hooks
+                    ;; reformat), seed = what the device now shows.
+                    (when (equal (plist-get jetpacs-files--edit :path) true)
+                      (setq jetpacs-files--edit
+                            (list :path true :seed value
+                                  :mtime (jetpacs-files--mtime-stamp true))))
+                    ;; ISOLATED: the write is already durable, so a
+                    ;; third-party seam subscriber that signals must not
+                    ;; turn this into `rejected' — SPEC 14.4 makes that
+                    ;; PERMANENT, and the Companion would re-deliver a
+                    ;; save that already landed.  (Caught by the F4 gate:
+                    ;; a broken subscriber flipped an accepted save.)
+                    (jetpacs-shell--run-isolated 'jetpacs-files-after-save-hook
+                                                 true)
+                    (jetpacs-shell-notify
+                     (if (and user-init-file
+                              (file-exists-p user-init-file)
+                              (file-equal-p true user-init-file))
+                         ;; Re-loading init mid-session never applies
+                         ;; cleanly; the honest instruction is a restart.
+                         "Saved init — restart Emacs to apply config changes"
+                       (format "Saved %s"
+                               (jetpacs-scalar-text
+                                (file-name-nondirectory true))))
+                     surface)
+                    (jetpacs-files--repush surface)
+                    'accepted)))))
+          (jetpacs-path-refused
+           (jetpacs-files--op-notify-refused "Save" (cadr err) surface)
+           'rejected)
+          (error
+           (jetpacs-shell-notify
+            (format "Save failed: %s" (jetpacs--error-label err)) surface)
+           'rejected)))))
 
   (jetpacs-defaction "jetpacs.files.grep"
     ;; SPEC 14.3: `on_submit' injects the submitted text as `value'

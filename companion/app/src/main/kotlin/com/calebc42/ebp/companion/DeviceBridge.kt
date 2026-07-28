@@ -242,7 +242,19 @@ class DeviceBridge(
     private fun dispatch(surface: String, descriptor: JSONObject, value: Any?,
                          injected: JSONObject?, fields: JSONObject?) {
         dispatchExecutor.execute {
-            engine?.dispatchAction(surface, descriptor, value, injected, fields) { _, error ->
+            // SPEC 18.1/14.4: a `dialog:` context dispatches in DIALOG
+            // context — dialog_id, no surface/revision.  The generic path
+            // resolved a revision for the pseudo-surface, got null, and
+            // silently dropped every remote descriptor inside a dialog
+            // (found by the JA-5 device gate).  Routed HERE so a parked
+            // confirmation resumes through the same fork.
+            if (surface.startsWith("dialog:"))
+                engine?.dispatchDialogAction(
+                    surface.removePrefix("dialog:"), descriptor, value,
+                    fields) { _, error ->
+                    error?.let { onQueueProblem(it.optString("message", "queue error")) }
+                }
+            else engine?.dispatchAction(surface, descriptor, value, injected, fields) { _, error ->
                 // SPEC 15.1: surface queue-full/storage failures visibly.
                 error?.let { onQueueProblem(it.optString("message", "queue error")) }
             }
@@ -254,6 +266,17 @@ class DeviceBridge(
         descriptor ?: return
         if (parkIfConfirmed(surface, descriptor, value, null, null)) return
         dispatch(surface, descriptor, value, null, null)
+    }
+
+    /** SPEC 18.1: renderer hook -> remote action from INSIDE a dialog.
+     * FIELDS is the capture snapshot read from the dialog's LOCAL field
+     * layer at tap time (dialog statefuls never enter the store). */
+    fun dialogAction(dialogId: String, descriptor: JSONObject?, value: Any?,
+                     fields: JSONObject?) {
+        descriptor ?: return
+        val surface = "dialog:" + dialogId
+        if (parkIfConfirmed(surface, descriptor, value, null, fields)) return
+        dispatch(surface, descriptor, value, null, fields)
     }
 
     /** SPEC 14.3: a multi-member hook (on_reorder from/to/order, on_add_row/

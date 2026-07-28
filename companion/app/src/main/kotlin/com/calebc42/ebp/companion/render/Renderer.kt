@@ -179,6 +179,22 @@ class RenderCtx(
                 }
             }
         }
+        if (d != null && descriptor != null && !descriptor.has("builtin")) {
+            // SPEC 18.1/14.4: a REMOTE descriptor inside a dialog dispatches
+            // in DIALOG context, its capture snapshot read from the local
+            // field layer exactly like dialog.submit (T3/LD-3).  The generic
+            // surface path silently dropped these — the JA-5 device gate's
+            // token+confirm Archive and date-pick relay were dead taps.
+            val fields = JSONObject()
+            descriptor.optJSONArray("capture_fields")?.let { capture ->
+                for (i in 0 until capture.length()) {
+                    val fieldId = capture.getString(i)
+                    fields.put(fieldId, d.capture(fieldId) ?: JSONObject.NULL)
+                }
+            }
+            d.bridge.dialogAction(d.dialogId, descriptor, value, fields)
+            return
+        }
         bridge.action(surface, descriptor, value)
     }
 

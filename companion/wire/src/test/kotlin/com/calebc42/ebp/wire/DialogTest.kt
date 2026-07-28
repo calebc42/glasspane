@@ -212,4 +212,47 @@ class DialogTest {
     }
 
     private fun assertNotNull(v: Any?) = assertTrue(v != null)
+
+    // SPEC 18.1/14.4: a REMOTE descriptor inside a dialog dispatches in
+    // DIALOG context — dialog_id INSTEAD of surface/revision, the capture
+    // snapshot from the dialog-local layer.  The JA-5 device gate found the
+    // generic dispatch silently dropping every such descriptor (it resolved
+    // a revision for the pseudo-surface, got null, returned).
+    @Test
+    fun remoteDescriptorInDialogDispatchesInDialogContext() {
+        val out = mutableListOf<JSONObject>()
+        val presented = mutableListOf<Pair<String, JSONObject?>>()
+        val engine = readyEngine(out, presented)
+        show(engine, "d1", "a")
+        val descriptor = JSONObject()
+            .put("action", "jetpacs.org.archive")
+            .put("args", JSONObject().put("token", "o1234-1"))
+            .put("capture_fields", JSONArray(listOf("name")))
+        val fields = JSONObject().put("name", "typed value")
+        engine.dispatchDialogAction("a", descriptor, null, fields)
+        val event = out.last {
+            it.optString("method") == "event.action" }.getJSONObject("params")
+        assertEquals("jetpacs.org.archive", event.getString("action"))
+        assertEquals("a", event.getString("dialog_id"))
+        assertFalse(event.has("surface"))
+        assertFalse(event.has("revision_seen"))
+        assertEquals("o1234-1",
+            event.getJSONObject("args").getString("token"))
+        assertEquals("typed value",
+            event.getJSONObject("fields").getString("name"))
+    }
+
+    @Test
+    fun remoteDescriptorAfterConclusionDispatchesNothing() {
+        val out = mutableListOf<JSONObject>()
+        val presented = mutableListOf<Pair<String, JSONObject?>>()
+        val engine = readyEngine(out, presented)
+        show(engine, "d1", "a")
+        engine.completeDialogSubmit("a", "done")
+        val before = out.size
+        engine.dispatchDialogAction("a",
+            JSONObject().put("action", "jetpacs.org.archive"), null, null)
+        // The tap raced the conclusion: no event, no crash.
+        assertEquals(before, out.size)
+    }
 }

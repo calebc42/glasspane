@@ -148,6 +148,12 @@
         :client-name "wsl-emacs" :client-version "30.1"
         :pairing-id "101112131415161718191a1b1c1d1e1f"
         :token (ebp-decode-pairing-token "AAECAwQFBgcICQoLDA0ODw")
+        ;; Without the WANT there is no grant, and every dialog-raising
+        ;; handler answers a SILENT rejected at its granted-p gate —
+        ;; found the hard way on the first hardware run: taps mutated,
+        ;; dialogs never appeared, and the raw method probe answered
+        ;; -32601 (an ungranted method is not-found to this Companion).
+        :wants '("surfaces.dialog")
         :receipt-file (make-temp-file "smoke-j5-receipts"))))
 
   (smoke-j5--drain 20 (lambda () (jetpacs-connected-p)))
@@ -253,7 +259,10 @@
 
     ;; S8 add-heading through the bridged prompt.
     (smoke-j5--mark "S8-TAP-'+ heading'->type-exactly:-Phone note->OK")
+    ;; The insert lands via the deferred-save seam: flush the armed idle
+    ;; timer in the poll (batch never idles) or disk never learns.
     (smoke-j5--drain 300 (lambda ()
+                           (smoke-j5--flush-idle-saves)
                            (string-search "* Phone note"
                                           (smoke-j5--text smoke-j5--file))))
     (smoke-j5--check "S8 heading appended on disk"

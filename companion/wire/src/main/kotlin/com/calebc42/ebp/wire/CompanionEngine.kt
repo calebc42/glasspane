@@ -281,6 +281,54 @@ class CompanionEngine(
      * on a single-view surface, an unknown view, a dialog completion outside
      * a dialog — is a safe no-op, never a crash.
      */
+    /** SPEC 18.1/14.4: dispatch a remote user action from INSIDE a dialog.
+     * The event carries `dialog_id` INSTEAD of surface + revision_seen —
+     * 14.4's contexts are exclusive — and its capture snapshot is the
+     * DIALOG's local field layer, which the caller (the renderer owns it;
+     * dialog statefuls never enter the store, SPEC 18.1) passes in.
+     * READY-only by construction: 18.1 makes every dialog descriptor
+     * drop-mode, so there is no durable arm.  A concluded dialog dispatches
+     * nothing — the tap raced the conclusion and the occurrence is void.
+     *
+     * Found by the JA-5 device gate: the generic `dispatchAction` resolves
+     * a revision for the `dialog:` pseudo-surface, gets null, and silently
+     * returns — every remote descriptor inside a dialog (the token+confirm
+     * Archive, the date-pick relay) was dead while all the dialog BUILTINS
+     * worked, because those route through DialogContext instead.  The
+     * JA-6 lesson verbatim: a wire member is not implemented because the
+     * validator accepts it. */
+    fun dispatchDialogAction(dialogId: String, descriptor: JSONObject,
+                             hookValue: Any?, fields: JSONObject?,
+                             callback: ((String?, JSONObject?) -> Unit)? = null) {
+        if (descriptor.has("builtin")) return  // builtins are the renderer's
+        if (state != SessionState.READY) return
+        if (!dialogs.containsKey(dialogId)) return
+        val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
+        // SPEC 14.3: the hook's produced value is injected, never authored.
+        if (hookValue != null) args.put("value", hookValue)
+        val params = JSONObject()
+            .put("event_id", EbpAuth.generateNonce())
+            .put("action", descriptor.getString("action"))
+            .put("dialog_id", dialogId)
+            .put("occurred_at_ms", queue.effectiveNow())
+        if (args.length() > 0) params.put("args", args)
+        val capture = descriptor.optJSONArray("capture_fields")
+        if (capture != null && capture.length() > 0) {
+            val snap = JSONObject()
+            for (i in 0 until capture.length()) {
+                val fieldId = capture.getString(i)
+                snap.put(fieldId, fields?.opt(fieldId) ?: JSONObject.NULL)
+            }
+            params.put("fields", snap)
+        }
+        // SPEC 14.4/15.4: the COMPLETE params against max_event_bytes.
+        if (params.toString().toByteArray(Charsets.UTF_8).size >
+            config.limits.getLong("max_event_bytes")) return
+        sendRequest("event.action", params) { result, error ->
+            callback?.invoke(result?.optString("status"), error)
+        }
+    }
+
     private fun executeBuiltin(surface: String, descriptor: JSONObject) {
         when (descriptor.optString("builtin")) {
             "view.switch" -> {

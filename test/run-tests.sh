@@ -126,6 +126,13 @@ emacs -Q --batch -L emacs -l test/jetpacs-org-render-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-org-dialogs-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-5g exit gate: the habits screen — the windowed graph with rotten
+# habits skipped, the one-canvas strip's A2 spend, the durable Done
+# with the prompt hazard loud, token honesty, and the grep pin keeping
+# the walk off the raw agenda forms.
+emacs -Q --batch -L emacs -l test/jetpacs-org-habits-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-3b exit gate: binding extraction (incl. the minor-mode-map poc-bug
 # regression), menu-bar mining over the :filter/:enable/:visible fixture,
 # and suppressed-commands unreachability.

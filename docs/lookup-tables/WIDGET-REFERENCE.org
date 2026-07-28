@@ -1,0 +1,1043 @@
+#+TITLE: Jetpacs Widget Reference
+#+AUTHOR: Auto-generated from jetpacs-widgets.el + Renderer + contract.json
+#+DATE: 2026-07-28
+#+STARTUP: showall
+#+OPTIONS: ^:nil
+# -*- mode: org; coding: utf-8 -*-
+
+* Overview
+
+The Jetpacs widget system provides a comprehensive set of UI components designed to bridge three layers of the stack:
+- *Elisp DSL*: The =jetpacs-*= functions developers call to construct user interfaces.
+- *Wire format*: The JSON node types serialized and sent over the protocol.
+- *Compose renderer*: The Material 3 (M3) composables the companion app renders natively.
+
+There are 39 widget types across 5 families:
+- *Core* (10): Fundamental building blocks and layout primitives.
+- *Content* (8): Display-only components for information presentation.
+- *Input* (10): Interactive controls for user data collection.
+- *Layout* (8): Complex containers and scrollable regions.
+- *Visualization* (3): Graphical representations like charts and calendars.
+
+For each widget, this reference provides the Elisp function signature, Wire format string, backing M3 component(s), relevant specification section, detailed properties table, usage example, and the renderer source location.
+
+* Summary Table
+
+| Wire Type | Family | Elisp Function | M3 Component(s) | Spec Section |
+|-----------|--------|----------------|-----------------|--------------|
+| ="text"= | Core | =jetpacs-text= | Text, SelectionContainer | §17.2 |
+| ="row"= | Core | =jetpacs-row= | Row | §17.3 |
+| ="column"= | Core | =jetpacs-column= | Column | §17.3 |
+| ="box"= | Core | =jetpacs-box= | Box | §17.3 |
+| ="spacer"= | Core | =jetpacs-spacer= | Spacer | §17.3 |
+| ="divider"= | Core | =jetpacs-divider= | HorizontalDivider | §17.3 |
+| ="button"= | Core | =jetpacs-button= | Button, FilledTonalButton, OutlinedButton, TextButton | §17.4 |
+| ="text_input"= | Core | =jetpacs-text-input= | OutlinedTextField | §17.4 |
+| ="scaffold"= | Core | =jetpacs-scaffold= | Scaffold, TopAppBar, SnackbarHost, FloatingActionButton, ModalNavigationDrawer, ModalDrawerSheet, PullToRefreshBox | §17.6 |
+| ="editor"= | Core | =jetpacs-editor= | OutlinedTextField, EditorToolbar | §17.4 + §17.7 |
+| ="rich_text"= | Content | =jetpacs-rich-text= | Text (AnnotatedString, SpanStyle, LinkAnnotation) | §17.2 |
+| ="icon"= | Content | =jetpacs-icon= | Icon, BadgedBox | §17.2 |
+| ="badge"= | Content | =jetpacs-badge= | Badge, BadgedBox, Surface | §17.2 |
+| ="image"= | Content | =jetpacs-image= | Image (or Box+Icon) | §17.2 |
+| ="section_header"= | Content | =jetpacs-section-header= | Row, Text | §17.2 |
+| ="empty_state"= | Content | =jetpacs-empty-state= | Column, Icon, Text, OutlinedButton | §17.2 |
+| ="progress"= | Content | =jetpacs-progress= | LinearProgressIndicator, CircularProgressIndicator | §17.2 |
+| ="date_stamp"= | Content | =jetpacs-date-stamp= | Column, ElevatedCard, Text | §17.2 |
+| ="icon_button"= | Input | =jetpacs-icon-button= | IconButton, Icon, BadgedBox | §17.4 |
+| ="chip"= | Input | =jetpacs-chip= | FilterChip | §17.4 |
+| ="assist_chip"= | Input | =jetpacs-assist-chip= | AssistChip | §17.4 |
+| ="menu"= | Input | =jetpacs-menu= | IconButton, Icon, DropdownMenu, DropdownMenuItem | §17.4 |
+| ="checkbox"= | Input | =jetpacs-checkbox= | Checkbox, Row, Text | §17.4 |
+| ="switch"= | Input | =jetpacs-switch= | Switch, Row, Text | §17.4 |
+| ="enum_list"= | Input | =jetpacs-enum-list= | FlowRow, FilterChip, AssistChip, AlertDialog, OutlinedTextField | §17.4 |
+| ="slider"= | Input | =jetpacs-slider= | Slider | §17.4 |
+| ="date_button"= | Input | =jetpacs-date-button= | OutlinedButton, DatePickerDialog, DatePicker | §17.4 |
+| ="time_button"= | Input | =jetpacs-time-button= | OutlinedButton, AlertDialog, TimePicker | §17.4 |
+| ="flow_row"= | Layout | =jetpacs-flow-row= | FlowRow | §17.3 |
+| ="surface"= | Layout | =jetpacs-surface= | Surface | §17.3 |
+| ="lazy_column"= | Layout | =jetpacs-lazy-column= | LazyColumn | §17.3 |
+| ="card"= | Layout | =jetpacs-card= | ElevatedCard, SwipeToDismissBox | §17.3 |
+| ="collapsible"= | Layout | =jetpacs-collapsible= | Column, Row, Icon, SwipeActionBox | §17.3 |
+| ="reorderable_list"= | Layout | =jetpacs-reorderable-list= | LazyColumn, Row, Icon, HorizontalDivider | §17.3 |
+| ="tabs"= | Layout | =jetpacs-tabs= | TabRow, ScrollableTabRow, Tab, HorizontalPager | §17.3 |
+| ="table"= | Layout | =jetpacs-table= | Column, Row, HorizontalDivider, IconButton, Text | §17.3 |
+| ="chart"= | Visualization | =jetpacs-chart= | Canvas | §17.5 |
+| ="canvas"= | Visualization | =jetpacs-canvas= | Canvas | §17.5 |
+| ="month_grid"= | Visualization | =jetpacs-month-grid= | Column, Row, IconButton, Icon, Box, CircleShape, Text | §17.5 |
+
+* FAMILY: Core
+
+** text
+- Elisp: =(jetpacs-text text &key style font-weight color selectable max-lines syntax)=
+- Wire: ="text"=
+- M3: =Text= (with =SelectionContainer= if selectable)
+- Renderer: =ContentNodes.kt:137-166=
+- Spec: §17.2
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~text~ | string | Yes | The text content |
+| ~style~ | enum | No | Typography style (body/title/headline/caption/label/mono) |
+| ~font_weight~ | font-weight | No | Font weight override |
+| ~color~ | color | No | Text color (§16.6 role or hex) |
+| ~selectable~ | boolean | No | Enable text selection |
+| ~max_lines~ | positive-integer | No | Maximum visible lines |
+| ~syntax~ | identifier | No | Syntax highlighting language |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-text "Hello world" :style "title" :color "primary")
+#+end_src
+
+** row
+- Elisp: =(jetpacs-row &rest args)= — trailing opts: =:spacing= =:align= =:arrange= =:scroll= =:fill=
+- Wire: ="row"=
+- M3: =Row= (with =fillMaxWidth=, =horizontalScroll=)
+- Renderer: =LayoutNodes.kt:119-140=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~children~ | node-array | Yes | Child nodes |
+| ~spacing~ | dp | No | Gap between children |
+| ~align~ | enum | No | Cross-axis alignment (top/center/bottom/baseline) |
+| ~arrange~ | enum | No | Main-axis arrangement (start/center/end/space_between/space_around/space_evenly) |
+| ~scroll~ | boolean | No | Enable horizontal scrolling |
+| ~fill~ | boolean | No | Fill parent width |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-row (jetpacs-text "A") (jetpacs-text "B") :spacing 8 :align "center")
+#+end_src
+
+** column
+- Elisp: =(jetpacs-column &rest args)= — trailing opts: =:spacing= =:align= =:arrange= =:scroll= =:fill=
+- Wire: ="column"=
+- M3: =Column= (with =fillMaxWidth=, =verticalScroll=)
+- Renderer: =LayoutNodes.kt:143-159=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~children~ | node-array | Yes | Child nodes |
+| ~spacing~ | dp | No | Gap between children |
+| ~align~ | enum | No | Cross-axis alignment (start/center/end) |
+| ~arrange~ | enum | No | Main-axis arrangement (start/center/end/space_between/space_around/space_evenly) |
+| ~scroll~ | boolean | No | Enable vertical scrolling |
+| ~fill~ | boolean | No | Fill parent width |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-column (jetpacs-text "Top") (jetpacs-text "Bottom") :spacing 12)
+#+end_src
+
+** box
+- Elisp: =(jetpacs-box &rest args)= — trailing opts: =:alignment= =:on-tap=
+- Wire: ="box"=
+- M3: =Box=
+- Renderer: =LayoutNodes.kt:183-201=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~children~ | node-array | Yes | Child nodes (z-stacked) |
+| ~alignment~ | enum | No | top_start/top_center/top_end/center_start/center/center_end/bottom_start/bottom_center/bottom_end |
+| ~on_tap~ | action descriptor | No | Tap handler |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-box (jetpacs-image url) (jetpacs-text "Overlay") :alignment "bottom_end")
+#+end_src
+
+** spacer
+- Elisp: =(jetpacs-spacer)=
+- Wire: ="spacer"=
+- M3: Foundation =Spacer=
+- Renderer: =Renderer.kt:286-288=
+- Spec: §17.3
+
+*Properties*
+(none — sized via universal attributes width/height/weight)
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-with-attrs (jetpacs-spacer) :weight 1)
+#+end_src
+
+** divider
+- Elisp: =(jetpacs-divider &key color thickness)=
+- Wire: ="divider"=
+- M3: =HorizontalDivider=
+- Renderer: =Renderer.kt:289=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~color~ | color | No | Divider color |
+| ~thickness~ | dp | No | Line thickness |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-divider :color "outline_variant" :thickness 2)
+#+end_src
+
+** button
+- Elisp: =(jetpacs-button label on-tap &key icon variant enabled)=
+- Wire: ="button"=
+- M3: =Button=, =FilledTonalButton=, =OutlinedButton=, =TextButton=
+- Renderer: =InputNodes.kt:72-91=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~label~ | string | Yes | Button text |
+| ~on_tap~ | action descriptor | Yes | Tap handler |
+| ~icon~ | identifier | No | Leading icon name |
+| ~variant~ | enum | No | Button style (filled/tonal/outlined/text) |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-button "Save" (jetpacs-action "save-doc") :icon "save" :variant "tonal")
+#+end_src
+
+** text_input
+- Elisp: =(jetpacs-text-input id &key value hint label on-change on-submit single-line min-lines max-lines monospace syntax password keyboard autofocus clear-on-submit enabled)=
+- Wire: ="text_input"=
+- M3: =OutlinedTextField=
+- Renderer: =Renderer.kt:351-420=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~id~ | identifier | Yes | State identity key |
+| ~value~ | string | No | Initial/current text value |
+| ~hint~ | string | No | Placeholder text |
+| ~label~ | string | No | Field label |
+| ~on_change~ | action descriptor | No | Value change handler |
+| ~on_submit~ | action descriptor | No | Submit handler (enter/done) |
+| ~single_line~ | boolean | No | Restrict to single line |
+| ~min_lines~ | positive-integer | No | Minimum visible lines |
+| ~max_lines~ | positive-integer | No | Maximum visible lines |
+| ~monospace~ | boolean | No | Use monospace font |
+| ~syntax~ | identifier | No | Syntax highlighting language |
+| ~password~ | boolean | No | Obfuscate input |
+| ~keyboard~ | enum | No | text/number/decimal/email/phone/uri |
+| ~autofocus~ | boolean | No | Focus on mount |
+| ~clear_on_submit~ | boolean | No | Clear field after submit |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-text-input "search" :hint "Search..." :on-submit (jetpacs-action "do-search") :single-line t :autofocus t)
+#+end_src
+
+** scaffold
+- Elisp: =(jetpacs-scaffold &key top-bar body bottom-bar fab floating-toolbar drawer snackbar snackbar-action on-refresh)=
+- Wire: ="scaffold"=
+- M3: =Scaffold=, =TopAppBar=, =SnackbarHost=, =FloatingActionButton=, =ModalNavigationDrawer=, =ModalDrawerSheet=, =PullToRefreshBox=
+- Renderer: =Renderer.kt:631-743=
+- Spec: §17.6
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~top_bar~ | node | No | Top app bar content |
+| ~body~ | node | No | Main content area |
+| ~bottom_bar~ | node | No | Bottom bar content |
+| ~fab~ | node | No | Floating action button |
+| ~floating_toolbar~ | node | No | Floating toolbar |
+| ~drawer~ | node | No | Navigation drawer content |
+| ~snackbar~ | string | No | Snackbar message text |
+| ~snackbar_action~ | label-on-tap-object| No | Snackbar action button |
+| ~on_refresh~ | action descriptor | No | Pull-to-refresh handler |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-scaffold
+ :top-bar (jetpacs-row (jetpacs-text "My App" :style "title") :align "center")
+ :body (jetpacs-column (jetpacs-text "Content"))
+ :fab (jetpacs-icon-button "add" (jetpacs-action "new-item"))
+ :on-refresh (jetpacs-action "refresh-data"))
+#+end_src
+
+** editor
+- Elisp: =(jetpacs-editor id &key document value on-save on-enter read-only syntax line-numbers complete chromeless publish-state autofocus toolbar enabled)=
+- Wire: ="editor"=
+- M3: =OutlinedTextField=, =EditorToolbar=
+- Renderer: =Renderer.kt:437-596=
+- Spec: §17.4 + §17.7
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~id~ | identifier | Yes | Editor identity key |
+| ~document~ | identifier | No | Linked document ID |
+| ~value~ | string | No | Initial text content |
+| ~on_save~ | action descriptor | No | Save handler |
+| ~on_enter~ | action descriptor | No | Enter key handler |
+| ~read_only~ | boolean | No | Disable editing |
+| ~syntax~ | identifier | No | Syntax highlighting language |
+| ~line_numbers~ | boolean | No | Show line numbers |
+| ~complete~ | boolean | No | Enable completion |
+| ~chromeless~ | boolean | No | Hide chrome (toolbar, line numbers) |
+| ~publish_state~ | boolean | No | Publish cursor/selection state |
+| ~autofocus~ | boolean | No | Focus on mount |
+| ~toolbar~ | toolbar-id-or-item-array| No | Toolbar items |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-editor "my-editor" :value "(defun hello () (message \"Hi\"))" :syntax "elisp" :line-numbers t)
+#+end_src
+
+* FAMILY: Content
+
+** rich_text
+- Elisp: =(jetpacs-rich-text spans &key style)=
+- Wire: ="rich_text"=
+- M3: =Text= with =AnnotatedString=, =SpanStyle=, =LinkAnnotation=
+- Renderer: =ContentNodes.kt:211-220=
+- Spec: §17.2
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~spans~ | rich-span-array | Yes | List of ~jetpacs-span~ objects |
+| ~style~ | enum | No | Base typography (body/title/headline/caption/label/mono) |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-rich-text (list (jetpacs-span "Bold text" :font-weight "bold") (jetpacs-span " normal")))
+#+end_src
+
+** icon
+- Elisp: =(jetpacs-icon name &key size color badge content-description)=
+- Wire: ="icon"=
+- M3: =Icon= with optional =BadgedBox=
+- Renderer: =ContentNodes.kt:224-242=
+- Spec: §17.2 (amendment 64)
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~name~ | string | Yes | Icon name (see ICON-REFERENCE.org) |
+| ~size~ | dp | No | Icon size |
+| ~color~ | color | No | Icon tint |
+| ~badge~ | string-or-number | No | Badge content |
+| ~content_description~| string | No | Accessibility label |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-icon "star" :size 24 :color "primary")
+#+end_src
+
+** badge
+- Elisp: =(jetpacs-badge label &key icon color children)=
+- Wire: ="badge"=
+- M3: =Badge=, =BadgedBox=, =Surface=
+- Renderer: =ContentNodes.kt:248-280=
+- Spec: §17.2
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~label~ | string | Yes | Badge text |
+| ~icon~ | identifier | No | Badge icon |
+| ~color~ | color | No | Badge background color |
+| ~children~ | node-array | No | Content to badge |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-badge "3" :color "error" :children (vector (jetpacs-icon "mail")))
+#+end_src
+
+** image
+- Elisp: =(jetpacs-image url &key content-scale content-description)=
+- Wire: ="image"=
+- M3: Foundation =Image= (or placeholder Box+Icon)
+- Renderer: =ContentNodes.kt:67-112=
+- Spec: §17.2
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~url~ | string | Yes | Image URL (https or data: base64) |
+| ~content_scale~ | enum | No | Scaling mode (fit/crop/fill) |
+| ~content_description~| string | No | Accessibility label |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-image "https://example.com/photo.jpg" :content-scale "crop")
+#+end_src
+
+** section_header
+- Elisp: =(jetpacs-section-header title &key trailing)=
+- Wire: ="section_header"=
+- M3: =Row=, =Text= (titleSmall, primary color)
+- Renderer: =ContentNodes.kt:283-294=
+- Spec: §17.2
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~title~ | string | Yes | Header text |
+| ~trailing~ | node | No | Trailing element (e.g., icon button) |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-section-header "Recent" :trailing (jetpacs-icon-button "more_vert" (jetpacs-action "show-more")))
+#+end_src
+
+** empty_state
+- Elisp: =(jetpacs-empty-state &key icon title caption action-label on-tap)=
+- Wire: ="empty_state"=
+- M3: =Column=, =Icon=, =Text=, =OutlinedButton=
+- Renderer: =ContentNodes.kt:297-323=
+- Spec: §17.2
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~icon~ | identifier | No | Decorative icon (default "inbox") |
+| ~title~ | string | No | Headline text |
+| ~caption~ | string | No | Explanatory text |
+| ~action_label~ | string | No | Action button label |
+| ~on_tap~ | action descriptor | No | Action button handler |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-empty-state :icon "inbox" :title "No messages" :caption "Check back later" :action-label "Refresh" :on-tap (jetpacs-action "refresh"))
+#+end_src
+
+** progress
+- Elisp: =(jetpacs-progress &key variant value)=
+- Wire: ="progress"=
+- M3: =LinearProgressIndicator=, =CircularProgressIndicator=
+- Renderer: =ContentNodes.kt:327-337=
+- Spec: §17.2
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~variant~ | enum | No | Indicator style (circular/linear) |
+| ~value~ | number | No | Determinate progress (0.0-1.0), or nil for indeterminate |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-progress :variant "linear" :value 0.75)
+#+end_src
+
+** date_stamp
+- Elisp: =(jetpacs-date-stamp &key day month month-index year time)=
+- Wire: ="date_stamp"=
+- M3: =Column=, =ElevatedCard=, =Text= (multiple typography tokens)
+- Renderer: =ContentNodes.kt:356-401=
+- Spec: §17.2
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~day~ | integer | No | Day of month (1-31) |
+| ~month~ | string | No | Month abbreviation |
+| ~month_index~ | integer | No | Month number (1-12) |
+| ~year~ | non-negative-integer| No | Year |
+| ~time~ | string | No | Time string (e.g., "14:30") |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-date-stamp :day 28 :month "Jul" :year 2026 :time "12:30")
+#+end_src
+
+* FAMILY: Input
+
+** icon_button
+- Elisp: =(jetpacs-icon-button icon on-tap &key content-description badge enabled)=
+- Wire: ="icon_button"=
+- M3: =IconButton=, =Icon=, optional =BadgedBox=
+- Renderer: =InputNodes.kt:96-111=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~icon~ | identifier | Yes | Icon name |
+| ~on_tap~ | action descriptor | Yes | Tap handler |
+| ~content_description~| string | No | Accessibility label |
+| ~badge~ | string-or-number | No | Badge content |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-icon-button "delete" (jetpacs-action "delete-item") :content-description "Delete")
+#+end_src
+
+** chip
+- Elisp: =(jetpacs-chip label &key on-tap selected icon enabled)=
+- Wire: ="chip"=
+- M3: =FilterChip=
+- Renderer: =InputNodes.kt:116-128=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~label~ | string | Yes | Chip text |
+| ~on_tap~ | action descriptor | No | Tap handler |
+| ~selected~ | boolean | No | Selection state |
+| ~icon~ | identifier | No | Leading icon |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-chip "Tag A" :on-tap (jetpacs-action "toggle-tag") :selected t :icon "label")
+#+end_src
+
+** assist_chip
+- Elisp: =(jetpacs-assist-chip label &key on-tap icon enabled)=
+- Wire: ="assist_chip"=
+- M3: =AssistChip=
+- Renderer: =InputNodes.kt:131-142=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~label~ | string | Yes | Chip text |
+| ~on_tap~ | action descriptor | No | Tap handler |
+| ~icon~ | identifier | No | Leading icon |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-assist-chip "Share" :on-tap (jetpacs-action "share") :icon "share")
+#+end_src
+
+** menu
+- Elisp: =(jetpacs-menu items &key icon enabled)=
+- Wire: ="menu"=
+- M3: =IconButton=, =Icon=, =DropdownMenu=, =DropdownMenuItem=
+- Renderer: =InputNodes.kt:147-177=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~items~ | menu-item-array | Yes | List of ~jetpacs-menu-item~ objects |
+| ~icon~ | identifier | No | Menu trigger icon (default "more_vert") |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-menu (list (jetpacs-menu-item "Edit" (jetpacs-action "edit")) (jetpacs-menu-item "Delete" (jetpacs-action "delete") :icon "delete")))
+#+end_src
+
+** checkbox
+- Elisp: =(jetpacs-checkbox id &key checked label on-change enabled)=
+- Wire: ="checkbox"=
+- M3: =Checkbox=, =Row=, =Text=
+- Renderer: =InputNodes.kt:182-200=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~id~ | identifier | Yes | State identity key |
+| ~checked~ | boolean | No | Current check state |
+| ~label~ | string | No | Label text |
+| ~on_change~ | action descriptor | No | Change handler (receives boolean) |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-checkbox "agree" :label "I agree" :on-change (jetpacs-action "toggle-agree"))
+#+end_src
+
+** switch
+- Elisp: =(jetpacs-switch id &key checked label on-change enabled)=
+- Wire: ="switch"=
+- M3: =Switch=, =Row=, =Text=
+- Renderer: =InputNodes.kt:203-221=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~id~ | identifier | Yes | State identity key |
+| ~checked~ | boolean | No | Current switch state |
+| ~label~ | string | No | Label text |
+| ~on_change~ | action descriptor | No | Change handler (receives boolean) |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-switch "dark-mode" :label "Dark mode" :checked t :on-change (jetpacs-action "toggle-dark"))
+#+end_src
+
+** enum_list
+- Elisp: =(jetpacs-enum-list id options &key value multi-select allow-add on-change enabled)=
+- Wire: ="enum_list"=
+- M3: =FlowRow=, =FilterChip=, =AssistChip=, =AlertDialog=, =OutlinedTextField=
+- Renderer: =InputNodes.kt:232-349=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~id~ | identifier | Yes | State identity key |
+| ~options~ | enum-option-array | Yes | List of ~jetpacs-enum-option~ objects |
+| ~value~ | string/string-array| No | Selected value(s) |
+| ~multi_select~| boolean | No | Allow multiple selections |
+| ~allow_add~ | boolean | No | Show "+ Add" chip for custom entries |
+| ~on_change~ | action descriptor | No | Change handler |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-enum-list "priority" (list (jetpacs-enum-option "Low" "low") (jetpacs-enum-option "High" "high")) :value "low")
+#+end_src
+
+** slider
+- Elisp: =(jetpacs-slider id on-change &key value min max values enabled)=
+- Wire: ="slider"=
+- M3: =Slider=
+- Renderer: =InputNodes.kt:358-403=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~id~ | identifier | Yes | State identity key |
+| ~on_change~ | action descriptor | Yes | Change handler (dispatches on commit) |
+| ~value~ | number | No | Current value |
+| ~min~ | number | No | Minimum (continuous mode) |
+| ~max~ | number | No | Maximum (continuous mode) |
+| ~values~ | number-array | No | Discrete step values (overrides min/max) |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-slider "volume" (jetpacs-action "set-volume") :value 50 :min 0 :max 100)
+#+end_src
+
+** date_button
+- Elisp: =(jetpacs-date-button label on-pick &key value enabled)=
+- Wire: ="date_button"=
+- M3: =OutlinedButton=, =DatePickerDialog=, =DatePicker=
+- Renderer: =InputNodes.kt:408-433=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~label~ | string | Yes | Button text |
+| ~on_pick~ | action descriptor | Yes | Pick handler (receives ISO date string) |
+| ~value~ | string | No | Initial date (YYYY-MM-DD) |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-date-button "Due date" (jetpacs-action "set-due") :value "2026-07-28")
+#+end_src
+
+** time_button
+- Elisp: =(jetpacs-time-button label on-pick &key value enabled)=
+- Wire: ="time_button"=
+- M3: =OutlinedButton=, =AlertDialog=, =TimePicker=
+- Renderer: =InputNodes.kt:438-463=
+- Spec: §17.4
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~label~ | string | Yes | Button text |
+| ~on_pick~ | action descriptor | Yes | Pick handler (receives "HH:MM") |
+| ~value~ | string | No | Initial time (HH:MM) |
+| ~enabled~ | boolean | No | Enable/disable |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-time-button "Start time" (jetpacs-action "set-start") :value "09:00")
+#+end_src
+
+* FAMILY: Layout
+
+** flow_row
+- Elisp: =(jetpacs-flow-row &rest args)= — trailing opts: =:spacing= =:run-spacing= =:align= =:arrange=
+- Wire: ="flow_row"=
+- M3: Foundation =FlowRow=
+- Renderer: =LayoutNodes.kt:162-178=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~children~ | node-array | Yes | Child nodes |
+| ~spacing~ | dp | No | Horizontal gap |
+| ~run_spacing~| dp | No | Vertical gap between runs |
+| ~align~ | enum | No | Cross-axis alignment (top/center/bottom) |
+| ~arrange~ | enum | No | start/center/end/space_between/space_around/space_evenly |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-flow-row (jetpacs-chip "A") (jetpacs-chip "B") (jetpacs-chip "C") :spacing 8 :run-spacing 4)
+#+end_src
+
+** surface
+- Elisp: =(jetpacs-surface &rest args)= — trailing opts: =:color= =:shape= =:elevation=
+- Wire: ="surface"=
+- M3: =Surface=
+- Renderer: =LayoutNodes.kt:204-223=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~children~ | node-array | Yes | Child nodes |
+| ~color~ | color | No | Surface color |
+| ~shape~ | enum | No | Surface shape (rounded/rounded_small/circle) |
+| ~elevation~ | dp | No | Tonal elevation |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-surface (jetpacs-text "Elevated") :color "surface_variant" :elevation 3 :shape "rounded")
+#+end_src
+
+** lazy_column
+- Elisp: =(jetpacs-lazy-column &rest args)= — trailing opts: =:spacing= =:content-padding=
+- Wire: ="lazy_column"=
+- M3: =LazyColumn=
+- Renderer: =LayoutNodes.kt:227-257=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~children~ | node-array | Yes | Child nodes (lazily composed) |
+| ~spacing~ | dp | No | Gap between items |
+| ~content_padding~| dp | No | Inner padding |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-lazy-column (jetpacs-card ...) (jetpacs-card ...) :spacing 8 :content-padding 16)
+#+end_src
+
+** card
+- Elisp: =(jetpacs-card &rest args)= — trailing opts: =:on-tap= =:on-long-tap= =:swipe-start= =:swipe-end=
+- Wire: ="card"=
+- M3: =ElevatedCard=, =SwipeToDismissBox=
+- Renderer: =LayoutNodes.kt:324-347=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~children~ | node-array | Yes | Card content |
+| ~on_tap~ | action descriptor | No | Tap handler |
+| ~on_long_tap~| action descriptor | No | Long-press handler |
+| ~swipe_start~| swipe-object | No | Left swipe action (from ~jetpacs-swipe~) |
+| ~swipe_end~ | swipe-object | No | Right swipe action (from ~jetpacs-swipe~) |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-card
+ (jetpacs-row (jetpacs-icon "mail") (jetpacs-text "New message") :spacing 8)
+ :on-tap (jetpacs-action "open-msg")
+ :swipe-end (jetpacs-swipe "Archive" :icon "archive" :color "primary"
+              :on-trigger (jetpacs-action "archive-msg")))
+#+end_src
+
+** collapsible
+- Elisp: =(jetpacs-collapsible id header &rest args)= — trailing opts: =:collapsed= =:on-long-tap= =:swipe-start= =:swipe-end=
+- Wire: ="collapsible"=
+- M3: =Column=, =Row=, =Icon=, =SwipeActionBox=
+- Renderer: =LayoutNodes.kt:351-386=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~id~ | identifier | Yes | Expansion state identity |
+| ~header~ | node | Yes | Header content |
+| ~children~ | node-array | Yes | Expandable body |
+| ~collapsed~ | boolean | No | Initial collapsed state |
+| ~on_long_tap~| action descriptor | No | Long-press handler |
+| ~swipe_start~| swipe-object | No | Left swipe action |
+| ~swipe_end~ | swipe-object | No | Right swipe action |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-collapsible "sect-1" (jetpacs-text "Details") (jetpacs-text "Hidden content") :collapsed t)
+#+end_src
+
+** reorderable_list
+- Elisp: =(jetpacs-reorderable-list items &key on-reorder)=
+- Wire: ="reorderable_list"=
+- M3: =LazyColumn=, =Row=, =Icon= (drag_handle), =HorizontalDivider=
+- Renderer: =LayoutNodes.kt:612-733=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~items~ | node-array | Yes | Draggable items (each needs key or id) |
+| ~on_reorder~ | action descriptor | No | Reorder handler (receives from/to/order) |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-reorderable-list items :on-reorder (jetpacs-action "reorder"))
+#+end_src
+
+** tabs
+- Elisp: =(jetpacs-tabs items children &key initial scrollable pager-only on-change id)=
+- Wire: ="tabs"=
+- M3: =TabRow=, =ScrollableTabRow=, =Tab=, =HorizontalPager=
+- Renderer: =LayoutNodes.kt:390-457=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~items~ | tab-item-array | Yes | Tab definitions (from ~jetpacs-tab-item~) |
+| ~children~ | node-array | Yes | Tab content (parallel to items) |
+| ~initial~ | non-negative-integer| No | Initially selected tab index |
+| ~scrollable~ | boolean | No | Use ScrollableTabRow |
+| ~pager_only~ | boolean | No | Show pager without tab strip |
+| ~on_change~ | action descriptor | No | Tab change handler |
+| ~id~ | identifier | No | State identity key |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-tabs
+ (list (jetpacs-tab-item "Tasks" :icon "checklist")
+       (jetpacs-tab-item "Calendar" :icon "event"))
+ (vector (jetpacs-column ...) (jetpacs-column ...))
+ :on-change (jetpacs-action "tab-changed"))
+#+end_src
+
+** table
+- Elisp: =(jetpacs-table rows &key aligns on-add-row on-add-col)=
+- Wire: ="table"=
+- M3: =Column=, =Row=, =HorizontalDivider=, =IconButton=, =Text=
+- Renderer: =LayoutNodes.kt:467-512=
+- Spec: §17.3
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~rows~ | table-row-array | Yes | Rows from ~jetpacs-table-row~/~jetpacs-table-rule~ |
+| ~aligns~ | align-array | No | Per-column alignment |
+| ~on_add_row~ | action descriptor | No | Add row handler (receives index) |
+| ~on_add_col~ | action descriptor | No | Add column handler (receives index) |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-table
+ (list (jetpacs-table-row "header"
+         (jetpacs-table-cell (list (jetpacs-span "Name")))
+         (jetpacs-table-cell (list (jetpacs-span "Value"))))
+       (jetpacs-table-rule)
+       (jetpacs-table-row "data"
+         (jetpacs-table-cell (list (jetpacs-span "foo")))
+         (jetpacs-table-cell (list (jetpacs-span "42"))))))
+#+end_src
+
+* FAMILY: Visualization
+
+** chart
+- Elisp: =(jetpacs-chart series &key kind height y-range summary on-point-tap children)=
+- Wire: ="chart"=
+- M3: Foundation =Canvas= with M3 colorScheme
+- Renderer: =VisualizationNodes.kt:75-185=
+- Spec: §17.5
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~series~ | chart-series-array | Yes | Data series (from ~jetpacs-chart-series~) |
+| ~kind~ | enum | No | Chart type (line/bar/area/sparkline) |
+| ~height~ | number | No | Chart height in dp |
+| ~y_range~ | two-number-array | No | Fixed Y axis range [min, max] |
+| ~summary~ | string | No | Accessibility summary |
+| ~on_point_tap~| action descriptor | No | Point tap handler |
+| ~children~ | node-array | No | Overlay nodes |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-chart
+ (list (jetpacs-chart-series
+         (list (jetpacs-chart-point 0 10) (jetpacs-chart-point 1 25) (jetpacs-chart-point 2 15))
+         :name "Revenue" :color "primary"))
+ :kind "line" :height 200)
+#+end_src
+
+** canvas
+- Elisp: =(jetpacs-canvas width height ops &key children)=
+- Wire: ="canvas"=
+- M3: Foundation =Canvas=
+- Renderer: =VisualizationNodes.kt:190-256=
+- Spec: §17.5
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~width~ | number | Yes | Canvas width |
+| ~height~ | number | Yes | Canvas height |
+| ~ops~ | canvas-op-array | Yes | Draw operations (line/rect/circle/path/text) |
+| ~children~ | node-array | No | Overlay nodes |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-canvas 200 100
+ (list (jetpacs-canvas-rect 10 10 80 40 :color "primary" :fill "primary_container")
+       (jetpacs-canvas-text 20 35 "Hello" :color "on_primary_container" :size 16)))
+#+end_src
+
+** month_grid
+- Elisp: =(jetpacs-month-grid month &key marks selected min-month max-month on-day-tap on-month-change children)=
+- Wire: ="month_grid"=
+- M3: =Column=, =Row=, =IconButton=, =Icon=, =Box=, =CircleShape=, =Text=
+- Renderer: =VisualizationNodes.kt:260-353=
+- Spec: §17.5
+
+*Properties*
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| ~month~ | string | Yes | Month to display (YYYY-MM) |
+| ~marks~ | date-marks-object | No | Day marks (date → {dots, color}) |
+| ~selected~ | string | No | Selected date (YYYY-MM-DD) |
+| ~min_month~ | string | No | Earliest navigable month (YYYY-MM) |
+| ~max_month~ | string | No | Latest navigable month (YYYY-MM) |
+| ~on_day_tap~ | action descriptor | No | Day tap handler |
+| ~on_month_change~| action descriptor | No | Month navigation handler |
+| ~children~ | node-array | No | Overlay nodes |
+
+*Usage Example*
+#+begin_src elisp
+(jetpacs-month-grid "2026-07" :selected "2026-07-28" :on-day-tap (jetpacs-action "select-day"))
+#+end_src
+
+* Sub-Element Constructors
+
+| Function | Purpose | Parameters |
+|----------|---------|------------|
+| =jetpacs-span= | Rich text run | =(text &key font-weight italic underline color bg mono on-tap)= |
+| =jetpacs-swipe= | Swipe action side | =(label &key icon color on-trigger)= |
+| =jetpacs-tab-item= | Tab definition | =(label &key icon)= |
+| =jetpacs-table-cell= | Table cell | =(spans &key on-tap on-long-tap)= |
+| =jetpacs-table-row= | Table data/header row | =(kind &rest cells)= |
+| =jetpacs-table-rule= | Table separator | =()= |
+| =jetpacs-menu-item= | Menu entry | =(label on-tap &key icon enabled)= |
+| =jetpacs-enum-option= | Enum choice | =(label value)= |
+| =jetpacs-toolbar-item= | Editor toolbar item | =(&key label icon snippet on-tap menu command line placement long-press)= |
+| =jetpacs-chart-point= | Chart data point | =(x y &key meta)= |
+| =jetpacs-chart-series= | Chart data series | =(points &key name color)= |
+| =jetpacs-canvas-line= | Canvas line op | =(x1 y1 x2 y2 &key color width)= |
+| =jetpacs-canvas-rect= | Canvas rectangle op | =(x y width height &key color fill stroke-width)= |
+| =jetpacs-canvas-circle= | Canvas circle op | =(cx cy radius &key color fill stroke-width)= |
+| =jetpacs-canvas-point= | Canvas path point | =(x y)= |
+| =jetpacs-canvas-path= | Canvas path op | =(points &key color fill stroke-width closed)= |
+| =jetpacs-canvas-text= | Canvas text op | =(x y text &key color size)= |
+| =jetpacs-month-mark= | Calendar day mark | =(dots &key color)= |
+| =jetpacs-snackbar-action= | Scaffold snackbar action | =(label on-tap)= |
+
+* Universal Attributes
+
+Apply to ALL wire types via =jetpacs-with-attrs=:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| ~key~ | identifier | Unique identity within parent |
+| ~id~ | identifier | Node identity key |
+| ~scroll_here~ | boolean | Scroll to this node |
+| ~padding~ | dp | Inner padding (all sides) |
+| ~pad~ | dp | Alternative padding specifier |
+| ~width~ | number | Explicit width |
+| ~height~ | number | Explicit height |
+| ~min_width~ | dp | Minimum width constraint |
+| ~max_width~ | dp | Maximum width constraint |
+| ~min_height~ | dp | Minimum height constraint |
+| ~max_height~ | dp | Maximum height constraint |
+| ~fill_fraction~| number (0-1) | Fractional fill of parent |
+| ~aspect_ratio~ | number | Width-to-height ratio |
+| ~weight~ | number | Flex weight in Row/Column |
+| ~bg~ | color | Background color |
+| ~corner~ | dp or object | Corner rounding radius |
+| ~border~ | object | Border {width, color} |
+| ~alpha~ | number (0-1) | Opacity |
+| ~clip~ | boolean | Clip content to bounds |
+| ~align_self~ | enum | Cross-axis self-alignment: start/center/end/stretch |
+
+* Color Roles
+
+Usable anywhere a color is accepted (plus =#rgb=, =#rgba=, =#rrggbb=, =#rrggbbaa= hex):
+
+| Role | M3 Token | Category |
+|------|----------|----------|
+| =primary= | ~colorScheme.primary~ | Primary |
+| =on_primary= | ~colorScheme.onPrimary~ | Primary |
+| =primary_container= | ~colorScheme.primaryContainer~ | Primary |
+| =on_primary_container=| ~colorScheme.onPrimaryContainer~ | Primary |
+| =secondary= | ~colorScheme.secondary~ | Secondary |
+| =on_secondary= | ~colorScheme.onSecondary~ | Secondary |
+| =secondary_container= | ~colorScheme.secondaryContainer~ | Secondary |
+| =on_secondary_container=| ~colorScheme.onSecondaryContainer~ | Secondary |
+| =tertiary= | ~colorScheme.tertiary~ | Tertiary |
+| =on_tertiary= | ~colorScheme.onTertiary~ | Tertiary |
+| =tertiary_container= | ~colorScheme.tertiaryContainer~ | Tertiary |
+| =on_tertiary_container=| ~colorScheme.onTertiaryContainer~ | Tertiary |
+| =error= | ~colorScheme.error~ | Error |
+| =on_error= | ~colorScheme.onError~ | Error |
+| =error_container= | ~colorScheme.errorContainer~ | Error |
+| =on_error_container= | ~colorScheme.onErrorContainer~ | Error |
+| =background= | ~colorScheme.background~ | Neutral |
+| =on_background= | ~colorScheme.onBackground~ | Neutral |
+| =surface= | ~colorScheme.surface~ | Neutral |
+| =on_surface= | ~colorScheme.onSurface~ | Neutral |
+| =surface_variant= | ~colorScheme.surfaceVariant~ | Neutral |
+| =on_surface_variant= | ~colorScheme.onSurfaceVariant~ | Neutral |
+| =outline= | ~colorScheme.outline~ | Neutral |
+| =success= | ~ExtendedColors.success~ | Extension |
+| =warning= | ~ExtendedColors.warning~ | Extension |
+
+* Action Descriptors
+
+Built with =(jetpacs-action action &rest args)= or =(jetpacs-builtin builtin ...)=:
+
+| Action Type | Constructor | Required Fields | Optional Fields |
+|-------------|------------|-----------------|----------------|
+| Remote custom | =(jetpacs-action ACTION &rest ARGS)= | ~action~ | ~args~, ~when_offline~, ~dedupe~, ~ttl_s~, ~confirm~, ~capture_fields~ |
+| =view.switch= | =(jetpacs-builtin "view.switch" :view VIEW)= | ~builtin~, ~view~ | — |
+| =clipboard.copy= | =(jetpacs-builtin "clipboard.copy" :text TEXT)= | ~builtin~, ~text~ | — |
+| =share.send= | =(jetpacs-builtin "share.send" :text TEXT)= | ~builtin~, ~text~ | ~title~ |
+| =companion.settings.open=| =(jetpacs-builtin "companion.settings.open")= | ~builtin~ | — |
+| =trigger.fire= | =(jetpacs-builtin "trigger.fire" :id ID)= | ~builtin~, ~id~ | — |
+| =dialog.submit= | =(jetpacs-builtin "dialog.submit")= | ~builtin~ | ~value~, ~capture_fields~ |
+| =dialog.dismiss= | =(jetpacs-builtin "dialog.dismiss")= | ~builtin~ | — |
+
+Offline policies: =drop= (default), =queue=, =wake=.
+
+* Surface Profiles
+
+Not all node types are available in all surfaces:
+
+| Profile | Node Type Count | Available Types |
+|---------|----------------|----------------|
+| =app= | 39 | All node types |
+| =dialog= | 27 | Core (text, row, column, box, spacer, divider, button, text_input, editor) + Content (8) + Input (10); NO scaffold, layout, viz |
+| =notification=| 6 | text, row, column, box, spacer, divider only |
+
+The runtime check uses =jetpacs-node-advertised-p= against the live =surface_profiles= from the device welcome.
+
+* Notes
+
+# Local Variables:
+# eval: (org-content)
+# End:

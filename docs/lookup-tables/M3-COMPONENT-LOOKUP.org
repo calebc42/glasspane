@@ -1,0 +1,245 @@
+# -*- mode: org; coding: utf-8 -*-
+#+TITLE: Jetpacs ↔ Material 3 Component Reference
+#+AUTHOR: Auto-generated from material3 1.4.0
+#+DATE: 2026-07-28
+#+STARTUP: showall
+#+OPTIONS: ^:nil
+
+* Jetpacs ↔ Material 3 Component Reference
+
+This document maps every user-facing Material Design 3 composable (from
+=material3= *1.4.0*) to its Jetpacs wire type and Elisp DSL function, showing
+which M3 components Jetpacs already wraps and which are available for future
+expansion.
+
+*Version provenance:* =material3= carries NO pinned version — it resolves
+through the Compose BOM (=compose-bom = "2026.02.01"= in
+=libs.versions.toml=), which constrains it to *1.4.0* (verified
+2026-07-28 via =dependencyInsight=; see the generator section).  When the
+BOM moves, re-verify and regenerate — the unwrapped list changes with the
+version (=FloatingToolbar= and =SplitButton= arrive in 1.5+).
+
+| Metric | Count |
+|---+---|
+| ✅ M3 components wrapped by Jetpacs | 30 |
+| ≈ M3 components approximated (contract met, composable unused) | 1 |
+| ⬜ M3 components available (unwrapped) | 14 |
+| Infrastructure classes (excluded) | 27 |
+
+** How to Read This Table
+
+- *✅ Wrapped*: Jetpacs exposes this M3 component through its wire format.
+  Use the =Wire Type= and =Elisp Function= columns to access it.
+- *≈ Approximated*: the wire slot and the CHROME-VOCABULARY contract
+  exist, but the renderer builds the visuals from generic composables
+  instead of invoking the real M3 component — fidelity gaps (insets,
+  scroll behaviors, indicator pills) are hand-managed or absent.
+- *⬜ Available*: This M3 component exists in the library but Jetpacs does
+  not yet wrap it.  It could be added by defining a new wire type,
+  Elisp constructor, and renderer case.
+
+** Generating This Table
+
+The component list comes from the RESOLVED =material3= AAR — never from
+"the first AAR in the Gradle cache", which holds every version ever
+resolved.  Two steps, portable (python3 + a populated cache):
+
+1. Confirm the resolved version (material3 rides the Compose BOM):
+
+#+begin_src sh :results output
+cd ../../companion && ./gradlew -q :app:dependencyInsight \
+  --dependency androidx.compose.material3:material3 \
+  --configuration debugCompileClasspath | head -1
+#+end_src
+
+2. Regenerate the raw list for that version and record it in the header:
+
+#+begin_src sh :results output
+python3 generate-component-list.py 1.4.0
+#+end_src
+
+The Status / Wire Type / Elisp Function / Notes columns of the
+cross-reference are maintained BY HAND — diff the regenerated raw list
+against the table's =M3 Component= column and reconcile additions and
+removals.
+
+** Component Cross-Reference Table
+
+| M3 Component | Status | Category | Wire Type | Elisp Function | Renderer Location | Notes |
+|---+---+---+---+---+---+---|
+| AlertDialog | ✅ Wrapped | Feedback | =N/A (dialog chrome)= | =ebp-client-dialog-show= | =Renderer.kt, InputNodes.kt= | Used internally for enum_list add, time_button, editor prompts |
+| AppBar | ≈ Approximated | Navigation | =scaffold.top_bar= | =jetpacs-scaffold :top-bar= | =RenderScaffold= | NOT the M3 TopAppBar: a plain Row (its own comment says so) — insets hand-managed, no pinned/collapsing scroll behaviors.  Adopting the real composable is the same rung as NavigationBar |
+| Badge | ✅ Wrapped | Content | =badge= | =jetpacs-badge= | =ContentNodes.kt:248-280= | Full widget with BadgedBox |
+| BottomSheetScaffold | ⬜ Available | Layout | — | — | — |  |
+| Button | ✅ Wrapped | Input | =button= | =jetpacs-button= | =InputNodes.kt:72-91= | Supports variant: filled/tonal/outlined/text |
+| Card | ✅ Wrapped | Layout | =card= | =jetpacs-card= | =LayoutNodes.kt:324-347= | Uses ElevatedCard + SwipeActionBox |
+| Carousel | ⬜ Available | Layout | — | — | — |  |
+| Checkbox | ✅ Wrapped | Input | =checkbox= | =jetpacs-checkbox= | =InputNodes.kt:182-200= |  |
+| Chip | ✅ Wrapped | Input | =chip, assist_chip= | =jetpacs-chip, jetpacs-assist-chip= | =InputNodes.kt:116-142= | FilterChip and AssistChip variants |
+| ColorScheme | ✅ Wrapped | Theming | =theme.set colors= | =jetpacs-theme= | =ThemeModel.kt, ColorModel.kt= | Full M3 color scheme + success/warning extensions |
+| DatePicker | ✅ Wrapped | Input | =date_button= | =jetpacs-date-button= | =InputNodes.kt:408-433= | DatePickerDialog wrapping DatePicker |
+| DateRangePicker | ⬜ Available | Input | — | — | — |  |
+| Divider | ✅ Wrapped | Layout | =divider= | =jetpacs-divider= | =Renderer.kt:289= | HorizontalDivider |
+| ExposedDropdownMenu | ⬜ Available | Input | — | — | — |  |
+| FloatingActionButton | ✅ Wrapped | Navigation | =scaffold.fab= | =jetpacs-scaffold :fab= | =Renderer.kt:631-743= | Rendered as scaffold child |
+| Icon | ✅ Wrapped | Content | =icon= | =jetpacs-icon= | =ContentNodes.kt:224-242= | 2025 icons via IconMap reflection |
+| IconButton | ✅ Wrapped | Input | =icon_button= | =jetpacs-icon-button= | =InputNodes.kt:96-111= | With optional BadgedBox |
+| Label | ⬜ Available | Content | — | — | — |  |
+| ListItem | ⬜ Available | Content | — | — | — | Approximated by =jetpacs-chrome-row= (card > row > leading/column/trailing) everywhere the base needs a list row |
+| MaterialTheme | ✅ Wrapped | Theming | =theme.set= | =jetpacs-theme= | =ThemeModel.kt:123-142= | EbpTheme wraps MaterialTheme |
+| Menu | ✅ Wrapped | Input | =menu= | =jetpacs-menu= | =InputNodes.kt:147-177= | DropdownMenu + DropdownMenuItem |
+| ModalBottomSheet | ⬜ Available | Layout | — | — | — |  |
+| NavigationBar | ⬜ Available | Navigation | — | — | — | Approximated today: the chrome dock (=jetpacs-chrome-dock-function=) authors weighted buttons into =scaffold.bottom_bar=, which the renderer draws as a docked band — contract met, real NavigationBar/NavigationBarItem visuals absent |
+| NavigationDrawer | ✅ Wrapped | Navigation | =scaffold.drawer= | =jetpacs-scaffold :drawer= | =Renderer.kt:631-743= | ModalNavigationDrawer + ModalDrawerSheet |
+| NavigationRail | ⬜ Available | Navigation | — | — | — |  |
+| OutlinedTextField | ✅ Wrapped | Input | =text_input, editor= | =jetpacs-text-input, jetpacs-editor= | =Renderer.kt:351-596= | Both text_input and editor use OutlinedTextField |
+| ProgressIndicator | ✅ Wrapped | Content | =progress= | =jetpacs-progress= | =ContentNodes.kt:327-337= | Linear and Circular variants |
+| PullToRefresh | ✅ Wrapped | Input | =scaffold.on_refresh= | =jetpacs-scaffold :on-refresh= | =Renderer.kt:631-743= | PullToRefreshBox inside scaffold |
+| RadioButton | ⬜ Available | Input | — | — | — |  |
+| Scaffold | ✅ Wrapped | Layout | =scaffold= | =jetpacs-scaffold= | =Renderer.kt:631-743= | Full scaffold with top/bottom bar, fab, drawer, snackbar |
+| SearchBar | ⬜ Available | Input | — | — | — |  |
+| SegmentedButton | ⬜ Available | Input | — | — | — |  |
+| Slider | ✅ Wrapped | Input | =slider= | =jetpacs-slider= | =InputNodes.kt:358-403= | Continuous or discrete (values list) |
+| Snackbar | ✅ Wrapped | Feedback | =scaffold.snackbar= | =jetpacs-scaffold :snackbar= | =Renderer.kt:631-743= | SnackbarHost inside scaffold |
+| SnackbarHost | ✅ Wrapped | Feedback | =scaffold.snackbar= | =jetpacs-scaffold :snackbar= | =Renderer.kt:631-743= | Used inside scaffold |
+| Surface | ✅ Wrapped | Layout | =surface= | =jetpacs-surface= | =LayoutNodes.kt:204-223= | Color, shape, elevation |
+| SwipeToDismissBox | ✅ Wrapped | Input | =card, collapsible (swipe_*)= | =jetpacs-swipe= | =LayoutNodes.kt:261-321= | SwipeActionBox wraps card/collapsible |
+| Switch | ✅ Wrapped | Input | =switch= | =jetpacs-switch= | =InputNodes.kt:203-221= |  |
+| Tab | ✅ Wrapped | Navigation | =tabs= | =jetpacs-tabs= | =LayoutNodes.kt:390-457= | Tab + TabRow/ScrollableTabRow + HorizontalPager |
+| TabRow | ✅ Wrapped | Navigation | =tabs= | =jetpacs-tabs= | =LayoutNodes.kt:390-457= | Part of tabs implementation |
+| Text | ✅ Wrapped | Content | =text, rich_text= | =jetpacs-text, jetpacs-rich-text= | =ContentNodes.kt:137-220= | Supports style, color, spans, syntax highlighting |
+| TextField | ⬜ Available | Input | — | — | — | Jetpacs uses OutlinedTextField instead |
+| TimePicker | ✅ Wrapped | Input | =time_button= | =jetpacs-time-button= | =InputNodes.kt:438-463= | TimePicker inside AlertDialog |
+| Tooltip | ⬜ Available | Feedback | — | — | — |  |
+| Typography | ✅ Wrapped | Theming | =text.style= | =jetpacs-text :style= | =ContentNodes.kt:116-123= | 6 mapped styles: title/headline/caption/label/mono/body |
+|---+---+---+---+---+---+---|
+
+** Unwrapped Components — Expansion Opportunities
+
+These M3 components are available in the library but not yet exposed through
+the Jetpacs wire format.  Each represents a potential new wire type.
+
+*** BottomSheetScaffold / ModalBottomSheet
+
+Persistent or modal bottom sheets.  Could expose as a =bottom_sheet= wire
+type with child content, or integrate into =scaffold= as a =bottom_sheet=
+property.
+
+*Precedent:* The =scaffold= already hosts =drawer=, =snackbar=, and =fab=
+as optional children — a bottom sheet would fit naturally here.
+
+*** Carousel
+
+A horizontally scrolling card carousel (=material3.carousel=).  Could map
+to a =carousel= wire type with =items= children, similar to =tabs= but
+optimized for card-sized content.
+
+*** DateRangePicker
+
+Extends =date_button= with a start/end date range.  Could be a
+=date_range_button= wire type returning ={start, end}= ISO dates.
+
+*** ExposedDropdownMenu
+
+A dropdown menu anchored to a text field.  Partially covered by =enum_list=
+(which uses =FlowRow= + =FilterChip=), but this provides the classic
+dropdown UX.  Could be a =dropdown= wire type.
+
+*** Label
+
+A tooltip-style label that points to an anchor.  Useful for onboarding
+flows.  Could be a =label= universal attribute rather than a node type.
+
+*** ListItem
+
+A structured list row with headline, supporting text, leading/trailing
+content.  Jetpacs currently achieves this with manual =row=/=column=
+composition inside =card=.  A dedicated =list_item= wire type would
+reduce boilerplate.
+
+*** NavigationBar
+
+Bottom navigation bar.  Would complement =scaffold= — could be the
+=bottom_bar= renderer when children are navigation items rather than
+arbitrary nodes.
+
+*** NavigationRail
+
+Side navigation rail for larger screens.  Similar to =NavigationBar= but
+vertical.  Relevant for tablet/foldable layouts.
+
+*** RadioButton
+
+Exclusive-choice radio buttons.  Currently achievable via =enum_list=
+with =multi_select: false=, but a dedicated =radio_group= wire type
+would be more semantic.
+
+*** SearchBar
+
+An expanding search bar with suggestions.  Could be a =search_bar= wire
+type with =on_query_change= and =suggestions= children.
+
+*** SecureTextField
+
+A text field with obfuscation (for passwords/PINs).  Partially available
+via =text_input :password t= which uses =OutlinedTextField= with
+=visualTransformation=.
+
+*** SegmentedButton
+
+A single-row button group for selecting between 2–5 options.  Semantically
+similar to =tabs= but with a different visual treatment (no pager).  Could
+be a =segmented_button= wire type.
+
+*** TextField (filled variant)
+
+Jetpacs uses =OutlinedTextField= exclusively.  The filled variant is
+available but intentionally not exposed — outlined is the canonical M3
+text field style.
+
+*** Tooltip
+
+Contextual help text on long-press/hover.  Could be a universal attribute
+(=:tooltip "Help text"=) rather than a standalone node type.
+
+** Infrastructure Classes (Excluded)
+
+The following classes from the =material3= package are infrastructure,
+theming tokens, state holders, or internal utilities — not user-facing
+composable components:
+
+- =AppBarColumn=, =AppBarDsl=, =AppBarRow= — internal AppBar layout helpers
+- =CarouselState=, =WideNavigationRailState= — state holders
+- =ContentColor= — =LocalContentColor= composition local
+- =DateInput=, =DateRangeInput= — internal date field renderers
+- =DatePickerDialog=, =TimePickerDialog= — dialog wrappers (used internally)
+- =DragHandle= — bottom sheet drag affordance
+- =DynamicTonalPalette=, =TonalPalette= — color generation utilities
+- =HorizontalCenterOptically= — layout modifier
+- =InteractiveComponentSize= — minimum touch target sizing
+- =KeylineList=, =Keylines=, =KeylineSnapPosition=, =Strategy= — carousel internals
+- =MotionScheme= — animation token scheme
+- =NavigationItem= — internal item for NavigationBar/Rail
+- =Ripple= — touch feedback indicator
+- =SecureTextField= — password field (text_input :password covers this)
+- =Shapes= — shape token scheme
+- =SheetDefaults= — bottom sheet configuration defaults
+- =ShortNavigationBar=, =WideNavigationRail= — adaptive navigation variants
+
+** Notes
+
+- *Version lock:* This table reflects =material3= *1.4.0*. Newer versions
+  may add components (e.g., =SplitButton=, =FloatingToolbar= in 1.5+).
+  Regenerate after updating the dependency.
+- *Jetpacs wire types are not 1:1 with M3 components.* A single wire type
+  like =scaffold= uses 8+ M3 composables internally; a single M3 component
+  like =OutlinedTextField= serves 2 wire types (=text_input= and =editor=).
+- *The spec governs expansion.* Adding a new M3 component to Jetpacs
+  requires: (1) a new wire type in =ebp/contract.json= =node_schema=,
+  (2) an Elisp constructor in =jetpacs-widgets.el=, (3) a renderer case
+  in the companion, (4) registration in =NodeSupport.kt=, and (5) golden
+  test coverage.
+
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:

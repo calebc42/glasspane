@@ -177,3 +177,10 @@ emacs -Q --batch -L emacs -l test/ebp-wire-test.el -l test/jetpacs-integration-t
 # so this suite is the one that must never be skipped.
 emacs -Q --batch -L emacs -l test/jetpacs-phase-a-test.el \
   -f ert-run-tests-batch-and-exit
+
+# Icon lint: SPEC 17.1's placeholder degrade means a misspelled icon
+# never fails at runtime — this is the only gate that catches a typo.
+# Ground truth is the generated docs/lookup-tables/M3-ICON-REFERENCE.org
+# (regenerate with generate-icon-table.py after a dependency bump).
+emacs -Q --batch -l test/jetpacs-icon-lint-test.el \
+  -f ert-run-tests-batch-and-exit

@@ -31,6 +31,14 @@
 (require 'jetpacs-device)
 (require 'jetpacs-files)
 (require 'jetpacs-launcher)
+;; The org experience (JA-5).  jetpacs-org-render pulls the engine and
+;; the dialogs, registers the org-mode skin, and — because jetpacs-files
+;; is already loaded above — wires the editor seams, so a `.org' tapped
+;; in Files opens RENDERED with the pencil toggle, the toolbar on the
+;; plain editor, and the add-heading FAB.  Habits registers the
+;; `jetpacs.org' owner: reach it from the Apps button.
+(require 'jetpacs-org-render)
+(require 'jetpacs-org-habits)
 
 ;; Mirror the device Emacs theme onto the chrome; `system'/`dark'/`off'
 ;; are the other choices (see `jetpacs-theme-mode').

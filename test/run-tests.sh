@@ -113,6 +113,13 @@ emacs -Q --batch -L emacs -l test/jetpacs-org-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-org-vulpea-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-5b exit gate: the org render skin — the golden, native-upgrade
+# budget charging (A2 cells, frame bytes), data:-URI images through the
+# root allowlist, the span-action arms, the org_parser trap fixture,
+# and the checkbox/widen verbs' gate order.
+emacs -Q --batch -L emacs -l test/jetpacs-org-render-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-3b exit gate: binding extraction (incl. the minor-mode-map poc-bug
 # regression), menu-bar mining over the :filter/:enable/:visible fixture,
 # and suppressed-commands unreachability.

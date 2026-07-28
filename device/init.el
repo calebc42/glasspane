@@ -31,6 +31,7 @@
 (require 'jetpacs-device)
 (require 'jetpacs-files)
 (require 'jetpacs-launcher)
+(require 'jetpacs-emacs-ui)   ; the Buffers app + the global M-x verb
 ;; The org experience (JA-5).  jetpacs-org-render pulls the engine and
 ;; the dialogs, registers the org-mode skin, and — because jetpacs-files
 ;; is already loaded above — wires the editor seams, so a `.org' tapped
@@ -57,6 +58,41 @@
                       :on-tap (jetpacs-action "hub.open"
                                               :args (list :buffer buffer))))
 
+;; The hub chrome follows docs/CHROME-VOCABULARY.md: the DRAWER (left,
+;; behind the Companion's hamburger) holds app destinations, the TOP BAR
+;; keeps M-x top-right, and the BOTTOM BAR is the view switcher —
+;; Home / Files / Eval, the poc's tabs reborn.  Eval is *ielm*: ielm
+;; derives from comint-mode, so the comint skin's pinned input row is
+;; the REPL.
+
+(defun jetpacs-hub--drawer ()
+  (apply #'jetpacs-column
+         (append
+          (list (jetpacs-text "Apps" :style "title"))
+          (jetpacs-launcher-rows "app:hub")
+          (list (jetpacs-divider)
+                (jetpacs-chrome-row
+                 "Theme" :subtitle "toggle modus light/dark"
+                 :on-tap (jetpacs-action "jetpacs.theme.modus-toggle")
+                 :key "drawer-theme")
+                :spacing 8))))
+
+(defun jetpacs-hub--tab (label icon on-tap &optional selected)
+  (jetpacs-with-attrs
+   (jetpacs-button label on-tap :icon icon
+                   :variant (if selected "tonal" "text"))
+   :weight 1))
+
+(defun jetpacs-hub--bottom-bar ()
+  (jetpacs-row
+   (jetpacs-hub--tab "Home" "home" (jetpacs-action "hub.home") t)
+   (jetpacs-hub--tab "Files" "folder_open"
+                     (jetpacs-action "jetpacs.launcher.open"
+                                     :args '(:surface "app:jetpacs.files")))
+   (jetpacs-hub--tab "Eval" "code"
+                     (jetpacs-action "hub.open" :args '(:buffer "*ielm*")))
+   :spacing 4))
+
 (defun jetpacs-hub--screen (_back)
   (jetpacs-chrome-screen
    "Jetpacs"
@@ -64,12 +100,12 @@
     (jetpacs-hub--row "Scratch" "lisp playground" "*scratch*")
     (jetpacs-hub--row "Messages" "the Emacs log" "*Messages*")
     (jetpacs-hub--row "Shell" "comint, with input" "*shell*")
-    (jetpacs-text "Kill ring: M-x jetpacs-clip-show   ·   files: M-x jetpacs-files   ·   home: M-x jetpacs-hub"
+    (jetpacs-text "Kill ring: M-x jetpacs-clip-show   ·   home: M-x jetpacs-hub"
                   :style "caption")
     :spacing 8)
-   :actions (list (jetpacs-button
-                   "Theme" (jetpacs-action "jetpacs.theme.modus-toggle"))
-                  (jetpacs-launcher-button))))
+   :actions (list (jetpacs-emacs-ui-mx-button))
+   :drawer (jetpacs-hub--drawer)
+   :bottom-bar (jetpacs-hub--bottom-bar)))
 
 (with-jetpacs-owner "hub"
   (jetpacs-chrome-define-root "hub" "home" #'jetpacs-hub--screen
@@ -82,10 +118,19 @@
          (lambda ()
            (when (and (equal name "*shell*") (not (get-buffer name)))
              (save-window-excursion (shell)))
+           (when (and (equal name "*ielm*") (not (get-buffer name)))
+             (save-window-excursion (ielm)))
            (condition-case err
                (jetpacs-navigate-buffer name surface)
              (error (message "hub.open: %s" (jetpacs--error-label err))))))
-        'accepted))))
+        'accepted)))
+
+  (jetpacs-defaction "hub.home"
+    ;; The view switcher's Home tab: back to the hub root.
+    (lambda (_args _params)
+      (jetpacs-flow-continue
+       (lambda () (jetpacs-chrome-reset-screens "hub")))
+      'accepted)))
 
 ;;;; Connection
 

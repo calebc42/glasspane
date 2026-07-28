@@ -606,14 +606,24 @@ cannot see."
   "Charge NODES' bytes and CELLS against the shared budgets.
 Non-nil when they fit (and are now spent); nil refuses and spends
 NOTHING, so the walk stops with a truthful caption instead of walking
-the push into GATE 5's whole-surface refusal."
+the push into a whole-surface refusal.  CELLS spend BOTH aggregates:
+`max_table_cells' (A2) and `max_rich_spans' — the Companion counts
+every RichSpan in the document, table-cell spans included, against
+the span allowance, and each emitted cell here carries exactly one
+span (AUDIT-ja5: the sender never accounted for them, so prose at
+~3900 spans plus a 300-cell table passed every local gate and 1201'd
+on device)."
   (let* ((budget jetpacs-buffer-budget)
          (bytes-left (and budget (cdr budget)))
+         (spans-left (and budget (car budget)))
          (size (apply #'+ (mapcar #'jetpacs-buffer-node-bytes nodes))))
     (cond
      ((and bytes-left (> size bytes-left)) nil)
+     ((and spans-left (> cells spans-left)) nil)
      ((not (jetpacs-buffer-spend-limit :max_table_cells cells)) nil)
      (t (when bytes-left (setcdr budget (- bytes-left size)))
+        (when (and spans-left (> cells 0))
+          (setcar budget (- spans-left cells)))
         t))))
 
 (defun jetpacs-org-render (buffer)

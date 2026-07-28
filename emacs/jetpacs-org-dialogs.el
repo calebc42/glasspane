@@ -91,11 +91,16 @@ wedging silently, and a flow error surfaces as a symbol, never text
    80))
 
 (defun jetpacs-org-dialogs--ref-at (buf pos)
-  "The heading ref at POS in BUF, or nil when no heading is there."
+  "The heading ref when POS still sits ON a heading line, else nil.
+Deliberately NOT `org-back-to-heading': the exposure was minted for a
+run on a heading LINE, and a rotted pos that drifted into some other
+subtree's body must answer \"gone\", not silently resolve to whatever
+heading now encloses it (the checkbox and timestamp arms re-verify the
+same way — AUDIT-ja5)."
   (with-current-buffer buf
     (org-with-wide-buffer
      (goto-char (min (max (point-min) pos) (point-max)))
-     (when (ignore-errors (org-back-to-heading t) t)
+     (when (org-at-heading-p)
        (jetpacs-org-ref-at-point)))))
 
 ;;;; The footnote dialog (poc 1578-1694)
@@ -108,19 +113,21 @@ nil), :def-line (definition's line number, labelled file-backed only)."
     (org-with-wide-buffer
      (goto-char (min (max (point-min) pos) (point-max)))
      (when-let* ((ctx (org-footnote-at-reference-p)))
+       ;; org-footnote.el (emacs-30.1): the return is (LABEL BEGIN END
+       ;; DEFINITION), where nth 3 IS the inline definition STRING —
+       ;; nth 1/2 bound the whole [fn:...] reference.  Reading nth 3 as
+       ;; a boolean and substringing 1..2 showed the bracket wrapper as
+       ;; the "definition" (AUDIT-ja5).
        (let* ((label (car ctx))
-              (inline (nth 3 ctx))
-              (def (if inline
-                       (and (nth 1 ctx) (nth 2 ctx)
-                            (buffer-substring-no-properties
-                             (nth 1 ctx) (nth 2 ctx)))
-                     (and label
-                          (nth 3 (org-footnote-get-definition label)))))
-              (def-line (and label (not inline)
+              (inline-def (nth 3 ctx))
+              (def (or inline-def
+                       (and label
+                            (nth 3 (org-footnote-get-definition label)))))
+              (def-line (and label (not inline-def)
                              (when-let* ((d (org-footnote-get-definition
                                              label)))
                                (line-number-at-pos (nth 1 d))))))
-         (list :label label :inline (and inline t)
+         (list :label label :inline (and inline-def t)
                :definition (and def (string-trim def))
                :def-line def-line))))))
 
@@ -140,8 +147,14 @@ nil), :def-line (definition's line number, labelled file-backed only)."
                                     (jetpacs-truncate-text
                                      (jetpacs-scalar-text def) 1000)
                                   "No definition found."))
+                  ;; The DIALOG profile's advertisement, not the app's:
+                  ;; SPEC 18.1 validates every builtin in a dialog spec
+                  ;; against the dialog profile, and the reference
+                  ;; Companion's dialog profile carries only the two
+                  ;; dialog builtins — an app-gated Copy button 1201'd
+                  ;; the whole footnote dialog (AUDIT-ja5 P1).
                   (when (and def (jetpacs-builtin-advertised-p
-                                  "clipboard.copy"))
+                                  "clipboard.copy" :dialog))
                     (jetpacs-button "Copy"
                                     (jetpacs-clipboard-copy
                                      (jetpacs-truncate-text
@@ -178,7 +191,12 @@ nil), :def-line (definition's line number, labelled file-backed only)."
            ;; affordance, minus its private files dependency).
            (run-at-time 0 nil
                         (lambda ()
-                          (jetpacs-navigate-buffer buf)
+                          ;; The TAPPED surface — a bare navigate from a
+                          ;; timer resolves to the shell default and the
+                          ;; drill lands where the user is not looking
+                          ;; (AUDIT-ja5).
+                          (jetpacs-navigate-buffer
+                           buf (plist-get params :surface))
                           (jetpacs-org-dialogs--notify
                            (format "Definition of [fn:%s] is at line %d"
                                    (jetpacs-scalar-text
@@ -262,8 +280,13 @@ the buffer's live state."
                     ref buf (plist-get result :value) params))))))
         (if (null request-id)
             (jetpacs-org-dialogs--notify "Busy — try again" params)
+          ;; :params rides along — the Archive event arrives in DIALOG
+          ;; context (dialog_id, no :surface per 14.4's exclusive
+          ;; contexts), so its feedback/refresh need the surface the
+          ;; sheet was OPENED from (AUDIT-ja5).
           (setq jetpacs-org-dialogs--sheet
-                (list :request-id request-id :token token))))))))
+                (list :request-id request-id :token token
+                      :params params))))))))
 
 (defun jetpacs-org-dialogs--sheet-dispatch (ref buf value params)
   "Run the sheet item VALUE for REF; every arm ends in a refresh.
@@ -280,7 +303,11 @@ candidate list first (23.2)."
            (jetpacs-org-dialogs--maybe-log-note ref params)
            (jetpacs-org-dialogs--refresh params))
           ((or "schedule" "deadline")
-           (let ((which (upcase value)))
+           ;; An explicit map, never string surgery: (upcase "schedule")
+           ;; is "SCHEDULE", which no engine entry point accepts — the
+           ;; arm shipped unable to write (AUDIT-ja5 P1).
+           (let ((which (if (equal value "schedule") "SCHEDULED"
+                          "DEADLINE")))
              (run-at-time 0 nil
                           (lambda ()
                             (jetpacs-org-dialogs--ts-open
@@ -541,51 +568,109 @@ rest — and org's fast tag selection cannot bridge)."
 
 (defun jetpacs-org-dialogs--ts-seed (stamp)
   "Session fields seeded from org timestamp string STAMP (or nil).
-Repeaters split into type/count/unit; a habit's /max tail and any
-delay cookie are ignored (the leading repeater still seeds)."
+Every seeded value must be LEGAL for the dialog nodes it lands in —
+`jetpacs-time-button' rejects a 1-digit hour and the unit enum offers
+only d/w/m/y, and a signaling spec build inside the show timer is a
+silently dead tap (AUDIT-ja5).  So: times are zero-padded, an
+UNSUPPORTED repeater (hourly unit) seeds `none' and is carried whole
+in :rep-raw, a habit's /max tail in :rep-tail, a delay cookie in
+:delay — the body rewrite re-appends all three, so opening the editor
+never destroys cookie data it cannot represent."
   (let* ((rep (and stamp (jetpacs-org-ts-repeater stamp)))
          (parts (and rep
                      (string-match
-                      "\\`\\(\\.\\+\\|\\+\\+\\|\\+\\)\\([0-9]+\\)\\([hdwmy]\\)"
+                      "\\`\\(\\.\\+\\|\\+\\+\\|\\+\\)\\([0-9]+\\)\\([hdwmy]\\)\\'"
                       rep)
                      (list (match-string 1 rep)
                            (match-string 2 rep)
-                           (match-string 3 rep)))))
+                           (match-string 3 rep))))
+         (supported (member (nth 2 parts) '("d" "w" "m" "y")))
+         (time (and stamp (jetpacs-org-ts-time stamp)))
+         (rep-tail (and stamp supported
+                        (string-match "[.+]?\\+[0-9]+[hdwmy]\\(/[0-9]+[hdwmy]\\)"
+                                      stamp)
+                        (match-string 1 stamp)))
+         (rep-raw (and rep (not supported)
+                       (progn (string-match
+                               "\\([.+]?\\+[0-9]+[hdwmy]\\(?:/[0-9]+[hdwmy]\\)?\\)"
+                               stamp)
+                              (match-string 1 stamp))))
+         (delay (and stamp
+                     (string-match " \\(--?[0-9]+[hdwmy]\\)" stamp)
+                     (match-string 1 stamp))))
     (list :date (or (and stamp (jetpacs-org-ts-date stamp))
                     (format-time-string "%Y-%m-%d"))
-          :time (and stamp (jetpacs-org-ts-time stamp))
-          :rep-type (or (nth 0 parts) "none")
-          :rep-n (or (nth 1 parts) "1")
-          :rep-unit (or (nth 2 parts) "w"))))
+          :time (and time (if (= (length time) 4) (concat "0" time) time))
+          :rep-type (if supported (nth 0 parts) "none")
+          :rep-n (if supported (nth 1 parts) "1")
+          :rep-unit (if supported (nth 2 parts) "w")
+          :rep-tail rep-tail
+          :rep-raw rep-raw
+          :delay delay)))
 
 (defconst jetpacs-org-dialogs--ts-rep-types
   '(("none" . "No repeat") ("+" . "+ every")
     ("++" . "++ next from today") (".+" . ".+ next from done"))
   "Repeater types with the poc's labels.")
 
+(defun jetpacs-org-dialogs--ts-cookies (session)
+  "SESSION's full cookie string (\" +1w/2w -1d\" style), or \"\".
+An edited repeater wins over :rep-raw; the /max tail and delay carry
+through either way, so the editor never destroys what it cannot show."
+  (let* ((rep (jetpacs-org-dialogs--ts-rep session))
+         (rep-part (cond (rep (concat rep (or (plist-get session :rep-tail)
+                                              "")))
+                         ((plist-get session :rep-raw))))
+         (delay (plist-get session :delay)))
+    (concat (if rep-part (concat " " rep-part) "")
+            (if delay (concat " " delay) ""))))
+
 (defun jetpacs-org-dialogs--ts-preview (session)
   "The stamp SESSION would write, for the preview line."
   (let* ((target (plist-get session :target))
          (bracket (if (eq (plist-get target :kind) 'body)
                       (plist-get target :bracket)
-                    ?<))
-         (rep (jetpacs-org-dialogs--ts-rep session)))
+                    ?<)))
     (format "%c%s%s%s%c"
             (if (eq bracket ?\[) ?\[ ?<)
             (plist-get session :date)
             (if (plist-get session :time)
                 (concat " " (plist-get session :time)) "")
-            (if rep (concat " " rep) "")
+            (jetpacs-org-dialogs--ts-cookies session)
             (if (eq bracket ?\[) ?\] ?>))))
 
 (defun jetpacs-org-dialogs--ts-rep (session)
-  "SESSION's repeater cookie string, or nil for none."
+  "SESSION's repeater cookie string, or nil for none.
+Every member is validated — type against the closed set, the count as
+1-4 digits, the UNIT against d/w/m/y.  The unit arrives as a captured
+device field and was concatenated into the org file unvalidated; a
+crafted \"unit\" smuggled arbitrary text, headings included, into the
+buffer (AUDIT-ja5 P1, SPEC 23.1)."
   (let ((type (plist-get session :rep-type))
-        (n (plist-get session :rep-n)))
+        (n (plist-get session :rep-n))
+        (unit (plist-get session :rep-unit)))
     (when (and (member type '("+" "++" ".+"))
-               (stringp n) (string-match-p "\\`[0-9]+\\'" n)
-               (> (string-to-number n) 0))
-      (concat type n (plist-get session :rep-unit)))))
+               (stringp n) (string-match-p "\\`[0-9]\\{1,4\\}\\'" n)
+               (> (string-to-number n) 0)
+               (member unit '("d" "w" "m" "y")))
+      (concat type n unit))))
+
+(defconst jetpacs-org-dialogs--ts-field-shapes
+  '((:ts-rep-type :rep-type "\\`\\(?:none\\|\\+\\|\\+\\+\\|\\.\\+\\)\\'")
+    (:ts-rep-n :rep-n "\\`[0-9]\\{1,4\\}\\'")
+    (:ts-rep-unit :rep-unit "\\`[dwmy]\\'"))
+  "Captured field -> session key -> the shape a device value must match.")
+
+(defun jetpacs-org-dialogs--ts-merge-fields (session fields)
+  "SESSION with the captured FIELDS merged in — shape-checked, 23.1.
+A member that fails its shape is DROPPED (the seed value stands); it
+is never written anywhere."
+  (let ((out (copy-sequence session)))
+    (pcase-dolist (`(,field ,key ,shape) jetpacs-org-dialogs--ts-field-shapes)
+      (let ((v (plist-get fields field)))
+        (when (and (stringp v) (string-match-p shape v))
+          (setq out (plist-put out key v)))))
+    out))
 
 (defun jetpacs-org-dialogs--ts-spec (sid session)
   "The timestamp dialog spec for SESSION under SID."
@@ -596,16 +681,26 @@ delay cookie are ignored (the leading repeater still seeds)."
                                  (downcase (plist-get target :which))))
                      (_ "Timestamp"))
                    :style "title")
+     ;; The picks CAPTURE the repeater trio (SPEC 14.1: a remote action
+     ;; whose outcome depends on stateful values must name them) — the
+     ;; re-present would otherwise reseed the fields and silently wipe
+     ;; the user's uncommitted repeater edits (AUDIT-ja5).
      (jetpacs-row
       (jetpacs-date-button (or (plist-get session :date) "Pick date")
                            (jetpacs-action "jetpacs.org.ts-pick"
                                            :args (list :sid sid
-                                                       :field "date"))
+                                                       :field "date")
+                                           :capture-fields
+                                           '("ts-rep-type" "ts-rep-n"
+                                             "ts-rep-unit"))
                            :value (plist-get session :date))
       (jetpacs-time-button (or (plist-get session :time) "Add time")
                            (jetpacs-action "jetpacs.org.ts-pick"
                                            :args (list :sid sid
-                                                       :field "time"))
+                                                       :field "time")
+                                           :capture-fields
+                                           '("ts-rep-type" "ts-rep-n"
+                                             "ts-rep-unit"))
                            :value (plist-get session :time)))
      (jetpacs-enum-list "ts-rep-type"
                         (mapcar (lambda (c)
@@ -702,8 +797,11 @@ delay cookie are ignored (the leading repeater still seeds)."
                                 value)))
       'rejected)
      (t
+      ;; Merge the captured repeater fields FIRST (shape-checked), then
+      ;; the pick — the re-present must reflect both.
       (puthash sid
-               (plist-put (copy-sequence session)
+               (plist-put (jetpacs-org-dialogs--ts-merge-fields
+                           session (plist-get params :fields))
                           (if (equal field "date") :date :time) value)
                jetpacs-org-dialogs--ts-sessions)
       (let ((old-request (plist-get session :request-id)))
@@ -720,12 +818,9 @@ delay cookie are ignored (the leading repeater still seeds)."
 FIELDS carries the captured repeater members keyed by node id."
   (let* ((target (plist-get session :target))
          (params (plist-get session :params))
-         (session (if fields
-                      (append (list :rep-type (plist-get fields :ts-rep-type)
-                                    :rep-n (plist-get fields :ts-rep-n)
-                                    :rep-unit (plist-get fields :ts-rep-unit))
-                              session)
-                    session)))
+         ;; Shape-checked merge — never a raw append of device fields
+         ;; (a crafted "unit" reached the org file verbatim, AUDIT-ja5).
+         (session (jetpacs-org-dialogs--ts-merge-fields session fields)))
     (condition-case err
         (pcase (plist-get target :kind)
           ('planning
@@ -783,7 +878,6 @@ snackbar, the stale-tap ethic."
                               (format-time-string
                                "%a" (org-time-string-to-time
                                      (plist-get session :date)))))
-                       (rep (jetpacs-org-dialogs--ts-rep session))
                        (stamp (format "%c%s %s%s%s%c"
                                       (plist-get target :bracket)
                                       (plist-get session :date)
@@ -792,7 +886,12 @@ snackbar, the stale-tap ethic."
                                           (concat " "
                                                   (plist-get session :time))
                                         "")
-                                      (if rep (concat " " rep) "")
+                                      ;; Repeater + preserved /max tail
+                                      ;; + delay — the editor never
+                                      ;; destroys cookies it cannot
+                                      ;; represent (AUDIT-ja5).
+                                      (jetpacs-org-dialogs--ts-cookies
+                                       session)
                                       (if (eq (plist-get target :bracket)
                                               ?\[)
                                           ?\] ?>))))
@@ -1020,8 +1119,18 @@ completed archive — and the spent sheet is abandoned."
      ((not (stringp token)) 'rejected)
      ((jetpacs-event-stale-p params) 'stale)
      (t
-      (let ((ref (jetpacs-org-token-ref
-                  token :owner jetpacs-org-dialogs-owner)))
+      (let* ((ref (jetpacs-org-token-ref
+                   token :owner jetpacs-org-dialogs-owner))
+             ;; Dialog-context events carry :dialog_id, never :surface
+             ;; (14.4 exclusive contexts) — feedback and the re-push
+             ;; target the surface the sheet was opened FROM.
+             (sheet jetpacs-org-dialogs--sheet)
+             (eff (if (plist-get params :surface)
+                      params
+                    (or (and sheet
+                             (equal token (plist-get sheet :token))
+                             (plist-get sheet :params))
+                        params))))
         (if (null ref)
             'stale
           (condition-case err
@@ -1036,8 +1145,8 @@ completed archive — and the spent sheet is abandoned."
                       (ebp-client-abandon client
                                           (plist-get sheet :request-id)))
                     (setq jetpacs-org-dialogs--sheet nil)))
-                (jetpacs-org-dialogs--notify "Archived" params)
-                (jetpacs-org-dialogs--refresh params)
+                (jetpacs-org-dialogs--notify "Archived" eff)
+                (jetpacs-org-dialogs--refresh eff)
                 'accepted)
             (jetpacs-org-unresolved 'stale)
             (jetpacs-org-refused 'rejected)

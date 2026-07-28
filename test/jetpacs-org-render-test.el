@@ -197,6 +197,36 @@ caption — never emitted into GATE 5's whole-push refusal."
                                    "… output truncated (surface budget)"))
                           nodes))))))
 
+(ert-deftest jetpacs-org-render-table-spends-span-aggregate ()
+  "AUDIT-ja5 P2: the Companion counts table-CELL spans against
+`max_rich_spans' too; a table the span allowance cannot cover is
+dropped with the caption, and an emitted table spends the aggregate."
+  (jetpacs-org-render-test--with-client
+      (:limits '(:max_rich_spans 5 :max_table_cells 100)
+       :profiles jetpacs-org-render-test--rich-profile)
+    (jetpacs-org-render-test--with-file f
+        "| a | b | c |\n| d | e | f |\n"
+      ;; 6 cells > 5 spans: dropped, captioned.
+      (let ((nodes (jetpacs-org-render (jetpacs-org-render-test--buffer f))))
+        (should-not (jetpacs-org-render-test--nodes-of nodes "table"))
+        (should (seq-find (lambda (n)
+                            (equal (plist-get n :text)
+                                   "… output truncated (surface budget)"))
+                          nodes)))))
+  (jetpacs-org-render-test--with-client
+      (:limits '(:max_rich_spans 200 :max_table_cells 100)
+       :profiles jetpacs-org-render-test--rich-profile)
+    (jetpacs-org-render-test--with-file f
+        "| a | b | c |\n| d | e | f |\n"
+      ;; Emitted: the 6 cell spans came out of the shared allowance.
+      (jetpacs-buffer-with-budget
+        (let ((before (car jetpacs-buffer-budget)))
+          (should (jetpacs-org-render-test--nodes-of
+                   (jetpacs-org-render (jetpacs-org-render-test--buffer f))
+                   "table"))
+          (should (<= (- before (car jetpacs-buffer-budget)) before))
+          (should (>= (- before (car jetpacs-buffer-budget)) 6)))))))
+
 (ert-deftest jetpacs-org-render-exposure-only-for-shipped-nodes ()
   "A checkbox whose line never survived the span budget is NOT exposed:
 records mirror the wire, not the builder's attempt (SPEC 23.1)."

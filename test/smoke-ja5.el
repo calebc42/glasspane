@@ -177,8 +177,9 @@
       (smoke-j5--check "S2 statistics cookie recounted"
                        (string-search "* Tasks [1/1]" text)))
 
-    ;; S3 drawer fold tap.
-    (smoke-j5--mark "S3-TAP-THE-:PROPERTIES:-LINE")
+    ;; S3 drawer fold tap.  The claim is the TRANSITION, so the folded
+    ;; precondition is asserted first — a drawer that starts visible
+    ;; would satisfy the poll before any tap and prove nothing.
     (let ((id-visible
            (lambda ()
              (with-current-buffer smoke-j5--buf
@@ -188,6 +189,19 @@
                 (let ((iv (get-char-property (match-beginning 0)
                                              'invisible)))
                   (not (and iv (invisible-p iv)))))))))
+      (unless (funcall id-visible)
+        (smoke-j5--check "S3 precondition: drawer starts folded" t))
+      (when (funcall id-visible)
+        ;; Fold it ourselves so the tap still has a transition to prove.
+        (with-current-buffer smoke-j5--buf
+          (org-with-wide-buffer
+           (goto-char (point-min))
+           (search-forward ":PROPERTIES:")
+           (beginning-of-line)
+           (org-cycle)))
+        (smoke-j5--check "S3 precondition: drawer folded by harness"
+                         (not (funcall id-visible))))
+      (smoke-j5--mark "S3-TAP-THE-:PROPERTIES:-LINE")
       (smoke-j5--drain 180 id-visible)
       (smoke-j5--check "S3 drawer unfolded (org-cycle via fold verb)"
                        (funcall id-visible)))

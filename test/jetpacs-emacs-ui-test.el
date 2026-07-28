@@ -229,6 +229,16 @@ worst a loop."
                    (should (= sent 1))))
         (jetpacs-echo-uninstall)))))
 
+(ert-deftest jetpacs-emacs-ui-mx-is-a-global-verb ()
+  "`jetpacs-emacs-ui-mx-button' renders in other owners' top bars
+(the CHROME-VOCABULARY top-bar contract), so the verb must carry the
+:any-surface exemption and the button must name it."
+  (should (gethash "jetpacs.emacs.mx" jetpacs--any-surface-actions))
+  (let ((btn (jetpacs-emacs-ui-mx-button)))
+    (should (equal (plist-get btn :icon) "terminal"))
+    (should (equal (plist-get (plist-get btn :on_tap) :action)
+                   "jetpacs.emacs.mx"))))
+
 (provide 'jetpacs-emacs-ui-test)
 ;;; jetpacs-emacs-ui-test.el ends here
 

@@ -64,10 +64,33 @@ list is stable across pushes."
                      entries)))))
 
 (defun jetpacs-launcher-button ()
-  "The top-bar affordance any app may embed to reach the launcher."
+  "The top-bar affordance any app may embed to reach the launcher.
+Under docs/CHROME-VOCABULARY.md the drawer is the canonical home for
+app destinations — prefer embedding `jetpacs-launcher-rows' there; this
+button remains for screens that have no drawer."
   (jetpacs-icon-button "apps"
                        (jetpacs-action "jetpacs.launcher.show")
                        :content-description "Apps"))
+
+(defun jetpacs-launcher-rows (&optional exclude)
+  "Destination rows for embedding in another app's drawer.
+One row per switchable app surface — the drawer contract's app-level
+destinations (docs/CHROME-VOCABULARY.md) — or a single empty-state.
+EXCLUDE names one more surface to omit, canonically the embedder's own
+\(its row would be a destination to where the user already is).  The
+rows dispatch `jetpacs.launcher.open', a GLOBAL VERB, so they work
+from any surface's drawer."
+  (let ((entries (cl-remove-if (lambda (entry)
+                                 (and exclude (equal (car entry) exclude)))
+                               (jetpacs-launcher--entries))))
+    (if (null entries)
+        (list (jetpacs-empty-state
+               :icon "apps"
+               :title "Nothing to switch to"
+               :caption "No other app has registered a surface"))
+      (mapcar (lambda (entry)
+                (jetpacs-launcher--row (car entry) (cdr entry)))
+              entries))))
 
 ;;;; Actions and registration
 
@@ -94,7 +117,13 @@ list is stable across pushes."
                  (jetpacs-shell-push target)
                (error (message "jetpacs-launcher: switch failed: %s"
                                (jetpacs--error-label err))))))
-          'accepted))))
+          'accepted)))
+    ;; A GLOBAL VERB since the drawer convention: `jetpacs-launcher-rows'
+    ;; renders these descriptors inside other owners' drawers, so the
+    ;; event's surface is legitimately foreign.  Safe under the exemption
+    ;; because the membership guard above never pushes a surface the
+    ;; registry does not name.
+    :any-surface t)
 
   (jetpacs-defaction "jetpacs.launcher.show"
     ;; A GLOBAL VERB: the button renders in other owners' top bars, so

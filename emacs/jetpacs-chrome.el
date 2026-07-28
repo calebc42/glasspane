@@ -65,13 +65,18 @@ the stack bottom — and returns a root Node.")
 ;;;; Composition
 
 (cl-defun jetpacs-chrome-screen (title body &key back actions fab drawer
-                                       on-refresh)
+                                       bottom-bar on-refresh)
   "A titled scaffold screen.  BACK, when given, is the tap descriptor
 of a leading arrow_back button (canonically `jetpacs-view-switch' of
 the screen below).  The weight-1 title is what keeps trailing ACTIONS
 at intrinsic width — the poc flex-trap lesson.  Validation rides the
 builders: bad TITLE signals in `jetpacs-text', bad slots in
-`jetpacs-scaffold', a bad BACK in `jetpacs-icon-button'."
+`jetpacs-scaffold', a bad BACK in `jetpacs-icon-button'.
+
+The optional slots follow docs/CHROME-VOCABULARY.md: DRAWER holds
+app-level destinations (the Companion adds the opening hamburger on
+the left by itself); BOTTOM-BAR is canonically a view switcher —
+three to five sibling places, never document actions."
   (jetpacs-scaffold
    :top-bar (apply #'jetpacs-row
                    (append
@@ -83,7 +88,8 @@ builders: bad TITLE signals in `jetpacs-text', bad slots in
                            :weight 1))
                     actions
                     (list :align "center" :spacing 4)))
-   :body body :fab fab :drawer drawer :on-refresh on-refresh))
+   :body body :fab fab :drawer drawer :bottom-bar bottom-bar
+   :on-refresh on-refresh))
 
 (cl-defun jetpacs-chrome-row (title &key subtitle icon leading trailing
                                     on-tap on-long-tap key)

@@ -980,5 +980,16 @@ depth 1 and sailed past the gate straight into a 1201."
                     (lambda () (jetpacs-shell-push "app:demo" :spec deep)))))
           (should (string-match-p "max_node_depth" msg)))))))
 
+(ert-deftest jetpacs-chrome-screen-carries-drawer-and-bottom-bar ()
+  "The CHROME-VOCABULARY slots pass through to the scaffold: DRAWER
+(app destinations, hamburger Companion-added) and BOTTOM-BAR (the
+view switcher)."
+  (let* ((screen (jetpacs-chrome-screen
+                  "T" (jetpacs-text "body")
+                  :drawer (jetpacs-text "d")
+                  :bottom-bar (jetpacs-text "bb"))))
+    (should (equal (plist-get (plist-get screen :drawer) :text) "d"))
+    (should (equal (plist-get (plist-get screen :bottom_bar) :text) "bb"))))
+
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

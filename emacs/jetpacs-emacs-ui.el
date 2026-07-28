@@ -165,9 +165,15 @@ down rather than truncating itself."
                   :key "row-messages")
                  (jetpacs-emacs-ui--hub-rows))))
    :back back
-   :actions (list (jetpacs-icon-button
-                   "terminal" (jetpacs-action "jetpacs.emacs.mx")
-                   :content-description "M-x"))))
+   :actions (list (jetpacs-emacs-ui-mx-button))))
+
+(defun jetpacs-emacs-ui-mx-button ()
+  "The top-bar M-x affordance any app may embed.
+`jetpacs.emacs.mx' is a GLOBAL VERB (it reads no surface-bound
+arguments), so the button works from any screen's top bar — the
+docs/CHROME-VOCABULARY.md top-bar contract puts it top-right."
+  (jetpacs-icon-button "terminal" (jetpacs-action "jetpacs.emacs.mx")
+                       :content-description "M-x"))
 
 ;; --- The drilled buffer screen -----------------------------------------------
 
@@ -602,11 +608,18 @@ offered (SPEC 23.1)")
       'accepted))
 
   (jetpacs-defaction "jetpacs.emacs.mx"
+    ;; A GLOBAL VERB (the theme-toggle precedent):
+    ;; `jetpacs-emacs-ui-mx-button' renders in other owners' top bars,
+    ;; so the event's surface is legitimately foreign.  Safe under the
+    ;; exemption: the handler reads no event arguments, and the flow's
+    ;; origin falls back to scratch when this owner's stack holds no
+    ;; drilled buffer.
     (lambda (_args _params)
       (jetpacs-flow-continue
        (lambda ()
          (jetpacs-emacs-ui--with-prompting #'jetpacs-emacs-ui--mx-flow)))
-      'accepted))
+      'accepted)
+    :any-surface t)
 
   (jetpacs-defaction "jetpacs.emacs.imenu"
     (lambda (args params)

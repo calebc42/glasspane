@@ -140,5 +140,42 @@ is legitimately foreign — the :any-surface exemption must hold."
                    '("jetpacs.launcher.show")))
     (should (member "icon_button" (jetpacs-launcher-test--collect btn :t)))))
 
+(ert-deftest jetpacs-launcher-open-is-a-global-verb ()
+  "`jetpacs-launcher-rows' renders open descriptors inside OTHER
+owners' drawers, so a foreign-surface event must dispatch — guarded
+still by the registry membership check."
+  (jetpacs-launcher-test--with-demos
+    (let ((client (jetpacs-launcher-test--client)))
+      (unwind-protect
+          (progn
+            (jetpacs-attach client)
+            (let ((handler (gethash "jetpacs.launcher.open"
+                                    jetpacs-action-handlers))
+                  (pushed '()))
+              (cl-letf (((symbol-function 'jetpacs-shell-push)
+                         (lambda (surface &rest _) (push surface pushed) 1)))
+                (should (eq (jetpacs--dispatch
+                             client '(:action "jetpacs.launcher.open"
+                                      :surface "app:demob"
+                                      :args (:surface "app:demoa"))
+                             handler)
+                            'accepted))
+                (cl-loop repeat 10 do (accept-process-output nil 0.05))
+                (should (equal pushed '("app:demoa"))))))
+        (jetpacs-detach)
+        (jetpacs-test-reset-state)))))
+
+(ert-deftest jetpacs-launcher-rows-carry-switches-and-exclude ()
+  "The drawer embedding: one row per destination, EXCLUDE omits the
+embedder's own surface."
+  (jetpacs-launcher-test--with-demos
+    (let ((rows (jetpacs-launcher-rows "app:demob")))
+      (should (member (list :surface "app:demoa")
+                      (jetpacs-launcher-test--collect rows :args)))
+      (should-not (member (list :surface "app:demob")
+                          (jetpacs-launcher-test--collect rows :args)))
+      (should (member "jetpacs.launcher.open"
+                      (jetpacs-launcher-test--collect rows :action))))))
+
 (provide 'jetpacs-launcher-test)
 ;;; jetpacs-launcher-test.el ends here

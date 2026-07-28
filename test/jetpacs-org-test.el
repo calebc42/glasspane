@@ -31,6 +31,9 @@ it, visits are cleaned up, and engine state is reset around BODY."
        (delete-file ,var)
        (jetpacs-org-reset))))
 
+(defvar jetpacs-org-test--sexp-ran nil
+  "Set by a hostile capture payload if the escape ever fails.")
+
 (defconst jetpacs-org-test--two-headings
   "* TODO First heading\nBody one.\n* Second heading\n:PROPERTIES:\n:ID: ja4-test-id-1\n:END:\nBody two.\n")
 
@@ -580,11 +583,77 @@ defaults drop from labels, duplicates collapse."
   (should (equal (jetpacs-org-capture-prompts "* plain") '())))
 
 (ert-deftest jetpacs-org-capture-fill-precedence ()
-  "User value > template default > empty; leftover carets stripped."
-  (should (equal (jetpacs-org-capture-fill
-                  "* %^{Title|dflt} %?\n%^t %^{Empty}"
-                  '(("Title" . "mine") ("Headline" . "H")))
-                 "* mine H\n ")))
+  "User value > template default > empty; leftover carets stripped.
+Wire values are SENTINELS in the returned text (they are installed after
+expansion); a template default is the user's own config and is inlined."
+  (let* ((pair (jetpacs-org-capture-fill
+                "* %^{Title|dflt} %?\n%^t %^{Empty}"
+                '(("Title" . "mine") ("Headline" . "H"))))
+         (text (car pair))
+         (bindings (cdr pair)))
+    ;; Both wire values deferred, neither present as literal text.
+    (should-not (string-search "mine" text))
+    (should-not (string-search "H" text))
+    (should (equal (sort (mapcar #'cdr bindings) #'string<) '("H" "mine")))
+    ;; Substituting the sentinels back reproduces the old expectation.
+    (dolist (b bindings)
+      (setq text (replace-regexp-in-string (regexp-quote (car b))
+                                           (cdr b) text t t)))
+    (should (equal text "* mine H\n "))))
+
+(ert-deftest jetpacs-org-capture-values-are-data-not-template ()
+  "JA-4 audit P1-1.  A wire value is substituted only AFTER org-capture
+has finished expanding, so no peer text can become template source:
+`%(sexp)' must not evaluate, `%[PATH]' must not read a file, and a
+literal \\=\\1 or & must not act as replacement-template syntax.  The
+regression half matters as much: the USER'S OWN template escapes must
+still work, or the fix has bought safety by removing the feature."
+  (jetpacs-org-test--with-fixture target "* Inbox\n"
+    (let ((secret (expand-file-name "ja4-secret.txt"
+                                    (file-name-directory target))))
+      (unwind-protect
+          (progn
+            (with-temp-file secret (insert "TOP-SECRET-PAYLOAD\n"))
+            (setq jetpacs-org-test--sexp-ran nil)
+            (let ((org-capture-templates
+                   `(("t" "T" entry (file ,target) "* TODO %^{Title}\n%?")
+                     ;; The user's own template, exercising org's power.
+                     ("u" "U" entry (file ,target)
+                      "* TODO %^{Title} :: %(concat \"tmpl\" \"-sexp-ok\")\n%?"))))
+              (jetpacs-org-capture-run
+               "t" `(("Title" . "hi %(progn (setq jetpacs-org-test--sexp-ran t) \"OWNED\")")
+                     ("Headline" . "body")))
+              (jetpacs-org-capture-run
+               "t" `(("Title" . ,(format "x %%[%s]" secret)) ("Headline" . "b")))
+              (jetpacs-org-capture-run
+               "t" '(("Title" . "back\\1slash & amp") ("Headline" . "b")))
+              (jetpacs-org-capture-run
+               "t" '(("Title" . "shared") ("Headline" . "b"))
+               "shared %(setq jetpacs-org-test--sexp-ran 'VIA-EXTRA-BODY)")
+              (jetpacs-org-capture-run
+               "u" '(("Title" . "legit") ("Headline" . "b"))))
+            (let ((text (with-temp-buffer (insert-file-contents target)
+                                          (buffer-string))))
+              ;; Nothing from the wire ran, in either carrier.
+              (should-not jetpacs-org-test--sexp-ran)
+              (should (string-search "hi %(progn" text))
+              (should (string-search "shared %(setq" text))
+              ;; No local file was read into the user's org file.
+              (should-not (string-search "TOP-SECRET-PAYLOAD" text))
+              (should (string-search "%[" text))
+              ;; replace-match LITERAL: \1 and & are inert.
+              (should (string-search "back\\1slash & amp" text))
+              ;; REGRESSION: the user's own template sexp still evaluates.
+              (should (string-search "tmpl-sexp-ok" text))
+              ;; And no scaffolding leaked into the file.
+              (should-not (string-match-p "JPCAPZ" text))))
+        (when (file-exists-p secret) (delete-file secret))))))
+
+(ert-deftest jetpacs-org-capture-run-refuses-a-prefix-group ()
+  "A 2-element entry is a legal PREFIX GROUP, not a template; indexing
+`nth' 4 on one signalled wrong-type-argument."
+  (let ((org-capture-templates '(("b" "Templates for buying"))))
+    (should-error (jetpacs-org-capture-run "b" nil) :type 'user-error)))
 
 (ert-deftest jetpacs-org-capture-run-real ()
   "Exit-gate G3: a REAL org-capture run into a temp target — user

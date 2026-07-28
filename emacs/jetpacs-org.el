@@ -817,19 +817,72 @@ this."
                                  ""))))))
           org-capture-templates))
 
+;;;; Wire values are DATA, never template source (SPEC 23.2, amendment #139)
+
+(defvar jetpacs-org--capture-nonce nil
+  "Per-run salt for capture sentinels, bound by `jetpacs-org-capture-run'.")
+
+(defun jetpacs-org--capture-sentinel (n)
+  "An inert placeholder standing in for substituted value N.
+Pure alphanumeric ON PURPOSE: it must pass through every `org-capture'
+expansion sweep untouched, so it may contain none of % ^ [ ] < > ( ) :
+and must not read as a link, a timestamp, or a property."
+  (format "JPCAPZ%sX%dZ" (or jetpacs-org--capture-nonce "0") n))
+
+(defun jetpacs-org--capture-restore (bindings)
+  "Replace each sentinel in BINDINGS with its raw value, in this buffer.
+Runs from `org-capture-before-finalize-hook' — AFTER org has finished
+every expansion.  That ordering IS the security property: a value can
+only be interpreted if it is present while an interpreter runs, so it
+is absent until none will.
+
+Two details are load-bearing:
+- ONE pass over an alternation, never a loop per binding.  Sequential
+  passes rescan already-substituted text, so one value could be re-read
+  as another value's sentinel.
+- `replace-match' with LITERAL non-nil.  Otherwise the VALUE is read as
+  a replacement template and a literal \\=\\1 or & in user text edits the
+  buffer — the same defect one layer down."
+  (when bindings
+    (save-excursion
+      (let ((re (regexp-opt (mapcar #'car bindings))))
+        (goto-char (point-min))
+        (while (re-search-forward re nil t)
+          (replace-match (cdr (assoc (match-string 0) bindings)) t t))))))
+
 (defun jetpacs-org-capture-fill (tmpl values)
-  "Fill org capture TMPL string from VALUES (NAME -> user input alist).
-VALUES is STRING-keyed (`assoc') — deliberately outside the alist->
-plist migration; the keys are the human field names the prompts
-extractor produced.  `%?' becomes the Headline value; each
-`%^{NAME|default}' becomes the user value for NAME, else its default,
-else empty.  Any other interactive escape that survives (`%^t', `%^g',
-a valueless `%^{…}') is then stripped, so `org-capture' can never block
-on a minibuffer prompt — which on the phone would hang behind the
-bridge."
-  (let ((headline (or (cdr (assoc "Headline" values)) "")))
-    ;; %? — free-form body position.
-    (setq tmpl (replace-regexp-in-string "%\\?" headline tmpl t t))
+  "Fill org capture TMPL from VALUES; return the cons (TEXT . BINDINGS).
+VALUES is STRING-keyed (`assoc') — deliberately outside the alist->plist
+migration; the keys are the human field names the prompts extractor
+produced.  TEXT carries an inert sentinel everywhere a WIRE-supplied
+value belongs, and BINDINGS maps each sentinel to its raw value for
+`jetpacs-org--capture-restore' to install once expansion is over.
+
+The values are deliberately NOT substituted here.  `org-capture' expands
+whatever template it is handed, so a value pasted in beforehand is
+indistinguishable from template the user wrote: `%(sexp)' in a phone
+field would reach `org-eval', and `%[PATH]' would read a local file into
+the user's org file (JA-4 audit P1-1, both reproduced).  There is no
+escaping alternative — org-capture has NO literal-percent escape
+\(verified against emacs-30.1 lisp/org/org-capture.el: every %% there is
+inside a `format' string), and its expansion is a series of independent
+regexp sweeps with no quoting syntax to hide behind.
+
+A template DEFAULT is the user's own configuration, so it is substituted
+directly and keeps org's semantics; only peer-supplied text is deferred.
+Any interactive escape that survives (`%^t', `%^g', a valueless
+`%^{…}') is stripped, so `org-capture' can never block on a minibuffer
+prompt the phone cannot answer."
+  (let* ((bindings '())
+         (n 0)
+         (stash (lambda (v)
+                  (let ((s (jetpacs-org--capture-sentinel (cl-incf n))))
+                    (push (cons s (or v "")) bindings)
+                    s)))
+         (headline (or (cdr (assoc "Headline" values)) "")))
+    ;; %? — free-form body position, a wire value.
+    (setq tmpl (replace-regexp-in-string
+                "%\\?" (lambda (_) (funcall stash headline)) tmpl t t))
     ;; %^{NAME|default} — scan the template's own tokens so NAME always
     ;; matches what `jetpacs-org-capture-prompts' produced.
     (setq tmpl (replace-regexp-in-string
@@ -844,13 +897,11 @@ bridge."
                          (default (and bar (substring spec (1+ bar))))
                          (val (cdr (assoc name values))))
                     (cond ((and (stringp val) (not (string-empty-p val)))
-                           val)
+                           (funcall stash val))
                           ((stringp default) default)
                           (t ""))))
                 tmpl t t))
-    ;; Neutralise any remaining caret (interactive) escapes; leave plain
-    ;; ones like %U %t %i %a for org to expand non-interactively.
-    (replace-regexp-in-string "%\\^.?" "" tmpl t t)))
+    (cons (replace-regexp-in-string "%\\^.?" "" tmpl t t) bindings)))
 
 (defun jetpacs-org-capture-run (template-key values &optional extra-body)
   "Run capture for TEMPLATE-KEY with VALUES alist (NAME -> user input).
@@ -858,17 +909,30 @@ EXTRA-BODY, when non-empty, is appended below the filled template — the
 carrier for text shared from another app.  An unknown TEMPLATE-KEY
 SIGNALS: the poc silently no-opped, which read as a capture that
 vanished."
-  (let ((entry (assoc template-key org-capture-templates)))
-    (unless entry
+  (let ((jetpacs-org--capture-nonce (format "%08x" (random (expt 2 32))))
+        (entry (assoc template-key org-capture-templates))
+        (bindings '()))
+    ;; A 2-element entry is a legal PREFIX GROUP, not a template
+    ;; (\"b\" \"Templates for marking stuff to buy\") — indexing nth 4 on
+    ;; one signalled wrong-type-argument.
+    (unless (and entry (> (length entry) 4))
       (user-error "No capture template %S" template-key))
     (let* ((tmpl (nth 4 entry))
            (filled (if (stringp tmpl)
-                       (jetpacs-org-capture-fill tmpl values)
+                       (let ((pair (jetpacs-org-capture-fill tmpl values)))
+                         (setq bindings (cdr pair))
+                         (car pair))
                      tmpl))
+           ;; EXTRA-BODY is wire text too — the share-sheet carrier is the
+           ;; one field an arbitrary other app controls verbatim — so it
+           ;; gets a sentinel rather than being concatenated raw.
            (filled (if (and (stringp filled)
                             (stringp extra-body)
                             (not (string-empty-p (string-trim extra-body))))
-                       (concat filled "\n" (string-trim extra-body))
+                       (let ((s (jetpacs-org--capture-sentinel
+                                 (1+ (length bindings)))))
+                         (push (cons s (string-trim extra-body)) bindings)
+                         (concat filled "\n" s))
                      filled))
            (new-entry (copy-sequence entry))
            ;; `plist-put' on a COPIED tail, never `append': org reads
@@ -885,7 +949,14 @@ vanished."
       ;; the pre-filled template the one that actually runs.  (Binding
       ;; the original re-ran the raw %^{…} prompts and double-asked the
       ;; user through the bridge.)
-      (let ((org-capture-entry new-entry))
+      (let* ((org-capture-entry new-entry)
+             (restore (lambda () (jetpacs-org--capture-restore bindings)))
+             ;; LET-bound, so it unwinds on a signal with no cleanup
+             ;; branch.  If a capture somehow does not finish
+             ;; synchronously the sentinels stay visible in the file:
+             ;; garbage text, never execution — the right way to fail.
+             (org-capture-before-finalize-hook
+              (cons restore org-capture-before-finalize-hook)))
         ;; Safety net: if any escape slips through, never let
         ;; `org-capture' block forever on a minibuffer the phone can't
         ;; answer — `with-timeout' fires even inside a synchronous read.

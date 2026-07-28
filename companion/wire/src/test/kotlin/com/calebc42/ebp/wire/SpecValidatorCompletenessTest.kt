@@ -251,6 +251,13 @@ class SpecValidatorCompletenessTest {
         rejects(toolbar(JSONObject().put("label", "X").put("snippet", "s")
             .put("long_press", JSONObject().put("label", "L")
                 .put("menu", JSONArray()))), "non-menu")
+        // SPEC 17.7: long_press is an OP PLIST — no label/icon required
+        // (the JA-5 device gate: rejecting bare ops killed every toolbar
+        // whose long-press was authored to spec).
+        accepts(toolbar(JSONObject().put("label", "X").put("snippet", "s")
+            .put("long_press", JSONObject().put("snippet", "[%]"))))
+        rejects(toolbar(JSONObject().put("label", "X").put("snippet", "s")
+            .put("long_press", JSONObject())), "exactly one")
         rejects(toolbar(JSONObject().put("label", "X").put("snippet", "s")
             .put("placement", "everywhere")), "cursor|line-start|block")
         // An unrecognized `line` VALUE is a render no-op, never a reject.

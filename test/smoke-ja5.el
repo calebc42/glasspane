@@ -91,9 +91,14 @@
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
    nil (expand-file-name "img.png" smoke-j5--dir)))
 
-(setq jetpacs-org-roots (list smoke-j5--dir)
+;; Roots SLASHLESS — how users write config, and the banked JA-6 trap:
+;; a trailing-slash root defeats the files guard's containment.
+(setq jetpacs-org-roots (list (directory-file-name smoke-j5--dir))
       org-agenda-files (list smoke-j5--habits)
-      jetpacs-files-roots (list smoke-j5--dir))
+      jetpacs-files-roots (list (directory-file-name smoke-j5--dir))
+      ;; The browser LANDS in default-dir (its default ~/ sits outside
+      ;; the fixture-only roots and the F1 open refuses).
+      jetpacs-files-default-dir (directory-file-name smoke-j5--dir))
 
 (defun smoke-j5--text (file)
   (with-temp-buffer (insert-file-contents file) (buffer-string)))

@@ -925,8 +925,16 @@ object SpecValidator {
     }
 
     private fun validateToolbarItem(item: JSONObject, path: String,
-                                    hasDocument: Boolean, allowMenu: Boolean) {
-        if (!item.has("label") && !item.has("icon"))
+                                    hasDocument: Boolean, allowMenu: Boolean,
+                                    // SPEC 17.7: `long_press` is "exactly one
+                                    // non-menu OPERATION" — an op plist, not a
+                                    // nested item, so it carries no label/icon.
+                                    // Requiring one here rejected every toolbar
+                                    // whose long-press was authored to spec
+                                    // (found by the JA-5 device gate: the org
+                                    // toolbar's [%] and <${date}> variants).
+                                    isLongPress: Boolean = false) {
+        if (!isLongPress && !item.has("label") && !item.has("icon"))
             throw ContentInvalid(path, "ToolbarItem needs label or icon")
         val ops = TOOLBAR_OPS.filter { item.has(it) }
         if (ops.size != 1)
@@ -968,7 +976,8 @@ object SpecValidator {
         if (item.has("long_press")) {
             val lp = item.optJSONObject("long_press")
                 ?: throw ContentInvalid("$path.long_press", "must be an object")
-            validateToolbarItem(lp, "$path.long_press", hasDocument, allowMenu = false)
+            validateToolbarItem(lp, "$path.long_press", hasDocument,
+                allowMenu = false, isLongPress = true)
         }
     }
 

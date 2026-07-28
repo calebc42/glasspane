@@ -120,6 +120,12 @@ emacs -Q --batch -L emacs -l test/jetpacs-org-vulpea-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-org-render-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-5d exit gate: the org dialogs — profile-pinned specs, drop-only
+# remote descriptors, fresh ids, 23.2 re-validation, the engine-backed
+# sheet mutations, token+confirm Archive, and the can-bridge gate.
+emacs -Q --batch -L emacs -l test/jetpacs-org-dialogs-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-3b exit gate: binding extraction (incl. the minor-mode-map poc-bug
 # regression), menu-bar mining over the :filter/:enable/:visible fixture,
 # and suppressed-commands unreachability.

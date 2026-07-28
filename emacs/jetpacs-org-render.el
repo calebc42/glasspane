@@ -70,6 +70,9 @@
 (require 'jetpacs-buffer)
 (require 'jetpacs-hypertext)
 (require 'jetpacs-async)
+;; The dialog handlers must exist before any descriptor naming them can
+;; render — loading the skin alone must never mint a dead tap.
+(require 'jetpacs-org-dialogs)
 
 ;;;; Options
 
@@ -548,6 +551,12 @@ cannot see."
       (goto-char pos)
       (let ((c (char-after pos)))
         (cond
+         ;; Footnote reference: [fn:...] opens the footnote dialog.
+         ((and (eq c ?\[) (eq (char-after (1+ pos)) ?f)
+               (org-in-regexp org-footnote-re)
+               (save-match-data (org-footnote-at-reference-p)))
+          (jetpacs-action "jetpacs.org.footnote"
+                          :args (list :buffer buffer-name :pos pos)))
          ;; Item checkbox: [ ] / [-] / [X].
          ((and (eq c ?\[) (jetpacs-org-render--checkbox-at pos))
           (jetpacs-action "jetpacs.org.checkbox"
@@ -566,6 +575,13 @@ cannot see."
                    (beginning-of-line)
                    (looking-at-p "[ \t]*#\\+begin_"))))
           (jetpacs-action "jetpacs.buffer.fold"
+                          :args (list :buffer buffer-name :pos pos)))
+         ;; Heading tap → the action sheet; a link inside the headline
+         ;; keeps its own Tier-0 open behavior.
+         ((and (eq (char-after (line-beginning-position)) ?*)
+               (org-at-heading-p)
+               (not (org-in-regexp org-link-any-re)))
+          (jetpacs-action "jetpacs.org.heading"
                           :args (list :buffer buffer-name :pos pos))))))))
 
 ;;;; The splice walk

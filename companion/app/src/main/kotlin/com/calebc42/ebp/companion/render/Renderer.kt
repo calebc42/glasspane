@@ -22,8 +22,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -422,6 +425,7 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // platform disabled state; a disabled/read-only node MUST NOT dispatch.
     val readOnly = node.optBoolean("read_only", false)
     val enabled = node.optBoolean("enabled", true)
+    val onSave = node.optJSONObject("on_save")
     // A TextFieldValue (not a bare String) so the toolbar can read the live
     // selection/caret for ${selection}, placements, line ops, and edit.command.
     // SPEC 16.1/13.6: the draft keys on the wire address (surface+id), not the
@@ -531,6 +535,25 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             onValueChange = commit,
             minLines = 3,
             modifier = Modifier.fillMaxWidth())
+        // SPEC 17.4 `on_save`: the save affordance for a value+on_save
+        // editor — dispatches the descriptor with the LIVE text injected
+        // as `value` (§14.3, the same injection as text_input's
+        // on_submit). Missing from the first shipped renderer: the
+        // member was in the contract, the validator, and the elisp
+        // goldens, and no chrome ever dispatched it — found by the JA-6
+        // device gate when a hardware save had nothing to tap.
+        if (onSave != null) {
+            Row(modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End) {
+                IconButton(
+                    onClick = { ctx.action(onSave, value.text) },
+                    // §17.4: a read-only or disabled editor MUST NOT
+                    // dispatch — same rule the commit path pins.
+                    enabled = enabled && !readOnly) {
+                    Icon(IconMap.get("save"), contentDescription = "Save")
+                }
+            }
+        }
         // SPEC 19.3 (JC-4b): the candidate list. Plain rows rather than a
         // floating DropdownMenu: this must work inside a dialog whose host
         // container scrolls, and a popup anchored to a field inside a

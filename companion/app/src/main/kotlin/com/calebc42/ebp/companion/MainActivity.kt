@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
                     SurfaceHost(currentSpec, bridge)
                     PieMenuHost(currentPieMenu, bridge)
                     DialogHost(currentDialog, bridge)
+                    ConfirmHost(bridge)
                     }
                 }
             }
@@ -116,6 +117,31 @@ private fun SurfaceHost(
             "EBP Companion — waiting for Emacs on 127.0.0.1:8765",
             Modifier.padding(24.dp))
         else -> RenderNode(s.second, s.first, bridge)
+    }
+}
+
+/**
+ * SPEC 14.1 `confirm`: the user confirms BEFORE the event is created.
+ * Its own host for the same reason the others have theirs — a parked
+ * confirmation must not recompose the surface tree.  A dismissal (scrim
+ * or back) is a REFUSAL: the event is never created, which is the whole
+ * point of a guarded destructive verb.
+ */
+@androidx.compose.runtime.Composable
+private fun ConfirmHost(bridge: DeviceBridge) {
+    val pending by bridge.pendingConfirm.collectAsState()
+    pending?.let { p ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { bridge.resolveConfirm(false) },
+            text = { Text(p.prompt) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { bridge.resolveConfirm(true) }) { Text("OK") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { bridge.resolveConfirm(false) }) { Text("Cancel") }
+            })
     }
 }
 

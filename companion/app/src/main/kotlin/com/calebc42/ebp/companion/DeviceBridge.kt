@@ -204,15 +204,56 @@ class DeviceBridge(
         }
 
 
-    /** SPEC 14.1: renderer hook -> remote action through the live engine. */
-    fun action(surface: String, descriptor: JSONObject?, value: Any? = null) {
-        descriptor ?: return
+    // SPEC 14.1 `confirm`: the descriptor asks the Companion to have the user
+    // confirm BEFORE the event is created.  Emacs relies on that: an action
+    // carrying `confirm` never prompts on its side, because prompting inside
+    // the dispatch extent is forbidden — so an unimplemented `confirm` turns
+    // a guarded destructive verb into an immediate one.  (The JA-6 device
+    // gate found exactly that: the member lived in the vocabulary and the
+    // validator, and no chrome ever presented it, so a Delete tap deleted.)
+    // The dispatch is PARKED here; `resolveConfirm' releases or drops it.
+    data class PendingConfirm(
+        val prompt: String, val surface: String, val descriptor: JSONObject,
+        val value: Any?, val injected: JSONObject?, val fields: JSONObject?)
+
+    private val _pendingConfirm = MutableStateFlow<PendingConfirm?>(null)
+    val pendingConfirm: StateFlow<PendingConfirm?> get() = _pendingConfirm
+
+    /** Release (RUN true) or drop the parked confirmation. */
+    fun resolveConfirm(run: Boolean) {
+        val p = _pendingConfirm.value ?: return
+        _pendingConfirm.value = null
+        if (run) dispatch(p.surface, p.descriptor, p.value, p.injected, p.fields)
+    }
+
+    /** Park when DESCRIPTOR carries `confirm`; true when parked. */
+    private fun parkIfConfirmed(surface: String, descriptor: JSONObject,
+                                value: Any?, injected: JSONObject?,
+                                fields: JSONObject?): Boolean {
+        val prompt = descriptor.optString("confirm")
+        if (prompt.isEmpty()) return false
+        // One outstanding confirmation: the modal is what the user is
+        // looking at, so a second tap cannot reach another descriptor.
+        _pendingConfirm.value =
+            PendingConfirm(prompt, surface, descriptor, value, injected, fields)
+        return true
+    }
+
+    private fun dispatch(surface: String, descriptor: JSONObject, value: Any?,
+                         injected: JSONObject?, fields: JSONObject?) {
         dispatchExecutor.execute {
-            engine?.dispatchAction(surface, descriptor, value) { _, error ->
+            engine?.dispatchAction(surface, descriptor, value, injected, fields) { _, error ->
                 // SPEC 15.1: surface queue-full/storage failures visibly.
                 error?.let { onQueueProblem(it.optString("message", "queue error")) }
             }
         }
+    }
+
+    /** SPEC 14.1: renderer hook -> remote action through the live engine. */
+    fun action(surface: String, descriptor: JSONObject?, value: Any? = null) {
+        descriptor ?: return
+        if (parkIfConfirmed(surface, descriptor, value, null, null)) return
+        dispatch(surface, descriptor, value, null, null)
     }
 
     /** SPEC 14.3: a multi-member hook (on_reorder from/to/order, on_add_row/
@@ -220,22 +261,16 @@ class DeviceBridge(
     fun actionInjecting(surface: String, descriptor: JSONObject?, injected: JSONObject,
                         value: Any? = null) {
         descriptor ?: return
-        dispatchExecutor.execute {
-            engine?.dispatchAction(surface, descriptor, value, injected) { _, error ->
-                error?.let { onQueueProblem(it.optString("message", "queue error")) }
-            }
-        }
+        if (parkIfConfirmed(surface, descriptor, value, injected, null)) return
+        dispatch(surface, descriptor, value, injected, null)
     }
 
     /** SPEC 14.6: a renderer-supplied occurrence-time field value — a
      * text_input password's on_submit, whose secret has no retained draft. */
     fun actionWithFields(surface: String, descriptor: JSONObject?, fields: JSONObject) {
         descriptor ?: return
-        dispatchExecutor.execute {
-            engine?.dispatchAction(surface, descriptor, null, null, fields) { _, error ->
-                error?.let { onQueueProblem(it.optString("message", "queue error")) }
-            }
-        }
+        if (parkIfConfirmed(surface, descriptor, null, null, fields)) return
+        dispatch(surface, descriptor, null, null, fields)
     }
 
     /** SPEC 14.6: renderer edit -> draft + state.changed publication. */

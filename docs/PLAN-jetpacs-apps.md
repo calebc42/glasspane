@@ -385,7 +385,7 @@ tables, rules, images and LaTeX; span-budget accounting under a synthetic
 `max_rich_spans`. Smoke — tap a footnote, tap a heading → sheet → schedule with
 a repeater, use the toolbar to insert a src block.
 
-### JA-6 — Files *(in progress — F1..F5 landed 2026-07-27; device smoke remains)*
+### JA-6 — Files *(**DONE + DEVICE-VERIFIED 2026-07-28** — F1..F5 + smoke-ja6 15/15)*
 
 > **Order amended (Caleb ratified, 2026-07-27): this rung lands before
 > JA-5 — it is the NEXT rung.**  Rationale at the JA-5 entry.
@@ -571,9 +571,33 @@ embed it (files via a `featurep` soft-couple). Exit gate: +1 seam test
 (all four slots + fall-through) and `test/jetpacs-launcher-test.el`
 (5 tests: registry read, row shape, membership stale-guard through the
 real dispatch, the `:any-surface` exemption, button shape). 5 more
-mutants killed (35 total for the rung). **Still to land: the device
-smoke — browse /sdcard, search, an op, edit init.el via the editor,
-restart, confirm the edit took, plus the launcher switch on hardware.**
+mutants killed (35 total for the rung). **DEVICE GATE PASSED 2026-07-28 — `test/smoke-ja6.el` 15/15 on the
+Pixel Tablet**: browse with a guard-checked cd and no up-row at the
+ceiling; a typed search submitting through SPEC 14.3, pushing the
+results screen, and its hit opening the editor; a device save reaching
+disk and a SECOND save over an externally-changed file answering
+`stale` and clobbering nothing; menu Duplicate; the `:confirm` delete;
+the bridged-dialog rename landing `gamma.org` -> `delta.org`; the apps
+button and the launcher switch back. **THE GATE FOUND TWO COMPANION
+DEFECTS, both the JA-1/JA-2 thesis again — the member sat in the
+contract, `Vocabulary`, `SpecValidator` AND the elisp goldens, and NO
+chrome implemented it, so every unit test on both sides passed while
+the hardware did nothing (fixed in `5fdb3a5`): (1) `on_save` was never
+rendered — `RenderEditor` drew the field and dropped the descriptor, so
+this rung's whole reason to exist had nothing to tap; (2) `confirm` was
+never presented, silently converting JA-6's guarded Delete into an
+immediate one — the smoke's first trash tap destroyed the file with no
+question asked. Emacs cannot compensate for either: prompting inside
+the dispatch extent is forbidden (D2), which is precisely why the
+descriptor carries `confirm`. LESSON: a wire member is not implemented
+because the validator accepts it. The reference Companion needs a "does
+any chrome DISPATCH this?" audit across the descriptor vocabulary, and
+the device gate is the only thing that has ever asked.** Two
+smoke-driver traps banked: the soft keyboard covers a bridged dialog's
+buttons (dismiss the IME with `keyevent 4` before tapping OK, else the
+tap is swallowed and reads as a cancel), and a run of `keyevent 67`
+does not clear a seeded field — use `keycombination 113 29` then one
+delete, and re-dump to confirm the field before submitting.
 
 **Lands:** the sandbox guard (with `file-remote-p` rejected **before** any
 stat), the /sdcard probe, the grep scanner behind a `text_input` `:on-submit`

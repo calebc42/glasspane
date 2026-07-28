@@ -385,7 +385,18 @@ tables, rules, images and LaTeX; span-budget accounting under a synthetic
 `max_rich_spans`. Smoke — tap a footnote, tap a heading → sheet → schedule with
 a repeater, use the toolbar to insert a src block.
 
-### JA-6 — Files *(**DONE + DEVICE-VERIFIED 2026-07-28** — F1..F5 + smoke-ja6 15/15)*
+### JA-6 — Files *(**CODE + DEVICE GATE DONE 2026-07-28; ADVERSARIAL REVIEW FOUND 5 P1s — NOT CLOSED**)*
+
+> **Review landed 2026-07-28: `docs/AUDIT-ja6-2026-07-28.md`** (183 agents,
+> 57 raw → 53 surviving findings, 5 distinct P1 after dedupe). The rung does
+> not close until the P1 batch lands. Headline: `jetpacs-check-path` returns a
+> truename that is safe to CHECK and unsafe to USE — every op acts on it, so an
+> op on a symlink hits the link's TARGET (delete-directory recursive). Plus:
+> the save path silently re-encodes CRLF/non-UTF-8 files; the buffer save route
+> destroys the buffer before the write can fail; a FIFO under a root hangs
+> Emacs forever mid-scan; and the wire-safe gate is applied at 6 of 8 sites.
+> The recurring one-call-site thesis recurred INSIDE the Companion `confirm`
+> fix written the same day (pie/reminder paths bypass it).
 
 > **Order amended (Caleb ratified, 2026-07-27): this rung lands before
 > JA-5 — it is the NEXT rung.**  Rationale at the JA-5 entry.
@@ -571,8 +582,10 @@ embed it (files via a `featurep` soft-couple). Exit gate: +1 seam test
 (all four slots + fall-through) and `test/jetpacs-launcher-test.el`
 (5 tests: registry read, row shape, membership stale-guard through the
 real dispatch, the `:any-surface` exemption, button shape). 5 more
-mutants killed (35 total for the rung). **DEVICE GATE PASSED 2026-07-28 — `test/smoke-ja6.el` 15/15 on the
-Pixel Tablet**: browse with a guard-checked cd and no up-row at the
+mutants killed (35 total for the rung). **DEVICE GATE PASSED 2026-07-28 — `test/smoke-ja6.el` 17/17 on the
+Pixel Tablet** (the rung's first record said "15/15"; the script asserts 17
+checks and all 17 passed — miscount caught by the adversarial review, and a
+reminder that a hand-counted PASS tally is evidence nobody verified): browse with a guard-checked cd and no up-row at the
 ceiling; a typed search submitting through SPEC 14.3, pushing the
 results screen, and its hit opening the editor; a device save reaching
 disk and a SECOND save over an externally-changed file answering

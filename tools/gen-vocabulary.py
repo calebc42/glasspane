@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 contract = json.loads((ROOT / "ebp" / "contract.json").read_text(encoding="utf-8"))
 
-OUT = ROOT / "companion/wire/src/main/kotlin/com/calebc42/ebp/wire/Vocabulary.kt"
+OUT = ROOT / "companion/wire/src/jvmMain/kotlin/com/calebc42/ebp/wire/Vocabulary.kt"
 
 
 def kt_set(values):

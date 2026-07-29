@@ -18,6 +18,11 @@
 // (-32700); duplicate member names are InvalidRequest (-32600, SPEC 4.1).
 package com.calebc42.ebp.wire
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -75,6 +80,31 @@ object EbpJson {
         is EbpValue.ENum -> v.v
         is EbpValue.EBool -> v.v
         EbpValue.ENull -> JSONObject.NULL
+    }
+
+    /**
+     * RF-2b: the same lossless projection, into kotlinx.serialization's tree —
+     * the successor to [toOrgJson], which is deleted once the last org.json
+     * call site is gone.
+     *
+     * Integers project as Long *always*. [toOrgJson]'s Int narrowing existed
+     * for exactly one customer — the response-id lookup's `as? Int` — and that
+     * map is being retyped to Long keys, so the narrowing dies with it.
+     *
+     * The wire path is [parse] followed by this projection, never
+     * `Json.parseToJsonElement`: kotlinx's own parser has the wrong taxonomy at
+     * the frame boundary (it accepts duplicate member names and integers past
+     * 2^53-1). kotlinx parses persisted store files, where leniency is the
+     * requirement; it never parses wire bytes.
+     */
+    fun toJsonElement(v: EbpValue): JsonElement = when (v) {
+        is EbpValue.EObj -> JsonObject(v.members.mapValues { (_, m) -> toJsonElement(m) })
+        is EbpValue.EArr -> JsonArray(v.items.map { toJsonElement(it) })
+        is EbpValue.EStr -> JsonPrimitive(v.v)
+        is EbpValue.EInt -> JsonPrimitive(v.v)
+        is EbpValue.ENum -> JsonPrimitive(v.v)
+        is EbpValue.EBool -> JsonPrimitive(v.v)
+        EbpValue.ENull -> JsonNull
     }
 
     private class Parser(private val s: String) {

@@ -34,8 +34,11 @@ rm -f emacs/ebp.elc
 # docstring-quote bug class this guard exists for would then reach a device.
 # ebp.el compiles twice (here and above); two seconds buys never maintaining
 # the list again.
-for f in emacs/*.el; do
-  emacs -Q --batch -L emacs \
+# The glob covers emacs/apps/*/ too: a Tier-1 app that modularizes into a
+# subdirectory (the M3 catalog is 42 files) must not escape the guard by
+# living one level down.
+for f in emacs/*.el emacs/apps/*/*.el; do
+  emacs -Q --batch -L emacs -L emacs/apps/m3-catalog \
     --eval '(setq byte-compile-error-on-warn t)' \
     -f batch-byte-compile "$f"
   rm -f "${f%.el}.elc"
@@ -176,6 +179,15 @@ emacs -Q --batch -L emacs -l test/ebp-wire-test.el -l test/jetpacs-integration-t
 # HANGING rather than failing (a prompt reached inside a dispatch extent),
 # so this suite is the one that must never be skipped.
 emacs -Q --batch -L emacs -l test/jetpacs-phase-a-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# The M3 Expressive Catalog (Tier-1 app) exit gate: the upstream
+# inventory — 41 components, 279 examples, upstream order — plus a build
+# of EVERY screen it can show, each checked for the §16.2 profile, §16.1
+# id uniqueness, and canonical serialization.  Nothing else in the tree
+# exercises this much of the builder surface at once.
+emacs -Q --batch -L emacs -L emacs/apps/m3-catalog \
+  -l test/jetpacs-m3-catalog-test.el \
   -f ert-run-tests-batch-and-exit
 
 # Icon lint: SPEC 17.1's placeholder degrade means a misspelled icon

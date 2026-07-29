@@ -40,6 +40,10 @@
 ;; `jetpacs.org' owner: reach it from the Apps button.
 (require 'jetpacs-org-render)
 (require 'jetpacs-org-habits)
+;; The Material 3 Expressive Catalog (owner `m3catalog'): 41 components
+;; and 279 examples of the node vocabulary, on its own surface.  Reach
+;; it from the Apps button, or M-x jetpacs-m3-catalog.
+(require 'jetpacs-m3-catalog)
 
 ;; Mirror the device Emacs theme onto the chrome; `system'/`dark'/`off'
 ;; are the other choices (see `jetpacs-theme-mode').

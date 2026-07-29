@@ -27,6 +27,17 @@
 (defun jetpacs-icon-lint--file (rel)
   (expand-file-name rel jetpacs-icon-lint--root))
 
+(defun jetpacs-icon-lint--app-files ()
+  "Every .el under emacs/apps/<app>/, or nil when there are no apps."
+  (let ((apps (jetpacs-icon-lint--file "emacs/apps"))
+        (out nil))
+    (when (file-directory-p apps)
+      (dolist (dir (directory-files apps t
+                                    directory-files-no-dot-files-regexp))
+        (when (file-directory-p dir)
+          (setq out (append out (directory-files dir t "\\.el\\'"))))))
+    out))
+
 (defun jetpacs-icon-lint--table-names ()
   "Icon names from the generated lookup table."
   (let ((names (make-hash-table :test #'equal)))
@@ -55,6 +66,10 @@
   "((FILE NAME) ...) for every icon literal in the Emacs modules."
   (let ((files (append (directory-files
                         (jetpacs-icon-lint--file "emacs") t "\\.el\\'")
+                       ;; A Tier-1 app that modularizes one level down
+                       ;; (emacs/apps/<app>/) must not escape the lint —
+                       ;; the M3 catalog alone is 42 files full of icons.
+                       (jetpacs-icon-lint--app-files)
                        (list (jetpacs-icon-lint--file "device/init.el"))))
         (used nil))
     (dolist (file files)

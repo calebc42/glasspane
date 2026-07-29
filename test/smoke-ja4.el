@@ -110,7 +110,8 @@
   (jetpacs-defaction "ja4.query"
     (lambda (_args _params)
       (let* ((tree (jetpacs-org-parse-query "(todo \"TODO\")"))
-             (refs (jetpacs-org-query "ja4" tree #'jetpacs-org-ref-at-point))
+             (refs (jetpacs-org-query "ja4" "refs" tree
+                                      #'jetpacs-org-ref-at-point))
              (mint-a (jetpacs-org-ref-tokens refs :set "q" :owner "ja4"))
              (mint-b (jetpacs-org-ref-tokens refs :set "q" :owner "ja4")))
         (setq smoke-j4--stale-token (car mint-a)   ; swept by mint B

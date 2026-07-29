@@ -237,45 +237,95 @@ between the existence filter and the map — the filter/prepare race)."
 (defvar jetpacs-org--cache (make-hash-table :test #'equal)
   "Memoised org extraction results.")
 
+(defconst jetpacs-org-cache-max 64
+  "Entries one key generation may hold before the table is dropped.
+The key embeds wire-supplied query text, so without a ceiling N
+distinct hostile queries retain N entries for the process lifetime
+\(JA-4 audit P2).  Every entry is cheap to recompute and the eviction
+is wholesale, so this is a plain bound rather than an LRU carrying its
+own per-entry bookkeeping: overflow costs one re-run, never a wrong
+answer.")
+
 (defcustom jetpacs-org-stat-ttl 1.0
   "Seconds the agenda-file mtime stamp is trusted between stats.
 The poc statted every agenda file on EVERY cache lookup, hits included
-— N truename+stat syscalls per lookup.  Within this window the stamp is
-reused; `jetpacs-org-cache-invalidate' clears it, so a mutation is
-never masked by the memo."
+— N truename+stat syscalls per lookup.  Within this window the DISK
+half of the stamp is reused; `jetpacs-org-cache-invalidate' clears it,
+so a mutation is never masked by the memo.  The BUFFER half
+\(`jetpacs-org--stamp-buffers') is never memoised — it costs no
+syscalls, and memoising it would blind the cache to an unsaved edit
+for exactly this window."
   :type 'number)
 
 (defvar jetpacs-org--stamp-memo nil
-  "(EXPIRY-FLOAT . STAMP) — the memoised file stamp, or nil.")
+  "(EXPIRY-FLOAT NAMES . DISK) — the memoised DISK half, or nil.")
 
-(defun jetpacs-org--files-stamp ()
-  "A full-resolution freshness stamp for the agenda file set.
-A LIST of (TRUENAME . MTIME-TIME-VALUE) conses — not a max float: the
-poc's max-of-float-time collided inside one clock tick (two writes,
-same double => stale hit) and was blind to set MEMBERSHIP changes
+(defun jetpacs-org--stamp-disk ()
+  "The syscall half of the freshness stamp: (NAMES . DISK), memoised.
+NAMES is a list of (ENTRY . TRUENAME) for the local agenda set — the
+buffer half below needs both spellings to find a visiting buffer
+without a syscall of its own.  DISK is a list of (TRUENAME . MTIME)
+for the entries that exist — a LIST, not a max float: the poc's
+max-of-float-time collided inside one clock tick (two writes, same
+double => stale hit) and was blind to set MEMBERSHIP changes
 \(dropping the newest file left the max unchanged).  Time values keep
 their native resolution and compare with `equal'."
   (let ((now (float-time)))
     (if (and jetpacs-org--stamp-memo
              (< now (car jetpacs-org--stamp-memo)))
         (cdr jetpacs-org--stamp-memo)
-      (let ((stamp
-             (delq nil
-                   (mapcar
-                    (lambda (file)
-                      (when (file-exists-p file)
-                        (let ((true (file-truename file)))
-                          (cons true
-                                (file-attribute-modification-time
-                                 (file-attributes true))))))
-                    ;; Remote entries are dropped BEFORE these stats: this
-                    ;; runs on every cache-key computation, i.e. inside
-                    ;; every query, which made it the hottest TRAMP dialler
-                    ;; in the module (JA-4 audit P1-7).
-                    (jetpacs-org-agenda-files)))))
-        (setq jetpacs-org--stamp-memo
-              (cons (+ now jetpacs-org-stat-ttl) stamp))
-        stamp))))
+      (let* ((names
+              (mapcar (lambda (file) (cons file (file-truename file)))
+                      ;; Remote entries are dropped BEFORE these stats: this
+                      ;; runs on every cache-key computation, i.e. inside
+                      ;; every query, which made it the hottest TRAMP dialler
+                      ;; in the module (JA-4 audit P1-7).
+                      (jetpacs-org-agenda-files)))
+             (disk
+              (delq nil
+                    (mapcar
+                     (lambda (name)
+                       ;; One stat, not an exists-p plus a stat: nil
+                       ;; attributes IS the file being gone.
+                       (when-let* ((attrs (file-attributes (cdr name))))
+                         (cons (cdr name)
+                               (file-attribute-modification-time attrs))))
+                     names)))
+             (value (cons names disk)))
+        (setq jetpacs-org--stamp-memo (cons (+ now jetpacs-org-stat-ttl) value))
+        value))))
+
+(defun jetpacs-org--stamp-buffers (names)
+  "The buffer half of the freshness stamp: (TRUENAME . CHARS-TICK) list.
+JA-4 audit P1-11: the stamp was derived entirely from `file-attributes'
+while EVERY cached value is produced by `org-map-entries' /
+`jetpacs-org-ref-at-point' reading the BUFFER.  An org buffer edited in
+Emacs and not yet written — the normal state of a working buffer, and
+precisely the state `jetpacs-org-with-mutation' deliberately leaves for
+the debounce window — moved nothing at all, so a repeated query served
+positions that no longer exist and (with the P1-9 scan) a tap mutated
+the wrong heading.
+
+`buffer-chars-modified-tick' is monotonic per buffer and free to read,
+which is why this half is recomputed on every lookup rather than
+memoised.  Both spellings in NAMES are probed: a buffer visits the name
+it was opened with, which need not be the truename, and `get-file-buffer'
+is a string comparison — `find-buffer-visiting' would stat every file
+again inside the very window `jetpacs-org-stat-ttl' exists to avoid."
+  (delq nil
+        (mapcar (lambda (name)
+                  (when-let* ((buf (or (get-file-buffer (car name))
+                                       (get-file-buffer (cdr name)))))
+                    (cons (cdr name) (buffer-chars-modified-tick buf))))
+                names)))
+
+(defun jetpacs-org--files-stamp ()
+  "A full-resolution freshness stamp for the agenda file set.
+\(DISK . BUFFERS): what the files say and what their live buffers say.
+Neither half alone is the truth the cache serves — see the two
+functions above."
+  (let ((memo (jetpacs-org--stamp-disk)))
+    (cons (cdr memo) (jetpacs-org--stamp-buffers (car memo)))))
 
 (defun jetpacs-org--cache-key (namespace &rest parts)
   "Build a cache key from NAMESPACE and PARTS.
@@ -286,19 +336,42 @@ stays at `nth 2' — `jetpacs-org-cache-invalidate' reads it there."
         (cons (jetpacs-org--files-stamp)
               (cons namespace parts))))
 
+(defvar jetpacs-org--cache-generation nil
+  "The (DATE . STAMP) head every live entry in the cache is keyed under.")
+
+(defun jetpacs-org--cache-admit (key value)
+  "Store VALUE under KEY, evicting so the table stays bounded.  Returns VALUE.
+Both evictions are wholesale (JA-4 audit P2 — the poc's table only ever
+grew).  A key carries (DATE STAMP) at its head, so the moment either
+moves every older entry is unreachable FOREVER: the buffer tick is
+monotonic and the date rolls forward, so a superseded generation is
+dead weight, not a cache.  Within the live generation
+`jetpacs-org-cache-max' bounds the table, because the rest of the key
+is wire-supplied query text."
+  (let ((generation (cons (nth 0 key) (nth 1 key))))
+    (unless (equal generation jetpacs-org--cache-generation)
+      (clrhash jetpacs-org--cache)
+      (setq jetpacs-org--cache-generation generation))
+    (when (>= (hash-table-count jetpacs-org--cache) jetpacs-org-cache-max)
+      (clrhash jetpacs-org--cache))
+    (puthash key value jetpacs-org--cache)))
+
 (defmacro jetpacs-org-with-cache (namespace key &rest body)
-  "Memoise BODY's result in `jetpacs-org--cache' under NAMESPACE and KEY."
+  "Memoise BODY's result in `jetpacs-org--cache' under NAMESPACE and KEY.
+KEY must distinguish everything the BODY's VALUE depends on that the
+stamp does not — including which function produced it (P1-12)."
   (declare (indent 2))
   (let ((k (gensym "key")) (hit (gensym "hit")))
     `(let* ((,k (jetpacs-org--cache-key ,namespace ,key))
             (,hit (gethash ,k jetpacs-org--cache 'jetpacs-org--miss)))
        (if (eq ,hit 'jetpacs-org--miss)
-           (puthash ,k (progn ,@body) jetpacs-org--cache)
+           (jetpacs-org--cache-admit ,k (progn ,@body))
          ,hit))))
 
 (defun jetpacs-org-cache-invalidate (&optional namespace)
   "Drop memoised org extractions (and the stat memo).
-With NAMESPACE, only entries under it.  Keys are collected before
+With NAMESPACE, only entries under it — the live generation stands, so
+every other namespace keeps its entries.  Keys are collected before
 removal — never `remhash' inside the `maphash' walk."
   (setq jetpacs-org--stamp-memo nil)
   (if namespace
@@ -307,7 +380,8 @@ removal — never `remhash' inside the `maphash' walk."
                    (when (equal (nth 2 k) namespace) (push k dead)))
                  jetpacs-org--cache)
         (dolist (k dead) (remhash k jetpacs-org--cache)))
-    (clrhash jetpacs-org--cache)))
+    (clrhash jetpacs-org--cache)
+    (setq jetpacs-org--cache-generation nil)))
 
 ;;;; Heading references — Emacs-side plists, never on the wire
 
@@ -448,8 +522,9 @@ exactly as they were.  (The poc swept, half-installed, then signalled:
 orphan tokens unreachable by the replace sweep, by owner teardown and
 by the set cap, plus a surface whose live tokens all died at once.)
 A ref whose :file fails the resolve policy signals at MINT time:
-statically invalid input fails at build, not at tap.  Returns tokens
-in REFS order."
+statically invalid input fails at build, not at tap — as does a REF
+that is not a plist carrying :file at all (P1-12).  Returns tokens in
+REFS order."
   (let ((owner (or owner jetpacs-current-owner)))
     (unless (stringp owner)
       (error "jetpacs-org-ref-tokens: no owner (bind via with-jetpacs-owner or pass :owner)"))
@@ -467,6 +542,14 @@ in REFS order."
                    owner jetpacs-org-token-sets-max))))
       ;; Pass 1 — validate EVERY ref while both tables stay untouched.
       (dolist (ref refs)
+        ;; SHAPE first (JA-4 audit P1-12): `(plist-get "Alpha" :file)'
+        ;; returns nil rather than signalling, so a list of display
+        ;; STRINGS — exactly what a mis-keyed query used to hand back —
+        ;; sailed past the policy check below and became live tokens.
+        ;; The offending value is not echoed (23.3): it may be user text
+        ;; or a path.
+        (unless (and (plistp ref) (plist-member ref :file))
+          (error "jetpacs-org-ref-tokens: not a ref plist (%s)" (type-of ref)))
         (let ((file (plist-get ref :file)))
           (when (and (stringp file) (not (string-empty-p file)))
             (jetpacs-org--check-file file))))
@@ -1074,17 +1157,37 @@ P1-5)."
        nil files))
     (nreverse items)))
 
-(defun jetpacs-org-query (namespace tree action)
+(defun jetpacs-org-query (namespace key tree action)
   "Run query sexp TREE over the agenda files, calling ACTION at matches.
-Results are cached under NAMESPACE.  ALWAYS the built-in interpreter:
-the poc dispatched to `org-ql-select' when installed, which meant (a) a
-permanently untested semantic fork whose results silently changed when
-a package appeared, and (b) an arbitrary-code hand-off — org-ql
-COMPILES query sexps.  If full org-ql is ever wanted, it enters as a
-new, separately vetted entry point, never as an fboundp fork here."
+Results are cached under NAMESPACE and KEY.  KEY is MANDATORY and must
+identify the ACTION, not merely the caller (JA-4 audit P1-12): the
+cached value is `(mapcar ACTION matches)', and a closure has no stable
+printed identity, so keying on (namespace, tree) alone handed the
+SECOND caller of a tree the FIRST caller's payload.  That is a D-4
+breach, not merely a cache bug — one screen asks a tree for display
+titles and for refs, and whichever ran second got the other list: ref
+plists (absolute paths) to a text consumer, and bare strings to
+`jetpacs-org-ref-tokens', whose per-ref policy check then silently did
+nothing.  The TREE still enters the key beneath KEY, printed with
+truncation switched OFF: `format \"%S\"' honours
+`print-length'/`print-level', so a caller with either bound collided
+two different trees onto one entry.
+
+ALWAYS the built-in interpreter: the poc dispatched to
+`org-ql-select' when installed, which meant (a) a permanently untested
+semantic fork whose results silently changed when a package appeared,
+and (b) an arbitrary-code hand-off — org-ql COMPILES query sexps.  If
+full org-ql is ever wanted, it enters as a new, separately vetted entry
+point, never as an fboundp fork here."
+  (unless (and key (or (stringp key) (symbolp key)))
+    (error "jetpacs-org-query: KEY must be a non-nil string or symbol"))
   (when tree
-    (jetpacs-org-with-cache namespace (format "%S" tree)
-      (jetpacs-org--run-query tree action))))
+    (let ((printed (let ((print-length nil)
+                         (print-level nil)
+                         (print-circle t))
+                     (format "%S" tree))))
+      (jetpacs-org-with-cache namespace (cons key printed)
+        (jetpacs-org--run-query tree action)))))
 
 ;;;; Shared org primitives (O3)
 ;; Timestamp field extractors, headless capture, the LOGBOOK parser,
@@ -1594,7 +1697,8 @@ target from a record."
 (defun jetpacs-org-reset ()
   "Reset engine state: cache, stat memo, tokens (fresh nonce), timers."
   (clrhash jetpacs-org--cache)
-  (setq jetpacs-org--stamp-memo nil)
+  (setq jetpacs-org--cache-generation nil
+        jetpacs-org--stamp-memo nil)
   (clrhash jetpacs-org--tokens)
   (clrhash jetpacs-org--token-sets)
   (setq jetpacs-org--token-nonce (format "%08x" (random #x100000000))

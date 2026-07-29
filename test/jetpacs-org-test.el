@@ -433,7 +433,7 @@ buffer was current (a nil `org-map-entries' scope means exactly that)."
       (let ((org-agenda-files (list f missing)))
         (should (equal (jetpacs-with-no-prompts
                         (jetpacs-org-query
-                         "ja4t" '(todo "TODO")
+                         "ja4t" "titles" '(todo "TODO")
                          (lambda () (nth 4 (org-heading-components)))))
                        '("Alive"))))
       (jetpacs-org-cache-invalidate)
@@ -441,7 +441,8 @@ buffer was current (a nil `org-map-entries' scope means exactly that)."
       (let* ((org-agenda-files (list missing))
              (err (should-error
                    (jetpacs-with-no-prompts
-                    (jetpacs-org-query "ja4t" '(todo "TODO") #'ignore))
+                    (jetpacs-org-query "ja4t" "titles" '(todo "TODO")
+                                       #'ignore))
                    :type 'jetpacs-org-unavailable)))
         (should (equal (cdr err) '(no-agenda-files)))))))
 
@@ -732,7 +733,7 @@ conjunction picks exactly one — an accidentally-OR interpreter fails.")
 
 (defun jetpacs-org-test--titles (tree)
   "Run TREE end-to-end through the REAL entry point; titles returned."
-  (jetpacs-org-query "ja4-test" tree
+  (jetpacs-org-query "ja4-test" "titles" tree
                      (lambda () (nth 4 (org-heading-components)))))
 
 (ert-deftest jetpacs-org-grammar-sexp-conjunction ()
@@ -1244,6 +1245,138 @@ any path handed to it."
     (let ((jetpacs-org-roots (list (make-temp-file "ja5-other" t))))
       (should-error (jetpacs-org-file-toplevel-records f)
                     :type 'jetpacs-org-refused))))
+
+;;;; The cache (JA-4 audit Batch 5: P1-11, P1-12, eviction)
+
+(ert-deftest jetpacs-org-cache-sees-an-unsaved-buffer-edit ()
+  "JA-4 audit P1-11: freshness was derived entirely from the DISK
+mtime while EVERY cached value is produced by `org-map-entries' reading
+the BUFFER.  An org buffer edited in Emacs and not yet written — the
+normal state of a working buffer, and precisely the state
+`jetpacs-org-with-mutation' deliberately leaves for the debounce
+window — did not move the key at all, so the phone re-rendered from
+positions that no longer exist and a tap then mutated the WRONG
+heading.  The stamp now carries `buffer-chars-modified-tick' for every
+visiting buffer."
+  (jetpacs-org-test--with-fixture f "* TODO Alpha\n"
+    (let ((org-agenda-files (list f))
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      ;; Open the file FIRST: the buffer SET is then identical across
+      ;; both queries, so only the edit itself can move the stamp.
+      (find-file-noselect f)
+      (cl-flet ((titles ()
+                  (jetpacs-org-query
+                   "ja4t" "titles" '(todo "TODO")
+                   (lambda () (nth 4 (org-heading-components))))))
+        (should (equal (titles) '("Alpha")))
+        (with-current-buffer (find-buffer-visiting f)
+          (org-with-wide-buffer
+           (goto-char (point-max))
+           (insert "* TODO Beta\n")))
+        ;; Nothing reached the disk — the mtime cannot have moved...
+        (should (equal (with-temp-buffer
+                         (insert-file-contents f) (buffer-string))
+                       "* TODO Alpha\n"))
+        ;; ...and the repeated query still sees the edit.
+        (should (equal (titles) '("Alpha" "Beta")))))))
+
+(ert-deftest jetpacs-org-query-keys-on-the-caller-supplied-key ()
+  "JA-4 audit P1-12: the key was (date, stamp, namespace, tree) while
+the cached VALUE is `(mapcar ACTION matches)', so a second caller with
+the same tree and a DIFFERENT action silently received the first
+caller's payload.  That is a D-4 breach, not merely a cache bug: JA-5
+asks one tree for display titles and for refs, and whichever ran
+second got the other list — ref plists (absolute paths) to a text
+consumer, bare strings to `jetpacs-org-ref-tokens', whose per-ref
+policy check `(plist-get \"Alpha\" :file)' then skipped silently.  KEY
+is now mandatory and enters the cache key above the tree."
+  (jetpacs-org-test--with-fixture f "* TODO Alpha\n"
+    (let ((org-agenda-files (list f))
+          (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (tree '(todo "TODO")))
+      (find-file-noselect f)            ; stable buffer set across all three
+      (let ((titles (jetpacs-org-query
+                     "ja4t" "titles" tree
+                     (lambda () (nth 4 (org-heading-components)))))
+            (refs (jetpacs-org-query "ja4t" "refs" tree
+                                     #'jetpacs-org-ref-at-point)))
+        (should (equal titles '("Alpha")))
+        (should (plistp (car refs)))
+        (should (equal (plist-get (car refs) :headline) "Alpha"))
+        ;; ...and the memo still MEMOISES: the same key hits, so the
+        ;; #'ignore action never runs.
+        (should (equal (jetpacs-org-query "ja4t" "titles" tree #'ignore)
+                       '("Alpha"))))
+      ;; A key is not optional — the whole point is that it cannot be
+      ;; forgotten into a collision.
+      (should-error (jetpacs-org-query "ja4t" nil tree #'ignore)))))
+
+(ert-deftest jetpacs-org-query-key-ignores-print-length ()
+  "JA-4 audit P1-12, the printer half: the tree entered the key through
+`format \"%S\"', which honours `print-length'/`print-level' — a caller
+with either bound collided two DIFFERENT trees onto one entry.  The
+serialisation now switches truncation off explicitly."
+  (jetpacs-org-test--with-agenda f
+    (find-file-noselect f)
+    (let ((print-length 2) (print-level 2))
+      (cl-flet ((run (tree)
+                  (jetpacs-org-query
+                   "ja4t" "titles" tree
+                   (lambda () (nth 4 (org-heading-components))))))
+        ;; Truncated to `print-length' 2 both trees print identically.
+        (should (equal (run '(and (todo "TODO") (tags "money")))
+                       '("Pay the bill")))
+        (should (equal (run '(and (todo "TODO") (tags "work")))
+                       '("Urgent thing")))))))
+
+(ert-deftest jetpacs-org-ref-tokens-refuses-a-non-plist-ref ()
+  "JA-4 audit P1-12, the downstream half: `(plist-get \"Alpha\" :file)'
+returns nil rather than signalling, so a list of DISPLAY STRINGS handed
+to the mint (exactly what the missing action key delivered) sailed past
+the per-ref policy check and became live tokens.  A ref that is not a
+plist carrying :file is now an error — and the offending value is NOT
+echoed (23.3)."
+  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+    (let ((ref (jetpacs-org-test--ref-to f "First heading")))
+      (let ((err (should-error
+                  (jetpacs-org-ref-tokens '("First heading" "Second heading")
+                                          :set "s" :owner "ja4"))))
+        (should-not (string-search "First heading" (format "%S" err))))
+      ;; A plist that is not a REF (no :file) is refused too: its
+      ;; policy check would silently be a no-op.
+      (should-error (jetpacs-org-ref-tokens
+                     (list '(:id nil :pos 1 :headline "x"))
+                     :set "s" :owner "ja4"))
+      ;; Nothing was minted by either attempt, and a real ref still mints.
+      (should (= (hash-table-count jetpacs-org--tokens) 0))
+      (should (= 1 (length (jetpacs-org-ref-tokens
+                            (list ref) :set "s" :owner "ja4")))))))
+
+(ert-deftest jetpacs-org-cache-evicts-instead-of-growing ()
+  "JA-4 audit P2 (Cache): every distinct stamp minted a NEW key
+generation and nothing ever evicted, while the key embeds wire-supplied
+query text — N hostile queries retained N entries for the process
+lifetime.  A stamp change now drops the superseded generation
+wholesale, and the live generation is capped."
+  (jetpacs-org-test--with-fixture f "* TODO Alpha\n"
+    (let ((org-agenda-files (list f)))
+      (find-file-noselect f)
+      (jetpacs-org-cache-invalidate)     ; a known-empty starting table
+      (should (= 1 (jetpacs-org-with-cache "ja4t" (list 'k) 1)))
+      (should (= 1 (hash-table-count jetpacs-org--cache)))
+      ;; An unsaved buffer edit moves the stamp (P1-11), so this is a
+      ;; new generation: the body re-runs AND the old entry is gone.
+      (with-current-buffer (find-buffer-visiting f)
+        (org-with-wide-buffer
+         (goto-char (point-max))
+         (insert "* TODO Beta\n")))
+      (should (= 2 (jetpacs-org-with-cache "ja4t" (list 'k) 2)))
+      (should (= 1 (hash-table-count jetpacs-org--cache)))
+      ;; The LIVE generation is bounded too.
+      (dotimes (i (* 2 jetpacs-org-cache-max))
+        (jetpacs-org-with-cache "ja4t" (list 'k i) i))
+      (should (<= (hash-table-count jetpacs-org--cache)
+                  jetpacs-org-cache-max)))))
 
 (provide 'jetpacs-org-test)
 ;;; jetpacs-org-test.el ends here

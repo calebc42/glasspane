@@ -96,6 +96,28 @@ parallelizable with RF-2..RF-4 and with each other.
   non-`ebp.` methods; §7.3 unknown/unnegotiated behavior for everything else
   is bit-for-bit unchanged, and the existing test corpus proves it.
 - **I6 — No rung lands without its gate green in CI** (once RF-1 exists).
+- **I7 — Emacs is the sole interpreter of source formats.** Consumers read
+  only projections Emacs produced and never author back into the source. A
+  companion parsing `.org` (or any authored format) directly is permanently
+  out of scope, not deferred: it would re-implement tag inheritance,
+  `#+FILETAGS`, ARCHIVE/COMMENT skipping, per-file TODO keyword sets,
+  repeaters, logbook semantics, priority normalization, `org-id` resolution —
+  and the user's own config on top. Evidence this is a bug farm, not a
+  theoretical risk: `AUDIT-ja4-2026-07-27.md`'s P2 org-semantics cluster found
+  exactly these divergences *inside Emacs, in elisp, with org loaded*. Writes
+  have a second edge — direct authoring collides with Emacs's live buffers
+  (the supersession/changed-on-disk machinery clamped in JA-4 batch 3 and the
+  mtime guard hardened in JA-6 exist because two writers with no protocol lose
+  data), so every mutation rides the §15 queue. Corollary: **a projection
+  stale by an hour is honest and correct; a live re-parse is fresher and
+  wrong.** Consumers surface the generation, never re-derive.
+- **I8 — A projection inherits its source's exposure and never widens it.** A
+  derived artifact (index DB, cache, bulk snapshot) is placed in storage no
+  more accessible than the source it summarizes. A vault in shared storage may
+  have its index beside it; a vault in app-private storage may not. Where the
+  vault lives is a user-facing onboarding choice (the Obsidian pattern: shared
+  storage is app-agnostic and survives uninstall); the index follows it
+  automatically, never independently.
 
 ---
 
@@ -229,6 +251,31 @@ now, CRDT-ready vocabulary later.
 - Write-back rides the **existing §15 durable queue** (Replicache/PowerSync
   upload-queue shape: Emacs = server authority, Companion mutations queue,
   ack, rebase). No second sync machinery.
+- **Projection authority is normative, per I7.** The module states that the
+  projection is authoritative for consumers and that a consumer MUST NOT
+  interpret the underlying source format or write to it. This is what makes a
+  shared artifact safe: Emacs applied every rule before the rows existed.
+- **OPTIONAL bulk-transfer capability — the same-host accelerator.** Wire
+  changesets are the floor and must stay complete: iOS, a remote Emacs, and
+  the browser companion have no shared filesystem. When both endpoints
+  discover co-residency, `ebp.data` MAY negotiate delivery of a changeset as a
+  **shared immutable artifact at a negotiated URI** instead of inline JSON —
+  worded platform-agnostically (a Tauri desktop companion uses the identical
+  mechanism with a local path; a peer that cannot simply does not advertise
+  it). Semantics are unchanged: same revisions, same schema identity, same
+  write-back path — only the bulk carrier differs.
+  - **Generation-swap, never live-shared.** Emacs never mutates a published
+    artifact in place: it builds `<name>.<generation>.db` under a temp name,
+    fsyncs, atomically renames, then notifies `{generation, uri,
+    schema_hash}`. The Companion opens it **read-only**, swaps its queries to
+    the new generation, and the superseded file is retired. Immutable
+    generations mean **no cross-process locking ever** — the reason this is
+    safe on FUSE-emulated Android shared storage, where advisory locks and
+    WAL shared-memory are exactly what two apps under different UIDs cannot
+    rely on. Two processes read/writing one live SQLite file there is
+    corruption territory; the spec MUST NOT describe that shape.
+  - Artifact placement obeys **I8** (a projection never widens its source's
+    exposure).
 
 **RF-4b — `ebp-data.el`:** built-in `sqlite.c` only (30.1 API: `sqlite-execute-batch`,
 transactions, pragmas, statement cursors) — no emacsql/closql in the core
@@ -241,13 +288,22 @@ receives the declared schema, creates tables, applies changesets in one
 transaction, tracks revisions, verifies schema identity. Zero `@Entity`;
 compile-time typed DAOs are the downstream consumer's job (post-plan,
 `jetpacs-vroom3`). Depends on the RF-3 seam + Room 3
-(`androidx.room3:room3-runtime` line).
+(`androidx.room3:room3-runtime` line). **Two delivery backends behind one
+interface** — inline changesets and (where negotiated) generation-swapped
+artifacts opened read-only; the schema-identity check and revision bookkeeping
+are shared, so a consumer above the interface cannot tell which carried the
+rows.
 
 **Gate:** contract entries + goldens for every `ebp.data` method
 (`check_spec_sync` binds prose↔contract both directions); elisp↔Kotlin
 loopback: declare schema → push changesets → kill Companion process → restart
 → verify materialized state + revision resume; write-back event survives
-offline queue + replay; schema-drift case golden-pinned.
+offline queue + replay; schema-drift case golden-pinned. If the bulk-transfer
+capability lands in the same rung: a peer that does **not** advertise it gets
+byte-identical results over inline changesets (the floor-completeness proof);
+a generation swap mid-read leaves the reader on its old generation until it
+swaps (no torn read); and a retired generation is not deleted while a reader
+holds it.
 
 ---
 
@@ -289,6 +345,11 @@ points here.
   schema RF-4a defines.
 - **`surfaces.widget` on device / Glance** — still unadvertised
   (`DeviceBridge.kt:111-113`); its materializer is Glance when scheduled.
+- **Live multi-process SQLite over one file, and companion-side `.org`
+  parsing** — not deferred, *rejected*. See I7 (interpretation authority) and
+  the generation-swap rationale in RF-4a (locking on FUSE-emulated shared
+  storage). The vault-location onboarding choice per I8 is a Jetpacs
+  application question, not a spec or plan rung.
 - **CRDT merge capability** — vocabulary is CRDT-ready (RF-4a); the
   capability itself waits for a multi-writer use case.
 - **Compose Multiplatform renderer / non-JVM targets** — enabled by RF-2, not

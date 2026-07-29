@@ -1,0 +1,102 @@
+;;; jetpacs-m3-date-pickers.el --- Catalog component: Date pickers -*- lexical-binding: t; -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Package-Requires: ((emacs "30.1"))
+
+;;; Commentary:
+
+;; Upstream: Components.kt `DatePickers' + Examples.kt
+;; `DatePickerExamples' (5 examples), samples/DatePickerSamples.kt.
+;;
+;; Two date shapes reach the wire.  `date_button' IS M3's
+;; DatePickerDialog: the Companion draws a button that opens
+;; DatePickerDialog { DatePicker(state) } with OK and Cancel and hands
+;; the confirmed day back as an ISO date, so DatePickerDialogSample
+;; recreates exactly.  `month_grid' is the inline calendar -- a month
+;; header with previous/next navigation, a weekday row, and a day grid
+;; carrying one selected day and a day-tap handler -- which is what
+;; DatePickerSample puts on screen with its pre-selection.
+;;
+;; The other three exist to demonstrate something neither node has a
+;; member for: a per-day SelectableDates predicate, DisplayMode.Input,
+;; and a two-ended range (DateRangePicker is unwrapped).
+
+;;; Code:
+
+(require 'jetpacs-widgets)
+(require 'jetpacs-m3-core)
+
+(defconst jetpacs-m3-date-pickers--source
+  "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/DatePickerSamples.kt"
+  "Upstream DatePickersExampleSourceUrl.")
+
+(defun jetpacs-m3-date-pickers--inline ()
+  "Upstream DatePickerSample: an inline DatePicker pre-selecting Jan 4, 2020.
+The sample sets initialSelectedDateMillis = 1578096000000 and prints
+the selection under the calendar.  The `month_grid' node carries all
+three parts the sample uses: the month shown, the pre-selected day, and
+a day tap that reports the ISO date it was given."
+  (jetpacs-column
+   (jetpacs-with-attrs
+    (jetpacs-month-grid "2020-01"
+                        :selected "2020-01-04"
+                        :on-day-tap (jetpacs-m3-demo
+                                     "Selected date timestamp"))
+    :padding 16)
+   (jetpacs-with-attrs
+    (jetpacs-text "Selected date timestamp: 1578096000000")
+    :align_self "center")
+   :spacing 8 :fill t))
+
+(defun jetpacs-m3-date-pickers--dialog ()
+  "Upstream DatePickerDialogSample: a DatePickerDialog with OK and Cancel.
+The `date_button' node IS that dialog: the Companion opens
+DatePickerDialog { DatePicker(state) } behind the button, draws the
+sample's own OK and Cancel text buttons, and dispatches the confirmed
+date -- which is where the sample's snackbar message comes from.  The
+state is `rememberDatePickerState()' with no pre-selection, so no
+`:value'."
+  (jetpacs-date-button "Select date"
+                       (jetpacs-m3-demo "Selected date timestamp")))
+
+(jetpacs-m3-defcomponent "date-pickers"
+  :name "Date pickers"
+  :description
+  "Date pickers let users select a date or range of dates."
+  :guidelines "https://m3.material.io/components/datepicker"
+  :docs "https://developer.android.com/reference/kotlin/androidx/compose/material3/package-summary#datepicker"
+  :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/DatePicker.kt"
+  :examples
+  (list
+   (jetpacs-m3-example
+    "DatePickerSample"
+    "Date picker examples"
+    :source jetpacs-m3-date-pickers--source
+    :build #'jetpacs-m3-date-pickers--inline)
+   (jetpacs-m3-example
+    "DatePickerDialogSample"
+    "Date picker examples"
+    :source jetpacs-m3-date-pickers--source
+    :build #'jetpacs-m3-date-pickers--dialog)
+   (jetpacs-m3-example
+    "DatePickerWithDateSelectableDatesSample"
+    "Date picker examples"
+    :source jetpacs-m3-date-pickers--source
+    :unsupported
+    "Neither the date_button node nor the month_grid node has a selectable-dates member: the SelectableDates predicate this sample exists to show, which blocks every Saturday and Sunday and every year before 2023, cannot be put on the wire, because month_grid bounds whole months with min_month and max_month and nothing finer.")
+   (jetpacs-m3-example
+    "DateInputSample"
+    "Date picker examples"
+    :source jetpacs-m3-date-pickers--source
+    :unsupported
+    "The date_button node has no display-mode member: DisplayMode.Input, the typed date-entry field with its own formatting and validation that this sample exists to show, is a DatePickerState setting Emacs cannot request, and month_grid draws a calendar only.")
+   (jetpacs-m3-example
+    "DateRangePickerSample"
+    "Date picker examples"
+    :source jetpacs-m3-date-pickers--source
+    :unsupported
+    "There is no date-range node type: the date_button node picks ONE day and has no start or end member, and month_grid has a single selected date, so the two-ended selection DateRangePicker exists to show cannot be expressed on the wire.")
+   ))
+
+(provide 'jetpacs-m3-date-pickers)
+;;; jetpacs-m3-date-pickers.el ends here

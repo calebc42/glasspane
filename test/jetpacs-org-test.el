@@ -113,12 +113,14 @@ against the documented status map never sees `jetpacs-path-refused'."
                       (progn (jetpacs-org--check-file bad) :no-signal)
                     (jetpacs-org-refused (car err))
                     (jetpacs-path-refused (car err))))))
-    ;; An unconfigured root set is distinguishable from out-of-policy.
+    ;; An unconfigured root set is distinguishable from out-of-policy —
+    ;; and RETRYABLE (JA-4 audit P1-10): unmounted storage must never
+    ;; delete a durable record.
     (should (eq 'no-roots
                 (let ((jetpacs-org-roots '("/nonexistent-root-xyz")))
                   (condition-case err
                       (progn (jetpacs-org--check-file f) :no-signal)
-                    (jetpacs-org-refused (cadr err))))))))
+                    (jetpacs-org-unavailable (cadr err))))))))
 
 (ert-deftest jetpacs-org-resolve-refuses-remote-before-any-stat ()
   "Defect 5: `file-remote-p' runs FIRST — the stat IS the connection.
@@ -419,10 +421,10 @@ daemon."
   "JA-4 audit P1-5: the `agenda' scope marched every configured entry
 through `org-check-agenda-file', which MESSAGES the absolute path and
 blocks on `read-char-exclusive' when the file is missing.  The query
-scope is now the existence-filtered explicit list; an EMPTY set refuses
-with the distinct `no-agenda-files' status instead of silently scanning
-whatever buffer was current (a nil `org-map-entries' scope means
-exactly that)."
+scope is now the existence-filtered explicit list; an EMPTY set signals
+the RETRYABLE `jetpacs-org-unavailable' with the distinct
+`no-agenda-files' data (P1-10) instead of silently scanning whatever
+buffer was current (a nil `org-map-entries' scope means exactly that)."
   (jetpacs-org-test--with-fixture f "* TODO Alive\nbody\n"
     (let ((missing (concat (file-name-directory f) "ja4-vanished.org"))
           (org-directory (file-name-directory f))
@@ -440,7 +442,7 @@ exactly that)."
              (err (should-error
                    (jetpacs-with-no-prompts
                     (jetpacs-org-query "ja4t" '(todo "TODO") #'ignore))
-                   :type 'jetpacs-org-refused)))
+                   :type 'jetpacs-org-unavailable)))
         (should (equal (cdr err) '(no-agenda-files)))))))
 
 (ert-deftest jetpacs-org-resolve-opens-quietly-when-the-file-drifted ()
@@ -556,6 +558,146 @@ filter happened to have current."
                              (list (concat fixture-dir
                                            (file-name-nondirectory f)))))))
         (delete-directory decoy t)))))
+
+;;;; The token/status contract (JA-4 audit Batch 4: P1-8, P1-9, P1-10)
+
+(ert-deftest jetpacs-org-token-mint-is-atomic ()
+  "JA-4 audit P1-8: the poc swept the old generation and half-installed
+the new one BEFORE validating every ref — a failed mint orphaned tokens
+past both sweeps (unreachable by replace, by teardown, by the set cap)
+and killed the surface's live tokens all at once.  The mint is now
+all-or-nothing: a failed mint leaves both tables and the live
+generation exactly as they were."
+  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+    (let* ((ref (jetpacs-org-test--ref-to f "First heading"))
+           (bad '(:id nil :file "/ssh:evil:/x.org" :pos 1 :headline ""))
+           (old (car (jetpacs-org-ref-tokens (list ref)
+                                             :set "s" :owner "ja4"))))
+      (should-error (jetpacs-org-ref-tokens (list ref bad)
+                                            :set "s" :owner "ja4")
+                    :type 'jetpacs-org-refused)
+      ;; The failed mint changed NOTHING: the prior generation still
+      ;; resolves and no orphan entered the token table.
+      (should (equal (jetpacs-org-token-ref old :owner "ja4") ref))
+      (should (= (hash-table-count jetpacs-org--tokens) 1))
+      ;; And teardown still reaches everything.
+      (jetpacs-org--on-teardown "ja4")
+      (should (= (hash-table-count jetpacs-org--tokens) 0))
+      (should-not (jetpacs-org-token-ref old :owner "ja4")))))
+
+(ert-deftest jetpacs-org-ambiguous-ref-answers-stale-not-a-guess ()
+  "JA-4 audit P1-9 (SPEC 14.5): two identical `* TODO Review' headings,
+a token minted for the SECOND, the desktop user edits the first — the
+queued tap must answer stale (`jetpacs-org-unresolved'), never resolve
+the first title match and mutate a heading the user did not tap."
+  (jetpacs-org-test--with-fixture f
+      (concat "* TODO Review\n" (make-string 200 ?p) "\n"
+              "* TODO Review\nbody two\n")
+    (let* ((ref (with-current-buffer (find-file-noselect f)
+                  (org-mode)
+                  (org-with-wide-buffer
+                   (goto-char (point-min))
+                   (search-forward "* TODO Review")
+                   (search-forward "* TODO Review")
+                   (jetpacs-org-ref-at-point))))
+           (token (car (jetpacs-org-ref-tokens (list ref)
+                                               :set "s" :owner "ja4")))
+           (before (with-temp-buffer (insert-file-contents f)
+                                     (buffer-string))))
+      ;; The desktop user edits the FIRST heading's body; the ref's
+      ;; trusted pos now points past point-max.
+      (with-current-buffer (find-file-noselect f)
+        (org-with-wide-buffer
+         (goto-char (point-min))
+         (forward-line 1)
+         (delete-region (point) (+ (point) 180))))
+      ;; The queued tap: the token still hands back the ref, and the
+      ;; mutation answers stale — never a first-match guess.
+      (let ((tapped (jetpacs-org-token-ref token :owner "ja4")))
+        (should (equal tapped ref))
+        (should-error (jetpacs-org-set-property tapped "ja4t" "MOOD" "x")
+                      :type 'jetpacs-org-unresolved))
+      ;; NEITHER heading was mutated, and nothing reached the disk.
+      (with-current-buffer (find-file-noselect f)
+        (org-with-wide-buffer
+         (goto-char (point-min))
+         (should-not (search-forward ":MOOD:" nil t))))
+      (should (equal (with-temp-buffer (insert-file-contents f)
+                                       (buffer-string))
+                     before)))))
+
+(ert-deftest jetpacs-org-resolve-headline-gate-is-mandatory ()
+  "JA-4 audit P1-9 defect (b): an empty :headline is a CLAIM (\"this
+heading has no title\" — `jetpacs-org-ref-at-point' mints \"\" for
+those), never a bypass of the trusted-position drift gate."
+  (jetpacs-org-test--with-fixture f "* TODO\nbody\n* TODO Titled\nmore\n"
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-with-wide-buffer
+       (goto-char (point-min))
+       ;; A ref to the TITLE-LESS heading still resolves through pos.
+       (let ((bare (jetpacs-org-ref-at-point)))
+         (should (equal (plist-get bare :headline) ""))
+         (let ((m (jetpacs-org-resolve-ref bare)))
+           (should (markerp m))
+           (should (= (marker-position m) (point-min)))
+           (set-marker m nil)))
+       ;; A drifted ref: pos points at the TITLED heading but claims no
+       ;; title — pre-fix the empty claim OPENED the gate and the wrong
+       ;; heading resolved; now it answers stale.
+       (search-forward "* TODO Titled")
+       (let ((tampered (list :id nil :file f
+                             :pos (line-beginning-position)
+                             :headline "")))
+         (should-error (jetpacs-org-resolve-ref tampered)
+                       :type 'jetpacs-org-unresolved))))))
+
+(ert-deftest jetpacs-org-status-split-and-dispositions ()
+  "JA-4 audit P1-10: `rejected' means the Companion DELETES the durable
+record (SPEC 14.4), so only permanent conditions may map there.
+Transient environment goes to `jetpacs-org-unavailable' (1500
+event-retry via `jetpacs-retry-later'); a vanished file is content
+drift (`jetpacs-org-unresolved' -> stale); and
+`jetpacs-org-refusal-disposition' hands handler authors the map."
+  (jetpacs-org-test--with-fixture f "* H\n"
+    ;; unreadable on an EXISTING file (an I/O condition) -> unavailable.
+    (let ((modes (file-modes f)))
+      (unwind-protect
+          (progn
+            (set-file-modes f 0)
+            (let ((err (should-error (jetpacs-org--check-file f)
+                                     :type 'jetpacs-org-unavailable)))
+              (should (equal (cdr err) '(unreadable)))))
+        (set-file-modes f modes)))
+    ;; An empty EFFECTIVE root set (unmounted storage) -> unavailable.
+    (let ((jetpacs-org-roots (list (concat (file-name-directory f)
+                                           "no-such-root/"))))
+      (should-error (jetpacs-org--check-file f)
+                    :type 'jetpacs-org-unavailable))
+    ;; A vanished file is content drift -> unresolved (stale).
+    (let ((gone (concat (file-name-directory f) "vanished.org")))
+      (should-error (jetpacs-org-resolve-ref
+                     (list :id nil :file gone :pos 1 :headline "H"))
+                    :type 'jetpacs-org-unresolved))
+    ;; not-absolute / remote / outside-roots stay permanently rejected.
+    (dolist (bad (list "relative.org" "/ssh:evil:/x.org"))
+      (should-error (jetpacs-org--check-file bad)
+                    :type 'jetpacs-org-refused))
+    (let ((jetpacs-org-roots (list (file-truename
+                                    (make-temp-file "ja4-other" t)))))
+      (should-error (jetpacs-org--check-file f)
+                    :type 'jetpacs-org-refused)))
+  ;; The disposition map handler authors get for free.
+  (should (eq (jetpacs-org-refusal-disposition
+               '(jetpacs-org-refused remote))
+              'rejected))
+  (should (eq (jetpacs-org-refusal-disposition
+               '(jetpacs-org-unavailable no-roots))
+              'retry))
+  (should (eq (jetpacs-org-refusal-disposition
+               '(jetpacs-org-unresolved))
+              'stale))
+  (should-not (jetpacs-org-refusal-disposition '(error "x"))))
 
 ;;;; Typed extraction
 

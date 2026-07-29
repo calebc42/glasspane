@@ -17,6 +17,17 @@
 ;;      answers `stale' (SPEC 14.5), and owner teardown sweeps the
 ;;      live set too.
 ;;
+;; JA-4 audit Batch 4 (P1-8/P1-9/P1-10) moved the token/status
+;; contract; this harness asserts the NEW shape:
+;;   - Q1 additionally proves the ATOMIC mint on the live flow: a mint
+;;      whose last ref is hostile signals `jetpacs-org-refused' and
+;;      leaves mint B's live generation resolving (pre-Batch-4 that
+;;      mint DESTROYED the live set and Q2's tap would answer stale).
+;;   - ja4.toggle maps engine conditions through
+;;      `jetpacs-org-refusal-disposition' — rejected / stale /
+;;      retry->`jetpacs-retry-later' — instead of a hand-kept
+;;      condition-case pair that predates `jetpacs-org-unavailable'.
+;;
 ;; Batch has no command loop, so idleness never begins and
 ;; `run-with-idle-timer' saves never fire on their own; the harness
 ;; fires the armed timer by hand (`smoke-j4--flush-idle-saves') — the
@@ -118,12 +129,18 @@
     (lambda (args _params)
       (let ((ref (jetpacs-org-token-ref (plist-get args :token) :owner "ja4")))
         (if (null ref) 'stale
-          (condition-case nil
+          ;; The Batch-4 status map, via the helper the engine ships:
+          ;; rejected / stale come back as statuses; retry concludes
+          ;; the action with 1500 event-retry (the record survives).
+          (condition-case err
               (progn (jetpacs-org-toggle-todo ref "ja4" "DONE")
                      (setq smoke-j4--toggled t)
                      'accepted)
-            (jetpacs-org-refused 'rejected)
-            (jetpacs-org-unresolved 'stale))))))
+            ((jetpacs-org-refused jetpacs-org-unavailable
+                                  jetpacs-org-unresolved)
+             (pcase (jetpacs-org-refusal-disposition err)
+               ('retry (jetpacs-retry-later))
+               (status status))))))))
 
   (jetpacs-defaction "ja4.capture"
     (lambda (_args _params)
@@ -178,6 +195,27 @@
     (smoke-j4--check "pre-re-mint token already swept (replace sweep)"
                      (null (jetpacs-org-token-ref smoke-j4--stale-token
                                                   :owner "ja4")))
+    ;; Batch 4 / P1-8: a FAILED mint into the same (owner,set) is
+    ;; all-or-nothing — it must leave mint B's live generation intact,
+    ;; or Q2's tap below would answer stale against a dead token.
+    (smoke-j4--check "failed mint leaves the live generation intact"
+                     (let ((live (jetpacs-org-token-ref
+                                  smoke-j4--live-token :owner "ja4")))
+                       (and live
+                            (eq 'jetpacs-org-refused
+                                (condition-case err
+                                    (progn
+                                      (jetpacs-org-ref-tokens
+                                       (list live
+                                             '(:id nil
+                                               :file "/ssh:evil:/x.org"
+                                               :pos 1 :headline ""))
+                                       :set "q" :owner "ja4")
+                                      'no-signal)
+                                  (error (car err))))
+                            (and (jetpacs-org-token-ref
+                                  smoke-j4--live-token :owner "ja4")
+                                 t))))
     (smoke-j4--drain 3)
 
     ;; Q2 toggle through the token, then the file re-read from disk.

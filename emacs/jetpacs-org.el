@@ -33,8 +33,11 @@
 ;; Emacs-side plists and NEVER cross the wire; the wire carries opaque
 ;; per-owner tokens minted against a replace-set table (the
 ;; `results.visit' :index contract generalized).  Status mapping for
-;; handlers: token miss -> `stale'; `jetpacs-org-unresolved' -> `stale';
-;; `jetpacs-org-refused' -> `rejected'.  The glasspane alist->plist
+;; handlers (`jetpacs-org-refusal-disposition' computes it): token miss
+;; -> `stale'; `jetpacs-org-unresolved' -> `stale';
+;; `jetpacs-org-refused' -> `rejected'; `jetpacs-org-unavailable' ->
+;; `jetpacs-retry-later' (1500 event-retry — the durable record
+;; survives redelivery).  The glasspane alist->plist
 ;; migration deliberately did NOT ride this rung — glasspane cannot load
 ;; against the rewrite yet, and migrates once, at its own port rung.
 
@@ -82,6 +85,34 @@
 
 (define-error 'jetpacs-org-refused "jetpacs-org: ref refused")
 (define-error 'jetpacs-org-unresolved "jetpacs-org: heading not found")
+(define-error 'jetpacs-org-unavailable "jetpacs-org: resource unavailable")
+
+(defun jetpacs-org-refusal-disposition (err)
+  "The SPEC 14.4/14.5 disposition for a signalled engine condition ERR.
+ERR is the (CONDITION . DATA) cons a `condition-case' binds (JA-4
+audit P1-10: `rejected' makes the Companion DELETE the durable record,
+so only permanent conditions may map there).  Returns:
+- `rejected' for `jetpacs-org-refused' — the path itself is out of
+  policy (`not-absolute', `remote', `outside-roots'), permanently
+  invalid;
+- `stale' for `jetpacs-org-unresolved' — content drift (heading gone,
+  file gone, ambiguous duplicates); the Companion re-presents (14.5);
+- `retry' for `jetpacs-org-unavailable' — transient environment
+  \(`unreadable', `no-roots', `no-agenda-files': an unmounted vault
+  comes back).  NOT a handler status: call `jetpacs-retry-later',
+  which concludes the action with `1500 event-retry' so the record
+  survives redelivery;
+- nil for anything else (not an engine condition — let it propagate).
+The handler shape this buys:
+  (condition-case err (…engine call… \\='accepted)
+    ((jetpacs-org-refused jetpacs-org-unavailable jetpacs-org-unresolved)
+     (pcase (jetpacs-org-refusal-disposition err)
+       (\\='retry (jetpacs-retry-later))
+       (status status))))"
+  (pcase (car-safe err)
+    ('jetpacs-org-refused 'rejected)
+    ('jetpacs-org-unresolved 'stale)
+    ('jetpacs-org-unavailable 'retry)))
 
 ;;;; The root allowlist
 
@@ -140,14 +171,27 @@ LOCAL agenda files, already absolute after the same anchoring."
 (defun jetpacs-org--check-file (file)
   "FILE validated against `jetpacs-org-roots', as a truename, or signal.
 The guard itself is `jetpacs-check-path' on the floor (JA-6 shares it);
-this wrapper only supplies the org root set and re-signals in the
-module's own condition so handler authors keep one status map.  An empty
-root set stays a refusal here — splitting `no-roots' out as a retryable
-condition is JA-4 audit P1-10, deliberately not in this change."
+this wrapper supplies the org root set and re-signals in the module's
+STATUS-SPLIT conditions (JA-4 audit P1-10 — `rejected' deletes the
+Companion's durable record, so a transient condition must never land
+there):
+- `jetpacs-org-refused' (handler: rejected): `not-absolute', `remote',
+  `outside-roots' — the path itself is out of policy;
+- `jetpacs-org-unavailable' (handler: `jetpacs-retry-later'):
+  `unreadable' on an EXISTING file (an I/O condition), and `no-roots'
+  \(the whole allowlist collapsed — an unmounted vault comes back);
+- `jetpacs-org-unresolved' (handler: stale): the file is GONE —
+  content drift, the Companion re-presents (14.5)."
   (condition-case err
       (jetpacs-check-path file (jetpacs-org--roots))
     (jetpacs-path-refused
-     (signal 'jetpacs-org-refused (cdr err)))))
+     (pcase (cadr err)
+       ('no-roots (signal 'jetpacs-org-unavailable (cdr err)))
+       ('unreadable
+        (if (file-exists-p file)
+            (signal 'jetpacs-org-unavailable (cdr err))
+          (signal 'jetpacs-org-unresolved (list 'file-missing))))
+       (_ (signal 'jetpacs-org-refused (cdr err)))))))
 
 ;;;; The D2 IO clamp
 
@@ -294,10 +338,13 @@ inside the socket filter is whatever happened to be current."
   "Resolve REF (a plist from `jetpacs-org-ref-at-point') to a marker.
 Signals `jetpacs-org-refused' on policy (absolute/remote/roots/
 readable — handler answer: `rejected') and `jetpacs-org-unresolved'
-when the heading is genuinely gone (content drift — handler answer:
-`stale', the Companion re-presents).  Resolution: id in the validated
-file, id via `org-id-locations' (the mapped file re-validated), trusted
-pos with a headline check, then a headline scan.  Files open QUIETLY
+when the heading is genuinely gone OR AMBIGUOUS (content drift —
+handler answer: `stale', the Companion re-presents; SPEC 14.5 mandates
+stale over a guess).  Resolution: id in the validated file, id via
+`org-id-locations' (the mapped file re-validated), trusted pos with a
+MANDATORY headline check, then a headline scan that resolves only a
+UNIQUE match (JA-4 audit P1-9 — the poc took the first duplicate and
+mutated a heading the user never tapped).  Files open QUIETLY
 \(NOWARN, under `jetpacs-org--with-clamped-io'): a changed-on-disk
 question cannot reach the dispatch extent — resolution answers from
 the buffer it has."
@@ -328,33 +375,40 @@ the buffer it has."
                                      (jetpacs-org--check-file mapped)
                                    (jetpacs-org-refused nil))))
                       (jetpacs-org--find-in-file-by-id id mapped-true)))
-               ;; 3. Trusted position, only while its headline holds.
-               (and true
+               ;; 3. Trusted position — only while the headline claim
+               ;;    still holds.  MANDATORY (JA-4 audit P1-9, defect
+               ;;    (b)): an empty :headline is a claim like any other
+               ;;    ("this heading has no title" — `ref-at-point'
+               ;;    mints \"\" for those), never a gate bypass; the
+               ;;    empty short-circuit fell open in exactly the case
+               ;;    it existed to catch.
+               (and true (stringp headline)
                     (with-current-buffer (find-file-noselect true t)
                       (org-with-wide-buffer
                        (when (and (integerp pos)
                                   (<= (point-min) pos (point-max)))
                          (goto-char pos)
                          (when (ignore-errors (org-back-to-heading t) t)
-                           (when (or (not (stringp headline))
-                                     (string-empty-p headline)
-                                     (equal (nth 4 (org-heading-components))
-                                            headline))
+                           (when (equal (or (nth 4 (org-heading-components))
+                                            "")
+                                        headline)
                              (copy-marker (point))))))))
-               ;; 4. Headline scan — first match wins, ambiguous by
-               ;;    construction among duplicate titles.
+               ;; 4. Headline scan — a UNIQUE match resolves; duplicates
+               ;;    fall through to `jetpacs-org-unresolved' (stale,
+               ;;    SPEC 14.5).  The poc took the FIRST match among
+               ;;    duplicate titles and mutated a heading the user
+               ;;    never tapped (P1-9).
                (and true (stringp headline) (not (string-empty-p headline))
                     (with-current-buffer (find-file-noselect true t)
                       (org-with-wide-buffer
                        (goto-char (point-min))
-                       (catch 'found
+                       (let (matches)
                          (while (re-search-forward org-heading-regexp nil t)
                            (when (equal (nth 4 (org-heading-components))
                                         headline)
-                             (throw 'found
-                                    (copy-marker
-                                     (line-beginning-position)))))
-                         nil)))))))
+                             (push (line-beginning-position) matches)))
+                         (when (and matches (null (cdr matches)))
+                           (copy-marker (car matches))))))))))
         (or marker
             ;; The SYMBOL path only: no filename, no headline text — the
             ;; poc formatted the absolute path into this error and
@@ -384,12 +438,18 @@ the buffer it has."
 (cl-defun jetpacs-org-ref-tokens (refs &key (set "default") owner)
   "Mint one opaque token per REF, REPLACING the (OWNER,SET) entry.
 OWNER defaults to `jetpacs-current-owner'; neither is an error.  Every
-token previously minted for this (owner,set) dies NOW — a re-render
-re-mints, so the table size stays equal to the live sets and a swept
-token is a plain miss (the `results.visit' replace-set shape).  A ref
-whose :file fails the resolve policy signals at MINT time: statically
-invalid input fails at build, not at tap.  Returns tokens in REFS
-order."
+token previously minted for this (owner,set) dies at install — a
+re-render re-mints, so the table size stays equal to the live sets and
+a swept token is a plain miss (the `results.visit' replace-set shape).
+ATOMIC (JA-4 audit P1-8): every ref is validated FIRST; the replace
+sweep and the install of BOTH tables run together only once nothing
+can signal — a failed mint leaves the tables and the live generation
+exactly as they were.  (The poc swept, half-installed, then signalled:
+orphan tokens unreachable by the replace sweep, by owner teardown and
+by the set cap, plus a surface whose live tokens all died at once.)
+A ref whose :file fails the resolve policy signals at MINT time:
+statically invalid input fails at build, not at tap.  Returns tokens
+in REFS order."
   (let ((owner (or owner jetpacs-current-owner)))
     (unless (stringp owner)
       (error "jetpacs-org-ref-tokens: no owner (bind via with-jetpacs-owner or pass :owner)"))
@@ -405,21 +465,27 @@ order."
           (when (>= sets jetpacs-org-token-sets-max)
             (error "jetpacs-org-ref-tokens: owner %s exceeds %d sets"
                    owner jetpacs-org-token-sets-max))))
-      ;; The replace sweep: the old generation dies before the new mints.
-      (dolist (old (gethash key jetpacs-org--token-sets))
-        (remhash old jetpacs-org--tokens))
-      (let (tokens)
-        (dolist (ref refs)
-          (let ((file (plist-get ref :file)))
-            (when (and (stringp file) (not (string-empty-p file)))
-              (jetpacs-org--check-file file)))
-          (let ((token (format "o%s-%x" jetpacs-org--token-nonce
-                               (cl-incf jetpacs-org--token-counter))))
-            (puthash token (list :owner owner :set set :ref ref)
-                     jetpacs-org--tokens)
-            (push token tokens)))
-        (puthash key (reverse tokens) jetpacs-org--token-sets)
-        (nreverse tokens)))))
+      ;; Pass 1 — validate EVERY ref while both tables stay untouched.
+      (dolist (ref refs)
+        (let ((file (plist-get ref :file)))
+          (when (and (stringp file) (not (string-empty-p file)))
+            (jetpacs-org--check-file file))))
+      ;; Pass 2 — mint locally; still no table writes.
+      (let ((entries
+             (mapcar (lambda (ref)
+                       (cons (format "o%s-%x" jetpacs-org--token-nonce
+                                     (cl-incf jetpacs-org--token-counter))
+                             ref))
+                     refs)))
+        ;; Pass 3 — the replace sweep + BOTH installs, signal-free.
+        (dolist (old (gethash key jetpacs-org--token-sets))
+          (remhash old jetpacs-org--tokens))
+        (dolist (entry entries)
+          (puthash (car entry)
+                   (list :owner owner :set set :ref (cdr entry))
+                   jetpacs-org--tokens))
+        (puthash key (mapcar #'car entries) jetpacs-org--token-sets)
+        (mapcar #'car entries)))))
 
 (cl-defun jetpacs-org-token-ref (token &key owner)
   "TOKEN -> its ref plist, or nil.
@@ -974,17 +1040,17 @@ Routes through `jetpacs-org-agenda-files' — the SAME P1-7 floor filter
 the roots and the cache stamp use — then drops entries whose files are
 gone (JA-4 audit P1-5: `org-check-agenda-file' messages the ABSOLUTE
 path and blocks on `read-char-exclusive' for a missing file).  An
-EMPTY result signals `jetpacs-org-refused' with the distinct data
-symbol `no-agenda-files' (vs the floor's `no-roots'): a nil scope
-handed to `org-map-entries' means the CURRENT BUFFER — whatever the
-socket filter happened to have current (sandbox drift).  Splitting
-this into a retryable `jetpacs-org-unavailable' is JA-4 audit P1-10
-\(Batch 4), deliberately not in this change.  Directory entries are NOT
-expanded to member files — the stamp already treats raw entries as
-files, and the query matches the module's own semantics, not the
-`org-agenda-files' function's."
+EMPTY result signals the RETRYABLE `jetpacs-org-unavailable' (P1-10:
+an unmounted vault comes back — never `rejected', which deletes the
+durable record) with the distinct data symbol `no-agenda-files' (vs
+the floor's `no-roots'): a nil scope handed to `org-map-entries' means
+the CURRENT BUFFER — whatever the socket filter happened to have
+current (sandbox drift).  Directory entries are NOT expanded to member
+files — the stamp already treats raw entries as files, and the query
+matches the module's own semantics, not the `org-agenda-files'
+function's."
   (or (cl-remove-if-not #'file-exists-p (jetpacs-org-agenda-files))
-      (signal 'jetpacs-org-refused (list 'no-agenda-files))))
+      (signal 'jetpacs-org-unavailable (list 'no-agenda-files))))
 
 (defun jetpacs-org--run-query (tree action)
   "Run vetted query TREE over the agenda files, calling ACTION at matches.

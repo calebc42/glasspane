@@ -32,6 +32,37 @@ Exploration facts this plan builds on (verified):
 
 ---
 
+## §0 STATE — execution ledger (update at every checkpoint)
+
+| Checkpoint | What | Status |
+|---|---|---|
+| P0 | Phase 0.2 pre-swap pin tests | **NOT DONE** — next step; still writable, org.json is still live |
+| A | RF-2a KMP flip, sources to `jvmMain` | DONE `7f6bfde` |
+| B0 | kotlinx-serialization-json dependency (`api`) | DONE `2271211` |
+| B1 | `JsonAccess.kt` + `EbpJson.toJsonElement` (additive) | DONE `94720a5` |
+| C2–C6 | the conversion proper | OPEN |
+| H1–H7 | RF-2c hoist to `commonMain` | OPEN |
+
+**Executed on `slop-fork/main`, not on per-sub-step branches** (Ground rules'
+branch/rollback scheme): every commit so far is a green checkpoint, so the
+branch bought nothing. Cut `rf-2b` before C2 — that is where the directed red
+period starts and where rollback stops being a one-commit revert.
+
+**Test-count parity number (0.2-9):** `:wire:jvmTest` ran **315** tests in 34
+suites at checkpoint A — the post-flip parity figure, taken after the flip
+rather than before it, so it proves nothing about the flip itself; the flip's
+proof is that `git diff --numstat -M` showed content edits in build files only.
+B1 added `JsonAccessTest` (16 tests) → **331**. `:app:testDebugUnitTest` 26.
+
+**Deviations from this runbook so far:** (1) Phase 0.2 was skipped ahead of
+Phase 1 — the pin tests are still valid and still pass against org.json, but
+write them before C2 or the conversion loses its semantic-delta harness;
+(2) B1 shipped `JsonAccessTest` (not called for in 2.2) — the accessors encode
+one decision each and were cheaper to pin than to re-derive at 625 call sites;
+(3) `isNullOrAbsent` is a named helper rather than the inline `let` of 2.3.
+
+---
+
 ## Phase 0 — Baseline + pre-swap pin tests (org.json still in place)
 
 **0.1 Baseline green.** Run all four gates from a clean tree; if anything is red, stop. Commit the two plan docs. `git switch -c rf-2a`.

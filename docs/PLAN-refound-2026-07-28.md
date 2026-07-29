@@ -37,7 +37,7 @@ by **graduating the name**, not the tree.
 |---|---|---|
 | RF-0 | Land the outstanding debt: pushes + open P1s | OPEN |
 | RF-1 | CI — enforce what is currently demonstrated-once | OPEN |
-| RF-2 | KMP flip (JVM-only target) + org.json → kotlinx.serialization | OPEN — blocked on RF-1 |
+| RF-2 | KMP flip (JVM-only target) + org.json → kotlinx.serialization | IN PROGRESS — RF-2a done; RF-2b at checkpoint B1. Runs ahead of RF-1 on local gates (ratified 2026-07-28); see [PLAN-rf2-kmp-migration.md](PLAN-rf2-kmp-migration.md) §0 |
 | RF-3 | Extension-dispatch seam + trivial tenant | OPEN — blocked on RF-2 |
 | RF-4 | `ebp.data` module spec + `ebp-data.el` + `ebp-room3` | OPEN — blocked on RF-3 |
 | RF-5 | Ecosystem swaps: track-changes / WorkManager / Keystore / Coil | OPEN — each independent, unblocked after RF-1 |

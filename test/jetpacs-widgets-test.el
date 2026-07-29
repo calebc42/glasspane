@@ -886,6 +886,88 @@ When a 40th type appears, this fails -- a reminder to add its constructor."
                          (alist-get 'universal_node_attributes
                                     (jetpacs-test--contract))))))
 
+(ert-deftest jetpacs-widgets/catalog-node-schema ()
+  "The GENERATED `jetpacs-node-schema' still matches the contract.
+The drift half of the tools/gen-jetpacs-vocabulary.py pattern: when this
+fails the contract moved, so REGENERATE rather than editing
+emacs/jetpacs-vocabulary.el by hand."
+  (let* ((contract (jetpacs-test--contract))
+         (schema (alist-get 'node_schema contract))
+         (expected
+          (mapcar (lambda (type)
+                    (let ((row (alist-get (intern type) schema)))
+                      (list type
+                            (sort (copy-sequence (alist-get 'required row))
+                                  #'string<)
+                            (sort (copy-sequence (alist-get 'optional row))
+                                  #'string<))))
+                  (alist-get 'node_types contract))))
+    (should (equal jetpacs-node-schema expected))))
+
+;;;; Container trailing options (checked against the generated schema)
+
+(defun jetpacs-test--error-message (thunk)
+  "The error message THUNK signals, or nil when it returns."
+  (condition-case err (progn (funcall thunk) nil)
+    (error (error-message-string err))))
+
+(ert-deftest jetpacs-widgets/container-rejects-an-unknown-option ()
+  "A misspelled trailing option signals instead of vanishing.
+The containers read their options with `plist-get', so before this
+`:spacng' was silently dropped and the row rendered with no spacing."
+  (let ((msg (jetpacs-test--error-message
+              (lambda () (jetpacs-row (jetpacs-text "a") :spacng 8)))))
+    (should msg)
+    (should (string-match-p "not a member of" msg))
+    ;; The message lists what IS allowed, or fixing a typo means going
+    ;; to read the contract.
+    (should (string-match-p "spacing" msg))))
+
+(ert-deftest jetpacs-widgets/container-rejects-a-universal-attribute ()
+  "A §16.5 attribute passed as a trailing option names its real home.
+`(jetpacs-row … :padding 8)' is the mistake authors actually make: it
+type-checked, serialized, and emitted a row with no padding."
+  (let ((msg (jetpacs-test--error-message
+              (lambda () (jetpacs-row (jetpacs-text "a") :padding 8)))))
+    (should msg)
+    (should (string-match-p "universal attribute" msg))
+    (should (string-match-p "jetpacs-with-attrs" msg)))
+  ;; …including the hyphenated spelling of a wire-spelled attribute.
+  (should (jetpacs-test--error-message
+           (lambda () (jetpacs-column (jetpacs-text "a") :min-width 8))))
+  ;; The same attribute stays legal where it belongs.
+  (should (jetpacs-with-attrs (jetpacs-row (jetpacs-text "a")) :padding 8)))
+
+(ert-deftest jetpacs-widgets/container-options-cover-every-container ()
+  "Every `&rest'-children container checks against its own node type."
+  (dolist (case '((jetpacs-row . "row")
+                  (jetpacs-column . "column")
+                  (jetpacs-flow-row . "flow_row")
+                  (jetpacs-box . "box")
+                  (jetpacs-surface . "surface")
+                  (jetpacs-lazy-column . "lazy_column")
+                  (jetpacs-card . "card")))
+    (let ((msg (jetpacs-test--error-message
+                (lambda () (funcall (car case) (jetpacs-text "a") :nope 1)))))
+      (should msg)
+      (should (string-match-p (regexp-quote (cdr case)) msg))))
+  ;; collapsible takes id and header positionally, before its children.
+  (should (jetpacs-test--error-message
+           (lambda ()
+             (jetpacs-collapsible "i" (jetpacs-text "h")
+                                  (jetpacs-text "a") :nope 1)))))
+
+(ert-deftest jetpacs-widgets/container-takes-a-list-of-children ()
+  "The computed-children form is supported alongside trailing options.
+Undocumented until now, which is why callers reached for
+`(apply #\\='jetpacs-row (append … (list :spacing 8)))' instead."
+  (should (equal (jetpacs-node->canonical-json
+                  (jetpacs-row (list (jetpacs-text "a") (jetpacs-text "b"))
+                               :spacing 8))
+                 (jetpacs-node->canonical-json
+                  (jetpacs-row (jetpacs-text "a") (jetpacs-text "b")
+                               :spacing 8)))))
+
 ;;;; The wire-id minter (JA-2/B5)
 
 (ert-deftest jetpacs-widgets/wire-id-valid-for-hostile-names ()

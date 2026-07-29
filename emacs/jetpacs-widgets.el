@@ -37,6 +37,7 @@
 
 (require 'cl-lib)
 (require 'ebp)
+(require 'jetpacs-vocabulary)
 
 ;;;; Catalogs (mirrors of ebp/contract.json, for gating and coverage tests)
 
@@ -354,14 +355,58 @@ Stricter than `jetpacs--node-p', which also accepts `:t'-less sub-specs
 \(action descriptors, spans, table cells).  Use where a root Node is required."
   (and (consp x) (eq (car x) :t)))
 
-(defun jetpacs--children-and-opts (args)
+(defun jetpacs--wire-name (key)
+  "The contract member name the option keyword KEY addresses.
+A constructor spells a multi-word member with a hyphen (`:content-padding'
+for `content_padding'); the §16.5 universal attributes keep the wire
+spelling (`:scroll_here'), so mapping hyphen to underscore is correct for
+both and lossless (no contract member name contains a hyphen)."
+  (string-replace "-" "_" (substring (symbol-name key) 1)))
+
+(defconst jetpacs--universal-wire-names
+  (mapcar #'jetpacs--wire-name jetpacs-universal-attributes)
+  "`jetpacs-universal-attributes' as contract member names.")
+
+(defun jetpacs--check-options (type opts)
+  "Signal unless every option keyword in OPTS is a member of node TYPE.
+The `&rest'-children containers read their options with `plist-get', so
+before this an unknown key was SILENTLY DROPPED — a typo (`:spacng') and,
+far more often, a universal attribute passed where it does not belong
+\(`(jetpacs-row … :padding 8)' emitted a row with no padding).  The
+`cl-defun &key' constructors have always refused an unknown keyword; this
+gives the containers the same guarantee, against the generated
+`jetpacs-node-schema' so an amendment cannot leave it behind."
+  (let* ((row (assoc type jetpacs-node-schema))
+         (allowed (append (nth 1 row) (nth 2 row)))
+         (p opts))
+    (unless row
+      (error "jetpacs: no contract schema for node type %S" type))
+    (while p
+      (let* ((key (pop p))
+             (name (jetpacs--wire-name key)))
+        (pop p)                         ; the value
+        (unless (member name allowed)
+          (if (member name jetpacs--universal-wire-names)
+              (error "jetpacs-%s: %S is a universal attribute (SPEC 16.5), not a `%s' member; attach it with `jetpacs-with-attrs'"
+                     type key type)
+            (error "jetpacs-%s: %S is not a member of `%s' (SPEC 16.1); members are %S"
+                   type key type allowed)))))))
+
+(defun jetpacs--children-and-opts (args &optional type)
   "Split container ARGS into (CHILDREN . OPTS) at the first keyword.
 Child nodes are plists; the first bare keyword in ARGS marks the start of
 the trailing options plist.  Lets a `&rest'-children constructor take
-options: `(jetpacs-row a b :spacing 8)' separates cleanly."
-  (let ((i (cl-position-if #'keywordp args)))
-    (if i (cons (cl-subseq args 0 i) (cl-subseq args i))
-      (cons args nil))))
+options: `(jetpacs-row a b :spacing 8)' separates cleanly.  A single LIST
+of children works too — `(jetpacs-row (list a b) :spacing 8)' — which is
+what to reach for when the children are computed.
+
+TYPE, when given, names the node type whose contract members the trailing
+options are validated against (`jetpacs--check-options')."
+  (let* ((i (cl-position-if #'keywordp args))
+         (split (if i (cons (cl-subseq args 0 i) (cl-subseq args i))
+                  (cons args nil))))
+    (when type (jetpacs--check-options type (cdr split)))
+    split))
 
 (defun jetpacs--as-children (args)
   "Normalize container ARGS to a child VECTOR (a JSON array), dropping nils.
@@ -684,7 +729,7 @@ a §16.6 color; CHILDREN a list of nodes the badge annotates."
 Trailing options: :spacing (dp), :align (top/center/bottom/baseline),
 :arrange (start/center/end/space_between/space_around/space_evenly),
 :scroll, :fill (booleans t or :json-false)."
-  (let* ((split (jetpacs--children-and-opts args))
+  (let* ((split (jetpacs--children-and-opts args "row"))
          (opts (cdr split))
          (spacing (plist-get opts :spacing))
          (align (plist-get opts :align))
@@ -705,7 +750,7 @@ Trailing options: :spacing (dp), :align (top/center/bottom/baseline),
   "A vertical column of child nodes (SPEC §17.3).
 Trailing options: :spacing, :align (start/center/end), :arrange, :scroll,
 :fill (booleans t or :json-false)."
-  (let* ((split (jetpacs--children-and-opts args))
+  (let* ((split (jetpacs--children-and-opts args "column"))
          (opts (cdr split))
          (spacing (plist-get opts :spacing))
          (align (plist-get opts :align))
@@ -726,7 +771,7 @@ Trailing options: :spacing, :align (start/center/end), :arrange, :scroll,
   "A flow row whose children wrap to later runs (SPEC §17.3).
 Trailing options: :spacing, :run-spacing (dp), :align (top/center/bottom),
 :arrange."
-  (let* ((split (jetpacs--children-and-opts args))
+  (let* ((split (jetpacs--children-and-opts args "flow_row"))
          (opts (cdr split))
          (spacing (plist-get opts :spacing))
          (run-spacing (plist-get opts :run-spacing))
@@ -744,7 +789,7 @@ Trailing options: :spacing, :run-spacing (dp), :align (top/center/bottom),
 (defun jetpacs-box (&rest args)
   "A box (z-stack, back-to-front) of child nodes (SPEC §17.3).
 Trailing options: :alignment (top_start..bottom_end), :on-tap."
-  (let* ((split (jetpacs--children-and-opts args))
+  (let* ((split (jetpacs--children-and-opts args "box"))
          (opts (cdr split))
          (alignment (plist-get opts :alignment))
          (on-tap (plist-get opts :on-tap)))
@@ -759,7 +804,7 @@ Trailing options: :alignment (top_start..bottom_end), :on-tap."
 (defun jetpacs-surface (&rest args)
   "A visual surface container (SPEC §17.3; distinct from a protocol Surface).
 Options: :color, :shape (rounded/rounded_small/circle), :elevation (a dp)."
-  (let* ((split (jetpacs--children-and-opts args))
+  (let* ((split (jetpacs--children-and-opts args "surface"))
          (opts (cdr split))
          (color (plist-get opts :color))
          (shape (plist-get opts :shape))
@@ -774,7 +819,7 @@ Options: :color, :shape (rounded/rounded_small/circle), :elevation (a dp)."
 (defun jetpacs-lazy-column (&rest args)
   "A lazily-composed vertical list preserving array order (SPEC §17.3).
 Trailing options: :spacing (dp), :content-padding (dp)."
-  (let* ((split (jetpacs--children-and-opts args))
+  (let* ((split (jetpacs--children-and-opts args "lazy_column"))
          (opts (cdr split))
          (spacing (plist-get opts :spacing))
          (content-padding (plist-get opts :content-padding)))
@@ -809,7 +854,7 @@ an ActionDescriptor dispatched at most once per gesture."
   "A card container of child nodes (SPEC §17.3).
 Trailing options: :on-tap, :on-long-tap (ActionDescriptors); :swipe-start,
 :swipe-end (from `jetpacs-swipe')."
-  (let* ((split (jetpacs--children-and-opts args))
+  (let* ((split (jetpacs--children-and-opts args "card"))
          (opts (cdr split))
          (on-tap (plist-get opts :on-tap))
          (on-long-tap (plist-get opts :on-long-tap))
@@ -833,7 +878,7 @@ Trailing options: :collapsed (t or :json-false), :on-long-tap, :swipe-start,
   (jetpacs--check-identifier id ":id")
   (unless (jetpacs--node-p header)
     (error "jetpacs-collapsible: HEADER must be a node, got %S" header))
-  (let* ((split (jetpacs--children-and-opts args))
+  (let* ((split (jetpacs--children-and-opts args "collapsible"))
          (opts (cdr split))
          (collapsed (plist-get opts :collapsed))
          (on-long-tap (plist-get opts :on-long-tap))

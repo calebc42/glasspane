@@ -4,6 +4,8 @@ kotlin = "2.1.10"
 compose-bom = "2026.02.01"
 activity-compose = "1.10.0"
 json = "20240303"
+# Runtime only (tree API, no @Serializable) — the release line for Kotlin 2.1.x.
+kotlinx-serialization = "1.8.0"
 junit = "4.13.2"
 compose-icons = "1.7.8"
 
@@ -15,6 +17,7 @@ androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 # Last standalone release; the icons artifacts left the Compose BOM in 2024.
 androidx-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "compose-icons" }
 json = { group = "org.json", name = "json", version.ref = "json" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]

@@ -14,6 +14,10 @@ kotlin {
 
     sourceSets {
         jvmMain.dependencies {
+            // RF-2b: `api`, not `implementation` — JsonElement appears in
+            // :wire's public signatures consumed by :app. Tree API only; no
+            // serialization compiler plugin, zero @Serializable.
+            api(libs.kotlinx.serialization.json)
             // org.json is the JSON surface shared with Android. compileOnly: on
             // the device the framework provides these classes; packaging the
             // artifact would shadow the boot classpath. JVM tests supply the

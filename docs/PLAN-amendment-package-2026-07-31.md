@@ -30,6 +30,7 @@ actual enforcement, so it does not get to assert unverified anchors.
 | D2 | Amendments to `docs/PLAN-refound-2026-07-28.md` (+ `PLAN-rf2` ledger edits) | **DONE 2026-07-31** |
 | D3 | `docs/DRAFT-amendments-140-152.md` | **DONE 2026-07-31** |
 | D4 | `docs/LIBRARY-LEDGER.md` | **DONE 2026-07-31** |
+| V2 | §Verification post-write pass (items 1–8) | **DONE 2026-07-31** — all green; three corrections found and fixed: D1's P2-5 metadata carried this plan's own `PLAN-rf2:11` off-by-one (the sentence is at `:10` @ `0fab0d5`); I1's frame count said 37 where `validate.py` prints 38; #144's draft claimed no golden carries a bare dedupe key, but `frames.golden`/`widgets.golden` carry `"battery-low"` (legal under the draft — note rewritten honestly). Suites: 29/29 ERT 0-unexpected; `:wire:jvmTest` 331 tests 0 failures; `validate.py` green; `ebp/` clean at `06fd9cd`; both external claims reproduced by hand (sqlite.c:286 hardcoded flags + unconditional `expand-file-name`; BundledSQLiteDriver `:84`/`:95` vs RoomConnectionManager `:81`) |
 
 **Scope wall.** Ratifying amendments into `ebp/SPEC.md` is **out of scope**. `git status
 --short ebp/` MUST stay empty for this entire package — the submodule is pinned at

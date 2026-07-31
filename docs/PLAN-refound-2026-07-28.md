@@ -123,8 +123,9 @@ on **both** sides: the child runbook's ledger and this ladder's row.
 
 - **I1 — `ebp/` is frozen through RF-2; wire-byte drift is expected (restated
   2026-07-31).** No file under `ebp/` is modified during RF-2 and goldens are
-  never regenerated; `ebp/goldens/` + `validate.py` (37 frames, 17 wire
-  fixtures, three chunkings) must pass unmodified, and the CI assertion is
+  never regenerated; `ebp/goldens/` + `validate.py` (38 frames, 17 wire
+  fixtures, three chunkings — the counts `validate.py` itself prints) must
+  pass unmodified, and the CI assertion is
   `git status --short ebp/` **empty**. Wire-byte drift is expected and
   SPEC-legal: §24 mandates *semantic* body comparison and forbids requiring
   member order or escaping choices (`SPEC.md:4287-4290`). The previous wording

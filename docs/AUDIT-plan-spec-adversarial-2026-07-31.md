@@ -312,7 +312,7 @@ retroactivity clause so "ratified deviation" has a boundary (D2).
 ### P2-5 · I1 reads stronger than anything enforces, and contradicts itself across documents
 
 **`PLAN-refound:83` says "byte-identical"; `PLAN-rf2:27` says explicitly *not* byte identity; SPEC.md:4287-4290 mandates semantic comparison — so byte drift is legal, expected, and undetected in the step most likely to cause it**
-`PLAN-refound-2026-07-28.md:83`; `PLAN-rf2-kmp-migration.md:11,:27`; `SPEC.md:4287-4290` · hand-verified
+`PLAN-refound-2026-07-28.md:83`; `PLAN-rf2-kmp-migration.md:10,:27`; `SPEC.md:4287-4290` · hand-verified
 
 *Claim.* No Kotlin test compares serialized bytes (`PLAN-rf2:10` records this,
 verified); the conformance regime *forbids* requiring member order or escaping choices;

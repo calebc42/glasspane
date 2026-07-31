@@ -5,6 +5,13 @@
 // Transport-agnostic: feed() consumes bytes, sink receives outbound bytes.
 package com.calebc42.ebp.wire
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -166,9 +173,11 @@ class CompanionEngine(
         if (pending.isNotEmpty()) {
             val callbacks = pending.values.toList()
             pending.clear()
-            val err = JSONObject()
-                .put("code", -32603).put("message", "Connection closed")
-                .put("data", JSONObject().put("kind", "connection-closed"))
+            val err = buildJsonObject {
+                put("code", -32603)
+                put("message", "Connection closed")
+                put("data", buildJsonObject { put("kind", "connection-closed") })
+            }
             callbacks.forEach { cb -> runCatching { cb(null, err) } }
         }
         // SPEC 18.1: on transport loss every outstanding dialog is
@@ -200,30 +209,34 @@ class CompanionEngine(
 
     // ------------------------------------------------------------ dispatch
 
-    private fun dispatch(msg: JSONObject) {
+    private fun dispatch(msg: JsonObject) {
         when (classifyMessage(msg)) {
             MessageClass.REQUEST ->
                 // SPEC 4.1/7.3: the raw params reach handleRequest so a
                 // non-object (a positional array) is rejected, not coerced.
-                handleRequest(msg.get("id"), msg.getString("method"), msg.opt("params"))
+                // classifyMessage guarantees id and a string method exist.
+                handleRequest(msg.getValue("id"), methodOf(msg)!!, msg["params"])
             MessageClass.NOTIFICATION ->
-                handleNotification(msg.getString("method"), msg.opt("params"))
+                handleNotification(methodOf(msg)!!, msg["params"])
             MessageClass.RESPONSE -> {
-                val callback = (msg.opt("id") as? Int)?.let(pending::remove)
-                callback?.invoke(msg.optJSONObject("result"),
-                    msg.optJSONObject("error"))
+                // SPEC 7.2: Companion-issued ids are integers; requestIdKey's
+                // isString guard keeps a response with the STRING "1" from
+                // concluding the pending integer id 1 (EnvelopeIdTest).
+                val callback = requestIdKey(msg["id"])?.let(pending::remove)
+                callback?.invoke(msg["result"] as? JsonObject,
+                    msg["error"] as? JsonObject)
             }
             null ->
                 // SPEC 7.3: structurally invalid; answer only when an id exists.
-                if (msg.has("id") && msg.has("method"))
-                    respondError(msg.get("id"), -32600, "Invalid Request", "invalid-request")
+                if ("id" in msg && "method" in msg)
+                    respondError(msg.getValue("id"), -32600, "Invalid Request", "invalid-request")
         }
     }
 
     // ------------------------------------------ outbound requests (SPEC 7)
 
-    private var nextOutboundId = 0
-    private val pending = HashMap<Int, (JSONObject?, JSONObject?) -> Unit>()
+    private var nextOutboundId = 0L
+    private val pending = HashMap<Long, (JsonObject?, JsonObject?) -> Unit>()
 
     // SPEC 22.3 (LD-13 bound half): outstanding-request count is a MUST-bound
     // resource — `pending` grew without limit against a peer that stops
@@ -251,21 +264,27 @@ class CompanionEngine(
      * would pause the pump and report `blocked_by: "overloaded"` for an error
      * the peer never sent, stalling durable delivery on our own load. */
     @Synchronized
-    fun sendRequest(method: String, params: JSONObject,
+    fun sendRequest(method: String, params: JsonObject,
                     bounded: Boolean = true,
-                    callback: (JSONObject?, JSONObject?) -> Unit) {
+                    callback: (JsonObject?, JsonObject?) -> Unit) {
         if (pendingHeld && pending.size <= PENDING_RESUME) pendingHeld = false
         if (bounded && (pendingHeld || pending.size >= PENDING_HOLD)) {
             pendingHeld = true
-            callback(null, JSONObject()
-                .put("code", 1401).put("message", "Outstanding requests exhausted")
-                .put("data", JSONObject().put("kind", "overloaded")))
+            callback(null, buildJsonObject {
+                put("code", 1401)
+                put("message", "Outstanding requests exhausted")
+                put("data", buildJsonObject { put("kind", "overloaded") })
+            })
             return
         }
         val id = ++nextOutboundId
         pending[id] = callback
-        emit(JSONObject().put("jsonrpc", "2.0").put("id", id)
-            .put("method", method).put("params", params))
+        emit(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", id)
+            put("method", method)
+            put("params", params)
+        })
     }
 
     // ---------------------------------------- actions and input (SPEC 14)
@@ -299,7 +318,7 @@ class CompanionEngine(
      * validator accepts it. */
     fun dispatchDialogAction(dialogId: String, descriptor: JSONObject,
                              hookValue: Any?, fields: JSONObject?,
-                             callback: ((String?, JSONObject?) -> Unit)? = null) {
+                             callback: ((String?, JsonObject?) -> Unit)? = null) {
         if (descriptor.has("builtin")) return  // builtins are the renderer's
         if (state != SessionState.READY) return
         if (!dialogs.containsKey(dialogId)) return
@@ -325,7 +344,7 @@ class CompanionEngine(
         if (params.toString().toByteArray(Charsets.UTF_8).size >
             config.limits.getLong("max_event_bytes")) return
         sendRequest("event.action", params) { result, error ->
-            callback?.invoke(result?.optString("status"), error)
+            callback?.invoke(result?.stringOr("status"), error)
         }
     }
 
@@ -380,7 +399,7 @@ class CompanionEngine(
                         * knows it. Required for a synchronized `editor`'s
                         * hooks so the §19 read-only rule can be enforced. */
                        sourceId: String? = null,
-                       callback: ((String?, JSONObject?) -> Unit)? = null) {
+                       callback: ((String?, JsonObject?) -> Unit)? = null) {
         // SPEC 19: "A synchronized editor MUST become read-only whenever the
         // connection is not READY. It MUST NOT create an offline input draft,
         // delta, save, completion, or editor command." Its every other path
@@ -467,7 +486,7 @@ class CompanionEngine(
             else -> { // drop: live delivery only (SPEC 15.1)
                 if (state != SessionState.READY) return
                 sendRequest("event.action", params) { result, error ->
-                    callback?.invoke(result?.optString("status"), error)
+                    callback?.invoke(result?.stringOr("status"), error)
                 }
             }
         }
@@ -502,7 +521,7 @@ class CompanionEngine(
                 .put("id", id).put("value", value ?: JSONObject.NULL)))
     }
 
-    private fun handleRequest(id: Any, method: String, rawParams: Any?) {
+    private fun handleRequest(id: JsonElement, method: String, rawParams: Any?) {
         // SPEC 7.2 (amendment #34): ids are strings or safe integers.
         if (!isValidRequestId(id))
             return respondError(id, -32600, "Invalid Request", "invalid-request")
@@ -592,19 +611,19 @@ class CompanionEngine(
     private var lastWakeMs = 0L
 
     private var pumpPaused = false
-    private var replayId: Any? = null
+    private var replayId: JsonElement? = null
     private var replayDelivered = 0
     private var replayRejected = 0
-    private var blockedBy: Any = JSONObject.NULL
+    private var blockedBy: JsonElement = JsonNull
 
-    private fun handleQueueReplay(id: Any) {
+    private fun handleQueueReplay(id: JsonElement) {
         // SPEC 15.3: only one replay may be active.
         if (replayId != null)
             return respondError(id, 1600, "A replay is already active", "queue-busy")
         replayId = id
         replayDelivered = 0
         replayRejected = 0
-        blockedBy = JSONObject.NULL
+        blockedBy = JsonNull
         pumpPaused = false // an explicit replay resumes a paused pump
         queue.sweepExpired()
         // SPEC 15.3: join an in-flight durable request rather than duplicate
@@ -633,12 +652,12 @@ class CompanionEngine(
         val barrier = if (state == SessionState.SYNCING) sessionBoundarySeq else null
         when (val d = queue.beginDelivery(barrier)) {
             is Delivery.Ready -> {
-                val seq = d.record.getLong("queue_seq")
+                val seq = d.record.reqLong("queue_seq")
                 myInFlightSeq = seq
                 // SPEC 15.3: the stored record replays with its stored event_id.
                 // SPEC 15.3: single-flight by construction, and a local
                 // refusal here would be misread as a peer error — exempt.
-                sendRequest("event.action", d.record.getJSONObject("event"),
+                sendRequest("event.action", d.record.reqObj("event"),
                     bounded = false) { result, error ->
                     onPumpResult(seq, result, error)
                 }
@@ -648,7 +667,7 @@ class CompanionEngine(
         }
     }
 
-    private fun onPumpResult(seq: Long, result: JSONObject?, error: JSONObject?) {
+    private fun onPumpResult(seq: Long, result: JsonObject?, error: JsonObject?) {
         queue.clearInFlight(seq)
         myInFlightSeq = null
         when {
@@ -657,17 +676,17 @@ class CompanionEngine(
                 // pauses the pump; later admissions never bypass it.
                 pumpPaused = true
                 // SPEC 15.3: only a valid string kind rides blocked_by.
-                blockedBy = ((error.opt("data") as? JSONObject)
-                    ?.opt("kind") as? String)?.takeIf { it.isNotEmpty() }
-                    ?: "json-rpc-error"
+                blockedBy = JsonPrimitive(error.objOrNull("data")
+                    ?.stringOrNull("kind")?.takeIf { it.isNotEmpty() }
+                    ?: "json-rpc-error")
                 concludeReplay()
             }
-            result?.optString("status") in listOf("accepted", "duplicate") -> {
+            result?.stringOr("status") in listOf("accepted", "duplicate") -> {
                 replayDelivered++
                 queue.deleteRecord(seq)
                 pumpAdvance()
             }
-            result?.optString("status") in listOf("stale", "rejected") -> {
+            result?.stringOr("status") in listOf("stale", "rejected") -> {
                 replayRejected++
                 queue.deleteRecord(seq)
                 pumpAdvance()
@@ -675,10 +694,11 @@ class CompanionEngine(
             else -> {
                 // SPEC 15.3: unknown status is a protocol violation —
                 // retain the event, one safe log.error, close.
-                emit(notification("log.error", JSONObject()
-                    .put("code", -32603)
-                    .put("message", "event.action result with unknown status")
-                    .put("data", JSONObject().put("kind", "internal-error"))))
+                emit(notification("log.error", buildJsonObject {
+                    put("code", -32603)
+                    put("message", "event.action result with unknown status")
+                    put("data", buildJsonObject { put("kind", "internal-error") })
+                }))
                 close("event.action result with unknown status")
             }
         }
@@ -704,7 +724,7 @@ class CompanionEngine(
             else -> null
         }?.takeIf { it in 0..9_007_199_254_740_991L } // SPEC 4.2
 
-    private fun handleSurfaceUpdate(id: Any, params: JSONObject) {
+    private fun handleSurfaceUpdate(id: JsonElement, params: JSONObject) {
         val surface = params.opt("surface") as? String
         val revision = surfaceRevision(params.opt("revision"))
         val spec = params.optJSONObject("spec")
@@ -933,7 +953,7 @@ class CompanionEngine(
         }
     }
 
-    private fun handleSurfaceRemove(id: Any, params: JSONObject) {
+    private fun handleSurfaceRemove(id: JsonElement, params: JSONObject) {
         val surface = params.opt("surface") as? String
         val revision = surfaceRevision(params.opt("revision"))
         if (surface == null || revision == null)
@@ -1117,7 +1137,7 @@ class CompanionEngine(
      * wake admit to the durable queue exactly as a surface action would.
      */
     private fun dispatchDescriptorContextless(descriptor: JSONObject, args: JSONObject,
-                                              callback: ((String?, JSONObject?) -> Unit)? = null) =
+                                              callback: ((String?, JsonObject?) -> Unit)? = null) =
         dispatchContextless(queue, config.limits.getLong("max_event_bytes"),
             descriptor, args, this, callback)
 
@@ -1127,11 +1147,11 @@ class CompanionEngine(
 
     /** SPEC 15.1: a drop event.action delivers live only while READY. */
     @Synchronized
-    override fun deliverLiveDrop(params: JSONObject,
-                                 callback: ((String?, JSONObject?) -> Unit)?) {
+    override fun deliverLiveDrop(params: JsonObject,
+                                 callback: ((String?, JsonObject?) -> Unit)?) {
         if (state != SessionState.READY) return
         sendRequest("event.action", params) { result, error ->
-            callback?.invoke(result?.optString("status"), error)
+            callback?.invoke(result?.stringOr("status"), error)
         }
     }
 
@@ -1159,7 +1179,7 @@ class CompanionEngine(
     private val identifier = Regex("[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
     private val reminderMembers = setOf("id", "title", "body", "at_ms", "on_tap")
 
-    private fun handleRemindersSet(id: Any, params: JSONObject) {
+    private fun handleRemindersSet(id: JsonElement, params: JSONObject) {
         if ("reminders.owner" !in granted)
             return respondError(id, -32601, "Method not found", "method-not-found")
         val owner = params.opt("owner") as? String
@@ -1247,7 +1267,7 @@ class CompanionEngine(
      * reminder with no on_tap dispatches nothing (dismissal is not a tap). */
     @Synchronized
     fun dispatchReminderTap(owner: String, reminderId: String,
-                            callback: ((String?, JSONObject?) -> Unit)? = null) {
+                            callback: ((String?, JsonObject?) -> Unit)? = null) {
         routeReminderTap(reminders, queue, config.limits.getLong("max_event_bytes"),
             owner, reminderId, this, callback)
     }
@@ -1297,7 +1317,7 @@ class CompanionEngine(
      * the reply is 1101 identifying the offending trigger. An accepted set
      * carries forward every unchanged id's runtime records (SPEC 21.1).
      */
-    private fun handleTriggersSet(id: Any, params: JSONObject) {
+    private fun handleTriggersSet(id: JsonElement, params: JSONObject) {
         if ("triggers" !in granted)
             return respondError(id, -32601, "Method not found", "method-not-found")
         val identity = pendingPairingId
@@ -1357,7 +1377,7 @@ class CompanionEngine(
      * verbatim. capability.invoke is available only when `capabilities` was
      * granted; invocations are session-scoped and non-durable (SPEC 20.2).
      */
-    private fun handleCapabilityInvoke(id: Any, params: JSONObject) {
+    private fun handleCapabilityInvoke(id: JsonElement, params: JSONObject) {
         if ("capabilities" !in granted)
             return respondError(id, -32601, "Method not found", "method-not-found")
         for (k in params.keySet()) if (k != "cap" && k != "args")
@@ -1552,10 +1572,10 @@ class CompanionEngine(
                 .put("session", s.sessionId)))
     }
 
-    private fun editorStale(id: Any) = respondError(id, 1201, "Invalid content",
+    private fun editorStale(id: JsonElement) = respondError(id, 1201, "Invalid content",
         "content-invalid", JSONObject().put("reason", "editor-stale"))
 
-    private fun handleEditApply(id: Any, params: JSONObject) {
+    private fun handleEditApply(id: JsonElement, params: JSONObject) {
         if ("editor.sync" !in granted)
             return respondError(id, -32601, "Method not found", "method-not-found")
         val doc = params.opt("document") as? String
@@ -1662,7 +1682,7 @@ class CompanionEngine(
         respondResult(id, JSONObject().put("status", "applied").put("seq", s.seq))
     }
 
-    private fun handleEditResync(id: Any, params: JSONObject) {
+    private fun handleEditResync(id: JsonElement, params: JSONObject) {
         if ("editor.sync" !in granted)
             return respondError(id, -32601, "Method not found", "method-not-found")
         val doc = params.opt("document") as? String
@@ -1696,15 +1716,19 @@ class CompanionEngine(
      * Non-durable, session-scoped. */
     @Synchronized
     fun requestCompletion(document: String, editorId: String,
-                          callback: (String, JSONArray, String, Long, Int) -> Unit) {
+                          callback: (String, JsonArray, String, Long, Int) -> Unit) {
         val s = editors[document to editorId] ?: return
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return
         val atSession = s.sessionId
         val atSeq = s.seq
         val atCursor = s.cursor
-        sendRequest("edit.complete", JSONObject()
-            .put("document", document).put("editor_id", editorId)
-            .put("session", atSession).put("seq", atSeq).put("cursor", atCursor)) { result, error ->
+        sendRequest("edit.complete", buildJsonObject {
+            put("document", document)
+            put("editor_id", editorId)
+            put("session", atSession)
+            put("seq", atSeq)
+            put("cursor", atCursor)
+        }) { result, error ->
             // SPEC 19.3: "The result and each candidate are closed objects.
             // `prefix` MUST be a string and `candidates` MUST be an array.
             // Each candidate MUST contain a non-empty string `label`."
@@ -1715,17 +1739,17 @@ class CompanionEngine(
             // discarded whole; a completion has no response to carry an error.
             if (error == null && result != null &&
                 editors[document to editorId]?.sessionId == atSession) {
-                val prefix = result.opt("prefix") as? String ?: return@sendRequest
-                val cands = result.opt("candidates") as? JSONArray ?: return@sendRequest
-                for (k in result.keySet())
+                val prefix = result.stringOrNull("prefix") ?: return@sendRequest
+                val cands = result.arrOrNull("candidates") ?: return@sendRequest
+                for (k in result.keys)
                     if (k != "prefix" && k != "candidates") return@sendRequest
-                for (i in 0 until cands.length()) {
-                    val c = cands.optJSONObject(i) ?: return@sendRequest
-                    if ((c.opt("label") as? String).isNullOrEmpty()) return@sendRequest
-                    if (c.has("annotation") && c.opt("annotation") !is String)
+                for (el in cands) {
+                    val c = el as? JsonObject ?: return@sendRequest
+                    if (c.stringOrNull("label").isNullOrEmpty()) return@sendRequest
+                    if ("annotation" in c && c.stringOrNull("annotation") == null)
                         return@sendRequest
-                    if (c.has("insert") && c.opt("insert") !is String) return@sendRequest
-                    for (k in c.keySet())
+                    if ("insert" in c && c.stringOrNull("insert") == null) return@sendRequest
+                    for (k in c.keys)
                         if (k != "label" && k != "annotation" && k != "insert")
                             return@sendRequest
                 }
@@ -1879,7 +1903,10 @@ class CompanionEngine(
     // ------------------------------------------------------ dialogs (18.1)
 
     // dialog_id -> the outstanding dialog.show request id (deferred reply).
-    private val dialogs = LinkedHashMap<String, Any>()
+    // The id is held as the peer's original JsonElement and echoed verbatim:
+    // a string id stays a string, an integer stays an integer (SPEC 7.2), and
+    // rpc.cancel's lookup uses JsonElement data-class equality so 5 != "5".
+    private val dialogs = LinkedHashMap<String, JsonElement>()
 
     /** Present hook: (dialog_id, spec) to show; (dialog_id, null) to
      * dismiss. What the dialog contains is the application's; the request
@@ -1890,7 +1917,7 @@ class CompanionEngine(
      * local validation diagnostic and erase any volatile password (§14.6). */
     var dialogOverflowListener: ((String) -> Unit)? = null
 
-    private fun handleDialogShow(id: Any, params: JSONObject) {
+    private fun handleDialogShow(id: JsonElement, params: JSONObject) {
         val dialogId = params.opt("dialog_id") as? String
         val spec = params.optJSONObject("spec")
         if (dialogId.isNullOrEmpty() || spec == null)
@@ -2020,7 +2047,7 @@ class CompanionEngine(
 
     private val hexId = Regex("[0-9a-f]{32}")
 
-    private fun handleHello(id: Any, params: JSONObject) {
+    private fun handleHello(id: JsonElement, params: JSONObject) {
         val protocol = params.opt("protocol")
         if (protocol != 2) {
             // SPEC 9.2/12: protocol mismatch is 1202 with data.supported.
@@ -2055,7 +2082,7 @@ class CompanionEngine(
         state = sessionStep(state, SessionEvent.HELLO_ACCEPTED) ?: state
     }
 
-    private fun handleAuth(id: Any, params: JSONObject) {
+    private fun handleAuth(id: JsonElement, params: JSONObject) {
         val pid = params.opt("pairing_id")
         val cn = params.opt("client_nonce")
         val sn = params.opt("server_nonce")
@@ -2234,7 +2261,7 @@ class CompanionEngine(
 
     // -------------------------------------------------------------- output
 
-    private fun respondResult(id: Any, result: JSONObject) {
+    private fun respondResult(id: JsonElement, result: JSONObject) {
         // SPEC 7.1: "A responder that computes a result but cannot serialize
         // the response body MUST answer the request with -32603
         // internal-error; it MUST NOT leave the request unanswered." Every
@@ -2267,7 +2294,7 @@ class CompanionEngine(
             null
         }
 
-    private fun respondError(id: Any, code: Int, message: String, kind: String,
+    private fun respondError(id: JsonElement, code: Int, message: String, kind: String,
                              data: JSONObject = JSONObject()) {
         // SPEC 7.2 (amendment #34): ids are strings or safe integers.
         if (isValidRequestId(id))

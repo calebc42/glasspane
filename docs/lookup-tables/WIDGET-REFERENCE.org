@@ -7,6 +7,17 @@
 
 * Overview
 
+#+begin_quote
+*TODO — replace with a deterministic generator.*  This file is
+LLM-drafted (2026-07-28) and has no generator; nothing enforces it
+against the code.  A deterministic =generate-widget-table.py= (39 node
+types × elisp constructors × renderer cases) is deferred deliberately:
+WIDGET's audience is third-party package authors, which needs Jetpacs
+stable, which needs EBP stable — build it when the wire vocabulary
+freezes (RF-6 territory).  Until then =ebp/contract.json= is the
+authority and this file is unverified orientation.
+#+end_quote
+
 The Jetpacs widget system provides a comprehensive set of UI components designed to bridge three layers of the stack:
 - *Elisp DSL*: The =jetpacs-*= functions developers call to construct user interfaces.
 - *Wire format*: The JSON node types serialized and sent over the protocol.

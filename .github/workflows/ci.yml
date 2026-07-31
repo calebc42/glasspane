@@ -1,0 +1,108 @@
+# RF-1a (PLAN-refound): the four jobs, no new dependencies.  Every
+# green number stops being demonstrated-once the moment this file
+# lands — red-on-regression is itself demonstrated by the three-red
+# gate recorded in the RF-1a status note.
+#
+# Documented exclusions (no silent caps):
+#   - device/instrumented tests stay manual (the smoke library in
+#     test/smoke-*.el runs against real hardware over adb);
+#   - lint is not wired (not in RF-1a's job table; add deliberately or
+#     not at all);
+#   - RF-1b (Robolectric render snapshots) and RF-1c (the
+#     cross-implementation loopback job) are later rungs.
+#
+# Two non-obvious facts this file depends on (verified 2026-07-31):
+#   - the WIRE job, not the spec job, is the real cross-repo binding:
+#     five :wire jvmTest suites resolve fixtures through the ebp.dir
+#     system property (wired in wire/build.gradle.kts) and error()
+#     when unset — hence submodules: recursive on every job that
+#     touches Gradle or validate.py;
+#   - local.properties is gitignored; the :app build finds the SDK via
+#     the runner's preinstalled ANDROID_HOME.
+
+name: CI
+
+on:
+  push:
+    branches: ["slop-fork/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wire:
+    name: wire (:wire:jvmTest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Wire suite (goldens + fixtures via ebp.dir)
+        working-directory: companion
+        run: |
+          chmod +x gradlew
+          ./gradlew :wire:jvmTest --console=plain
+
+  app:
+    name: app (:app unit tests + assembleDebug)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests and APK
+        working-directory: companion
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --console=plain
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ebp-companion-debug-apk
+          path: companion/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+
+  spec:
+    name: spec (validate.py + I1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      # I1: ebp/ is frozen through RF-2.  In a fresh checkout the
+      # working-tree half is vacuous by construction; the load-bearing
+      # halves are the in-sync submodule pointer and validate.py green
+      # against exactly the pinned artifacts.
+      - name: I1 — submodule in sync, tree clean
+        run: |
+          git submodule status ebp | grep -q '^ ' \
+            || { echo "submodule pointer out of sync"; exit 1; }
+          test -z "$(git status --short ebp/)" \
+            || { git status --short ebp/; exit 1; }
+      - name: validate.py (goldens, contract, check_spec_sync)
+        run: python3 ebp/validate.py
+
+  elisp:
+    name: elisp (guards + 29 ERT suites)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: purcell/setup-emacs@master
+        with:
+          version: "30.1"
+      - name: run-tests.sh (delineation guard, byte-compile guard, ERT)
+        run: test/run-tests.sh

@@ -619,6 +619,13 @@ points here.
   plan rung.
 - **CRDT merge capability** — vocabulary is CRDT-ready (RF-4a); the
   capability itself waits for a multi-writer use case.
+- **An authenticated + encrypted transport profile** (amendment #146's
+  option B) — deferred, direction recorded (Caleb, 2026-07-31): #146's
+  honest re-scope of the loopback threat model is the interim; a profile
+  with per-message integrity is the eventual answer to the unprivileged
+  port-interposition attacker, POC status notwithstanding. Sequenced no
+  earlier than post-RF-6; it is a new transport profile, not a patch to
+  this one.
 - **Non-JVM targets, and the CMP desktop companion — split (2026-07-31).**
   The headless JVM loopback host is now a *scheduled* rung (RF-2.6); the CMP
   **UI** app is an RF-6 item; desktop CMP is a JVM target, so RF-2's jvm-only

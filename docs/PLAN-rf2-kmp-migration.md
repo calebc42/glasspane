@@ -76,7 +76,9 @@ additive: contract `methods` entry + one new `frames.golden` frame
 (validate.py's coverage floor requires it) + a one-line
 `MethodRegistry.kt` mirror update after `methodRegistryMatchesContract`
 caught the drift exactly as designed; no existing golden, fixture, or limit
-changed; all four gates re-run green; I1 exemption class (b) is the record.
+changed; all four gates re-run green; I1 exemption class (b) is the record;
+(6) four more prose-only amendments (#143/#145/#146/#147) ratified 2026-07-31
+under exemption (a) (`ebp` @ `1e97bcb`); all gates re-run green.
 
 ---
 

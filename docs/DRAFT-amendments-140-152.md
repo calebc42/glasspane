@@ -7,15 +7,14 @@ appendix leads; anchors hand-verified in text).
 **These are drafts for ratification, not applied edits.** Each gives the
 `SPEC-CHANGES.md` row, the exact `SPEC.md` edits, and artifact changes.
 
-**Ratification status (2026-07-31):** the five no-decision entries — **#142, #144,
-#148, #150, #151** — are **ratified** (Caleb, 2026-07-31; `ebp` @ `f926f60`, all
-gates re-run green), and **#152 is ratified as option A plus the 1:1 intent
-sentence** (Caleb, 2026-07-31; `ebp` @ `bbd77d3` — contract entry, coverage-floor
-golden frame, and the Kotlin registry pin updated in the same change; the
-emit-before-close conformance case defers to RF-0.5b). Ratified entries below are
-the record of what was applied, not pending drafts. The seven design-decision
-entries remaining stay reserved — suggested order **#143, #147, #140, #141, #149,
-#145, #146** (wire-visible divergences first, honest re-scopes last).
+**Ratification status (2026-07-31):** ratified so far — the five no-decision
+entries **#142, #144, #148, #150, #151** (`ebp` @ `f926f60`); **#152** as option A
+plus the 1:1 intent sentence (`ebp` @ `bbd77d3`; emit-before-close conformance
+case defers to RF-0.5b); and **#143, #145, #146, #147**, each as option A (`ebp`
+@ `1e97bcb`; for #146 the stronger authenticated+encrypted profile — option B —
+is the recorded eventual direction, deferred, not rejected). Ratified entries
+below are the record of what was applied, not pending drafts. Remaining drafts,
+numbers reserved: **#140, #141, #149**.
 
 ---
 
@@ -109,7 +108,7 @@ the information. B remains a reasonable additional escape hatch for a later batc
 
 ---
 
-## #143 — dedupe can delete the retained-and-paused head (§15.2, §15.3)
+## #143 — dedupe can delete the retained-and-paused head (§15.2, §15.3) — **RATIFIED 2026-07-31 (option A)**
 
 **⚠ Design decision required: protect the paused head, or transfer the pause.** A is
 drafted.
@@ -172,7 +171,7 @@ deliberate (the example teaches the discipline; the golden pins the wire).
 
 ---
 
-## #145 — the accessibility duty is assigned to the endpoint with no data (§16.4, §17.2, §17.4)
+## #145 — the accessibility duty is assigned to the endpoint with no data (§16.4, §17.2, §17.4) — **RATIFIED 2026-07-31 (option A)**
 
 **⚠ Design decision required: derivation floor vs required member.** A is drafted.
 
@@ -202,7 +201,7 @@ closes at zero cost.
 
 ---
 
-## #146 — the loopback threat model excludes an attacker that needs no privilege (§9.3, §23.6, §5.2)
+## #146 — the loopback threat model excludes an attacker that needs no privilege (§9.3, §23.6, §5.2) — **RATIFIED 2026-07-31 (option A)**
 
 **⚠ Design decision required: honest re-scope vs a real integrity layer.** A is
 drafted.
@@ -255,7 +254,7 @@ patch.
 
 ---
 
-## #147 — the pre-auth surface is obligatory but has no eviction, aging, or fairness rule (§5.2, §9.1)
+## #147 — the pre-auth surface is obligatory but has no eviction, aging, or fairness rule (§5.2, §9.1) — **RATIFIED 2026-07-31 (option A)**
 
 **⚠ Design decision required: eviction discipline and rate-limit keying.** A is
 drafted.
@@ -442,11 +441,11 @@ whichever way this ratifies.
 | 140 | effective-clock ratchet unbounded forward | §15.2 | **yes — corroboration bound vs monotonic accounting** | none |
 | 141 | surface-ID floors non-reclaimable | §13.1, §11, §22.1 | **yes — release grain (per-ID vs reset-all)** | contract + goldens |
 | 142 (ratified 2026-07-31) | capture arithmetic exceeds event budget | §4.5 | no | none |
-| 143 | dedupe deletes the paused head | §15.2, §15.3 | **yes — protect head vs transfer pause** | none |
+| 143 (ratified 2026-07-31, A) | dedupe deletes the paused head | §15.2, §15.3 | **yes — protect head vs transfer pause** | none |
 | 144 (ratified 2026-07-31) | dedupe key space flat, examples disagree | §15.2, §14.1, §21.1 | no | none |
-| 145 | accessibility duty has no data | §16.4, §17.2, §17.4 | **yes — derivation floor vs required member** | none |
-| 146 | "privileged" mis-scopes the local MITM | §9.3, §23.6, §5.2 | **yes — re-scope vs integrity layer** | none |
-| 147 | pre-auth surface: no eviction/aging; limiter keyed on peer IDs | §5.2, §9.1 | **yes — eviction discipline + keying** | none |
+| 145 (ratified 2026-07-31, A) | accessibility duty has no data | §16.4, §17.2, §17.4 | **yes — derivation floor vs required member** | none |
+| 146 (ratified 2026-07-31, A) | "privileged" mis-scopes the local MITM | §9.3, §23.6, §5.2 | **yes — re-scope vs integrity layer** | none |
+| 147 (ratified 2026-07-31, A) | pre-auth surface: no eviction/aging; limiter keyed on peer IDs | §5.2, §9.1 | **yes — eviction discipline + keying** | none |
 | 148 (ratified 2026-07-31) | results don't absorb floors; supersession pending-inbound undefined | §13.2, §5.2 | no | none |
 | 149 | revision-space exhaustion undefined | §13.1, §4.2 | **yes — terminal rejection vs epochs** | none |
 | 150 (ratified 2026-07-31) | contract projection: incomplete gate, unstated | §24.4 | no | none |

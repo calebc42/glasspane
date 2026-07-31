@@ -231,6 +231,23 @@ A re-founding does not start on unpushed, known-defective ground.
 **Gate:** clean `git status` on both repos, remotes current **with upstreams
 set**, P1 ledger empty (including `granted` gating), device smoke green.
 
+**Status (2026-07-31):** items 1–3 done. Pushes verified (both upstreams set,
+zero unpushed commits). The P1 ledger was already empty when execution
+started: JA-6's five P1s and JA-4 P1-6 landed 2026-07-28 (`e6726e1`,
+`9a5d0d5`, with their regression tests) — item 2's "open" framing was stale
+from the plan's write date. `granted` gating landed with the commit carrying
+this note: `ebp--method-capabilities` (13 gated methods) is pinned against
+`ebp/contract.json` by `ebp-test-method-capability-table-matches-contract`
+(both directions, `surface.update`'s namespace-conditional gate asserted as
+deliberately outside the table); failure mode is a `ebp-ungranted` signal
+raised in both send funnels ahead of the overload ceiling, fail-closed
+pre-welcome; `jetpacs-theme.el:471`'s ungranted-branch taxonomy is unchanged
+(callers that gate above never reach the signal). Outstanding for the gate:
+**item 4, the device smoke (Caleb)** — and the five untracked
+`docs/lookup-tables/*.org` stand between the repo and the literal "clean
+`git status`" condition (commit or ignore: Caleb's call; they predate this
+rung).
+
 ---
 
 ## RF-0.5 — Process-scope the listener, then make it survive (added 2026-07-31)

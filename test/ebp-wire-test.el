@@ -250,6 +250,54 @@ safe integers; null and fractional numbers never."
                                        :test #'equal)))
     (should (ebp-valid-proof-p (plist-get auth :client_proof)))))
 
+;;;; The granted gate (SPEC 24.2) and its contract pin
+
+(ert-deftest ebp-test-method-capability-table-matches-contract ()
+  "`ebp--method-capabilities' ≡ the contract's gated Emacs-sender methods.
+Both directions, like Kotlin's `methodRegistryMatchesContract': every
+unconditionally gated emacs/either-sender method appears with the
+contract's capability, and nothing else appears.  `core' rows are
+ungated by definition; `core-or-surface-capability' (surface.update)
+is namespace-conditional and deliberately outside a method-level
+table — asserted here so its absence stays a decision, not drift."
+  (let* ((contract (ebp-test--read-json
+                    (expand-file-name "contract.json" ebp-test--ebp)))
+         (methods (alist-get 'methods contract))
+         (expected
+          (cl-loop for (m . row) in methods
+                   for sender = (alist-get 'sender row)
+                   for cap = (alist-get 'capability row)
+                   when (and (member sender '("emacs" "either"))
+                             (not (member cap '("core"
+                                                "core-or-surface-capability"))))
+                   collect (cons m cap))))
+    (should (equal "core-or-surface-capability"
+                   (alist-get 'capability
+                              (alist-get 'surface\.update methods))))
+    (should (null (cl-set-exclusive-or expected ebp--method-capabilities
+                                       :test #'equal)))))
+
+(ert-deftest ebp-test-granted-gate-refuses-ungranted-sends ()
+  "Gated methods signal `ebp-ungranted' unless the welcome granted them.
+Fail closed pre-welcome; core methods never gate; the gate sits in the
+notify funnel ahead of any wire write."
+  (let ((client (ebp-client-create
+                 :receipt-file (make-temp-file "ebp-gate-test"))))
+    ;; Fail closed: nothing absorbed yet.
+    (should-error (ebp-client--check-granted client 'theme\.set)
+                  :type 'ebp-ungranted)
+    (setf (ebp-client-granted client) ["theme"])
+    (ebp-client--check-granted client 'theme\.set)      ; granted → no signal
+    (ebp-client--check-granted client 'queue\.replay)   ; core → never gated
+    (let ((err (should-error (ebp-client--check-granted client 'dialog\.show)
+                             :type 'ebp-ungranted)))
+      (should (equal (cdr err) '(dialog\.show "surfaces.dialog"))))
+    ;; The funnel refuses before jsonrpc is ever reached.
+    (cl-letf (((symbol-function 'jsonrpc-notify)
+               (lambda (&rest _) (ert-fail "ungranted notify reached the wire"))))
+      (should-error (ebp-client-notify client 'dialog\.show '(:dialog "d"))
+                    :type 'ebp-ungranted))))
+
 ;;;; Duplicate members and nonce grammar
 
 (ert-deftest ebp-test-duplicate-member-scan ()
@@ -1303,6 +1351,9 @@ exactly-once.  The library calls are stubbed so the ceiling logic is
 what is under test; the loopback tests cover the live path."
   (let ((client (ebp-client-create :receipt-file (make-temp-file "ebp-ovl")))
         (sent '()) (refusals '()))
+    ;; The ceiling sits after the SPEC 24.2 granted gate; grant the
+    ;; capability so the ceiling, not the gate, is what refuses here.
+    (setf (ebp-client-granted client) ["surfaces.dialog"])
     (cl-letf (((symbol-function 'jsonrpc-async-request)
                (cl-function
                 (lambda (_conn method _params &key success-fn

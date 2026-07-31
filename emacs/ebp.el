@@ -960,6 +960,50 @@ Doubles as a drain point: a paused reader resumes at the low-water mark."
        (ebp-client--inbound-resume ,client))
      ,@body))
 
+;; SPEC 24.2: the reference endpoint gates its own sends.  The welcome's
+;; `granted' was absorbed (SPEC 10.2) but never consulted — the v2
+;; review's open P1: `theme.set'/`dialog.show' emitted unconditionally,
+;; so a consumer using ebp.el as the reference endpoint was ungated.
+(define-error 'ebp-ungranted
+              "EBP method requires a capability the welcome did not grant")
+
+(defconst ebp--method-capabilities
+  '((dialog\.show       . "surfaces.dialog")
+    (toast\.show        . "presentation.toast")
+    (pie_menu\.show     . "presentation.pie-menu")
+    (pie_menu\.dismiss  . "presentation.pie-menu")
+    (theme\.set         . "theme")
+    (reminders\.set     . "reminders.owner")
+    (edit\.resync       . "editor.sync")
+    (edit\.apply        . "editor.sync")
+    (diagnostics\.show  . "editor.sync")
+    (eldoc\.show        . "editor.sync")
+    (fontify\.show      . "editor.sync")
+    (capability\.invoke . "capabilities")
+    (triggers\.set      . "triggers"))
+  "Emacs-sender method → the SPEC 22.1 capability that gates it.
+Mirrors the `capability' field of the contract's method registry for
+every unconditionally gated Emacs-or-either-sender method; the wire
+suite pins the two together so registry drift is a test failure, not a
+runtime surprise (the same contract the Kotlin `MethodRegistry`
+carries).  Methods whose contract capability is `core' are ungated and
+deliberately absent.  `surface.update' is `core-or-surface-capability':
+its gate depends on the surface namespace, which a method-level table
+cannot express, so the namespace rule stays with the callers.")
+
+(defun ebp-client--check-granted (client method)
+  "Signal `ebp-ungranted' unless METHOD's gating capability was granted.
+Fail closed: before any welcome is absorbed, every gated METHOD
+refuses — `granted' is nil and a gated send pre-`READY' is illegal
+anyway (SPEC 11).  Signal data is (METHOD CAPABILITY).  Callers that
+gate above this (`jetpacs-granted-p' branches) never reach the signal,
+so their user-visible taxonomy is unchanged; a caller that reaches it
+has a gating bug, and the reference endpoint refuses to convert that
+bug into non-conformant wire traffic."
+  (when-let* ((cap (alist-get method ebp--method-capabilities)))
+    (unless (seq-contains-p (ebp-client-granted client) cap)
+      (signal 'ebp-ungranted (list method cap)))))
+
 (defun ebp-client--request (client method params callback &optional timeout)
   "Send a request through jsonrpc.el; ids are the library's integers.
 CALLBACK receives (RESULT ERROR); exactly one is non-nil except for the
@@ -982,7 +1026,12 @@ exactly once with `1401 overloaded' — self-inflicted load never closes
 the connection and never touches the wire.  `queue.replay' is exempt:
 the §15.3 replay is single-flight, so it cannot be the resource the
 ceiling protects, while refusing it would stall durable delivery on our
-own load (§22.3's forged-`blocked_by' clause)."
+own load (§22.3's forged-`blocked_by' clause).
+
+Signals `ebp-ungranted' for a capability-gated METHOD the session has
+not granted (SPEC 24.2) — before the overload ceiling, since an
+ungranted send is a caller bug, never load."
+  (ebp-client--check-granted client method)
   (when (and (ebp-client-outstanding-held client)
              (<= (ebp-client-outstanding client) ebp-overload-resume))
     (setf (ebp-client-outstanding-held client) nil))
@@ -1062,7 +1111,10 @@ caller that abandons must arrange for its callback to no-op afterwards."
   (ebp-client--cancel client id))
 
 (defun ebp-client-notify (client method params)
-  "Send a notification (SPEC 7.1)."
+  "Send a notification (SPEC 7.1).
+Signals `ebp-ungranted' for a capability-gated METHOD the session has
+not granted (SPEC 24.2; fail closed before any welcome)."
+  (ebp-client--check-granted client method)
   (jsonrpc-notify (ebp-client-connection client) method params))
 
 ;;;###autoload

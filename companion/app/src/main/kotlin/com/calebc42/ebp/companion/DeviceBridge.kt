@@ -92,7 +92,13 @@ class DeviceBridge(
 
     // SPEC 13.1/15.1/18.6: the durable stores are process-wide singletons
     // (CompanionStores), shared with cold-started manifest receivers.
-    val store = CompanionStores.surfaces(appContext)
+    // `store` is lazy because SurfaceStore's init reads and revalidates the
+    // whole surfaces file, and since RF-0.5a this constructor runs in
+    // Application.onCreate on the main thread at every process start —
+    // including broadcast-only cold starts that never render a surface.
+    // First touch is on a bridge/connection thread (serve(), listeners),
+    // the same place the cached-theme read already lives.
+    val store by lazy { CompanionStores.surfaces(appContext) }
     val queue = CompanionStores.queue(appContext)
     private val reminders = CompanionStores.reminders(appContext)
     private val triggers = CompanionStores.triggers(appContext)

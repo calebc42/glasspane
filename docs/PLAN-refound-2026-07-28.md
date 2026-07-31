@@ -274,6 +274,36 @@ into a destroyed Activity's callbacks.
 an alarm leaves the listener reachable; no bridge callback closes over an
 Activity.
 
+**Status: GATE CLOSED 2026-07-31.** The bridge and all four presentation
+flows moved to `EbpApplication` (listener started last, after durable
+recovery); MainActivity holds zero state. Device evidence: a
+broadcast-started process with **zero activities** answered a dial with
+`ready`/`applied` (impossible pre-change — and note the correct simulation
+is process death via `am kill` + an *exported* receiver: force-stop puts the
+app in the stopped state where broadcasts are silently ignored, the same
+platform fact behind RF-5b's rewritten gate); a session held across a
+physical rotation pushed `applied` both sides with the post-rotation render
+eyewitness-confirmed (pre-change the recreated Activity could not see the
+first bridge's pushes). An adversarial review fleet (3 lenses → 11
+independent verifiers) confirmed wire bytes unchanged and surfaced one real
+regression — the surface store's eager load moving onto the main thread for
+broadcast-only cold starts — fixed with a lazy delegate (first touch on
+bridge threads, like the cached-theme read). Two bonus fixes ride along: a
+confirm-parked destructive action now survives recreation, and the cached
+surface stays rendered across rotation (§13.5 SHOULD).
+
+**Carried findings from the review (pre-existing, NOT this rung's — filed
+so they are not rediscovered):** (1) a superseded session's async teardown
+can null the presentation flows / wipe editor mirrors after the new session
+presents — fix belongs to **RF-0.5b** (tag flow writes with the owning
+engine, the `clearLiveSession` CAS pattern); (2) notification posting paths
+(including the already-headless reminder path) have no
+`areNotificationsEnabled` check and no diagnostic on the silent drop;
+(3) SPEC §18.1 single-slot tension: completing dialog B nulls the flow while
+a still-outstanding dialog A is never re-presented; (4) improvement idea:
+seed `currentSpec` from the SurfaceStore at process start, symmetric with
+`loadTheme` (§10.4/§13.5).
+
 **RF-0.5b — foreground service + the reconnection-policy decision (after the
 RF-2b exit; new Kotlin written earlier would be converted twice).** The FGS
 restores v1's availability posture (`<service>` +

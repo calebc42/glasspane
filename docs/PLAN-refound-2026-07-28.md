@@ -242,11 +242,14 @@ this note: `ebp--method-capabilities` (13 gated methods) is pinned against
 deliberately outside the table); failure mode is a `ebp-ungranted` signal
 raised in both send funnels ahead of the overload ceiling, fail-closed
 pre-welcome; `jetpacs-theme.el:471`'s ungranted-branch taxonomy is unchanged
-(callers that gate above never reach the signal). Outstanding for the gate:
-**item 4, the device smoke (Caleb)** — and the five untracked
-`docs/lookup-tables/*.org` stand between the repo and the literal "clean
-`git status`" condition (commit or ignore: Caleb's call; they predate this
-rung).
+(callers that gate above never reach the signal). **GATE CLOSED
+2026-07-31:** the device smoke ran green on the Pixel Tablet (surface
+round-trip `applied`; dialog `submitted` with captured fields; a
+disconnected tap surviving force-stop and replaying on reconnect,
+`Count: 1`; and the granted gate refusing an ungranted `dialog.show` on
+the live wire with the session staying `ready`), the lookup tables were
+committed (regenerated from source, `1415180`/`18023dc`), and both
+repos are pushed with upstreams current.
 
 ---
 
@@ -341,28 +344,18 @@ file — no silent caps).
 **Gate:** intentionally break one wire test, one golden, one elisp test →
 three red runs → revert → green. Red-on-regression *demonstrated*, not assumed.
 
-**Status (2026-07-31):** workflow landed (`.github/workflows/ci.yml`,
-commit `dfea949`) — four jobs, v1's proven choices inherited
-(`purcell/setup-emacs` @ 30.1, `submodules: recursive`, temurin 21 +
-setup-gradle, `slop-fork/**` filter), exclusions documented in-file. All
-four job command sets pre-flighted green locally. **Three-red gate:
-prepared, awaiting pushes (Caleb).** Each breakage is verified locally
-red; the branches exist so main never carries a broken commit:
-
-1. Push main → expect all four jobs **green**.
-2. Push the ebp branch first: `git -C ebp push origin
-   slop-fork/ci-red-golden` (a corrupted `frames.golden` — never merge).
-   Then the three parent branches: `git push origin slop-fork/ci-red-wire
-   slop-fork/ci-red-elisp slop-fork/ci-red-golden`.
-3. Expect exactly: `ci-red-wire` → **wire** red
-   (`JsonEqualityTest.absentAndJsonNullAreDistinctBothDirections`);
-   `ci-red-elisp` → **elisp** red (`ebp-test-request-id-grammar`);
-   `ci-red-golden` → **spec** red (`validate.py`: unknown method +
-   `surface.release` coverage) — the pointer-bump vector, which is how
-   golden drift would actually arrive.
-4. Cleanup: delete all four remote branches (three parent + one ebp) and
-   their local copies; tick this note with the run links. The rung's
-   gate closes on 1 green + 3 correctly-attributed reds.
+**Status: GATE CLOSED 2026-07-31.** Workflow landed
+(`.github/workflows/ci.yml`, commit `dfea949`) — four jobs, v1's proven
+choices inherited, exclusions documented in-file. The three-red gate ran
+on throwaway `slop-fork/ci-red-*` branches (main never carried a broken
+commit): all four jobs **green** on main, then exactly one
+correctly-attributed red per branch — wire
+(`JsonEqualityTest.absentAndJsonNullAreDistinctBothDirections`), elisp
+(`ebp-test-request-id-grammar`), and spec (`validate.py` catching a
+corrupted golden arriving via submodule pointer bump — the vector golden
+drift would really use). Confirmed by Caleb 2026-07-31; all four demo
+branches deleted, remote and local. Red-on-regression is now
+*demonstrated*, and I6 binds from here: C2 onward requires CI green.
 
 **RF-1b — Robolectric + Compose renderer tests (deferred past C6).** Why it
 defers, recorded: the renderer's protection during C6 is the APK smoke plus

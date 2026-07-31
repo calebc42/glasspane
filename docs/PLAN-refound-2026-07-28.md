@@ -123,8 +123,9 @@ on **both** sides: the child runbook's ledger and this ladder's row.
 
 - **I1 — `ebp/` is frozen through RF-2; wire-byte drift is expected (restated
   2026-07-31).** No file under `ebp/` is modified during RF-2 and goldens are
-  never regenerated; `ebp/goldens/` + `validate.py` (38 frames, 17 wire
-  fixtures, three chunkings — the counts `validate.py` itself prints) must
+  never regenerated; `ebp/goldens/` + `validate.py` (39 frames, 17 wire
+  fixtures, three chunkings as of 2026-07-31 — the counts `validate.py`
+  itself prints are the authority) must
   pass unmodified, and the CI assertion is
   `git status --short ebp/` **empty**. Wire-byte drift is expected and
   SPEC-legal: §24 mandates *semantic* body comparison and forbids requiring
@@ -134,11 +135,20 @@ on **both** sides: the child runbook's ledger and this ladder's row.
   canonical-JSON amendment (audit P2-5). Generalised into the
   **enforcement-naming rule**: a stated invariant names the tool and scope
   that enforce it; an invariant nothing enforces is recorded as a wish, not an
-  invariant. **Exemption (ratified 2026-07-31):** a prose-only SPEC amendment
-  ratified by Caleb — touching no golden, contract entry, fixture, or limit
-  value — may land in `ebp/` during the window; #142/#144/#148/#150/#151
-  landed under it (`ebp` @ `f926f60`) with all gates re-run green. The freeze
-  protects the conversion's *reference artifacts*, and prose is not one.
+  invariant. **Exemptions (ratified 2026-07-31), two classes:** (a) a
+  prose-only SPEC amendment ratified by Caleb — touching no golden, contract
+  entry, fixture, or limit value — may land in `ebp/` during the window;
+  #142/#144/#148/#150/#151 landed under it (`ebp` @ `f926f60`). (b) An
+  **additive registry amendment** ratified by Caleb — a new §11 method with
+  its contract entry and the coverage-floor golden *frame* validate.py
+  requires, modifying no existing golden, fixture, or limit, with both
+  cross-implementation registry pins updated in the same change — may also
+  land; #152 landed under it (`ebp` @ `bbd77d3`; the Kotlin
+  `MethodRegistry` pin caught the drift exactly as designed, and the one-line
+  mirror update rode the pointer bump). All gates re-run green both times.
+  The freeze protects the conversion's *reference artifacts*: nothing the
+  RF-2b conversion is judged against may change, and under (a)/(b) nothing
+  did.
 - **I2 — The dependency arrow points one way: Jetpacs → EBP.** No `jetpacs.*`
   symbol, method name, or schema in `:wire`, `ebp.el`, `ebp-data.el`, or
   `ebp-room3`. (Upstream candidacy dies the day this breaks.)
@@ -269,8 +279,16 @@ oscillate forever):
 "not background-execution privileges") are a security-conformance burden, not
 a checkbox.
 
+**#152 ratified 2026-07-31** (`session.superseded`, option A + the 1:1 intent
+sentence): the rules above are now normative duties, not just plan
+discipline. This rung implements the Companion's emit-before-close, the
+Emacs-side stand-down (no automatic redial ≥60 s on receiving it), and the
+deferred §24.6 emit-before-close conformance case; the §11/contract/golden
+registration already landed with the ratification.
+
 **Gate:** 0.5a's smoke stays green under the FGS; a two-Emacsen supersession
-flap converges under the backoff rules instead of oscillating.
+flap converges under the backoff rules instead of oscillating; the
+`session.superseded` conformance case is green.
 
 ---
 

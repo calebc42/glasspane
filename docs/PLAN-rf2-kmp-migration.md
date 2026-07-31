@@ -70,7 +70,13 @@ one decision each and were cheaper to pin than to re-derive at 625 call sites;
 (4) five prose-only SPEC amendments (#142/#144/#148/#150/#151) were ratified
 into `ebp/` mid-window on Caleb's order (2026-07-31, `ebp` @ `f926f60`) — no
 golden, contract, or fixture change; all four gates re-run green; PLAN-refound
-I1 now carries the matching prose-only exemption.
+I1 now carries the matching prose-only exemption;
+(5) #152 (`session.superseded`) was ratified 2026-07-31 (`ebp` @ `bbd77d3`) —
+additive: contract `methods` entry + one new `frames.golden` frame
+(validate.py's coverage floor requires it) + a one-line
+`MethodRegistry.kt` mirror update after `methodRegistryMatchesContract`
+caught the drift exactly as designed; no existing golden, fixture, or limit
+changed; all four gates re-run green; I1 exemption class (b) is the record.
 
 ---
 

@@ -9,9 +9,12 @@ appendix leads; anchors hand-verified in text).
 
 **Ratification status (2026-07-31):** the five no-decision entries — **#142, #144,
 #148, #150, #151** — are **ratified** (Caleb, 2026-07-31; `ebp` @ `f926f60`, all
-gates re-run green). Their entries below are now the record of what was applied,
-not pending drafts. The eight design-decision entries remain drafts and their
-numbers stay reserved — suggested order **#152, #143, #147, #140, #141, #149,
+gates re-run green), and **#152 is ratified as option A plus the 1:1 intent
+sentence** (Caleb, 2026-07-31; `ebp` @ `bbd77d3` — contract entry, coverage-floor
+golden frame, and the Kotlin registry pin updated in the same change; the
+emit-before-close conformance case defers to RF-0.5b). Ratified entries below are
+the record of what was applied, not pending drafts. The seven design-decision
+entries remaining stay reserved — suggested order **#143, #147, #140, #141, #149,
 #145, #146** (wire-visible divergences first, honest re-scopes last).
 
 ---
@@ -393,7 +396,7 @@ path has its pressure valve.
 
 ---
 
-## #152 — supersession has no signal: the loser cannot distinguish it from a crash (§5.2, §11)
+## #152 — supersession has no signal: the loser cannot distinguish it from a crash (§5.2, §11) — **RATIFIED 2026-07-31 (option A + intent sentence)**
 
 **⚠ Design decision required: a wire signal vs a backoff-only rule.** A is drafted.
 
@@ -448,4 +451,4 @@ whichever way this ratifies.
 | 149 | revision-space exhaustion undefined | §13.1, §4.2 | **yes — terminal rejection vs epochs** | none |
 | 150 (ratified 2026-07-31) | contract projection: incomplete gate, unstated | §24.4 | no | none |
 | 151 (ratified 2026-07-31) | standing rule: monotone resources + enforcement naming | §25 | no | none |
-| 152 | supersession has no signal | §5.2, §11 | **yes — notification vs backoff-only** | contract + goldens |
+| 152 (ratified 2026-07-31, A + intent) | supersession has no signal | §5.2, §11 | **yes — notification vs backoff-only** | contract + goldens |

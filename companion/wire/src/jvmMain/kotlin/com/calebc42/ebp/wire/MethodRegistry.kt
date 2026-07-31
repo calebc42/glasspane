@@ -19,6 +19,9 @@ val METHOD_REGISTRY: Map<String, MethodSpec> = mapOf(
     "session.hello" to MethodSpec(Sender.EMACS, true, setOf(SessionState.CONNECTED)),
     "auth.response" to MethodSpec(Sender.EMACS, true, setOf(SessionState.CHALLENGED)),
     "session.ready" to MethodSpec(Sender.EMACS, true, setOf(SessionState.SYNCING)),
+    // SPEC 5.2 (#152): sent on the old session's transport before the
+    // supersession close; the emit itself lands with the reconnection rung.
+    "session.superseded" to MethodSpec(Sender.COMPANION, false, SR),
     "surface.update" to MethodSpec(Sender.EMACS, true, SR),
     "surface.remove" to MethodSpec(Sender.EMACS, true, SR),
     "queue.replay" to MethodSpec(Sender.EMACS, true, SR),

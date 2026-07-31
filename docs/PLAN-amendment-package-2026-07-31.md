@@ -27,7 +27,7 @@ actual enforcement, so it does not get to assert unverified anchors.
 |---|---|---|
 | V | Anchor + claim verification pass | **DONE 2026-07-31** — see §0.1 |
 | D1 | `docs/AUDIT-plan-spec-adversarial-2026-07-31.md` | **DONE 2026-07-31** |
-| D2 | Amendments to `docs/PLAN-refound-2026-07-28.md` (+ `PLAN-rf2` ledger edits) | OPEN — blocked on D1 |
+| D2 | Amendments to `docs/PLAN-refound-2026-07-28.md` (+ `PLAN-rf2` ledger edits) | **DONE 2026-07-31** |
 | D3 | `docs/DRAFT-amendments-140-152.md` | OPEN — blocked on D1 |
 | D4 | `docs/LIBRARY-LEDGER.md` | OPEN — the enforcement point for the library-adoption rule |
 

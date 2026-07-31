@@ -2,7 +2,7 @@
 
 ## Context
 
-RF-2 of [docs/PLAN-refound-2026-07-28.md](../../pkb/projects/jetpacs/jetpacs/llm-poc-2/docs/PLAN-refound-2026-07-28.md): make the wire core's platform-freedom compiler-enforced (KMP `commonMain`) and swap org.json for kotlinx.serialization's `JsonElement`. Hand-executed by Caleb; local gates only (no CI — deviation from the refound plan, ratified 2026-07-28); all 34 test files stay in `jvmTest`.
+RF-2 of [PLAN-refound-2026-07-28.md](PLAN-refound-2026-07-28.md): make the wire core's platform-freedom compiler-enforced (KMP `commonMain`) and swap org.json for kotlinx.serialization's `JsonElement`. Hand-executed by Caleb. Local gates through checkpoint B1 (deviation ratified 2026-07-28, grandfathered by PLAN-refound I6 as amended 2026-07-31); **C2 onward requires CI green — RF-1a lands first**. All 34 test files stay in `jvmTest`.
 
 Exploration facts this plan builds on (verified):
 - `EbpJson.parse` is already a hand-rolled, KMP-clean strict parser producing a custom `EbpValue` tree. org.json enters only via the projection `toOrgJson` (EbpJson.kt:65-78), which deliberately narrows `EInt`→`Int` so `CompanionEngine.kt:212`'s `(msg.opt("id") as? Int)` response-id lookup matches.
@@ -24,7 +24,14 @@ Exploration facts this plan builds on (verified):
 | G-spec | `cd $POC && python3 ebp/validate.py` | goldens/contract/spec-sync untouched |
 | G-elisp | `cd $POC && test/run-tests.sh` | ~26 ERT suites (elisp side; doesn't exercise Kotlin) |
 
-**I1 restated precisely**: (a) `git status --short $POC/ebp` shows no golden edits — goldens are never touched; (b) G-wire + G-app green; (c) G-spec green. It is *not* "output bytes identical" — byte drift is expected and SPEC-legal.
+**I1 restated precisely**: (a) `git status --short $POC/ebp` shows no golden edits — goldens are never touched; (b) G-wire + G-app green; (c) G-spec green. It is *not* "output bytes identical" — byte drift is expected and SPEC-legal. (PLAN-refound's I1 now says the same thing — the cross-document contradiction was fixed 2026-07-31.)
+
+**Standing instruction for the whole RF-1→C6 window (added 2026-07-31): every
+test or fixture builds JSON from string literals**
+(`Json.parseToJsonElement("""…""")`, literal `.json` files) — **never
+programmatic `JSONObject().put(...)` chains**, so conversion becomes a
+one-line parser swap per fixture. And RF-1b's reference images are called
+**render snapshots**, never "goldens" — I1's noun is already overloaded.
 
 **Branch/rollback**: one branch per sub-step (`rf-2a`, `rf-2b`, `rf-2c`) from a green tip; commit at every named checkpoint; rollback = `git reset --hard <checkpoint>`. Red commits are fine mid-`rf-2b` — the branch is the workspace, the merge is gated.
 
@@ -36,7 +43,7 @@ Exploration facts this plan builds on (verified):
 
 | Checkpoint | What | Status |
 |---|---|---|
-| P0 | Phase 0.2 pre-swap pin tests | **NOT DONE** — next step; still writable, org.json is still live |
+| P0 | Phase 0.2 pre-swap pin tests | **NOT DONE — hard prerequisite of C2** (amended 2026-07-31: order is RF-1a → P0 → cut `rf-2b` → C2); still writable, org.json is still live |
 | A | RF-2a KMP flip, sources to `jvmMain` | DONE `7f6bfde` |
 | B0 | kotlinx-serialization-json dependency (`api`) | DONE `2271211` |
 | B1 | `JsonAccess.kt` + `EbpJson.toJsonElement` (additive) | DONE `94720a5` |
@@ -255,4 +262,4 @@ APK smoke (manual, clean install): pair, one surface round-trip, one dialog, one
 
 ## Out of scope (explicit)
 
-CI (RF-1, later rung), kotlin.test/commonTest port (when a second target lands), RF-3 (module seam) and RF-4 (`ebp.data`) — separate plans. JA-4/JA-6 P1 batches: Claude executes next, independent of this runbook.
+kotlin.test/commonTest port (when a second target lands), RF-3 (module seam) and RF-4 (`ebp.data`) — separate plans. **CI is no longer out of scope** (amended 2026-07-31): RF-1a precedes C2 in the refound ladder, and C2 onward requires CI green. JA-4/JA-6 P1 batches: Claude executes next, independent of this runbook.

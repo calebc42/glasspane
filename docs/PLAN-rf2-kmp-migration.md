@@ -66,7 +66,11 @@ Phase 1 — the pin tests are still valid and still pass against org.json, but
 write them before C2 or the conversion loses its semantic-delta harness;
 (2) B1 shipped `JsonAccessTest` (not called for in 2.2) — the accessors encode
 one decision each and were cheaper to pin than to re-derive at 625 call sites;
-(3) `isNullOrAbsent` is a named helper rather than the inline `let` of 2.3.
+(3) `isNullOrAbsent` is a named helper rather than the inline `let` of 2.3;
+(4) five prose-only SPEC amendments (#142/#144/#148/#150/#151) were ratified
+into `ebp/` mid-window on Caleb's order (2026-07-31, `ebp` @ `f926f60`) — no
+golden, contract, or fixture change; all four gates re-run green; PLAN-refound
+I1 now carries the matching prose-only exemption.
 
 ---
 

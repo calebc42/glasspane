@@ -40,7 +40,7 @@ by **graduating the name**, not the tree.
 | RF-1a | CI: elisp + spec + wire + app; three-red demo. No new deps | RF-0 | Elisp suite is self-contained; the wire job needs the submodule |
 | RF-0.5a | Process-scope the listener in `EbpApplication`; absorb the rotation defect | RF-1a | Structural, not JSON — land before C2 so it does not enlarge C6 and every later smoke is trustworthy |
 | P0 | The owed pre-swap pin tests, string-literal fixtures | RF-1a | Enforced from birth, not demonstrated once |
-| C2–C6 | The conversion, on branch `rf-2b` (RF-2a/B0/B1 done — [PLAN-rf2-kmp-migration.md](PLAN-rf2-kmp-migration.md) §0) | P0, RF-1a | Nothing under `ebp/` may change |
+| C2–C6 | The conversion, on branch `rf-2b` (RF-2a/B0/B1 done — [PLAN-rf2-kmp-migration.md](PLAN-rf2-kmp-migration.md) §0) | P0, RF-1a | Nothing under `ebp/` may change (prose-only ratifications by Caleb exempt — see I1) |
 | spike-elisp | vulpea → flat rows | — (parallel now) | Zero Kotlin, zero `ebp/` |
 | RF-2c | Hoist to `commonMain` | RF-2b exit | |
 | spike-kotlin | table + apply-rows, `:app` only, via `surface.update` + `table` | RF-2b exit | Produces the measurement that decides RF-4a's carrier |
@@ -134,7 +134,11 @@ on **both** sides: the child runbook's ledger and this ladder's row.
   canonical-JSON amendment (audit P2-5). Generalised into the
   **enforcement-naming rule**: a stated invariant names the tool and scope
   that enforce it; an invariant nothing enforces is recorded as a wish, not an
-  invariant.
+  invariant. **Exemption (ratified 2026-07-31):** a prose-only SPEC amendment
+  ratified by Caleb — touching no golden, contract entry, fixture, or limit
+  value — may land in `ebp/` during the window; #142/#144/#148/#150/#151
+  landed under it (`ebp` @ `f926f60`) with all gates re-run green. The freeze
+  protects the conversion's *reference artifacts*, and prose is not one.
 - **I2 — The dependency arrow points one way: Jetpacs → EBP.** No `jetpacs.*`
   symbol, method name, or schema in `:wire`, `ebp.el`, `ebp-data.el`, or
   `ebp-room3`. (Upstream candidacy dies the day this breaks.)

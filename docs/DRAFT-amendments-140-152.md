@@ -7,8 +7,11 @@ appendix leads; anchors hand-verified in text).
 **These are drafts for ratification, not applied edits.** Each gives the
 `SPEC-CHANGES.md` row, the exact `SPEC.md` edits, and artifact changes.
 
-Ratification order: **#142, #144, #148, #150, #151** (no design decision), then the
-eight that need a shape call — suggested order **#152, #143, #147, #140, #141, #149,
+**Ratification status (2026-07-31):** the five no-decision entries — **#142, #144,
+#148, #150, #151** — are **ratified** (Caleb, 2026-07-31; `ebp` @ `f926f60`, all
+gates re-run green). Their entries below are now the record of what was applied,
+not pending drafts. The eight design-decision entries remain drafts and their
+numbers stay reserved — suggested order **#152, #143, #147, #140, #141, #149,
 #145, #146** (wire-visible divergences first, honest re-scopes last).
 
 ---
@@ -83,7 +86,7 @@ the information. B remains a reasonable additional escape hatch for a later batc
 
 ---
 
-## #142 — the capture arithmetic can exceed the event budget at the REQUIRED minimums (§4.5)
+## #142 — the capture arithmetic can exceed the event budget at the REQUIRED minimums (§4.5) — **RATIFIED 2026-07-31**
 
 **SPEC-CHANGES row:**
 
@@ -135,7 +138,7 @@ diagnostic window where an operator is looking at it.
 
 ---
 
-## #144 — the dedupe key space is flat, and the spec's own examples disagree about it (§14.1, §15.2, §21.1)
+## #144 — the dedupe key space is flat, and the spec's own examples disagree about it (§14.1, §15.2, §21.1) — **RATIFIED 2026-07-31**
 
 **SPEC-CHANGES row:**
 
@@ -292,7 +295,7 @@ observation does the same work more cheaply.
 
 ---
 
-## #148 — `applied`/`stale` are not floor-absorption points, and supersession's pending-inbound disposition is undefined (§13.2, §5.2)
+## #148 — `applied`/`stale` are not floor-absorption points, and supersession's pending-inbound disposition is undefined (§13.2, §5.2) — **RATIFIED 2026-07-31**
 
 **SPEC-CHANGES row:**
 
@@ -350,7 +353,7 @@ path has its pressure valve.
 
 ---
 
-## #150 — the contract projection is a necessary gate, not a complete one (§24.4)
+## #150 — the contract projection is a necessary gate, not a complete one (§24.4) — **RATIFIED 2026-07-31**
 
 **SPEC-CHANGES row:**
 
@@ -369,7 +372,7 @@ path has its pressure valve.
 
 ---
 
-## #151 — the standing rule: monotone resources state exhaustion; enforcement claims name their tool (§25)
+## #151 — the standing rule: monotone resources state exhaustion; enforcement claims name their tool (§25) — **RATIFIED 2026-07-31**
 
 **SPEC-CHANGES row:**
 
@@ -435,14 +438,14 @@ whichever way this ratifies.
 |---|---|---|---|---|
 | 140 | effective-clock ratchet unbounded forward | §15.2 | **yes — corroboration bound vs monotonic accounting** | none |
 | 141 | surface-ID floors non-reclaimable | §13.1, §11, §22.1 | **yes — release grain (per-ID vs reset-all)** | contract + goldens |
-| 142 | capture arithmetic exceeds event budget | §4.5 | no | none |
+| 142 (ratified 2026-07-31) | capture arithmetic exceeds event budget | §4.5 | no | none |
 | 143 | dedupe deletes the paused head | §15.2, §15.3 | **yes — protect head vs transfer pause** | none |
-| 144 | dedupe key space flat, examples disagree | §15.2, §14.1, §21.1 | no | none |
+| 144 (ratified 2026-07-31) | dedupe key space flat, examples disagree | §15.2, §14.1, §21.1 | no | none |
 | 145 | accessibility duty has no data | §16.4, §17.2, §17.4 | **yes — derivation floor vs required member** | none |
 | 146 | "privileged" mis-scopes the local MITM | §9.3, §23.6, §5.2 | **yes — re-scope vs integrity layer** | none |
 | 147 | pre-auth surface: no eviction/aging; limiter keyed on peer IDs | §5.2, §9.1 | **yes — eviction discipline + keying** | none |
-| 148 | results don't absorb floors; supersession pending-inbound undefined | §13.2, §5.2 | no | none |
+| 148 (ratified 2026-07-31) | results don't absorb floors; supersession pending-inbound undefined | §13.2, §5.2 | no | none |
 | 149 | revision-space exhaustion undefined | §13.1, §4.2 | **yes — terminal rejection vs epochs** | none |
-| 150 | contract projection: incomplete gate, unstated | §24.4 | no | none |
-| 151 | standing rule: monotone resources + enforcement naming | §25 | no | none |
+| 150 (ratified 2026-07-31) | contract projection: incomplete gate, unstated | §24.4 | no | none |
+| 151 (ratified 2026-07-31) | standing rule: monotone resources + enforcement naming | §25 | no | none |
 | 152 | supersession has no signal | §5.2, §11 | **yes — notification vs backoff-only** | contract + goldens |

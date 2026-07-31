@@ -4,7 +4,7 @@
 // chunk-size independence, verified by the same goldens/wire corpus.
 package com.calebc42.ebp.wire
 
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -65,8 +65,8 @@ class FrameDecoder {
     private var expected = -1  // declared body length, once the header parsed
     private var bodyStart = -1 // absolute index of the body's first byte
 
-    fun feed(bytes: ByteArray): List<JSONObject> =
-        mutableListOf<JSONObject>().also { feed(bytes, it::add) }
+    fun feed(bytes: ByteArray): List<JsonObject> =
+        mutableListOf<JsonObject>().also { feed(bytes, it::add) }
 
     /**
      * Deliver each complete message to CONSUMER in wire order as it is
@@ -75,7 +75,7 @@ class FrameDecoder {
      * ahead of a bad one in the same read is not lost — the live receiver
      * can answer the bad frame per SPEC 6.2 and keep the earlier work.
      */
-    fun feed(bytes: ByteArray, consumer: (JSONObject) -> Unit) {
+    fun feed(bytes: ByteArray, consumer: (JsonObject) -> Unit) {
         append(bytes)
         while (true) {
             if (expected < 0) {
@@ -177,7 +177,7 @@ class FrameDecoder {
      * Grammar, duplicate members, depth <= 64, surrogate pairing, integer
      * range, and finiteness are all enforced IN-PARSE by EbpJson — the two
      * compensating full-text re-scans this method used to run are gone. */
-    private fun parseBody(body: ByteArray): JSONObject {
+    private fun parseBody(body: ByteArray): JsonObject {
         val text = try {
             StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
@@ -189,7 +189,9 @@ class FrameDecoder {
         val value = EbpJson.parse(text)
         if (value !is EbpValue.EObj)
             throw InvalidRequest("top-level value is not a single message object")
-        return EbpJson.toOrgJson(value) as JSONObject
+        // The cast is the top-level-object check, same as before the swap:
+        // `value` is already known to be an EObj, so this cannot fail.
+        return EbpJson.toJsonElement(value) as JsonObject
     }
 }
 

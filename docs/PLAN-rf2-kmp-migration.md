@@ -78,7 +78,11 @@ additive: contract `methods` entry + one new `frames.golden` frame
 caught the drift exactly as designed; no existing golden, fixture, or limit
 changed; all four gates re-run green; I1 exemption class (b) is the record;
 (6) four more prose-only amendments (#143/#145/#146/#147) ratified 2026-07-31
-under exemption (a) (`ebp` @ `1e97bcb`); all gates re-run green.
+under exemption (a) (`ebp` @ `1e97bcb`); all gates re-run green;
+(7) #140 (prose, exemption (a)) and #141 (`surface.release` — additive method
++ contract entry + coverage-floor golden frame + `MethodRegistry.kt` mirror
+line, exemption (b)) ratified 2026-07-31 (`ebp` @ `83d6e08`); all gates
+re-run green.
 
 ---
 

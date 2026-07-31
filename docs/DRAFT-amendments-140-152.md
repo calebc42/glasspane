@@ -13,12 +13,15 @@ plus the 1:1 intent sentence (`ebp` @ `bbd77d3`; emit-before-close conformance
 case defers to RF-0.5b); and **#143, #145, #146, #147**, each as option A (`ebp`
 @ `1e97bcb`; for #146 the stronger authenticated+encrypted profile — option B —
 is the recorded eventual direction, deferred, not rejected). Ratified entries
-below are the record of what was applied, not pending drafts. Remaining drafts,
-numbers reserved: **#140, #141, #149**.
+below are the record of what was applied, not pending drafts. **#140 and #141** followed, each as
+option A (`ebp` @ `83d6e08`; #140's option B stays the recorded shape for a
+future protocol-major revision; #141's Companion-side apply defers to the
+implementation rung). The sole remaining draft, number reserved and **held at
+Caleb's direction** (2026-07-31, pending #141's valve proving out): **#149**.
 
 ---
 
-## #140 — the effective-clock ratchet is unbounded forward (§15.2)
+## #140 — the effective-clock ratchet is unbounded forward (§15.2) — **RATIFIED 2026-07-31 (option A; B recorded for a future major)**
 
 **⚠ Design decision required: how far to trust a single forward wall-clock step.**
 Two candidates; A is drafted, B is the deeper alternative.
@@ -57,7 +60,7 @@ major revision should adopt.
 
 ---
 
-## #141 — surface-ID floors are non-reclaimable, and the only remedy destroys everything (§13.1)
+## #141 — surface-ID floors are non-reclaimable, and the only remedy destroys everything (§13.1) — **RATIFIED 2026-07-31 (option A)**
 
 **⚠ Design decision required: the release mechanism's grain.** Two candidates; A is
 drafted.
@@ -438,8 +441,8 @@ whichever way this ratifies.
 
 | # | Hole | Sections | Needs a decision? | Artifacts |
 |---|---|---|---|---|
-| 140 | effective-clock ratchet unbounded forward | §15.2 | **yes — corroboration bound vs monotonic accounting** | none |
-| 141 | surface-ID floors non-reclaimable | §13.1, §11, §22.1 | **yes — release grain (per-ID vs reset-all)** | contract + goldens |
+| 140 (ratified 2026-07-31, A) | effective-clock ratchet unbounded forward | §15.2 | **yes — corroboration bound vs monotonic accounting** | none |
+| 141 (ratified 2026-07-31, A) | surface-ID floors non-reclaimable | §13.1, §11, §22.1 | **yes — release grain (per-ID vs reset-all)** | contract + goldens |
 | 142 (ratified 2026-07-31) | capture arithmetic exceeds event budget | §4.5 | no | none |
 | 143 (ratified 2026-07-31, A) | dedupe deletes the paused head | §15.2, §15.3 | **yes — protect head vs transfer pause** | none |
 | 144 (ratified 2026-07-31) | dedupe key space flat, examples disagree | §15.2, §14.1, §21.1 | no | none |

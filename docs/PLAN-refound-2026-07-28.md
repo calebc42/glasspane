@@ -604,7 +604,12 @@ points here.
 
 - **`ebp.nav` / Navigation 3** — sequenced after `ebp.data`; entirely disjoint
   from Room 3 (no dependency either direction). Gets the RF-4 treatment later:
-  `ebp.nav` module → `ebp-navigation3` → Jetpacs chrome.
+  `ebp.nav` module → `ebp-navigation3` → Jetpacs chrome. **Design constraint
+  recorded (2026-07-31, from amendment #141):** navigation materializes onto
+  **multi-view `app:*` specs + `view.switch`** — one surface, many views —
+  never one surface per destination; per-destination IDs are the churn
+  pattern that exhausts `max_surface_ids` floors, and `surface.release`
+  (#141) is the pressure valve for that pattern, not a license for it.
 - **`jetpacs-vroom3`** — the typed vulpea consumer (two-halved: elisp
   projection + compiled Room entities). Post-RF-4; needs the stable wire
   schema RF-4a defines.

@@ -43,7 +43,7 @@ one-line parser swap per fixture. And RF-1b's reference images are called
 
 | Checkpoint | What | Status |
 |---|---|---|
-| P0 | Phase 0.2 pre-swap pin tests | **NOT DONE — hard prerequisite of C2** (amended 2026-07-31: order is RF-1a → P0 → cut `rf-2b` → C2); still writable, org.json is still live |
+| P0 | Phase 0.2 pre-swap pin tests | **DONE 2026-07-31** — 23 pins added, all four gates green; `:wire:jvmTest` **39 suites / 354 tests** (was 331 — the post-swap parity floor). See §0.1 below |
 | A | RF-2a KMP flip, sources to `jvmMain` | DONE `7f6bfde` |
 | B0 | kotlinx-serialization-json dependency (`api`) | DONE `2271211` |
 | B1 | `JsonAccess.kt` + `EbpJson.toJsonElement` (additive) | DONE `94720a5` |
@@ -54,6 +54,42 @@ one-line parser swap per fixture. And RF-1b's reference images are called
 branch/rollback scheme): every commit so far is a green checkpoint, so the
 branch bought nothing. Cut `rf-2b` before C2 — that is where the directed red
 period starts and where rollback stops being a one-commit revert.
+
+### §0.1 P0 as executed (2026-07-31)
+
+**Where the pins live.** `PersistenceCompatTest.kt` (9, the upgrade gate),
+`PreSwapNumberTest.kt` (7, the number taxonomy), `EnvelopeIdTest.kt` (3, id
+identity), plus one each appended to `SubstitutionTest`, `TriggerTest`,
+`W6QueueTest`, and `DialogTest`. **Deviation from 0.2's placement:** the
+engine-level number/taxonomy pins were consolidated into one
+`PreSwapNumberTest` instead of being scattered across
+`ReminderTest`/`ActionEventTest`/`CapabilityTest`, so the C2–C6 executor has
+a single file to keep green; the unit-level pins stayed with their subjects
+as 0.2 specified.
+
+**Two corrections to 0.2, found by probing rather than assuming** (the
+behaviors were measured against the running org.json code before anything
+was pinned):
+
+1. **A JSONObject-built fixture cannot put a genuine float on the wire.**
+   org.json re-spells an integral double as an integer on serialization:
+   `JSONObject().put("at_ms", 5000.0).toString()` yields `{"at_ms":5000}`.
+   Every float/string pin therefore builds its frame as **raw text**. A pin
+   written the obvious way would have tested nothing.
+2. **0.2 item 2's `"ms": 100.0` claim needed narrowing.** Integral doubles
+   are accepted for `at_ms` (reminders) and `ttl_s` (action descriptors) —
+   both confirmed and pinned — and a float capability arg reaches the host
+   handler intact. But the surrounding taxonomy is stricter than the runbook
+   implies: `revision` rejects both `1.0` and `"1"` with −32602, and a toast
+   `duration_s` of `2.0` or `"5"` is **dropped, not coerced** (the whole
+   notification is invalid; the listener never fires). All pinned.
+
+**Also confirmed** (0.2 item 9's MUST-PORT-UNCHANGED list): `jsonValueEquals`
+holds `1 == 1.0` true and `"1" == 1` false; `TriggerStore.canonicalEquals`
+ignores number spelling — a respelled `throttle_s` must keep carrying its
+runtime records, or a trigger double-fires and a completed one-shot re-arms.
+Non-string `method` still closes the connection silently today, pinned so
+C2's deliberate flip to −32600 is visible rather than accidental.
 
 **Test-count parity number (0.2-9):** `:wire:jvmTest` ran **315** tests in 34
 suites at checkpoint A — the post-flip parity figure, taken after the flip

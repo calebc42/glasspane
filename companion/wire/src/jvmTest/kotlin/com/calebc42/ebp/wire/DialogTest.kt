@@ -158,6 +158,31 @@ class DialogTest {
     }
 
     @Test
+    fun rpcCancelWithIntegerIdConcludesDialog() {
+        // P0 pre-swap pin (PLAN-rf2 §0.2 item 8). The outstanding-dialog map
+        // is keyed by the REQUEST ID with its JSON type intact. jsonrpc.el
+        // numbers its requests with integers (amendment #34), so a dialog
+        // shown by request id 7 is cancelled by `rpc.cancel {id: 7}` — and
+        // NOT by `{id: "7"}` (SPEC 4.3: no coercion). Post-swap this map
+        // compares JsonElement to JsonElement, where data-class equality
+        // distinguishes 7 from "7"; a coercing lookup would conclude the
+        // wrong dialog and leave the real one outstanding forever.
+        val out = mutableListOf<JSONObject>()
+        val engine = readyEngine(out, mutableListOf())
+        engine.feed(frame(JSONObject().put("jsonrpc", "2.0").put("id", 7)
+            .put("method", "dialog.show").put("params", JSONObject()
+                .put("dialog_id", "rename").put("spec", dialogSpec()))))
+        // The string spelling of that id concludes nothing.
+        engine.feed(frame(notification("rpc.cancel", JSONObject().put("id", "7"))))
+        assertNull("a string id must not cancel an integer-id dialog",
+            out.lastOrNull { it.opt("id") == 7 })
+        // The integer spelling concludes it.
+        engine.feed(frame(notification("rpc.cancel", JSONObject().put("id", 7))))
+        assertEquals(1301, out.last { it.opt("id") == 7 }
+            .getJSONObject("error").getInt("code"))
+    }
+
+    @Test
     fun duplicateDialogIdIs1201FirstUntouched() {
         val out = mutableListOf<JSONObject>()
         val engine = readyEngine(out, mutableListOf())

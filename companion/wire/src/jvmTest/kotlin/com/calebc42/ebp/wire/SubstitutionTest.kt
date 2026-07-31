@@ -69,4 +69,23 @@ class SubstitutionTest {
         assertFalse(Substitution.referencesData(JSONObject().put("args",
             JSONObject().put("ms", 200))))
     }
+
+    @Test
+    fun integralDoubleSubstitutesWithoutDecimalPoint() {
+        // P0 pre-swap pin (PLAN-rf2 §0.2 item 7). Trigger fire-data arrives
+        // as JSON numbers and lands in user-visible notification text: a
+        // battery level of 19 must read "19%", never "19.0%". Keep
+        // Substitution.jsonNumber verbatim through the swap — kotlinx
+        // preserves the literal spelling where org.json normalized it, so
+        // this is exactly where "2.0" would start leaking into a toast.
+        assertEquals("2", sub("\${data.x}", JSONObject().put("x", 2.0)))
+        assertEquals("2", sub("\${data.x}", JSONObject().put("x", 2)))
+        assertEquals("2", sub("\${data.x}", JSONObject().put("x", 2L)))
+        // A genuinely fractional value keeps its point.
+        assertEquals("2.5", sub("\${data.x}", JSONObject().put("x", 2.5)))
+        // Negative and zero integral doubles collapse the same way.
+        assertEquals("-7", sub("\${data.x}", JSONObject().put("x", -7.0)))
+        assertEquals("0", sub("\${data.x}", JSONObject().put("x", 0.0)))
+    }
+
 }

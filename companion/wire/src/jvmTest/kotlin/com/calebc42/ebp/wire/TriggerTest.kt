@@ -269,4 +269,26 @@ class TriggerTest {
         assertNotSame(reg, store.registration(katPid, "t"))
         assertEquals(null, store.registration(katPid, "t")!!.throttleFloorMs)
     }
+
+    @Test
+    fun canonicalEqualsIgnoresNumberSpelling() {
+        // P0 pre-swap pin (PLAN-rf2 §0.2 item 4). canonicalEquals decides
+        // whether a re-`triggers.set` is the SAME registration and therefore
+        // carries its runtime records forward. If a respelled number
+        // (`60` vs `60.0`) ever compares unequal, the throttle floor and the
+        // one-shot completion are dropped: the trigger double-fires, and a
+        // completed one-shot re-arms. SPEC 4.3 equality is by VALUE.
+        assertTrue(TriggerStore.canonicalEquals(
+            JSONObject().put("throttle_s", 60), JSONObject().put("throttle_s", 60.0)))
+        assertTrue(TriggerStore.canonicalEquals(
+            JSONObject().put("a", JSONArray(listOf(1, 2L))),
+            JSONObject().put("a", JSONArray(listOf(1.0, 2.0)))))
+        // Type identity still holds across the string/number boundary.
+        assertFalse(TriggerStore.canonicalEquals(
+            JSONObject().put("ttl_s", 60), JSONObject().put("ttl_s", "60")))
+        // And a real value difference is still a difference.
+        assertFalse(TriggerStore.canonicalEquals(
+            JSONObject().put("throttle_s", 60), JSONObject().put("throttle_s", 61)))
+    }
+
 }

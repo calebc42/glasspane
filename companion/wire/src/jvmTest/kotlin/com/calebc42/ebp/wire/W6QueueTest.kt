@@ -506,4 +506,63 @@ class W6QueueTest {
         assertEquals("event-too-large", error!!.getJSONObject("data").getString("reason"))
         assertEquals(0, q.count()) // not admitted
     }
+
+    // ------------------------------------- P0 byte-gate pin (§0.2 item 5)
+
+    /**
+     * MEASURE WITH WHAT YOU EMIT. `max_event_bytes` is enforced by
+     * serializing params and counting UTF-8 octets (CompanionEngine.kt:325),
+     * the durable queue accounts capacity the same way (DurableQueue.kt:135),
+     * and the frame that goes out is serialized a third time. Today all three
+     * run through org.json's `toString()`, so they agree by construction.
+     * After the swap they agree only if ONE `wireSerialize` feeds all three —
+     * which is why the runbook requires the measuring sites and the emit site
+     * to migrate in the same commit.
+     *
+     * The payload makes escaping choices visible: an em dash, curly quotes, a
+     * euro sign (3-byte UTF-8), and `</x`, which some encoders escape for
+     * HTML safety. A sender that escapes differently than the gate measures
+     * either under-counts a frame it then refuses, or over-counts one it
+     * could have sent.
+     */
+    @Test
+    fun byteGateMeasuresWhatItEmits() {
+        val tricky = "— “q” €</xtail"
+        val raw = mutableListOf<ByteArray>()
+        val out = mutableListOf<JSONObject>()
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        val engine = CompanionEngine(config(), surfaceWithInput(), queue) { bytes ->
+            raw.add(bytes)
+            FrameDecoder().let { d -> d.feed(bytes).forEach(out::add); d.finish() }
+        }
+        engine.handshake()
+        raw.clear(); out.clear()
+
+        engine.dispatchAction("app:main", JSONObject().put("action", "a.b")
+            .put("args", JSONObject().put("note", tricky)), null)
+
+        val event = out.single { it.opt("method") == "event.action" }
+        val params = event.getJSONObject("params")
+        // 1. Character fidelity: every awkward scalar survives parse -> emit
+        //    unchanged — no mojibake, no HTML escaping of the `</x` run.
+        assertEquals(tricky, params.getJSONObject("args").getString("note"))
+
+        // 2. The emitted BODY bytes equal a re-serialization of the decoded
+        //    message: the encoder and the measuring path agree on escaping.
+        val frameBytes = raw.single { String(it, Charsets.UTF_8).contains("event.action") }
+        val text = String(frameBytes, Charsets.UTF_8)
+        val body = text.substring(text.indexOf("\r\n\r\n") + 4)
+        assertEquals(body.toByteArray(Charsets.UTF_8).size,
+            JSONObject(body).toString().toByteArray(Charsets.UTF_8).size)
+
+        // 3. The params the gate measures are the params on the wire.
+        assertEquals(params.toString().toByteArray(Charsets.UTF_8).size,
+            JSONObject(body).getJSONObject("params").toString()
+                .toByteArray(Charsets.UTF_8).size)
+
+        // 4. Content-Length declares those same octets (SPEC 6.1) — the
+        //    framing half of the same invariant.
+        val declared = Regex("Content-Length: (\\d+)").find(text)!!.groupValues[1].toInt()
+        assertEquals(declared, body.toByteArray(Charsets.UTF_8).size)
+    }
 }

@@ -1,0 +1,58 @@
+# -*- mode: org; coding: utf-8 -*-
+#+TITLE: Jetpacs Modifier Reference
+#+AUTHOR: Jetpacs Framework
+#+DATE: 2026-07-28
+#+STARTUP: showall
+#+OPTIONS: ^:nil
+
+* Jetpacs Modifier Reference
+
+This document maps the **Universal Node Attributes** (defined in =Attributes.kt=) that can be applied to any Jetpacs node to their underlying Jetpack Compose =Modifier= implementations. 
+
+It also includes a section for **Proposed Advanced Modifiers** to support the architectural shift toward a full Lisp-driven Compose toolkit.
+
+** Current Universal Attributes (§16.5)
+
+These attributes are parsed in =Modifier.universal()= and applied to every node during rendering.
+
+| Wire Attribute | Elisp Keyword | Type | Compose Modifier | Description |
+|----------------|---------------|------|------------------|-------------|
+| =padding= | =:padding= | Number (dp) | =Modifier.padding(all)= | Uniform padding |
+| =pad= | =:pad= | Object | =Modifier.padding()= | Directional padding (=start=, =top=, =end=, =bottom=, =horizontal=, =vertical=) |
+| =width= | =:width= | Number (dp) | =Modifier.width()= | Exact width |
+| =height= | =:height= | Number (dp) | =Modifier.height()= | Exact height |
+| =min_width= | =:min-width= | Number (dp) | =Modifier.widthIn(min)= | Minimum width constraint |
+| =max_width= | =:max-width= | Number (dp) | =Modifier.widthIn(max)= | Maximum width constraint |
+| =min_height= | =:min-height= | Number (dp) | =Modifier.heightIn(min)= | Minimum height constraint |
+| =max_height= | =:max-height= | Number (dp) | =Modifier.heightIn(max)= | Maximum height constraint |
+| =fill_fraction= | =:fill-fraction= | Number (0..1) | =Modifier.fillMaxWidth()= | Fraction of parent width to fill |
+| =aspect_ratio= | =:aspect-ratio= | Number | =Modifier.aspectRatio()= | Ratio of width to height |
+| =corner= | =:corner= | Number / Object | =RoundedCornerShape= | Corner radius (uniform or per-corner) |
+| =clip= | =:clip= | Boolean | =Modifier.clip()= | Clip to bounds or corner shape |
+| =bg= | =:bg= | Color String | =Modifier.background()= | Background color (respects corner shape) |
+| =border= | =:border= | Object | =Modifier.border()= | Border with =width= and =color= |
+| =alpha= | =:alpha= | Number (0..1) | =Modifier.alpha()= | Opacity |
+| =weight= | =:weight= | Number | =Modifier.weight()= | Flex weight (Row/Column children only) |
+| =align_self= | =:align-self= | String | =Modifier.align()= | Cross-axis override (Row/Column only) |
+
+** Proposed Advanced Modifiers (⚠️ NOT RECOMMENDED)
+
+> [!WARNING]
+> **Architectural Disclaimer:** Exposing raw Jetpack Compose Modifiers over the wire violates the Jetpacs design philosophy of being an *opinionated Material 3 toolkit*. Pushing lower-level Compose primitives (like =graphicsLayer= or =pointerInput=) to Emacs creates a leaky abstraction and forces the Emacs developer to micromanage Android UI rendering. 
+> 
+> **Recommended M3 Alternatives:** Instead of raw modifiers, expose high-level Material 3 semantic widgets. For example, instead of a =nested_scroll= modifier, use a native M3 =bottom_sheet= widget. Instead of =pointerInput= for swipe-to-dismiss, use the existing =SwipeToDismissBox= wrapper.
+
+To fully unleash Jetpack Compose from Emacs, we originally proposed extending the universal attributes with the following advanced Modifiers. These are preserved for reference but are not recommended.
+
+| Proposed Wire Attribute | Compose Modifier | Capability Unlocked |
+|-------------------------|------------------|---------------------|
+| =graphics_layer= | =Modifier.graphicsLayer()= | Rotation, scale, translation, camera distance (3D transforms), shadow elevation. |
+| =pointer_input= | =Modifier.pointerInput()= | Complex gesture detection (drag, swipe-to-dismiss, pinch-to-zoom) without needing specific widget wrappers. |
+| =nested_scroll= | =Modifier.nestedScroll()= | Coordinating scroll states between Emacs-defined containers and the Android system (e.g., collapsing toolbars). |
+| =on_size_changed= | =Modifier.onSizeChanged()= | Reporting actual rendered dimensions (in pixels) back to Emacs asynchronously via the wire protocol. |
+| =blur= | =Modifier.blur()= | Applying fast render-effect blurs to nodes, useful for modern glassmorphism UI designs. |
+| =zIndex= | =Modifier.zIndex()= | Explicitly controlling the drawing order of overlapping children in a =box= container. |
+
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:

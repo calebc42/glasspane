@@ -1,0 +1,40 @@
+# -*- mode: org; coding: utf-8 -*-
+#+TITLE: Jetpacs Action Reference
+#+AUTHOR: Jetpacs Framework
+#+DATE: 2026-07-28
+#+STARTUP: showall
+#+OPTIONS: ^:nil
+
+* Jetpacs Action Reference
+
+This document outlines the **Action Protocol** that allows UI events (taps, text submissions, toggles) to trigger behavior. Actions can either be routed back to Emacs for remote execution, or handled locally by the companion app via "Builtins".
+
+** 1. Remote Custom Actions
+
+These actions are sent back to the Emacs host over the wire protocol.
+
+| Elisp Constructor | Wire Payload Structure | Description |
+|-------------------|------------------------|-------------|
+| =(jetpacs-action "save" :dedupe t)= | ={"action": "save", "dedupe": true}= | Basic remote action execution. |
+| =(jetpacs-action "save" :args '(:force t))= | ={"action": "save", "args": {"force": true}}= | Action with arbitrary JSON arguments. |
+| =(jetpacs-action "save" :when-offline "queue")= | ={"action": "save", "when_offline": "queue"}= | Offline policy (=drop=, =queue=, =wake=). |
+| =(jetpacs-action "save" :confirm "Are you sure?")= | ={"action": "save", "confirm": "Are you sure?"}= | Triggers a native confirmation dialog before sending. |
+| =(jetpacs-action "search" :capture-fields '("q"))= | ={"action": "search", "capture_fields": ["q"]}= | Bundles local state (e.g., text inputs) with the request. |
+
+** 2. Local Builtin Actions
+
+Builtins are executed immediately by the companion app without requiring a round-trip to Emacs. They are defined in =ActionSupport.kt=.
+
+| Builtin Name | Elisp Constructor | Required Arguments | Optional Arguments | Kotlin Handler |
+|--------------|-------------------|--------------------|--------------------|----------------|
+| =view.switch= | =(jetpacs-builtin "view.switch" :view "profile")= | =view= (string) | — | Swaps the root view of the surface. |
+| =clipboard.copy= | =(jetpacs-builtin "clipboard.copy" :text "foo")= | =text= (string) | — | Copies text to Android clipboard. |
+| =share.send= | =(jetpacs-builtin "share.send" :text "link" :title "Share")= | =text= (string) | =title= (string) | Opens Android Share Sheet (Intent). |
+| =companion.settings.open= | =(jetpacs-builtin "companion.settings.open")= | — | — | Opens the Jetpacs Companion app settings. |
+| =trigger.fire= | =(jetpacs-builtin "trigger.fire" :id "timer1")= | =id= (string) | — | Fires a local state trigger. |
+| =dialog.submit= | =(jetpacs-builtin "dialog.submit")= | — | =value=, =capture_fields= | Submits and dismisses the current dialog. |
+| =dialog.dismiss= | =(jetpacs-builtin "dialog.dismiss")= | — | — | Dismisses the current dialog without submitting. |
+
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:

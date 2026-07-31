@@ -1,0 +1,43 @@
+# -*- mode: org; coding: utf-8 -*-
+#+TITLE: Jetpacs Animation & Transition Reference
+#+AUTHOR: Jetpacs Framework
+#+DATE: 2026-07-28
+#+STARTUP: showall
+#+OPTIONS: ^:nil
+
+* Jetpacs Animation Reference
+
+This document maps how visual transitions and animations are handled in Jetpacs. 
+
+Currently, Jetpacs relies heavily on Material 3's default motion system. This document outlines the proposed expansion to give Emacs explicit control over Compose Animations.
+
+** 1. Implicit / Automatic Animations (Current)
+
+These animations happen automatically within the Compose renderer without requiring explicit instructions from the wire protocol.
+
+| UI Interaction | Compose Mechanism | Description |
+|----------------|-------------------|-------------|
+| *Touch Feedback* | =Modifier.clickable= (Ripple) | Material 3 ink ripples automatically apply to =button=, =icon_button=, =card=, and anything with an =on_tap= action. |
+| *Tab Switching* | =HorizontalPager= | Swiping between =tabs= smoothly animates the content and the indicator pill. |
+| *Swipe-to-Dismiss* | =SwipeActionBox= | Swiping a =collapsible= or =card= smoothly translates the node and reveals the background action. |
+| *Bottom Sheets / Drawers* | =ModalNavigationDrawer= | Expanding/collapsing the scaffold =drawer= uses the standard M3 easing curves. |
+
+** 2. Proposed Advanced Animation Mappings (⚠️ NOT RECOMMENDED)
+
+> [!WARNING]
+> **Architectural Disclaimer:** Requiring Emacs to explicitly command layout transitions (like crossfades or shared element hero animations) forces Lisp to manage Android-specific motion mechanics. This breaks the abstraction of Jetpacs as a high-level, opinionated toolkit where premium animations should "just work" natively by default.
+> 
+> **Recommended M3 Alternatives:** Instead of exposing explicit animation APIs over the wire, the Jetpacs Compose renderer should implement them implicitly. For example, the =card= widget should natively use =animateContentSize()= under the hood so it naturally resizes without Emacs asking it to. Similarly, navigation routing transitions should use standard Material 3 motion patterns automatically.
+
+To build a truly premium UI, we originally proposed exposing the following Compose animation APIs to the wire protocol. These are preserved for reference but are not recommended.
+
+| Proposed Wire Property / Node | Compose Animation API | Capability Unlocked |
+|-------------------------------|-----------------------|---------------------|
+| =animate_size: true= | =Modifier.animateContentSize()= | When Emacs sends a changeset that adds text to a card or expands a list, the card smoothly grows instead of snapping. |
+| =crossfade= (Node wrapper) | =Crossfade= | When swapping two nodes (e.g., changing an icon from "play" to "pause"), they gracefully crossfade instead of blinking. |
+| =animated_visibility= (Node) | =AnimatedVisibility= | Allows Emacs to specify enter/exit transitions (e.g., =fade_in=, =slide_up=, =scale_out=) when a node is added or removed from the tree. |
+| =shared_element_id= | =Modifier.sharedElement()= | Allows a node (like an image) to hero-animate seamlessly from a list screen into a detail screen during a =view.switch= routing event. |
+
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:

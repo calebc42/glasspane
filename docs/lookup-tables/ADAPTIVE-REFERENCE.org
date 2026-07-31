@@ -1,0 +1,67 @@
+# -*- mode: org; coding: utf-8 -*-
+#+TITLE: Jetpacs Adaptive Design Reference
+#+AUTHOR: Jetpacs Framework
+#+DATE: 2026-07-28
+#+STARTUP: showall
+#+OPTIONS: ^:nil
+
+* Jetpacs Adaptive Design Reference
+
+This document maps how Android's Material 3 Adaptive Layouts (Window Size Classes) and hardware states are exposed to the Emacs host. 
+
+Because Android runs on phones, foldables, and tablets, the Jetpacs companion app must negotiate its physical reality with Emacs so that the Lisp UI can project the correct ergonomic layout.
+
+** 1. Window Size Classes (The Core Metrics)
+
+Material 3 categorizes screen real estate into "Window Size Classes". Emacs uses these as breakpoints to determine whether to project a phone UI or a tablet UI.
+
+| Class | Breakpoint | Typical Device | Recommended Navigation Pattern |
+|-------|------------|----------------|--------------------------------|
+| *Compact* | < 600dp width | Phones (Portrait) | Bottom =NavigationBar=, Modal =Drawer= |
+| *Medium* | 600dp - 839dp | Foldables / Tablets (Portrait) | Side =NavigationRail=, Modal =Drawer= |
+| *Expanded* | 840dp+ width | Tablets (Landscape) / Desktop | Standard =NavigationDrawer= (Pinned) |
+
+** 2. The Device Handshake Protocol
+
+When the Jetpacs companion connects to Emacs (or when the user rotates their device / unfolds their screen), the Android app sends a =device_state= update over the wire.
+
+*Proposed JSON Payload sent to Emacs:*
+#+begin_src json
+{
+  "event": "device_state_update",
+  "data": {
+    "window_width_class": "compact",
+    "window_height_class": "medium",
+    "orientation": "portrait",
+    "theme_preference": "dark",
+    "safe_insets": {
+      "top": 24,
+      "bottom": 16
+    }
+  }
+}
+#+end_src
+
+** 3. Adaptive Emacs Constructors
+
+To handle these breakpoints natively in Elisp without writing messy `if/else` boilerplate, we propose adaptive Jetpacs constructors.
+
+| Elisp Constructor | Behavior |
+|-------------------|----------|
+| =(jetpacs-adaptive-scaffold ...)= | Automatically renders a Bottom Bar on Compact screens, and morphs it into a Side Rail on Medium/Expanded screens. |
+| =(jetpacs-adaptive-grid :columns ...)= | Automatically adjusts the number of columns based on the window width class. |
+| =(jetpacs-responsive :compact (node) :expanded (node))= | Renders entirely different widget subtrees based on the current window size class. |
+
+** 4. The "Hinge" and Foldable Postures
+
+For advanced foldable support, Emacs can be notified of the physical posture of the device.
+
+| Posture State | Description | Lisp Strategy |
+|---------------|-------------|---------------|
+| *Flat* | Fully opened foldable | Use standard Expanded layout. |
+| *Half-Opened (Tabletop)* | Device is folded at 90 degrees like a laptop | Emacs should push the content to the top half, and the controls/keyboard to the bottom half. |
+| *Book* | Device is folded slightly like a book | Emacs can render a split-pane layout with the hinge acting as a natural divider. |
+
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:

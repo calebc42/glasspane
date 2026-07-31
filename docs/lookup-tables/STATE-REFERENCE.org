@@ -1,0 +1,56 @@
+# -*- mode: org; coding: utf-8 -*-
+#+TITLE: Jetpacs State Management Reference
+#+AUTHOR: Jetpacs Framework
+#+DATE: 2026-07-28
+#+STARTUP: showall
+#+OPTIONS: ^:nil
+
+* Jetpacs State Management Reference
+
+This document maps how Android's local UI state (Jetpack Compose =State<T>=) is synchronized back to the Emacs host over the wire protocol. 
+
+Because Jetpacs is a Server-Driven UI (SDUI), state management is split between "dumb" local state for immediate visual feedback and "authoritative" state held by Emacs.
+
+** 1. State Synchronization Strategies
+
+Jetpacs employs three distinct strategies for handling state, depending on the performance requirements and Emacs's need to know.
+
+| Strategy | Wire Mechanism | Example Use Case | Compose Behavior |
+|----------|----------------|------------------|------------------|
+| *Deferred Capture* | =capture_fields= in Action | Form submission | Compose holds local state (=remember=). When an action fires, it reads the current values of the listed IDs and bundles them in the JSON payload to Emacs. |
+| *Event-Driven* | =on_change= / =on_tap= | Live search filtering | Compose updates local state and immediately fires an action to Emacs with the new value. |
+| *Continuous Publishing* | =publish_state: true= | Collaborative editing | Compose attaches a listener to high-frequency state (like cursor position in an =editor=) and streams updates to Emacs over a throttled channel. |
+| *Pure Local* | (None) | Scroll position | Compose manages the state entirely (e.g., =rememberScrollState()=). Emacs is completely unaware. |
+
+** 2. Current State Mappings
+
+These are the widget states currently tracked and how they map to Compose state holders.
+
+| Wire Widget | State Property | Compose State Holder | Sync Method |
+|-------------|----------------|----------------------|-------------|
+| =text_input= | =value= (String) | =TextFieldValue= or =String= | =on_change= or =capture_fields= |
+| =editor= | =value= (String), =cursor= (Int) | =TextFieldValue= | =publish_state= (throttled) |
+| =checkbox= | =checked= (Boolean) | =Boolean= | =on_change= or =capture_fields= |
+| =switch= | =checked= (Boolean) | =Boolean= | =on_change= or =capture_fields= |
+| =slider= | =value= (Float) | =Float= | =on_change= (throttled) |
+| =tabs= | =selected_index= (Int) | =PagerState.currentPage= | =on_change= |
+
+** 3. Proposed Advanced State Mappings (⚠️ NOT RECOMMENDED)
+
+> [!WARNING]
+> **Architectural Disclaimer:** Exposing raw Compose State holders (like =ScrollState= or =SheetState=) to the wire protocol forces Emacs to manually manage low-level Android UI behaviors. This breaks the abstraction of Jetpacs as a high-level Material 3 toolkit and introduces significant latency issues for things like scroll tracking.
+> 
+> **Recommended M3 Alternatives:** Emacs should rarely need to read raw UI state like scroll positions. If you need a scroll-to-top behavior, it should be an explicit action sent to a high-level widget (e.g., =(jetpacs-action "list.scroll_top")=). If you need to manage a bottom sheet, use a native M3 =bottom_sheet= widget where the open/closed state is handled by the Android renderer, and it only notifies Emacs upon completion via a standard =on_change= event.
+
+To give Emacs deeper programmatic control over the Android UI, we originally proposed mapping these advanced Compose State holders into the wire protocol. These are preserved for reference but are not recommended.
+
+| Proposed Wire Property | Compose State Holder | Capability Unlocked |
+|------------------------|----------------------|---------------------|
+| =scroll_state= | =ScrollState= / =LazyListState= | Emacs can programmatically scroll a list to the top, or listen to scroll events to trigger pagination fetches. |
+| =sheet_state= | =SheetState= | Emacs can programmatically expand or collapse a Bottom Sheet, or track if the user swiped it away. |
+| =refresh_state= | =PullToRefreshState= | Emacs can explicitly tell the Android UI when a background sync has finished so the loading spinner stops. |
+| =focus_state= | =FocusRequester= | Emacs can programmatically force the keyboard to open and focus on a specific input field after a network request. |
+
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:

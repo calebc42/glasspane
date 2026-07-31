@@ -2,8 +2,11 @@
 // EBP 2 pairing and mutual authentication. Implements ebp/SPEC.md section 9.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
@@ -81,22 +84,27 @@ object EbpAuth {
 
     /** SPEC 9.2 `session.hello` params (the Companion validates these). */
     fun helloParams(clientName: String, clientVersion: String, pairingId: String,
-                    clientNonce: String, wants: List<String>): JSONObject =
-        JSONObject()
-            .put("protocol", 2)
-            .put("client", JSONObject().put("name", clientName).put("version", clientVersion))
-            .put("pairing_id", pairingId)
-            .put("client_nonce", clientNonce)
-            .put("wants", JSONArray(wants))
+                    clientNonce: String, wants: List<String>): JsonObject =
+        buildJsonObject {
+            put("protocol", 2)
+            put("client", buildJsonObject {
+                put("name", clientName)
+                put("version", clientVersion)
+            })
+            put("pairing_id", pairingId)
+            put("client_nonce", clientNonce)
+            put("wants", JsonArray(wants.map { JsonPrimitive(it) }))
+        }
 
     /** SPEC 9.3 `auth.response` params with the computed proof. */
     fun authParams(pairingId: String, clientNonce: String, serverNonce: String,
-                   token: ByteArray): JSONObject =
-        JSONObject()
-            .put("pairing_id", pairingId)
-            .put("client_nonce", clientNonce)
-            .put("server_nonce", serverNonce)
-            .put("client_proof", clientProof(token, pairingId, clientNonce, serverNonce))
+                   token: ByteArray): JsonObject =
+        buildJsonObject {
+            put("pairing_id", pairingId)
+            put("client_nonce", clientNonce)
+            put("server_nonce", serverNonce)
+            put("client_proof", clientProof(token, pairingId, clientNonce, serverNonce))
+        }
 
     private fun hmacSha256(key: ByteArray, message: String): ByteArray =
         Mac.getInstance("HmacSHA256").run {

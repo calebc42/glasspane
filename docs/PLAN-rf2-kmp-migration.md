@@ -84,6 +84,16 @@ was pinned):
    `duration_s` of `2.0` or `"5"` is **dropped, not coerced** (the whole
    notification is invalid; the listener never fires). All pinned.
 
+**The pins are DARK during C2–C4, and that is structural.** The test source
+set is still org.json until C5, so `:wire:jvmTest` cannot even compile while
+the conversion is in flight — the 23 pins written at P0 are unreachable
+exactly when the risky edits happen. The gate for C2/C3/C4 is therefore
+*compilation scope* (after C3, `grep "^e: "` must show errors in
+`CompanionEngine.kt` and nowhere else), and the pins become the acceptance
+harness at C5, which is why C5's gate is the first one that says G-wire.
+Read the pins while converting; they are the written specification of what
+must not change, even though nothing runs them yet.
+
 **Also confirmed** (0.2 item 9's MUST-PORT-UNCHANGED list): `jsonValueEquals`
 holds `1 == 1.0` true and `"1" == 1` false; `TriggerStore.canonicalEquals`
 ignores number spelling — a respelled `throttle_s` must keep carrying its

@@ -7,15 +7,19 @@
 // same shape as QueueStore/SurfaceBacking.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 import java.io.FileOutputStream
 
 /** One durable state: owner -> ordered reminder list, plus the fired
  * receipts keyed "owner id at_ms" (the SPEC 18.6 at-most-once tuple). */
 data class ReminderState(
-    val owners: Map<String, List<JSONObject>>,
+    val owners: Map<String, List<JsonObject>>,
     val fired: Set<String>,
 )
 
@@ -41,26 +45,36 @@ class FileReminderBacking(private val file: File) : ReminderBacking {
         if (!file.exists()) return ReminderState(emptyMap(), emptySet())
         val text = file.readText(Charsets.UTF_8)
         if (text.isBlank()) return ReminderState(emptyMap(), emptySet())
-        val root = JSONObject(text)
-        val ownersJson = root.getJSONObject("owners")
-        val owners = LinkedHashMap<String, List<JSONObject>>()
-        for (owner in ownersJson.keySet()) {
-            val arr = ownersJson.getJSONArray(owner)
-            owners[owner] = (0 until arr.length()).map { arr.getJSONObject(it) }
+        // PERSISTED text is read by kotlinx's lenient parser, NEVER by
+        // EbpJson.parse: that one is the strict WIRE parser, and its frame
+        // rules (SPEC 4.5's 64-container depth cap above all) are not the
+        // store's rules — a reminder's `on_tap.args` sits deeper on disk than
+        // it did in the frame that delivered it, because the file's own
+        // {"owners":{…:[…]}} wrapper adds levels. A strict re-parse would turn
+        // a perfectly legal store file into a boot crash-loop. Pinned by
+        // PersistenceCompatTest.strictParserRejectsWhatTheStoreMustAccept.
+        val root = Json.parseToJsonElement(text).jsonObject
+        val ownersJson = root.reqObj("owners")
+        val owners = LinkedHashMap<String, List<JsonObject>>()
+        for (owner in ownersJson.keys) {
+            val arr = ownersJson.reqArr(owner)
+            owners[owner] = arr.map { it.jsonObject }
         }
-        val firedArr = root.getJSONArray("fired")
+        val firedArr = root.reqArr("fired")
         return ReminderState(
             owners = owners,
-            fired = (0 until firedArr.length()).map { firedArr.getString(it) }.toSet(),
+            // Receipt keys are JSON strings and nothing else: org.json's
+            // getString coerced nothing here either.
+            fired = firedArr.map { it.asStringOrNull() ?: throw NoSuchElementException("fired") }
+                .toSet(),
         )
     }
 
     override fun replace(state: ReminderState) {
-        val ownersJson = JSONObject()
-        for ((owner, list) in state.owners) ownersJson.put(owner, JSONArray(list))
-        val root = JSONObject()
-            .put("owners", ownersJson)
-            .put("fired", JSONArray(state.fired.toList()))
+        val root = buildJsonObject {
+            put("owners", JsonObject(state.owners.mapValues { (_, list) -> JsonArray(list) }))
+            put("fired", JsonArray(state.fired.map { JsonPrimitive(it) }))
+        }
         val temp = File(file.parentFile, file.name + ".tmp")
         FileOutputStream(temp).use { out ->
             out.write(root.toString().toByteArray(Charsets.UTF_8))

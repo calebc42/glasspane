@@ -5,15 +5,19 @@
 // the kill-matrix witness — a process death is "re-open the same file".
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 import java.io.FileOutputStream
 
 /** One durable state of the queue: records plus the two counters that
  * must survive restart (SPEC 15.1 queue_seq; SPEC 15.2 clock mark). */
 data class QueueSnapshot(
-    val records: List<JSONObject>,
+    val records: List<JsonObject>,
     val nextSeq: Long,
     val clockHighWater: Long,
 )
@@ -40,20 +44,29 @@ class FileQueueStore(private val file: File) : QueueStore {
         if (!file.exists()) return QueueSnapshot(emptyList(), 1, 0)
         val text = file.readText(Charsets.UTF_8)
         if (text.isBlank()) return QueueSnapshot(emptyList(), 1, 0)
-        val root = JSONObject(text)
-        val array = root.getJSONArray("records")
+        // PERSISTED text is read by kotlinx's lenient parser, NEVER by
+        // EbpJson.parse: that one is the strict WIRE parser, and SPEC 4.5
+        // caps a frame at 64 nested containers. A queue record's `args` may
+        // legally nest deeper on disk than any single frame may carry (the
+        // record and the {"records":[…]} wrapper alone add levels), so a
+        // strict re-parse would turn a perfectly legal store file into a boot
+        // crash-loop. Pinned by
+        // PersistenceCompatTest.strictParserRejectsWhatTheStoreMustAccept.
+        val root = Json.parseToJsonElement(text).jsonObject
+        val array = root.reqArr("records")
         return QueueSnapshot(
-            records = (0 until array.length()).map { array.getJSONObject(it) },
-            nextSeq = root.getLong("next_seq"),
-            clockHighWater = root.getLong("clock_high_water"),
+            records = array.map { it.jsonObject },
+            nextSeq = root.reqLong("next_seq"),
+            clockHighWater = root.reqLong("clock_high_water"),
         )
     }
 
     override fun replace(snapshot: QueueSnapshot) {
-        val root = JSONObject()
-            .put("records", JSONArray(snapshot.records))
-            .put("next_seq", snapshot.nextSeq)
-            .put("clock_high_water", snapshot.clockHighWater)
+        val root = buildJsonObject {
+            put("records", JsonArray(snapshot.records))
+            put("next_seq", snapshot.nextSeq)
+            put("clock_high_water", snapshot.clockHighWater)
+        }
         val temp = File(file.parentFile, file.name + ".tmp")
         FileOutputStream(temp).use { out ->
             out.write(root.toString().toByteArray(Charsets.UTF_8))

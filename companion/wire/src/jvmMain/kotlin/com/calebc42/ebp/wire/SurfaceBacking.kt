@@ -7,8 +7,15 @@
 // as the durable queue's QueueStore.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 import java.io.FileOutputStream
 
@@ -18,12 +25,21 @@ data class PersistedRecord(
     val surface: String,
     val revision: Long,
     val present: Boolean,
-    val spec: JSONObject?,
+    val spec: JsonObject?,
     val currentView: String?,
 )
 
-/** One retained input draft; `value` may be null (a JSON null value). */
-data class PersistedDraft(val surface: String, val id: String, val value: Any?)
+/**
+ * One retained input draft; `value` may be null (a JSON null value).
+ *
+ * R6: this is the module's one documented exception to the "Kotlin null =
+ * member ABSENT" convention — at the draft seam Kotlin null IS the JSON null,
+ * which is exactly what the `?: JSONObject.NULL` elvis meant pre-swap. A
+ * draft's existence is carried by the record existing at all, so there is no
+ * absent value left to distinguish. The on-disk spelling is `"value":null` —
+ * never an omitted member, never the STRING "null".
+ */
+data class PersistedDraft(val surface: String, val id: String, val value: JsonElement?)
 
 data class SurfaceState(val records: List<PersistedRecord>, val drafts: List<PersistedDraft>)
 
@@ -63,17 +79,15 @@ class FileSurfaceBacking(
 
     override fun load(): SurfaceState {
         val root = readObject(file)
-        val records = root?.optJSONArray("records")?.let { a ->
-            (0 until a.length()).map { i ->
-                val o = a.getJSONObject(i)
-                PersistedRecord(
-                    surface = o.getString("surface"),
-                    revision = o.getLong("revision"),
-                    present = o.getBoolean("present"),
-                    spec = o.optJSONObject("spec"),
-                    currentView = if (o.has("current_view")) o.getString("current_view") else null,
-                )
-            }
+        val records = root?.arrOrNull("records")?.map { element ->
+            val o = element.jsonObject
+            PersistedRecord(
+                surface = o.reqString("surface"),
+                revision = o.reqLong("revision"),
+                present = o.reqBoolean("present"),
+                spec = o.objOrNull("spec"),
+                currentView = if ("current_view" in o) o.reqString("current_view") else null,
+            )
         } ?: emptyList()
         // Drafts come from the split file. Backward compat: a records file
         // written by the pre-split format carries its own `drafts` array.
@@ -82,48 +96,79 @@ class FileSurfaceBacking(
         // so a lazy fallback loses every migrated draft the moment anything
         // touches records before a draft is written.
         val draftsRoot = readObject(draftsFile) ?: root?.also { legacy ->
-            if (legacy.optJSONArray("drafts") != null)
-                runCatching { writeAtomic(draftsFile, JSONObject()
-                    .put("drafts", legacy.getJSONArray("drafts"))) }
-        }
-        val drafts = draftsRoot?.optJSONArray("drafts")?.let { a ->
-            (0 until a.length()).map { i ->
-                val o = a.getJSONObject(i)
-                val raw = o.get("value")
-                PersistedDraft(o.getString("surface"), o.getString("id"),
-                    if (raw == JSONObject.NULL) null else raw)
+            legacy.arrOrNull("drafts")?.let { legacyDrafts ->
+                runCatching {
+                    writeAtomic(draftsFile, buildJsonObject { put("drafts", legacyDrafts) })
+                }
             }
+        }
+        val drafts = draftsRoot?.arrOrNull("drafts")?.map { element ->
+            val o = element.jsonObject
+            // `value` must be PRESENT: org.json's throwing `get` is what said
+            // so, and a draft record without one is corrupt, not a null draft.
+            val raw = o["value"] ?: throw NoSuchElementException("value")
+            // R6: the draft seam spells JSON null as Kotlin null — see
+            // [PersistedDraft]. This is the load half of that round trip.
+            PersistedDraft(o.reqString("surface"), o.reqString("id"),
+                if (raw is JsonNull) null else raw)
         } ?: emptyList()
         return SurfaceState(records, drafts)
     }
 
     override fun replaceRecords(records: List<PersistedRecord>) {
-        val arr = JSONArray()
-        for (r in records) {
-            val o = JSONObject().put("surface", r.surface)
-                .put("revision", r.revision).put("present", r.present)
-            if (r.spec != null) o.put("spec", r.spec)
-            if (r.currentView != null) o.put("current_view", r.currentView)
-            arr.put(o)
-        }
-        writeAtomic(file, JSONObject().put("records", arr))
+        val arr = JsonArray(records.map { r ->
+            buildJsonObject {
+                put("surface", r.surface)
+                put("revision", r.revision)
+                put("present", r.present)
+                // Absent, not null: `spec` and `current_view` are read back by
+                // presence, and kotlinx's `put(k, null)` WRITES a JSON null
+                // where org.json's removed the member.
+                r.spec?.let { put("spec", it) }
+                r.currentView?.let { put("current_view", it) }
+            }
+        })
+        writeAtomic(file, buildJsonObject { put("records", arr) })
     }
 
     override fun replaceDrafts(drafts: List<PersistedDraft>) {
-        val arr = JSONArray()
-        for (d in drafts)
-            arr.put(JSONObject().put("surface", d.surface).put("id", d.id)
-                .put("value", d.value ?: JSONObject.NULL))
-        writeAtomic(draftsFile, JSONObject().put("drafts", arr))
+        val arr = JsonArray(drafts.map { d ->
+            buildJsonObject {
+                put("surface", d.surface)
+                put("id", d.id)
+                // R6: Kotlin null IS the JSON null here, so it is WRITTEN as
+                // one — `"value":null`, never an omitted member and never the
+                // STRING "null" (the delta a `put(k, v.toString())` port
+                // would introduce). Pinned by
+                // PersistenceCompatTest.draftNullRoundTripsAsJsonNull.
+                put("value", d.value ?: JsonNull)
+            }
+        })
+        writeAtomic(draftsFile, buildJsonObject { put("drafts", arr) })
     }
 
-    private fun readObject(f: File): JSONObject? {
+    private fun readObject(f: File): JsonObject? {
         if (!f.exists()) return null
         val text = f.readText(Charsets.UTF_8)
-        return if (text.isBlank()) null else JSONObject(text)
+        // PERSISTED text is read by kotlinx's lenient parser, NEVER by
+        // EbpJson.parse: that one is the strict WIRE parser, and SPEC 4.5 caps
+        // a frame at 64 nested containers. A stored `spec` may legally nest
+        // deeper on disk than any single frame may carry (the record and the
+        // {"records":[…]} wrapper alone add levels), so a strict re-parse
+        // would turn a perfectly legal store file into a boot crash-loop.
+        // Pinned by PersistenceCompatTest.strictParserRejectsWhatTheStoreMustAccept.
+        return if (text.isBlank()) null else Json.parseToJsonElement(text).jsonObject
     }
 
-    private fun writeAtomic(target: File, root: JSONObject) {
+    /** org.json's `getBoolean`, minus its "true"/"false" STRING coercion: a
+     * record with no usable `present` still refuses to load rather than
+     * silently becoming a tombstone. JsonAccess has no throwing boolean
+     * reader; this stays a member so adding one there cannot collide. */
+    private fun JsonObject.reqBoolean(k: String): Boolean =
+        (this[k] as? JsonPrimitive)?.takeIf { !it.isString }?.content?.toBooleanStrictOrNull()
+            ?: throw NoSuchElementException(k)
+
+    private fun writeAtomic(target: File, root: JsonObject) {
         val temp = File(target.parentFile, target.name + ".tmp")
         FileOutputStream(temp).use { out ->
             out.write(root.toString().toByteArray(Charsets.UTF_8))

@@ -7,6 +7,14 @@
 
 * Jetpacs Animation Reference
 
+#+begin_quote
+*STATUS: PROPOSAL (hand-authored 2026-07-28).*  §1 describes today's
+posture (Material 3 default motion; nothing animation-shaped is on the
+wire); §2 is ideation already marked NOT RECOMMENDED.  No rung
+schedules any of it.  =contract.json= is authoritative for what the
+wire carries.
+#+end_quote
+
 This document maps how visual transitions and animations are handled in Jetpacs. 
 
 Currently, Jetpacs relies heavily on Material 3's default motion system. This document outlines the proposed expansion to give Emacs explicit control over Compose Animations.

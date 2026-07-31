@@ -1,5 +1,5 @@
 #+TITLE: Jetpacs Widget Reference
-#+AUTHOR: Auto-generated from jetpacs-widgets.el + Renderer + contract.json
+#+AUTHOR: LLM-drafted 2026-07-28 from jetpacs-widgets.el + Renderer + contract.json — NOT deterministically generated; no generator exists; treat contract.json as authoritative
 #+DATE: 2026-07-28
 #+STARTUP: showall
 #+OPTIONS: ^:nil

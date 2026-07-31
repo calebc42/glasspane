@@ -7,11 +7,23 @@
 
 * Jetpacs Adaptive Design Reference
 
-This document maps how Android's Material 3 Adaptive Layouts (Window Size Classes) and hardware states are exposed to the Emacs host. 
+#+begin_quote
+*STATUS: PROPOSAL (hand-authored 2026-07-28).*  Everything below except
+§1 describes machinery that *does not exist* — no =device_state= event,
+no window-size-class member, and no adaptive constructor is on any wire
+or in any rung.  §1 restates upstream Material 3 guidance (cite: M3
+"Layout — window size classes"), not repo behavior.  What exists TODAY:
+the Companion advertises per-target =surface_profiles= in the welcome
+(SPEC §10.2) and a device report under §20.1 when =capabilities= /
+=triggers= are granted; =contract.json= is authoritative.  Any real
+version of §2 is a SPEC amendment through §25, not an app patch.
+#+end_quote
+
+This document proposes how Android's Material 3 Adaptive Layouts (Window Size Classes) and hardware states could be exposed to the Emacs host.
 
 Because Android runs on phones, foldables, and tablets, the Jetpacs companion app must negotiate its physical reality with Emacs so that the Lisp UI can project the correct ergonomic layout.
 
-** 1. Window Size Classes (The Core Metrics)
+** 1. Window Size Classes (The Core Metrics — upstream M3 fact)
 
 Material 3 categorizes screen real estate into "Window Size Classes". Emacs uses these as breakpoints to determine whether to project a phone UI or a tablet UI.
 
@@ -21,9 +33,9 @@ Material 3 categorizes screen real estate into "Window Size Classes". Emacs uses
 | *Medium* | 600dp - 839dp | Foldables / Tablets (Portrait) | Side =NavigationRail=, Modal =Drawer= |
 | *Expanded* | 840dp+ width | Tablets (Landscape) / Desktop | Standard =NavigationDrawer= (Pinned) |
 
-** 2. The Device Handshake Protocol
+** 2. Proposed: The Device Handshake Protocol (⚠️ NOT IMPLEMENTED)
 
-When the Jetpacs companion connects to Emacs (or when the user rotates their device / unfolds their screen), the Android app sends a =device_state= update over the wire.
+Proposal: when the Jetpacs companion connects to Emacs (or when the user rotates their device / unfolds their screen), the Android app would send a =device_state= update over the wire.  No such event exists today, and the payload below is not SPEC-shaped (it is not a JSON-RPC notification and names no registered method).
 
 *Proposed JSON Payload sent to Emacs:*
 #+begin_src json
@@ -42,7 +54,7 @@ When the Jetpacs companion connects to Emacs (or when the user rotates their dev
 }
 #+end_src
 
-** 3. Adaptive Emacs Constructors
+** 3. Proposed: Adaptive Emacs Constructors (⚠️ NOT IMPLEMENTED)
 
 To handle these breakpoints natively in Elisp without writing messy `if/else` boilerplate, we propose adaptive Jetpacs constructors.
 
@@ -52,7 +64,7 @@ To handle these breakpoints natively in Elisp without writing messy `if/else` bo
 | =(jetpacs-adaptive-grid :columns ...)= | Automatically adjusts the number of columns based on the window width class. |
 | =(jetpacs-responsive :compact (node) :expanded (node))= | Renders entirely different widget subtrees based on the current window size class. |
 
-** 4. The "Hinge" and Foldable Postures
+** 4. Proposed: The "Hinge" and Foldable Postures (⚠️ NOT IMPLEMENTED)
 
 For advanced foldable support, Emacs can be notified of the physical posture of the device.
 

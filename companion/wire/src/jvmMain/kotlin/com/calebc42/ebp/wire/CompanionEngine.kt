@@ -293,7 +293,7 @@ class CompanionEngine(
 
     /** SPEC 14.2: clipboard.copy / share.send / companion.settings.open are
      * host-platform duties — (builtin name, descriptor) for the app layer. */
-    var hostBuiltinListener: ((String, JSONObject) -> Unit)? = null
+    var hostBuiltinListener: ((String, JsonObject) -> Unit)? = null
 
     /**
      * SPEC 14.2: execute a Companion-local builtin from a surface hook. The
@@ -318,56 +318,66 @@ class CompanionEngine(
      * worked, because those route through DialogContext instead.  The
      * JA-6 lesson verbatim: a wire member is not implemented because the
      * validator accepts it. */
-    fun dispatchDialogAction(dialogId: String, descriptor: JSONObject,
-                             hookValue: Any?, fields: JSONObject?,
+    fun dispatchDialogAction(dialogId: String, descriptor: JsonObject,
+                             hookValue: JsonElement?, fields: JsonObject?,
                              callback: ((String?, JsonObject?) -> Unit)? = null) {
-        if (descriptor.has("builtin")) return  // builtins are the renderer's
+        if ("builtin" in descriptor) return  // builtins are the renderer's
         if (state != SessionState.READY) return
         if (!dialogs.containsKey(dialogId)) return
-        val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
-        // SPEC 14.3: the hook's produced value is injected, never authored.
-        if (hookValue != null) args.put("value", hookValue)
-        val params = JSONObject()
-            .put("event_id", EbpAuth.generateNonce())
-            .put("action", descriptor.getString("action"))
-            .put("dialog_id", dialogId)
-            .put("occurred_at_ms", queue.effectiveNow())
-        if (args.length() > 0) params.put("args", args)
-        val capture = descriptor.optJSONArray("capture_fields")
-        if (capture != null && capture.length() > 0) {
-            val snap = JSONObject()
-            for (i in 0 until capture.length()) {
-                val fieldId = capture.getString(i)
-                snap.put(fieldId, fields?.opt(fieldId) ?: JSONObject.NULL)
-            }
-            params.put("fields", snap)
+        // R4: the authored args share directly — immutable trees need no
+        // deep copy — and the injection is a single-builder merge (R3).
+        val args = buildJsonObject {
+            descriptor.objOrNull("args")?.forEach { (k, v) -> put(k, v) }
+            // SPEC 14.3: the hook's produced value is injected, never
+            // authored. The null guard survives AS a guard: a null hookValue
+            // means NO value member, exactly as before the swap.
+            if (hookValue != null) put("value", hookValue)
+        }
+        val params = buildJsonObject {
+            put("event_id", EbpAuth.generateNonce())
+            put("action", descriptor.reqString("action"))
+            put("dialog_id", dialogId)
+            put("occurred_at_ms", queue.effectiveNow())
+            if (args.isNotEmpty()) put("args", args)
+            val capture = descriptor.arrOrNull("capture_fields")
+            if (capture != null && capture.isNotEmpty())
+                put("fields", buildJsonObject {
+                    for (el in capture) {
+                        // Accept-time validation makes every entry a string.
+                        val fieldId = el.asStringOrNull() ?: continue
+                        // An uncaptured field IS a JSON null (SPEC 14.1), not
+                        // an absent member — JsonNull here is deliberate.
+                        put(fieldId, fields?.get(fieldId) ?: JsonNull)
+                    }
+                })
         }
         // SPEC 14.4/15.4: the COMPLETE params against max_event_bytes.
-        if (params.toString().toByteArray(Charsets.UTF_8).size >
+        if (wireSerialize(params).utf8Len() >
             config.limits.reqLong("max_event_bytes")) return
         sendRequest("event.action", params) { result, error ->
             callback?.invoke(result?.stringOr("status"), error)
         }
     }
 
-    private fun executeBuiltin(surface: String, descriptor: JSONObject) {
-        when (descriptor.optString("builtin")) {
+    private fun executeBuiltin(surface: String, descriptor: JsonObject) {
+        when (descriptor.stringOr("builtin")) {
             "view.switch" -> {
-                val view = descriptor.opt("view") as? String ?: return
+                val view = descriptor.stringOrNull("view") ?: return
                 if (!surfaces.switchView(surface, view)) return
                 surfaceListener?.invoke(surface)
                 // SPEC 14.2: while READY, report view.switched with the view
                 // in args — when_offline drop, so never queued.
                 if (state != SessionState.READY) return
                 val revision = surfaces.revisionOf(surface) ?: return
-                val params = JSONObject()
-                    .put("event_id", EbpAuth.generateNonce())
-                    .put("action", "view.switched")
-                    .put("surface", surface)
-                    .put("revision_seen", revision)
-                    .put("occurred_at_ms", queue.effectiveNow())
-                    .put("args", JSONObject().put("view", view))
-                if (params.toString().toByteArray(Charsets.UTF_8).size <=
+                val params = buildJsonObject {
+                    put("event_id", EbpAuth.generateNonce())
+                    put("action", "view.switched")
+                    put("surface", surface)
+                    put("revision_seen", revision)
+                    put("occurred_at_ms", queue.effectiveNow())
+                    put("args", buildJsonObject { put("view", view) })
+                }
+                if (wireSerialize(params).utf8Len() <=
                     config.limits.reqLong("max_event_bytes"))
                     sendRequest("event.action", params) { _, _ -> }
             }
@@ -375,11 +385,11 @@ class CompanionEngine(
                 // SPEC 14.2/21.5: fire the named manual trigger through the
                 // normal pipeline; requires the triggers capability.
                 if ("triggers" !in granted) return
-                val id = descriptor.opt("id") as? String ?: return
+                val id = descriptor.stringOrNull("id") ?: return
                 pendingPairingId?.let { firing.fireManual(it, id, "tap") }
             }
             "clipboard.copy", "share.send", "companion.settings.open" ->
-                hostBuiltinListener?.invoke(descriptor.optString("builtin"), descriptor)
+                hostBuiltinListener?.invoke(descriptor.stringOr("builtin"), descriptor)
             // dialog.submit/dismiss are valid only inside their dialog; the
             // renderer routes those through DialogContext. Reaching here is an
             // invalid context: no-op.
@@ -394,9 +404,9 @@ class CompanionEngine(
      * queue and wake policies land at W6, builtins at W7.
      */
     @Synchronized
-    fun dispatchAction(surface: String, descriptor: JSONObject, hookValue: Any?,
-                       injected: JSONObject? = null,
-                       extraFields: JSONObject? = null,
+    fun dispatchAction(surface: String, descriptor: JsonObject, hookValue: JsonElement?,
+                       injected: JsonObject? = null,
+                       extraFields: JsonObject? = null,
                        /** The id of the node whose hook fired, when the host
                         * knows it. Required for a synchronized `editor`'s
                         * hooks so the §19 read-only rule can be enforced. */
@@ -410,60 +420,83 @@ class CompanionEngine(
         // generic dispatch, so it is gated here rather than in the renderer.
         if (sourceId != null && state != SessionState.READY &&
             surfaceEditors[surface]?.containsKey(sourceId) == true) return
-        if (descriptor.has("builtin")) return executeBuiltin(surface, descriptor)
+        if ("builtin" in descriptor) return executeBuiltin(surface, descriptor)
         val revision = surfaces.revisionOf(surface) ?: return
-        val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
-        // SPEC 14.3: the hook's produced value is injected, never authored.
-        if (hookValue != null) args.put("value", hookValue)
-        // SPEC 14.3: multi-member hooks (on_reorder from/to/order, on_add_row/
-        // on_add_col index, swipe on_trigger direction) inject a copy of their
-        // produced members; authored conflicts were rejected at accept time.
-        injected?.let { for (k in it.keySet()) args.put(k, it.get(k)) }
-        val params = JSONObject()
-            .put("event_id", EbpAuth.generateNonce())
-            .put("action", descriptor.getString("action"))
-            .put("surface", surface)
-            .put("revision_seen", revision)
-            .put("occurred_at_ms", queue.effectiveNow())
-        if (args.length() > 0) params.put("args", args)
+        // R3/R4: authored args + hook value + multi-member injections merge
+        // in ONE builder; the immutable authored tree shares, no deep copy.
+        val args = buildJsonObject {
+            descriptor.objOrNull("args")?.forEach { (k, v) -> put(k, v) }
+            // SPEC 14.3: the hook's produced value is injected, never
+            // authored. The null guard survives AS a guard — null means no
+            // member, not a JsonNull write.
+            if (hookValue != null) put("value", hookValue)
+            // SPEC 14.3: multi-member hooks (on_reorder from/to/order,
+            // on_add_row/on_add_col index, swipe on_trigger direction) inject
+            // their produced members; authored conflicts were rejected at
+            // accept time.
+            injected?.forEach { (k, v) -> put(k, v) }
+        }
         // SPEC 14.1: capture_fields is one occurrence-time snapshot,
         // stored inside the durable record for queued policies (15.1).
-        val fields = JSONObject()
-        descriptor.optJSONArray("capture_fields")?.let { capture ->
-            for (i in 0 until capture.length()) {
-                val fieldId = capture.getString(i)
-                fields.put(fieldId,
-                    surfaces.currentValue(surface, fieldId) ?: JSONObject.NULL)
+        val fields = buildJsonObject {
+            descriptor.arrOrNull("capture_fields")?.let { capture ->
+                for (el in capture) {
+                    // Accept-time validation makes every entry a string.
+                    val fieldId = el.asStringOrNull() ?: continue
+                    // An uncaptured field IS a JSON null (SPEC 14.1) — the
+                    // JsonNull write is deliberate, not a collapsed guard.
+                    put(fieldId, surfaces.currentValue(surface, fieldId) ?: JsonNull)
+                }
             }
+            // SPEC 14.6: a value the renderer supplies at occurrence time — a
+            // text_input password's on_submit, whose secret has no retained
+            // draft for currentValue() to read (it never emits state.changed).
+            extraFields?.forEach { (k, v) -> put(k, v) }
         }
-        // SPEC 14.6: a value the renderer supplies at occurrence time — a
-        // text_input password's on_submit, whose secret has no retained draft
-        // for currentValue() to read (it never emits state.changed).
-        extraFields?.let { for (k in it.keySet()) fields.put(k, it.get(k)) }
-        if (fields.length() > 0) params.put("fields", fields)
-        val policy = descriptor.optString("when_offline", OFFLINE_DEFAULT)
-        // SPEC 15.1: a durable policy persists a queued_at_ms; it is part of
-        // the stored and replayed params, so add it BEFORE the size check.
-        if (policy == "queue" || policy == "wake")
-            params.put("queued_at_ms", queue.effectiveNow())
+        val policy = descriptor.stringOr("when_offline", OFFLINE_DEFAULT)
+        val params = buildJsonObject {
+            put("event_id", EbpAuth.generateNonce())
+            put("action", descriptor.reqString("action"))
+            put("surface", surface)
+            put("revision_seen", revision)
+            put("occurred_at_ms", queue.effectiveNow())
+            if (args.isNotEmpty()) put("args", args)
+            if (fields.isNotEmpty()) put("fields", fields)
+            // SPEC 15.1: a durable policy persists a queued_at_ms; it is part
+            // of the stored and replayed params, so add it BEFORE the size
+            // check.
+            if (policy == "queue" || policy == "wake")
+                put("queued_at_ms", queue.effectiveNow())
+        }
         // SPEC 14.4/15.4: verify the COMPLETE params against max_event_bytes
         // before persistence or transmission; an oversized occurrence is a
         // local diagnostic, never a frame or a record.
-        if (params.toString().toByteArray(Charsets.UTF_8).size >
+        if (wireSerialize(params).utf8Len() >
             config.limits.reqLong("max_event_bytes")) {
-            callback?.invoke(null, JSONObject()
-                .put("code", 1201).put("message", "Event exceeds max_event_bytes")
-                .put("data", JSONObject().put("kind", "content-invalid")
-                    .put("reason", "event-too-large")))
+            callback?.invoke(null, buildJsonObject {
+                put("code", 1201)
+                put("message", "Event exceeds max_event_bytes")
+                put("data", buildJsonObject {
+                    put("kind", "content-invalid")
+                    put("reason", "event-too-large")
+                })
+            })
             return
         }
         when (policy) {
             "queue", "wake" -> {
                 // SPEC 22.3/15.1: durable admission precedes every wake or
                 // delivery attempt, including when READY right now.
+                // ttl_s reads by VALUE (integralLongOrNull): SpecValidator
+                // bounds it to an integral number and PreSwapNumberTest pins
+                // the binary64 spelling 60.0 as accepted-and-functional —
+                // org.json's getLong truncated it; a strict integer-spelling
+                // read would refuse a legal older peer. Same shape as
+                // dispatchContextless (C3).
                 when (queue.admit(params, policy,
-                        descriptor.optString("dedupe").takeIf { it.isNotEmpty() },
-                        descriptor.getLong("ttl_s"))) {
+                        descriptor.stringOr("dedupe").takeIf { it.isNotEmpty() },
+                        integralLongOrNull(descriptor["ttl_s"])
+                            ?: throw NoSuchElementException("ttl_s"))) {
                     is AdmitResult.Admitted -> {
                         if (policy == "wake" && state != SessionState.READY &&
                             queue.effectiveNow() - lastWakeMs >= 60_000) {
@@ -475,14 +508,18 @@ class CompanionEngine(
                     }
                     AdmitResult.QueueFull ->
                         // SPEC 15.1: the 1601 queue-full equivalent, local.
-                        callback?.invoke(null, JSONObject()
-                            .put("code", 1601).put("message", "Queue full")
-                            .put("data", JSONObject().put("kind", "queue-full")))
+                        callback?.invoke(null, buildJsonObject {
+                            put("code", 1601)
+                            put("message", "Queue full")
+                            put("data", buildJsonObject { put("kind", "queue-full") })
+                        })
                     AdmitResult.StorageFailed ->
                         // SPEC 15.1: MUST NOT claim the interaction queued.
-                        callback?.invoke(null, JSONObject()
-                            .put("code", -32603).put("message", "Storage failed")
-                            .put("data", JSONObject().put("kind", "internal-error")))
+                        callback?.invoke(null, buildJsonObject {
+                            put("code", -32603)
+                            put("message", "Storage failed")
+                            put("data", buildJsonObject { put("kind", "internal-error") })
+                        })
                 }
             }
             else -> { // drop: live delivery only (SPEC 15.1)
@@ -828,13 +865,13 @@ class CompanionEngine(
     // T3/LD-3: the authored value of each stateful node in an outstanding
     // dialog — the layer under the user's dialog-local edits. Dialog state is
     // dialog-local (SPEC 18.1), so nothing else holds these.
-    private val dialogDefaults = HashMap<String, JSONObject>()
+    private val dialogDefaults = HashMap<String, JsonObject>()
 
     /** SPEC 14.1/18.1 (T3/LD-3): the authored values for an outstanding
      * dialog's stateful nodes, so `capture_fields` can resolve a field the
      * user never touched to its LOGICAL value instead of inventing one. */
     @Synchronized
-    fun dialogDefaults(dialogId: String): JSONObject? = dialogDefaults[dialogId]
+    fun dialogDefaults(dialogId: String): JsonObject? = dialogDefaults[dialogId]
 
     /** SPEC 19/4.5: distinct synchronized-editor identities presented right
      * now, across accepted surface AND dialog documents. */
@@ -1030,7 +1067,7 @@ class CompanionEngine(
     // ----------------------------------------------------- pie menus (18.3)
 
     // menu_id -> the categories array of an open menu (ephemeral).
-    private val pieMenus = LinkedHashMap<String, JSONArray>()
+    private val pieMenus = LinkedHashMap<String, JsonArray>()
 
     /** Present hook: (menu_id, {categories, center_label?}) to show;
      * (menu_id, null) to dismiss. */
@@ -1126,14 +1163,20 @@ class CompanionEngine(
     @Synchronized
     fun selectPieMenu(menuId: String, categoryIndex: Int, itemIndex: Int? = null) {
         val categories = pieMenus[menuId] ?: return
-        val category = categories.optJSONObject(categoryIndex) ?: return
+        val category = categories.getOrNull(categoryIndex) as? JsonObject ?: return
         val descriptor = if (itemIndex != null)
-            category.optJSONArray("items")?.optJSONObject(itemIndex)?.optJSONObject("on_tap")
-        else category.optJSONObject("on_tap")
+            (category.arrOrNull("items")?.getOrNull(itemIndex) as? JsonObject)
+                ?.objOrNull("on_tap")
+        else category.objOrNull("on_tap")
         descriptor ?: return
-        val args = JSONObject(descriptor.optJSONObject("args")?.toString() ?: "{}")
-            .put("menu_id", menuId).put("category_index", categoryIndex)
-        if (itemIndex != null) args.put("item_index", itemIndex)
+        // R3/R4: the injected members merge into a single builder over the
+        // shared (immutable) authored args — no deep copy, no dropped result.
+        val args = buildJsonObject {
+            descriptor.objOrNull("args")?.forEach { (k, v) -> put(k, v) }
+            put("menu_id", menuId)
+            put("category_index", categoryIndex)
+            if (itemIndex != null) put("item_index", itemIndex)
+        }
         pieMenus.remove(menuId)
         pieMenuListener?.invoke(menuId, null)
         dispatchDescriptorContextless(descriptor, args)
@@ -1145,7 +1188,7 @@ class CompanionEngine(
      * offline policy. A drop descriptor delivers live or is lost; queue and
      * wake admit to the durable queue exactly as a surface action would.
      */
-    private fun dispatchDescriptorContextless(descriptor: JSONObject, args: JSONObject,
+    private fun dispatchDescriptorContextless(descriptor: JsonObject, args: JsonObject,
                                               callback: ((String?, JsonObject?) -> Unit)? = null) =
         dispatchContextless(queue, config.limits.reqLong("max_event_bytes"),
             descriptor, args, this, callback)
@@ -1962,7 +2005,7 @@ class CompanionEngine(
         // SPEC 18.1: exceeding max_dialogs is 1401; existing dialogs stand.
         if (dialogs.size >= config.limits.longOr("max_dialogs", 4))
             return respondError(id, 1401, "Too many dialogs", "overloaded")
-        val statefuls: Map<String, JSONObject>
+        val statefuls: Map<String, JsonObject>
         try {
             statefuls = SpecValidator.validateSurfaceSpec(
                 spec, maxCaptureFields = config.limits.longOr("max_capture_fields", 64),
@@ -2021,9 +2064,11 @@ class CompanionEngine(
         // where §14.1 requires the node's logical value, boolean `true`.
         // Dialog state is dialog-local (§18.1), so this is the only place the
         // authored layer exists; the store's `currentValue` covers surfaces.
-        dialogDefaults[dialogId] = JSONObject().also { d ->
+        dialogDefaults[dialogId] = buildJsonObject {
+            // A stateful with no authored value defaults to JSON null — the
+            // JsonNull write is the logical value, not a collapsed guard.
             for ((nodeId, node) in statefuls)
-                d.put(nodeId, SurfaceStore.authoredValueOf(node) ?: JSONObject.NULL)
+                put(nodeId, SurfaceStore.authoredValueOf(node) ?: JsonNull)
         }
         if (dialogEditorNodes.isNotEmpty()) {
             val map = LinkedHashMap<String, String>()

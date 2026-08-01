@@ -540,7 +540,7 @@ class CompanionEngine(
     private val syncingDirty = LinkedHashSet<Pair<String, String>>()
 
     @Synchronized
-    fun publishState(surface: String, id: String, value: Any?) {
+    fun publishState(surface: String, id: String, value: JsonElement?) {
         // SPEC 14.6: a password node MUST NOT emit state.changed, and
         // only stateful nodes in the accepted snapshot have a wire
         // address at all.
@@ -554,10 +554,13 @@ class CompanionEngine(
             return
         }
         val revision = surfaces.revisionOf(surface) ?: return
-        emit(JSONObject().put("jsonrpc", "2.0").put("method", "state.changed")
-            .put("params", JSONObject()
-                .put("surface", surface).put("revision_seen", revision)
-                .put("id", id).put("value", value ?: JSONObject.NULL)))
+        // R6: Kotlin null means JSON null at this seam — the elvis survives.
+        emit(notification("state.changed", buildJsonObject {
+            put("surface", surface)
+            put("revision_seen", revision)
+            put("id", id)
+            put("value", value ?: JsonNull)
+        }))
     }
 
     private fun handleRequest(id: JsonElement, method: String, rawParams: Any?) {
@@ -622,11 +625,13 @@ class CompanionEngine(
                 for ((surface, nodeId) in syncingDirty.toList()) {
                     if (!surfaces.hasDraft(surface, nodeId)) continue
                     val revision = surfaces.revisionOf(surface) ?: continue
-                    emit(notification("state.changed", JSONObject()
-                        .put("surface", surface).put("revision_seen", revision)
-                        .put("id", nodeId)
-                        .put("value", surfaces.draft(surface, nodeId)
-                            ?: JSONObject.NULL)))
+                    emit(notification("state.changed", buildJsonObject {
+                        put("surface", surface)
+                        put("revision_seen", revision)
+                        put("id", nodeId)
+                        // R6: a null draft is JSON null — the elvis survives.
+                        put("value", surfaces.draft(surface, nodeId) ?: JsonNull)
+                    }))
                 }
                 syncingDirty.clear()
                 // SPEC 19: every synchronized editor on a present surface
@@ -757,12 +762,13 @@ class CompanionEngine(
 
     // ------------------------------------------------------ surfaces (13)
 
-    private fun surfaceRevision(value: Any?): Long? =
-        when (value) {
-            is Int -> value.toLong()
-            is Long -> value
-            else -> null
-        }?.takeIf { it in 0..9_007_199_254_740_991L } // SPEC 4.2
+    private fun surfaceRevision(value: JsonElement?): Long? =
+        // Integer SPELLING only, recovering the old `is Int || is Long`
+        // predicate: revision rejects both 1.0 and "1" with -32602
+        // (PreSwapNumberTest pins the taxonomy).
+        (value as? JsonPrimitive)?.takeIf { !it.isString && it !is JsonNull }
+            ?.content?.toLongOrNull()
+            ?.takeIf { it in 0..9_007_199_254_740_991L } // SPEC 4.2
 
     private fun handleSurfaceUpdate(id: JsonElement, params: JSONObject) {
         val surface = params.opt("surface") as? String
@@ -1338,13 +1344,13 @@ class CompanionEngine(
 
     /** SPEC 21.3/21.7: current sample for a state type (delegates to the shared
      * firing service, which owns the runtime). */
-    var triggerStateProvider: (String) -> JSONObject?
+    var triggerStateProvider: (String) -> JsonObject?
         get() = firing.stateProvider
         set(v) { firing.stateProvider = v }
 
     /** SPEC 21.4: post a substituted on_fire notification (delegates to the
      * shared firing service). */
-    var triggerNotifyListener: ((JSONObject) -> Unit)?
+    var triggerNotifyListener: ((JsonObject) -> Unit)?
         get() = firing.notifyListener
         set(v) { firing.notifyListener = v }
 
@@ -1352,12 +1358,12 @@ class CompanionEngine(
      * service and needs no live session (SPEC 21.1/21.2); the observe entry
      * points remain for a session-driven source and delegate to it. */
     @Synchronized
-    fun observeTriggerSample(type: String, sample: JSONObject) =
+    fun observeTriggerSample(type: String, sample: JsonObject) =
         firing.observeSample(type, sample)
 
     /** SPEC 21.5: an external occurrence (package/sms/boot/time/timezone/manual). */
     @Synchronized
-    fun observeTriggerEvent(type: String, data: JSONObject) =
+    fun observeTriggerEvent(type: String, data: JsonObject) =
         firing.observeExternal(type, data)
 
     /** SPEC 21.4/21.5: a `manual` trigger fired via the builtin or trigger.fire. */

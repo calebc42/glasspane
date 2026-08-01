@@ -47,7 +47,10 @@ one-line parser swap per fixture. And RF-1b's reference images are called
 | A | RF-2a KMP flip, sources to `jvmMain` | DONE `7f6bfde` |
 | B0 | kotlinx-serialization-json dependency (`api`) | DONE `2271211` |
 | B1 | `JsonAccess.kt` + `EbpJson.toJsonElement` (additive) | DONE `94720a5` |
-| C2–C6 | the conversion proper | OPEN |
+| C2 | core four (`EbpJson`, `FrameCodec`, `Envelope`, `JsonEquality`) | DONE `a8d5db1` (branch `rf-2b`) |
+| C3 | validators + stores (17 files; review fleet found 5, all applied) | DONE `2ece3b2` |
+| C4 | the hub — `CompanionEngine.kt` | **DONE 2026-07-31** — five staged passes per [PLAN-rf2-c4-hub.md](PLAN-rf2-c4-hub.md) (`C4.p1`–`p4` + the `RF-2b(C4)` commit); error ledger 68→65→40→31→24→0, monotone; compile-scope gate + `^import org.json` grep met (org.json survives in `jvmMain` only inside comments); G-spec + G-elisp spot-checked green, `ebp/` untouched. Deviations recorded in the pass commits: CompanionConfig converted at p2 (checkLimits' measuring sites), hookValue at p3 (builders can't put `Any`); the three event-build measures swapped with their builders at p3 so measure-equals-emit held per object at every commit |
+| C5–C6 | `:wire` tests (23 dark pins light up = acceptance), then `:app` | OPEN |
 | H1–H7 | RF-2c hoist to `commonMain` | OPEN |
 
 **Executed on `slop-fork/main`, not on per-sub-step branches** (Ground rules'

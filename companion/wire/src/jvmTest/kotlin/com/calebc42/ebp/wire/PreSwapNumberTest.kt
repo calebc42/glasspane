@@ -136,6 +136,17 @@ class PreSwapNumberTest {
             """"on_tap":{"action":"a.b","when_offline":"queue","ttl_s":60.0}}}}""")
         assertEquals("applied",
             replyTo(out, "p3").reqObj("result").reqString("status"))
+        // FUNCTIONAL, not merely accepted (strengthened at C5 by the mutation
+        // matrix, M2): the accepted spec stores the descriptor VERBATIM, so
+        // the 60.0 spelling reaches dispatchAction's own ttl_s read at TAP
+        // time. A spelling-strict reader there throws out of the tap and
+        // closes the session on the device — acceptance alone never covered
+        // that read.
+        val onTap = engine.surfaces.spec("app:t")!!.reqObj("on_tap")
+        var status: String? = null
+        engine.dispatchAction("app:t", onTap, null) { s, _ -> status = s }
+        assertEquals("a stored 60.0 ttl_s must still queue at tap time",
+            "queued", status)
     }
 
     @Test

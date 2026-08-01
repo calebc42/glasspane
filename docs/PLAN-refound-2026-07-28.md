@@ -43,7 +43,7 @@ by **graduating the name**, not the tree.
 | C2–C6 | The conversion, on branch `rf-2b` (RF-2a/B0/B1 done — [PLAN-rf2-kmp-migration.md](PLAN-rf2-kmp-migration.md) §0) | P0, RF-1a | Nothing under `ebp/` may change (prose-only ratifications by Caleb exempt — see I1) |
 | spike-elisp | vulpea → flat rows | — (parallel now) | Zero Kotlin, zero `ebp/` |
 | RF-2c | Hoist to `commonMain` | RF-2b exit | |
-| spike-kotlin | table + apply-rows, `:app` only, via `surface.update` + `table` | RF-2b exit | Produces the measurement that decides RF-4a's carrier |
+| spike-kotlin | table + apply-rows, `:app` only, via `surface.update` + `table` | **DONE 2026-07-31** | Answered: the binding limit is `max_table_cells` (4096 aggregate), never the frame — full-vault table chunks at 256 rows/update (3 updates, 7 ms); presentation-node caps argue changesets must be data, not nodes |
 | RF-1b | Robolectric + renderer tests | RF-2b exit | New dependency stack + SDK-36 shadow-jar risk |
 | RF-2.6 | Headless JVM loopback host | RF-2c | Nearly free once commonMain exists; four things depend on it |
 | RF-1c | Cross-implementation CI job | RF-2.6 | First time elisp↔Kotlin is enforced rather than assumed |
@@ -451,14 +451,39 @@ A throwaway measurement rung, split so each half sits where it is legal.
 and **must not modify anything under `ebp/`** (the I1 window). Project a real
 vault through vulpea into flat rows; measure.
 
-**spike-kotlin — after the RF-2b exit gate, in `:app` only — never `:wire`**
-(or RF-2c's six-file `jvmMain` inventory gate breaks). **The carrier, stated
-explicitly:** an ordinary `surface.update` carrying a `table` node — verified
-advertised at `NodeSupport.kt:34`. A `jetpacs.*` *method* is impossible
-pre-RF-3 (§7.3 unknown-method behavior is frozen, I5), and a `jetpacs.*`
-*capability* is impossible (`CapabilityCatalog.VALIDATED` is a closed set and
-a capability outside it throws, `CapabilityCatalog.kt:50,:58`) — the spike
-rides existing vocabulary or it does not ride.
+**spike-kotlin — DONE 2026-07-31; verdict below.** Ran on branch
+`spike/kotlin-table-rows` after the RF-2b exit (`2871b59`, PR #3), in the
+`:app` test source set only — the real engine driven with the app's real
+advertisement (`NodeSupport.surfaceProfiles()`) and `DeviceBridge`'s own
+limits, through the full frame path. Rows synthetic, matched to
+spike-elisp's measured distribution (the repo is public; vault content
+stays out of it). Carrier as specified: `surface.update` + `table`, no
+`jetpacs.*` anything.
+
+### The verdict (spike-kotlin, 2026-07-31)
+
+**The binding limit is never the frame — it is the presentation-node caps.**
+`max_table_cells` (4096, aggregate per SurfaceSpec, LD-22) with
+`max_rich_spans` (4096) counting in parallel:
+
+| Case | Result |
+|---|---|
+| Minimal shape, 586×5 = 2,930 cells, one update | **applied**, 142,527 B, 2.8 ms |
+| Full shape, 586×16 = 9,376 cells, one update | **rejected 1201 `exceeds max_table_cells`** — at 437,872 B the frame cap never entered |
+| Boundary through the full path | 4,096 cells applied; 4,097 rejected — exact |
+| Full shape chunked at floor(4096/16) = 256 rows/update | **3 updates, 438,135 B, 7.0 ms total accept** |
+| apply-rows (stored spec → flat list) | 586/586, ids unique, 0.72 ms |
+
+**Consequence for RF-4a, and it is an argument, not just a number:** a
+`table` node is a *view* of rows with a view's limits. Even this small
+vault's rich projection does not ride one `surface.update`. So `ebp.data`'s
+changesets must be *data*, not presentation nodes — their own schema,
+subject to frame/event limits only, which the elisp half showed are never
+binding at this scale. The spike's own carrier (table-as-vehicle) was the
+right *measurement* vehicle and would be the wrong *module* design; the
+Companion-side costs are immaterial either way (single-digit ms, 586/586
+fidelity). Raw record: `companion/app/src/test/.../spike/RESULTS.md` (dies
+with the spike).
 
 **Discipline** (this tree already carries two "staging, never required by
 base" arms that survived their welcome): written questions, kill criteria, a

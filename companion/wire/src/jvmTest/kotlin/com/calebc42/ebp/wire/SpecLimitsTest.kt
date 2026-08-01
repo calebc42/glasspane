@@ -5,8 +5,14 @@
 // the sum is what the limit bounds.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,27 +20,33 @@ import java.io.File
 
 class SpecLimitsTest {
 
-    private fun spans(n: Int) = JSONArray().also { arr ->
-        repeat(n) { arr.put(JSONObject().put("text", "s$it")) }
+    private fun spans(n: Int) = buildJsonArray {
+        repeat(n) { add(buildJsonObject { put("text", "s$it") }) }
     }
 
-    private fun richText(n: Int) = JSONObject()
-        .put("t", "rich_text").put("spans", spans(n))
+    private fun richText(n: Int) = buildJsonObject {
+        put("t", "rich_text"); put("spans", spans(n))
+    }
 
-    private fun column(children: List<JSONObject>) = JSONObject()
-        .put("t", "column").put("children", JSONArray(children))
+    private fun column(children: List<JsonObject>) = buildJsonObject {
+        put("t", "column"); put("children", JsonArray(children))
+    }
 
-    private fun table(rows: Int, cellsPerRow: Int, spansPerCell: Int = 1) = JSONObject()
-        .put("t", "table").put("rows", JSONArray().also { arr ->
+    private fun table(rows: Int, cellsPerRow: Int, spansPerCell: Int = 1) = buildJsonObject {
+        put("t", "table")
+        putJsonArray("rows") {
             repeat(rows) {
-                arr.put(JSONObject().put("kind", "data")
-                    .put("cells", JSONArray().also { cells ->
+                add(buildJsonObject {
+                    put("kind", "data")
+                    putJsonArray("cells") {
                         repeat(cellsPerRow) {
-                            cells.put(JSONObject().put("spans", spans(spansPerCell)))
+                            add(buildJsonObject { put("spans", spans(spansPerCell)) })
                         }
-                    }))
+                    }
+                })
             }
-        })
+        }
+    }
 
     @Test
     fun richSpansAggregateAcrossTheDocument() {
@@ -70,25 +82,29 @@ class SpecLimitsTest {
         // icon and its inline-reply input.key (both feed process-lifetime
         // maps keyed on the wire string).
         val longId = "a".repeat(WireLimits.MAX_IDENTIFIER_OCTETS + 1)
-        val remote = JSONObject().put("action", "demo.act")
-        fun notif(action: JSONObject) = JSONObject()
-            .put("body", JSONObject().put("t", "text").put("text", "x"))
-            .put("meta", JSONObject().put("actions", JSONArray().put(action)))
+        val remote = buildJsonObject { put("action", "demo.act") }
+        fun notif(action: JsonObject) = buildJsonObject {
+            putJsonObject("body") { put("t", "text"); put("text", "x") }
+            putJsonObject("meta") { putJsonArray("actions") { add(action) } }
+        }
         val iconErr = runCatching {
-            SpecValidator.validateNotificationSpec(notif(JSONObject()
-                .put("label", "L").put("on_tap", remote).put("icon", longId)))
+            SpecValidator.validateNotificationSpec(notif(buildJsonObject {
+                put("label", "L"); put("on_tap", remote); put("icon", longId)
+            }))
         }.exceptionOrNull()
         assertTrue(iconErr is ContentInvalid)
         val keyErr = runCatching {
-            SpecValidator.validateNotificationSpec(notif(JSONObject()
-                .put("label", "L").put("on_tap", remote)
-                .put("input", JSONObject().put("key", longId))))
+            SpecValidator.validateNotificationSpec(notif(buildJsonObject {
+                put("label", "L"); put("on_tap", remote)
+                putJsonObject("input") { put("key", longId) }
+            }))
         }.exceptionOrNull()
         assertTrue(keyErr is ContentInvalid)
         // Exactly at the bound stays legal.
-        SpecValidator.validateNotificationSpec(notif(JSONObject()
-            .put("label", "L").put("on_tap", remote)
-            .put("icon", "a".repeat(WireLimits.MAX_IDENTIFIER_OCTETS))))
+        SpecValidator.validateNotificationSpec(notif(buildJsonObject {
+            put("label", "L"); put("on_tap", remote)
+            put("icon", "a".repeat(WireLimits.MAX_IDENTIFIER_OCTETS))
+        }))
     }
 
     @Test
@@ -114,11 +130,11 @@ class SpecLimitsTest {
         // NEW contract constant fail here rather than sit silently unenforced
         // (which is how max_send_header_bytes reached the contract with no
         // Kotlin constant behind it at all).
-        val contract = JSONObject(
+        val contract = Json.parseToJsonElement(
             File(System.getProperty("ebp.dir")
                 ?: error("ebp.dir system property not set"), "contract.json")
-                .readText())
-        val fixed = contract.getJSONObject("limits").getJSONObject("fixed")
+                .readText()) as JsonObject
+        val fixed = contract.reqObj("limits").reqObj("fixed")
         val implemented = mapOf(
             "max_header_bytes" to WireLimits.MAX_HEADER_OCTETS,
             "max_body_bytes" to WireLimits.MAX_BODY_OCTETS,
@@ -131,9 +147,9 @@ class SpecLimitsTest {
             "max_send_header_bytes" to WireLimits.MAX_SEND_HEADER_OCTETS,
             "max_node_depth" to WireLimits.MAX_NODE_DEPTH,
         )
-        assertEquals(fixed.keySet().toSortedSet(), implemented.keys.toSortedSet())
+        assertEquals(fixed.keys.toSortedSet(), implemented.keys.toSortedSet())
         for ((key, value) in implemented)
-            assertEquals("limits.fixed.$key", fixed.getInt(key).toLong(), value.toLong())
+            assertEquals("limits.fixed.$key", fixed.reqLong(key), value.toLong())
     }
 
     @Test

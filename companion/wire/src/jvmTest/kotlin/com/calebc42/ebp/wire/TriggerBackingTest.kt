@@ -8,8 +8,10 @@
 package com.calebc42.ebp.wire
 
 import java.io.File
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -23,10 +25,14 @@ class TriggerBackingTest {
     val tmp = TemporaryFolder()
 
     // A minimal normalized entry (the store stores validated, normalized ones).
-    private fun entry(id: String, below: Int = 20) = JSONObject()
-        .put("id", id).put("type", "battery.level")
-        .put("params", JSONObject().put("below", below))
-        .put("when", JSONArray()).put("policy", "drop").put("on_fire", JSONArray())
+    private fun entry(id: String, below: Int = 20) = buildJsonObject {
+        put("id", id)
+        put("type", "battery.level")
+        putJsonObject("params") { put("below", below) }
+        put("when", JsonArray(emptyList()))
+        put("policy", "drop")
+        put("on_fire", JsonArray(emptyList()))
+    }
 
     @Test
     fun entriesAndRecordsSurviveReloadButBaselinesDoNot() {

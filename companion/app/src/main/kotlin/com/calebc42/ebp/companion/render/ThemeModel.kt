@@ -19,7 +19,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
 
 /** SPEC 18.4: the `success`/`warning` roles, which Material has no slot for. */
 data class ExtendedColors(
@@ -42,8 +42,8 @@ data class ExtendedColors(
 /** Falls back to the light defaults before any EbpTheme provides real ones. */
 val LocalExtendedColors = staticCompositionLocalOf { ExtendedColors.defaults(false) }
 
-private fun JSONObject.role(key: String): Color? =
-    optString(key).takeIf { it.isNotEmpty() }
+private fun JsonObject.role(key: String): Color? =
+    stringOr(key).takeIf { it.isNotEmpty() }
         ?.let { parseHexColor(it)?.let(::Color) }
 
 /** A legible on-color for a pushed extension role that arrived without one. */
@@ -56,7 +56,7 @@ private fun legibleOn(bg: Color): Color =
  * the pushed surface/surface_variant pair so token-colored nodes sit on the
  * pushed surface, not the base's.
  */
-fun buildColorScheme(colors: JSONObject?, base: ColorScheme): ColorScheme {
+fun buildColorScheme(colors: JsonObject?, base: ColorScheme): ColorScheme {
     val c = colors ?: return base
     val surface = c.role("surface") ?: base.surface
     val surfaceVariant = c.role("surface_variant") ?: base.surfaceVariant
@@ -101,16 +101,16 @@ fun buildColorScheme(colors: JSONObject?, base: ColorScheme): ColorScheme {
 }
 
 /** The ExtendedColors a theme selects: pushed success/warning over defaults. */
-fun buildExtendedColors(colors: JSONObject?, dark: Boolean): ExtendedColors {
+fun buildExtendedColors(colors: JsonObject?, dark: Boolean): ExtendedColors {
     val d = ExtendedColors.defaults(dark)
     val c = colors ?: return d
     val success = c.role("success") ?: d.success
     val warning = c.role("warning") ?: d.warning
     return ExtendedColors(
         success = success,
-        onSuccess = if (c.has("success")) legibleOn(success) else d.onSuccess,
+        onSuccess = if ("success" in c) legibleOn(success) else d.onSuccess,
         warning = warning,
-        onWarning = if (c.has("warning")) legibleOn(warning) else d.onWarning,
+        onWarning = if ("warning" in c) legibleOn(warning) else d.onWarning,
     )
 }
 
@@ -121,18 +121,22 @@ fun buildExtendedColors(colors: JSONObject?, dark: Boolean): ExtendedColors {
  * the Emacs palette. `syntax` is read separately by the editor (W9-h2).
  */
 @Composable
-fun EbpTheme(payload: JSONObject?, content: @Composable () -> Unit) {
-    val dark = when (val d = payload?.opt("dark")) {
+fun EbpTheme(payload: JsonObject?, content: @Composable () -> Unit) {
+    // C6: `boolOrNull` is the by-primitive form of the old `is Boolean` arm —
+    // only a real JSON boolean forces polarity; absent, JSON null and a
+    // non-boolean all fall to the system (amendment #36). The system read stays
+    // inside the else arm so it is not evaluated when the payload forces it.
+    val dark = when (val d = payload?.boolOrNull("dark")) {
         is Boolean -> d
         else -> isSystemInDarkTheme()
     }
-    val colors = payload?.optJSONObject("colors")
+    val colors = payload?.objOrNull("colors")
     val scheme = buildColorScheme(colors, if (dark) darkColorScheme() else lightColorScheme())
     val extended = buildExtendedColors(colors, dark)
     // SPEC 18.4: the pushed `syntax` SyntaxStyle map overlays the polarity
     // palette; the editor/text nodes read it from LocalSyntaxColors.
     val syntax = emacsSyntaxColors(
-        payload?.optJSONObject("syntax"), SyntaxColors.forBackground(dark))
+        payload?.objOrNull("syntax"), SyntaxColors.forBackground(dark))
     CompositionLocalProvider(
         LocalExtendedColors provides extended,
         LocalSyntaxColors provides syntax,

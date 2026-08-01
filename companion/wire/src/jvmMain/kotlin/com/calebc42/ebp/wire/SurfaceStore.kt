@@ -5,16 +5,25 @@
 // persistence layer arrives with W6 durability.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 private val SURFACE_ID = Regex("(app|notification|widget):[A-Za-z0-9][A-Za-z0-9._:/-]*")
 
 data class SurfaceResult(val status: String, val revision: Long, val present: Boolean)
 
 /** T3/LD-2: the value a stateful node's widget should display, and the
- * generation that value belongs to. See [SurfaceStore.inputDisplays]. */
-data class InputDisplay(val epoch: Long, val value: Any?)
+ * generation that value belongs to. See [SurfaceStore.inputDisplays].
+ *
+ * R6: `value` follows the draft seam — Kotlin null is the JSON null, not an
+ * absent member (see [PersistedDraft]). */
+data class InputDisplay(val epoch: Long, val value: JsonElement?)
 
 class SurfaceStore(
     private val maxSurfaces: Long,
@@ -43,13 +52,15 @@ class SurfaceStore(
     private class Record(
         var revision: Long,
         var present: Boolean,
-        var spec: JSONObject?,
+        var spec: JsonObject?,
         var currentView: String?,
-        var statefuls: Map<String, JSONObject>,
+        var statefuls: Map<String, JsonObject>,
     )
 
     private val records = LinkedHashMap<String, Record>()
-    private val drafts = HashMap<Pair<String, String>, Any?>()
+    // R6: a present key IS the draft; its value follows the draft seam, where
+    // Kotlin null is the JSON null (see [PersistedDraft]).
+    private val drafts = HashMap<Pair<String, String>, JsonElement?>()
     // T3/LD-2: display generations — see [inputEpoch]. Deliberately NOT
     // persisted: a process restart rebuilds every widget from the durable
     // draft or authored value anyway, so there is nothing stale to supersede.
@@ -150,7 +161,7 @@ class SurfaceStore(
         SURFACE_ID.matches(id) && id.toByteArray(Charsets.UTF_8).size <= 128
 
     /** The accepted snapshot for a present surface, for rendering. */
-    fun spec(surface: String): JSONObject? =
+    fun spec(surface: String): JsonObject? =
         records[surface]?.takeIf { it.present }?.spec
 
     /** SPEC 14.4: the accepted revision the user is looking at. */
@@ -166,8 +177,8 @@ class SurfaceStore(
      * presentation state. Returns whether the switch happened. */
     fun switchView(surface: String, view: String): Boolean {
         val r = records[surface]?.takeIf { it.present } ?: return false
-        val views = r.spec?.optJSONObject("views") ?: return false
-        if (!views.has(view)) return false
+        val views = r.spec?.objOrNull("views") ?: return false
+        if (view !in views) return false
         r.currentView = view
         persistRecords() // view choice is record state, no draft touched
         return true
@@ -175,14 +186,14 @@ class SurfaceStore(
 
     /** SPEC 14.1: the occurrence-time logical value of a stateful node —
      * the dirty draft when one exists, else the authored value/default. */
-    fun currentValue(surface: String, id: String): Any? {
+    fun currentValue(surface: String, id: String): JsonElement? {
         if (surface to id in drafts) return drafts[surface to id]
         return records[surface]?.statefuls?.get(id)?.let { authoredValue(it) }
     }
 
     /** SPEC 14.6: password nodes never emit state or retain drafts. */
     fun isPasswordNode(surface: String, id: String): Boolean =
-        records[surface]?.statefuls?.get(id)?.optBoolean("password") == true
+        records[surface]?.statefuls?.get(id)?.boolOr("password") == true
 
     /** Whether ID is a stateful node in SURFACE's accepted snapshot. */
     fun isStatefulNode(surface: String, id: String): Boolean =
@@ -192,12 +203,12 @@ class SurfaceStore(
 
     // ------------------------------------------------------ update (13.2)
 
-    fun update(surface: String, revision: Long, spec: JSONObject,
-               staleSpec: JSONObject?, currentView: String?,
-               resetIds: JSONArray?): SurfaceResult {
+    fun update(surface: String, revision: Long, spec: JsonObject,
+               staleSpec: JsonObject?, currentView: String?,
+               resetIds: JsonArray?): SurfaceResult {
         // SPEC 13.2: validate the entire request before changing state.
         // SPEC 13.4: the namespace decides the SurfaceSpec variant.
-        val statefuls: Map<String, JSONObject>
+        val statefuls: Map<String, JsonObject>
         val reset: Set<String>
         val isMultiView: Boolean
         if (namespace(surface) == "notification") {
@@ -209,7 +220,7 @@ class SurfaceStore(
                 maxRichSpans = maxRichSpans, maxTableCells = maxTableCells)
             if (currentView != null)
                 throw ContentInvalid("current_view", "not valid for a notification surface")
-            if (resetIds != null && resetIds.length() > 0)
+            if (resetIds != null && resetIds.size > 0)
                 throw ContentInvalid("reset_input_ids", "a notification surface has no drafts")
             staleSpec?.let {
                 SpecValidator.validateNotificationSpec(it, "stale_spec", maxCaptureFields,
@@ -234,12 +245,12 @@ class SurfaceStore(
             // live spec — an unadvertised builtin inside it is the same
             // invalid context, and an unadvertised node type must degrade
             // rather than be held to its per-type schema.
-            staleSpec?.let { SpecValidator.validateStaleSpec(it, spec.has("views"),
+            staleSpec?.let { SpecValidator.validateStaleSpec(it, "views" in spec,
                 maxCaptureFields, maxChartPoints, maxCanvasOps,
                 maxRichSpans, maxTableCells, appNodeTypes, appBuiltins) }
-            isMultiView = spec.has("views")
+            isMultiView = "views" in spec
             if (currentView != null) {
-                if (!isMultiView || !spec.getJSONObject("views").has(currentView))
+                if (!isMultiView || currentView !in spec.reqObj("views"))
                     throw ContentInvalid("current_view",
                         "valid only for a multi-view app spec naming an existing view")
             }
@@ -265,8 +276,8 @@ class SurfaceStore(
             !isMultiView -> null
             currentView != null -> currentView
             next.present && next.currentView != null &&
-                spec.getJSONObject("views").has(next.currentView!!) -> next.currentView
-            else -> spec.getString("initial_view")
+                next.currentView!! in spec.reqObj("views") -> next.currentView
+            else -> spec.reqString("initial_view")
         }
         // SPEC 13.6: the pre-update node types decide draft compatibility.
         val oldStatefuls = next.statefuls
@@ -329,41 +340,45 @@ class SurfaceStore(
     // -------------------------------------------------- welcome reporting
 
     /** SPEC 10.2: both present snapshots and tombstones are reported. */
-    fun snapshot(): JSONObject {
-        val out = JSONObject()
+    fun snapshot(): JsonObject = buildJsonObject {
         for ((id, record) in records) {
-            val entry = JSONObject()
-                .put("revision", record.revision).put("present", record.present)
-            // SPEC 10.2 (amendment #129): a present multi-view app surface also
-            // reports the view the user is actually on. `view.switched` is
-            // when_offline "drop", so a navigation performed while Emacs was
-            // disconnected is otherwise unrecoverable at the 10.3 barrier.
-            // currentView is null for a single-root snapshot (#128 clears it),
-            // so this is present exactly when the spec requires it.
-            if (record.present && id.startsWith("app:"))
-                record.currentView?.let { entry.put("current_view", it) }
-            out.put(id, entry)
+            put(id, buildJsonObject {
+                put("revision", record.revision)
+                put("present", record.present)
+                // SPEC 10.2 (amendment #129): a present multi-view app surface
+                // also reports the view the user is actually on.
+                // `view.switched` is when_offline "drop", so a navigation
+                // performed while Emacs was disconnected is otherwise
+                // unrecoverable at the 10.3 barrier. currentView is null for a
+                // single-root snapshot (#128 clears it), so this is present
+                // exactly when the spec requires it.
+                if (record.present && id.startsWith("app:"))
+                    record.currentView?.let { put("current_view", it) }
+            })
         }
-        return out
     }
 
     /** SPEC 10.2 input_state: latest non-password values, present surfaces. */
-    fun inputState(): JSONObject {
-        val out = JSONObject()
+    fun inputState(): JsonObject {
+        // Immutable trees: accumulate per surface and build once. The old
+        // `out.getJSONObject(surface).put(...)` reached into a nested object
+        // and mutated it in place — an operation that no longer exists.
+        val out = LinkedHashMap<String, MutableMap<String, JsonElement>>()
         for ((key, value) in drafts) {
             val (surface, id) = key
             if (records[surface]?.present != true) continue
-            if (!out.has(surface)) out.put(surface, JSONObject())
-            out.getJSONObject(surface).put(id, value ?: JSONObject.NULL)
+            // R6: a draft's Kotlin null IS the JSON null, and input_state
+            // reports it as one (the old `?: JSONObject.NULL`).
+            out.getOrPut(surface) { LinkedHashMap() }[id] = value ?: JsonNull
         }
-        return out
+        return JsonObject(out.mapValues { (_, members) -> JsonObject(members) })
     }
 
     // ------------------------------------------------------ drafts (13.6)
 
-    fun putDraft(surface: String, id: String, value: Any?) {
+    fun putDraft(surface: String, id: String, value: JsonElement?) {
         val node = records[surface]?.statefuls?.get(id) ?: return
-        if (node.optBoolean("password")) return // SPEC 14.6: never retained
+        if (node.boolOr("password")) return // SPEC 14.6: never retained
         drafts[surface to id] = value
         // SPEC 15.1: the input_state snapshot is durable no later than any
         // event created from this interaction. LD-14: only drafts.json is
@@ -372,7 +387,7 @@ class SurfaceStore(
         persistDrafts()
     }
 
-    fun draft(surface: String, id: String): Any? = drafts[surface to id]
+    fun draft(surface: String, id: String): JsonElement? = drafts[surface to id]
 
     fun hasDraft(surface: String, id: String): Boolean = (surface to id) in drafts
 
@@ -428,8 +443,8 @@ class SurfaceStore(
         return out
     }
 
-    private fun reconcileDrafts(surface: String, oldStatefuls: Map<String, JSONObject>,
-                                newStatefuls: Map<String, JSONObject>, reset: Set<String>) {
+    private fun reconcileDrafts(surface: String, oldStatefuls: Map<String, JsonObject>,
+                                newStatefuls: Map<String, JsonObject>, reset: Set<String>) {
         val stale = drafts.keys.filter { (s, id) ->
             s == surface && run {
                 val node = newStatefuls[id]
@@ -440,7 +455,7 @@ class SurfaceStore(
                     // SPEC 13.6/16.1: reusing an ID for a different node type
                     // is a new identity — erase even when the value schema is
                     // still compatible (checkbox<->switch, text_input->editor).
-                    (oldNode != null && oldNode.getString("t") != node.getString("t")) ||
+                    (oldNode != null && oldNode.reqString("t") != node.reqString("t")) ||
                     !compatible(node, value) ||      // schema incompatible
                     jsonValueEquals(authoredValue(node), value) // acknowledged
             }
@@ -449,36 +464,35 @@ class SurfaceStore(
     }
 
     /** SPEC 13.6: value-schema compatibility is exact. */
-    private fun compatible(node: JSONObject, value: Any?): Boolean =
-        when (node.getString("t")) {
-            "text_input" -> value is String && !node.optBoolean("password") &&
-                (!node.optBoolean("single_line") || '\n' !in value)
-            "checkbox", "switch" -> value is Boolean
+    private fun compatible(node: JsonObject, value: JsonElement?): Boolean =
+        when (node.reqString("t")) {
+            "text_input" -> value is JsonPrimitive && value.isString &&
+                !node.boolOr("password") &&
+                (!node.boolOr("single_line") || '\n' !in value.content)
+            "checkbox", "switch" -> isJsonBoolean(value)
             "enum_list" -> {
-                val options = node.getJSONArray("options")
-                val legal = { v: Any? ->
-                    (0 until options.length()).any {
-                        jsonValueEquals(options.getJSONObject(it).get("value"), v)
-                    } || (node.optBoolean("allow_add") && v is String && v.isNotEmpty())
+                val options = node.reqArr("options")
+                val legal = { v: JsonElement? ->
+                    options.any { jsonValueEquals(it.jsonObject["value"], v) } ||
+                        (node.boolOr("allow_add") &&
+                            v is JsonPrimitive && v.isString && v.content.isNotEmpty())
                 }
-                if (node.optBoolean("multi_select"))
-                    value is JSONArray && (0 until value.length()).all { legal(value.get(it)) }
-                else value !is JSONArray && legal(value)
+                if (node.boolOr("multi_select"))
+                    value is JsonArray && value.all { legal(it) }
+                else value !is JsonArray && legal(value)
             }
-            "slider" -> value is Number && run {
-                val values = node.optJSONArray("values")
+            "slider" -> jsonNumberOrNull(value)?.let { num ->
+                val values = node.arrOrNull("values")
                 if (values != null)
-                    (0 until values.length()).any {
-                        jsonValueEquals(values.get(it), value)
-                    }
+                    values.any { jsonValueEquals(it, value) }
                 else {
-                    val min = (node.opt("min") as? Number)?.toDouble() ?: 0.0
-                    val max = (node.opt("max") as? Number)?.toDouble() ?: 1.0
-                    value.toDouble() in min..max
+                    val min = jsonNumberOrNull(node["min"]) ?: 0.0
+                    val max = jsonNumberOrNull(node["max"]) ?: 1.0
+                    num in min..max
                 }
-            }
-            "editor" -> value is String && node.optBoolean("publish_state") &&
-                !node.has("document")
+            } ?: false
+            "editor" -> value is JsonPrimitive && value.isString &&
+                node.boolOr("publish_state") && "document" !in node
             else -> false
         }
 
@@ -486,17 +500,34 @@ class SurfaceStore(
         /** SPEC 14.1: the authored/default logical value of a stateful node —
          * the value in force before the user touches it. Shared with the
          * dialog defaults layer (T3/LD-3), which has no draft store of its
-         * own, so both layers resolve a default the same way. */
-        fun authoredValueOf(node: JSONObject): Any? = when (node.getString("t")) {
-            "text_input", "editor" -> node.opt("value") ?: ""
-            "checkbox", "switch" -> node.opt("checked") ?: false
-            "enum_list" ->
-                node.opt("value") ?: if (node.optBoolean("multi_select")) JSONArray() else null
-            "slider" -> node.opt("value")
-                ?: node.optJSONArray("values")?.get(0) ?: node.opt("min") ?: 0
+         * own, so both layers resolve a default the same way.
+         *
+         * The elvises test for an ABSENT member, exactly as `opt` did: an
+         * authored `"value": null` reads back as JsonNull (non-null, like
+         * org.json's NULL), so it still overrides the default rather than
+         * being replaced by it. */
+        fun authoredValueOf(node: JsonObject): JsonElement? = when (node.reqString("t")) {
+            "text_input", "editor" -> node["value"] ?: JsonPrimitive("")
+            "checkbox", "switch" -> node["checked"] ?: JsonPrimitive(false)
+            "enum_list" -> node["value"]
+                ?: if (node.boolOr("multi_select")) JsonArray(emptyList()) else null
+            "slider" -> node["value"]
+                ?: node.arrOrNull("values")?.get(0) ?: node["min"] ?: JsonPrimitive(0)
             else -> null
         }
+
+        /** The two SPEC 4.2 kind tests org.json used to get from Kotlin's
+         * `is Boolean` / `is Number`. Both refuse a JSON STRING that merely
+         * spells one (`"true"`, `"5"`) — the coercion that dies with the swap.
+         * Local to this file on purpose: JsonAccess has no boolean/binary64
+         * PREDICATE (its `boolOr`/`wireIntOrNull` are keyed readers), and a
+         * private member cannot collide with one being added there. */
+        private fun isJsonBoolean(v: JsonElement?): Boolean =
+            v is JsonPrimitive && !v.isString && v.content.toBooleanStrictOrNull() != null
+
+        private fun jsonNumberOrNull(v: JsonElement?): Double? =
+            (v as? JsonPrimitive)?.takeIf { !it.isString }?.content?.toDoubleOrNull()
     }
 
-    private fun authoredValue(node: JSONObject): Any? = authoredValueOf(node)
+    private fun authoredValue(node: JsonObject): JsonElement? = authoredValueOf(node)
 }

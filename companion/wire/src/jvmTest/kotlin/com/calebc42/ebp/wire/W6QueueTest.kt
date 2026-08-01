@@ -7,8 +7,15 @@
 //   (item 10); offline draft + sync + replay (item 11).
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -16,39 +23,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.File
 
 class W6QueueTest {
 
     @get:Rule
     val temp = TemporaryFolder()
 
-    private val katToken = EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")
-    private val katPid = "101112131415161718191a1b1c1d1e1f"
-    private val katCn = "202122232425262728292a2b2c2d2e2f"
-    private val katSn = "303132333435363738393a3b3c3d3e3f"
-
-    private fun limits(): JSONObject = JSONObject()
-        .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
-        .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
-        .put("max_surfaces", 16).put("max_surface_ids", 1024)
-        .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
-        .put("max_capture_fields", 64)
-
     private fun config() = CompanionConfig(
         serverName = "kat", serverVersion = "1",
         pairings = mapOf(katPid to katToken),
         supportedCapabilities = setOf("theme"),
-        surfaceProfiles = JSONObject().put("app", JSONObject()
-            .put("node_types", JSONArray(listOf("text", "text_input", "button")))
-            .put("builtins", JSONArray()).put("features", JSONArray())),
-        limits = limits(), nonceSource = { katSn })
-
-    private fun frame(msg: JSONObject) = encodeFrame(msg.toString())
+        surfaceProfiles = buildJsonObject {
+            putJsonObject("app") {
+                put("node_types",
+                    JsonArray(listOf("text", "text_input", "button").map(::JsonPrimitive)))
+                put("builtins", JsonArray(emptyList()))
+                put("features", JsonArray(emptyList()))
+            }
+        },
+        limits = testLimits(), nonceSource = { katSn })
 
     /** Engine + captured outbound frames over a given queue/store. */
     private fun engineOn(queue: DurableQueue, store: SurfaceStore,
-                         out: MutableList<JSONObject>): CompanionEngine =
+                         out: MutableList<JsonObject>): CompanionEngine =
         CompanionEngine(config(), store, queue) { bytes ->
             FrameDecoder().let { d -> d.feed(bytes).forEach(out::add); d.finish() }
         }
@@ -59,28 +56,30 @@ class W6QueueTest {
         feed(frame(request("h2", "auth.response",
             EbpAuth.authParams(katPid, katCn, katSn, katToken))))
         if (toReady) {
-            feed(frame(request("q0", "queue.replay", JSONObject())))
-            feed(frame(request("r1", "session.ready", JSONObject())))
+            feed(frame(request("q0", "queue.replay", JsonObject(emptyMap()))))
+            feed(frame(request("r1", "session.ready", JsonObject(emptyMap()))))
         }
     }
 
-    private fun queuedDescriptor(dedupe: String? = null): JSONObject =
-        JSONObject().put("action", "demo.tap").put("when_offline", "queue")
-            .put("ttl_s", 3600L)
-            .also { if (dedupe != null) it.put("dedupe", dedupe) }
-
-    private fun surfaceWithInput(): SurfaceStore = SurfaceStore(16, 1024).also {
-        it.update("app:main", 1, JSONObject().put("t", "text_input")
-            .put("id", "title").put("value", "authored"), null, null, null)
+    private fun queuedDescriptor(dedupe: String? = null): JsonObject = buildJsonObject {
+        put("action", "demo.tap")
+        put("when_offline", "queue")
+        put("ttl_s", 3600L)
+        if (dedupe != null) put("dedupe", dedupe)
     }
 
-    private fun List<JSONObject>.events() =
-        filter { it.opt("method") == "event.action" }
+    private fun surfaceWithInput(): SurfaceStore = SurfaceStore(16, 1024).also {
+        it.update("app:main", 1, buildJsonObject {
+            put("t", "text_input"); put("id", "title"); put("value", "authored")
+        }, null, null, null)
+    }
 
-    private fun respondTo(engine: CompanionEngine, event: JSONObject, status: String) =
-        engine.feed(frame(JSONObject().put("jsonrpc", "2.0")
-            .put("id", event.getInt("id"))
-            .put("result", JSONObject().put("status", status))))
+    private fun respondTo(engine: CompanionEngine, event: JsonObject, status: String) =
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", event["id"]!!)
+            put("result", buildJsonObject { put("status", status) })
+        }))
 
     // ------------------------------------------------ kill matrix (item 8)
 
@@ -88,38 +87,38 @@ class W6QueueTest {
     fun killBeforeDeliveryReplaysAfterRestart() {
         val file = temp.newFile("queue.json")
         val store = surfaceWithInput()
-        val out1 = mutableListOf<JSONObject>()
+        val out1 = mutableListOf<JsonObject>()
         val q1 = DurableQueue(FileQueueStore(file), 256, 8_388_608)
         val e1 = engineOn(q1, store, out1)
         // Offline occurrence: admitted durably, never delivered (no session).
         e1.dispatchAction("app:main", queuedDescriptor(), null)
         assertEquals(1, q1.count())
         assertTrue(out1.events().isEmpty())
-        val storedId = q1.head()!!.getJSONObject("event").getString("event_id")
+        val storedId = q1.head()!!.reqObj("event").reqString("event_id")
 
         // Process death; the next life reads the same file.
-        val out2 = mutableListOf<JSONObject>()
+        val out2 = mutableListOf<JsonObject>()
         val q2 = DurableQueue(FileQueueStore(file), 256, 8_388_608)
         assertEquals(1, q2.count())
         val e2 = engineOn(q2, surfaceWithInput(), out2)
         e2.handshake(toReady = false)
         // Welcome reports the retained event (SPEC 10.2).
-        assertEquals(1, out2.last().getJSONObject("result").getInt("queued_events"))
-        e2.feed(frame(request("q1", "queue.replay", JSONObject())))
+        assertEquals(1L, out2.last().reqObj("result").reqLong("queued_events"))
+        e2.feed(frame(request("q1", "queue.replay", JsonObject(emptyMap()))))
         val replayed = out2.events().single()
         // SPEC 14.4: the retry reuses the stored EventId.
-        assertEquals(storedId, replayed.getJSONObject("params").getString("event_id"))
+        assertEquals(storedId, replayed.reqObj("params").reqString("event_id"))
         respondTo(e2, replayed, "accepted")
-        val summary = out2.last { it.opt("id") == "q1" }.getJSONObject("result")
-        assertEquals(1, summary.getInt("delivered"))
-        assertEquals(0, summary.getInt("remaining"))
+        val summary = out2.replyTo("q1").reqObj("result")
+        assertEquals(1L, summary.reqLong("delivered"))
+        assertEquals(0L, summary.reqLong("remaining"))
         assertEquals(0, q2.count())
     }
 
     @Test
     fun killWithRequestInFlightRedeliversSameEventId() {
         val file = temp.newFile("queue.json")
-        val out1 = mutableListOf<JSONObject>()
+        val out1 = mutableListOf<JsonObject>()
         val q1 = DurableQueue(FileQueueStore(file), 256, 8_388_608)
         val e1 = engineOn(q1, surfaceWithInput(), out1)
         e1.handshake()
@@ -127,23 +126,23 @@ class W6QueueTest {
         // The request was written to the wire... and the process dies
         // before any response arrives.
         val sent = out1.events().single()
-        val sentId = sent.getJSONObject("params").getString("event_id")
+        val sentId = sent.reqObj("params").reqString("event_id")
         assertEquals(1, q1.count()) // still durable: no permanent result yet
 
-        val out2 = mutableListOf<JSONObject>()
+        val out2 = mutableListOf<JsonObject>()
         val q2 = DurableQueue(FileQueueStore(file), 256, 8_388_608)
         assertTrue(!q2.hasInFlight()) // nothing is in flight after death
         val e2 = engineOn(q2, surfaceWithInput(), out2)
         e2.handshake(toReady = false)
-        e2.feed(frame(request("q1", "queue.replay", JSONObject())))
+        e2.feed(frame(request("q1", "queue.replay", JsonObject(emptyMap()))))
         assertEquals(sentId,
-            out2.events().single().getJSONObject("params").getString("event_id"))
+            out2.events().single().reqObj("params").reqString("event_id"))
     }
 
     @Test
     fun killAfterPermanentResultDeliversNothing() {
         val file = temp.newFile("queue.json")
-        val out1 = mutableListOf<JSONObject>()
+        val out1 = mutableListOf<JsonObject>()
         val q1 = DurableQueue(FileQueueStore(file), 256, 8_388_608)
         val e1 = engineOn(q1, surfaceWithInput(), out1)
         e1.handshake()
@@ -159,7 +158,7 @@ class W6QueueTest {
 
     @Test
     fun transientErrorPausesPumpAndLaterAdmissionNeverBypasses() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val store = surfaceWithInput()
         val e = engineOn(q, store, out)
@@ -167,33 +166,37 @@ class W6QueueTest {
         e.dispatchAction("app:main", queuedDescriptor(), null)
         val first = out.events().single()
         // SPEC 15.3: 1500 retains the head and pauses the pump.
-        e.feed(frame(JSONObject().put("jsonrpc", "2.0")
-            .put("id", first.getInt("id"))
-            .put("error", JSONObject().put("code", 1500)
-                .put("message", "busy")
-                .put("data", JSONObject().put("kind", "event-retry")))))
+        e.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", first["id"]!!)
+            put("error", buildJsonObject {
+                put("code", 1500)
+                put("message", "busy")
+                put("data", buildJsonObject { put("kind", "event-retry") })
+            })
+        }))
         assertEquals(1, q.count())
         // A later admission MUST NOT clear the pause or bypass the head.
         e.dispatchAction("app:main", queuedDescriptor(), null)
         assertEquals(2, q.count())
         assertEquals(1, out.events().size) // nothing new left the pump
         // Replay resumes; strict queue_seq order; summary reports blockage.
-        e.feed(frame(request("q1", "queue.replay", JSONObject())))
+        e.feed(frame(request("q1", "queue.replay", JsonObject(emptyMap()))))
         val second = out.events()[1]
-        assertEquals(first.getJSONObject("params").getString("event_id"),
-            second.getJSONObject("params").getString("event_id"))
+        assertEquals(first.reqObj("params").reqString("event_id"),
+            second.reqObj("params").reqString("event_id"))
         respondTo(e, second, "accepted")
         respondTo(e, out.events()[2], "stale")
-        val summary = out.last { it.opt("id") == "q1" }.getJSONObject("result")
-        assertEquals(1, summary.getInt("delivered"))
-        assertEquals(1, summary.getInt("rejected"))
-        assertEquals(0, summary.getInt("remaining"))
-        assertEquals(JSONObject.NULL, summary.get("blocked_by"))
+        val summary = out.replyTo("q1").reqObj("result")
+        assertEquals(1L, summary.reqLong("delivered"))
+        assertEquals(1L, summary.reqLong("rejected"))
+        assertEquals(0L, summary.reqLong("remaining"))
+        assertEquals(JsonNull, summary["blocked_by"])
     }
 
     @Test
     fun blockedReplayReportsErrorKindAndConcurrentReplayIsBusy() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val store = surfaceWithInput()
         // The backlog predates the session (10.3: it is what replay drains).
@@ -203,24 +206,28 @@ class W6QueueTest {
         }
         val e = engineOn(q, store, out)
         e.handshake(toReady = false)
-        e.feed(frame(request("q1", "queue.replay", JSONObject())))
+        e.feed(frame(request("q1", "queue.replay", JsonObject(emptyMap()))))
         // SPEC 15.3: a second replay while one is active is 1600.
-        e.feed(frame(request("q2", "queue.replay", JSONObject())))
-        assertEquals(1600, out.last { it.opt("id") == "q2" }
-            .getJSONObject("error").getInt("code"))
-        e.feed(frame(JSONObject().put("jsonrpc", "2.0")
-            .put("id", out.events().single().getInt("id"))
-            .put("error", JSONObject().put("code", 1500)
-                .put("message", "busy")
-                .put("data", JSONObject().put("kind", "event-retry")))))
-        val summary = out.last { it.opt("id") == "q1" }.getJSONObject("result")
-        assertEquals("event-retry", summary.getString("blocked_by"))
-        assertEquals(1, summary.getInt("remaining"))
+        e.feed(frame(request("q2", "queue.replay", JsonObject(emptyMap()))))
+        assertEquals(1600L, out.replyTo("q2")
+            .reqObj("error").reqLong("code"))
+        e.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", out.events().single()["id"]!!)
+            put("error", buildJsonObject {
+                put("code", 1500)
+                put("message", "busy")
+                put("data", buildJsonObject { put("kind", "event-retry") })
+            })
+        }))
+        val summary = out.replyTo("q1").reqObj("result")
+        assertEquals("event-retry", summary.reqString("blocked_by"))
+        assertEquals(1L, summary.reqLong("remaining"))
     }
 
     @Test
     fun syncingWithholdsAutoDeliveryUntilReplay() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val store = surfaceWithInput()
         // A backlog event from before the session...
@@ -232,13 +239,13 @@ class W6QueueTest {
         e.handshake(toReady = false) // SYNCING
         // SPEC 10.3/15.3: during SYNCING only the explicit replay pumps.
         assertTrue(out.events().isEmpty())
-        e.feed(frame(request("q1", "queue.replay", JSONObject())))
+        e.feed(frame(request("q1", "queue.replay", JsonObject(emptyMap()))))
         assertEquals(1, out.events().size)
     }
 
     @Test
     fun readyAdmissionAutoStartsPump() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val e = engineOn(q, surfaceWithInput(), out)
         e.handshake()
@@ -254,39 +261,43 @@ class W6QueueTest {
     @Test
     fun dedupeReplacesOlderButNeverInFlight() {
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
-        fun event(id: String) = JSONObject().put("event_id", id.repeat(32).take(32))
-            .put("action", "a.b").put("occurred_at_ms", q.effectiveNow())
+        fun event(id: String) = buildJsonObject {
+            put("event_id", id.repeat(32).take(32))
+            put("action", "a.b"); put("occurred_at_ms", q.effectiveNow())
+        }
         q.admit(event("a"), "queue", "key", 3600)
         q.admit(event("b"), "queue", "key", 3600)
         // The older same-key record was compacted away (SPEC 15.2).
         assertEquals(1, q.count())
-        assertTrue(q.head()!!.getJSONObject("event").getString("event_id").startsWith("b"))
+        assertTrue(q.head()!!.reqObj("event").reqString("event_id").startsWith("b"))
         // An in-flight record is never replaced.
         q.beginDelivery(null) // atomically marks the head in-flight
         q.admit(event("c"), "queue", "key", 3600)
         assertEquals(2, q.count())
         // Sequence numbers stay strictly increasing across compaction.
-        val seqs = listOf(q.head()!!.getLong("queue_seq"))
+        val seqs = listOf(q.head()!!.reqLong("queue_seq"))
         assertTrue(seqs.all { it >= 1 })
     }
 
     @Test
     fun beginDeliveryGatesPendingLocalBarrierAndEmpty() {
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
-        fun ev(id: String) = JSONObject().put("event_id", id).put("action", "a.b")
-            .put("occurred_at_ms", q.effectiveNow())
+        fun ev(id: String) = buildJsonObject {
+            put("event_id", id); put("action", "a.b")
+            put("occurred_at_ms", q.effectiveNow())
+        }
         assertTrue(q.beginDelivery(null) is Delivery.Empty)
         // A pending-local head is withheld (the pump waits, not concludes).
         q.admit(ev("x"), "queue", null, 3600, pendingLocal = true)
         assertTrue(q.beginDelivery(null) is Delivery.PendingLocal)
-        q.clearPendingLocal(q.head()!!.getLong("queue_seq"))
+        q.clearPendingLocal(q.head()!!.reqLong("queue_seq"))
         // Now deliverable — and atomically marked in-flight.
         val d = q.beginDelivery(null)
         assertTrue(d is Delivery.Ready)
         assertTrue(q.hasInFlight())
         // The SYNCING replay barrier withholds a head at/after the boundary.
-        q.clearInFlight((d as Delivery.Ready).record.getLong("queue_seq"))
-        assertTrue(q.beginDelivery(q.head()!!.getLong("queue_seq")) is Delivery.BarrierHeld)
+        q.clearInFlight((d as Delivery.Ready).record.reqLong("queue_seq"))
+        assertTrue(q.beginDelivery(q.head()!!.reqLong("queue_seq")) is Delivery.BarrierHeld)
     }
 
     @Test
@@ -294,8 +305,10 @@ class W6QueueTest {
         var now = 1_000_000L
         val file = temp.newFile("queue.json")
         val q = DurableQueue(FileQueueStore(file), 256, 8_388_608).also { it.clock = { now } }
-        val event = JSONObject().put("event_id", "a".repeat(32))
-            .put("action", "a.b").put("occurred_at_ms", now)
+        val event = buildJsonObject {
+            put("event_id", "a".repeat(32))
+            put("action", "a.b"); put("occurred_at_ms", now)
+        }
         q.admit(event, "queue", null, 10) // expires at now + 10s
         now += 11_000
         // The sweep advances the durable mark and deletes the record.
@@ -306,16 +319,20 @@ class W6QueueTest {
         now = 900_000L
         val q2 = DurableQueue(FileQueueStore(file), 256, 8_388_608).also { it.clock = { now } }
         assertTrue(q2.effectiveNow() >= 1_011_000L) // the mark survived death
-        q2.admit(JSONObject().put("event_id", "b".repeat(32))
-            .put("action", "a.b").put("occurred_at_ms", 900_000L), "queue", null, 10)
+        q2.admit(buildJsonObject {
+            put("event_id", "b".repeat(32))
+            put("action", "a.b"); put("occurred_at_ms", 900_000L)
+        }, "queue", null, 10)
         assertEquals(1, q2.sweepExpired()) // 900s + 10s < mark: already expired
     }
 
     @Test
     fun capacityRejectsAdmissionWithoutClaimingQueued() {
         val q = DurableQueue(MemoryQueueStore(), maxEvents = 1, maxBytes = 8_388_608)
-        fun event(c: String) = JSONObject().put("event_id", c.repeat(32))
-            .put("action", "a.b").put("occurred_at_ms", q.effectiveNow())
+        fun event(c: String) = buildJsonObject {
+            put("event_id", c.repeat(32))
+            put("action", "a.b"); put("occurred_at_ms", q.effectiveNow())
+        }
         assertTrue(q.admit(event("a"), "queue", null, 60) is AdmitResult.Admitted)
         assertTrue(q.admit(event("b"), "queue", null, 60) is AdmitResult.QueueFull)
         assertEquals(1, q.count()) // the queue is unchanged
@@ -329,46 +346,47 @@ class W6QueueTest {
         // same process, same shared queue, new engine.
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val store = surfaceWithInput()
-        val out1 = mutableListOf<JSONObject>()
+        val out1 = mutableListOf<JsonObject>()
         val e1 = engineOn(q, store, out1)
         e1.handshake()
         e1.dispatchAction("app:main", queuedDescriptor(), null)
         assertTrue(q.hasInFlight()) // request written, no response yet
         e1.close("transport closed") // connection loss, process survives
         assertTrue(!q.hasInFlight())  // the marker died with the session
-        val out2 = mutableListOf<JSONObject>()
+        val out2 = mutableListOf<JsonObject>()
         val e2 = engineOn(q, store, out2)
         e2.handshake(toReady = false)
-        e2.feed(frame(request("q1", "queue.replay", JSONObject())))
+        e2.feed(frame(request("q1", "queue.replay", JsonObject(emptyMap()))))
         assertEquals(1, out2.events().size) // replay moves, not wedged
         respondTo(e2, out2.events().single(), "accepted")
-        val summary = out2.last { it.opt("id") == "q1" }.getJSONObject("result")
-        assertEquals(1, summary.getInt("delivered"))
+        val summary = out2.replyTo("q1").reqObj("result")
+        assertEquals(1L, summary.reqLong("delivered"))
     }
 
     @Test
     fun oversizedEventIsRefusedLocallyNeverPersistedOrSent() {
         // Review P0: SPEC 14.4/15.4 — max_event_bytes before persistence
         // or transmission; refusal is a local diagnostic.
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val store = surfaceWithInput()
         val e = engineOn(q, store, out)
         e.handshake()
-        e.publishState("app:main", "title", "x".repeat(300_000))
-        var localError: JSONObject? = null
+        e.publishState("app:main", "title", JsonPrimitive("x".repeat(300_000)))
+        var localError: JsonObject? = null
         e.dispatchAction("app:main",
-            queuedDescriptor().put("capture_fields", JSONArray(listOf("title"))),
+            queuedDescriptor().with("capture_fields",
+                JsonArray(listOf("title").map(::JsonPrimitive))),
             null) { _, error -> localError = error }
         assertEquals(0, q.count())            // never persisted
         assertTrue(out.events().isEmpty())    // never transmitted
         assertEquals("event-too-large", localError!!
-            .getJSONObject("data").getString("reason"))
+            .reqObj("data").reqString("reason"))
     }
 
     @Test
     fun unknownStatusRetainsEventAndClosesWithOneLogError() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val e = engineOn(q, surfaceWithInput(), out)
         e.handshake()
@@ -377,14 +395,14 @@ class W6QueueTest {
         // SPEC 15.3: retained, one safe log.error, connection closed.
         assertEquals(1, q.count())
         assertEquals(SessionState.CLOSED, e.state)
-        assertEquals(1, out.count { it.opt("method") == "log.error" })
+        assertEquals(1, out.count { it.stringOrNull("method") == "log.error" })
     }
 
     @Test
     fun newEventsAdmittedDuringSyncingStayBehindTheBarrier() {
         // Review P1: SPEC 10.3/15.3 — the SYNCING replay drains only the
         // backlog; a newly generated occurrence waits for session.ready.
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val store = surfaceWithInput()
         val e1 = engineOn(q, store, mutableListOf())
@@ -392,17 +410,17 @@ class W6QueueTest {
         e1.close("pre-session")
         val e2 = engineOn(q, store, out)
         e2.handshake(toReady = false)
-        e2.feed(frame(request("q1", "queue.replay", JSONObject())))
+        e2.feed(frame(request("q1", "queue.replay", JsonObject(emptyMap()))))
         // While the backlog head is in flight, a NEW occurrence arrives.
         e2.dispatchAction("app:main", queuedDescriptor(), null)
         respondTo(e2, out.events()[0], "accepted")
         // The replay concluded at the barrier: the new event is retained.
-        val summary = out.last { it.opt("id") == "q1" }.getJSONObject("result")
-        assertEquals(1, summary.getInt("delivered"))
-        assertEquals(1, summary.getInt("remaining"))
+        val summary = out.replyTo("q1").reqObj("result")
+        assertEquals(1L, summary.reqLong("delivered"))
+        assertEquals(1L, summary.reqLong("remaining"))
         assertEquals(1, out.events().size) // nothing new delivered yet
         // session.ready releases it.
-        e2.feed(frame(request("r1", "session.ready", JSONObject())))
+        e2.feed(frame(request("r1", "session.ready", JsonObject(emptyMap()))))
         assertEquals(2, out.events().size)
     }
 
@@ -410,20 +428,20 @@ class W6QueueTest {
     fun syncingEraEditsFlushBeforeReleasedEvents() {
         // Review P1: SPEC 10.3 — divergent SYNCING-era values flush as
         // state.changed ahead of any event released on READY.
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val store = surfaceWithInput()
         val e = engineOn(q, store, out)
         e.handshake(toReady = false)
-        e.publishState("app:main", "title", "syncing edit")
+        e.publishState("app:main", "title", JsonPrimitive("syncing edit"))
         e.dispatchAction("app:main", queuedDescriptor(), null)
-        assertTrue(out.none { it.opt("method") == "state.changed" })
-        e.feed(frame(request("r1", "session.ready", JSONObject())))
-        val stateIdx = out.indexOfFirst { it.opt("method") == "state.changed" }
-        val eventIdx = out.indexOfFirst { it.opt("method") == "event.action" }
+        assertTrue(out.none { it.stringOrNull("method") == "state.changed" })
+        e.feed(frame(request("r1", "session.ready", JsonObject(emptyMap()))))
+        val stateIdx = out.indexOfFirst { it.stringOrNull("method") == "state.changed" }
+        val eventIdx = out.indexOfFirst { it.stringOrNull("method") == "event.action" }
         assertTrue(stateIdx in 0 until eventIdx)
         assertEquals("syncing edit",
-            out[stateIdx].getJSONObject("params").getString("value"))
+            out[stateIdx].reqObj("params").reqString("value"))
     }
 
     // ------------------------------ offline draft + sync + replay (item 11)
@@ -437,14 +455,16 @@ class W6QueueTest {
         // state forward — a genuine kill, not a same-object reconnection.
         run {
             val store = SurfaceStore(16, 1024, backing = FileSurfaceBacking(surfaceFile))
-            store.update("app:main", 1, JSONObject().put("t", "text_input")
-                .put("id", "title").put("value", "authored"), null, null, null)
+            store.update("app:main", 1, buildJsonObject {
+                put("t", "text_input"); put("id", "title"); put("value", "authored")
+            }, null, null, null)
             val q1 = DurableQueue(FileQueueStore(queueFile), 256, 8_388_608)
-            val out1 = mutableListOf<JSONObject>()
+            val out1 = mutableListOf<JsonObject>()
             val e1 = engineOn(q1, store, out1)
-            e1.publishState("app:main", "title", "offline edit")
+            e1.publishState("app:main", "title", JsonPrimitive("offline edit"))
             e1.dispatchAction("app:main",
-                queuedDescriptor().put("capture_fields", JSONArray(listOf("title"))), null)
+                queuedDescriptor().with("capture_fields",
+                    JsonArray(listOf("title").map(::JsonPrimitive))), null)
             assertTrue(out1.isEmpty()) // nothing on the wire without a session
         }
 
@@ -453,17 +473,17 @@ class W6QueueTest {
         // delivers the event with its occurrence-time capture.
         val store2 = SurfaceStore(16, 1024, backing = FileSurfaceBacking(surfaceFile))
         val q2 = DurableQueue(FileQueueStore(queueFile), 256, 8_388_608)
-        val out2 = mutableListOf<JSONObject>()
+        val out2 = mutableListOf<JsonObject>()
         val e2 = engineOn(q2, store2, out2)
         e2.handshake(toReady = false)
-        val welcome = out2.last().getJSONObject("result")
-        assertEquals("offline edit", welcome.getJSONObject("input_state")
-            .getJSONObject("app:main").getString("title"))
-        assertEquals(1, welcome.getInt("queued_events"))
-        e2.feed(frame(request("q1", "queue.replay", JSONObject())))
-        val event = out2.events().single().getJSONObject("params")
-        assertEquals("offline edit", event.getJSONObject("fields").getString("title"))
-        assertNotNull(event.getLong("queued_at_ms"))
+        val welcome = out2.last().reqObj("result")
+        assertEquals("offline edit", welcome.reqObj("input_state")
+            .reqObj("app:main").reqString("title"))
+        assertEquals(1L, welcome.reqLong("queued_events"))
+        e2.feed(frame(request("q1", "queue.replay", JsonObject(emptyMap()))))
+        val event = out2.events().single().reqObj("params")
+        assertEquals("offline edit", event.reqObj("fields").reqString("title"))
+        assertNotNull(event.reqLong("queued_at_ms"))
         respondTo(e2, out2.events().single(), "accepted")
         assertEquals(0, q2.count())
     }
@@ -473,15 +493,16 @@ class W6QueueTest {
         // SPEC 13.1: a structurally invalid surface id is rejected, not made
         // into a tombstone that pollutes the welcome (audit finding 24).
         val store = SurfaceStore(16, 1024)
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = engineOn(DurableQueue(MemoryQueueStore(), 256, 8_388_608), store, out)
         engine.handshake(toReady = true)
-        engine.feed(frame(request("rm", "surface.remove", JSONObject()
-            .put("surface", "not a valid id!").put("revision", 1L))))
-        val err = out.last { it.opt("id") == "rm" }.getJSONObject("error")
-        assertEquals(1201, err.getInt("code"))
-        assertEquals("surface-id", err.getJSONObject("data").getString("reason"))
-        assertEquals(0, store.snapshot().length()) // no tombstone created
+        engine.feed(frame(request("rm", "surface.remove", buildJsonObject {
+            put("surface", "not a valid id!"); put("revision", 1L)
+        })))
+        val err = out.replyTo("rm").reqObj("error")
+        assertEquals(1201L, err.reqLong("code"))
+        assertEquals("surface-id", err.reqObj("data").reqString("reason"))
+        assertEquals(0, store.snapshot().size) // no tombstone created
     }
 
     @Test
@@ -490,20 +511,83 @@ class W6QueueTest {
         // params, INCLUDING queued_at_ms — an event that fits only without
         // that field must still be rejected (audit finding 22).
         val limit = 262144
-        val overhead = JSONObject()
-            .put("event_id", "0".repeat(32)).put("action", "demo.tap")
-            .put("surface", "app:main").put("revision_seen", 1L)
-            .put("occurred_at_ms", 1000L).put("args", JSONObject().put("pad", ""))
-            .toString().toByteArray(Charsets.UTF_8).size
+        val overhead = buildJsonObject {
+            put("event_id", "0".repeat(32)); put("action", "demo.tap")
+            put("surface", "app:main"); put("revision_seen", 1L)
+            put("occurred_at_ms", 1000L)
+            put("args", buildJsonObject { put("pad", "") })
+        }.toString().toByteArray(Charsets.UTF_8).size
         val pad = "x".repeat(limit - overhead) // params sans queued_at_ms == limit
         val q = DurableQueue(MemoryQueueStore(), 256, 8_388_608) { 1000L }
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = engineOn(q, surfaceWithInput(), out)
-        var error: JSONObject? = null
+        var error: JsonObject? = null
         engine.dispatchAction("app:main",
-            queuedDescriptor().put("args", JSONObject().put("pad", pad)), null) { _, e -> error = e }
-        assertEquals(1201, error!!.getInt("code"))
-        assertEquals("event-too-large", error!!.getJSONObject("data").getString("reason"))
+            queuedDescriptor().with("args", buildJsonObject { put("pad", pad) }),
+            null) { _, e -> error = e }
+        assertEquals(1201L, error!!.reqLong("code"))
+        assertEquals("event-too-large", error!!.reqObj("data").reqString("reason"))
         assertEquals(0, q.count()) // not admitted
+    }
+
+    // ------------------------------------- P0 byte-gate pin (§0.2 item 5)
+
+    /**
+     * MEASURE WITH WHAT YOU EMIT. `max_event_bytes` is enforced by
+     * serializing params and counting UTF-8 octets (CompanionEngine.kt:325),
+     * the durable queue accounts capacity the same way (DurableQueue.kt:135),
+     * and the frame that goes out is serialized a third time. Today all three
+     * run through org.json's `toString()`, so they agree by construction.
+     * After the swap they agree only if ONE `wireSerialize` feeds all three —
+     * which is why the runbook requires the measuring sites and the emit site
+     * to migrate in the same commit.
+     *
+     * The payload makes escaping choices visible: an em dash, curly quotes, a
+     * euro sign (3-byte UTF-8), and `</x`, which some encoders escape for
+     * HTML safety. A sender that escapes differently than the gate measures
+     * either under-counts a frame it then refuses, or over-counts one it
+     * could have sent.
+     */
+    @Test
+    fun byteGateMeasuresWhatItEmits() {
+        val tricky = "— “q” €</xtail"
+        val raw = mutableListOf<ByteArray>()
+        val out = mutableListOf<JsonObject>()
+        val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
+        val engine = CompanionEngine(config(), surfaceWithInput(), queue) { bytes ->
+            raw.add(bytes)
+            FrameDecoder().let { d -> d.feed(bytes).forEach(out::add); d.finish() }
+        }
+        engine.handshake()
+        raw.clear(); out.clear()
+
+        engine.dispatchAction("app:main", buildJsonObject {
+            put("action", "a.b")
+            put("args", buildJsonObject { put("note", tricky) })
+        }, null)
+
+        val event = out.events().single()
+        val params = event.reqObj("params")
+        // 1. Character fidelity: every awkward scalar survives parse -> emit
+        //    unchanged — no mojibake, no HTML escaping of the `</x` run.
+        assertEquals(tricky, params.reqObj("args").reqString("note"))
+
+        // 2. The emitted BODY bytes equal a re-serialization of the decoded
+        //    message: the encoder and the measuring path agree on escaping.
+        val frameBytes = raw.single { String(it, Charsets.UTF_8).contains("event.action") }
+        val text = String(frameBytes, Charsets.UTF_8)
+        val body = text.substring(text.indexOf("\r\n\r\n") + 4)
+        assertEquals(body.toByteArray(Charsets.UTF_8).size,
+            Json.parseToJsonElement(body).toString().toByteArray(Charsets.UTF_8).size)
+
+        // 3. The params the gate measures are the params on the wire.
+        assertEquals(params.toString().toByteArray(Charsets.UTF_8).size,
+            (Json.parseToJsonElement(body) as JsonObject).reqObj("params").toString()
+                .toByteArray(Charsets.UTF_8).size)
+
+        // 4. Content-Length declares those same octets (SPEC 6.1) — the
+        //    framing half of the same invariant.
+        val declared = Regex("Content-Length: (\\d+)").find(text)!!.groupValues[1].toInt()
+        assertEquals(declared, body.toByteArray(Charsets.UTF_8).size)
     }
 }

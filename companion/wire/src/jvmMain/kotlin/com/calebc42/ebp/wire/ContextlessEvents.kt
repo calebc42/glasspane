@@ -6,22 +6,31 @@
 // queue for later replay, using exactly the same code path the engine uses.
 package com.calebc42.ebp.wire
 
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** SPEC 17.1: the advertised node_types for a target from surface_profiles, or
  * null when the profile is absent (allow all — the reference always advertises
- * them; null keeps unit tests and the golden corpus ungated). */
-fun nodeTypesFromProfiles(profiles: JSONObject, target: String): Set<String>? {
-    val arr = profiles.optJSONObject(target)?.optJSONArray("node_types") ?: return null
-    return buildSet { for (i in 0 until arr.length()) arr.optString(i)?.let(::add) }
+ * them; null keeps unit tests and the golden corpus ungated).
+ *
+ * C3: a non-string entry is now SKIPPED rather than stringified. org.json's
+ * `optString(i)` coerced (the number 5 advertised the type "5") and turned a
+ * JSON null into the empty string, both of which then gated real traffic;
+ * neither spells a SPEC 4.4 identifier, so dropping them can only tighten a
+ * gate that was already validator-fed. */
+fun nodeTypesFromProfiles(profiles: JsonObject, target: String): Set<String>? {
+    val arr = profiles.objOrNull(target)?.arrOrNull("node_types") ?: return null
+    return buildSet { for (e in arr) e.asStringOrNull()?.let(::add) }
 }
 
 /** SPEC 14.2 (LD-17): the advertised builtins for a target from
  * surface_profiles, or null when the profile is absent (allow all — the
  * counterpart of [nodeTypesFromProfiles] for the builtin-context gate). */
-fun builtinsFromProfiles(profiles: JSONObject, target: String): Set<String>? {
-    val arr = profiles.optJSONObject(target)?.optJSONArray("builtins") ?: return null
-    return buildSet { for (i in 0 until arr.length()) arr.optString(i)?.let(::add) }
+fun builtinsFromProfiles(profiles: JsonObject, target: String): Set<String>? {
+    val arr = profiles.objOrNull(target)?.arrOrNull("builtins") ?: return null
+    return buildSet { for (e in arr) e.asStringOrNull()?.let(::add) }
 }
 
 /**
@@ -33,7 +42,7 @@ fun builtinsFromProfiles(profiles: JSONObject, target: String): Set<String>? {
  * (SPEC 15.1).
  */
 interface LiveSession {
-    fun deliverLiveDrop(params: JSONObject, callback: ((String?, JSONObject?) -> Unit)?)
+    fun deliverLiveDrop(params: JsonObject, callback: ((String?, JsonObject?) -> Unit)?)
     fun onDurableAdmitted(policy: String)
 }
 
@@ -46,43 +55,65 @@ interface LiveSession {
 fun dispatchContextless(
     queue: DurableQueue,
     maxEventBytes: Long,
-    descriptor: JSONObject,
-    args: JSONObject,
+    descriptor: JsonObject,
+    args: JsonObject,
     live: LiveSession?,
-    callback: ((String?, JSONObject?) -> Unit)? = null,
-    fields: JSONObject? = null,
+    callback: ((String?, JsonObject?) -> Unit)? = null,
+    fields: JsonObject? = null,
 ) {
-    val params = JSONObject()
-        .put("event_id", EbpAuth.generateNonce())
-        .put("action", descriptor.getString("action"))
-        .put("occurred_at_ms", queue.effectiveNow())
-    if (args.length() > 0) params.put("args", args)
-    // SPEC 18.5: a notification inline-reply carries the typed text in `fields`.
-    if (fields != null && fields.length() > 0) params.put("fields", fields)
-    val policy = descriptor.optString("when_offline", OFFLINE_DEFAULT)
-    if (policy == "queue" || policy == "wake")
-        params.put("queued_at_ms", queue.effectiveNow())
+    // C3: `params` is assembled in ONE builder rather than mutated member by
+    // member — a JsonObject is immutable, and the conditional members are
+    // conditions inside the builder instead of dropped `put` results. The
+    // two `effectiveNow()` reads stay two reads, in the same order.
+    val policy = descriptor.stringOr("when_offline", OFFLINE_DEFAULT)
+    val params = buildJsonObject {
+        put("event_id", EbpAuth.generateNonce())
+        put("action", descriptor.reqString("action"))
+        put("occurred_at_ms", queue.effectiveNow())
+        if (args.isNotEmpty()) put("args", args)
+        // SPEC 18.5: a notification inline-reply carries the typed text in `fields`.
+        if (fields != null && fields.isNotEmpty()) put("fields", fields)
+        if (policy == "queue" || policy == "wake")
+            put("queued_at_ms", queue.effectiveNow())
+    }
     if (params.toString().toByteArray(Charsets.UTF_8).size > maxEventBytes) {
-        callback?.invoke(null, JSONObject().put("code", 1201)
-            .put("message", "Event exceeds max_event_bytes")
-            .put("data", JSONObject().put("kind", "content-invalid")
-                .put("reason", "event-too-large")))
+        callback?.invoke(null, buildJsonObject {
+            put("code", 1201)
+            put("message", "Event exceeds max_event_bytes")
+            put("data", buildJsonObject {
+                put("kind", "content-invalid")
+                put("reason", "event-too-large")
+            })
+        })
         return
     }
     when (policy) {
+        // C3: `ttl_s` reads through [integralLongOrNull], NOT [reqLong]. Both
+        // on_tap arms of SpecValidator bound this member to an INTEGRAL number
+        // in 1..604800 and accept the binary64 spelling `60.0` — their comment
+        // ("validating it here makes the queue-admission getLong at dispatch
+        // time total") is the contract, and PreSwapNumberTest pins that
+        // acceptance as functional, not merely tolerated. org.json's `getLong`
+        // truncated such a double; the strict wire reader refuses it, which
+        // would start dropping a legal older peer's taps on the device.
         "queue", "wake" -> when (queue.admit(params, policy,
-                descriptor.optString("dedupe").takeIf { it.isNotEmpty() },
-                descriptor.getLong("ttl_s"))) {
+                descriptor.stringOr("dedupe").takeIf { it.isNotEmpty() },
+                integralLongOrNull(descriptor["ttl_s"])
+                    ?: throw NoSuchElementException("ttl_s"))) {
             is AdmitResult.Admitted -> {
                 live?.onDurableAdmitted(policy)
                 callback?.invoke("queued", null)
             }
-            AdmitResult.QueueFull -> callback?.invoke(null, JSONObject()
-                .put("code", 1601).put("message", "Queue full")
-                .put("data", JSONObject().put("kind", "queue-full")))
-            AdmitResult.StorageFailed -> callback?.invoke(null, JSONObject()
-                .put("code", -32603).put("message", "Storage failed")
-                .put("data", JSONObject().put("kind", "internal-error")))
+            AdmitResult.QueueFull -> callback?.invoke(null, buildJsonObject {
+                put("code", 1601)
+                put("message", "Queue full")
+                put("data", buildJsonObject { put("kind", "queue-full") })
+            })
+            AdmitResult.StorageFailed -> callback?.invoke(null, buildJsonObject {
+                put("code", -32603)
+                put("message", "Storage failed")
+                put("data", buildJsonObject { put("kind", "internal-error") })
+            })
         }
         // SPEC 15.1: a drop event delivers live or is lost; no session = lost.
         else -> live?.deliverLiveDrop(params, callback)
@@ -103,11 +134,16 @@ fun routeReminderTap(
     owner: String,
     reminderId: String,
     live: LiveSession?,
-    callback: ((String?, JSONObject?) -> Unit)? = null,
+    callback: ((String?, JsonObject?) -> Unit)? = null,
 ) {
-    val onTap = reminders.reminder(owner, reminderId)?.optJSONObject("on_tap") ?: return
-    val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
-        .put("owner", owner).put("reminder_id", reminderId)
+    val onTap = reminders.reminder(owner, reminderId)?.objOrNull("on_tap") ?: return
+    // C3: the authored args were deep-copied before the injection so the
+    // injected members never wrote through into the STORE's object. An
+    // immutable tree shares safely and `with` returns a new object, so the
+    // copy is gone and the aliasing it defended against is unreachable.
+    val args = (onTap.objOrNull("args") ?: JsonObject(emptyMap()))
+        .with("owner", JsonPrimitive(owner))
+        .with("reminder_id", JsonPrimitive(reminderId))
     dispatchContextless(queue, maxEventBytes, onTap, args, live, callback)
 }
 
@@ -122,30 +158,34 @@ fun routeReminderTap(
 fun routeNotificationAction(
     queue: DurableQueue,
     maxEventBytes: Long,
-    onTap: JSONObject,
+    onTap: JsonObject,
     replyKey: String?,
     replyText: String?,
     live: LiveSession?,
     maxFieldBytes: Long = Long.MAX_VALUE,
-    callback: ((String?, JSONObject?) -> Unit)? = null,
+    callback: ((String?, JsonObject?) -> Unit)? = null,
 ) {
     // SPEC 18.5/14.1: an inline reply is a field value bounded by
     // max_field_bytes — an over-limit reply is content-invalid, not dispatched
     // (so its notification is NOT dismissed).
     if (replyKey != null && replyText != null &&
         replyText.toByteArray(Charsets.UTF_8).size.toLong() > maxFieldBytes) {
-        callback?.invoke(null, JSONObject().put("code", 1201)
-            .put("message", "Reply exceeds max_field_bytes")
-            .put("data", JSONObject().put("kind", "content-invalid")
-                .put("reason", "field-too-large")))
+        callback?.invoke(null, buildJsonObject {
+            put("code", 1201)
+            put("message", "Reply exceeds max_field_bytes")
+            put("data", buildJsonObject {
+                put("kind", "content-invalid")
+                put("reason", "field-too-large")
+            })
+        })
         return
     }
     // SPEC 18.5: a notification action's on_tap is a remote descriptor (the
     // validator rejects a builtin); guard defensively so a stray non-action
     // never throws here.
-    if (!onTap.has("action")) return
-    val args = JSONObject(onTap.optJSONObject("args")?.toString() ?: "{}")
+    if ("action" !in onTap) return
+    val args = onTap.objOrNull("args") ?: JsonObject(emptyMap())
     val fields = if (replyKey != null && replyText != null)
-        JSONObject().put(replyKey, replyText) else null
+        buildJsonObject { put(replyKey, replyText) } else null
     dispatchContextless(queue, maxEventBytes, onTap, args, live, callback, fields)
 }

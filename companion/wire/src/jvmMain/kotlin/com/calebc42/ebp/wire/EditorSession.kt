@@ -139,8 +139,15 @@ class EditorSession(
          * compute identically (ebp.el uses `string-bytes (json-serialize
          * text)`). Two enclosing quotes; `"` `\` and the five short escapes
          * are 2 bytes; any other C0 control is 6 (\u00XX); everything else
-         * its plain UTF-8 length. Matches Emacs 30.1 json_out_string, not
-         * org.json's quote() (which also escapes `/` after `<`).
+         * its plain UTF-8 length. Matches Emacs 30.1 json_out_string.
+         *
+         * The rule is Emacs's and is computed here independently of whatever
+         * encoder happens to be linked, because it is the figure BOTH
+         * endpoints must agree on. Pre-C3 that independence was load-bearing:
+         * org.json's quote() also escaped `/` after `<`, so its output and
+         * this accounting disagreed. kotlinx's encoder escapes only `"`, `\`
+         * and the C0 controls, so the two now coincide — which is a
+         * convenience, not the contract.
          */
         fun jcsUtf8Bytes(text: String): Long {
             var bytes = 2L

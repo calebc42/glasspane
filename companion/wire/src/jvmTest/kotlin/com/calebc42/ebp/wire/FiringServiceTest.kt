@@ -7,8 +7,13 @@
 package com.calebc42.ebp.wire
 
 import java.io.File
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -29,41 +34,46 @@ class FiringServiceTest {
         trackableStateTypes = setOf("battery.level"),
         triggerCaps = setOf("vibrate"), maxResponses = 4)
 
-    private fun trig(id: String, block: JSONObject.() -> Unit) =
-        JSONObject().put("id", id).put("type", "battery.level")
-            .put("params", JSONObject().put("below", 20)).apply(block)
+    private fun trig(id: String, block: JsonObjectBuilder.() -> Unit = {}) =
+        buildJsonObject {
+            put("id", id); put("type", "battery.level")
+            putJsonObject("params") { put("below", 20) }
+            block()
+        }
 
-    private fun entries(vararg t: JSONObject) =
-        TriggerValidator.validateSet(JSONObject().put("triggers", JSONArray(t.toList())), caps)
+    private fun entries(vararg t: JsonObject) =
+        TriggerValidator.validateSet(
+            buildJsonObject { put("triggers", JsonArray(t.toList())) }, caps)
 
-    private fun battery(level: Int) = JSONObject().put("level", level)
+    private fun battery(level: Int) = buildJsonObject { put("level", level) }
 
     @Test
     fun firesWithNoSessionAndAdmitsDurablyRunningOnFire() {
         val storeFile = File(tmp.root, "t.json")
         val store = TriggerStore(FileTriggerBacking(storeFile))
         val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
-        val notified = mutableListOf<JSONObject>()
-        val state = hashMapOf<String, JSONObject>("battery.level" to battery(50))
+        val notified = mutableListOf<JsonObject>()
+        val state = hashMapOf<String, JsonObject>("battery.level" to battery(50))
         val service = TriggerFiringService(store, queue, 262_144, setOf("vibrate"))
         service.stateProvider = { state[it] }
         service.notifyListener = { notified.add(it) }
         // No engine attached (session == null).
         service.replaceSet("id", entries(trig("bat") {
-            put("policy", "queue").put("ttl_s", 86_400)
-            put("on_fire", JSONArray().put(JSONObject().put("notify",
-                JSONObject().put("text", "low"))))
+            put("policy", "queue"); put("ttl_s", 86_400)
+            putJsonArray("on_fire") {
+                add(buildJsonObject { putJsonObject("notify") { put("text", "low") } })
+            }
         }))
         state["battery.level"] = battery(19)
         service.observeSample("battery.level", battery(19))
         // Admitted durably, and its pending-local marker was cleared.
         assertEquals(1, queue.count())
-        val ev = queue.head()!!.getJSONObject("event")
-        assertEquals("trigger.fired", ev.getString("action"))
-        assertEquals(19, ev.getJSONObject("args").getJSONObject("data").getInt("level"))
+        val ev = queue.head()!!.reqObj("event")
+        assertEquals("trigger.fired", ev.reqString("action"))
+        assertEquals(19L, integralLongOrNull(ev.reqObj("args").reqObj("data")["level"]))
         assertTrue(!queue.headIsPendingLocal())
         // on_fire ran even with no session (SPEC 21.2).
-        assertEquals(listOf("low"), notified.map { it.getString("text") })
+        assertEquals(listOf("low"), notified.map { it.reqString("text") })
         // Throttle floor persisted across a store reload.
         assertNotNull(TriggerStore(FileTriggerBacking(storeFile))
             .registration("id", "bat")!!.throttleFloorMs)
@@ -73,7 +83,7 @@ class FiringServiceTest {
     fun throttleSurvivesServiceReconstruction() {
         val storeFile = File(tmp.root, "t.json")
         val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
-        val state = hashMapOf<String, JSONObject>("battery.level" to battery(50))
+        val state = hashMapOf<String, JsonObject>("battery.level" to battery(50))
         val store1 = TriggerStore(FileTriggerBacking(storeFile))
         val svc1 = TriggerFiringService(store1, queue, 262_144).also { it.stateProvider = { t -> state[t] } }
         svc1.replaceSet("id", entries(trig("bat") {
@@ -98,16 +108,17 @@ class FiringServiceTest {
         val store = TriggerStore()
         // A queue at capacity: the next admit is QueueFull.
         val queue = DurableQueue(MemoryQueueStore(), 1, 8_388_608)
-        queue.admit(JSONObject().put("occurred_at_ms", 0L), "queue", null, 3_600)
-        val notified = mutableListOf<JSONObject>()
-        val state = hashMapOf<String, JSONObject>("battery.level" to battery(50))
+        queue.admit(buildJsonObject { put("occurred_at_ms", 0L) }, "queue", null, 3_600)
+        val notified = mutableListOf<JsonObject>()
+        val state = hashMapOf<String, JsonObject>("battery.level" to battery(50))
         val service = TriggerFiringService(store, queue, 262_144)
         service.stateProvider = { state[it] }
         service.notifyListener = { notified.add(it) }
         service.replaceSet("id", entries(trig("bat") {
-            put("policy", "queue").put("ttl_s", 86_400)
-            put("on_fire", JSONArray().put(JSONObject().put("notify",
-                JSONObject().put("text", "low"))))
+            put("policy", "queue"); put("ttl_s", 86_400)
+            putJsonArray("on_fire") {
+                add(buildJsonObject { putJsonObject("notify") { put("text", "low") } })
+            }
         }))
         state["battery.level"] = battery(19); service.observeSample("battery.level", battery(19))
         assertTrue(notified.isEmpty())                                       // no on_fire
@@ -117,14 +128,18 @@ class FiringServiceTest {
     @Test
     fun recoverClearsPendingLocalAndFloorsThrottle() {
         val store = TriggerStore()
-        store.replace("id", entries(trig("bat") { put("policy", "queue").put("ttl_s", 86_400) }))
+        store.replace("id", entries(trig("bat") { put("policy", "queue"); put("ttl_s", 86_400) }))
         val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         // Simulate a crash mid-transaction: a trigger.fired admitted with
         // pending_local still set, and the registration's throttle NOT persisted.
-        val event = JSONObject().put("event_id", "e").put("action", "trigger.fired")
-            .put("occurred_at_ms", 12_345L)
-            .put("args", JSONObject().put("id", "bat").put("type", "battery.level")
-                .put("data", battery(19)))
+        val event = buildJsonObject {
+            put("event_id", "e"); put("action", "trigger.fired")
+            put("occurred_at_ms", 12_345L)
+            putJsonObject("args") {
+                put("id", "bat"); put("type", "battery.level")
+                put("data", battery(19))
+            }
+        }
         queue.admit(event, "queue", null, 86_400, pendingLocal = true)
         assertTrue(queue.headIsPendingLocal())
         assertNull(store.registration("id", "bat")!!.throttleFloorMs)
@@ -138,15 +153,23 @@ class FiringServiceTest {
         triggerTypes = setOf("time"), stateTypes = emptySet(),
         trackableStateTypes = emptySet(), triggerCaps = emptySet(), maxResponses = 4)
 
-    private fun timeEntries(id: String, params: JSONObject) =
-        TriggerValidator.validateSet(JSONObject().put("triggers", JSONArray().put(
-            JSONObject().put("id", id).put("type", "time").put("params", params)
-                .put("policy", "queue").put("ttl_s", 86_400))), timeCaps)
+    private fun timeEntries(id: String, params: JsonObject) =
+        TriggerValidator.validateSet(buildJsonObject {
+            putJsonArray("triggers") {
+                add(buildJsonObject {
+                    put("id", id); put("type", "time"); put("params", params)
+                    put("policy", "queue"); put("ttl_s", 86_400)
+                })
+            }
+        }, timeCaps)
 
-    private fun firedEvent(id: String, occurred: Long) = JSONObject()
-        .put("event_id", "e-$id").put("action", "trigger.fired")
-        .put("occurred_at_ms", occurred)
-        .put("args", JSONObject().put("id", id).put("type", "time").put("data", JSONObject()))
+    private fun firedEvent(id: String, occurred: Long) = buildJsonObject {
+        put("event_id", "e-$id"); put("action", "trigger.fired")
+        put("occurred_at_ms", occurred)
+        putJsonObject("args") {
+            put("id", id); put("type", "time"); put("data", JsonObject(emptyMap()))
+        }
+    }
 
     private class ThrowOnReplace(
         private val delegate: TriggerBacking = MemoryTriggerBacking(),
@@ -167,11 +190,11 @@ class FiringServiceTest {
         val backing = ThrowOnReplace()
         val store = TriggerStore(backing)
         val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
-        val state = hashMapOf<String, JSONObject>("battery.level" to battery(50))
+        val state = hashMapOf<String, JsonObject>("battery.level" to battery(50))
         val service = TriggerFiringService(store, queue, 262_144)
             .also { it.stateProvider = { t -> state[t] } }
         service.replaceSet("id", entries(trig("bat") {
-            put("policy", "queue").put("ttl_s", 86_400)
+            put("policy", "queue"); put("ttl_s", 86_400)
         }))
         backing.throwNow = true                                 // next persist (B) fails
         state["battery.level"] = battery(19)
@@ -187,13 +210,17 @@ class FiringServiceTest {
         // floor only A's throttle — not spuriously throttle B (SPEC 21.2: the
         // throttle is per pairing's trigger id).
         val store = TriggerStore()
-        store.replace("A", entries(trig("bat") { put("policy", "queue").put("ttl_s", 86_400) }))
-        store.replace("B", entries(trig("bat") { put("policy", "queue").put("ttl_s", 86_400) }))
+        store.replace("A", entries(trig("bat") { put("policy", "queue"); put("ttl_s", 86_400) }))
+        store.replace("B", entries(trig("bat") { put("policy", "queue"); put("ttl_s", 86_400) }))
         val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
-        val event = JSONObject().put("event_id", "e").put("action", "trigger.fired")
-            .put("occurred_at_ms", 12_345L)
-            .put("args", JSONObject().put("id", "bat").put("type", "battery.level")
-                .put("data", battery(19)))
+        val event = buildJsonObject {
+            put("event_id", "e"); put("action", "trigger.fired")
+            put("occurred_at_ms", 12_345L)
+            putJsonObject("args") {
+                put("id", "bat"); put("type", "battery.level")
+                put("data", battery(19))
+            }
+        }
         queue.admit(event, "queue", null, 86_400, triggerIdentity = "A")
         TriggerFiringService(store, queue, 262_144).recover()
         assertEquals(12_345L, store.registration("A", "bat")!!.throttleFloorMs) // floored
@@ -208,8 +235,8 @@ class FiringServiceTest {
         // exactly-once one-shot nor re-phase a repeat (SPEC 21.5).
         val storeFile = File(tmp.root, "t.json")
         val store = TriggerStore(FileTriggerBacking(storeFile))
-        store.replace("os", timeEntries("os", JSONObject().put("at_ms", 9_999_999_999L)))
-        store.replace("ev", timeEntries("ev", JSONObject().put("every_s", 60)))
+        store.replace("os", timeEntries("os", buildJsonObject { put("at_ms", 9_999_999_999L) }))
+        store.replace("ev", timeEntries("ev", buildJsonObject { put("every_s", 60) }))
         val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         queue.admit(firedEvent("os", 5_000L), "queue", null, 86_400)
         queue.admit(firedEvent("ev", 7_000L), "queue", null, 86_400)

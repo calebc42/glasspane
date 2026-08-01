@@ -43,17 +43,68 @@ one-line parser swap per fixture. And RF-1b's reference images are called
 
 | Checkpoint | What | Status |
 |---|---|---|
-| P0 | Phase 0.2 pre-swap pin tests | **NOT DONE — hard prerequisite of C2** (amended 2026-07-31: order is RF-1a → P0 → cut `rf-2b` → C2); still writable, org.json is still live |
+| P0 | Phase 0.2 pre-swap pin tests | **DONE 2026-07-31** — 23 pins added, all four gates green; `:wire:jvmTest` **39 suites / 354 tests** (was 331 — the post-swap parity floor). See §0.1 below |
 | A | RF-2a KMP flip, sources to `jvmMain` | DONE `7f6bfde` |
 | B0 | kotlinx-serialization-json dependency (`api`) | DONE `2271211` |
 | B1 | `JsonAccess.kt` + `EbpJson.toJsonElement` (additive) | DONE `94720a5` |
-| C2–C6 | the conversion proper | OPEN |
+| C2 | core four (`EbpJson`, `FrameCodec`, `Envelope`, `JsonEquality`) | DONE `a8d5db1` (branch `rf-2b`) |
+| C3 | validators + stores (17 files; review fleet found 5, all applied) | DONE `2ece3b2` |
+| C4 | the hub — `CompanionEngine.kt` | **DONE 2026-07-31** — five staged passes per [PLAN-rf2-c4-hub.md](PLAN-rf2-c4-hub.md) (`C4.p1`–`p4` + the `RF-2b(C4)` commit); error ledger 68→65→40→31→24→0, monotone; compile-scope gate + `^import org.json` grep met (org.json survives in `jvmMain` only inside comments); G-spec + G-elisp spot-checked green, `ebp/` untouched. Deviations recorded in the pass commits: CompanionConfig converted at p2 (checkLimits' measuring sites), hookValue at p3 (builders can't put `Any`); the three event-build measures swapped with their builders at p3 so measure-equals-emit held per object at every commit |
+| C5 | `:wire` tests to kotlinx — the 23 pins light up | **DONE 2026-07-31** — 38 files per [PLAN-rf2-c5-tests.md](PLAN-rf2-c5-tests.md) + the t4/t5 Opus-fleet docs; staged batches `C5.t0`–`t6`, ledger 658→603→553→453→343→180→43→0, monotone; `:wire:jvmTest` green, **39 suites / 353 tests** (P0's 354 − `EbpJsonTest.orgJsonProjectionPreservesTypesAndIds`, dead with `toOrgJson`; coverage lives in `JsonAccessTest`). **FIRST PIN RUN: 0 failures** — 0 test-port defects, 0 production regressions, 1 deliberate flip re-pinned (`nonStringMethodIsInvalidRequestNotSilentClose`, C2's −32600 decision made visible). Upgrade-gate fixtures frozen as org.json-spelled raw text (§3.8 variant ii). Vacuous-pass audit: mutation matrix M1–M5 all red-then-green — M2 exposed one coverage gap, fixed by `C5.tN1` (ttl_s pin now bites at tap time); adversarial review (9 pin files full, 29 sampled, tree critic, Opus fleet): 0 weakened-assertion findings; critic caught the dead `libs.json` dep lines (deleted — :wire is org.json-free at the dependency level, a deviation from §2.5's C6 timing, recorded) + 1 stale comment (fixed). **C4-fleet-skip scorecard: the pins caught 0 real regressions, the review caught 0 the pins missed — the C2–C4 conversion held clean.** Gate: G-wire + G-spec green, `ebp/` untouched (I1); G-elisp spot-checked; G-app red by design until C6 |
+| C6 | `:app` to kotlinx | **DONE 2026-07-31** — 22 files (18 main / **347** sites + 4 tests; the runbook's 16/295 undercounted — see below) per [PLAN-rf2-c6-app.md](PLAN-rf2-c6-app.md), Opus fleet + `NodeAccess.kt` (self-contained app readers: `dimInt` truncates legally-fractional dimensions, `intByValue` for by-value-validated integers, `longByValue` for the P0-pinned pass-throughs incl. `AppCapabilities` `ms` AND its un-flagged twin `pattern[i]`); ledger 77→0, zero straggler fixes; **G-app green first try: 26 tests / 0 failures (exact P0 parity) + assembleDebug**. Discovery of record: **`Notifications.kt` is grep-invisible** (a NUL byte in the `reminderKey` hash input makes GNU grep treat it as binary; 31 org.json sites and a device-critical `at_ms` alarm read hid behind it) — every module grep now runs `grep -a`, and the NUL byte itself must never change (it feeds PendingIntent identity; changing it orphans every armed alarm on upgrade) |
+| **RF-2b EXIT** | org.json is GONE | **MET 2026-07-31** — from clean: G-wire 353 + G-app 26 + APK in one invocation; G-spec green; G-elisp 29 suites green; `ebp/` untouched (I1). Zero `import org.json` anywhere; `libs.json` removed from both modules AND the catalog (org.json survives only in prose comments describing the old mechanism). Remaining before merge to `slop-fork/main`, all Caleb's: push `rf-2b` + PR (CI's four jobs bind the merge, per I6), the **clean-install** APK smoke (pair, surface round-trip, dialog, queued-offline action, one float-authored arg end-to-end — the SPEC 17.4 echo fix), and the merge itself |
 | H1–H7 | RF-2c hoist to `commonMain` | OPEN |
 
 **Executed on `slop-fork/main`, not on per-sub-step branches** (Ground rules'
 branch/rollback scheme): every commit so far is a green checkpoint, so the
 branch bought nothing. Cut `rf-2b` before C2 — that is where the directed red
 period starts and where rollback stops being a one-commit revert.
+
+### §0.1 P0 as executed (2026-07-31)
+
+**Where the pins live.** `PersistenceCompatTest.kt` (9, the upgrade gate),
+`PreSwapNumberTest.kt` (7, the number taxonomy), `EnvelopeIdTest.kt` (3, id
+identity), plus one each appended to `SubstitutionTest`, `TriggerTest`,
+`W6QueueTest`, and `DialogTest`. **Deviation from 0.2's placement:** the
+engine-level number/taxonomy pins were consolidated into one
+`PreSwapNumberTest` instead of being scattered across
+`ReminderTest`/`ActionEventTest`/`CapabilityTest`, so the C2–C6 executor has
+a single file to keep green; the unit-level pins stayed with their subjects
+as 0.2 specified.
+
+**Two corrections to 0.2, found by probing rather than assuming** (the
+behaviors were measured against the running org.json code before anything
+was pinned):
+
+1. **A JSONObject-built fixture cannot put a genuine float on the wire.**
+   org.json re-spells an integral double as an integer on serialization:
+   `JSONObject().put("at_ms", 5000.0).toString()` yields `{"at_ms":5000}`.
+   Every float/string pin therefore builds its frame as **raw text**. A pin
+   written the obvious way would have tested nothing.
+2. **0.2 item 2's `"ms": 100.0` claim needed narrowing.** Integral doubles
+   are accepted for `at_ms` (reminders) and `ttl_s` (action descriptors) —
+   both confirmed and pinned — and a float capability arg reaches the host
+   handler intact. But the surrounding taxonomy is stricter than the runbook
+   implies: `revision` rejects both `1.0` and `"1"` with −32602, and a toast
+   `duration_s` of `2.0` or `"5"` is **dropped, not coerced** (the whole
+   notification is invalid; the listener never fires). All pinned.
+
+**The pins are DARK during C2–C4, and that is structural.** The test source
+set is still org.json until C5, so `:wire:jvmTest` cannot even compile while
+the conversion is in flight — the 23 pins written at P0 are unreachable
+exactly when the risky edits happen. The gate for C2/C3/C4 is therefore
+*compilation scope* (after C3, `grep "^e: "` must show errors in
+`CompanionEngine.kt` and nowhere else), and the pins become the acceptance
+harness at C5, which is why C5's gate is the first one that says G-wire.
+Read the pins while converting; they are the written specification of what
+must not change, even though nothing runs them yet.
+
+**Also confirmed** (0.2 item 9's MUST-PORT-UNCHANGED list): `jsonValueEquals`
+holds `1 == 1.0` true and `"1" == 1` false; `TriggerStore.canonicalEquals`
+ignores number spelling — a respelled `throttle_s` must keep carrying its
+runtime records, or a trigger double-fires and a completed one-shot re-arms.
+Non-string `method` still closes the connection silently today, pinned so
+C2's deliberate flip to −32600 is visible rather than accidental.
 
 **Test-count parity number (0.2-9):** `:wire:jvmTest` ran **315** tests in 34
 suites at checkpoint A — the post-flip parity figure, taken after the flip

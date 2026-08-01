@@ -12,7 +12,9 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 object TriggerAlarms {
 
@@ -81,11 +83,12 @@ class BootReceiver : BroadcastReceiver() {
                 TriggerAlarms.reschedule(app)
                 val firing = CompanionStores.firing(app)
                 when (action) {
-                    Intent.ACTION_BOOT_COMPLETED -> firing.observeExternal("boot", JSONObject())
+                    Intent.ACTION_BOOT_COMPLETED ->
+                        firing.observeExternal("boot", JsonObject(emptyMap()))
                     // SPEC 21.5 fire-data: timezone.changed carries the new tz.
                     Intent.ACTION_TIMEZONE_CHANGED -> firing.observeExternal(
                         "timezone.changed",
-                        JSONObject().put("tz", java.time.ZoneId.systemDefault().id))
+                        buildJsonObject { put("tz", java.time.ZoneId.systemDefault().id) })
                 }
             } finally { pending.finish() }
         }

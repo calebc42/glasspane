@@ -4,8 +4,14 @@
 // `colors`/`syntax` are role maps or null-to-clear; gated on theme.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -13,21 +19,7 @@ import org.junit.Test
 
 class ThemeTest {
 
-    private val katToken = EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")
-    private val katPid = "101112131415161718191a1b1c1d1e1f"
-    private val katCn = "202122232425262728292a2b2c2d2e2f"
-    private val katSn = "303132333435363738393a3b3c3d3e3f"
-
-    data class Applied(val dark: Boolean?, val colors: JSONObject?, val syntax: JSONObject?)
-
-    private fun limits() = JSONObject()
-        .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
-        .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
-        .put("max_surfaces", 16).put("max_surface_ids", 1024)
-        .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
-        .put("max_capture_fields", 64)
-
-    private fun frame(msg: JSONObject) = encodeFrame(msg.toString())
+    data class Applied(val dark: Boolean?, val colors: JsonObject?, val syntax: JsonObject?)
 
     private fun readyEngine(applied: MutableList<Applied>,
                             grant: Boolean = true): CompanionEngine {
@@ -36,59 +28,69 @@ class ThemeTest {
             serverName = "kat", serverVersion = "1",
             pairings = mapOf(katPid to katToken),
             supportedCapabilities = setOf("theme"),
-            surfaceProfiles = JSONObject().put("app", JSONObject()
-                .put("node_types", JSONArray(listOf("text")))
-                .put("builtins", JSONArray()).put("features", JSONArray())),
-            limits = limits(), nonceSource = { katSn })) { }
+            surfaceProfiles = buildJsonObject {
+                putJsonObject("app") {
+                    putJsonArray("node_types") { add("text") }
+                    put("builtins", JsonArray(emptyList()))
+                    put("features", JsonArray(emptyList()))
+                }
+            },
+            limits = testLimits(), nonceSource = { katSn })) { }
         engine.themeListener = { d, c, s -> applied.add(Applied(d, c, s)) }
         engine.feed(frame(request("h1", "session.hello",
             EbpAuth.helloParams("t", "1", katPid, katCn, wants))))
         engine.feed(frame(request("h2", "auth.response",
             EbpAuth.authParams(katPid, katCn, katSn, katToken))))
-        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        engine.feed(frame(request("r1", "session.ready", JsonObject(emptyMap()))))
         return engine
     }
 
-    private fun themeSet(body: JSONObject) = frame(notification("theme.set", body))
+    private fun themeSet(body: JsonObject) = frame(notification("theme.set", body))
 
     @Test
     fun darkTriStateAndCompleteReplacement() {
         val applied = mutableListOf<Applied>()
         val engine = readyEngine(applied)
         // Forced dark.
-        engine.feed(themeSet(JSONObject().put("dark", true)
-            .put("colors", JSONObject().put("primary", "#3366ff"))))
+        engine.feed(themeSet(buildJsonObject {
+            put("dark", true)
+            putJsonObject("colors") { put("primary", "#3366ff") }
+        }))
         assertEquals(true, applied.last().dark)
-        assertEquals("#3366ff", applied.last().colors!!.getString("primary"))
+        assertEquals("#3366ff", applied.last().colors!!.reqString("primary"))
         // Forced light.
-        engine.feed(themeSet(JSONObject().put("dark", false)))
+        engine.feed(themeSet(buildJsonObject { put("dark", false) }))
         assertEquals(false, applied.last().dark)
         // Amendment #36: dark absent => follow-system (null), and this is a
         // complete replacement — the previous colors are gone.
-        engine.feed(themeSet(JSONObject().put("colors", JSONObject().put("primary", "#00ff00"))))
+        engine.feed(themeSet(buildJsonObject {
+            putJsonObject("colors") { put("primary", "#00ff00") }
+        }))
         assertNull(applied.last().dark)
-        assertEquals("#00ff00", applied.last().colors!!.getString("primary"))
+        assertEquals("#00ff00", applied.last().colors!!.reqString("primary"))
         // The stored theme reflects the latest replacement.
-        assertEquals(JSONObject.NULL, engine.currentTheme().get("dark"))
+        assertEquals(JsonNull, engine.currentTheme()["dark"])
     }
 
     @Test
     fun nullClearsColorMirror() {
         val applied = mutableListOf<Applied>()
         val engine = readyEngine(applied)
-        engine.feed(themeSet(JSONObject().put("colors", JSONObject().put("primary", "#111"))))
-        assertEquals("#111", applied.last().colors!!.getString("primary"))
+        engine.feed(themeSet(buildJsonObject {
+            putJsonObject("colors") { put("primary", "#111") }
+        }))
+        assertEquals("#111", applied.last().colors!!.reqString("primary"))
         // colors: null selects the Companion's native scheme (clears mirror).
-        engine.feed(themeSet(JSONObject().put("colors", JSONObject.NULL)))
+        engine.feed(themeSet(buildJsonObject { put("colors", JsonNull) }))
         assertNull(applied.last().colors)
-        assertEquals(JSONObject.NULL, engine.currentTheme().get("colors"))
+        assertEquals(JsonNull, engine.currentTheme()["colors"])
     }
 
     @Test
     fun ungrantedThemeIsDropped() {
         val applied = mutableListOf<Applied>()
         val engine = readyEngine(applied, grant = false)
-        engine.feed(themeSet(JSONObject().put("dark", true)))
+        engine.feed(themeSet(buildJsonObject { put("dark", true) }))
         assertTrue(applied.isEmpty())
     }
 }

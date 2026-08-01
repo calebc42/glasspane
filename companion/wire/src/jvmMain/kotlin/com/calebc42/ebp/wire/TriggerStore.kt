@@ -13,22 +13,27 @@
 // service.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 class TriggerStore(private val backing: TriggerBacking = MemoryTriggerBacking()) {
 
     /** One armed registration: its normalized entry plus mutable runtime
      * records that outlive an unchanged replace (SPEC 21.1) and persist across
      * restart (all but the baselines, which SPEC 21.5 re-establishes silently). */
-    class Registration(val entry: JSONObject) {
+    class Registration(val entry: JsonObject) {
         var identity: String? = null         // owning pairing (for recover attribution)
         var throttleFloorMs: Long? = null    // last admitted occurrence (21.2)
         var oneShotCompleted = false         // time.at_ms completed marker (21.5)
         var scheduleAnchorMs: Long? = null   // time.every_s acceptance anchor
         var lastFireFloorMs: Long? = null     // repeating last-fire floor
         var bootGeneration: String? = null   // boot receipt (21.5)
-        val baselines = HashMap<String, Any?>() // silent baselines / edge levels (NOT persisted)
+        // Silent baselines / edge levels (NOT persisted). Deliberately still
+        // `Any?` after C3: this bag is heterogeneous — the edge/side slots hold
+        // a Kotlin Boolean, the unfiltered-level slot holds a raw JSON value
+        // (a JsonElement?) — so it is not one of the "some JSON value" seams
+        // that re-type to JsonElement?.
+        val baselines = HashMap<String, Any?>()
     }
 
     // pairing identity -> (trigger id -> registration), insertion-ordered.
@@ -45,7 +50,7 @@ class TriggerStore(private val backing: TriggerBacking = MemoryTriggerBacking())
                 r.scheduleAnchorMs = p.scheduleAnchorMs
                 r.lastFireFloorMs = p.lastFireFloorMs
                 r.bootGeneration = p.bootGeneration
-                map[p.entry.getString("id")] = r  // baselines stay empty (21.5)
+                map[p.entry.reqString("id")] = r  // baselines stay empty (21.5)
             }
             byIdentity[identity] = map
         }
@@ -83,12 +88,12 @@ class TriggerStore(private val backing: TriggerBacking = MemoryTriggerBacking())
      * Returns the accepted count.
      */
     @Synchronized
-    fun replace(identity: String, entries: List<JSONObject>): Int {
+    fun replace(identity: String, entries: List<JsonObject>): Int {
         val prev = byIdentity[identity]?.let { LinkedHashMap(it) }
         val old = byIdentity[identity] ?: LinkedHashMap()
         val next = LinkedHashMap<String, Registration>()
         for (e in entries) {
-            val id = e.getString("id")
+            val id = e.reqString("id")
             val prior = old[id]
             next[id] = if (prior != null && canonicalEquals(prior.entry, e))
                 prior                       // unchanged: keep records (21.1)
@@ -110,19 +115,18 @@ class TriggerStore(private val backing: TriggerBacking = MemoryTriggerBacking())
          * are already defaults-materialized, so this is an order-independent
          * deep compare: objects match key-set and value-wise, arrays match
          * element-wise, numbers match by value, JSON null matches JSON null.
+         *
+         * C3 (R5): that is exactly [jsonValueEquals] — the same LD-20 type-tag
+         * gate, reimplemented over kotlinx's tree — so the clause-by-clause
+         * copy that used to live here is gone, not re-derived. What it must NOT
+         * become is kotlinx's own `JsonElement.equals`, which compares the
+         * literal content STRING: `60` and `60.0` would come out unequal, this
+         * function decides whether a re-`triggers.set` is the SAME
+         * registration, and so a merely respelled number would silently drop
+         * the throttle floor (the trigger double-fires) and the one-shot
+         * completion (a completed one-shot re-arms). Pinned by
+         * TriggerTest.canonicalEqualsIgnoresNumberSpelling.
          */
-        fun canonicalEquals(a: Any?, b: Any?): Boolean = when {
-            a is JSONObject && b is JSONObject -> {
-                a.keySet() == b.keySet() &&
-                    a.keySet().all { canonicalEquals(a.opt(it), b.opt(it)) }
-            }
-            a is JSONArray && b is JSONArray -> {
-                a.length() == b.length() &&
-                    (0 until a.length()).all { canonicalEquals(a.opt(it), b.opt(it)) }
-            }
-            a is Number && b is Number -> a.toDouble() == b.toDouble()
-            a == JSONObject.NULL || b == JSONObject.NULL -> a == b
-            else -> a == b
-        }
+        fun canonicalEquals(a: JsonElement?, b: JsonElement?): Boolean = jsonValueEquals(a, b)
     }
 }

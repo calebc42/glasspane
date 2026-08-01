@@ -16,13 +16,16 @@
 package com.calebc42.ebp.wire
 
 import java.time.ZoneId
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** Read a JSON string array from `o[key]` as a Set (top-level so it can seed a
- * constructor default). */
-fun jsonStringSet(o: JSONObject, key: String): Set<String> {
-    val arr = o.optJSONArray(key) ?: return emptySet()
-    return (0 until arr.length()).mapNotNull { arr.opt(it) as? String }.toSet()
+ * constructor default). A non-string entry is FILTERED, never an error — a
+ * misdeclared device report costs one advertised name, not the whole set. */
+fun jsonStringSet(o: JsonObject, key: String): Set<String> {
+    val arr = o.arrOrNull(key) ?: return emptySet()
+    return arr.mapNotNull { it.asStringOrNull() }.toSet()
 }
 
 /** SPEC 21.5: one host-armable time alarm — fire `triggerId` for `identity`
@@ -40,9 +43,9 @@ class TriggerFiringService(
     private val bootGeneration: () -> String? = { null },
 ) {
     /** SPEC 21.3/21.7: current sample for a state type (gate/edge/window). */
-    @Volatile var stateProvider: (String) -> JSONObject? = { null }
+    @Volatile var stateProvider: (String) -> JsonObject? = { null }
     /** SPEC 21.4: post a substituted local notification from an on_fire entry. */
-    @Volatile var notifyListener: ((JSONObject) -> Unit)? = null
+    @Volatile var notifyListener: ((JsonObject) -> Unit)? = null
     /** SPEC 21.5: the time schedule changed (a set replaced time.* triggers) —
      * the Android host re-queries timeSchedule() and arms alarms. Invoked after
      * the service monitor is released; a no-op off-device. */
@@ -80,16 +83,17 @@ class TriggerFiringService(
     /** SPEC 21.5: a level-type observation from a device source (identity-
      * agnostic — fans out over every registered identity). Eligibility is the
      * presence of durable registrations, NO live-session gate (SPEC 21.1/21.2). */
-    fun observeSample(type: String, sample: JSONObject) =
+    fun observeSample(type: String, sample: JsonObject) =
         runLocked { store.identities().forEach { runtime.onSample(it, type, sample) } }
 
     /** SPEC 21.5: an external occurrence (package/sms/boot/time/timezone/manual). */
-    fun observeExternal(type: String, data: JSONObject) =
+    fun observeExternal(type: String, data: JsonObject) =
         runLocked { store.identities().forEach { runtime.onExternal(it, type, data) } }
 
     /** SPEC 21.5 (manual): fire exactly the named manual registration. */
     fun fireManual(identity: String, triggerId: String, source: String) =
-        runLocked { runtime.fireManual(identity, triggerId, JSONObject().put("source", source)) }
+        runLocked { runtime.fireManual(identity, triggerId,
+            buildJsonObject { put("source", source) }) }
 
     /** SPEC 21.5 (time): a host alarm for exactly this time.* registration
      * elapsed — fire only it (each time entry has its own due time). The fire
@@ -98,7 +102,7 @@ class TriggerFiringService(
      * it, so the honest never-over-claimed value is `inexact`. */
     fun fireScheduled(identity: String, triggerId: String) =
         runLocked { runtime.fireScheduled(identity, triggerId,
-            JSONObject().put("precision", "inexact")) }
+            buildJsonObject { put("precision", "inexact") }) }
 
     /** SPEC 21.5: every time.* registration that still needs a host alarm, with
      * its next due wall-clock ms. A completed one-shot time.at_ms is omitted; a
@@ -110,14 +114,14 @@ class TriggerFiringService(
     fun timeSchedule(): List<TimeAlarm> {
         val out = ArrayList<TimeAlarm>()
         for (identity in store.identities()) for (reg in store.registrations(identity)) {
-            if (reg.entry.getString("type") != "time") continue
-            val params = reg.entry.optJSONObject("params") ?: continue
+            if (reg.entry.reqString("type") != "time") continue
+            val params = reg.entry.objOrNull("params") ?: continue
             val due = when {
-                params.has("at_ms") -> if (reg.oneShotCompleted) null else params.getLong("at_ms")
-                params.has("every_s") -> TriggerRuntime.nextRepeatDueMs(reg)
+                "at_ms" in params -> if (reg.oneShotCompleted) null else params.reqLong("at_ms")
+                "every_s" in params -> TriggerRuntime.nextRepeatDueMs(reg)
                 else -> null
             }
-            if (due != null) out.add(TimeAlarm(identity, reg.entry.getString("id"), due))
+            if (due != null) out.add(TimeAlarm(identity, reg.entry.reqString("id"), due))
         }
         return out
     }
@@ -134,7 +138,7 @@ class TriggerFiringService(
     /** SPEC 21.1: replace an identity's set (durable) then re-baseline the
      * new/changed registrations. Throws on storage failure. The host time-alarm
      * re-arm runs after the monitor is released (it re-enters timeSchedule). */
-    fun replaceSet(identity: String, entries: List<JSONObject>): Int {
+    fun replaceSet(identity: String, entries: List<JsonObject>): Int {
         val count = synchronized(this) {
             store.replace(identity, entries).also { runtime.armBaselines(identity) }
         }
@@ -152,24 +156,32 @@ class TriggerFiringService(
     // Moved from the engine: build the context-less trigger.fired, run the
     // durable half here, DEFER the live half. `commit` (throttle + persist +
     // on_fire) runs only for a durably-admitted occurrence.
-    private fun admit(reg: TriggerStore.Registration, data: JSONObject, commit: () -> Unit) {
+    private fun admit(reg: TriggerStore.Registration, data: JsonObject, commit: () -> Unit) {
         val entry = reg.entry
-        val args = JSONObject().put("id", entry.getString("id"))
-            .put("type", entry.getString("type")).put("data", data)
-        val params = JSONObject()
-            .put("event_id", EbpAuth.generateNonce())
-            .put("action", "trigger.fired")
-            .put("occurred_at_ms", queue.effectiveNow()).put("args", args)
-        val policy = entry.getString("policy")
-        if (policy == "queue" || policy == "wake")
-            params.put("queued_at_ms", queue.effectiveNow())
+        val args = buildJsonObject {
+            put("id", entry.reqString("id"))
+            put("type", entry.reqString("type"))
+            put("data", data)
+        }
+        val policy = entry.reqString("policy")
+        // C3: one build instead of build-then-mutate — a JsonObject is
+        // immutable, so `queued_at_ms` joins the same builder rather than being
+        // appended to a live object. Member order is unchanged.
+        val params = buildJsonObject {
+            put("event_id", EbpAuth.generateNonce())
+            put("action", "trigger.fired")
+            put("occurred_at_ms", queue.effectiveNow())
+            put("args", args)
+            if (policy == "queue" || policy == "wake")
+                put("queued_at_ms", queue.effectiveNow())
+        }
         // An event that cannot be created is a failed admission: commit nothing.
         if (params.toString().toByteArray(Charsets.UTF_8).size > maxEventBytes) return
-        val hasLocal = entry.getJSONArray("on_fire").length() > 0
+        val hasLocal = entry.reqArr("on_fire").size > 0
         when (policy) {
             "queue", "wake" -> when (val r = queue.admit(params, policy,
-                    entry.optString("dedupe").takeIf { it.isNotEmpty() },
-                    entry.getLong("ttl_s"), pendingLocal = hasLocal,
+                    entry.stringOr("dedupe").takeIf { it.isNotEmpty() },
+                    entry.reqLong("ttl_s"), pendingLocal = hasLocal,
                     triggerIdentity = reg.identity)) {
                 is AdmitResult.Admitted -> {
                     // SPEC 21.2: A (the event record) is committed. If B (throttle
@@ -179,10 +191,10 @@ class TriggerFiringService(
                     try {
                         commit() // step 3 (throttle + persist) + step 4 (on_fire)
                     } catch (_: Exception) {
-                        queue.deleteRecord(r.record.getLong("queue_seq"))
+                        queue.deleteRecord(r.record.reqLong("queue_seq"))
                         return
                     }
-                    if (hasLocal) queue.clearPendingLocal(r.record.getLong("queue_seq"))
+                    if (hasLocal) queue.clearPendingLocal(r.record.reqLong("queue_seq"))
                     pending.add { session.get()?.onDurableAdmitted(policy) } // step 5, post-lock
                 }
                 else -> Unit // durable transaction failed: no throttle, no on_fire
@@ -202,14 +214,14 @@ class TriggerFiringService(
     // engine). A notify posts through the host; a cap re-checks trigger_caps
     // membership + its Args schema and runs through the same executor as
     // capability.invoke. Every failure mode is a safe no-op.
-    private fun executeOnFire(entry: JSONObject) {
-        if (entry.has("notify")) {
-            notifyListener?.invoke(entry.getJSONObject("notify"))
+    private fun executeOnFire(entry: JsonObject) {
+        if ("notify" in entry) {
+            notifyListener?.invoke(entry.reqObj("notify"))
             return
         }
-        val cap = entry.getString("cap")
+        val cap = entry.reqString("cap")
         if (cap !in triggerCaps) return
-        val args = entry.optJSONObject("args") ?: JSONObject()
+        val args = entry.objOrNull("args") ?: JsonObject(emptyMap())
         try {
             CapabilityCatalog.validateArgs(cap, args)
         } catch (e: ContentInvalid) {
@@ -240,10 +252,10 @@ class TriggerFiringService(
         for ((seq, _) in queue.pendingLocalRecords()) queue.clearPendingLocal(seq)
         var changed = false
         for ((recIdentity, event) in queue.firedRecords()) {
-            if (event.optString("action") != "trigger.fired") continue
-            val a = event.optJSONObject("args") ?: continue
-            val id = a.optString("id")
-            val occurred = event.optLong("occurred_at_ms", 0)
+            if (event.stringOr("action") != "trigger.fired") continue
+            val a = event.objOrNull("args") ?: continue
+            val id = a.stringOr("id")
+            val occurred = event.longOr("occurred_at_ms", 0)
             // Scope to the firing pairing when the record carries it; fall back
             // to every identity for a record admitted before identity-stamping.
             val identities = recIdentity?.let { listOf(it) } ?: store.identities()
@@ -252,11 +264,11 @@ class TriggerFiringService(
                 if (occurred > (reg.throttleFloorMs ?: Long.MIN_VALUE)) {
                     reg.throttleFloorMs = occurred; changed = true
                 }
-                val params = reg.entry.optJSONObject("params")
-                if (reg.entry.getString("type") == "time" && params != null) {
-                    if (params.has("at_ms") && !reg.oneShotCompleted) {
+                val params = reg.entry.objOrNull("params")
+                if (reg.entry.reqString("type") == "time" && params != null) {
+                    if ("at_ms" in params && !reg.oneShotCompleted) {
                         reg.oneShotCompleted = true; changed = true
-                    } else if (params.has("every_s") &&
+                    } else if ("every_s" in params &&
                         occurred > (reg.lastFireFloorMs ?: Long.MIN_VALUE)) {
                         reg.lastFireFloorMs = occurred; changed = true
                     }

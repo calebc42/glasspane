@@ -9,8 +9,10 @@
 // surface.update is a whole-surface 1201; an advertised one must render).
 package com.calebc42.ebp.companion.render
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 object NodeSupport {
 
@@ -73,16 +75,24 @@ object NodeSupport {
     val DIALOG_FEATURES: Set<String> = IMAGE_FEATURES
     val NOTIFICATION_FEATURES: Set<String> = sortedSetOf()
 
+    // C6: the advertised ORDER is observable — these arrays ride the welcome's
+    // surface_profiles verbatim — so the `.toList()` of the sorted sets stays,
+    // and JsonArray preserves list order exactly as JSONArray(Collection) did.
+    // Every entry must stay a JSON string: the engine gates node types and
+    // builtins with `it.asStringOrNull() == …`, so a non-string entry would
+    // advertise nothing at all.
     private fun profile(nodes: Set<String>, builtins: Set<String>,
-                        features: Set<String>) = JSONObject()
-        .put("node_types", JSONArray(nodes.toList()))
-        .put("builtins", JSONArray(builtins.toList()))
-        .put("features", JSONArray(features.toList()))
+                        features: Set<String>) = buildJsonObject {
+        put("node_types", JsonArray(nodes.toList().map(::JsonPrimitive)))
+        put("builtins", JsonArray(builtins.toList().map(::JsonPrimitive)))
+        put("features", JsonArray(features.toList().map(::JsonPrimitive)))
+    }
 
     /** The advertised SPEC 10.2 surface_profiles, derived — never hand-kept. */
-    fun surfaceProfiles(): JSONObject = JSONObject()
-        .put("app", profile(APP_NODE_TYPES, APP_BUILTINS, APP_FEATURES))
-        .put("dialog", profile(DIALOG_NODE_TYPES, DIALOG_BUILTINS, DIALOG_FEATURES))
-        .put("notification",
+    fun surfaceProfiles(): JsonObject = buildJsonObject {
+        put("app", profile(APP_NODE_TYPES, APP_BUILTINS, APP_FEATURES))
+        put("dialog", profile(DIALOG_NODE_TYPES, DIALOG_BUILTINS, DIALOG_FEATURES))
+        put("notification",
             profile(NOTIFICATION_NODE_TYPES, sortedSetOf(), NOTIFICATION_FEATURES))
+    }
 }

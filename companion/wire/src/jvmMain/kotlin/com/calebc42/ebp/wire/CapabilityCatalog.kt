@@ -7,13 +7,13 @@
 // CapabilityHandler, whose typed refusal (1002/1003) it forwards verbatim.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /** SPEC 20.2: the host's outcome for one capability.invoke. */
 sealed class CapabilityOutcome {
     /** Success: the exact closed Result object from the catalog row. */
-    data class Ok(val result: JSONObject) : CapabilityOutcome()
+    data class Ok(val result: JsonObject) : CapabilityOutcome()
     /** A typed refusal: 1002 (cap-permission) or 1003 (cap-failed). The reason
      * becomes error.data.reason. */
     data class Fail(val code: Int, val reason: String) : CapabilityOutcome()
@@ -27,7 +27,7 @@ sealed class CapabilityOutcome {
  * argument as executable code.
  */
 fun interface CapabilityHandler {
-    fun invoke(cap: String, args: JSONObject): CapabilityOutcome
+    fun invoke(cap: String, args: JsonObject): CapabilityOutcome
 }
 
 /**
@@ -58,7 +58,7 @@ object CapabilityCatalog {
      * before any side effect. A cap outside VALIDATED throws — the host must
      * not advertise what the library cannot validate.
      */
-    fun validateArgs(cap: String, args: JSONObject) {
+    fun validateArgs(cap: String, args: JsonObject) {
         when (cap) {
             "vibrate" -> validateVibrate(args)
             "volume.set" -> {
@@ -69,8 +69,8 @@ object CapabilityCatalog {
             "tts.speak" -> {
                 closed(args, "text", "pitch", "rate")
                 strArg(args, "text")
-                if (args.has("pitch")) numArg(args, "pitch", 0.5, 2.0)
-                if (args.has("rate")) numArg(args, "rate", 0.5, 2.0)
+                if ("pitch" in args) numArg(args, "pitch", 0.5, 2.0)
+                if ("rate" in args) numArg(args, "rate", 0.5, 2.0)
             }
             "ringer.mode" -> { closed(args, "mode"); enumArg(args, "mode", RINGER_MODES) }
             "flashlight" -> { closed(args, "on"); boolArg(args, "on") }
@@ -84,9 +84,9 @@ object CapabilityCatalog {
     }
 
     // SPEC 20.3: `vibrate` takes exactly one of {ms} or {pattern}.
-    private fun validateVibrate(args: JSONObject) {
-        val hasMs = args.has("ms")
-        val hasPattern = args.has("pattern")
+    private fun validateVibrate(args: JsonObject) {
+        val hasMs = "ms" in args
+        val hasPattern = "pattern" in args
         if (hasMs == hasPattern)
             throw ContentInvalid("args", "exactly one of ms or pattern")
         if (hasMs) {
@@ -94,13 +94,13 @@ object CapabilityCatalog {
             intArg(args, "ms", 1, 60_000)
         } else {
             closed(args, "pattern")
-            val p = args.opt("pattern") as? JSONArray
+            val p = args.arrOrNull("pattern")
                 ?: throw ContentInvalid("args.pattern", "must be an array")
-            if (p.length() < 1 || p.length() > 64)
+            if (p.size < 1 || p.size > 64)
                 throw ContentInvalid("args.pattern", "1..64 entries")
             var total = 0L
-            for (i in 0 until p.length())
-                total += integer(p.opt(i), "args.pattern[$i]", 0, 60_000)
+            for (i in p.indices)
+                total += integer(p[i], "args.pattern[$i]", 0, 60_000)
             if (total > 60_000)
                 throw ContentInvalid("args.pattern", "total exceeds 60000 ms")
         }
@@ -108,41 +108,45 @@ object CapabilityCatalog {
 
     // ------------------------------------------------------------ primitives
 
-    private fun closed(o: JSONObject, vararg allowed: String) {
-        for (k in o.keySet()) if (k !in allowed)
+    private fun closed(o: JsonObject, vararg allowed: String) {
+        for (k in o.keys) if (k !in allowed)
             throw ContentInvalid("args.$k", "unknown member")
     }
 
-    private fun strArg(o: JSONObject, key: String): String =
-        o.opt(key) as? String ?: throw ContentInvalid("args.$key", "must be a string")
+    private fun strArg(o: JsonObject, key: String): String =
+        o.stringOrNull(key) ?: throw ContentInvalid("args.$key", "must be a string")
 
-    private fun boolArg(o: JSONObject, key: String): Boolean =
-        o.opt(key) as? Boolean ?: throw ContentInvalid("args.$key", "must be a boolean")
+    private fun boolArg(o: JsonObject, key: String): Boolean =
+        o.boolOrNull(key) ?: throw ContentInvalid("args.$key", "must be a boolean")
 
-    private fun enumArg(o: JSONObject, key: String, allowed: Set<String>): String {
-        val v = o.opt(key) as? String ?: throw ContentInvalid("args.$key", "must be a string")
+    private fun enumArg(o: JsonObject, key: String, allowed: Set<String>): String {
+        val v = o.stringOrNull(key) ?: throw ContentInvalid("args.$key", "must be a string")
         if (v !in allowed) throw ContentInvalid("args.$key", "not a permitted value")
         return v
     }
 
-    private fun intArg(o: JSONObject, key: String, min: Long, max: Long): Long =
-        integer(o.opt(key), "args.$key", min, max)
+    private fun intArg(o: JsonObject, key: String, min: Long, max: Long): Long =
+        integer(o[key], "args.$key", min, max)
 
-    /** An integral JSON number in [min, max]; rejects fractions and non-finite. */
-    private fun integer(v: Any?, path: String, min: Long, max: Long): Long {
-        if (v !is Number) throw ContentInvalid(path, "must be an integer")
-        val d = v.toDouble()
-        if (d.isNaN() || d.isInfinite() || d != Math.floor(d))
-            throw ContentInvalid(path, "must be an integer")
-        val n = v.toLong()
+    /** An integral JSON number in [min, max]; rejects fractions and non-finite.
+     * The value is normalized at accept time, so an older peer's `{"ms": 100.0}`
+     * is the same 100 ms it was under org.json (whose getLong truncated a
+     * Double) — pinned by PreSwapNumberTest. */
+    private fun integer(v: JsonElement?, path: String, min: Long, max: Long): Long {
+        val n = integralLongOrNull(v) ?: throw ContentInvalid(path, "must be an integer")
         if (n < min || n > max) throw ContentInvalid(path, "out of range $min..$max")
         return n
     }
 
-    private fun numArg(o: JSONObject, key: String, min: Double, max: Double): Double {
-        val v = o.opt(key)
-        if (v !is Number) throw ContentInvalid("args.$key", "must be a number")
-        val d = v.toDouble()
+    private fun numArg(o: JsonObject, key: String, min: Double, max: Double): Double {
+        // A binary64 arg (tts pitch/rate): any JSON number, integral or not.
+        // The reader's isString guard is what keeps the string "1.5" out —
+        // org.json's `as? Number` cast refused it the same way. A non-finite
+        // value cannot reach here from the wire (EbpJson refuses it), but a
+        // host-built tree can carry one, and it stays an out-of-range refusal
+        // rather than a "must be a number" one, exactly as before.
+        val d = o[key]?.asDoubleOrNull()
+            ?: throw ContentInvalid("args.$key", "must be a number")
         if (d.isNaN() || d.isInfinite() || d < min || d > max)
             throw ContentInvalid("args.$key", "out of range $min..$max")
         return d

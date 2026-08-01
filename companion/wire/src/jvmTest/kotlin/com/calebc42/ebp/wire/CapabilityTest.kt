@@ -5,8 +5,12 @@
 // side effect / -32601 when ungranted), and the closed Args catalog validators.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,41 +18,27 @@ import org.junit.Test
 
 class CapabilityTest {
 
-    private val katToken = EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")
-    private val katPid = "101112131415161718191a1b1c1d1e1f"
-    private val katCn = "202122232425262728292a2b2c2d2e2f"
-    private val katSn = "303132333435363738393a3b3c3d3e3f"
-
-    private fun limits() = JSONObject()
-        .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
-        .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
-        .put("max_surfaces", 16).put("max_surface_ids", 1024)
-        .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
-        .put("max_capture_fields", 64).put("max_device_report_bytes", 8192)
-        .put("max_rich_spans", 4096).put("max_table_cells", 4096)
-
-    private fun frame(msg: JSONObject) = encodeFrame(msg.toString())
-    private fun response(out: List<JSONObject>, id: String) = out.last { it.opt("id") == id }
-    private fun errorOf(out: List<JSONObject>, id: String) = response(out, id).getJSONObject("error")
-
-    private fun report(vararg caps: String) = JSONObject()
-        .put("caps", JSONArray(caps.toList()))
-        .put("trigger_caps", JSONArray())
-        .put("permissions", JSONObject())
+    private fun report(vararg caps: String) = buildJsonObject {
+        put("caps", JsonArray(caps.toList().map(::JsonPrimitive)))
+        put("trigger_caps", JsonArray(emptyList()))
+        put("permissions", JsonObject(emptyMap()))
+    }
 
     // A recording handler: every invocation that reaches the host is logged,
     // so a test can prove -32602 / 1001 refuse BEFORE any side effect.
-    private val calls = mutableListOf<Pair<String, JSONObject>>()
+    private val calls = mutableListOf<Pair<String, JsonObject>>()
 
-    private fun engine(out: MutableList<JSONObject>,
+    private fun engine(out: MutableList<JsonObject>,
                        grant: Boolean = true,
-                       deviceReport: JSONObject = report("vibrate", "clipboard.read", "volume.set"),
+                       deviceReport: JsonObject = report("vibrate", "clipboard.read", "volume.set"),
                        handler: CapabilityHandler? = CapabilityHandler { cap, args ->
                            calls.add(cap to args)
                            when (cap) {
-                               "clipboard.read" -> CapabilityOutcome.Ok(JSONObject().put("text", "hi"))
-                               "volume.set" -> CapabilityOutcome.Ok(JSONObject().put("max", 15))
-                               else -> CapabilityOutcome.Ok(JSONObject())
+                               "clipboard.read" -> CapabilityOutcome.Ok(
+                                   buildJsonObject { put("text", "hi") })
+                               "volume.set" -> CapabilityOutcome.Ok(
+                                   buildJsonObject { put("max", 15) })
+                               else -> CapabilityOutcome.Ok(JsonObject(emptyMap()))
                            }
                        }): CompanionEngine {
         val wants = if (grant) listOf("capabilities") else emptyList()
@@ -56,10 +46,16 @@ class CapabilityTest {
             serverName = "kat", serverVersion = "1",
             pairings = mapOf(katPid to katToken),
             supportedCapabilities = setOf("capabilities"),
-            surfaceProfiles = JSONObject().put("app", JSONObject()
-                .put("node_types", JSONArray(NODE_SCHEMA.keys.toList())).put("builtins", JSONArray())
-                .put("features", JSONArray())),
-            limits = limits(), deviceReport = deviceReport,
+            surfaceProfiles = buildJsonObject {
+                putJsonObject("app") {
+                    put("node_types", JsonArray(NODE_SCHEMA.keys.map(::JsonPrimitive)))
+                    put("builtins", JsonArray(emptyList()))
+                    put("features", JsonArray(emptyList()))
+                }
+            },
+            limits = testLimits("max_device_report_bytes" to 8192,
+                "max_rich_spans" to 4096, "max_table_cells" to 4096),
+            deviceReport = deviceReport,
             capabilityHandler = handler, nonceSource = { katSn })) { bytes ->
             FrameDecoder().let { d -> d.feed(bytes) { out.add(it) } }
         }
@@ -67,67 +63,69 @@ class CapabilityTest {
             EbpAuth.helloParams("t", "1", katPid, katCn, wants))))
         engine.feed(frame(request("h2", "auth.response",
             EbpAuth.authParams(katPid, katCn, katSn, katToken))))
-        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        engine.feed(frame(request("r1", "session.ready", JsonObject(emptyMap()))))
         return engine
     }
 
-    private fun invoke(engine: CompanionEngine, id: String, cap: String, args: JSONObject? = null) {
-        val p = JSONObject().put("cap", cap)
-        if (args != null) p.put("args", args)
-        engine.feed(frame(request(id, "capability.invoke", p)))
+    private fun invoke(engine: CompanionEngine, id: String, cap: String, args: JsonObject? = null) {
+        engine.feed(frame(request(id, "capability.invoke", buildJsonObject {
+            put("cap", cap)
+            if (args != null) put("args", args)
+        })))
     }
 
     // ------------------------------------------------ welcome device report
 
     @Test
     fun welcomeCarriesDeviceReportOnlyWhenAModuleGranted() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         engine(out)
-        val device = response(out, "h2").getJSONObject("result").getJSONObject("device")
-        assertEquals("vibrate", device.getJSONArray("caps").getString(0))
+        val device = out.replyTo("h2").reqObj("result").reqObj("device")
+        assertEquals("vibrate", device.reqArr("caps")[0].asStringOrNull()!!)
         // Ungranted: no device member at all.
-        val out2 = mutableListOf<JSONObject>()
+        val out2 = mutableListOf<JsonObject>()
         engine(out2, grant = false)
-        assertFalse(response(out2, "h2").getJSONObject("result").has("device"))
+        assertFalse("device" in out2.replyTo("h2").reqObj("result"))
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun oversizeDeviceReportFailsTheReservation() {
         // SPEC 4.5/20.1: a report larger than max_device_report_bytes cannot be
         // reserved for, so construction fails the welcome reservation check.
-        val bloated = report("vibrate").put("permissions",
-            JSONObject().put("blob", "y".repeat(9000)))
+        val bloated = report("vibrate").with("permissions",
+            buildJsonObject { put("blob", "y".repeat(9000)) })
         engine(mutableListOf(), deviceReport = bloated)
     }
 
     @Test
     fun capabilitiesOnlyWelcomeEmptiesTriggerSurface() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         // A report that lists a trigger surface while only capabilities is
         // granted: SPEC 20.1 requires trigger_caps empty (and the trigger-only
         // members MAY be empty) in that session.
         val report = report("vibrate")
-            .put("trigger_caps", JSONArray(listOf("vibrate")))
-            .put("trigger_types", JSONArray(listOf("battery.level")))
-            .put("trackable_state_types", JSONArray(listOf("battery.level")))
-            .put("state_types", JSONArray(listOf("battery.level")))
+            .with("trigger_caps", JsonArray(listOf("vibrate").map(::JsonPrimitive)))
+            .with("trigger_types", JsonArray(listOf("battery.level").map(::JsonPrimitive)))
+            .with("trackable_state_types", JsonArray(listOf("battery.level").map(::JsonPrimitive)))
+            .with("state_types", JsonArray(listOf("battery.level").map(::JsonPrimitive)))
         engine(out, deviceReport = report)
-        val device = response(out, "h2").getJSONObject("result").getJSONObject("device")
-        assertEquals(0, device.getJSONArray("trigger_caps").length())
-        assertEquals(0, device.getJSONArray("trigger_types").length())
-        assertEquals(0, device.getJSONArray("state_types").length()) // no state.get in caps
+        val device = out.replyTo("h2").reqObj("result").reqObj("device")
+        assertEquals(0, device.reqArr("trigger_caps").size)
+        assertEquals(0, device.reqArr("trigger_types").size)
+        assertEquals(0, device.reqArr("state_types").size) // no state.get in caps
     }
 
     // ------------------------------------------------- invoke happy + gating
 
     @Test
     fun invokeForwardsHandlerResultExactly() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = engine(out)
-        invoke(engine, "c1", "clipboard.read", JSONObject())
-        assertEquals("hi", response(out, "c1").getJSONObject("result").getString("text"))
-        invoke(engine, "c2", "volume.set", JSONObject().put("stream", "music").put("level", 3))
-        assertEquals(15, response(out, "c2").getJSONObject("result").getInt("max"))
+        invoke(engine, "c1", "clipboard.read", JsonObject(emptyMap()))
+        assertEquals("hi", out.replyTo("c1").reqObj("result").reqString("text"))
+        invoke(engine, "c2", "volume.set",
+            buildJsonObject { put("stream", "music"); put("level", 3) })
+        assertEquals(15L, out.replyTo("c2").reqObj("result").reqLong("max"))
     }
 
     @Test
@@ -140,45 +138,40 @@ class CapabilityTest {
         // Before the guard the encoder's failure escaped out of feed(), and
         // Emacs was left holding an id that never concluded (and which SPEC
         // 7.2 then forbids it from ever reusing).
-        val deep = JSONObject()
-        var cur = deep
-        repeat(60_000) {
-            val next = JSONObject()
-            cur.put("n", next)
-            cur = next
-        }
-        val out = mutableListOf<JSONObject>()
+        var deep = JsonObject(emptyMap())
+        repeat(60_000) { deep = JsonObject(mapOf("n" to deep)) }
+        val out = mutableListOf<JsonObject>()
         val engine = engine(out, handler = CapabilityHandler { _, _ ->
             CapabilityOutcome.Ok(deep)
         })
-        invoke(engine, "c1", "clipboard.read", JSONObject())
-        assertEquals(-32603, errorOf(out, "c1").getInt("code"))
+        invoke(engine, "c1", "clipboard.read", JsonObject(emptyMap()))
+        assertEquals(-32603L, out.errorOf("c1").reqLong("code"))
         assertEquals("internal-error",
-            errorOf(out, "c1").getJSONObject("data").getString("kind"))
+            out.errorOf("c1").reqObj("data").reqString("kind"))
         // The session survives: a fresh invocation is answered normally.
-        val out2 = mutableListOf<JSONObject>()
+        val out2 = mutableListOf<JsonObject>()
         val engine2 = engine(out2)
-        invoke(engine2, "c2", "clipboard.read", JSONObject())
-        assertEquals("hi", response(out2, "c2").getJSONObject("result").getString("text"))
+        invoke(engine2, "c2", "clipboard.read", JsonObject(emptyMap()))
+        assertEquals("hi", out2.replyTo("c2").reqObj("result").reqString("text"))
     }
 
     @Test
     fun ungrantedModuleIsMethodNotFound() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = engine(out, grant = false)
-        invoke(engine, "c1", "vibrate", JSONObject().put("ms", 100))
-        assertEquals(-32601, errorOf(out, "c1").getInt("code"))
+        invoke(engine, "c1", "vibrate", buildJsonObject { put("ms", 100) })
+        assertEquals(-32601L, out.errorOf("c1").reqLong("code"))
         assertTrue(calls.isEmpty())
     }
 
     @Test
     fun unknownCapIsCapUnsupported() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = engine(out)
         // flashlight is a real catalog entry but not in this device's caps.
-        invoke(engine, "c1", "flashlight", JSONObject().put("on", true))
-        assertEquals(1001, errorOf(out, "c1").getInt("code"))
-        assertEquals("cap-unsupported", errorOf(out, "c1").getJSONObject("data").getString("kind"))
+        invoke(engine, "c1", "flashlight", buildJsonObject { put("on", true) })
+        assertEquals(1001L, out.errorOf("c1").reqLong("code"))
+        assertEquals("cap-unsupported", out.errorOf("c1").reqObj("data").reqString("kind"))
         assertTrue(calls.isEmpty()) // no side effect
     }
 
@@ -186,19 +179,22 @@ class CapabilityTest {
 
     @Test
     fun invalidArgsIsInvalidParamsBeforeSideEffect() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = engine(out)
         // vibrate with both ms and pattern is ambiguous.
-        invoke(engine, "c1", "vibrate", JSONObject().put("ms", 100)
-            .put("pattern", JSONArray(listOf(0, 100))))
-        assertEquals(-32602, errorOf(out, "c1").getInt("code"))
+        invoke(engine, "c1", "vibrate", buildJsonObject {
+            put("ms", 100)
+            put("pattern", JsonArray(listOf(0, 100).map { JsonPrimitive(it) }))
+        })
+        assertEquals(-32602L, out.errorOf("c1").reqLong("code"))
         // out-of-range ms.
-        invoke(engine, "c2", "vibrate", JSONObject().put("ms", 0))
-        assertEquals(-32602, errorOf(out, "c2").getInt("code"))
+        invoke(engine, "c2", "vibrate", buildJsonObject { put("ms", 0) })
+        assertEquals(-32602L, out.errorOf("c2").reqLong("code"))
         // an unknown top-level param member is -32602.
-        engine.feed(frame(request("c3", "capability.invoke", JSONObject()
-            .put("cap", "clipboard.read").put("args", JSONObject()).put("extra", 1))))
-        assertEquals(-32602, errorOf(out, "c3").getInt("code"))
+        engine.feed(frame(request("c3", "capability.invoke", buildJsonObject {
+            put("cap", "clipboard.read"); put("args", JsonObject(emptyMap())); put("extra", 1)
+        })))
+        assertEquals(-32602L, out.errorOf("c3").reqLong("code"))
         assertTrue(calls.isEmpty()) // nothing reached the host
     }
 
@@ -206,88 +202,94 @@ class CapabilityTest {
 
     @Test
     fun handlerRefusalsAreForwardedTyped() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         // Real validated caps whose host executor refuses at invocation time.
         val engine = engine(out, deviceReport = report("flashlight", "vibrate"),
             handler = CapabilityHandler { cap, _ ->
                 if (cap == "flashlight") CapabilityOutcome.Fail(1002, "needs-grant")
                 else CapabilityOutcome.Fail(1003, "hardware-busy")
             })
-        invoke(engine, "c1", "flashlight", JSONObject().put("on", true))
-        assertEquals(1002, errorOf(out, "c1").getInt("code"))
-        assertEquals("cap-permission", errorOf(out, "c1").getJSONObject("data").getString("kind"))
-        invoke(engine, "c2", "vibrate", JSONObject().put("ms", 100))
-        assertEquals(1003, errorOf(out, "c2").getInt("code"))
-        assertEquals("hardware-busy", errorOf(out, "c2").getJSONObject("data").getString("reason"))
+        invoke(engine, "c1", "flashlight", buildJsonObject { put("on", true) })
+        assertEquals(1002L, out.errorOf("c1").reqLong("code"))
+        assertEquals("cap-permission", out.errorOf("c1").reqObj("data").reqString("kind"))
+        invoke(engine, "c2", "vibrate", buildJsonObject { put("ms", 100) })
+        assertEquals(1003L, out.errorOf("c2").reqLong("code"))
+        assertEquals("hardware-busy", out.errorOf("c2").reqObj("data").reqString("reason"))
     }
 
     @Test
     fun nullHandlerFailsCapFailed() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         // A device advertising caps but with no executor is misconfigured.
         val engine = engine(out, handler = null)
-        invoke(engine, "c1", "clipboard.read", JSONObject())
-        assertEquals(1003, errorOf(out, "c1").getInt("code"))
-        assertEquals("no-handler", errorOf(out, "c1").getJSONObject("data").getString("reason"))
+        invoke(engine, "c1", "clipboard.read", JsonObject(emptyMap()))
+        assertEquals(1003L, out.errorOf("c1").reqLong("code"))
+        assertEquals("no-handler", out.errorOf("c1").reqObj("data").reqString("reason"))
     }
 
     // ------------------------------------------------- catalog Args schemas
 
-    private fun ok(cap: String, args: JSONObject): Boolean =
+    private fun ok(cap: String, args: JsonObject): Boolean =
         try { CapabilityCatalog.validateArgs(cap, args); true }
         catch (e: ContentInvalid) { false }
 
     @Test
     fun vibrateSchema() {
-        assertTrue(ok("vibrate", JSONObject().put("ms", 1)))
-        assertTrue(ok("vibrate", JSONObject().put("ms", 60_000)))
-        assertTrue(ok("vibrate", JSONObject().put("pattern", JSONArray(listOf(0, 100, 0, 100)))))
-        assertFalse(ok("vibrate", JSONObject().put("ms", 0)))          // below 1
-        assertFalse(ok("vibrate", JSONObject().put("ms", 60_001)))     // above 60000
-        assertFalse(ok("vibrate", JSONObject()))                       // neither
-        assertFalse(ok("vibrate", JSONObject().put("ms", 5).put("pattern", JSONArray(listOf(0)))))
-        assertFalse(ok("vibrate", JSONObject().put("pattern", JSONArray(listOf<Int>()))))   // empty
-        assertFalse(ok("vibrate", JSONObject().put("pattern", JSONArray(listOf(60_000, 60_000))))) // total > 60000
-        assertFalse(ok("vibrate", JSONObject().put("pattern", JSONArray(listOf(1.5)))))     // non-integer
+        assertTrue(ok("vibrate", buildJsonObject { put("ms", 1) }))
+        assertTrue(ok("vibrate", buildJsonObject { put("ms", 60_000) }))
+        assertTrue(ok("vibrate", buildJsonObject {
+            put("pattern", JsonArray(listOf(0, 100, 0, 100).map { JsonPrimitive(it) })) }))
+        assertFalse(ok("vibrate", buildJsonObject { put("ms", 0) }))          // below 1
+        assertFalse(ok("vibrate", buildJsonObject { put("ms", 60_001) }))     // above 60000
+        assertFalse(ok("vibrate", JsonObject(emptyMap())))                    // neither
+        assertFalse(ok("vibrate", buildJsonObject {
+            put("ms", 5); put("pattern", JsonArray(listOf(0).map { JsonPrimitive(it) })) }))
+        assertFalse(ok("vibrate", buildJsonObject {
+            put("pattern", JsonArray(emptyList())) }))                        // empty
+        assertFalse(ok("vibrate", buildJsonObject {
+            put("pattern", JsonArray(listOf(60_000, 60_000).map { JsonPrimitive(it) })) })) // total > 60000
+        assertFalse(ok("vibrate", buildJsonObject {
+            put("pattern", JsonArray(listOf(JsonPrimitive(1.5)))) }))         // non-integer
     }
 
     @Test
     fun scalarSchemas() {
-        assertTrue(ok("volume.set", JSONObject().put("stream", "music").put("level", 5)))
-        assertFalse(ok("volume.set", JSONObject().put("stream", "bogus").put("level", 5)))
-        assertFalse(ok("volume.set", JSONObject().put("stream", "music").put("level", -1)))
-        assertFalse(ok("volume.set", JSONObject().put("stream", "music")))    // missing level
+        assertTrue(ok("volume.set", buildJsonObject { put("stream", "music"); put("level", 5) }))
+        assertFalse(ok("volume.set", buildJsonObject { put("stream", "bogus"); put("level", 5) }))
+        assertFalse(ok("volume.set", buildJsonObject { put("stream", "music"); put("level", -1) }))
+        assertFalse(ok("volume.set", buildJsonObject { put("stream", "music") }))    // missing level
 
-        assertTrue(ok("tts.speak", JSONObject().put("text", "hi")))
-        assertTrue(ok("tts.speak", JSONObject().put("text", "hi").put("pitch", 1.5).put("rate", 0.8)))
-        assertFalse(ok("tts.speak", JSONObject().put("text", "hi").put("pitch", 3.0)))
-        assertFalse(ok("tts.speak", JSONObject().put("text", 123)))
-        assertFalse(ok("tts.speak", JSONObject()))                            // missing text
+        assertTrue(ok("tts.speak", buildJsonObject { put("text", "hi") }))
+        assertTrue(ok("tts.speak", buildJsonObject {
+            put("text", "hi"); put("pitch", 1.5); put("rate", 0.8) }))
+        assertFalse(ok("tts.speak", buildJsonObject { put("text", "hi"); put("pitch", 3.0) }))
+        assertFalse(ok("tts.speak", buildJsonObject { put("text", 123) }))
+        assertFalse(ok("tts.speak", JsonObject(emptyMap())))                        // missing text
 
-        assertTrue(ok("ringer.mode", JSONObject().put("mode", "silent")))
-        assertFalse(ok("ringer.mode", JSONObject().put("mode", "loud")))
+        assertTrue(ok("ringer.mode", buildJsonObject { put("mode", "silent") }))
+        assertFalse(ok("ringer.mode", buildJsonObject { put("mode", "loud") }))
 
-        assertTrue(ok("flashlight", JSONObject().put("on", true)))
-        assertFalse(ok("flashlight", JSONObject().put("on", "yes")))
-        assertFalse(ok("flashlight", JSONObject()))
+        assertTrue(ok("flashlight", buildJsonObject { put("on", true) }))
+        assertFalse(ok("flashlight", buildJsonObject { put("on", "yes") }))
+        assertFalse(ok("flashlight", JsonObject(emptyMap())))
 
-        assertTrue(ok("media.key", JSONObject().put("key", "play_pause")))
-        assertFalse(ok("media.key", JSONObject().put("key", "eject")))
+        assertTrue(ok("media.key", buildJsonObject { put("key", "play_pause") }))
+        assertFalse(ok("media.key", buildJsonObject { put("key", "eject") }))
 
-        assertTrue(ok("screen.keep_on", JSONObject().put("on", false)))
+        assertTrue(ok("screen.keep_on", buildJsonObject { put("on", false) }))
 
-        assertTrue(ok("brightness.set", JSONObject().put("level", 255)))
-        assertFalse(ok("brightness.set", JSONObject().put("level", 256)))
-        assertFalse(ok("brightness.set", JSONObject().put("level", 1.5)))
+        assertTrue(ok("brightness.set", buildJsonObject { put("level", 255) }))
+        assertFalse(ok("brightness.set", buildJsonObject { put("level", 256) }))
+        assertFalse(ok("brightness.set", buildJsonObject { put("level", 1.5) }))
 
-        assertTrue(ok("dnd.set", JSONObject().put("mode", "priority")))
-        assertFalse(ok("dnd.set", JSONObject().put("mode", "maybe")))
+        assertTrue(ok("dnd.set", buildJsonObject { put("mode", "priority") }))
+        assertFalse(ok("dnd.set", buildJsonObject { put("mode", "maybe") }))
 
-        assertTrue(ok("clipboard.read", JSONObject()))
-        assertFalse(ok("clipboard.read", JSONObject().put("x", 1)))
+        assertTrue(ok("clipboard.read", JsonObject(emptyMap())))
+        assertFalse(ok("clipboard.read", buildJsonObject { put("x", 1) }))
 
         // A real catalog entry this build does not yet validate must throw,
         // never silently pass an unvalidated Args object to a side effect.
-        assertFalse(ok("state.get", JSONObject()))
+        assertFalse(ok("state.get", JsonObject(emptyMap())))
     }
 }

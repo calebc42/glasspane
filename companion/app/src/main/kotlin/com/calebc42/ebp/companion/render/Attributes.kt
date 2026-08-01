@@ -30,8 +30,9 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 // ------------------------------------------------------- pure clamps (JVM)
 
@@ -55,12 +56,12 @@ internal fun safeAlpha(v: Double): Float? =
  * duplicate key (which would crash the list). Pure, JVM-testable — and the
  * key precedence mirrors §16.1 presentation identity.
  */
-internal fun lazyChildKeys(children: JSONArray): List<String> {
+internal fun lazyChildKeys(children: JsonArray): List<String> {
     val seen = HashMap<String, Int>()
-    return (0 until children.length()).map { i ->
-        val c = children.optJSONObject(i)
-        val explicit = c?.optString("key").orEmpty()
-        val id = c?.optString("id").orEmpty()
+    return (0 until children.size).map { i ->
+        val c = children[i] as? JsonObject
+        val explicit = c?.stringOrNull("key").orEmpty()
+        val id = c?.stringOrNull("id").orEmpty()
         val base = when {
             explicit.isNotEmpty() -> "k:$explicit"
             id.isNotEmpty() -> "id:$id"
@@ -74,13 +75,13 @@ internal fun lazyChildKeys(children: JSONArray): List<String> {
 
 /** §16.1 presentation identity for a child at index i under `parentPath`:
  * key > id > tree path including the type discriminator. Pure. */
-internal fun identityPath(parentPath: String, node: JSONObject?, i: Int): String {
-    val key = node?.optString("key").orEmpty()
-    val id = node?.optString("id").orEmpty()
+internal fun identityPath(parentPath: String, node: JsonObject?, i: Int): String {
+    val key = node?.stringOrNull("key").orEmpty()
+    val id = node?.stringOrNull("id").orEmpty()
     return when {
         key.isNotEmpty() -> "$parentPath/k:$key"
         id.isNotEmpty() -> "$parentPath/id:$id"
-        else -> "$parentPath/$i:${node?.optString("t").orEmpty()}"
+        else -> "$parentPath/$i:${node?.stringOrNull("t").orEmpty()}"
     }
 }
 
@@ -88,16 +89,21 @@ internal fun identityPath(parentPath: String, node: JSONObject?, i: Int): String
 
 /** The node's corner shape: a number or per-corner object; 0/absent is
  * rectangular. Exposed so containers can stroke borders with the same shape. */
-internal fun cornerShape(node: JSONObject): Shape {
-    val c = node.opt("corner") ?: return RectangleShape
+internal fun cornerShape(node: JsonObject): Shape {
+    val c = node["corner"] ?: return RectangleShape
     return when (c) {
-        is Number -> safeDp(c.toDouble())?.takeIf { it > 0f }
+        // numOrNull carries the old `is Number` guard: a string, boolean or
+        // JSON null corner reads as no number and stays rectangular, exactly
+        // as it did when this arm tested for a boxed Number.
+        is JsonPrimitive -> c.numOrNull()?.let { safeDp(it) }?.takeIf { it > 0f }
             ?.let { RoundedCornerShape(it.dp) } ?: RectangleShape
-        is JSONObject -> {
-            fun side(k: String): Dp = safeDp(c.optDouble(k, 0.0))?.dp ?: 0.dp
+        is JsonObject -> {
+            fun side(k: String): Dp = safeDp(c.doubleOr(k, 0.0))?.dp ?: 0.dp
             RoundedCornerShape(side("top_start"), side("top_end"),
                 side("bottom_end"), side("bottom_start"))
         }
+        // FIELD_TYPES has no `corner` entry, so SpecValidator never types it:
+        // this arm is what keeps a nonconforming corner (an array) harmless.
         else -> RectangleShape
     }
 }
@@ -107,54 +113,58 @@ internal fun cornerShape(node: JSONObject): Shape {
  * first (layout), then the visual ops corner → clip → bg → border, then alpha.
  */
 @Composable
-internal fun Modifier.universal(node: JSONObject): Modifier {
+internal fun Modifier.universal(node: JsonObject): Modifier {
     var m = this
     // padding / pad (per-side wins over its axis shorthand).
-    val pad = node.optJSONObject("pad")
+    val pad = node.objOrNull("pad")
     if (pad != null) {
         fun side(specific: String, axis: String): Dp {
             val v = when {
-                pad.has(specific) -> pad.optDouble(specific, 0.0)
-                pad.has(axis) -> pad.optDouble(axis, 0.0)
-                else -> node.optDouble("padding", 0.0)
+                specific in pad -> pad.doubleOr(specific, 0.0)
+                axis in pad -> pad.doubleOr(axis, 0.0)
+                else -> node.doubleOr("padding", 0.0)
             }
             return (safeDp(v) ?: 0f).dp
         }
         m = m.padding(start = side("start", "horizontal"), top = side("top", "vertical"),
             end = side("end", "horizontal"), bottom = side("bottom", "vertical"))
-    } else if (node.has("padding")) {
-        safeDp(node.optDouble("padding", 0.0))?.let { m = m.padding(it.dp) }
+    } else if ("padding" in node) {
+        safeDp(node.doubleOr("padding", 0.0))?.let { m = m.padding(it.dp) }
     }
-    // Requested size + constraints.
-    if (node.has("width")) safeDp(node.optDouble("width"))?.let { m = m.width(it.dp) }
-    if (node.has("height")) safeDp(node.optDouble("height"))?.let { m = m.height(it.dp) }
-    val minW = node.takeIf { it.has("min_width") }?.let { safeDp(it.optDouble("min_width")) }
-    val maxW = node.takeIf { it.has("max_width") }?.let { safeDp(it.optDouble("max_width")) }
+    // Requested size + constraints. These read a member that may be absent
+    // AND may be non-numeric, and both must SKIP the modifier: the 1-arg
+    // optDouble they ported from defaulted to NaN, which every safe* clamp
+    // rejects. Never `?: 0.0` — that would apply a 0.dp width and collapse
+    // the node. The null-safe read carries the old has() gate with it.
+    node["width"]?.numOrNull()?.let { v -> safeDp(v)?.let { m = m.width(it.dp) } }
+    node["height"]?.numOrNull()?.let { v -> safeDp(v)?.let { m = m.height(it.dp) } }
+    val minW = node["min_width"]?.numOrNull()?.let { safeDp(it) }
+    val maxW = node["max_width"]?.numOrNull()?.let { safeDp(it) }
     if (minW != null || maxW != null)
         m = m.widthIn(min = minW?.dp ?: Dp.Unspecified, max = maxW?.dp ?: Dp.Unspecified)
-    val minH = node.takeIf { it.has("min_height") }?.let { safeDp(it.optDouble("min_height")) }
-    val maxH = node.takeIf { it.has("max_height") }?.let { safeDp(it.optDouble("max_height")) }
+    val minH = node["min_height"]?.numOrNull()?.let { safeDp(it) }
+    val maxH = node["max_height"]?.numOrNull()?.let { safeDp(it) }
     if (minH != null || maxH != null)
         m = m.heightIn(min = minH?.dp ?: Dp.Unspecified, max = maxH?.dp ?: Dp.Unspecified)
-    if (node.has("fill_fraction"))
-        safeFraction(node.optDouble("fill_fraction"))?.let { m = m.fillMaxWidth(it) }
-    if (node.has("aspect_ratio"))
-        safeAspect(node.optDouble("aspect_ratio"))?.let { m = m.aspectRatio(it) }
+    node["fill_fraction"]?.numOrNull()
+        ?.let { v -> safeFraction(v)?.let { m = m.fillMaxWidth(it) } }
+    node["aspect_ratio"]?.numOrNull()
+        ?.let { v -> safeAspect(v)?.let { m = m.aspectRatio(it) } }
     // Visual ops in SPEC order: corner shape, clipping, background, border.
     val shape = cornerShape(node)
     // SPEC 16.5: `clip` applies overflow clipping to the node's shape — a
     // rectangular shape (no corner) still clips the bounding box, so this MUST
     // NOT be gated on a non-rectangular corner.
-    if (node.optBoolean("clip")) m = m.clip(shape)
-    resolveColor(node.optString("bg").takeIf { it.isNotEmpty() })?.let {
+    if (node.boolOr("clip")) m = m.clip(shape)
+    resolveColor(node.stringOr("bg").takeIf { it.isNotEmpty() })?.let {
         m = m.background(it, shape)
     }
-    node.optJSONObject("border")?.let { b ->
-        val width = (safeDp(b.optDouble("width", 1.0)) ?: 1f).dp
-        val color = resolveColor(b.optString("color").takeIf { it.isNotEmpty() })
+    node.objOrNull("border")?.let { b ->
+        val width = (safeDp(b.doubleOr("width", 1.0)) ?: 1f).dp
+        val color = resolveColor(b.stringOr("color").takeIf { it.isNotEmpty() })
             ?: MaterialTheme.colorScheme.outline
         m = m.border(width, color, shape)
     }
-    if (node.has("alpha")) safeAlpha(node.optDouble("alpha"))?.let { m = m.alpha(it) }
+    node["alpha"]?.numOrNull()?.let { v -> safeAlpha(v)?.let { m = m.alpha(it) } }
     return m
 }

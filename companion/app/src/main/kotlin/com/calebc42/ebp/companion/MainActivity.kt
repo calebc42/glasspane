@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// W4 host: start the loopback bridge, render the latest accepted app:*
-// snapshot. Chrome, apps, and the shell arrive with later rungs.
+// W4 host, RF-0.5a shape: a PURE OBSERVER of the process-owned bridge.
+// EbpApplication constructs and starts the bridge and owns every
+// presentation flow; this Activity only renders them. Rotation recreates
+// the Activity freely — the bridge, its socket, and the accepted state
+// never notice. Chrome, apps, and the shell arrive with later rungs.
 package com.calebc42.ebp.companion
 
 import android.os.Bundle
@@ -24,62 +27,28 @@ import com.calebc42.ebp.companion.render.EbpTheme
 import com.calebc42.ebp.companion.render.RenderDialogRoot
 import com.calebc42.ebp.companion.render.RenderNode
 import com.calebc42.ebp.companion.render.RenderPieMenu
-import kotlinx.coroutines.flow.MutableStateFlow
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
 
 class MainActivity : ComponentActivity() {
 
-    // SPEC 14.4: the shown surface's ID travels with its spec so a tap
-    // names the surface it actually occurred in.  This activity still
-    // shows one app surface at a time (last accepted wins).
-    private val currentSpec = MutableStateFlow<Pair<String, JSONObject>?>(null)
-    private val currentDialog = MutableStateFlow<Pair<String, JSONObject>?>(null)
-    // SPEC 18.4: the accepted theme payload ({dark, colors, syntax}) to mirror,
-    // or null for the native scheme (dark = follow-system, amendment #36).
-    private val theme = MutableStateFlow<JSONObject?>(null)
-    private val currentPieMenu = MutableStateFlow<Pair<String, JSONObject>?>(null)
-    private lateinit var bridge: DeviceBridge
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // SPEC 18.5/18.6: request notification presentation permission.
+        // SPEC 18.5/18.6: request notification presentation permission —
+        // the one duty that genuinely needs an Activity, so it stays.
         if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
             != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(
                 arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
         }
-        bridge = DeviceBridge(
-            applicationContext,
-            onSurfaceChanged = { surface, spec ->
-                currentSpec.value = if (spec != null) surface to spec else null
-            },
-            onQueueProblem = { message ->
-                runOnUiThread {
-                    android.widget.Toast.makeText(
-                        this, "EBP queue: $message",
-                        android.widget.Toast.LENGTH_LONG).show()
-                }
-            },
-            onDialogChanged = { id, spec ->
-                // SPEC 18.1: one outstanding dialog presented at a time here.
-                currentDialog.value = if (spec != null && id != null) id to spec
-                    else null
-            },
-            onToast = { text ->
-                runOnUiThread {
-                    android.widget.Toast.makeText(
-                        this, text, android.widget.Toast.LENGTH_SHORT).show()
-                }
-            },
-            onTheme = { payload -> theme.value = payload },
-            onPieMenuChanged = { id, spec ->
-                currentPieMenu.value = if (spec != null) id to spec else null
-            })
-        bridge.start()
+        // RF-0.5a: the bridge and every presentation flow are process-owned
+        // (EbpApplication). SPEC 14.4's surface-ID-travels-with-spec pairing
+        // and 18.1's one-outstanding-dialog rule live where the state does.
+        val app = application as EbpApplication
+        val bridge = app.bridge
         setContent {
             // SPEC 18.4: mirror the pushed palette (colors/dark), or the native
             // scheme following the system when no theme is set.
-            val themePayload by theme.collectAsState()
+            val themePayload by app.theme.collectAsState()
             EbpTheme(themePayload) {
                 // The Surface paints edge-to-edge (the theme reaches under
                 // the system bars) but CONTENT stays inside the safe-drawing
@@ -93,11 +62,11 @@ class MainActivity : ComponentActivity() {
                     // so opening a dialog or pie menu recomposes only that host
                     // — not the surface tree. Reading all three here put them in
                     // one recompose scope, and because every render composable
-                    // takes an (unstable) JSONObject, a dialog opening
+                    // takes an (unstable) JsonObject, a dialog opening
                     // re-executed the entire surface render.
-                    SurfaceHost(currentSpec, bridge)
-                    PieMenuHost(currentPieMenu, bridge)
-                    DialogHost(currentDialog, bridge)
+                    SurfaceHost(app.currentSpec, bridge)
+                    PieMenuHost(app.currentPieMenu, bridge)
+                    DialogHost(app.currentDialog, bridge)
                     ConfirmHost(bridge)
                     }
                 }
@@ -108,7 +77,7 @@ class MainActivity : ComponentActivity() {
 
 @androidx.compose.runtime.Composable
 private fun SurfaceHost(
-    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
     bridge: DeviceBridge,
 ) {
     val shown by flow.collectAsState()
@@ -147,7 +116,7 @@ private fun ConfirmHost(bridge: DeviceBridge) {
 
 @androidx.compose.runtime.Composable
 private fun PieMenuHost(
-    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
     bridge: DeviceBridge,
 ) {
     val pie by flow.collectAsState()
@@ -156,7 +125,7 @@ private fun PieMenuHost(
 
 @androidx.compose.runtime.Composable
 private fun DialogHost(
-    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
     bridge: DeviceBridge,
 ) {
     val dialog by flow.collectAsState()

@@ -4,11 +4,14 @@
 // capacity limits — all over an atomic-replace QueueStore.
 package com.calebc42.ebp.wire
 
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 sealed class AdmitResult {
     /** The complete durable record, already committed. */
-    data class Admitted(val record: JSONObject) : AdmitResult()
+    data class Admitted(val record: JsonObject) : AdmitResult()
     /** SPEC 15.1: capacity exhaustion, the 1601 queue-full equivalent. */
     object QueueFull : AdmitResult()
     /** SPEC 15.1: storage failed — the interaction was NOT queued. */
@@ -21,7 +24,7 @@ sealed class AdmitResult {
  * TOCTOU where a concurrent admit could compact a head between select and mark. */
 sealed class Delivery {
     /** Ready to send; the record is now marked in-flight. */
-    data class Ready(val record: JSONObject) : Delivery()
+    data class Ready(val record: JsonObject) : Delivery()
     /** Queue empty — a replay concludes. */
     object Empty : Delivery()
     /** Head is still running its on_fire (SPEC 21.2) — wait, do not conclude. */
@@ -36,7 +39,7 @@ class DurableQueue(
     private val maxBytes: Long,
     var clock: () -> Long = System::currentTimeMillis,
 ) {
-    private var records: MutableList<JSONObject>
+    private var records: MutableList<JsonObject>
     private var nextSeq: Long
     private var highWater: Long
 
@@ -66,7 +69,7 @@ class DurableQueue(
     fun count(): Int = records.size
 
     @Synchronized
-    fun head(): JSONObject? = records.minByOrNull { it.getLong("queue_seq") }
+    fun head(): JsonObject? = records.minByOrNull { it.reqLong("queue_seq") }
 
     /**
      * SPEC 15.3/21.2: atomically pick the next deliverable head and mark it
@@ -81,11 +84,11 @@ class DurableQueue(
     @Synchronized
     fun beginDelivery(barrierSeq: Long?): Delivery {
         sweepExpired()
-        val record = records.minByOrNull { it.getLong("queue_seq") } ?: return Delivery.Empty
-        if (record.optBoolean("pending_local")) return Delivery.PendingLocal
-        if (barrierSeq != null && record.getLong("queue_seq") >= barrierSeq)
+        val record = records.minByOrNull { it.reqLong("queue_seq") } ?: return Delivery.Empty
+        if (record.boolOr("pending_local")) return Delivery.PendingLocal
+        if (barrierSeq != null && record.reqLong("queue_seq") >= barrierSeq)
             return Delivery.BarrierHeld
-        inFlightSeq = record.getLong("queue_seq")
+        inFlightSeq = record.reqLong("queue_seq")
         return Delivery.Ready(record)
     }
 
@@ -109,29 +112,33 @@ class DurableQueue(
      * occurred_at_ms, queued_at_ms).
      */
     @Synchronized
-    fun admit(event: JSONObject, policy: String, dedupe: String?,
+    fun admit(event: JsonObject, policy: String, dedupe: String?,
               ttlSeconds: Long, pendingLocal: Boolean = false,
               triggerIdentity: String? = null): AdmitResult {
         val now = effectiveNow()
-        val record = JSONObject()
-            .put("event", event)
-            .put("policy", policy)
-            .put("expires_at_ms", event.getLong("occurred_at_ms") + ttlSeconds * 1000)
-            .also { if (dedupe != null) it.put("dedupe", dedupe) }
+        val draft = buildJsonObject {
+            put("event", event)
+            put("policy", policy)
+            put("expires_at_ms", event.reqLong("occurred_at_ms") + ttlSeconds * 1000)
+            if (dedupe != null) put("dedupe", dedupe)
             // SPEC 21.2: a pending-local record is not yet eligible for remote
             // delivery — the pump waits on it until on_fire completes (clear).
-            .also { if (pendingLocal) it.put("pending_local", true) }
+            if (pendingLocal) put("pending_local", true)
             // SPEC 21.2 recovery: the firing pairing, so throttle reconstruction
             // floors only that pairing's registration (not every id-sharing one).
-            .also { if (triggerIdentity != null) it.put("trigger_identity", triggerIdentity) }
+            if (triggerIdentity != null) put("trigger_identity", triggerIdentity)
+        }
         // SPEC 15.2: replace older queued, non-in-flight, same-key events.
         val kept = if (dedupe == null) records.toMutableList()
         else records.filterNot {
-            it.optString("dedupe", "") == dedupe &&
-                it.getLong("queue_seq") != (inFlightSeq ?: -1L)
+            it.stringOr("dedupe") == dedupe &&
+                it.reqLong("queue_seq") != (inFlightSeq ?: -1L)
         }.toMutableList()
         // SPEC 15.4: enforce both capacity limits atomically at admission.
-        record.put("queue_seq", nextSeq)
+        // A JsonObject is immutable, so stamping the sequence number RETURNS
+        // the final record; it is built here, before the byte accounting, so
+        // that what is measured is exactly what is persisted and delivered.
+        val record = draft.with("queue_seq", JsonPrimitive(nextSeq))
         val prospectiveBytes = kept.sumOf { it.toString().toByteArray(Charsets.UTF_8).size } +
             record.toString().toByteArray(Charsets.UTF_8).size
         if (kept.size >= maxEvents || prospectiveBytes > maxBytes)
@@ -161,8 +168,8 @@ class DurableQueue(
     fun sweepExpired(): Int {
         val now = effectiveNow()
         val (expired, kept) = records.partition {
-            it.getLong("expires_at_ms") <= now &&
-                it.getLong("queue_seq") != (inFlightSeq ?: -1L)
+            it.reqLong("expires_at_ms") <= now &&
+                it.reqLong("queue_seq") != (inFlightSeq ?: -1L)
         }
         if (expired.isEmpty() && now <= highWater) return 0
         records = kept.toMutableList()
@@ -192,7 +199,7 @@ class DurableQueue(
      * the Emacs receipt store (14.4), so at-least-once holds either way. */
     @Synchronized
     fun deleteRecord(seq: Long) {
-        if (records.removeAll { it.getLong("queue_seq") == seq })
+        if (records.removeAll { it.reqLong("queue_seq") == seq })
             runCatching { persist() }
         if (inFlightSeq == seq) inFlightSeq = null
     }
@@ -200,35 +207,39 @@ class DurableQueue(
     /** True while the lowest-seq record is still running its on_fire (SPEC
      * 21.2): the pump MUST wait rather than deliver ahead of Step 4. */
     @Synchronized
-    fun headIsPendingLocal(): Boolean = head()?.optBoolean("pending_local") == true
+    fun headIsPendingLocal(): Boolean = head()?.boolOr("pending_local") == true
 
     /** SPEC 21.2: clear a record's pending-local marker once its on_fire has
      * completed (or recovery has resolved it), making it deliverable. */
     @Synchronized
     fun clearPendingLocal(seq: Long) {
-        records.firstOrNull { it.getLong("queue_seq") == seq }
-            ?.takeIf { it.has("pending_local") }
-            ?.let { it.remove("pending_local"); runCatching { persist() } }
+        // `without` RETURNS a new record — an immutable tree cannot be cleared
+        // in place, so the result is written back into the list before the
+        // persist; dropping it would compile and silently stall the pump.
+        val i = records.indexOfFirst { it.reqLong("queue_seq") == seq }
+        if (i < 0 || "pending_local" !in records[i]) return
+        records[i] = records[i].without("pending_local")
+        runCatching { persist() }
     }
 
     /** SPEC 21.2 recovery: every record still marked pending-local (a crash
      * during on_fire). Returns their (queue_seq, event) so the firing service
      * can resume/resolve them, then clear the markers. */
     @Synchronized
-    fun pendingLocalRecords(): List<Pair<Long, JSONObject>> =
-        records.filter { it.optBoolean("pending_local") }
-            .map { it.getLong("queue_seq") to it.getJSONObject("event") }
+    fun pendingLocalRecords(): List<Pair<Long, JsonObject>> =
+        records.filter { it.boolOr("pending_local") }
+            .map { it.reqLong("queue_seq") to it.reqObj("event") }
 
     /** A read-only snapshot of the queued event payloads (for SPEC 21.2
      * throttle reconstruction at recovery). */
     @Synchronized
-    fun events(): List<JSONObject> = records.map { it.getJSONObject("event") }
+    fun events(): List<JsonObject> = records.map { it.reqObj("event") }
 
     /** SPEC 21.2 recovery: each record's (trigger_identity, event). The identity
      * is null for a non-trigger record or one admitted before identity-stamping,
      * so recover falls back to all identities in that case. */
     @Synchronized
-    fun firedRecords(): List<Pair<String?, JSONObject>> = records.map {
-        it.optString("trigger_identity").takeIf { s -> s.isNotEmpty() } to it.getJSONObject("event")
+    fun firedRecords(): List<Pair<String?, JsonObject>> = records.map {
+        it.stringOr("trigger_identity").takeIf { s -> s.isNotEmpty() } to it.reqObj("event")
     }
 }

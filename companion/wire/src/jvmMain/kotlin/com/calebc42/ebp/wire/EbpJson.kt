@@ -23,8 +23,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import org.json.JSONArray
-import org.json.JSONObject
 
 /** SPEC 4.2's seven value kinds, closed. Integers and binary64 numbers are
  * distinct on the wire and distinct here; both are within EBP's ranges by
@@ -60,36 +58,15 @@ object EbpJson {
     }
 
     /**
-     * Lossless projection into the org.json tree the engine still consumes.
-     * The value has already passed every boundary rule, so the projection
-     * cannot smuggle anything the parser rejects: integers arrive as
-     * Int/Long within +/-2^53-1 (Int when it fits, matching what the old
-     * tokener produced so response-id lookups keep working), numbers are
-     * finite Doubles, strings are scalar-clean, and null is JSONObject.NULL.
-     */
-    fun toOrgJson(v: EbpValue): Any = when (v) {
-        is EbpValue.EObj -> JSONObject().also { o ->
-            for ((k, m) in v.members) o.put(k, toOrgJson(m))
-        }
-        is EbpValue.EArr -> JSONArray().also { a ->
-            for (item in v.items) a.put(toOrgJson(item))
-        }
-        is EbpValue.EStr -> v.v
-        is EbpValue.EInt ->
-            if (v.v in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) v.v.toInt() else v.v
-        is EbpValue.ENum -> v.v
-        is EbpValue.EBool -> v.v
-        EbpValue.ENull -> JSONObject.NULL
-    }
-
-    /**
-     * RF-2b: the same lossless projection, into kotlinx.serialization's tree —
-     * the successor to [toOrgJson], which is deleted once the last org.json
-     * call site is gone.
+     * Lossless projection into kotlinx.serialization's tree (C2: this
+     * replaced `toOrgJson`, deleted with the org.json dependency). The value
+     * has already passed every boundary rule, so the projection cannot
+     * smuggle anything the parser rejects: integers are within +/-2^53-1,
+     * numbers are finite, strings are scalar-clean, null is JsonNull.
      *
-     * Integers project as Long *always*. [toOrgJson]'s Int narrowing existed
+     * Integers project as Long *always*. `toOrgJson`'s Int narrowing existed
      * for exactly one customer — the response-id lookup's `as? Int` — and that
-     * map is being retyped to Long keys, so the narrowing dies with it.
+     * map is keyed on Long now, so the narrowing died with it.
      *
      * The wire path is [parse] followed by this projection, never
      * `Json.parseToJsonElement`: kotlinx's own parser has the wrong taxonomy at

@@ -10,8 +10,13 @@ package com.calebc42.ebp.wire
 
 import java.io.File
 import java.time.ZoneId
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -32,18 +37,18 @@ class TriggerScheduleTest {
 
     private var clock = 1_000L
     private var generation: String? = "1"
-    private val fired = mutableListOf<Pair<String, JSONObject>>()
+    private val fired = mutableListOf<Pair<String, JsonObject>>()
     private val store = TriggerStore()
     private val rt = TriggerRuntime(store, { clock }, { ZoneId.of("UTC") }, { null },
-        emit = { reg, data, commit -> commit(); fired.add(reg.entry.getString("id") to data) },
+        emit = { reg, data, commit -> commit(); fired.add(reg.entry.reqString("id") to data) },
         bootGeneration = { generation })
 
-    private fun trig(id: String, type: String, block: JSONObject.() -> Unit = {}) =
-        JSONObject().put("id", id).put("type", type).apply(block)
+    private fun trig(id: String, type: String, block: JsonObjectBuilder.() -> Unit = {}) =
+        buildJsonObject { put("id", id); put("type", type); block() }
 
-    private fun register(vararg triggers: JSONObject) {
+    private fun register(vararg triggers: JsonObject) {
         val entries = TriggerValidator.validateSet(
-            JSONObject().put("triggers", JSONArray(triggers.toList())), caps)
+            buildJsonObject { put("triggers", JsonArray(triggers.toList())) }, caps)
         store.replace("id", entries)
         rt.armBaselines("id")
     }
@@ -55,9 +60,9 @@ class TriggerScheduleTest {
 
     @Test
     fun oneShotAtMsFiresExactlyOnce() {
-        register(trig("os", "time") { put("params", JSONObject().put("at_ms", 5_000)) })
-        rt.fireScheduled("id", "os", JSONObject())
-        rt.fireScheduled("id", "os", JSONObject())   // eligibility skips the repeat
+        register(trig("os", "time") { putJsonObject("params") { put("at_ms", 5_000) } })
+        rt.fireScheduled("id", "os", JsonObject(emptyMap()))
+        rt.fireScheduled("id", "os", JsonObject(emptyMap()))   // eligibility skips the repeat
         assertEquals(listOf("os"), firedIds())
         assertTrue(reg("os").oneShotCompleted)
     }
@@ -69,13 +74,13 @@ class TriggerScheduleTest {
         generation = "1"
         register(trig("b", "boot"))                     // arm records gen "1" silently
         assertEquals("1", reg("b").bootGeneration)
-        rt.onExternal("id", "boot", JSONObject())        // same boot: must NOT fire
+        rt.onExternal("id", "boot", JsonObject(emptyMap()))  // same boot: must NOT fire
         assertEquals(0, fired.size)
         generation = "2"
-        rt.onExternal("id", "boot", JSONObject())        // next boot: fires once
+        rt.onExternal("id", "boot", JsonObject(emptyMap()))  // next boot: fires once
         assertEquals(1, fired.size)
         assertEquals("2", reg("b").bootGeneration)
-        rt.onExternal("id", "boot", JSONObject())        // same gen again: no refire
+        rt.onExternal("id", "boot", JsonObject(emptyMap()))  // same gen again: no refire
         assertEquals(1, fired.size)
     }
 
@@ -88,9 +93,12 @@ class TriggerScheduleTest {
         val store = TriggerStore(FileTriggerBacking(file))
         val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val service = TriggerFiringService(store, queue, 262_144, bootGeneration = { "7" })
-        service.replaceSet("id", TriggerValidator.validateSet(JSONObject().put("triggers",
-            JSONArray().put(trig("b", "boot"))
-                .put(trig("ev", "time") { put("params", JSONObject().put("every_s", 60)) })), caps))
+        service.replaceSet("id", TriggerValidator.validateSet(buildJsonObject {
+            putJsonArray("triggers") {
+                add(trig("b", "boot"))
+                add(trig("ev", "time") { putJsonObject("params") { put("every_s", 60) } })
+            }
+        }, caps))
         val reloaded = TriggerStore(FileTriggerBacking(file))  // a restart
         assertEquals("7", reloaded.registration("id", "b")!!.bootGeneration)
         assertNotNull(reloaded.registration("id", "ev")!!.scheduleAnchorMs)
@@ -104,7 +112,7 @@ class TriggerScheduleTest {
         // recorded generation is kept, so no occurrence is created (SPEC 21.5).
         rt.armBaselines("id")
         assertEquals("1", reg("b").bootGeneration)
-        rt.onExternal("id", "boot", JSONObject())
+        rt.onExternal("id", "boot", JsonObject(emptyMap()))
         assertEquals(0, fired.size)
     }
 
@@ -114,8 +122,8 @@ class TriggerScheduleTest {
         // is the sole once-per-boot guard, so each fed occurrence fires.
         generation = null
         register(trig("b", "boot"))
-        rt.onExternal("id", "boot", JSONObject())
-        rt.onExternal("id", "boot", JSONObject())
+        rt.onExternal("id", "boot", JsonObject(emptyMap()))
+        rt.onExternal("id", "boot", JsonObject(emptyMap()))
         assertEquals(2, fired.size)
     }
 
@@ -124,7 +132,7 @@ class TriggerScheduleTest {
     @Test
     fun everySAnchorsAtAcceptanceAndFirstDueIsOneInterval() {
         clock = 1_000
-        register(trig("ev", "time") { put("params", JSONObject().put("every_s", 60)) })
+        register(trig("ev", "time") { putJsonObject("params") { put("every_s", 60) } })
         // Arming anchors the cadence at acceptance; the first occurrence is one
         // interval later, never at arm time.
         assertEquals(1_000L, reg("ev").scheduleAnchorMs)
@@ -134,11 +142,11 @@ class TriggerScheduleTest {
     @Test
     fun everySCoalescesDeadWindowIntoOneOccurrence() {
         clock = 1_000
-        register(trig("ev", "time") { put("params", JSONObject().put("every_s", 60)) })
+        register(trig("ev", "time") { putJsonObject("params") { put("every_s", 60) } })
         // The device was dead across eight interval boundaries; the host arms
         // the single past-due alarm and it elapses at t=500_000.
         clock = 500_000
-        rt.fireScheduled("id", "ev", JSONObject())
+        rt.fireScheduled("id", "ev", JsonObject(emptyMap()))
         assertEquals(1, fired.size)                       // coalesced, not a burst
         assertEquals(500_000L, reg("ev").lastFireFloorMs)
         // The next occurrence is strictly in the future, back on phase.
@@ -151,16 +159,16 @@ class TriggerScheduleTest {
     fun everySThrottledBoundaryAdvancesCursorNoSpin() {
         clock = 1_000
         register(trig("ev", "time") {
-            put("params", JSONObject().put("every_s", 60)); put("throttle_s", 3600)
+            putJsonObject("params") { put("every_s", 60) }; put("throttle_s", 3600)
         })
         clock = 61_000
-        rt.fireScheduled("id", "ev", JSONObject())        // first boundary: admits
+        rt.fireScheduled("id", "ev", JsonObject(emptyMap()))  // first boundary: admits
         assertEquals(1, fired.size)
         // A later boundary inside the throttle window is NOT admitted — but the
         // schedule cursor MUST still advance so the host re-arms the NEXT
         // boundary, never re-arming a past-due one (the RTC_WAKEUP spin).
         clock = 121_000
-        rt.fireScheduled("id", "ev", JSONObject())
+        rt.fireScheduled("id", "ev", JsonObject(emptyMap()))
         assertEquals(1, fired.size)                        // throttled: no new fire
         assertEquals(121_000L, reg("ev").lastFireFloorMs)  // cursor advanced past now
         assertTrue(TriggerRuntime.nextRepeatDueMs(reg("ev"))!! > 121_000)
@@ -169,14 +177,15 @@ class TriggerScheduleTest {
     @Test
     fun nextRepeatDueMsPureCases() {
         // No anchor yet ⇒ nothing to schedule.
-        val bare = TriggerStore.Registration(trig("x", "time")
-            .put("params", JSONObject().put("every_s", 60)))
+        val bare = TriggerStore.Registration(trig("x", "time") {
+            putJsonObject("params") { put("every_s", 60) }
+        })
         assertNull(TriggerRuntime.nextRepeatDueMs(bare))
         bare.scheduleAnchorMs = 0
         assertEquals(60_000L, TriggerRuntime.nextRepeatDueMs(bare))
         // A one-shot has no repeat schedule.
         assertNull(TriggerRuntime.nextRepeatDueMs(TriggerStore.Registration(
-            trig("y", "time").put("params", JSONObject().put("at_ms", 5_000)))))
+            trig("y", "time") { putJsonObject("params") { put("at_ms", 5_000) } })))
     }
 
     // ----------------------------------------------- timeSchedule (host seam)
@@ -188,10 +197,12 @@ class TriggerScheduleTest {
         // every_s cadence math lives in the pure-runtime tests above.
         val queue = DurableQueue(MemoryQueueStore(), 256, 8_388_608)
         val service = TriggerFiringService(store, queue, 262_144, bootGeneration = { generation })
-        service.replaceSet("id", TriggerValidator.validateSet(JSONObject().put("triggers",
-            JSONArray()
-                .put(trig("os", "time") { put("params", JSONObject().put("at_ms", 90_000)) })
-                .put(trig("ev", "time") { put("params", JSONObject().put("every_s", 60)) })), caps))
+        service.replaceSet("id", TriggerValidator.validateSet(buildJsonObject {
+            putJsonArray("triggers") {
+                add(trig("os", "time") { putJsonObject("params") { put("at_ms", 90_000) } })
+                add(trig("ev", "time") { putJsonObject("params") { put("every_s", 60) } })
+            }
+        }, caps))
         val before = service.timeSchedule().associate { it.triggerId to it.dueMs }
         assertEquals(90_000L, before["os"])               // at_ms is its own due
         assertEquals(reg("ev").scheduleAnchorMs!! + 60_000L, before["ev"]) // anchor + interval

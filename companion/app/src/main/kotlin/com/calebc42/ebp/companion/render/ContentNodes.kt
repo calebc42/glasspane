@@ -52,8 +52,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /**
  * SPEC 17.2 image: fetch through the guarded ImageLoader off the main thread,
@@ -64,27 +65,31 @@ import org.json.JSONObject
  * aspect_ratio size the box.
  */
 @Composable
-internal fun RenderImage(node: JSONObject, m: Modifier) {
-    val url = node.optString("url")
-    val desc = node.optString("content_description").takeIf { it.isNotEmpty() }
+internal fun RenderImage(node: JsonObject, m: Modifier) {
+    val url = node.stringOr("url")
+    val desc = node.stringOr("content_description").takeIf { it.isNotEmpty() }
     val limits = ImageLoader.DEFAULT_LIMITS
     // LD-11: through the cache, so scrolling a lazy_column back to a seen
     // image does not re-fetch, and N nodes on one URL share one load.
     val bitmap by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, url) {
         value = ImageCache.get(url, limits)
     }
-    val scale = when (node.optString("content_scale")) {
+    val scale = when (node.stringOr("content_scale")) {
         "crop" -> androidx.compose.ui.layout.ContentScale.Crop
         "fill" -> androidx.compose.ui.layout.ContentScale.FillBounds
         else -> androidx.compose.ui.layout.ContentScale.Fit
     }
     val sizeMod = m.then(
         when {
-            node.has("width") && node.has("height") ->
-                Modifier.size(node.optInt("width").dp, node.optInt("height").dp)
-            node.has("aspect_ratio") ->
+            // C6: width/height are UNIVERSAL_NODE_ATTRIBUTES typed "number" and
+            // validated finite-only, so `"width": 120.5` is legal traffic that
+            // org.json's optInt truncated — [dimInt] truncates the same way and
+            // folds a non-numeric member into 0 as the no-default optInt did.
+            "width" in node && "height" in node ->
+                Modifier.size(node.dimInt("width", 0).dp, node.dimInt("height", 0).dp)
+            "aspect_ratio" in node ->
                 Modifier.fillMaxWidth().then(
-                    Modifier.aspectRatio(node.optDouble("aspect_ratio", 1.0).toFloat()))
+                    Modifier.aspectRatio(node.doubleOr("aspect_ratio", 1.0).toFloat()))
             else -> Modifier
         })
     val bmp = bitmap
@@ -122,26 +127,39 @@ internal fun textStyleForName(name: String): TextStyle = when (name) {
     else -> MaterialTheme.typography.bodyLarge
 }
 
-/** §17.1/§17.2: font_weight as a number (100..900) or a named weight. */
-internal fun fontWeightOf(value: Any?): FontWeight? = when (value) {
-    is Number -> value.toInt().takeIf { it in 1..1000 }?.let { FontWeight(it) }
-    "bold" -> FontWeight.Bold
-    "medium" -> FontWeight.Medium
-    "normal" -> FontWeight.Normal
-    "light" -> FontWeight.Light
-    else -> null
+/** §17.1/§17.2: font_weight as a number (100..900) or a named weight.
+ *
+ * C6: the org.json `when (value) { is Number -> …; "bold" -> … }` dispatch
+ * splits into an explicit number-then-string read, because a JsonElement is
+ * never a Kotlin Number or String. FIELD_TYPES maps font_weight to
+ * "font-weight", which SpecValidator leaves unvalidated, so a hostile
+ * `"font_weight": "9"` reaches here — [numOrNull]'s isString guard is what
+ * keeps it out of the numeric branch, exactly as `is Number` did. */
+internal fun fontWeightOf(value: JsonElement?): FontWeight? {
+    val n = value?.numOrNull()
+    if (n != null) return n.toInt().takeIf { it in 1..1000 }?.let { FontWeight(it) }
+    return when (value?.strOrNull()) {
+        "bold" -> FontWeight.Bold
+        "medium" -> FontWeight.Medium
+        "normal" -> FontWeight.Normal
+        "light" -> FontWeight.Light
+        else -> null
+    }
 }
 
 /** The full §17.2 text node (style/font_weight/color/selectable/max_lines). */
 @Composable
-internal fun RenderText(node: JSONObject, m: Modifier) {
-    val style = textStyleForName(node.optString("style"))
-    val maxLines = node.optInt("max_lines", Int.MAX_VALUE)
+internal fun RenderText(node: JsonObject, m: Modifier) {
+    val style = textStyleForName(node.stringOr("style"))
+    // C6: max_lines is validated integral BY VALUE upstream (validatePositiveInt
+    // floors an asDoubleOrNull), so `"max_lines": 3.0` is accepted traffic and
+    // must not silently fall back to the default here.
+    val maxLines = node.intByValue("max_lines", Int.MAX_VALUE)
         .takeIf { it > 0 } ?: Int.MAX_VALUE
-    val raw = node.optString("text")
+    val raw = node.stringOr("text")
     // SPEC 18.4: a `syntax` language fontifies the text with the active (pushed
     // or fallback) token palette; absent, it renders plain.
-    val language = node.optString("syntax")
+    val language = node.stringOr("syntax")
     val syntaxColors = LocalSyntaxColors.current
     val text: AnnotatedString = remember(raw, language, syntaxColors) {
         if (language.isEmpty()) AnnotatedString(raw)
@@ -154,15 +172,15 @@ internal fun RenderText(node: JSONObject, m: Modifier) {
         Text(
             text = text,
             style = style,
-            fontWeight = fontWeightOf(node.opt("font_weight")),
-            color = resolveColor(node.optString("color").takeIf { it.isNotEmpty() })
+            fontWeight = fontWeightOf(node["font_weight"]),
+            color = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
                 ?: Color.Unspecified,
             maxLines = maxLines,
             modifier = m)
     }
     // `selectable` enables long-press selection/copy; plain labels stay
     // non-selectable so taps on surrounding cards aren't intercepted.
-    if (node.optBoolean("selectable")) SelectionContainer { content() } else content()
+    if (node.boolOr("selectable")) SelectionContainer { content() } else content()
 }
 
 /**
@@ -173,27 +191,29 @@ internal fun RenderText(node: JSONObject, m: Modifier) {
  * link and dispatches through §14.
  */
 internal fun buildSpanString(
-    spans: JSONArray?,
+    spans: JsonArray?,
     linkColor: Color,
     resolve: (String?) -> Color?,
-    dispatch: (JSONObject) -> Unit,
+    dispatch: (JsonObject) -> Unit,
 ): AnnotatedString = buildAnnotatedString {
     if (spans == null) return@buildAnnotatedString
-    for (i in 0 until spans.length()) {
-        val s = spans.optJSONObject(i) ?: continue
-        val text = s.optString("text")
+    for (i in 0 until spans.size) {
+        // The index is bounded by `size`, so `spans[i]` cannot throw; a
+        // non-object entry is skipped exactly as optJSONObject's null was.
+        val s = spans[i] as? JsonObject ?: continue
+        val text = s.stringOr("text")
         if (text.isEmpty()) continue
         val span = SpanStyle(
-            fontWeight = fontWeightOf(s.opt("font_weight")),
-            fontStyle = if (s.optBoolean("italic")) FontStyle.Italic else null,
-            fontFamily = if (s.optBoolean("mono")) FontFamily.Monospace else null,
-            textDecoration = if (s.optBoolean("underline")) TextDecoration.Underline else null,
-            background = resolve(s.optString("bg").takeIf { it.isNotEmpty() })
+            fontWeight = fontWeightOf(s["font_weight"]),
+            fontStyle = if (s.boolOr("italic")) FontStyle.Italic else null,
+            fontFamily = if (s.boolOr("mono")) FontFamily.Monospace else null,
+            textDecoration = if (s.boolOr("underline")) TextDecoration.Underline else null,
+            background = resolve(s.stringOr("bg").takeIf { it.isNotEmpty() })
                 ?: Color.Unspecified,
-            color = resolve(s.optString("color").takeIf { it.isNotEmpty() })
+            color = resolve(s.stringOr("color").takeIf { it.isNotEmpty() })
                 ?: Color.Unspecified,
         )
-        val onTap = s.optJSONObject("on_tap")
+        val onTap = s.objOrNull("on_tap")
         if (onTap != null) {
             val linkSpan = if (span.color == Color.Unspecified)
                 span.copy(color = linkColor) else span
@@ -208,11 +228,11 @@ internal fun buildSpanString(
 }
 
 @Composable
-internal fun RenderRichText(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val style = textStyleForName(node.optString("style"))
+internal fun RenderRichText(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val style = textStyleForName(node.stringOr("style"))
     val scheme = MaterialTheme.colorScheme
     val annotated = buildSpanString(
-        node.optJSONArray("spans"),
+        node.arrOrNull("spans"),
         linkColor = scheme.primary,
         resolve = { resolveColorIn(scheme, it) },
         dispatch = { ctx.action(it) })
@@ -221,21 +241,21 @@ internal fun RenderRichText(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 
 /** §17.2 icon: name/size/color/badge/content_description. */
 @Composable
-internal fun RenderIcon(node: JSONObject, m: Modifier) {
-    val tint = resolveColor(node.optString("color").takeIf { it.isNotEmpty() })
+internal fun RenderIcon(node: JsonObject, m: Modifier) {
+    val tint = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
         ?: LocalContentColor.current
-    val size = node.optDouble("size", 0.0)
+    val size = node.doubleOr("size", 0.0)
     val icon: @Composable () -> Unit = {
         Icon(
-            IconMap.get(node.optString("name")),
-            contentDescription = node.optString("content_description")
+            IconMap.get(node.stringOr("name")),
+            contentDescription = node.stringOr("content_description")
                 .takeIf { it.isNotEmpty() },
             tint = tint,
             modifier = m.then(
                 safeDp(size)?.takeIf { it > 0f }?.let { Modifier.size(it.dp) }
                     ?: Modifier))
     }
-    val badge = node.optString("badge")
+    val badge = node.stringOr("badge")
     if (badge.isNotEmpty())
         BadgedBox(badge = { Badge { Text(badge) } }) { icon() }
     else icon()
@@ -245,11 +265,11 @@ internal fun RenderIcon(node: JSONObject, m: Modifier) {
  * with children it decorates them (BadgedBox). The exact value stays the
  * accessible text even if visually capped. */
 @Composable
-internal fun RenderBadge(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val label = node.optString("label")
-    val color = resolveColor(node.optString("color").takeIf { it.isNotEmpty() })
+internal fun RenderBadge(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val label = node.stringOr("label")
+    val color = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
         ?: MaterialTheme.colorScheme.onSurfaceVariant
-    val children = node.optJSONArray("children")
+    val children = node.arrOrNull("children")
     if (children != null) {
         BadgedBox(
             modifier = m,
@@ -259,7 +279,7 @@ internal fun RenderBadge(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             }) { RenderChildren(children, ctx) }
         return
     }
-    val iconName = node.optString("icon")
+    val iconName = node.stringOr("icon")
     Surface(
         modifier = m,
         shape = RoundedCornerShape(percent = 50),
@@ -280,38 +300,38 @@ internal fun RenderBadge(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 }
 
 @Composable
-internal fun RenderSectionHeader(node: JSONObject, ctx: RenderCtx, m: Modifier) {
+internal fun RenderSectionHeader(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = m.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp)) {
         Text(
-            text = node.optString("title"),
+            text = node.stringOr("title"),
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.weight(1f))
-        node.optJSONObject("trailing")?.let { RenderNode(it, ctx.child(it, 0)) }
+        node.objOrNull("trailing")?.let { RenderNode(it, ctx.child(it, 0)) }
     }
 }
 
 @Composable
-internal fun RenderEmptyState(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val actionJson = node.optJSONObject("on_tap")
-    val actionLabel = node.optString("action_label")
+internal fun RenderEmptyState(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val actionJson = node.objOrNull("on_tap")
+    val actionLabel = node.stringOr("action_label")
     Column(
         modifier = m.fillMaxWidth().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(
-            IconMap.get(node.optString("icon", "inbox")),
+            IconMap.get(node.stringOr("icon", "inbox")),
             contentDescription = null,
             modifier = Modifier.size(48.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-        node.optString("title").takeIf { it.isNotEmpty() }?.let {
+        node.stringOr("title").takeIf { it.isNotEmpty() }?.let {
             Text(it, style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center)
         }
-        node.optString("caption").takeIf { it.isNotEmpty() }?.let {
+        node.stringOr("caption").takeIf { it.isNotEmpty() }?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 textAlign = TextAlign.Center)
@@ -324,10 +344,10 @@ internal fun RenderEmptyState(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 
 /** §17.2 progress: circular (default) or linear; no value = indeterminate. */
 @Composable
-internal fun RenderProgress(node: JSONObject, m: Modifier) {
-    val linear = node.optString("variant") == "linear"
-    if (node.has("value")) {
-        val v = node.optDouble("value", 0.0).toFloat().coerceIn(0f, 1f)
+internal fun RenderProgress(node: JsonObject, m: Modifier) {
+    val linear = node.stringOr("variant") == "linear"
+    if ("value" in node) {
+        val v = node.doubleOr("value", 0.0).toFloat().coerceIn(0f, 1f)
         if (linear) LinearProgressIndicator(progress = { v }, modifier = m)
         else CircularProgressIndicator(progress = { v }, modifier = m)
     } else {
@@ -353,14 +373,17 @@ private fun monthColors(monthIndex: Int): Pair<Color, Color> {
 /** §17.2 date_stamp: a compact date (and optional time) chip-card —
  * presentation data, not a clock. */
 @Composable
-internal fun RenderDateStamp(node: JSONObject, m: Modifier) {
+internal fun RenderDateStamp(node: JsonObject, m: Modifier) {
     // Format-6 vocabulary: day and year are INTEGERS (poc-v1 sent strings),
-    // month and time are display strings.
-    val day = if (node.has("day")) node.optInt("day").toString() else ""
-    val month = node.optString("month")
-    val year = if (node.has("year")) node.optInt("year").toString() else ""
-    val time = node.optString("time")
-    val (headerColor, headerText) = monthColors(node.optInt("month_index", 0))
+    // month and time are display strings. C6: their validators (integer-1-31 /
+    // non-negative-integer / integer-1-12) all check integrality BY VALUE, so
+    // `"day": 5.0` is accepted traffic and reads through [intByValue]; the
+    // presence gate keeps an absent member rendering as "" as before.
+    val day = if ("day" in node) node.intByValue("day", 0).toString() else ""
+    val month = node.stringOr("month")
+    val year = if ("year" in node) node.intByValue("year", 0).toString() else ""
+    val time = node.stringOr("time")
+    val (headerColor, headerText) = monthColors(node.intByValue("month_index", 0))
     Column(modifier = m) {
         ElevatedCard(shape = RoundedCornerShape(6.dp), modifier = Modifier.width(64.dp)) {
             Column(

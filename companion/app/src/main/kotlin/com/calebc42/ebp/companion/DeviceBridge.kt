@@ -9,6 +9,8 @@
 package com.calebc42.ebp.companion
 
 import com.calebc42.ebp.companion.render.ImageCache
+import com.calebc42.ebp.companion.render.objOrNull
+import com.calebc42.ebp.companion.render.stringOr
 import com.calebc42.ebp.wire.CompanionEngine
 import com.calebc42.ebp.wire.CompanionConfig
 import com.calebc42.ebp.wire.EbpAuth
@@ -21,10 +23,14 @@ import com.calebc42.ebp.wire.utf16PosIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import org.json.JSONArray
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
-import org.json.JSONObject
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -73,26 +79,32 @@ class DeviceBridge(
     private val appContext: android.content.Context,
     /** SPEC 14.4: the shown surface's ID travels with its spec, so an
      * event names the surface the action actually occurred in. */
-    private val onSurfaceChanged: (String, JSONObject?) -> Unit,
+    private val onSurfaceChanged: (String, JsonObject?) -> Unit,
     /** SPEC 15.1: storage failure and queue exhaustion MUST reach the
      * user as a visible diagnostic. */
     private val onQueueProblem: (String) -> Unit = {},
     /** SPEC 18.1: (dialog_id, spec) to present; (dialog_id, null) to
      * dismiss. */
-    private val onDialogChanged: (String?, JSONObject?) -> Unit = { _, _ -> },
+    private val onDialogChanged: (String?, JsonObject?) -> Unit = { _, _ -> },
     /** SPEC 18.2: best-effort toast text. */
     private val onToast: (String) -> Unit = {},
     /** SPEC 18.4: the accepted theme payload (`{dark, colors, syntax}`) to
      * mirror, or null for the native scheme. Persisted, so a cached theme is
      * delivered once at start before any session. */
-    private val onTheme: (JSONObject?) -> Unit = {},
+    private val onTheme: (JsonObject?) -> Unit = {},
     /** SPEC 18.3: (menu_id, spec) to present; (menu_id, null) to dismiss. */
-    private val onPieMenuChanged: (String, JSONObject?) -> Unit = { _, _ -> },
+    private val onPieMenuChanged: (String, JsonObject?) -> Unit = { _, _ -> },
 ) {
 
     // SPEC 13.1/15.1/18.6: the durable stores are process-wide singletons
     // (CompanionStores), shared with cold-started manifest receivers.
-    val store = CompanionStores.surfaces(appContext)
+    // `store` is lazy because SurfaceStore's init reads and revalidates the
+    // whole surfaces file, and since RF-0.5a this constructor runs in
+    // Application.onCreate on the main thread at every process start —
+    // including broadcast-only cold starts that never render a surface.
+    // First touch is on a bridge/connection thread (serve(), listeners),
+    // the same place the cached-theme read already lives.
+    val store by lazy { CompanionStores.surfaces(appContext) }
     val queue = CompanionStores.queue(appContext)
     private val reminders = CompanionStores.reminders(appContext)
     private val triggers = CompanionStores.triggers(appContext)
@@ -115,32 +127,46 @@ class DeviceBridge(
         // the render/NodeSupport registry (the pin test holds the renderer's
         // dispatch to the same sets), never hand-kept here.
         surfaceProfiles = com.calebc42.ebp.companion.render.NodeSupport.surfaceProfiles(),
-        limits = JSONObject()
-            .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
-            .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
-            .put("max_surfaces", 64).put("max_surface_ids", 4096)
-            .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
-            .put("max_capture_fields", 64).put("max_dialogs", 4)
-            .put("max_pie_menus", 1).put("max_reminders", 256)
-            .put("max_editor_sessions", 8).put("max_trigger_responses", 8)
-            .put("max_triggers", 64).put("max_device_report_bytes", 8192)
+        // C6: every value below stays INTEGER-spelled. The engine's constructor
+        // reads the limits with reqLong, so a `.0` spelling would not merely
+        // widen a bound — it would throw at engine construction.
+        limits = buildJsonObject {
+            put("max_frame_bytes", 4_194_304)
+            put("max_queued_events", 256)
+            put("max_queued_bytes", 8_388_608)
+            put("max_event_bytes", 262_144)
+            put("max_surfaces", 64)
+            put("max_surface_ids", 4096)
+            put("max_field_bytes", 65_536)
+            put("max_input_state_bytes", 262_144)
+            put("max_capture_fields", 64)
+            put("max_dialogs", 4)
+            put("max_pie_menus", 1)
+            put("max_reminders", 256)
+            put("max_editor_sessions", 8)
+            put("max_trigger_responses", 8)
+            put("max_triggers", 64)
+            put("max_device_report_bytes", 8192)
             // SPEC 4.5/17.2: the three image limits are REQUIRED whenever image
             // is advertised — the same constants the loader enforces (no drift).
-            .put("max_image_bytes",
+            put("max_image_bytes",
                 com.calebc42.ebp.companion.render.ImageLoader.MAX_IMAGE_BYTES)
-            .put("max_decoded_image_bytes",
+            put("max_decoded_image_bytes",
                 com.calebc42.ebp.companion.render.ImageLoader.MAX_DECODED_IMAGE_BYTES)
-            .put("max_image_pixels",
+            put("max_image_pixels",
                 com.calebc42.ebp.companion.render.ImageLoader.MAX_IMAGE_PIXELS)
             // SPEC 4.5/17.5: REQUIRED whenever chart/canvas are advertised.
-            .put("max_chart_points", 4096).put("max_canvas_ops", 4096)
+            put("max_chart_points", 4096)
+            put("max_canvas_ops", 4096)
             // SPEC 4.5: REQUIRED whenever rich_text/table are advertised —
             // aggregate counts across one SurfaceSpec or dialog (LD-22).
-            .put("max_rich_spans", 4096).put("max_table_cells", 4096)
+            put("max_rich_spans", 4096)
+            put("max_table_cells", 4096)
             // SPEC 4.5 (amendment #84): REQUIRED when editor.sync is granted.
             // Declared at the floor: it is what keeps every editor path
             // (shadow rebuild, diff, highlight, relayout) comfortably linear.
-            .put("max_editor_bytes", 65_536),
+            put("max_editor_bytes", 65_536)
+        },
         // SPEC 20.1/20.2: advertise the device report and the platform executor.
         deviceReport = AppCapabilities.deviceReport(),
         capabilityHandler = AppCapabilities.handler(appContext, 65_536),
@@ -150,12 +176,19 @@ class DeviceBridge(
     // cached surface, the device keeps looking like your Emacs while it is away.
     private val themeFile = File(appContext.filesDir, "ebp-theme.json")
 
-    private fun loadTheme(): JSONObject? =
+    // C6: a PERSISTENCE read, so it parses with the plain lenient parser and
+    // never with the wire's strict frame parser — an `ebp-theme.json` written
+    // by a pre-upgrade (org.json) build must still load. The catch below
+    // already covers the new failure kinds (SerializationException,
+    // IllegalArgumentException, and the cast's ClassCastException).
+    private fun loadTheme(): JsonObject? =
         try {
-            if (themeFile.exists()) JSONObject(themeFile.readText()) else null
+            if (themeFile.exists())
+                Json.parseToJsonElement(themeFile.readText()) as JsonObject
+            else null
         } catch (e: Exception) { null }
 
-    private fun saveTheme(payload: JSONObject) {
+    private fun saveTheme(payload: JsonObject) {
         try {
             val tmp = File(themeFile.parentFile, "ebp-theme.json.tmp")
             tmp.writeText(payload.toString())
@@ -213,8 +246,8 @@ class DeviceBridge(
     // validator, and no chrome ever presented it, so a Delete tap deleted.)
     // The dispatch is PARKED here; `resolveConfirm' releases or drops it.
     data class PendingConfirm(
-        val prompt: String, val surface: String, val descriptor: JSONObject,
-        val value: Any?, val injected: JSONObject?, val fields: JSONObject?)
+        val prompt: String, val surface: String, val descriptor: JsonObject,
+        val value: JsonElement?, val injected: JsonObject?, val fields: JsonObject?)
 
     private val _pendingConfirm = MutableStateFlow<PendingConfirm?>(null)
     val pendingConfirm: StateFlow<PendingConfirm?> get() = _pendingConfirm
@@ -227,10 +260,10 @@ class DeviceBridge(
     }
 
     /** Park when DESCRIPTOR carries `confirm`; true when parked. */
-    private fun parkIfConfirmed(surface: String, descriptor: JSONObject,
-                                value: Any?, injected: JSONObject?,
-                                fields: JSONObject?): Boolean {
-        val prompt = descriptor.optString("confirm")
+    private fun parkIfConfirmed(surface: String, descriptor: JsonObject,
+                                value: JsonElement?, injected: JsonObject?,
+                                fields: JsonObject?): Boolean {
+        val prompt = descriptor.stringOr("confirm")
         if (prompt.isEmpty()) return false
         // One outstanding confirmation: the modal is what the user is
         // looking at, so a second tap cannot reach another descriptor.
@@ -239,8 +272,8 @@ class DeviceBridge(
         return true
     }
 
-    private fun dispatch(surface: String, descriptor: JSONObject, value: Any?,
-                         injected: JSONObject?, fields: JSONObject?) {
+    private fun dispatch(surface: String, descriptor: JsonObject, value: JsonElement?,
+                         injected: JsonObject?, fields: JsonObject?) {
         dispatchExecutor.execute {
             // SPEC 18.1/14.4: a `dialog:` context dispatches in DIALOG
             // context — dialog_id, no surface/revision.  The generic path
@@ -252,17 +285,17 @@ class DeviceBridge(
                 engine?.dispatchDialogAction(
                     surface.removePrefix("dialog:"), descriptor, value,
                     fields) { _, error ->
-                    error?.let { onQueueProblem(it.optString("message", "queue error")) }
+                    error?.let { onQueueProblem(it.stringOr("message", "queue error")) }
                 }
             else engine?.dispatchAction(surface, descriptor, value, injected, fields) { _, error ->
                 // SPEC 15.1: surface queue-full/storage failures visibly.
-                error?.let { onQueueProblem(it.optString("message", "queue error")) }
+                error?.let { onQueueProblem(it.stringOr("message", "queue error")) }
             }
         }
     }
 
     /** SPEC 14.1: renderer hook -> remote action through the live engine. */
-    fun action(surface: String, descriptor: JSONObject?, value: Any? = null) {
+    fun action(surface: String, descriptor: JsonObject?, value: JsonElement? = null) {
         descriptor ?: return
         if (parkIfConfirmed(surface, descriptor, value, null, null)) return
         dispatch(surface, descriptor, value, null, null)
@@ -271,8 +304,8 @@ class DeviceBridge(
     /** SPEC 18.1: renderer hook -> remote action from INSIDE a dialog.
      * FIELDS is the capture snapshot read from the dialog's LOCAL field
      * layer at tap time (dialog statefuls never enter the store). */
-    fun dialogAction(dialogId: String, descriptor: JSONObject?, value: Any?,
-                     fields: JSONObject?) {
+    fun dialogAction(dialogId: String, descriptor: JsonObject?, value: JsonElement?,
+                     fields: JsonObject?) {
         descriptor ?: return
         val surface = "dialog:" + dialogId
         if (parkIfConfirmed(surface, descriptor, value, null, fields)) return
@@ -281,8 +314,8 @@ class DeviceBridge(
 
     /** SPEC 14.3: a multi-member hook (on_reorder from/to/order, on_add_row/
      * col index, swipe direction) injects a member object beside args. */
-    fun actionInjecting(surface: String, descriptor: JSONObject?, injected: JSONObject,
-                        value: Any? = null) {
+    fun actionInjecting(surface: String, descriptor: JsonObject?, injected: JsonObject,
+                        value: JsonElement? = null) {
         descriptor ?: return
         if (parkIfConfirmed(surface, descriptor, value, injected, null)) return
         dispatch(surface, descriptor, value, injected, null)
@@ -290,14 +323,14 @@ class DeviceBridge(
 
     /** SPEC 14.6: a renderer-supplied occurrence-time field value — a
      * text_input password's on_submit, whose secret has no retained draft. */
-    fun actionWithFields(surface: String, descriptor: JSONObject?, fields: JSONObject) {
+    fun actionWithFields(surface: String, descriptor: JsonObject?, fields: JsonObject) {
         descriptor ?: return
         if (parkIfConfirmed(surface, descriptor, null, null, fields)) return
         dispatch(surface, descriptor, null, null, fields)
     }
 
     /** SPEC 14.6: renderer edit -> draft + state.changed publication. */
-    fun state(surface: String, id: String, value: Any?) {
+    fun state(surface: String, id: String, value: JsonElement?) {
         dispatchExecutor.execute { engine?.publishState(surface, id, value) }
     }
 
@@ -357,14 +390,14 @@ class DeviceBridge(
         dispatchExecutor.execute {
             engine?.requestCompletion(document, editorId) {
                 prefix, cands, session, seq, cursor ->
-                val list = (0 until cands.length()).mapNotNull { i ->
-                    cands.optJSONObject(i)?.let { c ->
+                val list = cands.mapNotNull { e ->
+                    (e as? JsonObject)?.let { c ->
                         CompletionCandidate(
-                            c.optString("label"),
-                            c.optString("annotation").takeIf { it.isNotEmpty() },
+                            c.stringOr("label"),
+                            c.stringOr("annotation").takeIf { it.isNotEmpty() },
                             // SPEC 19.3: `insert` defaults to `label`.
-                            c.optString("insert").takeIf { it.isNotEmpty() }
-                                ?: c.optString("label"))
+                            c.stringOr("insert").takeIf { it.isNotEmpty() }
+                                ?: c.stringOr("label"))
                     }
                 }
                 _completionOffers.value = _completionOffers.value +
@@ -422,14 +455,14 @@ class DeviceBridge(
     }
 
     /** SPEC 18.1: dialog.submit builtin -> complete the outstanding request. */
-    fun dialogSubmit(dialogId: String, value: Any?, fields: JSONObject) {
+    fun dialogSubmit(dialogId: String, value: JsonElement?, fields: JsonObject) {
         dispatchExecutor.execute { engine?.completeDialogSubmit(dialogId, value, fields) }
     }
 
     /** SPEC 14.1/18.1 (T3/LD-3): the authored values the engine computed for
      * this dialog's stateful nodes, so an untouched field captures its
      * logical value. Read once when the dialog is presented. */
-    fun dialogDefaults(dialogId: String): JSONObject? = engine?.dialogDefaults(dialogId)
+    fun dialogDefaults(dialogId: String): JsonObject? = engine?.dialogDefaults(dialogId)
 
     /** SPEC 18.1: dialog.dismiss builtin / platform dismissal. */
     fun dialogDismiss(dialogId: String) {
@@ -445,20 +478,23 @@ class DeviceBridge(
     fun pieMenuDismiss(menuId: String) {
         dispatchExecutor.execute {
             engine?.let { e ->
-                e.feed(com.calebc42.ebp.wire.encodeFrame(JSONObject()
-                    .put("jsonrpc", "2.0").put("method", "pie_menu.dismiss")
-                    .put("params", JSONObject().put("menu_id", menuId)).toString()))
+                // C6: the envelope comes from the wire's own SPEC 7.1 builder,
+                // which emits `jsonrpc` itself — one spelling of the envelope
+                // instead of a second hand-rolled one here.
+                e.feed(com.calebc42.ebp.wire.encodeFrame(
+                    com.calebc42.ebp.wire.notification("pie_menu.dismiss",
+                        buildJsonObject { put("menu_id", menuId) }).toString()))
             }
         }
     }
 
     /** SPEC 13.4/14.2: resolve a multi-view spec to the view being shown;
      * a single-view spec passes through. */
-    private fun resolveView(surface: String): JSONObject? {
+    private fun resolveView(surface: String): JsonObject? {
         val spec = store.spec(surface) ?: return null
-        val views = spec.optJSONObject("views") ?: return spec
-        val name = store.currentView(surface) ?: spec.optString("initial_view")
-        return views.optJSONObject(name)
+        val views = spec.objOrNull("views") ?: return spec
+        val name = store.currentView(surface) ?: spec.stringOr("initial_view")
+        return views.objOrNull(name)
     }
 
     private fun serve(socket: Socket) {
@@ -508,7 +544,7 @@ class DeviceBridge(
             when (builtin) {
                 "clipboard.copy" -> {
                     val clip = android.content.ClipData.newPlainText(
-                        "EBP", descriptor.optString("text"))
+                        "EBP", descriptor.stringOr("text"))
                     appContext.getSystemService(
                         android.content.ClipboardManager::class.java)
                         .setPrimaryClip(clip)
@@ -518,9 +554,9 @@ class DeviceBridge(
                     val send = android.content.Intent(android.content.Intent.ACTION_SEND)
                         .setType("text/plain")
                         .putExtra(android.content.Intent.EXTRA_TEXT,
-                            descriptor.optString("text"))
+                            descriptor.stringOr("text"))
                         .also {
-                            descriptor.optString("title").takeIf { t -> t.isNotEmpty() }
+                            descriptor.stringOr("title").takeIf { t -> t.isNotEmpty() }
                                 ?.let { t -> it.putExtra(
                                     android.content.Intent.EXTRA_TITLE, t) }
                         }

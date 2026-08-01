@@ -44,23 +44,23 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.wire.ToolbarEdit
 import com.calebc42.ebp.wire.ToolbarEdits
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun EditorToolbar(
-    items: JSONArray,
+    items: JsonArray,
     value: () -> TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
-    dispatch: (JSONObject) -> Unit,
+    dispatch: (JsonObject) -> Unit,
     onCommand: (String) -> Unit,
     localDate: () -> String,
     localTime: () -> String,
     enabled: Boolean = true,
 ) {
     // The op whose snippet carries ${input:...} parks here while its dialog shows.
-    var pendingInput by remember { mutableStateOf<JSONObject?>(null) }
+    var pendingInput by remember { mutableStateOf<JsonObject?>(null) }
 
     fun applyEdit(snippet: String, placement: String, input: String?) {
         val v = value()
@@ -70,11 +70,18 @@ internal fun EditorToolbar(
         onValueChange(TextFieldValue(r.text, TextRange(r.selStart, r.selEnd)))
     }
 
-    val runOp: (JSONObject) -> Unit = runOp@{ op ->
+    val runOp: (JsonObject) -> Unit = runOp@{ op ->
         // SPEC 17.4: a disabled/read-only editor's toolbar dispatches nothing.
         if (!enabled) return@runOp
-        val tap = op.optJSONObject("on_tap")
-        val line = op.optString("line")
+        val tap = op.objOrNull("on_tap")
+        val line = op.stringOr("line")
+        // SPEC 17.7 (exactly one operation per item): the branch ORDER is the
+        // priority, and the emptiness/presence asymmetry is deliberate — `line`
+        // tests non-emptiness while `snippet`/`command` test membership, so a
+        // `snippet: ""` still parks/applies but a `command: ""` dispatches
+        // nothing (the takeIf below). C6 spells the presence test `in`, which is
+        // the same containsKey org.json's `has` was: a member explicitly set to
+        // null is still PRESENT, and reads as "" through stringOr either way.
         when {
             tap != null -> dispatch(tap)
             line.isNotEmpty() -> {
@@ -82,13 +89,13 @@ internal fun EditorToolbar(
                 ToolbarEdits.lineOp(line, ToolbarEdit(v.text, v.selection.start, v.selection.end))
                     ?.let { onValueChange(TextFieldValue(it.text, TextRange(it.selStart, it.selEnd))) }
             }
-            op.has("snippet") -> {
-                val snippet = op.optString("snippet")
+            "snippet" in op -> {
+                val snippet = op.stringOr("snippet")
                 if (ToolbarEdits.needsInput(snippet)) pendingInput = op
-                else applyEdit(snippet, op.optString("placement"), null)
+                else applyEdit(snippet, op.stringOr("placement"), null)
             }
             // §17.7: the nested command is passed verbatim; Emacs allowlists it.
-            op.has("command") -> op.optString("command").takeIf { it.isNotEmpty() }?.let(onCommand)
+            "command" in op -> op.stringOr("command").takeIf { it.isNotEmpty() }?.let(onCommand)
         }
     }
 
@@ -98,39 +105,39 @@ internal fun EditorToolbar(
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            for (i in 0 until items.length()) items.optJSONObject(i)?.let { ToolbarItem(it, runOp) }
+            for (i in 0 until items.size) (items[i] as? JsonObject)?.let { ToolbarItem(it, runOp) }
         }
     }
 
     pendingInput?.let { op ->
-        val snippet = op.optString("snippet")
+        val snippet = op.stringOr("snippet")
         SnippetInputDialog(
             prompt = ToolbarEdits.inputPrompt(snippet),
             onDismiss = { pendingInput = null },
             onConfirm = { entry ->
                 pendingInput = null
-                applyEdit(snippet, op.optString("placement"), entry)
+                applyEdit(snippet, op.stringOr("placement"), entry)
             })
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ToolbarItem(item: JSONObject, runOp: (JSONObject) -> Unit) {
-    val icon = item.optString("icon")
-    val label = item.optString("label")
-    val menu = item.optJSONArray("menu")
-    val longPress = item.optJSONObject("long_press")
+private fun ToolbarItem(item: JsonObject, runOp: (JsonObject) -> Unit) {
+    val icon = item.stringOr("icon")
+    val label = item.stringOr("label")
+    val menu = item.arrOrNull("menu")
+    val longPress = item.objOrNull("long_press")
     when {
         menu != null -> {
             var expanded by remember { mutableStateOf(false) }
             Box {
                 ToolbarChip(icon, label) { expanded = true }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    for (i in 0 until menu.length()) {
-                        val sub = menu.optJSONObject(i) ?: continue
+                    for (i in 0 until menu.size) {
+                        val sub = menu[i] as? JsonObject ?: continue
                         DropdownMenuItem(
-                            text = { Text(sub.optString("label").ifEmpty { sub.optString("icon") }) },
+                            text = { Text(sub.stringOr("label").ifEmpty { sub.stringOr("icon") }) },
                             onClick = { expanded = false; runOp(sub) })
                     }
                 }

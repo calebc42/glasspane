@@ -5,8 +5,12 @@
 // Companion-originated requests.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -15,85 +19,80 @@ import org.junit.Test
 
 class ActionEventTest {
 
-    private val katToken = EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")
-    private val katPid = "101112131415161718191a1b1c1d1e1f"
-    private val katCn = "202122232425262728292a2b2c2d2e2f"
-    private val katSn = "303132333435363738393a3b3c3d3e3f"
-
-    private fun limits(): JSONObject = JSONObject()
-        .put("max_frame_bytes", 4_194_304).put("max_queued_events", 256)
-        .put("max_queued_bytes", 8_388_608).put("max_event_bytes", 262_144)
-        .put("max_surfaces", 16).put("max_surface_ids", 1024)
-        .put("max_field_bytes", 65_536).put("max_input_state_bytes", 262_144)
-        .put("max_capture_fields", 64)
-        .put("max_rich_spans", 4096).put("max_table_cells", 4096)
-
-    private fun readyEngine(out: MutableList<JSONObject>): CompanionEngine {
+    private fun readyEngine(out: MutableList<JsonObject>): CompanionEngine {
         val engine = CompanionEngine(CompanionConfig(
             serverName = "kat-companion", serverVersion = "1.0.0",
             pairings = mapOf(katPid to katToken),
             supportedCapabilities = setOf("theme"),
-            surfaceProfiles = JSONObject().put("app", JSONObject()
-                .put("node_types", JSONArray(listOf("text", "text_input", "button")))
-                .put("builtins", JSONArray()).put("features", JSONArray())),
-            limits = limits(), nonceSource = { katSn })) { bytes ->
+            surfaceProfiles = buildJsonObject {
+                putJsonObject("app") {
+                    put("node_types", JsonArray(listOf("text", "text_input", "button")
+                        .map(::JsonPrimitive)))
+                    put("builtins", JsonArray(emptyList()))
+                    put("features", JsonArray(emptyList()))
+                }
+            },
+            limits = testLimits("max_rich_spans" to 4096, "max_table_cells" to 4096),
+            nonceSource = { katSn })) { bytes ->
             FrameDecoder().let { d -> d.feed(bytes).forEach(out::add); d.finish() }
         }
-        fun frame(msg: JSONObject) = encodeFrame(msg.toString())
         engine.feed(frame(request("h1", "session.hello",
             EbpAuth.helloParams("t", "1", katPid, katCn, emptyList()))))
         engine.feed(frame(request("h2", "auth.response",
             EbpAuth.authParams(katPid, katCn, katSn, katToken))))
-        engine.feed(frame(request("s1", "surface.update", JSONObject()
-            .put("surface", "app:main").put("revision", 5)
-            .put("spec", JSONObject().put("t", "text_input")
-                .put("id", "title").put("value", "authored")))))
-        engine.feed(frame(request("r1", "session.ready", JSONObject())))
+        engine.feed(frame(request("s1", "surface.update", buildJsonObject {
+            put("surface", "app:main"); put("revision", 5)
+            putJsonObject("spec") {
+                put("t", "text_input"); put("id", "title"); put("value", "authored")
+            }
+        })))
+        engine.feed(frame(request("r1", "session.ready", JsonObject(emptyMap()))))
         assertEquals(SessionState.READY, engine.state)
         return engine
     }
 
-    private fun descriptor(vararg capture: String): JSONObject =
-        JSONObject().put("action", "demo.tap")
-            .put("args", JSONObject().put("k", 1))
-            .also {
-                if (capture.isNotEmpty())
-                    it.put("capture_fields", JSONArray(capture.toList()))
-            }
+    private fun descriptor(vararg capture: String): JsonObject = buildJsonObject {
+        put("action", "demo.tap")
+        putJsonObject("args") { put("k", 1) }
+        if (capture.isNotEmpty())
+            put("capture_fields", JsonArray(capture.toList().map(::JsonPrimitive)))
+    }
 
     @Test
     fun eventConstructionAndStatusRoundTrip() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = readyEngine(out)
         var status: String? = null
-        engine.publishState("app:main", "title", "typed")
-        engine.dispatchAction("app:main", descriptor("title"), "clicked") { s, _ ->
+        engine.publishState("app:main", "title", JsonPrimitive("typed"))
+        engine.dispatchAction("app:main", descriptor("title"), JsonPrimitive("clicked")) { s, _ ->
             status = s
         }
         // SPEC 14.6: state.changed precedes the action on the wire.
-        val stateIdx = out.indexOfFirst { it.opt("method") == "state.changed" }
-        val eventIdx = out.indexOfFirst { it.opt("method") == "event.action" }
+        val stateIdx = out.indexOfFirst { it.stringOrNull("method") == "state.changed" }
+        val eventIdx = out.indexOfFirst { it.stringOrNull("method") == "event.action" }
         assertTrue(stateIdx in 0 until eventIdx)
-        val stateParams = out[stateIdx].getJSONObject("params")
-        assertEquals(5, stateParams.getLong("revision_seen"))
-        assertEquals("typed", stateParams.getString("value"))
+        val stateParams = out[stateIdx].reqObj("params")
+        assertEquals(5L, stateParams.reqLong("revision_seen"))
+        assertEquals("typed", stateParams.reqString("value"))
         // SPEC 14.4 event shape.
         val event = out[eventIdx]
-        val params = event.getJSONObject("params")
-        assertTrue(EbpAuth.isValidNonce(params.getString("event_id")))
-        assertEquals("demo.tap", params.getString("action"))
-        assertEquals("app:main", params.getString("surface"))
-        assertEquals(5, params.getLong("revision_seen"))
-        assertTrue(params.getLong("occurred_at_ms") > 0)
+        val params = event.reqObj("params")
+        assertTrue(EbpAuth.isValidNonce(params.reqString("event_id")))
+        assertEquals("demo.tap", params.reqString("action"))
+        assertEquals("app:main", params.reqString("surface"))
+        assertEquals(5L, params.reqLong("revision_seen"))
+        assertTrue(params.reqLong("occurred_at_ms") > 0)
         // SPEC 14.3 injection beside authored args.
-        assertEquals("clicked", params.getJSONObject("args").getString("value"))
-        assertEquals(1, params.getJSONObject("args").getInt("k"))
+        assertEquals("clicked", params.reqObj("args").reqString("value"))
+        assertEquals(1L, params.reqObj("args").reqLong("k"))
         // SPEC 14.1: the occurrence-time captured draft.
-        assertEquals("typed", params.getJSONObject("fields").getString("title"))
+        assertEquals("typed", params.reqObj("fields").reqString("title"))
         // The 4-status result resolves the callback.
-        engine.feed(encodeFrame(JSONObject().put("jsonrpc", "2.0")
-            .put("id", event.getInt("id"))
-            .put("result", JSONObject().put("status", "accepted")).toString()))
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", event["id"]!!)
+            putJsonObject("result") { put("status", "accepted") }
+        }))
         assertEquals("accepted", status)
     }
 
@@ -101,112 +100,126 @@ class ActionEventTest {
     fun multiMemberInjectionRidesBesideAuthoredArgs() {
         // SPEC 14.3: on_reorder-style hooks inject several members (from/to/
         // order), not just `value`; they land in a COPY beside authored args.
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = readyEngine(out)
-        val injected = JSONObject().put("from", 2).put("to", 0)
-            .put("order", JSONArray(listOf("c", "a", "b")))
+        val injected = buildJsonObject {
+            put("from", 2); put("to", 0)
+            put("order", JsonArray(listOf("c", "a", "b").map(::JsonPrimitive)))
+        }
         engine.dispatchAction("app:main", descriptor(), null, injected)
-        val args = out.first { it.opt("method") == "event.action" }
-            .getJSONObject("params").getJSONObject("args")
-        assertEquals(2, args.getInt("from"))
-        assertEquals(0, args.getInt("to"))
-        assertEquals("c", args.getJSONArray("order").getString(0))
-        assertEquals(1, args.getInt("k")) // authored args intact
+        val args = out.first { it.stringOrNull("method") == "event.action" }
+            .reqObj("params").reqObj("args")
+        assertEquals(2L, args.reqLong("from"))
+        assertEquals(0L, args.reqLong("to"))
+        assertEquals("c", args.reqArr("order")[0].asStringOrNull())
+        assertEquals(1L, args.reqLong("k")) // authored args intact
     }
 
     @Test
     fun captureIsOccurrenceTimeNotDeliveryTime() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = readyEngine(out)
-        engine.publishState("app:main", "title", "first")
+        engine.publishState("app:main", "title", JsonPrimitive("first"))
         engine.dispatchAction("app:main", descriptor("title"), null)
         // A later edit must not rewrite the already-built occurrence.
-        engine.publishState("app:main", "title", "second")
-        val event = out.first { it.opt("method") == "event.action" }
+        engine.publishState("app:main", "title", JsonPrimitive("second"))
+        val event = out.first { it.stringOrNull("method") == "event.action" }
         assertEquals("first",
-            event.getJSONObject("params").getJSONObject("fields").getString("title"))
+            event.reqObj("params").reqObj("fields").reqString("title"))
     }
 
     @Test
     fun captureFallsBackToAuthoredValue() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = readyEngine(out)
         // No draft: the authored value is the logical value (SPEC 13.6).
         engine.dispatchAction("app:main", descriptor("title"), null)
-        val event = out.first { it.opt("method") == "event.action" }
+        val event = out.first { it.stringOrNull("method") == "event.action" }
         assertEquals("authored",
-            event.getJSONObject("params").getJSONObject("fields").getString("title"))
+            event.reqObj("params").reqObj("fields").reqString("title"))
     }
 
     @Test
     fun notReadyMeansDrop() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = CompanionEngine(CompanionConfig(
             serverName = "s", serverVersion = "1",
             pairings = mapOf(katPid to katToken),
             supportedCapabilities = emptySet(),
-            surfaceProfiles = JSONObject().put("app", JSONObject()
-                .put("node_types", JSONArray(NODE_SCHEMA.keys.toList())).put("builtins", JSONArray())
-                .put("features", JSONArray())),
-            limits = limits())) { bytes ->
+            surfaceProfiles = buildJsonObject {
+                putJsonObject("app") {
+                    put("node_types", JsonArray(NODE_SCHEMA.keys.map(::JsonPrimitive)))
+                    put("builtins", JsonArray(emptyList()))
+                    put("features", JsonArray(emptyList()))
+                }
+            },
+            limits = testLimits("max_rich_spans" to 4096, "max_table_cells" to 4096))) { bytes ->
             FrameDecoder().let { d -> d.feed(bytes).forEach(out::add); d.finish() }
         }
         // The cached snapshot from an earlier session gives the node its
         // wire address (SPEC 13.5); this session never reached READY.
         engine.surfaces.update("app:main", 5,
-            JSONObject().put("t", "text_input").put("id", "title"),
+            buildJsonObject { put("t", "text_input"); put("id", "title") },
             null, null, null)
         engine.dispatchAction("app:main",
-            JSONObject().put("action", "demo.tap"), null)
-        engine.publishState("app:main", "title", "offline draft")
+            buildJsonObject { put("action", "demo.tap") }, null)
+        engine.publishState("app:main", "title", JsonPrimitive("offline draft"))
         // Nothing on the wire pre-READY; the draft is retained locally
         // for the next welcome's input_state (SPEC 14.6).
         assertTrue(out.isEmpty())
-        assertEquals("offline draft", engine.surfaces.draft("app:main", "title"))
+        assertEquals(JsonPrimitive("offline draft"), engine.surfaces.draft("app:main", "title"))
     }
 
     @Test
     fun responseCorrelationSurvivesReordering() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = readyEngine(out)
         val statuses = mutableListOf<String?>()
         engine.dispatchAction("app:main", descriptor(), null) { s, _ -> statuses.add(s) }
         engine.dispatchAction("app:main", descriptor(), null) { s, _ -> statuses.add(s) }
-        val events = out.filter { it.opt("method") == "event.action" }
+        val events = out.filter { it.stringOrNull("method") == "event.action" }
         assertEquals(2, events.size)
         // Answer the second first: callbacks must match ids, not order.
-        engine.feed(encodeFrame(JSONObject().put("jsonrpc", "2.0")
-            .put("id", events[1].getInt("id"))
-            .put("result", JSONObject().put("status", "rejected")).toString()))
-        engine.feed(encodeFrame(JSONObject().put("jsonrpc", "2.0")
-            .put("id", events[0].getInt("id"))
-            .put("result", JSONObject().put("status", "accepted")).toString()))
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", events[1]["id"]!!)
+            putJsonObject("result") { put("status", "rejected") }
+        }))
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", events[0]["id"]!!)
+            putJsonObject("result") { put("status", "accepted") }
+        }))
         assertEquals(listOf("rejected", "accepted"), statuses)
         // An unknown response id is ignored, not fatal.
-        engine.feed(encodeFrame(JSONObject().put("jsonrpc", "2.0")
-            .put("id", 999)
-            .put("result", JSONObject().put("status", "accepted")).toString()))
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", 999)
+            putJsonObject("result") { put("status", "accepted") }
+        }))
         assertEquals(SessionState.READY, engine.state)
     }
 
     @Test
     fun passwordNodesNeverEmitStateChanged() {
-        val out = mutableListOf<JSONObject>()
+        val out = mutableListOf<JsonObject>()
         val engine = readyEngine(out)
         // SPEC 14.6: a password node MUST NOT emit state.changed, hold a
         // draft, or enter input_state — the value never leaves volatile
         // widget memory through this path.
-        engine.feed(encodeFrame(request("s2", "surface.update", JSONObject()
-            .put("surface", "app:pw").put("revision", 1)
-            .put("spec", JSONObject().put("t", "text_input")
-                .put("id", "secret").put("password", true))).toString()))
+        engine.feed(frame(request("s2", "surface.update", buildJsonObject {
+            put("surface", "app:pw"); put("revision", 1)
+            putJsonObject("spec") {
+                put("t", "text_input"); put("id", "secret"); put("password", true)
+            }
+        })))
         val before = out.size
-        engine.publishState("app:pw", "secret", "hunter2")
+        engine.publishState("app:pw", "secret", JsonPrimitive("hunter2"))
         assertEquals(before, out.size) // nothing on the wire
         assertNull(engine.surfaces.draft("app:pw", "secret"))
-        assertFalse(engine.surfaces.inputState().has("app:pw"))
+        assertFalse("app:pw" in engine.surfaces.inputState())
         // And an ID with no stateful address publishes nothing either.
-        engine.publishState("app:main", "no-such-node", "x")
+        engine.publishState("app:main", "no-such-node", JsonPrimitive("x"))
         assertEquals(before, out.size)
     }
 }

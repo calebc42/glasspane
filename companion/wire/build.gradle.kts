@@ -18,14 +18,11 @@ kotlin {
             // :wire's public signatures consumed by :app. Tree API only; no
             // serialization compiler plugin, zero @Serializable.
             api(libs.kotlinx.serialization.json)
-            // org.json is the JSON surface shared with Android. compileOnly: on
-            // the device the framework provides these classes; packaging the
-            // artifact would shadow the boot classpath. JVM tests supply the
-            // reference jar. (Deleted by RF-2b.)
-            compileOnly(libs.json)
+            // org.json left this module at C4 (jvmMain) and C5 (jvmTest): with
+            // the jar off both classpaths, a stray re-imported org.json symbol
+            // is a compile error, not a silent regression.
         }
         jvmTest.dependencies {
-            implementation(libs.json)
             implementation(libs.junit)
         }
     }

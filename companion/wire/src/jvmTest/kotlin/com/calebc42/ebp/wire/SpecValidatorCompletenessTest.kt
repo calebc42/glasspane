@@ -336,8 +336,12 @@ class SpecValidatorCompletenessTest {
         rejects(chart(buildJsonArray { add(buildJsonObject { put("x", 1) }) }),
             "finite number")
         // A builder never produces a non-finite number, but an overflowing
-        // JSON literal ("1e999") parses fine and its binary64 VALUE reads as
-        // Infinity — the wire-reachable vector, so the fixture stays raw text.
+        // JSON literal ("1e999") parses fine under the LENIENT reader and its
+        // binary64 VALUE reads as Infinity. The wire cannot deliver this —
+        // EbpJson refuses overflow in-parse (EbpJsonTest pins 1e309) — but the
+        // PERSISTENCE path can (stores read via Json.parseToJsonElement), so
+        // the validator's finite gate still needs the fixture; it stays raw
+        // text because no builder can spell it.
         rejects(chart(buildJsonArray {
             add(Json.parseToJsonElement("""{"x":1,"y":1e999}""") as JsonObject)
         }), "finite")

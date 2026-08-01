@@ -41,7 +41,7 @@ by **graduating the name**, not the tree.
 | RF-0.5a | Process-scope the listener in `EbpApplication`; absorb the rotation defect | RF-1a | Structural, not JSON — land before C2 so it does not enlarge C6 and every later smoke is trustworthy |
 | P0 | The owed pre-swap pin tests, string-literal fixtures | RF-1a | Enforced from birth, not demonstrated once |
 | C2–C6 | The conversion, on branch `rf-2b` (RF-2a/B0/B1 done — [PLAN-rf2-kmp-migration.md](PLAN-rf2-kmp-migration.md) §0) | P0, RF-1a | Nothing under `ebp/` may change (prose-only ratifications by Caleb exempt — see I1) |
-| spike-elisp | vulpea → flat rows | — (parallel now) | Zero Kotlin, zero `ebp/` |
+| spike-elisp | vulpea → flat rows | **DONE 2026-07-31** | Answered: full-row projection of a real vault is **7.34% of one frame**; no bulk carrier (Decision 9 upheld) |
 | RF-2c | Hoist to `commonMain` | RF-2b exit | |
 | spike-kotlin | table + apply-rows, `:app` only, via `surface.update` + `table` | **DONE 2026-07-31** | Answered: the binding limit is `max_table_cells` (4096 aggregate), never the frame — full-vault table chunks at 256 rows/update (3 updates, 7 ms); presentation-node caps argue changesets must be data, not nodes |
 | RF-1b | Robolectric + renderer tests | RF-2b exit | New dependency stack + SDK-36 shadow-jar risk |
@@ -447,9 +447,9 @@ hand-wave it when the target lands.
 
 A throwaway measurement rung, split so each half sits where it is legal.
 
-**spike-elisp — now, parallel with C2–C6.** Touches only `emacs/` + `test/`,
-and **must not modify anything under `ebp/`** (the I1 window). Project a real
-vault through vulpea into flat rows; measure.
+**spike-elisp — DONE 2026-07-31. The measurement is in; see the verdict
+below.** Ran on branch `spike/elisp-vulpea-rows`, `emacs/spike/` only, vault
+read-only, zero `ebp/`, zero Kotlin.
 
 **spike-kotlin — DONE 2026-07-31; verdict below.** Ran on branch
 `spike/kotlin-table-rows` after the RF-2b exit (`2871b59`, PR #3), in the
@@ -499,7 +499,45 @@ reserved bulk carrier is ever specified (Decision 9).
 spike measures the real shape: DB titles are display-formatted, so the
 projection must declare DB-vs-file provenance; and every mutation runs
 `save-buffer` plus a synchronous `vulpea-db-update-file` — the write path any
-change capture must coexist with.
+change capture must coexist with. *(Citation corrected 2026-07-31: that
+header is
+`~/pkb/projects/jetpacs-orgseq/orgseq/jetpacs-orgseq-model.el` — a
+**separate repo**, not this one. Both this plan and
+`AUDIT-plan-spec-adversarial-2026-07-31.md` cited it as
+`emacs/jetpacs-orgseq-model.el`, which resolves to nothing. Same defect
+class as the vulpea-ELPA correction the amendment package's §0.1 already
+recorded, missed on the same pass; the constraints themselves are verbatim
+correct.)*
+
+### The verdict (spike-elisp, 2026-07-31)
+
+**No bulk carrier. Decision 9 holds: the need was measured and does not
+exist.** Live vault, 586 notes across 8 files, projected through vulpea and
+serialized with the same `json-serialize` the wire path uses:
+
+| Projection | Total | % of ONE frame | Rows over a frame | Notes to fill a frame |
+|---|---|---|---|---|
+| Minimal row (id/title/todo/tags/level) | 105,383 B | **2.51%** | 0 | ~23,455 |
+| Full row (every struct scalar + properties) | 307,737 B | **7.34%** | 0 | ~8,002 |
+| *Bound:* every org file's raw source | 458,191 B | **10.9%** | — | — |
+
+The whole vault — metadata projection **and** every byte of org source
+together — is under 20% of a single 4,194,304-byte frame, and not one row
+comes near the limit. A vault needs roughly **8,000 notes** before its
+full-row projection fills one frame; changesets are incremental, so the
+whole-vault figure is the pessimistic case.
+
+**The encoding cost the rung worried about is not real:** `json-serialize`
+took 1.1 ms of an 8.4 ms full-row pass (12.7%) — walking the vulpea structs
+dominates. And the size distribution has no tail (p50 528 B, p95 581 B, max
+679 B), so the total is small because every row is small, not because
+outliers hid.
+
+**The one thing that would move this answer:** vulpea indexes *metadata*, not
+content — the note struct has no body field. Body text was measured
+separately as a bound (raw file bytes), not projected. If RF-4a's schema ever
+carries body text per row, re-measure before relying on this. Full record and
+caveats: `emacs/spike/RESULTS.md` (dies with the spike).
 
 ---
 
@@ -574,12 +612,18 @@ retirement, no reader-holds-old-generation rule.
 - **Honest cost, stated:** the projection is stored twice on one device.
   I7's logic accepts it — the Companion's copy is a projection, not a second
   interpreter.
-- **Reserved shape** if the spike's measurement ever justifies a bulk
-  carrier: not a SQLite file but a dumb hash-verified blob (gzipped NDJSON
-  changesets) at a negotiated URI, content hash carried inline. The artifact
-  need not be *durable*, only *detectable* — a torn or vanished file fails
-  the hash and the consumer falls back to inline changesets, which stay the
-  complete floor.
+- **Reserved shape — and the spike says it stays reserved (2026-07-31).**
+  The measurement came back at 7.34% of one frame for a full-row projection
+  of a real vault, with ~8,000 notes needed to fill a frame (see the data
+  spike's verdict above). **RF-4a therefore specifies no bulk carrier**;
+  inline changesets are the whole design, not a floor under an accelerator.
+  If a future vault ever justifies one, the shape held in reserve is: not a
+  SQLite file but a dumb hash-verified blob (gzipped NDJSON changesets) at a
+  negotiated URI, content hash carried inline. The artifact need not be
+  *durable*, only *detectable* — a torn or vanished file fails the hash and
+  the consumer falls back to inline changesets. Re-measure first; the
+  trigger to re-measure is a schema that carries body text per row, which
+  this measurement does not cover.
 
 **RF-4a — module spec** (drafted as spec text in `ebp/`, negotiated like §19;
 **sequenced after the RF-2b exit** — it edits `ebp/`, which I1 freezes while

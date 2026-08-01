@@ -124,7 +124,7 @@ do not specify a bulk carrier until the spike measures the need.
 ### P1-3 · RF-4b's trigger-based change capture collides with vulpea's write pattern
 
 **vulpea updates are delete-all-rows-per-file + re-INSERT with FK cascades, and a schema-epoch bump deletes the DB file — an in-DB changelog records churn, then gets annihilated**
-`~/.emacs.d/elpa/vulpea-20260714.543/vulpea-db-extract.el:1465`; `…/vulpea-db.el:341,675,176-198`; `emacs/jetpacs-orgseq-model.el` header · hand-verified
+`~/.emacs.d/elpa/vulpea-20260714.543/vulpea-db-extract.el:1465`; `…/vulpea-db.el:341,675,176-198`; `~/pkb/projects/jetpacs-orgseq/orgseq/jetpacs-orgseq-model.el` header *(path corrected 2026-07-31 by spike-elisp: originally cited as `emacs/jetpacs-orgseq-model.el`, which resolves to nothing — that file is in a **separate repo**. Same defect class as this pass's own vulpea-ELPA correction, missed on the same pass; the header's content is verbatim as quoted)* · hand-verified
 
 *Claim.* RF-4b specifies "change capture = triggers → changelog table". The projection's
 actual producer, vulpea, updates a file by deleting every row for that file and

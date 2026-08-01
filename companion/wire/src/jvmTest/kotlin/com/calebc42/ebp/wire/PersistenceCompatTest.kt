@@ -1,21 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // P0 pre-swap pin (PLAN-rf2 §0.2 item 1 + item 6): the UPGRADE GATE.
 //
-// Every fixture here is written by the org.json code that ships TODAY and
-// re-loaded through the same File*Backing the app uses, so these tests pass
-// against org.json and must keep passing after the kotlinx.serialization
-// swap. The load path is the whole point: a device that upgrades reads
-// yesterday's files with tomorrow's parser.
+// Pre-swap, every fixture here was written at runtime by the org.json code
+// that shipped then. The swap replaced that writer, so the legacy-file pins
+// now carry their fixtures as FROZEN raw text in org.json's spelling
+// (integral doubles written as integer literals, explicit "value":null) —
+// the gate keeps testing yesterday's file under tomorrow's parser instead of
+// decaying into a kotlinx self-round-trip (C5 decision of record,
+// PLAN-rf2-c5-tests §3.8). The round-trip pins still exercise today's writer.
 //
 // THE RULE THIS FILE ENFORCES: persistence reads MUST be lenient
 // (`Json.parseToJsonElement`), NEVER the strict wire parser
 // (`EbpJson.parse`). `strictParserRejectsWhatTheStoreMustAccept` proves the
 // two disagree on a legal stored file — a strict re-parse crash-loops the
 // app on its own durable state.
+//
+// C5 note: this file keeps every helper LOCAL on purpose (PLAN-rf2 §0.1's
+// "a single file to keep green" hermeticity) — do not adopt TestSupport here.
 package com.calebc42.ebp.wire
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -31,16 +42,21 @@ class PersistenceCompatTest {
     @get:Rule
     val temp = TemporaryFolder()
 
-    /** `args` nested [depth] containers deep, innermost carrying a value. */
-    private fun deepArgs(depth: Int): JSONObject {
-        var node = JSONObject().put("leaf", "bottom")
-        repeat(depth - 1) { node = JSONObject().put("n", node) }
+    /** `args` nested [depth] containers deep, innermost carrying a value —
+     * built bottom-up; the trees are immutable. */
+    private fun deepArgs(depth: Int): JsonObject {
+        var node = buildJsonObject { put("leaf", "bottom") }
+        repeat(depth - 1) { node = JsonObject(mapOf("n" to node)) }
         return node
     }
 
-    private fun jsonDepth(v: Any?): Int = when (v) {
-        is JSONObject -> 1 + (v.keySet().maxOfOrNull { jsonDepth(v.get(it)) } ?: 0)
-        is JSONArray -> 1 + ((0 until v.length()).maxOfOrNull { jsonDepth(v.get(it)) } ?: 0)
+    /** The same shape as raw TEXT, spelled the way org.json wrote it. */
+    private fun deepArgsText(depth: Int): String =
+        """{"n":""".repeat(depth - 1) + """{"leaf":"bottom"}""" + "}".repeat(depth - 1)
+
+    private fun jsonDepth(v: JsonElement?): Int = when (v) {
+        is JsonObject -> 1 + (v.values.maxOfOrNull(::jsonDepth) ?: 0)
+        is JsonArray -> 1 + (v.maxOfOrNull(::jsonDepth) ?: 0)
         else -> 0
     }
 
@@ -49,43 +65,52 @@ class PersistenceCompatTest {
     @Test
     fun queueRecordWithDeepArgsSurvivesRoundTrip() {
         val file = temp.newFile("queue.json")
-        // 62 deep inside `args`, which the record and the file's own
-        // {records:[...]} wrapper push past 64 in the stored document —
-        // legal on disk, and beyond what the WIRE parser accepts.
-        val args = deepArgs(62)
-        val record = JSONObject()
-            .put("event_id", "e1").put("queue_seq", 7)
-            .put("action", "a.b").put("args", args)
-            .put("occurred_at_ms", 1_000L).put("ttl_s", 3600)
-        FileQueueStore(file).replace(QueueSnapshot(listOf(record), 8, 1_234))
+        // FROZEN legacy fixture: 62 deep inside `args`, which the record and
+        // the file's own {records:[...]} wrapper push past 64 in the stored
+        // document — legal on disk, and beyond what the WIRE parser accepts.
+        file.writeText(
+            """{"records":[{"event_id":"e1","queue_seq":7,"action":"a.b","args":""" +
+                deepArgsText(62) +
+                ""","occurred_at_ms":1000,"ttl_s":3600}],"next_seq":8,"clock_high_water":1234}""",
+            Charsets.UTF_8)
 
         val back = FileQueueStore(file).load()
         assertEquals(1, back.records.size)
         assertEquals(8L, back.nextSeq)
         assertEquals(1_234L, back.clockHighWater)
         val r = back.records[0]
-        assertEquals("e1", r.getString("event_id"))
-        assertEquals(7L, r.getLong("queue_seq"))
+        assertEquals("e1", r.reqString("event_id"))
+        assertEquals(7L, r.reqLong("queue_seq"))
         // Fidelity all the way down: the 62nd level still carries its leaf.
-        var node = r.getJSONObject("args")
-        repeat(61) { node = node.getJSONObject("n") }
-        assertEquals("bottom", node.getString("leaf"))
+        var node = r.reqObj("args")
+        repeat(61) { node = node.reqObj("n") }
+        assertEquals("bottom", node.reqString("leaf"))
+
+        // And TODAY'S writer keeps the depth: replace() + reload round-trips
+        // the same record, so the write path stays under test too.
+        FileQueueStore(file).replace(
+            QueueSnapshot(back.records, back.nextSeq, back.clockHighWater))
+        var again = FileQueueStore(file).load().records[0].reqObj("args")
+        repeat(61) { again = again.reqObj("n") }
+        assertEquals("bottom", again.reqString("leaf"))
     }
 
     @Test
     fun strictParserRejectsWhatTheStoreMustAccept() {
         val file = temp.newFile("queue-deep.json")
-        val record = JSONObject().put("event_id", "e1").put("args", deepArgs(62))
-        FileQueueStore(file).replace(QueueSnapshot(listOf(record), 2, 0))
-        val text = file.readText()
+        // FROZEN legacy fixture, same construction as above.
+        val text = """{"records":[{"event_id":"e1","args":""" + deepArgsText(62) +
+            """}],"next_seq":2,"clock_high_water":0}"""
+        file.writeText(text, Charsets.UTF_8)
         // The stored document really is past the wire's depth ceiling.
         assertTrue("fixture must exceed MAX_JSON_DEPTH to have teeth",
-            jsonDepth(JSONObject(text)) > WireLimits.MAX_JSON_DEPTH)
+            jsonDepth(Json.parseToJsonElement(text)) > WireLimits.MAX_JSON_DEPTH)
         // The lenient store path loads it — this is the required behavior.
         assertEquals(1, FileQueueStore(file).load().records.size)
-        // The strict WIRE parser refuses the same bytes. Post-swap, wiring
-        // persistence to EbpJson.parse (or any depth-checked reader) turns
-        // this legal file into a boot crash.
+        // The strict WIRE parser refuses the same bytes. Wiring persistence
+        // to EbpJson.parse (or any depth-checked reader) turns this legal
+        // file into a boot crash. This try-block MUST stay EbpJson.parse —
+        // the strictness IS the assertion.
         try {
             EbpJson.parse(text)
             fail("EbpJson.parse must reject a >64-deep document")
@@ -98,19 +123,15 @@ class PersistenceCompatTest {
 
     @Test
     fun legacyPreSplitSurfacesFileMigratesItsDrafts() {
-        // A records file in the PRE-SPLIT format: drafts live inside it.
+        // FROZEN legacy fixture: a records file in the PRE-SPLIT format,
+        // drafts inside it, explicit "value":null spelled as org.json wrote it.
         val legacy = temp.newFile("surfaces.json")
-        legacy.writeText(JSONObject()
-            .put("records", JSONArray().put(JSONObject()
-                .put("surface", "app:main").put("revision", 42).put("present", true)
-                .put("spec", JSONObject().put("t", "text").put("text", "hi"))
-                .put("current_view", "home")))
-            .put("drafts", JSONArray()
-                .put(JSONObject().put("surface", "app:main").put("id", "title")
-                    .put("value", "half-typed"))
-                .put(JSONObject().put("surface", "app:main").put("id", "cleared")
-                    .put("value", JSONObject.NULL)))
-            .toString(), Charsets.UTF_8)
+        legacy.writeText(
+            """{"records":[{"surface":"app:main","revision":42,"present":true,""" +
+                """"spec":{"t":"text","text":"hi"},"current_view":"home"}],""" +
+                """"drafts":[{"surface":"app:main","id":"title","value":"half-typed"},""" +
+                """{"surface":"app:main","id":"cleared","value":null}]}""",
+            Charsets.UTF_8)
 
         val backing = FileSurfaceBacking(legacy)
         val state = backing.load()
@@ -119,13 +140,14 @@ class PersistenceCompatTest {
             assertEquals("app:main", it.surface)
             assertEquals(42L, it.revision)
             assertTrue(it.present)
-            assertEquals("hi", it.spec!!.getString("text"))
+            assertEquals("hi", it.spec!!.reqString("text"))
             assertEquals("home", it.currentView)
         }
         assertEquals(2, state.drafts.size)
-        assertEquals("half-typed", state.drafts[0].value)
-        // A JSON null draft loads as Kotlin null, never JSONObject.NULL and
-        // never the string "null".
+        assertEquals(JsonPrimitive("half-typed"), state.drafts[0].value)
+        // A JSON null draft loads as Kotlin null (PersistedDraft's documented
+        // exception: Kotlin null IS the JSON null draft), never the string
+        // "null".
         assertNull(state.drafts[1].value)
 
         // Migration is EAGER: the split file exists after one load, so a
@@ -142,11 +164,11 @@ class PersistenceCompatTest {
         val file = temp.newFile("s.json")
         val backing = FileSurfaceBacking(file)
         backing.replaceDrafts(listOf(
-            PersistedDraft("app:main", "typed", "text"),
+            PersistedDraft("app:main", "typed", JsonPrimitive("text")),
             PersistedDraft("app:main", "explicitNull", null)))
         val drafts = FileSurfaceBacking(file).load().drafts
         assertEquals(2, drafts.size)
-        assertEquals("text", drafts[0].value)
+        assertEquals(JsonPrimitive("text"), drafts[0].value)
         assertNull(drafts[1].value)
         // The on-disk spelling is a JSON null, not the STRING "null" — the
         // delta a naive `put(k, v.toString())` port would introduce.
@@ -158,8 +180,11 @@ class PersistenceCompatTest {
     @Test
     fun storeLevelDraftNullIsDistinctFromAbsent() {
         val store = SurfaceStore(16, 1024)
-        store.update("app:main", 1, JSONObject().put("t", "text_input")
-            .put("id", "title").put("value", "authored"), null, null, null)
+        store.update("app:main", 1, buildJsonObject {
+            put("t", "text_input")
+            put("id", "title")
+            put("value", "authored")
+        }, null, null, null)
         assertFalse(store.hasDraft("app:main", "title"))
         store.putDraft("app:main", "title", null)
         // A null draft is a PRESENT draft whose value is JSON null.
@@ -171,16 +196,17 @@ class PersistenceCompatTest {
     @Test
     fun reminderWithIntegralDoubleAtMsLoadsAsLong() {
         val file = temp.newFile("reminders.json")
-        // org.json writes an integral Double as an integer literal, so the
-        // stored form is `5000`; the fidelity that matters is that getLong
-        // still answers on reload whatever the spelling.
-        val rec = JSONObject().put("id", "x").put("title", "T")
-            .put("at_ms", 5_000.0).put("owner", "o")
-        FileReminderBacking(file).replace(
-            ReminderState(mapOf("o" to listOf(rec)), setOf("o|x|5000")))
+        // FROZEN legacy fixture: org.json wrote an integral Double as an
+        // integer literal, so the stored form is `5000`. The fidelity that
+        // matters is that the VALUE still answers as 5000 on reload,
+        // whatever the spelling — so the read is integralLongOrNull.
+        file.writeText(
+            """{"owners":{"o":[{"id":"x","title":"T","at_ms":5000,"owner":"o"}]},""" +
+                """"fired":["o|x|5000"]}""",
+            Charsets.UTF_8)
         val back = FileReminderBacking(file).load()
         assertEquals(1, back.owners["o"]!!.size)
-        assertEquals(5_000L, back.owners["o"]!![0].getLong("at_ms"))
+        assertEquals(5_000L, integralLongOrNull(back.owners["o"]!![0]["at_ms"]))
         assertEquals(setOf("o|x|5000"), back.fired)
     }
 
@@ -188,11 +214,13 @@ class PersistenceCompatTest {
     fun reminderWithFractionalAtMsIsPreservedVerbatim() {
         // Not legal to ACCEPT over the wire (ReminderTest pins the 1201),
         // but a store must never silently rewrite what it was handed.
+        // FROZEN legacy fixture — org.json preserved the fractional 1.5.
         val file = temp.newFile("reminders-frac.json")
-        val rec = JSONObject().put("id", "x").put("title", "T").put("at_ms", 1.5)
-        FileReminderBacking(file).replace(ReminderState(mapOf("o" to listOf(rec)), emptySet()))
+        file.writeText(
+            """{"owners":{"o":[{"id":"x","title":"T","at_ms":1.5}]},"fired":[]}""",
+            Charsets.UTF_8)
         val back = FileReminderBacking(file).load()
-        assertEquals(1.5, back.owners["o"]!![0].getDouble("at_ms"), 0.0)
+        assertEquals(1.5, back.owners["o"]!![0]["at_ms"]!!.asDoubleOrNull()!!, 0.0)
     }
 
     // ------------------------------------------------------------- triggers
@@ -200,9 +228,14 @@ class PersistenceCompatTest {
     @Test
     fun triggerRuntimeRecordsSurviveRoundTrip() {
         val file = temp.newFile("triggers.json")
-        val entry = JSONObject().put("id", "t1").put("type", "battery.level")
-            .put("params", JSONObject().put("below", 20))
-            .put("policy", "queue").put("ttl_s", 3600).put("throttle_s", 60)
+        val entry = buildJsonObject {
+            put("id", "t1")
+            put("type", "battery.level")
+            putJsonObject("params") { put("below", 20) }
+            put("policy", "queue")
+            put("ttl_s", 3600)
+            put("throttle_s", 60)
+        }
         val reg = PersistedRegistration(
             entry = entry,
             throttleFloorMs = 9_000L,
@@ -222,8 +255,8 @@ class PersistenceCompatTest {
             assertEquals(1_000L, it.scheduleAnchorMs)
             assertEquals(8_000L, it.lastFireFloorMs)
             assertEquals("boot-7", it.bootGeneration)
-            assertEquals("battery.level", it.entry.getString("type"))
-            assertEquals(20, it.entry.getJSONObject("params").getInt("below"))
+            assertEquals("battery.level", it.entry.reqString("type"))
+            assertEquals(20L, it.entry.reqObj("params").reqLong("below"))
         }
     }
 
@@ -231,7 +264,7 @@ class PersistenceCompatTest {
     fun triggerAbsentRuntimeFieldsStayAbsentNotZero() {
         val file = temp.newFile("triggers-sparse.json")
         val reg = PersistedRegistration(
-            entry = JSONObject().put("id", "t1").put("type", "screen"),
+            entry = buildJsonObject { put("id", "t1"); put("type", "screen") },
             throttleFloorMs = null, oneShotCompleted = false,
             scheduleAnchorMs = null, lastFireFloorMs = null, bootGeneration = null)
         FileTriggerBacking(file).replace(TriggerState(mapOf("pid" to listOf(reg))))

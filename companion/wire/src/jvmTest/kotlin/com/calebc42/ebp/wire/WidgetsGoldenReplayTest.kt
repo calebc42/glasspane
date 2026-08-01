@@ -8,26 +8,24 @@
 package com.calebc42.ebp.wire
 
 import java.io.File
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class WidgetsGoldenReplayTest {
 
-    // The contract repo rides as the ebp/ submodule at the repo root; tests
-    // run from companion/wire, so resolve upward.
-    private fun goldensDir(): File {
-        var dir: File? = File(System.getProperty("user.dir")).absoluteFile
-        while (dir != null) {
-            val g = File(dir, "ebp/goldens")
-            if (File(g, "widgets.golden").isFile) return g
-            dir = dir.parentFile
-        }
-        fail("ebp/goldens not found above ${System.getProperty("user.dir")}")
-        throw IllegalStateException()
-    }
+    // The contract repo location comes from the ebp.dir system property
+    // (set on the jvmTest task) — no cwd-dependent upward walk.
+    private fun goldensDir(): File =
+        File(System.getProperty("ebp.dir")
+            ?: error("ebp.dir system property not set")).resolve("goldens")
 
     private fun goldenLines(name: String): List<Pair<String, String>> =
         File(goldensDir(), name).readLines()
@@ -39,16 +37,14 @@ class WidgetsGoldenReplayTest {
 
     /** An action line validates inside a document that supplies a stateful
      * node for every captured field (capture resolution is document-wide). */
-    private fun wrapAction(action: JSONObject): JSONObject {
-        val children = JSONArray()
-        action.optJSONArray("capture_fields")?.let { cf ->
-            for (i in 0 until cf.length())
-                children.put(JSONObject().put("t", "text_input")
-                    .put("id", cf.getString(i)))
+    private fun wrapAction(action: JsonObject): JsonObject = buildJsonObject {
+        put("t", "column")
+        putJsonArray("children") {
+            action.arrOrNull("capture_fields")?.forEach { cf ->
+                addJsonObject { put("t", "text_input"); put("id", cf.asStringOrNull()!!) }
+            }
+            addJsonObject { put("t", "button"); put("label", "x"); put("on_tap", action) }
         }
-        children.put(JSONObject().put("t", "button").put("label", "x")
-            .put("on_tap", action))
-        return JSONObject().put("t", "column").put("children", children)
     }
 
     @Test
@@ -56,8 +52,8 @@ class WidgetsGoldenReplayTest {
         val lines = goldenLines("widgets.golden")
         assertTrue("expected the full corpus, got ${lines.size}", lines.size >= 72)
         for ((idx, json) in lines) {
-            val obj = JSONObject(json)
-            val doc = if (obj.has("action") || obj.has("builtin")) wrapAction(obj) else obj
+            val obj = Json.parseToJsonElement(json) as JsonObject
+            val doc = if ("action" in obj || "builtin" in obj) wrapAction(obj) else obj
             try {
                 SpecValidator.validateSurfaceSpec(doc, "widgets:$idx")
             } catch (e: ContentInvalid) {
@@ -69,7 +65,10 @@ class WidgetsGoldenReplayTest {
     @Test
     fun everyHypertextGoldenLineValidates() {
         for ((idx, json) in goldenLines("hypertext.golden")) {
-            val doc = JSONObject().put("t", "column").put("children", JSONArray(json))
+            val doc = buildJsonObject {
+                put("t", "column")
+                put("children", Json.parseToJsonElement(json) as JsonArray)
+            }
             try {
                 SpecValidator.validateSurfaceSpec(doc, "hypertext:$idx")
             } catch (e: ContentInvalid) {

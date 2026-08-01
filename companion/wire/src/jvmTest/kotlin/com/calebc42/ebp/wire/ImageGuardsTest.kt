@@ -6,7 +6,8 @@ package com.calebc42.ebp.wire
 
 import java.io.File
 import java.net.InetAddress
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -107,14 +108,14 @@ class ImageGuardsTest {
         // SPEC 17.2 (amendment #114) pins the encoding in
         // contract.limits.image_data_encoding: standard RFC 4648 alphabet,
         // padding required, whitespace forbidden.
-        val contract = JSONObject(
+        val contract = Json.parseToJsonElement(
             File(System.getProperty("ebp.dir")
                 ?: error("ebp.dir system property not set"), "contract.json")
-                .readText())
-        val enc = contract.getJSONObject("image_data_encoding")
-        assertEquals("rfc4648-standard", enc.getString("alphabet"))
-        assertEquals("required", enc.getString("padding"))
-        assertEquals("forbidden", enc.getString("whitespace"))
+                .readText()) as JsonObject
+        val enc = contract.reqObj("image_data_encoding")
+        assertEquals("rfc4648-standard", enc.reqString("alphabet"))
+        assertEquals("required", enc.reqString("padding"))
+        assertEquals("forbidden", enc.reqString("whitespace"))
 
         assertTrue(ImageGuards.isStrictBase64("aGVsbG8h"))     // 8 chars, no pad
         assertTrue(ImageGuards.isStrictBase64("aGk="))          // one pad char
@@ -167,7 +168,8 @@ class ImageGuardsTest {
         assertFalse(ImageGuards.isValidImageUrl("data:image/png;base64,iVBORw0"))
 
         // And it lands as ContentInvalid through the validator, at the path.
-        val spec = JSONObject("""{"t":"image","url":"data:image/png;base64,**"}""")
+        val spec = Json.parseToJsonElement(
+            """{"t":"image","url":"data:image/png;base64,**"}""")
         val err = try {
             SpecValidator.validateSurfaceSpec(spec); null
         } catch (e: ContentInvalid) { e }

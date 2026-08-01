@@ -7,7 +7,6 @@
 // surrogate escape survived to be re-encoded as '?'.
 package com.calebc42.ebp.wire
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -116,15 +115,9 @@ class EbpJsonTest {
         rejects("[".repeat(65) + "]".repeat(65))
     }
 
-    @Test
-    fun orgJsonProjectionPreservesTypesAndIds() {
-        val obj = EbpJson.toOrgJson(EbpJson.parse(
-            """{"id":7,"big":9007199254740991,"n":1.5,"z":null,"s":"x"}""")) as JSONObject
-        // Small integers project as Int — response-id lookups depend on it.
-        assertTrue(obj.get("id") is Int)
-        assertTrue(obj.get("big") is Long)
-        assertTrue(obj.get("n") is Double)
-        assertTrue(obj.get("z") === JSONObject.NULL)
-        assertEquals("x", obj.getString("s"))
-    }
+    // C5: orgJsonProjectionPreservesTypesAndIds is DELETED, not ported. Its
+    // subject, EbpJson.toOrgJson, died at C2 (its only customer was the
+    // Int-narrowed id map, redesigned away by R2); the projection coverage
+    // lives in JsonAccessTest's toJsonElement pins, which assert the same
+    // kinds and the spelling preservation the old Int-narrowing precluded.
 }

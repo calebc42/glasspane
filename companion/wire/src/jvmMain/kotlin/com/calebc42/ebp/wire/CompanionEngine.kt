@@ -10,6 +10,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.json.JSONArray
@@ -24,13 +26,13 @@ data class CompanionConfig(
     /** Capabilities this Companion supports (SPEC 22.1 names). */
     val supportedCapabilities: Set<String>,
     /** surface_profiles welcome member, exactly as advertised (SPEC 10.2). */
-    val surfaceProfiles: JSONObject,
+    val surfaceProfiles: JsonObject,
     /** The welcome limits object (SPEC 4.5). */
-    val limits: JSONObject,
+    val limits: JsonObject,
     /** SPEC 20.1: the device report, echoed in the welcome when `capabilities`
      * or `triggers` is granted. Its `caps` are the exact capability.invoke
      * catalog this Companion supports; empty means neither module is offered. */
-    val deviceReport: JSONObject = JSONObject(),
+    val deviceReport: JsonObject = JsonObject(emptyMap()),
     /** SPEC 20.2: the platform executor for capability.invoke. REQUIRED when
      * `device.caps` is non-empty; a null handler fails every invoke as 1003. */
     val capabilityHandler: CapabilityHandler? = null,
@@ -45,12 +47,12 @@ class CompanionEngine(
     private val config: CompanionConfig,
     /** Shared across connections: surface state outlives a session (13.5). */
     val surfaces: SurfaceStore = SurfaceStore(
-        config.limits.getLong("max_surfaces"), config.limits.getLong("max_surface_ids"),
-        config.limits.optLong("max_capture_fields", 64),
-        config.limits.optLong("max_chart_points", Long.MAX_VALUE),
-        config.limits.optLong("max_canvas_ops", Long.MAX_VALUE),
-        config.limits.optLong("max_rich_spans", Long.MAX_VALUE),
-        config.limits.optLong("max_table_cells", Long.MAX_VALUE),
+        config.limits.reqLong("max_surfaces"), config.limits.reqLong("max_surface_ids"),
+        config.limits.longOr("max_capture_fields", 64),
+        config.limits.longOr("max_chart_points", Long.MAX_VALUE),
+        config.limits.longOr("max_canvas_ops", Long.MAX_VALUE),
+        config.limits.longOr("max_rich_spans", Long.MAX_VALUE),
+        config.limits.longOr("max_table_cells", Long.MAX_VALUE),
         nodeTypesFromProfiles(config.surfaceProfiles, "app"),
         nodeTypesFromProfiles(config.surfaceProfiles, "notification"),
         builtinsFromProfiles(config.surfaceProfiles, "app"),
@@ -58,8 +60,8 @@ class CompanionEngine(
     /** Shared across connections AND restarts: the SPEC 15 durable queue. */
     val queue: DurableQueue = DurableQueue(
         MemoryQueueStore(),
-        config.limits.getLong("max_queued_events"),
-        config.limits.getLong("max_queued_bytes")),
+        config.limits.reqLong("max_queued_events"),
+        config.limits.reqLong("max_queued_bytes")),
     /** Shared across connections AND restarts: SPEC 18.6 reminders + fired
      * receipts outlive a session exactly like the queue and surfaces. */
     val reminders: ReminderStore = ReminderStore(),
@@ -70,7 +72,7 @@ class CompanionEngine(
      * instance; the default builds a per-engine one for tests. This engine
      * attaches as the LiveSession for live drop delivery + wake/pump. */
     val firing: TriggerFiringService = TriggerFiringService(
-        triggers, queue, maxEventBytes = config.limits.getLong("max_event_bytes"),
+        triggers, queue, maxEventBytes = config.limits.reqLong("max_event_bytes"),
         triggerCaps = jsonStringSet(config.deviceReport, "trigger_caps"),
         capabilityHandler = config.capabilityHandler),
     private val sink: (ByteArray) -> Unit,
@@ -342,7 +344,7 @@ class CompanionEngine(
         }
         // SPEC 14.4/15.4: the COMPLETE params against max_event_bytes.
         if (params.toString().toByteArray(Charsets.UTF_8).size >
-            config.limits.getLong("max_event_bytes")) return
+            config.limits.reqLong("max_event_bytes")) return
         sendRequest("event.action", params) { result, error ->
             callback?.invoke(result?.stringOr("status"), error)
         }
@@ -366,7 +368,7 @@ class CompanionEngine(
                     .put("occurred_at_ms", queue.effectiveNow())
                     .put("args", JSONObject().put("view", view))
                 if (params.toString().toByteArray(Charsets.UTF_8).size <=
-                    config.limits.getLong("max_event_bytes"))
+                    config.limits.reqLong("max_event_bytes"))
                     sendRequest("event.action", params) { _, _ -> }
             }
             "trigger.fire" -> {
@@ -448,7 +450,7 @@ class CompanionEngine(
         // before persistence or transmission; an oversized occurrence is a
         // local diagnostic, never a frame or a record.
         if (params.toString().toByteArray(Charsets.UTF_8).size >
-            config.limits.getLong("max_event_bytes")) {
+            config.limits.reqLong("max_event_bytes")) {
             callback?.invoke(null, JSONObject()
                 .put("code", 1201).put("message", "Event exceeds max_event_bytes")
                 .put("data", JSONObject().put("kind", "content-invalid")
@@ -576,7 +578,7 @@ class CompanionEngine(
             "session.ready" -> {
                 // SPEC 10.3: the {} response serializes ahead of every
                 // READY-only frame; emitting before transitioning does that.
-                respondResult(id, JSONObject())
+                respondResult(id, JsonObject(emptyMap()))
                 state = sessionStep(state, SessionEvent.READY_CONFIRMED) ?: state
                 // SPEC 10.3: flush every divergent value changed during
                 // SYNCING as ordered state.changed BEFORE releasing events.
@@ -707,12 +709,13 @@ class CompanionEngine(
     private fun concludeReplay() {
         val id = replayId ?: return
         replayId = null
-        respondResult(id, JSONObject()
-            .put("delivered", replayDelivered)
-            .put("rejected", replayRejected)
-            .put("expired", queue.takeExpiredCount())
-            .put("remaining", queue.count())
-            .put("blocked_by", blockedBy))
+        respondResult(id, buildJsonObject {
+            put("delivered", replayDelivered)
+            put("rejected", replayRejected)
+            put("expired", queue.takeExpiredCount())
+            put("remaining", queue.count())
+            put("blocked_by", blockedBy)
+        })
     }
 
     // ------------------------------------------------------ surfaces (13)
@@ -732,7 +735,7 @@ class CompanionEngine(
             return respondError(id, -32602, "Invalid params", "invalid-params")
         if (!surfaces.isValidSurfaceId(surface))
             return respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("reason", "surface-id"))
+                buildJsonObject { put("reason", "surface-id") })
         // SPEC 13.1: the namespace's capability must have been granted.
         val requiredCap = when (surfaces.namespace(surface)) {
             "notification" -> "surfaces.notification"
@@ -741,7 +744,7 @@ class CompanionEngine(
         }
         if (requiredCap != null && requiredCap !in granted)
             return respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("reason", "namespace-not-granted"))
+                buildJsonObject { put("reason", "namespace-not-granted") })
         // SPEC 19: count distinct synchronized-editor identities the whole
         // mutation would yield — every other surface's editors plus this
         // spec's — and reject before applying if it exceeds the limit.
@@ -749,21 +752,23 @@ class CompanionEngine(
             else emptyMap()
         val othersEditorCount = editorIdentityCount(excludingSurface = surface)
         if (othersEditorCount + newEditors.size >
-            config.limits.optLong("max_editor_sessions", 8))
+            config.limits.longOr("max_editor_sessions", 8))
             return respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("reason", "editor-session-limit"))
+                buildJsonObject { put("reason", "editor-session-limit") })
         // SPEC 19.4 (amendment #103): the seed carries max_editor_bytes as a
         // RECEIVER duty. Without this the sender-side rule has no enforcement
         // point at the seed: an over-limit document is accepted, edit.open
         // carries it, and every later edit — local and inbound — is refused
         // by the size rules, leaving the editor silently and permanently
         // read-only with no diagnostic in either direction.
-        val maxEditorBytes = config.limits.optLong("max_editor_bytes", Long.MAX_VALUE)
+        val maxEditorBytes = config.limits.longOr("max_editor_bytes", Long.MAX_VALUE)
         for ((eid, node) in newEditors)
             if (EditorSession.jcsUtf8Bytes(node.optString("value")) > maxEditorBytes)
                 return respondError(id, 1201, "Invalid content", "content-invalid",
-                    JSONObject().put("path", "spec.$eid.value")
-                        .put("reason", "editor-too-large"))
+                    buildJsonObject {
+                        put("path", "spec.$eid.value")
+                        put("reason", "editor-too-large")
+                    })
         // SPEC 19 (amendment #104): a synchronized editor session is keyed by
         // (document, presentation identity), so only ONE surface may present
         // a given tuple. Silently accepting a second surface's claim
@@ -778,8 +783,10 @@ class CompanionEngine(
             }?.key
             if (owner != null)
                 return respondError(id, 1201, "Invalid content", "content-invalid",
-                    JSONObject().put("path", "spec.$identity")
-                        .put("reason", "editor-duplicate"))
+                    buildJsonObject {
+                        put("path", "spec.$identity")
+                        put("reason", "editor-duplicate")
+                    })
         }
         try {
             val result = surfaces.update(
@@ -787,17 +794,18 @@ class CompanionEngine(
                 params.optJSONObject("stale_spec"),
                 params.opt("current_view") as? String,
                 params.optJSONArray("reset_input_ids"))
-            respondResult(id, JSONObject()
-                .put("status", result.status)
-                .put("revision", result.revision)
-                .put("present", result.present))
+            respondResult(id, buildJsonObject {
+                put("status", result.status)
+                put("revision", result.revision)
+                put("present", result.present)
+            })
             if (result.status == "applied") {
                 reconcileEditors(surface, newEditors)
                 surfaceListener?.invoke(surface)
             }
         } catch (e: ContentInvalid) {
             respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("path", e.path).put("reason", e.reason))
+                buildJsonObject { put("path", e.path); put("reason", e.reason) })
         }
     }
 
@@ -963,21 +971,22 @@ class CompanionEngine(
         // max_surface_ids slot. surface.update rejects it identically.
         if (!surfaces.isValidSurfaceId(surface))
             return respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("reason", "surface-id"))
+                buildJsonObject { put("reason", "surface-id") })
         // SPEC 13.1: removal is legal for any reported surface, no cap gate.
         try {
             val result = surfaces.remove(surface, revision)
-            respondResult(id, JSONObject()
-                .put("status", result.status)
-                .put("revision", result.revision)
-                .put("present", result.present))
+            respondResult(id, buildJsonObject {
+                put("status", result.status)
+                put("revision", result.revision)
+                put("present", result.present)
+            })
             if (result.status == "applied") {
                 closeSurfaceEditors(surface)
                 surfaceListener?.invoke(surface)
             }
         } catch (e: ContentInvalid) {
             respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("path", e.path).put("reason", e.reason))
+                buildJsonObject { put("path", e.path); put("reason", e.reason) })
         }
     }
 
@@ -1043,7 +1052,7 @@ class CompanionEngine(
         // SPEC 18.3: a new id over the limit is dropped with a diagnostic;
         // replacing an existing id stays legal at the limit.
         if (!pieMenus.containsKey(menuId) &&
-            pieMenus.size >= config.limits.optLong("max_pie_menus", 1)) {
+            pieMenus.size >= config.limits.longOr("max_pie_menus", 1)) {
             // SHOULD send a rate-limited log.error (rate limiting is W9).
             emit(notification("log.error", JSONObject().put("code", 1201)
                 .put("message", "Too many pie menus")
@@ -1138,7 +1147,7 @@ class CompanionEngine(
      */
     private fun dispatchDescriptorContextless(descriptor: JSONObject, args: JSONObject,
                                               callback: ((String?, JsonObject?) -> Unit)? = null) =
-        dispatchContextless(queue, config.limits.getLong("max_event_bytes"),
+        dispatchContextless(queue, config.limits.reqLong("max_event_bytes"),
             descriptor, args, this, callback)
 
     // ------- LiveSession: the connection-bound half of a context-less event.
@@ -1191,20 +1200,26 @@ class CompanionEngine(
         for (i in 0 until arr.length()) {
             val r = arr.optJSONObject(i)
                 ?: return respondError(id, 1201, "Invalid content", "content-invalid",
-                    JSONObject().put("path", "reminders[$i]").put("reason", "not-an-object"))
+                    buildJsonObject {
+                        put("path", "reminders[$i]")
+                        put("reason", "not-an-object")
+                    })
             try {
                 validateReminder(r, seen)
             } catch (e: ContentInvalid) {
                 return respondError(id, 1201, "Invalid content", "content-invalid",
-                    JSONObject().put("path", "reminders[$i].${e.path}").put("reason", e.reason))
+                    buildJsonObject {
+                        put("path", "reminders[$i].${e.path}")
+                        put("reason", e.reason)
+                    })
             }
             parsed.add(r)
         }
         // SPEC 18.6: replacement plus OTHER owners must fit max_reminders.
         val others = reminders.totalCount() - reminders.ownerCount(owner)
-        if (others + parsed.size > config.limits.optLong("max_reminders", 256))
+        if (others + parsed.size > config.limits.longOr("max_reminders", 256))
             return respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("reason", "reminder-limit"))
+                buildJsonObject { put("reason", "reminder-limit") })
         // SPEC 18.6: the accepted set commits durably before it is claimed; a
         // storage failure leaves the prior set in force and answers an error.
         // Capture the prior set BEFORE the replace so the host can cancel
@@ -1215,7 +1230,7 @@ class CompanionEngine(
         } catch (e: Exception) {
             return respondError(id, -32603, "Storage failed", "internal-error")
         }
-        respondResult(id, JSONObject().put("count", count))
+        respondResult(id, buildJsonObject { put("count", count) })
         reminderListener?.invoke(owner, JSONArray(parsed), JSONArray(prior))
     }
 
@@ -1268,7 +1283,7 @@ class CompanionEngine(
     @Synchronized
     fun dispatchReminderTap(owner: String, reminderId: String,
                             callback: ((String?, JsonObject?) -> Unit)? = null) {
-        routeReminderTap(reminders, queue, config.limits.getLong("max_event_bytes"),
+        routeReminderTap(reminders, queue, config.limits.reqLong("max_event_bytes"),
             owner, reminderId, this, callback)
     }
 
@@ -1327,19 +1342,19 @@ class CompanionEngine(
             stateTypes = jsonStringSet(config.deviceReport, "state_types"),
             trackableStateTypes = jsonStringSet(config.deviceReport, "trackable_state_types"),
             triggerCaps = jsonStringSet(config.deviceReport, "trigger_caps"),
-            maxResponses = config.limits.optLong("max_trigger_responses", 16).toInt(),
+            maxResponses = config.limits.longOr("max_trigger_responses", 16).toInt(),
             sensitiveSubstitutionApproved = config.sensitiveSubstitutionApproved)
         val entries = try {
             TriggerValidator.validateSet(params, caps)
         } catch (e: ContentInvalid) {
             return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
-                JSONObject().put("path", e.path).put("reason", e.reason))
+                buildJsonObject { put("path", e.path); put("reason", e.reason) })
         }
         // SPEC 21.1: the replace-set size MUST fit max_triggers; reject, never
         // truncate. Validated before any registration changes.
-        if (entries.size > config.limits.optLong("max_triggers", 64))
+        if (entries.size > config.limits.longOr("max_triggers", 64))
             return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
-                JSONObject().put("reason", "trigger-limit"))
+                buildJsonObject { put("reason", "trigger-limit") })
         // SPEC 21.5: a newly added or changed one-shot time.at_ms MUST be later
         // than the wall clock at acceptance. An unchanged entry (same id,
         // canonically equal to the prior) stays valid past its time, even once
@@ -1352,8 +1367,10 @@ class CompanionEngine(
             val changed = prior == null || !TriggerStore.canonicalEquals(prior, e)
             if (changed && p.getLong("at_ms") <= nowMs)
                 return respondError(id, 1101, "Triggers rejected", "triggers-rejected",
-                    JSONObject().put("path", "triggers[${e.getString("id")}].params.at_ms")
-                        .put("reason", "at_ms-not-future"))
+                    buildJsonObject {
+                        put("path", "triggers[${e.getString("id")}].params.at_ms")
+                        put("reason", "at_ms-not-future")
+                    })
         }
         // SPEC 21.1: the accepted set commits durably (via the firing service)
         // before it is claimed, then the new/changed registrations are silently
@@ -1363,7 +1380,7 @@ class CompanionEngine(
         } catch (e: Exception) {
             return respondError(id, -32603, "Storage failed", "internal-error")
         }
-        respondResult(id, JSONObject().put("count", count))
+        respondResult(id, buildJsonObject { put("count", count) })
         triggerListener?.invoke(identity, entries)
     }
 
@@ -1390,26 +1407,27 @@ class CompanionEngine(
             is JSONObject -> a
             else -> return respondError(id, -32602, "Invalid params", "invalid-params")
         }
-        // SPEC 20.2: cap MUST appear in device.caps, else 1001.
-        val caps = config.deviceReport.optJSONArray("caps") ?: JSONArray()
-        if ((0 until caps.length()).none { caps.opt(it) == cap })
+        // SPEC 20.2: cap MUST appear in device.caps, else 1001. A non-string
+        // entry never equals a string cap name, before and after the swap.
+        val caps = config.deviceReport.arrOrNull("caps") ?: JsonArray(emptyList())
+        if (caps.none { it.asStringOrNull() == cap })
             return respondError(id, 1001, "Unsupported capability", "cap-unsupported")
         // SPEC 20.3: validate the closed Args before any side effect.
         try {
             CapabilityCatalog.validateArgs(cap, args)
         } catch (e: ContentInvalid) {
             return respondError(id, -32602, "Invalid params", "invalid-params",
-                JSONObject().put("path", e.path).put("reason", e.reason))
+                buildJsonObject { put("path", e.path); put("reason", e.reason) })
         }
         // SPEC 20.2: the host re-checks authorization at invocation and runs it.
         val handler = config.capabilityHandler
             ?: return respondError(id, 1003, "Capability failed", "cap-failed",
-                JSONObject().put("reason", "no-handler"))
+                buildJsonObject { put("reason", "no-handler") })
         when (val out = handler.invoke(cap, args)) {
             is CapabilityOutcome.Ok -> respondResult(id, out.result)
             is CapabilityOutcome.Fail -> respondError(id, out.code, "Capability failed",
                 if (out.code == 1002) "cap-permission" else "cap-failed",
-                JSONObject().put("reason", out.reason))
+                buildJsonObject { put("reason", out.reason) })
         }
     }
 
@@ -1475,7 +1493,7 @@ class CompanionEngine(
         // SPEC 19.4 (amendment #84): a local edit that would carry the
         // document past max_editor_bytes is refused as if read-only.
         if (s.spliceJcsBytes(start, del, text) >
-            config.limits.optLong("max_editor_bytes", Long.MAX_VALUE)) return false
+            config.limits.longOr("max_editor_bytes", Long.MAX_VALUE)) return false
         val len = s.scalarLength() - del + text.codePointCount(0, text.length)
         if (!s.splice(start, del, text, len)) return false
         s.seq += 1
@@ -1543,19 +1561,25 @@ class CompanionEngine(
         // EditorSession's conversions.
         val (c, lo, hi) = scalarCaret(s.shadow, cursor, selStart, selEnd)
             ?: return false
-        val params = JSONObject()
-            .put("event_id", EbpAuth.generateNonce())
-            .put("action", "edit.command")
-            .put("surface", surface)
-            .put("revision_seen", revision)
-            .put("occurred_at_ms", queue.effectiveNow())
-            .put("args", JSONObject()
-                .put("command", command).put("document", document)
-                .put("editor_id", editorId).put("session", s.sessionId)
-                .put("seq", s.seq).put("cursor", c.v)
-                .put("sel_start", lo!!.v).put("sel_end", hi!!.v))
-        if (params.toString().toByteArray(Charsets.UTF_8).size >
-            config.limits.getLong("max_event_bytes")) return false
+        val params = buildJsonObject {
+            put("event_id", EbpAuth.generateNonce())
+            put("action", "edit.command")
+            put("surface", surface)
+            put("revision_seen", revision)
+            put("occurred_at_ms", queue.effectiveNow())
+            put("args", buildJsonObject {
+                put("command", command)
+                put("document", document)
+                put("editor_id", editorId)
+                put("session", s.sessionId)
+                put("seq", s.seq)
+                put("cursor", c.v)
+                put("sel_start", lo!!.v)
+                put("sel_end", hi!!.v)
+            })
+        }
+        if (wireSerialize(params).utf8Len() >
+            config.limits.reqLong("max_event_bytes")) return false
         sendRequest("event.action", params) { _, _ -> }
         return true
     }
@@ -1573,7 +1597,7 @@ class CompanionEngine(
     }
 
     private fun editorStale(id: JsonElement) = respondError(id, 1201, "Invalid content",
-        "content-invalid", JSONObject().put("reason", "editor-stale"))
+        "content-invalid", buildJsonObject { put("reason", "editor-stale") })
 
     private fun handleEditApply(id: JsonElement, params: JSONObject) {
         if ("editor.sync" !in granted)
@@ -1605,22 +1629,22 @@ class CompanionEngine(
             if (params.has("sel_start") != params.has("sel_end"))
                 return respondError(id, -32602, "Invalid params", "invalid-params")
             if (moveSeq != s.seq)
-                return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+                return respondResult(id, buildJsonObject { put("status", "stale"); put("seq", s.seq) })
             val selStartL = (params.opt("sel_start") as? Number)?.toLong()
             val selEndL = (params.opt("sel_end") as? Number)?.toLong()
             // Out-of-domain positions fail the 19.1 range gate (see the
             // text-form path below) rather than truncating to 32 bits.
             if (listOfNotNull(cursorL, selStartL, selEndL)
                     .any { it < 0 || it > Int.MAX_VALUE })
-                return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+                return respondResult(id, buildJsonObject { put("status", "stale"); put("seq", s.seq) })
             val cursor = cursorL.toInt()
             val selStart = selStartL?.toInt()
             val selEnd = selEndL?.toInt()
             if (!s.setCaret(ScalarPos(cursor),
                     selStart?.let(::ScalarPos), selEnd?.let(::ScalarPos)))
-                return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+                return respondResult(id, buildJsonObject { put("status", "stale"); put("seq", s.seq) })
             editorListener?.invoke(s)
-            return respondResult(id, JSONObject().put("status", "applied").put("seq", s.seq))
+            return respondResult(id, buildJsonObject { put("status", "applied"); put("seq", s.seq) })
         }
         val seq = (params.opt("seq") as? Number)?.toLong()
         val startL = (params.opt("start") as? Number)?.toLong()
@@ -1649,7 +1673,7 @@ class CompanionEngine(
         // result contract is a typed stale.
         val positions = listOfNotNull(startL, delL, lenL, cursorL, selStartL, selEndL)
         if (positions.any { it < 0 || it > Int.MAX_VALUE })
-            return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+            return respondResult(id, buildJsonObject { put("status", "stale"); put("seq", s.seq) })
         val start = startL.toInt()
         val del = delL.toInt()
         val len = lenL.toInt()
@@ -1659,7 +1683,7 @@ class CompanionEngine(
         // SPEC 19.4: apply only at seq+1 with a valid splice; otherwise a
         // typed stale result leaves this (winning) session OPEN.
         if (seq != s.seq + 1)
-            return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+            return respondResult(id, buildJsonObject { put("status", "stale"); put("seq", s.seq) })
         // SPEC 19.4 (amendment #84): an inbound apply that would carry the
         // document past max_editor_bytes is 1201 editor-too-large, text
         // unchanged. Only a splice that would otherwise be valid can be
@@ -1667,19 +1691,19 @@ class CompanionEngine(
         val grown = s.spliceJcsBytes(ScalarPos(start), del, text)
         if (grown >= 0 &&
             len == s.scalarLength() - del + text.codePointCount(0, text.length) &&
-            grown > config.limits.optLong("max_editor_bytes", Long.MAX_VALUE))
+            grown > config.limits.longOr("max_editor_bytes", Long.MAX_VALUE))
             return respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("reason", "editor-too-large"))
+                buildJsonObject { put("reason", "editor-too-large") })
         // SPEC 19.4 (LD-5): the splice AND the peer's post-state caret are
         // validated together, atomically — a failed gate changes nothing.
         // The old path spliced, then silently discarded a failed setCaret
         // and answered "applied" over a half-updated session.
         if (!s.spliceRemote(ScalarPos(start), del, text, len, ScalarPos(cursor),
                 selStart?.let(::ScalarPos), selEnd?.let(::ScalarPos)))
-            return respondResult(id, JSONObject().put("status", "stale").put("seq", s.seq))
+            return respondResult(id, buildJsonObject { put("status", "stale"); put("seq", s.seq) })
         s.seq = seq
         editorListener?.invoke(s)
-        respondResult(id, JSONObject().put("status", "applied").put("seq", s.seq))
+        respondResult(id, buildJsonObject { put("status", "applied"); put("seq", s.seq) })
     }
 
     private fun handleEditResync(id: JsonElement, params: JSONObject) {
@@ -1698,11 +1722,16 @@ class CompanionEngine(
         s.sessionId = EbpAuth.generateNonce()
         s.seq = 0
         s.state = EditorSession.State.OPEN
-        respondResult(id, JSONObject()
-            .put("document", doc).put("editor_id", eid)
-            .put("session", s.sessionId).put("seq", 0).put("text", s.shadow)
-            .put("cursor", s.cursor).put("sel_start", s.selStart)
-            .put("sel_end", s.selEnd))
+        respondResult(id, buildJsonObject {
+            put("document", doc)
+            put("editor_id", eid)
+            put("session", s.sessionId)
+            put("seq", 0)
+            put("text", s.shadow)
+            put("cursor", s.cursor)
+            put("sel_start", s.selStart)
+            put("sel_end", s.selEnd)
+        })
     }
 
     /** SPEC 19.3: ask Emacs to complete at the current cursor. The result's
@@ -1929,18 +1958,18 @@ class CompanionEngine(
         // content-invalid; the first is neither replaced nor aliased.
         if (dialogs.containsKey(dialogId))
             return respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("reason", "dialog-duplicate"))
+                buildJsonObject { put("reason", "dialog-duplicate") })
         // SPEC 18.1: exceeding max_dialogs is 1401; existing dialogs stand.
-        if (dialogs.size >= config.limits.optLong("max_dialogs", 4))
+        if (dialogs.size >= config.limits.longOr("max_dialogs", 4))
             return respondError(id, 1401, "Too many dialogs", "overloaded")
         val statefuls: Map<String, JSONObject>
         try {
             statefuls = SpecValidator.validateSurfaceSpec(
-                spec, maxCaptureFields = config.limits.optLong("max_capture_fields", 64),
-                maxChartPoints = config.limits.optLong("max_chart_points", Long.MAX_VALUE),
-                maxCanvasOps = config.limits.optLong("max_canvas_ops", Long.MAX_VALUE),
-                maxRichSpans = config.limits.optLong("max_rich_spans", Long.MAX_VALUE),
-                maxTableCells = config.limits.optLong("max_table_cells", Long.MAX_VALUE),
+                spec, maxCaptureFields = config.limits.longOr("max_capture_fields", 64),
+                maxChartPoints = config.limits.longOr("max_chart_points", Long.MAX_VALUE),
+                maxCanvasOps = config.limits.longOr("max_canvas_ops", Long.MAX_VALUE),
+                maxRichSpans = config.limits.longOr("max_rich_spans", Long.MAX_VALUE),
+                maxTableCells = config.limits.longOr("max_table_cells", Long.MAX_VALUE),
                 // SPEC 17.1: a dialog spec is gated to the dialog profile's
                 // advertised node_types — an app-only type (chart/editor/
                 // scaffold) degrades instead of rendering + dispatching here.
@@ -1951,7 +1980,7 @@ class CompanionEngine(
                 advertisedBuiltins = builtinsFromProfiles(config.surfaceProfiles, "dialog"))
         } catch (e: ContentInvalid) {
             return respondError(id, 1201, "Invalid content", "content-invalid",
-                JSONObject().put("path", e.path).put("reason", e.reason))
+                buildJsonObject { put("path", e.path); put("reason", e.reason) })
         }
         // SPEC 19: the editor-session count is over "accepted surface OR
         // DIALOG documents", and a synchronized editor presented in a dialog
@@ -1964,19 +1993,23 @@ class CompanionEngine(
         if (dialogEditorNodes.isNotEmpty()) {
             val others = editorIdentityCount()
             if (others + dialogEditorNodes.size >
-                config.limits.optLong("max_editor_sessions", 8))
+                config.limits.longOr("max_editor_sessions", 8))
                 return respondError(id, 1201, "Invalid content", "content-invalid",
-                    JSONObject().put("reason", "editor-session-limit"))
-            val maxBytes = config.limits.optLong("max_editor_bytes", Long.MAX_VALUE)
+                    buildJsonObject { put("reason", "editor-session-limit") })
+            val maxBytes = config.limits.longOr("max_editor_bytes", Long.MAX_VALUE)
             for ((identity, node) in dialogEditorNodes) {
                 if (EditorSession.jcsUtf8Bytes(node.optString("value")) > maxBytes)
                     return respondError(id, 1201, "Invalid content", "content-invalid",
-                        JSONObject().put("path", "spec.$identity")
-                            .put("reason", "editor-too-large"))
+                        buildJsonObject {
+                            put("path", "spec.$identity")
+                            put("reason", "editor-too-large")
+                        })
                 if (editors.containsKey(node.getString("document") to identity))
                     return respondError(id, 1201, "Invalid content", "content-invalid",
-                        JSONObject().put("path", "spec.$identity")
-                            .put("reason", "editor-duplicate"))
+                        buildJsonObject {
+                            put("path", "spec.$identity")
+                            put("reason", "editor-duplicate")
+                        })
             }
         }
         // SPEC 18.1: held outstanding — no reply until a builtin or cancel.
@@ -2008,20 +2041,29 @@ class CompanionEngine(
      * VALUE is the builtin's authored value; FIELDS the captured node
      * values (the renderer holds dialog-local state, SPEC 18.1). */
     @Synchronized
-    fun completeDialogSubmit(dialogId: String, value: Any? = null,
-                             fields: JSONObject? = null) {
+    fun completeDialogSubmit(dialogId: String, value: JsonElement? = null,
+                             fields: JsonObject? = null) {
         val reqId = dialogs[dialogId] ?: return
-        val result = JSONObject().put("status", "submitted")
-        if (value != null) result.put("value", value)
-        if (fields != null && fields.length() > 0) result.put("fields", fields)
+        // The null guard survives AS a guard: a null VALUE means the member is
+        // absent from the result, exactly as org.json's put(k, null) removal
+        // behaved (an authored JSON null arrives as JsonNull, which is
+        // non-null here and is written through).
+        val result = buildJsonObject {
+            put("status", "submitted")
+            if (value != null) put("value", value)
+            if (fields != null && fields.isNotEmpty()) put("fields", fields)
+        }
         // SPEC 18.1: serialize the prospective complete response FIRST. If its
         // body would exceed max_frame_bytes, write no part of it and do NOT
         // complete the dialog — the dialog stays outstanding so the user can
         // shrink the input, and the host concludes any password attempt with a
         // §14.6 erasure. This ordering prevents orphaning the request in
         // encodeFrame after the dialog was already removed.
-        val body = JSONObject().put("jsonrpc", "2.0").put("id", reqId)
-            .put("result", result).toString().toByteArray(Charsets.UTF_8).size
+        val body = wireSerialize(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", reqId)
+            put("result", result)
+        }).utf8Len()
         if (body > WireLimits.MAX_BODY_OCTETS) {
             dialogOverflowListener?.invoke(dialogId)
             return
@@ -2039,7 +2081,7 @@ class CompanionEngine(
         val reqId = dialogs.remove(dialogId) ?: return
         closeDialogEditors(dialogId)
         dialogDefaults.remove(dialogId)
-        respondResult(reqId, JSONObject().put("status", "dismissed"))
+        respondResult(reqId, buildJsonObject { put("status", "dismissed") })
         dialogListener?.invoke(dialogId, null)
     }
 
@@ -2052,7 +2094,7 @@ class CompanionEngine(
         if (protocol != 2) {
             // SPEC 9.2/12: protocol mismatch is 1202 with data.supported.
             return respondError(id, 1202, "Unsupported protocol major", "protocol-version",
-                JSONObject().put("supported", JSONArray(listOf(2))))
+                buildJsonObject { put("supported", buildJsonArray { add(2) }) })
         }
         val client = params.optJSONObject("client")
         val pairingId = params.opt("pairing_id")
@@ -2078,7 +2120,7 @@ class CompanionEngine(
         pendingPairingId = pairingId
         pendingClientNonce = clientNonce
         pendingServerNonce = config.nonceSource()
-        respondResult(id, JSONObject().put("server_nonce", pendingServerNonce))
+        respondResult(id, buildJsonObject { put("server_nonce", pendingServerNonce!!) })
         state = sessionStep(state, SessionEvent.HELLO_ACCEPTED) ?: state
     }
 
@@ -2127,46 +2169,51 @@ class CompanionEngine(
     private var lastWants: List<String> = emptyList()
     private var sessionBoundarySeq = Long.MAX_VALUE
 
-    private fun buildWelcome(token: ByteArray): JSONObject {
+    private fun buildWelcome(token: ByteArray): JsonObject {
         granted = lastWants.filter { it in config.supportedCapabilities }
         sessionBoundarySeq = queue.boundarySeq()
-        val welcome = JSONObject()
-            .put("server_proof", EbpAuth.serverProof(
+        return buildJsonObject {
+            put("server_proof", EbpAuth.serverProof(
                 token, pendingPairingId!!, pendingClientNonce!!, pendingServerNonce!!))
-            .put("protocol", 2)
-            .put("server", JSONObject()
-                .put("name", config.serverName).put("version", config.serverVersion))
-            .put("granted", JSONArray(granted))
-            .put("surface_profiles", config.surfaceProfiles)
-            .put("surfaces", surfaces.snapshot()) // snapshots AND tombstones (10.2)
+            put("protocol", 2)
+            put("server", buildJsonObject {
+                put("name", config.serverName)
+                put("version", config.serverVersion)
+            })
+            put("granted", buildJsonArray { granted.forEach { add(it) } })
+            put("surface_profiles", config.surfaceProfiles)
+            put("surfaces", surfaces.snapshot()) // snapshots AND tombstones (10.2)
             // SPEC 10.2: the count visible to the next replay, after the
             // already-identified expired records are gone.
-            .put("queued_events", queue.let { it.sweepExpired(); it.count() })
-            .put("limits", config.limits)
-        // SPEC 10.2: input_state MUST be omitted when empty; device waits
-        // for the capability/trigger modules.
-        surfaces.inputState().takeIf { it.length() > 0 }
-            ?.let { welcome.put("input_state", it) }
-        // SPEC 20.1: the device report is REQUIRED once capabilities or
-        // triggers is granted. trigger_caps MUST be empty unless triggers is
-        // granted, and the trigger-only members MAY be empty then too — so a
-        // capabilities-only session never sees a non-empty trigger surface.
-        if ("capabilities" in granted || "triggers" in granted) {
-            val report = JSONObject(config.deviceReport.toString())
-            if ("triggers" !in granted) {
-                report.put("trigger_caps", JSONArray())
-                report.put("trigger_types", JSONArray())
-                report.put("trackable_state_types", JSONArray())
-                report.put("trigger_unavailable", JSONObject())
-                // state_types is REQUIRED only when triggers granted or
-                // state.get is in caps; otherwise it too may be empty.
-                val caps = report.optJSONArray("caps") ?: JSONArray()
-                if ((0 until caps.length()).none { caps.opt(it) == "state.get" })
-                    report.put("state_types", JSONArray())
+            put("queued_events", queue.let { it.sweepExpired(); it.count() })
+            put("limits", config.limits)
+            // SPEC 10.2: input_state MUST be omitted when empty; device waits
+            // for the capability/trigger modules.
+            surfaces.inputState().takeIf { it.isNotEmpty() }
+                ?.let { put("input_state", it) }
+            // SPEC 20.1: the device report is REQUIRED once capabilities or
+            // triggers is granted. trigger_caps MUST be empty unless triggers
+            // is granted, and the trigger-only members MAY be empty then too —
+            // so a capabilities-only session never sees a non-empty trigger
+            // surface. (R4: the old deep copy is gone — the immutable report
+            // shares safely, and the suppressed variant is a `with` rebuild.)
+            if ("capabilities" in granted || "triggers" in granted) {
+                var report = config.deviceReport
+                if ("triggers" !in granted) {
+                    val empty = JsonArray(emptyList())
+                    report = report.with("trigger_caps", empty)
+                        .with("trigger_types", empty)
+                        .with("trackable_state_types", empty)
+                        .with("trigger_unavailable", JsonObject(emptyMap()))
+                    // state_types is REQUIRED only when triggers granted or
+                    // state.get is in caps; otherwise it too may be empty.
+                    val caps = report.arrOrNull("caps") ?: JsonArray(emptyList())
+                    if (caps.none { it.asStringOrNull() == "state.get" })
+                        report = report.with("state_types", empty)
+                }
+                put("device", report)
             }
-            welcome.put("device", report)
         }
-        return welcome
     }
 
     /**
@@ -2177,23 +2224,23 @@ class CompanionEngine(
     private fun checkLimits() {
         val l = config.limits
         fun floor(name: String, min: Long) {
-            val v = l.optLong(name, -1)
+            val v = l.longOr(name, -1)
             require(v >= min) { "limits.$name must be at least $min" }
         }
-        require(l.optLong("max_frame_bytes") == WireLimits.MAX_BODY_OCTETS.toLong()) {
+        require(l.longOr("max_frame_bytes") == WireLimits.MAX_BODY_OCTETS.toLong()) {
             "limits.max_frame_bytes must equal ${WireLimits.MAX_BODY_OCTETS}"
         }
         floor("max_queued_events", 256); floor("max_queued_bytes", 8_388_608)
         floor("max_event_bytes", 262_144); floor("max_surfaces", 16)
         floor("max_surface_ids", 1024); floor("max_field_bytes", 65_536)
         floor("max_input_state_bytes", 262_144); floor("max_capture_fields", 64)
-        require(l.getLong("max_event_bytes") <= l.getLong("max_frame_bytes") - 256) {
+        require(l.reqLong("max_event_bytes") <= l.reqLong("max_frame_bytes") - 256) {
             "max_event_bytes exceeds max_frame_bytes - 256"
         }
-        require(l.getLong("max_field_bytes") <= l.getLong("max_frame_bytes") - 2048) {
+        require(l.reqLong("max_field_bytes") <= l.reqLong("max_frame_bytes") - 2048) {
             "max_field_bytes exceeds max_frame_bytes - 2048"
         }
-        require(l.getLong("max_surfaces") <= l.getLong("max_surface_ids")) {
+        require(l.reqLong("max_surfaces") <= l.reqLong("max_surface_ids")) {
             "max_surfaces exceeds max_surface_ids"
         }
         // SPEC 4.5: conditional limits are REQUIRED the moment the capability
@@ -2202,44 +2249,54 @@ class CompanionEngine(
         // welcome (amendment #84; LD-15/LD-22).
         if ("editor.sync" in config.supportedCapabilities) {
             floor("max_editor_bytes", 65_536)
-            require(l.getLong("max_editor_bytes") <= l.getLong("max_frame_bytes") - 4096) {
+            require(l.reqLong("max_editor_bytes") <= l.reqLong("max_frame_bytes") - 4096) {
                 "max_editor_bytes exceeds max_frame_bytes - 4096"
             }
         }
-        for (target in config.surfaceProfiles.keySet()) {
+        for (target in config.surfaceProfiles.keys) {
             val types = nodeTypesFromProfiles(config.surfaceProfiles, target) ?: continue
             if ("rich_text" in types) floor("max_rich_spans", 1)
             if ("table" in types) floor("max_table_cells", 1)
         }
         // SPEC 4.5: the actual server strings must fit the 128-octet bound
         // the reservation reserves for them (SPEC 10.2).
-        require(config.serverName.toByteArray(Charsets.UTF_8).size <= 128 &&
-            config.serverVersion.toByteArray(Charsets.UTF_8).size <= 128) {
+        require(config.serverName.utf8Len() <= 128 &&
+            config.serverVersion.utf8Len() <= 128) {
             "server name/version exceed 128 UTF-8 octets"
         }
         // SPEC 4.5: `surfaces` at its worst case — max_surface_ids distinct
         // maximum-length IDs, maximum revision, and the longer `present`
         // encoding (`false`). Counting it empty was the reservation's hole.
-        val worstSurfaces = JSONObject()
-        for (i in 0 until l.getLong("max_surface_ids"))
-            // A distinct 128-octet key: a byte-size probe, not a real ID.
-            worstSurfaces.put(i.toString().padStart(WireLimits.MAX_IDENTIFIER_OCTETS, 'a'),
-                JSONObject().put("revision", 9_007_199_254_740_991L).put("present", false))
-        val prospective = JSONObject()
-            .put("jsonrpc", "2.0")
-            .put("id", "a".repeat(WireLimits.MAX_REQUEST_ID_OCTETS))
-            .put("result", JSONObject()
-                .put("server_proof", "0".repeat(64))
-                .put("protocol", 2)
+        val worstSurfaces = buildJsonObject {
+            for (i in 0 until l.reqLong("max_surface_ids"))
+                // A distinct 128-octet key: a byte-size probe, not a real ID.
+                put(i.toString().padStart(WireLimits.MAX_IDENTIFIER_OCTETS, 'a'),
+                    buildJsonObject {
+                        put("revision", 9_007_199_254_740_991L)
+                        put("present", false)
+                    })
+        }
+        val prospective = buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", "a".repeat(WireLimits.MAX_REQUEST_ID_OCTETS))
+            put("result", buildJsonObject {
+                put("server_proof", "0".repeat(64))
+                put("protocol", 2)
                 // SPEC 4.5: fixed members at their maximum legal encoded size.
-                .put("server", JSONObject()
-                    .put("name", "a".repeat(128)).put("version", "a".repeat(128)))
-                .put("granted", JSONArray(config.supportedCapabilities.toList()))
-                .put("surface_profiles", config.surfaceProfiles)
-                .put("surfaces", worstSurfaces)
-                .put("queued_events", l.getLong("max_queued_events"))
-                .put("input_state", JSONObject())
-                .put("limits", l))
+                put("server", buildJsonObject {
+                    put("name", "a".repeat(128))
+                    put("version", "a".repeat(128))
+                })
+                put("granted", buildJsonArray {
+                    config.supportedCapabilities.forEach { add(it) }
+                })
+                put("surface_profiles", config.surfaceProfiles)
+                put("surfaces", worstSurfaces)
+                put("queued_events", l.reqLong("max_queued_events"))
+                put("input_state", JsonObject(emptyMap()))
+                put("limits", l)
+            })
+        }
         // SPEC 4.5/20.1 (amendment #40): the welcome device report is a variable
         // member emitted when capabilities or triggers is granted. Reserve
         // max_device_report_bytes for it (rather than embed it in `prospective`,
@@ -2247,32 +2304,36 @@ class CompanionEngine(
         // report to fit that bound so it never depends on truncation.
         val emitsReport = "capabilities" in config.supportedCapabilities ||
             "triggers" in config.supportedCapabilities
-        val deviceBudget = if (emitsReport) l.optLong("max_device_report_bytes", 0) else 0
+        val deviceBudget = if (emitsReport) l.longOr("max_device_report_bytes", 0) else 0L
         if (deviceBudget > 0)
-            require(config.deviceReport.toString().toByteArray(Charsets.UTF_8).size <= deviceBudget) {
+            require(wireSerialize(config.deviceReport).utf8Len() <= deviceBudget) {
                 "device report exceeds max_device_report_bytes"
             }
-        val b = prospective.toString().toByteArray(Charsets.UTF_8).size.toLong()
-        require(b + deviceBudget + l.getLong("max_input_state_bytes") - 2 <=
-            l.getLong("max_frame_bytes")) {
+        val b = wireSerialize(prospective).utf8Len().toLong()
+        require(b + deviceBudget + l.reqLong("max_input_state_bytes") - 2 <=
+            l.reqLong("max_frame_bytes")) {
             "welcome reservation violated: B=$b, device=$deviceBudget"
         }
     }
 
     // -------------------------------------------------------------- output
 
-    private fun respondResult(id: JsonElement, result: JSONObject) {
+    private fun respondResult(id: JsonElement, result: JsonObject) {
         // SPEC 7.1: "A responder that computes a result but cannot serialize
         // the response body MUST answer the request with -32603
         // internal-error; it MUST NOT leave the request unanswered." Every
         // result here is host-supplied (a capability outcome, a device
-        // sample), so the shape is not ours to trust: org.json's toString()
-        // swallows its own JSONException and hands back null, and a
-        // pathologically nested object overflows the recursive encoder. Both
-        // used to escape as a thrown frame out of feed(), which answers
-        // nothing and leaves Emacs holding an id that never concludes.
-        val body = serializeReply(
-            JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result))
+        // sample), so the shape is not ours to trust: kotlinx THROWS where
+        // org.json's toString() swallowed its own JSONException and handed
+        // back null, and a pathologically nested host result still overflows
+        // the recursive encoder. Both used to escape as a thrown frame out of
+        // feed(), which answers nothing and leaves Emacs holding an id that
+        // never concludes — serializeReply is the funnel that prevents it.
+        val body = serializeReply(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", id)
+            put("result", result)
+        })
         if (body == null) {
             // The error body is small, fixed, and built from constants — it
             // serializes on a stack that has already unwound.
@@ -2282,12 +2343,12 @@ class CompanionEngine(
         sink(encodeFrame(body))
     }
 
-    /** null when the body cannot be encoded — org.json returns null from
-     * `toString()` on its own JSONException, and overflows the stack rather
-     * than throwing on a deeply nested value. */
-    private fun serializeReply(msg: JSONObject): String? =
+    /** null when the body cannot be encoded. Both arms stay across the
+     * kotlinx swap: an Exception where org.json returned null from
+     * `toString()`, and a StackOverflowError for a deep host-supplied tree. */
+    private fun serializeReply(msg: JsonObject): String? =
         try {
-            msg.toString()
+            wireSerialize(msg)
         } catch (e: Exception) {
             null
         } catch (e: StackOverflowError) {
@@ -2295,25 +2356,35 @@ class CompanionEngine(
         }
 
     private fun respondError(id: JsonElement, code: Int, message: String, kind: String,
-                             data: JSONObject = JSONObject()) {
+                             data: JsonObject = JsonObject(emptyMap())) {
         // SPEC 7.2 (amendment #34): ids are strings or safe integers.
+        // errorResponse merges `kind` into a COPY of data (C2 retired the
+        // caller-visible write-through).
         if (isValidRequestId(id))
-            emit(JSONObject().put("jsonrpc", "2.0").put("id", id)
-                .put("error", JSONObject().put("code", code).put("message", message)
-                    .put("data", data.put("kind", kind))))
+            emit(errorResponse(id, code, message, kind, data))
     }
 
     /** SPEC 6.2/8: a framing-level error carries `id: null`, which
      * `respondError` deliberately rejects (a request id is never null). */
     private fun emitFramingError(code: Int, message: String, kind: String) {
         if (state == SessionState.CLOSED) return
-        emit(JSONObject().put("jsonrpc", "2.0").put("id", JSONObject.NULL)
-            .put("error", JSONObject().put("code", code).put("message", message)
-                .put("data", JSONObject().put("kind", kind))))
+        emit(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", JsonNull)
+            put("error", buildJsonObject {
+                put("code", code)
+                put("message", message)
+                put("data", buildJsonObject { put("kind", kind) })
+            })
+        })
     }
 
-    private fun emit(msg: JSONObject) = sink(encodeFrame(msg.toString()))
+    private fun emit(msg: JsonObject) = sink(encodeFrame(wireSerialize(msg)))
 
-    private fun Any?.utf8Len(): Int =
-        (this as String).toByteArray(Charsets.UTF_8).size
+    /** The ONE outbound serializer: every emit site and every byte-measuring
+     * site go through it, so the SPEC 4.5/14.4/15.4 gates measure exactly the
+     * bytes the wire carries (W6QueueTest.byteGateMeasuresWhatItEmits). */
+    private fun wireSerialize(msg: JsonElement): String = msg.toString()
+
+    private fun String.utf8Len(): Int = toByteArray(Charsets.UTF_8).size
 }

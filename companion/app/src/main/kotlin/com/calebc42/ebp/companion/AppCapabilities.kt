@@ -10,10 +10,15 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.VibrationEffect
 import android.os.VibratorManager
+import com.calebc42.ebp.companion.render.arrOrNull
+import com.calebc42.ebp.companion.render.longByValue
 import com.calebc42.ebp.wire.CapabilityHandler
 import com.calebc42.ebp.wire.CapabilityOutcome
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * The caps this build actually executes on Android. Every entry is in
@@ -33,16 +38,21 @@ object AppCapabilities {
     private val STATE_TYPES = listOf("battery.level")
 
     /** SPEC 20.1: the device report echoed in the welcome (capabilities and
-     * triggers share one report). */
-    fun deviceReport(): JSONObject = JSONObject()
-        .put("caps", JSONArray(CAPS))
-        .put("trigger_caps", JSONArray(listOf("vibrate")))
-        .put("permissions", JSONObject())
+     * triggers share one report). Every advertised entry stays a JSON STRING:
+     * the engine gates a cap with `caps.none { it.asStringOrNull() == cap }`
+     * and jsonStringSet() drops non-strings outright. The serialized size is
+     * budget-checked (CompanionEngine max device_report bytes), so this builder
+     * carries exactly these seven members — no more. */
+    fun deviceReport(): JsonObject = buildJsonObject {
+        put("caps", JsonArray(CAPS.map(::JsonPrimitive)))
+        put("trigger_caps", JsonArray(listOf(JsonPrimitive("vibrate"))))
+        put("permissions", JsonObject(emptyMap()))
         // SPEC 20.1: REQUIRED once triggers is granted.
-        .put("trigger_types", JSONArray(TRIGGER_TYPES))
-        .put("state_types", JSONArray(STATE_TYPES))
-        .put("trackable_state_types", JSONArray(STATE_TYPES))
-        .put("trigger_unavailable", JSONObject())
+        put("trigger_types", JsonArray(TRIGGER_TYPES.map(::JsonPrimitive)))
+        put("state_types", JsonArray(STATE_TYPES.map(::JsonPrimitive)))
+        put("trackable_state_types", JsonArray(STATE_TYPES.map(::JsonPrimitive)))
+        put("trigger_unavailable", JsonObject(emptyMap()))
+    }
 
     /**
      * SPEC 20.2: the executor. `maxFieldBytes` bounds clipboard text per the
@@ -51,7 +61,7 @@ object AppCapabilities {
     fun handler(context: Context, maxFieldBytes: Int) = CapabilityHandler { cap, args ->
         try {
             when (cap) {
-                "vibrate" -> { vibrate(context, args); CapabilityOutcome.Ok(JSONObject()) }
+                "vibrate" -> { vibrate(context, args); CapabilityOutcome.Ok(JsonObject(emptyMap())) }
                 "clipboard.read" -> readClipboard(context, maxFieldBytes)
                 else -> CapabilityOutcome.Fail(1003, "unimplemented")
             }
@@ -63,15 +73,23 @@ object AppCapabilities {
     }
 
     // minSdk 34: VibratorManager is always present.
-    private fun vibrate(context: Context, args: JSONObject) {
+    private fun vibrate(context: Context, args: JsonObject) {
         val vibrator = (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE)
                 as VibratorManager).defaultVibrator
-        if (args.has("ms")) {
+        // C6: `ms` and EVERY `pattern` element are read BY VALUE. The engine
+        // hands this handler the original, un-normalized args; CapabilityCatalog
+        // normalizes only for validation, and it does so with integralLongOrNull
+        // — so an older peer's {"ms": 100.0} (or "pattern": [100.0, 200.0]) is
+        // accepted, working traffic that org.json's getLong simply truncated. A
+        // strict reader would yield nothing here, the blanket catch above would
+        // turn that into a plausible-looking 1003 "platform-error", and the
+        // device would stop buzzing with no other symptom.
+        if ("ms" in args) {
             vibrator.vibrate(VibrationEffect.createOneShot(
-                args.getLong("ms"), VibrationEffect.DEFAULT_AMPLITUDE))
+                longByValue(args["ms"]) ?: return, VibrationEffect.DEFAULT_AMPLITUDE))
         } else {
-            val arr = args.getJSONArray("pattern")
-            val pattern = LongArray(arr.length()) { arr.getLong(it) }
+            val arr = args.arrOrNull("pattern") ?: return
+            val pattern = arr.map { longByValue(it) ?: return }.toLongArray()
             vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
         }
     }
@@ -85,6 +103,6 @@ object AppCapabilities {
         // NOT be truncated — an oversize clip is a typed failure.
         if (text.toByteArray(Charsets.UTF_8).size > maxFieldBytes)
             return CapabilityOutcome.Fail(1003, "clipboard-too-large")
-        return CapabilityOutcome.Ok(JSONObject().put("text", text))
+        return CapabilityOutcome.Ok(buildJsonObject { put("text", text) })
     }
 }

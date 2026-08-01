@@ -6,7 +6,9 @@
 package com.calebc42.ebp.companion.render
 
 import androidx.compose.ui.graphics.Color
-import org.json.JSONObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -55,9 +57,13 @@ class SyntaxHighlightTest {
     @Test
     fun emacsSyntaxColorsOverlaysFgAndKeepsFallback() {
         val fallback = SyntaxColors.forBackground(dark = false)
-        val payload = JSONObject()
-            .put("keyword", JSONObject().put("fg", "#ff0000").put("italic", true))
-            .put("string", "#00ff00") // lenient: a bare color string is accepted
+        val payload = buildJsonObject {
+            putJsonObject("keyword") {
+                put("fg", "#ff0000")
+                put("italic", true)
+            }
+            put("string", "#00ff00") // lenient: a bare color string is accepted
+        }
         val merged = emacsSyntaxColors(payload, fallback)
         assertEquals(Color(0xFFFF0000), merged.keyword)
         assertEquals(Color(0xFF00FF00), merged.string)
@@ -71,7 +77,7 @@ class SyntaxHighlightTest {
     @Test
     fun pushedHeadingRecoloursTheWholeRainbowUniformly() {
         val merged = emacsSyntaxColors(
-            JSONObject().put("heading", JSONObject().put("fg", "#123456")),
+            buildJsonObject { putJsonObject("heading") { put("fg", "#123456") } },
             SyntaxColors.forBackground(dark = true))
         assertTrue(merged.heading.all { it == Color(0xFF123456) })
     }
@@ -81,9 +87,10 @@ class SyntaxHighlightTest {
     fun tagDrivesOrgTagsAndPreprocessorDrivesMetaLines() {
         val fallback = SyntaxColors.forBackground(dark = true)
         val merged = emacsSyntaxColors(
-            JSONObject()
-                .put("tag", JSONObject().put("fg", "#caa6df"))
-                .put("preprocessor", JSONObject().put("fg", "#ff7f9f")),
+            buildJsonObject {
+                putJsonObject("tag") { put("fg", "#caa6df") }
+                putJsonObject("preprocessor") { put("fg", "#ff7f9f") }
+            },
             fallback)
         assertEquals(Color(0xFFCAA6DF), merged.tag)
         assertEquals(Color(0xFFFF7F9F), merged.meta)
@@ -98,9 +105,10 @@ class SyntaxHighlightTest {
     fun unregisteredMetaAndParenAreIgnored() {
         val fallback = SyntaxColors.forBackground(dark = false)
         val merged = emacsSyntaxColors(
-            JSONObject()
-                .put("meta", JSONObject().put("fg", "#111111"))
-                .put("paren", JSONObject().put("fg", "#222222")),
+            buildJsonObject {
+                putJsonObject("meta") { put("fg", "#111111") }
+                putJsonObject("paren") { put("fg", "#222222") }
+            },
             fallback)
         // SPEC 18.4: unknown roles MUST be ignored — meta keeps the
         // static value and the paren rainbow keeps its depth cue.

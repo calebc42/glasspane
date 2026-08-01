@@ -24,7 +24,8 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /** Token colours for code highlighting; the fallback is a polarity palette. */
 data class SyntaxColors(
@@ -81,11 +82,11 @@ val LocalSyntaxColors = staticCompositionLocalOf { SyntaxColors.forBackground(fa
  * the foreground drives the tokenizer's colours; bg/weight/italic/underline are
  * the token's own per-type decisions.
  */
-private fun JSONObject.syntaxFg(role: String): Color? {
-    val v = opt(role) ?: return null
+private fun JsonObject.syntaxFg(role: String): Color? {
+    val v = this[role] ?: return null
     val hex = when (v) {
-        is JSONObject -> v.optString("fg").takeIf { it.isNotEmpty() }
-        is String -> v.takeIf { it.isNotEmpty() }
+        is JsonObject -> v.stringOr("fg").takeIf { it.isNotEmpty() }
+        is JsonPrimitive -> v.strOrNull()?.takeIf { it.isNotEmpty() }
         else -> null
     } ?: return null
     return parseHexColor(hex)?.let(::Color)
@@ -95,7 +96,7 @@ private fun JSONObject.syntaxFg(role: String): Color? {
  * REGISTERED roles only (SPEC 18.4 requires ignoring the rest): `tag` styles
  * org tags, `preprocessor` styles meta/table lines, and the paren rainbow is
  * never overlaid — one uniform color would destroy the depth cue (#126 B). */
-fun emacsSyntaxColors(syntax: JSONObject?, fallback: SyntaxColors): SyntaxColors {
+fun emacsSyntaxColors(syntax: JsonObject?, fallback: SyntaxColors): SyntaxColors {
     val s = syntax ?: return fallback
     fun one(role: String, base: Color) = s.syntaxFg(role) ?: base
     // A single "heading" fg recolours the whole heading rainbow uniformly.

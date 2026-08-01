@@ -8,7 +8,8 @@ package com.calebc42.ebp.companion.render
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
-import org.json.JSONObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -19,10 +20,11 @@ class ThemeModelTest {
     @Test
     fun overlaysPushedRolesAndKeepsBaseForTheRest() {
         val base = lightColorScheme()
-        val colors = JSONObject()
-            .put("primary", "#ff0000")
-            .put("surface", "#101010")
-            .put("surface_variant", "#303030")
+        val colors = buildJsonObject {
+            put("primary", "#ff0000")
+            put("surface", "#101010")
+            put("surface_variant", "#303030")
+        }
         val scheme = buildColorScheme(colors, base)
         // Pushed roles win.
         assertEquals(Color(0xFFFF0000), scheme.primary)
@@ -42,7 +44,8 @@ class ThemeModelTest {
         // derived contrast-legible from the pushed color (dark), NOT the light
         // scheme's white onPrimary (amendment #56).
         val base = lightColorScheme()
-        val scheme = buildColorScheme(JSONObject().put("primary", "#fffff0"), base)
+        val scheme = buildColorScheme(
+            buildJsonObject { put("primary", "#fffff0") }, base)
         assertEquals(Color(0xFFFFFFF0), scheme.primary)
         assertEquals(Color(0xFF1A1A1A), scheme.onPrimary) // legible dark, not base white
         assertNotEquals(base.onPrimary, scheme.onPrimary)
@@ -63,7 +66,10 @@ class ThemeModelTest {
         assertEquals(ExtendedColors.defaults(true), d)
         // Pushed: the authored color plus a legible derived on-color.
         val ext = buildExtendedColors(
-            JSONObject().put("success", "#eaffea").put("warning", "#402000"),
+            buildJsonObject {
+                put("success", "#eaffea")
+                put("warning", "#402000")
+            },
             dark = false)
         assertEquals(Color(0xFFEAFFEA), ext.success)
         // A light success gets a dark on-color; a dark warning gets white.

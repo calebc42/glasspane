@@ -60,8 +60,11 @@ import java.text.DateFormatSymbols
 import java.util.Calendar
 import kotlin.math.abs
 import kotlin.math.roundToInt
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // -------------------------------------------------------------------- chart
 
@@ -69,47 +72,59 @@ private val CHART_PALETTE = listOf(
     Color(0xFF4C6FFF), Color(0xFF00A676), Color(0xFFFF8A3D),
     Color(0xFFB05CE6), Color(0xFFE64980), Color(0xFF12B5CB))
 
-private class ChartSeriesData(val points: List<JSONObject>, val ys: DoubleArray, val color: Color)
+private class ChartSeriesData(val points: List<JsonObject>, val ys: DoubleArray, val color: Color)
 
 @Composable
-internal fun RenderChart(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val kind = node.optString("kind", "line")
-    val seriesArr = node.optJSONArray("series") ?: JSONArray()
-    val onPointTap = node.optJSONObject("on_point_tap")
-    val heightDp = node.optInt("height", 160).coerceAtLeast(0)
+internal fun RenderChart(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val kind = node.stringOr("kind", "line")
+    val seriesArr = node.arrOrNull("series") ?: JsonArray(emptyList())
+    val onPointTap = node.objOrNull("on_point_tap")
+    // C6: `height` is FIELD_TYPES "number" and the validator gates it as
+    // positive-finite only, so 12.5 is legal traffic; dimInt truncates it the
+    // way org.json's optInt did instead of defaulting the chart to 160dp.
+    val heightDp = node.dimInt("height", 160).coerceAtLeast(0)
     val scheme = MaterialTheme.colorScheme
 
     val series = ArrayList<ChartSeriesData>()
     var yMin = Double.POSITIVE_INFINITY
     var yMax = Double.NEGATIVE_INFINITY
     var maxLen = 0
-    for (s in 0 until seriesArr.length()) {
-        val so = seriesArr.optJSONObject(s) ?: continue
-        val ptsArr = so.optJSONArray("points") ?: JSONArray()
-        val pts = ArrayList<JSONObject>(ptsArr.length())
-        val ys = DoubleArray(ptsArr.length())
-        for (i in 0 until ptsArr.length()) {
-            val p = ptsArr.optJSONObject(i) ?: JSONObject()
+    for (s in 0 until seriesArr.size) {
+        val so = seriesArr[s] as? JsonObject ?: continue
+        val ptsArr = so.arrOrNull("points") ?: JsonArray(emptyList())
+        val pts = ArrayList<JsonObject>(ptsArr.size)
+        val ys = DoubleArray(ptsArr.size)
+        for (i in 0 until ptsArr.size) {
+            val p = ptsArr[i] as? JsonObject ?: JsonObject(emptyMap())
             pts.add(p)
-            val y = p.optDouble("y", 0.0)
+            val y = p.doubleOr("y", 0.0)
             ys[i] = y
             if (y < yMin) yMin = y
             if (y > yMax) yMax = y
         }
         maxLen = maxOf(maxLen, ys.size)
-        val color = resolveColorIn(scheme, so.optString("color").takeIf { it.isNotEmpty() })
+        val color = resolveColorIn(scheme, so.stringOr("color").takeIf { it.isNotEmpty() })
             ?: CHART_PALETTE[s % CHART_PALETTE.size]
         series.add(ChartSeriesData(pts, ys, color))
     }
-    node.optJSONArray("y_range")?.let {
-        if (it.length() == 2) { yMin = it.optDouble(0, yMin); yMax = it.optDouble(1, yMax) }
+    node.arrOrNull("y_range")?.let {
+        // C6: the length guard is now load-bearing — org.json's indexed
+        // optDouble(i, default) folded a short array into the default, kotlinx's
+        // [i] throws, so the bound stays and each read keeps its own fallback.
+        if (it.size == 2) {
+            yMin = it.getOrNull(0)?.numOrNull() ?: yMin
+            yMax = it.getOrNull(1)?.numOrNull() ?: yMax
+        }
     }
     // SPEC 17.5: bars/areas read against a zero baseline — but an explicit
     // y_range is authoritative, so only default the baseline when none was given.
-    if ((kind == "bar" || kind == "area") && !node.has("y_range") && yMin > 0.0) yMin = 0.0
+    if ((kind == "bar" || kind == "area") && "y_range" !in node && yMin > 0.0) yMin = 0.0
     if (!yMin.isFinite() || !yMax.isFinite()) { yMin = 0.0; yMax = 1.0 }
     if (yMax == yMin) yMax += 1.0
 
+    // C6: kotlinx JsonObject has structural equals (org.json's JSONObject had
+    // none), so remember(node) would now key by value — the toString() keys
+    // below are kept verbatim rather than changed inside a mechanical port.
     var started by remember(node.toString()) { mutableStateOf(false) }
     LaunchedEffect(Unit) { started = true }
     val progress by animateFloatAsState(
@@ -133,12 +148,12 @@ internal fun RenderChart(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 // authored points to be distinct and §4.3 makes 1 and 1.0
                 // equal, so without the index a duplicate point is
                 // unresolvable by any comparator.
-                ctx.actionInjecting(onPointTap, JSONObject().put("index", idx),
+                ctx.actionInjecting(onPointTap, buildJsonObject { put("index", idx) },
                     s0.points.getOrNull(idx))
             }
         }
     }
-    val desc = node.optString("summary").ifEmpty { "$kind chart" }
+    val desc = node.stringOr("summary").ifEmpty { "$kind chart" }
     Canvas(modifier = mod.semantics { contentDescription = desc }) {
         val w = size.width
         val h = size.height
@@ -187,55 +202,61 @@ internal fun RenderChart(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 // ------------------------------------------------------------------- canvas
 
 @Composable
-internal fun RenderCanvas(node: JSONObject, m: Modifier) {
-    val wDp = node.optInt("width", 100).coerceAtLeast(0)
-    val hDp = node.optInt("height", 100).coerceAtLeast(0)
-    val ops = node.optJSONArray("ops") ?: JSONArray()
+internal fun RenderCanvas(node: JsonObject, m: Modifier) {
+    // C6: canvas width/height are validated positive-finite (not integral), so
+    // they read through dimInt — truncating, exactly as optInt did.
+    val wDp = node.dimInt("width", 100).coerceAtLeast(0)
+    val hDp = node.dimInt("height", 100).coerceAtLeast(0)
+    val ops = node.arrOrNull("ops") ?: JsonArray(emptyList())
     val scheme = MaterialTheme.colorScheme
     val fallback = scheme.onSurface
     // Resolve each op colour up front — the DrawScope below is not composable.
-    val colors: List<Color> = (0 until ops.length()).map { i ->
-        resolveColorIn(scheme, ops.optJSONObject(i)?.optString("color")?.takeIf { it.isNotEmpty() })
-            ?: fallback
+    val colors: List<Color> = (0 until ops.size).map { i ->
+        resolveColorIn(scheme, (ops[i] as? JsonObject)?.stringOr("color")
+            ?.takeIf { it.isNotEmpty() }) ?: fallback
     }
     Canvas(modifier = m.size(wDp.dp, hDp.dp)) {
-        fun px(v: Double): Float = v.toFloat().dp.toPx()
-        for (i in 0 until ops.length()) {
-            val o = ops.optJSONObject(i) ?: continue
+        // C6: org.json's ONE-arg optDouble defaulted to NaN, and a NaN
+        // coordinate draws nothing — so an absent or non-numeric op member
+        // arrives here as null and stays NaN. It must never become 0.0, which
+        // would paint a malformed op at the origin instead of skipping it.
+        fun px(v: Double?): Float = (v ?: Double.NaN).toFloat().dp.toPx()
+        for (i in 0 until ops.size) {
+            val o = ops[i] as? JsonObject ?: continue
             val color = colors[i]
             // SPEC 17.5: `fill` is a Color; its presence means fill the interior
             // (omission = stroke only). A stroked shape uses the op's `color`.
             val fillColor = resolveColorIn(scheme,
-                o.optString("fill").takeIf { it.isNotEmpty() })
+                o.stringOr("fill").takeIf { it.isNotEmpty() })
             val filled = fillColor != null
-            val strokeW = px(o.optDouble("stroke_width", 1.0))
-            when (o.optString("op")) {
+            val strokeW = px(o.doubleOr("stroke_width", 1.0))
+            when (o.stringOr("op")) {
                 "line" -> drawLine(color,
-                    Offset(px(o.optDouble("x1")), px(o.optDouble("y1"))),
-                    Offset(px(o.optDouble("x2")), px(o.optDouble("y2"))),
-                    strokeWidth = px(o.optDouble("width", 1.0)))
+                    Offset(px(o["x1"]?.numOrNull()), px(o["y1"]?.numOrNull())),
+                    Offset(px(o["x2"]?.numOrNull()), px(o["y2"]?.numOrNull())),
+                    strokeWidth = px(o.doubleOr("width", 1.0)))
                 "rect" -> {
-                    val tl = Offset(px(o.optDouble("x")), px(o.optDouble("y")))
-                    val sz = Size(px(o.optDouble("width")), px(o.optDouble("height")))
+                    val tl = Offset(px(o["x"]?.numOrNull()), px(o["y"]?.numOrNull()))
+                    val sz = Size(px(o["width"]?.numOrNull()), px(o["height"]?.numOrNull()))
                     if (filled) drawRect(fillColor ?: color, tl, sz)
                     else drawRect(color, tl, sz, style = Stroke(strokeW))
                 }
                 "circle" -> {
-                    val center = Offset(px(o.optDouble("cx")), px(o.optDouble("cy")))
-                    val r = px(o.optDouble("radius"))
+                    val center = Offset(px(o["cx"]?.numOrNull()), px(o["cy"]?.numOrNull()))
+                    val r = px(o["radius"]?.numOrNull())
                     if (filled) drawCircle(fillColor ?: color, r, center)
                     else drawCircle(color, r, center, style = Stroke(strokeW))
                 }
                 "path" -> {
-                    val pts = o.optJSONArray("points") ?: JSONArray()
-                    if (pts.length() >= 2) {
+                    val pts = o.arrOrNull("points") ?: JsonArray(emptyList())
+                    if (pts.size >= 2) {
                         val path = Path()
-                        for (j in 0 until pts.length()) {
-                            val p = pts.optJSONObject(j) ?: continue
-                            val x = px(p.optDouble("x")); val y = px(p.optDouble("y"))
+                        for (j in 0 until pts.size) {
+                            val p = pts[j] as? JsonObject ?: continue
+                            val x = px(p["x"]?.numOrNull()); val y = px(p["y"]?.numOrNull())
                             if (j == 0) path.moveTo(x, y) else path.lineTo(x, y)
                         }
-                        if (o.optBoolean("closed", false)) path.close()
+                        if (o.boolOr("closed")) path.close()
                         if (filled) drawPath(path, fillColor ?: color)
                         else drawPath(path, color, style = Stroke(strokeW))
                     }
@@ -243,11 +264,11 @@ internal fun RenderCanvas(node: JSONObject, m: Modifier) {
                 "text" -> drawIntoCanvas { c ->
                     val paint = Paint().apply {
                         this.color = color.toArgb()
-                        textSize = px(o.optDouble("size", 12.0))
+                        textSize = px(o.doubleOr("size", 12.0))
                         isAntiAlias = true
                     }
-                    c.nativeCanvas.drawText(o.optString("text"),
-                        px(o.optDouble("x")), px(o.optDouble("y")), paint)
+                    c.nativeCanvas.drawText(o.stringOr("text"),
+                        px(o["x"]?.numOrNull()), px(o["y"]?.numOrNull()), paint)
                 }
                 else -> {} // SPEC 17.5: unknown op skipped, never fatal
             }
@@ -258,15 +279,15 @@ internal fun RenderCanvas(node: JSONObject, m: Modifier) {
 // --------------------------------------------------------------- month_grid
 
 @Composable
-internal fun RenderMonthGrid(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val specMonth = node.optString("month").takeIf { it.matches(Regex("""\d{4}-\d{2}""")) }
+internal fun RenderMonthGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val specMonth = node.stringOr("month").takeIf { it.matches(Regex("""\d{4}-\d{2}""")) }
         ?: return
-    val marks = node.optJSONObject("marks")
-    val selected = node.optString("selected")
-    val minMonth = node.optString("min_month").ifEmpty { null }
-    val maxMonth = node.optString("max_month").ifEmpty { null }
-    val onDayTap = node.optJSONObject("on_day_tap")
-    val onMonthChange = node.optJSONObject("on_month_change")
+    val marks = node.objOrNull("marks")
+    val selected = node.stringOr("selected")
+    val minMonth = node.stringOr("min_month").ifEmpty { null }
+    val maxMonth = node.stringOr("max_month").ifEmpty { null }
+    val onDayTap = node.objOrNull("on_day_tap")
+    val onMonthChange = node.objOrNull("on_month_change")
 
     // §16.1: the shown month keys on the presentation identity, re-seeded from
     // the spec when the authored month changes; mark-only re-pushes keep it.
@@ -276,7 +297,8 @@ internal fun RenderMonthGrid(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             val next = monthAdd(shownMonth, delta)
             if ((minMonth == null || next >= minMonth) && (maxMonth == null || next <= maxMonth)) {
                 shownMonth = next
-                onMonthChange?.let { ctx.action(it, next) } // §17.5 new month value
+                // §17.5 new month value
+                onMonthChange?.let { ctx.action(it, JsonPrimitive(next)) }
             }
         }
         val year = shownMonth.substring(0, 4).toInt()
@@ -338,9 +360,10 @@ internal fun RenderMonthGrid(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                                 Spacer(Modifier.weight(1f).aspectRatio(1f))
                             } else {
                                 val date = "%s-%02d".format(shownMonth, day)
-                                MonthGridDay(day, date, marks?.optJSONObject(date),
+                                MonthGridDay(day, date, marks?.objOrNull(date),
                                     date == today, date == selected,
-                                    onDayTap?.let { { ctx.action(it, date) } }, // §17.5 ISO date
+                                    // §17.5 ISO date
+                                    onDayTap?.let { { ctx.action(it, JsonPrimitive(date)) } },
                                     Modifier.weight(1f))
                             }
                         }
@@ -353,11 +376,13 @@ internal fun RenderMonthGrid(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 
 @Composable
 private fun MonthGridDay(
-    day: Int, date: String, mark: JSONObject?, isToday: Boolean, isSelected: Boolean,
+    day: Int, date: String, mark: JsonObject?, isToday: Boolean, isSelected: Boolean,
     onTap: (() -> Unit)?, modifier: Modifier,
 ) {
-    val dots = (mark?.optInt("dots", 0) ?: 0).coerceIn(0, 3)
-    val dotColor = resolveColor(mark?.optString("color")?.takeIf { it.isNotEmpty() })
+    // C6: `dots` is validated integral BY VALUE upstream (asDoubleOrNull +
+    // Math.floor), so "dots": 2.0 is accepted traffic and must still read 2.
+    val dots = (mark?.intByValue("dots", 0) ?: 0).coerceIn(0, 3)
+    val dotColor = resolveColor(mark?.stringOr("color")?.takeIf { it.isNotEmpty() })
         ?: MaterialTheme.colorScheme.primary
     val desc = date + if (dots > 0) ", $dots marked" else ""
     Box(

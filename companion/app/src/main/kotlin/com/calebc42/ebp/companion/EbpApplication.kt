@@ -19,23 +19,23 @@ import android.os.Looper
 import android.widget.Toast
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
 
 class EbpApplication : Application() {
 
     // Process-owned presentation state: the bridge writes, any Activity
     // observes. An Activity is a pure renderer of these flows — no bridge
     // callback may close over one (RF-0.5a's gate condition).
-    private val _currentSpec = MutableStateFlow<Pair<String, JSONObject>?>(null)
-    val currentSpec: StateFlow<Pair<String, JSONObject>?> get() = _currentSpec
-    private val _currentDialog = MutableStateFlow<Pair<String, JSONObject>?>(null)
-    val currentDialog: StateFlow<Pair<String, JSONObject>?> get() = _currentDialog
+    private val _currentSpec = MutableStateFlow<Pair<String, JsonObject>?>(null)
+    val currentSpec: StateFlow<Pair<String, JsonObject>?> get() = _currentSpec
+    private val _currentDialog = MutableStateFlow<Pair<String, JsonObject>?>(null)
+    val currentDialog: StateFlow<Pair<String, JsonObject>?> get() = _currentDialog
     // SPEC 18.4: the accepted theme payload ({dark, colors, syntax}) to mirror,
     // or null for the native scheme (dark = follow-system, amendment #36).
-    private val _theme = MutableStateFlow<JSONObject?>(null)
-    val theme: StateFlow<JSONObject?> get() = _theme
-    private val _currentPieMenu = MutableStateFlow<Pair<String, JSONObject>?>(null)
-    val currentPieMenu: StateFlow<Pair<String, JSONObject>?> get() = _currentPieMenu
+    private val _theme = MutableStateFlow<JsonObject?>(null)
+    val theme: StateFlow<JsonObject?> get() = _theme
+    private val _currentPieMenu = MutableStateFlow<Pair<String, JsonObject>?>(null)
+    val currentPieMenu: StateFlow<Pair<String, JsonObject>?> get() = _currentPieMenu
 
     lateinit var bridge: DeviceBridge
         private set

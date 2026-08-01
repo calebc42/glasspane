@@ -86,39 +86,42 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // ------------------------------------------------------ row/column/flow_row
 
 // §17.3: arrange distributes available space; a non-start value takes
 // precedence over spacing.
-private fun horizontalArrange(node: JSONObject): Arrangement.Horizontal =
-    when (node.optString("arrange")) {
+private fun horizontalArrange(node: JsonObject): Arrangement.Horizontal =
+    when (node.stringOr("arrange")) {
         "center" -> Arrangement.Center
         "end" -> Arrangement.End
         "space_between" -> Arrangement.SpaceBetween
         "space_around" -> Arrangement.SpaceAround
         "space_evenly" -> Arrangement.SpaceEvenly
         else -> Arrangement.spacedBy(
-            (safeDp(node.optDouble("spacing", 0.0)) ?: 0f).dp)
+            (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp)
     }
 
-private fun verticalArrange(node: JSONObject): Arrangement.Vertical =
-    when (node.optString("arrange")) {
+private fun verticalArrange(node: JsonObject): Arrangement.Vertical =
+    when (node.stringOr("arrange")) {
         "center" -> Arrangement.Center
         "end" -> Arrangement.Bottom
         "space_between" -> Arrangement.SpaceBetween
         "space_around" -> Arrangement.SpaceAround
         "space_evenly" -> Arrangement.SpaceEvenly
         else -> Arrangement.spacedBy(
-            (safeDp(node.optDouble("spacing", 0.0)) ?: 0f).dp)
+            (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp)
     }
 
 @Composable
-internal fun RenderRow(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val scroll = node.optBoolean("scroll")
-    val fill = node.optBoolean("fill")
+internal fun RenderRow(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val scroll = node.boolOr("scroll")
+    val fill = node.boolOr("fill")
     val mod = when {
         scroll -> m.fillMaxWidth().horizontalScroll(rememberScrollState())
         fill -> m.fillMaxWidth()
@@ -127,63 +130,63 @@ internal fun RenderRow(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     Row(
         modifier = mod,
         horizontalArrangement = horizontalArrange(node),
-        verticalAlignment = when (node.optString("align")) {
+        verticalAlignment = when (node.stringOr("align")) {
             "top" -> Alignment.Top
             "bottom" -> Alignment.Bottom
             // baseline needs per-child alignBy; center is the honest default.
             else -> Alignment.CenterVertically
         }) {
         // Weights are meaningless with unbounded width (§ port note).
-        if (scroll) RenderChildren(node.optJSONArray("children"), ctx)
-        else RenderRowChildren(node.optJSONArray("children"), ctx)
+        if (scroll) RenderChildren(node.arrOrNull("children"), ctx)
+        else RenderRowChildren(node.arrOrNull("children"), ctx)
     }
 }
 
 @Composable
-internal fun RenderColumn(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val scroll = node.optBoolean("scroll")
-    val fill = node.optBoolean("fill")
+internal fun RenderColumn(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val scroll = node.boolOr("scroll")
+    val fill = node.boolOr("fill")
     val mod = (if (fill) m.fillMaxWidth() else m).let {
         if (scroll) it.verticalScroll(rememberScrollState()) else it
     }
     Column(
         modifier = mod,
         verticalArrangement = verticalArrange(node),
-        horizontalAlignment = when (node.optString("align")) {
+        horizontalAlignment = when (node.stringOr("align")) {
             "center" -> Alignment.CenterHorizontally
             "end" -> Alignment.End
             else -> Alignment.Start
         }) {
-        RenderColumnChildren(node.optJSONArray("children"), ctx)
+        RenderColumnChildren(node.arrOrNull("children"), ctx)
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun RenderFlowRow(node: JSONObject, ctx: RenderCtx, m: Modifier) {
+internal fun RenderFlowRow(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     FlowRow(
         modifier = m,
         horizontalArrangement = horizontalArrange(node),
         // SPEC 17.3: flow_row.align is the per-run cross-axis alignment
         // (top|center|bottom, default top).
-        itemVerticalAlignment = when (node.optString("align")) {
+        itemVerticalAlignment = when (node.stringOr("align")) {
             "center" -> Alignment.CenterVertically
             "bottom" -> Alignment.Bottom
             else -> Alignment.Top
         },
         verticalArrangement = Arrangement.spacedBy(
-            (safeDp(node.optDouble("run_spacing", 0.0)) ?: 0f).dp)) {
-        RenderChildren(node.optJSONArray("children"), ctx)
+            (safeDp(node.doubleOr("run_spacing", 0.0)) ?: 0f).dp)) {
+        RenderChildren(node.arrOrNull("children"), ctx)
     }
 }
 
 // ------------------------------------------------------------- box/surface
 
 @Composable
-internal fun RenderBox(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val onTap = node.optJSONObject("on_tap")
+internal fun RenderBox(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val onTap = node.objOrNull("on_tap")
     // §17.3: the full 9-value alignment vocabulary; default top_start.
-    val alignment = when (node.optString("alignment")) {
+    val alignment = when (node.stringOr("alignment")) {
         "top_center" -> Alignment.TopCenter
         "top_end" -> Alignment.TopEnd
         "center_start" -> Alignment.CenterStart
@@ -196,42 +199,42 @@ internal fun RenderBox(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     }
     val mod = if (onTap != null) m.clickable { ctx.action(onTap) } else m
     Box(modifier = mod, contentAlignment = alignment) {
-        RenderChildren(node.optJSONArray("children"), ctx)
+        RenderChildren(node.arrOrNull("children"), ctx)
     }
 }
 
 @Composable
-internal fun RenderSurfaceNode(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val color = resolveColor(node.optString("color").takeIf { it.isNotEmpty() })
+internal fun RenderSurfaceNode(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val color = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
         ?: MaterialTheme.colorScheme.surface
     // §16.5: a numeric universal corner overrides shape, except circle.
-    val base = when (node.optString("shape")) {
+    val base = when (node.stringOr("shape")) {
         "rounded" -> RoundedCornerShape(8.dp)
         "rounded_small" -> RoundedCornerShape(4.dp)
         "circle" -> CircleShape
         else -> RectangleShape
     }
-    val shape = if (node.has("corner") && base != CircleShape)
+    val shape = if ("corner" in node && base != CircleShape)
         cornerShape(node) else base
     Surface(
         modifier = m,
         color = color,
         shape = shape,
-        tonalElevation = (safeDp(node.optDouble("elevation", 0.0)) ?: 0f).dp) {
-        RenderChildren(node.optJSONArray("children"), ctx)
+        tonalElevation = (safeDp(node.doubleOr("elevation", 0.0)) ?: 0f).dp) {
+        RenderChildren(node.arrOrNull("children"), ctx)
     }
 }
 
 // ------------------------------------------------------------- lazy_column
 
 @Composable
-internal fun RenderLazyColumn(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val children = node.optJSONArray("children") ?: return
+internal fun RenderLazyColumn(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val children = node.arrOrNull("children") ?: return
     // scroll_here: scroll to the marked child on first show and whenever its
     // index changes; an index-stable re-push never disturbs the position.
     var scrollTarget = -1
-    for (i in 0 until children.length()) {
-        if (children.optJSONObject(i)?.optBoolean("scroll_here") == true) {
+    for (i in 0 until children.size) {
+        if ((children[i] as? JsonObject)?.boolOr("scroll_here") == true) {
             scrollTarget = i; break
         }
     }
@@ -245,11 +248,11 @@ internal fun RenderLazyColumn(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         state = listState,
         modifier = m.fillMaxSize(),
         contentPadding = PaddingValues(
-            (safeDp(node.optDouble("content_padding", 0.0)) ?: 0f).dp),
+            (safeDp(node.doubleOr("content_padding", 0.0)) ?: 0f).dp),
         verticalArrangement = Arrangement.spacedBy(
-            (safeDp(node.optDouble("spacing", 0.0)) ?: 0f).dp)) {
-        items(count = children.length(), key = { keys[it] }) { i ->
-            children.optJSONObject(i)?.let {
+            (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp)) {
+        items(count = children.size, key = { keys[it] }) { i ->
+            (children.getOrNull(i) as? JsonObject)?.let {
                 Box(Modifier.animateItem()) { RenderNode(it, ctx.child(it, i)) }
             }
         }
@@ -262,8 +265,8 @@ internal fun RenderLazyColumn(node: JSONObject, ctx: RenderCtx, m: Modifier) {
  * on_trigger at most once per completed gesture, never settle dismissed. */
 @Composable
 internal fun SwipeActionBox(
-    swipeStart: JSONObject?,
-    swipeEnd: JSONObject?,
+    swipeStart: JsonObject?,
+    swipeEnd: JsonObject?,
     ctx: RenderCtx,
     content: @Composable () -> Unit,
 ) {
@@ -275,11 +278,13 @@ internal fun SwipeActionBox(
                 SwipeToDismissBoxValue.EndToStart -> swipeEnd
                 else -> null
             }
-            side?.optJSONObject("on_trigger")?.let {
+            side?.objOrNull("on_trigger")?.let {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 // §14.3: the swipe direction rides as an injected member.
-                ctx.actionInjecting(it, JSONObject().put("direction",
-                    if (value == SwipeToDismissBoxValue.StartToEnd) "start" else "end"))
+                ctx.actionInjecting(it, buildJsonObject {
+                    put("direction",
+                        if (value == SwipeToDismissBoxValue.StartToEnd) "start" else "end")
+                })
             }
             false // §17.3: the item returns to rest; the server's list decides.
         })
@@ -293,12 +298,12 @@ internal fun SwipeActionBox(
                 SwipeToDismissBoxValue.EndToStart -> swipeEnd
                 else -> null
             } ?: return@SwipeToDismissBox
-            val bg = resolveColor(side.optString("color").takeIf { it.isNotEmpty() })
+            val bg = resolveColor(side.stringOr("color").takeIf { it.isNotEmpty() })
                 ?: MaterialTheme.colorScheme.secondaryContainer
             val fg = if (bg.luminance() < 0.5f)
                 androidx.compose.ui.graphics.Color.White
             else androidx.compose.ui.graphics.Color(0xFF1A1A1A)
-            val label = side.optString("label")
+            val label = side.stringOr("label")
             Box(
                 Modifier.fillMaxSize().padding(vertical = 4.dp)
                     .background(bg, RoundedCornerShape(12.dp))
@@ -307,7 +312,7 @@ internal fun SwipeActionBox(
                     if (state.dismissDirection == SwipeToDismissBoxValue.StartToEnd)
                         Alignment.CenterStart else Alignment.CenterEnd) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    side.optString("icon").takeIf { it.isNotEmpty() }?.let {
+                    side.stringOr("icon").takeIf { it.isNotEmpty() }?.let {
                         Icon(IconMap.get(it), contentDescription = label.ifEmpty { null },
                             tint = fg)
                         Spacer(Modifier.width(6.dp))
@@ -322,9 +327,9 @@ internal fun SwipeActionBox(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun RenderCard(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val onTap = node.optJSONObject("on_tap")
-    val onLongTap = node.optJSONObject("on_long_tap")
+internal fun RenderCard(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val onTap = node.objOrNull("on_tap")
+    val onLongTap = node.objOrNull("on_long_tap")
     val content: @Composable () -> Unit = {
         ElevatedCard(
             modifier = m.fillMaxWidth().then(
@@ -335,12 +340,12 @@ internal fun RenderCard(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                     if (onTap != null) ctx.action(onTap)
                 })) {
             Box(Modifier.padding(16.dp)) {
-                RenderChildren(node.optJSONArray("children"), ctx)
+                RenderChildren(node.arrOrNull("children"), ctx)
             }
         }
     }
-    val swipeStart = node.optJSONObject("swipe_start")
-    val swipeEnd = node.optJSONObject("swipe_end")
+    val swipeStart = node.objOrNull("swipe_start")
+    val swipeEnd = node.objOrNull("swipe_end")
     if (swipeStart != null || swipeEnd != null)
         SwipeActionBox(swipeStart, swipeEnd, ctx) { content() }
     else content()
@@ -350,13 +355,13 @@ internal fun RenderCard(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun RenderCollapsible(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val collapsed = node.optBoolean("collapsed")
+internal fun RenderCollapsible(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val collapsed = node.boolOr("collapsed")
     // §17.3: `collapsed` seeds only the FIRST snapshot for a presentation
     // identity; later same-identity pushes keep the user's expansion state.
     var expanded by rememberSaveable(ctx.path) { mutableStateOf(!collapsed) }
-    val header = node.optJSONObject("header")
-    val onLongTap = node.optJSONObject("on_long_tap")
+    val header = node.objOrNull("header")
+    val onLongTap = node.objOrNull("on_long_tap")
     val chevron by animateFloatAsState(
         targetValue = if (expanded) 0f else -90f, label = "chevron")
     Column(modifier = m.fillMaxWidth()) {
@@ -376,25 +381,29 @@ internal fun RenderCollapsible(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 header?.let { RenderNode(it, ctx.child(it, 0)) }
             }
         }
-        val swipeStart = node.optJSONObject("swipe_start")
-        val swipeEnd = node.optJSONObject("swipe_end")
+        val swipeStart = node.objOrNull("swipe_start")
+        val swipeEnd = node.objOrNull("swipe_end")
         if (swipeStart != null || swipeEnd != null)
             SwipeActionBox(swipeStart, swipeEnd, ctx) { headerRow() }
         else headerRow()
-        if (expanded) RenderColumnChildren(node.optJSONArray("children"), ctx)
+        if (expanded) RenderColumnChildren(node.arrOrNull("children"), ctx)
     }
 }
 
 // -------------------------------------------------------------------- tabs
 
 @Composable
-internal fun RenderTabs(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val items = node.optJSONArray("items")
-    val children = node.optJSONArray("children") ?: return
-    val pageCount = children.length()
+internal fun RenderTabs(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val items = node.arrOrNull("items")
+    val children = node.arrOrNull("children") ?: return
+    val pageCount = children.size
     if (pageCount == 0) return
-    val initial = node.optInt("initial", 0).coerceIn(0, pageCount - 1)
-    val onChange = node.optJSONObject("on_change")
+    // C6: `initial` is integer-TYPED but validated integral BY VALUE upstream
+    // (SpecValidator floors an asDouble read, so `"initial": 2.0` is accepted
+    // traffic and org.json's optInt truncated it). A spelling-strict read would
+    // default it to 0 and silently open the tabs on the first page.
+    val initial = node.intByValue("initial", 0).coerceIn(0, pageCount - 1)
+    val onChange = node.objOrNull("on_change")
 
     // §16.1/§17.3: selection keys on the presentation identity — a new
     // identity resets to `initial`; a same-identity push preserves it.
@@ -421,26 +430,26 @@ internal fun RenderTabs(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 pagerState.settledPage < pageCount) {
                 lastReported = pagerState.settledPage
                 // §17.3: on_change receives the settled index as args.value.
-                onChange?.let { ctx.action(it, pagerState.settledPage) }
+                onChange?.let { ctx.action(it, JsonPrimitive(pagerState.settledPage)) }
             }
         }
         Column(modifier = m.fillMaxWidth()) {
-            if (!node.optBoolean("pager_only") && items != null) {
+            if (!node.boolOr("pager_only") && items != null) {
                 val selected = pagerState.currentPage.coerceIn(0, pageCount - 1)
                 val tabs: @Composable () -> Unit = {
-                    for (i in 0 until minOf(items.length(), pageCount)) {
-                        val item = items.optJSONObject(i) ?: continue
-                        val icon = item.optString("icon")
+                    for (i in 0 until minOf(items.size, pageCount)) {
+                        val item = items[i] as? JsonObject ?: continue
+                        val icon = item.stringOr("icon")
                         Tab(
                             selected = selected == i,
                             onClick = { scope.launch { pagerState.animateScrollToPage(i) } },
-                            text = { Text(item.optString("label")) },
+                            text = { Text(item.stringOr("label")) },
                             icon = if (icon.isNotEmpty()) {
                                 { Icon(IconMap.get(icon), contentDescription = null) }
                             } else null)
                     }
                 }
-                if (node.optBoolean("scrollable"))
+                if (node.boolOr("scrollable"))
                     ScrollableTabRow(selectedTabIndex = selected) { tabs() }
                 else TabRow(selectedTabIndex = selected) { tabs() }
             }
@@ -448,7 +457,7 @@ internal fun RenderTabs(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 state = pagerState,
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top) { page ->
-                children.optJSONObject(page)?.let {
+                (children.getOrNull(page) as? JsonObject)?.let {
                     RenderNode(it, ctx.child(it, page))
                 }
             }
@@ -459,27 +468,27 @@ internal fun RenderTabs(node: JSONObject, ctx: RenderCtx, m: Modifier) {
 // ------------------------------------------------------------------- table
 
 private sealed interface TableRowSpec
-private data class CellsSpec(val cells: List<JSONObject>, val header: Boolean) : TableRowSpec
+private data class CellsSpec(val cells: List<JsonObject>, val header: Boolean) : TableRowSpec
 private data class RuleSpec(val afterHeader: Boolean) : TableRowSpec
 
 /** §17.3 table: columns size to their widest cell; rules draw as dividers;
  * header rows emphasize; on_add_row/on_add_col inject `index` (§14.3). */
 @Composable
-internal fun RenderTable(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val rowsJson = node.optJSONArray("rows") ?: return
+internal fun RenderTable(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val rowsJson = node.arrOrNull("rows") ?: return
     val specs = buildList {
         var prevHeader = false
-        for (i in 0 until rowsJson.length()) {
-            val row = rowsJson.optJSONObject(i) ?: continue
-            when (row.optString("kind")) { // format 6: kind, not booleans
+        for (i in 0 until rowsJson.size) {
+            val row = rowsJson[i] as? JsonObject ?: continue
+            when (row.stringOr("kind")) { // format 6: kind, not booleans
                 "rule" -> { add(RuleSpec(afterHeader = prevHeader)); prevHeader = false }
                 "header", "data" -> {
-                    val cellsJson = row.optJSONArray("cells") ?: continue
+                    val cellsJson = row.arrOrNull("cells") ?: continue
                     val cells = buildList {
-                        for (c in 0 until cellsJson.length())
-                            cellsJson.optJSONObject(c)?.let { add(it) }
+                        for (c in 0 until cellsJson.size)
+                            (cellsJson[c] as? JsonObject)?.let { add(it) }
                     }
-                    val header = row.optString("kind") == "header"
+                    val header = row.stringOr("kind") == "header"
                     add(CellsSpec(cells, header))
                     prevHeader = header
                 }
@@ -488,25 +497,25 @@ internal fun RenderTable(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     }
     if (specs.none { it is CellsSpec && it.cells.isNotEmpty() }) return
     val aligns = buildList {
-        node.optJSONArray("aligns")?.let { a ->
-            for (i in 0 until a.length()) add(a.optString(i))
+        node.arrOrNull("aligns")?.let { a ->
+            for (i in 0 until a.size) add(a[i].strOrNull().orEmpty())
         }
     }
     val nrows = specs.count { it is CellsSpec }
     val ncols = specs.filterIsInstance<CellsSpec>().maxOf { it.cells.size }
-    val onAddRow = node.optJSONObject("on_add_row")
-    val onAddCol = node.optJSONObject("on_add_col")
+    val onAddRow = node.objOrNull("on_add_row")
+    val onAddCol = node.objOrNull("on_add_col")
     Column(modifier = m) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.horizontalScroll(rememberScrollState())) {
             TableGrid(specs, aligns, ctx)
             if (onAddCol != null) AddAffordance("Add column") {
-                ctx.actionInjecting(onAddCol, JSONObject().put("index", ncols))
+                ctx.actionInjecting(onAddCol, buildJsonObject { put("index", ncols) })
             }
         }
         if (onAddRow != null) AddAffordance("Add row") {
-            ctx.actionInjecting(onAddRow, JSONObject().put("index", nrows))
+            ctx.actionInjecting(onAddRow, buildJsonObject { put("index", nrows) })
         }
     }
 }
@@ -580,12 +589,12 @@ private fun TableGrid(specs: List<TableRowSpec>, aligns: List<String>, ctx: Rend
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TableCell(cell: JSONObject, header: Boolean, ctx: RenderCtx) {
-    val onTap = cell.optJSONObject("on_tap")
-    val onLongTap = cell.optJSONObject("on_long_tap")
+private fun TableCell(cell: JsonObject, header: Boolean, ctx: RenderCtx) {
+    val onTap = cell.objOrNull("on_tap")
+    val onLongTap = cell.objOrNull("on_long_tap")
     val scheme = MaterialTheme.colorScheme
     val annotated = buildSpanString(
-        cell.optJSONArray("spans"), scheme.primary,
+        cell.arrOrNull("spans"), scheme.primary,
         { resolveColorIn(scheme, it) }, { ctx.action(it) })
     val base = MaterialTheme.typography.bodyMedium
     val clickMod = if (onTap != null || onLongTap != null)
@@ -610,31 +619,35 @@ private fun TableCell(cell: JSONObject, header: Boolean, ctx: RenderCtx) {
  * from/to/order injected (§14.3). The authored list itself never mutates —
  * the server's next snapshot is the truth. */
 @Composable
-internal fun RenderReorderableList(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val onReorder = node.optJSONObject("on_reorder")
-    val itemsJson = node.optJSONArray("items") ?: return
+internal fun RenderReorderableList(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val onReorder = node.objOrNull("on_reorder")
+    val itemsJson = node.arrOrNull("items") ?: return
     val itemKey = { i: Int ->
-        val it = itemsJson.optJSONObject(i)
-        it?.optString("key").takeIf { k -> !k.isNullOrEmpty() }
-            ?: it?.optString("id").orEmpty()
+        val it = itemsJson.getOrNull(i) as? JsonObject
+        it?.stringOr("key").takeIf { k -> !k.isNullOrEmpty() }
+            ?: it?.stringOr("id").orEmpty()
     }
     // SPEC 14.3: `order` is an array of closed identity OBJECTS — {key: id} or
     // {id: id}, choosing `key` when the child has both — not bare strings.
     val itemIdentity = { i: Int ->
-        val it = itemsJson.optJSONObject(i)
-        val key = it?.optString("key").takeIf { k -> !k.isNullOrEmpty() }
-        if (key != null) JSONObject().put("key", key)
-        else JSONObject().put("id", it?.optString("id").orEmpty())
+        val it = itemsJson.getOrNull(i) as? JsonObject
+        val key = it?.stringOr("key").takeIf { k -> !k.isNullOrEmpty() }
+        if (key != null) buildJsonObject { put("key", key) }
+        else buildJsonObject { put("id", it?.stringOr("id").orEmpty()) }
     }
     // Display order as authored indices; reset when the authored list CHANGES
-    // by value. Two steps on purpose: JSONArray has no equals, so keying the
-    // state on the instance would reset the user's reorder on every re-push,
-    // while serializing on every recomposition burned a full toString each
-    // frame. The identity-keyed remember serializes once per accepted
+    // by value. Two steps on purpose: org.json's JSONArray had no equals, so
+    // keying the state on the instance would reset the user's reorder on every
+    // re-push, while serializing on every recomposition burned a full toString
+    // each frame. The identity-keyed remember serializes once per accepted
     // snapshot; the value-keyed remember resets only when content moved.
+    // C6: kotlinx JsonArray DOES implement structural equals (it delegates to
+    // the backing List), so the second step is now redundant — remember(itemsJson)
+    // alone would compare by value. The two steps remain CORRECT as written, and
+    // collapsing them changes remember-key equality, so that is a separate pass.
     val itemsSig = remember(itemsJson) { itemsJson.toString() }
     var order by remember(itemsSig) {
-        mutableStateOf((0 until itemsJson.length()).toList())
+        mutableStateOf((0 until itemsJson.size).toList())
     }
     val listState = rememberLazyListState()
     val haptic = LocalHapticFeedback.current
@@ -647,7 +660,7 @@ internal fun RenderReorderableList(node: JSONObject, ctx: RenderCtx, m: Modifier
         contentPadding = PaddingValues(vertical = 4.dp)) {
         items(count = order.size, key = { pos -> itemKey(order[pos]) }) { pos ->
             val authored = order[pos]
-            val item = itemsJson.optJSONObject(authored) ?: return@items
+            val item = itemsJson.getOrNull(authored) as? JsonObject ?: return@items
             val isDragged = draggedPos == pos
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -707,12 +720,13 @@ internal fun RenderReorderableList(node: JSONObject, ctx: RenderCtx, m: Modifier
                                         to != dragStartPos) {
                                         // §14.3: from/to/order injected; order
                                         // is the post-move identity-object list.
-                                        val ids = JSONArray()
-                                        order.forEach { ids.put(itemIdentity(it)) }
-                                        ctx.actionInjecting(onReorder, JSONObject()
-                                            .put("from", dragStartPos)
-                                            .put("to", to)
-                                            .put("order", ids))
+                                        ctx.actionInjecting(onReorder, buildJsonObject {
+                                            put("from", dragStartPos)
+                                            put("to", to)
+                                            put("order", buildJsonArray {
+                                                order.forEach { add(itemIdentity(it)) }
+                                            })
+                                        })
                                         haptic.performHapticFeedback(
                                             HapticFeedbackType.LongPress)
                                     }

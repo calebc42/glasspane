@@ -54,8 +54,13 @@ import com.calebc42.ebp.companion.DeviceBridge
 import com.calebc42.ebp.wire.EditorSession
 import com.calebc42.ebp.wire.InputDisplay
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** SPEC 18.1: a dialog's local state — its captured field values — and the
  * id needed to complete the outstanding request. Stateful dialog nodes are
@@ -64,11 +69,11 @@ class DialogContext(
     val dialogId: String,
     // Raw scalar values (string, boolean, number) so §14.6 capture returns
     // each stateful node's logical value, not a stringified one.
-    val fields: SnapshotStateMap<String, Any?>,
+    val fields: SnapshotStateMap<String, JsonElement?>,
     val bridge: DeviceBridge,
     /** T3/LD-3: the authored values the engine computed while validating this
      * dialog's spec — the layer UNDER the user's edits. */
-    val defaults: JSONObject? = null,
+    val defaults: JsonObject? = null,
 ) {
     /**
      * SPEC 14.1: the logical value of a stateful node at occurrence time —
@@ -87,14 +92,18 @@ class DialogContext(
      * default cell, with an explicit `found` bit deciding which layer answers
      * rather than the value's own emptiness.
      */
-    fun capture(id: String): Any? = captureValue(id, fields, defaults)
+    fun capture(id: String): JsonElement? = captureValue(id, fields, defaults)
 }
 
 /** The two-layer lookup of [DialogContext.capture], as pure logic so the
  * layering rule is testable without a live bridge. */
-fun captureValue(id: String, fields: Map<String, Any?>, defaults: JSONObject?): Any? = when {
+fun captureValue(id: String, fields: Map<String, JsonElement?>, defaults: JsonObject?): JsonElement? = when {
     fields.containsKey(id) -> fields[id]
-    defaults?.has(id) == true -> defaults.get(id).takeIf { it != JSONObject.NULL }
+    // C6: the engine writes `put(nodeId, authoredValueOf(node) ?: JsonNull)`,
+    // so a stateful node with no authored value is PRESENT and JSON null; the
+    // sentinel filter is what turns that into "no default", exactly as the
+    // JSONObject.NULL test did.
+    defaults != null && id in defaults -> defaults[id]?.takeIf { it !is JsonNull }
     // Neither layer has it. §14.1 makes an unresolvable capture a
     // document-level error the Companion already refused at validation, so
     // reaching here means the spec and this map disagree — surface null
@@ -116,7 +125,7 @@ class RenderCtx(
      * and the generation that value belongs to. */
     val displays: Map<Pair<String, String>, InputDisplay> = emptyMap(),
 ) {
-    fun child(node: JSONObject?, index: Int): RenderCtx =
+    fun child(node: JsonObject?, index: Int): RenderCtx =
         RenderCtx(surface, bridge, dialog, identityPath(path, node, index), displays)
 
     /**
@@ -144,9 +153,9 @@ class RenderCtx(
      * which is the LD-2 divergence by a route no epoch can detect, because
      * nothing in the store changed.
      */
-    fun storeValue(id: String): Any? = displays[surface to id]?.value
+    fun storeValue(id: String): JsonElement? = displays[surface to id]?.value
 
-    fun action(descriptor: JSONObject?, value: Any? = null) {
+    fun action(descriptor: JsonObject?, value: JsonElement? = null) {
         // SPEC 18.1 (T3c, closes LD-1): inside a dialog the dialog.submit /
         // dialog.dismiss builtins complete the outstanding request instead of
         // dispatching remotely — resolved HERE, in the one ordinary dispatch
@@ -157,20 +166,21 @@ class RenderCtx(
         // trailing action, or any on_tap inside a dialog document fell into
         // the engine's when with no dialog.submit arm and hung Emacs forever.
         val d = dialog
-        if (d != null && descriptor != null && descriptor.has("builtin")) {
-            when (descriptor.optString("builtin")) {
+        if (d != null && descriptor != null && "builtin" in descriptor) {
+            when (descriptor.stringOr("builtin")) {
                 "dialog.submit" -> {
-                    val fields = JSONObject()
-                    descriptor.optJSONArray("capture_fields")?.let { capture ->
-                        for (i in 0 until capture.length()) {
-                            val fieldId = capture.getString(i)
-                            // T3/LD-3: user layer, then authored layer.
-                            fields.put(fieldId,
-                                d.capture(fieldId) ?: JSONObject.NULL)
+                    val fields = buildJsonObject {
+                        descriptor.arrOrNull("capture_fields")?.let { capture ->
+                            for (i in capture.indices) {
+                                val fieldId = capture[i].strOrNull()!!
+                                // T3/LD-3: user layer, then authored layer.
+                                put(fieldId,
+                                    d.capture(fieldId) ?: JsonNull)
+                            }
                         }
                     }
                     d.bridge.dialogSubmit(d.dialogId,
-                        if (descriptor.has("value")) descriptor.opt("value") else null,
+                        if ("value" in descriptor) descriptor["value"] else null,
                         fields)
                     return
                 }
@@ -180,17 +190,18 @@ class RenderCtx(
                 }
             }
         }
-        if (d != null && descriptor != null && !descriptor.has("builtin")) {
+        if (d != null && descriptor != null && "builtin" !in descriptor) {
             // SPEC 18.1/14.4: a REMOTE descriptor inside a dialog dispatches
             // in DIALOG context, its capture snapshot read from the local
             // field layer exactly like dialog.submit (T3/LD-3).  The generic
             // surface path silently dropped these — the JA-5 device gate's
             // token+confirm Archive and date-pick relay were dead taps.
-            val fields = JSONObject()
-            descriptor.optJSONArray("capture_fields")?.let { capture ->
-                for (i in 0 until capture.length()) {
-                    val fieldId = capture.getString(i)
-                    fields.put(fieldId, d.capture(fieldId) ?: JSONObject.NULL)
+            val fields = buildJsonObject {
+                descriptor.arrOrNull("capture_fields")?.let { capture ->
+                    for (i in capture.indices) {
+                        val fieldId = capture[i].strOrNull()!!
+                        put(fieldId, d.capture(fieldId) ?: JsonNull)
+                    }
                 }
             }
             d.bridge.dialogAction(d.dialogId, descriptor, value, fields)
@@ -200,19 +211,19 @@ class RenderCtx(
     }
 
     /** §14.3 multi-member hooks (on_reorder, on_add_row/col, swipe sides). */
-    fun actionInjecting(descriptor: JSONObject?, injected: JSONObject,
-                        value: Any? = null) =
+    fun actionInjecting(descriptor: JsonObject?, injected: JsonObject,
+                        value: JsonElement? = null) =
         bridge.actionInjecting(surface, descriptor, injected, value)
 
     /** §14.6 an app-surface password on_submit — the secret rides `fields`,
      * never `args` and never a retained draft. (In a dialog the secret is
      * captured dialog-locally via dialog.submit + capture_fields instead.) */
-    fun actionWithFields(descriptor: JSONObject?, fields: JSONObject) =
+    fun actionWithFields(descriptor: JsonObject?, fields: JsonObject) =
         bridge.actionWithFields(surface, descriptor, fields)
 
     val inDialog: Boolean get() = dialog != null
 
-    fun state(id: String, value: Any?) {
+    fun state(id: String, value: JsonElement?) {
         if (dialog != null) dialog.fields[id] = value // SPEC 18.1: local only
         else bridge.state(surface, id, value)
     }
@@ -225,7 +236,7 @@ class RenderCtx(
 
 /** Root entry for a surface (MainActivity). */
 @Composable
-fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
+fun RenderNode(node: JsonObject, surface: String, bridge: DeviceBridge,
                dialog: DialogContext? = null) {
     // T3/LD-2: collected once at the root and carried down the tree, so a
     // stateful widget reads its generation and its seed without each one
@@ -236,8 +247,8 @@ fun RenderNode(node: JSONObject, surface: String, bridge: DeviceBridge,
 
 /** Root of a dialog's node tree: owns the local field map (SPEC 18.1). */
 @Composable
-fun RenderDialogRoot(dialogId: String, spec: JSONObject, bridge: DeviceBridge) {
-    val fields = remember(dialogId) { mutableStateMapOf<String, Any?>() }
+fun RenderDialogRoot(dialogId: String, spec: JsonObject, bridge: DeviceBridge) {
+    val fields = remember(dialogId) { mutableStateMapOf<String, JsonElement?>() }
     // T3/LD-3: the authored layer, computed by the engine while it validated
     // this spec — read once per presented dialog, so the two layers can never
     // disagree about which nodes are stateful.
@@ -247,14 +258,14 @@ fun RenderDialogRoot(dialogId: String, spec: JSONObject, bridge: DeviceBridge) {
 }
 
 @Composable
-fun RenderNode(node: JSONObject, ctx: RenderCtx, modifier: Modifier = Modifier) {
-    val type = node.optString("t")
+fun RenderNode(node: JsonObject, ctx: RenderCtx, modifier: Modifier = Modifier) {
+    val type = node.stringOr("t")
     // SPEC 17.1/16.2: a type not advertised for THIS target (a dialog advertises
     // fewer than the app profile) is unsupported — degrade to its children as a
     // neutral column, never render its semantics or dispatch its actions.
     val advertised = if (ctx.inDialog) NodeSupport.DIALOG_NODE_TYPES else NodeSupport.APP_NODE_TYPES
     if (type !in advertised) {
-        node.optJSONArray("children")?.let { kids ->
+        node.arrOrNull("children")?.let { kids ->
             Column(modifier) { RenderChildren(kids, ctx) }
         }
         return
@@ -285,8 +296,8 @@ fun RenderNode(node: JSONObject, ctx: RenderCtx, modifier: Modifier = Modifier) 
         "canvas" -> RenderCanvas(node, m)
         "month_grid" -> RenderMonthGrid(node, ctx, m)
         "spacer" -> Spacer(m
-            .width((safeDp(node.optDouble("width", 0.0)) ?: 0f).dp)
-            .height((safeDp(node.optDouble("height", 0.0)) ?: 0f).dp))
+            .width((safeDp(node.doubleOr("width", 0.0)) ?: 0f).dp)
+            .height((safeDp(node.doubleOr("height", 0.0)) ?: 0f).dp))
         "divider" -> HorizontalDivider(modifier = m)
         "scaffold" -> RenderScaffold(node, ctx)
         "editor" -> RenderEditor(node, ctx, m)
@@ -305,7 +316,7 @@ fun RenderNode(node: JSONObject, ctx: RenderCtx, modifier: Modifier = Modifier) 
         else ->
             // SPEC 16.2: unknown types render children as a neutral
             // vertical sequence, or nothing.
-            node.optJSONArray("children")?.let { children ->
+            node.arrOrNull("children")?.let { children ->
                 Column(modifier = m) { RenderColumnChildren(children, ctx) }
             }
     }
@@ -314,33 +325,33 @@ fun RenderNode(node: JSONObject, ctx: RenderCtx, modifier: Modifier = Modifier) 
 // ------------------------------------------------------------ children
 
 @Composable
-fun RenderChildren(children: JSONArray?, ctx: RenderCtx) {
+fun RenderChildren(children: JsonArray?, ctx: RenderCtx) {
     if (children == null) return
-    for (i in 0 until children.length()) {
-        (children.opt(i) as? JSONObject)?.let { RenderNode(it, ctx.child(it, i)) }
+    for (i in 0 until children.size) {
+        (children[i] as? JsonObject)?.let { RenderNode(it, ctx.child(it, i)) }
     }
 }
 
 // SPEC 16.5: `weight` distributes remaining main-axis space — it needs the
 // Row/Column scope, so the container cases route through these.
-private fun weightOf(node: JSONObject): Float? =
-    node.optDouble("weight", 0.0).toFloat().takeIf { it.isFinite() && it > 0f }
+private fun weightOf(node: JsonObject): Float? =
+    node.doubleOr("weight", 0.0).toFloat().takeIf { it.isFinite() && it > 0f }
 
 @Composable
-fun RowScope.RenderRowChildren(children: JSONArray?, ctx: RenderCtx) {
+fun RowScope.RenderRowChildren(children: JsonArray?, ctx: RenderCtx) {
     if (children == null) return
-    for (i in 0 until children.length()) {
-        val child = children.opt(i) as? JSONObject ?: continue
+    for (i in 0 until children.size) {
+        val child = children[i] as? JsonObject ?: continue
         val m = weightOf(child)?.let { Modifier.weight(it) } ?: Modifier
         RenderNode(child, ctx.child(child, i), m)
     }
 }
 
 @Composable
-fun ColumnScope.RenderColumnChildren(children: JSONArray?, ctx: RenderCtx) {
+fun ColumnScope.RenderColumnChildren(children: JsonArray?, ctx: RenderCtx) {
     if (children == null) return
-    for (i in 0 until children.length()) {
-        val child = children.opt(i) as? JSONObject ?: continue
+    for (i in 0 until children.size) {
+        val child = children[i] as? JsonObject ?: continue
         val m = weightOf(child)?.let { Modifier.weight(it) } ?: Modifier
         RenderNode(child, ctx.child(child, i), m)
     }
@@ -349,13 +360,13 @@ fun ColumnScope.RenderColumnChildren(children: JSONArray?, ctx: RenderCtx) {
 // ------------------------------------------------------------ input nodes
 
 @Composable
-private fun RenderTextInput(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val id = node.optString("id")
-    val enabled = node.optBoolean("enabled", true) // SPEC 17.4
-    val password = node.optBoolean("password")
-    val singleLine = node.optBoolean("single_line")
-    val onChange = node.optJSONObject("on_change")
-    val onSubmit = node.optJSONObject("on_submit")
+private fun RenderTextInput(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val id = node.stringOr("id")
+    val enabled = node.boolOr("enabled", true) // SPEC 17.4
+    val password = node.boolOr("password")
+    val singleLine = node.boolOr("single_line")
+    val onChange = node.objOrNull("on_change")
+    val onSubmit = node.objOrNull("on_submit")
     // SPEC 14.6: a password value MUST NOT be persisted to saved-instance-state.
     // A non-password draft keys on the §13.6 wire address (surface+id), NOT the
     // key-first presentation path, so changing only a `key` keeps a compatible
@@ -365,11 +376,17 @@ private fun RenderTextInput(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     else
         rememberSaveable(ctx.surface, id, ctx.epochOf(id),
             key = "ti:${ctx.surface}:$id:${ctx.epochOf(id)}") {
-            mutableStateOf(ctx.storeValue(id) as? String ?: node.optString("value"))
+            // C6: the store's value is a JsonElement, so the seed reads the
+            // STRING primitive explicitly — a safe cast to a Kotlin String
+            // would compile and be forever null, silently reverting the widget
+            // to the authored value while the store still held the user's
+            // draft (LD-2).
+            mutableStateOf((ctx.storeValue(id) as? JsonPrimitive)
+                ?.takeIf { it.isString }?.content ?: node.stringOr("value"))
         }
     // SPEC 18.4/17.4: a `syntax` language recolours the field in place; a
     // password masks with dots instead (a syntax highlight on a secret is moot).
-    val language = node.optString("syntax")
+    val language = node.stringOr("syntax")
     val syntaxColors = LocalSyntaxColors.current
     val transform = remember(language, syntaxColors, password) {
         when {
@@ -384,11 +401,11 @@ private fun RenderTextInput(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             onSubmit == null -> {}
             // SPEC 14.6/14.3: a password submission carries the secret in
             // `fields.<id>`, never in `args`.
-            password -> ctx.actionWithFields(onSubmit, JSONObject().put(id, v))
-            else -> ctx.action(onSubmit, v) // §14.3 value injection
+            password -> ctx.actionWithFields(onSubmit, buildJsonObject { put(id, v) })
+            else -> ctx.action(onSubmit, JsonPrimitive(v)) // §14.3 value injection
         }
         // SPEC 17.4: clear_on_submit resets the field after submit.
-        if (node.optBoolean("clear_on_submit")) value = ""
+        if (node.boolOr("clear_on_submit")) value = ""
     }
     OutlinedTextField(
         value = value,
@@ -402,17 +419,17 @@ private fun RenderTextInput(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             // surface, suppress state entirely; in a dialog the value stays
             // dialog-local in memory for a dialog.submit capture.
             if (!password) {
-                ctx.state(id, next)           // state.changed (14.6) or dialog-local
-                onChange?.let { ctx.action(it, next) } // §14.6: after state.changed
+                ctx.state(id, JsonPrimitive(next))  // state.changed (14.6) or dialog-local
+                onChange?.let { ctx.action(it, JsonPrimitive(next)) } // §14.6: after state.changed
             } else if (ctx.inDialog) {
-                ctx.state(id, next)           // dialog-local only, in memory
+                ctx.state(id, JsonPrimitive(next))  // dialog-local only, in memory
             }
         },
-        label = node.optString("label").takeIf { it.isNotEmpty() }
+        label = node.stringOr("label").takeIf { it.isNotEmpty() }
             ?.let { { Text(it) } },
         singleLine = singleLine,
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-            keyboardType = keyboardTypeOf(node.optString("keyboard"), password),
+            keyboardType = keyboardTypeOf(node.stringOr("keyboard"), password),
             imeAction = if (onSubmit != null) androidx.compose.ui.text.input.ImeAction.Done
                 else androidx.compose.ui.text.input.ImeAction.Default),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(
@@ -435,14 +452,14 @@ private fun keyboardTypeOf(name: String, password: Boolean): androidx.compose.ui
 }
 
 @Composable
-private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
-    val id = node.optString("id")
-    val document = node.optString("document")
+private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val id = node.stringOr("id")
+    val document = node.stringOr("document")
     // SPEC 17.4: `read_only` governs editing permission and `enabled` the
     // platform disabled state; a disabled/read-only node MUST NOT dispatch.
-    val readOnly = node.optBoolean("read_only", false)
-    val enabled = node.optBoolean("enabled", true)
-    val onSave = node.optJSONObject("on_save")
+    val readOnly = node.boolOr("read_only", false)
+    val enabled = node.boolOr("enabled", true)
+    val onSave = node.objOrNull("on_save")
     // A TextFieldValue (not a bare String) so the toolbar can read the live
     // selection/caret for ${selection}, placements, line ops, and edit.command.
     // SPEC 16.1/13.6: the draft keys on the wire address (surface+id), not the
@@ -450,8 +467,12 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     var value by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
         stateSaver = TextFieldValue.Saver,
         key = "ed:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+        // C6: the explicit STRING primitive read, for the reason spelled out
+        // at the text_input seed — a Kotlin-String safe cast on a JsonElement
+        // is always null.
         mutableStateOf(TextFieldValue(
-            ctx.storeValue(id) as? String ?: node.optString("value")))
+            (ctx.storeValue(id) as? JsonPrimitive)?.takeIf { it.isString }?.content
+                ?: node.stringOr("value")))
     }
     // T2/LD-5: the engine shadow is the text authority for a synchronized
     // editor. Adopt every mirror publication — an inbound edit.apply, or the
@@ -474,7 +495,7 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // SPEC 18.4/17.4: a `syntax` language recolours the field in place via an
     // identity VisualTransformation (never changes the character count, so the
     // cursor/selection/IME behave exactly as on a plain field).
-    val language = node.optString("syntax")
+    val language = node.stringOr("syntax")
     val syntaxColors = LocalSyntaxColors.current
     val transform = remember(language, syntaxColors) {
         if (language.isEmpty()) VisualTransformation.None
@@ -496,7 +517,7 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
                 if (del > 0 || ins.isNotEmpty())
                     ctx.bridge.editorEdit(document, id, start, del, ins, old)
             } else {
-                ctx.state(id, new.text) // local editor: state.changed
+                ctx.state(id, JsonPrimitive(new.text)) // local editor: state.changed
             }
             // SPEC 19.3 (JC-4b): the offer described the text as it WAS; drop
             // it the moment the text moves, so no stale candidate is tappable
@@ -512,7 +533,7 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
     // SPEC 17.4: `complete` is the node's own request for completion, so it
     // gates both the round trips and the dropdown. Without it every
     // synchronized editor would pay for completions it never asked for.
-    val wantsCompletion = node.optBoolean("complete", false)
+    val wantsCompletion = node.boolOr("complete", false)
     val offers by ctx.bridge.completionOffers.collectAsState()
     val offer = if (wantsCompletion) offers[document to id] else null
     if (wantsCompletion && document.isNotEmpty() && !readOnly && enabled) {
@@ -526,7 +547,7 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
         // SPEC 17.7: the toolbar rail above the field. `command` is valid only
         // for a synchronized editor (document present) in READY — the wire side
         // enforces the session/state gate; a local editor's command no-ops.
-        node.optJSONArray("toolbar")?.let { items ->
+        node.arrOrNull("toolbar")?.let { items ->
             EditorToolbar(
                 items = items,
                 enabled = enabled && !readOnly, // §17.4: disabled/read-only inert
@@ -563,7 +584,7 @@ private fun RenderEditor(node: JSONObject, ctx: RenderCtx, m: Modifier) {
             Row(modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End) {
                 IconButton(
-                    onClick = { ctx.action(onSave, value.text) },
+                    onClick = { ctx.action(onSave, JsonPrimitive(value.text)) },
                     // §17.4: a read-only or disabled editor MUST NOT
                     // dispatch — same rule the commit path pins.
                     enabled = enabled && !readOnly) {
@@ -630,11 +651,11 @@ private fun localTimeStamp(): String {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
+fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
     val hostState = remember { SnackbarHostState() }
-    val snackbar = node.optString("snackbar").takeIf { it.isNotEmpty() }
-    val action = node.optJSONObject("snackbar_action")
-    val drawer = node.optJSONObject("drawer")
+    val snackbar = node.stringOr("snackbar").takeIf { it.isNotEmpty() }
+    val action = node.objOrNull("snackbar_action")
+    val drawer = node.objOrNull("drawer")
     val drawerState = androidx.compose.material3.rememberDrawerState(
         androidx.compose.material3.DrawerValue.Closed)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -642,17 +663,17 @@ fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
         if (snackbar != null) {
             val result = hostState.showSnackbar(
                 message = snackbar,
-                actionLabel = action?.optString("label")?.takeIf { it.isNotEmpty() },
+                actionLabel = action?.stringOr("label")?.takeIf { it.isNotEmpty() },
                 duration = SnackbarDuration.Short)
             if (result == SnackbarResult.ActionPerformed)
-                ctx.action(action?.optJSONObject("on_tap"))
+                ctx.action(action?.objOrNull("on_tap"))
         }
     }
     val scaffold: @Composable () -> Unit = {
         Scaffold(
             snackbarHost = { SnackbarHost(hostState) },
             topBar = {
-                val topBar = node.optJSONObject("top_bar")
+                val topBar = node.objOrNull("top_bar")
                 if (topBar != null || drawer != null) {
                     // §17.6: the top bar is drawn edge-to-edge, so it MUST clear
                     // the system status bar itself (a plain Row, unlike M3's
@@ -679,11 +700,11 @@ fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
                 }
             },
             floatingActionButton = {
-                node.optJSONObject("fab")?.let { RenderNode(it, ctx.child(it, 2)) }
+                node.objOrNull("fab")?.let { RenderNode(it, ctx.child(it, 2)) }
             },
             bottomBar = {
-                val floatingToolbar = node.optJSONObject("floating_toolbar")
-                val bottomBar = node.optJSONObject("bottom_bar")
+                val floatingToolbar = node.objOrNull("floating_toolbar")
+                val bottomBar = node.objOrNull("bottom_bar")
                 if (floatingToolbar != null || bottomBar != null) {
                     Column {
                         floatingToolbar?.let {
@@ -720,8 +741,8 @@ fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
             val bodyModifier = Modifier.padding(inner)
                 .consumeWindowInsets(inner)
                 .imePadding()
-            val onRefresh = node.optJSONObject("on_refresh")
-            val body = node.optJSONObject("body")
+            val onRefresh = node.objOrNull("on_refresh")
+            val body = node.objOrNull("body")
             if (onRefresh != null) {
                 var refreshing by remember { mutableStateOf(false) }
                 LaunchedEffect(refreshing) {
@@ -757,7 +778,7 @@ fun RenderScaffold(node: JSONObject, ctx: RenderCtx) {
 
 // The dialog rebinding lives in RenderCtx.action (T3c) — button sites are
 // plain dispatches like every other descriptor site.
-fun onButton(onTap: JSONObject?, ctx: RenderCtx) {
+fun onButton(onTap: JsonObject?, ctx: RenderCtx) {
     onTap ?: return
     ctx.action(onTap)
 }

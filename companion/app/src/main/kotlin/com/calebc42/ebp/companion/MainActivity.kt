@@ -27,7 +27,7 @@ import com.calebc42.ebp.companion.render.EbpTheme
 import com.calebc42.ebp.companion.render.RenderDialogRoot
 import com.calebc42.ebp.companion.render.RenderNode
 import com.calebc42.ebp.companion.render.RenderPieMenu
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
 
 class MainActivity : ComponentActivity() {
 
@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
                     // so opening a dialog or pie menu recomposes only that host
                     // — not the surface tree. Reading all three here put them in
                     // one recompose scope, and because every render composable
-                    // takes an (unstable) JSONObject, a dialog opening
+                    // takes an (unstable) JsonObject, a dialog opening
                     // re-executed the entire surface render.
                     SurfaceHost(app.currentSpec, bridge)
                     PieMenuHost(app.currentPieMenu, bridge)
@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
 
 @androidx.compose.runtime.Composable
 private fun SurfaceHost(
-    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
     bridge: DeviceBridge,
 ) {
     val shown by flow.collectAsState()
@@ -116,7 +116,7 @@ private fun ConfirmHost(bridge: DeviceBridge) {
 
 @androidx.compose.runtime.Composable
 private fun PieMenuHost(
-    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
     bridge: DeviceBridge,
 ) {
     val pie by flow.collectAsState()
@@ -125,7 +125,7 @@ private fun PieMenuHost(
 
 @androidx.compose.runtime.Composable
 private fun DialogHost(
-    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JSONObject>?>,
+    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
     bridge: DeviceBridge,
 ) {
     val dialog by flow.collectAsState()

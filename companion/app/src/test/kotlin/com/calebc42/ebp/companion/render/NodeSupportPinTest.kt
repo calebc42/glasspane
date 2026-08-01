@@ -13,6 +13,9 @@ package com.calebc42.ebp.companion.render
 import com.calebc42.ebp.wire.CORE_NODE_SET
 import com.calebc42.ebp.wire.NODE_SCHEMA
 import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -140,12 +143,12 @@ class NodeSupportPinTest {
 
     @Test
     fun lazyKeysAreStableAndUnique() {
-        val children = org.json.JSONArray("""[
+        val children = Json.parseToJsonElement("""[
             {"t":"text","key":"a"},
             {"t":"text_input","id":"field"},
             {"t":"text"},
             {"t":"text","key":"a"}
-        ]""")
+        ]""") as JsonArray
         val keys = lazyChildKeys(children)
         assertEquals(listOf("k:a", "id:field", "i:2", "k:a#1"), keys)
         assertEquals(keys.size, keys.toSet().size)
@@ -153,11 +156,12 @@ class NodeSupportPinTest {
 
     @Test
     fun identityPathPrefersKeyThenIdThenTreePath() {
-        val n = org.json.JSONObject("""{"t":"text","key":"k","id":"i"}""")
+        val n = Json.parseToJsonElement(
+            """{"t":"text","key":"k","id":"i"}""") as JsonObject
         assertEquals("/k:k", identityPath("", n, 3))
-        assertEquals("/id:i", identityPath("",
-            org.json.JSONObject("""{"t":"text","id":"i"}"""), 3))
-        assertEquals("/3:text", identityPath("",
-            org.json.JSONObject("""{"t":"text"}"""), 3))
+        assertEquals("/id:i", identityPath("", Json.parseToJsonElement(
+            """{"t":"text","id":"i"}""") as JsonObject, 3))
+        assertEquals("/3:text", identityPath("", Json.parseToJsonElement(
+            """{"t":"text"}""") as JsonObject, 3))
     }
 }

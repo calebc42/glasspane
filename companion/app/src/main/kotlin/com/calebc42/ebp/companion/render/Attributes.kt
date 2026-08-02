@@ -4,7 +4,8 @@
 // min/max bounds, fill_fraction, aspect_ratio, bg, corner, border, alpha,
 // clip — in the SPEC's visual-op order corner → clip → bg → border. `weight`
 // and `align_self` need the parent Row/Column scope and are applied by the
-// container cases. Out-of-range numbers are SKIPPED, not applied: wire
+// container cases in Renderer.kt (RenderRowChildren/RenderColumnChildren).
+// Out-of-range numbers are SKIPPED, not applied: wire
 // validation already rejected invalid content, so anything reaching here is
 // either valid or a nonconforming sender the renderer must survive without
 // throwing (a composition throw blanks the whole surface — poc-v1's safe*

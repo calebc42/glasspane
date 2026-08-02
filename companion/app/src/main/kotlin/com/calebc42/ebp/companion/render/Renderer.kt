@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -46,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
@@ -333,7 +335,12 @@ fun RenderChildren(children: JsonArray?, ctx: RenderCtx) {
 }
 
 // SPEC 16.5: `weight` distributes remaining main-axis space — it needs the
-// Row/Column scope, so the container cases route through these.
+// Row/Column scope, so the container cases route through these. `align_self`
+// (start|center|end|stretch, SPEC 16.5) overrides the parent's CROSS-axis
+// alignment and needs the same scope: in a Row the cross axis is vertical, in
+// a Column it is horizontal. Attributes.kt has always claimed the containers
+// applied it; they did not, so it was a declared, elisp-validated, never-read
+// member — the `badge ""` defect class.
 private fun weightOf(node: JsonObject): Float? =
     node.doubleOr("weight", 0.0).toFloat().takeIf { it.isFinite() && it > 0f }
 
@@ -342,7 +349,14 @@ fun RowScope.RenderRowChildren(children: JsonArray?, ctx: RenderCtx) {
     if (children == null) return
     for (i in 0 until children.size) {
         val child = children[i] as? JsonObject ?: continue
-        val m = weightOf(child)?.let { Modifier.weight(it) } ?: Modifier
+        var m = weightOf(child)?.let { Modifier.weight(it) } ?: Modifier
+        m = when (child.stringOr("align_self")) {
+            "start" -> m.align(Alignment.Top)
+            "center" -> m.align(Alignment.CenterVertically)
+            "end" -> m.align(Alignment.Bottom)
+            "stretch" -> m.fillMaxHeight()
+            else -> m
+        }
         RenderNode(child, ctx.child(child, i), m)
     }
 }
@@ -352,7 +366,14 @@ fun ColumnScope.RenderColumnChildren(children: JsonArray?, ctx: RenderCtx) {
     if (children == null) return
     for (i in 0 until children.size) {
         val child = children[i] as? JsonObject ?: continue
-        val m = weightOf(child)?.let { Modifier.weight(it) } ?: Modifier
+        var m = weightOf(child)?.let { Modifier.weight(it) } ?: Modifier
+        m = when (child.stringOr("align_self")) {
+            "start" -> m.align(Alignment.Start)
+            "center" -> m.align(Alignment.CenterHorizontally)
+            "end" -> m.align(Alignment.End)
+            "stretch" -> m.fillMaxWidth()
+            else -> m
+        }
         RenderNode(child, ctx.child(child, i), m)
     }
 }
@@ -426,6 +447,11 @@ private fun RenderTextInput(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             }
         },
         label = node.stringOr("label").takeIf { it.isNotEmpty() }
+            ?.let { { Text(it) } },
+        // SPEC 17.4 `hint` is the M3 placeholder — shown while the field is
+        // unfocused and empty. It was declared, elisp-validated and never
+        // passed here, so every authored hint rendered as nothing.
+        placeholder = node.stringOr("hint").takeIf { it.isNotEmpty() }
             ?.let { { Text(it) } },
         singleLine = singleLine,
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(

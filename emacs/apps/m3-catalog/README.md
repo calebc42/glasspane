@@ -73,8 +73,11 @@ wrapped nodes.
    node.
 4. Re-use the upstream sample's own strings ("Like", "Elevated
    Button", "Localized description") — that is most of the fidelity.
-5. Every tap handler is `(jetpacs-m3-demo "…")`, which pops a
-   snackbar.  Never register new actions from a component module.
+5. Every tap handler is `(jetpacs-m3-demo "…")`, which pops a **toast**
+   — `jetpacs-shell-notify` injects `scaffold.snackbar` only when the
+   pushed spec's `:t` is `"scaffold"`, and this app's root is a
+   `multi_view`, so every message takes the non-scaffold fallback.
+   Never register new actions from a component module.
 6. Stateful nodes (`checkbox`, `switch`, `slider`, `text_input`,
    `enum_list`, `collapsible`, `tabs`) need an `id` that is **unique
    across the whole app**: prefix it with the slug, e.g.

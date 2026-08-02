@@ -7,11 +7,16 @@ activity-compose = "1.10.0"
 kotlinx-serialization = "1.8.0"
 junit = "4.13.2"
 compose-icons = "1.7.8"
+# The M3 Expressive line. 1.4.0 (BOM-managed) ships the design TOKENS for
+# SplitButton/ButtonGroup/LoadingIndicator/FloatingToolbar/ToggleButton but not
+# their composables, and lacks MaterialShapes and FloatingActionButtonMenu
+# outright — the catalog's upstream pins this alpha for exactly that reason.
+material3 = "1.5.0-alpha16"
 
 [libraries]
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
-androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 # Last standalone release; the icons artifacts left the Compose BOM in 2024.
 androidx-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "compose-icons" }

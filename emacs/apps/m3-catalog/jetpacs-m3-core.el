@@ -35,6 +35,8 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+;; `jetpacs-theme-mode' backs the ThemePicker's System/Light/Dark row.
+(require 'jetpacs-theme)
 
 (defconst jetpacs-m3-owner "m3catalog"
   "The D1 owner whose surface hosts the catalog.
@@ -475,6 +477,29 @@ instead, because a Node tree cannot nest a scaffold."
                   :on-change (jetpacs-action "m3catalog.pref"
                                              :args (list :key key))))
 
+(defun jetpacs-m3--polarity-row ()
+  "Upstream ThemePicker's Theme section: System / Light / Dark.
+Not a Companion-owned setting Emacs can only mirror -- the direction of
+control runs the other way.  `theme.set' carries an OPTIONAL `dark'
+sent BY Emacs, and amendment #36 exists precisely to spell the
+three-way choice: a real boolean forces the polarity and only its
+ABSENCE falls through to the device's own setting.  `jetpacs-theme-mode'
+already names those three, and its `:set' pushes on the live
+connection.
+
+`:value' must name an authored option, so the two modes upstream does
+not offer (`mirror', `off') select nothing rather than pass a value the
+list does not carry."
+  (let ((mode (symbol-name jetpacs-theme-mode)))
+    (jetpacs-enum-list
+     "m3-pref-polarity"
+     (list (jetpacs-enum-option "System" "system")
+           (jetpacs-enum-option "Light" "light")
+           (jetpacs-enum-option "Dark" "dark"))
+     :value (car (member mode '("system" "light" "dark")))
+     :on-change (jetpacs-action "m3catalog.pref"
+                                :args (list :key "polarity")))))
+
 (defun jetpacs-m3--unsupported-row (label reason)
   "A theme row for an upstream setting with no EBP equivalent."
   (jetpacs-chrome-row label :subtitle reason :icon "block"
@@ -496,9 +521,7 @@ instead, because a Node tree cannot nest a scaffold."
     (jetpacs-m3--unsupported-row
      "Color mode"
      "Baseline/Custom/Dynamic — the Companion owns the color scheme")
-    (jetpacs-m3--unsupported-row
-     "Light/Dark/System"
-     "Set by the Companion; Emacs mirrors it with jetpacs-theme-mode")
+    (jetpacs-m3--polarity-row)
     (jetpacs-m3--unsupported-row
      "Font scale" "No text-scale member in the EBP node vocabulary")
     (jetpacs-m3--unsupported-row
@@ -583,6 +606,13 @@ no user in front of it."
                       (not jetpacs-m3-mark-expressive)))
       ("only" (setopt jetpacs-m3-show-only-expressive
                       (not jetpacs-m3-show-only-expressive)))
+      ;; §14.3 injects the picked option's value; `setopt' runs
+      ;; `jetpacs-theme-mode's :set, which pushes theme.set itself.
+      ("polarity"
+       (let ((value (plist-get args :value)))
+         (if (member value '("system" "light" "dark"))
+             (setopt jetpacs-theme-mode (intern value))
+           (setq key nil))))
       (_ (setq key nil)))
     (if (null key)
         'rejected

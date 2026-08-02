@@ -20,10 +20,16 @@
 ;; claims this Example screen's own `drawer' slot -- a Node tree cannot
 ;; nest a scaffold -- and gets its sheet back verbatim.
 ;;
-;; The permanent and dismissible samples do not, because that one wire
-;; member names ONE drawer: there is no flavor member on the scaffold,
-;; and neither a sheet standing open beside the body forever nor a sheet
-;; that shoves the body sideways with no scrim can be asked for.
+;; The PERMANENT sample needs no drawer slot at all, which is what this
+;; module first got wrong.  `PermanentNavigationDrawer' holds no
+;; `DrawerState', draws no scrim and offers no hamburger: it IS a Row of
+;; (240dp sheet, content).  A `row' of a `surface' and a weighted
+;; `column' is that, exactly, out of nodes the wire already carries.
+;;
+;; The DISMISSIBLE sample still cannot be asked for: its sheet shoves
+;; the body sideways and leaves it live and scrimless, driven by a
+;; `DrawerState' the wire has no member for, and the one `drawer' member
+;; names ONE drawer with no flavor to select.
 ;;
 ;; NavigationDrawerItem is not a node type, but nothing in it is missing
 ;; from the sheet's node content: it is an icon beside a label in a
@@ -64,13 +70,20 @@ and labels each item `item.name.substringAfterLast(\".\")', so the label
 is the icon's own CamelCase name -- reproduced here literally, beside
 the snake_case wire name of the same icon.")
 
-(defun jetpacs-m3-navigation-drawer--item (icon label selected)
+(defun jetpacs-m3-navigation-drawer--item (prefix icon label selected)
   "One NavigationDrawerItem: ICON beside LABEL, filled when SELECTED.
 There is no drawer-item node, and none is needed: the item is an icon
 and a text in a tappable full-height pill, and its selected container is
 `secondaryContainer' in M3, which is the `:bg' universal attribute on
 the pill.  Tapping selects upstream (and closes the drawer); here it
-reports, like every other recreated handler."
+reports, like every other recreated handler.
+
+PREFIX namespaces the `:key'.  A §16.1 `key' is presentation identity
+scoped to its parent, not a document-unique `id' (only `:id' is
+collected by `jetpacs--collect-node-ids'), so two sheets could legally
+share one -- but the modal and permanent sheets are different parents on
+different screens, and distinct prefixes keep them independently
+reconcilable."
   (jetpacs-with-attrs
    (jetpacs-box
     (jetpacs-with-attrs
@@ -79,23 +92,58 @@ reports, like every other recreated handler."
                   :spacing 12 :align "center" :fill t)
      :pad (list :horizontal 16 :vertical 12))
     :on-tap (jetpacs-m3-demo label))
-   :key (concat "navigation-drawer-" icon)
+   :key (concat prefix "-" icon)
    :bg (and selected "secondary_container")
    :corner 28))
 
-(defun jetpacs-m3-navigation-drawer--sheet ()
-  "The ModalDrawerSheet of upstream ModalNavigationDrawerSample.
-A vertically scrolling Column, a 12dp Spacer, then the 18 items, the
-first (`items[0]', AccountCircle) selected."
+(defun jetpacs-m3-navigation-drawer--items-column (prefix &rest options)
+  "The 12dp Spacer then the 18 items, the first selected, keyed by PREFIX.
+OPTIONS are appended to the `jetpacs-column' call.  Every sample in
+DrawerSamples.kt builds this same column; only its host differs."
   (let ((selected (cdr (car jetpacs-m3-navigation-drawer--items))))
     (apply #'jetpacs-column
            (append
             (list (jetpacs-with-attrs (jetpacs-spacer) :height 12))
             (mapcar (lambda (cell)
                       (jetpacs-m3-navigation-drawer--item
-                       (car cell) (cdr cell) (equal (cdr cell) selected)))
+                       prefix (car cell) (cdr cell)
+                       (equal (cdr cell) selected)))
                     jetpacs-m3-navigation-drawer--items)
-            (list :spacing 4 :scroll t)))))
+            options))))
+
+(defun jetpacs-m3-navigation-drawer--sheet ()
+  "The ModalDrawerSheet of upstream ModalNavigationDrawerSample.
+A vertically scrolling Column, a 12dp Spacer, then the 18 items, the
+first (`items[0]', AccountCircle) selected."
+  (jetpacs-m3-navigation-drawer--items-column
+   "navigation-drawer-modal" :spacing 4 :scroll t))
+
+(defun jetpacs-m3-navigation-drawer--permanent ()
+  "Upstream PermanentNavigationDrawerSample.
+`PermanentNavigationDrawer' IS a Row of (sheet, content) with no
+`DrawerState', no scrim and no hamburger -- so unlike its two siblings
+this sample never wanted the scaffold's `drawer' slot, and every piece
+of it is on the wire: a `row', a `surface' whose omitted shape is the
+RectangleShape `PermanentDrawerSheet' draws, `:width 240', and
+`:weight 1' for the content beside it.
+
+The sheet column deliberately does NOT carry `:scroll t'.  The Example
+screen already wraps the body in a scrolling column, and a
+`verticalScroll' inside a `verticalScroll' is measured with an infinite
+maximum height and throws, blanking the surface; the outer scroll
+already carries the 18 items."
+  (jetpacs-row
+   (jetpacs-with-attrs
+    (jetpacs-surface
+     (jetpacs-m3-navigation-drawer--items-column
+      "navigation-drawer-permanent" :spacing 4)
+     :color "surface")
+    :width 240)
+   (jetpacs-with-attrs
+    (jetpacs-column (jetpacs-text "Application content")
+                    :align "center" :fill t)
+    :weight 1 :padding 16)
+   :align "top" :fill t))
 
 (jetpacs-m3-defcomponent "navigation-drawer"
   :name "Navigation drawer"
@@ -115,8 +163,7 @@ first (`items[0]', AccountCircle) selected."
     "PermanentNavigationDrawerSample"
     "Navigation drawer examples"
     :source jetpacs-m3-navigation-drawer--source
-    :unsupported
-    "The scaffold drawer member is a ModalNavigationDrawer with a scrim and nothing else: there is no variant member asking for a PermanentDrawerSheet, the 240dp column that stands open beside the body with no drawer state at all, which is the only thing this sample adds to the modal one.")
+    :build #'jetpacs-m3-navigation-drawer--permanent)
    (jetpacs-m3-example
     "DismissibleNavigationDrawerSample"
     "Navigation drawer examples"

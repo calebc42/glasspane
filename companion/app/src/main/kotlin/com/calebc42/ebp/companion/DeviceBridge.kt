@@ -219,7 +219,15 @@ class DeviceBridge(
                 // SPEC 5.2: one session at a time; the newcomer supersedes.
                 current?.runCatching { close() }
                 current = socket
-                thread(name = "ebp-conn", isDaemon = true) { serve(socket) }
+                // Neither may the CONNECTION thread. `serve` sets up a whole
+                // engine before it ever reads, and every line of that setup
+                // runs on a socket a newcomer may already have closed; an
+                // escape here is a FATAL EXCEPTION on a daemon thread, i.e.
+                // the whole Companion dies while merely being reconnected to.
+                thread(name = "ebp-conn", isDaemon = true) {
+                    runCatching { serve(socket) }
+                    socket.runCatching { close() }
+                }
             }
         } catch (_: Exception) {
             // The listener thread must never take down the host app.
@@ -591,9 +599,16 @@ class DeviceBridge(
             onTheme(payload)
         }
         engine.pieMenuListener = { id, spec -> onPieMenuChanged(id, spec) }
-        val input = socket.getInputStream()
-        val buffer = ByteArray(8192)
         try {
+            // INSIDE the try: SPEC 5.2's newest-wins supersession closes this
+            // socket from the accept loop the instant a newcomer arrives, and
+            // that can land before this thread ever reaches getInputStream().
+            // Outside the try it threw SocketException("Socket is closed") out
+            // of the thread and killed the process — which is what a retrying
+            // `jetpacs-start' produced every time, since its second dial
+            // superseded the first mid-setup.
+            val input = socket.getInputStream()
+            val buffer = ByteArray(8192)
             while (engine.state != SessionState.CLOSED) {
                 val n = input.read(buffer)
                 if (n < 0) break

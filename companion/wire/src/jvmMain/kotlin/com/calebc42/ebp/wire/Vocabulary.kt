@@ -17,7 +17,7 @@ val UNIVERSAL_NODE_ATTRIBUTES: Set<String> = setOf("key", "id", "scroll_here", "
 /** SPEC 14.6: node types whose id/value participate in input state. */
 val STATEFUL_NODE_TYPES: Set<String> = setOf(
     "text_input", "checkbox", "switch", "enum_list", "slider", "editor",
-    "search_bar",
+    "search_bar", "dropdown", "segmented_button",
     // Conditionally stateful: a plain button carries no state and needs no
     // id. SpecValidator's isStateful predicate registers these ONLY when
     // `checked` is present — see the `editor` precedent.
@@ -73,6 +73,10 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "pane_scaffold" to NodeRow(setOf("list", "detail"), setOf("extra", "variant")),
     "navigation_rail" to NodeRow(setOf("items"), setOf("variant", "expanded", "arrangement", "header")),
     "search_bar" to NodeRow(setOf("id"), setOf("value", "hint", "variant", "on_search", "on_change", "leading_icon", "trailing_icon", "children", "enabled")),
+    "dropdown" to NodeRow(setOf("id", "options"), setOf("value", "label", "hint", "editable", "on_change", "enabled")),
+    "segmented_button" to NodeRow(setOf("id", "options"), setOf("value", "multi_select", "on_change", "enabled")),
+    "app_bar_row" to NodeRow(setOf("items"), setOf("overflow_icon", "max_items")),
+    "app_bar_column" to NodeRow(setOf("items"), setOf("overflow_icon", "max_items")),
 )
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(
@@ -121,6 +125,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "display_mode" to "string",
     "document" to "identifier",
     "drawer" to "node",
+    "editable" to "boolean",
     "elevation" to "dp",
     "enabled" to "boolean",
     "extra" to "node",
@@ -157,6 +162,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "marks" to "date-marks-object",
     "mask" to "string",
     "max" to "number",
+    "max_items" to "positive-integer",
     "max_length" to "positive-integer",
     "max_lines" to "positive-integer",
     "max_month" to "yyyy-mm",
@@ -173,6 +179,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "ops" to "canvas-op-array",
     "options" to "enum-option-array",
     "orientation" to "string",
+    "overflow_icon" to "identifier",
     "padding" to "dp",
     "pager_only" to "boolean",
     "password" to "boolean",

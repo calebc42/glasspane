@@ -481,7 +481,21 @@ class SurfaceStore(
             "switch" -> isJsonBoolean(value)
             "button", "icon_button" -> "checked" in node && isJsonBoolean(value)
             "search_bar" -> value is JsonPrimitive && value.isString
-            "enum_list" -> {
+            // §17.4 dropdown: the editable form's value is the TEXT (any
+            // string, like text_input); the plain form's is an option value,
+            // like enum_list single-select.
+            "dropdown" ->
+                if (node.boolOr("editable"))
+                    value is JsonPrimitive && value.isString
+                else {
+                    val options = node.reqArr("options")
+                    value !is JsonArray &&
+                        options.any { jsonValueEquals(it.jsonObject["value"], value) }
+                }
+            // §17.4: segmented_button's value schema mirrors enum_list exactly
+            // (one option value, or an array of them under multi_select),
+            // minus allow_add, which it does not carry.
+            "enum_list", "segmented_button" -> {
                 val options = node.reqArr("options")
                 val legal = { v: JsonElement? ->
                     options.any { jsonValueEquals(it.jsonObject["value"], v) } ||
@@ -537,7 +551,10 @@ class SurfaceStore(
             // null when absent: a plain button has no authored value at all.
             "button", "icon_button" -> node["checked"]
             "search_bar" -> node["value"] ?: JsonPrimitive("")
-            "enum_list" -> node["value"]
+            "dropdown" ->
+                if (node.boolOr("editable")) node["value"] ?: JsonPrimitive("")
+                else node["value"]
+            "enum_list", "segmented_button" -> node["value"]
                 ?: if (node.boolOr("multi_select")) JsonArray(emptyList()) else null
             "slider" ->
                 if ("value_end" in node) {

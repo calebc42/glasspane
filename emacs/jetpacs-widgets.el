@@ -49,8 +49,9 @@
     "assist_chip" "menu" "text_input" "editor" "checkbox" "switch"
     "enum_list" "date_button" "time_button" "slider" "chart" "canvas"
     "month_grid" "scaffold" "tooltip" "split_button" "pane_scaffold"
-    "navigation_rail" "search_bar")
-  "The 44 EBP node types (contract.json `node_types').")
+    "navigation_rail" "search_bar" "dropdown" "segmented_button"
+    "app_bar_row" "app_bar_column")
+  "The 48 EBP node types (contract.json `node_types').")
 
 (defconst jetpacs-core-node-set
   '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
@@ -1198,6 +1199,113 @@ submit with the query injected), :on-change (per keystroke),
                    :leading_icon leading-icon :trailing_icon trailing-icon
                    :enabled enabled)))
 
+(cl-defun jetpacs-dropdown (id options &key value label hint editable
+                               on-change enabled)
+  "An exposed dropdown identified by ID over OPTIONS (SPEC §17.4).
+M3's ExposedDropdownMenuBox: the popup anchored to a FIELD, which
+`jetpacs-menu' (popup off its own icon) and `jetpacs-text-input' (no
+menu anchor) cannot compose.  OPTIONS are from `jetpacs-enum-option'.
+
+Plain (no EDITABLE): the field is read-only, shows the picked option's
+label, and VALUE is an option value — enum_list's schema exactly.
+EDITABLE: the field is a real text field whose TEXT is the value,
+published per keystroke, and the popup filters the options to those
+whose label contains it — locally, no round trip.  LABEL and HINT are
+the field's own slots; ON-CHANGE dispatches on an option pick."
+  (jetpacs--check-identifier id ":id")
+  (when value
+    (unless (or (stringp value) (numberp value) (memq value '(t :json-false)))
+      (error "jetpacs-dropdown: :value must be a string, number, or boolean, got %S" value))
+    (unless (or (eq editable t)
+                (cl-member value
+                           (mapcar (lambda (o) (plist-get o :value)) options)
+                           :test #'jetpacs--json-equal))
+      (error "jetpacs-dropdown: value %S is not among options (SPEC 17.4)" value)))
+  (when label (jetpacs--require-string label ":label"))
+  (when hint (jetpacs--require-string hint ":hint"))
+  (when editable (jetpacs--check-bool editable ":editable"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "dropdown"
+                 :id id :options (vconcat options) :value value
+                 :label label :hint hint :editable editable
+                 :on_change on-change :enabled enabled))
+
+(cl-defun jetpacs-segmented-button (id options &key value multi-select
+                                       on-change enabled)
+  "A connected segmented track identified by ID over OPTIONS (SPEC §17.4).
+M3's Single/MultiChoiceSegmentedButtonRow: per-segment
+itemShape(index, count), the fused seam, and the checked crossfade are
+the renderer's own, which is why this is a node and not a styling of
+`jetpacs-enum-list'.  The value schema mirrors enum_list exactly: VALUE
+is one option value, or (with MULTI-SELECT) a list/vector of distinct
+option values.  An option's :icon draws before its label."
+  (jetpacs--check-identifier id ":id")
+  (when multi-select (jetpacs--check-bool multi-select ":multi-select"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when (and (eq multi-select t) value)
+    (cond ((listp value) (setq value (vconcat value)))
+          ((vectorp value))
+          (t (error "jetpacs-segmented-button: multi_select :value must be a list or vector, got %S" value)))
+    (let ((elts (append value nil)))
+      (unless (= (length elts)
+                 (length (cl-remove-duplicates elts :test #'jetpacs--json-equal)))
+        (error "jetpacs-segmented-button: multi_select :value must have distinct values (SPEC 17.4)"))))
+  (let ((option-vals (mapcar (lambda (o) (plist-get o :value)) options)))
+    (unless (= (length option-vals)
+               (length (cl-remove-duplicates option-vals :test #'jetpacs--json-equal)))
+      (error "jetpacs-segmented-button: option values must be distinct under SPEC 4.3 (17.4)"))
+    (when value
+      (dolist (s (if (vectorp value) (append value nil) (list value)))
+        (unless (cl-member s option-vals :test #'jetpacs--json-equal)
+          (error "jetpacs-segmented-button: value %S is not among options (SPEC 17.4)" s)))))
+  (jetpacs--node "segmented_button"
+                 :id id :options (vconcat options) :value value
+                 :multi_select multi-select
+                 :on_change on-change :enabled enabled))
+
+(cl-defun jetpacs-app-bar-item (label icon on-tap &key enabled)
+  "One item of an app-bar overflow strip (SPEC §17.3).
+LABEL is required — it is the item's menu row when it overflows and its
+accessible name inline; ICON is what renders while it fits."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-identifier icon ":icon")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node nil :label label :icon icon :on_tap on-tap :enabled enabled))
+
+(defun jetpacs--app-bar-strip (type items opts)
+  "The shared body of `jetpacs-app-bar-row'/`-column': TYPE over ITEMS."
+  (let ((overflow-icon (plist-get opts :overflow-icon))
+        (max-items (plist-get opts :max-items)))
+    (unless items
+      (error "jetpacs-%s: items must be non-empty (SPEC 17.3)"
+             (string-replace "_" "-" type)))
+    (when overflow-icon (jetpacs--check-identifier overflow-icon ":overflow-icon"))
+    (when max-items (jetpacs--check-integer max-items ":max-items" 1 nil))
+    (jetpacs--node type
+                   :items (vconcat items)
+                   :overflow_icon overflow-icon
+                   :max_items max-items)))
+
+(cl-defun jetpacs-app-bar-row (items &key overflow-icon max-items)
+  "M3's AppBarRow: ITEMS inline while they fit, overflowed at MEASURE time.
+ITEMS are from `jetpacs-app-bar-item'.  Which items fold into the
+overflow menu is a width decision the device makes per layout pass —
+Emacs never learns it, which is why a static row-plus-menu split could
+never be this component.  OVERFLOW-ICON renames the more_vert
+indicator; MAX-ITEMS caps the inline count below what would fit."
+  (jetpacs--app-bar-strip "app_bar_row" items
+                          (list :overflow-icon overflow-icon
+                                :max-items max-items)))
+
+(cl-defun jetpacs-app-bar-column (items &key overflow-icon max-items)
+  "M3's AppBarColumn — `jetpacs-app-bar-row' stood on end (SPEC §17.3)."
+  (jetpacs--app-bar-strip "app_bar_column" items
+                          (list :overflow-icon overflow-icon
+                                :max-items max-items)))
+
 (defconst jetpacs--rail-variants '("standard" "wide"))
 (defconst jetpacs--rail-arrangements '("top" "center" "bottom"))
 
@@ -1565,13 +1673,16 @@ CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
                  :thumb_icon thumb-icon
                  :on_change on-change :enabled enabled))
 
-(defun jetpacs-enum-option (label value)
-  "An EnumOption {label, value} for `jetpacs-enum-list' (SPEC §17.4).
-VALUE is a string, number, or boolean (t or :json-false)."
+(cl-defun jetpacs-enum-option (label value &key icon)
+  "An EnumOption {label, value} for the option-carrying inputs (SPEC §17.4).
+VALUE is a string, number, or boolean (t or :json-false).  ICON is an
+identifier a `jetpacs-segmented-button' segment draws before its label
+under the checked crossfade; `enum_list' and `dropdown' ignore it."
   (jetpacs--require-string label ":label")
   (unless (or (stringp value) (numberp value) (memq value '(t :json-false)))
     (error "jetpacs-enum-option: value must be a string, number, or boolean, got %S" value))
-  (jetpacs--node nil :label label :value value))
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs--node nil :label label :value value :icon icon))
 
 (cl-defun jetpacs-enum-list (id options &key value multi-select allow-add
                                 on-change enabled)
@@ -2224,12 +2335,13 @@ as a single list."
 (defconst jetpacs-input-node-types
   '("icon_button" "chip" "assist_chip" "menu" "checkbox" "switch"
     "enum_list" "slider" "date_button" "time_button" "split_button"
-    "navigation_rail" "search_bar")
+    "navigation_rail" "search_bar" "dropdown" "segmented_button")
   "The §17.4 input node types shared by the reference app and dialog profiles.")
 
 (defconst jetpacs-layout-node-types
   '("flow_row" "surface" "lazy_column" "card" "collapsible"
-    "reorderable_list" "tabs" "table" "pane_scaffold")
+    "reorderable_list" "tabs" "table" "pane_scaffold"
+    "app_bar_row" "app_bar_column")
   "The §17.3 non-core layout node types (reference app profile).")
 
 (defconst jetpacs-viz-node-types '("chart" "canvas" "month_grid")

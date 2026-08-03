@@ -29,12 +29,13 @@ object NodeSupport {
     private val INPUT_NODE_TYPES: Set<String> = sortedSetOf(
         "icon_button", "chip", "assist_chip", "menu", "checkbox", "switch",
         "enum_list", "slider", "date_button", "time_button", "split_button",
-        "navigation_rail", "search_bar")
+        "navigation_rail", "search_bar", "dropdown", "segmented_button")
 
     /** SPEC 17.3 layout nodes (app profile). */
     private val LAYOUT_NODE_TYPES: Set<String> = sortedSetOf(
         "flow_row", "surface", "lazy_column", "card", "collapsible",
-        "reorderable_list", "tabs", "table", "pane_scaffold")
+        "reorderable_list", "tabs", "table", "pane_scaffold",
+        "app_bar_row", "app_bar_column")
 
     /** SPEC 17.5 visualization nodes (app profile). */
     private val VIZ_NODE_TYPES: Set<String> = sortedSetOf("chart", "canvas", "month_grid")

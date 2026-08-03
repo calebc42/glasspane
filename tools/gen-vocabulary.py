@@ -62,7 +62,7 @@ val UNIVERSAL_NODE_ATTRIBUTES: Set<String> = {kt_set(contract["universal_node_at
 /** SPEC 14.6: node types whose id/value participate in input state. */
 val STATEFUL_NODE_TYPES: Set<String> = setOf(
     "text_input", "checkbox", "switch", "enum_list", "slider", "editor",
-    "search_bar",
+    "search_bar", "dropdown", "segmented_button",
     // Conditionally stateful: a plain button carries no state and needs no
     // id. SpecValidator's isStateful predicate registers these ONLY when
     // `checked` is present — see the `editor` precedent.

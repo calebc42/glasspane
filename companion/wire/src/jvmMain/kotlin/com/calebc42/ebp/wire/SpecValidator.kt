@@ -633,7 +633,10 @@ object SpecValidator {
                 if (node.stringOr("label").isEmpty() && node.stringOr("icon").isEmpty())
                     throw ContentInvalid(path, "split_button needs a label, an icon, or both")
             }
-            "enum_list" -> {
+            // §17.4: dropdown and segmented_button share enum_list's option
+            // and value rules; dropdown's `editable` relaxes value-in-options
+            // exactly as allow_add does (the typed text IS the value).
+            "enum_list", "dropdown", "segmented_button" -> {
                 // SPEC 16.1: a wrong-typed required member rejects (1201),
                 // it never crashes the session — so arrOrNull, not reqArr.
                 val options = node.arrOrNull("options")
@@ -651,7 +654,8 @@ object SpecValidator {
                 // SPEC 17.4: unless allow_add, every selected value appears in
                 // options; multi_select values are an array of distinct values.
                 if ("value" in node && !node.isNullOrAbsent("value")) {
-                    val allowAdd = node.boolOr("allow_add")
+                    val allowAdd = node.boolOr("allow_add") ||
+                        (t == "dropdown" && node.boolOr("editable"))
                     fun checkMember(v: JsonElement, p: String) {
                         if (!allowAdd && seen.none { jsonValueEquals(it, v) })
                             throw ContentInvalid(p, "selected value not in options")

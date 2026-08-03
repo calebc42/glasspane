@@ -56,6 +56,8 @@ import androidx.compose.material3.ElevatedSuggestionChip
 import androidx.compose.material3.ElevatedToggleButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -66,6 +68,8 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.Label
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
@@ -78,6 +82,9 @@ import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.RangeSliderState
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SliderState
@@ -1324,4 +1331,184 @@ internal fun RenderSearchBar(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             onExpandedChange = { expanded = it }, modifier = m, content = results)
     else SearchBar(inputField = inputField, expanded = expanded,
         onExpandedChange = { expanded = it }, modifier = m, content = results)
+}
+
+/** §17.4 dropdown: M3's ExposedDropdownMenuBox — the popup anchored to a
+ * FIELD, which `menu` (popup off its own anchor icon) and `text_input`
+ * (no menuAnchor) could never compose.
+ *
+ * Two forms, one node. Plain (`editable` absent): the field is read-only,
+ * displays the picked option's LABEL, and the device-held value keyed on
+ * `id` is the option VALUE, exactly enum_list's schema. Editable: the
+ * field is a real text field, the TEXT is the value (published per
+ * keystroke like text_input), and the popup filters the options to those
+ * whose label contains the text — locally, per keystroke, no round trip. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun RenderDropdown(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val id = node.stringOr("id")
+    val enabled = node.boolOr("enabled", true)
+    val editable = node.boolOr("editable")
+    val onChange = node.objOrNull("on_change")
+    val options = node.arrOrNull("options") ?: return
+    fun labelOf(v: String): String {
+        for (o in options) {
+            val obj = o as? JsonObject ?: continue
+            if ((obj["value"] as? JsonPrimitive)?.content == v)
+                return obj.stringOr("label")
+        }
+        return v
+    }
+    var value by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
+        key = "dd:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+        mutableStateOf((ctx.storeValue(id) as? JsonPrimitive)
+            ?.takeIf { it.isString }?.content ?: node.stringOr("value"))
+    }
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled) expanded = it },
+        modifier = m) {
+        OutlinedTextField(
+            value = if (editable) value else labelOf(value),
+            onValueChange = {
+                if (editable) {
+                    value = it
+                    ctx.state(id, JsonPrimitive(it))
+                }
+            },
+            readOnly = !editable,
+            enabled = enabled,
+            singleLine = true,
+            label = node.stringOr("label").takeIf { it.isNotEmpty() }
+                ?.let { { Text(it) } },
+            placeholder = node.stringOr("hint").takeIf { it.isNotEmpty() }
+                ?.let { { Text(it) } },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            modifier = Modifier
+                .menuAnchor(if (editable) MenuAnchorType.PrimaryEditable
+                    else MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth())
+        // The editable filter is Companion-local presentation: the options
+        // shown are those whose label CONTAINS the draft, case-insensitive
+        // (upstream's own filter), and the authored list is never mutated.
+        val shown = if (editable && value.isNotEmpty())
+            options.filter {
+                (it as? JsonObject)?.stringOr("label")
+                    ?.contains(value, ignoreCase = true) == true
+            }
+        else options.toList()
+        if (shown.isNotEmpty()) ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }) {
+            for (o in shown) {
+                val obj = o as? JsonObject ?: continue
+                val optValue = (obj["value"] as? JsonPrimitive)?.content ?: continue
+                val label = obj.stringOr("label")
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        // Editable publishes the LABEL (it becomes the field
+                        // text); plain publishes the option VALUE (§14.6
+                        // state first, then on_change).
+                        val published = if (editable) label else optValue
+                        value = published
+                        expanded = false
+                        ctx.state(id, JsonPrimitive(published))
+                        if (onChange != null)
+                            ctx.action(onChange, JsonPrimitive(published))
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding)
+            }
+        }
+    }
+}
+
+/** §17.4 segmented_button: the connected single/multi-choice track.
+ *
+ * A node rather than members on enum_list because the three things the
+ * component exists for are renderer behaviour: per-segment
+ * SegmentedButtonDefaults.itemShape(index, count), the fused seam the
+ * row draws (negative spacing no wire dp could carry), and the checked
+ * crossfade + Role.RadioButton semantics. The value schema mirrors
+ * enum_list exactly: one option value, or an array under multi_select. */
+@Composable
+internal fun RenderSegmentedButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val id = node.stringOr("id")
+    val enabled = node.boolOr("enabled", true)
+    val multi = node.boolOr("multi_select")
+    val onChange = node.objOrNull("on_change")
+    val options = node.arrOrNull("options") ?: return
+    val n = options.size
+    val segIcon: @Composable (JsonObject, Boolean) -> (@Composable () -> Unit)? =
+        { obj, active ->
+            obj.stringOr("icon").takeIf { it.isNotEmpty() }?.let { name ->
+                {
+                    SegmentedButtonDefaults.Icon(active = active) {
+                        Icon(IconMap.get(name), contentDescription = null,
+                            modifier = Modifier.size(SegmentedButtonDefaults.IconSize))
+                    }
+                }
+            }
+        }
+    if (multi) {
+        var chosen by remember(ctx.surface, id, ctx.epochOf(id)) {
+            mutableStateOf((ctx.storeValue(id) as? JsonArray)?.toList()
+                ?: (node["value"] as? JsonArray)?.toList() ?: emptyList())
+        }
+        MultiChoiceSegmentedButtonRow(modifier = m) {
+            options.forEachIndexed { i, o ->
+                val obj = o as? JsonObject ?: return@forEachIndexed
+                val v = obj["value"] ?: return@forEachIndexed
+                val checked = chosen.any { jsonValueEquals(it, v) }
+                val slot = segIcon(obj, checked)
+                val body: @Composable () -> Unit = {
+                    Text(obj.stringOr("label"))
+                }
+                val flip: (Boolean) -> Unit = {
+                    chosen = if (checked) chosen.filterNot { jsonValueEquals(it, v) }
+                        else chosen + v
+                    val arr = JsonArray(chosen)
+                    ctx.state(id, arr)          // §14.6 state first
+                    if (onChange != null) ctx.action(onChange, arr)
+                }
+                if (slot != null)
+                    SegmentedButton(checked = checked, onCheckedChange = flip,
+                        shape = SegmentedButtonDefaults.itemShape(index = i, count = n),
+                        enabled = enabled, icon = slot, label = body)
+                else SegmentedButton(checked = checked, onCheckedChange = flip,
+                    shape = SegmentedButtonDefaults.itemShape(index = i, count = n),
+                    enabled = enabled, label = body)
+            }
+        }
+    } else {
+        var value by remember(ctx.surface, id, ctx.epochOf(id)) {
+            mutableStateOf(ctx.storeValue(id) ?: node["value"])
+        }
+        SingleChoiceSegmentedButtonRow(modifier = m) {
+            options.forEachIndexed { i, o ->
+                val obj = o as? JsonObject ?: return@forEachIndexed
+                val v = obj["value"] ?: return@forEachIndexed
+                val selected = value != null && jsonValueEquals(value!!, v)
+                val slot = segIcon(obj, selected)
+                val body: @Composable () -> Unit = {
+                    Text(obj.stringOr("label"))
+                }
+                val pick = {
+                    value = v
+                    ctx.state(id, v)            // §14.6 state first
+                    if (onChange != null) ctx.action(onChange, v)
+                }
+                if (slot != null)
+                    SegmentedButton(selected = selected, onClick = pick,
+                        shape = SegmentedButtonDefaults.itemShape(index = i, count = n),
+                        enabled = enabled, icon = slot, label = body)
+                else SegmentedButton(selected = selected, onClick = pick,
+                    shape = SegmentedButtonDefaults.itemShape(index = i, count = n),
+                    enabled = enabled, label = body)
+            }
+        }
+    }
 }

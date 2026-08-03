@@ -49,6 +49,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AppBarColumn
+import androidx.compose.material3.AppBarMenuState
+import androidx.compose.material3.AppBarOverflowIndicator
+import androidx.compose.material3.AppBarRow
+import androidx.compose.material3.AppBarScope
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
@@ -880,4 +885,48 @@ internal fun RenderPaneScaffold(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         detailPane = detailPane,
         extraPane = extraPane,
         modifier = m)
+}
+
+/** §17.3 app_bar_row / app_bar_column: M3's measuring overflow containers.
+ *
+ * `items` are {icon, label, on_tap, enabled?} records, rendered inline as
+ * icon buttons while they FIT and folded into an overflow menu at measure
+ * time — each folded item's label becoming its menu row. Which items fold
+ * is a width decision made on the device per layout pass; Emacs never
+ * learns it, which is why a static row-plus-menu split could never be
+ * this component. `overflow_icon` renames the more_vert indicator;
+ * `max_items` caps the inline count below what would fit. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun RenderAppBarStrip(
+    node: JsonObject, ctx: RenderCtx, m: Modifier, vertical: Boolean,
+) {
+    val items = node.arrOrNull("items") ?: return
+    val overflowIcon = node.stringOr("overflow_icon")
+    val maxItems = node.doubleOr("max_items", 0.0).toInt()
+        .takeIf { it > 0 } ?: Int.MAX_VALUE
+    val indicator: @Composable (AppBarMenuState) -> Unit =
+        if (overflowIcon.isEmpty()) { state -> AppBarOverflowIndicator(state) }
+        else { state ->
+            IconButton(onClick = { state.show() }) {
+                Icon(IconMap.get(overflowIcon), contentDescription = "More")
+            }
+        }
+    val fill: AppBarScope.() -> Unit = {
+        for (i in 0 until items.size) {
+            val item = items[i] as? JsonObject ?: continue
+            val onTap = item.objOrNull("on_tap")
+            clickableItem(
+                onClick = { if (onTap != null) ctx.action(onTap) },
+                icon = { Icon(IconMap.get(item.stringOr("icon")),
+                    contentDescription = null) },
+                label = item.stringOr("label"),
+                enabled = item.boolOr("enabled", true))
+        }
+    }
+    if (vertical)
+        AppBarColumn(modifier = m, overflowIndicator = indicator,
+            maxItemCount = maxItems) { fill() }
+    else AppBarRow(modifier = m, overflowIndicator = indicator,
+        maxItemCount = maxItems) { fill() }
 }

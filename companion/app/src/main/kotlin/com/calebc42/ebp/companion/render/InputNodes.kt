@@ -17,6 +17,7 @@ package com.calebc42.ebp.companion.render
 
 import android.icu.util.Calendar
 import android.icu.util.TimeZone
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -52,13 +53,16 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -323,7 +327,15 @@ internal fun RenderSwitch(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         node.stringOr("label").takeIf { it.isNotEmpty() }?.let {
             Text(it, modifier = Modifier.weight(1f))
         }
-        Switch(checked = checked, enabled = enabled, onCheckedChange = {
+        val thumbIcon = node.stringOr("thumb_icon")
+        Switch(checked = checked, enabled = enabled,
+            // Drawn only while the LIVE checked value is true, matching the
+            // upstream sample's own lambda.
+            thumbContent = if (thumbIcon.isNotEmpty() && checked) {
+                { Icon(IconMap.get(thumbIcon), null,
+                    Modifier.size(SwitchDefaults.IconSize)) }
+            } else null,
+            onCheckedChange = {
             checked = it
             ctx.state(id, JsonPrimitive(it))
             if (onChange != null) ctx.action(onChange, JsonPrimitive(it))
@@ -473,11 +485,26 @@ internal fun RenderEnumList(node: JsonObject, ctx: RenderCtx, m: Modifier) {
  * toolkit step arithmetic.
  */
 @Composable
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val id = node.stringOr("id")
     val enabled = node.boolOr("enabled", true)
     val onChange = node.objOrNull("on_change")
     val values = node.arrOrNull("values")
+    // §17.4 presentation members. `color` tints the thumb and the active
+    // track together, which is the pair every upstream custom-colour sample
+    // sets; `track` picks M3's centred track; `thumb_icon` names a vector,
+    // since IconMap is the only path a drawable reaches the device.
+    val tint = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
+    val sliderColors = if (tint != null)
+        SliderDefaults.colors(thumbColor = tint, activeTrackColor = tint)
+        else SliderDefaults.colors()
+    val centered = node.stringOr("track") == "centered"
+    val thumbIconName = node.stringOr("thumb_icon")
+    // SliderDefaults.Thumb wants the slider's OWN interaction source, so it is
+    // hoisted and handed to both — otherwise the default thumb loses its
+    // press/hover feedback the moment we supply the slot at all.
+    val interaction = remember { MutableInteractionSource() }
     if (values != null && values.size >= 2) {
         val n = values.size
         fun seedIndex(): Int {
@@ -502,6 +529,19 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             valueRange = 0f..(n - 1).toFloat(),
             steps = (n - 2).coerceAtLeast(0),
             enabled = enabled,
+            colors = sliderColors,
+            track = { st ->
+                if (centered) SliderDefaults.CenteredTrack(st, colors = sliderColors)
+                else SliderDefaults.Track(st, colors = sliderColors)
+            },
+            interactionSource = interaction,
+            thumb = {
+                if (thumbIconName.isNotEmpty())
+                    Icon(IconMap.get(thumbIconName), null,
+                        Modifier.size(24.dp), tint = tint ?: LocalContentColor.current)
+                else SliderDefaults.Thumb(interaction, colors = sliderColors,
+                    enabled = enabled)
+            },
             modifier = m.fillMaxWidth())
     } else {
         val min = node.doubleOr("min", 0.0).toFloat()
@@ -520,6 +560,19 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             },
             valueRange = min..max,
             enabled = enabled,
+            colors = sliderColors,
+            track = { st ->
+                if (centered) SliderDefaults.CenteredTrack(st, colors = sliderColors)
+                else SliderDefaults.Track(st, colors = sliderColors)
+            },
+            interactionSource = interaction,
+            thumb = {
+                if (thumbIconName.isNotEmpty())
+                    Icon(IconMap.get(thumbIconName), null,
+                        Modifier.size(24.dp), tint = tint ?: LocalContentColor.current)
+                else SliderDefaults.Thumb(interaction, colors = sliderColors,
+                    enabled = enabled)
+            },
             modifier = m.fillMaxWidth())
     }
 }

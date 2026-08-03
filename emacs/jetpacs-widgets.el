@@ -764,14 +764,17 @@ Trailing options: :spacing, :align (start/center/end), :arrange, :scroll,
          (align (plist-get opts :align))
          (arrange (plist-get opts :arrange))
          (scroll (plist-get opts :scroll))
+         (reverse-scroll (plist-get opts :reverse-scroll))
          (fill (plist-get opts :fill)))
     (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
+    (when reverse-scroll (jetpacs--check-bool reverse-scroll ":reverse-scroll"))
     (when align (setq align (jetpacs--check-enum align jetpacs--column-aligns ":align")))
     (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
     (when scroll (jetpacs--check-bool scroll ":scroll"))
     (when fill (jetpacs--check-bool fill ":fill"))
     (jetpacs--node "column"
                    :children (jetpacs--as-children (car split))
+                   :reverse_scroll reverse-scroll
                    :spacing spacing :align align :arrange arrange
                    :scroll scroll :fill fill)))
 
@@ -811,18 +814,25 @@ Trailing options: :alignment (top_start..bottom_end), :on-tap."
 
 (defun jetpacs-surface (&rest args)
   "A visual surface container (SPEC §17.3; distinct from a protocol Surface).
-Options: :color, :shape (rounded/rounded_small/circle), :elevation (a dp)."
+Options: :color, :shape (rounded/rounded_small/circle), :elevation (a
+dp of TONAL elevation) and :shadow-elevation (a dp of the cast shadow).
+They are different things: M3 spends `elevation' on tonalElevation, which
+recolors nothing unless the container is the surface role, so a floating
+container needs :shadow-elevation to actually float."
   (let* ((split (jetpacs--children-and-opts args "surface"))
          (opts (cdr split))
          (color (plist-get opts :color))
          (shape (plist-get opts :shape))
-         (elevation (plist-get opts :elevation)))
+         (elevation (plist-get opts :elevation))
+         (shadow (plist-get opts :shadow-elevation)))
     (when color (jetpacs--check-color color))
     (when shape (setq shape (jetpacs--check-enum shape jetpacs--surface-shapes ":shape")))
     (when elevation (jetpacs--check-number elevation ":elevation" 0 nil))
+    (when shadow (jetpacs--check-number shadow ":shadow_elevation" 0 nil))
     (jetpacs--node "surface"
                    :children (jetpacs--as-children (car split))
-                   :color color :shape shape :elevation elevation)))
+                   :color color :shape shape :elevation elevation
+                   :shadow_elevation shadow)))
 
 (defun jetpacs-lazy-column (&rest args)
   "A lazily-composed vertical list preserving array order (SPEC §17.3).
@@ -1083,15 +1093,28 @@ VARIANT flat(default)/elevated/suggestion/elevated_suggestion."
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node nil :label label :on_tap on-tap :icon icon :enabled enabled))
 
-(cl-defun jetpacs-menu (items &key icon enabled)
-  "A menu of ITEMS (from `jetpacs-menu-item') (SPEC §17.4)."
+(defconst jetpacs--menu-initial-scrolls '("start" "end"))
+
+(cl-defun jetpacs-menu (items &key icon initial-scroll enabled)
+  "A menu of ITEMS (from `jetpacs-menu-item') (SPEC §17.4).
+INITIAL-SCROLL is start (default) or end: where the popup opens when the
+item list is longer than the screen."
   (when icon (jetpacs--check-identifier icon ":icon"))
+  (when initial-scroll
+    (setq initial-scroll (jetpacs--check-enum initial-scroll
+                                              jetpacs--menu-initial-scrolls
+                                              ":initial-scroll")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "menu" :items (vconcat items) :icon icon :enabled enabled))
+  (jetpacs--node "menu" :items (vconcat items) :icon icon
+                 :initial_scroll initial-scroll :enabled enabled))
+
+(defconst jetpacs--text-input-variants '("outlined" "filled"))
 
 (cl-defun jetpacs-text-input (id &key value hint label on-change on-submit
                                  single-line min-lines max-lines monospace syntax
-                                 password keyboard autofocus clear-on-submit enabled)
+                                 password keyboard autofocus clear-on-submit
+                                 variant is-error supporting-text prefix suffix
+                                 leading-icon trailing-icon max-length enabled)
   "A text input identified by ID (SPEC §17.4).
 Booleans (SINGLE-LINE, MONOSPACE, PASSWORD, AUTOFOCUS, CLEAR-ON-SUBMIT,
 ENABLED) take t or :json-false.  Enforces the §17.4 line-count, single-line
@@ -1114,6 +1137,15 @@ no-newline, and password constraints at build time."
   (when autofocus (jetpacs--check-bool autofocus ":autofocus"))
   (when clear-on-submit (jetpacs--check-bool clear-on-submit ":clear-on-submit"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when variant
+    (setq variant (jetpacs--check-enum variant jetpacs--text-input-variants ":variant")))
+  (when is-error (jetpacs--check-bool is-error ":is_error"))
+  (when supporting-text (jetpacs--require-string supporting-text ":supporting_text"))
+  (when prefix (jetpacs--require-string prefix ":prefix"))
+  (when suffix (jetpacs--require-string suffix ":suffix"))
+  (when leading-icon (jetpacs--check-identifier leading-icon ":leading_icon"))
+  (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing_icon"))
+  (when max-length (jetpacs--check-integer max-length ":max_length" 1 nil))
   (when (eq single-line t)
     (when (and min-lines (/= min-lines 1))
       (error "jetpacs-text-input: single_line requires :min-lines 1 (SPEC 17.4)"))
@@ -1136,7 +1168,12 @@ no-newline, and password constraints at build time."
                  :single_line single-line :min_lines min-lines :max_lines max-lines
                  :monospace monospace :syntax syntax :password password
                  :keyboard keyboard :autofocus autofocus
-                 :clear_on_submit clear-on-submit :enabled enabled))
+                 :clear_on_submit clear-on-submit
+                 :variant variant :is_error is-error
+                 :supporting_text supporting-text :prefix prefix :suffix suffix
+                 :leading_icon leading-icon :trailing_icon trailing-icon
+                 :max_length max-length
+                 :enabled enabled))
 
 (cl-defun jetpacs-checkbox (id &key checked label on-change enabled)
   "A checkbox identified by ID (SPEC §17.4).
@@ -1149,7 +1186,7 @@ CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
   (jetpacs--node "checkbox" :id id :checked checked :label label
                  :on_change on-change :enabled enabled))
 
-(cl-defun jetpacs-switch (id &key checked label on-change enabled)
+(cl-defun jetpacs-switch (id &key checked label on-change thumb-icon enabled)
   "A switch identified by ID (SPEC §17.4).
 CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
   (jetpacs--check-identifier id ":id")
@@ -1157,7 +1194,9 @@ CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
   (when label (jetpacs--require-string label ":label"))
   (when on-change (jetpacs--check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when thumb-icon (jetpacs--check-identifier thumb-icon ":thumb_icon"))
   (jetpacs--node "switch" :id id :checked checked :label label
+                 :thumb_icon thumb-icon
                  :on_change on-change :enabled enabled))
 
 (defun jetpacs-enum-option (label value)
@@ -1198,25 +1237,34 @@ ALLOW-ADD, every selected value MUST appear in OPTIONS.  No implicit selection."
                  :multi_select multi-select :allow_add allow-add
                  :on_change on-change :enabled enabled))
 
-(cl-defun jetpacs-date-button (label on-pick &key value enabled)
+(cl-defun jetpacs-date-button (label on-pick &key value mode enabled)
   "A date-picker button labeled LABEL dispatching ON-PICK (SPEC §17.4).
 VALUE is a YYYY-MM-DD string."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-pick ":on-pick")
   (when value (jetpacs--check-date value))
+  (when mode (setq mode (jetpacs--check-enum mode '("calendar" "input") ":mode")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "date_button" :label label :on_pick on-pick :value value :enabled enabled))
+  (jetpacs--node "date_button" :label label :on_pick on-pick :value value
+                 :mode mode :enabled enabled))
 
-(cl-defun jetpacs-time-button (label on-pick &key value enabled)
+(cl-defun jetpacs-time-button (label on-pick &key value display-mode enabled)
   "A time-picker button labeled LABEL dispatching ON-PICK (SPEC §17.4).
 VALUE is an HH:MM string in local civil time."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-pick ":on-pick")
   (when value (jetpacs--check-time value))
+  (when display-mode
+    (setq display-mode (jetpacs--check-enum display-mode '("picker" "input")
+                                            ":display-mode")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "time_button" :label label :on_pick on-pick :value value :enabled enabled))
+  (jetpacs--node "time_button" :label label :on_pick on-pick :value value
+                 :display_mode display-mode :enabled enabled))
 
-(cl-defun jetpacs-slider (id on-change &key value min max values enabled)
+(defconst jetpacs--slider-tracks '("default" "centered"))
+
+(cl-defun jetpacs-slider (id on-change &key value min max values
+                             track color thumb-icon enabled)
   "A slider identified by ID dispatching ON-CHANGE (SPEC §17.4).
 Continuous: :min (default 0) < :max (default 1), :value in [min,max].
 Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
@@ -1224,6 +1272,9 @@ Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
   (jetpacs--check-identifier id ":id")
   (jetpacs--check-descriptor on-change ":on-change")
   (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when track (setq track (jetpacs--check-enum track jetpacs--slider-tracks ":track")))
+  (when color (jetpacs--check-color color))
+  (when thumb-icon (jetpacs--check-identifier thumb-icon ":thumb_icon"))
   (cond
    (values
     (when (or min max)
@@ -1246,6 +1297,7 @@ Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
   (jetpacs--node "slider"
                  :id id :on_change on-change :value value
                  :min min :max max :values (and values (vconcat values))
+                 :track track :color color :thumb_icon thumb-icon
                  :enabled enabled))
 
 ;;;; Editor + toolbar (§17.4 editor row, §17.7)

@@ -8,10 +8,11 @@
 // builtins to dialog completion and text_input edits to dialog-local state.
 package com.calebc42.ebp.companion.render
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -20,11 +21,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -37,6 +37,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -428,38 +429,81 @@ private fun RenderTextInput(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         // SPEC 17.4: clear_on_submit resets the field after submit.
         if (node.boolOr("clear_on_submit")) value = ""
     }
+    val isError = node.boolOr("is_error")
+    val supporting = node.stringOr("supporting_text")
+    val leadingName = node.stringOr("leading_icon")
+    val trailingName = node.stringOr("trailing_icon")
+    val prefixText = node.stringOr("prefix")
+    val suffixText = node.stringOr("suffix")
+    // §17.4 shared slots. M3 measures the helper line to the FIELD's own
+    // width and tints it from (enabled, isError, focused), which is exactly
+    // why a sibling `text` node underneath is not a substitute.
+    val labelSlot: (@Composable () -> Unit)? = node.stringOr("label")
+        .takeIf { it.isNotEmpty() }?.let { { Text(it) } }
+    val placeholderSlot: (@Composable () -> Unit)? = node.stringOr("hint")
+        .takeIf { it.isNotEmpty() }?.let { { Text(it) } }
+    val supportingSlot: (@Composable () -> Unit)? =
+        supporting.takeIf { it.isNotEmpty() }?.let { { Text(it) } }
+    val leadingSlot: (@Composable () -> Unit)? =
+        leadingName.takeIf { it.isNotEmpty() }?.let { { Icon(IconMap.get(it), null) } }
+    val trailingSlot: (@Composable () -> Unit)? =
+        trailingName.takeIf { it.isNotEmpty() }?.let { { Icon(IconMap.get(it), null) } }
+    val prefixSlot: (@Composable () -> Unit)? =
+        prefixText.takeIf { it.isNotEmpty() }?.let { { Text(it) } }
+    val suffixSlot: (@Composable () -> Unit)? =
+        suffixText.takeIf { it.isNotEmpty() }?.let { { Text(it) } }
+    val onValueChange: (String) -> Unit = { raw ->
+        // SPEC 17.4: single_line strips every U+000A from entered text.
+        var next = if (singleLine) raw.replace("\n", "") else raw
+        // `max_length` refuses committed text past N — paste and IME included,
+        // the same discipline as the single_line newline rule.
+        val cap = node.doubleOr("max_length", 0.0).toInt()
+        if (cap > 0 && next.length > cap) next = next.take(cap)
+        value = next
+        if (!password) {
+            ctx.state(id, JsonPrimitive(next))
+            onChange?.let { ctx.action(it, JsonPrimitive(next)) }
+        } else if (ctx.inDialog) {
+            ctx.state(id, JsonPrimitive(next))
+        }
+    }
+    val keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+        keyboardType = keyboardTypeOf(node.stringOr("keyboard"), password),
+        imeAction = if (onSubmit != null) androidx.compose.ui.text.input.ImeAction.Done
+            else androidx.compose.ui.text.input.ImeAction.Default)
+    val keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+        onDone = { submit() })
+    if (node.stringOr("variant") == "filled") {
+        TextField(
+            value = value, enabled = enabled, visualTransformation = transform,
+            onValueChange = onValueChange, label = labelSlot,
+            placeholder = placeholderSlot, singleLine = singleLine,
+            isError = isError, supportingText = supportingSlot,
+            leadingIcon = leadingSlot, trailingIcon = trailingSlot,
+            prefix = prefixSlot, suffix = suffixSlot,
+            keyboardOptions = keyboardOptions, keyboardActions = keyboardActions,
+            modifier = m)
+        return
+    }
     OutlinedTextField(
         value = value,
         enabled = enabled,
+        isError = isError,
+        supportingText = supportingSlot,
+        leadingIcon = leadingSlot,
+        trailingIcon = trailingSlot,
+        prefix = prefixSlot,
+        suffix = suffixSlot,
         visualTransformation = transform,
-        onValueChange = { raw ->
-            // SPEC 17.4: single_line strips every U+000A from entered text.
-            val next = if (singleLine) raw.replace("\n", "") else raw
-            value = next
-            // SPEC 14.6: a password MUST NOT emit state.changed. On an app
-            // surface, suppress state entirely; in a dialog the value stays
-            // dialog-local in memory for a dialog.submit capture.
-            if (!password) {
-                ctx.state(id, JsonPrimitive(next))  // state.changed (14.6) or dialog-local
-                onChange?.let { ctx.action(it, JsonPrimitive(next)) } // §14.6: after state.changed
-            } else if (ctx.inDialog) {
-                ctx.state(id, JsonPrimitive(next))  // dialog-local only, in memory
-            }
-        },
-        label = node.stringOr("label").takeIf { it.isNotEmpty() }
-            ?.let { { Text(it) } },
+        onValueChange = onValueChange,
+        label = labelSlot,
         // SPEC 17.4 `hint` is the M3 placeholder — shown while the field is
         // unfocused and empty. It was declared, elisp-validated and never
         // passed here, so every authored hint rendered as nothing.
-        placeholder = node.stringOr("hint").takeIf { it.isNotEmpty() }
-            ?.let { { Text(it) } },
+        placeholder = placeholderSlot,
         singleLine = singleLine,
-        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-            keyboardType = keyboardTypeOf(node.stringOr("keyboard"), password),
-            imeAction = if (onSubmit != null) androidx.compose.ui.text.input.ImeAction.Done
-                else androidx.compose.ui.text.input.ImeAction.Default),
-        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-            onDone = { submit() }),
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
         modifier = m)
 }
 

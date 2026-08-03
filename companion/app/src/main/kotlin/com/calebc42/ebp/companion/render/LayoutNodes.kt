@@ -149,7 +149,8 @@ internal fun RenderColumn(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val scroll = node.boolOr("scroll")
     val fill = node.boolOr("fill")
     val mod = (if (fill) m.fillMaxWidth() else m).let {
-        if (scroll) it.verticalScroll(rememberScrollState()) else it
+        if (scroll) it.verticalScroll(rememberScrollState(),
+            reverseScrolling = node.boolOr("reverse_scroll")) else it
     }
     Column(
         modifier = mod,
@@ -222,7 +223,11 @@ internal fun RenderSurfaceNode(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         modifier = m,
         color = color,
         shape = shape,
-        tonalElevation = (safeDp(node.doubleOr("elevation", 0.0)) ?: 0f).dp) {
+        tonalElevation = (safeDp(node.doubleOr("elevation", 0.0)) ?: 0f).dp,
+        // §17.3: `elevation` is TONAL — applyTonalElevation returns the colour
+        // unchanged for every container but colorScheme.surface, so it can
+        // never make a container float. `shadow_elevation` is the cast shadow.
+        shadowElevation = (safeDp(node.doubleOr("shadow_elevation", 0.0)) ?: 0f).dp) {
         RenderChildren(node.arrOrNull("children"), ctx)
     }
 }

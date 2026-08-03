@@ -1,5 +1,21 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
+> **Ledger state as of 2026-08-03 — 206/279 built, 73 remain.** Landed
+> since this audit was written, beyond the Tier-1 package it triggered:
+> G-26/G-27/G-28/G-29 (scaffold snackbar + refresh members), G-30/G-31
+> (both picker display modes incl. `switchable`), G-37/G-56 (checkbox
+> stroke + tri-state), G-50/G-52/G-53 (text_input selection, mask+filter,
+> content_padding), G-57/G-58/G-59/G-60 (range/vertical/labelled/
+> track-icon sliders), G-73 (`is_refreshing`), icon_button `color`
+> (Tinted), split_button label→optional (the icon-only leading half),
+> tooltip `caret_width`/`caret_height`, `tab_item.tooltip`, and the
+> search-bars/tabs/icon-buttons catalog recreations their earlier wire
+> work was waiting on. Still open: G-12, G-16/17, G-35 pairing, G-39
+> riders, G-41/42, G-44/45 (two_rows), G-48 (sheet), G-49 (dialogs),
+> G-51, G-54/55, G-61/62, G-63/64/65, G-66, G-68..G-72, G-74..G-82, and
+> the Tier-3 node types G-87/G-88/G-89/G-91..G-95 plus the Tier-4
+> protocol members.
+
 The resume of `PLAN-m3-catalog-verification.md`, carried to completion. That
 plan verified 12 of 41 components by hand and stopped; this pass triaged
 **all 217** `:unsupported` examples at once and rolled the result into a

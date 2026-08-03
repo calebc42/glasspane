@@ -1,6 +1,18 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
-> **Ledger state as of 2026-08-03 — 206/279 built, 73 remain.** Landed
+> **Ledger state as of 2026-08-03 (second pass) — 218/279 built, 61
+> remain.** The node wave landed too: G-89 `dropdown` (45th), G-91
+> `segmented_button` (46th — the node owns the fused seam, so G-64
+> negative spacing is no longer needed for it), G-88 `app_bar_row` +
+> `app_bar_column` (47th/48th), and G-87 `carousel` (49th, keyline
+> strategies multi_browse/uncontained/centered_hero; the Fading and
+> MultiAspect samples stay out with corrected reasons). Consumed by
+> menus, segmented-button, bottom-app-bar, floating-toolbar,
+> top-app-bar (adaptive actions) and carousel recreations. Still open
+> among the node types: G-93 fab_menu, G-94 button_group, G-95
+> lazy_grid, plus everything in the note below.
+>
+> Earlier the same day — 206/279: Landed
 > since this audit was written, beyond the Tier-1 package it triggered:
 > G-26/G-27/G-28/G-29 (scaffold snackbar + refresh members), G-30/G-31
 > (both picker display modes incl. `switchable`), G-37/G-56 (checkbox

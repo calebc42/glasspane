@@ -105,7 +105,13 @@ the sample was demonstrating in the first place.")
 (cl-defun jetpacs-m3-example (name description &key source expressive
                                    build slots top-bar unsupported
                                    top-bar-style top-bar-subtitle
-                                   scroll-behavior)
+                                   scroll-behavior
+                                   floating-toolbar-orientation
+                                   floating-toolbar-expanded
+                                   floating-toolbar-placement
+                                   floating-toolbar-fab
+                                   floating-toolbar-scroll
+                                   floating-toolbar-exit-direction)
   "Describe one catalog example; returns the plist the registry stores.
 NAME and DESCRIPTION are upstream's; SOURCE is its sourceUrl; EXPRESSIVE
 mirrors `isExpressive'.
@@ -157,11 +163,24 @@ sample would need; the example then drills into \"Not supported\"."
   (when scroll-behavior (jetpacs--require-string scroll-behavior ":scroll-behavior"))
   (when (and (or top-bar-style scroll-behavior) (not top-bar))
     (error "jetpacs-m3: example %S styles a top bar it does not author" name))
+  (when (and floating-toolbar-orientation
+             (not (plist-member slots :floating-toolbar)))
+    (error "jetpacs-m3: example %S styles a floating toolbar it does not author"
+           name))
   (list :name name :description description :source source
         :expressive (and expressive t)
         :build build :slots slots :top-bar top-bar
         :top-bar-style top-bar-style :top-bar-subtitle top-bar-subtitle
         :scroll-behavior scroll-behavior
+        ;; Booleans ride as a two-element cell so an explicit :json-false
+        ;; survives — `plist-get' cannot tell "false" from "absent", and
+        ;; `floating-toolbar-expanded' has a meaningful false.
+        :floating-toolbar (list :orientation floating-toolbar-orientation
+                                :expanded floating-toolbar-expanded
+                                :placement floating-toolbar-placement
+                                :fab floating-toolbar-fab
+                                :scroll floating-toolbar-scroll
+                                :exit-direction floating-toolbar-exit-direction)
         :unsupported unsupported))
 
 (cl-defun jetpacs-m3-defcomponent (id &key name description guidelines docs
@@ -451,6 +470,23 @@ catalog must stay navigable when one recreation is wrong."
      (slots (jetpacs-m3--slot-hint slots))
      (t (jetpacs-m3--slot-hint nil)))))
 
+(defun jetpacs-m3--toolbar-options (example)
+  "EXAMPLE's §17.6 floating-toolbar styling, as scaffold keyword arguments.
+Each member is emitted only when the example set it — `plist-member', not
+`plist-get', because `:expanded' has a meaningful `:json-false' that
+`plist-get' cannot tell from absent."
+  (let ((tb (plist-get example :floating-toolbar))
+        (out '()))
+    (dolist (pair '((:orientation . :floating-toolbar-orientation)
+                    (:expanded . :floating-toolbar-expanded)
+                    (:placement . :floating-toolbar-placement)
+                    (:fab . :floating-toolbar-fab)
+                    (:scroll . :floating-toolbar-scroll)
+                    (:exit-direction . :floating-toolbar-exit-direction)))
+      (when-let* ((v (plist-get tb (car pair))))
+        (setq out (append out (list (cdr pair) v)))))
+    out))
+
 (defun jetpacs-m3--example-slots (example)
   "EXAMPLE's scaffold slots as a `jetpacs-scaffold' keyword plist."
   (let ((label (plist-get example :name))
@@ -498,9 +534,11 @@ instead, because a Node tree cannot nest a scaffold."
                   (list :top-bar-subtitle v))
                 (when-let* ((v (plist-get example :scroll-behavior)))
                   (list :scroll-behavior v))
+                (jetpacs-m3--toolbar-options example)
                 slots))
       (apply #'jetpacs-chrome-screen (plist-get example :name) body
-             :back back :actions actions slots))))
+             :back back :actions actions
+             (append (jetpacs-m3--toolbar-options example) slots)))))
 
 ;;;; Theme
 

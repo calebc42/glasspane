@@ -9,32 +9,54 @@
 ;; `FloatingToolbarsExamples' (11 examples),
 ;; samples/FloatingToolbarSamples.kt.
 ;;
-;; M3's `FloatingToolbar' composable is not in the Companion's material3
-;; at all (1.4.0; it arrives in 1.5+, per M3-COMPONENT-LOOKUP).  What the
-;; wire has is the `scaffold.floating_toolbar' slot -- CHROME-VOCABULARY's
-;; "Toolbar -- floating", a persistent cluster of contextual actions the
-;; renderer draws as a full-width elevated Surface above the bottom bar --
-;; and `scaffold.fab', which places one node exactly where M3 puts a FAB.
-;; Between them they carry a toolbar's ACTIONS and their order, and
-;; nothing else: no `expanded', no orientation, no Alignment or
-;; ScreenOffset, no scrollBehavior, no AppBarRow overflow.
+;; M3's `FloatingToolbar' is not a node type, but the `scaffold' now
+;; carries one as a slot with six §17.6 members:
+;; `floating_toolbar_orientation' turns the slot from the full-width band
+;; above the bottom bar into M3's REAL pill, floating over the body, and
+;; `floating_toolbar_expanded', `_placement', `_fab', `_scroll' and
+;; `_exit_direction' vary it.  That is most of what these eleven samples
+;; exist to show.
 ;;
-;; Every one of the eleven samples is that cluster plus ONE of those
-;; absent axes -- upstream ships no plain FloatingToolbar sample, because
-;; `expanded' is a required parameter.  So the two whose subject the
-;; scaffold does carry are recreated: the KDoc sample of
-;; `HorizontalFloatingToolbar' itself, whose leading/content/trailing
-;; actions are the band the slot draws, and the one that hands a whole
-;; toolbar to `Scaffold(floatingActionButton =)', which is this screen's
-;; own fab slot.  The other nine name the axis they exist to show -- a
-;; vertical rail, an overflow menu, a scroll-driven exit, an
-;; overlay placement, a FAB-toggled collapse -- none of which has a
-;; member on the wire.
+;; NONE OF IT IS REACHABLE FROM A COMPONENT MODULE.  `jetpacs-m3-example'
+;; offers `:build', `:top-bar', the three top-bar keywords, and `:slots' --
+;; a CLOSED key list whose values must be NULLARY BUILDERS.  The six new
+;; members are strings, a boolean and a node, so they fit neither door: no
+;; example can put them on the Example screen's own scaffold.  This is the
+;; same harness gap the top-app-bar module hit before `jetpacs-m3-example'
+;; grew `:top-bar-style', and the fix has the same shape -- six more
+;; first-class keywords passed straight through in
+;; `jetpacs-m3-example-screen' -- but it lives in jetpacs-m3-core.el.
 ;;
-;; The horizontal recreation also authors its own top bar: with no
-;; floating-toolbar keyword on `jetpacs-chrome-screen', the slot is
-;; reachable only through the scaffold the `:top-bar' path builds, so
-;; that sample supplies the back arrow and the title itself.
+;; So the reasons below separate two kinds of missing, and say which.
+;;
+;; HARNESS ONLY (4): both Scrollable samples and both Centered-with-FAB
+;; samples.  Every member their subject needs is on the wire and correct;
+;; they build the day the example carries those keywords.
+;;
+;; STILL GENUINELY MISSING (5):
+;;
+;;   * AppBarRow / AppBarColumn -- no node measures a row or a column and
+;;     moves what does not fit into an overflow menu (the two Overflowing
+;;     samples).
+;;   * floatingToolbarVerticalNestedScroll -- `floating_toolbar_scroll' is
+;;     exitAlwaysScrollBehavior, which SLIDES the pill off an edge.  The
+;;     Expandable samples show the other motion: a collapse to the leading
+;;     content and back as the list scrolls.  No member carries it, and
+;;     `floating_toolbar_expanded' is a static value.
+;;   * a BINDING for `floating_toolbar_expanded' -- it has no on-change
+;;     descriptor, so the FAB that toggles it in the two *WithFab samples
+;;     has nothing to drive.
+;;
+;; Two are recreated, and neither needs the pill: the KDoc sample of
+;; `HorizontalFloatingToolbar', whose leading/content/trailing actions are
+;; the cluster the UNSTYLED band draws (orientation absent keeps that
+;; rendering exactly), and the one that hands a whole toolbar to
+;; `Scaffold(floatingActionButton =)', which is this screen's own fab slot.
+;;
+;; The horizontal recreation also authors its own top bar:
+;; `jetpacs-chrome-screen' has no floating-toolbar keyword, so the slot is
+;; reachable only through the scaffold the `:top-bar' path builds, and that
+;; sample supplies the back arrow and the title itself.
 
 ;;; Code:
 
@@ -45,10 +67,16 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/FloatingToolbarSamples.kt"
   "Upstream FloatingToolbarsExampleSourceUrl.")
 
-(defconst jetpacs-m3-floating-toolbar--vertical-note
-  "There is one floating_toolbar slot and the Companion draws it as a full-width band above the bottom bar: no orientation or alignment member stands a VerticalFloatingToolbar rail at the center end of the screen."
-  "Why every VerticalFloatingToolbar sample is unsupported.
-The orientation settles it before the sample's second axis does.")
+(defconst jetpacs-m3-floating-toolbar--harness-note
+  "No catalog example can ask for those members yet: jetpacs-m3-example takes a scaffold slot only as a nullary builder under a closed key list, and the six floating_toolbar members are strings, a boolean and a node, so reaching them needs first-class keywords on the example the way top_bar_style already has them."
+  "The harness half of every reason in this module.
+The §17.6 members landed on `jetpacs-scaffold', not on
+`jetpacs-m3-example': `jetpacs-m3--example-slots' filters `:slots'
+through `jetpacs-m3-slot-keys' and demands a function for every value,
+so no component module can put a string, a boolean or a bare node on
+the Example screen's scaffold.  Appended to the reasons whose sample
+the WIRE can already carry, and kept out of the ones a real wire gap
+settles first.")
 
 (defun jetpacs-m3-floating-toolbar--action (icon message)
   "One toolbar IconButton showing ICON and reporting MESSAGE on tap.
@@ -74,11 +102,17 @@ filled icon button already is)."
   "Upstream ExpandableHorizontalFloatingToolbarSample, as the toolbar slot.
 The KDoc sample of HorizontalFloatingToolbar: leadingContent is Check
 and Edit, content is a 64dp-wide FilledIconButton with Add, and
-trailingContent is Download and Favorite.  The slot draws that cluster
-persistently, which is the toolbar's `expanded = true' state -- the
-collapse driven by floatingToolbarVerticalNestedScroll is Companion-side
-motion with no wire member, which is why the Scrollable sample below,
-whose whole subject is that motion, is unsupported."
+trailingContent is Download and Favorite.  That cluster, in that order,
+is what the slot draws.
+
+It draws it as the full-width BAND, not as M3's pill.
+`floating_toolbar_orientation' would make it a pill, and
+`jetpacs-m3-example' has no keyword that reaches that member --
+see `jetpacs-m3-floating-toolbar--harness-note'.  The sample's other
+half fails for a second and independent reason: the collapse to the
+leading content that `floatingToolbarVerticalNestedScroll' drives is
+NOT `floating_toolbar_scroll' (that is exitAlwaysScrollBehavior, which
+slides the whole pill off an edge), and no member carries it."
   (jetpacs-row
    (jetpacs-m3-floating-toolbar--action "check" "Check")
    (jetpacs-m3-floating-toolbar--action "edit" "Edit")
@@ -106,10 +140,14 @@ sample authors the bar -- BACK first, as the contract requires."
 Upstream hands the whole toolbar to `Scaffold(floatingActionButton =)'
 with `FabPosition.End'; the wire's fab slot places one node in exactly
 that spot, so the toolbar goes there -- the sample's subject is the
-hosting, and this screen hosts it the same way.  The four IconButtons
-\(Person, Edit, Favorite, MoreVert) and the Add FAB share one `surface'
-because a floating toolbar IS that cluster; primary_container is the
-role the wire can name for vibrantFloatingToolbarColors."
+hosting, and this screen hosts it the same way.
+
+The four IconButtons \(Person, Edit, Favorite, MoreVert) and the vibrant
+Add FAB share one `surface': the fab slot takes ONE node and a scaffold
+cannot nest inside a scaffold, so the pill and the FAB fused to its end
+\(upstream's `floatingActionButton =', the wire's `floating_toolbar_fab')
+are composed here rather than asked for.  primary_container is the role
+the wire can name for vibrantFloatingToolbarColors."
   (jetpacs-surface
    (jetpacs-with-attrs
     (jetpacs-row
@@ -152,41 +190,52 @@ role the wire can name for vibrantFloatingToolbarColors."
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
     :unsupported
-    "Neither the scaffold nor its floating_toolbar has a scroll-behavior member, and the wire carries no scroll signal at all: FloatingToolbarDefaults.exitAlwaysScrollBehavior, which slides the toolbar off the bottom edge as the body scrolls, cannot be asked for from Emacs.")
+    (concat
+     "The scaffold now carries every member this sample varies: a horizontal pill at floating_toolbar_placement bottom_center, expanded, with floating_toolbar_scroll and floating_toolbar_exit_direction \"bottom\" building the FloatingToolbarDefaults.exitAlwaysScrollBehavior(Bottom) that slides it off the bottom edge as the body scrolls and brings it back. "
+     jetpacs-m3-floating-toolbar--harness-note))
    (jetpacs-m3-example
     "ExpandableVerticalFloatingToolbarSample"
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
-    :unsupported jetpacs-m3-floating-toolbar--vertical-note)
+    :unsupported
+    (concat
+     "floating_toolbar_scroll is exitAlwaysScrollBehavior, which slides the whole pill off an edge; this sample shows the OTHER motion, the floatingToolbarVerticalNestedScroll that collapses the rail to its leading content as the list scrolls and expands it again. No member carries that, and floating_toolbar_expanded is a static value. The center-end vertical rail it collapses is on the wire. "
+     jetpacs-m3-floating-toolbar--harness-note))
    (jetpacs-m3-example
     "OverflowingVerticalFloatingToolbarSample"
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
     :unsupported
-    "Neither half is on the wire: the floating_toolbar slot has no orientation member for a vertical rail, and there is no AppBarColumn node that moves the actions which do not fit into an overflow menu.")
+    "There is no AppBarColumn node: a column cannot measure its children and move the ones that do not fit into an overflow menu, and that automatic overflow of Download, Favorite, Add, Person and ArrowUpward is this sample's whole subject. The vertical rail it overflows inside is now a scaffold member (floating_toolbar_orientation); the overflow is not on the wire at all.")
    (jetpacs-m3-example
     "ScrollableVerticalFloatingToolbarSample"
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
     :unsupported
-    "Neither half is on the wire: the floating_toolbar slot has no orientation member for a vertical rail, and no scroll-behavior member for the exitAlwaysScrollBehavior that hides it toward the end edge.")
+    (concat
+     "The scaffold now carries every member this sample varies: floating_toolbar_orientation \"vertical\" at floating_toolbar_placement \"center_end\" for the rail, and floating_toolbar_scroll with floating_toolbar_exit_direction \"end\" for the exitAlwaysScrollBehavior(End) that hides it toward the end edge. "
+     jetpacs-m3-floating-toolbar--harness-note))
    (jetpacs-m3-example
     "HorizontalFloatingToolbarWithFabSample"
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
     :unsupported
-    "The wire puts chrome in fixed scaffold slots: no alignment or ScreenOffset member floats a toolbar over the body at BottomEnd, and the floating_toolbar slot holds a node and never state, so the expanded flag this sample's FAB toggles has nothing to ride on.")
+    (concat
+     "floating_toolbar_expanded is a value with no on-change descriptor, so the FAB that toggles this toolbar's expanded state -- the sample's whole subject -- has nothing to drive, and its tap could only report. The bottom-end pill and the vibrant FAB fused to its end are otherwise on the wire. "
+     jetpacs-m3-floating-toolbar--harness-note))
    (jetpacs-m3-example
     "CenteredHorizontalFloatingToolbarWithFabSample"
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
     :unsupported
-    "The floating_toolbar band is drawn full width above the bottom bar, with no member for the bottom-centered ScreenOffset placement, and no scroll-behavior member for the exitAlwaysScrollBehavior that hides the toolbar and its FAB together.")
+    (concat
+     "The scaffold now carries every member this sample varies: floating_toolbar_placement \"bottom_center\", always expanded, floating_toolbar_fab for the vibrant FAB fused to the pill's end, and floating_toolbar_scroll with floating_toolbar_exit_direction \"bottom\" for the scroll behavior that hides the toolbar and its FAB together. "
+     jetpacs-m3-floating-toolbar--harness-note))
    (jetpacs-m3-example
     "HorizontalFloatingToolbarAsScaffoldFabSample"
     "Floating toolbar examples"
@@ -198,13 +247,19 @@ role the wire can name for vibrantFloatingToolbarColors."
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
-    :unsupported jetpacs-m3-floating-toolbar--vertical-note)
+    :unsupported
+    (concat
+     "floating_toolbar_expanded is a value with no on-change descriptor, so the FAB that toggles this rail's expanded state -- the sample's whole subject -- has nothing to drive. The vertical pill at floating_toolbar_placement \"bottom_end\" and the vibrant FAB fused to its end are otherwise on the wire. "
+     jetpacs-m3-floating-toolbar--harness-note))
    (jetpacs-m3-example
     "CenteredVerticalFloatingToolbarWithFabSample"
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
-    :unsupported jetpacs-m3-floating-toolbar--vertical-note)
+    :unsupported
+    (concat
+     "The scaffold now carries every member this sample varies: floating_toolbar_orientation \"vertical\" at floating_toolbar_placement \"center_end\", always expanded, floating_toolbar_fab for the fused vibrant FAB, and floating_toolbar_scroll with floating_toolbar_exit_direction \"end\" to hide the rail and its FAB together. "
+     jetpacs-m3-floating-toolbar--harness-note))
    ))
 
 (provide 'jetpacs-m3-floating-toolbar)

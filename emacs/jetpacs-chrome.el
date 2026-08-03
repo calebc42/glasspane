@@ -77,7 +77,13 @@ surfaces it appears on — it renders on every chrome surface.")
 ;;;; Composition
 
 (cl-defun jetpacs-chrome-screen (title body &key back actions fab drawer
-                                       bottom-bar on-refresh)
+                                       bottom-bar on-refresh floating-toolbar
+                                       floating-toolbar-orientation
+                                       floating-toolbar-expanded
+                                       floating-toolbar-placement
+                                       floating-toolbar-fab
+                                       floating-toolbar-scroll
+                                       floating-toolbar-exit-direction)
   "A titled scaffold screen.  BACK, when given, is the tap descriptor
 of a leading arrow_back button (canonically `jetpacs-view-switch' of
 the screen below).  The weight-1 title is what keeps trailing ACTIONS
@@ -101,7 +107,14 @@ three to five sibling places, never document actions."
                     actions
                     (list :align "center" :spacing 4)))
    :body body :fab fab :drawer drawer :bottom-bar bottom-bar
-   :on-refresh on-refresh))
+   :on-refresh on-refresh
+   :floating-toolbar floating-toolbar
+   :floating-toolbar-orientation floating-toolbar-orientation
+   :floating-toolbar-expanded floating-toolbar-expanded
+   :floating-toolbar-placement floating-toolbar-placement
+   :floating-toolbar-fab floating-toolbar-fab
+   :floating-toolbar-scroll floating-toolbar-scroll
+   :floating-toolbar-exit-direction floating-toolbar-exit-direction))
 
 (cl-defun jetpacs-chrome-row (title &key subtitle icon leading trailing
                                     on-tap on-long-tap key)

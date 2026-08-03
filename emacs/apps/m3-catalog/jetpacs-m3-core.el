@@ -162,7 +162,14 @@ sample would need; the example then drills into \"Not supported\"."
       (let ((key (pop tail)) (value (pop tail)))
         (unless (memq key jetpacs-m3-slot-keys)
           (error "jetpacs-m3: example %S has unknown slot %S" name key))
-        (unless (if (eq key :snackbar) (stringp value) (functionp value))
+        ;; Two slots are VALUES, not node builders: :snackbar is the
+        ;; message string and :on-refresh the action DESCRIPTOR
+        ;; `jetpacs-scaffold' expects — running either through the node
+        ;; guard could only ever degrade it to an error card.
+        (unless (pcase key
+                  (:snackbar (stringp value))
+                  (:on-refresh (and (consp value) (keywordp (car value))))
+                  (_ (functionp value)))
           (error "jetpacs-m3: example %S slot %S has the wrong type"
                  name key)))))
   (when unsupported
@@ -507,7 +514,9 @@ catalog must stay navigable when one recreation is wrong."
     (cl-loop
      for (key value) on (plist-get example :slots) by #'cddr
      do (push key out)
-        (push (if (eq key :snackbar)
+        ;; :snackbar (a string) and :on-refresh (a descriptor) pass
+        ;; through raw; every other slot is a builder run under guard.
+        (push (if (memq key '(:snackbar :on-refresh))
                   value
                 (jetpacs-m3--guard label value))
               out))

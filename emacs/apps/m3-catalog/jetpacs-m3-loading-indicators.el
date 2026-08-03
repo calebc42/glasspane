@@ -23,13 +23,13 @@
 ;; recreate exactly -- bare and contained, indeterminate and
 ;; determinate.
 ;;
-;; The pull-to-refresh sample is the one that stays out.  EBP does carry
-;; pull-to-refresh -- `scaffold.on_refresh' -- but that member is a bare
-;; descriptor: it names WHAT to run, never which indicator the Companion
-;; draws while it runs, and it reports no distanceFraction back, so the
-;; hand-placed, hand-scaled indicator this sample is about cannot be put
-;; in the refresh slot even though the node that draws it now exists.
-;; Its setting is expressible; its subject is not.
+;; The pull-to-refresh sample rides the scaffold now: `on_refresh' says
+;; WHAT to run and `refresh_indicator "loading"' says which indicator
+;; the Companion draws while it runs --
+;; PullToRefreshDefaults.LoadingIndicator, the canned form of exactly
+;; the composable this sample hand-places.  The per-frame pull scaling
+;; stays the Companion's own, as it is in the canned indicator itself;
+;; no distanceFraction ever crosses the wire.
 
 ;;; Code:
 
@@ -126,8 +126,18 @@ The same Column as the determinate sample, with the contained variant."
     "Loading indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/LoadingIndicatorSamples.kt"
     :expressive t
-    :unsupported
-    "The progress node can draw the loading indicator now, but not here: the scaffold's on_refresh member is a bare action descriptor, so it cannot name PullToRefreshDefaults.LoadingIndicator as the indicator the Companion draws while refreshing, and it reports no distanceFraction, so the pull-scaled indicator this sample places by hand never reaches the wire.")
+    :slots (list :on-refresh (jetpacs-m3-demo "Refreshed"))
+    ;; PullToRefreshDefaults.LoadingIndicator in the indicator slot.
+    :scaffold (list :refresh-indicator "loading")
+    :build (lambda ()
+             (apply #'jetpacs-lazy-column
+                    (append
+                     (mapcar (lambda (n)
+                               (jetpacs-with-attrs
+                                (jetpacs-text (format "Item %d" n))
+                                :key (format "loading-ptr-item-%d" n)))
+                             (number-sequence 1 15))
+                     (list :spacing 8 :content-padding 8)))))
    ))
 
 (provide 'jetpacs-m3-loading-indicators)

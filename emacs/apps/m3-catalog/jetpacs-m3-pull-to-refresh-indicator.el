@@ -11,28 +11,23 @@
 ;; All six samples are the SAME screen -- a top bar titled "Title" with
 ;; an accessible Refresh action, over a fifteen-row list you pull on --
 ;; and differ only in the indicator and in who owns the refresh state.
-;; That is the whole triage, because `scaffold.on_refresh' is the whole
-;; of pull-to-refresh on the wire: ONE action descriptor, dispatched
-;; after the gesture crosses the threshold.  There is no indicator
-;; member, no `is_refreshing' member, and no message reporting
-;; `PullToRefreshState.distanceFraction' back to Emacs (the Companion's
-;; spinner self-clears; SPEC §17.6 says so outright, "there is no
-;; completion signal").  So the plain sample is the component, and the
-;; five that exist to REPLACE the indicator (LoadingIndicator, a custom
-;; IndicatorBox), to SCALE it from the pull distance, to supply a
-;; custom `PullToRefreshState', or to gate the screen on a hoisted
-;; `isRefreshing' have no member to carry what they demonstrate.
+;; The `:on-refresh' slot passes the descriptor through raw now (it
+;; used to fall into the node guard and die), so the gesture itself is
+;; live on every recreated screen here.
 ;;
-;; HARNESS NOTE.  Pull-to-refresh IS screen chrome, so PullToRefreshSample
-;; should claim this Example screen's `:on-refresh' slot.  It cannot
-;; today: `jetpacs-m3--example-slots' runs every slot but `:snackbar'
-;; through `jetpacs-m3--guard', which demands a ROOT NODE, while
-;; `jetpacs-scaffold' demands an action DESCRIPTOR for `:on-refresh' --
-;; so the slot always degrades to an "empty_state" node and then signals.
-;; `:on-refresh' needs the same exemption `:snackbar' already has.  Until
-;; then this module recreates the sample's top bar and list, and its
-;; live affordance is the one upstream itself calls "an accessible
-;; alternative to trigger refresh".
+;; `refresh_indicator' fills the box's indicator slot (M3's spinner,
+;; its LoadingIndicator sibling, or none), and `is_refreshing' is the
+;; authored spinner state -- Emacs as the ViewModel, replacing the
+;; optimistic self-clearing local flag.  One seam on the ViewModel
+;; recreation: the demo verb cannot flip authored state, so its spinner
+;; is authored off and what the member demonstrates here is WHO owns it
+;; -- a real app's on_refresh handler re-pushes with t and clears it on
+;; the data's arrival.
+;;
+;; The three still unsupported each need a channel, not a member: the
+;; scaling indicator wants per-frame distanceFraction, the custom-state
+;; sample implements the PullToRefreshState INTERFACE in Kotlin, and
+;; the custom IndicatorBox is a composable the wire cannot carry.
 
 ;;; Code:
 
@@ -91,13 +86,19 @@ text ListItem would have held."
     "Pull-to-refresh examples"
     :source jetpacs-m3-pull-to-refresh-indicator--source
     :top-bar #'jetpacs-m3-pull-to-refresh-indicator--top-bar
+    :slots (list :on-refresh (jetpacs-m3-demo "Trigger Refresh"))
     :build #'jetpacs-m3-pull-to-refresh-indicator--items)
    (jetpacs-m3-example
     "PullToRefreshWithLoadingIndicatorSample"
     "Pull-to-refresh examples"
     :source jetpacs-m3-pull-to-refresh-indicator--source
     :expressive t
-    :unsupported jetpacs-m3-pull-to-refresh-indicator--indicator-note)
+    :top-bar #'jetpacs-m3-pull-to-refresh-indicator--top-bar
+    :slots (list :on-refresh (jetpacs-m3-demo "Trigger Refresh"))
+    ;; PullToRefreshDefaults.LoadingIndicator in the indicator slot —
+    ;; the one thing this sample adds to PullToRefreshSample.
+    :scaffold (list :refresh-indicator "loading")
+    :build #'jetpacs-m3-pull-to-refresh-indicator--items)
    (jetpacs-m3-example
     "PullToRefreshScalingSample"
     "Pull-to-refresh examples"
@@ -114,8 +115,13 @@ text ListItem would have held."
     "PullToRefreshViewModelSample"
     "Pull-to-refresh examples"
     :source jetpacs-m3-pull-to-refresh-indicator--source
-    :unsupported
-    "The scaffold has no is_refreshing member and the Companion's spinner self-clears with no completion signal, so the ViewModel-held isRefreshing that this sample gates its list and its Trigger Refresh button on never reaches the wire.")
+    :top-bar #'jetpacs-m3-pull-to-refresh-indicator--top-bar
+    :slots (list :on-refresh (jetpacs-m3-demo "Trigger Refresh"))
+    ;; Emacs IS the ViewModel: the authored flag replaces the
+    ;; self-clearing local one.  The Commentary records the seam — the
+    ;; demo verb cannot flip it, a real handler re-pushes with t.
+    :scaffold (list :is-refreshing :json-false)
+    :build #'jetpacs-m3-pull-to-refresh-indicator--items)
    (jetpacs-m3-example
     "PullToRefreshCustomIndicatorWithDefaultTransform"
     "Pull-to-refresh examples"

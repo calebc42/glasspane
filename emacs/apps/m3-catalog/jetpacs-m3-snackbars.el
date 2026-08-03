@@ -28,12 +28,19 @@
 ;; the view being shown, so ScaffoldWithSimpleSnackbar draws the
 ;; SnackbarHost it exists to show.
 ;;
-;; The other four are that sample plus one twist, and every twist is a
-;; member the wire does not have.  `scaffold.snackbar' is ONE STRING,
-;; not a node: it carries no duration and no dismiss affordance, it
-;; reports no SnackbarResult back, and it cannot be given a maxLines
-;; clamp or a border, because the SnackbarHost content lambda -- where
-;; upstream draws all three of those -- has no form on the wire at all.
+;; The other four are that sample plus one twist.  Two of the twists
+;; are members now: `snackbar_duration' (indefinite implies the
+;; trailing dismiss X -- such a snackbar must always leave the user an
+;; exit) and `snackbar_max_lines' (the visible clamp; Text semantics
+;; keep the whole string for a screen reader).  Both are STATIC members
+;; of the view's scaffold, so the Example screen's own `:scaffold'
+;; plist carries them and the notify-injected message wears them when
+;; it lands.
+;;
+;; The two still out of reach both need a channel, not a member: a
+;; SnackbarResult reported back for the coroutines sample, and a
+;; SnackbarHost content lambda -- a bordered container with a colored
+;; action -- for the custom one.
 
 ;;; Code:
 
@@ -57,6 +64,15 @@ SnackbarHost this sample exists to show.  The click count upstream keeps
 in `remember\=' has no wire state to live in, so the message stays
 \"Snackbar # 1\"."
   (jetpacs-button "Show snackbar" (jetpacs-m3-demo "Snackbar # 1")
+                  :variant "filled"))
+
+(defun jetpacs-m3-snackbars--long-fab ()
+  "The Multiline sample's FAB: its message is upstream's longMessage.
+The clamp is the scaffold's `:snackbar-max-lines', not the string."
+  (jetpacs-button "Show snackbar"
+                  (jetpacs-m3-demo
+                   (concat "very very very very very very very very very "
+                           "very long message"))
                   :variant "filled"))
 
 (defun jetpacs-m3-snackbars--simple-body ()
@@ -84,8 +100,11 @@ fillMaxSize/wrapContentSize modifier pair does upstream."
     "ScaffoldWithIndefiniteSnackbar"
     "Snackbars examples"
     :source jetpacs-m3-snackbars--source
-    :unsupported
-    "The scaffold snackbar member is a bare message string: it has no duration member for SnackbarDuration.Indefinite and no with_dismiss_action member for the trailing dismiss button, so the snackbar that stays until the user clears it -- the whole delta from ScaffoldWithSimpleSnackbar -- cannot be asked for from Emacs.")
+    :build #'jetpacs-m3-snackbars--simple-body
+    :slots (list :fab #'jetpacs-m3-snackbars--simple-fab)
+    ;; SnackbarDuration.Indefinite; the implied dismiss X is the user's
+    ;; exit, exactly upstream's withDismissAction = true.
+    :scaffold (list :snackbar-duration "indefinite"))
    (jetpacs-m3-example
     "ScaffoldWithCustomSnackbar"
     "Snackbars examples"
@@ -101,8 +120,11 @@ fillMaxSize/wrapContentSize modifier pair does upstream."
     "ScaffoldWithMultilineSnackbar"
     "Snackbars examples"
     :source jetpacs-m3-snackbars--source
-    :unsupported
-    "Clamping a long message to the two lines the Material spec recommends means replacing the SnackbarHost content, and the scaffold snackbar member is a plain string with no max_lines or overflow member of its own.")
+    :build #'jetpacs-m3-snackbars--simple-body
+    :slots (list :fab #'jetpacs-m3-snackbars--long-fab)
+    ;; The two lines the Material spec recommends; the ellipsis is
+    ;; visual only, the accessible value stays whole.
+    :scaffold (list :snackbar-max-lines 2))
    ))
 
 (provide 'jetpacs-m3-snackbars)

@@ -8,12 +8,12 @@
 ;; Upstream: Components.kt `Switches' + Examples.kt
 ;; `SwitchExamples' (2 examples), samples/SwitchSamples.kt.
 ;;
-;; The `switch' node carries id, checked, label, on_change and enabled
-;; -- and nothing else.  Both upstream samples are the SAME remembered
-;; boolean Switch; they differ only in `thumbContent', a composable slot
-;; drawn INSIDE the thumb.  So the bare one recreates exactly, and the
-;; thumb-icon one has no wire member to carry the one thing it exists to
-;; demonstrate.
+;; The `switch' node carries id, checked, label, on_change, enabled and
+;; thumb_icon.  Both upstream samples are the SAME remembered boolean
+;; Switch; they differ only in `thumbContent', a composable slot drawn
+;; INSIDE the thumb.  `thumb_icon' names a vector for that slot, drawn
+;; at SwitchDefaults.IconSize and only while checked is live-true --
+;; which is exactly the upstream lambda.  So both samples recreate.
 
 ;;; Code:
 
@@ -33,6 +33,19 @@ as the message the toggle reports."
                   :checked t
                   :on-change (jetpacs-m3-demo "Demo")))
 
+(defun jetpacs-m3-switches--thumb-icon ()
+  "Upstream SwitchWithThumbIconSample: a Switch with a check in its thumb.
+Upstream draws Icons.Filled.Check inside the thumb at
+SwitchDefaults.IconSize while checked; `:thumb-icon' is that slot, and
+the Companion draws it under the same condition.  Upstream hangs
+contentDescription \"Demo with icon\" on the switch through semantics;
+the switch node has no content_description member, so it survives here
+as the message the toggle reports."
+  (jetpacs-switch "switches-thumb-icon"
+                  :checked t
+                  :thumb-icon "check"
+                  :on-change (jetpacs-m3-demo "Demo with icon")))
+
 (jetpacs-m3-defcomponent "switches"
   :name "Switches"
   :description
@@ -51,8 +64,7 @@ as the message the toggle reports."
     "SwitchWithThumbIconSample"
     "Switch examples"
     :source jetpacs-m3-switches--source
-    :unsupported
-    "The switch node has no thumb_content member: the Icons.Filled.Check that this sample draws inside the thumb at SwitchDefaults.IconSize is a composable slot, and the wire cannot nest a node inside a switch.")
+    :build #'jetpacs-m3-switches--thumb-icon)
    ))
 
 (provide 'jetpacs-m3-switches)

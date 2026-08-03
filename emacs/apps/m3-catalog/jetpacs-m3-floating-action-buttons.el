@@ -17,27 +17,46 @@
 ;; each with its own container size, corner size and matching
 ;; FloatingActionButtonDefaults icon size.
 ;;
-;; A FAB is screen chrome: the wire spells it `scaffold.fab' (§17.6, and
-;; the FloatingActionButton row of M3-COMPONENT-LOOKUP), and a Node tree
-;; cannot nest a scaffold, so the default-size sample claims THIS
-;; Example screen's own fab slot rather than drawing a nested scaffold in
-;; the body -- see `jetpacs-m3-slot-keys'.  The slot takes any node, and
-;; `icon_button' carries the icon and its accessible name, which is the
-;; whole of that sample.  What the slot cannot promise is the container:
-;; `RenderScaffold' hands the fab node straight to `RenderNode', so the
-;; M3 FAB elevation and corner size are the Companion's business.
+;; That container is now composable end to end.  `surface' carries
+;; `:shadow-elevation', which `RenderSurfaceNode' spends on Compose's
+;; real `shadowElevation' -- so the thing this module used to call
+;; unreachable, the CAST SHADOW that makes a FAB float, is a wire member
+;; today.  Put it with the §16.5 universal `:width', `:height' and a
+;; numeric `:corner' (which `RenderSurfaceNode' honours over its own
+;; shape enum) around a `box' that centers an `icon' of the matching
+;; `:size', and each size step is the M3 token set exactly:
 ;;
-;; The other four ask for something with no wire member -- but not the
-;; one this module first blamed.  The size scale IS expressible: a
-;; `surface' carrying `:width', `:height' and a numeric `:corner' around
-;; an `icon' of the matching `:size' composes every step, and the
-;; Companion consumes all four.  What no member reaches is the SHADOW:
-;; `RenderSurfaceNode' spends `elevation' on `tonalElevation' alone,
-;; which is inert for every container color but the surface role, so a
-;; composed FAB sits flat.  The fifth adds the scroll-driven SHOW AND
-;; HIDE of `Modifier.animateFloatingActionButton', whose `visible'
-;; argument is derived from a LazyColumn's `firstVisibleItemIndex' on
-;; the device and never crosses the wire.
+;;   small    40dp   corner 12   icon 24    (FabSmallTokens)
+;;   default  56dp   corner 16   icon 24    (FabBaselineTokens)
+;;   medium   80dp   corner 20   icon 28    (FabMediumTokens, LargeIncreased)
+;;   large    96dp   corner 28   icon 36    (FabLargeTokens; the icon is
+;;                                           FloatingActionButtonDefaults.
+;;                                           LargeIconSize, which overrides
+;;                                           its own token)
+;;
+;; on `primary_container' at 6dp of shadow -- FabPrimaryContainerTokens'
+;; ContainerColor and its Level3 ContainerElevation.  The `box' takes the
+;; tap because `surface' has no on_tap member; Surface propagates its min
+;; constraints to its content, so the box fills the whole container and
+;; the ripple is clipped to the corner.
+;;
+;; A FAB is also screen chrome: the wire spells it `scaffold.fab' (§17.6,
+;; and the FloatingActionButton row of M3-COMPONENT-LOOKUP), and a Node
+;; tree cannot nest a scaffold, so all four sized samples claim THIS
+;; Example screen's own fab slot rather than drawing a nested scaffold in
+;; the body -- see `jetpacs-m3-slot-keys'.  `RenderScaffold' hands the fab
+;; node straight to `RenderNode', so the slot renders whatever it is
+;; given: the composed container, pinned where a FAB belongs.
+;;
+;; Only the fifth is still out of reach, and for a reason that has
+;; nothing to do with the container: it adds the scroll-driven SHOW AND
+;; HIDE of `Modifier.animateFloatingActionButton'.  `scaffold' has no
+;; visibility member (its optional set ends at `on_refresh') and
+;; `RenderScaffold' renders the fab unconditionally, so nothing on the
+;; wire can ASK for the behaviour -- note that this is a missing request,
+;; not missing data: upstream derives `visible' locally with
+;; `derivedStateOf' over the list's own state, and the Companion holds
+;; that same state in `RenderLazyColumn'.
 
 ;;; Code:
 
@@ -48,27 +67,56 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/FloatingActionButtonSamples.kt"
   "Upstream FloatingActionButtonsExampleSourceUrl.")
 
-(defconst jetpacs-m3-floating-action-buttons--size-note
-  "The surface node's elevation member is a tonal elevation only, so nothing on the wire can make a FAB cast a shadow. The size scale itself IS expressible — a surface carrying :width, :height and a numeric :corner around an icon of the matching :size composes each step exactly — but M3 renders that surface with tonalElevation, which recolors nothing unless the container is the surface role, and leaves shadowElevation at zero. A container that sits flat on the background is not a floating action button, so the sample's subject survives only in outline."
-  "Why every sized FAB sample is unsupported.
-
-An earlier revision of this string claimed the container size, corner size
-and icon size could not be asked for from Emacs.  That was false three
-times over: `:width'/`:height' and a numeric `:corner' are §16.5 universal
-attributes the Companion applies in `Attributes.kt', `RenderSurfaceNode'
-explicitly honours a numeric corner over its own shape enum, and
-`RenderIcon' consumes `:size'.  The sample also never needed `icon_button',
-whose missing size member the old string blamed.  What is really absent is
-the shadow.")
+(defun jetpacs-m3-floating-action-buttons--fab (size corner icon-size)
+  "A composed FAB: a SIZE-dp CORNER-cornered container over an ICON-SIZE icon.
+The container is a `surface' at `primary_container' with 6dp of
+`:shadow-elevation' (FabPrimaryContainerTokens' ContainerColor and its
+Level3 ContainerElevation), and its child is the one thing every upstream
+FAB sample holds: Icon(Icons.Filled.Add, \"Localized description\").  The
+tap lives on the `box' because `surface' has no on_tap member; Surface
+propagates its min constraints, so the box fills the container and the
+ripple clips to the corner."
+  (jetpacs-with-attrs
+   (jetpacs-surface
+    (jetpacs-box (jetpacs-icon "add" :size icon-size
+                               :color "on_primary_container"
+                               :content-description "Localized description")
+                 :alignment "center"
+                 :on-tap (jetpacs-m3-demo "Localized description"))
+    :color "primary_container" :shadow-elevation 6)
+   :width size :height size :corner corner))
 
 (defun jetpacs-m3-floating-action-buttons--default ()
   "Upstream FloatingActionButtonSample, as this screen\\='s FAB.
 FloatingActionButton(onClick) wrapping one child,
-Icon(Icons.Filled.Add, \"Localized description\").  The icon and that
-accessible name are the whole sample; on the wire the name is the
-content_description member, where a screen reader looks."
-  (jetpacs-icon-button "add" (jetpacs-m3-demo "Localized description")
-                       :content-description "Localized description"))
+Icon(Icons.Filled.Add, \"Localized description\").  The baseline container
+is FabBaselineTokens: 56dp square, CornerLarge (16dp), a 24dp icon."
+  (jetpacs-m3-floating-action-buttons--fab 56 16 24))
+
+(defun jetpacs-m3-floating-action-buttons--small ()
+  "Upstream SmallFloatingActionButtonSample, as this screen\\='s FAB.
+SmallFloatingActionButton(onClick) over Icon(Icons.Filled.Add,
+contentDescription = \"Localized description\").  FabSmallTokens: 40dp
+square, CornerMedium (12dp), and the baseline 24dp icon -- the sample
+passes no Modifier.size, because small shares the default icon size."
+  (jetpacs-m3-floating-action-buttons--fab 40 12 24))
+
+(defun jetpacs-m3-floating-action-buttons--medium ()
+  "Upstream MediumFloatingActionButtonSample, as this screen\\='s FAB.
+MediumFloatingActionButton(onClick) over an Icon sized
+FloatingActionButtonDefaults.MediumIconSize.  FabMediumTokens: 80dp
+square and a 28dp icon, with FloatingActionButtonDefaults.mediumShape
+(ShapeDefaults.LargeIncreased, 20dp)."
+  (jetpacs-m3-floating-action-buttons--fab 80 20 28))
+
+(defun jetpacs-m3-floating-action-buttons--large ()
+  "Upstream LargeFloatingActionButtonSample, as this screen\\='s FAB.
+LargeFloatingActionButton(onClick) over an Icon sized
+FloatingActionButtonDefaults.LargeIconSize.  FabLargeTokens: 96dp square
+and CornerExtraLarge (28dp); the icon is 36dp, which is the constant
+LargeIconSize, not FabLargeTokens.IconSize -- upstream overrides its own
+token there."
+  (jetpacs-m3-floating-action-buttons--fab 96 28 36))
 
 (jetpacs-m3-defcomponent "floating-action-buttons"
   :name "Floating action buttons"
@@ -88,25 +136,25 @@ content_description member, where a screen reader looks."
     "LargeFloatingActionButtonSample"
     "Floating action button examples"
     :source jetpacs-m3-floating-action-buttons--source
-    :unsupported jetpacs-m3-floating-action-buttons--size-note)
+    :slots (list :fab #'jetpacs-m3-floating-action-buttons--large))
    (jetpacs-m3-example
     "AnimatedFloatingActionButtonSample"
     "Floating action button examples"
     :source jetpacs-m3-floating-action-buttons--source
     :expressive t
     :unsupported
-    "Neither half is on the wire: no node placed in the scaffold fab slot has a visible member for animateFloatingActionButton, and nothing reports a LazyColumn's firstVisibleItemIndex back to Emacs, so the FAB scaling away as the list scrolls past its first item is state the device derives on its own. The medium container this one wears is separately blocked by the missing shadow elevation.")
+    "The medium container this one wears composes fine now; the animation it exists for cannot be asked for. The scaffold node has no fab visibility member — its members are top_bar, body, bottom_bar, fab, floating_toolbar, drawer, snackbar, snackbar_action and on_refresh — so the fab is always rendered as given, with no Modifier.animateFloatingActionButton around it. The gap is a missing request rather than missing data: upstream derives the visible flag on the device, from the list's own scroll state, which the Companion equally holds. Until the wire carries a member asking for it, the FAB never scales away as the list scrolls past its first item.")
    (jetpacs-m3-example
     "MediumFloatingActionButtonSample"
     "Floating action button examples"
     :source jetpacs-m3-floating-action-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-floating-action-buttons--size-note)
+    :slots (list :fab #'jetpacs-m3-floating-action-buttons--medium))
    (jetpacs-m3-example
     "SmallFloatingActionButtonSample"
     "Floating action button examples"
     :source jetpacs-m3-floating-action-buttons--source
-    :unsupported jetpacs-m3-floating-action-buttons--size-note)
+    :slots (list :fab #'jetpacs-m3-floating-action-buttons--small))
    ))
 
 (provide 'jetpacs-m3-floating-action-buttons)

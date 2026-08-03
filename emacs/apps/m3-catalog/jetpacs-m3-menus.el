@@ -10,19 +10,20 @@
 ;; samples/ExposedDropdownMenuSamples.kt.
 ;;
 ;; The `menu' node is the whole of DropdownMenu on the wire: an anchor
-;; icon plus a flat list of MenuItem {label, on_tap, icon, enabled}.
-;; That is exactly the plain `MenuSample' -- an icon button that opens a
-;; list of labelled, leading-icon rows -- so that one recreates.
+;; icon, a flat list of MenuItem {label, on_tap, icon, enabled}, and
+;; `initial_scroll'.  Two samples are exactly that.  `MenuSample' is an
+;; icon button that opens a list of labelled, leading-icon rows.
+;; `MenuWithScrollStateSample' is thirty such rows opened at their end,
+;; which is the whole visible result of the scroll state it hoists.
 ;;
-;; The other five demonstrate something the map has no room for.  Two
-;; want more of DropdownMenu than the item record holds: GROUPS with
+;; The other four demonstrate something the map has no room for.  One
+;; wants more of DropdownMenu than the item record holds: GROUPS with
 ;; labels and shapes, per-item SUPPORTING TEXT, a per-item CHECKED
-;; state, TRAILING content, and a hoisted SCROLL STATE the sample drives
-;; to the menu's bottom.  Three are ExposedDropdownMenu, which
-;; M3-COMPONENT-LOOKUP lists as available-but-unwrapped: their whole
-;; subject is a menu ANCHORED TO A TEXT FIELD, filtering and completing
-;; what is typed, and neither the anchoring nor the caret arithmetic has
-;; a wire member.
+;; state with its checked leading icon, and TRAILING content.  Three
+;; are ExposedDropdownMenu, which M3-COMPONENT-LOOKUP lists as
+;; available-but-unwrapped: their whole subject is a menu ANCHORED TO A
+;; TEXT FIELD, filtering and completing what is typed, and neither the
+;; anchoring nor the caret arithmetic has a wire member.
 
 ;;; Code:
 
@@ -53,6 +54,23 @@ trailing shortcut text.  The a11y TooltipBox around the anchor is the
                             :icon "email"))
    :icon "more_vert"))
 
+(defun jetpacs-m3-menus--with-scroll-state ()
+  "Upstream MenuWithScrollStateSample: thirty items, opened at the end.
+Upstream hoists a `rememberScrollState' into DropdownMenu and, in a
+LaunchedEffect on expand, scrolls it to `maxValue' -- \"Scroll to show
+the bottom menu items.\"  The `menu' node holds no scroll state, but
+`:initial-scroll \"end\"' is that effect's whole visible result: the
+popup opens on \"Item 30\".  What is lost is the handle, not the
+demonstration -- the position is chosen once, at open, and afterwards
+the wire can neither read it nor drive it."
+  (jetpacs-menu
+   (mapcar (lambda (n)
+             (let ((label (format "Item %d" n)))
+               (jetpacs-menu-item label (jetpacs-m3-demo label) :icon "edit")))
+           (number-sequence 1 30))
+   :icon "more_vert"
+   :initial-scroll "end"))
+
 (jetpacs-m3-defcomponent "menus"
   :name "Menus"
   :description
@@ -78,8 +96,7 @@ trailing shortcut text.  The a11y TooltipBox around the anchor is the
     "MenuWithScrollStateSample"
     "Menus examples"
     :source jetpacs-m3-menus--source
-    :unsupported
-    "The menu node has no scroll_state member: this sample exists to hand DropdownMenu a hoisted rememberScrollState and scroll it to maxValue as the menu opens, and the wire can neither name a menu's scroll position nor drive it.")
+    :build #'jetpacs-m3-menus--with-scroll-state)
    (jetpacs-m3-example
     "ExposedDropdownMenuSample"
     "Menus examples"

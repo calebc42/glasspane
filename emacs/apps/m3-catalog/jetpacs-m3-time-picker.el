@@ -16,11 +16,16 @@
 ;; The `time_button' node is that screen: the Companion renders it as an
 ;; OutlinedButton that opens an AlertDialog around an M3 `TimePicker'
 ;; with OK and Cancel, handing the chosen "HH:MM" to on_pick.  So the
-;; Picker sample recreates exactly.  But the node's members are label,
-;; on_pick, value and enabled -- there is no display-mode member and no
-;; slot in that Companion-built dialog, so the `TimeInput' variant and
-;; the mode-toggling variant have nothing on the wire to carry the one
-;; thing each exists to demonstrate.
+;; Picker sample recreates exactly.
+;;
+;; The node now also takes a `display_mode' member (picker|input), so
+;; the Picker sample can name the mode upstream names.  But that is as
+;; far as it goes today: the Companion's time_button renderer does not
+;; read `display_mode' -- its dialog body is `TimePicker(state)' with no
+;; branch -- so asking for "input" still draws the clock dial, and the
+;; enum has no "switchable" value and the dialog no toggle slot.  The
+;; TimeInput sample and the mode-toggling sample therefore still have
+;; nothing that carries the one thing each exists to demonstrate.
 
 ;;; Code:
 
@@ -32,11 +37,11 @@
   "Upstream TimePickerExampleSourceUrl.")
 
 (defconst jetpacs-m3-time-picker--input-note
-  "The time_button node has no display-mode member: the Companion always fills its picker dialog with an M3 TimePicker clock dial, so TimePickerDisplayMode.Input -- the TimeInput hour and minute text fields this sample exists to show -- cannot be asked for from Emacs."
+  "The time_button node has gained a display_mode member (picker|input), but the Companion does not yet read it: it fills its picker dialog with an M3 TimePicker clock dial unconditionally, so asking for \"input\" still draws the dial. The TimeInput hour and minute text fields this sample exists to show cannot be asked for, and a pair of number text_inputs would be a hand-built lookalike of a different composable, not TimeInput inside the picker dialog."
   "Why TimeInputSample is unsupported.")
 
 (defconst jetpacs-m3-time-picker--toggle-note
-  "The time_button node has no display-mode member and its dialog is built entirely by the Companion, so neither the TimePickerDisplayMode this sample flips nor the TimePickerDialogDefaults.DisplayModeToggle button it puts in the dialog can be put on the wire."
+  "The time_button node's display_mode member selects one fixed mode and has no \"switchable\" value, and its dialog is still built entirely by the Companion, so the TimePickerDialogDefaults.DisplayModeToggle button this sample puts in the dialog -- and the mid-dialog flip between clock dial and typed input that it drives -- have no slot and no member on the wire."
   "Why TimePickerSwitchableSample is unsupported.")
 
 (defun jetpacs-m3-time-picker--picker ()
@@ -44,9 +49,12 @@
 The time_button node IS the whole sample -- the Companion opens an
 AlertDialog holding an M3 TimePicker with OK and Cancel and hands the
 picked \"HH:MM\" to on_pick, which upstream reports as the
-\"Entered time\" snackbar.  Upstream leaves rememberTimePickerState at
-its default, so no :value is sent."
-  (jetpacs-time-button "Set Time" (jetpacs-m3-demo "Entered time")))
+\"Entered time\" snackbar.  Upstream passes TimePickerDisplayMode.Picker
+explicitly, so :display-mode says \"picker\" -- the clock dial the
+Companion draws.  Upstream leaves rememberTimePickerState at its
+default, so no :value is sent."
+  (jetpacs-time-button "Set Time" (jetpacs-m3-demo "Entered time")
+                       :display-mode "picker"))
 
 (jetpacs-m3-defcomponent "time-picker"
   :name "Time Picker"

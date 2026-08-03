@@ -9,15 +9,17 @@
 ;; `IconButtonExamples' (12 examples), samples/IconButtonSamples.kt.
 ;;
 ;; The `icon_button' node carries icon, on_tap, content_description,
-;; badge, variant, enabled -- and now checked, checked_icon and
-;; on_change.  The variant enum (filled/tonal/outlined) recreates the
-;; four CONTAINER samples and the checked member recreates the four
-;; TOGGLE samples, so eight of the twelve build.  The remaining four
-;; ask for something with no wire member still: a TINT (Icon(tint =
-;; Color.Red)) and a SIZE and SHAPE (the expressive
-;; extraSmall/medium/large container scale with its Narrow/Uniform/Wide
-;; width options and square/round shapes) -- `button' grew size and
-;; shape members, `icon_button' did not.
+;; badge, variant, enabled -- and now checked, checked_icon, on_change,
+;; size, shape and width_mode.  The variant enum (filled/tonal/
+;; outlined) recreates the four CONTAINER samples, the checked member
+;; the four TOGGLE samples, and the size/shape/width_mode trio the
+;; three EXPRESSIVE geometry samples: the Companion derives the whole
+;; coordinated set from one size step -- container via
+;; IconButtonDefaults.<step>ContainerSize(width), the step's square or
+;; round shape, and the matching <step>IconSize on the inner glyph.
+;; Eleven of the twelve build.  The one left asks for something with no
+;; wire member still: a TINT -- Icon(tint = Color.Red) -- because the
+;; node draws its own Icon and no member colors it.
 ;;
 ;; Two honest limits on the toggles, both worth stating because they
 ;; are what the recreation does NOT reproduce.
@@ -59,10 +61,6 @@
 (defconst jetpacs-m3-icon-buttons--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/IconButtonSamples.kt"
   "Upstream IconButtonsExampleSourceUrl.")
-
-(defconst jetpacs-m3-icon-buttons--size-note
-  "The icon_button node has no size or shape member: the M3 expressive container-size scale (extraSmall through large), its Narrow/Uniform/Wide width options and the matching square and round shapes cannot be expressed on the wire."
-  "Why every expressive size-and-shape sample is unsupported.")
 
 (defun jetpacs-m3-icon-buttons--standard ()
   "Upstream IconButtonSample: IconButton showing Icons.Filled.Lock.
@@ -112,6 +110,35 @@ is the whole two-state display: see the Commentary for why the pair is
                         :checked-icon "lock"
                         :variant variant)
    :id id))
+
+(defun jetpacs-m3-icon-buttons--xsmall-narrow-square ()
+  "Upstream ExtraSmallNarrowSquareIconButtonsSample (the catalog's XSmall).
+A FilledIconButton at extraSmallContainerSize(Narrow) wearing
+extraSmallSquareShape, its Lock glyph at extraSmallIconSize -- one size
+step, three coordinated tokens, all derived from :size on the device."
+  (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
+                       :content-description "Localized description"
+                       :variant "filled"
+                       :size "xsmall" :width-mode "narrow" :shape "square"))
+
+(defun jetpacs-m3-icon-buttons--medium-round-wide ()
+  "Upstream MediumRoundWideIconButtonSample: the plain container, sized.
+An IconButton at mediumContainerSize(Wide) wearing mediumRoundShape,
+the glyph at mediumIconSize.  No :variant -- upstream uses the
+standard, container-less IconButton."
+  (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
+                       :content-description "Localized description"
+                       :size "medium" :width-mode "wide" :shape "round"))
+
+(defun jetpacs-m3-icon-buttons--large-round-outlined ()
+  "Upstream LargeRoundUniformOutlinedIconButtonSample.
+An OutlinedIconButton at largeContainerSize() -- Uniform width, the
+default, so no :width-mode -- wearing largeRoundShape, the glyph at
+largeIconSize."
+  (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
+                       :content-description "Localized description"
+                       :variant "outlined"
+                       :size "large" :shape "round"))
 
 (defun jetpacs-m3-icon-buttons--toggle ()
   "Upstream IconToggleButtonSample: the plain, container-less IconToggleButton."
@@ -196,21 +223,19 @@ The container is the variant member; it does not itself change with
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
     :expressive t
-    :unsupported
-    "The filled container is on the wire, but the size is not: icon_button has no size or shape member, so extraSmallContainerSize(Narrow) with extraSmallSquareShape and the matching extraSmallIconSize -- the whole point of this sample -- cannot be asked for from Emacs.")
+    :build #'jetpacs-m3-icon-buttons--xsmall-narrow-square)
    (jetpacs-m3-example
     "MediumRoundWideIconButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-icon-buttons--size-note)
+    :build #'jetpacs-m3-icon-buttons--medium-round-wide)
    (jetpacs-m3-example
     "LargeRoundUniformOutlinedIconButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
     :expressive t
-    :unsupported
-    "The outlined container is on the wire, but the size is not: icon_button has no size or shape member, so largeContainerSize() with largeRoundShape and the matching largeIconSize -- the whole point of this sample -- cannot be asked for from Emacs.")
+    :build #'jetpacs-m3-icon-buttons--large-round-outlined)
    ))
 
 (provide 'jetpacs-m3-icon-buttons)

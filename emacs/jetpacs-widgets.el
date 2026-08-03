@@ -1770,12 +1770,22 @@ a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
   v)
 
 (defconst jetpacs--top-bar-styles '("small" "center" "medium" "large"))
+(defconst jetpacs--toolbar-orientations '("horizontal" "vertical"))
+(defconst jetpacs--toolbar-placements
+  '("bottom_center" "bottom_start" "bottom_end" "center_start" "center_end"))
+(defconst jetpacs--toolbar-exit-directions '("bottom" "top" "start" "end"))
 (defconst jetpacs--scroll-behaviors
   '("pinned" "enter_always" "exit_until_collapsed"))
 
 (cl-defun jetpacs-scaffold (&key top-bar body bottom-bar fab floating-toolbar
                                  drawer snackbar snackbar-action on-refresh
-                                 top-bar-style top-bar-subtitle scroll-behavior)
+                                 top-bar-style top-bar-subtitle scroll-behavior
+                                 floating-toolbar-orientation
+                                 floating-toolbar-expanded
+                                 floating-toolbar-placement
+                                 floating-toolbar-fab
+                                 floating-toolbar-scroll
+                                 floating-toolbar-exit-direction)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
@@ -1788,7 +1798,14 @@ rendering, which is why every existing caller is untouched.
 SCROLL-BEHAVIOR (pinned, enter_always, exit_until_collapsed) needs
 TOP-BAR-STYLE: it is the M3 behavior the bar and the body's nested scroll
 share, and there is no bar to attach it to otherwise.  TOP-BAR-SUBTITLE is
-the second line M3 draws under the title."
+the second line M3 draws under the title.
+
+FLOATING-TOOLBAR-ORIENTATION turns the FLOATING-TOOLBAR slot into a REAL M3
+floating toolbar — a rounded pill that floats OVER the body — instead of the
+full-width band above the bottom bar the Companion draws when it is absent.
+PLACEMENT positions that pill, EXPANDED (default true) collapses it to its
+leading content, FAB is a node attached to the pill's end, and SCROLL with
+EXIT-DIRECTION lets it slide away as the body scrolls."
   (dolist (pair (list (cons ":top-bar" top-bar) (cons ":body" body)
                       (cons ":bottom-bar" bottom-bar) (cons ":fab" fab)
                       (cons ":floating-toolbar" floating-toolbar)
@@ -1810,7 +1827,37 @@ the second line M3 draws under the title."
                                                ":scroll-behavior"))
     (unless top-bar-style
       (error "jetpacs-scaffold: :scroll-behavior needs :top-bar-style (SPEC 17.6)")))
+  (when floating-toolbar-orientation
+    (setq floating-toolbar-orientation
+          (jetpacs--check-enum floating-toolbar-orientation
+                               jetpacs--toolbar-orientations
+                               ":floating-toolbar-orientation"))
+    (unless floating-toolbar
+      (error "jetpacs-scaffold: :floating-toolbar-orientation styles a toolbar it does not author (SPEC 17.6)")))
+  (when floating-toolbar-expanded
+    (jetpacs--check-bool floating-toolbar-expanded ":floating-toolbar-expanded"))
+  (when floating-toolbar-placement
+    (setq floating-toolbar-placement
+          (jetpacs--check-enum floating-toolbar-placement
+                               jetpacs--toolbar-placements
+                               ":floating-toolbar-placement")))
+  (when floating-toolbar-scroll
+    (jetpacs--check-bool floating-toolbar-scroll ":floating-toolbar-scroll"))
+  (when floating-toolbar-exit-direction
+    (setq floating-toolbar-exit-direction
+          (jetpacs--check-enum floating-toolbar-exit-direction
+                               jetpacs--toolbar-exit-directions
+                               ":floating-toolbar-exit-direction")))
+  (when (and floating-toolbar-fab (not (jetpacs--root-node-p floating-toolbar-fab)))
+    (error "jetpacs-scaffold: :floating-toolbar-fab must be a node, got %S"
+           floating-toolbar-fab))
   (jetpacs--node "scaffold"
+                 :floating_toolbar_orientation floating-toolbar-orientation
+                 :floating_toolbar_expanded floating-toolbar-expanded
+                 :floating_toolbar_placement floating-toolbar-placement
+                 :floating_toolbar_fab floating-toolbar-fab
+                 :floating_toolbar_scroll floating-toolbar-scroll
+                 :floating_toolbar_exit_direction floating-toolbar-exit-direction
                  :top_bar top-bar :body body :bottom_bar bottom-bar
                  :fab fab :floating_toolbar floating-toolbar :drawer drawer
                  :snackbar snackbar :snackbar_action snackbar-action

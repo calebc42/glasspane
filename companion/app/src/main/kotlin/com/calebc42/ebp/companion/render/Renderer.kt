@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -28,7 +29,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingToolbarDefaults
+import androidx.compose.material3.FloatingToolbarExitDirection
+import androidx.compose.material3.FloatingToolbarScrollBehavior
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
@@ -45,6 +50,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.VerticalFloatingToolbar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -763,11 +769,25 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
             "exit_until_collapsed" -> TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
             else -> null
         }
+    // §17.6 floating toolbar. Absent orientation keeps the full-width band in
+    // the bottomBar slot; present, it becomes M3's real pill floating OVER the
+    // body, which is what every upstream sample actually shows.
+    val toolbarOrientation = node.stringOr("floating_toolbar_orientation")
+    val toolbarScroll = node.boolOr("floating_toolbar_scroll")
+    val toolbarBehavior: FloatingToolbarScrollBehavior? =
+        if (!toolbarScroll || toolbarOrientation.isEmpty()) null
+        else FloatingToolbarDefaults.exitAlwaysScrollBehavior(
+            exitDirection = when (node.stringOr("floating_toolbar_exit_direction")) {
+                "top" -> FloatingToolbarExitDirection.Top
+                "start" -> FloatingToolbarExitDirection.Start
+                "end" -> FloatingToolbarExitDirection.End
+                else -> FloatingToolbarExitDirection.Bottom
+            })
     val scaffold: @Composable () -> Unit = {
         Scaffold(
-            modifier = scrollBehavior?.let {
-                Modifier.nestedScroll(it.nestedScrollConnection)
-            } ?: Modifier,
+            modifier = Modifier
+                .let { m -> scrollBehavior?.let { m.nestedScroll(it.nestedScrollConnection) } ?: m }
+                .let { m -> toolbarBehavior?.let { m.nestedScroll(it) } ?: m },
             snackbarHost = { SnackbarHost(hostState) },
             topBar = {
                 val topBar = node.objOrNull("top_bar")
@@ -838,7 +858,12 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                 node.objOrNull("fab")?.let { RenderNode(it, ctx.child(it, 2)) }
             },
             bottomBar = {
-                val floatingToolbar = node.objOrNull("floating_toolbar")
+                // §17.6: a STYLED floating toolbar floats over the body
+                // instead, so it is excluded here — the band below is the
+                // unstyled rendering this slot has always drawn.
+                val floatingToolbar =
+                    if (toolbarOrientation.isEmpty()) node.objOrNull("floating_toolbar")
+                    else null
                 val bottomBar = node.objOrNull("bottom_bar")
                 if (floatingToolbar != null || bottomBar != null) {
                     Column {
@@ -894,6 +919,47 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                 }
             } else {
                 Box(bodyModifier) { body?.let { RenderNode(it, ctx.child(it, 1)) } }
+            }
+            // The pill sits OVER the body, aligned by `placement`.
+            val toolbar = node.objOrNull("floating_toolbar")
+            if (toolbar != null && toolbarOrientation.isNotEmpty()) {
+                val expanded = node.boolOr("floating_toolbar_expanded", true)
+                val fab = node.objOrNull("floating_toolbar_fab")
+                val align = when (node.stringOr("floating_toolbar_placement")) {
+                    "bottom_start" -> Alignment.BottomStart
+                    "bottom_end" -> Alignment.BottomEnd
+                    "center_start" -> Alignment.CenterStart
+                    "center_end" -> Alignment.CenterEnd
+                    else -> Alignment.BottomCenter
+                }
+                Box(Modifier.padding(inner).fillMaxSize()) {
+                    val pill = Modifier.align(align).padding(16.dp)
+                    val content: @Composable RowScope.() -> Unit = {
+                        RenderNode(toolbar, ctx.child(toolbar, 3))
+                    }
+                    val vContent: @Composable ColumnScope.() -> Unit = {
+                        RenderNode(toolbar, ctx.child(toolbar, 3))
+                    }
+                    if (toolbarOrientation == "vertical") {
+                        if (fab != null) VerticalFloatingToolbar(
+                            expanded = expanded, modifier = pill,
+                            scrollBehavior = toolbarBehavior,
+                            floatingActionButton = { RenderNode(fab, ctx.child(fab, 6)) },
+                            content = vContent)
+                        else VerticalFloatingToolbar(
+                            expanded = expanded, modifier = pill,
+                            scrollBehavior = toolbarBehavior, content = vContent)
+                    } else {
+                        if (fab != null) HorizontalFloatingToolbar(
+                            expanded = expanded, modifier = pill,
+                            scrollBehavior = toolbarBehavior,
+                            floatingActionButton = { RenderNode(fab, ctx.child(fab, 6)) },
+                            content = content)
+                        else HorizontalFloatingToolbar(
+                            expanded = expanded, modifier = pill,
+                            scrollBehavior = toolbarBehavior, content = content)
+                    }
+                }
             }
         }
     }

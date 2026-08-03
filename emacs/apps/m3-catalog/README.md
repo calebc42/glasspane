@@ -52,7 +52,7 @@ the missing wire member or node type, e.g.
 > ask for.
 
 `docs/lookup-tables/M3-COMPONENT-LOOKUP.org` is the authority on which
-M3 components Jetpacs wraps (30 wrapped, 14 available-but-unwrapped).
+M3 components Jetpacs wraps (31 wrapped, 13 available-but-unwrapped).
 An unwrapped component (Carousel, SearchBar, SegmentedButton,
 NavigationRail, RadioButton, ModalBottomSheet, Tooltip, ListItem,
 ExposedDropdownMenu, DateRangePicker …) means its samples are
@@ -184,7 +184,9 @@ Color roles (`docs/lookup-tables/COLORS-REFERENCE.org`): `primary`,
 
 **Not node types** (do not reach for them): NavigationBar,
 NavigationRail, SearchBar, SegmentedButton, Carousel, ModalBottomSheet,
-Tooltip, ListItem, RadioButton, DateRangePicker, ExposedDropdownMenu.
+ListItem, RadioButton, DateRangePicker, ExposedDropdownMenu.
+(`Tooltip` WAS on this list; it is now the `tooltip` node — see the
+cheat-sheet above.)
 
 ## Samples that ARE screen chrome
 

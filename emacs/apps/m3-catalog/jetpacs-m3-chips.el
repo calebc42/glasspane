@@ -131,7 +131,9 @@ every option.  Both halves are nodes -- a row with `scroll', and `menu',
 which IS DropdownMenu.  A menu anchors on an icon button, so the \"Show
 All\" AssistChip becomes its Tune icon.  `trailing_icon' is a `chip'
 member only, so the per-chip trailing ArrowDropDown is dropped rather
-than moved to these assist chips' leading slot."
+than moved to these assist chips' leading slot; a MenuItem's `icon' is
+likewise the leading slot alone, so each item's trailing ArrowRight is
+dropped rather than moved in front of its label."
   (jetpacs-column
    (apply #'jetpacs-row
           (append

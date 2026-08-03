@@ -17,23 +17,27 @@
 ;; its DpSize, manual invocation -- over the same Favorite / AddCircle
 ;; / Info IconButton anchor.
 ;;
-;; docs/lookup-tables/M3-COMPONENT-LOOKUP.org lists Tooltip as
-;; available-but-unwrapped, and it is unwrapped the whole way down:
-;; there is no tooltip node in the Core Node Set, no anchored-popup
-;; member on any node, no caret or anchor-position member anywhere, no
-;; `tooltip' in `jetpacs-universal-attributes' (the lookup table
-;; PROPOSES one as a future universal attribute, which is not the same
-;; as having one), and no action descriptor that asks the Companion to
-;; raise or dismiss a popup.  So the component is unsupported end to
-;; end, and each reason names the axis its own sample was varying.
+;; The `tooltip' node now carries that: it wraps its ANCHOR children
+;; the way `badge' wraps its own, the anchor keeps its own `on_tap'
+;; (a tooltip is raised by long press, not by consuming the tap), and
+;; `position' spells all six anchor positions -- with `left'/`right'
+;; kept ABSOLUTE and therefore distinct from the direction-relative
+;; `start'/`end', which is exactly the distinction four of these
+;; samples exist to draw.  `caret' grows the pointer aimed back at the
+;; anchor; `rich' selects M3's RichTooltip with its `title' and its
+;; `action_label'/`on_action' button; `shown' asks the Companion to
+;; display without the long press.  Eleven samples are recreated on it.
 ;;
-;; The temptation to resist: the scaffold `snackbar' slot is the wire's
-;; one transient surface, and `card'/`collapsible' carry `on_long_tap'.
-;; Together they could pop "Add to favorites" on a long press -- and
-;; demonstrate none of it.  A snackbar is a screen-level message with
-;; no anchor, no position, no caret, and it cannot be a rich tooltip's
-;; persistent title/text/action panel either.  That is a lookalike, not
-;; a recreation, so it is not here.
+;; The two that are not are the CUSTOM-caret pair.  `caret' is a
+;; boolean -- TooltipDefaults.caretShape() or nothing -- and those two
+;; samples exist for the argument to it, DpSize(24.dp, 12.dp) and
+;; DpSize(32.dp, 16.dp).  A default caret renders in their place, so
+;; the temptation is to call them done; but a resized caret is the only
+;; thing either one was demonstrating, which is the
+;; `ButtonWithAnimatedShapeSample' rule.
+;;
+;; What the manual-invocation pair keeps and what it drops is spelled
+;; out on `jetpacs-m3-tooltips--display-button'.
 
 ;;; Code:
 
@@ -44,23 +48,150 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/TooltipSamples.kt"
   "Upstream TooltipsExampleSourceUrl.")
 
-(defconst jetpacs-m3-tooltips--plain-note
-  "There is no tooltip node type and no tooltip universal attribute: a PlainTooltip is a transient surface anchored to a widget and raised by long-press, and the wire has no member that attaches one to a node."
-  "Why the bare PlainTooltip sample is unsupported.")
+(defconst jetpacs-m3-tooltips--subhead "Permissions"
+  "Upstream `richTooltipSubheadText'.")
 
-(defconst jetpacs-m3-tooltips--rich-note
-  "There is no rich tooltip node: RichTooltip is a persistent anchored panel carrying a title, supporting text and an action button, and the wire's only transient surface is the scaffold snackbar slot, which is a screen-level message with no anchor and no action button."
-  "Why the bare RichTooltip sample is unsupported.")
+(defconst jetpacs-m3-tooltips--text
+  "Configure permissions for selected service accounts. You can add and remove service account members and assign roles to them. Visit go/permissions for details"
+  "Upstream `richTooltipText'.")
 
-(defun jetpacs-m3-tooltips--caret-note (placement)
-  "Why the caret sample that places its tooltip PLACEMENT is unsupported.
-PLACEMENT is the phrase naming this sample's TooltipAnchorPosition,
-e.g. \"below the anchor\"."
-  (concat "There is no tooltip node, so there is nothing for a caret to "
-          "point from: this sample exists to put TooltipDefaults.caretShape() "
-          placement
-          ", and the wire has neither an anchored-popup member nor an "
-          "anchor-position member to carry that."))
+(defconst jetpacs-m3-tooltips--action-text "Request Access"
+  "Upstream `richTooltipActionText'.")
+
+(defun jetpacs-m3-tooltips--custom-caret-note (size)
+  "Why the custom-caret sample whose caret is SIZE is unsupported.
+SIZE is the sample's own DpSize call, e.g. \"DpSize(24.dp, 12.dp)\"."
+  (concat "The tooltip node's caret member is a boolean -- "
+          "TooltipDefaults.caretShape() or no caret at all -- and this "
+          "sample exists for the argument to it, a caret resized to "
+          size
+          ". The wire has no caret-size member, and node geometry stops "
+          "at the universal width and height attributes, which size the "
+          "node itself."))
+
+(defun jetpacs-m3-tooltips--anchor (icon)
+  "The IconButton every sample anchors its tooltip to, drawn with ICON.
+Upstream's `onClick' is the comment \"Icon button's click event\": the
+anchor keeps a tap of its own precisely because the tooltip is raised by
+the long press instead of by it."
+  (jetpacs-icon-button icon (jetpacs-m3-demo "Icon button's click event")
+                       :content-description "Localized Description"))
+
+(defun jetpacs-m3-tooltips--plain-caret (position)
+  "A caret tooltip \"Add to favorites\" placed at POSITION over a Favorite icon.
+The six `PlainTooltipWithCaret*' samples differ in nothing else: each is
+`TooltipDefaults.rememberTooltipPositionProvider' handed one
+TooltipAnchorPosition, over `PlainTooltip(caretShape =
+TooltipDefaults.caretShape())'."
+  (jetpacs-tooltip "Add to favorites"
+                   (jetpacs-m3-tooltips--anchor "favorite")
+                   :position position :caret t))
+
+(defun jetpacs-m3-tooltips--rich (&rest args)
+  "The RichTooltip the Rich samples share, over an Info icon.
+ARGS are the extra tooltip options a given sample varies, e.g. :caret.
+
+Upstream's action button dismisses the tooltip; the Companion dismisses
+after dispatching `on_action', so the descriptor here reports the label
+and the dismissal is the renderer's."
+  (apply #'jetpacs-tooltip jetpacs-m3-tooltips--text
+         (jetpacs-m3-tooltips--anchor "info")
+         :rich t
+         :title jetpacs-m3-tooltips--subhead
+         :action-label jetpacs-m3-tooltips--action-text
+         :on-action (jetpacs-m3-demo jetpacs-m3-tooltips--action-text)
+         args))
+
+(defun jetpacs-m3-tooltips--index (name)
+  "The upstream position of this component's example called NAME.
+Looked up rather than written down, because the number is an address on
+the wire: a stale literal would send \"Display tooltip\" to a different
+sample's screen with nothing to say so."
+  (or (cl-position name
+                   (plist-get (jetpacs-m3-component "tooltips") :examples)
+                   :key (lambda (e) (plist-get e :name)) :test #'equal)
+      (error "jetpacs-m3-tooltips: no example named %s" name)))
+
+(defun jetpacs-m3-tooltips--display-button (name)
+  "Upstream's \"Display tooltip\" OutlinedButton, for the example NAME.
+
+Upstream it calls `TooltipState.show()'.  On the wire that is
+`tooltip.shown' -- authored presentation state, not a verb -- so the
+tooltip enters the screen already displayed, which is the axis the
+sample varies: raised without the long press.  The button then re-asks
+for this same Example screen through `m3catalog.example', the catalog's
+existing re-push (an id already on the chrome stack truncates to itself,
+so this is re-entrant navigation, not a fourth screen), and the snapshot
+it re-sends carries :shown t.
+
+What is NOT here is a per-example toggle: a component module registers
+no actions, so the button re-asserts the shown state rather than
+flipping it off and on."
+  (jetpacs-button "Display tooltip"
+                  (jetpacs-action "m3catalog.example"
+                                  :args (list :component "tooltips"
+                                              :index (jetpacs-m3-tooltips--index
+                                                      name)))
+                  :variant "outlined"))
+
+(defun jetpacs-m3-tooltips--manual (tooltip name)
+  "Upstream's manual-invocation Column: TOOLTIP, a 30dp Spacer, the button.
+NAME is the sample's own upstream name, which
+`jetpacs-m3-tooltips--display-button' turns back into its screen."
+  (jetpacs-column tooltip
+                  (jetpacs-with-attrs (jetpacs-spacer) :height 30)
+                  (jetpacs-m3-tooltips--display-button name)
+                  :align "center"))
+
+(defun jetpacs-m3-tooltips--plain ()
+  "Upstream PlainTooltipSample."
+  (jetpacs-tooltip "Add to favorites"
+                   (jetpacs-m3-tooltips--anchor "favorite")))
+
+(defun jetpacs-m3-tooltips--plain-manual ()
+  "Upstream PlainTooltipWithManualInvocationSample."
+  (jetpacs-m3-tooltips--manual
+   (jetpacs-tooltip "Add to list"
+                    (jetpacs-m3-tooltips--anchor "add_circle")
+                    :shown t)
+   "PlainTooltipWithManualInvocationSample"))
+
+(defun jetpacs-m3-tooltips--caret-above ()
+  "Upstream PlainTooltipWithCaret (TooltipAnchorPosition.Above)."
+  (jetpacs-m3-tooltips--plain-caret "above"))
+
+(defun jetpacs-m3-tooltips--caret-below ()
+  "Upstream PlainTooltipWithCaretBelowAnchor (TooltipAnchorPosition.Below)."
+  (jetpacs-m3-tooltips--plain-caret "below"))
+
+(defun jetpacs-m3-tooltips--caret-left ()
+  "Upstream PlainTooltipWithCaretLeftOfAnchor (TooltipAnchorPosition.Left)."
+  (jetpacs-m3-tooltips--plain-caret "left"))
+
+(defun jetpacs-m3-tooltips--caret-right ()
+  "Upstream PlainTooltipWithCaretRightOfAnchor (TooltipAnchorPosition.Right)."
+  (jetpacs-m3-tooltips--plain-caret "right"))
+
+(defun jetpacs-m3-tooltips--caret-start ()
+  "Upstream PlainTooltipWithCaretStartOfAnchor (TooltipAnchorPosition.Start)."
+  (jetpacs-m3-tooltips--plain-caret "start"))
+
+(defun jetpacs-m3-tooltips--caret-end ()
+  "Upstream PlainTooltipWithCaretEndOfAnchor (TooltipAnchorPosition.End)."
+  (jetpacs-m3-tooltips--plain-caret "end"))
+
+(defun jetpacs-m3-tooltips--rich-plain ()
+  "Upstream RichTooltipSample."
+  (jetpacs-m3-tooltips--rich))
+
+(defun jetpacs-m3-tooltips--rich-manual ()
+  "Upstream RichTooltipWithManualInvocationSample."
+  (jetpacs-m3-tooltips--manual (jetpacs-m3-tooltips--rich :shown t)
+                               "RichTooltipWithManualInvocationSample"))
+
+(defun jetpacs-m3-tooltips--rich-caret ()
+  "Upstream RichTooltipWithCaretSample."
+  (jetpacs-m3-tooltips--rich :caret t))
 
 (jetpacs-m3-defcomponent "tooltips"
   :name "Tooltips"
@@ -75,78 +206,69 @@ e.g. \"below the anchor\"."
     "PlainTooltipSample"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported jetpacs-m3-tooltips--plain-note)
+    :build #'jetpacs-m3-tooltips--plain)
    (jetpacs-m3-example
     "PlainTooltipWithManualInvocationSample"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    "Neither half is on the wire: there is no tooltip node, and no action descriptor asks the Companion to show a popup, which is the whole point of the \"Display tooltip\" button calling TooltipState.show() here.")
+    :build #'jetpacs-m3-tooltips--plain-manual)
    (jetpacs-m3-example
     "PlainTooltipWithCaret"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported (jetpacs-m3-tooltips--caret-note "above the anchor"))
+    :build #'jetpacs-m3-tooltips--caret-above)
    (jetpacs-m3-example
     "PlainTooltipWithCaretBelowAnchor"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported (jetpacs-m3-tooltips--caret-note "below the anchor"))
+    :build #'jetpacs-m3-tooltips--caret-below)
    (jetpacs-m3-example
     "PlainTooltipWithCaretLeftOfAnchor"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    (jetpacs-m3-tooltips--caret-note "to the left of the anchor"))
+    :build #'jetpacs-m3-tooltips--caret-left)
    (jetpacs-m3-example
     "PlainTooltipWithCaretRightOfAnchor"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    (jetpacs-m3-tooltips--caret-note "to the right of the anchor"))
+    :build #'jetpacs-m3-tooltips--caret-right)
    (jetpacs-m3-example
     "PlainTooltipWithCaretStartOfAnchor"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    (jetpacs-m3-tooltips--caret-note
-     "at the layout-direction start of the anchor"))
+    :build #'jetpacs-m3-tooltips--caret-start)
    (jetpacs-m3-example
     "PlainTooltipWithCaretEndOfAnchor"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    (jetpacs-m3-tooltips--caret-note
-     "at the layout-direction end of the anchor"))
+    :build #'jetpacs-m3-tooltips--caret-end)
    (jetpacs-m3-example
     "PlainTooltipWithCustomCaret"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    "The subject here is a caret resized to DpSize(24.dp, 12.dp), and the wire has no tooltip node to hang a caret on, let alone a caret-size member: node geometry stops at the universal width and height attributes, which size the node itself.")
+    :unsupported (jetpacs-m3-tooltips--custom-caret-note
+                  "DpSize(24.dp, 12.dp)"))
    (jetpacs-m3-example
     "RichTooltipSample"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported jetpacs-m3-tooltips--rich-note)
+    :build #'jetpacs-m3-tooltips--rich-plain)
    (jetpacs-m3-example
     "RichTooltipWithManualInvocationSample"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    "Neither half is on the wire: there is no rich tooltip node, and no action descriptor shows or dismisses a popup, which is what the \"Display tooltip\" button and the tooltip's own action button do here.")
+    :build #'jetpacs-m3-tooltips--rich-manual)
    (jetpacs-m3-example
     "RichTooltipWithCaretSample"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    "There is no rich tooltip node and no caret member: this sample adds TooltipDefaults.caretShape() to the persistent title/text/action panel, and the wire cannot describe the panel, its anchor or the caret joining them.")
+    :build #'jetpacs-m3-tooltips--rich-caret)
    (jetpacs-m3-example
     "RichTooltipWithCustomCaretSample"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported
-    "There is no rich tooltip node and no caret-size member: a caret of DpSize(32.dp, 16.dp) on an anchored persistent panel is Companion-side geometry the wire has no way to ask for.")
+    :unsupported (jetpacs-m3-tooltips--custom-caret-note
+                  "DpSize(32.dp, 16.dp)"))
    ))
 
 (provide 'jetpacs-m3-tooltips)

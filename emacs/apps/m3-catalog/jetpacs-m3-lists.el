@@ -22,8 +22,10 @@
 ;;   exclusive choice with a `RadioButton' as its indicator.  No
 ;;   container node carries a `selected' member and there is no
 ;;   `radio_button' node type; `enum_list' is the only single-selection
-;;   stateful node and it renders as a `FlowRow' of `FilterChip's, not
-;;   as list rows.  Both SingleSelection samples are unsupported.
+;;   stateful node -- M3-COMPONENT-LOOKUP records RadioButton as
+;;   "currently achievable via enum_list with multi_select: false" -- and
+;;   `RenderEnumList' lays it out as a `FlowRow' of `FilterChip's, not as
+;;   list rows.  Both SingleSelection samples are unsupported.
 ;;   MULTI-selection is a different story: `checkbox' IS a node with its
 ;;   own live state, so both MultiSelection samples compose around a
 ;;   real checkbox and are authored.
@@ -33,6 +35,19 @@
 ;;   checkbox target.  Each stateful node on the wire owns only its own
 ;;   value, and no member lets a gesture on one node rewrite its
 ;;   siblings.
+;;
+;; Both gaps were re-triaged against the members that landed since.
+;; `button' and `icon_button' now carry `checked'/`on_change' (and
+;; `icon_button' a `checked_icon'), which is the nearest thing yet to a
+;; radio indicator -- but a checked node holds only its OWN value on the
+;; device: nothing makes a group of them exclusive, and nothing lets a
+;; gesture on one row rewrite its siblings, which is precisely what both
+;; samples exist to show.  So both gaps stand.  The rest of the session's
+;; vocabulary does not reach a ListItem sample either: upstream draws no
+;; chip, no tooltip and no elevated card here, and the segmented group
+;; keeps `bg' + `corner' rather than a `surface', because `surface.shape'
+;; is an enum of three and cannot spell the four radii of
+;; `segmentedShapes'.
 ;;
 ;; `SegmentedListItem' needs no special pleading:
 ;; `ListItemDefaults.segmentedShapes(index, count)' rounds the outer
@@ -57,7 +72,7 @@
   "Upstream ListsExampleSourceUrl.")
 
 (defconst jetpacs-m3-lists--single-selection-note
-  "There is no radio_button node type and no container node carries a selected member: this sample exists to make a whole list row one exclusive choice that recolors when it wins, and enum_list, the only single-selection stateful node, renders as a FlowRow of filter chips rather than as list rows."
+  "This sample exists to make a whole list row one exclusive choice, indicated by a radio button, and the wire carries neither half: there is no radio_button node type, no container node carries a selected member, and every checked node -- checkbox, switch, and the button and icon_button toggles -- holds only its own value on the device, so checking one row could never clear its siblings. enum_list is the one node that owns an exclusive choice, and it renders as a FlowRow of filter chips rather than as list rows."
   "Why both SingleSelection samples are unsupported.")
 
 (defconst jetpacs-m3-lists--segmented-color "surface_variant"
@@ -353,7 +368,7 @@ header takes segment 0 of 4 and the three children the rest."
     :source jetpacs-m3-lists--source
     :expressive t
     :unsupported
-    "No node can change another node's interaction mode: one long press here turns every row at once from a counting click target into a checkbox target, and each stateful node on the wire owns only its own value, with no member a gesture on one row can use to rewrite its siblings.")
+    "No node can change another node's interaction mode: one long press here turns every row at once from a counting click target into a checkbox target, and each stateful node on the wire -- checkbox, switch, and the button and icon_button toggles -- owns only its own value, with no member a gesture on one row can use to rewrite its siblings.")
    (jetpacs-m3-example
     "SingleSelectionSegmentedListItemSample"
     "List examples"

@@ -110,7 +110,7 @@ removals.
 | Text | ✅ Wrapped | Content | =text, rich_text= | =jetpacs-text, jetpacs-rich-text= | =ContentNodes.kt:137-220= | Supports style, color, spans, syntax highlighting |
 | TextField | ⬜ Available | Input | — | — | — | Jetpacs uses OutlinedTextField instead |
 | TimePicker | ✅ Wrapped | Input | =time_button= | =jetpacs-time-button= | =InputNodes.kt:438-463= | TimePicker inside AlertDialog |
-| Tooltip | ⬜ Available | Feedback | — | — | — |  |
+| Tooltip | ✅ Wrapped | Feedback | tooltip | text, position, caret, rich, title, action_label, on_action, shown | PlainTooltip / RichTooltip via TooltipBox |  |
 | Typography | ✅ Wrapped | Theming | =text.style= | =jetpacs-text :style= | =ContentNodes.kt:116-123= | 6 mapped styles: title/headline/caption/label/mono/body |
 |---+---+---+---+---+---+---|
 
@@ -196,11 +196,6 @@ be a =segmented_button= wire type.
 Jetpacs uses =OutlinedTextField= exclusively.  The filled variant is
 available but intentionally not exposed — outlined is the canonical M3
 text field style.
-
-*** Tooltip
-
-Contextual help text on long-press/hover.  Could be a universal attribute
-(=:tooltip "Help text"=) rather than a standalone node type.
 
 ** Infrastructure Classes (Excluded)
 

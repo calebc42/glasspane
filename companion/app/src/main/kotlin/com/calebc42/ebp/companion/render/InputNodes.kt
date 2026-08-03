@@ -21,6 +21,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +41,7 @@ import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DockedSearchBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedAssistChip
@@ -65,6 +67,8 @@ import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedToggleButton
 import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.SearchBar
+import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SplitButtonDefaults
@@ -968,4 +972,62 @@ internal fun RenderNavigationRail(node: JsonObject, ctx: RenderCtx, m: Modifier)
     else NavigationRail(
         modifier = m, header = headerSlot?.let { { it() } },
         content = { destinations() })
+}
+
+/** §17.4 search_bar: the query field plus the results it reveals when expanded.
+ *
+ * Two pieces of device-held state, and they are deliberately different. The
+ * QUERY rides the store keyed on `id`, exactly as text_input's does, so it
+ * survives a re-push and is reported in state.changed. EXPANSION does not:
+ * it is a Companion-local presentation mode with no wire member, because a
+ * search bar that collapsed every time Emacs re-rendered would be unusable.
+ *
+ * `children` are the suggestions M3 shows inside the expanded bar — which is
+ * why they are the node's children rather than a sibling the author places:
+ * only the bar knows where its own expanded surface is. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun RenderSearchBar(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val id = node.stringOr("id")
+    val enabled = node.boolOr("enabled", true)
+    val onSearch = node.objOrNull("on_search")
+    val onChange = node.objOrNull("on_change")
+    var query by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
+        key = "sb:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+        mutableStateOf((ctx.storeValue(id) as? JsonPrimitive)
+            ?.takeIf { it.isString }?.content ?: node.stringOr("value"))
+    }
+    var expanded by rememberSaveable(ctx.surface, id) { mutableStateOf(false) }
+    val leading = node.stringOr("leading_icon")
+    val trailing = node.stringOr("trailing_icon")
+    val inputField: @Composable () -> Unit = {
+        SearchBarDefaults.InputField(
+            query = query,
+            onQueryChange = {
+                query = it
+                ctx.state(id, JsonPrimitive(it))          // §14.6 state first
+                if (onChange != null) ctx.action(onChange, JsonPrimitive(it))
+            },
+            onSearch = {
+                expanded = false
+                if (onSearch != null) ctx.action(onSearch, JsonPrimitive(it))
+            },
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+            enabled = enabled,
+            placeholder = node.stringOr("hint").takeIf { it.isNotEmpty() }
+                ?.let { { Text(it) } },
+            leadingIcon = leading.takeIf { it.isNotEmpty() }
+                ?.let { { Icon(IconMap.get(it), contentDescription = null) } },
+            trailingIcon = trailing.takeIf { it.isNotEmpty() }
+                ?.let { { Icon(IconMap.get(it), contentDescription = null) } })
+    }
+    val results: @Composable ColumnScope.() -> Unit = {
+        RenderChildren(node.arrOrNull("children"), ctx)
+    }
+    if (node.stringOr("variant") == "docked")
+        DockedSearchBar(inputField = inputField, expanded = expanded,
+            onExpandedChange = { expanded = it }, modifier = m, content = results)
+    else SearchBar(inputField = inputField, expanded = expanded,
+        onExpandedChange = { expanded = it }, modifier = m, content = results)
 }

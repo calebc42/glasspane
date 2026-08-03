@@ -17,6 +17,7 @@ val UNIVERSAL_NODE_ATTRIBUTES: Set<String> = setOf("key", "id", "scroll_here", "
 /** SPEC 14.6: node types whose id/value participate in input state. */
 val STATEFUL_NODE_TYPES: Set<String> = setOf(
     "text_input", "checkbox", "switch", "enum_list", "slider", "editor",
+    "search_bar",
     // Conditionally stateful: a plain button carries no state and needs no
     // id. SpecValidator's isStateful predicate registers these ONLY when
     // `checked` is present — see the `editor` precedent.
@@ -71,6 +72,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "split_button" to NodeRow(setOf("label", "on_tap"), setOf("icon", "variant", "size", "trailing_icon", "trailing_label", "trailing_description", "checked", "on_change", "on_trailing_tap", "items", "enabled")),
     "pane_scaffold" to NodeRow(setOf("list", "detail"), setOf("extra", "variant")),
     "navigation_rail" to NodeRow(setOf("items"), setOf("variant", "expanded", "arrangement", "header")),
+    "search_bar" to NodeRow(setOf("id"), setOf("value", "hint", "variant", "on_search", "on_change", "leading_icon", "trailing_icon", "children", "enabled")),
 )
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(

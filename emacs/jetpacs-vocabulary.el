@@ -73,7 +73,8 @@
     ("tooltip" ("children" "text") ("action_label" "caret" "on_action" "position" "rich" "shown" "title"))
     ("split_button" ("label" "on_tap") ("checked" "enabled" "icon" "items" "on_change" "on_trailing_tap" "size" "trailing_description" "trailing_icon" "trailing_label" "variant"))
     ("pane_scaffold" ("detail" "list") ("extra" "variant"))
-    ("navigation_rail" ("items") ("arrangement" "expanded" "header" "variant")))
+    ("navigation_rail" ("items") ("arrangement" "expanded" "header" "variant"))
+    ("search_bar" ("id") ("children" "enabled" "hint" "leading_icon" "on_change" "on_search" "trailing_icon" "value" "variant")))
   "Contract members per node type: (TYPE (REQUIRED...) (OPTIONAL...)).
 WIRE names, so the table compares directly against contract.json.  The
 constructors spell a multi-word member with a hyphen (`:content-padding'

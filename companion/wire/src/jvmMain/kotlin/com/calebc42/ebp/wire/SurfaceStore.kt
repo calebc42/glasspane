@@ -471,6 +471,7 @@ class SurfaceStore(
                 (!node.boolOr("single_line") || '\n' !in value.content)
             "checkbox", "switch" -> isJsonBoolean(value)
             "button", "icon_button" -> "checked" in node && isJsonBoolean(value)
+            "search_bar" -> value is JsonPrimitive && value.isString
             "enum_list" -> {
                 val options = node.reqArr("options")
                 val legal = { v: JsonElement? ->
@@ -512,6 +513,7 @@ class SurfaceStore(
             "checkbox", "switch" -> node["checked"] ?: JsonPrimitive(false)
             // null when absent: a plain button has no authored value at all.
             "button", "icon_button" -> node["checked"]
+            "search_bar" -> node["value"] ?: JsonPrimitive("")
             "enum_list" -> node["value"]
                 ?: if (node.boolOr("multi_select")) JsonArray(emptyList()) else null
             "slider" -> node["value"]

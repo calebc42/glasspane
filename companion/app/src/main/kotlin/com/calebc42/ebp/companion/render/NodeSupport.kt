@@ -29,7 +29,7 @@ object NodeSupport {
     private val INPUT_NODE_TYPES: Set<String> = sortedSetOf(
         "icon_button", "chip", "assist_chip", "menu", "checkbox", "switch",
         "enum_list", "slider", "date_button", "time_button", "split_button",
-        "navigation_rail")
+        "navigation_rail", "search_bar")
 
     /** SPEC 17.3 layout nodes (app profile). */
     private val LAYOUT_NODE_TYPES: Set<String> = sortedSetOf(

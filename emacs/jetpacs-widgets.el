@@ -49,8 +49,8 @@
     "assist_chip" "menu" "text_input" "editor" "checkbox" "switch"
     "enum_list" "date_button" "time_button" "slider" "chart" "canvas"
     "month_grid" "scaffold" "tooltip" "split_button" "pane_scaffold"
-    "navigation_rail")
-  "The 43 EBP node types (contract.json `node_types').")
+    "navigation_rail" "search_bar")
+  "The 44 EBP node types (contract.json `node_types').")
 
 (defconst jetpacs-core-node-set
   '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
@@ -1145,6 +1145,50 @@ and ON-CHANGE receives the flipped boolean."
                  :checked checked :checked_icon checked-icon
                  :on_change on-change :enabled enabled))
 
+(defconst jetpacs--search-bar-variants '("full_screen" "docked"))
+
+(cl-defun jetpacs-search-bar (id &rest args)
+  "A search bar identified by ID, with its results as children (§17.4).
+
+The bar holds its QUERY on the device, keyed on ID, exactly as
+`text_input' does — so ID is required and must be unique across the
+document.  CHILDREN are what the bar reveals when it EXPANDS: the
+suggestion list M3 shows over the screen, which is why they are the
+node\='s children rather than a sibling the author places by hand.
+
+Trailing options: :value (the seeded query), :hint (the placeholder),
+:variant (full_screen, the default, or docked — the difference is where
+the expanded results go, not what they are), :on-search (dispatched on
+submit with the query injected), :on-change (per keystroke),
+:leading-icon and :trailing-icon, :enabled."
+  (jetpacs--check-identifier id ":id")
+  (let* ((split (jetpacs--children-and-opts args "search_bar"))
+         (opts (cdr split))
+         (value (plist-get opts :value))
+         (hint (plist-get opts :hint))
+         (variant (plist-get opts :variant))
+         (on-search (plist-get opts :on-search))
+         (on-change (plist-get opts :on-change))
+         (leading-icon (plist-get opts :leading-icon))
+         (trailing-icon (plist-get opts :trailing-icon))
+         (enabled (plist-get opts :enabled)))
+    (when value (jetpacs--require-string value ":value"))
+    (when hint (jetpacs--require-string hint ":hint"))
+    (when variant
+      (setq variant (jetpacs--check-enum variant jetpacs--search-bar-variants
+                                         ":variant")))
+    (when on-search (jetpacs--check-descriptor on-search ":on-search"))
+    (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+    (when leading-icon (jetpacs--check-identifier leading-icon ":leading-icon"))
+    (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing-icon"))
+    (when enabled (jetpacs--check-bool enabled ":enabled"))
+    (jetpacs--node "search_bar" :id id
+                   :children (jetpacs--as-children (car split))
+                   :value value :hint hint :variant variant
+                   :on_search on-search :on_change on-change
+                   :leading_icon leading-icon :trailing_icon trailing-icon
+                   :enabled enabled)))
+
 (defconst jetpacs--rail-variants '("standard" "wide"))
 (defconst jetpacs--rail-arrangements '("top" "center" "bottom"))
 
@@ -2008,7 +2052,7 @@ as a single list."
 (defconst jetpacs-input-node-types
   '("icon_button" "chip" "assist_chip" "menu" "checkbox" "switch"
     "enum_list" "slider" "date_button" "time_button" "split_button"
-    "navigation_rail")
+    "navigation_rail" "search_bar")
   "The §17.4 input node types shared by the reference app and dialog profiles.")
 
 (defconst jetpacs-layout-node-types
@@ -2024,14 +2068,14 @@ as a single list."
             "text_input" "scaffold" "editor")
           jetpacs-content-node-types jetpacs-input-node-types
           jetpacs-layout-node-types jetpacs-viz-node-types)
-  "The reference companion's advertised `app' node_types (all 43; §10.2/§16.2).
+  "The reference companion's advertised `app' node_types (all 44; §10.2/§16.2).
 The AUTHORITATIVE set for a connection is its welcome `surface_profiles'.")
 
 (defconst jetpacs-dialog-node-types
   (append '("text" "row" "column" "box" "spacer" "divider" "button" "text_input"
             "editor")
           jetpacs-content-node-types jetpacs-input-node-types)
-  "The reference companion's advertised `dialog' node_types (30; no
+  "The reference companion's advertised `dialog' node_types (31; no
 scaffold/layout/viz).
 `editor' is in the set because JC-4b added it to the Companion's
 `DIALOG_NODE_TYPES' (NodeSupport.kt) so a dialog could host the capf

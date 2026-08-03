@@ -24,10 +24,14 @@
 ;; own upstream description says the sample "is better experienced in a
 ;; resizable emulator or foldable device".
 ;;
-;; Neither half of that is on the wire, and it is the same floor
-;; `jetpacs-m3-adaptive' stands on.  The `scaffold' node (SPEC §17.6)
+;; Neither half of that is on the wire.  `jetpacs-m3-adaptive' no longer
+;; stands on the same floor -- the `pane_scaffold' node adapts its panes
+;; by window size, and two of its samples build on that -- but a pane
+;; scaffold is BODY content, and what this component needs is a
+;; navigation container in the CHROME.  The `scaffold' node (SPEC §17.6)
 ;; has exactly top_bar, body, bottom_bar, fab, floating_toolbar, drawer,
-;; snackbar, snackbar_action and on_refresh -- fixed chrome slots, with
+;; snackbar, snackbar_action, on_refresh and their styling members --
+;; fixed chrome slots, with
 ;; no navigation-suite slot, no suite type and no rail.  And nothing
 ;; ever tells Emacs the window size class: a Node tree is built with no
 ;; idea how wide the window it lands in is, so there is nothing for a

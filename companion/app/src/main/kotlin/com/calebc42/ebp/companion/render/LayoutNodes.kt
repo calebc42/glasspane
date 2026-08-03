@@ -76,6 +76,7 @@ import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.layout.SupportingPaneScaffold
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldPaneScope
 import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
+import androidx.compose.material3.adaptive.navigation.rememberSupportingPaneScaffoldNavigator
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -820,8 +821,16 @@ internal fun RenderPaneScaffold(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val list = node.objOrNull("list") ?: return
     val detail = node.objOrNull("detail") ?: return
     val extra = node.objOrNull("extra")
-    val navigator = rememberListDetailPaneScaffoldNavigator<Any>()
     val supporting = node.stringOr("variant") == "supporting"
+    // Each variant needs its OWN navigator. They differ in which pane ROLE is
+    // the initial destination: the list-detail navigator opens on Secondary
+    // (the list), the supporting one on Primary (the main pane). Sharing the
+    // list-detail navigator across both made a single-pane `supporting`
+    // scaffold surface its SUPPORTING pane first, where upstream surfaces the
+    // main one — the panes were right and the entry point was wrong.
+    val navigator =
+        if (supporting) rememberSupportingPaneScaffoldNavigator<Any>()
+        else rememberListDetailPaneScaffoldNavigator<Any>()
     val listPane: @Composable ThreePaneScaffoldPaneScope.() -> Unit = {
         AnimatedPane { RenderNode(list, ctx.child(list, 0)) }
     }

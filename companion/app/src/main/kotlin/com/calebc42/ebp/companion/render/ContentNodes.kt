@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -472,6 +473,14 @@ internal fun RenderTooltip(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val text = node.stringOr("text")
     val rich = node.boolOr("rich")
     val caret = node.boolOr("caret")
+    // `caret_width`/`caret_height` resize the pointer — meaningful only with
+    // `caret`, which the validator enforces as both-or-neither dp.
+    val caretShape = if (!caret) null else {
+        val w = node["caret_width"]?.numOrNull()?.toFloat()
+        val h = node["caret_height"]?.numOrNull()?.toFloat()
+        if (w != null && h != null) TooltipDefaults.caretShape(DpSize(w.dp, h.dp))
+        else TooltipDefaults.caretShape()
+    }
     val position = when (node.stringOr("position")) {
         "below" -> TooltipAnchorPosition.Below
         "left" -> TooltipAnchorPosition.Left
@@ -503,10 +512,10 @@ internal fun RenderTooltip(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                         }) { Text(it) }
                     }
                 },
-                caretShape = if (caret) TooltipDefaults.caretShape() else null,
+                caretShape = caretShape,
             ) { Text(text) }
             else PlainTooltip(
-                caretShape = if (caret) TooltipDefaults.caretShape() else null,
+                caretShape = caretShape,
             ) { Text(text) }
         }) {
         RenderChildren(node.arrOrNull("children"), ctx)

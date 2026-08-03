@@ -28,9 +28,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -39,6 +42,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DockedSearchBar
@@ -60,6 +64,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.Label
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -67,11 +72,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedToggleButton
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.RangeSliderState
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SliderState
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.SuggestionChip
@@ -81,9 +90,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimeInput
 import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TimePickerDialog
+import androidx.compose.material3.TimePickerDialogDefaults
+import androidx.compose.material3.TimePickerDisplayMode
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.TonalToggleButton
+import androidx.compose.material3.TriStateCheckbox
+import androidx.compose.material3.VerticalSlider
 import androidx.compose.material3.WideNavigationRail
 import androidx.compose.material3.WideNavigationRailItem
 import androidx.compose.material3.WideNavigationRailValue
@@ -102,10 +116,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.calebc42.ebp.wire.SurfaceStore
 import com.calebc42.ebp.wire.jsonValueEquals
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -306,10 +332,15 @@ internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         else -> null
     }
     val mm = if (containerSize != null) m.size(containerSize) else m
+    // §17.4 `color`: the Icon's tint — the one member TintedIconButtonSample
+    // exists for. The node draws its own Icon, so without this no §16.6 color
+    // could ever reach the glyph.
+    val iconTint = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
     val body: @Composable () -> Unit = {
         val icon: @Composable () -> Unit = {
             Icon(IconMap.get(shownIcon),
                 modifier = if (glyphSize != null) Modifier.size(glyphSize) else Modifier,
+                tint = iconTint ?: LocalContentColor.current,
                 contentDescription = node.stringOr("content_description")
                     .takeIf { it.isNotEmpty() })
         }
@@ -418,10 +449,67 @@ internal fun RenderMenu(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 
 // §17.4: every flip produces state.changed (boolean), then on_change with the
 // boolean in args.value — in that order (the single executor preserves it).
+/** §17.4 checkbox. Plain: a boolean keyed on `id`. `state` present makes it
+ * M3's TriStateCheckbox over off|on|indeterminate — a click cycles
+ * indeterminate/off -> on -> off, publishes the ENUM STRING (not a boolean)
+ * first, then dispatches on_change with it injected. `stroke`
+ * ({width?, cap?, join?}) reaches Checkbox's checkmarkStroke/outlineStroke
+ * pair — the rounded-strokes samples are exactly this member. */
 @Composable
 internal fun RenderCheckbox(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val id = node.stringOr("id")
     val enabled = node.boolOr("enabled", true)
+    val onChange = node.objOrNull("on_change")
+    val strokes = node.objOrNull("stroke")?.let { spec ->
+        val width = with(LocalDensity.current) {
+            ((spec["width"]?.numOrNull()?.toFloat())?.dp
+                ?: CheckboxDefaults.StrokeWidth).toPx()
+        }
+        val cap = when (spec.stringOr("cap")) {
+            "butt" -> StrokeCap.Butt
+            "square" -> StrokeCap.Square
+            else -> StrokeCap.Round
+        }
+        val join = when (spec.stringOr("join")) {
+            "miter" -> StrokeJoin.Miter
+            "bevel" -> StrokeJoin.Bevel
+            else -> StrokeJoin.Round
+        }
+        Stroke(width = width, cap = cap, join = join)
+    }
+    val label: @Composable () -> Unit = {
+        node.stringOr("label").takeIf { it.isNotEmpty() }?.let {
+            Text(it, modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+    if ("state" in node) {
+        var tri by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
+            key = "in:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+            mutableStateOf((ctx.storeValue(id) as? JsonPrimitive)
+                ?.takeIf { it.isString && it.content in SurfaceStore.TRI_STATES }
+                ?.content ?: node.stringOr("state").ifEmpty { "off" })
+        }
+        val toggleable = when (tri) {
+            "on" -> ToggleableState.On
+            "indeterminate" -> ToggleableState.Indeterminate
+            else -> ToggleableState.Off
+        }
+        val onClick = {
+            tri = if (tri == "on") "off" else "on"
+            ctx.state(id, JsonPrimitive(tri))
+            if (onChange != null) ctx.action(onChange, JsonPrimitive(tri))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = m) {
+            if (strokes != null)
+                TriStateCheckbox(state = toggleable, onClick = onClick,
+                    checkmarkStroke = strokes, outlineStroke = strokes,
+                    enabled = enabled)
+            else TriStateCheckbox(state = toggleable, onClick = onClick,
+                enabled = enabled)
+            label()
+        }
+        return
+    }
     var checked by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
         key = "in:${ctx.surface}:$id:${ctx.epochOf(id)}") {
         // C6: the store value is a JsonElement, so `as? Boolean` would compile
@@ -433,16 +521,18 @@ internal fun RenderCheckbox(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             ?.takeIf { !it.isString }?.content?.toBooleanStrictOrNull()
             ?: node.boolOr("checked"))
     }
-    val onChange = node.objOrNull("on_change")
+    val flip: (Boolean) -> Unit = {
+        checked = it
+        ctx.state(id, JsonPrimitive(it))
+        if (onChange != null) ctx.action(onChange, JsonPrimitive(it))
+    }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = m) {
-        Checkbox(checked = checked, enabled = enabled, onCheckedChange = {
-            checked = it
-            ctx.state(id, JsonPrimitive(it))
-            if (onChange != null) ctx.action(onChange, JsonPrimitive(it))
-        })
-        node.stringOr("label").takeIf { it.isNotEmpty() }?.let {
-            Text(it, modifier = Modifier.padding(start = 8.dp))
-        }
+        if (strokes != null)
+            Checkbox(checked = checked, onCheckedChange = flip,
+                checkmarkStroke = strokes, outlineStroke = strokes,
+                enabled = enabled)
+        else Checkbox(checked = checked, enabled = enabled, onCheckedChange = flip)
+        label()
     }
 }
 
@@ -617,10 +707,19 @@ internal fun RenderEnumList(node: JsonObject, ctx: RenderCtx, m: Modifier) {
  * §17.4 slider. Continuous: min/max/value, dispatching once on gesture
  * commit. Discrete: `values` (strictly increasing authored numbers) — the
  * thumb moves over indices and the EXACT authored number is returned, never
- * toolkit step arithmetic.
+ * toolkit step arithmetic. `value_end` present makes it a RangeSlider and
+ * the published value a two-number array; with `values` authored each thumb
+ * SNAPS to the nearest authored number on commit, keeping the discrete rule.
+ * `orientation` vertical renders M3's VerticalSlider and deliberately does
+ * NOT fillMaxWidth — the author's universal height is the length of the
+ * rail. `value_label` wraps the thumb in M3's Label/PlainTooltip showing
+ * the in-flight position, which never crosses the wire (dispatch stays on
+ * commit). `track_icon_start`/`track_icon_end` reproduce the M3 sample's
+ * drawWithContent recipe: icons at both edges of each track segment, tinted
+ * active/inactive, suppressed when the segment is narrower than the icon.
  */
 @Composable
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val id = node.stringOr("id")
     val enabled = node.boolOr("enabled", true)
@@ -628,19 +727,170 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val values = node.arrOrNull("values")
     // §17.4 presentation members. `color` tints the thumb and the active
     // track together, which is the pair every upstream custom-colour sample
-    // sets; `track` picks M3's centred track; `thumb_icon` names a vector,
-    // since IconMap is the only path a drawable reaches the device.
+    // sets; `color_end` tints the END thumb of a range alone; `track` picks
+    // M3's centred track; `thumb_icon` names a vector, since IconMap is the
+    // only path a drawable reaches the device.
     val tint = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
+    val endTint = resolveColor(node.stringOr("color_end").takeIf { it.isNotEmpty() })
     val sliderColors = if (tint != null)
         SliderDefaults.colors(thumbColor = tint, activeTrackColor = tint)
         else SliderDefaults.colors()
+    val endColors = if (endTint != null)
+        SliderDefaults.colors(thumbColor = endTint) else sliderColors
     val centered = node.stringOr("track") == "centered"
+    val vertical = node.stringOr("orientation") == "vertical"
+    val showLabel = node.boolOr("value_label")
     val thumbIconName = node.stringOr("thumb_icon")
+    val startIconName = node.stringOr("track_icon_start")
+    val endIconName = node.stringOr("track_icon_end")
     // SliderDefaults.Thumb wants the slider's OWN interaction source, so it is
     // hoisted and handed to both — otherwise the default thumb loses its
     // press/hover feedback the moment we supply the slot at all.
     val interaction = remember { MutableInteractionSource() }
-    if (values != null && values.size >= 2) {
+    fun publish(v: JsonElement) {
+        ctx.state(id, v)
+        if (onChange != null) ctx.action(onChange, v)
+    }
+    // The upstream SliderWithTrackIconsSample recipe, driven by two icon
+    // NAMES: drawn at both edges of the active and inactive segments, active
+    // tick colour on the active side, suppressed when a segment is narrower
+    // than icon + padding. No DrawScope ever crosses the wire.
+    val trackIcons = startIconName.isNotEmpty() || endIconName.isNotEmpty()
+    val startPainter = if (startIconName.isNotEmpty())
+        rememberVectorPainter(IconMap.get(startIconName)) else null
+    val endPainter = if (endIconName.isNotEmpty())
+        rememberVectorPainter(IconMap.get(endIconName)) else null
+    val activeIconColor = sliderColors.activeTickColor
+    val inactiveIconColor = sliderColors.inactiveTickColor
+    fun trackIconModifier(fraction: () -> Float): Modifier =
+        if (!trackIcons) Modifier else Modifier.height(36.dp).drawWithContent {
+            drawContent()
+            val iconSize = Size(20.dp.toPx(), 20.dp.toPx())
+            val iconPad = 10.dp.toPx()
+            val gap = 6.dp.toPx()
+            val yOffset = size.height / 2 - iconSize.height / 2
+            fun drawPair(startX: Float, endX: Float, color: Color) {
+                if (iconSize.width >= endX - startX - iconPad * 2) return
+                startPainter?.let {
+                    translate(startX + iconPad, yOffset) {
+                        with(it) { draw(iconSize, colorFilter = ColorFilter.tint(color)) }
+                    }
+                }
+                endPainter?.let {
+                    translate(endX - iconPad - iconSize.width, yOffset) {
+                        with(it) { draw(iconSize, colorFilter = ColorFilter.tint(color)) }
+                    }
+                }
+            }
+            val activeEnd = size.width * fraction() - gap
+            drawPair(0f, activeEnd, activeIconColor)
+            drawPair(activeEnd + gap * 2, size.width, inactiveIconColor)
+        }
+    // The label is presentation only: the in-flight position shows over the
+    // thumb and dispatch still happens once, on commit (§17.4).
+    val labelledThumb: @Composable (position: () -> Float, content: @Composable () -> Unit) -> Unit =
+        { position, content ->
+            if (showLabel)
+                Label(label = {
+                    PlainTooltip(Modifier.sizeIn(45.dp, 25.dp).wrapContentWidth()) {
+                        Text("%.2f".format(position()))
+                    }
+                }, interactionSource = interaction) { content() }
+            else content()
+        }
+    val defaultThumb: @Composable () -> Unit = {
+        if (thumbIconName.isNotEmpty())
+            Icon(IconMap.get(thumbIconName), null,
+                Modifier.size(24.dp), tint = tint ?: LocalContentColor.current)
+        else SliderDefaults.Thumb(interaction, colors = sliderColors,
+            enabled = enabled)
+    }
+    val min = node.doubleOr("min", 0.0).toFloat()
+    val max = node.doubleOr("max", 1.0).toFloat()
+    fun nearestAuthored(x: Float): JsonElement? =
+        values?.minByOrNull { v ->
+            val n = v.numOrNull()?.toFloat() ?: return@minByOrNull Float.MAX_VALUE
+            kotlin.math.abs(n - x)
+        }
+    if ("value_end" in node) {
+        // ---- RangeSlider: two thumbs, a two-number array on the wire.
+        val lo = if (values != null && values.isNotEmpty())
+            values.first().numOrNull()?.toFloat() ?: min else min
+        val hi = if (values != null && values.isNotEmpty())
+            values.last().numOrNull()?.toFloat() ?: max else max
+        val steps = if (values != null) (values.size - 2).coerceAtLeast(0) else 0
+        val state = remember(ctx.surface, id, ctx.epochOf(id)) {
+            val draft = (ctx.storeValue(id) as? JsonArray)?.takeIf { it.size == 2 }
+            val start = draft?.get(0)?.numOrNull()?.toFloat()
+                ?: node.doubleOr("value", lo.toDouble()).toFloat()
+            val end = draft?.get(1)?.numOrNull()?.toFloat()
+                ?: node.doubleOr("value_end", hi.toDouble()).toFloat()
+            RangeSliderState(start, end, steps = steps, valueRange = lo..hi)
+        }
+        state.onValueChangeFinished = {
+            // With authored `values`, publish the EXACT authored numbers the
+            // thumbs settle nearest to — never toolkit step arithmetic.
+            val a = nearestAuthored(state.activeRangeStart)
+                ?: JsonPrimitive(state.activeRangeStart.toDouble())
+            val b = nearestAuthored(state.activeRangeEnd)
+                ?: JsonPrimitive(state.activeRangeEnd.toDouble())
+            publish(JsonArray(listOf(a, b)))
+        }
+        val endInteraction = remember { MutableInteractionSource() }
+        RangeSlider(
+            state = state,
+            enabled = enabled,
+            colors = sliderColors,
+            startInteractionSource = interaction,
+            endInteractionSource = endInteraction,
+            startThumb = {
+                labelledThumb({ state.activeRangeStart }) { defaultThumb() }
+            },
+            endThumb = {
+                if (endTint != null)
+                    SliderDefaults.Thumb(endInteraction, colors = endColors,
+                        enabled = enabled)
+                else SliderDefaults.Thumb(endInteraction, colors = sliderColors,
+                    enabled = enabled)
+            },
+            track = { st ->
+                SliderDefaults.Track(rangeSliderState = st, colors = sliderColors,
+                    modifier = trackIconModifier {
+                        (st.activeRangeEnd - st.valueRange.start) /
+                            (st.valueRange.endInclusive - st.valueRange.start)
+                    })
+            },
+            modifier = m.fillMaxWidth())
+    } else if (vertical) {
+        // ---- VerticalSlider: the author's height is the rail length, so no
+        // fillMaxWidth — the flattening the audit warned about.
+        val lo = if (values != null && values.isNotEmpty())
+            values.first().numOrNull()?.toFloat() ?: min else min
+        val hi = if (values != null && values.isNotEmpty())
+            values.last().numOrNull()?.toFloat() ?: max else max
+        val steps = if (values != null) (values.size - 2).coerceAtLeast(0) else 0
+        val state = remember(ctx.surface, id, ctx.epochOf(id)) {
+            val seed = ctx.storeValue(id)?.numOrNull()?.toFloat()
+                ?: node.doubleOr("value", lo.toDouble()).toFloat()
+            SliderState(seed, steps = steps, valueRange = lo..hi)
+        }
+        state.onValueChangeFinished = {
+            publish(nearestAuthored(state.value)
+                ?: JsonPrimitive(state.value.toDouble()))
+        }
+        VerticalSlider(
+            state = state,
+            enabled = enabled,
+            colors = sliderColors,
+            interactionSource = interaction,
+            thumb = { labelledThumb({ state.value }) { defaultThumb() } },
+            track = { st ->
+                if (centered) SliderDefaults.CenteredTrack(sliderState = st,
+                    colors = sliderColors)
+                else SliderDefaults.Track(sliderState = st, colors = sliderColors)
+            },
+            modifier = m)
+    } else if (values != null && values.size >= 2) {
         val n = values.size
         fun seedIndex(): Int {
             // C6: the org.json gate was `as? Number ?: return 0` — keep only a
@@ -658,8 +908,7 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             onValueChange = { index = it.toInt().coerceIn(0, n - 1) },
             onValueChangeFinished = {
                 val exact = values[index] // the authored number, exactly
-                ctx.state(id, exact)
-                if (onChange != null) ctx.action(onChange, exact)
+                publish(exact)
             },
             valueRange = 0f..(n - 1).toFloat(),
             steps = (n - 2).coerceAtLeast(0),
@@ -667,20 +916,17 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             colors = sliderColors,
             track = { st ->
                 if (centered) SliderDefaults.CenteredTrack(st, colors = sliderColors)
-                else SliderDefaults.Track(st, colors = sliderColors)
+                else SliderDefaults.Track(st, colors = sliderColors,
+                    modifier = trackIconModifier { st.coercedValueAsFraction })
             },
             interactionSource = interaction,
             thumb = {
-                if (thumbIconName.isNotEmpty())
-                    Icon(IconMap.get(thumbIconName), null,
-                        Modifier.size(24.dp), tint = tint ?: LocalContentColor.current)
-                else SliderDefaults.Thumb(interaction, colors = sliderColors,
-                    enabled = enabled)
+                labelledThumb({ values[index].numOrNull()?.toFloat() ?: 0f }) {
+                    defaultThumb()
+                }
             },
             modifier = m.fillMaxWidth())
     } else {
-        val min = node.doubleOr("min", 0.0).toFloat()
-        val max = node.doubleOr("max", 1.0).toFloat()
         var pos by remember(ctx.surface, id, ctx.epochOf(id)) {
             mutableFloatStateOf(
                 (ctx.storeValue(id)?.numOrNull()?.toFloat()
@@ -690,24 +936,18 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             value = pos,
             onValueChange = { pos = it },
             onValueChangeFinished = {
-                ctx.state(id, JsonPrimitive(pos.toDouble()))
-                if (onChange != null) ctx.action(onChange, JsonPrimitive(pos.toDouble()))
+                publish(JsonPrimitive(pos.toDouble()))
             },
             valueRange = min..max,
             enabled = enabled,
             colors = sliderColors,
             track = { st ->
                 if (centered) SliderDefaults.CenteredTrack(st, colors = sliderColors)
-                else SliderDefaults.Track(st, colors = sliderColors)
+                else SliderDefaults.Track(st, colors = sliderColors,
+                    modifier = trackIconModifier { st.coercedValueAsFraction })
             },
             interactionSource = interaction,
-            thumb = {
-                if (thumbIconName.isNotEmpty())
-                    Icon(IconMap.get(thumbIconName), null,
-                        Modifier.size(24.dp), tint = tint ?: LocalContentColor.current)
-                else SliderDefaults.Thumb(interaction, colors = sliderColors,
-                    enabled = enabled)
-            },
+            thumb = { labelledThumb({ pos }) { defaultThumb() } },
             modifier = m.fillMaxWidth())
     }
 }
@@ -749,10 +989,12 @@ internal fun RenderDateButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 }
 
 /** §17.4 time_button: value is HH:MM local civil time. `display_mode`
- * selects what fills the dialog: the clock-face `picker` (the default) or
- * M3's `input`, the keyboard-first pair of HH/MM fields TimeInput draws.
- * Any other value falls back to the picker (§12 rule 6). */
-@OptIn(ExperimentalMaterial3Api::class)
+ * selects what fills the dialog: the clock-face `picker` (the default),
+ * M3's `input` — the keyboard-first pair of HH/MM fields TimeInput draws —
+ * or `switchable`, M3's TimePickerDialog carrying its own DisplayModeToggle
+ * so the user flips between the two mid-dialog. Any other value falls back
+ * to the picker (§12 rule 6). */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun RenderTimeButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val onPick = node.objOrNull("on_pick")
@@ -764,19 +1006,42 @@ internal fun RenderTimeButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     if (show) {
         val (h, min) = remember { parseHm(node.stringOr("value")) }
         val state = rememberTimePickerState(initialHour = h, initialMinute = min)
-        AlertDialog(
+        val confirm: @Composable () -> Unit = {
+            TextButton(onClick = {
+                show = false
+                if (onPick != null)
+                    ctx.action(onPick, JsonPrimitive(
+                        String.format("%02d:%02d", state.hour, state.minute)))
+            }) { Text("OK") }
+        }
+        val dismiss: @Composable () -> Unit = {
+            TextButton(onClick = { show = false }) { Text("Cancel") }
+        }
+        if (node.stringOr("display_mode") == "switchable") {
+            // The mid-dialog flip is the whole member: TimePickerDialog owns
+            // the Title(displayMode) and the toggle affordance itself.
+            var mode by remember { mutableStateOf(TimePickerDisplayMode.Picker) }
+            TimePickerDialog(
+                onDismissRequest = { show = false },
+                confirmButton = { confirm() },
+                dismissButton = { dismiss() },
+                title = { TimePickerDialogDefaults.Title(displayMode = mode) },
+                modeToggleButton = {
+                    TimePickerDialogDefaults.DisplayModeToggle(
+                        onDisplayModeChange = {
+                            mode = if (mode == TimePickerDisplayMode.Picker)
+                                TimePickerDisplayMode.Input
+                            else TimePickerDisplayMode.Picker
+                        },
+                        displayMode = mode)
+                }) {
+                if (mode == TimePickerDisplayMode.Input) TimeInput(state = state)
+                else TimePicker(state = state)
+            }
+        } else AlertDialog(
             onDismissRequest = { show = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    show = false
-                    if (onPick != null)
-                        ctx.action(onPick, JsonPrimitive(
-                            String.format("%02d:%02d", state.hour, state.minute)))
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { show = false }) { Text("Cancel") }
-            },
+            confirmButton = { confirm() },
+            dismissButton = { dismiss() },
             text = {
                 if (node.stringOr("display_mode") == "input")
                     TimeInput(state = state)
@@ -859,15 +1124,23 @@ internal fun RenderSplitButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                 border = border,
                 contentPadding = SplitButtonDefaults.leadingButtonContentPaddingFor(h),
             ) {
+                // §17.4: the leading half is a label, an icon, or both — never
+                // neither (the constructor refuses it). Icon-only keeps its
+                // accessible name via the icon identifier, the tabs precedent
+                // for §16.4's icon-not-sole-carrier rule.
                 val iconName = node.stringOr("icon")
+                val label = node.stringOr("label")
                 if (iconName.isNotEmpty()) {
-                    Icon(IconMap.get(iconName), contentDescription = null,
+                    Icon(IconMap.get(iconName),
+                        contentDescription = if (label.isEmpty()) iconName else null,
                         modifier = Modifier.size(SplitButtonDefaults.LeadingIconSize))
-                    androidx.compose.foundation.layout.Spacer(
-                        Modifier.size(ButtonDefaults.IconSpacing))
+                    if (label.isNotEmpty())
+                        androidx.compose.foundation.layout.Spacer(
+                            Modifier.size(ButtonDefaults.IconSpacing))
                 }
-                Text(node.stringOr("label"), maxLines = 1, softWrap = false,
-                    overflow = TextOverflow.Ellipsis)
+                if (label.isNotEmpty())
+                    Text(label, maxLines = 1, softWrap = false,
+                        overflow = TextOverflow.Ellipsis)
             }
         },
         trailingButton = {

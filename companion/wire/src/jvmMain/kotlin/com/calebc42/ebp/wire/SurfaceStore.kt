@@ -469,7 +469,16 @@ class SurfaceStore(
             "text_input" -> value is JsonPrimitive && value.isString &&
                 !node.boolOr("password") &&
                 (!node.boolOr("single_line") || '\n' !in value.content)
-            "checkbox", "switch" -> isJsonBoolean(value)
+            // §13.6: `state` present makes the value schema the enum STRING,
+            // not a boolean — a retained boolean draft is incompatible and is
+            // erased, which is why tri-state is a distinct member rather than
+            // a widened `checked`.
+            "checkbox" ->
+                if ("state" in node)
+                    value is JsonPrimitive && value.isString &&
+                        value.content in TRI_STATES
+                else isJsonBoolean(value)
+            "switch" -> isJsonBoolean(value)
             "button", "icon_button" -> "checked" in node && isJsonBoolean(value)
             "search_bar" -> value is JsonPrimitive && value.isString
             "enum_list" -> {
@@ -483,16 +492,27 @@ class SurfaceStore(
                     value is JsonArray && value.all { legal(it) }
                 else value !is JsonArray && legal(value)
             }
-            "slider" -> jsonNumberOrNull(value)?.let { num ->
-                val values = node.arrOrNull("values")
-                if (values != null)
-                    values.any { jsonValueEquals(it, value) }
-                else {
+            // §13.6: `value_end` present makes the value schema a TWO-NUMBER
+            // array (both thumbs), so a scalar draft from before the member
+            // was authored is incompatible and erased — and vice versa.
+            "slider" ->
+                if ("value_end" in node) {
                     val min = jsonNumberOrNull(node["min"]) ?: 0.0
                     val max = jsonNumberOrNull(node["max"]) ?: 1.0
-                    num in min..max
-                }
-            } ?: false
+                    val pair = (value as? JsonArray)?.takeIf { it.size == 2 }
+                        ?.mapNotNull { jsonNumberOrNull(it) }
+                    pair != null && pair.size == 2 && pair[0] <= pair[1] &&
+                        pair.all { it in min..max }
+                } else jsonNumberOrNull(value)?.let { num ->
+                    val values = node.arrOrNull("values")
+                    if (values != null)
+                        values.any { jsonValueEquals(it, value) }
+                    else {
+                        val min = jsonNumberOrNull(node["min"]) ?: 0.0
+                        val max = jsonNumberOrNull(node["max"]) ?: 1.0
+                        num in min..max
+                    }
+                } ?: false
             "editor" -> value is JsonPrimitive && value.isString &&
                 node.boolOr("publish_state") && "document" !in node
             else -> false
@@ -510,16 +530,26 @@ class SurfaceStore(
          * being replaced by it. */
         fun authoredValueOf(node: JsonObject): JsonElement? = when (node.reqString("t")) {
             "text_input", "editor" -> node["value"] ?: JsonPrimitive("")
-            "checkbox", "switch" -> node["checked"] ?: JsonPrimitive(false)
+            "checkbox" ->
+                if ("state" in node) node["state"] ?: JsonPrimitive("off")
+                else node["checked"] ?: JsonPrimitive(false)
+            "switch" -> node["checked"] ?: JsonPrimitive(false)
             // null when absent: a plain button has no authored value at all.
             "button", "icon_button" -> node["checked"]
             "search_bar" -> node["value"] ?: JsonPrimitive("")
             "enum_list" -> node["value"]
                 ?: if (node.boolOr("multi_select")) JsonArray(emptyList()) else null
-            "slider" -> node["value"]
-                ?: node.arrOrNull("values")?.get(0) ?: node["min"] ?: JsonPrimitive(0)
+            "slider" ->
+                if ("value_end" in node) {
+                    val floor = node["value"] ?: node["min"] ?: JsonPrimitive(0)
+                    JsonArray(listOf(floor, node["value_end"] ?: floor))
+                } else node["value"]
+                    ?: node.arrOrNull("values")?.get(0) ?: node["min"] ?: JsonPrimitive(0)
             else -> null
         }
+
+        /** The legal checkbox `state` strings (§17.4 tri-state). */
+        val TRI_STATES: Set<String> = setOf("off", "on", "indeterminate")
 
         /** The two SPEC 4.2 kind tests org.json used to get from Kotlin's
          * `is Boolean` / `is Number`. Both refuse a JSON STRING that merely

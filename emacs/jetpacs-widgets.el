@@ -968,7 +968,8 @@ ActionDescriptor.  ITEMS is a list of node plists."
 
 (defconst jetpacs--tab-icon-positions '("above" "leading"))
 
-(cl-defun jetpacs-tab-item (&optional label &key icon icon-position badge)
+(cl-defun jetpacs-tab-item (&optional label &key icon icon-position badge
+                                      tooltip)
   "A TabItem for `jetpacs-tabs' (SPEC §17.3).
 
 LABEL may be omitted WHEN ICON is present, which is how M3 draws its
@@ -978,7 +979,10 @@ with a blank line in it.
 
 ICON-POSITION is above (default) or leading — the latter is M3's
 LeadingIconTab, a single row of icon then label.  BADGE is a string or
-number drawn over the tab, empty meaning the bare attention dot."
+number drawn over the tab, empty meaning the bare attention dot.
+TOOLTIP is the plain tooltip M3 wants over an icon-only tab, anchored
+above; a screen reader hears the icon's fallback name either way, so
+the tooltip is the SIGHTED user's label, not a replacement for one."
   (when label (jetpacs--require-string label ":label"))
   (when icon (jetpacs--check-identifier icon ":icon"))
   (unless (or label icon)
@@ -990,8 +994,10 @@ number drawn over the tab, empty meaning the bare attention dot."
     (unless icon
       (error "jetpacs-tab-item: :icon-position needs an :icon (SPEC 17.3)")))
   (when badge (jetpacs--check-badge badge))
+  (when tooltip (jetpacs--require-string tooltip ":tooltip"))
   (jetpacs--node nil :label label :icon icon
-                 :icon_position icon-position :badge badge))
+                 :icon_position icon-position :badge badge
+                 :tooltip tooltip))
 
 (defconst jetpacs--tab-styles '("primary" "secondary"))
 
@@ -1115,10 +1121,12 @@ unique across the document (§16.1); a plain button carries neither."
 (cl-defun jetpacs-icon-button (icon on-tap &key content-description badge
                                     variant size shape width-mode
                                     checked checked-icon on-change
-                                    enabled)
+                                    color enabled)
   "An icon button showing ICON dispatching ON-TAP (SPEC §17.4).
 ICON is a §4.4 identifier (§17.1); BADGE a string or number; VARIANT
 filled/tonal/outlined (omit for the plain, container-less icon button).
+COLOR is a §16.6 color tinting the glyph — the node draws its own Icon,
+so no universal attribute could reach it.
 
 CHECKED makes this a toggle (device-held, keyed on `:id', which such a
 node then REQUIRES); CHECKED-ICON is the identifier drawn while checked,
@@ -1137,13 +1145,14 @@ and ON-CHANGE receives the flipped boolean."
   (when checked (jetpacs--check-bool checked ":checked"))
   (when checked-icon (jetpacs--check-identifier checked-icon ":checked_icon"))
   (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when color (jetpacs--check-color color))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "icon_button" :icon icon :on_tap on-tap
                  :content_description content-description :badge badge
                  :variant variant :size size :shape shape
                  :width_mode width-mode
                  :checked checked :checked_icon checked-icon
-                 :on_change on-change :enabled enabled))
+                 :on_change on-change :color color :enabled enabled))
 
 (defconst jetpacs--search-bar-variants '("full_screen" "docked"))
 
@@ -1259,8 +1268,14 @@ TRAILING-ICON overrides the default arrow, TRAILING-LABEL puts text there
 instead, and TRAILING-DESCRIPTION is the accessible name an icon-only
 trailing half needs.
 
-A node carrying CHECKED is stateful and REQUIRES a unique `:id' (§16.1)."
-  (jetpacs--require-string label ":label")
+A node carrying CHECKED is stateful and REQUIRES a unique `:id' (§16.1).
+
+LABEL may be nil WHEN ICON is present — the icon-only LeadingButton form,
+whose accessible name falls back to the icon identifier — but a leading
+half with neither is refused."
+  (if label (jetpacs--require-string label ":label")
+    (unless icon
+      (error "jetpacs-split-button: the leading half needs a :label, an icon, or both (SPEC 17.4)")))
   (jetpacs--check-descriptor on-tap ":on-tap")
   (when icon (jetpacs--check-identifier icon ":icon"))
   (when variant
@@ -1325,14 +1340,18 @@ wraps its own; the anchor keeps its own `on_tap'.
 
 Trailing options: :position (one of `jetpacs--tooltip-positions', above
 by default), :caret (a boolean asking for the pointer aimed back at the
-anchor), :rich (M3's RichTooltip rather than the plain one), :title and
-:action-label/:on-action (rich only), and :shown, which asks the
-Companion to display the tooltip without the long press."
+anchor), :caret-width and :caret-height (both-or-neither dp resizing
+that pointer, valid only with :caret), :rich (M3's RichTooltip rather
+than the plain one), :title and :action-label/:on-action (rich only),
+and :shown, which asks the Companion to display the tooltip without the
+long press."
   (jetpacs--require-string text ":text")
   (let* ((split (jetpacs--children-and-opts args "tooltip"))
          (opts (cdr split))
          (position (plist-get opts :position))
          (caret (plist-get opts :caret))
+         (caret-width (plist-get opts :caret-width))
+         (caret-height (plist-get opts :caret-height))
          (rich (plist-get opts :rich))
          (title (plist-get opts :title))
          (action-label (plist-get opts :action-label))
@@ -1342,6 +1361,13 @@ Companion to display the tooltip without the long press."
       (setq position (jetpacs--check-enum position jetpacs--tooltip-positions
                                          ":position")))
     (when caret (jetpacs--check-bool caret ":caret"))
+    (when (or caret-width caret-height)
+      (unless (and caret-width caret-height)
+        (error "jetpacs-tooltip: :caret-width and :caret-height come together (SPEC 17.2)"))
+      (unless (eq caret t)
+        (error "jetpacs-tooltip: caret sizes need :caret t (SPEC 17.2)"))
+      (jetpacs--check-number caret-width ":caret-width" 0 nil)
+      (jetpacs--check-number caret-height ":caret-height" 0 nil))
     (when rich (jetpacs--check-bool rich ":rich"))
     (when title (jetpacs--require-string title ":title"))
     (when action-label (jetpacs--require-string action-label ":action-label"))
@@ -1351,7 +1377,9 @@ Companion to display the tooltip without the long press."
       (error "jetpacs-tooltip: :action-label needs :on-action (SPEC 17.2)"))
     (jetpacs--node "tooltip"
                    :children (jetpacs--as-children (car split))
-                   :text text :position position :caret caret :rich rich
+                   :text text :position position :caret caret
+                   :caret_width caret-width :caret_height caret-height
+                   :rich rich
                    :title title :action_label action-label
                    :on_action on-action :shown shown)))
 
@@ -1380,15 +1408,29 @@ item list is longer than the screen."
 
 (defconst jetpacs--text-input-variants '("outlined" "filled"))
 
+(defconst jetpacs--text-input-filters '("digits" "alnum"))
+
 (cl-defun jetpacs-text-input (id &key value hint label on-change on-submit
                                  single-line min-lines max-lines monospace syntax
                                  password keyboard autofocus clear-on-submit
                                  variant is-error supporting-text prefix suffix
-                                 leading-icon trailing-icon max-length enabled)
+                                 leading-icon trailing-icon max-length
+                                 selection hide-keyboard-on-submit
+                                 content-padding mask filter enabled)
   "A text input identified by ID (SPEC §17.4).
 Booleans (SINGLE-LINE, MONOSPACE, PASSWORD, AUTOFOCUS, CLEAR-ON-SUBMIT,
 ENABLED) take t or :json-false.  Enforces the §17.4 line-count, single-line
-no-newline, and password constraints at build time."
+no-newline, and password constraints at build time.
+
+SELECTION is (START END), non-negative character offsets into VALUE with
+START <= END <= its length — it seeds the initial cursor/selection only.
+HIDE-KEYBOARD-ON-SUBMIT dismisses the IME after ON-SUBMIT (Compose's
+default hide-on-Done is suppressed the moment a submit handler exists).
+CONTENT-PADDING is the field's INTERIOR padding in dp — the dense form —
+distinct from the universal padding, which is margin.  MASK is a display
+template over the stored value (every `#' consumes one stored character,
+everything else is literal filler that never enters the value); FILTER
+reverts characters outside digits/alnum at the keystroke, locally."
   (jetpacs--check-identifier id ":id")
   (when value (jetpacs--require-string value ":value"))
   (when hint (jetpacs--require-string hint ":hint"))
@@ -1416,6 +1458,30 @@ no-newline, and password constraints at build time."
   (when leading-icon (jetpacs--check-identifier leading-icon ":leading_icon"))
   (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing_icon"))
   (when max-length (jetpacs--check-integer max-length ":max_length" 1 nil))
+  (when selection
+    (unless (and (listp selection) (= 2 (length selection)))
+      (error "jetpacs-text-input: :selection must be (START END) (SPEC 17.4)"))
+    (let ((start (nth 0 selection)) (end (nth 1 selection))
+          (len (length (or value ""))))
+      (jetpacs--check-integer start ":selection start" 0 nil)
+      (jetpacs--check-integer end ":selection end" 0 nil)
+      (unless (<= start end len)
+        (error "jetpacs-text-input: :selection needs START <= END <= value length (SPEC 17.4)")))
+    (setq selection (vconcat selection)))
+  (when hide-keyboard-on-submit
+    (jetpacs--check-bool hide-keyboard-on-submit ":hide-keyboard-on-submit")
+    (unless on-submit
+      (error "jetpacs-text-input: :hide-keyboard-on-submit needs :on-submit (SPEC 17.4)")))
+  (when content-padding
+    (jetpacs--check-number content-padding ":content-padding" 0 nil))
+  (when mask
+    (jetpacs--require-string mask ":mask")
+    (unless (string-search "#" mask)
+      (error "jetpacs-text-input: :mask needs at least one `#' slot (SPEC 17.4)"))
+    (when (or (eq password t) syntax)
+      (error "jetpacs-text-input: :mask is invalid with :password or :syntax (SPEC 17.4)")))
+  (when filter
+    (setq filter (jetpacs--check-enum filter jetpacs--text-input-filters ":filter")))
   (when (eq single-line t)
     (when (and min-lines (/= min-lines 1))
       (error "jetpacs-text-input: single_line requires :min-lines 1 (SPEC 17.4)"))
@@ -1443,17 +1509,47 @@ no-newline, and password constraints at build time."
                  :supporting_text supporting-text :prefix prefix :suffix suffix
                  :leading_icon leading-icon :trailing_icon trailing-icon
                  :max_length max-length
+                 :selection selection
+                 :hide_keyboard_on_submit hide-keyboard-on-submit
+                 :content_padding content-padding
+                 :mask mask :filter filter
                  :enabled enabled))
 
-(cl-defun jetpacs-checkbox (id &key checked label on-change enabled)
+(defconst jetpacs--checkbox-states '("off" "on" "indeterminate"))
+(defconst jetpacs--stroke-caps '("butt" "round" "square"))
+(defconst jetpacs--stroke-joins '("miter" "round" "bevel"))
+
+(cl-defun jetpacs-checkbox (id &key checked state stroke label on-change enabled)
   "A checkbox identified by ID (SPEC §17.4).
-CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
+CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor.
+
+STATE makes it tri-state (off, on, indeterminate) and is mutually
+exclusive with CHECKED — it changes what `state.changed' carries for ID
+from a boolean to the enum string, which is a different value schema
+under §13.6.  STROKE is a plist (:width DP :cap CAP :join JOIN), every
+key optional, reaching M3's checkmarkStroke/outlineStroke pair."
   (jetpacs--check-identifier id ":id")
   (when checked (jetpacs--check-bool checked ":checked"))
+  (when state
+    (when checked
+      (error "jetpacs-checkbox: :state and :checked are mutually exclusive (SPEC 17.4)"))
+    (setq state (jetpacs--check-enum state jetpacs--checkbox-states ":state")))
+  (when stroke
+    (unless (and (listp stroke) (cl-evenp (length stroke)))
+      (error "jetpacs-checkbox: :stroke must be a plist (SPEC 17.4)"))
+    (cl-loop for (key value) on stroke by #'cddr
+             do (pcase key
+                  (:width (jetpacs--check-number value ":stroke :width" 0 nil))
+                  (:cap (jetpacs--check-enum value jetpacs--stroke-caps
+                                             ":stroke :cap"))
+                  (:join (jetpacs--check-enum value jetpacs--stroke-joins
+                                              ":stroke :join"))
+                  (_ (error "jetpacs-checkbox: unknown :stroke key %S" key)))))
   (when label (jetpacs--require-string label ":label"))
   (when on-change (jetpacs--check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "checkbox" :id id :checked checked :label label
+  (jetpacs--node "checkbox" :id id :checked checked :state state
+                 :stroke stroke :label label
                  :on_change on-change :enabled enabled))
 
 (cl-defun jetpacs-switch (id &key checked label on-change thumb-icon enabled)
@@ -1525,26 +1621,53 @@ VALUE is an HH:MM string in local civil time."
   (jetpacs--check-descriptor on-pick ":on-pick")
   (when value (jetpacs--check-time value))
   (when display-mode
-    (setq display-mode (jetpacs--check-enum display-mode '("picker" "input")
+    (setq display-mode (jetpacs--check-enum display-mode
+                                            '("picker" "input" "switchable")
                                             ":display-mode")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "time_button" :label label :on_pick on-pick :value value
                  :display_mode display-mode :enabled enabled))
 
 (defconst jetpacs--slider-tracks '("default" "centered"))
+(defconst jetpacs--slider-orientations '("horizontal" "vertical"))
 
-(cl-defun jetpacs-slider (id on-change &key value min max values
-                             track color thumb-icon enabled)
+(cl-defun jetpacs-slider (id on-change &key value value-end min max values
+                             track orientation color color-end thumb-icon
+                             value-label track-icon-start track-icon-end
+                             enabled)
   "A slider identified by ID dispatching ON-CHANGE (SPEC §17.4).
 Continuous: :min (default 0) < :max (default 1), :value in [min,max].
 Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
-:min/:max, and :value must equal a listed number."
+:min/:max, and :value must equal a listed number.
+
+VALUE-END makes it a RangeSlider: two thumbs, and `state.changed'
+carries a two-number array — a different value schema under §13.6.
+With :values, each thumb snaps to the nearest authored number on
+commit.  ORIENTATION vertical renders M3's VerticalSlider; give it a
+universal :height, since a vertical rail has no width to fill.
+COLOR-END tints the end thumb alone (needs VALUE-END).  VALUE-LABEL
+shows the in-flight position over the thumb — presentation only, the
+dispatch still happens once on commit.  TRACK-ICON-START/END name icons
+drawn at both edges of each track segment, active/inactive tinted."
   (jetpacs--check-identifier id ":id")
   (jetpacs--check-descriptor on-change ":on-change")
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (when track (setq track (jetpacs--check-enum track jetpacs--slider-tracks ":track")))
+  (when orientation
+    (setq orientation (jetpacs--check-enum orientation
+                                           jetpacs--slider-orientations
+                                           ":orientation")))
   (when color (jetpacs--check-color color))
+  (when color-end
+    (unless value-end
+      (error "jetpacs-slider: :color-end needs :value-end (SPEC 17.4)"))
+    (jetpacs--check-color color-end))
+  (when value-label (jetpacs--check-bool value-label ":value-label"))
   (when thumb-icon (jetpacs--check-identifier thumb-icon ":thumb_icon"))
+  (when track-icon-start
+    (jetpacs--check-identifier track-icon-start ":track_icon_start"))
+  (when track-icon-end
+    (jetpacs--check-identifier track-icon-end ":track_icon_end"))
   (cond
    (values
     (when (or min max)
@@ -1554,20 +1677,33 @@ Discrete: :values is 2+ strictly-increasing distinct numbers, MUST omit
                  (apply #'< values))
       (error "jetpacs-slider: :values must be 2+ strictly-increasing finite numbers (SPEC 17.4)"))
     (when (and value (not (cl-member value values :test #'jetpacs--json-equal)))
-      (error "jetpacs-slider: discrete :value must equal a listed number under SPEC 4.3 (17.4)")))
+      (error "jetpacs-slider: discrete :value must equal a listed number under SPEC 4.3 (17.4)"))
+    (when (and value-end
+               (not (cl-member value-end values :test #'jetpacs--json-equal)))
+      (error "jetpacs-slider: discrete :value-end must equal a listed number under SPEC 4.3 (17.4)")))
    (t
     (when min (jetpacs--check-number min ":min" nil nil))
     (when max (jetpacs--check-number max ":max" nil nil))
     (when value (jetpacs--check-number value ":value" nil nil))
+    (when value-end (jetpacs--check-number value-end ":value-end" nil nil))
     (let ((lo (or min 0)) (hi (or max 1)))
       (unless (< lo hi)
         (error "jetpacs-slider: :min must be less than :max (SPEC 17.4)"))
       (when (and value (not (<= lo value hi)))
-        (error "jetpacs-slider: :value must be within [min,max] (SPEC 17.4)")))))
+        (error "jetpacs-slider: :value must be within [min,max] (SPEC 17.4)"))
+      (when (and value-end (not (<= lo value-end hi)))
+        (error "jetpacs-slider: :value-end must be within [min,max] (SPEC 17.4)")))))
+  (when (and value value-end (numberp value) (numberp value-end)
+             (> value value-end))
+    (error "jetpacs-slider: :value must not exceed :value-end (SPEC 17.4)"))
   (jetpacs--node "slider"
-                 :id id :on_change on-change :value value
+                 :id id :on_change on-change :value value :value_end value-end
                  :min min :max max :values (and values (vconcat values))
-                 :track track :color color :thumb_icon thumb-icon
+                 :track track :orientation orientation
+                 :color color :color_end color-end
+                 :thumb_icon thumb-icon :value_label value-label
+                 :track_icon_start track-icon-start
+                 :track_icon_end track-icon-end
                  :enabled enabled))
 
 ;;;; Editor + toolbar (§17.4 editor row, §17.7)

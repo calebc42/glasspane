@@ -9,6 +9,7 @@
 package com.calebc42.ebp.companion.render
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -40,6 +42,7 @@ import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -47,6 +50,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
@@ -64,6 +68,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -426,12 +431,16 @@ private fun RenderTextInput(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                 ?.takeIf { it.isString }?.content ?: node.stringOr("value"))
         }
     // SPEC 18.4/17.4: a `syntax` language recolours the field in place; a
-    // password masks with dots instead (a syntax highlight on a secret is moot).
+    // password masks with dots instead (a syntax highlight on a secret is
+    // moot); a `mask` template formats the stored value for DISPLAY only —
+    // its literals never enter value/state.changed — and outranks syntax.
     val language = node.stringOr("syntax")
     val syntaxColors = LocalSyntaxColors.current
-    val transform = remember(language, syntaxColors, password) {
+    val maskSpec = node.stringOr("mask")
+    val transform = remember(language, syntaxColors, password, maskSpec) {
         when {
             password -> androidx.compose.ui.text.input.PasswordVisualTransformation()
+            maskSpec.isNotEmpty() -> MaskTransformation(maskSpec)
             language.isEmpty() -> VisualTransformation.None
             else -> SyntaxTransformation(language, syntaxColors)
         }
@@ -474,6 +483,14 @@ private fun RenderTextInput(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val onValueChange: (String) -> Unit = { raw ->
         // SPEC 17.4: single_line strips every U+000A from entered text.
         var next = if (singleLine) raw.replace("\n", "") else raw
+        // `filter` reverts characters outside the class at the keystroke,
+        // locally — the companion half of `mask`, so a phone field never
+        // round-trips an alphabetic keypress to Emacs and back.
+        next = when (node.stringOr("filter")) {
+            "digits" -> next.filter { it.isDigit() }
+            "alnum" -> next.filter { it.isLetterOrDigit() }
+            else -> next
+        }
         // `max_length` refuses committed text past N — paste and IME included,
         // the same discipline as the single_line newline rule.
         val cap = node.doubleOr("max_length", 0.0).toInt()
@@ -490,8 +507,62 @@ private fun RenderTextInput(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         keyboardType = keyboardTypeOf(node.stringOr("keyboard"), password),
         imeAction = if (onSubmit != null) androidx.compose.ui.text.input.ImeAction.Done
             else androidx.compose.ui.text.input.ImeAction.Default)
+    // §17.4 `hide_keyboard_on_submit`: Compose's default hide-on-Done is
+    // SUPPRESSED the moment KeyboardActions supplies onDone, so without this
+    // member the IME stays up after every submit and nothing can ask otherwise.
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val hideOnSubmit = node.boolOr("hide_keyboard_on_submit")
     val keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-        onDone = { submit() })
+        onDone = { submit(); if (hideOnSubmit) keyboardController?.hide() })
+    // §17.4 `content_padding`: the field's INTERIOR padding, which only the
+    // DecorationBox overload owns — the universal `padding` lands outside the
+    // widget as margin and `min_height` cannot shrink the ~56dp interior.
+    val innerPad = node["content_padding"]?.numOrNull()
+    if (innerPad != null && !password) {
+        RenderDenseTextInput(node, value, onValueChange, transform,
+            keyboardOptions, keyboardActions, enabled, singleLine, isError,
+            innerPad.toFloat(), labelSlot, placeholderSlot, supportingSlot,
+            leadingSlot, trailingSlot, prefixSlot, suffixSlot, m)
+        return
+    }
+    // §17.4 `selection`: seeds the initial TextRange only — re-seeded on an
+    // input-reset epoch exactly like `value` — so the field composes through
+    // the TextFieldValue overload while the draft store still carries the
+    // bare string.
+    val selSpec = node.arrOrNull("selection")
+    if (selSpec != null && !password) {
+        var sel by remember(ctx.surface, id, ctx.epochOf(id)) {
+            val a = selSpec.mapNotNull { it.numOrNull()?.toInt() }
+            val start = (a.getOrNull(0) ?: 0).coerceIn(0, value.length)
+            val end = (a.getOrNull(1) ?: start).coerceIn(start, value.length)
+            mutableStateOf(androidx.compose.ui.text.TextRange(start, end))
+        }
+        val tfv = androidx.compose.ui.text.input.TextFieldValue(value, sel)
+        val onTfv: (androidx.compose.ui.text.input.TextFieldValue) -> Unit = {
+            sel = it.selection
+            onValueChange(it.text)
+        }
+        if (node.stringOr("variant") == "filled")
+            TextField(
+                value = tfv, enabled = enabled, visualTransformation = transform,
+                onValueChange = onTfv, label = labelSlot,
+                placeholder = placeholderSlot, singleLine = singleLine,
+                isError = isError, supportingText = supportingSlot,
+                leadingIcon = leadingSlot, trailingIcon = trailingSlot,
+                prefix = prefixSlot, suffix = suffixSlot,
+                keyboardOptions = keyboardOptions, keyboardActions = keyboardActions,
+                modifier = m)
+        else OutlinedTextField(
+            value = tfv, enabled = enabled, visualTransformation = transform,
+            onValueChange = onTfv, label = labelSlot,
+            placeholder = placeholderSlot, singleLine = singleLine,
+            isError = isError, supportingText = supportingSlot,
+            leadingIcon = leadingSlot, trailingIcon = trailingSlot,
+            prefix = prefixSlot, suffix = suffixSlot,
+            keyboardOptions = keyboardOptions, keyboardActions = keyboardActions,
+            modifier = m)
+        return
+    }
     if (node.stringOr("variant") == "filled") {
         TextField(
             value = value, enabled = enabled, visualTransformation = transform,
@@ -524,6 +595,78 @@ private fun RenderTextInput(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         modifier = m)
+}
+
+/** §17.4 `content_padding`: BasicTextField under the variant's own
+ * DecorationBox, which is the only seam where M3 exposes the interior
+ * padding. Everything else — slots, transform, keyboard — is the same
+ * machinery RenderTextInput hoisted; only the decoration differs. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun RenderDenseTextInput(
+    node: JsonObject,
+    value: String,
+    onValueChange: (String) -> Unit,
+    transform: VisualTransformation,
+    keyboardOptions: androidx.compose.foundation.text.KeyboardOptions,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions,
+    enabled: Boolean,
+    singleLine: Boolean,
+    isError: Boolean,
+    innerPadDp: Float,
+    labelSlot: (@Composable () -> Unit)?,
+    placeholderSlot: (@Composable () -> Unit)?,
+    supportingSlot: (@Composable () -> Unit)?,
+    leadingSlot: (@Composable () -> Unit)?,
+    trailingSlot: (@Composable () -> Unit)?,
+    prefixSlot: (@Composable () -> Unit)?,
+    suffixSlot: (@Composable () -> Unit)?,
+    m: Modifier,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val padding = PaddingValues(innerPadDp.dp)
+    val filled = node.stringOr("variant") == "filled"
+    val textStyle = MaterialTheme.typography.bodyLarge.copy(
+        color = MaterialTheme.colorScheme.onSurface)
+    androidx.compose.foundation.text.BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        enabled = enabled,
+        singleLine = singleLine,
+        textStyle = textStyle,
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(
+            MaterialTheme.colorScheme.primary),
+        visualTransformation = transform,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+        interactionSource = interaction,
+        modifier = m,
+    ) { inner ->
+        if (filled)
+            TextFieldDefaults.DecorationBox(
+                value = value, innerTextField = inner, enabled = enabled,
+                singleLine = singleLine, visualTransformation = transform,
+                interactionSource = interaction, isError = isError,
+                label = labelSlot, placeholder = placeholderSlot,
+                leadingIcon = leadingSlot, trailingIcon = trailingSlot,
+                prefix = prefixSlot, suffix = suffixSlot,
+                supportingText = supportingSlot,
+                contentPadding = padding)
+        else OutlinedTextFieldDefaults.DecorationBox(
+            value = value, innerTextField = inner, enabled = enabled,
+            singleLine = singleLine, visualTransformation = transform,
+            interactionSource = interaction, isError = isError,
+            label = labelSlot, placeholder = placeholderSlot,
+            leadingIcon = leadingSlot, trailingIcon = trailingSlot,
+            prefix = prefixSlot, suffix = suffixSlot,
+            supportingText = supportingSlot,
+            contentPadding = padding,
+            container = {
+                OutlinedTextFieldDefaults.Container(
+                    enabled = enabled, isError = isError,
+                    interactionSource = interaction)
+            })
+    }
 }
 
 /** SPEC 17.4 `keyboard`: text|number|decimal|email|phone|uri; password wins. */

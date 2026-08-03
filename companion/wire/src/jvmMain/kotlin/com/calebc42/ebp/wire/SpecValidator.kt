@@ -587,6 +587,13 @@ object SpecValidator {
                         if (!listed)
                             throw ContentInvalid("$path.value", "must equal a listed discrete value")
                     }
+                    if ("value_end" in node) {
+                        val v = node.getValue("value_end")
+                        if (v.asDoubleOrNull() == null)
+                            throw ContentInvalid("$path.value_end", "must be a number")
+                        if (values.none { jsonValueEquals(it, v) })
+                            throw ContentInvalid("$path.value_end", "must equal a listed discrete value")
+                    }
                 } else {
                     val min = node["min"]?.asDoubleOrNull() ?: 0.0
                     val max = node["max"]?.asDoubleOrNull() ?: 1.0
@@ -599,7 +606,32 @@ object SpecValidator {
                         if (v.isNaN() || v < min || v > max)
                             throw ContentInvalid("$path.value", "must be within min..max")
                     }
+                    if ("value_end" in node) {
+                        val v = node["value_end"]?.asDoubleOrNull()
+                            ?: throw ContentInvalid("$path.value_end", "must be a number")
+                        if (v.isNaN() || v < min || v > max)
+                            throw ContentInvalid("$path.value_end", "must be within min..max")
+                    }
                 }
+                // SPEC 17.4: both thumbs of a range keep their order.
+                val start = node["value"]?.asDoubleOrNull()
+                val end = node["value_end"]?.asDoubleOrNull()
+                if (start != null && end != null && start > end)
+                    throw ContentInvalid(path, "slider value must not exceed value_end")
+            }
+            "checkbox" -> {
+                // SPEC 17.4/13.6: `state` and `checked` carry DIFFERENT value
+                // schemas for the same id, so a node carrying both is content-
+                // invalid rather than one silently outranking the other.
+                if ("state" in node && "checked" in node)
+                    throw ContentInvalid(path, "checkbox state and checked are mutually exclusive")
+            }
+            "split_button" -> {
+                // SPEC 17.4: the leading half is a label, an icon, or both —
+                // never neither (label left the required set for the icon-only
+                // LeadingButton form, not for an empty one).
+                if (node.stringOr("label").isEmpty() && node.stringOr("icon").isEmpty())
+                    throw ContentInvalid(path, "split_button needs a label, an icon, or both")
             }
             "enum_list" -> {
                 // SPEC 16.1: a wrong-typed required member rejects (1201),

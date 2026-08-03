@@ -59,6 +59,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LeadingIconTab
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.ScrollableTabRow
@@ -70,6 +71,10 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.layout.AnimatedPane
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
@@ -490,15 +495,28 @@ internal fun RenderTabs(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                         }
                         val textSlot: (@Composable () -> Unit)? =
                             if (hasLabel) { { Text(item.stringOr("label")) } } else null
-                        if (icon.isNotEmpty() &&
-                            item.stringOr("icon_position") == "leading")
-                            LeadingIconTab(
+                        val tab: @Composable () -> Unit = {
+                            if (icon.isNotEmpty() &&
+                                item.stringOr("icon_position") == "leading")
+                                LeadingIconTab(
+                                    selected = selected == i, onClick = onClick,
+                                    text = textSlot ?: {}, icon = iconSlot)
+                            else Tab(
                                 selected = selected == i, onClick = onClick,
-                                text = textSlot ?: {}, icon = iconSlot)
-                        else Tab(
-                            selected = selected == i, onClick = onClick,
-                            text = textSlot,
-                            icon = if (icon.isNotEmpty()) iconSlot else null)
+                                text = textSlot,
+                                icon = if (icon.isNotEmpty()) iconSlot else null)
+                        }
+                        // §17.3 `tooltip`: the PlainTooltip M3 wants on an
+                        // icon-only tab, anchored Above — its own default.
+                        val tip = item.stringOr("tooltip")
+                        if (tip.isNotEmpty())
+                            TooltipBox(
+                                positionProvider = TooltipDefaults
+                                    .rememberTooltipPositionProvider(
+                                        TooltipAnchorPosition.Above),
+                                tooltip = { PlainTooltip { Text(tip) } },
+                                state = rememberTooltipState()) { tab() }
+                        else tab()
                     }
                 }
                 // §17.3 `style`: secondary (the default) is the full-width

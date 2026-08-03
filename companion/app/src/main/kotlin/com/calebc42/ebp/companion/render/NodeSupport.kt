@@ -19,7 +19,7 @@ object NodeSupport {
     /** SPEC 17.2 content nodes shared by the app and dialog profiles. */
     private val CONTENT_NODE_TYPES: Set<String> = sortedSetOf(
         "rich_text", "icon", "badge", "image", "section_header", "empty_state",
-        "progress", "date_stamp")
+        "progress", "date_stamp", "tooltip")
 
     /** SPEC 17.2: advertising `image` REQUIRES at least one form feature in the
      * same profile — the guarded loader handles both https and base64 data. */

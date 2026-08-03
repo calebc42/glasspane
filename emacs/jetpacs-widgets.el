@@ -48,8 +48,8 @@
     "reorderable_list" "tabs" "table" "button" "icon_button" "chip"
     "assist_chip" "menu" "text_input" "editor" "checkbox" "switch"
     "enum_list" "date_button" "time_button" "slider" "chart" "canvas"
-    "month_grid" "scaffold")
-  "The 39 EBP node types (contract.json `node_types').")
+    "month_grid" "scaffold" "tooltip")
+  "The 40 EBP node types (contract.json `node_types').")
 
 (defconst jetpacs-core-node-set
   '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
@@ -1102,6 +1102,49 @@ VARIANT flat(default)/elevated/suggestion/elevated_suggestion."
   (jetpacs--node "assist_chip" :label label :on_tap on-tap :icon icon
                  :variant variant :enabled enabled))
 
+(defconst jetpacs--tooltip-positions
+  '("above" "below" "left" "right" "start" "end")
+  "SPEC §17.2 `tooltip.position'.  `left'/`right' are ABSOLUTE sides, which
+is why they are distinct from the direction-relative `start'/`end' the
+alignment enums use.")
+
+(cl-defun jetpacs-tooltip (text &rest args)
+  "A tooltip carrying TEXT over its ANCHOR children (SPEC §17.2).
+CHILDREN are the anchor the tooltip describes, wrapped exactly as `badge'
+wraps its own; the anchor keeps its own `on_tap'.
+
+Trailing options: :position (one of `jetpacs--tooltip-positions', above
+by default), :caret (a boolean asking for the pointer aimed back at the
+anchor), :rich (M3's RichTooltip rather than the plain one), :title and
+:action-label/:on-action (rich only), and :shown, which asks the
+Companion to display the tooltip without the long press."
+  (jetpacs--require-string text ":text")
+  (let* ((split (jetpacs--children-and-opts args "tooltip"))
+         (opts (cdr split))
+         (position (plist-get opts :position))
+         (caret (plist-get opts :caret))
+         (rich (plist-get opts :rich))
+         (title (plist-get opts :title))
+         (action-label (plist-get opts :action-label))
+         (on-action (plist-get opts :on-action))
+         (shown (plist-get opts :shown)))
+    (when position
+      (setq position (jetpacs--check-enum position jetpacs--tooltip-positions
+                                         ":position")))
+    (when caret (jetpacs--check-bool caret ":caret"))
+    (when rich (jetpacs--check-bool rich ":rich"))
+    (when title (jetpacs--require-string title ":title"))
+    (when action-label (jetpacs--require-string action-label ":action-label"))
+    (when on-action (jetpacs--check-descriptor on-action ":on-action"))
+    (when shown (jetpacs--check-bool shown ":shown"))
+    (when (and action-label (not on-action))
+      (error "jetpacs-tooltip: :action-label needs :on-action (SPEC 17.2)"))
+    (jetpacs--node "tooltip"
+                   :children (jetpacs--as-children (car split))
+                   :text text :position position :caret caret :rich rich
+                   :title title :action_label action-label
+                   :on_action on-action :shown shown)))
+
 (cl-defun jetpacs-menu-item (label on-tap &key icon enabled)
   "A MenuItem {label, on_tap, icon?, enabled?} for `jetpacs-menu' (SPEC §17.4)."
   (jetpacs--require-string label ":label")
@@ -1716,7 +1759,7 @@ as a single list."
 
 (defconst jetpacs-content-node-types
   '("rich_text" "icon" "badge" "image" "section_header" "empty_state"
-    "progress" "date_stamp")
+    "progress" "date_stamp" "tooltip")
   "The §17.2 content node types shared by the reference app and dialog profiles.")
 
 (defconst jetpacs-input-node-types
@@ -1737,14 +1780,14 @@ as a single list."
             "text_input" "scaffold" "editor")
           jetpacs-content-node-types jetpacs-input-node-types
           jetpacs-layout-node-types jetpacs-viz-node-types)
-  "The reference companion's advertised `app' node_types (all 39; §10.2/§16.2).
+  "The reference companion's advertised `app' node_types (all 40; §10.2/§16.2).
 The AUTHORITATIVE set for a connection is its welcome `surface_profiles'.")
 
 (defconst jetpacs-dialog-node-types
   (append '("text" "row" "column" "box" "spacer" "divider" "button" "text_input"
             "editor")
           jetpacs-content-node-types jetpacs-input-node-types)
-  "The reference companion's advertised `dialog' node_types (27; no
+  "The reference companion's advertised `dialog' node_types (28; no
 scaffold/layout/viz).
 `editor' is in the set because JC-4b added it to the Companion's
 `DIALOG_NODE_TYPES' (NodeSupport.kt) so a dialog could host the capf

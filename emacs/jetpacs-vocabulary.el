@@ -69,7 +69,8 @@
     ("chart" ("series") ("children" "height" "kind" "on_point_tap" "summary" "y_range"))
     ("canvas" ("height" "ops" "width") ("children"))
     ("month_grid" ("month") ("children" "marks" "max_month" "min_month" "on_day_tap" "on_month_change" "selected"))
-    ("scaffold" () ("body" "bottom_bar" "drawer" "fab" "floating_toolbar" "on_refresh" "snackbar" "snackbar_action" "top_bar")))
+    ("scaffold" () ("body" "bottom_bar" "drawer" "fab" "floating_toolbar" "on_refresh" "snackbar" "snackbar_action" "top_bar"))
+    ("tooltip" ("children" "text") ("action_label" "caret" "on_action" "position" "rich" "shown" "title")))
   "Contract members per node type: (TYPE (REQUIRED...) (OPTIONAL...)).
 WIRE names, so the table compares directly against contract.json.  The
 constructors spell a multi-word member with a hyphen (`:content-padding'

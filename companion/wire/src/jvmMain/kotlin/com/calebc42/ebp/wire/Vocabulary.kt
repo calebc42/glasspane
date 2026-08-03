@@ -67,6 +67,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "canvas" to NodeRow(setOf("width", "height", "ops"), setOf("children")),
     "month_grid" to NodeRow(setOf("month"), setOf("marks", "selected", "min_month", "max_month", "on_day_tap", "on_month_change", "children")),
     "scaffold" to NodeRow(setOf(), setOf("top_bar", "body", "bottom_bar", "fab", "floating_toolbar", "drawer", "snackbar", "snackbar_action", "on_refresh")),
+    "tooltip" to NodeRow(setOf("children", "text"), setOf("position", "caret", "rich", "title", "action_label", "on_action", "shown")),
 )
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(
@@ -94,6 +95,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "body" to "node",
     "bottom_bar" to "node",
     "caption" to "string",
+    "caret" to "boolean",
     "checked" to "boolean",
     "checked_icon" to "identifier",
     "children" to "node-array",
@@ -151,10 +153,12 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "padding" to "dp",
     "pager_only" to "boolean",
     "password" to "boolean",
+    "position" to "string",
     "prefix" to "string",
     "publish_state" to "boolean",
     "read_only" to "boolean",
     "reverse_scroll" to "boolean",
+    "rich" to "boolean",
     "rows" to "table-row-array",
     "run_spacing" to "dp",
     "scroll" to "boolean",
@@ -164,6 +168,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "selected" to "varies-per-node",
     "series" to "chart-series-array",
     "shadow_elevation" to "dp",
+    "shown" to "boolean",
     "single_line" to "boolean",
     "size" to "varies-per-node",
     "snackbar" to "string",

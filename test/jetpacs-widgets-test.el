@@ -600,9 +600,9 @@
 
 (ert-deftest jetpacs-widgets/profile-gating ()
   "jetpacs-check-profile / -node-types gate emitted types to the target (§16.2)."
-  ;; reference set sizes + exact membership (app == the 39 node types)
-  (should (= (length jetpacs-app-node-types) 39))
-  (should (= (length jetpacs-dialog-node-types) 27))
+  ;; reference set sizes + exact membership (app == the 40 node types)
+  (should (= (length jetpacs-app-node-types) 40))
+  (should (= (length jetpacs-dialog-node-types) 28))
   (should (= (length jetpacs-notification-node-types) 6))
   (should (equal (sort (copy-sequence jetpacs-app-node-types) #'string<)
                  (sort (copy-sequence jetpacs-node-types) #'string<)))
@@ -863,8 +863,8 @@ case is the sharp one (0 is truthy, so a presence-only check let it pass)."
 ;; check is future work.
 
 (ert-deftest jetpacs-widgets/catalog-node-types ()
-  "The 39-type catalog stays in lockstep with contract.json `node_types'.
-When a 40th type appears, this fails -- a reminder to add its constructor."
+  "The 40-type catalog stays in lockstep with contract.json `node_types'.
+When a 41st type appears, this fails -- a reminder to add its constructor."
   (should (equal jetpacs-node-types
                  (alist-get 'node_types (jetpacs-test--contract)))))
 

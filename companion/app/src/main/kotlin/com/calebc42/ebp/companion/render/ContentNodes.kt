@@ -26,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -34,9 +35,17 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.RichTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -442,5 +451,64 @@ internal fun RenderDateStamp(node: JsonObject, m: Modifier) {
                 }
             }
         }
+    }
+}
+
+/** §17.2 tooltip: wraps its ANCHOR children in M3's TooltipBox, exactly as
+ * `badge` wraps its children in a BadgedBox. The anchor keeps its own on_tap —
+ * a tooltip is raised by long press (or hover), never by consuming the tap.
+ *
+ * `position` places the bubble against the anchor; `left`/`right` are ABSOLUTE
+ * sides and stay distinct from the direction-relative `start`/`end`, which is
+ * why this enum is its own rather than a reuse of the alignment enums.
+ * `caret` grows the pointer aimed back at the anchor. `rich` selects M3's
+ * RichTooltip, which is the only form with a title and an action. `shown` is
+ * authored presentation state: a true value asks the Companion to display the
+ * tooltip without the long press, which is how a "Display tooltip" button
+ * raises one over a sibling anchor with no new action descriptor. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun RenderTooltip(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val text = node.stringOr("text")
+    val rich = node.boolOr("rich")
+    val caret = node.boolOr("caret")
+    val position = when (node.stringOr("position")) {
+        "below" -> TooltipAnchorPosition.Below
+        "left" -> TooltipAnchorPosition.Left
+        "right" -> TooltipAnchorPosition.Right
+        "start" -> TooltipAnchorPosition.Start
+        "end" -> TooltipAnchorPosition.End
+        else -> TooltipAnchorPosition.Above          // §12 rule 6 fallback
+    }
+    val state = rememberTooltipState(isPersistent = rich)
+    // `shown` drives the state rather than the composition: re-pushing a
+    // snapshot whose value flipped shows or dismisses it.
+    val shown = node.boolOr("shown")
+    LaunchedEffect(shown) { if (shown) state.show() else state.dismiss() }
+    val title = node.stringOr("title")
+    val actionLabel = node.stringOr("action_label")
+    val onAction = node.objOrNull("on_action")
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(position),
+        state = state,
+        modifier = m,
+        tooltip = {
+            if (rich) RichTooltip(
+                title = title.takeIf { it.isNotEmpty() }?.let { { Text(it) } },
+                action = actionLabel.takeIf { it.isNotEmpty() }?.let {
+                    {
+                        TextButton(onClick = {
+                            if (onAction != null) ctx.action(onAction)
+                            state.dismiss()
+                        }) { Text(it) }
+                    }
+                },
+                caretShape = if (caret) TooltipDefaults.caretShape() else null,
+            ) { Text(text) }
+            else PlainTooltip(
+                caretShape = if (caret) TooltipDefaults.caretShape() else null,
+            ) { Text(text) }
+        }) {
+        RenderChildren(node.arrOrNull("children"), ctx)
     }
 }

@@ -44,6 +44,7 @@ import androidx.compose.material3.ElevatedAssistChip
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ElevatedFilterChip
 import androidx.compose.material3.ElevatedSuggestionChip
+import androidx.compose.material3.ElevatedToggleButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
@@ -57,6 +58,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedToggleButton
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -66,6 +68,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
+import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.material3.TonalToggleButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
@@ -170,6 +175,26 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         else -> ButtonDefaults.shapes()
     }
     val variant = node.stringOr("variant")
+    // A `checked` button is M3's ToggleButton, not a Button wearing state: the
+    // toggle has its OWN checked container and its own selected/unselected
+    // shape pair, so holding the boolean while drawing a plain Button would
+    // make checked and unchecked look identical — the state would be real and
+    // invisible, which is the defect class this whole pass exists to remove.
+    if (toggle != null) {
+        val onCheckedChange: (Boolean) -> Unit = { onClick() }
+        val tShapes = ToggleButtonDefaults.shapesFor(h ?: ButtonDefaults.MinHeight)
+        when (variant) {
+            "elevated" -> ElevatedToggleButton(toggle.value, onCheckedChange, mm,
+                enabled, shapes = tShapes, contentPadding = pad) { content() }
+            "tonal" -> TonalToggleButton(toggle.value, onCheckedChange, mm,
+                enabled, shapes = tShapes, contentPadding = pad) { content() }
+            "outlined" -> OutlinedToggleButton(toggle.value, onCheckedChange, mm,
+                enabled, shapes = tShapes, contentPadding = pad) { content() }
+            else -> ToggleButton(toggle.value, onCheckedChange, mm,
+                enabled, shapes = tShapes, contentPadding = pad) { content() }
+        }
+        return
+    }
     if (shapes != null) {
         // The shapes= overloads carry the press-state morph. They take
         // `shapes` as the SECOND positional parameter, so every argument here

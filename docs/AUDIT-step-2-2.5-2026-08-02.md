@@ -5,16 +5,32 @@ architecture-samples, Compose sample, and Nav 3 source trees. GitHub was not use
 as a code authority. Gradle's own checksum registry was used only to authenticate
 the selected wrapper distribution and wrapper JAR.
 
+## Room-first architecture correction
+
+The original audit treated Room as a surface projection appended to POC 2's
+file-backed stores. That direction is superseded by
+[`PLAN-room3-rebuild.md`](PLAN-room3-rebuild.md): POC 3 will be rebuilt from the
+local architecture template, and Room 3 will be Jetpacs' sole durable
+implementation of POC 2's EBP state. The existing surface cache is a proven
+prototype, not the production persistence seam.
+
+Consequently, S2-001 is no longer a post-accept cache callback; it is a generic
+suspending EBP transaction SPI plus an optional post-commit domain-change hook.
+S2-002 is part of the full Room surface contract. S2-003 is the complete
+Room-first rebuild and file-store cutover. Later projection language in this
+dated audit is historical; the rebuild plan is canonical.
+
 ## Boundary decision
 
 EBP remains Jetpacs-agnostic. `emacs/ebp.el` and the future `kotlin-ebp` library
 may define protocol state, validation, accepted-mutation DTOs, and persistence
 ports, but they may not depend on Jetpacs, Room, Nav 3, Android, or Compose.
 
-Room 3 is Jetpacs' durable cache/projection of state accepted from Emacs. Nav 3
-owns Jetpacs destinations and history. Neither choice becomes an EBP field,
-method, or requirement. EBP document-local `view.switch` remains distinct from
-Jetpacs app navigation.
+Room 3 is Jetpacs' sole durable implementation of state accepted from Emacs;
+`kotlin-ebp` remains the storage-independent semantic authority. Nav 3 owns
+Jetpacs destinations and history. Neither choice becomes an EBP field, method,
+or requirement. EBP document-local `view.switch` remains distinct from Jetpacs
+app navigation.
 
 ## Step 2 status
 
@@ -42,43 +58,48 @@ remaining 344 passed. Core/app verification is green independently.
 
 ## Step 2 blockers before production Room/Nav wiring
 
-### S2-001 — canonical accepted-surface event
+### S2-001 — generic transaction SPI and committed change stream
 
 The current app callback is `(surface, resolvedView?)`. It omits pairing,
 revision, tombstone state, the full accepted document, `stale_after_s`, and
 `stale_spec`. A `view.switch` can also change the resolved view without a new
-surface revision, so the callback is not a safe cache input.
+surface revision, so the callback is neither a safe cache input nor a durable
+transaction boundary.
 
-Add a typed post-accept event in `:wire`/future `kotlin-ebp` containing at least
-pairing ID, surface ID, accepted revision, presence, full accepted spec,
-`stale_after_s`, and `stale_spec`. It must fire only after generic EBP validation
-and ordering succeed. It must contain no Room type or Jetpacs policy.
+Do not expand it into a post-accept Room writer. Define a suspending,
+storage-independent transaction SPI in `:wire`/future `kotlin-ebp`; Jetpacs'
+Room adapter commits through that SPI before returning `applied`. An optional
+typed domain-change event may be emitted after commit for platform effects. It
+contains no Room type or Jetpacs policy and is not a second persistence path.
 
 ### S2-002 — fix existing stale-snapshot persistence
 
 The current wire handler validates `stale_spec` but `SurfaceStore.Record` and
 `PersistedRecord` discard it, and `stale_after_s` is not consumed. That is an
-existing Section 13.2/13.5 conformance gap and prevents a correct Room
-projection. Characterize old persisted files, add the missing fields with
-backward-compatible decoding, and test disconnect/process-death behavior before
-using this state as the renderer cache source.
+existing Section 13.2/13.5 conformance gap and prevents a complete Room store.
+Characterize old persisted files, include the fields in the new Room schema and
+legacy importer, and test disconnect/process-death behavior before using Room as
+the renderer source.
 
-### S2-003 — one durable projection and restart reconciliation
+### S2-003 — Room-first durable rebuild and cutover
 
-`FileSurfaceBacking`, the new Room table, and `EbpApplication` flows are three
-representations today. Do not let file storage and Room independently reject
-revisions. The target path is:
+The JSON backings, one-table Room prototype, and `EbpApplication` flows are
+parallel representations today. Replace them with one Room-backed implementation
+of the generic EBP transaction SPI:
 
 ```text
-Emacs -> generic EBP validation/order state -> typed accepted mutation
-      -> Jetpacs Room projection -> repository Flow -> ViewModel StateFlow
+Emacs -> kotlin-ebp reducer -> generic transaction SPI
+      -> Jetpacs Room transaction -> committed Room state
+      -> read-only repository Flow -> ViewModel StateFlow
       -> dumb Compose renderer
 ```
 
-Room is the renderer's sole Jetpacs cache. Generic EBP semantics remain the
-source of acceptance decisions. Define startup replay/reconciliation and a
-crash-boundary test so acceptance followed by process death cannot leave Room
-permanently behind. Section 19 session state remains non-durable.
+The rebuild includes the pairing partition, surfaces/drafts, queue, reminders,
+triggers/runtime, theme, legacy import, and crash-resumable revocation. It uses
+one process-lifetime coroutine actor and never dual-writes. The same behavioral
+contracts run against memory and Room, and every `applied` response follows the
+commit. Section 19 session state remains non-durable. The detailed work packages
+and cutover gates are in `PLAN-room3-rebuild.md`.
 
 ### S2-004 — lifecycle-aware Nav 3 composition root
 

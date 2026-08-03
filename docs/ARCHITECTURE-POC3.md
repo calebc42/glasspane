@@ -1,4 +1,10 @@
-# POC 3 architecture scaffold
+# POC 3 target architecture
+
+The canonical implementation sequence is
+[`PLAN-room3-rebuild.md`](PLAN-room3-rebuild.md). It supersedes the original
+fork-forward surface-cache adapter: POC 3 now rebuilds the durable POC 2
+semantics on Room 3 rather than projecting file-backed state into a second
+database.
 
 ## Non-negotiable boundaries
 
@@ -10,9 +16,9 @@ policy.
 
 Jetpacs is one implementation of EBP. The long-term product target is the
 Compose Catalog authored in Emacs/Elisp and transferred as EBP documents. The
-Android app is a dumb renderer: it selects a document, caches the last accepted
-snapshot, renders it, and returns typed EBP actions. It must not compile a
-second Kotlin copy of the catalog.
+Android app is a dumb renderer: it selects a document from Jetpacs' durable Room
+implementation of accepted EBP state, renders it, and returns typed EBP
+actions. It must not compile a second Kotlin copy of the catalog.
 
 Room 3 and Navigation 3 are Jetpacs choices, not EBP requirements. The EBP spec
 must permit their use without naming or requiring them.
@@ -21,41 +27,49 @@ must permit their use without naming or requiring them.
 
 | Module | Responsibility | May depend on |
 |---|---|---|
-| `:wire` | Current incubator for transport, framing, contract, and protocol state; future `kotlin-ebp` | Kotlin/platform transport libraries only |
-| `:core:model` | Jetpacs cache keys and accepted snapshot models | Kotlin |
-| `:core:database` | Room 3 schema, DAO, builder, and retained tombstone floors | `:core:model`, Room 3, SQLite |
-| `:core:data` | Repository API and atomic Room-backed cache policy | `:core:model`, `:core:database` |
+| `:wire` | Incubator for transport, framing, contract, reducers, transaction SPI, and protocol state; future `kotlin-ebp` | Kotlin, serialization, coroutines, platform transport abstractions only |
+| `:core:model` | Jetpacs read models and identifiers | Kotlin |
+| `:core:database` | Complete Room 3 schema, DAOs, builders, migrations, and exported schemas | Room 3, SQLite |
+| `:core:ebp-store` | Jetpacs Room implementation of the storage-independent EBP transaction SPI | `:wire`, `:core:database` |
+| `:core:data` | Read-only Room `Flow` projections for Jetpacs UI state | `:core:model`, `:core:database` |
 | `:core:navigation` | Serializable Nav 3 destination keys | Nav 3 |
 | `:core:testing` | Shared fakes that obey production revision rules | `:core:data`, `:core:model` |
-| `:app` | Android composition root and dumb renderer | `:wire` plus Jetpacs `:core:*` modules |
+| `:feature:pairing`, `:feature:surface`, `:feature:settings` | ViewModels, entry providers, and Jetpacs feature UI | Jetpacs `:core:*` modules |
+| `:app` | Single Android composition root, transport/platform adapters, and dumb renderer shell | `:wire`, Jetpacs core/feature modules |
 
 The present module names intentionally keep `:wire` outside `:core`.
 Extraction should be a source-compatible dependency substitution: publish
 `kotlin-ebp`, replace `implementation(projects.wire)`, and delete the
 incubator only after the standalone library passes the same goldens.
 
-## Room 3 cache contract
+## Room 3 durable-state contract
 
-Room is a local observable cache of information accepted from Emacs, not an
-authority beside Emacs.
+Room is Jetpacs' sole durable implementation of information accepted from
+Emacs, not an authority beside Emacs and not a second projection beside POC 2
+files. Protocol acceptance rules remain generic `kotlin-ebp` behavior; the Room
+adapter supplies their atomic persistence.
 
-- A surface row is keyed by `(pairing_id, surface_id)`.
-- A replacement is accepted only when its revision is greater than the stored
-  revision.
-- A tombstone retains the highest revision while removing the renderable
-  snapshot. This prevents an older delayed update from resurrecting a surface.
-- The DAO is exposed as `Flow`; screen state will derive from repository
-  streams instead of querying the bridge from composables.
-- The compare-and-upsert operation is one Room write transaction.
-- Whole-database delete-and-replace refreshes are forbidden for EBP updates.
-  Each accepted EBP mutation changes only its addressed cache records.
+- Every durable record derived from Emacs is partitioned by pairing identity.
+- Room stores surfaces/tombstones/stale metadata/current views, input drafts,
+  queue counters/events/clock state, reminders/receipts, trigger
+  registrations/runtime, themes, import state, and revocation cleanup state.
+- Surface acceptance, draft reconciliation, queue dedupe/counter admission,
+  reminder receipt handling, trigger runtime plus event admission, and pairing
+  revocation use explicit Room transactions.
+- No result is reported as accepted and no platform effect runs before commit.
+- DAO `Flow` values feed read-only repositories and ViewModels; composables do
+  not query the protocol engine or write accepted state.
+- Whole-database delete-and-replace refreshes and live Room/file dual-write are
+  forbidden.
 - Section 19 editor sessions, deltas, sequence counters, caret positions, and
   completion results are session-scoped and non-durable. They must not enter
   Room or the offline action queue.
 
-This expands the useful Room pattern from POC 1. POC 1 persisted queued events
-and triggers; POC 3 uses Room 3 for accepted snapshots and revision/tombstone
-floors while preserving EBP's durability rules.
+POC 1 used Room for queued events and triggers only. POC 2 introduced richer
+file-backed queue, surface/tombstone/draft, reminder, and trigger state. POC 3
+ports that richer behavior into one normalized Room 3 store and fixes the
+pairing, stale-state, commit-reporting, and cross-store transaction gaps rather
+than returning to POC 1's smaller schema.
 
 ## Navigation 3 contract
 
@@ -76,7 +90,7 @@ work.
 | Local checkout/ref | Commit reviewed | Pattern adopted |
 |---|---|---|
 | Jetpacs `slop-fork/main` | `9241bdd7c3881fbbdce3e4d871208c793cd0d99c` | Current KMP-shaped `:wire`/app baseline and later rebase target |
-| EBP `slop-fork/main` | `4f6f82b871c5734a998cdc3b5ca4704de57c79c7` | Current protocol and Section 19 authority |
+| EBP superproject gitlink | `4f8c7ba2bf5a38bcbe41246f1fc0b0c8f63e8776` | Current protocol, durability, and Section 19 authority |
 | `architecture-templates` `origin/multimodule` | `9babdc9ca9b9559194bef3238503656b9a1e163e` | Data/database/testing/navigation module boundaries |
 | `architecture-samples` TODO app | `ee66e1526b84c026615df032c705842b7d2a521f` | Repository as the data entry point, Room `Flow` as local source, screen state holders, shared fakes |
 | `nav3-recipes` | `6564c15b4d1e8be318bffdf980504757d2d70645` | Saveable back stack, serializable `NavKey`, later multiple-stack/scene patterns |
@@ -93,36 +107,45 @@ after the pending rebase without changing cache semantics.
 
 ## Implementation sequence
 
-### Step 1 — scaffold and prove the cache boundary
+### Historical Step 1 — preparatory scaffold and device proof
 
-Compile the five KMP core modules. Prove revision/tombstone behavior against the
-shared fake, then add Room DAO tests for the same contract. Keep the existing
-renderer and `:wire` sources unchanged.
+The original five-module scaffold, revision/tombstone prototype, rebase, Android
+16 floor, Room KMP/device proof, CI gates, and toolchain verification are useful
+preparatory evidence. They are not the final persistence architecture.
 
 Run bundled-SQLite DAO and repository integration tests on the KMP JVM target.
 Do not treat Android host tests as device coverage: the Android variant of the
 bundled driver loads JNI from an Android package, and local Room 3 itself
 disables `testAndroidHostTest` for its multiplatform suite. Prove the Android
 boundary by compiling the Android KMP variants and assembling the app. The
-pre-Step-2 device follow-up reuses the same `commonTest` suite on connected
-Android hardware, verified on a Pixel Tablet running Android 17/API 37.
+device follow-up reused the same `commonTest` suite on connected Android
+hardware and was verified on a Pixel Tablet running Android 17/API 37.
 
-### Step 2 — audit, rebase, and connect the dumb renderer
+### Step 2 — clean Room-integrated rebuild
 
-Local Jetpacs `slop-fork/main` now contains the current m3-fidelity baseline.
-After this scaffold checkpoint, rebase `slop-fork/v3` onto it. Resolve the app
-only after the protocol/core boundary is stable, through one composition adapter:
+Recreate the Companion from the local architecture template, preserve POC 2
+behavior as backend contracts, add the generic suspending transaction SPI and
+serialized runtime actor, implement the complete normalized Room schema, and
+port one durable vertical slice at a time. The final data path is:
 
 ```
-kotlin-ebp / :wire accepted mutation
-        -> SurfaceCacheRepository
-        -> Room 3 Flow
+kotlin-ebp / :wire reducer
+        -> generic EBP transaction SPI
+        -> :core:ebp-store Room transaction
+        -> committed Room 3 state
+        -> read-only repository Flow
         -> screen ViewModel StateFlow
         -> dumb Compose EBP renderer
 ```
 
-Move destination ownership to a saveable Nav 3 back stack. A catalog
-destination selects the cached EBP surface; it does not define the catalog.
+The former typed post-accept cache callback is not a persistence seam. A
+post-commit domain change may notify platform-effect adapters, but Room is
+already committed before it exists. Move destination ownership to a saveable
+Nav 3 back stack only after the Room store cutover. A catalog destination
+selects a cached EBP surface; it does not define the catalog.
+
+The complete work packages, schema, transaction matrix, import policy, and
+cutover gates live in `PLAN-room3-rebuild.md`.
 
 Before adapter work, run a local-source best-practices audit and make its
 findings an explicit gate:
@@ -151,7 +174,7 @@ primary/secondary tab rows, and Kotlin 2.4 exhaustiveness.
 
 ### Step 2.5 — harden the workspace before the synchronization engine
 
-Pause feature work after the rebase and renderer connection. Produce an
+Pause feature work after the Room cutover and renderer connection. Refine the
 evidence-backed hardening backlog before changing `ebp-sync.el` or its
 `track-changes.el` engine:
 

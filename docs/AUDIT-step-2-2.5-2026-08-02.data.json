@@ -1,11 +1,11 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "audit_date": "2026-08-02",
   "branch": "slop-fork/v3",
   "rebased_onto": "9241bdd7c3881fbbdce3e4d871208c793cd0d99c",
   "status": {
-    "step_2": "in_progress",
-    "step_2_5": "in_progress",
+    "step_2": "replanned_room3_rebuild",
+    "step_2_5": "planned_after_room_cutover",
     "step_3": "not_started"
   },
   "completed": [
@@ -15,26 +15,27 @@
     "local-template-compose-alignment",
     "gradle-wrapper-checksum",
     "core-app-lint-release-gates",
-    "ci-core-lint-release-gates"
+    "ci-core-lint-release-gates",
+    "room3-rebuild-plan"
   ],
   "blockers": [
     {
       "id": "S2-001",
       "priority": "P0",
       "owner": "kotlin-ebp",
-      "summary": "Define a typed canonical accepted-surface event."
+      "summary": "Define a generic suspending EBP transaction SPI, serialized runtime actor, and post-commit domain-change stream."
     },
     {
       "id": "S2-002",
       "priority": "P0",
       "owner": "kotlin-ebp",
-      "summary": "Persist and replay stale_after_s and stale_spec compatibly."
+      "summary": "Include stale_after_s, stale_spec, current view, tombstones, and drafts in the complete Room surface contract and legacy importer."
     },
     {
       "id": "S2-003",
       "priority": "P0",
       "owner": "jetpacs",
-      "summary": "Make Room the sole Jetpacs projection and test crash/startup reconciliation."
+      "summary": "Rebuild all pairing-scoped durable POC2 semantics on Room 3 and cut over with no live file dual-write."
     },
     {
       "id": "S2-004",
@@ -69,6 +70,11 @@
   ],
   "next_gates": [
     "wire:jvmTest",
+    "wire:persistence-contract",
+    "wire:actor-ordering-contract",
+    "core:ebp-store:jvmTest",
+    "room-schema-export-check",
+    "legacy-import-contract",
     "core:database:jvmTest",
     "core:data:jvmTest",
     "core:testing:jvmTest",
@@ -82,6 +88,7 @@
   ],
   "references": {
     "human_report": "docs/AUDIT-step-2-2.5-2026-08-02.md",
-    "architecture": "docs/ARCHITECTURE-POC3.md"
+    "architecture": "docs/ARCHITECTURE-POC3.md",
+    "room_rebuild_plan": "docs/PLAN-room3-rebuild.md"
   }
 }

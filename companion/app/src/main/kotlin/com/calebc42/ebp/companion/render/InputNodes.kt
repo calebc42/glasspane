@@ -58,6 +58,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
@@ -76,8 +78,12 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.TonalToggleButton
+import androidx.compose.material3.WideNavigationRail
+import androidx.compose.material3.WideNavigationRailItem
+import androidx.compose.material3.WideNavigationRailValue
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.rememberWideNavigationRailState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -900,4 +906,66 @@ internal fun RenderSplitButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                 }
             }
         })
+}
+
+/** §17.4 navigation_rail: the vertical sibling of a bottom navigation bar.
+ *
+ * `variant: "wide"` is M3's WideNavigationRail, the only one that can EXPAND
+ * to show labels beside the icons rather than under them — which is why
+ * `expanded` requires it and the elisp constructor refuses the pair otherwise.
+ * `arrangement` places the destinations within the rail's height, and
+ * `header` is the node above them, canonically the menu button that toggles
+ * the expansion. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun RenderNavigationRail(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val items = node.arrOrNull("items") ?: return
+    val header = node.objOrNull("header")
+    val wide = node.stringOr("variant") == "wide"
+    val expanded = node.boolOr("expanded")
+    val arrangement = when (node.stringOr("arrangement")) {
+        "center" -> Arrangement.Center
+        "bottom" -> Arrangement.Bottom
+        else -> Arrangement.Top
+    }
+    val headerSlot: (@Composable () -> Unit)? =
+        header?.let { { RenderNode(it, ctx.child(it, 0)) } }
+    val destinations: @Composable () -> Unit = {
+        for (i in 0 until items.size) {
+            val item = items[i] as? JsonObject ?: continue
+            val onTap = item.objOrNull("on_tap")
+            val selected = item.boolOr("selected")
+            val enabled = item.boolOr("enabled", true)
+            val badge = item.stringOr("badge")
+            val icon: @Composable () -> Unit = {
+                val glyph: @Composable () -> Unit = {
+                    Icon(IconMap.get(item.stringOr("icon")), contentDescription = null)
+                }
+                if ("badge" in item)
+                    BadgedBox(badge = {
+                        if (badge.isNotEmpty()) Badge { Text(badge) } else Badge()
+                    }) { glyph() }
+                else glyph()
+            }
+            val label: @Composable () -> Unit = { Text(item.stringOr("label")) }
+            val click = { onButton(onTap, ctx) }
+            if (wide) WideNavigationRailItem(
+                railExpanded = expanded, selected = selected, onClick = click,
+                icon = icon, label = label, enabled = enabled)
+            else NavigationRailItem(
+                selected = selected, onClick = click, icon = icon,
+                label = label, enabled = enabled)
+        }
+    }
+    if (wide) WideNavigationRail(
+        modifier = m,
+        state = rememberWideNavigationRailState(
+            initialValue = if (expanded) WideNavigationRailValue.Expanded
+                else WideNavigationRailValue.Collapsed),
+        header = headerSlot,
+        arrangement = arrangement,
+        content = destinations)
+    else NavigationRail(
+        modifier = m, header = headerSlot?.let { { it() } },
+        content = { destinations() })
 }

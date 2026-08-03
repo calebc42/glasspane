@@ -70,6 +70,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "tooltip" to NodeRow(setOf("children", "text"), setOf("position", "caret", "rich", "title", "action_label", "on_action", "shown")),
     "split_button" to NodeRow(setOf("label", "on_tap"), setOf("icon", "variant", "size", "trailing_icon", "trailing_label", "trailing_description", "checked", "on_change", "on_trailing_tap", "items", "enabled")),
     "pane_scaffold" to NodeRow(setOf("list", "detail"), setOf("extra", "variant")),
+    "navigation_rail" to NodeRow(setOf("items"), setOf("variant", "expanded", "arrangement", "header")),
 )
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(
@@ -91,6 +92,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "allow_add" to "boolean",
     "animate_shape" to "boolean",
     "annotation" to "string",
+    "arrangement" to "string",
     "autofocus" to "boolean",
     "badge" to "string-or-number",
     "bg" to "color",

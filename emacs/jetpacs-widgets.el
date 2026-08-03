@@ -48,8 +48,9 @@
     "reorderable_list" "tabs" "table" "button" "icon_button" "chip"
     "assist_chip" "menu" "text_input" "editor" "checkbox" "switch"
     "enum_list" "date_button" "time_button" "slider" "chart" "canvas"
-    "month_grid" "scaffold" "tooltip" "split_button" "pane_scaffold")
-  "The 42 EBP node types (contract.json `node_types').")
+    "month_grid" "scaffold" "tooltip" "split_button" "pane_scaffold"
+    "navigation_rail")
+  "The 43 EBP node types (contract.json `node_types').")
 
 (defconst jetpacs-core-node-set
   '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
@@ -1144,6 +1145,49 @@ and ON-CHANGE receives the flipped boolean."
                  :checked checked :checked_icon checked-icon
                  :on_change on-change :enabled enabled))
 
+(defconst jetpacs--rail-variants '("standard" "wide"))
+(defconst jetpacs--rail-arrangements '("top" "center" "bottom"))
+
+(cl-defun jetpacs-rail-item (label icon on-tap &key selected badge enabled)
+  "One destination of a `jetpacs-navigation-rail' (SPEC §17.4).
+LABEL and ICON are required — a rail destination without both is not
+navigable — and SELECTED marks the current one.  BADGE is a string or
+number over the icon, empty meaning the bare attention dot."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-identifier icon ":icon")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (when selected (jetpacs--check-bool selected ":selected"))
+  (when badge (jetpacs--check-badge badge))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node nil :label label :icon icon :on_tap on-tap
+                 :selected selected :badge badge :enabled enabled))
+
+(cl-defun jetpacs-navigation-rail (items &key variant expanded arrangement
+                                         header)
+  "A vertical navigation rail of ITEMS (SPEC §17.4).
+
+ITEMS come from `jetpacs-rail-item'.  VARIANT is standard (default) or
+wide — M3's WideNavigationRail, the only one that can EXPAND to show its
+labels beside the icons, which is what EXPANDED asks for.  ARRANGEMENT
+(top by default, center, bottom) is where the destinations sit in the
+rail's height, and HEADER is a node above them, canonically the menu
+button that toggles a wide rail."
+  (unless items (error "jetpacs-navigation-rail: ITEMS must be non-empty (SPEC 17.4)"))
+  (when variant
+    (setq variant (jetpacs--check-enum variant jetpacs--rail-variants ":variant")))
+  (when expanded
+    (jetpacs--check-bool expanded ":expanded")
+    (unless (equal variant "wide")
+      (error "jetpacs-navigation-rail: :expanded needs :variant \"wide\" (SPEC 17.4)")))
+  (when arrangement
+    (setq arrangement (jetpacs--check-enum arrangement jetpacs--rail-arrangements
+                                           ":arrangement")))
+  (when (and header (not (jetpacs--root-node-p header)))
+    (error "jetpacs-navigation-rail: :header must be a node, got %S" header))
+  (jetpacs--node "navigation_rail" :items (vconcat items)
+                 :variant variant :expanded expanded
+                 :arrangement arrangement :header header))
+
 (defconst jetpacs--split-button-variants
   '("filled" "tonal" "elevated" "outlined"))
 (defconst jetpacs--split-button-sizes
@@ -1963,7 +2007,8 @@ as a single list."
 
 (defconst jetpacs-input-node-types
   '("icon_button" "chip" "assist_chip" "menu" "checkbox" "switch"
-    "enum_list" "slider" "date_button" "time_button" "split_button")
+    "enum_list" "slider" "date_button" "time_button" "split_button"
+    "navigation_rail")
   "The §17.4 input node types shared by the reference app and dialog profiles.")
 
 (defconst jetpacs-layout-node-types
@@ -1979,14 +2024,14 @@ as a single list."
             "text_input" "scaffold" "editor")
           jetpacs-content-node-types jetpacs-input-node-types
           jetpacs-layout-node-types jetpacs-viz-node-types)
-  "The reference companion's advertised `app' node_types (all 42; §10.2/§16.2).
+  "The reference companion's advertised `app' node_types (all 43; §10.2/§16.2).
 The AUTHORITATIVE set for a connection is its welcome `surface_profiles'.")
 
 (defconst jetpacs-dialog-node-types
   (append '("text" "row" "column" "box" "spacer" "divider" "button" "text_input"
             "editor")
           jetpacs-content-node-types jetpacs-input-node-types)
-  "The reference companion's advertised `dialog' node_types (29; no
+  "The reference companion's advertised `dialog' node_types (30; no
 scaffold/layout/viz).
 `editor' is in the set because JC-4b added it to the Companion's
 `DIALOG_NODE_TYPES' (NodeSupport.kt) so a dialog could host the capf

@@ -6,8 +6,6 @@
 # Documented exclusions (no silent caps):
 #   - device/instrumented tests stay manual (the smoke library in
 #     test/smoke-*.el runs against real hardware over adb);
-#   - lint is not wired (not in RF-1a's job table; add deliberately or
-#     not at all);
 #   - RF-1b (Robolectric render snapshots) and RF-1c (the
 #     cross-implementation loopback job) are later rungs.
 #
@@ -51,7 +49,7 @@ jobs:
           ./gradlew :wire:jvmTest --console=plain
 
   app:
-    name: app (:app unit tests + assembleDebug)
+    name: app (core + unit + lint + debug/release)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,11 +60,19 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
-      - name: Unit tests and APK
+      - name: Core caches, app tests, lint, and APKs
         working-directory: companion
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug --console=plain
+          ./gradlew \
+            :core:database:jvmTest \
+            :core:data:jvmTest \
+            :core:testing:jvmTest \
+            :app:testDebugUnitTest \
+            :app:lintDebug \
+            :app:assembleDebug \
+            :app:assembleRelease \
+            --console=plain
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

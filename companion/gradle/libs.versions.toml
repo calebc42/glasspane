@@ -1,8 +1,8 @@
 [versions]
 agp = "9.2.1"
 kotlin = "2.3.21"
-compose-bom = "2026.02.01"
-activity-compose = "1.10.0"
+compose-bom = "2026.05.01"
+activity-compose = "1.13.0"
 kotlinx-serialization = "1.11.0"
 kotlinx-coroutines = "1.11.0"
 navigation3 = "1.1.2"

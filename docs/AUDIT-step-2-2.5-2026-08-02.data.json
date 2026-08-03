@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "audit_date": "2026-08-02",
+  "branch": "slop-fork/v3",
+  "rebased_onto": "9241bdd7c3881fbbdce3e4d871208c793cd0d99c",
+  "status": {
+    "step_2": "in_progress",
+    "step_2_5": "in_progress",
+    "step_3": "not_started"
+  },
+  "completed": [
+    "rebase-current-main",
+    "room-pairing-revocation",
+    "android-min-api-36",
+    "local-template-compose-alignment",
+    "gradle-wrapper-checksum",
+    "core-app-lint-release-gates",
+    "ci-core-lint-release-gates"
+  ],
+  "blockers": [
+    {
+      "id": "S2-001",
+      "priority": "P0",
+      "owner": "kotlin-ebp",
+      "summary": "Define a typed canonical accepted-surface event."
+    },
+    {
+      "id": "S2-002",
+      "priority": "P0",
+      "owner": "kotlin-ebp",
+      "summary": "Persist and replay stale_after_s and stale_spec compatibly."
+    },
+    {
+      "id": "S2-003",
+      "priority": "P0",
+      "owner": "jetpacs",
+      "summary": "Make Room the sole Jetpacs projection and test crash/startup reconciliation."
+    },
+    {
+      "id": "S2-004",
+      "priority": "P0",
+      "owner": "jetpacs",
+      "summary": "Connect repository Flow, ViewModel StateFlow, lifecycle collection, and one saveable Nav 3 stack."
+    },
+    {
+      "id": "S2-005",
+      "priority": "P0",
+      "owner": "workspace",
+      "summary": "Reconcile local EBP repositories and check out the superproject gitlink reproducibly."
+    },
+    {
+      "id": "S25-001",
+      "priority": "P0",
+      "owner": "ebp.el",
+      "summary": "Expose a validated edit-delta callback before ebp-sync.el."
+    },
+    {
+      "id": "S25-002",
+      "priority": "P0",
+      "owner": "tooling",
+      "summary": "Generate and validate contract enum tables for Kotlin and Elisp."
+    },
+    {
+      "id": "S25-003",
+      "priority": "P0",
+      "owner": "jetpacs-renderer",
+      "summary": "Add Compose semantics, screenshot, and cross-runtime characterization."
+    }
+  ],
+  "next_gates": [
+    "wire:jvmTest",
+    "core:database:jvmTest",
+    "core:data:jvmTest",
+    "core:testing:jvmTest",
+    "app:testDebugUnitTest",
+    "app:lintDebug",
+    "app:assembleDebug",
+    "app:assembleRelease",
+    "android-device-room-tests",
+    "emacs-30.1-ebp-wire-test",
+    "current-emacs-ebp-wire-test"
+  ],
+  "references": {
+    "human_report": "docs/AUDIT-step-2-2.5-2026-08-02.md",
+    "architecture": "docs/ARCHITECTURE-POC3.md"
+  }
+}

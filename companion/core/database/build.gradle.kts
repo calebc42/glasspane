@@ -16,7 +16,7 @@ kotlin {
     android {
         namespace = "com.calebc42.jetpacs.core.database"
         compileSdk = 36
-        minSdk = 34
+        minSdk = 36
         withHostTestBuilder {}
         withDeviceTestBuilder {
             sourceSetTreeName = "test"

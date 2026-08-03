@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.calebc42.ebp.companion"
-        minSdk = 34
+        minSdk = 36
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0-w4"

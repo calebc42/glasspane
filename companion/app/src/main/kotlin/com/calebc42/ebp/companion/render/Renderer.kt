@@ -49,6 +49,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -894,10 +895,20 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(snackbar) {
         if (snackbar != null) {
+            val durationName = node.stringOr("snackbar_duration")
             val result = hostState.showSnackbar(
                 message = snackbar,
                 actionLabel = action?.stringOr("label")?.takeIf { it.isNotEmpty() },
-                duration = SnackbarDuration.Short)
+                // §17.6: `snackbar_dismiss` is the trailing X, and an
+                // INDEFINITE snackbar implies it — such a snackbar must
+                // always leave the user an exit.
+                withDismissAction = node.boolOr("snackbar_dismiss") ||
+                    durationName == "indefinite",
+                duration = when (durationName) {
+                    "long" -> SnackbarDuration.Long
+                    "indefinite" -> SnackbarDuration.Indefinite
+                    else -> SnackbarDuration.Short
+                })
             if (result == SnackbarResult.ActionPerformed)
                 ctx.action(action?.objOrNull("on_tap"))
         }
@@ -934,7 +945,36 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
             modifier = Modifier
                 .let { m -> scrollBehavior?.let { m.nestedScroll(it.nestedScrollConnection) } ?: m }
                 .let { m -> toolbarBehavior?.let { m.nestedScroll(it) } ?: m },
-            snackbarHost = { SnackbarHost(hostState) },
+            snackbarHost = {
+                SnackbarHost(hostState) { data ->
+                    // §17.6 `snackbar_max_lines`: clamp the VISIBLE message
+                    // to the Material-recommended line count; Text semantics
+                    // keep the whole string, so a screen reader loses nothing.
+                    val cap = node.doubleOr("snackbar_max_lines", 0.0).toInt()
+                    if (cap > 0)
+                        androidx.compose.material3.Snackbar(
+                            action = data.visuals.actionLabel?.let { label ->
+                                {
+                                    TextButton(onClick = { data.performAction() }) {
+                                        Text(label)
+                                    }
+                                }
+                            },
+                            dismissAction = if (data.visuals.withDismissAction) {
+                                {
+                                    IconButton(onClick = { data.dismiss() }) {
+                                        Icon(IconMap.get("close"),
+                                            contentDescription = "Dismiss")
+                                    }
+                                }
+                            } else null,
+                        ) {
+                            Text(data.visuals.message, maxLines = cap,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                    else androidx.compose.material3.Snackbar(data)
+                }
+            },
             topBar = {
                 val topBar = node.objOrNull("top_bar")
                 if (topBarStyle.isNotEmpty()) {
@@ -1050,15 +1090,45 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
             val onRefresh = node.objOrNull("on_refresh")
             val body = node.objOrNull("body")
             if (onRefresh != null) {
-                var refreshing by remember { mutableStateOf(false) }
-                LaunchedEffect(refreshing) {
-                    if (refreshing) { kotlinx.coroutines.delay(1200); refreshing = false }
+                var localRefreshing by remember { mutableStateOf(false) }
+                LaunchedEffect(localRefreshing) {
+                    if (localRefreshing) { kotlinx.coroutines.delay(1200); localRefreshing = false }
                 }
+                // §17.6 `is_refreshing`: Emacs IS the ViewModel — an authored
+                // flag replaces the optimistic local one (which stays the
+                // default so existing senders are unaffected), and the next
+                // accepted snapshot clears it.
+                val refreshing = if ("is_refreshing" in node)
+                    node.boolOr("is_refreshing") else localRefreshing
+                val ptrState =
+                    androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+                val indicatorName = node.stringOr("refresh_indicator")
                 androidx.compose.material3.pulltorefresh.PullToRefreshBox(
                     isRefreshing = refreshing,
+                    state = ptrState,
                     onRefresh = {
-                        refreshing = true
+                        localRefreshing = true
                         ctx.action(onRefresh) // §17.6: user gesture only
+                    },
+                    // `refresh_indicator`: the indicator SLOT of the box —
+                    // M3's spinner (the default), its LoadingIndicator
+                    // sibling, or nothing for a body that draws its own.
+                    indicator = {
+                        when (indicatorName) {
+                            "loading" ->
+                                androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+                                    .LoadingIndicator(
+                                        state = ptrState,
+                                        isRefreshing = refreshing,
+                                        modifier = Modifier.align(Alignment.TopCenter))
+                            "none" -> {}
+                            else ->
+                                androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+                                    .Indicator(
+                                        state = ptrState,
+                                        isRefreshing = refreshing,
+                                        modifier = Modifier.align(Alignment.TopCenter))
+                        }
                     },
                     modifier = bodyModifier) {
                     body?.let { RenderNode(it, ctx.child(it, 1)) }

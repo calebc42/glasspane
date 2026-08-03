@@ -2026,6 +2026,8 @@ a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
 (defconst jetpacs--toolbar-exit-directions '("bottom" "top" "start" "end"))
 (defconst jetpacs--scroll-behaviors
   '("pinned" "enter_always" "exit_until_collapsed"))
+(defconst jetpacs--refresh-indicators '("default" "loading" "none"))
+(defconst jetpacs--snackbar-durations '("short" "long" "indefinite"))
 
 (cl-defun jetpacs-scaffold (&key top-bar body bottom-bar fab floating-toolbar
                                  drawer snackbar snackbar-action on-refresh
@@ -2035,10 +2037,21 @@ a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
                                  floating-toolbar-placement
                                  floating-toolbar-fab
                                  floating-toolbar-scroll
-                                 floating-toolbar-exit-direction)
+                                 floating-toolbar-exit-direction
+                                 refresh-indicator is-refreshing
+                                 snackbar-duration snackbar-dismiss
+                                 snackbar-max-lines)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
+
+REFRESH-INDICATOR (default, loading, none) fills the pull-to-refresh
+indicator slot; IS-REFRESHING is the authored spinner state — Emacs as
+the ViewModel — replacing the optimistic self-clearing local flag; both
+need ON-REFRESH.  SNACKBAR-DURATION (short, long, indefinite) and
+SNACKBAR-DISMISS (the trailing X, implied by indefinite) shape the
+snackbar's stay; SNACKBAR-MAX-LINES clamps its visible message while a
+screen reader still hears the whole string.
 
 TOP-BAR-STYLE asks for a REAL M3 TopAppBar around TOP-BAR — small,
 center(-aligned), medium or large — instead of the plain status-bar-padded
@@ -2065,6 +2078,24 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
   (when snackbar (jetpacs--require-string snackbar ":snackbar"))
   (when snackbar-action (jetpacs--check-snackbar-action snackbar-action))
   (when on-refresh (jetpacs--check-descriptor on-refresh ":on-refresh"))
+  (when refresh-indicator
+    (setq refresh-indicator (jetpacs--check-enum refresh-indicator
+                                                 jetpacs--refresh-indicators
+                                                 ":refresh-indicator"))
+    (unless on-refresh
+      (error "jetpacs-scaffold: :refresh-indicator needs :on-refresh (SPEC 17.6)")))
+  (when is-refreshing
+    (jetpacs--check-bool is-refreshing ":is-refreshing")
+    (unless on-refresh
+      (error "jetpacs-scaffold: :is-refreshing needs :on-refresh (SPEC 17.6)")))
+  (when snackbar-duration
+    (setq snackbar-duration (jetpacs--check-enum snackbar-duration
+                                                 jetpacs--snackbar-durations
+                                                 ":snackbar-duration")))
+  (when snackbar-dismiss
+    (jetpacs--check-bool snackbar-dismiss ":snackbar-dismiss"))
+  (when snackbar-max-lines
+    (jetpacs--check-integer snackbar-max-lines ":snackbar-max-lines" 1 nil))
   (when top-bar-style
     (setq top-bar-style (jetpacs--check-enum top-bar-style
                                              jetpacs--top-bar-styles
@@ -2111,7 +2142,12 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                  :top_bar top-bar :body body :bottom_bar bottom-bar
                  :fab fab :floating_toolbar floating-toolbar :drawer drawer
                  :snackbar snackbar :snackbar_action snackbar-action
+                 :snackbar_duration snackbar-duration
+                 :snackbar_dismiss snackbar-dismiss
+                 :snackbar_max_lines snackbar-max-lines
                  :on_refresh on-refresh
+                 :refresh_indicator refresh-indicator
+                 :is_refreshing is-refreshing
                  :top_bar_style top-bar-style
                  :top_bar_subtitle top-bar-subtitle
                  :scroll_behavior scroll-behavior))

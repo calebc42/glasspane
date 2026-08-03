@@ -8,13 +8,16 @@
 ;; Upstream: Components.kt `Buttons' + Examples.kt `ButtonsExamples'
 ;; (17 examples), samples/ButtonSamples.kt.
 ;;
-;; The `button' node carries label, on_tap, icon, variant
-;; (filled/tonal/outlined/text) and enabled -- and nothing else.  So the
-;; four plain variants and the with-icon sample recreate exactly; the
-;; twelve that exist upstream to demonstrate a SHAPE (squareShape,
-;; ButtonDefaults.shapes press morph), an ELEVATION (ElevatedButton) or
-;; a SIZE (XSmall through XLarge container heights) have no wire member
-;; to carry the thing they demonstrate, and say so.
+;; The `button' node carries label, on_tap, icon, enabled, variant
+;; (filled/tonal/elevated/outlined/text), size (xsmall..xlarge), shape
+;; (round/square) and animate_shape -- which is the whole of what this
+;; sample file demonstrates, so all seventeen examples build.  The five
+;; variants map one-to-one onto Button/FilledTonalButton/ElevatedButton/
+;; OutlinedButton/TextButton; `animate_shape' is the ButtonDefaults.shapes()
+;; press morph; `shape' is ButtonDefaults.squareShape; and a `size' step is
+;; the coordinated ButtonDefaults token set (container height, content
+;; padding, icon size, icon spacing, label typography) the WithIcon size
+;; samples spell out by hand.
 
 ;;; Code:
 
@@ -25,37 +28,89 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ButtonSamples.kt"
   "Upstream ButtonsExampleSourceUrl.")
 
-(defconst jetpacs-m3-buttons--shape-note
-  "The button node has no shape member: M3 shape morphing on press (ButtonDefaults.shapes) is a Companion-side visual the wire cannot ask for."
-  "Why every WithAnimatedShape sample is unsupported.")
-
-(defconst jetpacs-m3-buttons--size-note
-  "The button node has no size member: the M3 container-height scale (XSmall through XLarge) and its matching content padding cannot be expressed on the wire."
-  "Why every size-variant sample is unsupported.")
-
 (defun jetpacs-m3-buttons--filled ()
   "Upstream ButtonSample: Button(onClick = {}) { Text(\"Button\") }."
   (jetpacs-button "Button" (jetpacs-m3-demo "Button") :variant "filled"))
+
+(defun jetpacs-m3-buttons--animated-shape ()
+  "Upstream ButtonWithAnimatedShapeSample: shapes = ButtonDefaults.shapes()."
+  (jetpacs-button "Button" (jetpacs-m3-demo "Button")
+                  :variant "filled" :animate-shape t))
+
+(defun jetpacs-m3-buttons--square ()
+  "Upstream SquareButtonSample: shape = ButtonDefaults.squareShape."
+  (jetpacs-button "Button" (jetpacs-m3-demo "Button")
+                  :variant "filled" :shape "square"))
+
+(defun jetpacs-m3-buttons--small ()
+  "Upstream SmallButtonSample: contentPadding = ButtonDefaults.SmallContentPadding."
+  (jetpacs-button "Button" (jetpacs-m3-demo "Button")
+                  :variant "filled" :size "small"))
+
+(defun jetpacs-m3-buttons--elevated ()
+  "Upstream ElevatedButtonSample."
+  (jetpacs-button "Elevated Button" (jetpacs-m3-demo "Elevated Button")
+                  :variant "elevated"))
+
+(defun jetpacs-m3-buttons--elevated-animated-shape ()
+  "Upstream ElevatedButtonWithAnimatedShapeSample."
+  (jetpacs-button "Elevated Button" (jetpacs-m3-demo "Elevated Button")
+                  :variant "elevated" :animate-shape t))
 
 (defun jetpacs-m3-buttons--tonal ()
   "Upstream FilledTonalButtonSample."
   (jetpacs-button "Filled Tonal Button" (jetpacs-m3-demo "Filled Tonal Button")
                   :variant "tonal"))
 
+(defun jetpacs-m3-buttons--tonal-animated-shape ()
+  "Upstream FilledTonalButtonWithAnimatedShapeSample."
+  (jetpacs-button "Filled Tonal Button" (jetpacs-m3-demo "Filled Tonal Button")
+                  :variant "tonal" :animate-shape t))
+
 (defun jetpacs-m3-buttons--outlined ()
   "Upstream OutlinedButtonSample."
   (jetpacs-button "Outlined Button" (jetpacs-m3-demo "Outlined Button")
                   :variant "outlined"))
+
+(defun jetpacs-m3-buttons--outlined-animated-shape ()
+  "Upstream OutlinedButtonWithAnimatedShapeSample."
+  (jetpacs-button "Outlined Button" (jetpacs-m3-demo "Outlined Button")
+                  :variant "outlined" :animate-shape t))
 
 (defun jetpacs-m3-buttons--text ()
   "Upstream TextButtonSample."
   (jetpacs-button "Text Button" (jetpacs-m3-demo "Text Button")
                   :variant "text"))
 
+(defun jetpacs-m3-buttons--text-animated-shape ()
+  "Upstream TextButtonWithAnimatedShapeSample."
+  (jetpacs-button "Text Button" (jetpacs-m3-demo "Text Button")
+                  :variant "text" :animate-shape t))
+
 (defun jetpacs-m3-buttons--with-icon ()
   "Upstream ButtonWithIconSample: a leading Favorite icon and \"Like\"."
   (jetpacs-button "Like" (jetpacs-m3-demo "Like")
                   :icon "favorite" :variant "filled"))
+
+(defun jetpacs-m3-buttons--xsmall-with-icon ()
+  "Upstream XSmallButtonWithIconSample: ExtraSmallContainerHeight."
+  (jetpacs-button "Label" (jetpacs-m3-demo "Label")
+                  :icon "edit" :variant "filled" :size "xsmall"))
+
+(defun jetpacs-m3-buttons--medium-with-icon ()
+  "Upstream MediumButtonWithIconSample: MediumContainerHeight."
+  (jetpacs-button "Label" (jetpacs-m3-demo "Label")
+                  :icon "edit" :variant "filled" :size "medium"))
+
+(defun jetpacs-m3-buttons--large-with-icon ()
+  "Upstream LargeButtonWithIconSample: LargeContainerHeight."
+  (jetpacs-button "Label" (jetpacs-m3-demo "Label")
+                  :icon "edit" :variant "filled" :size "large"))
+
+(defun jetpacs-m3-buttons--xlarge-with-icon ()
+  "Upstream XLargeButtonWithIconSample: ExtraLargeContainerHeight."
+  (jetpacs-button "Label" (jetpacs-m3-demo "Label")
+                  :icon "edit" :variant "filled" :size "xlarge"))
 
 (jetpacs-m3-defcomponent "buttons"
   :name "Buttons"
@@ -76,33 +131,30 @@
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--shape-note)
+    :build #'jetpacs-m3-buttons--animated-shape)
    (jetpacs-m3-example
     "SquareButtonSample"
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported
-    "The button node has no shape member, so ButtonDefaults.squareShape cannot be requested from Emacs.")
+    :build #'jetpacs-m3-buttons--square)
    (jetpacs-m3-example
     "SmallButtonSample"
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--size-note)
+    :build #'jetpacs-m3-buttons--small)
    (jetpacs-m3-example
     "ElevatedButtonSample"
     "Button examples"
     :source jetpacs-m3-buttons--source
-    :unsupported
-    "The button variant enum is filled/tonal/outlined/text; M3 ElevatedButton is not one of them.")
+    :build #'jetpacs-m3-buttons--elevated)
    (jetpacs-m3-example
     "ElevatedButtonWithAnimatedShapeSample"
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported
-    "Neither half is on the wire: button has no elevated variant and no shape member.")
+    :build #'jetpacs-m3-buttons--elevated-animated-shape)
    (jetpacs-m3-example
     "FilledTonalButtonSample"
     "Button examples"
@@ -113,7 +165,7 @@
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--shape-note)
+    :build #'jetpacs-m3-buttons--tonal-animated-shape)
    (jetpacs-m3-example
     "OutlinedButtonSample"
     "Button examples"
@@ -124,7 +176,7 @@
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--shape-note)
+    :build #'jetpacs-m3-buttons--outlined-animated-shape)
    (jetpacs-m3-example
     "TextButtonSample"
     "Button examples"
@@ -135,7 +187,7 @@
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--shape-note)
+    :build #'jetpacs-m3-buttons--text-animated-shape)
    (jetpacs-m3-example
     "ButtonWithIconSample"
     "Button examples"
@@ -146,25 +198,25 @@
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--size-note)
+    :build #'jetpacs-m3-buttons--xsmall-with-icon)
    (jetpacs-m3-example
     "MediumButtonWithIconSample"
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--size-note)
+    :build #'jetpacs-m3-buttons--medium-with-icon)
    (jetpacs-m3-example
     "LargeButtonWithIconSample"
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--size-note)
+    :build #'jetpacs-m3-buttons--large-with-icon)
    (jetpacs-m3-example
     "XLargeButtonWithIconSample"
     "Button examples"
     :source jetpacs-m3-buttons--source
     :expressive t
-    :unsupported jetpacs-m3-buttons--size-note)
+    :build #'jetpacs-m3-buttons--xlarge-with-icon)
    ))
 
 (provide 'jetpacs-m3-buttons)

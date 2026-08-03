@@ -9,18 +9,17 @@
 ;; `ProgressIndicatorsExamples' (8 examples),
 ;; samples/ProgressIndicatorSamples.kt.
 ;;
-;; The `progress' node carries exactly two members: variant
-;; (circular/linear) and value.  That is the whole of the classic M3
-;; ProgressIndicator API the catalog shows here -- a value member is a
-;; determinate indicator, an omitted one is indeterminate -- so the four
-;; non-wavy samples recreate exactly, two determinate and two
-;; indeterminate.
+;; The `progress' node carries exactly two members: variant and value.
+;; That is the whole of the M3 ProgressIndicator API the catalog shows
+;; here -- a value member is a determinate indicator, an omitted one is
+;; indeterminate -- and `variant' now spells the Expressive wavy tracks
+;; as well (`linear_wavy', `circular_wavy'), so all eight examples
+;; recreate exactly: four determinate and four indeterminate, each pair
+;; once classic and once wavy.
 ;;
-;; The other four are the paired Expressive samples, and every one of
-;; them exists to demonstrate the WAVY track (LinearWavyProgressIndicator
-;; / CircularWavyProgressIndicator, with their amplitude, wavelength and
-;; wave speed).  `variant' is a two-value enum with no wavy member, so
-;; the wire cannot ask for the one thing those samples are about.
+;; Upstream pairs each determinate sample with a 300dp Slider that
+;; writes the float back into local state; here the slider carries the
+;; same initial 0.1f and reports through the demo verb.
 
 ;;; Code:
 
@@ -30,10 +29,6 @@
 (defconst jetpacs-m3-progress-indicators--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ProgressIndicatorSamples.kt"
   "Upstream ProgressIndicatorsExampleSourceUrl.")
-
-(defconst jetpacs-m3-progress-indicators--wavy-note
-  "The progress node's variant enum is circular or linear only: there is no wavy member, so the undulating track a WavyProgressIndicator exists to demonstrate -- its amplitude, wavelength and wave speed -- cannot be asked for from Emacs."
-  "Why every Wavy sample is unsupported.")
 
 (defun jetpacs-m3-progress-indicators--determinate (variant id)
   "A determinate VARIANT indicator over a slider identified by ID.
@@ -59,6 +54,15 @@ on the wire."
   (jetpacs-m3-progress-indicators--determinate
    "linear" "progress-indicators-linear"))
 
+(defun jetpacs-m3-progress-indicators--linear-wavy ()
+  "Upstream LinearWavyProgressIndicatorSample.
+The linear sample's Column with LinearWavyProgressIndicator in place of
+LinearProgressIndicator: on the wire, variant `linear_wavy' with a
+value.  Upstream passes no amplitude, wavelength or wave speed, so the
+sample is the default undulating track the variant already draws."
+  (jetpacs-m3-progress-indicators--determinate
+   "linear_wavy" "progress-indicators-linear-wavy"))
+
 (defun jetpacs-m3-progress-indicators--indeterminate-linear ()
   "Upstream IndeterminateLinearProgressIndicatorSample.
 A bare LinearProgressIndicator() centered in a Column: on the wire that
@@ -68,11 +72,26 @@ how the node spells indeterminate."
    (jetpacs-progress :variant "linear")
    :align "center"))
 
+(defun jetpacs-m3-progress-indicators--indeterminate-linear-wavy ()
+  "Upstream IndeterminateLinearWavyProgressIndicatorSample.
+A bare LinearWavyProgressIndicator() centered in a Column: variant
+`linear_wavy' with no value member."
+  (jetpacs-column
+   (jetpacs-progress :variant "linear_wavy")
+   :align "center"))
+
 (defun jetpacs-m3-progress-indicators--circular ()
   "Upstream CircularProgressIndicatorSample.
 The same Column as the linear sample, with the circular variant."
   (jetpacs-m3-progress-indicators--determinate
    "circular" "progress-indicators-circular"))
+
+(defun jetpacs-m3-progress-indicators--circular-wavy ()
+  "Upstream CircularWavyProgressIndicatorSample.
+The same Column again, with CircularWavyProgressIndicator: variant
+`circular_wavy' with a value."
+  (jetpacs-m3-progress-indicators--determinate
+   "circular_wavy" "progress-indicators-circular-wavy"))
 
 (defun jetpacs-m3-progress-indicators--indeterminate-circular ()
   "Upstream IndeterminateCircularProgressIndicatorSample.
@@ -80,6 +99,14 @@ A bare CircularProgressIndicator() centered in a Column: the progress
 node with variant circular and no value."
   (jetpacs-column
    (jetpacs-progress :variant "circular")
+   :align "center"))
+
+(defun jetpacs-m3-progress-indicators--indeterminate-circular-wavy ()
+  "Upstream IndeterminateCircularWavyProgressIndicatorSample.
+A bare CircularWavyProgressIndicator() centered in a Column: variant
+`circular_wavy' with no value."
+  (jetpacs-column
+   (jetpacs-progress :variant "circular_wavy")
    :align "center"))
 
 (jetpacs-m3-defcomponent "progress-indicators"
@@ -101,7 +128,7 @@ node with variant circular and no value."
     "Progress indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ProgressIndicatorSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-progress-indicators--wavy-note)
+    :build #'jetpacs-m3-progress-indicators--linear-wavy)
    (jetpacs-m3-example
     "IndeterminateLinearProgressIndicatorSample"
     "Progress indicators examples"
@@ -112,7 +139,7 @@ node with variant circular and no value."
     "Progress indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ProgressIndicatorSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-progress-indicators--wavy-note)
+    :build #'jetpacs-m3-progress-indicators--indeterminate-linear-wavy)
    (jetpacs-m3-example
     "CircularProgressIndicatorSample"
     "Progress indicators examples"
@@ -123,7 +150,7 @@ node with variant circular and no value."
     "Progress indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ProgressIndicatorSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-progress-indicators--wavy-note)
+    :build #'jetpacs-m3-progress-indicators--circular-wavy)
    (jetpacs-m3-example
     "IndeterminateCircularProgressIndicatorSample"
     "Progress indicators examples"
@@ -134,7 +161,7 @@ node with variant circular and no value."
     "Progress indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ProgressIndicatorSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-progress-indicators--wavy-note)
+    :build #'jetpacs-m3-progress-indicators--indeterminate-circular-wavy)
    ))
 
 (provide 'jetpacs-m3-progress-indicators)

@@ -9,15 +9,14 @@
 ;; `IconButtonExamples' (12 examples), samples/IconButtonSamples.kt.
 ;;
 ;; The `icon_button' node carries icon, on_tap, content_description,
-;; badge and enabled -- and nothing else.  `RenderIconButton'
-;; (InputNodes.kt:96) always calls the plain M3 `IconButton', so the
-;; standard sample recreates exactly and every other one of the twelve
-;; asks for something that has no wire member: a CONTAINER
-;; (FilledIconButton, FilledTonalIconButton, OutlinedIconButton -- the
-;; variant enum lives on `button', not on `icon_button'), a CHECKED
-;; state (IconToggleButton and its three variants, which swap
-;; Icons.Outlined.Lock for Icons.Filled.Lock), a TINT
-;; (Icon(tint = Color.Red)) or a SIZE and SHAPE (the expressive
+;; badge, variant and enabled -- and nothing else.  The variant enum
+;; (filled/tonal/outlined) covers the CONTAINER samples, so
+;; IconButtonSample, FilledIconButtonSample,
+;; FilledTonalIconButtonSample and OutlinedIconButtonSample all
+;; recreate exactly.  The remaining eight ask for something that still
+;; has no wire member: a CHECKED state (IconToggleButton and its three
+;; variants, which swap Icons.Outlined.Lock for Icons.Filled.Lock), a
+;; TINT (Icon(tint = Color.Red)) or a SIZE and SHAPE (the expressive
 ;; extraSmall/medium/large container scale with its Narrow/Uniform/Wide
 ;; width options and square/round shapes).
 ;;
@@ -36,16 +35,12 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/IconButtonSamples.kt"
   "Upstream IconButtonsExampleSourceUrl.")
 
-(defconst jetpacs-m3-icon-buttons--variant-note
-  "The icon_button node has no variant member: it always renders the standard M3 IconButton, so the filled, tonal or outlined container this sample exists to show cannot be asked for from Emacs."
-  "Why every container-variant icon-button sample is unsupported.")
-
 (defconst jetpacs-m3-icon-buttons--toggle-note
   "There is no icon toggle button node, and icon_button has no checked member: the two-state button that swaps Icons.Outlined.Lock for Icons.Filled.Lock cannot be put on the wire."
   "Why the plain IconToggleButton sample is unsupported.")
 
 (defconst jetpacs-m3-icon-buttons--variant-toggle-note
-  "Neither half is on the wire: icon_button has no checked member for the toggle state, and no variant member for the filled, tonal or outlined container."
+  "The container is on the wire -- icon_button has a variant member now -- but the toggle is not: there is no icon toggle button node and no checked member, so the two-state button that swaps Icons.Outlined.Lock for Icons.Filled.Lock, which is what this sample exists to show, cannot be asked for from Emacs."
   "Why every variant IconToggleButton sample is unsupported.")
 
 (defconst jetpacs-m3-icon-buttons--size-note
@@ -59,6 +54,30 @@ Upstream wraps it in a TooltipBox whose PlainTooltip repeats
 the content_description member, which is what the tooltip supplies."
   (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
                        :content-description "Localized description"))
+
+(defun jetpacs-m3-icon-buttons--filled ()
+  "Upstream FilledIconButtonSample: FilledIconButton showing Icons.Filled.Lock.
+The filled container is the variant member; the a11y name upstream
+supplies through its TooltipBox is content_description."
+  (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
+                       :content-description "Localized description"
+                       :variant "filled"))
+
+(defun jetpacs-m3-icon-buttons--filled-tonal ()
+  "Upstream FilledTonalIconButtonSample: FilledTonalIconButton, Icons.Filled.Lock.
+The tonal container is the variant member; the a11y name upstream
+supplies through its TooltipBox is content_description."
+  (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
+                       :content-description "Localized description"
+                       :variant "tonal"))
+
+(defun jetpacs-m3-icon-buttons--outlined ()
+  "Upstream OutlinedIconButtonSample: OutlinedIconButton, Icons.Filled.Lock.
+The outlined container is the variant member; the a11y name upstream
+supplies through its TooltipBox is content_description."
+  (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
+                       :content-description "Localized description"
+                       :variant "outlined"))
 
 (jetpacs-m3-defcomponent "icon-buttons"
   :name "Icon buttons"
@@ -89,7 +108,7 @@ the content_description member, which is what the tooltip supplies."
     "FilledIconButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :unsupported jetpacs-m3-icon-buttons--variant-note)
+    :build #'jetpacs-m3-icon-buttons--filled)
    (jetpacs-m3-example
     "FilledIconToggleButtonSample"
     "Icon button examples"
@@ -99,7 +118,7 @@ the content_description member, which is what the tooltip supplies."
     "FilledTonalIconButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :unsupported jetpacs-m3-icon-buttons--variant-note)
+    :build #'jetpacs-m3-icon-buttons--filled-tonal)
    (jetpacs-m3-example
     "FilledTonalIconToggleButtonSample"
     "Icon button examples"
@@ -109,7 +128,7 @@ the content_description member, which is what the tooltip supplies."
     "OutlinedIconButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :unsupported jetpacs-m3-icon-buttons--variant-note)
+    :build #'jetpacs-m3-icon-buttons--outlined)
    (jetpacs-m3-example
     "OutlinedIconToggleButtonSample"
     "Icon button examples"
@@ -121,7 +140,7 @@ the content_description member, which is what the tooltip supplies."
     :source jetpacs-m3-icon-buttons--source
     :expressive t
     :unsupported
-    "Neither half is on the wire: icon_button has no size or shape member for extraSmallContainerSize(Narrow) with extraSmallSquareShape, and no variant member for the filled container.")
+    "The filled container is on the wire, but the size is not: icon_button has no size or shape member, so extraSmallContainerSize(Narrow) with extraSmallSquareShape and the matching extraSmallIconSize -- the whole point of this sample -- cannot be asked for from Emacs.")
    (jetpacs-m3-example
     "MediumRoundWideIconButtonSample"
     "Icon button examples"
@@ -134,7 +153,7 @@ the content_description member, which is what the tooltip supplies."
     :source jetpacs-m3-icon-buttons--source
     :expressive t
     :unsupported
-    "Neither half is on the wire: icon_button has no size or shape member for largeContainerSize() with largeRoundShape, and no variant member for the outlined container.")
+    "The outlined container is on the wire, but the size is not: icon_button has no size or shape member, so largeContainerSize() with largeRoundShape and the matching largeIconSize -- the whole point of this sample -- cannot be asked for from Emacs.")
    ))
 
 (provide 'jetpacs-m3-icon-buttons)

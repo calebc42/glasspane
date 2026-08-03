@@ -15,20 +15,21 @@
 ;; flavour seats that morph on a shaped container, and the determinate
 ;; flavour advances the morph with progress instead of with time.
 ;;
-;; The nearest thing on the wire is the `progress' node, whose variant
-;; enum is circular or linear -- and those two ARE
-;; CircularProgressIndicator and LinearProgressIndicator, the separate
-;; upstream component the sibling "Progress indicators" module already
-;; recreates.  Drawing one of those here would put the OLD indicator on
-;; screen under the NEW one's name, which is the lookalike the fidelity
-;; rule forbids, so each example names the node the wire is missing.
+;; The `progress' node now names it directly: variant `loading' IS
+;; `LoadingIndicator' and variant `contained_loading' IS
+;; `ContainedLoadingIndicator', and the node's existing `value' member
+;; decides determinate vs indeterminate for those two exactly as it does
+;; for the circular and linear tracks.  So the four Column samples
+;; recreate exactly -- bare and contained, indeterminate and
+;; determinate.
 ;;
-;; The pull-to-refresh sample is the same story told in the scaffold.
-;; EBP does carry pull-to-refresh -- `scaffold.on_refresh' -- but that
-;; member is a bare descriptor: the Companion owns whatever indicator
-;; it draws, and this sample exists to put the LoadingIndicator THERE,
-;; hand-scaled by the pull distance.  Its setting is expressible; its
-;; subject is not.
+;; The pull-to-refresh sample is the one that stays out.  EBP does carry
+;; pull-to-refresh -- `scaffold.on_refresh' -- but that member is a bare
+;; descriptor: it names WHAT to run, never which indicator the Companion
+;; draws while it runs, and it reports no distanceFraction back, so the
+;; hand-placed, hand-scaled indicator this sample is about cannot be put
+;; in the refresh slot even though the node that draws it now exists.
+;; Its setting is expressible; its subject is not.
 
 ;;; Code:
 
@@ -39,13 +40,53 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/LoadingIndicatorSamples.kt"
   "Upstream LoadingIndicatorsExampleSourceUrl.")
 
-(defconst jetpacs-m3-loading-indicators--indicator-note
-  "There is no loading_indicator node: the progress node's variant enum is circular or linear, and those name CircularProgressIndicator and LinearProgressIndicator, not the rotating sequence of morphing MaterialShapes polygons an M3 Expressive LoadingIndicator is."
-  "Why every plain LoadingIndicator sample is unsupported.")
+(defun jetpacs-m3-loading-indicators--determinate (variant id)
+  "A determinate VARIANT loading indicator over a slider identified by ID.
+Both determinate samples upstream are the same Column: the indicator
+driven by animatedProgress, a 30dp spacer, the text \"Set loading
+progress:\", and a 300dp-wide Slider over 0f..1f writing the float
+back.  The initial 0f rides the value member -- a value member present
+at all is what determinate means on the wire -- and the writeback only
+mutates local state upstream, so here the slider reports through the
+demo verb."
+  (jetpacs-column
+   (jetpacs-progress :variant variant :value 0.0)
+   (jetpacs-with-attrs (jetpacs-spacer) :height 30)
+   (jetpacs-text "Set loading progress:")
+   (jetpacs-with-attrs
+    (jetpacs-slider id (jetpacs-m3-demo "Set loading progress:") :value 0.0)
+    :width 300)
+   :align "center"))
 
-(defconst jetpacs-m3-loading-indicators--contained-note
-  "Neither half is on the wire: there is no loading_indicator node for the morphing MaterialShapes indicator, and no container member that would seat it on the shaped, filled background a ContainedLoadingIndicator adds."
-  "Why every ContainedLoadingIndicator sample is unsupported.")
+(defun jetpacs-m3-loading-indicators--loading ()
+  "Upstream LoadingIndicatorSample.
+A bare LoadingIndicator() centered in a Column: the progress node with
+variant loading and NO value member, which is how the node spells
+indeterminate."
+  (jetpacs-column
+   (jetpacs-progress :variant "loading")
+   :align "center"))
+
+(defun jetpacs-m3-loading-indicators--contained ()
+  "Upstream ContainedLoadingIndicatorSample.
+The same centered Column with variant contained_loading, which is the
+indicator seated on its shaped, filled container."
+  (jetpacs-column
+   (jetpacs-progress :variant "contained_loading")
+   :align "center"))
+
+(defun jetpacs-m3-loading-indicators--determinate-loading ()
+  "Upstream DeterminateLoadingIndicatorSample.
+LoadingIndicator(progress = {animatedProgress}) is the progress node
+with variant loading and a value."
+  (jetpacs-m3-loading-indicators--determinate
+   "loading" "loading-indicators-determinate"))
+
+(defun jetpacs-m3-loading-indicators--determinate-contained ()
+  "Upstream DeterminateContainedLoadingIndicatorSample.
+The same Column as the determinate sample, with the contained variant."
+  (jetpacs-m3-loading-indicators--determinate
+   "contained_loading" "loading-indicators-determinate-contained"))
 
 (jetpacs-m3-defcomponent "loading-indicators"
   :name "Loading indicators"
@@ -61,34 +102,32 @@
     "Loading indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/LoadingIndicatorSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-loading-indicators--indicator-note)
+    :build #'jetpacs-m3-loading-indicators--loading)
    (jetpacs-m3-example
     "ContainedLoadingIndicatorSample"
     "Loading indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/LoadingIndicatorSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-loading-indicators--contained-note)
+    :build #'jetpacs-m3-loading-indicators--contained)
    (jetpacs-m3-example
     "DeterminateLoadingIndicatorSample"
     "Loading indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/LoadingIndicatorSamples.kt"
     :expressive t
-    :unsupported
-    "There is no loading_indicator node, so the progress node's value member cannot drive the one thing this sample shows: a determinate LoadingIndicator stepping through its MaterialShapes morph sequence rather than filling a circular or linear track.")
+    :build #'jetpacs-m3-loading-indicators--determinate-loading)
    (jetpacs-m3-example
     "DeterminateContainedLoadingIndicatorSample"
     "Loading indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/LoadingIndicatorSamples.kt"
     :expressive t
-    :unsupported
-    "There is no loading_indicator node and no container member: neither the progress-driven MaterialShapes morph nor the shaped background it sits on can be asked for through the progress node's variant and value.")
+    :build #'jetpacs-m3-loading-indicators--determinate-contained)
    (jetpacs-m3-example
     "LoadingIndicatorPullToRefreshSample"
     "Loading indicators examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/LoadingIndicatorSamples.kt"
     :expressive t
     :unsupported
-    "The scaffold's on_refresh member is a bare action descriptor: it cannot name PullToRefreshDefaults.LoadingIndicator as the indicator the Companion draws, and it reports no distanceFraction for the scale this sample animates, so the loading indicator the sample is about never reaches the wire.")
+    "The progress node can draw the loading indicator now, but not here: the scaffold's on_refresh member is a bare action descriptor, so it cannot name PullToRefreshDefaults.LoadingIndicator as the indicator the Companion draws while refreshing, and it reports no distanceFraction, so the pull-scaled indicator this sample places by hand never reaches the wire.")
    ))
 
 (provide 'jetpacs-m3-loading-indicators)

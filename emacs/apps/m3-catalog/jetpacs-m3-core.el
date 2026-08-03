@@ -103,7 +103,9 @@ the example claims the slot of the screen that hosts it — which is what
 the sample was demonstrating in the first place.")
 
 (cl-defun jetpacs-m3-example (name description &key source expressive
-                                   build slots top-bar unsupported)
+                                   build slots top-bar unsupported
+                                   top-bar-style top-bar-subtitle
+                                   scroll-behavior)
   "Describe one catalog example; returns the plist the registry stores.
 NAME and DESCRIPTION are upstream's; SOURCE is its sourceUrl; EXPRESSIVE
 mirrors `isExpressive'.
@@ -118,6 +120,14 @@ one gives at least one of:
   TOP-BAR   a function of one argument BACK (a `view.switch' descriptor,
             nil at the stack bottom) returning the screen's whole top
             bar.  It MUST offer a way back — use `jetpacs-m3-back-button'.
+
+TOP-BAR-STYLE, TOP-BAR-SUBTITLE and SCROLL-BEHAVIOR are the §17.6 scaffold
+members, passed straight through to this screen's own scaffold, so a sample
+whose subject is a REAL M3 TopAppBar — a large bar that collapses as the
+body scrolls, say — can ask for one.  They are strings, not builders, and
+SCROLL-BEHAVIOR needs TOP-BAR-STYLE (`jetpacs-scaffold' enforces that).
+The styled bar puts TOP-BAR's node in its title slot and has no actions
+slot, so a sample's actions and its way back both live inside that node.
 
 UNSUPPORTED is a sentence naming the wire member or node type the
 sample would need; the example then drills into \"Not supported\"."
@@ -141,9 +151,17 @@ sample would need; the example then drills into \"Not supported\"."
                  name key)))))
   (when unsupported
     (jetpacs--require-string unsupported ":unsupported"))
+  (when top-bar-style (jetpacs--require-string top-bar-style ":top-bar-style"))
+  (when top-bar-subtitle
+    (jetpacs--require-string top-bar-subtitle ":top-bar-subtitle"))
+  (when scroll-behavior (jetpacs--require-string scroll-behavior ":scroll-behavior"))
+  (when (and (or top-bar-style scroll-behavior) (not top-bar))
+    (error "jetpacs-m3: example %S styles a top bar it does not author" name))
   (list :name name :description description :source source
         :expressive (and expressive t)
         :build build :slots slots :top-bar top-bar
+        :top-bar-style top-bar-style :top-bar-subtitle top-bar-subtitle
+        :scroll-behavior scroll-behavior
         :unsupported unsupported))
 
 (cl-defun jetpacs-m3-defcomponent (id &key name description guidelines docs
@@ -469,7 +487,18 @@ instead, because a Node tree cannot nest a scaffold."
                :top-bar (jetpacs-m3--guard
                          (plist-get example :name)
                          (lambda () (funcall top-bar back)))
-               :body body slots)
+               :body body
+               ;; §17.6 top-bar members ride the same scaffold; nil values are
+               ;; dropped by `jetpacs--node', so an unstyled example is
+               ;; byte-identical to before.
+               (append
+                (when-let* ((v (plist-get example :top-bar-style)))
+                  (list :top-bar-style v))
+                (when-let* ((v (plist-get example :top-bar-subtitle)))
+                  (list :top-bar-subtitle v))
+                (when-let* ((v (plist-get example :scroll-behavior)))
+                  (list :scroll-behavior v))
+                slots))
       (apply #'jetpacs-chrome-screen (plist-get example :name) body
              :back back :actions actions slots))))
 

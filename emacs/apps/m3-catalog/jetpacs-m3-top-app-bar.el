@@ -25,21 +25,49 @@
 ;; "center" is how CenterAlignedTopAppBar centers a title over the BAR
 ;; rather than over the gap between the navigation icon and the actions.
 ;;
-;; The other eleven are not layout.  Ten exist to demonstrate a
+;; The other eleven are not layout.  Ten turn on a
 ;; TopAppBarScrollBehavior -- pinned (recolor the container once the
 ;; content under it moves), enterAlways (hide going up, return going
 ;; down), exitUntilCollapsed (fold a Medium, Large or TwoRows bar down to
-;; one row) -- and `scaffold' has no scroll-behavior member, its top_bar
-;; has no collapsed- or expanded-height member, and nothing ever hands a
-;; node a collapse fraction to author against.  Two of those ten also
-;; want a list node the wire does not have: a lazy list opened at item
-;; 30, and a reversed adaptive grid.  The eleventh, the adaptive actions
-;; sample, needs the window size class, and no wire message reports that
-;; to Emacs.
+;; one row).  The eleventh, the adaptive actions sample, needs the window
+;; size class, and no wire message reports that to Emacs; there is no
+;; `app_bar_row' node for its overflow either.
+;;
+;; THE WIRE HAS THE BEHAVIORS; THIS MODULE CANNOT REACH THEM.  `scaffold'
+;; gained `top_bar_style' (small, center, medium, large),
+;; `top_bar_subtitle' and `scroll_behavior' (pinned, enter_always,
+;; exit_until_collapsed): a present style routes the authored `top_bar'
+;; node into a REAL M3 TopAppBar's title slot and puts
+;; Modifier.nestedScroll on the Scaffold, so the bar genuinely collapses.
+;; None of it is reachable from a catalog example.  `jetpacs-m3-example'
+;; hands `:top-bar' one argument, BACK, and takes back one NODE; the only
+;; other scaffold members an example may set are `jetpacs-m3-slot-keys'
+;; -- :fab, :bottom-bar, :drawer, :floating-toolbar, :on-refresh,
+;; :snackbar -- so `jetpacs-m3-example-screen' always calls
+;; `jetpacs-scaffold' with no style, and a scroll behavior without a
+;; style is an error by construction.  Closing this is a `jetpacs-m3-core'
+;; change (an example needs a way to name a bar style, a subtitle and a
+;; scroll behavior for its own screen's scaffold), not a change here.  So
+;; all ten stay unsupported, and for four of them -- PinnedTopAppBar,
+;; EnterAlwaysTopAppBar and the two plain ExitUntilCollapsed bars -- the
+;; HARNESS is the only thing left in the way, which is what their reasons
+;; now say instead of the wire.
+;;
+;; The other six would still not build if the harness carried the style,
+;; and their reasons say so too: a lazy list opened at item 30, an
+;; adaptive reversed grid plus the custom isScrollingContentAtStart the
+;; `scroll_behavior' enum has no room for, a reverse-scrolling column,
+;; the two Flexible bars (only the SMALL style takes `top_bar_subtitle',
+;; and no style carries a title alignment -- the asymmetry is AppBar.kt's
+;; own), and TwoRowsTopAppBar, for which there is no node at all and no
+;; collapse fraction reported back to Emacs to author its title swap
+;; against.
 ;;
 ;; Upstream wraps every IconButton in a TooltipBox with a PlainTooltip
-;; repeating its label; there is no tooltip node, and the label already
-;; rides `:content-description', where a screen reader looks.
+;; repeating its label, anchored TooltipAnchorPosition.Above.  That is the
+;; `tooltip' node's own default, so the four recreations author it --
+;; `jetpacs-m3-top-app-bar--tipped' -- and the label rides
+;; `:content-description' as well, where a screen reader looks.
 
 ;;; Code:
 
@@ -51,8 +79,12 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/AppBarSamples.kt"
   "Upstream TopAppBarExampleSourceUrl.")
 
+(defconst jetpacs-m3-top-app-bar--harness-note
+  "The wire carries this now: the scaffold node's top_bar_style asks for a real M3 TopAppBar and its scroll_behavior wires pinned, enter_always or exit_until_collapsed to that bar and to the body's nested scroll.  The catalog harness is what cannot reach it -- an example's :top-bar is a function returning the top_bar node alone, and the slots an example may claim are :fab, :bottom-bar, :drawer, :floating-toolbar, :on-refresh and :snackbar, with no bar style or scroll behavior among them, so this screen's own scaffold is always built without a style."
+  "Why the scroll-behavior samples are unsupported: the harness, not the wire.")
+
 (defconst jetpacs-m3-top-app-bar--flexible-note
-  "The centered title and the subtitle are already recreated by the two Simple samples; what is left is the flexible bar folding from its expanded height down to one row, and the scaffold node has no scroll-behavior member and its top_bar has no expanded-height member to ask for that."
+  "The centered title and the subtitle are already recreated by the two Simple samples; what is left is the flexible bar folding from its expanded height down to one row while a centered subtitle stays under the centered title.  The wire's bar styles do not reach that: only the small style takes top_bar_subtitle -- \"medium\" and \"large\" ignore it, which is the asymmetry AppBar.kt itself has -- and no style carries a title-alignment member, so a medium or large bar draws a plain start-aligned title and no second line.  The catalog harness cannot ask an example for a bar style in the first place."
   "Why both ExitUntilCollapsed...Flexible... samples are unsupported.")
 
 (defconst jetpacs-m3-top-app-bar--item-count 76
@@ -71,15 +103,22 @@ height to compose against inside one."
                                    :pad (list :horizontal 16)))
                  (list :spacing 8 :fill t))))
 
+(defun jetpacs-m3-top-app-bar--tipped (icon label)
+  "ICON as an IconButton described by LABEL, under LABEL's plain tooltip.
+Upstream wraps every one of these bars' IconButtons in a TooltipBox whose
+PlainTooltip repeats the contentDescription, anchored
+TooltipAnchorPosition.Above -- which is the `tooltip' node's own default."
+  (jetpacs-tooltip label
+                   (jetpacs-icon-button icon (jetpacs-m3-demo label)
+                                        :content-description label)))
+
 (defun jetpacs-m3-top-app-bar--nav-icon ()
   "The navigationIcon every sample shares: a Menu IconButton."
-  (jetpacs-icon-button "menu" (jetpacs-m3-demo "Menu")
-                       :content-description "Menu"))
+  (jetpacs-m3-top-app-bar--tipped "menu" "Menu"))
 
 (defun jetpacs-m3-top-app-bar--favorite ()
   "The actions slot the recreated samples share: Add to favorites."
-  (jetpacs-icon-button "favorite" (jetpacs-m3-demo "Add to favorites")
-                       :content-description "Add to favorites"))
+  (jetpacs-m3-top-app-bar--tipped "favorite" "Add to favorites"))
 
 (defun jetpacs-m3-top-app-bar--title (title subtitle centered)
   "The title block: TITLE, with SUBTITLE under it when there is one.
@@ -189,39 +228,49 @@ keeps the string \"Simple TopAppBar\" as the title of this one."
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :unsupported
-    "The scaffold node has no scroll-behavior member: pinnedScrollBehavior recolors the bar's container as soon as the content under it is scrolled, and that recoloring is this sample's whole difference from SimpleTopAppBar.")
+    (concat
+     "pinnedScrollBehavior recolors the bar's container as soon as the content under it is scrolled, and that recoloring is this sample's whole difference from SimpleTopAppBar.  "
+     jetpacs-m3-top-app-bar--harness-note))
    (jetpacs-m3-example
     "PinnedTopAppBarWithPreScrolledLazyColumn"
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :unsupported
-    "Neither half is on the wire: the scaffold node has no scroll-behavior member, and no list node takes an initial index for rememberLazyListState(initialFirstVisibleItemIndex = 30), which is the state this sample hands the behavior so the bar starts out already recolored.")
+    (concat
+     "No list node takes an initial index, so rememberLazyListState(initialFirstVisibleItemIndex = 30) -- the pre-scrolled state this sample hands the behavior so the bar starts out already recolored -- cannot be asked for at all.  The pinning is a second, separate gap.  "
+     jetpacs-m3-top-app-bar--harness-note))
    (jetpacs-m3-example
     "PinnedTopAppBarWithReversedLazyGrid"
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :unsupported
-    "There is no lazy-grid node -- nothing carries LazyVerticalGrid, GridCells.Adaptive or reverseLayout -- and the scaffold node has no scroll-behavior member to take the custom isScrollingContentAtStart that reversed grid exists to need.")
+    "There is no lazy-grid node -- nothing carries LazyVerticalGrid, GridCells.Adaptive or reverseLayout -- and the scaffold node's scroll_behavior is a bare enum (pinned, enter_always, exit_until_collapsed) with no place for the custom isScrollingContentAtStart a reversed grid needs to keep the bar's color correct, which is the very thing this sample exists to show.")
    (jetpacs-m3-example
     "EnterAlwaysTopAppBar"
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :expressive t
     :unsupported
-    "The scaffold node has no scroll-behavior member: enterAlwaysScrollBehavior slides the top bar away as the content scrolls up and brings it straight back on the way down, and that motion is this sample's whole subject.")
+    (concat
+     "enterAlwaysScrollBehavior slides the top bar away as the content scrolls up and brings it straight back on the way down, and that motion is this sample's whole subject.  "
+     jetpacs-m3-top-app-bar--harness-note))
    (jetpacs-m3-example
     "EnterAlwaysTopAppBarWithReverseScrolling"
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :expressive t
     :unsupported
-    "Neither half is on the wire: the scaffold node has no scroll-behavior member, and the column node's scroll member is a plain boolean with no reverse-scrolling flag for the bottom-anchored content this sample pairs it with.")
+    (concat
+     "The column node's scroll member is a plain boolean with no reverse-scrolling flag, so the bottom-anchored, reverse-scrolled content this sample pairs the behavior with cannot be built at all.  The enterAlways half is a second, separate gap.  "
+     jetpacs-m3-top-app-bar--harness-note))
    (jetpacs-m3-example
     "ExitUntilCollapsedMediumTopAppBar"
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :unsupported
-    "The scaffold node has no scroll-behavior member and its top_bar has no collapsed- or expanded-height member: a MediumTopAppBar folding from two rows to one as the content scrolls up is exactly what exitUntilCollapsedScrollBehavior drives, and it is all this sample adds.")
+    (concat
+     "A MediumTopAppBar folding from two rows to one as the content scrolls up is exactly what exitUntilCollapsedScrollBehavior drives, and it is all this sample adds.  "
+     jetpacs-m3-top-app-bar--harness-note))
    (jetpacs-m3-example
     "ExitUntilCollapsedCenterAlignedMediumFlexibleTopAppBar with subtitle"
     "Top app bar examples"
@@ -232,7 +281,9 @@ keeps the string \"Simple TopAppBar\" as the title of this one."
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :unsupported
-    "The scaffold node has no scroll-behavior member and its top_bar has no collapsed- or expanded-height member: a LargeTopAppBar folding from its tall two-row form down to one row is what exitUntilCollapsedScrollBehavior drives, and it is all this sample adds.")
+    (concat
+     "A LargeTopAppBar folding from its tall two-row form down to one row is what exitUntilCollapsedScrollBehavior drives, and it is all this sample adds.  "
+     jetpacs-m3-top-app-bar--harness-note))
    (jetpacs-m3-example
     "ExitUntilCollapsedCenterAlignedLargeFlexibleTopAppBar with subtitle"
     "Top app bar examples"

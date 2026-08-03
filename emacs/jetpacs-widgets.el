@@ -50,8 +50,8 @@
     "enum_list" "date_button" "time_button" "slider" "chart" "canvas"
     "month_grid" "scaffold" "tooltip" "split_button" "pane_scaffold"
     "navigation_rail" "search_bar" "dropdown" "segmented_button"
-    "app_bar_row" "app_bar_column")
-  "The 48 EBP node types (contract.json `node_types').")
+    "app_bar_row" "app_bar_column" "carousel")
+  "The 49 EBP node types (contract.json `node_types').")
 
 (defconst jetpacs-core-node-set
   '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
@@ -1289,6 +1289,45 @@ accessible name inline; ICON is what renders while it fits."
                    :overflow_icon overflow-icon
                    :max_items max-items)))
 
+(defconst jetpacs--carousel-strategies
+  '("multi_browse" "uncontained" "centered_hero"))
+
+(cl-defun jetpacs-carousel (&rest args)
+  "An M3 keyline carousel over its item CHILDREN (SPEC §17.3).
+The Companion runs all the keyline math and the per-frame item mask;
+Emacs supplies content only and never learns the width — the same
+device-owns-presentation split as tabs and collapsible.
+
+Trailing options: :strategy (multi_browse, the default; uncontained;
+centered_hero), :item-width (multi_browse's preferredItemWidth or
+uncontained's itemWidth — centered_hero sizes itself), :item-spacing,
+:content-padding (inside the scroll viewport), and :item-corner (the
+maskClip radius, applied to the item's LIVE mask rect so the clip
+breathes with the keylines)."
+  (let* ((split (jetpacs--children-and-opts args "carousel"))
+         (opts (cdr split))
+         (strategy (plist-get opts :strategy))
+         (item-width (plist-get opts :item-width))
+         (item-spacing (plist-get opts :item-spacing))
+         (content-padding (plist-get opts :content-padding))
+         (item-corner (plist-get opts :item-corner)))
+    (when strategy
+      (setq strategy (jetpacs--check-enum strategy
+                                          jetpacs--carousel-strategies
+                                          ":strategy")))
+    (when item-width (jetpacs--check-number item-width ":item-width" 0 nil))
+    (when item-spacing (jetpacs--check-number item-spacing ":item-spacing" 0 nil))
+    (when content-padding
+      (jetpacs--check-number content-padding ":content-padding" 0 nil))
+    (when item-corner (jetpacs--check-number item-corner ":item-corner" 0 nil))
+    (jetpacs--node "carousel"
+                   :children (jetpacs--as-children (car split))
+                   :strategy strategy
+                   :item_width item-width
+                   :item_spacing item-spacing
+                   :content_padding content-padding
+                   :item_corner item-corner)))
+
 (cl-defun jetpacs-app-bar-row (items &key overflow-icon max-items)
   "M3's AppBarRow: ITEMS inline while they fit, overflowed at MEASURE time.
 ITEMS are from `jetpacs-app-bar-item'.  Which items fold into the
@@ -2341,7 +2380,7 @@ as a single list."
 (defconst jetpacs-layout-node-types
   '("flow_row" "surface" "lazy_column" "card" "collapsible"
     "reorderable_list" "tabs" "table" "pane_scaffold"
-    "app_bar_row" "app_bar_column")
+    "app_bar_row" "app_bar_column" "carousel")
   "The §17.3 non-core layout node types (reference app profile).")
 
 (defconst jetpacs-viz-node-types '("chart" "canvas" "month_grid")

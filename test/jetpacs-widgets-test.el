@@ -600,8 +600,8 @@
 
 (ert-deftest jetpacs-widgets/profile-gating ()
   "jetpacs-check-profile / -node-types gate emitted types to the target (§16.2)."
-  ;; reference set sizes + exact membership (app == the 48 node types)
-  (should (= (length jetpacs-app-node-types) 48))
+  ;; reference set sizes + exact membership (app == the 49 node types)
+  (should (= (length jetpacs-app-node-types) 49))
   (should (= (length jetpacs-dialog-node-types) 33))
   (should (= (length jetpacs-notification-node-types) 6))
   (should (equal (sort (copy-sequence jetpacs-app-node-types) #'string<)

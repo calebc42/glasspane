@@ -77,6 +77,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "segmented_button" to NodeRow(setOf("id", "options"), setOf("value", "multi_select", "on_change", "enabled")),
     "app_bar_row" to NodeRow(setOf("items"), setOf("overflow_icon", "max_items")),
     "app_bar_column" to NodeRow(setOf("items"), setOf("overflow_icon", "max_items")),
+    "carousel" to NodeRow(setOf("children"), setOf("strategy", "item_width", "item_spacing", "content_padding", "item_corner")),
 )
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(
@@ -152,6 +153,9 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "is_error" to "boolean",
     "is_refreshing" to "boolean",
     "italic" to "boolean",
+    "item_corner" to "dp",
+    "item_spacing" to "dp",
+    "item_width" to "dp",
     "items" to "varies-per-node",
     "key" to "identifier",
     "keyboard" to "enum",
@@ -212,6 +216,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "spacing" to "dp",
     "spans" to "rich-span-array",
     "state" to "string",
+    "strategy" to "string",
     "stroke" to "stroke-object",
     "suffix" to "string",
     "summary" to "string",

@@ -79,6 +79,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.carousel.CarouselItemScope
+import androidx.compose.material3.carousel.HorizontalCenteredHeroCarousel
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.HorizontalUncontainedCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.layout.AnimatedPane
@@ -929,4 +934,51 @@ internal fun RenderAppBarStrip(
             maxItemCount = maxItems) { fill() }
     else AppBarRow(modifier = m, overflowIndicator = indicator,
         maxItemCount = maxItems) { fill() }
+}
+
+/** §17.3 carousel: M3's keyline carousel. The Companion runs ALL the
+ * keyline math and the per-frame item mask; Emacs supplies `children`
+ * only and never learns the width — the same device-owns-presentation
+ * split as tabs' page and collapsible's expansion.
+ *
+ * `strategy` picks the M3 form: multi_browse (the default —
+ * preferredItemWidth keylines with small items at the edges),
+ * uncontained (fixed itemWidth, items run off the edge), or
+ * centered_hero (one large centered item). `item_corner` is the
+ * maskClip radius, applied to the item's LIVE mask rect rather than
+ * the node box — a carousel clip breathes with the keylines. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun RenderCarousel(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val children = node.arrOrNull("children") ?: return
+    val state = rememberCarouselState { children.size }
+    val spacing = (safeDp(node.doubleOr("item_spacing", 0.0)) ?: 0f).dp
+    val contentPad = PaddingValues(
+        horizontal = (safeDp(node.doubleOr("content_padding", 0.0)) ?: 0f).dp)
+    val itemWidth = (safeDp(node.doubleOr("item_width", 186.0)) ?: 186f).dp
+    val corner = node["item_corner"]?.numOrNull()
+    val item: @Composable CarouselItemScope.(Int) -> Unit = { i ->
+        val child = children[i] as? JsonObject
+        if (child != null) {
+            val mask = if (corner != null)
+                Modifier.maskClip(RoundedCornerShape(corner.toFloat().dp))
+            else Modifier
+            Box(mask) { RenderNode(child, ctx.child(child, i)) }
+        }
+    }
+    when (node.stringOr("strategy")) {
+        "uncontained" -> HorizontalUncontainedCarousel(
+            state = state, modifier = m.fillMaxWidth(),
+            itemWidth = itemWidth, itemSpacing = spacing,
+            contentPadding = contentPad, content = item)
+        "centered_hero" -> HorizontalCenteredHeroCarousel(
+            state = state, modifier = m.fillMaxWidth(),
+            itemSpacing = spacing, contentPadding = contentPad,
+            content = item)
+        else -> HorizontalMultiBrowseCarousel(
+            state = state, modifier = m.fillMaxWidth(),
+            preferredItemWidth = itemWidth, itemSpacing = spacing,
+            contentPadding = contentPad, content = item)
+    }
 }

@@ -68,6 +68,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "month_grid" to NodeRow(setOf("month"), setOf("marks", "selected", "min_month", "max_month", "on_day_tap", "on_month_change", "children")),
     "scaffold" to NodeRow(setOf(), setOf("top_bar", "body", "bottom_bar", "fab", "floating_toolbar", "drawer", "snackbar", "snackbar_action", "on_refresh")),
     "tooltip" to NodeRow(setOf("children", "text"), setOf("position", "caret", "rich", "title", "action_label", "on_action", "shown")),
+    "split_button" to NodeRow(setOf("label", "on_tap"), setOf("icon", "variant", "size", "trailing_icon", "trailing_label", "trailing_description", "checked", "on_change", "on_trailing_tap", "items", "enabled")),
 )
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(
@@ -190,7 +191,9 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "top_bar" to "node",
     "track" to "string",
     "trailing" to "node",
+    "trailing_description" to "string",
     "trailing_icon" to "identifier",
+    "trailing_label" to "string",
     "underline" to "boolean",
     "url" to "string",
     "value" to "varies-per-node",

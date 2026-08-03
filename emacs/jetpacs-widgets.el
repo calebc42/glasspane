@@ -48,8 +48,8 @@
     "reorderable_list" "tabs" "table" "button" "icon_button" "chip"
     "assist_chip" "menu" "text_input" "editor" "checkbox" "switch"
     "enum_list" "date_button" "time_button" "slider" "chart" "canvas"
-    "month_grid" "scaffold" "tooltip")
-  "The 40 EBP node types (contract.json `node_types').")
+    "month_grid" "scaffold" "tooltip" "split_button")
+  "The 41 EBP node types (contract.json `node_types').")
 
 (defconst jetpacs-core-node-set
   '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
@@ -1089,6 +1089,58 @@ and ON-CHANGE receives the flipped boolean."
                  :checked checked :checked_icon checked-icon
                  :on_change on-change :enabled enabled))
 
+(defconst jetpacs--split-button-variants
+  '("filled" "tonal" "elevated" "outlined"))
+(defconst jetpacs--split-button-sizes
+  '("xsmall" "small" "medium" "large" "xlarge"))
+
+(cl-defun jetpacs-split-button (label on-tap
+                                &key icon variant size
+                                     trailing-icon trailing-label
+                                     trailing-description
+                                     checked on-change on-trailing-tap
+                                     items enabled)
+  "An M3 split button: LABEL/ON-TAP leading, a divided trailing half (§17.4).
+
+The two halves are ONE component with a shared outline and a 2dp gap, not
+a row of buttons — the outer corners are full and the inner ones are
+small, and they morph together on press, which is the whole subject of
+the upstream samples.
+
+ICON is the leading identifier; VARIANT and SIZE apply to BOTH halves.
+The trailing half is one of three things, in order of precedence:
+ITEMS (a list of `jetpacs-menu-item') makes it open a dropdown;
+CHECKED makes it a toggle whose arrow rotates 180 degrees, with ON-CHANGE
+receiving the flipped boolean; otherwise ON-TRAILING-TAP fires plainly.
+TRAILING-ICON overrides the default arrow, TRAILING-LABEL puts text there
+instead, and TRAILING-DESCRIPTION is the accessible name an icon-only
+trailing half needs.
+
+A node carrying CHECKED is stateful and REQUIRES a unique `:id' (§16.1)."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when variant
+    (setq variant (jetpacs--check-enum variant jetpacs--split-button-variants ":variant")))
+  (when size
+    (setq size (jetpacs--check-enum size jetpacs--split-button-sizes ":size")))
+  (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing-icon"))
+  (when trailing-label (jetpacs--require-string trailing-label ":trailing-label"))
+  (when trailing-description
+    (jetpacs--require-string trailing-description ":trailing-description"))
+  (when checked (jetpacs--check-bool checked ":checked"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when on-trailing-tap (jetpacs--check-descriptor on-trailing-tap ":on-trailing-tap"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node "split_button" :label label :on_tap on-tap
+                 :icon icon :variant variant :size size
+                 :trailing_icon trailing-icon :trailing_label trailing-label
+                 :trailing_description trailing-description
+                 :checked checked :on_change on-change
+                 :on_trailing_tap on-trailing-tap
+                 :items (and items (vconcat items))
+                 :enabled enabled))
+
 (cl-defun jetpacs-chip (label &key on-tap selected icon trailing-icon
                               variant enabled)
   "A chip labeled LABEL (SPEC §17.4).
@@ -1779,7 +1831,7 @@ as a single list."
 
 (defconst jetpacs-input-node-types
   '("icon_button" "chip" "assist_chip" "menu" "checkbox" "switch"
-    "enum_list" "slider" "date_button" "time_button")
+    "enum_list" "slider" "date_button" "time_button" "split_button")
   "The §17.4 input node types shared by the reference app and dialog profiles.")
 
 (defconst jetpacs-layout-node-types
@@ -1795,14 +1847,14 @@ as a single list."
             "text_input" "scaffold" "editor")
           jetpacs-content-node-types jetpacs-input-node-types
           jetpacs-layout-node-types jetpacs-viz-node-types)
-  "The reference companion's advertised `app' node_types (all 40; §10.2/§16.2).
+  "The reference companion's advertised `app' node_types (all 41; §10.2/§16.2).
 The AUTHORITATIVE set for a connection is its welcome `surface_profiles'.")
 
 (defconst jetpacs-dialog-node-types
   (append '("text" "row" "column" "box" "spacer" "divider" "button" "text_input"
             "editor")
           jetpacs-content-node-types jetpacs-input-node-types)
-  "The reference companion's advertised `dialog' node_types (28; no
+  "The reference companion's advertised `dialog' node_types (29; no
 scaffold/layout/viz).
 `editor' is in the set because JC-4b added it to the Companion's
 `DIALOG_NODE_TYPES' (NodeSupport.kt) so a dialog could host the capf

@@ -17,6 +17,7 @@ package com.calebc42.ebp.companion.render
 
 import android.icu.util.Calendar
 import android.icu.util.TimeZone
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -63,6 +65,8 @@ import androidx.compose.material3.OutlinedToggleButton
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SplitButtonDefaults
+import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -86,6 +90,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -783,4 +788,116 @@ internal fun isoDateFromUtcMillis(millis: Long): String {
     return String.format("%04d-%02d-%02d",
         cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1,
         cal.get(Calendar.DAY_OF_MONTH))
+}
+
+/** §17.4 split_button: M3's SplitButtonLayout — ONE component whose two halves
+ * share an outline and a 2dp gap, with full outer corners and small inner
+ * ones that morph together on press. That fused geometry is the whole subject
+ * of the upstream samples, and it is why a `row` of two buttons was never a
+ * recreation of it.
+ *
+ * The trailing half is one of three things, in precedence order: `items` opens
+ * a dropdown; `checked` makes it a toggle whose arrow rotates 180° (device-held
+ * state keyed on the id, so the node is stateful only when `checked` is
+ * present); otherwise `on_trailing_tap` fires plainly. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun RenderSplitButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val enabled = node.boolOr("enabled", true)
+    val h = buttonHeightOf(node.stringOr("size")) ?: SplitButtonDefaults.SmallContainerHeight
+    val variant = node.stringOr("variant")
+    val id = node.stringOr("id")
+    val isToggle = "checked" in node
+    val toggle = if (isToggle) rememberToggle(node, ctx, id) else null
+    val onChange = node.objOrNull("on_change")
+    val items = node.arrOrNull("items")
+    var menuOpen by remember { mutableStateOf(false) }
+
+    // Both halves take the same colour treatment, so the pair reads as one
+    // component rather than two buttons that happen to touch.
+    val colors = when (variant) {
+        "tonal" -> ButtonDefaults.filledTonalButtonColors()
+        "elevated" -> ButtonDefaults.elevatedButtonColors()
+        "outlined" -> ButtonDefaults.outlinedButtonColors()
+        else -> ButtonDefaults.buttonColors()
+    }
+    val border = if (variant == "outlined") ButtonDefaults.outlinedButtonBorder(enabled) else null
+
+    SplitButtonLayout(
+        modifier = m,
+        leadingButton = {
+            SplitButtonDefaults.LeadingButton(
+                onClick = { onButton(node.objOrNull("on_tap"), ctx) },
+                enabled = enabled,
+                shapes = SplitButtonDefaults.leadingButtonShapesFor(h),
+                colors = colors,
+                border = border,
+                contentPadding = SplitButtonDefaults.leadingButtonContentPaddingFor(h),
+            ) {
+                val iconName = node.stringOr("icon")
+                if (iconName.isNotEmpty()) {
+                    Icon(IconMap.get(iconName), contentDescription = null,
+                        modifier = Modifier.size(SplitButtonDefaults.LeadingIconSize))
+                    androidx.compose.foundation.layout.Spacer(
+                        Modifier.size(ButtonDefaults.IconSpacing))
+                }
+                Text(node.stringOr("label"), maxLines = 1, softWrap = false,
+                    overflow = TextOverflow.Ellipsis)
+            }
+        },
+        trailingButton = {
+            val trailingLabel = node.stringOr("trailing_label")
+            val trailingIcon = node.stringOr("trailing_icon").ifEmpty { "keyboard_arrow_down" }
+            val expanded = toggle?.value == true || menuOpen
+            // The arrow flips with the state — the sample's own animateFloatAsState.
+            val rotation by animateFloatAsState(
+                targetValue = if (expanded) 180f else 0f, label = "trailing arrow")
+            val trailingContent: @Composable RowScope.() -> Unit = {
+                if (trailingLabel.isNotEmpty())
+                    Text(trailingLabel, maxLines = 1, softWrap = false,
+                        overflow = TextOverflow.Ellipsis)
+                else Icon(IconMap.get(trailingIcon),
+                    contentDescription = node.stringOr("trailing_description")
+                        .takeIf { it.isNotEmpty() },
+                    modifier = Modifier
+                        .size(SplitButtonDefaults.TrailingIconSize)
+                        .graphicsLayer { this.rotationZ = rotation })
+            }
+            val shapes = SplitButtonDefaults.trailingButtonShapesFor(h)
+            val pad = SplitButtonDefaults.trailingButtonContentPaddingFor(h)
+            Box {
+                when {
+                    items != null -> SplitButtonDefaults.TrailingButton(
+                        checked = menuOpen, onCheckedChange = { menuOpen = it },
+                        enabled = enabled, shapes = shapes, colors = colors,
+                        border = border, contentPadding = pad, content = trailingContent)
+                    toggle != null -> SplitButtonDefaults.TrailingButton(
+                        checked = toggle.value,
+                        onCheckedChange = {
+                            toggle.value = it
+                            ctx.state(id, JsonPrimitive(it))       // §14.6 state first
+                            if (onChange != null) ctx.action(onChange, JsonPrimitive(it))
+                        },
+                        enabled = enabled, shapes = shapes, colors = colors,
+                        border = border, contentPadding = pad, content = trailingContent)
+                    else -> SplitButtonDefaults.TrailingButton(
+                        onClick = { onButton(node.objOrNull("on_trailing_tap"), ctx) },
+                        enabled = enabled, shapes = shapes, colors = colors,
+                        border = border, contentPadding = pad, content = trailingContent)
+                }
+                if (items != null) DropdownMenu(
+                    expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    for (i in 0 until items.size) {
+                        val item = items[i] as? JsonObject ?: continue
+                        DropdownMenuItem(
+                            text = { Text(item.stringOr("label")) },
+                            enabled = item.boolOr("enabled", true),
+                            onClick = {
+                                menuOpen = false
+                                onButton(item.objOrNull("on_tap"), ctx)
+                            })
+                    }
+                }
+            }
+        })
 }

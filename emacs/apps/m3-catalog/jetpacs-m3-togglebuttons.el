@@ -15,29 +15,49 @@
 ;; component's own description says so: "a selectable button that
 ;; animates on press".
 ;;
-;; Nothing on the wire holds it.  There is no `toggle_button' node
-;; type, and the `button' node -- which now carries label, on_tap,
-;; icon, variant (filled/tonal/elevated/outlined/text), size (xsmall
-;; through xlarge), shape (round/square), animate_shape and enabled --
-;; still has no checked member and no on_change.  The neighbours one
-;; could reach for are worse rather than better: `chip' (M3 FilterChip,
-;; and already the subject of the Chips page) has a `selected' member
-;; but no id, so its state is authored from Emacs and a tap can never
-;; flip it; `switch' and `checkbox' do hold state Companion-side, but
-;; they draw a switch and a checkbox, each the subject of its own
-;; catalog component.  A plain `button' would render and would
-;; demonstrate nothing the Buttons page does not already show.
+;; The wire now holds it.  `button' carries `checked' and `on_change':
+;; a button carrying `checked' is a toggle, the Companion holds the
+;; flipped boolean on the device keyed by the node's `id', publishes
+;; `state.changed' before the action, and hands the new boolean to
+;; `on_change' in `args.value'.  So each of these builders authors
+;; `:checked :json-false' -- upstream's `mutableStateOf(false)', the
+;; initial value, not a default worth omitting: a `button' WITHOUT
+;; `checked' is not a toggle at all -- plus the `:id' (§16.1) the state
+;; is keyed on.  `on_tap' stays required by the node and carries the
+;; same demo message, since a toggle dispatches `on_change' instead of
+;; it.
 ;;
-;; So all ten are still unsupported -- but on one missing thing rather
-;; than several.  The container each sample dresses its ToggleButton in
-;; IS now expressible: the elevated variant (3 and 6), the square
-;; resting shape and press morph (2), the container-height scale (7
-;; through 10).  What no example survives is the toggling, and the
-;; reasons say only that, plus the two places where a second detail --
-;; ToggleButtonShapes' checkedShape (2) and the Filled/Outlined Edit
-;; swap (6 through 10) -- is itself keyed to the missing checked state.
-;; One upstream oddity is preserved as data: the example named
-;; "RoundToggleButtonSample" invokes `SquareToggleButtonSample'.
+;; The containers each sample dresses its ToggleButton in were already
+;; expressible and now travel with the state: the elevated variant (3
+;; and 6), the tonal (4), the outlined (5), and the container-height
+;; scale (7 through 10).  Nine of ten recreate.
+;;
+;; No builder here asks for `animate_shape'.  Every ToggleButton has a
+;; press morph from its own defaults -- `ToggleButtonDefaults.shapes()',
+;; and `shapesFor(size)' at a size step, which is what samples 7 through
+;; 10 spell out by hand -- so it belongs to the component the Companion
+;; draws, not to a member Emacs asks for; `animate_shape' exists because
+;; a plain `Button' has no morph unless one is passed.
+;;
+;; One sample does author a bespoke shape set and is the one gap:
+;; SquareToggleButtonSample inverts the defaults, square at rest and
+;; ROUND once checked, which is why the catalog names the example
+;; RoundToggleButtonSample.  `shape' selects the resting shape; nothing
+;; on the wire selects a shape for the checked state, so the morph the
+;; example is named for cannot be asked for.  (Preserved as data: the
+;; example named "RoundToggleButtonSample" invokes
+;; `SquareToggleButtonSample'.)
+;;
+;; Two details of ToggleButtonWithIconSample and its four sized
+;; siblings survive as notes rather than nodes: upstream swaps
+;; Icons.Filled.Edit for Icons.Outlined.Edit while checked, and
+;; `checked_icon' is an `icon_button' member, not a `button' one -- and
+;; even there the icon vocabulary is one name per glyph, resolved
+;; outlined-first, so no wire string names the filled Edit.  `edit'
+;; draws the outlined vector, which is the unchecked state upstream
+;; starts in.  The samples' subject -- a toggle whose content is an
+;; icon and a label, at a container-height step -- is on the wire, so
+;; they build.
 
 ;;; Code:
 
@@ -48,13 +68,65 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ToggleButtonSamples.kt"
   "Upstream ToggleButtonsExampleSourceUrl.")
 
-(defconst jetpacs-m3-togglebuttons--checked-note
-  "There is no toggle_button node type, and the button node -- label, on_tap, icon, variant, size, shape, animate_shape, enabled -- holds no checked state and dispatches no onCheckedChange, which is the pair this sample exists to demonstrate."
-  "Why the plain ToggleButton sample is unsupported.")
+(defun jetpacs-m3-togglebuttons--toggle (id label &rest options)
+  "A toggle `button' labeled LABEL, keyed on ID, starting unchecked.
+OPTIONS are extra `jetpacs-button' keywords.  `:checked :json-false' is
+upstream's `mutableStateOf(false)' and is what makes the node a toggle
+at all; ID is the §16.1 address its device-held state is published on.
+`on_change' receives the flipped boolean; the required `on_tap' carries
+the same message, because a toggle dispatches `on_change' in its place."
+  (jetpacs-with-attrs
+   (apply #'jetpacs-button label (jetpacs-m3-demo label)
+          :checked :json-false
+          :on-change (jetpacs-m3-demo label)
+          options)
+   :id id))
 
-(defconst jetpacs-m3-togglebuttons--size-note
-  "The button node now has a :size member, so this step of the M3 container-height scale, with its matching shapesFor and contentPaddingFor, can be asked for from Emacs. The toggling cannot: no wire member holds the checked state, and the Filled/Outlined Edit swap is driven from that same missing state."
-  "Why every size-variant ToggleButton sample is unsupported.")
+(defun jetpacs-m3-togglebuttons--basic ()
+  "Upstream ToggleButtonSample: ToggleButton(checked, onCheckedChange)."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-basic" "Button"))
+
+(defun jetpacs-m3-togglebuttons--elevated ()
+  "Upstream ElevatedToggleButtonSample: ElevatedToggleButton."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-elevated" "Elevated Button"
+                                    :variant "elevated"))
+
+(defun jetpacs-m3-togglebuttons--tonal ()
+  "Upstream TonalToggleButtonSample: TonalToggleButton."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-tonal" "Tonal Button"
+                                    :variant "tonal"))
+
+(defun jetpacs-m3-togglebuttons--outlined ()
+  "Upstream OutlinedToggleButtonSample: OutlinedToggleButton."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-outlined" "Outlined Button"
+                                    :variant "outlined"))
+
+(defun jetpacs-m3-togglebuttons--with-icon ()
+  "Upstream ToggleButtonWithIconSample: an ElevatedToggleButton, Edit icon.
+Upstream draws Icons.Filled.Edit while checked and Icons.Outlined.Edit
+otherwise; `edit' is the outlined vector, the state it starts in."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-with-icon" "Edit"
+                                    :variant "elevated" :icon "edit"))
+
+(defun jetpacs-m3-togglebuttons--xsmall-with-icon ()
+  "Upstream XSmallToggleButtonWithIconSample: ExtraSmallContainerHeight."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-xsmall" "Label"
+                                    :icon "edit" :size "xsmall"))
+
+(defun jetpacs-m3-togglebuttons--medium-with-icon ()
+  "Upstream MediumToggleButtonWithIconSample: MediumContainerHeight."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-medium" "Label"
+                                    :icon "edit" :size "medium"))
+
+(defun jetpacs-m3-togglebuttons--large-with-icon ()
+  "Upstream LargeToggleButtonWithIconSample: LargeContainerHeight."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-large" "Label"
+                                    :icon "edit" :size "large"))
+
+(defun jetpacs-m3-togglebuttons--xlarge-with-icon ()
+  "Upstream XLargeToggleButtonWithIconSample: ExtraLargeContainerHeight."
+  (jetpacs-m3-togglebuttons--toggle "togglebuttons-xlarge" "Label"
+                                    :icon "edit" :size "xlarge"))
 
 (jetpacs-m3-defcomponent "togglebuttons"
   :name "ToggleButtons"
@@ -70,66 +142,62 @@
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported jetpacs-m3-togglebuttons--checked-note)
+    :build #'jetpacs-m3-togglebuttons--basic)
    (jetpacs-m3-example
     "RoundToggleButtonSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
     :unsupported
-    "The button node now carries :shape \"square\" and :animate-shape, so two thirds of ToggleButtonShapes(squareShape, pressedShape, roundShape) can be asked for. The third is checkedShape, and no wire member holds the checked state that selects it -- so the square-becomes-round morph this sample exists to demonstrate cannot be expressed.")
+    "This example invokes SquareToggleButtonSample, which inverts M3's default toggle shapes: ToggleButtonShapes(squareShape, pressedShape, roundShape) is square at rest and ROUND once checked, the morph the catalog names the example for. The button node carries :shape, which selects the resting shape, and :checked, which now carries the toggling -- but no wire member selects a shape for the checked state, so the inversion cannot be asked for and a recreation would sit square in both states.")
    (jetpacs-m3-example
     "ElevatedToggleButtonSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported
-    "The button node does have :variant \"elevated\", so ElevatedToggleButton's container is on the wire, but it has no checked member and no on_change, so the toggling that ElevatedToggleButton exists to show cannot be put on the wire.")
+    :build #'jetpacs-m3-togglebuttons--elevated)
    (jetpacs-m3-example
     "TonalToggleButtonSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported
-    "The button node does have :variant \"tonal\", but it has no checked member and no on_change, so the toggling that TonalToggleButton exists to show cannot be put on the wire.")
+    :build #'jetpacs-m3-togglebuttons--tonal)
    (jetpacs-m3-example
     "OutlinedToggleButtonSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported
-    "The button node does have :variant \"outlined\", but it has no checked member and no on_change, so the toggling that OutlinedToggleButton exists to show cannot be put on the wire.")
+    :build #'jetpacs-m3-togglebuttons--outlined)
    (jetpacs-m3-example
     "ToggleButtonWithIconSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported
-    "The button node does have :variant \"elevated\" and a leading :icon, so the container and the Edit icon render. It carries one fixed icon name and no checked state, so neither the toggling nor the Filled/Outlined Edit swap this sample drives from checked can be expressed.")
+    :build #'jetpacs-m3-togglebuttons--with-icon)
    (jetpacs-m3-example
     "XSmallToggleButtonWithIconSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported jetpacs-m3-togglebuttons--size-note)
+    :build #'jetpacs-m3-togglebuttons--xsmall-with-icon)
    (jetpacs-m3-example
     "MediumToggleButtonWithIconSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported jetpacs-m3-togglebuttons--size-note)
+    :build #'jetpacs-m3-togglebuttons--medium-with-icon)
    (jetpacs-m3-example
     "LargeToggleButtonWithIconSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported jetpacs-m3-togglebuttons--size-note)
+    :build #'jetpacs-m3-togglebuttons--large-with-icon)
    (jetpacs-m3-example
     "XLargeToggleButtonWithIconSample"
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported jetpacs-m3-togglebuttons--size-note)
+    :build #'jetpacs-m3-togglebuttons--xlarge-with-icon)
    ))
 
 (provide 'jetpacs-m3-togglebuttons)

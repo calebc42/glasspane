@@ -818,6 +818,10 @@ a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
       (let ((client (jetpacs-client-or-error))
             (snack (prog1 (gethash surface jetpacs-shell--snackbars)
                      (remhash surface jetpacs-shell--snackbars)))
+            ;; Whether the injection above found a scaffold slot; the drain
+            ;; cannot re-derive it, since a multi_view injection rewrites a
+            ;; VIEW rather than the root.
+            (snack-in-scaffold nil)
             (refused nil)
             (revision nil))
         (unwind-protect
@@ -861,8 +865,11 @@ spec (SPEC 13.4)" current-view)))
               ;; after the send, so a refused push keeps the feedback.
               ;; (:snackbar is a string member; it adds no node types or
               ;; builtins, so injecting post-gate is sound.)
-              (when (and snack (equal (plist-get spec :t) "scaffold"))
-                (setq spec (append spec (list :snackbar snack))))
+              (when snack
+                (if-let* ((injected (jetpacs-shell--inject-snackbar
+                                     spec current-view snack)))
+                    (setq spec injected snack-in-scaffold t)
+                  (setq snack-in-scaffold nil)))
               ;; Re-assert a navigation the W10 ceiling refused, and
               ;; record the view this snapshot will leave the surface on —
               ;; BEFORE the send, because a refusal concludes its callback
@@ -917,7 +924,7 @@ spec (SPEC 13.4)" current-view)))
                 ;; ungranted Companion just loses the feedback — stale
                 ;; feedback later would be worse).
                 (when snack
-                  (unless (equal (plist-get spec :t) "scaffold")
+                  (unless snack-in-scaffold
                     (ignore-errors (jetpacs-toast snack)))
                   (setq snack nil))
                 (jetpacs-shell--run-isolated 'jetpacs-shell-after-push-hook))
@@ -926,6 +933,32 @@ spec (SPEC 13.4)" current-view)))
           (when snack
             (unless (gethash surface jetpacs-shell--snackbars)
               (puthash surface snack jetpacs-shell--snackbars)))))))))
+
+(defun jetpacs-shell--inject-snackbar (spec view snack)
+  "SPEC with SNACK in a scaffold `snackbar' slot, or nil if there is none.
+
+A §13.4 `app:*' spec is USUALLY a multi_view, not a scaffold: every
+`jetpacs-chrome' screen is a `jetpacs-scaffold', and the stack wraps them
+as VIEWS.  So the slot lives one level down, on the view being shown —
+testing only the root\='s `:t\=' found no scaffold on any chrome app and
+silently degraded every snackbar in the product to a toast.
+
+VIEW is the view this push will land on (nil = the spec\='s own
+`initial_view\=').  Returns nil when neither shape offers a scaffold, and
+the caller degrades to a toast as before."
+  (cond
+   ((equal (plist-get spec :t) "scaffold")
+    (append spec (list :snackbar snack)))
+   ((plist-get spec :views)
+    (let* ((views (plist-get spec :views))
+           (vid (or view (plist-get spec :initial_view)))
+           (root (and vid (gethash vid views))))
+      (when (equal (plist-get root :t) "scaffold")
+        ;; Copy-on-write: the caller\='s spec is not ours to mutate, and a
+        ;; refused push must leave it exactly as it was.
+        (let ((copy (copy-hash-table views)))
+          (puthash vid (append root (list :snackbar snack)) copy)
+          (plist-put (copy-sequence spec) :views copy)))))))
 
 (defun jetpacs-shell--run-isolated (hook &rest args)
   "Run HOOK's functions with ARGS, each isolated; log failures by SYMBOL.

@@ -9,16 +9,41 @@
 ;; `IconButtonExamples' (12 examples), samples/IconButtonSamples.kt.
 ;;
 ;; The `icon_button' node carries icon, on_tap, content_description,
-;; badge, variant and enabled -- and nothing else.  The variant enum
-;; (filled/tonal/outlined) covers the CONTAINER samples, so
-;; IconButtonSample, FilledIconButtonSample,
-;; FilledTonalIconButtonSample and OutlinedIconButtonSample all
-;; recreate exactly.  The remaining eight ask for something that still
-;; has no wire member: a CHECKED state (IconToggleButton and its three
-;; variants, which swap Icons.Outlined.Lock for Icons.Filled.Lock), a
-;; TINT (Icon(tint = Color.Red)) or a SIZE and SHAPE (the expressive
+;; badge, variant, enabled -- and now checked, checked_icon and
+;; on_change.  The variant enum (filled/tonal/outlined) recreates the
+;; four CONTAINER samples and the checked member recreates the four
+;; TOGGLE samples, so eight of the twelve build.  The remaining four
+;; ask for something with no wire member still: a TINT (Icon(tint =
+;; Color.Red)) and a SIZE and SHAPE (the expressive
 ;; extraSmall/medium/large container scale with its Narrow/Uniform/Wide
-;; width options and square/round shapes).
+;; width options and square/round shapes) -- `button' grew size and
+;; shape members, `icon_button' did not.
+;;
+;; Two honest limits on the toggles, both worth stating because they
+;; are what the recreation does NOT reproduce.
+;;
+;; First the glyphs.  Every upstream toggle swaps Icons.Outlined.Lock
+;; for Icons.Filled.Lock, one glyph in two weights -- and those are ONE
+;; `lock' name here, because IconMap resolves Icons.Outlined first and
+;; reaches Icons.Filled only for names Outlined lacks.  A wire toggle
+;; distinguishes its two states by NAME, through checked_icon, so the
+;; unchecked state takes `lock_open' and the checked state takes `lock'.
+;; Naming two glyphs is as close as identifiers get to one glyph in two
+;; weights; the checked state is upstream's, the unchecked one is a
+;; stand-in.
+;;
+;; Second the containers.  There is no *IconToggleButton on the wire,
+;; only `icon_button' with a checked member: the Companion draws the
+;; variant's own container and swaps the glyph under it, so the M3
+;; checked/unchecked container pair (surfaceVariant -> primary on a
+;; FilledIconToggleButton) is not what a tap changes here.  `checked'
+;; reaches the eye as the glyph alone.
+;;
+;; A tap on a toggle dispatches on_change and then on_tap, which here
+;; would report the same one string twice, so the toggles carry
+;; `jetpacs-m3-demo' on on_tap alone.  Nothing is lost: upstream's
+;; `onCheckedChange = { checked = it }' only writes the state the
+;; Companion already holds on the device, keyed on the node's id.
 ;;
 ;; Every sample in the upstream file wraps its button in a `TooltipBox'
 ;; carrying "Localized description", with the comment "Icon button
@@ -34,14 +59,6 @@
 (defconst jetpacs-m3-icon-buttons--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/IconButtonSamples.kt"
   "Upstream IconButtonsExampleSourceUrl.")
-
-(defconst jetpacs-m3-icon-buttons--toggle-note
-  "There is no icon toggle button node, and icon_button has no checked member: the two-state button that swaps Icons.Outlined.Lock for Icons.Filled.Lock cannot be put on the wire."
-  "Why the plain IconToggleButton sample is unsupported.")
-
-(defconst jetpacs-m3-icon-buttons--variant-toggle-note
-  "The container is on the wire -- icon_button has a variant member now -- but the toggle is not: there is no icon toggle button node and no checked member, so the two-state button that swaps Icons.Outlined.Lock for Icons.Filled.Lock, which is what this sample exists to show, cannot be asked for from Emacs."
-  "Why every variant IconToggleButton sample is unsupported.")
 
 (defconst jetpacs-m3-icon-buttons--size-note
   "The icon_button node has no size or shape member: the M3 expressive container-size scale (extraSmall through large), its Narrow/Uniform/Wide width options and the matching square and round shapes cannot be expressed on the wire."
@@ -79,6 +96,46 @@ supplies through its TooltipBox is content_description."
                        :content-description "Localized description"
                        :variant "outlined"))
 
+(defun jetpacs-m3-icon-buttons--lock-toggle (id variant)
+  "The lock toggle every *IconToggleButtonSample is, as node ID.
+VARIANT is the container (nil for the plain, container-less one).
+Upstream opens on `checked = false' and flips it in onCheckedChange; on
+the wire `checked' opens :json-false, the tap flips it on the device
+and §16.1 keys that state on ID, which is why every toggle here needs
+one and the four plain icon buttons above need none.  `checked_icon'
+is the whole two-state display: see the Commentary for why the pair is
+`lock_open' and `lock' rather than the one Lock in two weights."
+  (jetpacs-with-attrs
+   (jetpacs-icon-button "lock_open" (jetpacs-m3-demo "Localized description")
+                        :content-description "Localized description"
+                        :checked :json-false
+                        :checked-icon "lock"
+                        :variant variant)
+   :id id))
+
+(defun jetpacs-m3-icon-buttons--toggle ()
+  "Upstream IconToggleButtonSample: the plain, container-less IconToggleButton."
+  (jetpacs-m3-icon-buttons--lock-toggle "icon-buttons-toggle" nil))
+
+(defun jetpacs-m3-icon-buttons--filled-toggle ()
+  "Upstream FilledIconToggleButtonSample: the toggle in the filled container.
+The container is the variant member; it does not itself change with
+`checked', which is the limit the Commentary records."
+  (jetpacs-m3-icon-buttons--lock-toggle "icon-buttons-filled-toggle" "filled"))
+
+(defun jetpacs-m3-icon-buttons--filled-tonal-toggle ()
+  "Upstream FilledTonalIconToggleButtonSample: the toggle, tonal container.
+The container is the variant member; it does not itself change with
+`checked', which is the limit the Commentary records."
+  (jetpacs-m3-icon-buttons--lock-toggle "icon-buttons-tonal-toggle" "tonal"))
+
+(defun jetpacs-m3-icon-buttons--outlined-toggle ()
+  "Upstream OutlinedIconToggleButtonSample: the toggle, outlined container.
+The container is the variant member; it does not itself change with
+`checked', which is the limit the Commentary records."
+  (jetpacs-m3-icon-buttons--lock-toggle "icon-buttons-outlined-toggle"
+                                        "outlined"))
+
 (jetpacs-m3-defcomponent "icon-buttons"
   :name "Icon buttons"
   :description
@@ -103,7 +160,7 @@ supplies through its TooltipBox is content_description."
     "IconToggleButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :unsupported jetpacs-m3-icon-buttons--toggle-note)
+    :build #'jetpacs-m3-icon-buttons--toggle)
    (jetpacs-m3-example
     "FilledIconButtonSample"
     "Icon button examples"
@@ -113,7 +170,7 @@ supplies through its TooltipBox is content_description."
     "FilledIconToggleButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :unsupported jetpacs-m3-icon-buttons--variant-toggle-note)
+    :build #'jetpacs-m3-icon-buttons--filled-toggle)
    (jetpacs-m3-example
     "FilledTonalIconButtonSample"
     "Icon button examples"
@@ -123,7 +180,7 @@ supplies through its TooltipBox is content_description."
     "FilledTonalIconToggleButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :unsupported jetpacs-m3-icon-buttons--variant-toggle-note)
+    :build #'jetpacs-m3-icon-buttons--filled-tonal-toggle)
    (jetpacs-m3-example
     "OutlinedIconButtonSample"
     "Icon button examples"
@@ -133,7 +190,7 @@ supplies through its TooltipBox is content_description."
     "OutlinedIconToggleButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :unsupported jetpacs-m3-icon-buttons--variant-toggle-note)
+    :build #'jetpacs-m3-icon-buttons--outlined-toggle)
    (jetpacs-m3-example
     "XSmallNarrowSquareIconButtonsSample"
     "Icon button examples"

@@ -141,8 +141,11 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             val next = !toggle.value
             toggle.value = next
             ctx.state(id, JsonPrimitive(next))          // §14.6 state first
+            // ONE action per tap. A toggle's semantic event is on_change; the
+            // required on_tap is the fallback for a toggle that authors none.
+            // Firing both would double-dispatch every tap.
             if (onChange != null) ctx.action(onChange, JsonPrimitive(next))
-            onButton(onTap, ctx)
+            else onButton(onTap, ctx)
         }
     } else { { onButton(onTap, ctx) } }
     val h = buttonHeightOf(node.stringOr("size"))
@@ -239,8 +242,9 @@ internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             val next = !toggle.value
             toggle.value = next
             ctx.state(id, JsonPrimitive(next))
+            // One action per tap — see RenderButton.
             if (onChange != null) ctx.action(onChange, JsonPrimitive(next))
-            onButton(onTap, ctx)
+            else onButton(onTap, ctx)
         }
     } else { { onButton(onTap, ctx) } }
     // `checked_icon` swaps the glyph while checked; IconMap is the only path a

@@ -8,14 +8,15 @@
 ;; Upstream: Components.kt `Chips' + Examples.kt
 ;; `ChipsExamples' (13 examples), samples/ChipSamples.kt.
 ;;
-;; M3 ships five chips; with `variant' on both chip nodes the wire now
-;; reaches FOUR of them.  `chip' is FilterChip (flat, the default),
-;; ElevatedFilterChip (`elevated') and InputChip (`input');
-;; `assist_chip' is AssistChip (flat), ElevatedAssistChip
-;; (`elevated'), SuggestionChip (`suggestion') and
-;; ElevatedSuggestionChip (`elevated_suggestion') -- RenderChip and
-;; RenderAssistChip in InputNodes.kt dispatch exactly those seven
-;; composables.  `chip' also has a `trailing_icon' member now, so the
+;; M3 has four chip types -- assist, filter, input, suggestion -- which
+;; Chip.kt ships as SEVEN composables (every type but input also comes
+;; elevated).  With `variant' on both chip nodes the wire reaches all
+;; seven: `chip' is FilterChip (flat, the default), ElevatedFilterChip
+;; (`elevated') and InputChip (`input'); `assist_chip' is AssistChip
+;; (flat), ElevatedAssistChip (`elevated'), SuggestionChip
+;; (`suggestion') and ElevatedSuggestionChip (`elevated_suggestion') --
+;; RenderChip and RenderAssistChip in InputNodes.kt dispatch exactly
+;; those seven.  `chip' also has a `trailing_icon' member now, so the
 ;; trailing ArrowDropDown is on the wire.  Eleven of the thirteen
 ;; samples recreate.
 ;;
@@ -28,8 +29,10 @@
 ;; no `trailing_icon', which is why ChipGroupSingleLineSample drops the
 ;; per-chip ArrowDropDown.
 ;;
-;; `selected' is authored presentation state -- the Companion draws the
-;; snapshot Emacs sent, and the tap dispatches -- so a filter chip
+;; The `checked'/`on_change' toggle pair landed on `button' and
+;; `icon_button', NOT on either chip node, so `selected' is still
+;; authored presentation state -- the Companion draws the snapshot
+;; Emacs sent, and the tap only dispatches -- and a filter chip
 ;; recreates as ONE state of the upstream toggle.  Each sample keeps the
 ;; state it remembers (`mutableStateOf(false)'), except
 ;; ChipGroupReflowSample, where false is precisely the state a flow_row
@@ -215,7 +218,7 @@ VerticalDivider is dropped: the divider node is HorizontalDivider."
     "Chips examples"
     :source jetpacs-m3-chips--source
     :unsupported
-    "The chip node has no horizontal_arrangement member: FilterChipDefaults.horizontalArrangement(4.dp) spaces the icon and label INSIDE the chip's own content row, which no universal attribute reaches.")
+    "The chip node reaches FilterChip, but it has no horizontal_arrangement member: FilterChipDefaults.horizontalArrangement(4.dp) sets the spacing between the icon and the label INSIDE the chip's own content row, which no universal attribute reaches, and that spacing is the only thing separating this sample from FilterChipSample.")
    (jetpacs-m3-example
     "InputChipSample"
     "Chips examples"

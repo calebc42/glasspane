@@ -208,18 +208,15 @@ wire."
 ;;;; Verbs authored into the tree
 
 (defun jetpacs-m3-demo (message)
-  "A descriptor for the demo verb: taps report MESSAGE as a toast.
+  "A descriptor for the demo verb: taps report MESSAGE as a snackbar.
 Every recreated sample whose upstream handler only mutates local state
 uses this, so a tap is visibly live instead of silently inert.
 
-A TOAST, not a snackbar, and the distinction is the catalog's own.
-`jetpacs-shell-notify' injects a queued message as `scaffold.snackbar'
-only when the pushed spec's `:t' IS \"scaffold\" (`jetpacs-shell.el'),
-and this app's root is a `multi_view' -- `jetpacs-chrome' stacks its
-screens as views -- so every message on this surface takes the
-documented fallback and is presented as a toast instead.  Raising a
-real snackbar from an event needs the wire member the audit tracks as
-G-76; until then the feedback is honest but it is not chrome."
+A real `scaffold.snackbar\=', as of the `jetpacs-shell--inject-snackbar\='
+fix.  It was a toast for as long as this app existed, and the cause was
+never the catalog: the injection tested the ROOT spec\='s `:t\=', and a
+`jetpacs-chrome\=' app is a `multi_view\=' whose VIEWS are the scaffolds,
+so no chrome app in the product ever found its own slot."
   (jetpacs-action "m3catalog.demo" :args (list :message message)))
 
 (defun jetpacs-m3--open (id)

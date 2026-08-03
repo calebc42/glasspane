@@ -19,15 +19,14 @@
 ;; descriptor reaches Emacs and `jetpacs-m3-demo' hands the message to
 ;; `jetpacs-shell-notify', which queues it, latest wins.
 ;;
-;; What arrives on device is a TOAST, not the scaffold snackbar this
-;; module first claimed.  `jetpacs-shell-notify' injects the queued
-;; message as `scaffold.snackbar' only when the pushed spec's `:t' IS
-;; "scaffold"; this app's root is a `multi_view' (`jetpacs-chrome'
-;; stacks screens as views), so the message takes the documented
-;; fallback and is toasted instead.  ScaffoldWithSimpleSnackbar
-;; therefore shows its message, in the wrong container -- honest
-;; feedback, but not the SnackbarHost the sample exists to show.  The
-;; audit tracks the event-driven raise as G-76.
+;; That message really does arrive as `scaffold.snackbar' now, and for
+;; a while it did not.  `jetpacs-shell-notify' injected the queued
+;; string only when the pushed spec's `:t' was "scaffold", and a
+;; `jetpacs-chrome' app is a `multi_view' whose VIEWS are the scaffolds
+;; -- so no chrome app in the product ever found its own slot and every
+;; snackbar in Jetpacs degraded to a toast.  The injection now targets
+;; the view being shown, so ScaffoldWithSimpleSnackbar draws the
+;; SnackbarHost it exists to show.
 ;;
 ;; The other four are that sample plus one twist, and every twist is a
 ;; member the wire does not have.  `scaffold.snackbar' is ONE STRING,
@@ -52,12 +51,10 @@
 (defun jetpacs-m3-snackbars--simple-fab ()
   "Upstream ScaffoldWithSimpleSnackbar's FAB, as this screen's FAB.
 The text-only ExtendedFloatingActionButton reading \"Show snackbar\".
-Its tap reaches Emacs, which queues the message -- and on this surface
-presents it as a TOAST, not the scaffold snackbar (see the Commentary:
-the catalog root is a `multi_view', so `jetpacs-shell-notify' takes its
-non-scaffold fallback).  The SnackbarHost the sample exists to show is
-therefore still ahead of us.  The click count upstream keeps in
-`remember' has no wire state to live in either, so the message stays
+Its tap reaches Emacs, which queues the message; the next push carries
+it as the scaffold snackbar member of the view being shown, which is the
+SnackbarHost this sample exists to show.  The click count upstream keeps
+in `remember\=' has no wire state to live in, so the message stays
 \"Snackbar # 1\"."
   (jetpacs-button "Show snackbar" (jetpacs-m3-demo "Snackbar # 1")
                   :variant "filled"))

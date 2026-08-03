@@ -13,6 +13,11 @@ kotlin {
         compileSdk = 36
         minSdk = 34
         withHostTestBuilder {}
+        withDeviceTestBuilder {
+            sourceSetTreeName = "test"
+        }.configure {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
     }
 
     sourceSets {
@@ -26,6 +31,11 @@ kotlin {
             implementation(libs.androidx.sqlite.bundled)
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
+        }
+        getByName("androidDeviceTest").dependencies {
+            implementation(libs.androidx.test.core)
+            implementation(libs.androidx.test.ext.junit)
+            implementation(libs.androidx.test.runner)
         }
     }
 }

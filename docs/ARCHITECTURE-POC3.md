@@ -103,8 +103,9 @@ Run bundled-SQLite DAO and repository integration tests on the KMP JVM target.
 Do not treat Android host tests as device coverage: the Android variant of the
 bundled driver loads JNI from an Android package, and local Room 3 itself
 disables `testAndroidHostTest` for its multiplatform suite. Prove the Android
-boundary by compiling the Android KMP variants and assembling the app; add
-instrumented device coverage with the renderer connection in Step 2.
+boundary by compiling the Android KMP variants and assembling the app. The
+pre-Step-2 device follow-up reuses the same `commonTest` suite on connected
+Android hardware, verified on a Pixel Tablet running Android 17/API 37.
 
 ### Step 2 — audit, rebase, and connect the dumb renderer
 
@@ -126,9 +127,9 @@ destination selects the cached EBP surface; it does not define the catalog.
 Before adapter work, run a local-source best-practices audit and make its
 findings an explicit gate:
 
-- Android 16/API 36 and 36.1 behavior changes, lifecycle, background work,
 - Gradle wrapper, AGP, Kotlin, KSP, and Compose compiler compatibility,
   including a verified distribution checksum for the selected wrapper.
+- Android 16/API 36 and 36.1 behavior changes, lifecycle, background work,
   permissions, edge-to-edge, security, accessibility, and adaptive layouts.
 - Current Android Jetpack guidance for repository/state-holder boundaries,
   lifecycle-aware collection, testing, and dependency injection.
@@ -147,6 +148,38 @@ Treat every compiler deprecation warning as an audit input. The first green
 Android build already identifies inherited renderer/wire cleanup candidates:
 AutoMirrored icons, positional `rememberSaveable`, dynamic swipe anchors,
 primary/secondary tab rows, and Kotlin 2.4 exhaustiveness.
+
+### Step 2.5 — harden the workspace before the synchronization engine
+
+Pause feature work after the rebase and renderer connection. Produce an
+evidence-backed hardening backlog before changing `ebp-sync.el` or its
+`track-changes.el` engine:
+
+- Inventory Kotlin and Elisp code smells, duplicated behavior, oversized
+  files, leaky boundaries, and missing characterization tests. Classify each
+  extraction as Jetpacs app code, reusable `kotlin-ebp`, upstreamable `ebp.el`,
+  or workspace-only tooling; do not move product policy into EBP.
+- Inventory existing utilities, reference material, generators, and lookup
+  assets, especially `docs/lookup-tables`, vocabulary generators, goldens,
+  validation scripts, and device helpers. Prefer extending one authoritative
+  utility over introducing parallel helpers or hand-maintained tables.
+- Diff the rebased m3-fidelity implementation and its tests against the DSL
+  core. Identify missing or inconsistent primitives for structure, modifiers,
+  state, actions, theming, adaptive behavior, accessibility, and expressive
+  components; distinguish EBP vocabulary gaps from renderer-only defects.
+- Build a POC 1 versus POC 2 regression and pattern matrix covering behavior,
+  performance, persistence, synchronization, tests, and developer workflows.
+  Mark each item restore, improve, replace with a built-in, or intentionally
+  retire, including the former `jetpacs-sync.el` behavior now planned as
+  generic `ebp-sync.el`.
+- Propose developer-experience tools where they remove repeated reasoning:
+  one-command local gates, schema/vocabulary drift checks, lookup-table
+  generation, golden refresh/verification, module-boundary lint, device
+  selection, fixture builders, and concise machine-readable audit reports.
+
+Land only low-risk cleanup needed to make Step 3 legible. Larger abstractions
+require at least two demonstrated consumers or a measured duplication/problem,
+plus characterization coverage that proves behavior before and after the move.
 
 ### Step 3 — restore synchronization as generic `ebp-sync.el`
 

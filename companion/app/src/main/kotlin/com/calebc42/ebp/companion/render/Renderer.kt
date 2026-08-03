@@ -26,10 +26,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -38,6 +42,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -50,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -721,7 +729,8 @@ private fun localTimeStamp(): String {
  * the refreshed push lands in roughly the same window). A drawer opens from
  * the hamburger (Companion-local, like view switching) and closes by scrim.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
     val hostState = remember { SnackbarHostState() }
@@ -741,12 +750,66 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                 ctx.action(action?.objOrNull("on_tap"))
         }
     }
+    // §17.6 `top_bar_style`: an ABSENT style keeps the plain status-bar-padded
+    // Row this renderer has always drawn, so no existing chrome moves. A
+    // present one asks for the real M3 TopAppBar, which is the only thing a
+    // scroll behavior can attach to — the authored `top_bar` node becomes its
+    // title slot, and the drawer hamburger its navigationIcon.
+    val topBarStyle = node.stringOr("top_bar_style")
+    val scrollBehavior: TopAppBarScrollBehavior? =
+        if (topBarStyle.isEmpty()) null else when (node.stringOr("scroll_behavior")) {
+            "pinned" -> TopAppBarDefaults.pinnedScrollBehavior()
+            "enter_always" -> TopAppBarDefaults.enterAlwaysScrollBehavior()
+            "exit_until_collapsed" -> TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+            else -> null
+        }
     val scaffold: @Composable () -> Unit = {
         Scaffold(
+            modifier = scrollBehavior?.let {
+                Modifier.nestedScroll(it.nestedScrollConnection)
+            } ?: Modifier,
             snackbarHost = { SnackbarHost(hostState) },
             topBar = {
                 val topBar = node.objOrNull("top_bar")
-                if (topBar != null || drawer != null) {
+                if (topBarStyle.isNotEmpty()) {
+                    val title: @Composable () -> Unit = {
+                        topBar?.let { RenderNode(it, ctx.child(it, 0)) }
+                    }
+                    val nav: @Composable () -> Unit = {
+                        if (drawer != null) IconButton(onClick = {
+                            scope.launch {
+                                if (drawerState.isClosed) drawerState.open()
+                                else drawerState.close()
+                            }
+                        }) { Icon(IconMap.get("menu"), contentDescription = "Menu") }
+                    }
+                    val subtitle = node.stringOr("top_bar_subtitle")
+                    // Only the small TopAppBar takes a `subtitle`; the
+                    // center-aligned one carries the alignment instead, so a
+                    // subtitled centre bar is the small overload with
+                    // titleHorizontalAlignment rather than a different bar.
+                    when {
+                        subtitle.isNotEmpty() && topBarStyle != "medium" &&
+                            topBarStyle != "large" ->
+                            TopAppBar(title = title, subtitle = { Text(subtitle) },
+                                navigationIcon = nav,
+                                titleHorizontalAlignment =
+                                    if (topBarStyle == "center") Alignment.CenterHorizontally
+                                    else Alignment.Start,
+                                scrollBehavior = scrollBehavior)
+                        topBarStyle == "center" -> CenterAlignedTopAppBar(
+                            title = title, navigationIcon = nav,
+                            scrollBehavior = scrollBehavior)
+                        topBarStyle == "medium" -> MediumTopAppBar(
+                            title = title, navigationIcon = nav,
+                            scrollBehavior = scrollBehavior)
+                        topBarStyle == "large" -> LargeTopAppBar(
+                            title = title, navigationIcon = nav,
+                            scrollBehavior = scrollBehavior)
+                        else -> TopAppBar(title = title, navigationIcon = nav,
+                            scrollBehavior = scrollBehavior)
+                    }
+                } else if (topBar != null || drawer != null) {
                     // §17.6: the top bar is drawn edge-to-edge, so it MUST clear
                     // the system status bar itself (a plain Row, unlike M3's
                     // TopAppBar, gets no automatic inset) — else the hamburger

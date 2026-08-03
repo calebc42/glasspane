@@ -1740,11 +1740,26 @@ a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
   (jetpacs--check-descriptor (plist-get v :on_tap) ":on_tap")
   v)
 
+(defconst jetpacs--top-bar-styles '("small" "center" "medium" "large"))
+(defconst jetpacs--scroll-behaviors
+  '("pinned" "enter_always" "exit_until_collapsed"))
+
 (cl-defun jetpacs-scaffold (&key top-bar body bottom-bar fab floating-toolbar
-                                 drawer snackbar snackbar-action on-refresh)
+                                 drawer snackbar snackbar-action on-refresh
+                                 top-bar-style top-bar-subtitle scroll-behavior)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
-string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor."
+string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
+
+TOP-BAR-STYLE asks for a REAL M3 TopAppBar around TOP-BAR — small,
+center(-aligned), medium or large — instead of the plain status-bar-padded
+row the Companion draws when it is absent.  Omitting it is exactly today's
+rendering, which is why every existing caller is untouched.
+
+SCROLL-BEHAVIOR (pinned, enter_always, exit_until_collapsed) needs
+TOP-BAR-STYLE: it is the M3 behavior the bar and the body's nested scroll
+share, and there is no bar to attach it to otherwise.  TOP-BAR-SUBTITLE is
+the second line M3 draws under the title."
   (dolist (pair (list (cons ":top-bar" top-bar) (cons ":body" body)
                       (cons ":bottom-bar" bottom-bar) (cons ":fab" fab)
                       (cons ":floating-toolbar" floating-toolbar)
@@ -1754,11 +1769,26 @@ string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor."
   (when snackbar (jetpacs--require-string snackbar ":snackbar"))
   (when snackbar-action (jetpacs--check-snackbar-action snackbar-action))
   (when on-refresh (jetpacs--check-descriptor on-refresh ":on-refresh"))
+  (when top-bar-style
+    (setq top-bar-style (jetpacs--check-enum top-bar-style
+                                             jetpacs--top-bar-styles
+                                             ":top-bar-style")))
+  (when top-bar-subtitle
+    (jetpacs--require-string top-bar-subtitle ":top-bar-subtitle"))
+  (when scroll-behavior
+    (setq scroll-behavior (jetpacs--check-enum scroll-behavior
+                                               jetpacs--scroll-behaviors
+                                               ":scroll-behavior"))
+    (unless top-bar-style
+      (error "jetpacs-scaffold: :scroll-behavior needs :top-bar-style (SPEC 17.6)")))
   (jetpacs--node "scaffold"
                  :top_bar top-bar :body body :bottom_bar bottom-bar
                  :fab fab :floating_toolbar floating-toolbar :drawer drawer
                  :snackbar snackbar :snackbar_action snackbar-action
-                 :on_refresh on-refresh))
+                 :on_refresh on-refresh
+                 :top_bar_style top-bar-style
+                 :top_bar_subtitle top-bar-subtitle
+                 :scroll_behavior scroll-behavior))
 
 ;;;; SurfaceSpec shapes (§13.4)
 ;;

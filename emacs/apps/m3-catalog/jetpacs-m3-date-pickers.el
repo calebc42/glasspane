@@ -17,9 +17,17 @@
 ;; carrying one selected day and a day-tap handler -- which is what
 ;; DatePickerSample puts on screen with its pre-selection.
 ;;
-;; The other three exist to demonstrate something neither node has a
-;; member for: a per-day SelectableDates predicate, DisplayMode.Input,
-;; and a two-ended range (DateRangePicker is unwrapped).
+;; `date_button' also carries `:mode' now, and `input' IS
+;; DisplayMode.Input -- the typed date-entry field with M3's own mask
+;; and validation -- so DateInputSample recreates.  One seam stated:
+;; upstream shows the input field INLINE and the wire's only door to a
+;; DatePickerState is the dialog behind `date_button', so the field
+;; appears on tap rather than standing in the body (`month_grid', the
+;; inline node, draws a calendar only).
+;;
+;; The other two exist to demonstrate something neither node has a
+;; member for: a per-day SelectableDates predicate, and a two-ended
+;; range (DateRangePicker is unwrapped).
 
 ;;; Code:
 
@@ -59,6 +67,21 @@ state is `rememberDatePickerState()' with no pre-selection, so no
   (jetpacs-date-button "Select date"
                        (jetpacs-m3-demo "Selected date timestamp")))
 
+(defun jetpacs-m3-date-pickers--input ()
+  "Upstream DateInputSample: DisplayMode.Input, the typed date-entry field.
+`:mode \"input\"' seeds the dialog's DatePickerState with it, so the tap
+lands on M3's own masked MM/DD/YYYY field rather than the calendar; the
+dialog keeps its built-in toggle between the two, as the state does
+upstream.  The caption is the sample's own selection readout."
+  (jetpacs-column
+   (jetpacs-date-button "Select date"
+                        (jetpacs-m3-demo "Entered date timestamp")
+                        :mode "input")
+   (jetpacs-with-attrs
+    (jetpacs-text "Entered date timestamp: no input")
+    :align_self "center")
+   :spacing 8 :fill t))
+
 (jetpacs-m3-defcomponent "date-pickers"
   :name "Date pickers"
   :description
@@ -88,8 +111,7 @@ state is `rememberDatePickerState()' with no pre-selection, so no
     "DateInputSample"
     "Date picker examples"
     :source jetpacs-m3-date-pickers--source
-    :unsupported
-    "The date_button node has no display-mode member: DisplayMode.Input, the typed date-entry field with its own formatting and validation that this sample exists to show, is a DatePickerState setting Emacs cannot request, and month_grid draws a calendar only.")
+    :build #'jetpacs-m3-date-pickers--input)
    (jetpacs-m3-example
     "DateRangePickerSample"
     "Date picker examples"

@@ -18,14 +18,13 @@
 ;; with OK and Cancel, handing the chosen "HH:MM" to on_pick.  So the
 ;; Picker sample recreates exactly.
 ;;
-;; The node now also takes a `display_mode' member (picker|input), so
-;; the Picker sample can name the mode upstream names.  But that is as
-;; far as it goes today: the Companion's time_button renderer does not
-;; read `display_mode' -- its dialog body is `TimePicker(state)' with no
-;; branch -- so asking for "input" still draws the clock dial, and the
-;; enum has no "switchable" value and the dialog no toggle slot.  The
-;; TimeInput sample and the mode-toggling sample therefore still have
-;; nothing that carries the one thing each exists to demonstrate.
+;; The node's `display_mode' member (picker|input) selects what fills
+;; that dialog: the clock dial, or M3 `TimeInput' -- the keyboard-first
+;; HH/MM fields -- so the Picker and the TimeInput samples both
+;; recreate, each naming the mode upstream names.  What remains out of
+;; reach is the mid-dialog FLIP: the enum has no "switchable" value and
+;; the Companion's dialog has no toggle slot, so the third sample's
+;; DisplayModeToggle still has no wire representation.
 
 ;;; Code:
 
@@ -35,10 +34,6 @@
 (defconst jetpacs-m3-time-picker--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/TimePicker.kt"
   "Upstream TimePickerExampleSourceUrl.")
-
-(defconst jetpacs-m3-time-picker--input-note
-  "The time_button node has gained a display_mode member (picker|input), but the Companion does not yet read it: it fills its picker dialog with an M3 TimePicker clock dial unconditionally, so asking for \"input\" still draws the dial. The TimeInput hour and minute text fields this sample exists to show cannot be asked for, and a pair of number text_inputs would be a hand-built lookalike of a different composable, not TimeInput inside the picker dialog."
-  "Why TimeInputSample is unsupported.")
 
 (defconst jetpacs-m3-time-picker--toggle-note
   "The time_button node's display_mode member selects one fixed mode and has no \"switchable\" value, and its dialog is still built entirely by the Companion, so the TimePickerDialogDefaults.DisplayModeToggle button this sample puts in the dialog -- and the mid-dialog flip between clock dial and typed input that it drives -- have no slot and no member on the wire."
@@ -55,6 +50,14 @@ Companion draws.  Upstream leaves rememberTimePickerState at its
 default, so no :value is sent."
   (jetpacs-time-button "Set Time" (jetpacs-m3-demo "Entered time")
                        :display-mode "picker"))
+
+(defun jetpacs-m3-time-picker--input ()
+  "Upstream TimeInputSample: the same screen with TimeInput in the dialog.
+`:display-mode \"input\"' fills the dialog with M3's keyboard-first HH
+and MM fields instead of the dial -- TimePickerDisplayMode.Input, the
+one thing that separates this sample from TimePickerSample."
+  (jetpacs-time-button "Set Time" (jetpacs-m3-demo "Entered time")
+                       :display-mode "input"))
 
 (jetpacs-m3-defcomponent "time-picker"
   :name "Time Picker"
@@ -74,7 +77,7 @@ default, so no :value is sent."
     "TimeInputSample"
     "Time Picker examples"
     :source jetpacs-m3-time-picker--source
-    :unsupported jetpacs-m3-time-picker--input-note)
+    :build #'jetpacs-m3-time-picker--input)
    (jetpacs-m3-example
     "TimePickerSwitchableSample"
     "Time Picker examples"

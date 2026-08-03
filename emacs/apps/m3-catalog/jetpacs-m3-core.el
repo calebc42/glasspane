@@ -104,6 +104,7 @@ the sample was demonstrating in the first place.")
 
 (cl-defun jetpacs-m3-example (name description &key source expressive
                                    build slots top-bar unsupported
+                                   scaffold
                                    top-bar-style top-bar-subtitle
                                    scroll-behavior
                                    floating-toolbar-orientation
@@ -127,13 +128,22 @@ one gives at least one of:
             nil at the stack bottom) returning the screen's whole top
             bar.  It MUST offer a way back — use `jetpacs-m3-back-button'.
 
-TOP-BAR-STYLE, TOP-BAR-SUBTITLE and SCROLL-BEHAVIOR are the §17.6 scaffold
-members, passed straight through to this screen's own scaffold, so a sample
-whose subject is a REAL M3 TopAppBar — a large bar that collapses as the
-body scrolls, say — can ask for one.  They are strings, not builders, and
-SCROLL-BEHAVIOR needs TOP-BAR-STYLE (`jetpacs-scaffold' enforces that).
-The styled bar puts TOP-BAR's node in its title slot and has no actions
-slot, so a sample's actions and its way back both live inside that node.
+SCAFFOLD is a plist of §17.6 members appended verbatim to this screen's own
+scaffold — the general door for anything that is NOT a builder, so a sample
+whose subject is a scaffold member the harness has never heard of can ask
+for it WITHOUT a change here.  `jetpacs-scaffold' validates it, so a
+misspelled member is an error there rather than a silent drop.
+
+    :slots (list :floating-toolbar #\='my-toolbar)
+    :scaffold (list :floating-toolbar-orientation \"horizontal\"
+                    :floating-toolbar-placement \"bottom_end\")
+
+The named TOP-BAR-* / SCROLL-BEHAVIOR / FLOATING-TOOLBAR-* keywords are
+sugar over the same plist, kept because modules already read that way.  Two
+rules they carry: a styled top bar puts TOP-BAR's node in the real bar's
+TITLE slot and has no actions slot, so a sample's actions and its way back
+both live inside that node; and SCROLL-BEHAVIOR needs TOP-BAR-STYLE, which
+`jetpacs-scaffold' enforces.
 
 UNSUPPORTED is a sentence naming the wire member or node type the
 sample would need; the example then drills into \"Not supported\"."
@@ -161,12 +171,15 @@ sample would need; the example then drills into \"Not supported\"."
   (when top-bar-subtitle
     (jetpacs--require-string top-bar-subtitle ":top-bar-subtitle"))
   (when scroll-behavior (jetpacs--require-string scroll-behavior ":scroll-behavior"))
-  (when (and (or top-bar-style scroll-behavior) (not top-bar))
-    (error "jetpacs-m3: example %S styles a top bar it does not author" name))
-  (when (and floating-toolbar-orientation
+  ;; The guard covers BOTH doors: the sugar keyword and the generic plist.
+  (when (and (or floating-toolbar-orientation
+                 (plist-member scaffold :floating-toolbar-orientation))
              (not (plist-member slots :floating-toolbar)))
     (error "jetpacs-m3: example %S styles a floating toolbar it does not author"
            name))
+  (when (and (or top-bar-style (plist-member scaffold :top-bar-style))
+             (not top-bar))
+    (error "jetpacs-m3: example %S styles a top bar it does not author" name))
   (list :name name :description description :source source
         :expressive (and expressive t)
         :build build :slots slots :top-bar top-bar
@@ -175,12 +188,29 @@ sample would need; the example then drills into \"Not supported\"."
         ;; Booleans ride as a two-element cell so an explicit :json-false
         ;; survives — `plist-get' cannot tell "false" from "absent", and
         ;; `floating-toolbar-expanded' has a meaningful false.
-        :floating-toolbar (list :orientation floating-toolbar-orientation
-                                :expanded floating-toolbar-expanded
-                                :placement floating-toolbar-placement
-                                :fab floating-toolbar-fab
-                                :scroll floating-toolbar-scroll
-                                :exit-direction floating-toolbar-exit-direction)
+        ;; One plist reaches the scaffold.  The named keywords fold in
+        ;; here, so the screen builder has a single thing to forward and a
+        ;; future §17.6 member needs no change in this file at all.
+        :scaffold
+        (append
+         scaffold
+         (when top-bar-style (list :top-bar-style top-bar-style))
+         (when top-bar-subtitle (list :top-bar-subtitle top-bar-subtitle))
+         (when scroll-behavior (list :scroll-behavior scroll-behavior))
+         (when floating-toolbar-orientation
+           (list :floating-toolbar-orientation floating-toolbar-orientation))
+         ;; `plist-member', not a truth test: :expanded and :scroll have a
+         ;; meaningful :json-false that a truth test would drop.
+         (when floating-toolbar-expanded
+           (list :floating-toolbar-expanded floating-toolbar-expanded))
+         (when floating-toolbar-placement
+           (list :floating-toolbar-placement floating-toolbar-placement))
+         (when floating-toolbar-fab
+           (list :floating-toolbar-fab floating-toolbar-fab))
+         (when floating-toolbar-scroll
+           (list :floating-toolbar-scroll floating-toolbar-scroll))
+         (when floating-toolbar-exit-direction
+           (list :floating-toolbar-exit-direction floating-toolbar-exit-direction)))
         :unsupported unsupported))
 
 (cl-defun jetpacs-m3-defcomponent (id &key name description guidelines docs
@@ -470,23 +500,6 @@ catalog must stay navigable when one recreation is wrong."
      (slots (jetpacs-m3--slot-hint slots))
      (t (jetpacs-m3--slot-hint nil)))))
 
-(defun jetpacs-m3--toolbar-options (example)
-  "EXAMPLE's §17.6 floating-toolbar styling, as scaffold keyword arguments.
-Each member is emitted only when the example set it — `plist-member', not
-`plist-get', because `:expanded' has a meaningful `:json-false' that
-`plist-get' cannot tell from absent."
-  (let ((tb (plist-get example :floating-toolbar))
-        (out '()))
-    (dolist (pair '((:orientation . :floating-toolbar-orientation)
-                    (:expanded . :floating-toolbar-expanded)
-                    (:placement . :floating-toolbar-placement)
-                    (:fab . :floating-toolbar-fab)
-                    (:scroll . :floating-toolbar-scroll)
-                    (:exit-direction . :floating-toolbar-exit-direction)))
-      (when-let* ((v (plist-get tb (car pair))))
-        (setq out (append out (list (cdr pair) v)))))
-    out))
-
 (defun jetpacs-m3--example-slots (example)
   "EXAMPLE's scaffold slots as a `jetpacs-scaffold' keyword plist."
   (let ((label (plist-get example :name))
@@ -527,18 +540,11 @@ instead, because a Node tree cannot nest a scaffold."
                ;; §17.6 top-bar members ride the same scaffold; nil values are
                ;; dropped by `jetpacs--node', so an unstyled example is
                ;; byte-identical to before.
-               (append
-                (when-let* ((v (plist-get example :top-bar-style)))
-                  (list :top-bar-style v))
-                (when-let* ((v (plist-get example :top-bar-subtitle)))
-                  (list :top-bar-subtitle v))
-                (when-let* ((v (plist-get example :scroll-behavior)))
-                  (list :scroll-behavior v))
-                (jetpacs-m3--toolbar-options example)
-                slots))
+               (append (plist-get example :scaffold) slots))
       (apply #'jetpacs-chrome-screen (plist-get example :name) body
              :back back :actions actions
-             (append (jetpacs-m3--toolbar-options example) slots)))))
+             :scaffold (plist-get example :scaffold)
+             slots))))
 
 ;;;; Theme
 

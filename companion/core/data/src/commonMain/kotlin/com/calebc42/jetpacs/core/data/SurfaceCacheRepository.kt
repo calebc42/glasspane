@@ -17,4 +17,6 @@ interface SurfaceCacheRepository {
         revision: Long,
         observedAtEpochMs: Long,
     ): CacheWriteResult
+
+    suspend fun revokePairing(pairingId: String)
 }

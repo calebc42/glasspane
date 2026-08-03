@@ -44,6 +44,14 @@ class FakeSurfaceCacheRepository : SurfaceCacheRepository {
         }
     }
 
+    override suspend fun revokePairing(pairingId: String) {
+        require(pairingId.isNotBlank()) { "pairingId must not be blank" }
+        mutex.withLock {
+            records.value = records.value.filterKeys { it.pairingId != pairingId }
+            revisionFloors.keys.removeAll { it.pairingId == pairingId }
+        }
+    }
+
     private suspend fun mutate(
         key: SurfaceKey,
         revision: Long,

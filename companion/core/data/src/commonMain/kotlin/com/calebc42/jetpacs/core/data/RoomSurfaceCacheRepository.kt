@@ -44,6 +44,11 @@ class RoomSurfaceCacheRepository(
         )
     }
 
+    override suspend fun revokePairing(pairingId: String) {
+        require(pairingId.isNotBlank()) { "pairingId must not be blank" }
+        dao.deletePairing(pairingId)
+    }
+
     private suspend fun replaceIfNewer(record: SurfaceRecordEntity): CacheWriteResult =
         database.withWriteTransaction {
             val currentRevision =

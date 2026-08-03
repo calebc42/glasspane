@@ -48,4 +48,20 @@ class FakeSurfaceCacheRepositoryTest {
         assertEquals(CacheWriteResult.Applied(3), repository.accept(revisionThree))
         assertEquals(revisionThree, repository.observeSurface(key).first())
     }
+
+    @Test
+    fun revokePairingErasesOnlyItsRecordsAndRevisionFloors() = runTest {
+        val repository = FakeSurfaceCacheRepository()
+        val retainedKey = SurfaceKey("pairing-2", "catalog")
+        val revoked = CachedSurface(key, 5, "{}", acceptedAtEpochMs = 50)
+        val retained = CachedSurface(retainedKey, 2, "{}", acceptedAtEpochMs = 20)
+        repository.accept(revoked)
+        repository.accept(retained)
+
+        repository.revokePairing(key.pairingId)
+
+        assertNull(repository.observeSurface(key).first())
+        assertEquals(retained, repository.observeSurface(retainedKey).first())
+        assertEquals(CacheWriteResult.Applied(1), repository.accept(revoked.copy(revision = 1)))
+    }
 }

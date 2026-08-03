@@ -53,6 +53,22 @@ class SurfaceDaoTest {
         )
     }
 
+    @Test
+    fun deletePairingErasesSnapshotsAndTombstonesOnlyForThatPairing() = runTest {
+        dao.upsert(record(pairingId = "pair-a", surfaceId = "visible"))
+        dao.upsert(record(pairingId = "pair-a", surfaceId = "removed", present = false))
+        dao.upsert(record(pairingId = "pair-b", surfaceId = "preserved"))
+
+        dao.deletePairing("pair-a")
+
+        assertNull(dao.getRecord("pair-a", "visible"))
+        assertNull(dao.getRecord("pair-a", "removed"))
+        assertEquals(
+            "preserved",
+            dao.getRecord("pair-b", "preserved")?.surfaceId,
+        )
+    }
+
     private fun record(
         pairingId: String = "pair-a",
         surfaceId: String = "surface-a",

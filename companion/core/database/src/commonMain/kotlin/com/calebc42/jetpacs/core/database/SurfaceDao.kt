@@ -40,4 +40,7 @@ interface SurfaceDao {
 
     @Upsert
     suspend fun upsert(record: SurfaceRecordEntity)
+
+    @Query("DELETE FROM surface_records WHERE pairingId = :pairingId")
+    suspend fun deletePairing(pairingId: String)
 }

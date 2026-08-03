@@ -72,6 +72,23 @@ class RoomSurfaceCacheRepositoryTest {
         assertEquals(25, repository.observeSurface(key).first()?.revision)
     }
 
+    @Test
+    fun revokePairingErasesItsRevisionFloorsWithoutTouchingOtherPairings() = runTest {
+        val revoked = SurfaceKey("pair-a", "surface-a")
+        val retained = SurfaceKey("pair-b", "surface-a")
+        repository.tombstone(revoked, revision = 7, observedAtEpochMs = 70)
+        repository.accept(surface(retained, revision = 3))
+
+        repository.revokePairing("pair-a")
+
+        assertNull(database.surfaceDao().getRecord("pair-a", "surface-a"))
+        assertEquals(3, repository.observeSurface(retained).first()?.revision)
+        assertEquals(
+            CacheWriteResult.Applied(1),
+            repository.accept(surface(revoked, revision = 1)),
+        )
+    }
+
     private fun surface(
         key: SurfaceKey,
         revision: Long,

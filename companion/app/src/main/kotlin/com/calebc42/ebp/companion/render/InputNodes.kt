@@ -53,6 +53,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
@@ -226,8 +227,10 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     }
 }
 
-/** §17.4 icon_button: icon + on_tap, badge/content_description/variant/enabled.
- * Omitted `variant` keeps the plain, container-less IconButton. */
+/** §17.4 icon_button: icon + on_tap, badge/content_description/variant/
+ * size/shape/width_mode/checked/enabled. Omitted `variant` keeps the plain,
+ * container-less IconButton and omitted `size` keeps its baseline geometry. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val badge = node.stringOr("badge")
@@ -252,9 +255,44 @@ internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val checkedIcon = node.stringOr("checked_icon")
     val shownIcon = if (toggle?.value == true && checkedIcon.isNotEmpty())
         checkedIcon else node.stringOr("icon")
+    // §17.4 icon_button geometry. A size step is a coordinated set here too:
+    // the CONTAINER grows via IconButtonDefaults.<step>ContainerSize(width) and
+    // the inner Icon must be sized to match, because RenderIconButton draws it
+    // with no size modifier at all — a container member alone would leave a
+    // baseline glyph rattling inside a large button.
+    val sizeName = node.stringOr("size")
+    val square = node.stringOr("shape") == "square"
+    val widthOption = when (node.stringOr("width_mode")) {
+        "narrow" -> IconButtonDefaults.IconButtonWidthOption.Narrow
+        "wide" -> IconButtonDefaults.IconButtonWidthOption.Wide
+        else -> IconButtonDefaults.IconButtonWidthOption.Uniform
+    }
+    val containerSize = when (sizeName) {
+        "xsmall" -> IconButtonDefaults.extraSmallContainerSize(widthOption)
+        "small" -> IconButtonDefaults.smallContainerSize(widthOption)
+        "medium" -> IconButtonDefaults.mediumContainerSize(widthOption)
+        "large" -> IconButtonDefaults.largeContainerSize(widthOption)
+        else -> null
+    }
+    val stepShape = when (sizeName) {
+        "xsmall" -> if (square) IconButtonDefaults.extraSmallSquareShape else IconButtonDefaults.extraSmallRoundShape
+        "small" -> if (square) IconButtonDefaults.smallSquareShape else IconButtonDefaults.smallRoundShape
+        "medium" -> if (square) IconButtonDefaults.mediumSquareShape else IconButtonDefaults.mediumRoundShape
+        "large" -> if (square) IconButtonDefaults.largeSquareShape else IconButtonDefaults.largeRoundShape
+        else -> null
+    }
+    val glyphSize = when (sizeName) {
+        "xsmall" -> IconButtonDefaults.extraSmallIconSize
+        "small" -> IconButtonDefaults.smallIconSize
+        "medium" -> IconButtonDefaults.mediumIconSize
+        "large" -> IconButtonDefaults.largeIconSize
+        else -> null
+    }
+    val mm = if (containerSize != null) m.size(containerSize) else m
     val body: @Composable () -> Unit = {
         val icon: @Composable () -> Unit = {
             Icon(IconMap.get(shownIcon),
+                modifier = if (glyphSize != null) Modifier.size(glyphSize) else Modifier,
                 contentDescription = node.stringOr("content_description")
                     .takeIf { it.isNotEmpty() })
         }
@@ -263,10 +301,16 @@ internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         else icon()
     }
     when (node.stringOr("variant")) {
-        "filled" -> FilledIconButton(onClick, m, enabled) { body() }
-        "tonal" -> FilledTonalIconButton(onClick, m, enabled) { body() }
-        "outlined" -> OutlinedIconButton(onClick, m, enabled) { body() }
-        else -> IconButton(onClick, m, enabled) { body() }
+        "filled" -> if (stepShape != null)
+            FilledIconButton(onClick, mm, enabled, shape = stepShape) { body() }
+            else FilledIconButton(onClick, mm, enabled) { body() }
+        "tonal" -> if (stepShape != null)
+            FilledTonalIconButton(onClick, mm, enabled, shape = stepShape) { body() }
+            else FilledTonalIconButton(onClick, mm, enabled) { body() }
+        "outlined" -> if (stepShape != null)
+            OutlinedIconButton(onClick, mm, enabled, shape = stepShape) { body() }
+            else OutlinedIconButton(onClick, mm, enabled) { body() }
+        else -> IconButton(onClick, mm, enabled) { body() }
     }
 }
 

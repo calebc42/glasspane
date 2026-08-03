@@ -1018,6 +1018,12 @@ typography — never a height alone, so omitting it means the Companion's
 unscaled default rather than any partial application.")
 (defconst jetpacs--button-shapes '("round" "square"))
 (defconst jetpacs--icon-button-variants '("filled" "tonal" "outlined"))
+(defconst jetpacs--icon-button-sizes '("xsmall" "small" "medium" "large"))
+(defconst jetpacs--icon-button-shapes '("round" "square"))
+(defconst jetpacs--icon-button-width-modes '("narrow" "uniform" "wide")
+  "How wide the container runs at a given size step: M3's
+IconButtonWidthOption.  `uniform' is the default square-ish container;
+`narrow' and `wide' change only the horizontal padding.")
 (defconst jetpacs--chip-variants '("flat" "elevated" "input"))
 (defconst jetpacs--assist-chip-variants
   '("flat" "elevated" "suggestion" "elevated_suggestion"))
@@ -1051,7 +1057,8 @@ unique across the document (§16.1); a plain button carries neither."
                  :checked checked :on_change on-change :enabled enabled))
 
 (cl-defun jetpacs-icon-button (icon on-tap &key content-description badge
-                                    variant checked checked-icon on-change
+                                    variant size shape width-mode
+                                    checked checked-icon on-change
                                     enabled)
   "An icon button showing ICON dispatching ON-TAP (SPEC §17.4).
 ICON is a §4.4 identifier (§17.1); BADGE a string or number; VARIANT
@@ -1065,13 +1072,21 @@ and ON-CHANGE receives the flipped boolean."
   (when content-description (jetpacs--require-string content-description ":content_description"))
   (when badge (jetpacs--check-badge badge))
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--icon-button-variants ":variant")))
+  (when size (setq size (jetpacs--check-enum size jetpacs--icon-button-sizes ":size")))
+  (when shape (setq shape (jetpacs--check-enum shape jetpacs--icon-button-shapes ":shape")))
+  (when width-mode
+    (setq width-mode (jetpacs--check-enum width-mode
+                                          jetpacs--icon-button-width-modes
+                                          ":width-mode")))
   (when checked (jetpacs--check-bool checked ":checked"))
   (when checked-icon (jetpacs--check-identifier checked-icon ":checked_icon"))
   (when on-change (jetpacs--check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "icon_button" :icon icon :on_tap on-tap
                  :content_description content-description :badge badge
-                 :variant variant :checked checked :checked_icon checked-icon
+                 :variant variant :size size :shape shape
+                 :width_mode width-mode
+                 :checked checked :checked_icon checked-icon
                  :on_change on-change :enabled enabled))
 
 (cl-defun jetpacs-chip (label &key on-tap selected icon trailing-icon

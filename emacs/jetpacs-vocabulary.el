@@ -54,7 +54,7 @@
     ("tabs" ("children" "items") ("id" "initial" "on_change" "pager_only" "scrollable"))
     ("table" ("rows") ("aligns" "on_add_col" "on_add_row"))
     ("button" ("label" "on_tap") ("animate_shape" "checked" "enabled" "icon" "on_change" "shape" "size" "variant"))
-    ("icon_button" ("icon" "on_tap") ("badge" "checked" "checked_icon" "content_description" "enabled" "on_change" "variant"))
+    ("icon_button" ("icon" "on_tap") ("badge" "checked" "checked_icon" "content_description" "enabled" "on_change" "shape" "size" "variant" "width_mode"))
     ("chip" ("label") ("enabled" "icon" "on_tap" "selected" "trailing_icon" "variant"))
     ("assist_chip" ("label") ("enabled" "icon" "on_tap" "variant"))
     ("menu" ("items") ("enabled" "icon" "initial_scroll"))

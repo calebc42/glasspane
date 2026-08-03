@@ -51,7 +51,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "tabs" to NodeRow(setOf("items", "children"), setOf("initial", "scrollable", "pager_only", "on_change", "id")),
     "table" to NodeRow(setOf("rows"), setOf("aligns", "on_add_row", "on_add_col")),
     "button" to NodeRow(setOf("label", "on_tap"), setOf("icon", "variant", "enabled", "size", "shape", "animate_shape", "checked", "on_change")),
-    "icon_button" to NodeRow(setOf("icon", "on_tap"), setOf("content_description", "badge", "enabled", "variant", "checked", "on_change", "checked_icon")),
+    "icon_button" to NodeRow(setOf("icon", "on_tap"), setOf("content_description", "badge", "enabled", "variant", "checked", "on_change", "checked_icon", "size", "shape", "width_mode")),
     "chip" to NodeRow(setOf("label"), setOf("on_tap", "selected", "icon", "enabled", "variant", "trailing_icon")),
     "assist_chip" to NodeRow(setOf("label"), setOf("on_tap", "icon", "enabled", "variant")),
     "menu" to NodeRow(setOf("items"), setOf("icon", "enabled", "initial_scroll")),
@@ -196,6 +196,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "value" to "varies-per-node",
     "values" to "number-array",
     "width" to "number",
+    "width_mode" to "string",
     "y_range" to "two-number-array",
     "year" to "non-negative-integer",
 )

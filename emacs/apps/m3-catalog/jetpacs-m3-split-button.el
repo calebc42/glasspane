@@ -9,30 +9,32 @@
 ;; `SplitButtonExamples' (12 examples), samples/SplitButtonSamples.kt.
 ;;
 ;; All twelve samples are one composable, `SplitButtonLayout': a leading
-;; action button and a trailing toggle FUSED into a single container --
+;; action button and a trailing button FUSED into a single container --
 ;; SplitButtonDefaults gives the outer corners a full radius, the inner
 ;; corners a small one and the seam a 2dp gap, and the trailing half is
-;; `checked'/`onCheckedChange', morphing its shape while its
-;; KeyboardArrowDown rotates through 180 degrees.  That fusion, and the
-;; checked trailing half, are the whole subject; the leading content
-;; (icon+text, text only, icon only), the color variant and the
-;; container-height scale are just what each sample varies.
+;; usually `checked'/`onCheckedChange', morphing its shape while its
+;; KeyboardArrowDown rotates through 180 degrees.
 ;;
-;; M3-COMPONENT-LOOKUP puts SplitButton among the components Jetpacs
-;; does not wrap.  The wire has `button' (label, on_tap, icon, variant,
-;; enabled) and `icon_button' -- two independent containers with NO
-;; CHECKED STATE, so for every sample whose trailing half is checkable
-;; the shape morph and the 180-degree arrow rotation that the check
-;; drives cannot be asked for, and a row of buttons would be a
-;; lookalike rather than the component.
+;; That component is the `split_button' node, so the fusion, the checked
+;; trailing half and its rotation are asked for by name instead of drawn
+;; as a lookalike row of two buttons.  Each sample is ONE node: the
+;; label and `:icon' are the leading content, `:variant' and `:size'
+;; apply to BOTH halves (and `elevated' is a variant here, unlike
+;; `button'), and the trailing half is whichever of the three forms the
+;; sample uses -- `:checked' with `:on-change' for the nine toggles,
+;; `:on-trailing-tap' for the uncheckable one, `:items' for the one that
+;; opens a DropdownMenu.
 ;;
-;; The FUSED GEOMETRY itself does compose, though: `:corner' takes a
-;; per-corner object on any node (`jetpacs--corner-keys') and `row'
-;; takes `:spacing' -- which is how `jetpacs-m3-lists.el' builds
-;; `ListItemDefaults.segmentedShapes'.  So the ONE sample with no
-;; checked state anywhere, SplitButtonWithUnCheckableTrailingButtonSample,
-;; whose whole subject IS that fusion, is recreated; the other eleven
-;; are unsupported on the checked state each of them needs.
+;; Upstream wraps every icon-only half in a TooltipBox for one reason,
+;; stated in its own comment: the icon needs an accessible name.
+;; `:trailing-description' is that name on the wire -- upstream's
+;; `contentDescription = description' on the trailing semantics -- so no
+;; `tooltip' node wraps these.  One that did would anchor to the whole
+;; split button and so describe the leading half too, which is not what
+;; upstream anchors it to.
+;;
+;; One sample is left: SplitButtonWithIconSample's leading half is an
+;; icon with no text at all, and the node's label is required.
 
 ;;; Code:
 
@@ -43,50 +45,110 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SplitButtonSamples.kt"
   "Upstream SplitButtonExampleSourceUrl.")
 
-(defconst jetpacs-m3-split-button--layout-note
-  "There is no split_button node, and no wire member holds the checked state of its trailing half: the shape morph and the 180-degree arrow rotation that SplitButtonLayout drives from onCheckedChange are what this sample exists to show."
-  "Why a sample that varies only the leading content is unsupported.")
+(defun jetpacs-m3-split-button--toggle (id label &rest options)
+  "A `split_button' labeled LABEL whose trailing half toggles, keyed on ID.
+OPTIONS are extra `jetpacs-split-button' keywords.  Every sample here but
+two starts at `mutableStateOf(false)' and flips it from the trailing
+half's `onCheckedChange': `:checked :json-false' is that state and is
+what makes the trailing half a toggle at all, ID is the §16.1 address it
+is published on, and `:on-change' receives the flipped boolean.  The
+KeyboardArrowDown and its 180-degree rotation are the node's own -- the
+arrow is the default trailing icon and the check is what turns it.
 
-(defconst jetpacs-m3-split-button--fused-corner 20
-  "The outer corner radius of a fused SplitButtonLayout half.
-SplitButtonDefaults gives the outer corners a full radius and the
-inner ones a small one; 20/4 over a 40dp-tall half reads as that.")
-
-(defun jetpacs-m3-split-button--half (node leading)
-  "NODE as one fused half: LEADING picks which corners are rounded."
+`:trailing-description' is upstream's `contentDescription = description'
+on the trailing semantics.  What that semantics block also sets and the
+wire does not carry is `stateDescription', the \"Expanded\"/\"Collapsed\"
+a screen reader would announce alongside the name."
   (jetpacs-with-attrs
-   node
-   :corner (if leading
-               (list :top_start jetpacs-m3-split-button--fused-corner
-                     :bottom_start jetpacs-m3-split-button--fused-corner
-                     :top_end 4 :bottom_end 4)
-             (list :top_end jetpacs-m3-split-button--fused-corner
-                   :bottom_end jetpacs-m3-split-button--fused-corner
-                   :top_start 4 :bottom_start 4))
-   :bg "primary" :clip t))
+   (apply #'jetpacs-split-button label (jetpacs-m3-demo label)
+          :trailing-description "Toggle Button"
+          :checked :json-false
+          :on-change (jetpacs-m3-demo "Toggle Button")
+          options)
+   :id id))
+
+(defun jetpacs-m3-split-button--filled ()
+  "Upstream FilledSplitButtonSample: the plain SplitButtonDefaults halves."
+  (jetpacs-m3-split-button--toggle "split-button-filled" "My Button"
+                                   :icon "edit" :variant "filled"))
 
 (defun jetpacs-m3-split-button--uncheckable ()
   "Upstream SplitButtonWithUnCheckableTrailingButtonSample.
-The one sample with no checked state anywhere, so its whole subject is
-the fusion: two halves seamed 2dp apart, outer corners full radius and
-inner corners small.  `:corner' takes exactly that per-corner object,
-the same composition `jetpacs-m3-lists.el' uses for
-`ListItemDefaults.segmentedShapes'."
-  (jetpacs-row
-   (jetpacs-m3-split-button--half
-    (jetpacs-button "My Button" (jetpacs-m3-demo "My Button")
-                    :icon "edit" :variant "filled")
-    t)
-   (jetpacs-m3-split-button--half
-    (jetpacs-icon-button "keyboard_arrow_down"
-                         (jetpacs-m3-demo "Toggle Button")
-                         :content-description "Toggle Button")
-    nil)
-   :spacing 2 :align "center"))
+The one sample whose trailing half is a plain `onClick' TrailingButton
+rather than a toggle: no `:checked', so the node is stateless and takes
+no `:id', and `:on-trailing-tap' is the third of the trailing forms."
+  (jetpacs-split-button "My Button" (jetpacs-m3-demo "My Button")
+                        :icon "edit" :variant "filled"
+                        :trailing-description "Toggle Button"
+                        :on-trailing-tap (jetpacs-m3-demo "Toggle Button")))
 
-(defconst jetpacs-m3-split-button--size-note
-  "Two things are missing: there is no split_button node to fuse the two halves, and no size member for the SplitButtonDefaults container-height scale (ExtraSmall through ExtraLarge) with the shapes, content padding, icon sizes and text style it selects."
-  "Why every container-height sample is unsupported.")
+(defun jetpacs-m3-split-button--with-dropdown-menu ()
+  "Upstream SplitButtonWithDropdownMenuSample: the trailing half opens a menu.
+`:items' is that DropdownMenu, and it takes precedence over `:checked' --
+upstream's checked state exists only to be the menu's `expanded', so the
+node holds no state of its own and takes no `:id'.  The three items keep
+their upstream labels and Outlined leading icons; what the MenuItem
+record cannot carry rides along as loss, exactly as in
+`jetpacs-m3-menus.el': the HorizontalDivider above \"Send Feedback\" and
+that item's \"F11\" trailing shortcut text."
+  (jetpacs-split-button "My Button" (jetpacs-m3-demo "My Button")
+                        :icon "edit" :variant "filled"
+                        :trailing-description "Toggle Button"
+                        :items
+                        (list (jetpacs-menu-item "Edit" (jetpacs-m3-demo "Edit")
+                                                 :icon "edit")
+                              (jetpacs-menu-item "Settings"
+                                                 (jetpacs-m3-demo "Settings")
+                                                 :icon "settings")
+                              (jetpacs-menu-item "Send Feedback"
+                                                 (jetpacs-m3-demo "Send Feedback")
+                                                 :icon "email"))))
+
+(defun jetpacs-m3-split-button--tonal ()
+  "Upstream TonalSplitButtonSample: TonalLeadingButton + TonalTrailingButton.
+`:variant' applies to both halves, which is what the sample varies."
+  (jetpacs-m3-split-button--toggle "split-button-tonal" "My Button"
+                                   :icon "edit" :variant "tonal"))
+
+(defun jetpacs-m3-split-button--elevated ()
+  "Upstream ElevatedSplitButtonSample: the Elevated leading and trailing halves."
+  (jetpacs-m3-split-button--toggle "split-button-elevated" "My Button"
+                                   :icon "edit" :variant "elevated"))
+
+(defun jetpacs-m3-split-button--outlined ()
+  "Upstream OutlinedSplitButtonSample: the outline runs around both halves."
+  (jetpacs-m3-split-button--toggle "split-button-outlined" "My Button"
+                                   :icon "edit" :variant "outlined"))
+
+(defun jetpacs-m3-split-button--with-text ()
+  "Upstream SplitButtonWithTextSample: a LeadingButton of Text alone.
+The only sample with no leading icon, so the node carries no `:icon'."
+  (jetpacs-m3-split-button--toggle "split-button-with-text" "My Button"))
+
+(defun jetpacs-m3-split-button--xsmall ()
+  "Upstream XSmallFilledSplitButtonSample: ExtraSmallContainerHeight.
+`:size' selects the SplitButtonDefaults scale for BOTH halves -- the
+shapes, content padding, icon sizes and text style the sample threads
+through `leadingButtonShapesFor(size)' and its siblings."
+  (jetpacs-m3-split-button--toggle "split-button-xsmall" "My Button"
+                                   :icon "edit" :size "xsmall"))
+
+(defun jetpacs-m3-split-button--medium ()
+  "Upstream MediumFilledSplitButtonSample: MediumContainerHeight."
+  (jetpacs-m3-split-button--toggle "split-button-medium" "My Button"
+                                   :icon "edit" :size "medium"))
+
+(defun jetpacs-m3-split-button--large ()
+  "Upstream LargeFilledSplitButtonSample: LargeContainerHeight."
+  (jetpacs-m3-split-button--toggle "split-button-large" "My Button"
+                                   :icon "edit" :size "large"))
+
+(defun jetpacs-m3-split-button--xlarge ()
+  "Upstream ExtraLargeFilledSplitButtonSample: ExtraLargeContainerHeight.
+This is the one sample whose leading text is \"Button\", not \"My
+Button\"."
+  (jetpacs-m3-split-button--toggle "split-button-xlarge" "Button"
+                                   :icon "edit" :size "xlarge"))
 
 (jetpacs-m3-defcomponent "split-button"
   :name "Split Button"
@@ -102,7 +164,7 @@ the same composition `jetpacs-m3-lists.el' uses for
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported jetpacs-m3-split-button--layout-note)
+    :build #'jetpacs-m3-split-button--filled)
    (jetpacs-m3-example
     "SplitButtonWithUnCheckableTrailingButtonSample"
     "Split Button examples"
@@ -114,66 +176,62 @@ the same composition `jetpacs-m3-lists.el' uses for
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported
-    "There is no split_button node, and the menu node carries its own icon trigger, so a DropdownMenu cannot be anchored to a split button's checkable trailing half; a menu item also has no divider and no trailing shortcut label for \"F11\".")
+    :build #'jetpacs-m3-split-button--with-dropdown-menu)
    (jetpacs-m3-example
     "TonalSplitButtonSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported
-    "The button node does have a tonal variant, but there is no split_button node to fuse a TonalLeadingButton and a checkable TonalTrailingButton into the single container this sample exists to show.")
+    :build #'jetpacs-m3-split-button--tonal)
    (jetpacs-m3-example
     "ElevatedSplitButtonSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported
-    "Neither half is on the wire: the button variant enum is filled/tonal/outlined/text with no elevated member, and there is no split_button node to fuse the two halves into one container.")
+    :build #'jetpacs-m3-split-button--elevated)
    (jetpacs-m3-example
     "OutlinedSplitButtonSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported
-    "The button node does have an outlined variant, but there is no split_button node, so the shared outline that runs around both halves and turns inward at the seam cannot be asked for from Emacs.")
+    :build #'jetpacs-m3-split-button--outlined)
    (jetpacs-m3-example
     "SplitButtonWithTextSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported jetpacs-m3-split-button--layout-note)
+    :build #'jetpacs-m3-split-button--with-text)
    (jetpacs-m3-example
     "SplitButtonWithIconSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
     :unsupported
-    "There is no split_button node, and the button node requires a label, so the icon-only LeadingButton this sample pairs with the checkable trailing half has no wire form of its own either.")
+    "The split_button node requires a label and has no leading icon-only form: this sample's LeadingButton is Icons.Filled.Edit alone, with the tooltip and contentDescription \"Button\" as its whole accessible name, so any label the wire could send would put back the text the sample exists to leave out.")
    (jetpacs-m3-example
     "XSmallFilledSplitButtonSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported jetpacs-m3-split-button--size-note)
+    :build #'jetpacs-m3-split-button--xsmall)
    (jetpacs-m3-example
     "MediumFilledSplitButtonSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported jetpacs-m3-split-button--size-note)
+    :build #'jetpacs-m3-split-button--medium)
    (jetpacs-m3-example
     "LargeFilledSplitButtonSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported jetpacs-m3-split-button--size-note)
+    :build #'jetpacs-m3-split-button--large)
    (jetpacs-m3-example
     "ExtraLargeFilledSplitButtonSample"
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported jetpacs-m3-split-button--size-note)
+    :build #'jetpacs-m3-split-button--xlarge)
    ))
 
 (provide 'jetpacs-m3-split-button)

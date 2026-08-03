@@ -1,11 +1,10 @@
-# jetpacs llm-poc-2 — the conformant rewrite
+# jetpacs llm-poc-3 — the KMP architecture scaffold
 
-A from-scratch rewrite of the Jetpacs reference implementation against the
-normalized EBP spec: **`ebp/SPEC.md`** (protocol 2, document 2.0.0-draft,
-contract format 6), pinned by the `ebp` submodule. The wire core is written
-new, conformance-first; the organs of the first PoC (renderers, capability
-effectors, the org layer, app chrome) are ported behind it once their rung
-is green.
+POC 3 extends the conformant rewrite with KMP architecture boundaries, a Room 3
+cache, and Navigation 3. The in-tree `:wire` module remains the incubator for a
+future standalone, Jetpacs-agnostic `kotlin-ebp` library; Jetpacs-specific
+policy lives in `companion/core`. See `docs/ARCHITECTURE-POC3.md` for the local
+reference review and implementation sequence.
 
 ## Lineage and walls
 
@@ -13,8 +12,9 @@ is green.
   its divergence-map audit
   (`../llm-poc/docs/AUDIT-ebp2-divergence-map.md`). It is guidance and organ
   donor: read it, port from it, do not merge it.
-- **`slop-fork/main`** (this tree) — the rewrite. Fresh history, no
-  ancestry with poc-v1.
+- **`slop-fork/main`** — the current local rewrite and eventual rebase target.
+- **`slop-fork/v3`** (this tree/worktree) — the POC 3 architecture scaffold,
+  kept separate for this checkpoint and rebased onto local `slop-fork/main` next.
 - **`main`** — the clean-room hand-rebuild track. Sealed from both
   slop-fork lines; nothing here is merged there and nothing there is read
   from here.
@@ -42,6 +42,7 @@ is green.
 |---|---|
 | `ebp/` | Submodule: the governing spec, contract, goldens, validate.py |
 | `emacs/` | The elisp client, spec-first (`ebp.el` wire core, then modules) |
-| `companion/` | The Kotlin companion (arrives with its K-track rungs) |
+| `companion/` | Kotlin app, future `kotlin-ebp` incubator, and Jetpacs KMP core modules |
 | `test/` | ERT suites; every wire test is driven by `ebp/goldens/` |
 | `docs/REWRITE-PLAN.md` | Rung ladder, gates, port manifest |
+| `docs/ARCHITECTURE-POC3.md` | Local references, module boundaries, Room/Nav/track-changes plan |

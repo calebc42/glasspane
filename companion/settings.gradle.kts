@@ -1,5 +1,5 @@
-// The companion's Gradle root: the pure-JVM :wire protocol module plus the
-// :app Android module that hosts it on the device.
+// POC 3 keeps the proven wire/app pair intact and grows architecture-template
+// style core modules around the future standalone kotlin-ebp library.
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {
@@ -18,3 +18,8 @@ dependencyResolutionManagement {
 rootProject.name = "ebp-companion"
 include(":wire")
 include(":app")
+include(":core:model")
+include(":core:database")
+include(":core:data")
+include(":core:navigation")
+include(":core:testing")

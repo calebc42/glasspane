@@ -24,10 +24,15 @@ android {
 
 dependencies {
     implementation(projects.wire)
+    implementation(projects.core.data)
+    implementation(projects.core.database)
+    implementation(projects.core.navigation)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.adaptive)
     implementation(libs.androidx.adaptive.layout)

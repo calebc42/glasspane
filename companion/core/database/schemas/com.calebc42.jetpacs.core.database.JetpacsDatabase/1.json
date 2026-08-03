@@ -1,0 +1,76 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "7eb2297451853b55c7e9d8bead11ce4f",
+    "entities": [
+      {
+        "tableName": "surface_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairingId` TEXT NOT NULL, `surfaceId` TEXT NOT NULL, `revision` INTEGER NOT NULL, `present` INTEGER NOT NULL, `specJson` TEXT, `staleSpecJson` TEXT, `staleAfterSeconds` INTEGER, `acceptedAtEpochMs` INTEGER NOT NULL, `disconnectedAtEpochMs` INTEGER, PRIMARY KEY(`pairingId`, `surfaceId`))",
+        "fields": [
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairingId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surfaceId",
+            "columnName": "surfaceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "present",
+            "columnName": "present",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "specJson",
+            "columnName": "specJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "staleSpecJson",
+            "columnName": "staleSpecJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "staleAfterSeconds",
+            "columnName": "staleAfterSeconds",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "acceptedAtEpochMs",
+            "columnName": "acceptedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "disconnectedAtEpochMs",
+            "columnName": "disconnectedAtEpochMs",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairingId",
+            "surfaceId"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7eb2297451853b55c7e9d8bead11ce4f')"
+    ]
+  }
+}

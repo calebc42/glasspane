@@ -23,9 +23,14 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -35,9 +40,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -342,17 +347,34 @@ internal fun RenderEmptyState(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     }
 }
 
-/** §17.2 progress: circular (default) or linear; no value = indeterminate. */
+/** §17.2 progress: circular (default), linear, the two wavy indicators, or
+ * M3's LoadingIndicator in bare and contained form. `value` alone still
+ * decides determinate vs indeterminate for every variant, so the expressive
+ * members needed no second member. Unknown values fall back to circular. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun RenderProgress(node: JsonObject, m: Modifier) {
-    val linear = node.stringOr("variant") == "linear"
-    if ("value" in node) {
-        val v = node.doubleOr("value", 0.0).toFloat().coerceIn(0f, 1f)
-        if (linear) LinearProgressIndicator(progress = { v }, modifier = m)
-        else CircularProgressIndicator(progress = { v }, modifier = m)
-    } else {
-        if (linear) LinearProgressIndicator(modifier = m)
-        else CircularProgressIndicator(modifier = m)
+    val v = if ("value" in node)
+        node.doubleOr("value", 0.0).toFloat().coerceIn(0f, 1f) else null
+    when (node.stringOr("variant")) {
+        "linear" ->
+            if (v != null) LinearProgressIndicator(progress = { v }, modifier = m)
+            else LinearProgressIndicator(modifier = m)
+        "linear_wavy" ->
+            if (v != null) LinearWavyProgressIndicator(progress = { v }, modifier = m)
+            else LinearWavyProgressIndicator(modifier = m)
+        "circular_wavy" ->
+            if (v != null) CircularWavyProgressIndicator(progress = { v }, modifier = m)
+            else CircularWavyProgressIndicator(modifier = m)
+        "loading" ->
+            if (v != null) LoadingIndicator(progress = { v }, modifier = m)
+            else LoadingIndicator(modifier = m)
+        "contained_loading" ->
+            if (v != null) ContainedLoadingIndicator(progress = { v }, modifier = m)
+            else ContainedLoadingIndicator(modifier = m)
+        else ->
+            if (v != null) CircularProgressIndicator(progress = { v }, modifier = m)
+            else CircularProgressIndicator(modifier = m)
     }
 }
 

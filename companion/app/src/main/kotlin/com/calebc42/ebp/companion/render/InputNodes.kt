@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
@@ -31,19 +32,32 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedAssistChip
+import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.ElevatedFilterChip
+import androidx.compose.material3.ElevatedSuggestionChip
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +76,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.wire.jsonValueEquals
 import kotlinx.serialization.json.JsonArray
@@ -70,38 +85,96 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/** §17.4 button with variant/icon/enabled; single-line ellipsised label. */
+/** §17.4 `button.size`: the M3 container scale. A step is a COORDINATED token
+ * set — height, content padding, icon size, icon spacing and label typography
+ * all derive from the one height — so it is resolved once, here, and never
+ * applied in part: a container stretched around unscaled content is a
+ * different component, not a larger one. An unrecognized value falls back to
+ * the unscaled default per §12 rule 6. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+private fun buttonHeightOf(name: String): Dp? = when (name) {
+    "xsmall" -> ButtonDefaults.ExtraSmallContainerHeight
+    "small" -> ButtonDefaults.MinHeight
+    "medium" -> ButtonDefaults.MediumContainerHeight
+    "large" -> ButtonDefaults.LargeContainerHeight
+    "xlarge" -> ButtonDefaults.ExtraLargeContainerHeight
+    else -> null
+}
+
+/** §17.4 button with variant/size/shape/animate_shape/icon/enabled. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val enabled = node.boolOr("enabled", true)
     val onTap = node.objOrNull("on_tap")
     val iconName = node.stringOr("icon")
     val onClick = { onButton(onTap, ctx) }
-    val pad = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+    val h = buttonHeightOf(node.stringOr("size"))
+    // Absent `size` keeps the literals this renderer has always used, so no
+    // existing traffic changes meaning.
+    val pad = if (h != null) ButtonDefaults.contentPaddingFor(h)
+        else PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+    val iconSize = if (h != null) ButtonDefaults.iconSizeFor(h) else 18.dp
+    val iconGap = if (h != null) ButtonDefaults.iconSpacingFor(h) else 6.dp
+    val mm = if (h != null) m.heightIn(min = h) else m
     val content: @Composable () -> Unit = {
         if (iconName.isNotEmpty()) {
-            Icon(IconMap.get(iconName), null, Modifier.size(18.dp))
-            androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
+            Icon(IconMap.get(iconName), null, Modifier.size(iconSize))
+            androidx.compose.foundation.layout.Spacer(Modifier.size(iconGap))
         }
-        Text(node.stringOr("label"), maxLines = 1, softWrap = false,
-            overflow = TextOverflow.Ellipsis)
+        val label = @Composable {
+            Text(node.stringOr("label"), maxLines = 1, softWrap = false,
+                overflow = TextOverflow.Ellipsis)
+        }
+        if (h != null) ProvideTextStyle(ButtonDefaults.textStyleFor(h)) { label() }
+        else label()
     }
-    when (node.stringOr("variant")) {
-        "text" -> TextButton(onClick, m, enabled, contentPadding = pad) { content() }
-        "outlined" -> OutlinedButton(onClick, m, enabled, contentPadding = pad) { content() }
-        "tonal" -> FilledTonalButton(onClick, m, enabled, contentPadding = pad) { content() }
-        else -> Button(onClick, m, enabled, contentPadding = pad) { content() }
+    // `shape` names the container's OWN shape, which universal `corner` cannot
+    // reach — that decorates the modifier outside minimumInteractiveComponentSize,
+    // i.e. the 48dp touch box rather than the container.
+    val square = node.stringOr("shape") == "square"
+    val shapes: ButtonShapes? = when {
+        !node.boolOr("animate_shape") -> null
+        h != null -> ButtonDefaults.shapesFor(h)
+        else -> ButtonDefaults.shapes()
+    }
+    val variant = node.stringOr("variant")
+    if (shapes != null) {
+        // The shapes= overloads carry the press-state morph. They take
+        // `shapes` as the SECOND positional parameter, so every argument here
+        // is named — positional order differs from the shape= overloads.
+        when (variant) {
+            "text" -> TextButton(onClick = onClick, shapes = shapes,
+                modifier = mm, enabled = enabled, contentPadding = pad) { content() }
+            "outlined" -> OutlinedButton(onClick = onClick, shapes = shapes,
+                modifier = mm, enabled = enabled, contentPadding = pad) { content() }
+            "tonal" -> FilledTonalButton(onClick = onClick, shapes = shapes,
+                modifier = mm, enabled = enabled, contentPadding = pad) { content() }
+            "elevated" -> ElevatedButton(onClick = onClick, shapes = shapes,
+                modifier = mm, enabled = enabled, contentPadding = pad) { content() }
+            else -> Button(onClick = onClick, shapes = shapes,
+                modifier = mm, enabled = enabled, contentPadding = pad) { content() }
+        }
+    } else {
+        val shape = if (square) ButtonDefaults.squareShape else ButtonDefaults.shape
+        when (variant) {
+            "text" -> TextButton(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }
+            "outlined" -> OutlinedButton(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }
+            "tonal" -> FilledTonalButton(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }
+            "elevated" -> ElevatedButton(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }
+            else -> Button(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }
+        }
     }
 }
 
-/** §17.4 icon_button: icon + on_tap, badge/content_description/enabled. */
+/** §17.4 icon_button: icon + on_tap, badge/content_description/variant/enabled.
+ * Omitted `variant` keeps the plain, container-less IconButton. */
 @Composable
 internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val badge = node.stringOr("badge")
-    IconButton(
-        onClick = { onButton(node.objOrNull("on_tap"), ctx) },
-        enabled = node.boolOr("enabled", true),
-        modifier = m) {
+    val onClick = { onButton(node.objOrNull("on_tap"), ctx) }
+    val enabled = node.boolOr("enabled", true)
+    val body: @Composable () -> Unit = {
         val icon: @Composable () -> Unit = {
             Icon(IconMap.get(node.stringOr("icon")),
                 contentDescription = node.stringOr("content_description")
@@ -111,6 +184,12 @@ internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             BadgedBox(badge = { Badge { Text(badge) } }) { icon() }
         else icon()
     }
+    when (node.stringOr("variant")) {
+        "filled" -> FilledIconButton(onClick, m, enabled) { body() }
+        "tonal" -> FilledTonalIconButton(onClick, m, enabled) { body() }
+        "outlined" -> OutlinedIconButton(onClick, m, enabled) { body() }
+        else -> IconButton(onClick, m, enabled) { body() }
+    }
 }
 
 /** §17.4 chip: selectable filter chip. `selected` is authored presentation
@@ -119,29 +198,48 @@ internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 internal fun RenderChip(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val onTap = node.objOrNull("on_tap")
     val iconName = node.stringOr("icon")
-    FilterChip(
-        selected = node.boolOr("selected"),
-        enabled = node.boolOr("enabled", true),
-        onClick = { if (onTap != null) onButton(onTap, ctx) },
-        label = { Text(node.stringOr("label")) },
-        leadingIcon = if (iconName.isNotEmpty()) {
-            { Icon(IconMap.get(iconName), null, Modifier.size(18.dp)) }
-        } else null,
-        modifier = m)
+    val trailingName = node.stringOr("trailing_icon")
+    val selected = node.boolOr("selected")
+    val enabled = node.boolOr("enabled", true)
+    val click = { if (onTap != null) onButton(onTap, ctx) }
+    val label: @Composable () -> Unit = { Text(node.stringOr("label")) }
+    val lead: (@Composable () -> Unit)? = if (iconName.isNotEmpty()) {
+        { Icon(IconMap.get(iconName), null, Modifier.size(18.dp)) }
+    } else null
+    // `icon` has always been spent on leadingIcon; the trailing slot was
+    // simply never passed, so an authored trailing affordance vanished.
+    val trail: (@Composable () -> Unit)? = if (trailingName.isNotEmpty()) {
+        { Icon(IconMap.get(trailingName), null, Modifier.size(18.dp)) }
+    } else null
+    when (node.stringOr("variant")) {
+        "elevated" -> ElevatedFilterChip(selected, click, label, m, enabled,
+            leadingIcon = lead, trailingIcon = trail)
+        "input" -> InputChip(selected, click, label, m, enabled,
+            leadingIcon = lead, trailingIcon = trail)
+        else -> FilterChip(selected, click, label, m, enabled,
+            leadingIcon = lead, trailingIcon = trail)
+    }
 }
 
 @Composable
 internal fun RenderAssistChip(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val onTap = node.objOrNull("on_tap")
     val iconName = node.stringOr("icon")
-    AssistChip(
-        enabled = node.boolOr("enabled", true),
-        onClick = { if (onTap != null) onButton(onTap, ctx) },
-        label = { Text(node.stringOr("label")) },
-        leadingIcon = if (iconName.isNotEmpty()) {
-            { Icon(IconMap.get(iconName), null, Modifier.size(18.dp)) }
-        } else null,
-        modifier = m)
+    val enabled = node.boolOr("enabled", true)
+    val click = { if (onTap != null) onButton(onTap, ctx) }
+    val label: @Composable () -> Unit = { Text(node.stringOr("label")) }
+    val lead: (@Composable () -> Unit)? = if (iconName.isNotEmpty()) {
+        { Icon(IconMap.get(iconName), null, Modifier.size(18.dp)) }
+    } else null
+    when (node.stringOr("variant")) {
+        "elevated" -> ElevatedAssistChip(click, label, m, enabled, leadingIcon = lead)
+        // A SuggestionChip's single graphic slot IS its icon slot, so the
+        // authored `icon` rides it rather than being dropped.
+        "suggestion" -> SuggestionChip(click, label, m, enabled, icon = lead)
+        "elevated_suggestion" ->
+            ElevatedSuggestionChip(click, label, m, enabled, icon = lead)
+        else -> AssistChip(click, label, m, enabled, leadingIcon = lead)
+    }
 }
 
 /** §17.4 menu: an overflow icon opening a dropdown; each item dispatches its

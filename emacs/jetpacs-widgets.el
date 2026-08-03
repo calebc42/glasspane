@@ -688,11 +688,19 @@ an ActionDescriptor.  ACTION-LABEL and ON-TAP are both-or-neither."
   (jetpacs--node "empty_state" :icon icon :title title :caption caption
                  :action_label action-label :on_tap on-tap))
 
+(defconst jetpacs--progress-variants
+  '("circular" "linear" "linear_wavy" "circular_wavy"
+    "loading" "contained_loading")
+  "SPEC §17.2 `progress.variant'.  The four expressive members draw M3's
+wavy indicators and its LoadingIndicator; `value' still decides
+determinate vs indeterminate for every one of them, so no second member
+is needed.")
+
 (cl-defun jetpacs-progress (&key variant value)
   "A progress node (SPEC §17.2).
-VARIANT is circular (default) or linear; VALUE a number 0..1 (omit for
-indeterminate)."
-  (when variant (setq variant (jetpacs--check-enum variant '("circular" "linear") ":variant")))
+VARIANT is one of `jetpacs--progress-variants' (circular by default);
+VALUE a number 0..1 (omit for indeterminate)."
+  (when variant (setq variant (jetpacs--check-enum variant jetpacs--progress-variants ":variant")))
   (when value (jetpacs--check-number value ":value" 0 1))
   (jetpacs--node "progress" :variant variant :value value))
 
@@ -850,26 +858,34 @@ an ActionDescriptor dispatched at most once per gesture."
   (jetpacs--check-descriptor on-trigger ":on-trigger")   ; required (§17.3)
   (jetpacs--node nil :label label :icon icon :color color :on_trigger on-trigger))
 
+(defconst jetpacs--card-variants '("filled" "elevated" "outlined"))
+
 (defun jetpacs-card (&rest args)
   "A card container of child nodes (SPEC §17.3).
 Trailing options: :on-tap, :on-long-tap (ActionDescriptors); :swipe-start,
-:swipe-end (from `jetpacs-swipe')."
+:swipe-end (from `jetpacs-swipe'); :variant, one of
+`jetpacs--card-variants' (elevated by default, which is what the
+Companion has always drawn)."
   (let* ((split (jetpacs--children-and-opts args "card"))
          (opts (cdr split))
          (on-tap (plist-get opts :on-tap))
          (on-long-tap (plist-get opts :on-long-tap))
          (swipe-start (plist-get opts :swipe-start))
-         (swipe-end (plist-get opts :swipe-end)))
+         (swipe-end (plist-get opts :swipe-end))
+         (variant (plist-get opts :variant)))
     (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
     (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
     (when swipe-start (jetpacs--check-swipe swipe-start ":swipe-start"))
     (when swipe-end (jetpacs--check-swipe swipe-end ":swipe-end"))
+    (when variant
+      (setq variant (jetpacs--check-enum variant jetpacs--card-variants ":variant")))
     (jetpacs--node "card"
                    :children (jetpacs--as-children (car split))
                    :on_tap on-tap
                    :on_long_tap on-long-tap
                    :swipe_start swipe-start
-                   :swipe_end swipe-end)))
+                   :swipe_end swipe-end
+                   :variant variant)))
 
 (cl-defun jetpacs-collapsible (id header &rest args)
   "A collapsible section with required ID and HEADER node, plus children (§17.3).
@@ -982,50 +998,82 @@ ALIGNS is a list of start/center/end (one per column); :on-add-row and
 ;; `:json-false' to emit it explicitly.  `on_*' fields are validated as
 ;; ActionDescriptors.  (The `editor' node lands with its toolbar in JW-4.)
 
-(defconst jetpacs--button-variants '("filled" "tonal" "outlined" "text"))
+(defconst jetpacs--button-variants
+  '("filled" "tonal" "elevated" "outlined" "text"))
+(defconst jetpacs--button-sizes
+  '("xsmall" "small" "medium" "large" "xlarge")
+  "The M3 button container scale.  A step is a COORDINATED token set —
+container height, content padding, icon size, icon spacing and label
+typography — never a height alone, so omitting it means the Companion's
+unscaled default rather than any partial application.")
+(defconst jetpacs--button-shapes '("round" "square"))
+(defconst jetpacs--icon-button-variants '("filled" "tonal" "outlined"))
+(defconst jetpacs--chip-variants '("flat" "elevated" "input"))
+(defconst jetpacs--assist-chip-variants
+  '("flat" "elevated" "suggestion" "elevated_suggestion"))
 (defconst jetpacs--keyboards '("text" "number" "decimal" "email" "phone" "uri"))
 
-(cl-defun jetpacs-button (label on-tap &key icon variant enabled)
+(cl-defun jetpacs-button (label on-tap &key icon variant size shape
+                                animate-shape enabled)
   "A button labeled LABEL dispatching ON-TAP (SPEC §17.4).
-ICON a §4.4 identifier; VARIANT filled(default)/tonal/outlined/text; ENABLED
-a boolean (t or :json-false; default true)."
+ICON a §4.4 identifier; VARIANT filled(default)/tonal/elevated/outlined/text;
+SIZE one of `jetpacs--button-sizes' (omit for the unscaled default);
+SHAPE round(default)/square; ANIMATE-SHAPE a boolean asking for the M3
+press-state shape morph; ENABLED a boolean (t or :json-false; default true)."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-tap ":on-tap")
   (when icon (jetpacs--check-identifier icon ":icon"))
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--button-variants ":variant")))
+  (when size (setq size (jetpacs--check-enum size jetpacs--button-sizes ":size")))
+  (when shape (setq shape (jetpacs--check-enum shape jetpacs--button-shapes ":shape")))
+  (when animate-shape (jetpacs--check-bool animate-shape ":animate_shape"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "button" :label label :on_tap on-tap
-                 :icon icon :variant variant :enabled enabled))
+                 :icon icon :variant variant :size size :shape shape
+                 :animate_shape animate-shape :enabled enabled))
 
-(cl-defun jetpacs-icon-button (icon on-tap &key content-description badge enabled)
+(cl-defun jetpacs-icon-button (icon on-tap &key content-description badge
+                                    variant enabled)
   "An icon button showing ICON dispatching ON-TAP (SPEC §17.4).
-ICON is a §4.4 identifier (§17.1); BADGE a string or number."
+ICON is a §4.4 identifier (§17.1); BADGE a string or number; VARIANT
+filled/tonal/outlined (omit for the plain, container-less icon button)."
   (jetpacs--check-identifier icon ":icon")
   (jetpacs--check-descriptor on-tap ":on-tap")
   (when content-description (jetpacs--require-string content-description ":content_description"))
   (when badge (jetpacs--check-badge badge))
+  (when variant (setq variant (jetpacs--check-enum variant jetpacs--icon-button-variants ":variant")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "icon_button" :icon icon :on_tap on-tap
-                 :content_description content-description :badge badge :enabled enabled))
+                 :content_description content-description :badge badge
+                 :variant variant :enabled enabled))
 
-(cl-defun jetpacs-chip (label &key on-tap selected icon enabled)
+(cl-defun jetpacs-chip (label &key on-tap selected icon trailing-icon
+                              variant enabled)
   "A chip labeled LABEL (SPEC §17.4).
-ON-TAP an ActionDescriptor; SELECTED/ENABLED booleans; ICON an identifier."
+ON-TAP an ActionDescriptor; SELECTED/ENABLED booleans; ICON and
+TRAILING-ICON identifiers occupying the leading and trailing slots;
+VARIANT flat(default)/elevated/input."
   (jetpacs--require-string label ":label")
   (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
   (when selected (jetpacs--check-bool selected ":selected"))
   (when icon (jetpacs--check-identifier icon ":icon"))
+  (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing_icon"))
+  (when variant (setq variant (jetpacs--check-enum variant jetpacs--chip-variants ":variant")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "chip" :label label :on_tap on-tap
-                 :selected selected :icon icon :enabled enabled))
+                 :selected selected :icon icon :trailing_icon trailing-icon
+                 :variant variant :enabled enabled))
 
-(cl-defun jetpacs-assist-chip (label &key on-tap icon enabled)
-  "An assist chip labeled LABEL (SPEC §17.4)."
+(cl-defun jetpacs-assist-chip (label &key on-tap icon variant enabled)
+  "An assist chip labeled LABEL (SPEC §17.4).
+VARIANT flat(default)/elevated/suggestion/elevated_suggestion."
   (jetpacs--require-string label ":label")
   (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
   (when icon (jetpacs--check-identifier icon ":icon"))
+  (when variant (setq variant (jetpacs--check-enum variant jetpacs--assist-chip-variants ":variant")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "assist_chip" :label label :on_tap on-tap :icon icon :enabled enabled))
+  (jetpacs--node "assist_chip" :label label :on_tap on-tap :icon icon
+                 :variant variant :enabled enabled))
 
 (cl-defun jetpacs-menu-item (label on-tap &key icon enabled)
   "A MenuItem {label, on_tap, icon?, enabled?} for `jetpacs-menu' (SPEC §17.4)."

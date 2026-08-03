@@ -19,6 +19,7 @@
 //   org-specific promote/demote does not.
 package com.calebc42.ebp.companion.render
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -48,11 +49,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
@@ -74,7 +77,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -330,18 +332,25 @@ internal fun SwipeActionBox(
 internal fun RenderCard(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val onTap = node.objOrNull("on_tap")
     val onLongTap = node.objOrNull("on_long_tap")
+    val cardModifier = m.fillMaxWidth().then(
+        if (onLongTap != null) Modifier.combinedClickable(
+            onClick = { if (onTap != null) ctx.action(onTap) },
+            onLongClick = { ctx.action(onLongTap) })
+        else Modifier.clickable(enabled = onTap != null) {
+            if (onTap != null) ctx.action(onTap)
+        })
+    val body: @Composable () -> Unit = {
+        Box(Modifier.padding(16.dp)) {
+            RenderChildren(node.arrOrNull("children"), ctx)
+        }
+    }
+    // §17.3 `card.variant`: omitted stays `elevated`, which is the only card
+    // this renderer has ever drawn, so no existing traffic changes meaning.
     val content: @Composable () -> Unit = {
-        ElevatedCard(
-            modifier = m.fillMaxWidth().then(
-                if (onLongTap != null) Modifier.combinedClickable(
-                    onClick = { if (onTap != null) ctx.action(onTap) },
-                    onLongClick = { ctx.action(onLongTap) })
-                else Modifier.clickable(enabled = onTap != null) {
-                    if (onTap != null) ctx.action(onTap)
-                })) {
-            Box(Modifier.padding(16.dp)) {
-                RenderChildren(node.arrOrNull("children"), ctx)
-            }
+        when (node.stringOr("variant")) {
+            "filled" -> Card(modifier = cardModifier) { body() }
+            "outlined" -> OutlinedCard(modifier = cardModifier) { body() }
+            else -> ElevatedCard(modifier = cardModifier) { body() }
         }
     }
     val swipeStart = node.objOrNull("swipe_start")

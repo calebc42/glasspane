@@ -17,24 +17,24 @@
 ;; SliderDefaults.CenteredTrack over SliderDefaults.Track; `thumb_icon'
 ;; names a vector for the thumb slot.
 ;;
-;; So five of the eleven recreate: the two whose subject is the RANGE
-;; (the default 0f..1f one, and steps = 9 over 0f..100f, which is
-;; precisely the discrete `values' list), the two whose subject is a
-;; recoloured or icon THUMB, and the centred track.
+;; The second member wave finished the module: `value_end' makes the
+;; node a RangeSlider (state.changed becomes a two-number array, and
+;; with `values' each thumb snaps to the nearest authored number on
+;; commit), `orientation' renders M3's VerticalSlider against the
+;; authored universal height, `value_label' floats each thumb's own
+;; Label/PlainTooltip printing the in-flight position, `color_end'
+;; tints the end thumb alone, and `track_icon_start'/`track_icon_end'
+;; reproduce the MusicNote/MusicOff DrawScope recipe from two icon
+;; names.  All eleven recreate.
 ;;
-;; The six that remain want something with no member at all: a DRAWING
-;; hung on the track (the MusicNote/MusicOff DrawScope), an ORIENTATION
-;; (VerticalSlider), or a SECOND THUMB (RangeSlider, whose state is an
-;; activeRangeStart/activeRangeEnd pair and not one number).
-;;
-;; Two details of the recreations do not survive.  Upstream prints
-;; "%.2f".format(value) above the track and recomposes it on every drag;
-;; the wire slider dispatches on_change once on gesture commit, and a
-;; catalog sample may only reach `jetpacs-m3-demo', so the readout is
-;; authored at the starting value and the drag reports as a snackbar.
-;; The same limit costs the Label/PlainTooltip that
-;; SliderWithCustomThumbSample floats over its thumb while it is pressed:
-;; thumb_icon is the icon, not a live bubble printing the position.
+;; Two seams stated.  Upstream prints "%.2f".format(value) above the
+;; track and recomposes it on every drag; the wire slider dispatches
+;; once on gesture commit, so the readout above a track is authored at
+;; the starting value — the LIVE readout is `value_label', on the thumb,
+;; where M3 puts it.  And `color' is the thumbColor+activeTrackColor
+;; PAIR, so RangeSliderWithCustomComponents' blue start thumb over a red
+;; track collapses to one color for both; its green end thumb is
+;; `color_end', exactly.
 
 ;;; Code:
 
@@ -45,9 +45,91 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SliderSamples.kt"
   "Upstream SlidersExampleSourceUrl.")
 
-(defconst jetpacs-m3-sliders--range-note
-  "There is no range slider node, and the slider value member is a single scalar: the two thumbs of RangeSlider, activeRangeStart and activeRangeEnd, cannot be put on the wire as one node."
-  "Why every RangeSlider sample is unsupported.")
+(defconst jetpacs-m3-sliders--steps-values
+  (list 0 10 20 30 40 50 60 70 80 90 100)
+  "Nine steps over 0..100, excluding the endpoints: the multiples of ten.")
+
+(defun jetpacs-m3-sliders--track-icons ()
+  "Upstream SliderWithTrackIconsSample: MusicNote/MusicOff on each segment.
+`:track-icon-start'/`:track-icon-end' are that DrawScope recipe by NAME:
+the Companion draws each icon at the leading and trailing edge of both
+the active and the inactive segment, tinted the segment's tick colour,
+and suppresses a pair when its segment is narrower than the icon."
+  (jetpacs-column
+   (jetpacs-text "0.00")
+   (jetpacs-slider "sliders-track-icons"
+                   (jetpacs-m3-demo "Slider with track icons")
+                   :value 0 :min 0 :max 100
+                   :track-icon-start "music_note"
+                   :track-icon-end "music_off")
+   :spacing 8 :fill t))
+
+(defun jetpacs-m3-sliders--vertical ()
+  "Upstream VerticalSliderSample: nine steps over 0..100, stood on end.
+`:orientation \"vertical\"' is M3's VerticalSlider; the universal
+:height is the rail's length -- a vertical slider has no width to fill,
+which is why the node deliberately does not fillMaxWidth here."
+  (jetpacs-column
+   (jetpacs-with-attrs (jetpacs-text "0.00") :align_self "center")
+   (jetpacs-with-attrs
+    (jetpacs-slider "sliders-vertical" (jetpacs-m3-demo "Vertical slider")
+                    :value 0
+                    :values jetpacs-m3-sliders--steps-values
+                    :orientation "vertical")
+    :height 300 :align_self "center")
+   :spacing 16 :fill t))
+
+(defun jetpacs-m3-sliders--vertical-centered ()
+  "Upstream VerticalCenteredSliderSample: the centred track, vertical.
+Both members compose: `:track \"centered\"' grows the active track out
+from the middle of -50..50, and `:orientation' stands it on end."
+  (jetpacs-column
+   (jetpacs-with-attrs (jetpacs-text "0.00") :align_self "center")
+   (jetpacs-with-attrs
+    (jetpacs-slider "sliders-vertical-centered"
+                    (jetpacs-m3-demo "Vertical centered slider")
+                    :value 0 :min -50 :max 50
+                    :orientation "vertical"
+                    :track "centered")
+    :height 300 :align_self "center")
+   :spacing 16 :fill t))
+
+(defun jetpacs-m3-sliders--range ()
+  "Upstream RangeSliderSample: two thumbs over 0f..100f.
+`:value-end' IS the second thumb: its presence renders RangeSlider and
+the committed value becomes the [start, end] pair."
+  (jetpacs-column
+   (jetpacs-text "0.00 .. 100.00")
+   (jetpacs-slider "sliders-range" (jetpacs-m3-demo "Range slider")
+                   :value 0 :value-end 100 :min 0 :max 100)
+   :spacing 8 :fill t))
+
+(defun jetpacs-m3-sliders--step-range ()
+  "Upstream StepRangeSliderSample: the same two thumbs over nine steps.
+With `:values' each thumb SNAPS to the nearest authored number on
+commit, so the pair reported is always two listed numbers -- the
+discrete rule survives the range."
+  (jetpacs-column
+   (jetpacs-text "0.00 .. 100.00")
+   (jetpacs-slider "sliders-step-range" (jetpacs-m3-demo "Step range slider")
+                   :value 0 :value-end 100
+                   :values jetpacs-m3-sliders--steps-values)
+   :spacing 8 :fill t))
+
+(defun jetpacs-m3-sliders--range-custom ()
+  "Upstream RangeSliderWithCustomComponents: dressed thumbs with labels.
+`:value-label' floats each thumb's own Label bubble printing its end of
+the range in flight; `:color-end' is the green end thumb exactly.  The
+one collapse the Commentary records: `:color' tints the start thumb AND
+the active track as a pair, where upstream splits them blue and red."
+  (jetpacs-column
+   (jetpacs-slider "sliders-range-custom"
+                   (jetpacs-m3-demo "Range slider with custom components")
+                   :value 0 :value-end 100 :min 0 :max 100
+                   :color "#FF0000"
+                   :color-end "#00A000"
+                   :value-label t)
+   :spacing 8 :fill t))
 
 (defun jetpacs-m3-sliders--basic ()
   "Upstream SliderSample: a Slider over the default 0f..1f range.
@@ -150,8 +232,7 @@ active track has no width yet and grows out either way as it is dragged."
     "Sliders examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SliderSamples.kt"
     :expressive t
-    :unsupported
-    "The slider track member chooses between M3's default and centered track and nothing else: the MusicNote and MusicOff icons this sample paints at both ends of the active and the inactive segment come from a DrawScope hung on the track composable, and the wire has no way to hand the Companion a drawing.")
+    :build #'jetpacs-m3-sliders--track-icons)
    (jetpacs-m3-example
     "CenteredSliderSample"
     "Sliders examples"
@@ -163,32 +244,28 @@ active track has no width yet and grows out either way as it is dragged."
     "Sliders examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SliderSamples.kt"
     :expressive t
-    :unsupported
-    "There is no vertical slider node and no orientation member: steps = 9 over 0f..100f is the discrete values list, but the slider node always renders the horizontal M3 Slider, so VerticalSlider with reverseDirection cannot be asked for from Emacs.")
+    :build #'jetpacs-m3-sliders--vertical)
    (jetpacs-m3-example
     "VerticalCenteredSliderSample"
     "Sliders examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SliderSamples.kt"
     :expressive t
-    :unsupported
-    "Only the track half is on the wire: track \"centered\" is SliderDefaults.CenteredTrack exactly, but there is no vertical slider node and no orientation member, so this sample's subject -- that same track stood on end and reversed -- cannot be asked for.")
+    :build #'jetpacs-m3-sliders--vertical-centered)
    (jetpacs-m3-example
     "RangeSliderSample"
     "Sliders examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SliderSamples.kt"
-    :unsupported jetpacs-m3-sliders--range-note)
+    :build #'jetpacs-m3-sliders--range)
    (jetpacs-m3-example
     "StepRangeSliderSample"
     "Sliders examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SliderSamples.kt"
-    :unsupported
-    "Only half of this one is on the wire: steps = 9 is the discrete slider values list, but there is no range slider node, and the slider value member is one scalar rather than an activeRangeStart and activeRangeEnd pair.")
+    :build #'jetpacs-m3-sliders--step-range)
    (jetpacs-m3-example
     "RangeSliderWithCustomComponents"
     "Sliders examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SliderSamples.kt"
-    :unsupported
-    "There is no range slider node for the two thumbs, and the one color member could not dress them anyway: it is a single thumb-and-active-track pair, while this sample gives the start thumb blue with a red active track, the end thumb green, and each its own Label printing that end of the range.")
+    :build #'jetpacs-m3-sliders--range-custom)
    ))
 
 (provide 'jetpacs-m3-sliders)

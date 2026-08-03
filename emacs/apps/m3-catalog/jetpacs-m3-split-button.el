@@ -33,8 +33,13 @@
 ;; split button and so describe the leading half too, which is not what
 ;; upstream anchors it to.
 ;;
-;; One sample is left: SplitButtonWithIconSample's leading half is an
-;; icon with no text at all, and the node's label is required.
+;; The label became optional for SplitButtonWithIconSample's sake -- a
+;; leading half may be a label, an icon, or both, never neither -- so
+;; the icon-only form recreates and all twelve build.  Label-less, the
+;; icon identifier is the accessible fallback name; upstream's tooltip
+;; naming it "Button" cannot ride (the icon slot takes an identifier,
+;; not a node), which parallels the tabs' tooltip seam, closed there by
+;; tab_item.tooltip and still open here.
 
 ;;; Code:
 
@@ -206,8 +211,16 @@ Button\"."
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :unsupported
-    "The split_button node requires a label and has no leading icon-only form: this sample's LeadingButton is Icons.Filled.Edit alone, with the tooltip and contentDescription \"Button\" as its whole accessible name, so any label the wire could send would put back the text the sample exists to leave out.")
+    :build (lambda ()
+             ;; The leading half is Icons.Filled.Edit alone — the form the
+             ;; label went optional for.
+             (jetpacs-with-attrs
+              (jetpacs-split-button nil (jetpacs-m3-demo "Button")
+                                    :icon "edit"
+                                    :trailing-description "Toggle Button"
+                                    :checked :json-false
+                                    :on-change (jetpacs-m3-demo "Toggle Button"))
+              :id "split-button-with-icon")))
    (jetpacs-m3-example
     "XSmallFilledSplitButtonSample"
     "Split Button examples"

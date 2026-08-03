@@ -14,19 +14,20 @@
 ;; HorizontalPager, giving every Tab `text = Text(label)' and, when the
 ;; item names one, an icon.
 ;;
-;; Three facts decide the triage.  (1) There is no tab-style member:
-;; TabRow draws the full-width SecondaryIndicator -- the SECONDARY
-;; style -- so the Secondary* samples recreate and their Primary*
-;; twins, which exist beside them precisely to show PrimaryTabRow's
-;; content-width indicator, cannot.  (2) The label always renders, so
-;; an icon-only tab cannot be asked for.  (3) An item is a label and an
-;; icon NAME, not a node, and there is no indicator member, so the four
-;; Fancy* samples have nowhere to put the custom Tab content and custom
-;; indicators they exist to demonstrate.
+;; The wire now carries the whole non-Fancy set: `style' picks
+;; PrimaryTabRow's content-width indicator over the secondary
+;; full-width one, an ABSENT label is the icon-only 48dp tab, a
+;; `tab_item' takes `icon_position' leading (M3's LeadingIconTab, whose
+;; `badge' then hangs on the TITLE, as upstream's own sample does) and
+;; `tooltip' — the PlainTooltip M3 wants naming an icon-only tab for
+;; sighted users; a screen reader hears the icon's fallback name either
+;; way.  Eight of the twelve build.
 ;;
-;; TextAndIconTabs is the one sample that uses PrimaryTabRow and still
-;; recreates: it is alone in the set in demonstrating a tab that
-;; carries BOTH a title and an icon, and that pairing IS a tab_item.
+;; What remains is the Fancy* four: an item is a label and an icon
+;; NAME, not a node, and there is no indicator member, so custom Tab
+;; content and custom indicators have nowhere on the wire to go — two
+;; of them further drive per-edge Animatables at differential spring
+;; stiffnesses, which no declarative member could name.
 ;;
 ;; Upstream shows the selection as one Text below the row ("Secondary
 ;; tab 2 selected").  Here the selection lives in the pager, so each
@@ -34,20 +35,13 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'jetpacs-widgets)
 (require 'jetpacs-m3-core)
 
 (defconst jetpacs-m3-tabs--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/TabSamples.kt"
   "Upstream TabsExampleSourceUrl.")
-
-(defconst jetpacs-m3-tabs--primary-note
-  "The tabs node has no tab-style member: scrollable picks TabRow or ScrollableTabRow and both draw the full-width secondary indicator, so PrimaryTabRow's content-width primary indicator cannot be requested from Emacs."
-  "Why a Primary* sample whose Secondary* twin recreates is unsupported.")
-
-(defconst jetpacs-m3-tabs--icon-only-note
-  "A tab_item is {label, icon} and the Companion always renders the label in the Tab's text slot, so an icon-only tab is not expressible -- nor is the PlainTooltip that upstream needs to name it, TooltipBox being no node type."
-  "Why the icon-only tab samples are unsupported.")
 
 (defconst jetpacs-m3-tabs--indicator-note
   "The tabs node has no indicator member: a custom indicator drawn through Modifier.tabIndicatorOffset or tabIndicatorLayout is Compose drawing code, and the wire can only name the tab strip, never paint it."
@@ -73,6 +67,62 @@
   "COUNT pages, page N reading TEMPLATE filled with N, counting from 1."
   (mapcar (lambda (n) (jetpacs-m3-tabs--page (format template n)))
           (number-sequence 1 count)))
+
+(defun jetpacs-m3-tabs--primary-text ()
+  "Upstream PrimaryTextTabs: the same three titles under the primary style.
+`:style \"primary\"' is PrimaryTabRow -- the content-width rounded
+indicator that is the only thing separating this from its Secondary
+twin."
+  (jetpacs-tabs
+   (mapcar #'jetpacs-tab-item jetpacs-m3-tabs--titles)
+   (jetpacs-m3-tabs--pages "Primary tab %d selected"
+                           (length jetpacs-m3-tabs--titles))
+   :style "primary"
+   :id "tabs-primary-text"
+   :on-change (jetpacs-m3-demo "Primary tab selected")))
+
+(defun jetpacs-m3-tabs--icon-only (id style)
+  "The icon-only pair: three Favorite tabs under STYLE, as strip ID.
+An ABSENT label is the 48dp icon-only tab (`label \"\"' would still fill
+the text slot), and `:tooltip' is the PlainTooltip upstream anchors
+above every one, reading \"Favorite\"."
+  (jetpacs-tabs
+   (cl-loop repeat 3
+            collect (jetpacs-tab-item nil :icon "favorite"
+                                      :tooltip "Favorite"))
+   (jetpacs-m3-tabs--pages "Icon tab %d selected" 3)
+   :style style
+   :id id
+   :on-change (jetpacs-m3-demo "Icon tab selected")))
+
+(defun jetpacs-m3-tabs--leading-icon ()
+  "Upstream LeadingIconTabs: icon before label, a 999+ badge on the title.
+`:icon-position \"leading\"' is M3's LeadingIconTab, and its `:badge'
+hangs on the TITLE -- upstream's own BadgedBox placement -- not on the
+glyph, where the above-position tabs wear theirs."
+  (jetpacs-tabs
+   (mapcar (lambda (title)
+             (jetpacs-tab-item title :icon "favorite"
+                               :icon-position "leading"
+                               :badge "999+"))
+           jetpacs-m3-tabs--titles)
+   (jetpacs-m3-tabs--pages "Leading icon tab %d selected"
+                           (length jetpacs-m3-tabs--titles))
+   :style "primary"
+   :id "tabs-leading-icon"
+   :on-change (jetpacs-m3-demo "Leading icon tab selected")))
+
+(defun jetpacs-m3-tabs--scrolling-primary ()
+  "Upstream ScrollingPrimaryTextTabs: ten tabs, primary indicator.
+`:scrollable' is PrimaryScrollableTabRow once `:style' names primary."
+  (jetpacs-tabs
+   (mapcar #'jetpacs-tab-item jetpacs-m3-tabs--scrolling-titles)
+   (jetpacs-m3-tabs--pages "Scrolling primary tab %d selected"
+                           (length jetpacs-m3-tabs--scrolling-titles))
+   :scrollable t
+   :style "primary"
+   :id "tabs-scrolling-primary"
+   :on-change (jetpacs-m3-demo "Scrolling primary tab selected")))
 
 (defun jetpacs-m3-tabs--secondary-text ()
   "Upstream SecondaryTextTabs: three text tabs in a SecondaryTabRow."
@@ -118,13 +168,13 @@ strip to ScrollableTabRow, which is what the sample is about."
     "PrimaryTextTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :unsupported jetpacs-m3-tabs--primary-note)
+    :build #'jetpacs-m3-tabs--primary-text)
    (jetpacs-m3-example
     "PrimaryIconTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :unsupported
-    "Neither half is on the wire: a tab_item always renders its label, so there is no icon-only tab, and no member selects PrimaryTabRow's indicator.")
+    :build (lambda () (jetpacs-m3-tabs--icon-only "tabs-primary-icon"
+                                                  "primary")))
    (jetpacs-m3-example
     "SecondaryTextTabs"
     "Tabs examples"
@@ -134,7 +184,8 @@ strip to ScrollableTabRow, which is what the sample is about."
     "SecondaryIconTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :unsupported jetpacs-m3-tabs--icon-only-note)
+    :build (lambda () (jetpacs-m3-tabs--icon-only "tabs-secondary-icon"
+                                                  "secondary")))
    (jetpacs-m3-example
     "TextAndIconTabs"
     "Tabs examples"
@@ -144,13 +195,12 @@ strip to ScrollableTabRow, which is what the sample is about."
     "LeadingIconTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :unsupported
-    "There is no LeadingIconTab on the wire: a tab_item's icon always renders above its label, never leading it, and the item has no badge member for the \"999+\" BadgedBox this sample hangs on the title.")
+    :build #'jetpacs-m3-tabs--leading-icon)
    (jetpacs-m3-example
     "ScrollingPrimaryTextTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :unsupported jetpacs-m3-tabs--primary-note)
+    :build #'jetpacs-m3-tabs--scrolling-primary)
    (jetpacs-m3-example
     "ScrollingSecondaryTextTabs"
     "Tabs examples"

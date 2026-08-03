@@ -58,17 +58,6 @@
 (defconst jetpacs-m3-tooltips--action-text "Request Access"
   "Upstream `richTooltipActionText'.")
 
-(defun jetpacs-m3-tooltips--custom-caret-note (size)
-  "Why the custom-caret sample whose caret is SIZE is unsupported.
-SIZE is the sample's own DpSize call, e.g. \"DpSize(24.dp, 12.dp)\"."
-  (concat "The tooltip node's caret member is a boolean -- "
-          "TooltipDefaults.caretShape() or no caret at all -- and this "
-          "sample exists for the argument to it, a caret resized to "
-          size
-          ". The wire has no caret-size member, and node geometry stops "
-          "at the universal width and height attributes, which size the "
-          "node itself."))
-
 (defun jetpacs-m3-tooltips--anchor (icon)
   "The IconButton every sample anchors its tooltip to, drawn with ICON.
 Upstream's `onClick' is the comment \"Icon button's click event\": the
@@ -246,8 +235,11 @@ NAME is the sample's own upstream name, which
     "PlainTooltipWithCustomCaret"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported (jetpacs-m3-tooltips--custom-caret-note
-                  "DpSize(24.dp, 12.dp)"))
+    :build (lambda ()
+             ;; The sample IS the argument to caretShape: DpSize(24.dp, 12.dp).
+             (jetpacs-tooltip "Add to favorites"
+                              (jetpacs-m3-tooltips--anchor "favorite")
+                              :caret t :caret-width 24 :caret-height 12)))
    (jetpacs-m3-example
     "RichTooltipSample"
     "Tooltips examples"
@@ -267,8 +259,10 @@ NAME is the sample's own upstream name, which
     "RichTooltipWithCustomCaretSample"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :unsupported (jetpacs-m3-tooltips--custom-caret-note
-                  "DpSize(32.dp, 16.dp)"))
+    :build (lambda ()
+             ;; The rich twin: caretShape(DpSize(32.dp, 16.dp)).
+             (jetpacs-m3-tooltips--rich :caret t
+                                        :caret-width 32 :caret-height 16)))
    ))
 
 (provide 'jetpacs-m3-tooltips)

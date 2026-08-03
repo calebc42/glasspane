@@ -480,24 +480,33 @@ internal fun RenderTabs(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                         // optional rather than defaulted.
                         val hasLabel = "label" in item
                         val badge = item.stringOr("badge")
+                        val leading = icon.isNotEmpty() &&
+                            item.stringOr("icon_position") == "leading"
                         val onClick = { scope.launch { pagerState.animateScrollToPage(i) }; Unit }
+                        val badged: @Composable (@Composable () -> Unit) -> Unit = { c ->
+                            BadgedBox(badge = {
+                                if (badge.isNotEmpty()) Badge { Text(badge) } else Badge()
+                            }) { c() }
+                        }
                         val iconSlot: @Composable () -> Unit = {
                             val glyph: @Composable () -> Unit = {
                                 Icon(IconMap.get(icon), contentDescription =
                                     if (hasLabel) null else item.stringOr("label")
                                         .ifEmpty { icon })
                             }
-                            if ("badge" in item)
-                                BadgedBox(badge = {
-                                    if (badge.isNotEmpty()) Badge { Text(badge) } else Badge()
-                                }) { glyph() }
+                            // A LeadingIconTab hangs its badge on the TITLE
+                            // (M3's own sample) — badging the glyph there would
+                            // stack two ornaments at the row's start.
+                            if ("badge" in item && !leading) badged { glyph() }
                             else glyph()
                         }
                         val textSlot: (@Composable () -> Unit)? =
-                            if (hasLabel) { { Text(item.stringOr("label")) } } else null
+                            if (!hasLabel) null
+                            else if ("badge" in item && leading)
+                                { { badged { Text(item.stringOr("label")) } } }
+                            else { { Text(item.stringOr("label")) } }
                         val tab: @Composable () -> Unit = {
-                            if (icon.isNotEmpty() &&
-                                item.stringOr("icon_position") == "leading")
+                            if (leading)
                                 LeadingIconTab(
                                     selected = selected == i, onClick = onClick,
                                     text = textSlot ?: {}, icon = iconSlot)

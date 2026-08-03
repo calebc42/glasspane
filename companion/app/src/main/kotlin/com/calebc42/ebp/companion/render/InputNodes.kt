@@ -787,15 +787,17 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             drawPair(activeEnd + gap * 2, size.width, inactiveIconColor)
         }
     // The label is presentation only: the in-flight position shows over the
-    // thumb and dispatch still happens once, on commit (§17.4).
-    val labelledThumb: @Composable (position: () -> Float, content: @Composable () -> Unit) -> Unit =
-        { position, content ->
+    // thumb and dispatch still happens once, on commit (§17.4). Each thumb
+    // hands its OWN interaction source, or a range's end label would pop
+    // while the start thumb is the one being dragged.
+    val labelledThumb: @Composable (source: MutableInteractionSource, position: () -> Float, content: @Composable () -> Unit) -> Unit =
+        { source, position, content ->
             if (showLabel)
                 Label(label = {
                     PlainTooltip(Modifier.sizeIn(45.dp, 25.dp).wrapContentWidth()) {
                         Text("%.2f".format(position()))
                     }
-                }, interactionSource = interaction) { content() }
+                }, interactionSource = source) { content() }
             else content()
         }
     val defaultThumb: @Composable () -> Unit = {
@@ -844,14 +846,18 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             startInteractionSource = interaction,
             endInteractionSource = endInteraction,
             startThumb = {
-                labelledThumb({ state.activeRangeStart }) { defaultThumb() }
+                labelledThumb(interaction, { state.activeRangeStart }) { defaultThumb() }
             },
             endThumb = {
-                if (endTint != null)
-                    SliderDefaults.Thumb(endInteraction, colors = endColors,
+                // Each thumb carries its own Label upstream, so the end
+                // thumb is wrapped too — reading its own end of the range.
+                labelledThumb(endInteraction, { state.activeRangeEnd }) {
+                    if (endTint != null)
+                        SliderDefaults.Thumb(endInteraction, colors = endColors,
+                            enabled = enabled)
+                    else SliderDefaults.Thumb(endInteraction, colors = sliderColors,
                         enabled = enabled)
-                else SliderDefaults.Thumb(endInteraction, colors = sliderColors,
-                    enabled = enabled)
+                }
             },
             track = { st ->
                 SliderDefaults.Track(rangeSliderState = st, colors = sliderColors,
@@ -883,7 +889,7 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             enabled = enabled,
             colors = sliderColors,
             interactionSource = interaction,
-            thumb = { labelledThumb({ state.value }) { defaultThumb() } },
+            thumb = { labelledThumb(interaction, { state.value }) { defaultThumb() } },
             track = { st ->
                 if (centered) SliderDefaults.CenteredTrack(sliderState = st,
                     colors = sliderColors)
@@ -921,7 +927,7 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             },
             interactionSource = interaction,
             thumb = {
-                labelledThumb({ values[index].numOrNull()?.toFloat() ?: 0f }) {
+                labelledThumb(interaction, { values[index].numOrNull()?.toFloat() ?: 0f }) {
                     defaultThumb()
                 }
             },
@@ -947,7 +953,7 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                     modifier = trackIconModifier { st.coercedValueAsFraction })
             },
             interactionSource = interaction,
-            thumb = { labelledThumb({ pos }) { defaultThumb() } },
+            thumb = { labelledThumb(interaction, { pos }) { defaultThumb() } },
             modifier = m.fillMaxWidth())
     }
 }

@@ -17,9 +17,9 @@
 ;; coordinated set from one size step -- container via
 ;; IconButtonDefaults.<step>ContainerSize(width), the step's square or
 ;; round shape, and the matching <step>IconSize on the inner glyph.
-;; Eleven of the twelve build.  The one left asks for something with no
-;; wire member still: a TINT -- Icon(tint = Color.Red) -- because the
-;; node draws its own Icon and no member colors it.
+;; The `:color' member then closed the last gap -- Icon(tint =
+;; Color.Red), which no universal attribute could reach because the
+;; node draws its own Icon.  All twelve build.
 ;;
 ;; Two honest limits on the toggles, both worth stating because they
 ;; are what the recreation does NOT reproduce.
@@ -181,8 +181,13 @@ The container is the variant member; it does not itself change with
     "TintedIconButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :unsupported
-    "The icon_button node draws its own Icon and has no tint or color member: Icon(tint = Color.Red), the one thing this sample adds to IconButtonSample, cannot be requested from Emacs.")
+    :build (lambda ()
+             ;; Icon(tint = Color.Red) — the one thing this sample adds to
+             ;; IconButtonSample, now the :color member.
+             (jetpacs-icon-button "lock"
+                                  (jetpacs-m3-demo "Localized description")
+                                  :content-description "Localized description"
+                                  :color "#FF0000")))
    (jetpacs-m3-example
     "IconToggleButtonSample"
     "Icon button examples"

@@ -28,10 +28,18 @@
 ;; not the same member wearing different names, so the error sample does
 ;; not reach for it.
 ;;
-;; The five that stay unsupported each miss one specific thing: the
-;; initial `TextRange' (twice), the output transformation, and
-;; `TextFieldDefaults' interior contentPadding -- plus hiding the
-;; software keyboard from the IME action.
+;; The second member wave finished the module: `selection' seeds the
+;; initial TextRange, `mask'+`filter' are the output and input
+;; transformations (formatting and digit-guarding happen locally, per
+;; keystroke, and the literals never enter the value), `content_padding'
+;; reaches the interior padding through the DecorationBox overload, and
+;; `hide_keyboard_on_submit' restores the hide-on-Done that supplying a
+;; submit handler suppresses.  All fourteen build.
+;;
+;; Two dense-field seams stated: `content_padding' is one dp on all four
+;; sides where upstream splits 4dp vertical from 12dp horizontal, and
+;; upstream's onKeyboardAction ONLY hides -- here the demo verb also
+;; reports the submit, since a dead handler would read as a broken one.
 ;;
 ;; No recreated field authors `on_change'.  Upstream every one of these
 ;; handlers is `rememberTextFieldState' -- "hold what was typed" --
@@ -57,6 +65,57 @@
           "proident, sunt in culpa qui officia deserunt mollit anim id est "
           "laborum.")
   "The paragraph upstream `TextArea' seeds its state with, verbatim.")
+
+(defun jetpacs-m3-text-fields--selection (id variant)
+  "The InitialValueAndSelection pair: \"Initial text\" selected whole.
+`:selection (0 12)' is rememberTextFieldState's TextRange(0, 12) -- it
+seeds the initial cursor/selection only, re-seeded on an input reset
+exactly like the value.  VARIANT separates the twins."
+  (jetpacs-text-input id
+                      :variant variant
+                      :value "Initial text"
+                      :selection (list 0 12)
+                      :label "Label"
+                      :single-line t))
+
+(defun jetpacs-m3-text-fields--transformations ()
+  "Upstream TextFieldWithTransformations: the phone-number field.
+`:mask' is the output transformation -- (###) ###-#### redraws the
+stored digits with literal filler that never enters the value -- and
+`:filter \"digits\"' is the input transformation's digits-only revert,
+applied locally at the keystroke, paste included.  `:max-length' and the
+number keyboard carry the rest, as before."
+  (jetpacs-text-input "text-fields-transformations"
+                      :label "Phone number"
+                      :single-line t
+                      :keyboard "number"
+                      :max-length 10
+                      :filter "digits"
+                      :mask "(###) ###-####"))
+
+(defun jetpacs-m3-text-fields--dense ()
+  "Upstream DenseTextFieldContentPadding: the interior padding, shrunk.
+`:content-padding 4' rides the DecorationBox overload -- the only seam
+that owns the field's interior -- and `:min_height 48' is the sample's
+own heightIn floor under the default 56dp."
+  (jetpacs-with-attrs
+   (jetpacs-text-input "text-fields-dense"
+                       :variant "filled"
+                       :label "Label"
+                       :single-line t
+                       :content-padding 4)
+   :min_height 48))
+
+(defun jetpacs-m3-text-fields--hide-keyboard ()
+  "Upstream TextFieldWithHideKeyboardOnImeAction.
+`:hide-keyboard-on-submit' dismisses the IME after the Done action --
+the default Compose behaviour that authoring any submit handler
+suppresses, which is exactly why it must be a member."
+  (jetpacs-text-input "text-fields-hide-keyboard"
+                      :variant "filled"
+                      :label "Label"
+                      :on-submit (jetpacs-m3-demo "Done")
+                      :hide-keyboard-on-submit t))
 
 (defun jetpacs-m3-text-fields--filled ()
   "Upstream SimpleTextFieldSample: TextField, single line, label \"Label\".
@@ -197,8 +256,9 @@ carrying that size."
     "TextFieldWithInitialValueAndSelection"
     "Text fields examples"
     :source jetpacs-m3-text-fields--source
-    :unsupported
-    "The text_input node has no selection member: the filled container is requestable now and the value member does seed \"Initial text\", but TextRange(0, 12) -- the pre-selection that is all this sample adds to SimpleTextFieldSample -- cannot be put on the wire.")
+    :build (lambda ()
+             (jetpacs-m3-text-fields--selection "text-fields-selection"
+                                                "filled")))
    (jetpacs-m3-example
     "SimpleOutlinedTextFieldSample"
     "Text fields examples"
@@ -208,14 +268,14 @@ carrying that size."
     "OutlinedTextFieldWithInitialValueAndSelection"
     "Text fields examples"
     :source jetpacs-m3-text-fields--source
-    :unsupported
-    "The text_input node has no selection member: its value member does seed \"Initial text\", but TextRange(0, 12), the initial selection that is all this sample adds to SimpleOutlinedTextFieldSample, cannot be put on the wire.")
+    :build (lambda ()
+             (jetpacs-m3-text-fields--selection "text-fields-outlined-selection"
+                                                "outlined")))
    (jetpacs-m3-example
     "TextFieldWithTransformations"
     "Text fields examples"
     :source jetpacs-m3-text-fields--source
-    :unsupported
-    "The text_input node has no output_transformation member: max_length and the number keyboard now carry the ten-digit limit and the numeric keypad, but the (XXX) XXX-XXXX formatting that redraws the value as it is typed -- the transformation this sample is named for -- cannot be put on the wire, and neither can the digits-only revertAllChanges filter that guards a paste.")
+    :build #'jetpacs-m3-text-fields--transformations)
    (jetpacs-m3-example
     "TextFieldWithIcons"
     "Text fields examples"
@@ -245,8 +305,7 @@ carrying that size."
     "DenseTextFieldContentPadding"
     "Text fields examples"
     :source jetpacs-m3-text-fields--source
-    :unsupported
-    "The text_input node has no content_padding member: what makes this field dense is TextFieldDefaults' interior padding, and the universal padding attribute sits outside the field's container instead of inside it.")
+    :build #'jetpacs-m3-text-fields--dense)
    (jetpacs-m3-example
     "PasswordTextField"
     "Text fields examples"
@@ -256,8 +315,7 @@ carrying that size."
     "TextFieldWithHideKeyboardOnImeAction"
     "Text fields examples"
     :source jetpacs-m3-text-fields--source
-    :unsupported
-    "There is no keyboard-visibility member and no Companion-local builtin for one: authoring on_submit does raise the IME action to Done, but hiding the software keyboard from that handler, which is what this sample exists to show, cannot be asked for from Emacs.")
+    :build #'jetpacs-m3-text-fields--hide-keyboard)
    (jetpacs-m3-example
     "TextArea"
     "Text fields examples"

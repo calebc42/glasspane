@@ -8,14 +8,22 @@
 ;; Upstream: Components.kt `Checkboxes' + Examples.kt
 ;; `CheckboxesExamples' (5 examples), samples/CheckboxSamples.kt.
 ;;
-;; The `checkbox' node carries id, checked, label, on_change and enabled
-;; -- and nothing else.  `checked' is a plain boolean, and the renderer
-;; draws a label as Row(Checkbox, Text), so the bare sample and the
-;; with-text sample recreate exactly.  The other three exist to
-;; demonstrate a THIRD toggle state (ToggleableState.Indeterminate, via
-;; the separate TriStateCheckbox composable) or a STROKE
-;; (checkmarkStroke/outlineStroke), and neither has a wire member to
-;; carry it.
+;; The `checkbox' node carries id, checked, label, on_change, enabled --
+;; and now `state' and `stroke'.  `checked' is a plain boolean and the
+;; renderer draws a label as Row(Checkbox, Text), so the bare sample and
+;; the with-text sample recreate exactly.  `:state' is the tri-state form
+;; (TriStateCheckbox over off/on/indeterminate, a different §13.6 value
+;; schema, which is why it is not a widened boolean), and `:stroke'
+;; reaches the checkmarkStroke/outlineStroke pair, so the other three
+;; recreate too.
+;;
+;; One seam stated for the two TriState samples: upstream DERIVES the
+;; parent's state from its two children per frame and a parent click
+;; writes both children.  On the wire each of the three boxes holds its
+;; own state on the device, and nothing links them — the linkage would
+;; be an Emacs round trip re-pushing with reset epochs, which is
+;; ordinary EBP but not what these samples demonstrate.  What they
+;; demonstrate — the third state, and the rounded strokes — rides.
 
 ;;; Code:
 
@@ -26,13 +34,37 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/CheckboxSamples.kt"
   "Upstream CheckboxesExampleSourceUrl.")
 
-(defconst jetpacs-m3-checkboxes--stroke-note
-  "The checkbox node has no stroke member: the checkmarkStroke and outlineStroke of CheckboxDefaults.StrokeWidth, with StrokeCap.Round and StrokeJoin.Round, are Companion-side drawing the wire cannot ask for."
-  "Why every RoundedStrokes sample is unsupported.")
+(defconst jetpacs-m3-checkboxes--rounded-stroke
+  (list :cap "round" :join "round")
+  "Upstream's checkmark stroke: CheckboxDefaults.StrokeWidth, Round/Round.
+The width key is omitted -- the renderer's default IS StrokeWidth.")
 
-(defconst jetpacs-m3-checkboxes--tri-state-note
-  "There is no tri-state checkbox node, and the checkbox checked member is a plain boolean: ToggleableState.Indeterminate, the parent state this sample exists to show, cannot be put on the wire."
-  "Why every TriStateCheckbox sample is unsupported.")
+(defun jetpacs-m3-checkboxes--tri-family (suffix &optional stroke)
+  "The shared body of both TriState samples, ids suffixed with SUFFIX.
+The parent \"Receive Emails\" tri-state box over the \"Daily\" and
+\"Weekly\" children, both starting checked -- so the parent starts on,
+exactly as upstream's derivation does.  STROKE dresses all three."
+  (jetpacs-column
+   (jetpacs-checkbox (concat "checkboxes-parent-" suffix)
+                     :state "on"
+                     :stroke stroke
+                     :label "Receive Emails"
+                     :on-change (jetpacs-m3-demo "Receive Emails"))
+   (jetpacs-with-attrs
+    (jetpacs-column
+     (jetpacs-checkbox (concat "checkboxes-daily-" suffix)
+                       :checked t
+                       :stroke stroke
+                       :label "Daily"
+                       :on-change (jetpacs-m3-demo "Daily"))
+     (jetpacs-checkbox (concat "checkboxes-weekly-" suffix)
+                       :checked t
+                       :stroke stroke
+                       :label "Weekly"
+                       :on-change (jetpacs-m3-demo "Weekly"))
+     :spacing 4)
+    :pad (list :start 24))
+   :spacing 12))
 
 (defun jetpacs-m3-checkboxes--basic ()
   "Upstream CheckboxSample: one Checkbox, remembered as checked."
@@ -73,18 +105,23 @@ which is what the sample hoists its toggleable onto upstream."
     "CheckboxRoundedStrokesSample"
     "Checkboxes examples"
     :source jetpacs-m3-checkboxes--source
-    :unsupported jetpacs-m3-checkboxes--stroke-note)
+    :build (lambda ()
+             (jetpacs-checkbox "checkboxes-rounded"
+                               :checked t
+                               :stroke jetpacs-m3-checkboxes--rounded-stroke
+                               :on-change (jetpacs-m3-demo "Checkbox"))))
    (jetpacs-m3-example
     "TriStateCheckboxSample"
     "Checkboxes examples"
     :source jetpacs-m3-checkboxes--source
-    :unsupported jetpacs-m3-checkboxes--tri-state-note)
+    :build (lambda () (jetpacs-m3-checkboxes--tri-family "plain")))
    (jetpacs-m3-example
     "TriStateCheckboxRoundedStrokesSample"
     "Checkboxes examples"
     :source jetpacs-m3-checkboxes--source
-    :unsupported
-    "Neither half is on the wire: there is no tri-state checkbox node for ToggleableState.Indeterminate, and the checkbox node has no checkmarkStroke or outlineStroke member.")
+    :build (lambda ()
+             (jetpacs-m3-checkboxes--tri-family
+              "rounded" jetpacs-m3-checkboxes--rounded-stroke)))
    ))
 
 (provide 'jetpacs-m3-checkboxes)

@@ -939,18 +939,45 @@ ActionDescriptor.  ITEMS is a list of node plists."
                  :items (vconcat items)
                  :on_reorder on-reorder))
 
-(cl-defun jetpacs-tab-item (label &key icon)
-  "A TabItem {label, icon?} for `jetpacs-tabs' (SPEC §17.3)."
-  (jetpacs--require-string label ":label")
+(defconst jetpacs--tab-icon-positions '("above" "leading"))
+
+(cl-defun jetpacs-tab-item (&optional label &key icon icon-position badge)
+  "A TabItem for `jetpacs-tabs' (SPEC §17.3).
+
+LABEL may be omitted WHEN ICON is present, which is how M3 draws its
+icon-only 48dp tab.  Passing the empty string is NOT the same thing: an
+empty label still fills the text slot and forces the 72dp two-line tab
+with a blank line in it.
+
+ICON-POSITION is above (default) or leading — the latter is M3's
+LeadingIconTab, a single row of icon then label.  BADGE is a string or
+number drawn over the tab, empty meaning the bare attention dot."
+  (when label (jetpacs--require-string label ":label"))
   (when icon (jetpacs--check-identifier icon ":icon"))
-  (jetpacs--node nil :label label :icon icon))
+  (unless (or label icon)
+    (error "jetpacs-tab-item: a tab needs a :label, an :icon, or both (SPEC 17.3)"))
+  (when icon-position
+    (setq icon-position (jetpacs--check-enum icon-position
+                                             jetpacs--tab-icon-positions
+                                             ":icon-position"))
+    (unless icon
+      (error "jetpacs-tab-item: :icon-position needs an :icon (SPEC 17.3)")))
+  (when badge (jetpacs--check-badge badge))
+  (jetpacs--node nil :label label :icon icon
+                 :icon_position icon-position :badge badge))
+
+(defconst jetpacs--tab-styles '("primary" "secondary"))
 
 (cl-defun jetpacs-tabs (items children &key initial scrollable pager-only
-                              on-change id)
+                              on-change id style)
   "A tab strip: parallel ITEMS (TabItems) and CHILDREN (Nodes) (SPEC §17.3).
 The two lists MUST have equal non-zero length.  INITIAL is a 0-based index
 below the count; SCROLLABLE/PAGER-ONLY are booleans (t or :json-false);
-ON-CHANGE an ActionDescriptor; ID a §4.4 identifier."
+ON-CHANGE an ActionDescriptor; ID a §4.4 identifier.
+
+STYLE is primary or secondary (default): M3's PrimaryTabRow draws the
+content-width rounded indicator, SecondaryTabRow the full-width one the
+Companion has always drawn."
   (let ((ni (length items)) (nc (length children)))
     (when (or (zerop ni) (/= ni nc))
       (error "jetpacs-tabs: items and children must be equal non-zero length (SPEC 17.3): %d vs %d"
@@ -960,6 +987,7 @@ ON-CHANGE an ActionDescriptor; ID a §4.4 identifier."
     (when pager-only (jetpacs--check-bool pager-only ":pager-only"))
     (when id (jetpacs--check-identifier id ":id"))
     (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+    (when style (setq style (jetpacs--check-enum style jetpacs--tab-styles ":style")))
     (jetpacs--node "tabs"
                    :items (vconcat items)
                    :children (vconcat children)
@@ -967,6 +995,7 @@ ON-CHANGE an ActionDescriptor; ID a §4.4 identifier."
                    :scrollable scrollable
                    :pager_only pager-only
                    :on_change on-change
+                   :style style
                    :id id)))
 
 (cl-defun jetpacs-table-cell (spans &key on-tap on-long-tap)

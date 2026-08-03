@@ -49,14 +49,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LeadingIconTab
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.SecondaryScrollableTabRow
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -454,18 +461,51 @@ internal fun RenderTabs(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                     for (i in 0 until minOf(items.size, pageCount)) {
                         val item = items[i] as? JsonObject ?: continue
                         val icon = item.stringOr("icon")
-                        Tab(
-                            selected = selected == i,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(i) } },
-                            text = { Text(item.stringOr("label")) },
-                            icon = if (icon.isNotEmpty()) {
-                                { Icon(IconMap.get(icon), contentDescription = null) }
-                            } else null)
+                        // §17.3: an ABSENT label is the icon-only 48dp tab.
+                        // `label ""` is NOT the same thing — an empty Text
+                        // still fills the slot and forces the 72dp two-line
+                        // tab with a blank line, which is why the member is
+                        // optional rather than defaulted.
+                        val hasLabel = "label" in item
+                        val badge = item.stringOr("badge")
+                        val onClick = { scope.launch { pagerState.animateScrollToPage(i) }; Unit }
+                        val iconSlot: @Composable () -> Unit = {
+                            val glyph: @Composable () -> Unit = {
+                                Icon(IconMap.get(icon), contentDescription =
+                                    if (hasLabel) null else item.stringOr("label")
+                                        .ifEmpty { icon })
+                            }
+                            if ("badge" in item)
+                                BadgedBox(badge = {
+                                    if (badge.isNotEmpty()) Badge { Text(badge) } else Badge()
+                                }) { glyph() }
+                            else glyph()
+                        }
+                        val textSlot: (@Composable () -> Unit)? =
+                            if (hasLabel) { { Text(item.stringOr("label")) } } else null
+                        if (icon.isNotEmpty() &&
+                            item.stringOr("icon_position") == "leading")
+                            LeadingIconTab(
+                                selected = selected == i, onClick = onClick,
+                                text = textSlot ?: {}, icon = iconSlot)
+                        else Tab(
+                            selected = selected == i, onClick = onClick,
+                            text = textSlot,
+                            icon = if (icon.isNotEmpty()) iconSlot else null)
                     }
                 }
-                if (node.boolOr("scrollable"))
-                    ScrollableTabRow(selectedTabIndex = selected) { tabs() }
-                else TabRow(selectedTabIndex = selected) { tabs() }
+                // §17.3 `style`: secondary (the default) is the full-width
+                // indicator this renderer has always drawn; primary is M3's
+                // content-width rounded one. Naming them explicitly also
+                // retires the deprecated TabRow/ScrollableTabRow calls.
+                val primary = node.stringOr("style") == "primary"
+                if (node.boolOr("scrollable")) {
+                    if (primary) PrimaryScrollableTabRow(selectedTabIndex = selected) { tabs() }
+                    else SecondaryScrollableTabRow(selectedTabIndex = selected) { tabs() }
+                } else {
+                    if (primary) PrimaryTabRow(selectedTabIndex = selected) { tabs() }
+                    else SecondaryTabRow(selectedTabIndex = selected) { tabs() }
+                }
             }
             HorizontalPager(
                 state = pagerState,

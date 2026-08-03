@@ -51,7 +51,7 @@
     ("card" ("children") ("on_long_tap" "on_tap" "swipe_end" "swipe_start" "variant"))
     ("collapsible" ("children" "header" "id") ("collapsed" "on_long_tap" "swipe_end" "swipe_start"))
     ("reorderable_list" ("items") ("on_reorder"))
-    ("tabs" ("children" "items") ("id" "initial" "on_change" "pager_only" "scrollable"))
+    ("tabs" ("children" "items") ("id" "initial" "on_change" "pager_only" "scrollable" "style"))
     ("table" ("rows") ("aligns" "on_add_col" "on_add_row"))
     ("button" ("label" "on_tap") ("animate_shape" "checked" "enabled" "icon" "on_change" "shape" "size" "variant"))
     ("icon_button" ("icon" "on_tap") ("badge" "checked" "checked_icon" "content_description" "enabled" "on_change" "shape" "size" "variant" "width_mode"))

@@ -70,6 +70,12 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.layout.AnimatedPane
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
+import androidx.compose.material3.adaptive.layout.SupportingPaneScaffold
+import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldPaneScope
+import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -798,4 +804,44 @@ internal fun RenderReorderableList(node: JsonObject, ctx: RenderCtx, m: Modifier
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         }
     }
+}
+
+/** §17.3 pane_scaffold: M3's adaptive two- or three-pane layout. The panes are
+ * placed BY WINDOW SIZE — side by side where there is room, one at a time
+ * where there is not — which is why a `row` of two columns was never a
+ * substitute for it: a row is the wide layout always, on every screen.
+ *
+ * The navigator supplies both the directive (derived from the current window)
+ * and the scaffold state, so the adaptation and the back stack come from one
+ * object rather than needing a window-size message on the wire. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+internal fun RenderPaneScaffold(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val list = node.objOrNull("list") ?: return
+    val detail = node.objOrNull("detail") ?: return
+    val extra = node.objOrNull("extra")
+    val navigator = rememberListDetailPaneScaffoldNavigator<Any>()
+    val supporting = node.stringOr("variant") == "supporting"
+    val listPane: @Composable ThreePaneScaffoldPaneScope.() -> Unit = {
+        AnimatedPane { RenderNode(list, ctx.child(list, 0)) }
+    }
+    val detailPane: @Composable ThreePaneScaffoldPaneScope.() -> Unit = {
+        AnimatedPane { RenderNode(detail, ctx.child(detail, 1)) }
+    }
+    val extraPane: (@Composable ThreePaneScaffoldPaneScope.() -> Unit)? =
+        extra?.let { { AnimatedPane { RenderNode(it, ctx.child(it, 2)) } } }
+    if (supporting) SupportingPaneScaffold(
+        directive = navigator.scaffoldDirective,
+        scaffoldState = navigator.scaffoldState,
+        mainPane = listPane,
+        supportingPane = detailPane,
+        extraPane = extraPane,
+        modifier = m)
+    else ListDetailPaneScaffold(
+        directive = navigator.scaffoldDirective,
+        scaffoldState = navigator.scaffoldState,
+        listPane = listPane,
+        detailPane = detailPane,
+        extraPane = extraPane,
+        modifier = m)
 }

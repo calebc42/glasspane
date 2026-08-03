@@ -71,7 +71,8 @@
     ("month_grid" ("month") ("children" "marks" "max_month" "min_month" "on_day_tap" "on_month_change" "selected"))
     ("scaffold" () ("body" "bottom_bar" "drawer" "fab" "floating_toolbar" "floating_toolbar_exit_direction" "floating_toolbar_expanded" "floating_toolbar_fab" "floating_toolbar_orientation" "floating_toolbar_placement" "floating_toolbar_scroll" "on_refresh" "scroll_behavior" "snackbar" "snackbar_action" "top_bar" "top_bar_style" "top_bar_subtitle"))
     ("tooltip" ("children" "text") ("action_label" "caret" "on_action" "position" "rich" "shown" "title"))
-    ("split_button" ("label" "on_tap") ("checked" "enabled" "icon" "items" "on_change" "on_trailing_tap" "size" "trailing_description" "trailing_icon" "trailing_label" "variant")))
+    ("split_button" ("label" "on_tap") ("checked" "enabled" "icon" "items" "on_change" "on_trailing_tap" "size" "trailing_description" "trailing_icon" "trailing_label" "variant"))
+    ("pane_scaffold" ("detail" "list") ("extra" "variant")))
   "Contract members per node type: (TYPE (REQUIRED...) (OPTIONAL...)).
 WIRE names, so the table compares directly against contract.json.  The
 constructors spell a multi-word member with a hyphen (`:content-padding'

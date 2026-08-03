@@ -48,8 +48,8 @@
     "reorderable_list" "tabs" "table" "button" "icon_button" "chip"
     "assist_chip" "menu" "text_input" "editor" "checkbox" "switch"
     "enum_list" "date_button" "time_button" "slider" "chart" "canvas"
-    "month_grid" "scaffold" "tooltip" "split_button")
-  "The 41 EBP node types (contract.json `node_types').")
+    "month_grid" "scaffold" "tooltip" "split_button" "pane_scaffold")
+  "The 42 EBP node types (contract.json `node_types').")
 
 (defconst jetpacs-core-node-set
   '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
@@ -869,6 +869,32 @@ an ActionDescriptor dispatched at most once per gesture."
   (jetpacs--node nil :label label :icon icon :color color :on_trigger on-trigger))
 
 (defconst jetpacs--card-variants '("filled" "elevated" "outlined"))
+
+(defconst jetpacs--pane-scaffold-variants '("list_detail" "supporting"))
+
+(cl-defun jetpacs-pane-scaffold (list detail &key extra variant)
+  "An adaptive two- or three-pane layout (SPEC §17.3).
+
+LIST and DETAIL are the two panes; EXTRA is an optional third.  The
+Companion places them BY WINDOW SIZE — side by side where there is room,
+one at a time where there is not — which is the whole point of the node,
+and the reason a `row' of two columns is not a substitute: a row is the
+wide layout always, on every screen.
+
+VARIANT is list_detail (default) or supporting, which is M3's other pane
+ROLE assignment (a main pane with a supporting one), not a different
+layout engine."
+  (unless (jetpacs--root-node-p list)
+    (error "jetpacs-pane-scaffold: LIST must be a node, got %S" list))
+  (unless (jetpacs--root-node-p detail)
+    (error "jetpacs-pane-scaffold: DETAIL must be a node, got %S" detail))
+  (when (and extra (not (jetpacs--root-node-p extra)))
+    (error "jetpacs-pane-scaffold: :extra must be a node, got %S" extra))
+  (when variant
+    (setq variant (jetpacs--check-enum variant jetpacs--pane-scaffold-variants
+                                       ":variant")))
+  (jetpacs--node "pane_scaffold" :list list :detail detail
+                 :extra extra :variant variant))
 
 (defun jetpacs-card (&rest args)
   "A card container of child nodes (SPEC §17.3).
@@ -1942,7 +1968,7 @@ as a single list."
 
 (defconst jetpacs-layout-node-types
   '("flow_row" "surface" "lazy_column" "card" "collapsible"
-    "reorderable_list" "tabs" "table")
+    "reorderable_list" "tabs" "table" "pane_scaffold")
   "The §17.3 non-core layout node types (reference app profile).")
 
 (defconst jetpacs-viz-node-types '("chart" "canvas" "month_grid")
@@ -1953,7 +1979,7 @@ as a single list."
             "text_input" "scaffold" "editor")
           jetpacs-content-node-types jetpacs-input-node-types
           jetpacs-layout-node-types jetpacs-viz-node-types)
-  "The reference companion's advertised `app' node_types (all 41; §10.2/§16.2).
+  "The reference companion's advertised `app' node_types (all 42; §10.2/§16.2).
 The AUTHORITATIVE set for a connection is its welcome `surface_profiles'.")
 
 (defconst jetpacs-dialog-node-types

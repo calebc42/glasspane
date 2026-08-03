@@ -69,6 +69,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "scaffold" to NodeRow(setOf(), setOf("top_bar", "body", "bottom_bar", "fab", "floating_toolbar", "drawer", "snackbar", "snackbar_action", "on_refresh", "top_bar_style", "top_bar_subtitle", "scroll_behavior", "floating_toolbar_orientation", "floating_toolbar_expanded", "floating_toolbar_placement", "floating_toolbar_fab", "floating_toolbar_scroll", "floating_toolbar_exit_direction")),
     "tooltip" to NodeRow(setOf("children", "text"), setOf("position", "caret", "rich", "title", "action_label", "on_action", "shown")),
     "split_button" to NodeRow(setOf("label", "on_tap"), setOf("icon", "variant", "size", "trailing_icon", "trailing_label", "trailing_description", "checked", "on_change", "on_trailing_tap", "items", "enabled")),
+    "pane_scaffold" to NodeRow(setOf("list", "detail"), setOf("extra", "variant")),
 )
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(
@@ -109,11 +110,13 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "content_description" to "string",
     "content_padding" to "dp",
     "day" to "integer-1-31",
+    "detail" to "node",
     "display_mode" to "string",
     "document" to "identifier",
     "drawer" to "node",
     "elevation" to "dp",
     "enabled" to "boolean",
+    "extra" to "node",
     "fab" to "node",
     "fg" to "color",
     "fill" to "varies-per-node",
@@ -140,6 +143,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "label" to "string",
     "leading_icon" to "identifier",
     "line_numbers" to "boolean",
+    "list" to "node",
     "marks" to "date-marks-object",
     "max" to "number",
     "max_length" to "positive-integer",

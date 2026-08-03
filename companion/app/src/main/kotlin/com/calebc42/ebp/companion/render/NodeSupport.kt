@@ -33,7 +33,7 @@ object NodeSupport {
     /** SPEC 17.3 layout nodes (app profile). */
     private val LAYOUT_NODE_TYPES: Set<String> = sortedSetOf(
         "flow_row", "surface", "lazy_column", "card", "collapsible",
-        "reorderable_list", "tabs", "table")
+        "reorderable_list", "tabs", "table", "pane_scaffold")
 
     /** SPEC 17.5 visualization nodes (app profile). */
     private val VIZ_NODE_TYPES: Set<String> = sortedSetOf("chart", "canvas", "month_grid")

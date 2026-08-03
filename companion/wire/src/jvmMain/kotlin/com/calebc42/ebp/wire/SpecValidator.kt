@@ -711,8 +711,15 @@ object SpecValidator {
             // synchronized editor as stateful let publishState write a
             // DURABLE draft for it (persisted, and reportable in the next
             // welcome's input_state) — the offline draft §19 forbids.
-            val isStateful = t != "editor" ||
-                (node.boolOr("publish_state") && "document" !in node)
+            // A `button`/`icon_button` is stateful only when it carries
+            // `checked`: the toggle holds device state keyed on its id, while
+            // a plain button holds none and MUST NOT be forced to carry an id
+            // — every button already on the wire has none.
+            val isStateful = when (t) {
+                "editor" -> node.boolOr("publish_state") && "document" !in node
+                "button", "icon_button" -> "checked" in node
+                else -> true
+            }
             if (isStateful) {
                 val id = node.stringOrNull("id")
                     ?: throw ContentInvalid(path, "$t requires an id")

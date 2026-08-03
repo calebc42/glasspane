@@ -16,7 +16,11 @@ val UNIVERSAL_NODE_ATTRIBUTES: Set<String> = setOf("key", "id", "scroll_here", "
 
 /** SPEC 14.6: node types whose id/value participate in input state. */
 val STATEFUL_NODE_TYPES: Set<String> = setOf(
-    "text_input", "checkbox", "switch", "enum_list", "slider", "editor")
+    "text_input", "checkbox", "switch", "enum_list", "slider", "editor",
+    // Conditionally stateful: a plain button carries no state and needs no
+    // id. SpecValidator's isStateful predicate registers these ONLY when
+    // `checked` is present — see the `editor` precedent.
+    "button", "icon_button")
 
 val ACTION_HOOK_KEYS: Set<String> = setOf("on_tap", "on_change", "on_submit", "on_save", "on_enter", "on_pick", "on_reorder", "on_refresh", "on_long_tap", "on_add_row", "on_add_col", "on_day_tap", "on_month_change", "on_point_tap", "on_trigger", "header_action")
 
@@ -46,8 +50,8 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "reorderable_list" to NodeRow(setOf("items"), setOf("on_reorder")),
     "tabs" to NodeRow(setOf("items", "children"), setOf("initial", "scrollable", "pager_only", "on_change", "id")),
     "table" to NodeRow(setOf("rows"), setOf("aligns", "on_add_row", "on_add_col")),
-    "button" to NodeRow(setOf("label", "on_tap"), setOf("icon", "variant", "enabled", "size", "shape", "animate_shape")),
-    "icon_button" to NodeRow(setOf("icon", "on_tap"), setOf("content_description", "badge", "enabled", "variant")),
+    "button" to NodeRow(setOf("label", "on_tap"), setOf("icon", "variant", "enabled", "size", "shape", "animate_shape", "checked", "on_change")),
+    "icon_button" to NodeRow(setOf("icon", "on_tap"), setOf("content_description", "badge", "enabled", "variant", "checked", "on_change", "checked_icon")),
     "chip" to NodeRow(setOf("label"), setOf("on_tap", "selected", "icon", "enabled", "variant", "trailing_icon")),
     "assist_chip" to NodeRow(setOf("label"), setOf("on_tap", "icon", "enabled", "variant")),
     "menu" to NodeRow(setOf("items"), setOf("icon", "enabled", "initial_scroll")),
@@ -91,6 +95,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "bottom_bar" to "node",
     "caption" to "string",
     "checked" to "boolean",
+    "checked_icon" to "identifier",
     "children" to "node-array",
     "chromeless" to "boolean",
     "clear_on_submit" to "boolean",

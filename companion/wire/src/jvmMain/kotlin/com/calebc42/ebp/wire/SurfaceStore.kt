@@ -470,6 +470,7 @@ class SurfaceStore(
                 !node.boolOr("password") &&
                 (!node.boolOr("single_line") || '\n' !in value.content)
             "checkbox", "switch" -> isJsonBoolean(value)
+            "button", "icon_button" -> "checked" in node && isJsonBoolean(value)
             "enum_list" -> {
                 val options = node.reqArr("options")
                 val legal = { v: JsonElement? ->
@@ -509,6 +510,8 @@ class SurfaceStore(
         fun authoredValueOf(node: JsonObject): JsonElement? = when (node.reqString("t")) {
             "text_input", "editor" -> node["value"] ?: JsonPrimitive("")
             "checkbox", "switch" -> node["checked"] ?: JsonPrimitive(false)
+            // null when absent: a plain button has no authored value at all.
+            "button", "icon_button" -> node["checked"]
             "enum_list" -> node["value"]
                 ?: if (node.boolOr("multi_select")) JsonArray(emptyList()) else null
             "slider" -> node["value"]

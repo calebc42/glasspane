@@ -1024,12 +1024,17 @@ unscaled default rather than any partial application.")
 (defconst jetpacs--keyboards '("text" "number" "decimal" "email" "phone" "uri"))
 
 (cl-defun jetpacs-button (label on-tap &key icon variant size shape
-                                animate-shape enabled)
+                                animate-shape checked on-change enabled)
   "A button labeled LABEL dispatching ON-TAP (SPEC §17.4).
 ICON a §4.4 identifier; VARIANT filled(default)/tonal/elevated/outlined/text;
 SIZE one of `jetpacs--button-sizes' (omit for the unscaled default);
 SHAPE round(default)/square; ANIMATE-SHAPE a boolean asking for the M3
-press-state shape morph; ENABLED a boolean (t or :json-false; default true)."
+press-state shape morph; ENABLED a boolean (t or :json-false; default true).
+
+CHECKED makes this a TOGGLE button — the Companion holds the flipped
+value on the device, keyed on the node's `:id', and ON-CHANGE receives
+it.  A button carrying CHECKED is stateful and so REQUIRES an `:id'
+unique across the document (§16.1); a plain button carries neither."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-tap ":on-tap")
   (when icon (jetpacs--check-identifier icon ":icon"))
@@ -1037,25 +1042,37 @@ press-state shape morph; ENABLED a boolean (t or :json-false; default true)."
   (when size (setq size (jetpacs--check-enum size jetpacs--button-sizes ":size")))
   (when shape (setq shape (jetpacs--check-enum shape jetpacs--button-shapes ":shape")))
   (when animate-shape (jetpacs--check-bool animate-shape ":animate_shape"))
+  (when checked (jetpacs--check-bool checked ":checked"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "button" :label label :on_tap on-tap
                  :icon icon :variant variant :size size :shape shape
-                 :animate_shape animate-shape :enabled enabled))
+                 :animate_shape animate-shape
+                 :checked checked :on_change on-change :enabled enabled))
 
 (cl-defun jetpacs-icon-button (icon on-tap &key content-description badge
-                                    variant enabled)
+                                    variant checked checked-icon on-change
+                                    enabled)
   "An icon button showing ICON dispatching ON-TAP (SPEC §17.4).
 ICON is a §4.4 identifier (§17.1); BADGE a string or number; VARIANT
-filled/tonal/outlined (omit for the plain, container-less icon button)."
+filled/tonal/outlined (omit for the plain, container-less icon button).
+
+CHECKED makes this a toggle (device-held, keyed on `:id', which such a
+node then REQUIRES); CHECKED-ICON is the identifier drawn while checked,
+and ON-CHANGE receives the flipped boolean."
   (jetpacs--check-identifier icon ":icon")
   (jetpacs--check-descriptor on-tap ":on-tap")
   (when content-description (jetpacs--require-string content-description ":content_description"))
   (when badge (jetpacs--check-badge badge))
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--icon-button-variants ":variant")))
+  (when checked (jetpacs--check-bool checked ":checked"))
+  (when checked-icon (jetpacs--check-identifier checked-icon ":checked_icon"))
+  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "icon_button" :icon icon :on_tap on-tap
                  :content_description content-description :badge badge
-                 :variant variant :enabled enabled))
+                 :variant variant :checked checked :checked_icon checked-icon
+                 :on_change on-change :enabled enabled))
 
 (cl-defun jetpacs-chip (label &key on-tap selected icon trailing-icon
                               variant enabled)

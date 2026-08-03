@@ -70,6 +70,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -105,14 +106,40 @@ private fun buttonHeightOf(name: String): Dp? = when (name) {
     else -> null
 }
 
-/** §17.4 button with variant/size/shape/animate_shape/icon/enabled. */
+/** §17.4 `checked` on button/icon_button: device-held toggle state keyed on
+ * the node's id, seeded from the store (the user's draft) and falling back to
+ * the authored member — the same machine RenderCheckbox uses, including its
+ * state-BEFORE-action ordering (§14.6). A node without `checked` is not
+ * stateful at all and never reaches here. */
+@Composable
+private fun rememberToggle(node: JsonObject, ctx: RenderCtx, id: String): MutableState<Boolean> =
+    rememberSaveable(ctx.surface, id, ctx.epochOf(id),
+        key = "tg:${ctx.surface}:$id:${ctx.epochOf(id)}") {
+        mutableStateOf((ctx.storeValue(id) as? JsonPrimitive)
+            ?.takeIf { !it.isString }?.content?.toBooleanStrictOrNull()
+            ?: node.boolOr("checked"))
+    }
+
+/** §17.4 button with variant/size/shape/animate_shape/icon/checked/enabled. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val enabled = node.boolOr("enabled", true)
     val onTap = node.objOrNull("on_tap")
     val iconName = node.stringOr("icon")
-    val onClick = { onButton(onTap, ctx) }
+    val isToggle = "checked" in node
+    val id = node.stringOr("id")
+    val toggle = if (isToggle) rememberToggle(node, ctx, id) else null
+    val onChange = node.objOrNull("on_change")
+    val onClick = if (toggle != null) {
+        {
+            val next = !toggle.value
+            toggle.value = next
+            ctx.state(id, JsonPrimitive(next))          // §14.6 state first
+            if (onChange != null) ctx.action(onChange, JsonPrimitive(next))
+            onButton(onTap, ctx)
+        }
+    } else { { onButton(onTap, ctx) } }
     val h = buttonHeightOf(node.stringOr("size"))
     // Absent `size` keeps the literals this renderer has always used, so no
     // existing traffic changes meaning.
@@ -176,11 +203,29 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 @Composable
 internal fun RenderIconButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val badge = node.stringOr("badge")
-    val onClick = { onButton(node.objOrNull("on_tap"), ctx) }
     val enabled = node.boolOr("enabled", true)
+    val isToggle = "checked" in node
+    val id = node.stringOr("id")
+    val toggle = if (isToggle) rememberToggle(node, ctx, id) else null
+    val onChange = node.objOrNull("on_change")
+    val onTap = node.objOrNull("on_tap")
+    val onClick = if (toggle != null) {
+        {
+            val next = !toggle.value
+            toggle.value = next
+            ctx.state(id, JsonPrimitive(next))
+            if (onChange != null) ctx.action(onChange, JsonPrimitive(next))
+            onButton(onTap, ctx)
+        }
+    } else { { onButton(onTap, ctx) } }
+    // `checked_icon` swaps the glyph while checked; IconMap is the only path a
+    // vector reaches the device, so the swap is by NAME.
+    val checkedIcon = node.stringOr("checked_icon")
+    val shownIcon = if (toggle?.value == true && checkedIcon.isNotEmpty())
+        checkedIcon else node.stringOr("icon")
     val body: @Composable () -> Unit = {
         val icon: @Composable () -> Unit = {
-            Icon(IconMap.get(node.stringOr("icon")),
+            Icon(IconMap.get(shownIcon),
                 contentDescription = node.stringOr("content_description")
                     .takeIf { it.isNotEmpty() })
         }

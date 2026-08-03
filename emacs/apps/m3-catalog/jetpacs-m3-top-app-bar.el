@@ -35,18 +35,17 @@
 ;; `jetpacs-m3-top-app-bar--centered-bar' is a full-width `box' with the
 ;; icon row behind a centered title.
 ;;
-;; TRIAGE.  Eight of the fifteen are recreated: the four Simple bars
-;; (title, subtitle, centered, centered with subtitle) and the four whose
+;; TRIAGE.  Nine of the fifteen are recreated: the four Simple bars
+;; (title, subtitle, centered, centered with subtitle), the four whose
 ;; subject is a scroll behavior the wire spells exactly -- PinnedTopAppBar
 ;; (pinned), EnterAlwaysTopAppBar (enter_always) and the Medium and Large
 ;; ExitUntilCollapsed bars (exit_until_collapsed on the medium and large
-;; styles).
+;; styles) -- and SimpleTopAppBarWithAdaptiveActions on the `app_bar_row'
+;; node, which folds the actions that do not fit into the more_vert menu
+;; at measure time (upstream's ADDITIONAL window-class cap stays a stated
+;; seam: no wire message reports a size class to cap by).
 ;;
-;; The remaining seven are not layout and not a bare behavior:
-;;
-;; * SimpleTopAppBarWithAdaptiveActions needs the window size class, and
-;;   no wire message reports that to Emacs; there is no `app_bar_row' node
-;;   for its overflow either.
+;; The remaining six are not layout and not a bare behavior:
 ;; * PinnedTopAppBarWithPreScrolledLazyColumn and
 ;;   EnterAlwaysTopAppBarWithReverseScrolling are both about ARGUMENTS to
 ;;   the behavior -- a lazyListState, a scrollState with reverseScrolling
@@ -163,6 +162,27 @@ icons, since M3 stacks the two in one column."
     :alignment "center")
    :fill_fraction 1.0))
 
+(defun jetpacs-m3-top-app-bar--adaptive (back)
+  "Upstream SimpleTopAppBarWithAdaptiveActions: an AppBarRow of five.
+The `app_bar_row' node measures Attachment, Edit, Star, Snooze and
+Mark unread against the bar's remaining width and folds the rest into
+the more_vert menu — each folded item's label becoming its menu row."
+  (jetpacs-row
+   (jetpacs-m3-back-button back)
+   (jetpacs-m3-top-app-bar--nav-icon)
+   (jetpacs-with-attrs
+    (jetpacs-text "Simple TopAppBar" :style "title" :max-lines 1)
+    :weight 1)
+   (jetpacs-app-bar-row
+    (list (jetpacs-app-bar-item "Attachment" "attachment"
+                                (jetpacs-m3-demo "Attachment"))
+          (jetpacs-app-bar-item "Edit" "edit" (jetpacs-m3-demo "Edit"))
+          (jetpacs-app-bar-item "Star" "star" (jetpacs-m3-demo "Star"))
+          (jetpacs-app-bar-item "Snooze" "snooze" (jetpacs-m3-demo "Snooze"))
+          (jetpacs-app-bar-item "Mark unread" "mark_email_unread"
+                                (jetpacs-m3-demo "Mark unread"))))
+   :align "center" :spacing 4 :fill t))
+
 (defun jetpacs-m3-top-app-bar--simple (back)
   "Upstream SimpleTopAppBar: Menu, the title, Add to favorites.
 The one sample here that sets no scrollBehavior at all -- its own
@@ -234,9 +254,16 @@ Its \"Subtitle\" is `:top-bar-subtitle' on the example, not a node here."
    (jetpacs-m3-example
     "SimpleTopAppBarWithAdaptiveActions"
     "Top app bar examples"
-    :source "Top app bar examples"
-    :unsupported
-    "There is no app-bar-row node and no wire message tells Emacs the window size class: AppBarRow showing three actions on a compact window and five on a wider one, with the rest folding into an overflow menu, is decided at measure time on the device and is this sample's whole subject.")
+    :source jetpacs-m3-top-app-bar--source
+    ;; The app_bar_row node measures the five actions in the bar and
+    ;; folds what does not fit into the more_vert menu — the adaptation
+    ;; happens at layout time on the device.  One seam: upstream
+    ;; ADDITIONALLY caps the inline count from the window width class
+    ;; (three on compact); here the fold is pure measurement, since no
+    ;; wire message reports a size class to cap by.
+    :top-bar #'jetpacs-m3-top-app-bar--adaptive
+    :top-bar-style "small"
+    :build #'jetpacs-m3-top-app-bar--content)
    (jetpacs-m3-example
     "SimpleTopAppBarWithSubtitle"
     "Top app bar examples"

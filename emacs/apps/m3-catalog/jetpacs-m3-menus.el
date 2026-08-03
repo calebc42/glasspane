@@ -16,14 +16,20 @@
 ;; `MenuWithScrollStateSample' is thirty such rows opened at their end,
 ;; which is the whole visible result of the scroll state it hoists.
 ;;
-;; The other four demonstrate something the map has no room for.  One
-;; wants more of DropdownMenu than the item record holds: GROUPS with
-;; labels and shapes, per-item SUPPORTING TEXT, a per-item CHECKED
-;; state with its checked leading icon, and TRAILING content.  Three
-;; are ExposedDropdownMenu, which M3-COMPONENT-LOOKUP lists as
-;; available-but-unwrapped: their whole subject is a menu ANCHORED TO A
-;; TEXT FIELD, filtering and completing what is typed, and neither the
-;; anchoring nor the caret arithmetic has a wire member.
+;; The `dropdown' node — the 45th type — is ExposedDropdownMenu on the
+;; wire: the popup anchored to a FIELD, which this `menu' node (popup
+;; off its own icon) could never compose.  The plain sample and the
+;; editable sample recreate on it.  Two seams stated on the editable
+;; one: the Companion filters by label CONTAINMENT where upstream
+;; subsequence-matches, and the matched letters are not underlined —
+;; option labels are plain strings, not spans.
+;;
+;; Two remain out.  GroupedMenuSample wants more of DropdownMenu than
+;; the item record holds: groups with labels and shapes, supporting
+;; text, a checked state, trailing content.  MultiAutocomplete completes
+;; the comma-separated token AROUND THE CARET, and no wire message
+;; reports a text_input's caret back to Emacs — the write-side
+;; `selection' member seeds it, but the read side is the missing half.
 
 ;;; Code:
 
@@ -34,9 +40,13 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/MenuSamples.kt"
   "Upstream MenusExampleSourceUrl.")
 
-(defconst jetpacs-m3-menus--exposed-note
-  "There is no exposed_dropdown_menu node: the menu node hangs its popup off its own anchor icon, and the wire has no way to anchor one to a text_input, which is the entire subject of this sample."
-  "Why every ExposedDropdownMenu sample is unsupported.")
+(defconst jetpacs-m3-menus--desserts
+  (list (jetpacs-enum-option "Android" "android")
+        (jetpacs-enum-option "Base" "base")
+        (jetpacs-enum-option "Cupcake" "cupcake")
+        (jetpacs-enum-option "Donut" "donut")
+        (jetpacs-enum-option "Eclair" "eclair"))
+  "Upstream SampleData.take(5): the first five dessert releases.")
 
 (defun jetpacs-m3-menus--basic ()
   "Upstream MenuSample: a MoreVert IconButton opening a DropdownMenu.
@@ -102,21 +112,30 @@ the wire can neither read it nor drive it."
     "Menus examples"
     :source jetpacs-m3-menus--source
     :expressive t
-    :unsupported jetpacs-m3-menus--exposed-note)
+    :build (lambda ()
+             ;; Read-only field seeded with options[0]; the popup hangs off
+             ;; the field, which is the node's whole reason to exist.
+             (jetpacs-dropdown "menus-exposed" jetpacs-m3-menus--desserts
+                               :value "android"
+                               :label "Label"
+                               :on-change (jetpacs-m3-demo "Picked"))))
    (jetpacs-m3-example
     "EditableExposedDropdownMenuSample"
     "Menus examples"
     :source jetpacs-m3-menus--source
-    :unsupported
-    (concat jetpacs-m3-menus--exposed-note
-            "  The menu is also rebuilt on every keystroke from a subsequence match, with the matched letters underlined, and menu items carry a plain label string, not spans."))
+    :build (lambda ()
+             ;; The TEXT is the value and the popup filters as you type —
+             ;; by containment, the Commentary's stated seam.
+             (jetpacs-dropdown "menus-editable" jetpacs-m3-menus--desserts
+                               :editable t
+                               :label "Label"
+                               :on-change (jetpacs-m3-demo "Picked"))))
    (jetpacs-m3-example
     "MultiAutocompleteExposedDropdownMenuSample"
     "Menus examples"
     :source jetpacs-m3-menus--source
     :unsupported
-    (concat jetpacs-m3-menus--exposed-note
-            "  It also completes the comma-separated token around the caret, and the text_input node has no selection or cursor member for a TextRange to be read from or placed back into."))
+    "The dropdown node carries the anchored popup now, but this sample completes the comma-separated token AROUND THE CARET, and no wire message reports a text_input caret back to Emacs: the selection member seeds the initial TextRange and nothing reads one back, so the token arithmetic this sample exists for has no input.")
    ))
 
 (provide 'jetpacs-m3-menus)

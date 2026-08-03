@@ -51,11 +51,12 @@
 ;; no colors member, so a rendered pill is always M3's standard palette
 ;; (surfaceContainer, with a primaryContainer FAB).
 ;;
-;; STILL GENUINELY MISSING (5):
+;; The two Overflowing samples ride the `app_bar_row'/`app_bar_column'
+;; nodes now: the five actions measure INSIDE the pill and fold into
+;; the more_vert menu at layout time, in either orientation.
 ;;
-;;   * AppBarRow / AppBarColumn -- no node measures a row or a column and
-;;     moves what does not fit into an overflow menu (the two Overflowing
-;;     samples).
+;; STILL GENUINELY MISSING (3):
+;;
 ;;   * floatingToolbarVerticalNestedScroll -- `floating_toolbar_scroll' is
 ;;     exitAlwaysScrollBehavior, which SLIDES the pill off an edge.  The
 ;;     Expandable samples show the other motion: a collapse to the leading
@@ -255,6 +256,24 @@ VerticalFloatingToolbar's content, in upstream's order."
    (jetpacs-m3-floating-toolbar--action "more_vert" "MoreVert")
    :align "center"))
 
+(defun jetpacs-m3-floating-toolbar--overflow-strip (vertical)
+  "The Overflowing samples' five actions as a measuring overflow strip.
+Download, Favorite, Add, Person and ArrowUpward render inline while
+they fit inside the pill and fold into the more_vert menu at layout
+time; VERTICAL picks `app_bar_column', the strip stood on end."
+  (let ((items (list (jetpacs-app-bar-item "Download" "download"
+                                           (jetpacs-m3-demo "Download"))
+                     (jetpacs-app-bar-item "Favorite" "favorite"
+                                           (jetpacs-m3-demo "Favorite"))
+                     (jetpacs-app-bar-item "Add" "add"
+                                           (jetpacs-m3-demo "Add"))
+                     (jetpacs-app-bar-item "Person" "person"
+                                           (jetpacs-m3-demo "Person"))
+                     (jetpacs-app-bar-item "Upload" "arrow_upward"
+                                           (jetpacs-m3-demo "Upload")))))
+    (if vertical (jetpacs-app-bar-column items)
+      (jetpacs-app-bar-row items))))
+
 (defun jetpacs-m3-floating-toolbar--as-scaffold-fab ()
   "Upstream HorizontalFloatingToolbarAsScaffoldFabSample, in the fab slot.
 Upstream hands the whole toolbar to `Scaffold(floatingActionButton =)'
@@ -313,8 +332,10 @@ for an inexact one is not a win, so the composition stays."
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
-    :unsupported
-    "There is no AppBarRow node: a row cannot measure its children and move the ones that do not fit into a more_vert overflow menu, and that automatic overflow of Download, Favorite, Add, Person and ArrowUpward is this sample's whole subject.")
+    :build #'jetpacs-m3-floating-toolbar--list-content
+    :slots (list :floating-toolbar
+                 (lambda () (jetpacs-m3-floating-toolbar--overflow-strip nil)))
+    :floating-toolbar-orientation "horizontal")
    (jetpacs-m3-example
     "ScrollableHorizontalFloatingToolbarSample"
     "Floating toolbar examples"
@@ -340,8 +361,10 @@ for an inexact one is not a win, so the composition stays."
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
-    :unsupported
-    "There is no AppBarColumn node: a column cannot measure its children and move the ones that do not fit into an overflow menu, and that automatic overflow of Download, Favorite, Add, Person and ArrowUpward is this sample's whole subject. The vertical rail it overflows inside is now a scaffold member (floating_toolbar_orientation); the overflow is not on the wire at all.")
+    :build #'jetpacs-m3-floating-toolbar--list-content
+    :slots (list :floating-toolbar
+                 (lambda () (jetpacs-m3-floating-toolbar--overflow-strip t)))
+    :floating-toolbar-orientation "vertical")
    (jetpacs-m3-example
     "ScrollableVerticalFloatingToolbarSample"
     "Floating toolbar examples"

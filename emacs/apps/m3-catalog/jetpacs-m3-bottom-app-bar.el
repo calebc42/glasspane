@@ -29,10 +29,10 @@
 ;;   :arrange, :spacing and a `surface' color -- so those are
 ;;   recreated.
 ;;
-;; * AppBarRow's OVERFLOW: actions that do not fit migrating into a
-;;   more-vert menu at measure time.  No node has an overflow member,
-;;   and which actions overflow is a width measurement Emacs never
-;;   sees, so BottomAppBarWithOverflow is unsupported.
+;; * AppBarRow's OVERFLOW rides the `app_bar_row' node now: the six
+;;   actions render inline while they fit and fold into the more_vert
+;;   menu at MEASURE time -- a width decision the device makes per
+;;   layout pass, which Emacs never sees and never needs to.
 ;;
 ;; Upstream wraps every action in a TooltipBox with a PlainTooltip
 ;; repeating its label; there is no tooltip node, and the label already
@@ -171,8 +171,23 @@ sample sets as the bar\\='s containerColor."
     "Bottom app bar examples"
     :source jetpacs-m3-bottom-app-bar--source
     :expressive t
-    :unsupported
-    "No node has an overflow member: AppBarRow moves the actions that do not fit into a more-vert menu at measure time, and which ones those are is a width Emacs never sees.")
+    ;; The app_bar_row node IS AppBarRow: inline while they fit, folded
+    ;; into the more_vert menu at measure time.
+    :slots (list :bottom-bar
+                 (lambda ()
+                   (jetpacs-app-bar-row
+                    (list (jetpacs-app-bar-item "Back" "arrow_back"
+                                                (jetpacs-m3-demo "Back"))
+                          (jetpacs-app-bar-item "Forward" "arrow_forward"
+                                                (jetpacs-m3-demo "Forward"))
+                          (jetpacs-app-bar-item "Add" "add"
+                                                (jetpacs-m3-demo "Add"))
+                          (jetpacs-app-bar-item "Check" "check"
+                                                (jetpacs-m3-demo "Check"))
+                          (jetpacs-app-bar-item "Edit" "edit"
+                                                (jetpacs-m3-demo "Edit"))
+                          (jetpacs-app-bar-item "Favorite" "favorite"
+                                                (jetpacs-m3-demo "Favorite")))))))
    (jetpacs-m3-example
     "ExitAlwaysBottomAppBar"
     "Bottom app bar examples"

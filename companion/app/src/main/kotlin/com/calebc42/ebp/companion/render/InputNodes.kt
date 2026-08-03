@@ -42,6 +42,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DockedSearchBar
+import androidx.compose.material3.DisplayMode
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedAssistChip
@@ -78,6 +79,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
@@ -711,7 +713,10 @@ internal fun RenderSlider(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 }
 
 /** §17.4 date_button: value is YYYY-MM-DD local civil time; on_pick gets the
- * picked date injected as args.value. */
+ * picked date injected as args.value. `mode` seeds the dialog's display mode:
+ * `input` is M3's typed date-entry field with its own mask and validation,
+ * and the dialog keeps its built-in toggle between the two either way. Any
+ * other value falls back to the calendar (§12 rule 6). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun RenderDateButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
@@ -723,7 +728,10 @@ internal fun RenderDateButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         modifier = m) { Text(node.stringOr("label")) }
     if (show) {
         val initialMillis = remember { parseIsoDateUtc(node.stringOr("value")) }
-        val state = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = initialMillis,
+            initialDisplayMode = if (node.stringOr("mode") == "input")
+                DisplayMode.Input else DisplayMode.Picker)
         DatePickerDialog(
             onDismissRequest = { show = false },
             confirmButton = {
@@ -740,7 +748,10 @@ internal fun RenderDateButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     }
 }
 
-/** §17.4 time_button: value is HH:MM local civil time. */
+/** §17.4 time_button: value is HH:MM local civil time. `display_mode`
+ * selects what fills the dialog: the clock-face `picker` (the default) or
+ * M3's `input`, the keyboard-first pair of HH/MM fields TimeInput draws.
+ * Any other value falls back to the picker (§12 rule 6). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun RenderTimeButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
@@ -766,7 +777,11 @@ internal fun RenderTimeButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             dismissButton = {
                 TextButton(onClick = { show = false }) { Text("Cancel") }
             },
-            text = { TimePicker(state = state) })
+            text = {
+                if (node.stringOr("display_mode") == "input")
+                    TimeInput(state = state)
+                else TimePicker(state = state)
+            })
     }
 }
 

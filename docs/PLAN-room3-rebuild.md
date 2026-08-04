@@ -1,6 +1,6 @@
 # POC 3 Room 3 rebuild plan
 
-Status: proposed architectural direction, 2026-08-02.
+Status: accepted Android persistence subplan, revised 2026-08-03.
 
 This plan supersedes the fork-forward cache adapter described by the original
 POC 3 scaffold. POC 3 is a clean rebuild of Jetpacs around Room 3. It preserves
@@ -9,20 +9,36 @@ POC 2's file-backed application architecture.
 
 ## Decision
 
-Room 3 will be Jetpacs' sole durable implementation of EBP presentation and
-delivery state. It is not a second projection written after POC 2 has already
-accepted and persisted a mutation.
+Room 3 will be Jetpacs' sole durable implementation of accepted presentation
+state and the Companion-owned durable delivery queue. It is not a second
+projection written after POC 2 has already accepted and persisted a mutation.
 
-Emacs remains the authority for authored documents. The future `kotlin-ebp`
-library remains the authority for protocol validation, ordering, state-machine
-rules, and storage-independent commands and results. Jetpacs' Room adapter
-durably applies those rules and exposes read-only `Flow` projections to the
-Android UI.
+Emacs remains the authority for authored documents. The EBP spec remains the
+cross-platform authority. `:ebp-kmp` contains the storage-neutral durable-store
+SPI, reducers, and memory reference implementation, while `:wire` retains
+transport, framing, and protocol code. Jetpacs' Room adapter implements that SPI
+and exposes read-only `Flow` projections to the Android UI.
+
+Durable event delivery therefore has two independent ledgers:
+
+- Jetpacs commits outgoing `event.action` records to its Room 3 outbox.
+- Emacs commits received EventIds together with durable work to its local
+  `ebp-sqlite.el` inbox before returning `accepted`.
+
+Room never substitutes for the receiver-owned Emacs commitment required by
+SPEC 14.4.
 
 EBP remains Jetpacs-agnostic. The EBP specification may require observable
 durability and atomicity, but it must not name Room, Android, Navigation 3,
 Compose, Jetpacs, or any Jetpacs schema. Room 3 and Navigation 3 are Jetpacs
 implementation choices permitted by the specification.
+
+The rebuild proves observable behavior in implementation and backend contracts
+before proposing EBP changes. Once those gates are green, each mismatch is
+audited against the current spec: the implementation changes when the spec
+already covers the behavior; otherwise the spec may be expanded only with a
+language- and platform-agnostic requirement. Kotlin, Room, Android, Nav,
+Compose, and Jetpacs remain implementation evidence, never EBP requirements.
 
 The existing branch checkpoint at `1bc66e8` remains the recoverable pre-rebuild
 reference in Git history. Rebuilding must not use runtime dual-write as a
@@ -57,30 +73,30 @@ the gaps above.
 ## Target module graph
 
 ```text
-:wire  (incubator for future kotlin-ebp)
-  models, framing, validation, reducers, persistence SPI, runtime actor
+:wire -----------------------> :ebp-kmp
+  transport, framing,          durable-store SPI, reducers,
+  protocol handling/state      rollback-capable memory reference
   forbidden: Jetpacs, Room, Android, Nav, Compose, java.io file stores
-                         |
-                         v
-:core:ebp-store  (new)
-  Jetpacs implementation of the EBP persistence SPI
-                         |
-                         v
-:core:database
-  Room 3 entities, DAOs, migrations, builders, exported schemas
-                         |
-             +-----------+-----------+
-             |                       |
-             v                       v
-:core:data read-only Flow       Android platform effects
-  projections                   alarms, notifications, triggers
-             |
-             v
+
+:core:ebp-store -------------> :ebp-kmp
+  Jetpacs Room adapter
+        |
+        +---------------------> :core:database
+                                  Room 3 entities, DAOs, migrations,
+                                  builders, exported schemas
+                                           |
+                               +-----------+-----------+
+                               |                       |
+                               v                       v
+                     :core:data read-only Flow   Android platform effects
+                               |
+                               v
 feature ViewModels -> Nav 3 -> dumb Compose EBP renderer
 ```
 
 The complete initial scaffold is:
 
+- `:ebp-kmp`
 - `:wire`
 - `:core:model`
 - `:core:database`
@@ -93,9 +109,12 @@ The complete initial scaffold is:
 - `:feature:settings`
 - `:app`
 
-`:wire` defines EBP-domain types and transaction contracts. It never sees a
+`:ebp-kmp` defines the storage-neutral durable records, reducers, transaction
+contracts, and memory reference implementation. `:wire` retains transport,
+framing, and protocol code and depends on `:ebp-kmp`. Neither module sees a
 Room entity. `:core:database` contains storage mechanics and does not depend on
-`:wire`. `:core:ebp-store` depends on both and performs the mapping. `:core:data`
+`:ebp-kmp` or `:wire`. `:core:ebp-store` depends on `:ebp-kmp` and
+`:core:database` and performs the mapping. `:core:data`
 is read-only from the protocol's perspective: it must not compare revisions,
 accept mutations, or write EBP state.
 
@@ -105,10 +124,10 @@ application. Room KMP configuration follows the local Fruitties sample, and
 the single saveable stack and entry decorators follow local `nav3-recipes`.
 Local repositories, not GitHub, are the implementation references.
 
-## Storage-independent persistence API
+## Companion storage-independent persistence API
 
-The permanent SPI must not preserve the current whole-file `load`/`replace`
-shape. It must be suspending and transaction-oriented. The preferred shape is
+The implemented `:ebp-kmp` SPI does not preserve the whole-file `load`/`replace`
+shape. It is suspending and transaction-oriented. Its core shape is
 an EBP-domain transaction scope:
 
 ```kotlin
@@ -123,14 +142,15 @@ interface EbpDurableStore {
 ```
 
 `EbpWriteTransaction` exposes domain records and bounded operations, never SQL,
-DAOs, cursors, or Room annotations. Generic reducers in `:wire` own revision
+DAOs, cursors, or Room annotations. Generic reducers in `:ebp-kmp` own revision
 ordering, draft reconciliation, dedupe selection, unchanged-trigger decisions,
 and result construction inside that transaction. Named use cases such as
 `applySurface`, `admitEvent`, `replaceReminders`, `replaceTriggers`, and
 `commitTriggerOccurrence` sit above the primitive transaction scope so callers
 cannot accidentally omit an invariant.
 
-This split gives `kotlin-ebp` one implementation of EBP behavior while allowing
+This split gives `:ebp-kmp` one storage-neutral implementation of EBP behavior
+while allowing
 an in-memory reference store, Jetpacs Room, or a future non-Android store to
 supply atomic persistence. A Room transaction is not an EBP concept.
 
@@ -227,6 +247,9 @@ notification API, Keystore call, image deletion, or local trigger effect.
 
 ## Explicitly not stored in Room
 
+- Emacs-side accepted EventId receipts or application work. Those live in the
+  receiver-owned `ebp-sqlite.el` database and remain recoverable without a
+  Jetpacs process or EBP session.
 - Section 19 editor sessions, shadows, deltas, sequence contention, carets,
   completion results, diagnostic overlays, or fontification.
 - queue in-flight ownership, replay request ownership, and accumulated summary
@@ -284,6 +307,10 @@ clear-data flow; silently reopening stale JSON files is forbidden.
 - Preserve POC 2 goldens and convert its surface, queue, reminder, trigger,
   firing, and persistence-compatibility tests into backend contract fixtures.
 - Run the contracts against an in-memory transactional reference store.
+- Add Emacs store contracts proving receipt-plus-work admission, pairing
+  isolation, restart recovery, lease recovery, and commit-before-accepted.
+- Add a regression proving the current effect-then-receipt dispatcher is not a
+  conforming substitute for SPEC 14.4 durable work.
 - Add failing regression tests for pairing isolation, stale fields,
   `surface.release`, response-after-commit, current queue-clock rules, and
   revocation.
@@ -300,16 +327,17 @@ before production Room code is written.
 - Add the module graph above, including `:core:ebp-store` and feature modules.
 - Configure Room KMP constructor/KSP/bundled SQLite from the local Fruitties
   sample and export the new database's complete schema version 1.
-- Add module-boundary checks proving `:wire` is free of Room, Android, Nav,
-  Compose, Jetpacs, and file-storage imports.
+- Add module-boundary checks proving `:ebp-kmp` and `:wire` are free of Room,
+  Android, Nav, Compose, Jetpacs, and file-storage imports.
 
 Exit: the clean empty scaffold builds on JVM and Android before POC 2 app code
 is transplanted.
 
 ### WP2 — Build the generic SPI and serialized runtime
 
-- Move platform-neutral EBP types, validation, reducers, and tests into
-  `:wire/commonMain` where feasible.
+- Keep the storage-neutral durable-store SPI, reducers, tests, and memory
+  reference implementation in `:ebp-kmp/commonMain`; keep transport, framing,
+  and protocol code in `:wire`.
 - Add the suspending transaction SPI and in-memory rollback-capable backend.
 - Replace monitor/executor entry points with the bounded process-lifetime actor
   and ordered outbound frame channel.
@@ -393,6 +421,8 @@ POC 3 may call the Room rebuild complete only when:
   corrections required by the specification;
 - all persistent state is pairing-partitioned;
 - every accepted response and platform effect occurs after commit;
+- every accepted action delivered to Emacs has receiver-owned durable
+  receipt/work state independent of Jetpacs Room and session lifetime;
 - trigger runtime and queue admission share one transaction;
 - `surface.update`, remove, release, stale state, drafts, and current view are
   durable with no second revision authority;

@@ -1,18 +1,21 @@
 # POC 3 target architecture
 
-The canonical implementation sequence is
-[`PLAN-room3-rebuild.md`](PLAN-room3-rebuild.md). It supersedes the original
-fork-forward surface-cache adapter: POC 3 now rebuilds the durable POC 2
-semantics on Room 3 rather than projecting file-backed state into a second
-database.
+The canonical cross-platform implementation sequence is
+[`PLAN-poc3-rebuild.md`](PLAN-poc3-rebuild.md). The detailed Android store is
+specified by [`PLAN-room3-rebuild.md`](PLAN-room3-rebuild.md), and required
+platform primitives are pinned in
+[`PLATFORM-RENTAL-REGISTER.md`](PLATFORM-RENTAL-REGISTER.md). Together they
+supersede the original fork-forward cache adapter and the historical lock-hoist
+KMP runbook.
 
 ## Non-negotiable boundaries
 
 EBP is Jetpacs-agnostic. Its Emacs implementation uses built-in Emacs
-facilities, and its Kotlin implementation is being incubated in `:wire` for
-eventual extraction as a standalone `kotlin-ebp` library. Neither library may
-depend on Jetpacs packages, Room, Navigation, Compose, Android, or Jetpacs cache
-policy.
+facilities. In this tree, `:ebp-kmp` contains the storage-neutral KMP
+durable-store SPI, reducers, and rollback-capable memory reference
+implementation. `:wire` retains transport, framing, and protocol code and
+depends on `:ebp-kmp`. Neither module may depend on Jetpacs packages, Room,
+Navigation, Compose, Android, or Jetpacs cache policy.
 
 Jetpacs is one implementation of EBP. The long-term product target is the
 Compose Catalog authored in Emacs/Elisp and transferred as EBP documents. The
@@ -20,34 +23,55 @@ Android app is a dumb renderer: it selects a document from Jetpacs' durable Room
 implementation of accepted EBP state, renders it, and returns typed EBP
 actions. It must not compile a second Kotlin copy of the catalog.
 
+Durable delivery crosses two independent failure domains. Jetpacs commits
+outgoing events to a Room 3 transactional outbox. Emacs commits received
+EventIds plus recoverable application work to its own `ebp-sqlite.el` inbox
+before returning `accepted`. The sender's Room database is never the receiver's
+acceptance evidence.
+
 Room 3 and Navigation 3 are Jetpacs choices, not EBP requirements. The EBP spec
 must permit their use without naming or requiring them.
+
+Implementation and backend contracts prove the observable behavior first.
+After those gates are green, audit mismatches against the current EBP spec:
+change the implementation when it is out of spec, or expand the spec only when
+the missing requirement can be stated without a language, platform, database,
+UI toolkit, or product dependency.
 
 ## Module map
 
 | Module | Responsibility | May depend on |
 |---|---|---|
-| `:wire` | Incubator for transport, framing, contract, reducers, transaction SPI, and protocol state; future `kotlin-ebp` | Kotlin, serialization, coroutines, platform transport abstractions only |
+| `:ebp-kmp` | Storage-neutral durable-store SPI, reducers, and rollback-capable memory reference implementation | Kotlin, serialization |
+| `:wire` | Transport, framing, contract vocabulary, and protocol handling/state | `:ebp-kmp`, Kotlin, serialization, coroutines, platform transport abstractions only |
 | `:core:model` | Jetpacs read models and identifiers | Kotlin |
 | `:core:database` | Complete Room 3 schema, DAOs, builders, migrations, and exported schemas | Room 3, SQLite |
-| `:core:ebp-store` | Jetpacs Room implementation of the storage-independent EBP transaction SPI | `:wire`, `:core:database` |
+| `:core:ebp-store` | Jetpacs Room implementation of the storage-independent EBP transaction SPI | `:ebp-kmp`, `:core:database` |
 | `:core:data` | Read-only Room `Flow` projections for Jetpacs UI state | `:core:model`, `:core:database` |
 | `:core:navigation` | Serializable Nav 3 destination keys | Nav 3 |
-| `:core:testing` | Shared fakes that obey production revision rules | `:core:data`, `:core:model` |
+| `:core:testing` | Shared read-model fakes and backend contract fixtures | `:core:data`, `:core:model` |
+| `:renderer:model` | Target-neutral normalized renderer IR and profile registries | public storage-neutral EBP contract types only |
+| `:renderer:compose` | Compose renderer for the application target | `:renderer:model`, Compose |
+| `:renderer:glance` (later) | Restricted widget renderer/profile | `:renderer:model`, Glance |
 | `:feature:pairing`, `:feature:surface`, `:feature:settings` | ViewModels, entry providers, and Jetpacs feature UI | Jetpacs `:core:*` modules |
 | `:app` | Single Android composition root, transport/platform adapters, and dumb renderer shell | `:wire`, Jetpacs core/feature modules |
 
-The present module names intentionally keep `:wire` outside `:core`.
-Extraction should be a source-compatible dependency substitution: publish
-`kotlin-ebp`, replace `implementation(projects.wire)`, and delete the
-incubator only after the standalone library passes the same goldens.
+The present split is intentional: `:wire` consumes `:ebp-kmp` for portable
+durability behavior, while `:core:ebp-store` supplies Jetpacs' Room-backed
+implementation. A future publication boundary should preserve these APIs and
+must not pull Jetpacs choices into EBP.
 
 ## Room 3 durable-state contract
 
 Room is Jetpacs' sole durable implementation of information accepted from
 Emacs, not an authority beside Emacs and not a second projection beside POC 2
-files. Protocol acceptance rules remain generic `kotlin-ebp` behavior; the Room
-adapter supplies their atomic persistence.
+files. Storage-independent acceptance rules remain `:ebp-kmp` reducer
+behavior; the Room adapter supplies their atomic persistence.
+
+Room also owns the Companion's durable outbound event queue. It does not own
+the Emacs-side EventId receipt/work commitment: that is an independent local
+SQLite inbox controlled by the receiving endpoint. Loss of Jetpacs or its
+session must not erase Emacs' accepted-event evidence.
 
 - Every durable record derived from Emacs is partitioned by pairing identity.
 - Room stores surfaces/tombstones/stale metadata/current views, input drafts,
@@ -96,7 +120,7 @@ work.
 | `nav3-recipes` | `6564c15b4d1e8be318bffdf980504757d2d70645` | Saveable back stack, serializable `NavKey`, later multiple-stack/scene patterns |
 | `kotlin-multiplatform-samples` Fruitties | `7844c73335eebc83f0162cfc4b22eb025a2f5458` | KMP Android library DSL, per-target KSP, generated Room constructor, bundled SQLite driver |
 | AndroidX | `d69c96e6bc402016899904d66646816a62ebff4d` | Room 3 packages/plugin, write transaction, builder, current local release `3.0.0-rc01` |
-| Emacs | `ba331c27f14adb429ef21fdf3d5c62febb7564d3` | Built-in `track-changes.el` version 1.5 API |
+| Emacs | `ba331c27f14adb429ef21fdf3d5c62febb7564d3` | Current built-in `track-changes.el`; Step 3 stays within the version 1.2 API shipped by Emacs 30.1 |
 
 The TODO app's full fake-network refresh is deliberately not adopted. EBP
 already supplies ordered, revisioned mutations, so deleting all local rows and
@@ -129,13 +153,14 @@ serialized runtime actor, implement the complete normalized Room schema, and
 port one durable vertical slice at a time. The final data path is:
 
 ```
-kotlin-ebp / :wire reducer
-        -> generic EBP transaction SPI
+:wire transport / framing / protocol
+        -> :ebp-kmp reducer / transaction SPI
         -> :core:ebp-store Room transaction
         -> committed Room 3 state
         -> read-only repository Flow
         -> screen ViewModel StateFlow
-        -> dumb Compose EBP renderer
+        -> target-neutral renderer model
+        -> dumb Compose EBP renderer (or later target profile)
 ```
 
 The former typed post-accept cache callback is not a persistence seam. A
@@ -165,7 +190,7 @@ findings an explicit gate:
 - Emacs 30+ built-ins, especially `jsonrpc.el` and `track-changes.el`, with
   ERT coverage on the minimum supported 30.1 release and current Emacs.
 - EBP conformance against local EBP `slop-fork/main`, keeping both
-  `kotlin-ebp` and `ebp.el` independent of Jetpacs.
+  `:ebp-kmp` and `ebp.el` independent of Jetpacs.
 
 Treat every compiler deprecation warning as an audit input. The first green
 Android build already identifies inherited renderer/wire cleanup candidates:
@@ -180,7 +205,7 @@ evidence-backed hardening backlog before changing `ebp-sync.el` or its
 
 - Inventory Kotlin and Elisp code smells, duplicated behavior, oversized
   files, leaky boundaries, and missing characterization tests. Classify each
-  extraction as Jetpacs app code, reusable `kotlin-ebp`, upstreamable `ebp.el`,
+  extraction as Jetpacs app code, reusable `:ebp-kmp`, upstreamable `ebp.el`,
   or workspace-only tooling; do not move product policy into EBP.
 - Inventory existing utilities, reference material, generators, and lookup
   assets, especially `docs/lookup-tables`, vocabulary generators, goldens,
@@ -258,3 +283,9 @@ settings, and an isolated renderer test app. Use ViewModels that combine
 repository `Flow` values into immutable `StateFlow` UI state, following the
 local TODO sample. Recreate each Compose Catalog example in Elisp/EBP and test
 the dumb renderer against it before adding another example.
+
+Glance remains a later Jetpacs renderer profile. It consumes the same cached
+Room state through the renderer-model seam, stores widget-instance configuration
+separately, and routes actions through the Room outbox. It is advertised only
+after its restricted handler registry passes device tests. Quick Settings stays
+a separate `TileService` projection.

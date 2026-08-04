@@ -1,5 +1,13 @@
 # RF-2 Runbook — `:wire` to KMP (jvm-only) + org.json → kotlinx.serialization
 
+> **Historical research only.** The JSON migration measurements and pure-code
+> inventory remain useful, but the H6/H7 monitor-to-`WireLock` migration and
+> its `llm-poc-2` execution paths are superseded by
+> [`PLAN-poc3-rebuild.md`](PLAN-poc3-rebuild.md) and
+> [`PLAN-room3-rebuild.md`](PLAN-room3-rebuild.md). POC 3 uses a bounded
+> coroutine actor plus suspending transaction SPI; do not execute this runbook
+> verbatim or introduce the proposed expect/actual lock layer.
+
 ## Context
 
 RF-2 of [PLAN-refound-2026-07-28.md](PLAN-refound-2026-07-28.md): make the wire core's platform-freedom compiler-enforced (KMP `commonMain`) and swap org.json for kotlinx.serialization's `JsonElement`. Hand-executed by Caleb. Local gates through checkpoint B1 (deviation ratified 2026-07-28, grandfathered by PLAN-refound I6 as amended 2026-07-31); **C2 onward requires CI green — RF-1a lands first**. All 34 test files stay in `jvmTest`.

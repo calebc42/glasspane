@@ -1,10 +1,15 @@
-# jetpacs llm-poc-3 — the KMP architecture scaffold
+# jetpacs llm-poc-3 — the durable rebuild worktree
 
-POC 3 extends the conformant rewrite with KMP architecture boundaries, a Room 3
-cache, and Navigation 3. The in-tree `:wire` module remains the incubator for a
-future standalone, Jetpacs-agnostic `kotlin-ebp` library; Jetpacs-specific
-policy lives in `companion/core`. See `docs/ARCHITECTURE-POC3.md` for the local
-reference review and implementation sequence.
+POC 3 rebuilds the conformant rewrite around explicit KMP boundaries, a Room 3
+outbox/cache owned by Jetpacs, an independent SQLite inbox owned by Emacs, and
+Navigation 3. The in-tree `:ebp-kmp` module contains the storage-neutral KMP
+durable-store SPI, reducers, and memory reference implementation. `:wire`
+retains transport, framing, and protocol code and depends on `:ebp-kmp`;
+Jetpacs-specific policy lives outside both. Start with
+`docs/PLAN-poc3-rebuild.md`, then use
+`docs/ARCHITECTURE-POC3.md`, `docs/PLAN-room3-rebuild.md`, and
+`docs/PLATFORM-RENTAL-REGISTER.md` for the detailed boundaries and local-source
+implementation references.
 
 ## Lineage and walls
 
@@ -13,18 +18,19 @@ reference review and implementation sequence.
   (`../llm-poc/docs/AUDIT-ebp2-divergence-map.md`). It is guidance and organ
   donor: read it, port from it, do not merge it.
 - **`slop-fork/main`** — the current local rewrite and eventual rebase target.
-- **`slop-fork/v3`** (this tree/worktree) — the POC 3 architecture scaffold,
-  kept separate for this checkpoint and rebased onto local `slop-fork/main` next.
+- **`slop-fork/v3`** (this tree/worktree) — the POC 3 rebuild, kept separate
+  until the current m3-fidelity work is fully merged; rebase onto local
+  `slop-fork/main` once at that boundary, not during the architecture reset.
 - **`main`** — the clean-room hand-rebuild track. Sealed from both
   slop-fork lines; nothing here is merged there and nothing there is read
   from here.
 
 ## Rules of construction
 
-1. **The spec is law.** Every behavior traces to a SPEC.md section. A
-   needed behavior with no section is a spec bug: it goes to
-   `ebp/SPEC-CHANGES.md` as an amendment first (the W-register in the
-   poc-v1 audit seeds this), never silently into code.
+1. **The spec remains the cross-platform contract.** First prove required
+   behavior in implementation and backend contracts against the current spec.
+   Then audit any mismatch: repair the implementation when the spec already
+   covers it, or expand the spec only in language- and platform-agnostic terms.
 2. **Conformance before features.** A rung lands only with its `ebp`
    fixtures green: the wire Goldens (`ebp/goldens/wire/` incl. the §9.3
    known-answer vector), the frame/widget/hypertext corpora, and the §24.6
@@ -42,7 +48,9 @@ reference review and implementation sequence.
 |---|---|
 | `ebp/` | Submodule: the governing spec, contract, goldens, validate.py |
 | `emacs/` | The elisp client, spec-first (`ebp.el` wire core, then modules) |
-| `companion/` | Kotlin app, future `kotlin-ebp` incubator, and Jetpacs KMP core modules |
+| `companion/` | Storage-neutral `:ebp-kmp`, protocol `:wire`, and Jetpacs KMP app/core modules |
 | `test/` | ERT suites; every wire test is driven by `ebp/goldens/` |
+| `docs/PLAN-poc3-rebuild.md` | Cross-platform execution phases and exit gates |
+| `docs/PLATFORM-RENTAL-REGISTER.md` | Built-ins/libraries that POC 3 must rent instead of reimplementing |
 | `docs/REWRITE-PLAN.md` | Rung ladder, gates, port manifest |
 | `docs/ARCHITECTURE-POC3.md` | Local references, module boundaries, Room/Nav/track-changes plan |

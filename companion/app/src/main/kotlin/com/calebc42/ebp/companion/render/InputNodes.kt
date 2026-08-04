@@ -349,13 +349,20 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         }
         return
     }
+    // §17.4 `color`: a §16.6 role recoloring a TEXT button's content — the
+    // node draws its own Text, so no universal attribute could reach it
+    // (the custom-snackbar action's error-vs-normal textButtonColors).
+    val textColors = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
+        ?.let { ButtonDefaults.textButtonColors(contentColor = it) }
     if (shapes != null) {
         // The shapes= overloads carry the press-state morph. They take
         // `shapes` as the SECOND positional parameter, so every argument here
         // is named — positional order differs from the shape= overloads.
         when (variant) {
             "text" -> TextButton(onClick = onClick, shapes = shapes,
-                modifier = mm, enabled = enabled, contentPadding = pad) { content() }
+                modifier = mm, enabled = enabled,
+                colors = textColors ?: ButtonDefaults.textButtonColors(),
+                contentPadding = pad) { content() }
             "outlined" -> OutlinedButton(onClick = onClick, shapes = shapes,
                 modifier = mm, enabled = enabled, contentPadding = pad) { content() }
             "tonal" -> FilledTonalButton(onClick = onClick, shapes = shapes,
@@ -368,7 +375,9 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     } else {
         val shape = if (square) ButtonDefaults.squareShape else ButtonDefaults.shape
         when (variant) {
-            "text" -> TextButton(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }
+            "text" -> TextButton(onClick, mm, enabled, shape = shape,
+                colors = textColors ?: ButtonDefaults.textButtonColors(),
+                contentPadding = pad) { content() }
             "outlined" -> OutlinedButton(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }
             "tonal" -> FilledTonalButton(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }
             "elevated" -> ElevatedButton(onClick, mm, enabled, shape = shape, contentPadding = pad) { content() }

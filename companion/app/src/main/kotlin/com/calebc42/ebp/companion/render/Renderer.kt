@@ -991,11 +991,19 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
             },
             snackbarHost = {
                 SnackbarHost(hostState) { data ->
+                    // §17.6 `snackbar_content`: the authored node replaces the
+                    // whole Snackbar face while the HOST keeps M3's animation,
+                    // timing and dismissal; the plain `snackbar` string stays
+                    // the message and the accessible text, so the author
+                    // repeats it inside the face.
+                    val custom = node.objOrNull("snackbar_content")
                     // §17.6 `snackbar_max_lines`: clamp the VISIBLE message
                     // to the Material-recommended line count; Text semantics
                     // keep the whole string, so a screen reader loses nothing.
                     val cap = node.doubleOr("snackbar_max_lines", 0.0).toInt()
-                    if (cap > 0)
+                    if (custom != null)
+                        RenderNode(custom, ctx.child(custom, 0))
+                    else if (cap > 0)
                         androidx.compose.material3.Snackbar(
                             action = data.visuals.actionLabel?.let { label ->
                                 {

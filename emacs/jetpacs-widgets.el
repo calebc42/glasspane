@@ -1195,7 +1195,7 @@ IconButtonWidthOption.  `uniform' is the default square-ish container;
 (cl-defun jetpacs-button (label on-tap &key icon variant size shape
                                 animate-shape checked on-change expanded
                                 checked-shape shape-role checked-icon
-                                enabled)
+                                color enabled)
   "A button labeled LABEL dispatching ON-TAP (SPEC §17.4).
 ICON a §4.4 identifier; VARIANT filled(default)/tonal/elevated/outlined/text;
 SIZE one of `jetpacs--button-sizes' (omit for the unscaled default);
@@ -1219,7 +1219,10 @@ swap).  SHAPE-ROLE names this toggle's position in a CONNECTED group —
 leading/middle/trailing across, top/bottom down — selecting the M3
 connected shape set with its caps and its press and checked morphs;
 the group itself is a row or column of such toggles (:spacing 2 across,
-:overlap 6 down), with the selection model in your own state."
+:overlap 6 down), with the selection model in your own state.
+
+COLOR is a §16.6 color recoloring a TEXT button\\='s content (needs
+:variant \"text\"); the filled variants keep their role containers."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-tap ":on-tap")
   (when icon (jetpacs--check-identifier icon ":icon"))
@@ -1255,12 +1258,20 @@ the group itself is a row or column of such toggles (:spacing 2 across,
       (error "jetpacs-button: :checked-icon needs :checked (SPEC 17.4)"))
     (jetpacs--check-identifier checked-icon ":checked-icon"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when color
+    ;; §17.4: color recolors a TEXT button's content (the custom-snackbar
+    ;; action's error-vs-normal colors); the filled variants keep their
+    ;; role-derived containers.
+    (unless (equal variant "text")
+      (error "jetpacs-button: :color needs :variant \"text\" (SPEC 17.4)"))
+    (jetpacs--check-color color))
   (jetpacs--node "button" :label label :on_tap on-tap
                  :icon icon :variant variant :size size :shape shape
                  :animate_shape animate-shape
                  :checked checked :on_change on-change
                  :expanded expanded :checked_shape checked-shape
                  :shape_role shape-role :checked_icon checked-icon
+                 :color color
                  :enabled enabled))
 
 (cl-defun jetpacs-icon-button (icon on-tap &key content-description badge
@@ -2557,7 +2568,8 @@ builds the range and re-pushes."
                                  drawer-variant bottom-bar-behavior
                                  fab-position
                                  top-bar-expanded top-bar-collapsed-height
-                                 top-bar-expanded-height top-bar-centered)
+                                 top-bar-expanded-height top-bar-centered
+                                 snackbar-content)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
@@ -2568,7 +2580,11 @@ the ViewModel — replacing the optimistic self-clearing local flag; both
 need ON-REFRESH.  SNACKBAR-DURATION (short, long, indefinite) and
 SNACKBAR-DISMISS (the trailing X, implied by indefinite) shape the
 snackbar's stay; SNACKBAR-MAX-LINES clamps its visible message while a
-screen reader still hears the whole string.
+screen reader still hears the whole string.  SNACKBAR-CONTENT, a Node,
+replaces the whole drawn snackbar face while the host keeps M3's
+animation, timing and dismissal — SNACKBAR stays the message and the
+accessible text, so repeat it inside the face; the face's own buttons
+dispatch ordinary actions.
 
 SHEET is the bottom-sheet slot, a Node.  With SHEET-PEEK-HEIGHT it is
 the PERSISTENT BottomSheetScaffold form, resting at its peek over the
@@ -2629,6 +2645,12 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
     (jetpacs--check-bool snackbar-dismiss ":snackbar-dismiss"))
   (when snackbar-max-lines
     (jetpacs--check-integer snackbar-max-lines ":snackbar-max-lines" 1 nil))
+  (when snackbar-content
+    (unless (jetpacs--root-node-p snackbar-content)
+      (error "jetpacs-scaffold: :snackbar-content must be a node, got %S"
+             snackbar-content))
+    (unless snackbar
+      (error "jetpacs-scaffold: :snackbar-content needs :snackbar — the string stays the message and the accessible text (SPEC 17.6)")))
   (when (and sheet (not (jetpacs--root-node-p sheet)))
     (error "jetpacs-scaffold: :sheet must be a node, got %S" sheet))
   (when sheet-peek-height
@@ -2728,6 +2750,7 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                  :snackbar_duration snackbar-duration
                  :snackbar_dismiss snackbar-dismiss
                  :snackbar_max_lines snackbar-max-lines
+                 :snackbar_content snackbar-content
                  :on_refresh on-refresh
                  :refresh_indicator refresh-indicator
                  :is_refreshing is-refreshing

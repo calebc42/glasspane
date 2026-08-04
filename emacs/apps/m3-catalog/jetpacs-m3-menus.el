@@ -210,7 +210,13 @@ caret, trimmed."
                      jetpacs-m3-menus--auto-text
                      jetpacs-m3-menus--auto-authored
                      jetpacs-m3-menus--auto-caret
-                     (length jetpacs-m3-menus--auto-authored)))))
+                     (length jetpacs-m3-menus--auto-authored))
+               ;; §13.6 protects the user's standing draft from every
+               ;; push; the splice is the author DELIBERATELY replacing
+               ;; it, and reset_input_ids is the one door.
+               (list :reset-input-ids
+                     (list (or (jetpacs-claimed-node-id "menus-multiauto")
+                               "menus-multiauto"))))))
          jetpacs-m3-fn-registry)
 
 (defun jetpacs-m3-menus--multi-autocomplete ()

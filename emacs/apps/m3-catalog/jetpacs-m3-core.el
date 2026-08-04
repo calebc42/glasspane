@@ -907,15 +907,22 @@ no user in front of it."
         'rejected
       ;; A nullary mutation runs as itself; a unary one receives the
       ;; event's injected value (SPEC 14.3) — an option pick's label.
-      (if (zerop (cdr (func-arity fn)))
-          (funcall fn)
-        (funcall fn (plist-get args :value)))
-      (jetpacs-flow-continue
-       (lambda ()
-         (condition-case err
-             (jetpacs-shell-push (or surface jetpacs-m3-owner))
-           (error (message "jetpacs-m3: fn refresh failed: %s"
-                           (jetpacs--error-label err))))))
+      ;; A mutation that RETURNS a plist (car is a keyword) hands extra
+      ;; arguments to the re-push: the completion splice returns
+      ;; (:reset-input-ids ...) so the author's value replaces the
+      ;; user's standing draft, which §13.6 otherwise protects.
+      (let ((push-args (if (zerop (cdr (func-arity fn)))
+                           (funcall fn)
+                         (funcall fn (plist-get args :value)))))
+        (unless (and (consp push-args) (keywordp (car push-args)))
+          (setq push-args nil))
+        (jetpacs-flow-continue
+         (lambda ()
+           (condition-case err
+               (apply #'jetpacs-shell-push (or surface jetpacs-m3-owner)
+                      push-args)
+             (error (message "jetpacs-m3: fn refresh failed: %s"
+                             (jetpacs--error-label err)))))))
       'accepted)))
 
 (defun jetpacs-m3--on-dialog (args params)
@@ -984,15 +991,23 @@ re-push through `jetpacs-flow-continue', never block.")
        (error (message "jetpacs-m3: window refresh failed: %s"
                        (jetpacs--error-label err)))))))
 
+(defun jetpacs-m3--on-ready (client)
+  "Attach the catalog's client hooks when the connection comes up.
+`jetpacs-m3-register' runs at LOAD, before any client exists, so the
+hooks must attach at READY — the register-time attach only covers a
+re-register on an already-live session.  Both are `cl-pushnew', so
+running twice is harmless."
+  (cl-pushnew #'jetpacs-m3--on-window-changed
+              (ebp-client-window-changed-functions client))
+  (cl-pushnew #'jetpacs-m3--on-state-changed
+              (ebp-client-state-changed-functions client)))
+
 (defun jetpacs-m3-register ()
   "Register the catalog's owner, verbs and root screen.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
 stack to Home, which is the documented live-reload path."
   (when (jetpacs-connected-p)
-    (cl-pushnew #'jetpacs-m3--on-window-changed
-                (ebp-client-window-changed-functions (jetpacs-client)))
-    (cl-pushnew #'jetpacs-m3--on-state-changed
-                (ebp-client-state-changed-functions (jetpacs-client))))
+    (jetpacs-m3--on-ready (jetpacs-client)))
   (with-jetpacs-owner jetpacs-m3-owner
     (jetpacs-defaction "m3catalog.open" #'jetpacs-m3--on-open)
     (jetpacs-defaction "m3catalog.example" #'jetpacs-m3--on-example)

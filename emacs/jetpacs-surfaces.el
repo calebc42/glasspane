@@ -489,7 +489,9 @@ frame synchronously, which is what makes that ordering true."
   (when (fboundp 'jetpacs-shell--on-ready)
     (push #'jetpacs-shell--on-ready (ebp-client-ready-functions client)))
   (when (fboundp 'jetpacs-theme--on-ready)
-    (push #'jetpacs-theme--on-ready (ebp-client-ready-functions client))))
+    (push #'jetpacs-theme--on-ready (ebp-client-ready-functions client)))
+  (when (fboundp 'jetpacs-m3--on-ready)
+    (push #'jetpacs-m3--on-ready (ebp-client-ready-functions client))))
 
 ;;;; Actions (the SPEC 14 shim over `ebp-client-register-action')
 

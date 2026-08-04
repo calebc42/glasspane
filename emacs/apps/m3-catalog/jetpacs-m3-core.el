@@ -179,12 +179,17 @@ sample would need; the example then drills into \"Not supported\"."
     (jetpacs--require-string top-bar-subtitle ":top-bar-subtitle"))
   (when scroll-behavior (jetpacs--require-string scroll-behavior ":scroll-behavior"))
   ;; The guard covers BOTH doors: the sugar keyword and the generic plist.
+  ;; A FUNCTION-valued scaffold (live sample state read at build time)
+  ;; cannot be inspected here; its members are validated by
+  ;; `jetpacs-scaffold' on every build instead.
   (when (and (or floating-toolbar-orientation
-                 (plist-member scaffold :floating-toolbar-orientation))
+                 (and (listp scaffold)
+                      (plist-member scaffold :floating-toolbar-orientation)))
              (not (plist-member slots :floating-toolbar)))
     (error "jetpacs-m3: example %S styles a floating toolbar it does not author"
            name))
-  (when (and (or top-bar-style (plist-member scaffold :top-bar-style))
+  (when (and (or top-bar-style
+                 (and (listp scaffold) (plist-member scaffold :top-bar-style)))
              (not top-bar))
     (error "jetpacs-m3: example %S styles a top bar it does not author" name))
   (list :name name :description description :source source
@@ -197,11 +202,23 @@ sample would need; the example then drills into \"Not supported\"."
         ;; `floating-toolbar-expanded' has a meaningful false.
         ;; One plist reaches the scaffold.  The named keywords fold in
         ;; here, so the screen builder has a single thing to forward and a
-        ;; future §17.6 member needs no change in this file at all.
+        ;; future §17.6 member needs no change in this file at all.  A
+        ;; FUNCTION-valued scaffold (live sample state, resolved at build
+        ;; time) is stored as-is and cannot mix with the sugar keywords.
         :scaffold
-        (append
-         scaffold
-         (when top-bar-style (list :top-bar-style top-bar-style))
+        (if (functionp scaffold)
+            (progn
+              (when (or top-bar-style top-bar-subtitle scroll-behavior
+                        floating-toolbar-orientation floating-toolbar-expanded
+                        floating-toolbar-placement floating-toolbar-fab
+                        floating-toolbar-scroll
+                        floating-toolbar-exit-direction)
+                (error "jetpacs-m3: example %S mixes a function :scaffold with sugar keywords"
+                       name))
+              scaffold)
+          (append
+           scaffold
+           (when top-bar-style (list :top-bar-style top-bar-style))
          (when top-bar-subtitle (list :top-bar-subtitle top-bar-subtitle))
          (when scroll-behavior (list :scroll-behavior scroll-behavior))
          (when floating-toolbar-orientation
@@ -216,8 +233,9 @@ sample would need; the example then drills into \"Not supported\"."
            (list :floating-toolbar-fab floating-toolbar-fab))
          (when floating-toolbar-scroll
            (list :floating-toolbar-scroll floating-toolbar-scroll))
-         (when floating-toolbar-exit-direction
-           (list :floating-toolbar-exit-direction floating-toolbar-exit-direction)))
+           (when floating-toolbar-exit-direction
+             (list :floating-toolbar-exit-direction
+                   floating-toolbar-exit-direction))))
         :unsupported unsupported))
 
 (cl-defun jetpacs-m3-defcomponent (id &key name description guidelines docs
@@ -292,6 +310,33 @@ never the catalog: the injection tested the ROOT spec\='s `:t\=', and a
 `jetpacs-chrome\=' app is a `multi_view\=' whose VIEWS are the scaffolds,
 so no chrome app in the product ever found its own slot."
   (jetpacs-action "m3catalog.demo" :args (list :message message)))
+
+(defvar jetpacs-m3--flags (make-hash-table :test #'equal)
+  "Sample flag KEY -> boolean, flipped by the m3catalog.flag verb.
+The catalog's one piece of LIVE sample state: a sample whose upstream
+handler writes a remembered boolean (show the sheet, start refreshing)
+authors `jetpacs-m3-flag-action' on the affordance and reads
+`jetpacs-m3-flag' in its builder — the verb flips and re-pushes, so the
+flow is the real Emacs-owns-the-model round trip, not a demo toast.")
+
+(defun jetpacs-m3-flag (key)
+  "The current value of sample flag KEY (nil until first flipped)."
+  (gethash key jetpacs-m3--flags))
+
+(defun jetpacs-m3-flag-action (key)
+  "A descriptor flipping sample flag KEY and re-rendering the surface."
+  (jetpacs-action "m3catalog.flag" :args (list :key key)))
+
+(defvar jetpacs-m3-dialog-registry (make-hash-table :test #'equal)
+  "Dialog KEY -> nullary builder returning a SPEC §18.1 dialog spec.
+A sample whose subject is a MODAL DIALOG registers its spec here and
+authors `jetpacs-m3-dialog-action' on the affordance; the verb raises
+it through `ebp-client-dialog-show' outside the dispatch extent, which
+is the one legal door to an Emacs-raised dialog.")
+
+(defun jetpacs-m3-dialog-action (key)
+  "A descriptor raising the registered dialog KEY."
+  (jetpacs-action "m3catalog.dialog" :args (list :key key)))
 
 (defun jetpacs-m3--open (id)
   (jetpacs-action "m3catalog.open" :args (list :component id)))
@@ -534,6 +579,11 @@ instead, because a Node tree cannot nest a scaffold."
                                        (plist-get component :guidelines)
                                        (plist-get component :docs)
                                        (plist-get example :source)))
+         ;; A function-valued :scaffold reads live sample state (flags)
+         ;; at BUILD time, which is what lets a verb-driven re-push move
+         ;; a sheet or a spinner authored in the screen's own chrome.
+         (extra-scaffold (let ((s (plist-get example :scaffold)))
+                           (if (functionp s) (funcall s) s)))
          (top-bar (plist-get example :top-bar))
          (body (jetpacs-with-attrs
                 (jetpacs-column (jetpacs-m3--example-body example)
@@ -549,10 +599,10 @@ instead, because a Node tree cannot nest a scaffold."
                ;; §17.6 top-bar members ride the same scaffold; nil values are
                ;; dropped by `jetpacs--node', so an unstyled example is
                ;; byte-identical to before.
-               (append (plist-get example :scaffold) slots))
+               (append extra-scaffold slots))
       (apply #'jetpacs-chrome-screen (plist-get example :name) body
              :back back :actions actions
-             :scaffold (plist-get example :scaffold)
+             :scaffold extra-scaffold
              slots))))
 
 ;;;; Theme
@@ -732,6 +782,47 @@ no user in front of it."
       (jetpacs-shell-notify text (plist-get params :surface))
       'accepted)))
 
+(defun jetpacs-m3--on-flag (args params)
+  "Flip a sample flag and re-render — the live-sample-state verb."
+  (let ((key (plist-get args :key))
+        (surface (plist-get params :surface)))
+    (if (not (stringp key))
+        'rejected
+      (puthash key (not (gethash key jetpacs-m3--flags)) jetpacs-m3--flags)
+      (jetpacs-flow-continue
+       (lambda ()
+         (condition-case err
+             (jetpacs-shell-push (or surface jetpacs-m3-owner))
+           (error (message "jetpacs-m3: flag refresh failed: %s"
+                           (jetpacs--error-label err))))))
+      'accepted)))
+
+(defun jetpacs-m3--on-dialog (args params)
+  "Raise a registered §18.1 dialog (upstream's openDialog flow).
+The raise happens through `jetpacs-flow-continue' because a dialog MUST
+be raised outside the dispatch extent; the conclusion reports as a
+snackbar, which is where upstream's onDismissRequest writes too."
+  (let* ((key (plist-get args :key))
+         (builder (and (stringp key)
+                       (gethash key jetpacs-m3-dialog-registry)))
+         (surface (plist-get params :surface)))
+    (if (null builder)
+        'rejected
+      (jetpacs-flow-continue
+       (lambda ()
+         (condition-case err
+             (ebp-client-dialog-show
+              (jetpacs-client-or-error)
+              (concat "m3dlg-" key)
+              (funcall builder)
+              :callback (lambda (status _result _error)
+                          (jetpacs-shell-notify
+                           (format "Dialog %s" (or status "cancelled"))
+                           surface)))
+           (error (message "jetpacs-m3: dialog %s failed: %s" key
+                           (jetpacs--error-label err))))))
+      'accepted)))
+
 (defun jetpacs-m3--on-home (_args params)
   "Return to Home (the drawer's home row)."
   (let ((surface (plist-get params :surface)))
@@ -751,6 +842,8 @@ stack to Home, which is the documented live-reload path."
     (jetpacs-defaction "m3catalog.pref" #'jetpacs-m3--on-pref)
     (jetpacs-defaction "m3catalog.pin" #'jetpacs-m3--on-pin)
     (jetpacs-defaction "m3catalog.demo" #'jetpacs-m3--on-demo)
+    (jetpacs-defaction "m3catalog.flag" #'jetpacs-m3--on-flag)
+    (jetpacs-defaction "m3catalog.dialog" #'jetpacs-m3--on-dialog)
     (jetpacs-defaction "m3catalog.home" #'jetpacs-m3--on-home)
     (jetpacs-chrome-define-root jetpacs-m3-owner "home"
                                 #'jetpacs-m3-home-screen)))
@@ -759,7 +852,7 @@ stack to Home, which is the documented live-reload path."
   "Deregister the catalog verbs and its chrome root."
   (dolist (verb '("m3catalog.open" "m3catalog.example" "m3catalog.theme"
                   "m3catalog.pref" "m3catalog.pin" "m3catalog.demo"
-                  "m3catalog.home"))
+                  "m3catalog.flag" "m3catalog.dialog" "m3catalog.home"))
     (jetpacs-undefaction verb))
   (jetpacs-chrome-remove jetpacs-m3-owner))
 

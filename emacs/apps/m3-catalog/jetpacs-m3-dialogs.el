@@ -8,30 +8,31 @@
 ;; Upstream: Components.kt `Dialogs' + Examples.kt
 ;; `DialogExamples' (3 examples), samples/AlertDialogSamples.kt.
 ;;
-;; All three samples are one shape: an "Open dialog" Button, and a modal
-;; raised over the whole app while `openDialog' is true.  The wire has no
-;; node for that.  `jetpacs-app-node-types' advertises 39 node types and
-;; none of them is a dialog, and M3-COMPONENT-LOOKUP.org lists
-;; AlertDialog as wrapped with wire type `N/A (dialog chrome)' behind
-;; `ebp-client-dialog-show' -- a SPEC 18.1 `dialog.show' REQUEST that
-;; Emacs sends with its own SurfaceSpec, concluded by the `dialog.submit'
-;; and `dialog.dismiss' builtins.  A sample builder returns ONE node for
-;; the screen body; it cannot make a request, and `jetpacs-m3-slot-keys'
-;; (fab, bottom-bar, drawer, floating-toolbar, on-refresh, snackbar) has
-;; no dialog slot for it to claim either.  So this component is
-;; unsupported end to end.
+;; All three recreate, by two different doors.
 ;;
-;; The temptation to resist: `confirm' on a SPEC 14.1 action descriptor
-;; IS a real M3 AlertDialog raised declaratively from the node tree --
-;; ConfirmHost in MainActivity.kt draws one.  But it carries a single
-;; prompt string, and the Companion fixes everything else: no title slot,
-;; no icon slot, and TextButtons reading "OK" and "Cancel" rather than
-;; this sample's "Confirm" and "Dismiss".  Of the four content slots
-;; AlertDialogSample exists to show it can carry one, and it would draw
-;; AlertDialogSample and AlertDialogWithIconSample identically, the icon
-;; being the only thing that separates them upstream.  That is a
-;; lookalike, not a recreation, so it is not here -- but each reason
-;; names it, because a reader deserves to know how near the wire gets.
+;; The two AlertDialog samples ride the §14.1 `confirm' OBJECT: their
+;; whole upstream flow is a Button whose tap raises an AlertDialog with
+;; a title, supporting text, an optional icon and Confirm/Dismiss
+;; actions — and that is precisely what a confirm-gated descriptor IS.
+;; The Companion parks the dispatch behind the authored face; Confirm
+;; releases it (the demo verb reports), Dismiss and the scrim drop it.
+;; No lookalike is drawn: the dialog is the ConfirmHost's own real
+;; AlertDialog.
+;;
+;; BasicAlertDialogSample is the OTHER door: its subject is the
+;; CALLER-supplied container — Surface(shape, tonalElevation) — inside
+;; the bare dialog window, so it must be a §18.1 dialog spec, and
+;; `surface' joined the dialog profile for exactly this.  The spec is
+;; registered in `jetpacs-m3-dialog-registry' and the button's verb
+;; raises it through `ebp-client-dialog-show' outside the dispatch
+;; extent; its Confirm is `jetpacs-dialog-dismiss', as upstream's
+;; onClick is onDismissRequest.
+;;
+;; One seam stated: upstream opens each dialog from `openDialog'
+;; remember initialized TRUE, so the dialog is up on entry.  Here every
+;; dialog opens from its button — a modal cannot be authored open by a
+;; snapshot, which is §18.1's own design (dialogs are REQUESTS, not
+;; tree state).
 
 ;;; Code:
 
@@ -40,20 +41,62 @@
 
 (defconst jetpacs-m3-dialogs--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/AlertDialogSamples.kt"
-  "Upstream DialogExampleSourceUrl.")
+  "Upstream DialogsExampleSourceUrl.")
 
-(defconst jetpacs-m3-dialogs--no-node-note
-  "There is no dialog node type: the app profile advertises 39 and none of them is a dialog, and M3-COMPONENT-LOOKUP records AlertDialog as dialog chrome behind ebp-client-dialog-show rather than as a wire type."
-  "The sentence every AlertDialog sample fails on first.")
+(defconst jetpacs-m3-dialogs--icon-text
+  "This area typically contains the supporting text which presents the details regarding the Dialog's purpose."
+  "The supporting text the icon dialog and the basic dialog share.")
 
-(defun jetpacs-m3-dialogs--note (tail)
-  "The Dialogs unsupported reason: the shared first sentence, then TAIL."
-  (concat jetpacs-m3-dialogs--no-node-note " " tail))
+(defun jetpacs-m3-dialogs--alert ()
+  "Upstream AlertDialogSample: the confirm-gated button.
+Title \"Title\", text \"Turned on by default\", Confirm and Dismiss —
+each a member of the confirm object, drawn by the ConfirmHost's real
+AlertDialog."
+  (jetpacs-with-attrs
+   (jetpacs-button "Open dialog"
+                   (jetpacs-action "m3catalog.demo"
+                                   :args (list :message "Confirmed")
+                                   :confirm (list :title "Title"
+                                                  :text "Turned on by default"
+                                                  :confirm-label "Confirm"
+                                                  :dismiss-label "Dismiss")))
+   :align_self "center"))
+
+(defun jetpacs-m3-dialogs--alert-with-icon ()
+  "Upstream AlertDialogWithIconSample: the same gate wearing an icon.
+Icons.Filled.Favorite above a centered title — the icon member; the
+wire name resolves through IconMap as every icon does."
+  (jetpacs-with-attrs
+   (jetpacs-button "Open dialog"
+                   (jetpacs-action "m3catalog.demo"
+                                   :args (list :message "Confirmed")
+                                   :confirm (list :icon "favorite"
+                                                  :title "Title"
+                                                  :text jetpacs-m3-dialogs--icon-text
+                                                  :confirm-label "Confirm"
+                                                  :dismiss-label "Dismiss")))
+   :align_self "center"))
+
+(defun jetpacs-m3-dialogs--basic-spec ()
+  "Upstream BasicAlertDialogSample's caller-supplied content.
+A Surface (the dialog profile's one shaped, elevated container) holding
+the supporting text and a Confirm that dismisses — upstream's onClick
+IS onDismissRequest."
+  (jetpacs-surface
+   (jetpacs-with-attrs
+    (jetpacs-column
+     (jetpacs-text jetpacs-m3-dialogs--icon-text)
+     (jetpacs-with-attrs
+      (jetpacs-button "Confirm" (jetpacs-dialog-dismiss) :variant "text")
+      :align_self "end")
+     :spacing 24)
+    :padding 16)
+   :shape "rounded" :elevation 6))
 
 (jetpacs-m3-defcomponent "dialogs"
   :name "Dialogs"
   :description
-  "Dialogs provide important prompts in a user flow. They can require an action, communicate information, or help users accomplish a task."
+  "Dialogs provide important prompts in a user flow."
   :guidelines "https://m3.material.io/components/dialogs"
   :docs "https://developer.android.com/reference/kotlin/androidx/compose/material3/package-summary#alertdialog"
   :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/AlertDialog.kt"
@@ -63,22 +106,23 @@
     "AlertDialogSample"
     "Dialog examples"
     :source jetpacs-m3-dialogs--source
-    :unsupported
-    (jetpacs-m3-dialogs--note
-     "The nearest thing a node tree can raise is confirm on a SPEC 14.1 action descriptor, which is one prompt string the Companion draws with fixed OK and Cancel buttons, so of the four slots this sample fills only text survives: the title \"Title\" and the \"Confirm\" and \"Dismiss\" button labels have no member to carry them."))
+    :build #'jetpacs-m3-dialogs--alert)
    (jetpacs-m3-example
     "AlertDialogWithIconSample"
     "Dialog examples"
     :source jetpacs-m3-dialogs--source
-    :unsupported
-    (jetpacs-m3-dialogs--note
-     "This sample differs from AlertDialogSample by exactly one thing, the AlertDialog icon slot holding Icons.Filled.Favorite, and the SPEC 14.1 confirm prompt that stands nearest to a dialog is a bare string with no icon member and no title member at all."))
+    :build #'jetpacs-m3-dialogs--alert-with-icon)
    (jetpacs-m3-example
     "BasicAlertDialogSample"
     "Dialog examples"
     :source jetpacs-m3-dialogs--source
-    :unsupported
-    "BasicAlertDialog is the unstyled dialog window whose whole content the caller supplies, and on the wire that is the SPEC 18.1 dialog.show request Emacs sends with its own SurfaceSpec, not a node type: a sample builder returns one node for the screen body, and jetpacs-m3-slot-keys has no dialog slot to claim, so nothing in the node vocabulary can put this Surface, its tonal elevation and its trailing Confirm TextButton on screen.")
+    :build (lambda ()
+             (puthash "basic" #'jetpacs-m3-dialogs--basic-spec
+                      jetpacs-m3-dialog-registry)
+             (jetpacs-with-attrs
+              (jetpacs-button "Open dialog"
+                              (jetpacs-m3-dialog-action "basic"))
+              :align_self "center")))
    ))
 
 (provide 'jetpacs-m3-dialogs)

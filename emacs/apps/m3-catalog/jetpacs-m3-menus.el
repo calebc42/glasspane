@@ -10,11 +10,18 @@
 ;; samples/ExposedDropdownMenuSamples.kt.
 ;;
 ;; The `menu' node is the whole of DropdownMenu on the wire: an anchor
-;; icon, a flat list of MenuItem {label, on_tap, icon, enabled}, and
-;; `initial_scroll'.  Two samples are exactly that.  `MenuSample' is an
-;; icon button that opens a list of labelled, leading-icon rows.
-;; `MenuWithScrollStateSample' is thirty such rows opened at their end,
-;; which is the whole visible result of the scroll state it hoists.
+;; icon, MenuItems {label, on_tap, icon, enabled, supporting_text,
+;; trailing_icon, checked, checked_icon} — flat under `items' or
+;; sectioned under `groups' — an optional `footer' node inside the
+;; popup, and `initial_scroll'.  Two samples are the flat form.
+;; `MenuSample' is an icon button that opens a list of labelled,
+;; leading-icon rows.  `MenuWithScrollStateSample' is thirty such rows
+;; opened at their end, which is the whole visible result of the scroll
+;; state it hoists.  `GroupedMenuSample' is the grouped form live on
+;; sample flags: checked is authored presentation state, so each toggle
+;; round-trips through Emacs, and the footer button row appears only
+;; while the last item is checked — see the builder's own docstring for
+;; the one icon seam.
 ;;
 ;; The `dropdown' node — the 45th type — is ExposedDropdownMenu on the
 ;; wire: the popup anchored to a FIELD, which this `menu' node (popup
@@ -24,12 +31,10 @@
 ;; subsequence-matches, and the matched letters are not underlined —
 ;; option labels are plain strings, not spans.
 ;;
-;; Two remain out.  GroupedMenuSample wants more of DropdownMenu than
-;; the item record holds: groups with labels and shapes, supporting
-;; text, a checked state, trailing content.  MultiAutocomplete completes
-;; the comma-separated token AROUND THE CARET, and no wire message
-;; reports a text_input's caret back to Emacs — the write-side
-;; `selection' member seeds it, but the read side is the missing half.
+;; One remains out.  MultiAutocomplete completes the comma-separated
+;; token AROUND THE CARET, and no wire message reports a text_input's
+;; caret back to Emacs — the write-side `selection' member seeds it,
+;; but the read side is the missing half.
 
 ;;; Code:
 
@@ -81,6 +86,56 @@ the wire can neither read it nor drive it."
    :icon "more_vert"
    :initial-scroll "end"))
 
+(defun jetpacs-m3-menus--grouped-item (flag label &rest opts)
+  "A checkable MenuItem bound to sample FLAG: checked reads it, tap flips it."
+  (apply #'jetpacs-menu-item label (jetpacs-m3-flag-action flag)
+         :checked (if (jetpacs-m3-flag flag) t :json-false)
+         opts))
+
+(defun jetpacs-m3-menus--grouped ()
+  "Upstream GroupedMenuSample: two labeled groups of checkable items over
+dividers, and a footer button row that exists only while the last item
+is checked.  Every checked flip is a REAL round trip: the tap flips a
+sample flag in Emacs and the next snapshot re-authors checked and the
+conditional footer — exactly the authored-presentation-state contract.
+Seam: upstream swaps outlined icons for their Filled variants when
+checked; the icon vocabulary has one spelling per name, so Home takes
+the literal upstream Filled.Check via :checked-icon and the rest keep
+their icon."
+  (jetpacs-menu
+   nil
+   :groups
+   (list
+    (jetpacs-menu-group
+     "Modification"
+     (list
+      (jetpacs-m3-menus--grouped-item
+       "menus-grouped-edit" "Edit"
+       :icon "edit" :checked-icon "edit" :supporting-text "Edit mode")
+      (jetpacs-m3-menus--grouped-item
+       "menus-grouped-settings" "Settings"
+       :icon "settings" :checked-icon "settings")))
+    (jetpacs-menu-group
+     "Navigation"
+     (list
+      (jetpacs-m3-menus--grouped-item
+       "menus-grouped-home" "Home"
+       :checked-icon "check" :trailing-icon "home")
+      (jetpacs-m3-menus--grouped-item
+       "menus-grouped-more" "More Options"
+       :icon "info" :checked-icon "info" :trailing-icon "more_vert"
+       :supporting-text "Opens menu"))))
+   :footer
+   (when (jetpacs-m3-flag "menus-grouped-more")
+     (jetpacs-row
+      (jetpacs-icon-button "thumb_up" (jetpacs-m3-demo "Thumbs up")
+                           :variant "filled")
+      (jetpacs-icon-button "thumb_down" (jetpacs-m3-demo "Thumbs down")
+                           :variant "filled")
+      (jetpacs-icon-button "tag_faces" (jetpacs-m3-demo "Emotes")
+                           :variant "filled")
+      :spacing 8))))
+
 (jetpacs-m3-defcomponent "menus"
   :name "Menus"
   :description
@@ -100,8 +155,7 @@ the wire can neither read it nor drive it."
     "Menus examples"
     :source jetpacs-m3-menus--source
     :expressive t
-    :unsupported
-    "A MenuItem on the wire is {label, on_tap, icon, enabled} and the menu node has a flat items array: DropdownMenuGroup with its MenuDefaults.groupShape, the per-item supportingText, the checked state with its checkedLeadingIcon, and the trailing icons this sample toggles have no members to be sent in.")
+    :build #'jetpacs-m3-menus--grouped)
    (jetpacs-m3-example
     "MenuWithScrollStateSample"
     "Menus examples"

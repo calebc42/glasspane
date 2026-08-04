@@ -12,10 +12,12 @@
 > floating-toolbar complete 8/8) and rewrote adaptive's levitated-sheet
 > reason around its true remaining gap. The 15 that remain, all with
 > audited-true reasons: adaptive ×5 (pane strategies/navigators),
-> pull-to-refresh ×2 (G-74), tabs two-stiffness pair ×2, top-app-bar
-> behavior-argument pair ×2, lists SingleSelection radio rows ×2,
-> menus MultiAutocomplete (G-51), carousel Fading alpha,
-> floating-toolbar scroll-driven collapse. Every gate green: 40 slugs
+> pull-to-refresh ×3 (G-74 + the indicator slot), tabs two-stiffness
+> pair ×2, top-app-bar behavior-argument pair ×2, menus
+> MultiAutocomplete (G-51), carousel Fading alpha, floating-toolbar
+> scroll-driven collapse. (The lists radio rows this note first
+> claimed were already live on the enum_list radio variant — the
+> registry, not the note, is the count.) Every gate green: 40 slugs
 > m3-check, widgets 68/68, catalog 14/14, theme 22/22, gradle compile +
 > :wire:jvmTest, ebp validate (43 frames, 100 widget lines).
 >

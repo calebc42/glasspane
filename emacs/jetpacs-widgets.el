@@ -772,14 +772,17 @@ a §16.6 color; CHILDREN a list of nodes the badge annotates."
   "A horizontal row of child nodes (SPEC §17.3).
 Trailing options: :spacing (dp), :align (top/center/bottom/baseline),
 :arrange (start/center/end/space_between/space_around/space_evenly),
-:scroll, :fill (booleans t or :json-false), and :overlap -- a POSITIVE
+:scroll, :fill (booleans t or :json-false), :overlap -- a POSITIVE
 dp by which the children interlock (spacing stays non-negative under
 SPEC 16.5; overlap is the one door to a negative arrangement, and the
-two are mutually exclusive)."
+two are mutually exclusive) -- and :content-padding, a dp drawn INSIDE
+the scroll viewport so the content scrolls under it (needs :scroll;
+a static row wants universal padding instead)."
   (let* ((split (jetpacs--children-and-opts args "row"))
          (opts (cdr split))
          (spacing (plist-get opts :spacing))
          (overlap (plist-get opts :overlap))
+         (content-padding (plist-get opts :content-padding))
          (align (plist-get opts :align))
          (arrange (plist-get opts :arrange))
          (scroll (plist-get opts :scroll))
@@ -789,13 +792,19 @@ two are mutually exclusive)."
       (jetpacs--check-number overlap ":overlap" 0 nil)
       (when spacing
         (error "jetpacs-row: :overlap and :spacing are mutually exclusive (SPEC 17.3)")))
+    (when content-padding
+      (jetpacs--check-number content-padding ":content-padding" 0 nil)
+      (unless scroll
+        (error "jetpacs-row: :content-padding needs :scroll (SPEC 17.3) — use universal padding on a static row")))
     (when align (setq align (jetpacs--check-enum align jetpacs--row-aligns ":align")))
     (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
     (when scroll (jetpacs--check-bool scroll ":scroll"))
     (when fill (jetpacs--check-bool fill ":fill"))
     (jetpacs--node "row"
                    :children (jetpacs--as-children (car split))
-                   :spacing spacing :overlap overlap :align align :arrange arrange
+                   :spacing spacing :overlap overlap
+                   :content_padding content-padding
+                   :align align :arrange arrange
                    :scroll scroll :fill fill)))
 
 (defun jetpacs-column (&rest args)

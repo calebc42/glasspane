@@ -179,8 +179,14 @@ private fun verticalArrange(node: JsonObject): Arrangement.Vertical =
 internal fun RenderRow(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val scroll = node.boolOr("scroll")
     val fill = node.boolOr("fill")
+    // §17.3 `content_padding`: INSIDE the scroll viewport (after
+    // horizontalScroll in the chain), so the content scrolls under it —
+    // upstream LazyRow's contentPadding, which the universal `padding`
+    // (applied before the scroll) cannot express.
+    val contentPad = (safeDp(node.doubleOr("content_padding", 0.0)) ?: 0f).dp
     val mod = when {
         scroll -> m.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .let { if (contentPad > 0.dp) it.padding(horizontal = contentPad) else it }
         fill -> m.fillMaxWidth()
         else -> m
     }

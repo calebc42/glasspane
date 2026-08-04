@@ -38,7 +38,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "empty_state" to NodeRow(setOf(), setOf("icon", "title", "caption", "action_label", "on_tap")),
     "progress" to NodeRow(setOf(), setOf("variant", "value")),
     "badge" to NodeRow(setOf("label"), setOf("icon", "color", "children")),
-    "row" to NodeRow(setOf("children"), setOf("spacing", "align", "arrange", "scroll", "fill", "overlap")),
+    "row" to NodeRow(setOf("children"), setOf("spacing", "align", "arrange", "scroll", "fill", "overlap", "content_padding")),
     "column" to NodeRow(setOf("children"), setOf("spacing", "align", "arrange", "scroll", "fill", "reverse_scroll", "overlap")),
     "flow_row" to NodeRow(setOf("children"), setOf("spacing", "run_spacing", "align", "arrange")),
     "box" to NodeRow(setOf("children"), setOf("alignment", "on_tap", "on_long_tap")),

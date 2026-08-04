@@ -40,7 +40,7 @@
     ("empty_state" () ("action_label" "caption" "icon" "on_tap" "title"))
     ("progress" () ("value" "variant"))
     ("badge" ("label") ("children" "color" "icon"))
-    ("row" ("children") ("align" "arrange" "fill" "overlap" "scroll" "spacing"))
+    ("row" ("children") ("align" "arrange" "content_padding" "fill" "overlap" "scroll" "spacing"))
     ("column" ("children") ("align" "arrange" "fill" "overlap" "reverse_scroll" "scroll" "spacing"))
     ("flow_row" ("children") ("align" "arrange" "run_spacing" "spacing"))
     ("box" ("children") ("alignment" "on_long_tap" "on_tap"))

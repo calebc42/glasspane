@@ -755,7 +755,17 @@ a §16.6 color; CHILDREN a list of nodes the badge annotates."
 (defconst jetpacs--box-alignments
   '("top_start" "top_center" "top_end" "center_start" "center" "center_end"
     "bottom_start" "bottom_center" "bottom_end"))
-(defconst jetpacs--surface-shapes '("rounded" "rounded_small" "circle"))
+(defconst jetpacs--surface-shapes
+  '("rounded" "rounded_small" "circle"
+    ;; The M3 MaterialShapes polygon vocabulary — one wire name per
+    ;; polygon, resolved on the Companion so bg/clip/border honor it.
+    "square" "slanted" "arch" "fan" "arrow" "semi_circle" "oval" "pill"
+    "triangle" "diamond" "clam_shell" "pentagon" "gem" "sunny"
+    "very_sunny" "cookie_4_sided" "cookie_6_sided" "cookie_7_sided"
+    "cookie_9_sided" "cookie_12_sided" "ghostish" "clover_4_leaf"
+    "clover_8_leaf" "burst" "soft_burst" "boom" "soft_boom" "flower"
+    "puffy" "puffy_diamond" "pixel_circle" "pixel_triangle" "bun"
+    "heart"))
 (defconst jetpacs--table-aligns '("start" "center" "end"))
 
 (defun jetpacs-row (&rest args)
@@ -840,7 +850,9 @@ Trailing options: :alignment (top_start..bottom_end), :on-tap."
 
 (defun jetpacs-surface (&rest args)
   "A visual surface container (SPEC §17.3; distinct from a protocol Surface).
-Options: :color, :shape (rounded/rounded_small/circle), :elevation (a
+Options: :color, :shape (rounded/rounded_small/circle, or any name from
+the M3 MaterialShapes polygon vocabulary in `jetpacs--surface-shapes' --
+arch, sunny, ghostish, heart, ...), :elevation (a
 dp of TONAL elevation) and :shadow-elevation (a dp of the cast shadow).
 They are different things: M3 spends `elevation' on tonalElevation, which
 recolors nothing unless the container is the surface role, so a floating

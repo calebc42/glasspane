@@ -71,7 +71,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LeadingIconTab
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.toShape
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.PrimaryScrollableTabRow
@@ -118,6 +120,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -262,11 +265,14 @@ internal fun RenderSurfaceNode(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val color = resolveColor(node.stringOr("color").takeIf { it.isNotEmpty() })
         ?: MaterialTheme.colorScheme.surface
     // §16.5: a numeric universal corner overrides shape, except circle.
-    val base = when (node.stringOr("shape")) {
+    // Beyond the three classics, `shape` accepts the M3 MaterialShapes
+    // polygon vocabulary — resolved here so bg/clip/border honor it; an
+    // unknown name stays rectangular per §12 rule 6.
+    val base = when (val s = node.stringOr("shape")) {
         "rounded" -> RoundedCornerShape(8.dp)
         "rounded_small" -> RoundedCornerShape(4.dp)
         "circle" -> CircleShape
-        else -> RectangleShape
+        else -> materialShapeOf(s) ?: RectangleShape
     }
     val shape = if ("corner" in node && base != CircleShape)
         cornerShape(node) else base
@@ -1135,3 +1141,46 @@ internal fun RenderLazyGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         }
     }
 }
+
+/** §17.3 `surface.shape`: the M3 MaterialShapes polygon vocabulary, one
+ * wire name per polygon, resolved to a Shape so the surface's own clip
+ * carries it (upstream clips a bare Spacer the same way). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun materialShapeOf(name: String): Shape? = when (name) {
+        "square" -> MaterialShapes.Square
+        "slanted" -> MaterialShapes.Slanted
+        "arch" -> MaterialShapes.Arch
+        "fan" -> MaterialShapes.Fan
+        "arrow" -> MaterialShapes.Arrow
+        "semi_circle" -> MaterialShapes.SemiCircle
+        "oval" -> MaterialShapes.Oval
+        "pill" -> MaterialShapes.Pill
+        "triangle" -> MaterialShapes.Triangle
+        "diamond" -> MaterialShapes.Diamond
+        "clam_shell" -> MaterialShapes.ClamShell
+        "pentagon" -> MaterialShapes.Pentagon
+        "gem" -> MaterialShapes.Gem
+        "sunny" -> MaterialShapes.Sunny
+        "very_sunny" -> MaterialShapes.VerySunny
+        "cookie_4_sided" -> MaterialShapes.Cookie4Sided
+        "cookie_6_sided" -> MaterialShapes.Cookie6Sided
+        "cookie_7_sided" -> MaterialShapes.Cookie7Sided
+        "cookie_9_sided" -> MaterialShapes.Cookie9Sided
+        "cookie_12_sided" -> MaterialShapes.Cookie12Sided
+        "ghostish" -> MaterialShapes.Ghostish
+        "clover_4_leaf" -> MaterialShapes.Clover4Leaf
+        "clover_8_leaf" -> MaterialShapes.Clover8Leaf
+        "burst" -> MaterialShapes.Burst
+        "soft_burst" -> MaterialShapes.SoftBurst
+        "boom" -> MaterialShapes.Boom
+        "soft_boom" -> MaterialShapes.SoftBoom
+        "flower" -> MaterialShapes.Flower
+        "puffy" -> MaterialShapes.Puffy
+        "puffy_diamond" -> MaterialShapes.PuffyDiamond
+        "pixel_circle" -> MaterialShapes.PixelCircle
+        "pixel_triangle" -> MaterialShapes.PixelTriangle
+        "bun" -> MaterialShapes.Bun
+        "heart" -> MaterialShapes.Heart
+    else -> null
+}?.toShape()

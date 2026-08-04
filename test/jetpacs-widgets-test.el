@@ -213,7 +213,7 @@
   (should-error (jetpacs-row (jetpacs-text "a") :arrange 'nope))     ; arrange enum
   (should-error (jetpacs-row (jetpacs-text "a") :scroll 1))          ; bool t/:json-false
   (should-error (jetpacs-box (jetpacs-text "a") :alignment 'middle)) ; box alignment enum
-  (should-error (jetpacs-surface (jetpacs-text "a") :shape 'oval))   ; shape enum
+  (should-error (jetpacs-surface (jetpacs-text "a") :shape 'blob))   ; shape enum
   ;; reorderable_list: every item needs a unique key/id
   (should-error (jetpacs-reorderable-list (list (jetpacs-text "a"))))
   (should-error (jetpacs-reorderable-list

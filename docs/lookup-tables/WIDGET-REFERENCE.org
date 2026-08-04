@@ -10,12 +10,20 @@
 #+begin_quote
 *TODO — replace with a deterministic generator.*  This file is
 LLM-drafted (2026-07-28) and has no generator; nothing enforces it
-against the code.  A deterministic =generate-widget-table.py= (39 node
-types × elisp constructors × renderer cases) is deferred deliberately:
-WIDGET's audience is third-party package authors, which needs Jetpacs
-stable, which needs EBP stable — build it when the wire vocabulary
-freezes (RF-6 territory).  Until then =ebp/contract.json= is the
-authority and this file is unverified orientation.
+against the code.  *It is now a full sprint behind*: the 2026-08-03/04
+M3-catalog sprint grew the vocabulary from the 39 node types drafted
+here to *52* (dropdown, segmented_button, search_bar, carousel,
+fab_menu, button_group, lazy_grid, app_bar_row/column, …) and added
+member families this draft has never heard of (connected-toggle
+shape_role, menu groups, the two-rows top bar, the scaffold rail/sheet
+slots, tabs indicator/content, MaterialShapes surface names).  A
+deterministic =generate-widget-table.py= is still deferred
+deliberately: WIDGET's audience is third-party package authors, which
+needs Jetpacs stable, which needs EBP stable — build it when the wire
+vocabulary freezes (RF-6 territory).  Until then =ebp/contract.json=
+is the authority, the constructor docstrings in =jetpacs-widgets.el=
+are the per-member reference, and this file is unverified orientation
+for the pre-sprint core only.
 #+end_quote
 
 The Jetpacs widget system provides a comprehensive set of UI components designed to bridge three layers of the stack:

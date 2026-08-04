@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
@@ -980,27 +981,36 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
     // RenderScaffold only composes for the surface being presented, so the
     // raise lands where the SPEC says it must. The respond callback answers
     // the pending snackbar.show request with how it concluded.
-    // The collector is keyed on Unit — it lives as long as this host. Keying
-    // it on the pending value instead was a self-cancelling loop: clearing
-    // the flow inside the effect changed the key, which cancelled the very
-    // coroutine that was awaiting showSnackbar, so the raise never appeared.
+    // The raise consumer, hardened by the device: the collector runs only
+    // while THIS host's lifecycle is STARTED, and takes the raise with an
+    // atomic compareAndSet. Both halves matter. A second MainActivity
+    // stacked behind the visible one keeps its whole composition — and an
+    // always-on collector there raced the visible host for every raise on
+    // a CONFLATED StateFlow, so raises landed in an invisible scaffold or
+    // vanished entirely, depending on who resumed first. Lifecycle gating
+    // stops backgrounded hosts from competing; the CAS makes the surviving
+    // race (two STARTED hosts, e.g. split screen) single-show. Keying the
+    // effect on the pending value was the previous bug: clearing the flow
+    // changed the key and cancelled the coroutine awaiting showSnackbar.
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(Unit) {
-        SnackbarRaises.flow.collect { raise ->
-            raise ?: return@collect
-            // Claim it before awaiting: a second host must not show it too,
-            // and the null emission this causes is ignored by the guard above.
-            SnackbarRaises.flow.value = null
-            val res = hostState.showSnackbar(
-                message = raise.message,
-                actionLabel = raise.actionLabel,
-                withDismissAction = raise.duration == "indefinite",
-                duration = when (raise.duration) {
-                    "long" -> SnackbarDuration.Long
-                    "indefinite" -> SnackbarDuration.Indefinite
-                    else -> SnackbarDuration.Short
-                })
-            raise.respond(
-                if (res == SnackbarResult.ActionPerformed) "action" else "dismissed")
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            SnackbarRaises.flow.collect { raise ->
+                raise ?: return@collect
+                if (!SnackbarRaises.flow.compareAndSet(raise, null))
+                    return@collect
+                val res = hostState.showSnackbar(
+                    message = raise.message,
+                    actionLabel = raise.actionLabel,
+                    withDismissAction = raise.duration == "indefinite",
+                    duration = when (raise.duration) {
+                        "long" -> SnackbarDuration.Long
+                        "indefinite" -> SnackbarDuration.Indefinite
+                        else -> SnackbarDuration.Short
+                    })
+                raise.respond(
+                    if (res == SnackbarResult.ActionPerformed) "action" else "dismissed")
+            }
         }
     }
     // §17.6 `rail`: a node slot laid on the START edge beside the whole

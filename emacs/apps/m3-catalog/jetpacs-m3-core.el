@@ -651,11 +651,44 @@ list does not carry."
      :on-change (jetpacs-action "m3catalog.pref"
                                 :args (list :key "polarity")))))
 
-(defun jetpacs-m3--unsupported-row (label reason)
-  "A theme row for an upstream setting with no EBP equivalent."
-  (jetpacs-chrome-row label :subtitle reason :icon "block"
-                      :on-tap (jetpacs-m3-demo "Not supported")
-                      :key (jetpacs-wire-id "m3pref" label)))
+(defun jetpacs-m3--color-mode-row ()
+  "Upstream ThemePicker's Color mode: Baseline vs the device Dynamic.
+`theme.set dynamic' asks for the wallpaper-derived palette as the base;
+upstream's third mode, Custom, wants a seed COLOR to derive a scheme
+from, and no wire member carries one — that seam stays stated here."
+  (jetpacs-enum-list
+   "m3-pref-colormode"
+   (list (jetpacs-enum-option "Baseline" "baseline")
+         (jetpacs-enum-option "Dynamic" "dynamic"))
+   :value (if jetpacs-theme-dynamic "dynamic" "baseline")
+   :on-change (jetpacs-action "m3catalog.pref"
+                              :args (list :key "colormode"))))
+
+(defun jetpacs-m3--font-scale-row ()
+  "Upstream ThemePicker's font-scale slider, live on `theme.set'.
+One number scales every text node on the surface together; 1.0 is the
+authored resting point when the option still follows the device."
+  (jetpacs-column
+   (jetpacs-text "Font scale" :style "body")
+   (jetpacs-slider
+    "m3-pref-fontscale"
+    (jetpacs-action "m3catalog.pref" :args (list :key "fontscale"))
+    :value (or jetpacs-theme-font-scale 1.0)
+    :min 0.4 :max 2.0)
+   :spacing 4))
+
+(defun jetpacs-m3--direction-row ()
+  "Upstream ThemePicker's text direction: System / LTR / RTL.
+`theme.set layout_direction' mirrors the whole surface; absent follows
+the system, the tri-state `dark' convention."
+  (jetpacs-enum-list
+   "m3-pref-direction"
+   (list (jetpacs-enum-option "System" "system")
+         (jetpacs-enum-option "LTR" "ltr")
+         (jetpacs-enum-option "RTL" "rtl"))
+   :value (symbol-name jetpacs-theme-layout-direction)
+   :on-change (jetpacs-action "m3catalog.pref"
+                              :args (list :key "direction"))))
 
 (defun jetpacs-m3-theme-screen (back)
   "The theme screen — upstream's ThemePicker bottom sheet, as a screen."
@@ -669,14 +702,10 @@ list does not carry."
                             jetpacs-m3-show-only-expressive)
     (jetpacs-divider)
     (jetpacs-text "Theme" :style "title")
-    (jetpacs-m3--unsupported-row
-     "Color mode"
-     "Baseline/Custom/Dynamic — the Companion owns the color scheme")
+    (jetpacs-m3--color-mode-row)
     (jetpacs-m3--polarity-row)
-    (jetpacs-m3--unsupported-row
-     "Font scale" "No text-scale member in the EBP node vocabulary")
-    (jetpacs-m3--unsupported-row
-     "Text direction" "No layout-direction member in the wire format")
+    (jetpacs-m3--font-scale-row)
+    (jetpacs-m3--direction-row)
     :spacing 12 :content-padding 16)
    :back back
    :actions (jetpacs-m3--actions "theme")))
@@ -763,6 +792,24 @@ no user in front of it."
        (let ((value (plist-get args :value)))
          (if (member value '("system" "light" "dark"))
              (setopt jetpacs-theme-mode (intern value))
+           (setq key nil))))
+      ;; The presentation trio: each setopt runs the option's own :set,
+      ;; which pushes theme.set on the live connection.
+      ("colormode"
+       (let ((value (plist-get args :value)))
+         (if (member value '("baseline" "dynamic"))
+             (setopt jetpacs-theme-dynamic (equal value "dynamic"))
+           (setq key nil))))
+      ("fontscale"
+       (let ((value (plist-get args :value)))
+         (if (numberp value)
+             (setopt jetpacs-theme-font-scale
+                     (max 0.4 (min 2.0 (float value))))
+           (setq key nil))))
+      ("direction"
+       (let ((value (plist-get args :value)))
+         (if (member value '("system" "ltr" "rtl"))
+             (setopt jetpacs-theme-layout-direction (intern value))
            (setq key nil))))
       (_ (setq key nil)))
     (if (null key)

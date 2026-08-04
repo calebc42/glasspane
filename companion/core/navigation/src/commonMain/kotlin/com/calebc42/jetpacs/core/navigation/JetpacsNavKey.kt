@@ -11,6 +11,11 @@ sealed interface JetpacsNavKey : NavKey {
     @Serializable
     data class Catalog(
         val pairingId: String,
+    ) : JetpacsNavKey
+
+    @Serializable
+    data class Surface(
+        val pairingId: String,
         val surfaceId: String,
     ) : JetpacsNavKey
 

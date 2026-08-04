@@ -3,19 +3,16 @@ package com.calebc42.jetpacs.core.data
 import androidx.room3.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.calebc42.jetpacs.core.database.JetpacsDatabase
-import com.calebc42.jetpacs.core.model.CacheWriteResult
-import com.calebc42.jetpacs.core.model.CachedSurface
+import com.calebc42.jetpacs.core.database.PairingPartitionEntity
+import com.calebc42.jetpacs.core.database.PairingRuntimeEntity
+import com.calebc42.jetpacs.core.database.SurfaceRecordEntity
 import com.calebc42.jetpacs.core.model.SurfaceKey
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 
@@ -38,64 +35,116 @@ class RoomSurfaceCacheRepositoryTest {
     }
 
     @Test
-    fun tombstoneRetainsTheRevisionFloorAndPreventsStaleResurrection() = runTest {
-        val key = SurfaceKey("pair-a", "surface-a")
+    fun projectionsArePairingScopedAndExcludeTombstones() = runTest {
+        val dao = database.surfaceDao()
+        insertPairing("pair-a")
+        insertPairing("pair-b")
+        dao.insertRecordRow(record(pairingId = "pair-a", surfaceId = "visible"))
+        dao.insertRecordRow(record(pairingId = "pair-a", surfaceId = "removed", present = false, firstSeenOrdinal = 2))
+        dao.insertRecordRow(record(pairingId = "pair-b", surfaceId = "other-pair"))
 
-        assertIs<CacheWriteResult.Applied>(repository.accept(surface(key, revision = 1)))
-        assertIs<CacheWriteResult.Applied>(
-            repository.tombstone(key, revision = 2, observedAtEpochMs = 20),
-        )
         assertEquals(
-            CacheWriteResult.IgnoredStale(revision = 1, currentRevision = 2),
-            repository.accept(surface(key, revision = 1)),
+            listOf("visible"),
+            repository.observeSurfaces("pair-a").first().map { it.key.surfaceId },
         )
-
-        assertNull(repository.observeSurface(key).first())
-        val tombstone = database.surfaceDao().getRecord(key.pairingId, key.surfaceId)
-        assertEquals(2, tombstone?.revision)
-        assertEquals(false, tombstone?.present)
-        assertNull(tombstone?.specJson)
+        assertNull(repository.observeSurface(SurfaceKey("pair-a", "removed")).first())
     }
 
     @Test
-    fun concurrentOutOfOrderUpdatesConvergeOnTheNewestRevision() = runTest {
-        val key = SurfaceKey("pair-a", "surface-a")
+    fun projectionPreservesAcceptedSurfaceMetadata() = runTest {
+        insertPairing("pair-a", readyDisconnectedAtEpochMs = 80)
+        val expected = record(
+            revision = 7,
+            specJson = "{\"revision\":7}",
+            staleSpecJson = "{\"stale\":true}",
+            staleAfterSeconds = 60,
+            currentView = "details",
+            acceptedAtEpochMs = 70,
+        )
+        database.surfaceDao().insertRecordRow(expected)
 
-        coroutineScope {
-            (1L..25L).map { revision ->
-                async(Dispatchers.Default) {
-                    repository.accept(surface(key, revision))
-                }
-            }.awaitAll()
-        }
-
-        assertEquals(25, repository.observeSurface(key).first()?.revision)
+        val actual = repository.observeSurface(SurfaceKey("pair-a", "surface-a")).first()
+        assertEquals(expected.revision, actual?.revision)
+        assertEquals(expected.specJson, actual?.specJson)
+        assertEquals(expected.staleSpecJson, actual?.staleSpecJson)
+        assertEquals(expected.staleAfterSeconds, actual?.staleAfterSeconds)
+        assertEquals(expected.currentView, actual?.currentView)
+        assertEquals(expected.acceptedAtEpochMs, actual?.acceptedAtEpochMs)
+        assertEquals(80, actual?.readyDisconnectedAtEpochMs)
     }
 
     @Test
-    fun revokePairingErasesItsRevisionFloorsWithoutTouchingOtherPairings() = runTest {
-        val revoked = SurfaceKey("pair-a", "surface-a")
-        val retained = SurfaceKey("pair-b", "surface-a")
-        repository.tombstone(revoked, revision = 7, observedAtEpochMs = 70)
-        repository.accept(surface(retained, revision = 3))
+    fun committedDaoUpdatesFlowThroughTheReadOnlyRepository() = runTest {
+        val dao = database.surfaceDao()
+        val key = SurfaceKey("pair-a", "surface-a")
+        insertPairing("pair-a")
+        dao.insertRecordRow(record(revision = 1, specJson = "{\"revision\":1}"))
+        assertEquals(1, repository.observeSurface(key).first()?.revision)
 
-        repository.revokePairing("pair-a")
-
-        assertNull(database.surfaceDao().getRecord("pair-a", "surface-a"))
-        assertEquals(3, repository.observeSurface(retained).first()?.revision)
-        assertEquals(
-            CacheWriteResult.Applied(1),
-            repository.accept(surface(revoked, revision = 1)),
-        )
+        assertEquals(1, dao.updateRecordRow(record(revision = 2, specJson = "{\"revision\":2}")))
+        assertEquals(2, repository.observeSurface(key).first()?.revision)
     }
 
-    private fun surface(
-        key: SurfaceKey,
-        revision: Long,
-    ) = CachedSurface(
-        key = key,
+    @Test
+    fun pairingRuntimeUpdatesFlowThroughTheReadOnlyRepository() = runTest {
+        val key = SurfaceKey("pair-a", "surface-a")
+        val runtime = insertPairing("pair-a")
+        database.surfaceDao().insertRecordRow(record())
+
+        assertNull(repository.observeSurface(key).first()?.readyDisconnectedAtEpochMs)
+
+        assertEquals(
+            1,
+            database.pairingDao().updateRuntime(
+                runtime.copy(readyDisconnectedAtEpochMs = 90),
+            ),
+        )
+        assertEquals(90, repository.observeSurface(key).first()?.readyDisconnectedAtEpochMs)
+    }
+
+    private fun record(
+        pairingId: String = "pair-a",
+        surfaceId: String = "surface-a",
+        revision: Long = 1,
+        present: Boolean = true,
+        specJson: String? = if (present) "{}" else null,
+        staleSpecJson: String? = null,
+        staleAfterSeconds: Long? = null,
+        currentView: String? = null,
+        acceptedAtEpochMs: Long = revision,
+        firstSeenOrdinal: Long = 1,
+    ) = SurfaceRecordEntity(
+        pairingId = pairingId,
+        surfaceId = surfaceId,
         revision = revision,
-        specJson = "{\"revision\":$revision}",
-        acceptedAtEpochMs = revision,
+        present = present,
+        specJson = specJson,
+        staleSpecJson = staleSpecJson,
+        staleAfterSeconds = staleAfterSeconds,
+        currentView = currentView,
+        acceptedAtEpochMs = acceptedAtEpochMs,
+        firstSeenOrdinal = firstSeenOrdinal,
     )
+
+    private suspend fun insertPairing(
+        pairingId: String,
+        readyDisconnectedAtEpochMs: Long? = null,
+    ): PairingRuntimeEntity {
+        val runtime = PairingRuntimeEntity(
+            pairingId = pairingId,
+            readyDisconnectedAtEpochMs = readyDisconnectedAtEpochMs,
+        )
+        database.pairingDao().insertPairing(
+            partition = PairingPartitionEntity(
+                pairingId = pairingId,
+                credentialKeyAlias = "credential-$pairingId",
+                payloadKeyAlias = "payload-$pairingId",
+                state = PairingPartitionEntity.ACTIVE,
+                createdAtEpochMs = 1,
+                lastAuthenticatedAtEpochMs = null,
+            ),
+            runtime = runtime,
+        )
+        return runtime
+    }
 }

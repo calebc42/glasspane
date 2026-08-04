@@ -24,9 +24,8 @@ android {
 
 dependencies {
     implementation(projects.wire)
-    implementation(projects.core.data)
-    implementation(projects.core.database)
-    implementation(projects.core.navigation)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

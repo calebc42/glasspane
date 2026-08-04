@@ -5,7 +5,7 @@ import androidx.room3.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.coroutines.Dispatchers
 
-private const val DATABASE_NAME = "jetpacs-cache.db"
+private const val DATABASE_NAME = "jetpacs-v3.db"
 
 fun buildJetpacsDatabase(context: Context): JetpacsDatabase =
     Room.databaseBuilder<JetpacsDatabase>(

@@ -2,21 +2,239 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "7eb2297451853b55c7e9d8bead11ce4f",
+    "identityHash": "10285bf1a83b0fe8d7d8ef08d955336d",
     "entities": [
       {
-        "tableName": "surface_records",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairingId` TEXT NOT NULL, `surfaceId` TEXT NOT NULL, `revision` INTEGER NOT NULL, `present` INTEGER NOT NULL, `specJson` TEXT, `staleSpecJson` TEXT, `staleAfterSeconds` INTEGER, `acceptedAtEpochMs` INTEGER NOT NULL, `disconnectedAtEpochMs` INTEGER, PRIMARY KEY(`pairingId`, `surfaceId`))",
+        "tableName": "pairing_partitions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairing_id` TEXT NOT NULL, `credential_key_alias` TEXT NOT NULL, `payload_key_alias` TEXT NOT NULL, `state` TEXT NOT NULL, `created_at_epoch_ms` INTEGER NOT NULL, `last_authenticated_at_epoch_ms` INTEGER, PRIMARY KEY(`pairing_id`))",
         "fields": [
           {
             "fieldPath": "pairingId",
-            "columnName": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "credentialKeyAlias",
+            "columnName": "credential_key_alias",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadKeyAlias",
+            "columnName": "payload_key_alias",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "created_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAuthenticatedAtEpochMs",
+            "columnName": "last_authenticated_at_epoch_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairing_id"
+          ]
+        }
+      },
+      {
+        "tableName": "pairing_runtime",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairing_id` TEXT NOT NULL, `next_queue_sequence` INTEGER NOT NULL DEFAULT 1, `next_surface_ordinal` INTEGER NOT NULL DEFAULT 1, `clock_high_water_epoch_ms` INTEGER NOT NULL DEFAULT 0, `forward_step_claim_epoch_ms` INTEGER, `clock_forward_claim_boot_id` TEXT, `forward_step_claimed_at_elapsed_ms` INTEGER, `ready_disconnected_at_epoch_ms` INTEGER, PRIMARY KEY(`pairing_id`), FOREIGN KEY(`pairing_id`) REFERENCES `pairing_partitions`(`pairing_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextQueueSequence",
+            "columnName": "next_queue_sequence",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "nextSurfaceOrdinal",
+            "columnName": "next_surface_ordinal",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "clockHighWaterEpochMs",
+            "columnName": "clock_high_water_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "forwardStepClaimEpochMs",
+            "columnName": "forward_step_claim_epoch_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "clockForwardClaimBootId",
+            "columnName": "clock_forward_claim_boot_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "forwardStepClaimedAtElapsedMs",
+            "columnName": "forward_step_claimed_at_elapsed_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "readyDisconnectedAtEpochMs",
+            "columnName": "ready_disconnected_at_epoch_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairing_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "pairing_partitions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairing_id"
+            ],
+            "referencedColumns": [
+              "pairing_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "pairing_revocations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairing_id` TEXT NOT NULL, `pairing_created_at_epoch_ms` INTEGER NOT NULL, `fenced_at_epoch_ms` INTEGER NOT NULL, `finalized_at_epoch_ms` INTEGER, PRIMARY KEY(`pairing_id`))",
+        "fields": [
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pairingCreatedAtEpochMs",
+            "columnName": "pairing_created_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fencedAtEpochMs",
+            "columnName": "fenced_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finalizedAtEpochMs",
+            "columnName": "finalized_at_epoch_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairing_id"
+          ]
+        }
+      },
+      {
+        "tableName": "revocation_artifacts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairing_id` TEXT NOT NULL, `artifact_kind` TEXT NOT NULL, `artifact_reference` TEXT NOT NULL, `completed_at_epoch_ms` INTEGER, PRIMARY KEY(`pairing_id`, `artifact_kind`, `artifact_reference`), FOREIGN KEY(`pairing_id`) REFERENCES `pairing_revocations`(`pairing_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "artifactKind",
+            "columnName": "artifact_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "artifactReference",
+            "columnName": "artifact_reference",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAtEpochMs",
+            "columnName": "completed_at_epoch_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairing_id",
+            "artifact_kind",
+            "artifact_reference"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_revocation_artifacts_pairing_pending",
+            "unique": false,
+            "columnNames": [
+              "pairing_id",
+              "completed_at_epoch_ms",
+              "artifact_kind",
+              "artifact_reference"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_revocation_artifacts_pairing_pending` ON `${TABLE_NAME}` (`pairing_id`, `completed_at_epoch_ms`, `artifact_kind`, `artifact_reference`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "pairing_revocations",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairing_id"
+            ],
+            "referencedColumns": [
+              "pairing_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "surface_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairing_id` TEXT NOT NULL, `surface_id` TEXT NOT NULL, `revision` INTEGER NOT NULL, `present` INTEGER NOT NULL, `spec_json` TEXT, `stale_spec_json` TEXT, `stale_after_seconds` INTEGER, `current_view` TEXT, `accepted_at_epoch_ms` INTEGER NOT NULL, `first_seen_ordinal` INTEGER NOT NULL, PRIMARY KEY(`pairing_id`, `surface_id`), FOREIGN KEY(`pairing_id`) REFERENCES `pairing_partitions`(`pairing_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
             "fieldPath": "surfaceId",
-            "columnName": "surfaceId",
+            "columnName": "surface_id",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -34,43 +252,360 @@
           },
           {
             "fieldPath": "specJson",
-            "columnName": "specJson",
+            "columnName": "spec_json",
             "affinity": "TEXT"
           },
           {
             "fieldPath": "staleSpecJson",
-            "columnName": "staleSpecJson",
+            "columnName": "stale_spec_json",
             "affinity": "TEXT"
           },
           {
             "fieldPath": "staleAfterSeconds",
-            "columnName": "staleAfterSeconds",
+            "columnName": "stale_after_seconds",
             "affinity": "INTEGER"
           },
           {
+            "fieldPath": "currentView",
+            "columnName": "current_view",
+            "affinity": "TEXT"
+          },
+          {
             "fieldPath": "acceptedAtEpochMs",
-            "columnName": "acceptedAtEpochMs",
+            "columnName": "accepted_at_epoch_ms",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "disconnectedAtEpochMs",
-            "columnName": "disconnectedAtEpochMs",
-            "affinity": "INTEGER"
+            "fieldPath": "firstSeenOrdinal",
+            "columnName": "first_seen_ordinal",
+            "affinity": "INTEGER",
+            "notNull": true
           }
         ],
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "pairingId",
-            "surfaceId"
+            "pairing_id",
+            "surface_id"
           ]
-        }
+        },
+        "indices": [
+          {
+            "name": "index_surface_records_pairing_first_seen",
+            "unique": true,
+            "columnNames": [
+              "pairing_id",
+              "first_seen_ordinal"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_surface_records_pairing_first_seen` ON `${TABLE_NAME}` (`pairing_id`, `first_seen_ordinal`)"
+          },
+          {
+            "name": "index_surface_records_pairing_present_order",
+            "unique": false,
+            "columnNames": [
+              "pairing_id",
+              "present",
+              "first_seen_ordinal"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_surface_records_pairing_present_order` ON `${TABLE_NAME}` (`pairing_id`, `present`, `first_seen_ordinal`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "pairing_partitions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairing_id"
+            ],
+            "referencedColumns": [
+              "pairing_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "surface_drafts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairing_id` TEXT NOT NULL, `surface_id` TEXT NOT NULL, `node_id` TEXT NOT NULL, `value_json` TEXT NOT NULL, PRIMARY KEY(`pairing_id`, `surface_id`, `node_id`), FOREIGN KEY(`pairing_id`, `surface_id`) REFERENCES `surface_records`(`pairing_id`, `surface_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surfaceId",
+            "columnName": "surface_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nodeId",
+            "columnName": "node_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "valueJson",
+            "columnName": "value_json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairing_id",
+            "surface_id",
+            "node_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_surface_drafts_pairing_surface",
+            "unique": false,
+            "columnNames": [
+              "pairing_id",
+              "surface_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_surface_drafts_pairing_surface` ON `${TABLE_NAME}` (`pairing_id`, `surface_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "surface_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairing_id",
+              "surface_id"
+            ],
+            "referencedColumns": [
+              "pairing_id",
+              "surface_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "queue_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairing_id` TEXT NOT NULL, `queue_seq` INTEGER NOT NULL, `event_id` TEXT NOT NULL, `storage_generation` TEXT NOT NULL, `payload_envelope` BLOB NOT NULL, `accounted_byte_count` INTEGER NOT NULL, `policy` TEXT NOT NULL, `occurred_at_epoch_ms` INTEGER NOT NULL, `queued_at_epoch_ms` INTEGER NOT NULL, `expires_at_epoch_ms` INTEGER NOT NULL, `dedupe_key` TEXT, `pending_local` INTEGER NOT NULL DEFAULT 0, `trigger_identity` TEXT, PRIMARY KEY(`pairing_id`, `queue_seq`), FOREIGN KEY(`pairing_id`) REFERENCES `pairing_partitions`(`pairing_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queueSequence",
+            "columnName": "queue_seq",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "storageGeneration",
+            "columnName": "storage_generation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadEnvelope",
+            "columnName": "payload_envelope",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountedByteCount",
+            "columnName": "accounted_byte_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "policy",
+            "columnName": "policy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "occurredAtEpochMs",
+            "columnName": "occurred_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queuedAtEpochMs",
+            "columnName": "queued_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expiresAtEpochMs",
+            "columnName": "expires_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dedupeKey",
+            "columnName": "dedupe_key",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingLocal",
+            "columnName": "pending_local",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "triggerIdentity",
+            "columnName": "trigger_identity",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairing_id",
+            "queue_seq"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_queue_events_pairing_event_id",
+            "unique": true,
+            "columnNames": [
+              "pairing_id",
+              "event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_queue_events_pairing_event_id` ON `${TABLE_NAME}` (`pairing_id`, `event_id`)"
+          },
+          {
+            "name": "index_queue_events_pairing_dedupe",
+            "unique": false,
+            "columnNames": [
+              "pairing_id",
+              "dedupe_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_queue_events_pairing_dedupe` ON `${TABLE_NAME}` (`pairing_id`, `dedupe_key`)"
+          },
+          {
+            "name": "index_queue_events_pairing_expiry",
+            "unique": false,
+            "columnNames": [
+              "pairing_id",
+              "expires_at_epoch_ms",
+              "queue_seq"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_queue_events_pairing_expiry` ON `${TABLE_NAME}` (`pairing_id`, `expires_at_epoch_ms`, `queue_seq`)"
+          },
+          {
+            "name": "index_queue_events_pairing_pending_local",
+            "unique": false,
+            "columnNames": [
+              "pairing_id",
+              "pending_local",
+              "queue_seq"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_queue_events_pairing_pending_local` ON `${TABLE_NAME}` (`pairing_id`, `pending_local`, `queue_seq`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "pairing_partitions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairing_id"
+            ],
+            "referencedColumns": [
+              "pairing_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "issued_event_ids",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairing_id` TEXT NOT NULL, `event_id` TEXT NOT NULL, `issued_at_epoch_ms` INTEGER NOT NULL, `reusable_after_epoch_ms` INTEGER NOT NULL, PRIMARY KEY(`pairing_id`, `event_id`), FOREIGN KEY(`pairing_id`) REFERENCES `pairing_partitions`(`pairing_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "pairingId",
+            "columnName": "pairing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "issuedAtEpochMs",
+            "columnName": "issued_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reusableAfterEpochMs",
+            "columnName": "reusable_after_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairing_id",
+            "event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_issued_event_ids_pairing_reusable",
+            "unique": false,
+            "columnNames": [
+              "pairing_id",
+              "reusable_after_epoch_ms",
+              "event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_issued_event_ids_pairing_reusable` ON `${TABLE_NAME}` (`pairing_id`, `reusable_after_epoch_ms`, `event_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "pairing_partitions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairing_id"
+            ],
+            "referencedColumns": [
+              "pairing_id"
+            ]
+          }
+        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7eb2297451853b55c7e9d8bead11ce4f')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '10285bf1a83b0fe8d7d8ef08d955336d')"
     ]
   }
 }

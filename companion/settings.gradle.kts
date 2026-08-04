@@ -16,10 +16,12 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ebp-companion"
+include(":ebp-kmp")
 include(":wire")
 include(":app")
 include(":core:model")
 include(":core:database")
+include(":core:ebp-store")
 include(":core:data")
 include(":core:navigation")
 include(":core:testing")

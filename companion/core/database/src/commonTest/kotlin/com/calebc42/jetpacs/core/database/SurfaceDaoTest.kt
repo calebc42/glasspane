@@ -1,13 +1,10 @@
 package com.calebc42.jetpacs.core.database
 
-import androidx.room3.Room
-import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 
@@ -17,10 +14,7 @@ class SurfaceDaoTest {
 
     @BeforeTest
     fun setUp() {
-        database = Room.inMemoryDatabaseBuilder<JetpacsDatabase>()
-            .setDriver(BundledSQLiteDriver())
-            .setQueryCoroutineContext(Dispatchers.IO)
-            .build()
+        database = inMemoryTestDatabase()
         dao = database.surfaceDao()
     }
 
@@ -31,21 +25,34 @@ class SurfaceDaoTest {
 
     @Test
     fun presentQueryIsScopedByPairingAndExcludesTombstones() = runTest {
-        dao.upsert(record(pairingId = "pair-a", surfaceId = "visible"))
-        dao.upsert(record(pairingId = "pair-a", surfaceId = "removed", present = false))
-        dao.upsert(record(pairingId = "pair-b", surfaceId = "other-pair"))
+        database.insertTestPairing("pair-a")
+        database.insertTestPairing("pair-b")
+        dao.insertRecordRow(record(pairingId = "pair-a", surfaceId = "later", firstSeenOrdinal = 3))
+        dao.insertRecordRow(
+            record(pairingId = "pair-a", surfaceId = "visible", firstSeenOrdinal = 1)
+        )
+        dao.insertRecordRow(
+            record(
+                pairingId = "pair-a",
+                surfaceId = "removed",
+                present = false,
+                firstSeenOrdinal = 2,
+            )
+        )
+        dao.insertRecordRow(record(pairingId = "pair-b", surfaceId = "other-pair", firstSeenOrdinal = 1))
 
         assertEquals(
-            listOf("visible"),
+            listOf("visible", "later"),
             dao.observePresent("pair-a").first().map(SurfaceRecordEntity::surfaceId),
         )
         assertNull(dao.observePresent("pair-a", "removed").first())
     }
 
     @Test
-    fun upsertReplacesTheRecordAtItsCompositeKey() = runTest {
-        dao.upsert(record(revision = 1, specJson = "{\"revision\":1}"))
-        dao.upsert(record(revision = 2, specJson = "{\"revision\":2}"))
+    fun explicitUpdateReplacesTheRecordAtItsCompositeKey() = runTest {
+        database.insertTestPairing()
+        dao.insertRecordRow(record(revision = 1, specJson = "{\"revision\":1}"))
+        assertEquals(1, dao.updateRecordRow(record(revision = 2, specJson = "{\"revision\":2}")))
 
         assertEquals(
             record(revision = 2, specJson = "{\"revision\":2}"),
@@ -54,19 +61,24 @@ class SurfaceDaoTest {
     }
 
     @Test
-    fun deletePairingErasesSnapshotsAndTombstonesOnlyForThatPairing() = runTest {
-        dao.upsert(record(pairingId = "pair-a", surfaceId = "visible"))
-        dao.upsert(record(pairingId = "pair-a", surfaceId = "removed", present = false))
-        dao.upsert(record(pairingId = "pair-b", surfaceId = "preserved"))
+    fun genericDeleteErasesOneSurfaceAndItsDraftsWithoutCrossingPairings() = runTest {
+        database.insertTestPairing("pair-a")
+        database.insertTestPairing("pair-b")
+        dao.insertRecordRow(record(pairingId = "pair-a", surfaceId = "deleted", firstSeenOrdinal = 1))
+        dao.insertRecordRow(record(pairingId = "pair-a", surfaceId = "retained", firstSeenOrdinal = 2))
+        dao.insertRecordRow(record(pairingId = "pair-b", surfaceId = "preserved", firstSeenOrdinal = 1))
+        dao.upsertDraft(testDraft(pairingId = "pair-a", surfaceId = "deleted"))
+        dao.upsertDraft(testDraft(pairingId = "pair-a", surfaceId = "retained"))
+        dao.upsertDraft(testDraft(pairingId = "pair-b", surfaceId = "preserved"))
 
-        dao.deletePairing("pair-a")
+        assertEquals(1, dao.deleteRecord("pair-a", "deleted"))
 
-        assertNull(dao.getRecord("pair-a", "visible"))
-        assertNull(dao.getRecord("pair-a", "removed"))
-        assertEquals(
-            "preserved",
-            dao.getRecord("pair-b", "preserved")?.surfaceId,
-        )
+        assertNull(dao.getRecord("pair-a", "deleted"))
+        assertEquals(emptyList(), dao.getDrafts("pair-a", "deleted"))
+        assertEquals("retained", dao.getRecord("pair-a", "retained")?.surfaceId)
+        assertEquals(1, dao.getDrafts("pair-a", "retained").size)
+        assertEquals("preserved", dao.getRecord("pair-b", "preserved")?.surfaceId)
+        assertEquals(1, dao.getDrafts("pair-b", "preserved").size)
     }
 
     private fun record(
@@ -75,6 +87,7 @@ class SurfaceDaoTest {
         revision: Long = 1,
         present: Boolean = true,
         specJson: String? = if (present) "{}" else null,
+        firstSeenOrdinal: Long = 1,
     ) = SurfaceRecordEntity(
         pairingId = pairingId,
         surfaceId = surfaceId,
@@ -83,7 +96,8 @@ class SurfaceDaoTest {
         specJson = specJson,
         staleSpecJson = null,
         staleAfterSeconds = null,
+        currentView = null,
         acceptedAtEpochMs = revision,
-        disconnectedAtEpochMs = if (present) null else revision,
+        firstSeenOrdinal = firstSeenOrdinal,
     )
 }

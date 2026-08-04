@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   wire:
-    name: wire (:wire:jvmTest)
+    name: ebp-kmp + wire
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +46,10 @@ jobs:
         working-directory: companion
         run: |
           chmod +x gradlew
-          ./gradlew :wire:jvmTest --console=plain
+          ./gradlew \
+            :ebp-kmp:jvmTest \
+            :wire:jvmTest \
+            --console=plain
 
   app:
     name: app (core + unit + lint + debug/release)
@@ -65,7 +68,18 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew \
+            :ebp-kmp:compileAndroidMain \
+            :core:model:compileAndroidMain \
+            :core:database:compileAndroidMain \
+            :core:ebp-store:compileAndroidMain \
+            :core:data:compileAndroidMain \
+            :core:testing:compileAndroidMain \
+            :core:navigation:compileAndroidMain \
+            :core:navigation:jvmTest \
+            :core:database:compileAndroidDeviceTestSources \
+            :core:data:compileAndroidDeviceTestSources \
             :core:database:jvmTest \
+            :core:ebp-store:jvmTest \
             :core:data:jvmTest \
             :core:testing:jvmTest \
             :app:testDebugUnitTest \

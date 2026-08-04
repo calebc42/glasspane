@@ -1,83 +1,36 @@
 package com.calebc42.jetpacs.core.data
 
-import androidx.room3.withWriteTransaction
 import com.calebc42.jetpacs.core.database.JetpacsDatabase
 import com.calebc42.jetpacs.core.database.SurfaceRecordEntity
-import com.calebc42.jetpacs.core.model.CacheWriteResult
 import com.calebc42.jetpacs.core.model.CachedSurface
 import com.calebc42.jetpacs.core.model.SurfaceKey
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 
 class RoomSurfaceCacheRepository(
     private val database: JetpacsDatabase,
 ) : SurfaceCacheRepository {
-    private val dao = database.surfaceDao()
+    private val surfaceDao = database.surfaceDao()
+    private val pairingDao = database.pairingDao()
 
     override fun observeSurfaces(pairingId: String): Flow<List<CachedSurface>> =
-        dao.observePresent(pairingId).map { records -> records.map(SurfaceRecordEntity::toModel) }
+        combine(
+            surfaceDao.observePresent(pairingId),
+            pairingDao.observeRuntime(pairingId),
+        ) { records, runtime ->
+            records.map { it.toModel(runtime?.readyDisconnectedAtEpochMs) }
+        }
 
     override fun observeSurface(key: SurfaceKey): Flow<CachedSurface?> =
-        dao.observePresent(key.pairingId, key.surfaceId).map { it?.toModel() }
-
-    override suspend fun accept(surface: CachedSurface): CacheWriteResult =
-        replaceIfNewer(surface.toRecord())
-
-    override suspend fun tombstone(
-        key: SurfaceKey,
-        revision: Long,
-        observedAtEpochMs: Long,
-    ): CacheWriteResult {
-        require(revision >= 0) { "revision must be non-negative" }
-        return replaceIfNewer(
-            SurfaceRecordEntity(
-                pairingId = key.pairingId,
-                surfaceId = key.surfaceId,
-                revision = revision,
-                present = false,
-                specJson = null,
-                staleSpecJson = null,
-                staleAfterSeconds = null,
-                acceptedAtEpochMs = observedAtEpochMs,
-                disconnectedAtEpochMs = observedAtEpochMs,
-            )
-        )
-    }
-
-    override suspend fun revokePairing(pairingId: String) {
-        require(pairingId.isNotBlank()) { "pairingId must not be blank" }
-        dao.deletePairing(pairingId)
-    }
-
-    private suspend fun replaceIfNewer(record: SurfaceRecordEntity): CacheWriteResult =
-        database.withWriteTransaction {
-            val currentRevision =
-                dao.getRecord(record.pairingId, record.surfaceId)?.revision
-            if (currentRevision != null && record.revision <= currentRevision) {
-                CacheWriteResult.IgnoredStale(
-                    revision = record.revision,
-                    currentRevision = currentRevision,
-                )
-            } else {
-                dao.upsert(record)
-                CacheWriteResult.Applied(record.revision)
-            }
+        combine(
+            surfaceDao.observePresent(key.pairingId, key.surfaceId),
+            pairingDao.observeRuntime(key.pairingId),
+        ) { record, runtime ->
+            record?.toModel(runtime?.readyDisconnectedAtEpochMs)
         }
 }
 
-private fun CachedSurface.toRecord() = SurfaceRecordEntity(
-    pairingId = key.pairingId,
-    surfaceId = key.surfaceId,
-    revision = revision,
-    present = true,
-    specJson = specJson,
-    staleSpecJson = staleSpecJson,
-    staleAfterSeconds = staleAfterSeconds,
-    acceptedAtEpochMs = acceptedAtEpochMs,
-    disconnectedAtEpochMs = disconnectedAtEpochMs,
-)
-
-private fun SurfaceRecordEntity.toModel(): CachedSurface {
+private fun SurfaceRecordEntity.toModel(readyDisconnectedAtEpochMs: Long?): CachedSurface {
     check(present) { "Only present records can be mapped to CachedSurface" }
     val presentSpecJson = requireNotNull(specJson) { "A present record must have spec JSON" }
     return CachedSurface(
@@ -86,7 +39,8 @@ private fun SurfaceRecordEntity.toModel(): CachedSurface {
         specJson = presentSpecJson,
         staleSpecJson = staleSpecJson,
         staleAfterSeconds = staleAfterSeconds,
+        currentView = currentView,
         acceptedAtEpochMs = acceptedAtEpochMs,
-        disconnectedAtEpochMs = disconnectedAtEpochMs,
+        readyDisconnectedAtEpochMs = readyDisconnectedAtEpochMs,
     )
 }

@@ -78,8 +78,8 @@ surfaces it appears on — it renders on every chrome surface.")
   "Function (SURFACE) -> the dock's destinations as DATA, or nil.
 The window-class-adaptive alternative to `jetpacs-chrome-dock-function\':
 each item is a plist (:label STR :icon STR :on-tap DESCRIPTOR
-\[:selected BOOL]), and chrome wears the SAME destinations as a
-weighted bottom-bar row on compact and medium widths and as a
+\[:selected BOOL]), and chrome wears the SAME destinations as a real
+M3 navigation bar on compact and medium widths and as a
 `jetpacs-navigation-rail\' in the scaffold\'s start-edge rail slot when
 the width class is \"expanded\" (SPEC 20.1.1) — the
 NavigationSuiteScaffold swap, driven by data instead of two authorings.
@@ -176,13 +176,32 @@ must cost the dock, never every chrome surface in the process."
 
 (defun jetpacs-chrome--dock-tab (item)
   "One bottom-bar destination from a dock ITEM plist.
-The weighted text/tonal button row is the form the hub proved on
-device; selection is the tonal fill."
-  (jetpacs-with-attrs
-   (jetpacs-button (plist-get item :label) (plist-get item :on-tap)
-                   :icon (plist-get item :icon)
-                   :variant (if (plist-get item :selected) "tonal" "text"))
-   :weight 1))
+The REAL M3 NavigationBarItem, in the composition the catalog proved
+on device (jetpacs-m3-navigation-bar): the icon above the label, the
+64x32 secondary_container active indicator behind a selected icon, and
+the NavigationBarItemDefaults color roles — on_secondary_container in
+the pill, on_surface for the selected label, on_surface_variant
+everywhere else.  Equal weights are the bars\' EqualWeight default."
+  (let ((selected (plist-get item :selected)))
+    (jetpacs-with-attrs
+     (jetpacs-box
+      (jetpacs-column
+       (jetpacs-with-attrs
+        (jetpacs-box (jetpacs-icon (plist-get item :icon)
+                                   :color (if selected
+                                              "on_secondary_container"
+                                            "on_surface_variant")
+                                   :content-description
+                                   (plist-get item :label))
+                     :alignment "center")
+        :width 64 :height 32 :corner 16
+        :bg (and selected "secondary_container"))
+       (jetpacs-text (plist-get item :label) :style "label"
+                     :color (if selected "on_surface" "on_surface_variant"))
+       :spacing 4 :align "center")
+      :alignment "center"
+      :on-tap (plist-get item :on-tap))
+     :weight 1)))
 
 (defun jetpacs-chrome--dock-slot (surface)
   "SURFACE\'s dock as (SLOT . NODE), or nil.
@@ -211,9 +230,14 @@ re-authored into a rail."
                                items)
                        :arrangement "center"))
               (cons :bottom_bar
-                    (apply #'jetpacs-row
-                           (append (mapcar #'jetpacs-chrome--dock-tab items)
-                                   (list :spacing 4))))))
+                    ;; The 80dp container height is what the M3
+                    ;; NavigationBar composable owns upstream; here it is
+                    ;; the universal height attribute on the slot node.
+                    (jetpacs-with-attrs
+                     (apply #'jetpacs-row
+                            (append (mapcar #'jetpacs-chrome--dock-tab items)
+                                    (list :align "center" :fill t)))
+                     :height 80))))
         (error (message "jetpacs-chrome: dock items failed: %s"
                         (jetpacs--error-label err))
                nil)))))

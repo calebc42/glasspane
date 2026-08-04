@@ -55,9 +55,11 @@ the places are the `multi_view`/`view.switched` machinery, and the
 destinations persist across every screen via the dock seam — a navigation
 bar that vanishes on drill is a defect, not a style.  Author the
 destinations as data with `jetpacs-chrome-dock-items-function` and chrome
-wears them per SPEC 20.1.1: a bottom navigation bar on compact and medium
-widths, a start-edge navigation rail (`scaffold.rail`) on expanded — the
-M3 NavigationSuiteScaffold behavior, one authoring.  The raw-node
+wears them per SPEC 20.1.1: a real M3 navigation bar on compact and
+medium widths (the catalog-proven item composition — icon above label,
+the secondary-container active indicator, 80dp container), a start-edge
+navigation rail (`scaffold.rail`) on expanded — the M3
+NavigationSuiteScaffold behavior, one authoring.  The raw-node
 `jetpacs-chrome-dock-function` remains as an override for a hand-built bar
 (always `bottom_bar`, never adaptive), and wins when both are set.
 

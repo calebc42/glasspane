@@ -1029,11 +1029,11 @@ persists across drills — while a screen authoring its own bar wins."
       (jetpacs-chrome-remove "app:dockdemo"))))
 
 (ert-deftest jetpacs-chrome-items-dock-wears-bottom-bar-on-compact ()
-  "The data dock: on a compact width the destinations become the same
-weighted text/tonal button row the node dock always was — selection is
-the tonal fill.  Disconnected `jetpacs-window-class' already answers
-compact, which is also why every OTHER chrome test stays untouched by
-the adaptive seam."
+  "The data dock: on a compact width the destinations become a real M3
+navigation bar — the catalog-proven item composition, selection as the
+active-indicator pill.  Disconnected `jetpacs-window-class' already
+answers compact, which is also why every OTHER chrome test stays
+untouched by the adaptive seam."
   (let ((jetpacs-chrome-dock-items-function
          (lambda (_s)
            (list (list :label "A" :icon "home"
@@ -1053,9 +1053,14 @@ the adaptive seam."
                  (tabs (plist-get bar :children)))
             (should-not (plist-member view :rail))
             (should (equal (plist-get bar :t) "row"))
+            (should (equal (plist-get bar :height) 80))
             (should (= 2 (length tabs)))
-            (should (equal (plist-get (aref tabs 0) :variant) "tonal"))
-            (should (equal (plist-get (aref tabs 1) :variant) "text"))))
+            ;; The selected item wears the secondary_container active
+            ;; indicator; the unselected one must not.
+            (should (string-match-p "secondary_container"
+                                    (format "%S" (aref tabs 0))))
+            (should-not (string-match-p "secondary_container"
+                                        (format "%S" (aref tabs 1))))))
       (jetpacs-chrome-remove "app:itemsdemo"))))
 
 (ert-deftest jetpacs-chrome-items-dock-wears-rail-on-expanded ()

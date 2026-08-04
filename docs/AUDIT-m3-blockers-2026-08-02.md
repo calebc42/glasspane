@@ -1,5 +1,26 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
+> **Ledger state as of 2026-08-04 (sixth pass) — 255/279 built, 24
+> remain. THE SMALL/MEDIUM MEMBER LANE IS CLOSED.** This pass landed,
+> in order: G-42/70 (bottom_bar_behavior exit_always + fab_position
+> end_overlay — bottom-app-bar 9/9), the toggle checked_shape
+> (togglebuttons 10/10), G-66 (surface.shape grew the 34-name
+> MaterialShapes vocabulary — material-shapes 1/1), G-39/79/40 (menu
+> groups/footer/MenuItem riders + the initial_scroll renderer fix that
+> the member had silently lacked — menus 6/6 but MultiAutocomplete),
+> G-35 (box.on_long_tap + the m3catalog.fn COMPOUND-mutation verb —
+> lists mode-change live), G-44/45 (top_bar_style medium_flexible/
+> large_flexible/two_rows + top_bar_centered + the height pair +
+> top_bar_expanded node slot — top-app-bar 13/15), and G-63/64/65
+> (button shape_role incl. vertical top/bottom caps, checked_icon with
+> the IconMap _filled suffix, row/column overlap — button-groups 4/4).
+> Still open: the protocol tier (G-51 caret read, G-74, G-76 snackbar
+> result, G-77/78 window.changed + rail slot, G-92 toolbar-with-FAB,
+> G-96..98 theme.set), the behavior-ARGUMENT pair in top-app-bar
+> (PreScrolledLazyColumn, ReverseScrolling pairing), the two
+> SingleSelection radio-row lists samples, tabs G-81/82, carousel
+> G-80-adjacent, and the documented-impossible set.
+>
 > **Ledger state as of 2026-08-04 (fifth pass) — 244/279 built, 35
 > remain.** G-71/G-72 landed: scaffold.drawer_variant (modal|
 > dismissible|permanent, the permanent hamburger suppressed) and the

@@ -2024,6 +2024,34 @@ class CompanionEngine(
     /** SPEC 18.4: the persisted theme, for rendering across reconnects. */
     fun currentTheme(): JsonObject = theme
 
+    // ------------------------------------------------- window (20.1.1)
+
+    /** SPEC 20.1.1: the last-reported geometry, mirrored in the welcome. */
+    private var windowGeom: JsonObject? = null
+
+    private fun sizeClassOf(dp: Int, mediumAt: Int, expandedAt: Int): String =
+        when {
+            dp >= expandedAt -> "expanded"
+            dp >= mediumAt -> "medium"
+            else -> "compact"
+        }
+
+    /** SPEC 20.1.1: report the window geometry. Stores always (the welcome
+     * mirror), emits only on a post-auth session, and never re-sends an
+     * unchanged geometry. */
+    fun windowChanged(widthDp: Int, heightDp: Int) {
+        val geom = buildJsonObject {
+            put("width_dp", widthDp)
+            put("height_dp", heightDp)
+            put("width_class", sizeClassOf(widthDp, 600, 840))
+            put("height_class", sizeClassOf(heightDp, 480, 900))
+        }
+        if (geom == windowGeom) return
+        windowGeom = geom
+        if (state == SessionState.READY || state == SessionState.SYNCING)
+            emit(notification("window.changed", geom))
+    }
+
     // ------------------------------------------------------- toasts (18.2)
 
     /** Present hook: (text, duration_s or null for the platform default).
@@ -2309,6 +2337,9 @@ class CompanionEngine(
             // already-identified expired records are gone.
             put("queued_events", queue.let { it.sweepExpired(); it.count() })
             put("limits", config.limits)
+            // SPEC 20.1.1: mirror the known geometry so the FIRST snapshot
+            // can be authored for the right class; omitted when unknown.
+            windowGeom?.let { put("window", it) }
             // SPEC 10.2: input_state MUST be omitted when empty; device waits
             // for the capability/trigger modules.
             surfaces.inputState().takeIf { it.isNotEmpty() }

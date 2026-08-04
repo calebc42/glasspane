@@ -49,6 +49,13 @@ class MainActivity : ComponentActivity() {
             // SPEC 18.4: mirror the pushed palette (colors/dark), or the native
             // scheme following the system when no theme is set.
             val themePayload by app.theme.collectAsState()
+            // SPEC 20.1.1: report the window geometry on first composition
+            // and every configuration change (rotation, fold, resize).
+            val config = androidx.compose.ui.platform.LocalConfiguration.current
+            androidx.compose.runtime.LaunchedEffect(
+                config.screenWidthDp, config.screenHeightDp) {
+                bridge.windowChanged(config.screenWidthDp, config.screenHeightDp)
+            }
             EbpTheme(themePayload) {
                 // The Surface paints edge-to-edge (the theme reaches under
                 // the system bars) but CONTENT stays inside the safe-drawing

@@ -907,10 +907,32 @@ snackbar, which is where upstream's onDismissRequest writes too."
        (jetpacs-chrome-reset-screens (or surface jetpacs-m3-owner))))
     'accepted))
 
+(defun jetpacs-m3-window-class (axis)
+  "The SPEC 20.1.1 size class for AXIS (:width or :height), a string.
+Falls back to compact width / medium height before any report — the
+phone-shaped guess, and the honest one for a first paint that may
+arrive before the welcome mirror on an old Companion."
+  (let ((window (and (jetpacs-connected-p)
+                     (ebp-client-window (jetpacs-client)))))
+    (or (plist-get window (if (eq axis :width) :width_class :height_class))
+        (if (eq axis :width) "compact" "medium"))))
+
+(defun jetpacs-m3--on-window-changed (_client _window)
+  "Re-author the catalog for the new size class (SPEC 20.1.1)."
+  (jetpacs-flow-continue
+   (lambda ()
+     (condition-case err
+         (jetpacs-shell-push jetpacs-m3-owner)
+       (error (message "jetpacs-m3: window refresh failed: %s"
+                       (jetpacs--error-label err)))))))
+
 (defun jetpacs-m3-register ()
   "Register the catalog's owner, verbs and root screen.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
 stack to Home, which is the documented live-reload path."
+  (when (jetpacs-connected-p)
+    (cl-pushnew #'jetpacs-m3--on-window-changed
+                (ebp-client-window-changed-functions (jetpacs-client))))
   (with-jetpacs-owner jetpacs-m3-owner
     (jetpacs-defaction "m3catalog.open" #'jetpacs-m3--on-open)
     (jetpacs-defaction "m3catalog.example" #'jetpacs-m3--on-example)

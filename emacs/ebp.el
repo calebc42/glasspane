@@ -583,6 +583,11 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   (input-values (make-hash-table :test #'equal))
   (reset-history (make-hash-table :test #'equal))
   state-changed-functions ; called with (client surface revision id value)
+  ;; SPEC 20.1.1: the last-reported window geometry plist
+  ;; (:width_dp :height_dp :width_class :height_class), from the welcome
+  ;; mirror and every window.changed since.
+  window
+  window-changed-functions ; called with (client window-plist)
   ;; SPEC 19: Emacs's mirror of synchronized editors, (doc . id) ->
   ;; plist (:session :seq :text :cursor).  Emacs chars ARE Unicode
   ;; scalar values, so splice positions are char positions directly.
@@ -637,6 +642,8 @@ receipts default to `ebp-receipts' under `user-emacs-directory' —
                                  #'ebp-client--handle-event-action)
     (ebp-client-register-handler client "state.changed"
                                  #'ebp-client--handle-state-changed)
+    (ebp-client-register-handler client "window.changed"
+                                 #'ebp-client--handle-window-changed)
     (when-let* ((fn (plist-get config :edit-change-function)))
       (push fn (ebp-client-edit-change-functions client)))
     (when-let* ((fn (plist-get config :edit-open-function)))
@@ -1197,7 +1204,10 @@ synchronization barrier (SPEC 10.3)."
           (ebp-client-limits client) (plist-get result :limits)
           (ebp-client-input-state client) (plist-get result :input_state)
           ;; SPEC 20.1: absorb the device report (nil unless a module granted).
-          (ebp-client-device client) (plist-get result :device))
+          (ebp-client-device client) (plist-get result :device)
+          ;; SPEC 20.1.1: the welcome's window mirror, so the FIRST
+          ;; snapshot can be authored for the right size class.
+          (ebp-client-window client) (plist-get result :window))
     ;; Reported floors cover snapshots AND tombstones (SPEC 10.2/13.3).
     (cl-loop for (key entry) on (plist-get result :surfaces) by #'cddr
              do (puthash (substring (symbol-name key) 1)
@@ -1560,6 +1570,14 @@ reported draft; only a later-revision report reinstates one."
              (and (> (car entry) revision-seen)
                   (member id (cdr entry))))
            (gethash surface (ebp-client-reset-history client))))
+
+(defun ebp-client--handle-window-changed (client params)
+  "The `window.changed' receiver (SPEC 20.1.1).
+Stores the geometry plist and runs `window-changed-functions' — the
+application's seam for re-authoring layout for the new size class."
+  (setf (ebp-client-window client) params)
+  (dolist (fn (ebp-client-window-changed-functions client))
+    (funcall fn client params)))
 
 (defun ebp-client--handle-state-changed (client params)
   "The `state.changed' receiver (SPEC 14.6 + P1 #2).

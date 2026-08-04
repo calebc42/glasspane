@@ -2569,10 +2569,14 @@ builds the range and re-pushes."
                                  fab-position
                                  top-bar-expanded top-bar-collapsed-height
                                  top-bar-expanded-height top-bar-centered
-                                 snackbar-content)
+                                 snackbar-content rail)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
+RAIL is a Node laid on the START edge beside the whole chrome — author a
+`jetpacs-navigation-rail' there when the SPEC 20.1.1 window class is wide,
+and the same items in BOTTOM-BAR when it is compact; the two slots are the
+NavigationSuiteScaffold swap with the choice in your own hands.
 
 REFRESH-INDICATOR (default, loading, none) fills the pull-to-refresh
 indicator slot; IS-REFRESHING is the authored spinner state — Emacs as
@@ -2645,6 +2649,8 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
     (jetpacs--check-bool snackbar-dismiss ":snackbar-dismiss"))
   (when snackbar-max-lines
     (jetpacs--check-integer snackbar-max-lines ":snackbar-max-lines" 1 nil))
+  (when (and rail (not (jetpacs--root-node-p rail)))
+    (error "jetpacs-scaffold: :rail must be a node, got %S" rail))
   (when snackbar-content
     (unless (jetpacs--root-node-p snackbar-content)
       (error "jetpacs-scaffold: :snackbar-content must be a node, got %S"
@@ -2751,6 +2757,7 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                  :snackbar_dismiss snackbar-dismiss
                  :snackbar_max_lines snackbar-max-lines
                  :snackbar_content snackbar-content
+                 :rail rail
                  :on_refresh on-refresh
                  :refresh_indicator refresh-indicator
                  :is_refreshing is-refreshing

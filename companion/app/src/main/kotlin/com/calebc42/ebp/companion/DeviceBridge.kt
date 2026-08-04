@@ -507,6 +507,17 @@ class DeviceBridge(
         }
     }
 
+    // SPEC 20.1.1: the last geometry the Activity reported, for seeding
+    // sessions that begin before (or after) a recomposition.
+    private var lastWindow: Pair<Int, Int>? = null
+
+    /** SPEC 20.1.1: the Activity reports window geometry here on first
+     * composition and every configuration change. */
+    fun windowChanged(widthDp: Int, heightDp: Int) {
+        lastWindow = widthDp to heightDp
+        engine?.windowChanged(widthDp, heightDp)
+    }
+
     /** SPEC 13.4/14.2: resolve a multi-view spec to the view being shown;
      * a single-view spec passes through. */
     private fun resolveView(surface: String): JsonObject? {
@@ -530,6 +541,9 @@ class DeviceBridge(
             }
         }
         this.engine = engine
+        // SPEC 20.1.1: seed the new session with the last-known geometry so
+        // the welcome can mirror it before the Activity recomposes.
+        lastWindow?.let { (w, h) -> engine.windowChanged(w, h) }
         // SPEC 5.2 newest-wins: cold receivers (reminder tap/alarm) reach the
         // current live session through this slot; a drop with no session is lost.
         CompanionStores.setLiveSession(engine)

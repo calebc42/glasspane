@@ -976,6 +976,12 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                 "end" -> FloatingToolbarExitDirection.End
                 else -> FloatingToolbarExitDirection.Bottom
             })
+    // §17.6 `rail`: a node slot laid on the START edge beside the whole
+    // chrome — with the §20.1.1 geometry known, Emacs fills bottom_bar or
+    // rail from the same items, the NavigationSuiteScaffold swap. The slot
+    // hosts an authored navigation_rail, whose own variant and synced
+    // expanded state carry the collapsed/expanded forms.
+    val rail = node.objOrNull("rail")
     val scaffold: @Composable () -> Unit = {
         Scaffold(
             modifier = Modifier
@@ -1352,6 +1358,14 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                 sheetPeekHeight = peek,
                 scaffoldState = sheetScaffoldState) { _ -> content() }
         }
+    val railed: @Composable () -> Unit = if (rail != null) {
+        {
+            Row(Modifier.fillMaxSize()) {
+                RenderNode(rail, ctx.child(rail, 0))
+                Box(Modifier.weight(1f)) { scaffold() }
+            }
+        }
+    } else scaffold
     if (drawer != null) {
         // §17.6 `drawer_variant`: the host around the SAME drawer node.
         // Dismissible pushes the body aside and leaves it live; permanent
@@ -1365,14 +1379,14 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                         androidx.compose.material3.DismissibleDrawerSheet {
                             RenderNode(drawer, ctx.child(drawer, 5))
                         }
-                    }) { sheetWrap { scaffold() } }
+                    }) { sheetWrap { railed() } }
             "permanent" ->
                 androidx.compose.material3.PermanentNavigationDrawer(
                     drawerContent = {
                         androidx.compose.material3.PermanentDrawerSheet {
                             RenderNode(drawer, ctx.child(drawer, 5))
                         }
-                    }) { sheetWrap { scaffold() } }
+                    }) { sheetWrap { railed() } }
             else ->
                 androidx.compose.material3.ModalNavigationDrawer(
                     drawerState = drawerState,
@@ -1381,9 +1395,9 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                             modifier = Modifier.fillMaxWidth(0.75f)) {
                             RenderNode(drawer, ctx.child(drawer, 5))
                         }
-                    }) { sheetWrap { scaffold() } }
+                    }) { sheetWrap { railed() } }
         }
-    } else sheetWrap { scaffold() }
+    } else sheetWrap { railed() }
     // §17.6 `sheet`: the bottom-sheet slot. With `sheet_peek_height` absent
     // this is the MODAL form — an overlay composing after the scaffold, shown
     // while the AUTHORED sheet_state says so. A user dismissal dispatches

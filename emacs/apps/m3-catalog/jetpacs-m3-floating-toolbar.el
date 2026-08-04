@@ -173,7 +173,7 @@ horizontal samples and `Modifier.height(64.dp)' in the vertical ones."
                     :color "primary" :shape "circle")
    (if vertical :height :width) size))
 
-(defun jetpacs-m3-floating-toolbar--fused-fab ()
+(defun jetpacs-m3-floating-toolbar--fused-fab (&optional on-tap)
   "The FAB fused to a pill's end, as the node `floating_toolbar_fab' takes.
 Upstream is FloatingToolbarDefaults.VibrantFloatingActionButton over
 Icon(Icons.Filled.Add, \"Localized description\"), and the toolbar
@@ -193,7 +193,7 @@ around it draws anyway -- `colors' is not a wire member."
     (jetpacs-box (jetpacs-icon "add" :size 24 :color "on_primary_container"
                                :content-description "Localized description")
                  :alignment "center"
-                 :on-tap (jetpacs-m3-demo "Add"))
+                 :on-tap (or on-tap (jetpacs-m3-demo "Add")))
     :color "primary_container" :shadow-elevation 6)
    :corner 16))
 
@@ -228,6 +228,25 @@ where the horizontal samples pass a width."
    (jetpacs-m3-floating-toolbar--action "download" "Download")
    (jetpacs-m3-floating-toolbar--action "favorite" "Favorite")
    :align "center"))
+
+(defun jetpacs-m3-floating-toolbar--with-fab-scaffold (flag orientation
+                                                            placement exit)
+  "The LIVE scaffold of a WithFab sample: the fused FAB is the toggle.
+Upstream's FAB flips the toolbar's remembered expanded state; here its
+tap flips sample FLAG and the next snapshot re-authors
+floating_toolbar_expanded — authored presentation state, the rails'
+discipline.  Expanded starts true (flag nil) exactly like upstream's
+remember(true)."
+  (lambda ()
+    (list :floating-toolbar-orientation orientation
+          :floating-toolbar-placement placement
+          :floating-toolbar-expanded
+          (jetpacs-bool (not (jetpacs-m3-flag flag)))
+          :floating-toolbar-fab
+          (jetpacs-m3-floating-toolbar--fused-fab
+           (jetpacs-m3-flag-action flag))
+          :floating-toolbar-scroll t
+          :floating-toolbar-exit-direction exit)))
 
 (defun jetpacs-m3-floating-toolbar--actions-row ()
   "The four IconButtons the *WithFab samples hold, in a row.
@@ -383,8 +402,12 @@ for an inexact one is not a win, so the composition stays."
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
-    :unsupported
-    "floating_toolbar_expanded is a value with no on-change descriptor, so the FAB that toggles this toolbar's expanded state -- the sample's whole subject -- has nothing to drive, and its tap could only report. The bottom-end pill and the vibrant FAB fused to its end are otherwise reachable: floating_toolbar_placement bottom_end and floating_toolbar_fab, which CenteredHorizontalFloatingToolbarWithFabSample uses.")
+    :build #'jetpacs-m3-floating-toolbar--prose-content
+    :slots (list :floating-toolbar
+                 #'jetpacs-m3-floating-toolbar--actions-row)
+    :scaffold (jetpacs-m3-floating-toolbar--with-fab-scaffold
+               "floating-toolbar-h-collapsed"
+               "horizontal" "bottom_end" "bottom"))
    (jetpacs-m3-example
     "CenteredHorizontalFloatingToolbarWithFabSample"
     "Floating toolbar examples"
@@ -410,8 +433,12 @@ for an inexact one is not a win, so the composition stays."
     "Floating toolbar examples"
     :source jetpacs-m3-floating-toolbar--source
     :expressive t
-    :unsupported
-    "floating_toolbar_expanded is a value with no on-change descriptor, so the FAB that toggles this rail's expanded state -- the sample's whole subject -- has nothing to drive. The vertical pill at floating_toolbar_placement bottom_end and the vibrant FAB fused to its end are otherwise reachable, as CenteredVerticalFloatingToolbarWithFabSample shows.")
+    :build #'jetpacs-m3-floating-toolbar--prose-content
+    :slots (list :floating-toolbar
+                 #'jetpacs-m3-floating-toolbar--actions-column)
+    :scaffold (jetpacs-m3-floating-toolbar--with-fab-scaffold
+               "floating-toolbar-v-collapsed"
+               "vertical" "bottom_end" "end"))
    (jetpacs-m3-example
     "CenteredVerticalFloatingToolbarWithFabSample"
     "Floating toolbar examples"

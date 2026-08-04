@@ -200,7 +200,7 @@ sample (PaneExpansionDragHandleSample) and is not on the wire."
     "Adaptive examples"
     :source jetpacs-m3-adaptive--source
     :unsupported
-    "The pane_scaffold node has no adapt-strategy member and there is no bottom-sheet node: the supporting variant places the three panes, but AdaptStrategy.Levitate with Alignment.BottomCenter and a rememberDragToResizeState(DockedEdge.Bottom) -- the extra pane docking to the bottom edge as a sheet the user drags to resize, under a BottomSheetDefaults.DragHandle -- has neither a pane member nor a wrapped BottomSheetScaffold to land on.")
+    "The pane_scaffold node has no adapt-strategy member: the supporting variant places the three panes, but AdaptStrategy.Levitate with Alignment.BottomCenter and a rememberDragToResizeState(DockedEdge.Bottom) -- the extra pane docking to the bottom edge as a sheet the user drags to resize, under a BottomSheetDefaults.DragHandle -- has no pane member to land on. The scaffold sheet slot does exist now, but it belongs to the CHROME, not to a pane: nothing lets a pane_scaffold hand its extra pane to the host scaffold, and the drag-to-resize state would still have no member.")
    (jetpacs-m3-example
     "ListDetailWithNavigation2Sample"
     "Adaptive examples"

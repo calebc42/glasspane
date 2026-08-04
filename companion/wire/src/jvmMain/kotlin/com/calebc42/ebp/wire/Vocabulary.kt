@@ -78,6 +78,9 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "app_bar_row" to NodeRow(setOf("items"), setOf("overflow_icon", "max_items")),
     "app_bar_column" to NodeRow(setOf("items"), setOf("overflow_icon", "max_items")),
     "carousel" to NodeRow(setOf("children"), setOf("strategy", "item_width", "item_spacing", "content_padding", "item_corner")),
+    "fab_menu" to NodeRow(setOf("items"), setOf("icon", "close_icon")),
+    "button_group" to NodeRow(setOf("items"), setOf("overflow_icon")),
+    "lazy_grid" to NodeRow(setOf("children"), setOf("columns", "min_item_width", "reverse", "spacing", "content_padding")),
 )
 
 val ACTION_SCHEMA: Map<String, ActionRow> = mapOf(
@@ -115,9 +118,11 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "chromeless" to "boolean",
     "clear_on_submit" to "boolean",
     "clip" to "boolean",
+    "close_icon" to "identifier",
     "collapsed" to "boolean",
     "color" to "color",
     "color_end" to "color",
+    "columns" to "positive-integer",
     "complete" to "boolean",
     "content_description" to "string",
     "content_padding" to "dp",
@@ -171,6 +176,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "max_lines" to "positive-integer",
     "max_month" to "yyyy-mm",
     "min" to "number",
+    "min_item_width" to "dp",
     "min_lines" to "positive-integer",
     "min_month" to "yyyy-mm",
     "mode" to "string",
@@ -192,6 +198,7 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "publish_state" to "boolean",
     "read_only" to "boolean",
     "refresh_indicator" to "string",
+    "reverse" to "boolean",
     "reverse_scroll" to "boolean",
     "rich" to "boolean",
     "rows" to "table-row-array",

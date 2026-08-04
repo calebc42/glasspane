@@ -50,8 +50,9 @@
     "enum_list" "date_button" "time_button" "slider" "chart" "canvas"
     "month_grid" "scaffold" "tooltip" "split_button" "pane_scaffold"
     "navigation_rail" "search_bar" "dropdown" "segmented_button"
-    "app_bar_row" "app_bar_column" "carousel")
-  "The 49 EBP node types (contract.json `node_types').")
+    "app_bar_row" "app_bar_column" "carousel" "fab_menu" "button_group"
+    "lazy_grid")
+  "The 52 EBP node types (contract.json `node_types').")
 
 (defconst jetpacs-core-node-set
   '("text" "row" "column" "box" "spacer" "divider" "button" "text_input")
@@ -1289,6 +1290,85 @@ accessible name inline; ICON is what renders while it fits."
                    :overflow_icon overflow-icon
                    :max_items max-items)))
 
+(cl-defun jetpacs-fab-menu-item (label icon on-tap)
+  "One item of a `jetpacs-fab-menu' (SPEC §17.3).
+Both LABEL and ICON are required — an M3 FAB menu item always carries
+the pair; ON-TAP is its ActionDescriptor."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-identifier icon ":icon")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (jetpacs--node nil :label label :icon icon :on_tap on-tap))
+
+(cl-defun jetpacs-fab-menu (items &key icon close-icon)
+  "M3's FloatingActionButtonMenu: a checkable FAB unfolding ITEMS above it.
+ITEMS are from `jetpacs-fab-menu-item'.  The toggle FAB morphs between
+ICON (add, by default) and CLOSE-ICON (close) driven by its own checked
+progress, and the expansion is Companion-local presentation — a menu
+that snapped shut on every re-push would be unusable.  Meant for the
+scaffold's fab slot."
+  (unless items
+    (error "jetpacs-fab-menu: items must be non-empty (SPEC 17.3)"))
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when close-icon (jetpacs--check-identifier close-icon ":close-icon"))
+  (jetpacs--node "fab_menu"
+                 :items (vconcat items)
+                 :icon icon :close_icon close-icon))
+
+(cl-defun jetpacs-button-group-item (label on-tap &key icon enabled)
+  "One item of a `jetpacs-button-group' (SPEC §17.3).
+LABEL is required — it is the button's text inline and its menu row when
+it overflows; ICON is optional, unlike an app-bar item's."
+  (jetpacs--require-string label ":label")
+  (jetpacs--check-descriptor on-tap ":on-tap")
+  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (jetpacs--node nil :label label :on_tap on-tap :icon icon
+                 :enabled enabled))
+
+(cl-defun jetpacs-button-group (items &key overflow-icon)
+  "M3's ButtonGroup over ITEMS from `jetpacs-button-group-item' (SPEC §17.3).
+The press animation couples neighbours, and what does not fit moves
+into an overflow menu at MEASURE time — the same never-ask-Emacs width
+rule as `jetpacs-app-bar-row'.  OVERFLOW-ICON renames the indicator."
+  (unless items
+    (error "jetpacs-button-group: items must be non-empty (SPEC 17.3)"))
+  (when overflow-icon (jetpacs--check-identifier overflow-icon ":overflow-icon"))
+  (jetpacs--node "button_group"
+                 :items (vconcat items)
+                 :overflow_icon overflow-icon))
+
+(cl-defun jetpacs-lazy-grid (&rest args)
+  "A LazyVerticalGrid over its CHILDREN, order preserved (SPEC §17.3).
+Trailing options: :min-item-width (GridCells.Adaptive — outranks
+:columns), :columns (GridCells.Fixed, default 2), :reverse (t or
+:json-false — reverseLayout, the grid growing from the bottom),
+:spacing and :content-padding.  Like `jetpacs-lazy-column' it needs a
+bounded height: the scaffold body, or an explicit universal :height
+inside a scrolling column."
+  (let* ((split (jetpacs--children-and-opts args "lazy_grid"))
+         (opts (cdr split))
+         (columns (plist-get opts :columns))
+         (min-item-width (plist-get opts :min-item-width))
+         (reverse (plist-get opts :reverse))
+         (spacing (plist-get opts :spacing))
+         (content-padding (plist-get opts :content-padding)))
+    (when columns (jetpacs--check-integer columns ":columns" 1 nil))
+    (when min-item-width
+      (jetpacs--check-number min-item-width ":min-item-width" 1 nil))
+    (when (and columns min-item-width)
+      (error "jetpacs-lazy-grid: :columns and :min-item-width are mutually exclusive (SPEC 17.3)"))
+    (when reverse (jetpacs--check-bool reverse ":reverse"))
+    (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
+    (when content-padding
+      (jetpacs--check-number content-padding ":content-padding" 0 nil))
+    (jetpacs--node "lazy_grid"
+                   :children (jetpacs--as-children (car split))
+                   :columns columns
+                   :min_item_width min-item-width
+                   :reverse reverse
+                   :spacing spacing
+                   :content_padding content-padding)))
+
 (defconst jetpacs--carousel-strategies
   '("multi_browse" "uncontained" "centered_hero"))
 
@@ -2380,7 +2460,8 @@ as a single list."
 (defconst jetpacs-layout-node-types
   '("flow_row" "surface" "lazy_column" "card" "collapsible"
     "reorderable_list" "tabs" "table" "pane_scaffold"
-    "app_bar_row" "app_bar_column" "carousel")
+    "app_bar_row" "app_bar_column" "carousel" "fab_menu" "button_group"
+    "lazy_grid")
   "The §17.3 non-core layout node types (reference app profile).")
 
 (defconst jetpacs-viz-node-types '("chart" "canvas" "month_grid")

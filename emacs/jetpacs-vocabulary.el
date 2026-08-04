@@ -79,7 +79,10 @@
     ("segmented_button" ("id" "options") ("enabled" "multi_select" "on_change" "value"))
     ("app_bar_row" ("items") ("max_items" "overflow_icon"))
     ("app_bar_column" ("items") ("max_items" "overflow_icon"))
-    ("carousel" ("children") ("content_padding" "item_corner" "item_spacing" "item_width" "strategy")))
+    ("carousel" ("children") ("content_padding" "item_corner" "item_spacing" "item_width" "strategy"))
+    ("fab_menu" ("items") ("close_icon" "icon"))
+    ("button_group" ("items") ("overflow_icon"))
+    ("lazy_grid" ("children") ("columns" "content_padding" "min_item_width" "reverse" "spacing")))
   "Contract members per node type: (TYPE (REQUIRED...) (OPTIONAL...)).
 WIRE names, so the table compares directly against contract.json.  The
 constructors spell a multi-word member with a hyphen (`:content-padding'

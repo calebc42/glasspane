@@ -42,6 +42,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -55,6 +57,13 @@ import androidx.compose.material3.AppBarOverflowIndicator
 import androidx.compose.material3.AppBarRow
 import androidx.compose.material3.AppBarScope
 import androidx.compose.material3.Badge
+import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ButtonGroupMenuState
+import androidx.compose.material3.FloatingActionButtonMenu
+import androidx.compose.material3.FloatingActionButtonMenuItem
+import androidx.compose.material3.ToggleFloatingActionButton
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedCard
@@ -103,10 +112,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -980,5 +991,119 @@ internal fun RenderCarousel(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             state = state, modifier = m.fillMaxWidth(),
             preferredItemWidth = itemWidth, itemSpacing = spacing,
             contentPadding = contentPad, content = item)
+    }
+}
+
+/** §17.3 fab_menu: the checkable FAB whose menu unfolds above it.
+ *
+ * The ToggleFloatingActionButton drives an Add-to-Close icon morph from
+ * its own checked progress (`icon`/`close_icon` name the two ends); the
+ * expansion is Companion-local presentation, exactly search_bar's split —
+ * a menu that snapped shut on every re-push would be unusable. Items are
+ * {icon, label, on_tap} records, each a FloatingActionButtonMenuItem. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun RenderFabMenu(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val items = node.arrOrNull("items") ?: return
+    val openName = node.stringOr("icon").ifEmpty { "add" }
+    val closeName = node.stringOr("close_icon").ifEmpty { "close" }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    FloatingActionButtonMenu(
+        modifier = m,
+        expanded = expanded,
+        button = {
+            ToggleFloatingActionButton(
+                checked = expanded,
+                onCheckedChange = { expanded = !expanded },
+            ) {
+                // The morph swaps the glyph at half progress and animates
+                // it with the container — upstream's own recipe.
+                val glyph by remember {
+                    derivedStateOf {
+                        if (checkedProgress > 0.5f) closeName else openName
+                    }
+                }
+                with(ToggleFloatingActionButtonDefaults) {
+                    Icon(
+                        painter = rememberVectorPainter(IconMap.get(glyph)),
+                        contentDescription =
+                            if (expanded) "Close menu" else "Open menu",
+                        modifier = Modifier.animateIcon({ checkedProgress }),
+                    )
+                }
+            }
+        }) {
+        for (i in 0 until items.size) {
+            val item = items[i] as? JsonObject ?: continue
+            val onTap = item.objOrNull("on_tap")
+            FloatingActionButtonMenuItem(
+                onClick = {
+                    expanded = false
+                    if (onTap != null) ctx.action(onTap)
+                },
+                icon = { Icon(IconMap.get(item.stringOr("icon")),
+                    contentDescription = null) },
+                text = { Text(item.stringOr("label")) })
+        }
+    }
+}
+
+/** §17.3 button_group: M3's ButtonGroup. {label, on_tap, icon?, enabled?}
+ * items whose press animation couples neighbours; what does not fit moves
+ * into an overflow menu at MEASURE time — the same never-ask-Emacs width
+ * rule as the app-bar strips. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun RenderButtonGroup(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val items = node.arrOrNull("items") ?: return
+    val overflowIcon = node.stringOr("overflow_icon")
+    val indicator: @Composable (ButtonGroupMenuState) -> Unit =
+        if (overflowIcon.isEmpty()) { state ->
+            ButtonGroupDefaults.OverflowIndicator(menuState = state)
+        } else { state ->
+            IconButton(onClick = { state.show() }) {
+                Icon(IconMap.get(overflowIcon), contentDescription = "More")
+            }
+        }
+    ButtonGroup(modifier = m, overflowIndicator = indicator) {
+        for (i in 0 until items.size) {
+            val item = items[i] as? JsonObject ?: continue
+            val onTap = item.objOrNull("on_tap")
+            val iconName = item.stringOr("icon")
+            clickableItem(
+                onClick = { if (onTap != null) ctx.action(onTap) },
+                label = item.stringOr("label"),
+                icon = iconName.takeIf { it.isNotEmpty() }?.let {
+                    { Icon(IconMap.get(it), contentDescription = null) }
+                },
+                enabled = item.boolOr("enabled", true))
+        }
+    }
+}
+
+/** §17.3 lazy_grid: LazyVerticalGrid over the child array, order preserved
+ * exactly as lazy_column. `min_item_width` (GridCells.Adaptive) outranks
+ * `columns` (GridCells.Fixed, default 2); `reverse` is reverseLayout —
+ * the Companion never asks Emacs which end is the start. */
+@Composable
+internal fun RenderLazyGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
+    val children = node.arrOrNull("children") ?: return
+    val minItem = node["min_item_width"]?.numOrNull()?.let { safeDp(it) }
+    val cells = if (minItem != null) GridCells.Adaptive(minItem.dp)
+        else GridCells.Fixed(node.doubleOr("columns", 2.0).toInt().coerceAtLeast(1))
+    val spacing = (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp
+    val pad = (safeDp(node.doubleOr("content_padding", 0.0)) ?: 0f).dp
+    LazyVerticalGrid(
+        columns = cells,
+        reverseLayout = node.boolOr("reverse"),
+        verticalArrangement = Arrangement.spacedBy(spacing),
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        contentPadding = PaddingValues(pad),
+        modifier = m.fillMaxWidth()) {
+        items(children.size) { i ->
+            (children[i] as? JsonObject)?.let {
+                RenderNode(it, ctx.child(it, i))
+            }
+        }
     }
 }

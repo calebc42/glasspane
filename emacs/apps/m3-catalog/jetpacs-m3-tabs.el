@@ -43,10 +43,6 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/TabSamples.kt"
   "Upstream TabsExampleSourceUrl.")
 
-(defconst jetpacs-m3-tabs--indicator-note
-  "The tabs node has no indicator member: a custom indicator drawn through Modifier.tabIndicatorOffset or tabIndicatorLayout is Compose drawing code, and the wire can only name the tab strip, never paint it."
-  "Why every Fancy indicator sample is unsupported.")
-
 (defconst jetpacs-m3-tabs--titles
   '("Tab 1" "Tab 2" "Tab 3 with lots of text")
   "The three titles upstream gives each non-scrolling text sample.")
@@ -155,6 +151,47 @@ strip to ScrollableTabRow, which is what the sample is about."
    :id "tabs-scrolling-secondary"
    :on-change (jetpacs-m3-demo "Scrolling secondary tab selected")))
 
+(defun jetpacs-m3-tabs--fancy-face (title selected)
+  "Upstream FancyTab's drawn face: the 10dp dot above TITLE.
+The dot is primary while SELECTED, the background color otherwise --
+which is the whole of what upstream's `selected' parameter changes."
+  (jetpacs-column
+   (jetpacs-with-attrs
+    (jetpacs-spacer)
+    :width 10 :height 10 :corner 5
+    :bg (if selected "primary" "background"))
+   (jetpacs-text title :style "body")
+   :align "center" :spacing 6))
+
+(defun jetpacs-m3-tabs--fancy ()
+  "Upstream FancyTabs: three tabs whose FACE is an authored node pair.
+Each tab_item carries :content (dot unlit) and :selected-content (dot
+lit primary); the DEVICE swaps them on its own live selection, so the
+selected-state face crosses the wire as two authored nodes and no
+selection report is needed to draw it."
+  (jetpacs-tabs
+   (cl-loop for i from 1 to 3
+            for title = (format "Tab %d" i)
+            collect (jetpacs-tab-item
+                     title
+                     :content (jetpacs-m3-tabs--fancy-face title nil)
+                     :selected-content (jetpacs-m3-tabs--fancy-face title t)))
+   (cl-loop for i from 1 to 3
+            collect (jetpacs-m3-tabs--page (format "Fancy tab %d selected" i)))))
+
+(defun jetpacs-m3-tabs--fancy-indicator ()
+  "Upstream FancyIndicatorTabs: the outline indicator vocabulary.
+:indicator (:kind outline) is the FancyIndicator picture -- a 2dp
+primary border in a 5dp-rounded rectangle inset 5dp from the selected
+tab's bounds -- still animated by the standard offset."
+  (jetpacs-tabs
+   (cl-loop for i from 1 to 3
+            collect (jetpacs-tab-item (format "Tab %d" i)))
+   (cl-loop for i from 1 to 3
+            collect (jetpacs-m3-tabs--page
+                     (format "Fancy indicator tab %d selected" i)))
+   :indicator (list :kind "outline")))
+
 (jetpacs-m3-defcomponent "tabs"
   :name "Tabs"
   :description
@@ -210,25 +247,24 @@ strip to ScrollableTabRow, which is what the sample is about."
     "FancyTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :unsupported
-    "A tab_item is a label and an icon name, not a node: the custom Tab content this sample exists to show -- a Column holding a 10.dp colored Box above the title -- has nowhere on the wire to go.")
+    :build #'jetpacs-m3-tabs--fancy)
    (jetpacs-m3-example
     "FancyIndicatorTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :unsupported jetpacs-m3-tabs--indicator-note)
+    :build #'jetpacs-m3-tabs--fancy-indicator)
    (jetpacs-m3-example
     "FancyIndicatorContainerTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
     :unsupported
-    "The tabs node has no indicator member, and nothing on the wire drives an Animatable: this sample is an indicator whose two edges spring to the selected tab at different stiffnesses.")
+    "The indicator member carries a bounded picture vocabulary (underline, outline) animated by the standard offset; this sample is an indicator whose two EDGES spring to the selected tab at different stiffnesses -- a custom Animatable pair no declarative member drives.")
    (jetpacs-m3-example
     "ScrollingFancyIndicatorContainerTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
     :unsupported
-    "Scrollable is on the wire and the animated custom indicator is not: the tabs node has no indicator member, so the only thing this sample adds to a scrolling row cannot be asked for.")
+    "Scrollable is on the wire and indicator carries the bounded underline/outline vocabulary, but this sample's indicator is the two-stiffness spring pair of its non-scrolling sibling -- the same custom Animatable no declarative member drives -- so the only thing it adds to a scrolling row still cannot be asked for.")
    ))
 
 (provide 'jetpacs-m3-tabs)

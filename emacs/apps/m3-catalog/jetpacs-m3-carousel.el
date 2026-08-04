@@ -108,6 +108,33 @@ under a titled header is what the sample composes."
    (jetpacs-m3-carousel--multi-browse)
    :spacing 8 :fill t))
 
+(defconst jetpacs-m3-carousel--multi-aspect-widths '(305 205 275 350 100)
+  "MultiAspectCarouselLazyRowSample's five mainAxisSize values.")
+
+(defun jetpacs-m3-carousel--multi-aspect ()
+  "Upstream MultiAspectCarouselLazyRowSample: five widths, one height.
+Upstream is a plain LazyRow, not a keyline carousel, so the recreation
+is the composed row it actually is: scroll with :content-padding 16
+(inside the viewport, scrolling under it, exactly LazyRow's
+contentPadding), spacing 8, each item a 205dp-tall clipped tonal box at
+its own width.  Stated seam: upstream's maskClip(extraLarge, drawInfo)
+re-masks each item from its live draw geometry as it scrolls; the wire
+clips statically at the same extraLarge corner."
+  (jetpacs-with-attrs
+   (apply #'jetpacs-row
+          (append
+           (cl-loop
+            for w in jetpacs-m3-carousel--multi-aspect-widths
+            for tone in jetpacs-m3-carousel--tones
+            for i from 1
+            collect (jetpacs-with-attrs
+                     (jetpacs-box
+                      (jetpacs-text (format "Item %d" i) :style "title")
+                      :alignment "center")
+                     :bg tone :width w :height 205 :corner 28 :clip t))
+           (list :scroll t :content-padding 16 :spacing 8)))
+   :height 221))
+
 (jetpacs-m3-defcomponent "carousel"
   :name "Carousel"
   :description
@@ -153,8 +180,7 @@ under a titled header is what the sample composes."
     "Carousel examples"
     :source jetpacs-m3-carousel--source
     :expressive t
-    :unsupported
-    "The carousel node's strategies are the keyline forms (multi_browse, uncontained, centered_hero); this sample is the LazyRow-based multi-aspect form -- MultiAspectCarouselScope items alternating two aspect ratios inside a plain LazyRow -- a different composable whose per-item aspect strategy the node does not carry.")
+    :build #'jetpacs-m3-carousel--multi-aspect)
    ))
 
 (provide 'jetpacs-m3-carousel)

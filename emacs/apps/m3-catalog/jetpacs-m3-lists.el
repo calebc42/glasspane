@@ -30,24 +30,29 @@
 ;;   own live state, so both MultiSelection samples compose around a
 ;;   real checkbox and are authored.
 ;;
-;; * MODE CHANGE.  `ListItemWithModeChangeOnLongClickSample' flips every
-;;   row at once, on a long press, between a counting click target and a
-;;   checkbox target.  Each stateful node on the wire owns only its own
-;;   value, and no member lets a gesture on one node rewrite its
-;;   siblings.
+;; * MODE CHANGE.  `ListItemWithModeChangeOnLongClickSample' now builds:
+;;   `box.on_long_tap' gives a composed row a long-press dispatch, and
+;;   the whole-list mode flip lives where it always belonged -- in the
+;;   app.  Each row is a box whose on_tap counts or toggles and whose
+;;   on_long_tap runs a COMPOUND mutation (enter selection mode checking
+;;   the pressed row; exit clearing every row) registered on the
+;;   `m3catalog.fn' verb, so one gesture rewriting the siblings is just
+;;   Emacs rewriting its own model and re-pushing.  The selection-mode
+;;   checkbox is authored and inert, which is upstream verbatim: its
+;;   Checkbox passes onCheckedChange = null and the row's own click
+;;   does the toggling.
 ;;
-;; Both gaps were re-triaged against the members that landed since.
-;; `button' and `icon_button' now carry `checked'/`on_change' (and
-;; `icon_button' a `checked_icon'), which is the nearest thing yet to a
-;; radio indicator -- but a checked node holds only its OWN value on the
-;; device: nothing makes a group of them exclusive, and nothing lets a
-;; gesture on one row rewrite its siblings, which is precisely what both
-;; samples exist to show.  So both gaps stand.  The rest of the session's
-;; vocabulary does not reach a ListItem sample either: upstream draws no
-;; chip, no tooltip and no elevated card here, and the segmented group
-;; keeps `bg' + `corner' rather than a `surface', because `surface.shape'
-;; is an enum of three and cannot spell the four radii of
-;; `segmentedShapes'.
+;; The SELECTION gap was re-triaged against the members that landed
+;; since.  `button' and `icon_button' now carry `checked'/`on_change'
+;; (and `icon_button' a `checked_icon'), which is the nearest thing yet
+;; to a radio indicator -- but a checked node holds only its OWN value
+;; on the device, and nothing makes a group of them exclusive, which is
+;; precisely what the SingleSelection samples exist to show.  So that
+;; gap stands.  The rest of the session's vocabulary does not reach a
+;; ListItem sample either: upstream draws no chip, no tooltip and no
+;; elevated card here, and the segmented group keeps `bg' + `corner'
+;; rather than a `surface', because `surface.shape' names whole shapes
+;; and cannot spell the four distinct radii of `segmentedShapes'.
 ;;
 ;; `SegmentedListItem' needs no special pleading:
 ;; `ListItemDefaults.segmentedShapes(index, count)' rounds the outer
@@ -336,6 +341,70 @@ header takes segment 0 of 4 and the three children the rest."
               (number-sequence 1 (1- count))))
      :collapsed t)))
 
+(defvar jetpacs-m3-lists--mode-select nil
+  "ListItemWithModeChangeOnLongClick: nil = click mode, t = selection mode.")
+(defvar jetpacs-m3-lists--mode-counts (make-vector 3 0)
+  "Per-row tap counts for the mode-change sample\='s click mode.")
+(defvar jetpacs-m3-lists--mode-checked (make-vector 3 nil)
+  "Per-row checked states for the mode-change sample\='s selection mode.")
+
+;; The compound mutations, exactly upstream's handlers: a click counts or
+;; toggles depending on the mode; a long press enters selection mode
+;; checking the pressed row, or exits it clearing every row.
+(dotimes (i 3)
+  (puthash (format "lists-mode-tap-%d" i)
+           (let ((i i))
+             (lambda ()
+               (if jetpacs-m3-lists--mode-select
+                   (aset jetpacs-m3-lists--mode-checked i
+                         (not (aref jetpacs-m3-lists--mode-checked i)))
+                 (cl-incf (aref jetpacs-m3-lists--mode-counts i)))))
+           jetpacs-m3-fn-registry)
+  (puthash (format "lists-mode-long-%d" i)
+           (let ((i i))
+             (lambda ()
+               (if jetpacs-m3-lists--mode-select
+                   (progn (setq jetpacs-m3-lists--mode-select nil)
+                          (fillarray jetpacs-m3-lists--mode-checked nil))
+                 (setq jetpacs-m3-lists--mode-select t)
+                 (aset jetpacs-m3-lists--mode-checked i t))))
+           jetpacs-m3-fn-registry))
+
+(defun jetpacs-m3-lists--mode-change-item (i)
+  "Row I of the mode-change sample, in whichever mode the state says.
+The row is a `box' -- on_tap counts or toggles, on_long_tap switches the
+mode -- around the composed ListItem.  In selection mode the leading
+checkbox is authored and INERT (no on-change), which is upstream
+verbatim: its Checkbox passes onCheckedChange = null and the row's own
+click does the toggling."
+  (let ((select jetpacs-m3-lists--mode-select))
+    (jetpacs-box
+     (jetpacs-m3-lists--row
+      (format "Item %d" (1+ i))
+      :supporting "Long-click to change interaction mode."
+      :leading (if select
+                   (jetpacs-checkbox
+                    (format "lists-mode-check-%d" i)
+                    :checked (if (aref jetpacs-m3-lists--mode-checked i)
+                                 t :json-false)
+                    :enabled :json-false)
+                 (jetpacs-icon "home"))
+      :trailing (if select
+                    (jetpacs-m3-lists--favorite)
+                  (jetpacs-text
+                   (number-to-string (aref jetpacs-m3-lists--mode-counts i)))))
+     :on-tap (jetpacs-m3-fn-action (format "lists-mode-tap-%d" i))
+     :on-long-tap (jetpacs-m3-fn-action (format "lists-mode-long-%d" i)))))
+
+(defun jetpacs-m3-lists--mode-change ()
+  "Upstream ListItemWithModeChangeOnLongClickSample, live on the fn verb.
+Three rows that are counting click targets until a long press flips the
+whole list into checkbox targets (checking the pressed row), and back
+(clearing every row).  Every gesture is a real round trip: the compound
+mutation runs in Emacs and the next snapshot re-authors all three rows."
+  (jetpacs-m3-lists--divided
+   (mapcar #'jetpacs-m3-lists--mode-change-item (number-sequence 0 2))))
+
 (jetpacs-m3-defcomponent "lists"
   :name "Lists"
   :description
@@ -395,8 +464,7 @@ header takes segment 0 of 4 and the three children the rest."
     "List examples"
     :source jetpacs-m3-lists--source
     :expressive t
-    :unsupported
-    "No node can change another node's interaction mode: one long press here turns every row at once from a counting click target into a checkbox target, and each stateful node on the wire -- checkbox, switch, and the button and icon_button toggles -- owns only its own value, with no member a gesture on one row can use to rewrite its siblings.")
+    :build #'jetpacs-m3-lists--mode-change)
    (jetpacs-m3-example
     "SingleSelectionSegmentedListItemSample"
     "List examples"

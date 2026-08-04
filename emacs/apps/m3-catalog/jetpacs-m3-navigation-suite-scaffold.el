@@ -96,23 +96,25 @@
                              "nav-suite-select" i)))
           (list :arrange "space_evenly" :align "center" :fill t))))
 
-(defun jetpacs-m3-nav-suite--body (type)
-  "Upstream's body: the current suite TYPE, visibility, and the toggle."
-  (lambda ()
-    (jetpacs-column
-     (jetpacs-text (format "Current NavigationSuiteType: %s" type))
-     (jetpacs-text (format "Navigation visible: %s"
-                           (if (jetpacs-m3-flag "nav-suite-hidden") "no" "yes")))
-     (jetpacs-button (if (jetpacs-m3-flag "nav-suite-hidden")
-                         "Show navigation" "Hide navigation")
-                     (jetpacs-m3-flag-action "nav-suite-hidden"))
-     :align "center" :spacing 12)))
+(defun jetpacs-m3-nav-suite--body (type flag)
+  "Upstream's body: the current suite TYPE, visibility, and the toggle.
+FLAG is this sample's OWN hide flag — upstream holds a
+rememberNavigationSuiteScaffoldState per sample, so hiding the
+navigation in one sample must not hide it in the other."
+  (jetpacs-column
+   (jetpacs-text (format "Current NavigationSuiteType: %s" type))
+   (jetpacs-text (format "Navigation visible: %s"
+                         (if (jetpacs-m3-flag flag) "no" "yes")))
+   (jetpacs-button (if (jetpacs-m3-flag flag)
+                       "Show navigation" "Hide navigation")
+                   (jetpacs-m3-flag-action flag))
+   :align "center" :spacing 12))
 
-(defun jetpacs-m3-nav-suite--scaffold (type)
-  "The suite slots for TYPE, honoring the hide toggle.
+(defun jetpacs-m3-nav-suite--scaffold (type flag)
+  "The suite slots for TYPE, honoring this sample's own hide FLAG.
 bar -> the bottom_bar slot; rail/rail_expanded -> the rail slot; the
 centered variant carries arrangement center down the rail."
-  (unless (jetpacs-m3-flag "nav-suite-hidden")
+  (unless (jetpacs-m3-flag flag)
     (pcase type
       ("bar" (list :bottom-bar (jetpacs-m3-nav-suite--bar)))
       ("rail" (list :rail (jetpacs-m3-nav-suite--rail nil "top")))
@@ -149,22 +151,26 @@ compact/medium widths the collapsed rail — items centered down it."
     :source jetpacs-m3-navigation-suite-scaffold--source
     :expressive t
     :build (lambda ()
-             (funcall (jetpacs-m3-nav-suite--body
-                       (jetpacs-m3-nav-suite--auto-type))))
+             (jetpacs-m3-nav-suite--body
+              (jetpacs-m3-nav-suite--auto-type)
+              "nav-suite-hidden-auto"))
     :scaffold (lambda ()
                 (jetpacs-m3-nav-suite--scaffold
-                 (jetpacs-m3-nav-suite--auto-type))))
+                 (jetpacs-m3-nav-suite--auto-type)
+                 "nav-suite-hidden-auto")))
    (jetpacs-m3-example
     "NavigationSuiteScaffoldCustomConfigSample"
     "Navigation suite scaffold examples"
     :source jetpacs-m3-navigation-suite-scaffold--source
     :expressive t
     :build (lambda ()
-             (funcall (jetpacs-m3-nav-suite--body
-                       (jetpacs-m3-nav-suite--custom-type))))
+             (jetpacs-m3-nav-suite--body
+              (jetpacs-m3-nav-suite--custom-type)
+              "nav-suite-hidden-custom"))
     :scaffold (lambda ()
                 (jetpacs-m3-nav-suite--scaffold
-                 (jetpacs-m3-nav-suite--custom-type))))
+                 (jetpacs-m3-nav-suite--custom-type)
+                 "nav-suite-hidden-custom")))
    ))
 
 (provide 'jetpacs-m3-navigation-suite-scaffold)

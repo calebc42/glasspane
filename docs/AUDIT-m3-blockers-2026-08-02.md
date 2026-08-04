@@ -1,7 +1,16 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
-> **Ledger state as of 2026-08-04 (second pass) — 233/279 built, 46
-> remain.** The member lane advanced: G-48 (the sheet slot, both forms —
+> **Ledger state as of 2026-08-04 (third pass) — 235/279 built, 44
+> remain.** G-61/G-62 landed too: date_button carries the
+> SelectableDates predicate declaratively (min_date/max_date/
+> disabled_weekdays, 0 = Sunday) and month_grid takes the same
+> day-level bounds plus range_start/range_end, shading the span with
+> rounded caps — date-pickers complete at 5/5. Still open: G-12+G-69
+> (the body-scroll signal seam), G-35, G-39/79, G-42/70, G-44/45,
+> G-63/65, G-66, G-68, G-71/72, togglebuttons Round, the protocol tier,
+> 3 impossible.
+>
+> Earlier (second pass) — 233/279: The member lane advanced: G-48 (the sheet slot, both forms —
 > bottom-sheet 3/3), G-49 route b + G-41 (the confirm OBJECT and surface
 > in the dialog profile — dialogs 3/3, no lookalikes), G-54/G-55
 > (enum_list radio + children — radio-buttons 2/2, lists 11/12),

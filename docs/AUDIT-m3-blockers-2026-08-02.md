@@ -1,5 +1,24 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
+> **Ledger state as of 2026-08-04 (eighth pass, the DX audit) —
+> 264/279 built, 15 remain. THE SPRINT IS CLOSED.** The DX pass named
+> the idioms the sprint kept writing by hand (jetpacs-bool, spacer
+> sizing keywords, jetpacs-m3-defselection), brought the catalog README
+> and the widget-reference disclaimer back to the current state, and
+> audited every remaining :unsupported reason for truth — which itself
+> flipped the two floating-toolbar WithFab samples (the fused FAB is an
+> authored node; its tap flips a flag and the next snapshot re-authors
+> floating_toolbar_expanded — the reasons predated the flag verb;
+> floating-toolbar complete 8/8) and rewrote adaptive's levitated-sheet
+> reason around its true remaining gap. The 15 that remain, all with
+> audited-true reasons: adaptive ×5 (pane strategies/navigators),
+> pull-to-refresh ×2 (G-74), tabs two-stiffness pair ×2, top-app-bar
+> behavior-argument pair ×2, lists SingleSelection radio rows ×2,
+> menus MultiAutocomplete (G-51), carousel Fading alpha,
+> floating-toolbar scroll-driven collapse. Every gate green: 40 slugs
+> m3-check, widgets 68/68, catalog 14/14, theme 22/22, gradle compile +
+> :wire:jvmTest, ebp validate (43 frames, 100 widget lines).
+>
 > **Ledger state as of 2026-08-04 (seventh pass) — 262/279 built, 17
 > remain. THE PROTOCOL TIER IS SUBSTANTIALLY DONE.** This pass landed:
 > G-80's content_padding half (carousel multi-aspect on a composed

@@ -1,5 +1,26 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
+> **Ledger state as of 2026-08-04 (tenth pass, the base harvest) —
+> 265/279 built, 14 remain.** The sprint's findings were folded back
+> into the base platform (window-class API, notify riding snackbar.show,
+> real M3 chrome bars, the adaptive dock: same destinations worn as the
+> bottom bar or as a navigation rail per SPEC 20.1.1, hardware-verified
+> both ways through a live rotation class-flip), and the catalog paid
+> the toll of notify's channel change: the Indefinite sample's duration
+> now rides the raise (`jetpacs-m3-demo` grew the optional DURATION),
+> which is the more faithful recreation of upstream's
+> SnackbarDuration.Indefinite anyway; multiline is untouched because
+> the host clamps every snackbar it shows. Two device-found Companion
+> bugs died on the way: the raise consumer was a self-cancelling
+> LaunchedEffect keyed on the value it cleared, and — the flip-flopping
+> one — a second stacked MainActivity kept its composition alive and
+> raced the visible host for every raise on the conflated StateFlow, so
+> raises landed invisibly or vanished depending on who resumed first.
+> The consumer now collects under repeatOnLifecycle(STARTED) with a
+> compareAndSet claim, and MainActivity is singleTop. G-76's successor
+> class is closed on hardware: tap -> indefinite snackbar with dismiss
+> X in the visible host, X concludes the request.
+>
 > **Ledger state as of 2026-08-04 (ninth pass) — 265/279 built, 14
 > remain. G-51 IS CLOSED, ON HARDWARE.** state.changed grew an opt-in
 > caret (SPEC 14.6.1): a text-valued stateful node authored with

@@ -115,7 +115,7 @@ centered variant carries arrangement center down the rail."
   (unless (jetpacs-m3-flag "nav-suite-hidden")
     (pcase type
       ("bar" (list :bottom-bar (jetpacs-m3-nav-suite--bar)))
-      ("rail" (list :rail (jetpacs-m3-nav-suite--rail nil "start")))
+      ("rail" (list :rail (jetpacs-m3-nav-suite--rail nil "top")))
       ("rail_expanded"
        (list :rail (jetpacs-m3-nav-suite--rail t "center")))
       ("rail_centered"

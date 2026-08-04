@@ -513,10 +513,14 @@ class DeviceBridge(
     private var lastWindow: Pair<Int, Int>? = null
 
     /** SPEC 20.1.1: the Activity reports window geometry here on first
-     * composition and every configuration change. */
+     * composition and every configuration change. The caller is the COMPOSE
+     * UI thread and windowChanged may emit a notification — a socket write —
+     * so the engine call marshals through the dispatch executor exactly like
+     * every other UI-originated engine call (NetworkOnMainThreadException
+     * killed the whole process on rotation before it did). */
     fun windowChanged(widthDp: Int, heightDp: Int) {
         lastWindow = widthDp to heightDp
-        engine?.windowChanged(widthDp, heightDp)
+        dispatchExecutor.execute { engine?.windowChanged(widthDp, heightDp) }
     }
 
     /** SPEC 13.4/14.2: resolve a multi-view spec to the view being shown;
@@ -548,9 +552,15 @@ class DeviceBridge(
         // SPEC 18.2.1: the event-driven snackbar routes to whichever
         // scaffold host is on screen.
         engine.snackbarListener = { message, action, duration, respond ->
+            // The consumer answers from the COMPOSE UI thread when the
+            // snackbar leaves the screen; the reply is a socket write, so it
+            // marshals through the dispatch executor like every other
+            // UI-originated engine call.
             com.calebc42.ebp.companion.render.SnackbarRaises.flow.value =
                 com.calebc42.ebp.companion.render.SnackbarRaises.Raise(
-                    message, action, duration, respond)
+                    message, action, duration) { outcome ->
+                    dispatchExecutor.execute { respond(outcome) }
+                }
         }
         // SPEC 5.2 newest-wins: cold receivers (reminder tap/alarm) reach the
         // current live session through this slot; a drop with no session is lost.

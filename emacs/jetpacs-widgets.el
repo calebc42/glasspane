@@ -1462,7 +1462,7 @@ indicator; MAX-ITEMS caps the inline count below what would fit."
                           (list :overflow-icon overflow-icon
                                 :max-items max-items)))
 
-(defconst jetpacs--rail-variants '("standard" "wide"))
+(defconst jetpacs--rail-variants '("standard" "wide" "modal"))
 (defconst jetpacs--rail-arrangements '("top" "center" "bottom"))
 
 (cl-defun jetpacs-rail-item (label icon on-tap &key selected badge enabled)
@@ -1480,22 +1480,36 @@ number over the icon, empty meaning the bare attention dot."
                  :selected selected :badge badge :enabled enabled))
 
 (cl-defun jetpacs-navigation-rail (items &key variant expanded arrangement
-                                         header)
+                                         header hide-on-collapse
+                                         on-expand-change)
   "A vertical navigation rail of ITEMS (SPEC §17.4).
 
-ITEMS come from `jetpacs-rail-item'.  VARIANT is standard (default) or
-wide — M3's WideNavigationRail, the only one that can EXPAND to show its
-labels beside the icons, which is what EXPANDED asks for.  ARRANGEMENT
-(top by default, center, bottom) is where the destinations sit in the
-rail's height, and HEADER is a node above them, canonically the menu
-button that toggles a wide rail."
+ITEMS come from `jetpacs-rail-item'.  VARIANT is standard (default),
+wide — M3's WideNavigationRail, the only one that can EXPAND to show
+its labels beside the icons — or modal: collapsed a narrow icon rail,
+expanding in a MODAL overlay, with HIDE-ON-COLLAPSE keeping it
+entirely offscreen until opened (the dismissible form).
+
+EXPANDED is SYNCED authored state: a re-push whose value changed
+animates the open rail, and a settle the author did not write (a modal
+scrim dismissal) reports back through ON-EXPAND-CHANGE with the
+flipped boolean — so a re-push cannot slam the rail back open.
+ARRANGEMENT (top by default, center, bottom) is where the destinations
+sit in the rail's height, and HEADER is a node above them, canonically
+the menu button that toggles a wide rail."
   (unless items (error "jetpacs-navigation-rail: ITEMS must be non-empty (SPEC 17.4)"))
   (when variant
     (setq variant (jetpacs--check-enum variant jetpacs--rail-variants ":variant")))
   (when expanded
     (jetpacs--check-bool expanded ":expanded")
-    (unless (equal variant "wide")
-      (error "jetpacs-navigation-rail: :expanded needs :variant \"wide\" (SPEC 17.4)")))
+    (unless (member variant '("wide" "modal"))
+      (error "jetpacs-navigation-rail: :expanded needs :variant \"wide\" or \"modal\" (SPEC 17.4)")))
+  (when hide-on-collapse
+    (jetpacs--check-bool hide-on-collapse ":hide-on-collapse")
+    (unless (equal variant "modal")
+      (error "jetpacs-navigation-rail: :hide-on-collapse needs :variant \"modal\" (SPEC 17.4)")))
+  (when on-expand-change
+    (jetpacs--check-descriptor on-expand-change ":on-expand-change"))
   (when arrangement
     (setq arrangement (jetpacs--check-enum arrangement jetpacs--rail-arrangements
                                            ":arrangement")))
@@ -1503,6 +1517,8 @@ button that toggles a wide rail."
     (error "jetpacs-navigation-rail: :header must be a node, got %S" header))
   (jetpacs--node "navigation_rail" :items (vconcat items)
                  :variant variant :expanded expanded
+                 :hide_on_collapse hide-on-collapse
+                 :on_expand_change on-expand-change
                  :arrangement arrangement :header header))
 
 (defconst jetpacs--split-button-variants
@@ -2397,7 +2413,8 @@ builds the range and re-pushes."
                                  snackbar-duration snackbar-dismiss
                                  snackbar-max-lines
                                  sheet sheet-peek-height sheet-state
-                                 on-sheet-change fab-hide-on-scroll)
+                                 on-sheet-change fab-hide-on-scroll
+                                 drawer-variant)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
@@ -2479,6 +2496,12 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
     (jetpacs--check-bool fab-hide-on-scroll ":fab-hide-on-scroll")
     (unless fab
       (error "jetpacs-scaffold: :fab-hide-on-scroll styles a fab it does not author (SPEC 17.6)")))
+  (when drawer-variant
+    (setq drawer-variant (jetpacs--check-enum drawer-variant
+                                              '("modal" "dismissible" "permanent")
+                                              ":drawer-variant"))
+    (unless drawer
+      (error "jetpacs-scaffold: :drawer-variant styles a drawer it does not author (SPEC 17.6)")))
   (when top-bar-style
     (setq top-bar-style (jetpacs--check-enum top-bar-style
                                              jetpacs--top-bar-styles
@@ -2534,6 +2557,7 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                  :sheet sheet :sheet_peek_height sheet-peek-height
                  :sheet_state sheet-state :on_sheet_change on-sheet-change
                  :fab_hide_on_scroll fab-hide-on-scroll
+                 :drawer_variant drawer-variant
                  :top_bar_style top-bar-style
                  :top_bar_subtitle top-bar-subtitle
                  :scroll_behavior scroll-behavior))

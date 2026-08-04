@@ -74,6 +74,7 @@ import androidx.compose.material3.InputChip
 import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.Label
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.ModalWideNavigationRail
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.NavigationRail
@@ -1371,8 +1372,10 @@ internal fun RenderSplitButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 internal fun RenderNavigationRail(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val items = node.arrOrNull("items") ?: return
     val header = node.objOrNull("header")
-    val wide = node.stringOr("variant") == "wide"
+    val variant = node.stringOr("variant")
+    val wide = variant == "wide" || variant == "modal"
     val expanded = node.boolOr("expanded")
+    val onExpandChange = node.objOrNull("on_expand_change")
     val arrangement = when (node.stringOr("arrangement")) {
         "center" -> Arrangement.Center
         "bottom" -> Arrangement.Bottom
@@ -1380,6 +1383,9 @@ internal fun RenderNavigationRail(node: JsonObject, ctx: RenderCtx, m: Modifier)
     }
     val headerSlot: (@Composable () -> Unit)? =
         header?.let { { RenderNode(it, ctx.child(it, 0)) } }
+    val railState = if (wide) rememberWideNavigationRailState(
+        initialValue = if (expanded) WideNavigationRailValue.Expanded
+            else WideNavigationRailValue.Collapsed) else null
     val destinations: @Composable () -> Unit = {
         for (i in 0 until items.size) {
             val item = items[i] as? JsonObject ?: continue
@@ -1400,22 +1406,50 @@ internal fun RenderNavigationRail(node: JsonObject, ctx: RenderCtx, m: Modifier)
             val label: @Composable () -> Unit = { Text(item.stringOr("label")) }
             val click = { onButton(onTap, ctx) }
             if (wide) WideNavigationRailItem(
-                railExpanded = expanded, selected = selected, onClick = click,
+                railExpanded = railState?.targetValue ==
+                    WideNavigationRailValue.Expanded,
+                selected = selected, onClick = click,
                 icon = icon, label = label, enabled = enabled)
             else NavigationRailItem(
                 selected = selected, onClick = click, icon = icon,
                 label = label, enabled = enabled)
         }
     }
-    if (wide) WideNavigationRail(
-        modifier = m,
-        state = rememberWideNavigationRailState(
-            initialValue = if (expanded) WideNavigationRailValue.Expanded
-                else WideNavigationRailValue.Collapsed),
-        header = headerSlot,
-        arrangement = arrangement,
-        content = destinations)
-    else NavigationRail(
+    if (wide) {
+        val state = railState!!
+        // §17.4 `expanded` is SYNCED authored state (the tooltip.shown
+        // discipline): a re-push whose value changed animates the open
+        // rail, and a settle the author did not write — a modal scrim
+        // dismissal — reports back through on_expand_change so a re-push
+        // cannot slam the rail back open.
+        LaunchedEffect(expanded) {
+            if (expanded) state.expand() else state.collapse()
+        }
+        val settled = state.currentValue
+        var reported by remember { mutableStateOf(settled) }
+        LaunchedEffect(settled) {
+            if (settled != reported) {
+                reported = settled
+                val isOpen = settled == WideNavigationRailValue.Expanded
+                if (isOpen != expanded && onExpandChange != null)
+                    ctx.action(onExpandChange, JsonPrimitive(isOpen))
+            }
+        }
+        if (variant == "modal")
+            ModalWideNavigationRail(
+                modifier = m,
+                state = state,
+                hideOnCollapse = node.boolOr("hide_on_collapse"),
+                header = headerSlot,
+                arrangement = arrangement,
+                content = destinations)
+        else WideNavigationRail(
+            modifier = m,
+            state = state,
+            header = headerSlot,
+            arrangement = arrangement,
+            content = destinations)
+    } else NavigationRail(
         modifier = m, header = headerSlot?.let { { it() } },
         content = { destinations() })
 }

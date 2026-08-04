@@ -1008,12 +1008,19 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                         topBar?.let { RenderNode(it, ctx.child(it, 0)) }
                     }
                     val nav: @Composable () -> Unit = {
-                        if (drawer != null) IconButton(onClick = {
-                            scope.launch {
-                                if (drawerState.isClosed) drawerState.open()
-                                else drawerState.close()
+                        // A PERMANENT drawer stands open; its hamburger
+                        // would toggle nothing, so it is suppressed.
+                        if (drawer != null &&
+                            node.stringOr("drawer_variant") != "permanent")
+                            IconButton(onClick = {
+                                scope.launch {
+                                    if (drawerState.isClosed) drawerState.open()
+                                    else drawerState.close()
+                                }
+                            }) {
+                                Icon(IconMap.get("menu"),
+                                    contentDescription = "Menu")
                             }
-                        }) { Icon(IconMap.get("menu"), contentDescription = "Menu") }
                     }
                     val subtitle = node.stringOr("top_bar_subtitle")
                     // Only the small TopAppBar takes a `subtitle`; the
@@ -1050,7 +1057,8 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                     Row(
                         modifier = Modifier.fillMaxWidth().statusBarsPadding(),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        if (drawer != null) {
+                        if (drawer != null &&
+                            node.stringOr("drawer_variant") != "permanent") {
                             androidx.compose.material3.IconButton(
                                 onClick = {
                                     scope.launch {
@@ -1265,14 +1273,36 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                 scaffoldState = sheetScaffoldState) { _ -> content() }
         }
     if (drawer != null) {
-        androidx.compose.material3.ModalNavigationDrawer(
-            drawerState = drawerState,
-            drawerContent = {
-                androidx.compose.material3.ModalDrawerSheet(
-                    modifier = Modifier.fillMaxWidth(0.75f)) {
-                    RenderNode(drawer, ctx.child(drawer, 5))
-                }
-            }) { sheetWrap { scaffold() } }
+        // §17.6 `drawer_variant`: the host around the SAME drawer node.
+        // Dismissible pushes the body aside and leaves it live; permanent
+        // stands open (its hamburger is suppressed at the bar — it would
+        // toggle nothing).
+        when (node.stringOr("drawer_variant")) {
+            "dismissible" ->
+                androidx.compose.material3.DismissibleNavigationDrawer(
+                    drawerState = drawerState,
+                    drawerContent = {
+                        androidx.compose.material3.DismissibleDrawerSheet {
+                            RenderNode(drawer, ctx.child(drawer, 5))
+                        }
+                    }) { sheetWrap { scaffold() } }
+            "permanent" ->
+                androidx.compose.material3.PermanentNavigationDrawer(
+                    drawerContent = {
+                        androidx.compose.material3.PermanentDrawerSheet {
+                            RenderNode(drawer, ctx.child(drawer, 5))
+                        }
+                    }) { sheetWrap { scaffold() } }
+            else ->
+                androidx.compose.material3.ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    drawerContent = {
+                        androidx.compose.material3.ModalDrawerSheet(
+                            modifier = Modifier.fillMaxWidth(0.75f)) {
+                            RenderNode(drawer, ctx.child(drawer, 5))
+                        }
+                    }) { sheetWrap { scaffold() } }
+        }
     } else sheetWrap { scaffold() }
     // §17.6 `sheet`: the bottom-sheet slot. With `sheet_peek_height` absent
     // this is the MODAL form — an overlay composing after the scaffold, shown

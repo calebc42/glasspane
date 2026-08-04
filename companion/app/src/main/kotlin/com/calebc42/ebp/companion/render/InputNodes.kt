@@ -34,6 +34,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -77,6 +80,7 @@ import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedToggleButton
 import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.RangeSliderState
@@ -135,6 +139,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -645,6 +650,51 @@ internal fun RenderEnumList(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         if (onChange != null) ctx.action(onChange, v)
     }
 
+    // SPEC 17.4 `variant` radio / `children`: the SAME id/options/value/
+    // on_change state path rendered as one selectable ROW per option —
+    // RadioButton targets in a selectableGroup for single-select, Checkbox
+    // rows for multi — with the parallel child node as the row body when
+    // `children` is authored (its universal attributes ride, so a segmented
+    // bg/corner reaches each row whole). allow_add stays a chips-only
+    // affordance; the elisp constructor refuses the pairing.
+    val childRows = node.arrOrNull("children")
+    if (node.stringOr("variant") == "radio" || childRows != null) {
+        Column(modifier = m.fillMaxWidth().selectableGroup()) {
+            for (i in 0 until options.size) {
+                val opt = options[i] as? JsonObject ?: continue
+                val ov = opt["value"] ?: continue
+                val selected = isSelected(ov)
+                val toggle = {
+                    selectedValues = when {
+                        multi && selected ->
+                            selectedValues.filterNot { jsonValueEquals(it, ov) }
+                        multi -> selectedValues + ov
+                        else -> listOf(ov)
+                    }
+                    publish()
+                }
+                val child = childRows?.getOrNull(i) as? JsonObject
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                        .selectable(selected = selected, enabled = enabled,
+                            role = if (multi) Role.Checkbox else Role.RadioButton,
+                            onClick = toggle)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    if (multi)
+                        Checkbox(checked = selected, onCheckedChange = null,
+                            enabled = enabled)
+                    else RadioButton(selected = selected, onClick = null,
+                        enabled = enabled)
+                    androidx.compose.foundation.layout.Spacer(
+                        Modifier.size(16.dp))
+                    if (child != null) RenderNode(child, ctx.child(child, i))
+                    else Text(opt.stringOr("label"))
+                }
+            }
+        }
+        return
+    }
     FlowRow(
         modifier = m.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

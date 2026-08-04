@@ -60,7 +60,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "editor" to NodeRow(setOf("id"), setOf("document", "value", "on_save", "on_enter", "read_only", "syntax", "line_numbers", "complete", "chromeless", "publish_state", "autofocus", "toolbar", "enabled")),
     "checkbox" to NodeRow(setOf("id"), setOf("checked", "state", "stroke", "label", "on_change", "enabled")),
     "switch" to NodeRow(setOf("id"), setOf("checked", "label", "on_change", "enabled", "thumb_icon")),
-    "enum_list" to NodeRow(setOf("id", "options"), setOf("value", "multi_select", "allow_add", "on_change", "enabled")),
+    "enum_list" to NodeRow(setOf("id", "options"), setOf("value", "multi_select", "allow_add", "on_change", "enabled", "variant", "children")),
     "date_button" to NodeRow(setOf("label", "on_pick"), setOf("value", "enabled", "mode")),
     "time_button" to NodeRow(setOf("label", "on_pick"), setOf("value", "enabled", "display_mode")),
     "slider" to NodeRow(setOf("id", "on_change"), setOf("value", "value_end", "min", "max", "values", "enabled", "track", "orientation", "color", "color_end", "thumb_icon", "value_label", "track_icon_start", "track_icon_end")),

@@ -62,7 +62,7 @@
     ("editor" ("id") ("autofocus" "chromeless" "complete" "document" "enabled" "line_numbers" "on_enter" "on_save" "publish_state" "read_only" "syntax" "toolbar" "value"))
     ("checkbox" ("id") ("checked" "enabled" "label" "on_change" "state" "stroke"))
     ("switch" ("id") ("checked" "enabled" "label" "on_change" "thumb_icon"))
-    ("enum_list" ("id" "options") ("allow_add" "enabled" "multi_select" "on_change" "value"))
+    ("enum_list" ("id" "options") ("allow_add" "children" "enabled" "multi_select" "on_change" "value" "variant"))
     ("date_button" ("label" "on_pick") ("enabled" "mode" "value"))
     ("time_button" ("label" "on_pick") ("display_mode" "enabled" "value"))
     ("slider" ("id" "on_change") ("color" "color_end" "enabled" "max" "min" "orientation" "thumb_icon" "track" "track_icon_end" "track_icon_start" "value" "value_end" "value_label" "values"))

@@ -1826,17 +1826,38 @@ under the checked crossfade; `enum_list' and `dropdown' ignore it."
   (when icon (jetpacs--check-identifier icon ":icon"))
   (jetpacs--node nil :label label :value value :icon icon))
 
+(defconst jetpacs--enum-list-variants '("chips" "radio"))
+
 (cl-defun jetpacs-enum-list (id options &key value multi-select allow-add
-                                on-change enabled)
+                                on-change enabled variant children)
   "A single/multi-select list identified by ID over OPTIONS (SPEC §17.4).
 OPTIONS is a list from `jetpacs-enum-option'.  VALUE is one option value, or
 \(with MULTI-SELECT) a list/vector of distinct option values.  Unless
-ALLOW-ADD, every selected value MUST appear in OPTIONS.  No implicit selection."
+ALLOW-ADD, every selected value MUST appear in OPTIONS.  No implicit selection.
+
+VARIANT chips (default) renders the FlowRow of FilterChips; radio
+renders M3 RadioButton targets in a selectableGroup (Checkbox rows
+under MULTI-SELECT), the same state path throughout.  CHILDREN is a
+node list PARALLEL to OPTIONS: each option becomes one whole selectable
+row with its child as the body — how a list row becomes one exclusive
+choice.  ALLOW-ADD is a chips-only affordance and refuses both."
   (jetpacs--check-identifier id ":id")
   (when multi-select (jetpacs--check-bool multi-select ":multi-select"))
   (when allow-add (jetpacs--check-bool allow-add ":allow-add"))
   (when on-change (jetpacs--check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
+  (when variant
+    (setq variant (jetpacs--check-enum variant jetpacs--enum-list-variants
+                                       ":variant")))
+  (when children
+    (unless (= (length children) (length options))
+      (error "jetpacs-enum-list: :children must parallel :options, got %d for %d (SPEC 17.4)"
+             (length children) (length options)))
+    (dolist (child children)
+      (unless (jetpacs--root-node-p child)
+        (error "jetpacs-enum-list: every :children entry must be a node, got %S" child))))
+  (when (and (eq allow-add t) (or (equal variant "radio") children))
+    (error "jetpacs-enum-list: :allow-add is a chips-only affordance (SPEC 17.4)"))
   (when (and (eq multi-select t) value)
     (cond ((listp value) (setq value (vconcat value)))
           ((vectorp value))
@@ -1854,6 +1875,8 @@ ALLOW-ADD, every selected value MUST appear in OPTIONS.  No implicit selection."
   (jetpacs--node "enum_list"
                  :id id :options (vconcat options) :value value
                  :multi_select multi-select :allow_add allow-add
+                 :variant variant
+                 :children (and children (vconcat children))
                  :on_change on-change :enabled enabled))
 
 (cl-defun jetpacs-date-button (label on-pick &key value mode enabled)

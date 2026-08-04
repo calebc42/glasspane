@@ -18,7 +18,7 @@
 (defconst ebp-test--root
   (expand-file-name ".." (file-name-directory
                           (or load-file-name buffer-file-name)))
-  "llm-poc-2 checkout root.")
+  "llm-poc-3 checkout root.")
 
 (defconst ebp-test--ebp (expand-file-name "ebp" ebp-test--root)
   "The ebp submodule: spec, contract, goldens.")

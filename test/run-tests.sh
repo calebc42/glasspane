@@ -44,6 +44,11 @@ for f in emacs/*.el emacs/apps/*/*.el; do
   rm -f "${f%.el}.elc"
 done
 
+# Storage-independent SPEC 14.4 receipt/work contract and its built-in
+# Emacs 30.1 SQLite backend.  No Jetpacs or ebp.el dependency.
+emacs -Q --batch -L emacs -l test/ebp-store-test.el \
+  -f ert-run-tests-batch-and-exit
+
 emacs -Q --batch -L emacs -l test/ebp-wire-test.el \
   -f ert-run-tests-batch-and-exit
 

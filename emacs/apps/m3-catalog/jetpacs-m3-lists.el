@@ -71,9 +71,36 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ListSamples.kt"
   "Upstream ListsExampleSourceUrl.")
 
-(defconst jetpacs-m3-lists--single-selection-note
-  "This sample exists to make a whole list row one exclusive choice, indicated by a radio button, and the wire carries neither half: there is no radio_button node type, no container node carries a selected member, and every checked node -- checkbox, switch, and the button and icon_button toggles -- holds only its own value on the device, so checking one row could never clear its siblings. enum_list is the one node that owns an exclusive choice, and it renders as a FlowRow of filter chips rather than as list rows."
-  "Why both SingleSelection samples are unsupported.")
+(defun jetpacs-m3-lists--selection-child (n)
+  "Row body for single-selection option N: the ListItem text column.
+The RadioButton leading slot is the radio variant's own, so the child
+carries only what upstream's content/supportingContent slots held."
+  (jetpacs-column
+   (jetpacs-text (format "Item %d" n))
+   (jetpacs-text "Additional info" :style "caption"
+                 :color "on_surface_variant")
+   :spacing 2))
+
+(defun jetpacs-m3-lists--single-selection (id &optional segmented)
+  "The SingleSelection pair: three whole-row exclusive choices, as ID.
+`enum_list' `:variant \"radio\"' with `:children' makes each option one
+selectable ROW — checking a row clears its siblings because the node
+owns the exclusive choice, which no per-row checked member could.
+SEGMENTED dresses each child with the group color and its own corners,
+riding the children's universal attributes."
+  (jetpacs-enum-list
+   id
+   (list (jetpacs-enum-option "Item 1" "item-1")
+         (jetpacs-enum-option "Item 2" "item-2")
+         (jetpacs-enum-option "Item 3" "item-3"))
+   :variant "radio"
+   :value "item-1"
+   :children (cl-loop for n from 1 to 3
+                      for child = (jetpacs-m3-lists--selection-child n)
+                      collect (if segmented
+                                  (jetpacs-m3-lists--segment (1- n) 3 child)
+                                child))
+   :on-change (jetpacs-m3-demo "Selection")))
 
 (defconst jetpacs-m3-lists--segmented-color "surface_variant"
   "The nearest §16.6 role to the samples\\=' surfaceContainer.
@@ -355,7 +382,8 @@ header takes segment 0 of 4 and the three children the rest."
     "List examples"
     :source jetpacs-m3-lists--source
     :expressive t
-    :unsupported jetpacs-m3-lists--single-selection-note)
+    :build (lambda ()
+             (jetpacs-m3-lists--single-selection "lists-single-selection")))
    (jetpacs-m3-example
     "MultiSelectionListItemSample"
     "List examples"
@@ -374,7 +402,8 @@ header takes segment 0 of 4 and the three children the rest."
     "List examples"
     :source jetpacs-m3-lists--source
     :expressive t
-    :unsupported jetpacs-m3-lists--single-selection-note)
+    :build (lambda ()
+             (jetpacs-m3-lists--single-selection "lists-single-segmented" t)))
    (jetpacs-m3-example
     "MultiSelectionSegmentedListItemSample"
     "List examples"

@@ -976,6 +976,27 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                 "end" -> FloatingToolbarExitDirection.End
                 else -> FloatingToolbarExitDirection.Bottom
             })
+    // SPEC 18.2.1: consume a pending event-driven snackbar in THIS host —
+    // RenderScaffold only composes for the surface being presented, so the
+    // raise lands where the SPEC says it must. The respond callback answers
+    // the pending snackbar.show request with how it concluded.
+    val pendingRaise by SnackbarRaises.flow.collectAsState()
+    LaunchedEffect(pendingRaise) {
+        pendingRaise?.let { raise ->
+            SnackbarRaises.flow.value = null
+            val res = hostState.showSnackbar(
+                message = raise.message,
+                actionLabel = raise.actionLabel,
+                withDismissAction = raise.duration == "indefinite",
+                duration = when (raise.duration) {
+                    "long" -> SnackbarDuration.Long
+                    "indefinite" -> SnackbarDuration.Indefinite
+                    else -> SnackbarDuration.Short
+                })
+            raise.respond(
+                if (res == SnackbarResult.ActionPerformed) "action" else "dismissed")
+        }
+    }
     // §17.6 `rail`: a node slot laid on the START edge beside the whole
     // chrome — with the §20.1.1 geometry known, Emacs fills bottom_bar or
     // rail from the same items, the NavigationSuiteScaffold swap. The slot

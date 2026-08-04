@@ -618,6 +618,7 @@ class CompanionEngine(
             "surface.remove" -> handleSurfaceRemove(id, params)
             "queue.replay" -> handleQueueReplay(id)
             "dialog.show" -> handleDialogShow(id, params)
+            "snackbar.show" -> handleSnackbarShow(id, params)
             "reminders.set" -> handleRemindersSet(id, params)
             "triggers.set" -> handleTriggersSet(id, params)
             "capability.invoke" -> handleCapabilityInvoke(id, params)
@@ -2069,6 +2070,32 @@ class CompanionEngine(
             params.wireIntOrNull("duration_s")?.takeIf { it in 1..10 } ?: return
         else null
         toastListener?.invoke(text, duration)
+    }
+
+    // ---------------------------------------------- snackbar raise (18.2.1)
+
+    /** Present hook: (message, action_label, duration, respond) — call
+     * respond with "action" or "dismissed" exactly once as the snackbar
+     * leaves the screen; the pending request completes then. */
+    var snackbarListener: ((String, String?, String?, (String) -> Unit) -> Unit)? = null
+
+    private fun handleSnackbarShow(id: JsonElement, params: JsonObject) {
+        // SPEC 22.1: presentation.snackbar must have been granted.
+        if ("presentation.snackbar" !in granted)
+            return respondError(id, -32601, "Method not found", "method-not-found")
+        val message = params.stringOrNull("message")
+            ?: return respondError(id, -32602, "Invalid params", "invalid-params")
+        val action = params.stringOrNull("action_label")
+        val duration = params.stringOrNull("duration")
+        val listener = snackbarListener
+        if (listener == null) {
+            // SPEC 18.2.1: no scaffold host on screen — toast, dismissed.
+            toastListener?.invoke(message, null)
+            return respondResult(id, buildJsonObject { put("result", "dismissed") })
+        }
+        listener(message, action, duration) { outcome ->
+            respondResult(id, buildJsonObject { put("result", outcome) })
+        }
     }
 
     // ------------------------------------------------------ dialogs (18.1)

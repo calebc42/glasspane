@@ -2046,6 +2046,33 @@ into a dialog is an application concern above this boundary."
    ;; which SPEC 18.1 concludes with 1301 and dismisses the dialog.
    (or (ebp-client--user-paced-timeout ebp-dialog-timeout) 'none)))
 
+(cl-defun ebp-client-snackbar-show (client message &key action-label
+                                           duration callback)
+  "Raise an event-driven snackbar (SPEC 18.2.1) and hear how it went.
+MESSAGE shows in the snackbar host of the surface currently presented;
+ACTION-LABEL adds the action button; DURATION is short (default), long
+or indefinite.  CALLBACK receives (RESULT ERROR): RESULT is the string
+dismissed or action when the snackbar leaves the screen — the
+SnackbarResult an application branches on — and ERROR the JSON-RPC
+error plist if the raise failed.  The static scaffold snackbar members
+remain the authored-tree form; this is the out-of-band raise."
+  (when duration
+    (unless (member duration '("short" "long" "indefinite"))
+      (error "ebp-client-snackbar-show: :duration must be short, long, or indefinite, got %S"
+             duration)))
+  (ebp-client--request
+   client 'snackbar.show
+   `(:message ,message
+     ,@(when action-label `(:action_label ,action-label))
+     ,@(when duration `(:duration ,duration)))
+   (lambda (result error)
+     (when callback
+       (funcall callback (and result (plist-get result :result)) error)))
+   ;; SPEC 18.2.1: the reply arrives when the snackbar LEAVES the screen,
+   ;; which an indefinite snackbar makes user-paced — same policy as a
+   ;; dialog: floor a configured ceiling at 60 s.
+   (or (ebp-client--user-paced-timeout ebp-dialog-timeout) 'none)))
+
 ;;;; TCP transport (SPEC 5.2): jsonrpc-process-connection, unmodified
 
 ;;;###autoload

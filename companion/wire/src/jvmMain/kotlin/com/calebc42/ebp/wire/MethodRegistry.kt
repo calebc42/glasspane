@@ -31,6 +31,7 @@ val METHOD_REGISTRY: Map<String, MethodSpec> = mapOf(
     "state.changed" to MethodSpec(Sender.COMPANION, false, R),
     "window.changed" to MethodSpec(Sender.COMPANION, false, SR),
     "dialog.show" to MethodSpec(Sender.EMACS, true, R),
+    "snackbar.show" to MethodSpec(Sender.EMACS, true, R),
     "toast.show" to MethodSpec(Sender.EMACS, false, R),
     "pie_menu.show" to MethodSpec(Sender.EMACS, false, R),
     "pie_menu.dismiss" to MethodSpec(Sender.EMACS, false, R),

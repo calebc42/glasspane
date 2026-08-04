@@ -121,6 +121,7 @@ class DeviceBridge(
             "101112131415161718191a1b1c1d1e1f" to
                 EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
         supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
+            "presentation.snackbar",
             "presentation.pie-menu", "reminders.owner", "surfaces.notification",
             "editor.sync", "capabilities", "triggers"),
         // SPEC 10.2: what this build's renderer actually honors — derived from
@@ -544,6 +545,13 @@ class DeviceBridge(
         // SPEC 20.1.1: seed the new session with the last-known geometry so
         // the welcome can mirror it before the Activity recomposes.
         lastWindow?.let { (w, h) -> engine.windowChanged(w, h) }
+        // SPEC 18.2.1: the event-driven snackbar routes to whichever
+        // scaffold host is on screen.
+        engine.snackbarListener = { message, action, duration, respond ->
+            com.calebc42.ebp.companion.render.SnackbarRaises.flow.value =
+                com.calebc42.ebp.companion.render.SnackbarRaises.Raise(
+                    message, action, duration, respond)
+        }
         // SPEC 5.2 newest-wins: cold receivers (reminder tap/alarm) reach the
         // current live session through this slot; a drop with no session is lost.
         CompanionStores.setLiveSession(engine)

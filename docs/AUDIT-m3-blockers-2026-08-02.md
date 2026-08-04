@@ -1,7 +1,17 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
-> **Ledger state as of 2026-08-04 (fourth pass) — 240/279 built, 39
-> remain.** G-12 and G-69 landed on one shared seam: BodyScrollSignal, a
+> **Ledger state as of 2026-08-04 (fifth pass) — 244/279 built, 35
+> remain.** G-71/G-72 landed: scaffold.drawer_variant (modal|
+> dismissible|permanent, the permanent hamburger suppressed) and the
+> rail's closed state loop — expanded is SYNCED authored state,
+> on_expand_change reports settles the author did not write, variant
+> modal + hide_on_collapse are the two ModalWideNavigationRail forms.
+> navigation-drawer complete at 3/3, navigation-rail at 8/8, all three
+> rail recreations LIVE on the flag verb. Still open: G-35, G-39/79,
+> G-42/70, G-44/45, G-63/65, G-66, G-68, togglebuttons Round, the
+> protocol tier, 3 impossible.
+>
+> Earlier (fourth pass) — 240/279: G-12 and G-69 landed on one shared seam: BodyScrollSignal, a
 > CompositionLocal the scaffold provides around its BODY, published by
 > the body's scrolling containers (at-start, reverseLayout included,
 > always derived on the device) and read by `button.expanded "auto"`

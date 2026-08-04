@@ -37,10 +37,19 @@
 ;; plist carries them and the notify-injected message wears them when
 ;; it lands.
 ;;
-;; The two still out of reach both need a channel, not a member: a
-;; SnackbarResult reported back for the coroutines sample, and a
-;; SnackbarHost content lambda -- a bordered container with a colored
-;; action -- for the custom one.
+;; The custom-host sample is a member now too: `snackbar_content' is a
+;; node drawn in place of the whole Snackbar face while the HOST keeps
+;; M3's animation, timing and dismissal, and `button.color' recolors the
+;; text action.  The per-raise error alternation is module state on the
+;; fn verb: each FAB tap increments the count in Emacs and the next
+;; snapshot re-authors both the message and the face, odd raises styled
+;; as errors exactly like upstream's isError.  Two seams stated on the
+;; builder: the error action's errorContainer FILL is not carried
+;; (color recolors content only), and the face replaces M3's Snackbar
+;; container, so the recreation draws its own inverse_surface pill.
+;;
+;; The one still out of reach needs a channel, not a member: a
+;; SnackbarResult reported back for the coroutines sample.
 
 ;;; Code:
 
@@ -51,9 +60,51 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ScaffoldSamples.kt"
   "Upstream SnackbarsExampleSourceUrl.")
 
-(defconst jetpacs-m3-snackbars--host-note
-  "The scaffold snackbar member is one message string and there is no snackbar node to author, so the SnackbarHost content lambda this sample replaces -- the only place a bordered container, a colored TextButton action or a per-message SnackbarVisuals can be drawn -- has no form on the wire."
-  "Why every custom-SnackbarHost sample is unsupported.")
+(defvar jetpacs-m3-snackbars--custom-count 0
+  "ScaffoldWithCustomSnackbar's clickCount: odd raises are errors.")
+
+(puthash "snackbars-custom-show"
+         (lambda () (cl-incf jetpacs-m3-snackbars--custom-count))
+         jetpacs-m3-fn-registry)
+
+(defun jetpacs-m3-snackbars--custom-fab ()
+  "The custom sample's FAB: each tap counts a raise through the fn verb.
+Upstream keeps clickCount in `remember\\='; here the count is module
+state, so the alternating error styling is Emacs re-authoring the face."
+  (jetpacs-button "Show snackbar"
+                  (jetpacs-m3-fn-action "snackbars-custom-show")
+                  :variant "filled"))
+
+(defun jetpacs-m3-snackbars--custom-scaffold ()
+  "The custom sample's LIVE scaffold: message + authored snackbar face.
+Nothing before the first tap; after it, the bordered face upstream draws
+in its SnackbarHost lambda -- the 2dp secondary border, 12dp gap, the
+inverse_surface pill, and the text action colored error on odd raises
+(upstream's isError) or inverse_primary otherwise.  Seams: the error
+action's errorContainer FILL is not carried (button color recolors
+content only), and the authored face replaces M3's Snackbar chrome, so
+the pill here is its own surface."
+  (let ((n jetpacs-m3-snackbars--custom-count))
+    (when (> n 0)
+      (let* ((error-p (= 1 (% n 2)))
+             (msg (format "Snackbar # %d" n)))
+        (list
+         :snackbar msg
+         :snackbar-content
+         (jetpacs-with-attrs
+          (jetpacs-surface
+           (jetpacs-with-attrs
+            (jetpacs-row
+             (jetpacs-with-attrs
+              (jetpacs-text msg :color "inverse_on_surface")
+              :weight 1)
+             (jetpacs-button "Action" (jetpacs-m3-demo "Action")
+                             :variant "text"
+                             :color (if error-p "error" "inverse_primary"))
+             :align "center" :spacing 8)
+            :padding 12)
+           :color "inverse_surface" :shape "rounded_small")
+          :border (list :width 2 :color "secondary") :pad 12))))))
 
 (defun jetpacs-m3-snackbars--simple-fab ()
   "Upstream ScaffoldWithSimpleSnackbar's FAB, as this screen's FAB.
@@ -109,7 +160,9 @@ fillMaxSize/wrapContentSize modifier pair does upstream."
     "ScaffoldWithCustomSnackbar"
     "Snackbars examples"
     :source jetpacs-m3-snackbars--source
-    :unsupported jetpacs-m3-snackbars--host-note)
+    :build #'jetpacs-m3-snackbars--simple-body
+    :slots (list :fab #'jetpacs-m3-snackbars--custom-fab)
+    :scaffold #'jetpacs-m3-snackbars--custom-scaffold)
    (jetpacs-m3-example
     "ScaffoldWithCoroutinesSnackbar"
     "Snackbars examples"

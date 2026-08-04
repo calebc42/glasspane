@@ -13,7 +13,7 @@ and are not renamed.  Tier-1 apps may deviate; the base does not.*
 | Layer | Names | Owned by |
 |---|---|---|
 | Wire | `top_bar` `bottom_bar` `fab` `floating_toolbar` `drawer` (scaffold slots) | SPEC §17.6 — frozen |
-| Elisp API | `jetpacs-chrome-screen` keywords, `jetpacs-chrome-dock-function` | base — stable |
+| Elisp API | `jetpacs-chrome-screen` keywords, `jetpacs-chrome-dock-items-function` (and the raw-node `jetpacs-chrome-dock-function`) | base — stable |
 | Vocabulary | the M3 component names below | this document |
 
 1:1 holds at the vocabulary layer ONLY.  The wire layer is deliberately not
@@ -31,6 +31,7 @@ without it (M-x parity, JA-3).  Chrome is a projection of commands.
 | slide-in panel behind the hamburger | **Navigation drawer** ("drawer" in running text) | `scaffold.drawer` | App Menu, hamburger menu |
 | bar across the top | **Top app bar** ("top bar") | `scaffold.top_bar` | Menu bar, Contextual Actions Bar |
 | docked bottom bar of destinations | **Navigation bar** | `scaffold.bottom_bar` (via the dock seam) | View switcher, Bottom nav bar |
+| start-edge column of destinations on a wide window | **Navigation rail** | `scaffold.rail` (the same dock seam, expanded width) | — |
 | floating cluster of contextual actions | **Toolbar — floating** | `scaffold.floating_toolbar` | Contextual Actions Bar |
 | bottom-anchored row of actions | **Toolbar — docked** | `scaffold.bottom_bar` holding actions | — |
 | round primary-action button | **FAB** | `scaffold.fab` | — |
@@ -48,11 +49,17 @@ right (M-x sits top-right), plus at most one overflow menu.  It never
 changes contents in response to a selection (that is the floating toolbar's
 job).
 
-**Navigation bar** — three to five *destinations*, the selected one always
-indicated; items are places, never actions.  In Jetpacs the places are the
-`multi_view`/`view.switched` machinery, and the bar persists across every
-screen via `jetpacs-chrome-dock-function` — a navigation bar that vanishes
-on drill is a defect, not a style.
+**Navigation bar / navigation rail** — three to five *destinations*, the
+selected one always indicated; items are places, never actions.  In Jetpacs
+the places are the `multi_view`/`view.switched` machinery, and the
+destinations persist across every screen via the dock seam — a navigation
+bar that vanishes on drill is a defect, not a style.  Author the
+destinations as data with `jetpacs-chrome-dock-items-function` and chrome
+wears them per SPEC 20.1.1: a bottom navigation bar on compact and medium
+widths, a start-edge navigation rail (`scaffold.rail`) on expanded — the
+M3 NavigationSuiteScaffold behavior, one authoring.  The raw-node
+`jetpacs-chrome-dock-function` remains as an override for a hand-built bar
+(always `bottom_bar`, never adaptive), and wins when both are set.
 
 **Toolbar** — *actions*, in two variants exactly as M3 draws them:
 **floating** (the `floating_toolbar` slot) for mode- or selection-contextual

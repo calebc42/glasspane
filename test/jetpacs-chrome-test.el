@@ -1028,6 +1028,85 @@ persists across drills — while a screen authoring its own bar wins."
                            "mine"))))
       (jetpacs-chrome-remove "app:dockdemo"))))
 
+(ert-deftest jetpacs-chrome-items-dock-wears-bottom-bar-on-compact ()
+  "The data dock: on a compact width the destinations become the same
+weighted text/tonal button row the node dock always was — selection is
+the tonal fill.  Disconnected `jetpacs-window-class' already answers
+compact, which is also why every OTHER chrome test stays untouched by
+the adaptive seam."
+  (let ((jetpacs-chrome-dock-items-function
+         (lambda (_s)
+           (list (list :label "A" :icon "home"
+                       :on-tap (jetpacs-action "jetpacs.noop") :selected t)
+                 (list :label "B" :icon "code"
+                       :on-tap (jetpacs-action "jetpacs.noop"))))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "itemsdemo"
+            (jetpacs-chrome-define-root "itemsdemo" "root"
+                                        (lambda (_back)
+                                          (jetpacs-chrome-screen
+                                           "R" (jetpacs-text "r")))))
+          (let* ((mv (jetpacs-chrome--build "app:itemsdemo"))
+                 (view (gethash "root" (plist-get mv :views)))
+                 (bar (plist-get view :bottom_bar))
+                 (tabs (plist-get bar :children)))
+            (should-not (plist-member view :rail))
+            (should (equal (plist-get bar :t) "row"))
+            (should (= 2 (length tabs)))
+            (should (equal (plist-get (aref tabs 0) :variant) "tonal"))
+            (should (equal (plist-get (aref tabs 1) :variant) "text"))))
+      (jetpacs-chrome-remove "app:itemsdemo"))))
+
+(ert-deftest jetpacs-chrome-items-dock-wears-rail-on-expanded ()
+  "The data dock on an expanded width: the SAME destinations ride the
+scaffold rail slot as a navigation_rail, and no bottom bar is injected
+— the NavigationSuiteScaffold swap (SPEC 20.1.1 x 17.6)."
+  (let ((jetpacs-chrome-dock-items-function
+         (lambda (_s)
+           (list (list :label "A" :icon "home"
+                       :on-tap (jetpacs-action "jetpacs.noop") :selected t)
+                 (list :label "B" :icon "code"
+                       :on-tap (jetpacs-action "jetpacs.noop"))))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-window-class)
+                   (lambda (axis)
+                     (if (eq axis :width) "expanded" "medium"))))
+          (with-jetpacs-owner "raildemo"
+            (jetpacs-chrome-define-root "raildemo" "root"
+                                        (lambda (_back)
+                                          (jetpacs-chrome-screen
+                                           "R" (jetpacs-text "r")))))
+          (let* ((mv (jetpacs-chrome--build "app:raildemo"))
+                 (view (gethash "root" (plist-get mv :views)))
+                 (rail (plist-get view :rail)))
+            (should-not (plist-member view :bottom_bar))
+            (should (equal (plist-get rail :t) "navigation_rail"))))
+      (jetpacs-chrome-remove "app:raildemo"))))
+
+(ert-deftest jetpacs-chrome-node-dock-outranks-items-and-stays-bottom ()
+  "`jetpacs-chrome-dock-function' is the raw-node override: when both
+are set the finished node wins, and it stays a bottom bar even on an
+expanded window — only the data form can be re-authored into a rail."
+  (let ((jetpacs-chrome-dock-function (lambda (_s) (jetpacs-text "raw")))
+        (jetpacs-chrome-dock-items-function
+         (lambda (_s) (list (list :label "A" :icon "home"
+                                  :on-tap (jetpacs-action "jetpacs.noop"))))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-window-class)
+                   (lambda (_axis) "expanded")))
+          (with-jetpacs-owner "rawdemo"
+            (jetpacs-chrome-define-root "rawdemo" "root"
+                                        (lambda (_back)
+                                          (jetpacs-chrome-screen
+                                           "R" (jetpacs-text "r")))))
+          (let* ((mv (jetpacs-chrome--build "app:rawdemo"))
+                 (view (gethash "root" (plist-get mv :views))))
+            (should-not (plist-member view :rail))
+            (should (equal (plist-get (plist-get view :bottom_bar) :text)
+                           "raw"))))
+      (jetpacs-chrome-remove "app:rawdemo"))))
+
 (ert-deftest jetpacs-chrome-dock-failure-degrades-to-no-dock ()
   "A signalling dock builder costs the dock, never the surface."
   (let ((jetpacs-chrome-dock-function (lambda (_s) (error "boom"))))

@@ -74,6 +74,20 @@ signal or a non-node degrades the same way and never fails the build.
 Every descriptor the dock ships must be a GLOBAL VERB or scoped to the
 surfaces it appears on — it renders on every chrome surface.")
 
+(defvar jetpacs-chrome-dock-items-function nil
+  "Function (SURFACE) -> the dock's destinations as DATA, or nil.
+The window-class-adaptive alternative to `jetpacs-chrome-dock-function\':
+each item is a plist (:label STR :icon STR :on-tap DESCRIPTOR
+\[:selected BOOL]), and chrome wears the SAME destinations as a
+weighted bottom-bar row on compact and medium widths and as a
+`jetpacs-navigation-rail\' in the scaffold\'s start-edge rail slot when
+the width class is \"expanded\" (SPEC 20.1.1) — the
+NavigationSuiteScaffold swap, driven by data instead of two authorings.
+`jetpacs-chrome-dock-function\' (a finished node, always the bottom
+bar) WINS when both are set — it is the raw-node override.  Degrades
+like the node dock: a signal or malformed items cost the dock, never
+the surface.")
+
 ;;;; Composition
 
 (cl-defun jetpacs-chrome-screen (title body &key back actions fab drawer
@@ -159,6 +173,76 @@ must cost the dock, never every chrome surface in the process."
       (error (message "jetpacs-chrome: dock builder failed: %s"
                       (jetpacs--error-label err))
              nil))))
+
+(defun jetpacs-chrome--dock-tab (item)
+  "One bottom-bar destination from a dock ITEM plist.
+The weighted text/tonal button row is the form the hub proved on
+device; selection is the tonal fill."
+  (jetpacs-with-attrs
+   (jetpacs-button (plist-get item :label) (plist-get item :on-tap)
+                   :icon (plist-get item :icon)
+                   :variant (if (plist-get item :selected) "tonal" "text"))
+   :weight 1))
+
+(defun jetpacs-chrome--dock-slot (surface)
+  "SURFACE\'s dock as (SLOT . NODE), or nil.
+SLOT is `:bottom_bar\' — or `:rail\' when the destinations come from
+`jetpacs-chrome-dock-items-function\' and the width class is expanded
+\(SPEC 20.1.1): same places, worn on the start edge where M3 puts
+navigation on a wide window.  The raw-node dock stays a bottom bar
+unconditionally; only the data form can swap, because only data can be
+re-authored into a rail."
+  (if-let* ((node (jetpacs-chrome--dock surface)))
+      (cons :bottom_bar node)
+    (when jetpacs-chrome-dock-items-function
+      (condition-case err
+          (when-let* ((items (funcall jetpacs-chrome-dock-items-function
+                                      surface))
+                      ((consp items)))
+            (if (equal (jetpacs-window-class :width) "expanded")
+                (cons :rail
+                      (jetpacs-navigation-rail
+                       (mapcar (lambda (item)
+                                 (jetpacs-rail-item
+                                  (plist-get item :label)
+                                  (plist-get item :icon)
+                                  (plist-get item :on-tap)
+                                  :selected (plist-get item :selected)))
+                               items)
+                       :arrangement "center"))
+              (cons :bottom_bar
+                    (apply #'jetpacs-row
+                           (append (mapcar #'jetpacs-chrome--dock-tab items)
+                                   (list :spacing 4))))))
+        (error (message "jetpacs-chrome: dock items failed: %s"
+                        (jetpacs--error-label err))
+               nil)))))
+
+(defvar jetpacs-chrome--window-classes nil
+  "The (WIDTH-CLASS . HEIGHT-CLASS) chrome last authored for.")
+
+(defun jetpacs-chrome--on-window-changed (_client _window)
+  "Re-push every chrome surface when the size CLASS flips (SPEC 20.1.1).
+Geometry ticks inside one class cost nothing; a flip re-pushes each
+chrome surface (debounced by the shell) so the dock swaps forms and
+every screen re-authors for the new class."
+  (let ((classes (cons (jetpacs-window-class :width)
+                       (jetpacs-window-class :height))))
+    (unless (equal classes jetpacs-chrome--window-classes)
+      (setq jetpacs-chrome--window-classes classes)
+      (maphash (lambda (surface _stack)
+                 (jetpacs-shell--schedule-repush surface))
+               jetpacs-chrome--stacks))))
+
+(defun jetpacs-chrome--on-ready (client)
+  "Seed the class memo and attach the window hook.
+The welcome mirrors the geometry before ready runs (SPEC 20.1.1), so
+seeding here means the first `window.changed\' re-pushes only on a REAL
+class flip — not on the notification that merely repeats the welcome."
+  (setq jetpacs-chrome--window-classes
+        (cons (jetpacs-window-class :width) (jetpacs-window-class :height)))
+  (cl-pushnew #'jetpacs-chrome--on-window-changed
+              (ebp-client-window-changed-functions client)))
 
 (defun jetpacs-chrome--error-screen (surface id back err)
   "A Core-Node-Set stand-in for screen ID whose builder failed with ERR.
@@ -250,7 +334,7 @@ together, on every rebuild."
       (error "jetpacs-chrome: no chrome stack for %s" surface))
     (jetpacs-buffer-with-budget
      (let ((seen (make-hash-table :test #'equal))
-           (dock (jetpacs-chrome--dock surface))
+           (dock (jetpacs-chrome--dock-slot surface))
            views prev-id)
       (dolist (entry (reverse stack))
         (let* ((id (car entry))
@@ -266,8 +350,8 @@ together, on every rebuild."
                            ;; the builder's own node is never mutated.
                            (when (and dock (jetpacs--root-node-p n)
                                       (equal (plist-get n :t) "scaffold")
-                                      (not (plist-member n :bottom_bar)))
-                             (setq n (append n (list :bottom_bar dock))))
+                                      (not (plist-member n (car dock))))
+                             (setq n (append n (list (car dock) (cdr dock)))))
                            (jetpacs-chrome--gate-view surface n)
                            (jetpacs-chrome--claim-screen-ids n seen)
                            n)

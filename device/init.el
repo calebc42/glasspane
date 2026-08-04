@@ -64,8 +64,9 @@
 
 ;; The hub chrome follows docs/CHROME-VOCABULARY.md: the DRAWER (left,
 ;; behind the Companion's hamburger) holds app destinations, the TOP BAR
-;; keeps M-x top-right, and the BOTTOM BAR is the view switcher —
-;; Home / Files / Eval, the poc's tabs reborn.  Eval is *ielm*: ielm
+;; keeps M-x top-right, and the view switcher — Home / Files / Eval,
+;; the poc's tabs reborn — docks as the BOTTOM BAR, or as a NAVIGATION
+;; RAIL when the window is expanded (SPEC 20.1.1).  Eval is *ielm*: ielm
 ;; derives from comint-mode, so the comint skin's pinned input row is
 ;; the REPL.
 
@@ -81,41 +82,35 @@
                  :key "drawer-theme")
                 :spacing 8))))
 
-(defun jetpacs-hub--tab (label icon on-tap &optional selected)
-  (jetpacs-with-attrs
-   (jetpacs-button label on-tap :icon icon
-                   :variant (if selected "tonal" "text"))
-   :weight 1))
-
 ;; The Eval screen is the *ielm* drill on the hub stack; the B5 minter
 ;; is stable across renders, so its id is computable here.
 (defvar jetpacs-hub--eval-screen (jetpacs-wire-id "drill" "*ielm*"))
 
-(defun jetpacs-hub--dock (surface)
-  "The persistent view switcher, injected into EVERY chrome screen.
-`jetpacs-chrome-dock-function' calls this once per surface build; the
-selected tab follows where the user actually is: the files surface, the
-hub's Eval drill, or the hub itself.  Every descriptor here is a global
-verb — the dock renders on every owner's surface."
+(defun jetpacs-hub--dock-items (surface)
+  "The persistent view switcher's destinations, as data.
+Chrome wears these as the bottom bar on compact/medium widths and as a
+navigation rail on expanded (SPEC 20.1.1).  The selected destination
+follows where the user actually is: the files surface, the hub's Eval
+drill, or the hub itself.  Every descriptor here is a global verb — the
+dock renders on every owner's surface."
   (let ((sel (cond ((equal surface "app:jetpacs.files") 'files)
                    ((not (equal surface "app:hub")) nil)
                    ((equal (car (jetpacs-chrome-stack surface))
                            jetpacs-hub--eval-screen)
                     'eval)
                    (t 'home))))
-    (jetpacs-row
-     (jetpacs-hub--tab "Home" "home"
-                       (jetpacs-action "hub.home") (eq sel 'home))
-     (jetpacs-hub--tab "Files" "folder_open"
-                       (jetpacs-action "jetpacs.launcher.open"
-                                       :args '(:surface "app:jetpacs.files"))
-                       (eq sel 'files))
-     (jetpacs-hub--tab "Eval" "code"
-                       (jetpacs-action "hub.open" :args '(:buffer "*ielm*"))
-                       (eq sel 'eval))
-     :spacing 4)))
+    (list (list :label "Home" :icon "home"
+                :on-tap (jetpacs-action "hub.home")
+                :selected (eq sel 'home))
+          (list :label "Files" :icon "folder_open"
+                :on-tap (jetpacs-action "jetpacs.launcher.open"
+                                        :args '(:surface "app:jetpacs.files"))
+                :selected (eq sel 'files))
+          (list :label "Eval" :icon "code"
+                :on-tap (jetpacs-action "hub.open" :args '(:buffer "*ielm*"))
+                :selected (eq sel 'eval)))))
 
-(setq jetpacs-chrome-dock-function #'jetpacs-hub--dock)
+(setq jetpacs-chrome-dock-items-function #'jetpacs-hub--dock-items)
 
 (defun jetpacs-hub--screen (_back)
   (jetpacs-chrome-screen

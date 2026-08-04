@@ -340,6 +340,46 @@ real Emacs-owns-the-model round trip.")
   "A descriptor running the registered sample mutation KEY."
   (jetpacs-action "m3catalog.fn" :args (list :key key)))
 
+(defmacro jetpacs-m3-defselection (var prefix count &optional docstring)
+  "Define VAR as a selectedIndex driven by COUNT fn-verb mutations.
+Upstream's \=`var selectedIndex by remember { mutableIntStateOf(0) }\='
+as one declaration: VAR starts at 0, and PREFIX-0 .. PREFIX-(COUNT-1)
+register in `jetpacs-m3-fn-registry\=', each setting VAR to its index.
+Author the tap with `jetpacs-m3-selection-action\=' and read the checked
+state as (jetpacs-bool (= i VAR)) — three samples hand-rolled exactly
+this before it had a name."
+  (declare (indent 2))
+  `(progn
+     (defvar ,var 0 ,docstring)
+     (dotimes (i ,count)
+       (puthash (format "%s-%d" ,prefix i)
+                (let ((i i)) (lambda () (setq ,var i)))
+                jetpacs-m3-fn-registry))))
+
+(defun jetpacs-m3-selection-action (prefix i)
+  "The descriptor selecting index I of the PREFIX selection."
+  (jetpacs-m3-fn-action (format "%s-%d" prefix i)))
+
+(defmacro jetpacs-m3-defselection (var prefix count &optional docstring)
+  "Define VAR as a selectedIndex driven by COUNT fn-verb mutations.
+Upstream's \=`var selectedIndex by remember { mutableIntStateOf(0) }\='
+as one declaration: VAR starts at 0, and PREFIX-0 .. PREFIX-(COUNT-1)
+register in `jetpacs-m3-fn-registry\=', each setting VAR to its index.
+Author the tap with `jetpacs-m3-selection-action\=' and read the checked
+state as (jetpacs-bool (= i VAR)) — three samples hand-rolled exactly
+this before it had a name."
+  (declare (indent 2))
+  `(progn
+     (defvar ,var 0 ,docstring)
+     (dotimes (i ,count)
+       (puthash (format "%s-%d" ,prefix i)
+                (let ((i i)) (lambda () (setq ,var i)))
+                jetpacs-m3-fn-registry))))
+
+(defun jetpacs-m3-selection-action (prefix i)
+  "The descriptor selecting index I of the PREFIX selection."
+  (jetpacs-m3-fn-action (format "%s-%d" prefix i)))
+
 (defvar jetpacs-m3-dialog-registry (make-hash-table :test #'equal)
   "Dialog KEY -> nullary builder returning a SPEC §18.1 dialog spec.
 A sample whose subject is a MODAL DIALOG registers its spec here and

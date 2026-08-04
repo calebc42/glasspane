@@ -123,8 +123,7 @@ chrome, and a Core-only Companion is better served by the rows alone."
                                         (concat name (if desc " ↓" " ↑"))
                                       name)
                                     ;; format 6: booleans are t / :json-false
-                                    :selected (if (equal name key)
-                                                  t :json-false)
+                                    :selected (jetpacs-bool (equal name key))
                                     :on-tap (jetpacs-action
                                              "tablist.sort"
                                              :args (list :buffer (buffer-name)

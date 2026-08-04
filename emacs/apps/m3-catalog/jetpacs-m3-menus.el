@@ -89,7 +89,7 @@ the wire can neither read it nor drive it."
 (defun jetpacs-m3-menus--grouped-item (flag label &rest opts)
   "A checkable MenuItem bound to sample FLAG: checked reads it, tap flips it."
   (apply #'jetpacs-menu-item label (jetpacs-m3-flag-action flag)
-         :checked (if (jetpacs-m3-flag flag) t :json-false)
+         :checked (jetpacs-bool (jetpacs-m3-flag flag))
          opts))
 
 (defun jetpacs-m3-menus--grouped ()

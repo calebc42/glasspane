@@ -154,7 +154,7 @@ Companion-local; the two settled values are what ride the wire."
   (let ((open (and (jetpacs-m3-flag "rail-open") t)))
     (jetpacs-m3-navigation-rail--rail
      :variant "wide"
-     :expanded (if open t :json-false)
+     :expanded (jetpacs-bool open)
      :on-expand-change (jetpacs-m3-flag-action "rail-open")
      :header (jetpacs-m3-navigation-rail--live-header "rail-open"))))
 
@@ -167,7 +167,7 @@ and so the next push — honest."
   (let ((open (and (jetpacs-m3-flag "modal-rail") t)))
     (jetpacs-m3-navigation-rail--rail
      :variant "modal"
-     :expanded (if open t :json-false)
+     :expanded (jetpacs-bool open)
      :on-expand-change (jetpacs-m3-flag-action "modal-rail")
      :header (jetpacs-m3-navigation-rail--live-header "modal-rail"))))
 
@@ -182,7 +182,7 @@ slides it away and reports back through `:on-expand-change'."
       (jetpacs-m3-navigation-rail--destinations)
       :variant "modal"
       :hide-on-collapse t
-      :expanded (if open t :json-false)
+      :expanded (jetpacs-bool open)
       :on-expand-change (jetpacs-m3-flag-action "dismissible-rail"))
      (jetpacs-with-attrs
       (jetpacs-column

@@ -59,14 +59,9 @@
 (defconst jetpacs-m3-nav-suite--items '("Songs" "Artists" "Playlists")
   "Upstream's three destinations; every item wears the favorite heart.")
 
-(defvar jetpacs-m3-nav-suite--selected 0
+(jetpacs-m3-defselection jetpacs-m3-nav-suite--selected
+    "nav-suite-select" 3
   "The shared selectedIndex, upstream verbatim.")
-
-(dotimes (i 3)
-  (puthash (format "nav-suite-select-%d" i)
-           (let ((i i))
-             (lambda () (setq jetpacs-m3-nav-suite--selected i)))
-           jetpacs-m3-fn-registry))
 
 (defun jetpacs-m3-nav-suite--rail (expanded arrangement)
   "The rail form of the three destinations, selection live on the fn verb."
@@ -75,11 +70,11 @@
             for i from 0
             collect (jetpacs-rail-item
                      label "favorite"
-                     (jetpacs-m3-fn-action (format "nav-suite-select-%d" i))
-                     :selected (if (= i jetpacs-m3-nav-suite--selected)
-                                   t :json-false)))
+                     (jetpacs-m3-selection-action "nav-suite-select" i)
+                     :selected (jetpacs-bool
+                                (= i jetpacs-m3-nav-suite--selected))))
    :variant "wide"
-   :expanded (if expanded t :json-false)
+   :expanded (jetpacs-bool expanded)
    :arrangement arrangement))
 
 (defun jetpacs-m3-nav-suite--bar ()
@@ -97,8 +92,8 @@
                                               "primary" "on_surface_variant"))
                      (jetpacs-text label :style "caption")
                      :align "center" :spacing 2)
-                    :on-tap (jetpacs-m3-fn-action
-                             (format "nav-suite-select-%d" i))))
+                    :on-tap (jetpacs-m3-selection-action
+                             "nav-suite-select" i)))
           (list :arrange "space_evenly" :align "center" :fill t))))
 
 (defun jetpacs-m3-nav-suite--body (type)

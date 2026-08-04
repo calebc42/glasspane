@@ -427,6 +427,16 @@ b))' and `(jetpacs-row a b)' mean the same."
 
 ;;;; Universal attributes (§16.5) and colors (§16.6)
 
+(defun jetpacs-bool (value)
+  "VALUE as a wire boolean: any non-nil is t, nil is `:json-false'.
+The wire distinguishes ABSENT (elisp nil, which `jetpacs--node' drops)
+from FALSE (`:json-false'), so a plain elisp boolean cannot ride a
+member directly — every caller authoring live state wrote
+\=`(if x t :json-false)' by hand.  This is that idiom with a name:
+
+    :checked (jetpacs-bool (eq i selected))"
+  (if value t :json-false))
+
 (defun jetpacs-with-attrs (node &rest attrs)
   "Return NODE (a node plist) with universal ATTRS merged in.
 ATTRS is a plist of universal attribute keywords; nil-valued members are
@@ -914,9 +924,16 @@ Trailing options: :spacing (dp), :content-padding (dp)."
                    :children (jetpacs--as-children (car split))
                    :spacing spacing :content_padding content-padding)))
 
-(defun jetpacs-spacer ()
-  "A spacer node (SPEC §17.3); size it with universal width/height/weight."
-  (jetpacs--node "spacer"))
+(cl-defun jetpacs-spacer (&key width height weight)
+  "A spacer node (SPEC §17.3), sized by WIDTH/HEIGHT/WEIGHT.
+The three ARE the §16.5 universal attributes — a spacer is nothing but
+its size, so they ride here as keywords instead of demanding a
+`jetpacs-with-attrs' wrap; any other universal still attaches the
+usual way, and each value gets the same §16.5 validation."
+  (apply #'jetpacs-with-attrs (jetpacs--node "spacer")
+         (append (when width (list :width width))
+                 (when height (list :height height))
+                 (when weight (list :weight weight)))))
 
 (cl-defun jetpacs-divider (&key color thickness)
   "A divider node (SPEC §17.3).

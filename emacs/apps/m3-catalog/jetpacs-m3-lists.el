@@ -385,8 +385,8 @@ click does the toggling."
       :leading (if select
                    (jetpacs-checkbox
                     (format "lists-mode-check-%d" i)
-                    :checked (if (aref jetpacs-m3-lists--mode-checked i)
-                                 t :json-false)
+                    :checked (jetpacs-bool
+                              (aref jetpacs-m3-lists--mode-checked i))
                     :enabled :json-false)
                  (jetpacs-icon "home"))
       :trailing (if select

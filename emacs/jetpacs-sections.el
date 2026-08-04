@@ -320,7 +320,7 @@ interleaved with child sections, in buffer order."
                          ;; Seeds the FIRST snapshot only (SPEC 17.3);
                          ;; fold is device-local thereafter — see the
                          ;; commentary.
-                         (if (jetpacs-sections--hidden-p sec) t :json-false)
+                         (jetpacs-bool (jetpacs-sections--hidden-p sec))
                          :on-long-tap
                          (jetpacs-action "sections.menu"
                                          :args (list :buffer name

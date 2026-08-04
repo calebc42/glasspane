@@ -72,23 +72,13 @@
     ("Search" . "search") ("Home" . "home"))
   "The five connected options: (label . icon), upstream order.")
 
-(defvar jetpacs-m3-button-groups--selected 0
+(jetpacs-m3-defselection jetpacs-m3-button-groups--selected
+    "button-groups-single" 5
   "SingleSelectConnected\='s one selectedIndex, upstream verbatim.")
 
-(dotimes (i 5)
-  (puthash (format "button-groups-single-%d" i)
-           (let ((i i))
-             (lambda () (setq jetpacs-m3-button-groups--selected i)))
-           jetpacs-m3-fn-registry))
-
-(defvar jetpacs-m3-button-groups--vertical-selected 0
+(jetpacs-m3-defselection jetpacs-m3-button-groups--vertical-selected
+    "button-groups-vertical" 5
   "VerticalButtonGroupSample\='s selectedIndex.")
-
-(dotimes (i 5)
-  (puthash (format "button-groups-vertical-%d" i)
-           (let ((i i))
-             (lambda () (setq jetpacs-m3-button-groups--vertical-selected i)))
-           jetpacs-m3-fn-registry))
 
 (defun jetpacs-m3-button-groups--connected (n i label icon &rest opts)
   "Connected toggle I of N: LABEL, ICON, the positional shape role.
@@ -113,10 +103,9 @@ really does clear the other four."
     collect (jetpacs-with-attrs
              (jetpacs-m3-button-groups--connected
               5 i label icon
-              :checked (if (= i jetpacs-m3-button-groups--selected)
-                           t :json-false)
-              :on-change (jetpacs-m3-fn-action
-                          (format "button-groups-single-%d" i)))
+              :checked (jetpacs-bool (= i jetpacs-m3-button-groups--selected))
+              :on-change (jetpacs-m3-selection-action
+                          "button-groups-single" i))
              :id (format "button-groups-single-%d" i)))
    :spacing 2 :run-spacing 2))
 
@@ -149,10 +138,10 @@ single-select row."
                     (jetpacs-button
                      (format "Button %d" (1+ i))
                      (jetpacs-m3-demo (format "Button %d" (1+ i)))
-                     :checked (if (= i jetpacs-m3-button-groups--vertical-selected)
-                                  t :json-false)
-                     :on-change (jetpacs-m3-fn-action
-                                 (format "button-groups-vertical-%d" i))
+                     :checked (jetpacs-bool
+                               (= i jetpacs-m3-button-groups--vertical-selected))
+                     :on-change (jetpacs-m3-selection-action
+                                 "button-groups-vertical" i)
                      :shape-role (cond ((= i 0) "top")
                                        ((= i 4) "bottom")
                                        (t "middle")))

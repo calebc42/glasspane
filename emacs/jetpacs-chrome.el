@@ -79,9 +79,9 @@ surfaces it appears on — it renders on every chrome surface.")
 The window-class-adaptive alternative to `jetpacs-chrome-dock-function\':
 each item is a plist (:label STR :icon STR :on-tap DESCRIPTOR
 \[:selected BOOL]), and chrome wears the SAME destinations as a real
-M3 navigation bar on compact and medium widths and as a
-`jetpacs-navigation-rail\' in the scaffold\'s start-edge rail slot when
-the width class is \"expanded\" (SPEC 20.1.1) — the
+M3 navigation bar on a compact window (either axis) and as a
+`jetpacs-navigation-rail\' in the scaffold\'s start-edge rail slot on
+medium and expanded ones (SPEC 20.1.1) — the
 NavigationSuiteScaffold swap, driven by data instead of two authorings.
 `jetpacs-chrome-dock-function\' (a finished node, always the bottom
 bar) WINS when both are set — it is the raw-node override.  Degrades
@@ -206,11 +206,12 @@ everywhere else.  Equal weights are the bars\' EqualWeight default."
 (defun jetpacs-chrome--dock-slot (surface)
   "SURFACE\'s dock as (SLOT . NODE), or nil.
 SLOT is `:bottom_bar\' — or `:rail\' when the destinations come from
-`jetpacs-chrome-dock-items-function\' and the width class is expanded
-\(SPEC 20.1.1): same places, worn on the start edge where M3 puts
-navigation on a wide window.  The raw-node dock stays a bottom bar
-unconditionally; only the data form can swap, because only data can be
-re-authored into a rail."
+`jetpacs-chrome-dock-items-function\' and NEITHER window axis is
+compact (SPEC 20.1.1): the M3 layout guidance and Compose\'s
+NavigationSuiteScaffold both give the bar to compact windows — a phone
+in either orientation — and the start-edge rail to medium and expanded
+ones.  The raw-node dock stays a bottom bar unconditionally; only the
+data form can swap, because only data can be re-authored into a rail."
   (if-let* ((node (jetpacs-chrome--dock surface)))
       (cons :bottom_bar node)
     (when jetpacs-chrome-dock-items-function
@@ -218,7 +219,8 @@ re-authored into a rail."
           (when-let* ((items (funcall jetpacs-chrome-dock-items-function
                                       surface))
                       ((consp items)))
-            (if (equal (jetpacs-window-class :width) "expanded")
+            (if (not (or (equal (jetpacs-window-class :width) "compact")
+                         (equal (jetpacs-window-class :height) "compact")))
                 (cons :rail
                       (jetpacs-navigation-rail
                        (mapcar (lambda (item)

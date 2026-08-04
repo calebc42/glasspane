@@ -31,7 +31,7 @@ without it (M-x parity, JA-3).  Chrome is a projection of commands.
 | slide-in panel behind the hamburger | **Navigation drawer** ("drawer" in running text) | `scaffold.drawer` | App Menu, hamburger menu |
 | bar across the top | **Top app bar** ("top bar") | `scaffold.top_bar` | Menu bar, Contextual Actions Bar |
 | docked bottom bar of destinations | **Navigation bar** | `scaffold.bottom_bar` (via the dock seam) | View switcher, Bottom nav bar |
-| start-edge column of destinations on a wide window | **Navigation rail** | `scaffold.rail` (the same dock seam, expanded width) | — |
+| start-edge column of destinations on a wide window | **Navigation rail** | `scaffold.rail` (the same dock seam, medium width and up) | — |
 | floating cluster of contextual actions | **Toolbar — floating** | `scaffold.floating_toolbar` | Contextual Actions Bar |
 | bottom-anchored row of actions | **Toolbar — docked** | `scaffold.bottom_bar` holding actions | — |
 | round primary-action button | **FAB** | `scaffold.fab` | — |
@@ -55,11 +55,12 @@ the places are the `multi_view`/`view.switched` machinery, and the
 destinations persist across every screen via the dock seam — a navigation
 bar that vanishes on drill is a defect, not a style.  Author the
 destinations as data with `jetpacs-chrome-dock-items-function` and chrome
-wears them per SPEC 20.1.1: a real M3 navigation bar on compact and
-medium widths (the catalog-proven item composition — icon above label,
-the secondary-container active indicator, 80dp container), a start-edge
-navigation rail (`scaffold.rail`) on expanded — the M3
-NavigationSuiteScaffold behavior, one authoring.  The raw-node
+wears them per SPEC 20.1.1: a real M3 navigation bar on a compact
+window (either axis compact — a phone in any orientation; the
+catalog-proven item composition: icon above label, the
+secondary-container active indicator, 80dp container), a start-edge
+navigation rail (`scaffold.rail`) on medium and expanded windows — the
+M3 NavigationSuiteScaffold behavior, one authoring.  The raw-node
 `jetpacs-chrome-dock-function` remains as an override for a hand-built bar
 (always `bottom_bar`, never adaptive), and wins when both are set.
 

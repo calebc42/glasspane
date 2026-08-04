@@ -1063,10 +1063,35 @@ untouched by the adaptive seam."
                                         (format "%S" (aref tabs 1))))))
       (jetpacs-chrome-remove "app:itemsdemo"))))
 
-(ert-deftest jetpacs-chrome-items-dock-wears-rail-on-expanded ()
-  "The data dock on an expanded width: the SAME destinations ride the
-scaffold rail slot as a navigation_rail, and no bottom bar is injected
-— the NavigationSuiteScaffold swap (SPEC 20.1.1 x 17.6)."
+(ert-deftest jetpacs-chrome-items-dock-wears-bar-on-phone-landscape ()
+  "A medium width with a COMPACT height — a phone in landscape — keeps
+the bottom bar: NavigationSuiteScaffold gives the rail only to windows
+compact on neither axis."
+  (let ((jetpacs-chrome-dock-items-function
+         (lambda (_s)
+           (list (list :label "A" :icon "home"
+                       :on-tap (jetpacs-action "jetpacs.noop"))))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-window-class)
+                   (lambda (axis)
+                     (if (eq axis :width) "medium" "compact"))))
+          (with-jetpacs-owner "phonedemo"
+            (jetpacs-chrome-define-root "phonedemo" "root"
+                                        (lambda (_back)
+                                          (jetpacs-chrome-screen
+                                           "R" (jetpacs-text "r")))))
+          (let* ((mv (jetpacs-chrome--build "app:phonedemo"))
+                 (view (gethash "root" (plist-get mv :views))))
+            (should-not (plist-member view :rail))
+            (should (equal (plist-get (plist-get view :bottom_bar) :t)
+                           "row"))))
+      (jetpacs-chrome-remove "app:phonedemo"))))
+
+(ert-deftest jetpacs-chrome-items-dock-wears-rail-on-medium-and-up ()
+  "The data dock on a window compact on neither axis: the SAME
+destinations ride the scaffold rail slot as a navigation_rail, and no
+bottom bar is injected — the NavigationSuiteScaffold swap
+\(SPEC 20.1.1 x 17.6).  Medium width is already rail territory."
   (let ((jetpacs-chrome-dock-items-function
          (lambda (_s)
            (list (list :label "A" :icon "home"
@@ -1076,7 +1101,7 @@ scaffold rail slot as a navigation_rail, and no bottom bar is injected
     (unwind-protect
         (cl-letf (((symbol-function 'jetpacs-window-class)
                    (lambda (axis)
-                     (if (eq axis :width) "expanded" "medium"))))
+                     (if (eq axis :width) "medium" "medium"))))
           (with-jetpacs-owner "raildemo"
             (jetpacs-chrome-define-root "raildemo" "root"
                                         (lambda (_back)

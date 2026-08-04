@@ -280,7 +280,24 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     // invisible, which is the defect class this whole pass exists to remove.
     if (toggle != null) {
         val onCheckedChange: (Boolean) -> Unit = { onClick() }
-        val tShapes = ToggleButtonDefaults.shapesFor(h ?: ButtonDefaults.MinHeight)
+        // §17.4: on a toggle, `shape` names the RESTING shape and
+        // `checked_shape` the one it morphs to while checked — so the
+        // inverted square-at-rest/round-checked set is two members, each
+        // saying exactly one thing. (`shape` on a toggle used to be read
+        // and silently ignored; this closes that too.)
+        val checkedShapeName = node.stringOr("checked_shape")
+        val base = ToggleButtonDefaults.shapesFor(h ?: ButtonDefaults.MinHeight)
+        val tShapes = if (square || checkedShapeName.isNotEmpty())
+            ToggleButtonDefaults.shapes(
+                shape = if (square) ToggleButtonDefaults.squareShape
+                    else ToggleButtonDefaults.roundShape,
+                pressedShape = base.pressedShape,
+                checkedShape = when (checkedShapeName) {
+                    "round" -> ToggleButtonDefaults.roundShape
+                    "square" -> ToggleButtonDefaults.squareShape
+                    else -> base.checkedShape
+                })
+        else base
         when (variant) {
             "elevated" -> ElevatedToggleButton(toggle.value, onCheckedChange, mm,
                 enabled, shapes = tShapes, contentPadding = pad) { content() }

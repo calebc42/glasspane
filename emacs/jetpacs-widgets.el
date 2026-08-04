@@ -1118,7 +1118,7 @@ IconButtonWidthOption.  `uniform' is the default square-ish container;
 
 (cl-defun jetpacs-button (label on-tap &key icon variant size shape
                                 animate-shape checked on-change expanded
-                                enabled)
+                                checked-shape enabled)
   "A button labeled LABEL dispatching ON-TAP (SPEC §17.4).
 ICON a §4.4 identifier; VARIANT filled(default)/tonal/elevated/outlined/text;
 SIZE one of `jetpacs--button-sizes' (omit for the unscaled default);
@@ -1150,12 +1150,21 @@ unique across the document (§16.1); a plain button carries neither."
     (unless (or (memq expanded '(t :json-false)) (equal expanded "auto"))
       (error "jetpacs-button: :expanded must be t, :json-false, or \"auto\" (SPEC 17.4), got %S"
              expanded)))
+  (when checked-shape
+    ;; On a toggle, :shape is the RESTING shape and :checked-shape the
+    ;; one it morphs to while checked.
+    (unless checked
+      (error "jetpacs-button: :checked-shape needs :checked (SPEC 17.4)"))
+    (setq checked-shape (jetpacs--check-enum checked-shape
+                                             jetpacs--button-shapes
+                                             ":checked-shape")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "button" :label label :on_tap on-tap
                  :icon icon :variant variant :size size :shape shape
                  :animate_shape animate-shape
                  :checked checked :on_change on-change
-                 :expanded expanded :enabled enabled))
+                 :expanded expanded :checked_shape checked-shape
+                 :enabled enabled))
 
 (cl-defun jetpacs-icon-button (icon on-tap &key content-description badge
                                     variant size shape width-mode
@@ -2414,7 +2423,8 @@ builds the range and re-pushes."
                                  snackbar-max-lines
                                  sheet sheet-peek-height sheet-state
                                  on-sheet-change fab-hide-on-scroll
-                                 drawer-variant)
+                                 drawer-variant bottom-bar-behavior
+                                 fab-position)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
@@ -2502,6 +2512,16 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                                               ":drawer-variant"))
     (unless drawer
       (error "jetpacs-scaffold: :drawer-variant styles a drawer it does not author (SPEC 17.6)")))
+  (when bottom-bar-behavior
+    (setq bottom-bar-behavior (jetpacs--check-enum bottom-bar-behavior
+                                                   '("pinned" "exit_always")
+                                                   ":bottom-bar-behavior"))
+    (unless bottom-bar
+      (error "jetpacs-scaffold: :bottom-bar-behavior styles a bar it does not author (SPEC 17.6)")))
+  (when fab-position
+    (setq fab-position (jetpacs--check-enum fab-position
+                                            '("end" "end_overlay" "center")
+                                            ":fab-position")))
   (when top-bar-style
     (setq top-bar-style (jetpacs--check-enum top-bar-style
                                              jetpacs--top-bar-styles
@@ -2558,6 +2578,8 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                  :sheet_state sheet-state :on_sheet_change on-sheet-change
                  :fab_hide_on_scroll fab-hide-on-scroll
                  :drawer_variant drawer-variant
+                 :bottom_bar_behavior bottom-bar-behavior
+                 :fab_position fab-position
                  :top_bar_style top-bar-style
                  :top_bar_subtitle top-bar-subtitle
                  :scroll_behavior scroll-behavior))

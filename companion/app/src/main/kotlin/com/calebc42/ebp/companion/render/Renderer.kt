@@ -952,6 +952,13 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
             "exit_until_collapsed" -> TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
             else -> null
         }
+    // §17.6 `bottom_bar_behavior`: exit_always hides the bottom bar as the
+    // body scrolls up and returns it on the way down — Companion-local
+    // nested scroll, the same discipline as the top bar's behaviors.
+    val bottomBarBehavior =
+        if (node.stringOr("bottom_bar_behavior") == "exit_always")
+            androidx.compose.material3.BottomAppBarDefaults.exitAlwaysScrollBehavior()
+        else null
     // §17.6 floating toolbar. Absent orientation keeps the full-width band in
     // the bottomBar slot; present, it becomes M3's real pill floating OVER the
     // body, which is what every upstream sample actually shows.
@@ -970,7 +977,15 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
         Scaffold(
             modifier = Modifier
                 .let { m -> scrollBehavior?.let { m.nestedScroll(it.nestedScrollConnection) } ?: m }
+                .let { m -> bottomBarBehavior?.let { m.nestedScroll(it.nestedScrollConnection) } ?: m }
                 .let { m -> toolbarBehavior?.let { m.nestedScroll(it) } ?: m },
+            // §17.6 `fab_position`: end_overlay rides the FAB OVER the
+            // bottom bar — the ExitAlways pairing.
+            floatingActionButtonPosition = when (node.stringOr("fab_position")) {
+                "end_overlay" -> androidx.compose.material3.FabPosition.EndOverlay
+                "center" -> androidx.compose.material3.FabPosition.Center
+                else -> androidx.compose.material3.FabPosition.End
+            },
             snackbarHost = {
                 SnackbarHost(hostState) { data ->
                     // §17.6 `snackbar_max_lines`: clamp the VISIBLE message
@@ -1105,14 +1120,18 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                             }
                         }
                         bottomBar?.let {
-                            // A DOCKED bar, not a floating toolbar: the M3
-                            // navigation-bar container color makes it read as
-                            // a band flush with the screen edge, and it owns
-                            // the system navigation inset (a plain Surface,
-                            // unlike M3's NavigationBar, gets no automatic
-                            // inset — without it the items sit in the gesture
-                            // area).
-                            androidx.compose.material3.Surface(
+                            // With the exit_always behavior the slot content
+                            // rides a real M3 BottomAppBar — the composable
+                            // that owns the hide-and-return offset. Otherwise
+                            // the docked Surface band this slot has always
+                            // drawn (which owns the navigation inset itself,
+                            // since a plain Surface gets none).
+                            if (bottomBarBehavior != null)
+                                androidx.compose.material3.BottomAppBar(
+                                    scrollBehavior = bottomBarBehavior) {
+                                    RenderNode(it, ctx.child(it, 4))
+                                }
+                            else androidx.compose.material3.Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
                                 modifier = Modifier.fillMaxWidth()) {
                                 Box(Modifier.navigationBarsPadding()

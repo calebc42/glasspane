@@ -48,8 +48,12 @@
 ;; (color recolors content only), and the face replaces M3's Snackbar
 ;; container, so the recreation draws its own inverse_surface pill.
 ;;
-;; The one still out of reach needs a channel, not a member: a
-;; SnackbarResult reported back for the coroutines sample.
+;; The coroutines sample rides the channel it was waiting for:
+;; `snackbar.show' (SPEC 18.2.1) is a REQUEST whose reply carries how
+;; the snackbar concluded, so each FAB tap counts a raise in Emacs,
+;; shows "Snackbar # N" with "Action on N" in this screen's own host,
+;; and the reply branches exactly like upstream's when(result) — the
+;; component is complete.
 
 ;;; Code:
 
@@ -105,6 +109,45 @@ the pill here is its own surface."
             :padding 12)
            :color "inverse_surface" :shape "rounded_small")
           :border (list :width 2 :color "secondary") :pad 12))))))
+
+(defvar jetpacs-m3-snackbars--coroutines-count 0
+  "ScaffoldWithCoroutinesSnackbar's message counter.")
+
+(puthash "snackbars-coroutines-show"
+         (lambda ()
+           (cl-incf jetpacs-m3-snackbars--coroutines-count)
+           (let ((n jetpacs-m3-snackbars--coroutines-count))
+             ;; The raise runs OUTSIDE the mutation's re-push: the request
+             ;; completes when the snackbar leaves the screen, and the
+             ;; branch on its result is exactly upstream's when(result).
+             (run-at-time
+              0 nil
+              (lambda ()
+                (condition-case err
+                    (ebp-client-snackbar-show
+                     (jetpacs-client-or-error)
+                     (format "Snackbar # %d" n)
+                     :action-label (format "Action on %d" n)
+                     :callback
+                     (lambda (result error)
+                       (jetpacs-shell-notify
+                        (cond (error "Snackbar failed")
+                              ((equal result "action")
+                               (format "Action on %d performed" n))
+                              (t (format "Snackbar # %d dismissed" n)))
+                        jetpacs-m3-owner)))
+                  (error (message "jetpacs-m3: snackbar raise failed: %s"
+                                  (jetpacs--error-label err))))))))
+         jetpacs-m3-fn-registry)
+
+(defun jetpacs-m3-snackbars--coroutines-fab ()
+  "The coroutines sample's FAB: each tap raises through snackbar.show.
+Upstream launches a coroutine, shows the snackbar, and branches on its
+SnackbarResult; here the fn verb counts the raise and the reply drives
+the same branch — a REAL result round trip, not a demo toast."
+  (jetpacs-button "Show snackbar"
+                  (jetpacs-m3-fn-action "snackbars-coroutines-show")
+                  :variant "filled"))
 
 (defun jetpacs-m3-snackbars--simple-fab ()
   "Upstream ScaffoldWithSimpleSnackbar's FAB, as this screen's FAB.
@@ -167,8 +210,8 @@ fillMaxSize/wrapContentSize modifier pair does upstream."
     "ScaffoldWithCoroutinesSnackbar"
     "Snackbars examples"
     :source jetpacs-m3-snackbars--source
-    :unsupported
-    "This sample exists to route a snackbar through a business-logic layer and then branch on its SnackbarResult, and the wire reports no such result: nothing signals SnackbarResult.Dismissed, and the scaffold snackbar_action that would carry \"Action on 1\" is a static member of the pushed tree, never something the tap that raises a snackbar can attach to it.")
+    :build #'jetpacs-m3-snackbars--simple-body
+    :slots (list :fab #'jetpacs-m3-snackbars--coroutines-fab))
    (jetpacs-m3-example
     "ScaffoldWithMultilineSnackbar"
     "Snackbars examples"

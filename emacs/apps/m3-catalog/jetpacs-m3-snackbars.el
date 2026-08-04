@@ -17,25 +17,22 @@
 ;;
 ;; The snackbar itself is not authored into the tree: the FAB's tap
 ;; descriptor reaches Emacs and `jetpacs-m3-demo' hands the message to
-;; `jetpacs-shell-notify', which queues it, latest wins.
+;; `jetpacs-shell-notify', which RAISES it through `snackbar.show'
+;; (SPEC 18.2.1) -- the message shows immediately in this screen's own
+;; SnackbarHost, no re-push involved.  (An ungranted session falls back
+;; to the queued next-push member, latest wins.)
 ;;
-;; That message really does arrive as `scaffold.snackbar' now, and for
-;; a while it did not.  `jetpacs-shell-notify' injected the queued
-;; string only when the pushed spec's `:t' was "scaffold", and a
-;; `jetpacs-chrome' app is a `multi_view' whose VIEWS are the scaffolds
-;; -- so no chrome app in the product ever found its own slot and every
-;; snackbar in Jetpacs degraded to a toast.  The injection now targets
-;; the view being shown, so ScaffoldWithSimpleSnackbar draws the
-;; SnackbarHost it exists to show.
-;;
-;; The other four are that sample plus one twist.  Two of the twists
-;; are members now: `snackbar_duration' (indefinite implies the
-;; trailing dismiss X -- such a snackbar must always leave the user an
-;; exit) and `snackbar_max_lines' (the visible clamp; Text semantics
-;; keep the whole string for a screen reader).  Both are STATIC members
-;; of the view's scaffold, so the Example screen's own `:scaffold'
-;; plist carries them and the notify-injected message wears them when
-;; it lands.
+;; The other four are that sample plus one twist, and the twists ride
+;; two different channels.  Duration is a property of the RAISE: the
+;; indefinite sample's demo descriptor carries :duration "indefinite",
+;; which is also what implies the trailing dismiss X -- such a snackbar
+;; must always leave the user an exit.  The visible clamp is a property
+;; of the HOST: `snackbar_max_lines' is a static member of the view's
+;; scaffold and the host applies it to EVERY snackbar it shows, raised
+;; or authored, so the multiline sample keeps its `:scaffold' plist
+;; (Text semantics keep the whole string for a screen reader).
+;; `snackbar_duration' remains the static twin for tree-authored
+;; snackbars -- the custom sample's channel, covered by the goldens.
 ;;
 ;; The custom-host sample is a member now too: `snackbar_content' is a
 ;; node drawn in place of the whole Snackbar face while the HOST keeps
@@ -152,12 +149,21 @@ the same branch — a REAL result round trip, not a demo toast."
 (defun jetpacs-m3-snackbars--simple-fab ()
   "Upstream ScaffoldWithSimpleSnackbar's FAB, as this screen's FAB.
 The text-only ExtendedFloatingActionButton reading \"Show snackbar\".
-Its tap reaches Emacs, which queues the message; the next push carries
-it as the scaffold snackbar member of the view being shown, which is the
-SnackbarHost this sample exists to show.  The click count upstream keeps
-in `remember\=' has no wire state to live in, so the message stays
-\"Snackbar # 1\"."
+Its tap reaches Emacs and the message raises straight back through
+`snackbar.show\' into the SnackbarHost this sample exists to show.
+The click count upstream keeps in `remember\=' has no wire state to
+live in, so the message stays \"Snackbar # 1\"."
   (jetpacs-button "Show snackbar" (jetpacs-m3-demo "Snackbar # 1")
+                  :variant "filled"))
+
+(defun jetpacs-m3-snackbars--indefinite-fab ()
+  "The Indefinite sample's FAB: the raise carries the duration.
+Upstream passes SnackbarDuration.Indefinite to showSnackbar; here the
+demo descriptor carries :duration \"indefinite\" onto `snackbar.show\',
+and the implied trailing dismiss X is the user's exit, exactly
+upstream's withDismissAction = true."
+  (jetpacs-button "Show snackbar"
+                  (jetpacs-m3-demo "Snackbar # 1" "indefinite")
                   :variant "filled"))
 
 (defun jetpacs-m3-snackbars--long-fab ()
@@ -195,10 +201,7 @@ fillMaxSize/wrapContentSize modifier pair does upstream."
     "Snackbars examples"
     :source jetpacs-m3-snackbars--source
     :build #'jetpacs-m3-snackbars--simple-body
-    :slots (list :fab #'jetpacs-m3-snackbars--simple-fab)
-    ;; SnackbarDuration.Indefinite; the implied dismiss X is the user's
-    ;; exit, exactly upstream's withDismissAction = true.
-    :scaffold (list :snackbar-duration "indefinite"))
+    :slots (list :fab #'jetpacs-m3-snackbars--indefinite-fab))
    (jetpacs-m3-example
     "ScaffoldWithCustomSnackbar"
     "Snackbars examples"

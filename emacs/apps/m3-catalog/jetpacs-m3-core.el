@@ -299,17 +299,20 @@ wire."
 
 ;;;; Verbs authored into the tree
 
-(defun jetpacs-m3-demo (message)
+(defun jetpacs-m3-demo (message &optional duration)
   "A descriptor for the demo verb: taps report MESSAGE as a snackbar.
 Every recreated sample whose upstream handler only mutates local state
 uses this, so a tap is visibly live instead of silently inert.
+DURATION rides the raise when given (\"long\" or \"indefinite\").
 
-A real `scaffold.snackbar\=', as of the `jetpacs-shell--inject-snackbar\='
-fix.  It was a toast for as long as this app existed, and the cause was
-never the catalog: the injection tested the ROOT spec\='s `:t\=', and a
-`jetpacs-chrome\=' app is a `multi_view\=' whose VIEWS are the scaffolds,
-so no chrome app in the product ever found its own slot."
-  (jetpacs-action "m3catalog.demo" :args (list :message message)))
+The report is the SPEC 18.2.1 raise now: `jetpacs-shell-notify\='
+sends `snackbar.show\' and the message lands immediately in THIS
+screen\='s SnackbarHost.  (Its earlier lives — a queued member
+injected on the next push, and before the view-targeting fix a toast —
+are the history that motivated the raise.)"
+  (jetpacs-action "m3catalog.demo"
+                  :args (append (list :message message)
+                                (and duration (list :duration duration)))))
 
 (defvar jetpacs-m3--flags (make-hash-table :test #'equal)
   "Sample flag KEY -> boolean, flipped by the m3catalog.flag verb.
@@ -856,11 +859,14 @@ no user in front of it."
       'accepted)))
 
 (defun jetpacs-m3--on-demo (args params)
-  "The sample verb: report the message, mutate nothing."
+  "The sample verb: report the message, mutate nothing.
+A :duration in ARGS rides the raise (the indefinite sample); the
+ungranted queue fallback shows the text alone."
   (let ((text (plist-get args :message)))
     (if (not (stringp text))
         'rejected
-      (jetpacs-shell-notify text (plist-get params :surface))
+      (jetpacs-shell-notify text (plist-get params :surface)
+                            :duration (plist-get args :duration))
       'accepted)))
 
 (defun jetpacs-m3--on-flag (args params)

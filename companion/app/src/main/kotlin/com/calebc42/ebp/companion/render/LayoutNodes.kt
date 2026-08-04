@@ -104,6 +104,7 @@ import androidx.compose.material3.adaptive.navigation.rememberSupportingPaneScaf
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -187,10 +188,20 @@ internal fun RenderRow(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 @Composable
 internal fun RenderColumn(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val scroll = node.boolOr("scroll")
+    // The §17.6 body-scroll signal: a scrolling column inside a scaffold
+    // body publishes whether it rests at its start.
+    val signal = LocalBodyScrollSignal.current
     val fill = node.boolOr("fill")
     val mod = (if (fill) m.fillMaxWidth() else m).let {
-        if (scroll) it.verticalScroll(rememberScrollState(),
-            reverseScrolling = node.boolOr("reverse_scroll")) else it
+        if (scroll) {
+            val state = rememberScrollState()
+            if (signal != null) {
+                val atStart by remember { derivedStateOf { state.value == 0 } }
+                LaunchedEffect(atStart) { signal.atStart = atStart }
+            }
+            it.verticalScroll(state,
+                reverseScrolling = node.boolOr("reverse_scroll"))
+        } else it
     }
     Column(
         modifier = mod,
@@ -286,6 +297,13 @@ internal fun RenderLazyColumn(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         }
     }
     val listState = rememberLazyListState()
+    // The §17.6 body-scroll signal (see BodyScrollSignal).
+    LocalBodyScrollSignal.current?.let { signal ->
+        val atStart by remember {
+            derivedStateOf { listState.firstVisibleItemIndex == 0 }
+        }
+        LaunchedEffect(atStart) { signal.atStart = atStart }
+    }
     if (scrollTarget >= 0) {
         LaunchedEffect(scrollTarget) { listState.scrollToItem(scrollTarget) }
     }
@@ -1093,8 +1111,18 @@ internal fun RenderLazyGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         else GridCells.Fixed(node.doubleOr("columns", 2.0).toInt().coerceAtLeast(1))
     val spacing = (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp
     val pad = (safeDp(node.doubleOr("content_padding", 0.0)) ?: 0f).dp
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    // The §17.6 body-scroll signal; the Companion derives at-start itself,
+    // reverseLayout included — never Emacs.
+    LocalBodyScrollSignal.current?.let { signal ->
+        val atStart by remember {
+            derivedStateOf { gridState.firstVisibleItemIndex == 0 }
+        }
+        LaunchedEffect(atStart) { signal.atStart = atStart }
+    }
     LazyVerticalGrid(
         columns = cells,
+        state = gridState,
         reverseLayout = node.boolOr("reverse"),
         verticalArrangement = Arrangement.spacedBy(spacing),
         horizontalArrangement = Arrangement.spacedBy(spacing),

@@ -56,8 +56,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.VerticalFloatingToolbar
+import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -84,6 +86,21 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+
+/** §17.6 the body-scroll signal: `button.expanded "auto"` and
+ * `scaffold.fab_hide_on_scroll` both derive from whether the scaffold
+ * body's scrollable rests at its START — exactly the
+ * firstVisibleItemIndex == 0 upstream derives locally — so the signal is
+ * device-local state no wire message ever carries. The scaffold provides
+ * one around its BODY only; the body's scrolling containers publish into
+ * it (last writer wins — the body's primary scrollable is the one that
+ * matters), and the fab slot reads it. */
+class BodyScrollSignal {
+    var atStart by mutableStateOf(true)
+}
+
+val LocalBodyScrollSignal =
+    androidx.compose.runtime.compositionLocalOf<BodyScrollSignal?> { null }
 
 /** SPEC 18.1: a dialog's local state — its captured field values — and the
  * id needed to complete the outstanding request. Stateful dialog nodes are
@@ -895,6 +912,7 @@ private fun localTimeStamp(): String {
 @Composable
 fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
     val hostState = remember { SnackbarHostState() }
+    val scrollSignal = remember { BodyScrollSignal() }
     val snackbar = node.stringOr("snackbar").takeIf { it.isNotEmpty() }
     val action = node.objOrNull("snackbar_action")
     val drawer = node.objOrNull("drawer")
@@ -1049,7 +1067,17 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                 }
             },
             floatingActionButton = {
-                node.objOrNull("fab")?.let { RenderNode(it, ctx.child(it, 2)) }
+                // §17.6 `fab_hide_on_scroll`: scale the slot's occupant away
+                // as the body leaves its start — the derived form; an
+                // author-driven boolean alone would have no driver.
+                val fabMod = if (node.boolOr("fab_hide_on_scroll"))
+                    Modifier.animateFloatingActionButton(
+                        visible = scrollSignal.atStart,
+                        alignment = Alignment.BottomEnd)
+                else Modifier
+                Box(fabMod) {
+                    node.objOrNull("fab")?.let { RenderNode(it, ctx.child(it, 2)) }
+                }
             },
             bottomBar = {
                 // §17.6: a STYLED floating toolbar floats over the body
@@ -1139,10 +1167,18 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                         }
                     },
                     modifier = bodyModifier) {
-                    body?.let { RenderNode(it, ctx.child(it, 1)) }
+                    CompositionLocalProvider(
+                        LocalBodyScrollSignal provides scrollSignal) {
+                        body?.let { RenderNode(it, ctx.child(it, 1)) }
+                    }
                 }
             } else {
-                Box(bodyModifier) { body?.let { RenderNode(it, ctx.child(it, 1)) } }
+                Box(bodyModifier) {
+                    CompositionLocalProvider(
+                        LocalBodyScrollSignal provides scrollSignal) {
+                        body?.let { RenderNode(it, ctx.child(it, 1)) }
+                    }
+                }
             }
             // The pill sits OVER the body, aligned by `placement`.
             val toolbar = node.objOrNull("floating_toolbar")

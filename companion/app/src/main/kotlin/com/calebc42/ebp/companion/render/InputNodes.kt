@@ -216,17 +216,51 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val iconSize = if (h != null) ButtonDefaults.iconSizeFor(h) else 18.dp
     val iconGap = if (h != null) ButtonDefaults.iconSpacingFor(h) else 6.dp
     val mm = if (h != null) m.heightIn(min = h) else m
+    // §17.4 `expanded`: absent/true is icon+label as always; false is the
+    // icon-only FAB; "auto" derives from the scaffold body's own scroll
+    // signal — expanded while the body rests at its start — entirely
+    // device-local, so no per-scroll traffic ever crosses the wire.
+    val hasExpanded = "expanded" in node
+    val expandedNow = when (val e = node["expanded"]) {
+        is JsonPrimitive ->
+            if (e.isString)
+                e.content != "auto" ||
+                    (LocalBodyScrollSignal.current?.atStart ?: true)
+            else e.content.toBooleanStrictOrNull() ?: true
+        else -> true
+    }
     val content: @Composable () -> Unit = {
-        if (iconName.isNotEmpty()) {
+        if (iconName.isNotEmpty())
             Icon(IconMap.get(iconName), null, Modifier.size(iconSize))
-            androidx.compose.foundation.layout.Spacer(Modifier.size(iconGap))
-        }
         val label = @Composable {
             Text(node.stringOr("label"), maxLines = 1, softWrap = false,
                 overflow = TextOverflow.Ellipsis)
         }
-        if (h != null) ProvideTextStyle(ButtonDefaults.textStyleFor(h)) { label() }
-        else label()
+        val styled = @Composable {
+            if (h != null) ProvideTextStyle(ButtonDefaults.textStyleFor(h)) { label() }
+            else label()
+        }
+        if (hasExpanded)
+            // The label animates in and out the way ExtendedFAB's own
+            // expanded parameter does; the icon stays put.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = expandedNow,
+                enter = androidx.compose.animation.fadeIn() +
+                    androidx.compose.animation.expandHorizontally(),
+                exit = androidx.compose.animation.fadeOut() +
+                    androidx.compose.animation.shrinkHorizontally()) {
+                Row {
+                    if (iconName.isNotEmpty())
+                        androidx.compose.foundation.layout.Spacer(
+                            Modifier.size(iconGap))
+                    styled()
+                }
+            }
+        else {
+            if (iconName.isNotEmpty())
+                androidx.compose.foundation.layout.Spacer(Modifier.size(iconGap))
+            styled()
+        }
     }
     // `shape` names the container's OWN shape, which universal `corner` cannot
     // reach — that decorates the modifier outside minimumInteractiveComponentSize,

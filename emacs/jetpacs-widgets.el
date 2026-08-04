@@ -1117,12 +1117,18 @@ IconButtonWidthOption.  `uniform' is the default square-ish container;
 (defconst jetpacs--keyboards '("text" "number" "decimal" "email" "phone" "uri"))
 
 (cl-defun jetpacs-button (label on-tap &key icon variant size shape
-                                animate-shape checked on-change enabled)
+                                animate-shape checked on-change expanded
+                                enabled)
   "A button labeled LABEL dispatching ON-TAP (SPEC §17.4).
 ICON a §4.4 identifier; VARIANT filled(default)/tonal/elevated/outlined/text;
 SIZE one of `jetpacs--button-sizes' (omit for the unscaled default);
 SHAPE round(default)/square; ANIMATE-SHAPE a boolean asking for the M3
 press-state shape morph; ENABLED a boolean (t or :json-false; default true).
+
+EXPANDED is the Extended-FAB collapse: t (or absent) draws icon+label,
+:json-false the icon-only form, and \"auto\" derives it from the
+scaffold body's own scroll — expanded while the body rests at its
+start, collapsing as it scrolls, with no per-scroll wire traffic.
 
 CHECKED makes this a TOGGLE button — the Companion holds the flipped
 value on the device, keyed on the node's `:id', and ON-CHANGE receives
@@ -1137,11 +1143,19 @@ unique across the document (§16.1); a plain button carries neither."
   (when animate-shape (jetpacs--check-bool animate-shape ":animate_shape"))
   (when checked (jetpacs--check-bool checked ":checked"))
   (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when expanded
+    ;; §17.4: t/absent is icon+label; :json-false the icon-only FAB;
+    ;; "auto" derives from the scaffold body's own scroll — expanded
+    ;; while it rests at its start, entirely device-local.
+    (unless (or (memq expanded '(t :json-false)) (equal expanded "auto"))
+      (error "jetpacs-button: :expanded must be t, :json-false, or \"auto\" (SPEC 17.4), got %S"
+             expanded)))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "button" :label label :on_tap on-tap
                  :icon icon :variant variant :size size :shape shape
                  :animate_shape animate-shape
-                 :checked checked :on_change on-change :enabled enabled))
+                 :checked checked :on_change on-change
+                 :expanded expanded :enabled enabled))
 
 (cl-defun jetpacs-icon-button (icon on-tap &key content-description badge
                                     variant size shape width-mode
@@ -2383,7 +2397,7 @@ builds the range and re-pushes."
                                  snackbar-duration snackbar-dismiss
                                  snackbar-max-lines
                                  sheet sheet-peek-height sheet-state
-                                 on-sheet-change)
+                                 on-sheet-change fab-hide-on-scroll)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
@@ -2461,6 +2475,10 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                                            ":sheet-state")))
   (when on-sheet-change
     (jetpacs--check-descriptor on-sheet-change ":on-sheet-change"))
+  (when fab-hide-on-scroll
+    (jetpacs--check-bool fab-hide-on-scroll ":fab-hide-on-scroll")
+    (unless fab
+      (error "jetpacs-scaffold: :fab-hide-on-scroll styles a fab it does not author (SPEC 17.6)")))
   (when top-bar-style
     (setq top-bar-style (jetpacs--check-enum top-bar-style
                                              jetpacs--top-bar-styles
@@ -2515,6 +2533,7 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                  :is_refreshing is-refreshing
                  :sheet sheet :sheet_peek_height sheet-peek-height
                  :sheet_state sheet-state :on_sheet_change on-sheet-change
+                 :fab_hide_on_scroll fab-hide-on-scroll
                  :top_bar_style top-bar-style
                  :top_bar_subtitle top-bar-subtitle
                  :scroll_behavior scroll-behavior))

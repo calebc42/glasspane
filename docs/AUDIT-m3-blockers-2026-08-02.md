@@ -1,5 +1,27 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
+> **Ledger state as of 2026-08-04 (seventh pass) — 262/279 built, 17
+> remain. THE PROTOCOL TIER IS SUBSTANTIALLY DONE.** This pass landed:
+> G-80's content_padding half (carousel multi-aspect on a composed
+> scrolling row; the snap half was deliberately dropped — its only
+> sample landed on the carousel node's uncontained strategy), G-81/82
+> (tabs.indicator outline vocabulary + TabItem content/selected_content
+> swapped by the device on its live selection — fancy tabs pair live),
+> G-75 (scaffold.snackbar_content + button.color — the custom snackbar
+> live on the fn verb), G-96..98 (theme.set dynamic/font_scale/
+> layout_direction + the three theme-screen rows live), G-77/78
+> (window.changed + the welcome window mirror + the scaffold rail slot
+> — navigation-suite-scaffold complete 2/2, the swap a real re-push on
+> every geometry change), and G-76 (snackbar.show, a REQUEST answered
+> with action|dismissed when the snackbar leaves — snackbars complete
+> 5/5). Remaining 17: G-51 caret read (menus MultiAutocomplete), G-92
+> floating-toolbar-with-FAB (3), G-74 pull-to-refresh progress (2, the
+> honest answer stays a canned indicator variant), the top-app-bar
+> behavior-ARGUMENT pair (2), lists SingleSelection radio rows (2),
+> tabs two-stiffness Container pair (2), carousel Fading alpha (1), and
+> the documented-impossible set. Next: the DX/refactor pass, final
+> gates and docs.
+>
 > **Ledger state as of 2026-08-04 (sixth pass) — 255/279 built, 24
 > remain. THE SMALL/MEDIUM MEMBER LANE IS CLOSED.** This pass landed,
 > in order: G-42/70 (bottom_bar_behavior exit_always + fab_position

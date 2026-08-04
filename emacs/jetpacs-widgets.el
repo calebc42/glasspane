@@ -772,37 +772,52 @@ a §16.6 color; CHILDREN a list of nodes the badge annotates."
   "A horizontal row of child nodes (SPEC §17.3).
 Trailing options: :spacing (dp), :align (top/center/bottom/baseline),
 :arrange (start/center/end/space_between/space_around/space_evenly),
-:scroll, :fill (booleans t or :json-false)."
+:scroll, :fill (booleans t or :json-false), and :overlap -- a POSITIVE
+dp by which the children interlock (spacing stays non-negative under
+SPEC 16.5; overlap is the one door to a negative arrangement, and the
+two are mutually exclusive)."
   (let* ((split (jetpacs--children-and-opts args "row"))
          (opts (cdr split))
          (spacing (plist-get opts :spacing))
+         (overlap (plist-get opts :overlap))
          (align (plist-get opts :align))
          (arrange (plist-get opts :arrange))
          (scroll (plist-get opts :scroll))
          (fill (plist-get opts :fill)))
     (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
+    (when overlap
+      (jetpacs--check-number overlap ":overlap" 0 nil)
+      (when spacing
+        (error "jetpacs-row: :overlap and :spacing are mutually exclusive (SPEC 17.3)")))
     (when align (setq align (jetpacs--check-enum align jetpacs--row-aligns ":align")))
     (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
     (when scroll (jetpacs--check-bool scroll ":scroll"))
     (when fill (jetpacs--check-bool fill ":fill"))
     (jetpacs--node "row"
                    :children (jetpacs--as-children (car split))
-                   :spacing spacing :align align :arrange arrange
+                   :spacing spacing :overlap overlap :align align :arrange arrange
                    :scroll scroll :fill fill)))
 
 (defun jetpacs-column (&rest args)
   "A vertical column of child nodes (SPEC §17.3).
 Trailing options: :spacing, :align (start/center/end), :arrange, :scroll,
-:fill (booleans t or :json-false)."
+:fill (booleans t or :json-false), and :overlap -- a POSITIVE dp by
+which the children interlock, mutually exclusive with :spacing (see
+`jetpacs-row')."
   (let* ((split (jetpacs--children-and-opts args "column"))
          (opts (cdr split))
          (spacing (plist-get opts :spacing))
+         (overlap (plist-get opts :overlap))
          (align (plist-get opts :align))
          (arrange (plist-get opts :arrange))
          (scroll (plist-get opts :scroll))
          (reverse-scroll (plist-get opts :reverse-scroll))
          (fill (plist-get opts :fill)))
     (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
+    (when overlap
+      (jetpacs--check-number overlap ":overlap" 0 nil)
+      (when spacing
+        (error "jetpacs-column: :overlap and :spacing are mutually exclusive (SPEC 17.3)")))
     (when reverse-scroll (jetpacs--check-bool reverse-scroll ":reverse-scroll"))
     (when align (setq align (jetpacs--check-enum align jetpacs--column-aligns ":align")))
     (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
@@ -811,7 +826,7 @@ Trailing options: :spacing, :align (start/center/end), :arrange, :scroll,
     (jetpacs--node "column"
                    :children (jetpacs--as-children (car split))
                    :reverse_scroll reverse-scroll
-                   :spacing spacing :align align :arrange arrange
+                   :spacing spacing :overlap overlap :align align :arrange arrange
                    :scroll scroll :fill fill)))
 
 (defun jetpacs-flow-row (&rest args)
@@ -1133,9 +1148,13 @@ IconButtonWidthOption.  `uniform' is the default square-ish container;
   '("flat" "elevated" "suggestion" "elevated_suggestion"))
 (defconst jetpacs--keyboards '("text" "number" "decimal" "email" "phone" "uri"))
 
+(defconst jetpacs--button-shape-roles
+  '("leading" "middle" "trailing" "top" "bottom"))
+
 (cl-defun jetpacs-button (label on-tap &key icon variant size shape
                                 animate-shape checked on-change expanded
-                                checked-shape enabled)
+                                checked-shape shape-role checked-icon
+                                enabled)
   "A button labeled LABEL dispatching ON-TAP (SPEC §17.4).
 ICON a §4.4 identifier; VARIANT filled(default)/tonal/elevated/outlined/text;
 SIZE one of `jetpacs--button-sizes' (omit for the unscaled default);
@@ -1150,7 +1169,16 @@ start, collapsing as it scrolls, with no per-scroll wire traffic.
 CHECKED makes this a TOGGLE button — the Companion holds the flipped
 value on the device, keyed on the node's `:id', and ON-CHANGE receives
 it.  A button carrying CHECKED is stateful and so REQUIRES an `:id'
-unique across the document (§16.1); a plain button carries neither."
+unique across the document (§16.1); a plain button carries neither.
+
+Two more members exist only on a toggle.  CHECKED-ICON is the glyph
+drawn while the LIVE checked value is true (append _filled to any icon
+name for its Filled vector — the Outlined-at-rest/Filled-while-checked
+swap).  SHAPE-ROLE names this toggle's position in a CONNECTED group —
+leading/middle/trailing across, top/bottom down — selecting the M3
+connected shape set with its caps and its press and checked morphs;
+the group itself is a row or column of such toggles (:spacing 2 across,
+:overlap 6 down), with the selection model in your own state."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-tap ":on-tap")
   (when icon (jetpacs--check-identifier icon ":icon"))
@@ -1175,12 +1203,23 @@ unique across the document (§16.1); a plain button carries neither."
     (setq checked-shape (jetpacs--check-enum checked-shape
                                              jetpacs--button-shapes
                                              ":checked-shape")))
+  (when shape-role
+    (unless checked
+      (error "jetpacs-button: :shape-role needs :checked (SPEC 17.4)"))
+    (setq shape-role (jetpacs--check-enum shape-role
+                                          jetpacs--button-shape-roles
+                                          ":shape-role")))
+  (when checked-icon
+    (unless checked
+      (error "jetpacs-button: :checked-icon needs :checked (SPEC 17.4)"))
+    (jetpacs--check-identifier checked-icon ":checked-icon"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "button" :label label :on_tap on-tap
                  :icon icon :variant variant :size size :shape shape
                  :animate_shape animate-shape
                  :checked checked :on_change on-change
                  :expanded expanded :checked_shape checked-shape
+                 :shape_role shape-role :checked_icon checked-icon
                  :enabled enabled))
 
 (cl-defun jetpacs-icon-button (icon on-tap &key content-description badge

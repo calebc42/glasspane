@@ -48,7 +48,11 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenuGroup
+import androidx.compose.material3.ToggleButtonShapes
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
@@ -236,9 +240,14 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             else e.content.toBooleanStrictOrNull() ?: true
         else -> true
     }
+    // §17.4 `checked_icon`: the glyph drawn while the LIVE checked state is
+    // true (upstream swaps Outlined for Filled) — `icon` stays the resting one.
+    val checkedIconName = node.stringOr("checked_icon")
+    val shownIcon = if (toggle?.value == true && checkedIconName.isNotEmpty())
+        checkedIconName else iconName
     val content: @Composable () -> Unit = {
-        if (iconName.isNotEmpty())
-            Icon(IconMap.get(iconName), null, Modifier.size(iconSize))
+        if (shownIcon.isNotEmpty())
+            Icon(IconMap.get(shownIcon), null, Modifier.size(iconSize))
         val label = @Composable {
             Text(node.stringOr("label"), maxLines = 1, softWrap = false,
                 overflow = TextOverflow.Ellipsis)
@@ -257,14 +266,14 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                 exit = androidx.compose.animation.fadeOut() +
                     androidx.compose.animation.shrinkHorizontally()) {
                 Row {
-                    if (iconName.isNotEmpty())
+                    if (shownIcon.isNotEmpty())
                         androidx.compose.foundation.layout.Spacer(
                             Modifier.size(iconGap))
                     styled()
                 }
             }
         else {
-            if (iconName.isNotEmpty())
+            if (shownIcon.isNotEmpty())
                 androidx.compose.foundation.layout.Spacer(Modifier.size(iconGap))
             styled()
         }
@@ -293,7 +302,31 @@ internal fun RenderButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         // and silently ignored; this closes that too.)
         val checkedShapeName = node.stringOr("checked_shape")
         val base = ToggleButtonDefaults.shapesFor(h ?: ButtonDefaults.MinHeight)
-        val tShapes = if (square || checkedShapeName.isNotEmpty())
+        // §17.4 `shape_role`: one position of a CONNECTED group. The M3
+        // leading/middle/trailing shape sets carry the caps, the press morph
+        // and the checked morph; top/bottom are the vertical caps upstream
+        // builds by copying CornerSize(100) onto the middle shape.
+        val roleShapes: ToggleButtonShapes? = when (node.stringOr("shape_role")) {
+            "leading" -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+            "middle" -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+            "trailing" -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+            "top", "bottom" -> {
+                val mid = ButtonGroupDefaults.connectedMiddleButtonShapes()
+                val midShape = mid.shape as? RoundedCornerShape
+                val capped = if (midShape != null) {
+                    if (node.stringOr("shape_role") == "top")
+                        midShape.copy(topStart = CornerSize(100), topEnd = CornerSize(100))
+                    else
+                        midShape.copy(bottomStart = CornerSize(100), bottomEnd = CornerSize(100))
+                } else mid.shape
+                ToggleButtonShapes(shape = capped,
+                    pressedShape = mid.pressedShape,
+                    checkedShape = ButtonGroupDefaults.connectedButtonCheckedShape)
+            }
+            else -> null
+        }
+        val tShapes = if (roleShapes != null) roleShapes
+        else if (square || checkedShapeName.isNotEmpty())
             ToggleButtonDefaults.shapes(
                 shape = if (square) ToggleButtonDefaults.squareShape
                     else ToggleButtonDefaults.roundShape,

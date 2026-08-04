@@ -149,8 +149,15 @@ private fun horizontalArrange(node: JsonObject): Arrangement.Horizontal =
         "space_between" -> Arrangement.SpaceBetween
         "space_around" -> Arrangement.SpaceAround
         "space_evenly" -> Arrangement.SpaceEvenly
-        else -> Arrangement.spacedBy(
-            (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp)
+        // §16.5 keeps `spacing` non-negative; `overlap` is the one door to
+        // Arrangement.spacedBy(-dp) — children interlocking, the vertical
+        // connected button group's -6dp.
+        else -> {
+            val overlap = safeDp(node.doubleOr("overlap", 0.0)) ?: 0f
+            if (overlap > 0f) Arrangement.spacedBy(-overlap.dp)
+            else Arrangement.spacedBy(
+                (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp)
+        }
     }
 
 private fun verticalArrange(node: JsonObject): Arrangement.Vertical =
@@ -160,8 +167,12 @@ private fun verticalArrange(node: JsonObject): Arrangement.Vertical =
         "space_between" -> Arrangement.SpaceBetween
         "space_around" -> Arrangement.SpaceAround
         "space_evenly" -> Arrangement.SpaceEvenly
-        else -> Arrangement.spacedBy(
-            (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp)
+        else -> {
+            val overlap = safeDp(node.doubleOr("overlap", 0.0)) ?: 0f
+            if (overlap > 0f) Arrangement.spacedBy(-overlap.dp)
+            else Arrangement.spacedBy(
+                (safeDp(node.doubleOr("spacing", 0.0)) ?: 0f).dp)
+        }
     }
 
 @Composable

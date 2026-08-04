@@ -87,11 +87,23 @@ object IconMap {
     }
 
     fun get(name: String): ImageVector = cache[name] ?: run {
-        val pascal = name.split('_').joinToString("") { part ->
+        // A `_filled` suffix asks for the Filled vector of the base name —
+        // the checked-state glyph swap (Outlined at rest, Filled while
+        // checked) that every wire name resolved Outlined-first could not
+        // spell. Falls through to the normal chain if no Filled exists.
+        val filled = name.endsWith("_filled")
+        val base = if (filled) name.removeSuffix("_filled") else name
+        val pascal = base.split('_').joinToString("") { part ->
             part.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         }
-        val resolved = resolve("androidx.compose.material.icons.outlined.${pascal}Kt",
-            "get$pascal", Icons.Outlined)
+        val resolved = (if (filled)
+            resolve("androidx.compose.material.icons.filled.${pascal}Kt",
+                "get$pascal", Icons.Filled)
+                ?: resolve("androidx.compose.material.icons.automirrored.filled.${pascal}Kt",
+                    "get$pascal", Icons.AutoMirrored.Filled)
+            else null)
+            ?: resolve("androidx.compose.material.icons.outlined.${pascal}Kt",
+                "get$pascal", Icons.Outlined)
             ?: resolve("androidx.compose.material.icons.automirrored.outlined.${pascal}Kt",
                 "get$pascal", Icons.AutoMirrored.Outlined)
             ?: resolve("androidx.compose.material.icons.filled.${pascal}Kt",

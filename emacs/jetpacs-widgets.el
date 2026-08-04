@@ -835,18 +835,23 @@ Trailing options: :spacing, :run-spacing (dp), :align (top/center/bottom),
 
 (defun jetpacs-box (&rest args)
   "A box (z-stack, back-to-front) of child nodes (SPEC §17.3).
-Trailing options: :alignment (top_start..bottom_end), :on-tap."
+Trailing options: :alignment (top_start..bottom_end), :on-tap, and
+:on-long-tap -- with both, a press dispatches :on-tap and a long press
+:on-long-tap, the same split a card makes."
   (let* ((split (jetpacs--children-and-opts args "box"))
          (opts (cdr split))
          (alignment (plist-get opts :alignment))
-         (on-tap (plist-get opts :on-tap)))
+         (on-tap (plist-get opts :on-tap))
+         (on-long-tap (plist-get opts :on-long-tap)))
     (when alignment
       (setq alignment (jetpacs--check-enum alignment jetpacs--box-alignments ":alignment")))
     (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
+    (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
     (jetpacs--node "box"
                    :children (jetpacs--as-children (car split))
                    :alignment alignment
-                   :on_tap on-tap)))
+                   :on_tap on-tap
+                   :on_long_tap on-long-tap)))
 
 (defun jetpacs-surface (&rest args)
   "A visual surface container (SPEC §17.3; distinct from a protocol Surface).

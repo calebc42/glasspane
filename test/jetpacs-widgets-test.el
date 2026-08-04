@@ -167,7 +167,8 @@
       (chk "21" (jetpacs-flow-row '(:t "chip" :label "a") :align 'top :arrange 'start
                                   :run-spacing 2 :spacing 4))
       (chk "22" (jetpacs-box (jetpacs-text "a") :alignment 'center
-                             :on-tap (jetpacs-action "demo.tap")))
+                             :on-tap (jetpacs-action "demo.tap")
+                             :on-long-tap (jetpacs-action "demo.long")))
       (chk "23" (jetpacs-surface (jetpacs-text "a") :color "surface" :elevation 2
                                  :shape 'rounded))
       (chk "24" (jetpacs-lazy-column (jetpacs-text "a") :content-padding 8 :spacing 4))

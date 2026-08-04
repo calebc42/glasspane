@@ -327,6 +327,19 @@ flow is the real Emacs-owns-the-model round trip, not a demo toast.")
   "A descriptor flipping sample flag KEY and re-rendering the surface."
   (jetpacs-action "m3catalog.flag" :args (list :key key)))
 
+(defvar jetpacs-m3-fn-registry (make-hash-table :test #'equal)
+  "Sample mutation KEY -> nullary function over that sample\='s own state.
+The compound sibling of `jetpacs-m3--flags\=': a sample whose upstream
+handler mutates MORE than one remembered value in a single gesture
+(check an item AND switch modes; clear every checkbox on exit) registers
+the whole mutation here and authors `jetpacs-m3-fn-action\=' on the
+affordance.  The verb funcalls it and re-pushes, so the flow stays the
+real Emacs-owns-the-model round trip.")
+
+(defun jetpacs-m3-fn-action (key)
+  "A descriptor running the registered sample mutation KEY."
+  (jetpacs-action "m3catalog.fn" :args (list :key key)))
+
 (defvar jetpacs-m3-dialog-registry (make-hash-table :test #'equal)
   "Dialog KEY -> nullary builder returning a SPEC §18.1 dialog spec.
 A sample whose subject is a MODAL DIALOG registers its spec here and
@@ -797,6 +810,22 @@ no user in front of it."
                            (jetpacs--error-label err))))))
       'accepted)))
 
+(defun jetpacs-m3--on-fn (args params)
+  "Run a registered sample mutation and re-render."
+  (let* ((key (plist-get args :key))
+         (fn (and (stringp key) (gethash key jetpacs-m3-fn-registry)))
+         (surface (plist-get params :surface)))
+    (if (null fn)
+        'rejected
+      (funcall fn)
+      (jetpacs-flow-continue
+       (lambda ()
+         (condition-case err
+             (jetpacs-shell-push (or surface jetpacs-m3-owner))
+           (error (message "jetpacs-m3: fn refresh failed: %s"
+                           (jetpacs--error-label err))))))
+      'accepted)))
+
 (defun jetpacs-m3--on-dialog (args params)
   "Raise a registered §18.1 dialog (upstream's openDialog flow).
 The raise happens through `jetpacs-flow-continue' because a dialog MUST
@@ -843,6 +872,7 @@ stack to Home, which is the documented live-reload path."
     (jetpacs-defaction "m3catalog.pin" #'jetpacs-m3--on-pin)
     (jetpacs-defaction "m3catalog.demo" #'jetpacs-m3--on-demo)
     (jetpacs-defaction "m3catalog.flag" #'jetpacs-m3--on-flag)
+    (jetpacs-defaction "m3catalog.fn" #'jetpacs-m3--on-fn)
     (jetpacs-defaction "m3catalog.dialog" #'jetpacs-m3--on-dialog)
     (jetpacs-defaction "m3catalog.home" #'jetpacs-m3--on-home)
     (jetpacs-chrome-define-root jetpacs-m3-owner "home"

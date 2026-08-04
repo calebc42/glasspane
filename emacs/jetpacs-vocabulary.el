@@ -43,7 +43,7 @@
     ("row" ("children") ("align" "arrange" "fill" "scroll" "spacing"))
     ("column" ("children") ("align" "arrange" "fill" "reverse_scroll" "scroll" "spacing"))
     ("flow_row" ("children") ("align" "arrange" "run_spacing" "spacing"))
-    ("box" ("children") ("alignment" "on_tap"))
+    ("box" ("children") ("alignment" "on_long_tap" "on_tap"))
     ("surface" ("children") ("color" "elevation" "shadow_elevation" "shape"))
     ("lazy_column" ("children") ("content_padding" "spacing"))
     ("spacer" () ())

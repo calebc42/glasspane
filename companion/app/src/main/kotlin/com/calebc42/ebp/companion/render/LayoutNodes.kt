@@ -240,8 +240,10 @@ internal fun RenderFlowRow(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 // ------------------------------------------------------------- box/surface
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 internal fun RenderBox(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val onTap = node.objOrNull("on_tap")
+    val onLongTap = node.objOrNull("on_long_tap")
     // §17.3: the full 9-value alignment vocabulary; default top_start.
     val alignment = when (node.stringOr("alignment")) {
         "top_center" -> Alignment.TopCenter
@@ -254,7 +256,13 @@ internal fun RenderBox(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         "bottom_end" -> Alignment.BottomEnd
         else -> Alignment.TopStart
     }
-    val mod = if (onTap != null) m.clickable { ctx.action(onTap) } else m
+    val mod = when {
+        onLongTap != null -> m.combinedClickable(
+            onClick = { if (onTap != null) ctx.action(onTap) },
+            onLongClick = { ctx.action(onLongTap) })
+        onTap != null -> m.clickable { ctx.action(onTap) }
+        else -> m
+    }
     Box(modifier = mod, contentAlignment = alignment) {
         RenderChildren(node.arrOrNull("children"), ctx)
     }

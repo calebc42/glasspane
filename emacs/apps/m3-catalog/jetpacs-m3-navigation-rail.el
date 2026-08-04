@@ -27,16 +27,19 @@
 ;; Favorite/FavoriteBorder and Star/StarBorder each have their own name
 ;; and the two unselected destinations keep their outlined glyphs.
 ;;
-;; Three stay unsupported, and none of them for want of a rail.
-;; `expanded' is the value a rail is BUILT at, not a state: there is no
-;; hook beside it to expand or collapse a rail already on screen, and
-;; nothing comes back saying what one is doing, which is the whole of
-;; WideNavigationRailResponsiveSample -- it exists to animate between the
-;; two values from a header tap and print `isAnimating' and the current
-;; value beside the rail.  And `variant' is standard or wide only:
-;; ModalWideNavigationRail is a third rail, scrimmed and elevated over
-;; the app's content, which the other two samples drive open and shut
-;; from a header tap, a body button and a destination tap.
+;; The state loop closed the last three.  `:expanded' is SYNCED
+;; authored state now -- a re-push whose value changed animates the
+;; open rail, and a settle the author did not write reports back
+;; through `:on-expand-change' -- so the Responsive sample's header
+;; tap is a real Emacs round trip on the flag verb.  `:variant
+;; \"modal\"' is ModalWideNavigationRail, scrimmed and elevated over
+;; the content, and `:hide-on-collapse' is its dismissible form,
+;; offscreen until a body button opens it.  All eight build.
+;;
+;; One seam stated on the Responsive sample: upstream also prints
+;; WideNavigationRailState's `isAnimating' beside the rail, and the
+;; animation internals stay Companion-local -- the two settled values
+;; are what ride the wire.
 
 ;;; Code:
 
@@ -128,6 +131,69 @@ variant, because only that rail can open out and set the labels beside
 the icons instead of under them."
   (jetpacs-m3-navigation-rail--rail :variant "wide" :expanded t))
 
+(defun jetpacs-m3-navigation-rail--live-header (flag)
+  "A rail header whose menu button flips sample FLAG — the live toggle.
+The tooltip and the accessible name track the state, as upstream's
+headerDescription does."
+  (let ((label (if (jetpacs-m3-flag flag) "Collapse rail" "Expand rail")))
+    (jetpacs-tooltip
+     label
+     (jetpacs-with-attrs
+      (jetpacs-icon-button "menu" (jetpacs-m3-flag-action flag)
+                           :content-description label)
+      :pad (list :start 24)))))
+
+(defun jetpacs-m3-navigation-rail--responsive ()
+  "Upstream WideNavigationRailResponsiveSample: the header tap animates.
+The header's menu button flips a flag, the verb re-pushes, and the
+SYNCED `:expanded' animates the open rail between its two values —
+the state loop this sample exists for, as a real Emacs round trip.
+One seam stated: upstream also prints WideNavigationRailState's
+isAnimating flag beside the rail, and the animation internals stay
+Companion-local; the two settled values are what ride the wire."
+  (let ((open (and (jetpacs-m3-flag "rail-open") t)))
+    (jetpacs-m3-navigation-rail--rail
+     :variant "wide"
+     :expanded (if open t :json-false)
+     :on-expand-change (jetpacs-m3-flag-action "rail-open")
+     :header (jetpacs-m3-navigation-rail--live-header "rail-open"))))
+
+(defun jetpacs-m3-navigation-rail--modal ()
+  "Upstream ModalWideNavigationRailSample.
+`:variant \"modal\"' stays a narrow icon rail when collapsed and
+expands into a scrimmed panel elevated over the content; a scrim
+dismissal reports through `:on-expand-change', which keeps the flag —
+and so the next push — honest."
+  (let ((open (and (jetpacs-m3-flag "modal-rail") t)))
+    (jetpacs-m3-navigation-rail--rail
+     :variant "modal"
+     :expanded (if open t :json-false)
+     :on-expand-change (jetpacs-m3-flag-action "modal-rail")
+     :header (jetpacs-m3-navigation-rail--live-header "modal-rail"))))
+
+(defun jetpacs-m3-navigation-rail--dismissible-modal ()
+  "Upstream DismissibleModalWideNavigationRailSample.
+`:hide-on-collapse' keeps the modal rail entirely offscreen until the
+body's menu button expands it; collapsing — scrim or destination tap —
+slides it away and reports back through `:on-expand-change'."
+  (let ((open (and (jetpacs-m3-flag "dismissible-rail") t)))
+    (jetpacs-row
+     (jetpacs-navigation-rail
+      (jetpacs-m3-navigation-rail--destinations)
+      :variant "modal"
+      :hide-on-collapse t
+      :expanded (if open t :json-false)
+      :on-expand-change (jetpacs-m3-flag-action "dismissible-rail"))
+     (jetpacs-with-attrs
+      (jetpacs-column
+       (jetpacs-icon-button "menu"
+                            (jetpacs-m3-flag-action "dismissible-rail")
+                            :content-description "Open rail")
+       (jetpacs-text "Tap the menu icon to open the rail")
+       :spacing 8)
+      :weight 1 :padding 16)
+     :align "top" :fill t)))
+
 (defun jetpacs-m3-navigation-rail--header ()
   "The rail header of upstream WideNavigationRailArrangementsSample.
 A menu IconButton 24dp in from the start edge, inside a TooltipBox whose
@@ -181,22 +247,19 @@ move does not happen here, exactly as the selection does not."
     "Navigation rail examples"
     :source jetpacs-m3-navigation-rail--source
     :expressive t
-    :unsupported
-    "The navigation_rail node has no rail state: expanded is the value a rail is built at, there is no hook beside it to expand or collapse one already on screen, and nothing is reported back -- while this sample exists to animate WideNavigationRailState between the two values from a header tap and print its isAnimating flag and current value beside the rail.")
+    :build #'jetpacs-m3-navigation-rail--responsive)
    (jetpacs-m3-example
     "ModalWideNavigationRailSample"
     "Navigation rail examples"
     :source jetpacs-m3-navigation-rail--source
     :expressive t
-    :unsupported
-    "navigation_rail.variant is standard or wide only: ModalWideNavigationRail is the third rail, the one that stays a narrow icon rail when collapsed and expands into a scrimmed panel elevated over the app's content, and neither that variant nor the expandedHeaderTopPadding that aligns its header across the animation is on the wire.")
+    :build #'jetpacs-m3-navigation-rail--modal)
    (jetpacs-m3-example
     "DismissibleModalWideNavigationRailSample"
     "Navigation rail examples"
     :source jetpacs-m3-navigation-rail--source
     :expressive t
-    :unsupported
-    "navigation_rail.variant has no modal value and the node has no open state: this sample's subject is a hideOnCollapse modal rail that is entirely offscreen until a body button expands it and slides away again when a destination tap collapses it, and the wire can ask for neither the modal variant nor the expansion that button drives.")
+    :build #'jetpacs-m3-navigation-rail--dismissible-modal)
    (jetpacs-m3-example
     "WideNavigationRailCollapsedSample"
     "Navigation rail examples"

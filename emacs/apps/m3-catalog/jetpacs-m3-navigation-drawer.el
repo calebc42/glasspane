@@ -118,6 +118,11 @@ first (`items[0]', AccountCircle) selected."
   (jetpacs-m3-navigation-drawer--items-column
    "navigation-drawer-modal" :spacing 4 :scroll t))
 
+(defun jetpacs-m3-navigation-drawer--dismissible-sheet ()
+  "The DismissibleDrawerSheet of the Dismissible sample — same 18 items."
+  (jetpacs-m3-navigation-drawer--items-column
+   "navigation-drawer-dismissible" :spacing 4 :scroll t))
+
 (defun jetpacs-m3-navigation-drawer--permanent ()
   "Upstream PermanentNavigationDrawerSample.
 `PermanentNavigationDrawer' IS a Row of (sheet, content) with no
@@ -168,8 +173,16 @@ already carries the 18 items."
     "DismissibleNavigationDrawerSample"
     "Navigation drawer examples"
     :source jetpacs-m3-navigation-drawer--source
-    :unsupported
-    "The scaffold drawer member is a ModalNavigationDrawer with a scrim and nothing else: a DismissibleDrawerSheet instead pushes the body aside and leaves it live and scrimless, and no wire member selects that drawer.")
+    ;; :drawer-variant "dismissible" selects DismissibleNavigationDrawer
+    ;; around the SAME drawer node: it pushes the body aside and leaves
+    ;; it live and scrimless, which is the whole delta from the modal
+    ;; sample.  The hamburger the Companion synthesizes is the way in.
+    :build (lambda ()
+             (jetpacs-column
+              (jetpacs-text "Swipe from the edge or tap the menu icon")
+              :align "center" :fill t))
+    :slots (list :drawer #'jetpacs-m3-navigation-drawer--dismissible-sheet)
+    :scaffold (list :drawer-variant "dismissible"))
    ))
 
 (provide 'jetpacs-m3-navigation-drawer)

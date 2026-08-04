@@ -14,16 +14,13 @@
 ;; Spacer clipped to `polygon.toShape()' and backed with the primary
 ;; color.  Its entire subject is that shape set.
 ;;
-;; Nothing on the wire can name one of those shapes.  `surface' carries a
-;; three-value shape enum (rounded/rounded_small/circle), and the
-;; universal `:corner' attribute only sets four radii on a rectangle;
-;; MaterialShapes.Arch or MaterialShapes.Ghostish has no spelling in
-;; either.  The `canvas' node's `path' op does draw closed polylines, but
-;; its vertices would be invented in this file rather than read from
-;; androidx.graphics.shapes, and a polyline carries none of the corner
-;; rounding that makes a RoundedPolygon a Material shape -- that is a
-;; lookalike, not this sample.  So the one example is unsupported, and
-;; says which member is missing.
+;; The recreation rides `surface.shape', whose enum carries the whole
+;; MaterialShapes vocabulary by wire name (arch, ghostish, heart, ...);
+;; the Companion resolves each name to the real RoundedPolygon via
+;; MaterialShapes.<Name>.toShape(), so the corner rounding is androidx's
+;; own, not a polyline lookalike.  One seam: upstream clips a Spacer and
+;; paints primary through the clip, while here the shape belongs to a
+;; surface node -- same pixels, different owner.
 
 ;;; Code:
 
@@ -33,6 +30,33 @@
 (defconst jetpacs-m3-material-shapes--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/MaterialShapesSamples.kt"
   "Upstream MaterialShapesExample sourceUrl.")
+
+(defconst jetpacs-m3-material-shapes--names
+  '(("circle" . "Circle") ("square" . "Square") ("slanted" . "Slanted")
+    ("arch" . "Arch") ("fan" . "Fan") ("arrow" . "Arrow")
+    ("semi_circle" . "SemiCircle") ("oval" . "Oval") ("pill" . "Pill")
+    ("triangle" . "Triangle") ("diamond" . "Diamond")
+    ("clam_shell" . "ClamShell") ("pentagon" . "Pentagon") ("gem" . "Gem")
+    ("sunny" . "Sunny") ("very_sunny" . "VerySunny")
+    ("cookie_4_sided" . "Cookie4Sided") ("cookie_6_sided" . "Cookie6Sided")
+    ("cookie_7_sided" . "Cookie7Sided") ("cookie_9_sided" . "Cookie9Sided")
+    ("cookie_12_sided" . "Cookie12Sided") ("ghostish" . "Ghostish")
+    ("clover_4_leaf" . "Clover4Leaf") ("clover_8_leaf" . "Clover8Leaf")
+    ("burst" . "Burst") ("soft_burst" . "SoftBurst") ("boom" . "Boom")
+    ("soft_boom" . "SoftBoom") ("flower" . "Flower") ("puffy" . "Puffy")
+    ("puffy_diamond" . "PuffyDiamond") ("pixel_circle" . "PixelCircle")
+    ("pixel_triangle" . "PixelTriangle") ("bun" . "Bun")
+    ("heart" . "Heart"))
+  "The 35 named MaterialShapes: (wire-name . upstream label), grid order.")
+
+(defun jetpacs-m3-material-shapes--cell (pair)
+  "One grid cell for PAIR: the upstream label above a 56dp shaped swatch."
+  (jetpacs-column
+   (jetpacs-text (cdr pair) :style "body")
+   (jetpacs-surface
+    (jetpacs-with-attrs (jetpacs-spacer) :width 56 :height 56)
+    :shape (car pair) :color "primary")
+   :align "center" :spacing 8))
 
 (jetpacs-m3-defcomponent "material-shapes"
   :name "Material Shapes"
@@ -49,8 +73,13 @@
     "Material shapes examples"
     :source jetpacs-m3-material-shapes--source
     :expressive t
-    :unsupported
-    "No wire member can name a MaterialShapes polygon: the surface node's shape enum is rounded/rounded_small/circle and the universal corner attribute only sets four radii, so the 35 named RoundedPolygon clips this sample exists to show (Arch, Fan, Ghostish, Puffy, Heart, ...) cannot be asked for from Emacs.")
+    :build
+    (lambda ()
+      (apply #'jetpacs-lazy-grid
+             (append
+              (mapcar #'jetpacs-m3-material-shapes--cell
+                      jetpacs-m3-material-shapes--names)
+              (list :columns 4 :spacing 4)))))
    ))
 
 (provide 'jetpacs-m3-material-shapes)

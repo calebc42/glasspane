@@ -980,9 +980,15 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
     // RenderScaffold only composes for the surface being presented, so the
     // raise lands where the SPEC says it must. The respond callback answers
     // the pending snackbar.show request with how it concluded.
-    val pendingRaise by SnackbarRaises.flow.collectAsState()
-    LaunchedEffect(pendingRaise) {
-        pendingRaise?.let { raise ->
+    // The collector is keyed on Unit — it lives as long as this host. Keying
+    // it on the pending value instead was a self-cancelling loop: clearing
+    // the flow inside the effect changed the key, which cancelled the very
+    // coroutine that was awaiting showSnackbar, so the raise never appeared.
+    LaunchedEffect(Unit) {
+        SnackbarRaises.flow.collect { raise ->
+            raise ?: return@collect
+            // Claim it before awaiting: a second host must not show it too,
+            // and the null emission this causes is ignored by the guard above.
             SnackbarRaises.flow.value = null
             val res = hostState.showSnackbar(
                 message = raise.message,

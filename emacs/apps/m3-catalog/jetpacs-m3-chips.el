@@ -16,17 +16,12 @@
 ;; (flat), ElevatedAssistChip (`elevated'), SuggestionChip
 ;; (`suggestion') and ElevatedSuggestionChip (`elevated_suggestion') --
 ;; RenderChip and RenderAssistChip in InputNodes.kt dispatch exactly
-;; those seven.  `chip' also has a `trailing_icon' member now, so the
-;; trailing ArrowDropDown is on the wire.  Eleven of the thirteen
-;; samples recreate.
-;;
-;; Two gaps remain, both per-member.  `chip' has no avatar slot, so
-;; InputChipWithAvatarSample cannot show the thing it is named for --
-;; `icon' is the 18dp leadingIcon, not the circular
-;; InputChipDefaults.AvatarSize graphic.  And no chip has an
-;; arrangement member, so the spacing INSIDE its own content row is not
-;; askable.  A third gap costs no example outright: `assist_chip' has
-;; no `trailing_icon', which is why ChipGroupSingleLineSample drops the
+;; those seven.  `chip' also carries `trailing_icon', `avatar' (the
+;; InputChip 24dp circular slot, distinct from the 18dp leadingIcon)
+;; and `content_spacing' (FilterChipDefaults.horizontalArrangement, the
+;; gap INSIDE the chip's own content row) -- so all thirteen samples
+;; recreate.  One gap costs no example outright: `assist_chip' has no
+;; `trailing_icon', which is why ChipGroupSingleLineSample drops the
 ;; per-chip ArrowDropDown.
 ;;
 ;; The `checked'/`on_change' toggle pair landed on `button' and
@@ -219,8 +214,16 @@ VerticalDivider is dropped: the divider node is HorizontalDivider."
     "FilterChipWithCustomSpacingSample"
     "Chips examples"
     :source jetpacs-m3-chips--source
-    :unsupported
-    "The chip node reaches FilterChip, but it has no horizontal_arrangement member: FilterChipDefaults.horizontalArrangement(4.dp) sets the spacing between the icon and the label INSIDE the chip's own content row, which no universal attribute reaches, and that spacing is the only thing separating this sample from FilterChipSample.")
+    :build (lambda ()
+             ;; FilterChipDefaults.horizontalArrangement(4.dp), verbatim.
+             ;; The authoring caveat the audit flagged: upstream's leading
+             ;; icon exists only while selected, so the sample seeds both
+             ;; :selected and :icon or the member would render invisibly.
+             (jetpacs-chip "Filter chip"
+                           :on-tap (jetpacs-m3-demo "Filter chip")
+                           :selected t
+                           :icon "done"
+                           :content-spacing 4)))
    (jetpacs-m3-example
     "InputChipSample"
     "Chips examples"
@@ -230,8 +233,13 @@ VerticalDivider is dropped: the divider node is HorizontalDivider."
     "InputChipWithAvatarSample"
     "Chips examples"
     :source jetpacs-m3-chips--source
-    :unsupported
-    "The chip node reaches InputChip through :variant \"input\", but it has no avatar member: its icon is the 18dp leadingIcon slot, not the circular InputChipDefaults.AvatarSize Person that is the only thing separating this sample from InputChipSample.")
+    :build (lambda ()
+             ;; The circular InputChipDefaults.AvatarSize Person — the one
+             ;; thing separating this from InputChipSample.
+             (jetpacs-chip "Input chip"
+                           :on-tap (jetpacs-m3-demo "Input chip")
+                           :variant "input"
+                           :avatar "person")))
    (jetpacs-m3-example
     "SuggestionChipSample"
     "Chips examples"

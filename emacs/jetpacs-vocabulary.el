@@ -55,7 +55,7 @@
     ("table" ("rows") ("aligns" "on_add_col" "on_add_row"))
     ("button" ("label" "on_tap") ("animate_shape" "checked" "enabled" "icon" "on_change" "shape" "size" "variant"))
     ("icon_button" ("icon" "on_tap") ("badge" "checked" "checked_icon" "color" "content_description" "enabled" "on_change" "shape" "size" "variant" "width_mode"))
-    ("chip" ("label") ("enabled" "icon" "on_tap" "selected" "trailing_icon" "variant"))
+    ("chip" ("label") ("avatar" "content_spacing" "enabled" "icon" "on_tap" "selected" "trailing_icon" "variant"))
     ("assist_chip" ("label") ("enabled" "icon" "on_tap" "variant"))
     ("menu" ("items") ("enabled" "icon" "initial_scroll"))
     ("text_input" ("id") ("autofocus" "clear_on_submit" "content_padding" "enabled" "filter" "hide_keyboard_on_submit" "hint" "is_error" "keyboard" "label" "leading_icon" "mask" "max_length" "max_lines" "min_lines" "monospace" "on_change" "on_submit" "password" "prefix" "selection" "single_line" "suffix" "supporting_text" "syntax" "trailing_icon" "value" "variant"))

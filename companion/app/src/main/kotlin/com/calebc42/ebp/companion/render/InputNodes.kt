@@ -68,7 +68,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.Label
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MenuAnchorType
@@ -393,13 +395,30 @@ internal fun RenderChip(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val trail: (@Composable () -> Unit)? = if (trailingName.isNotEmpty()) {
         { Icon(IconMap.get(trailingName), null, Modifier.size(18.dp)) }
     } else null
+    // §17.4 `avatar`: InputChip's 24dp circular slot — distinct from the
+    // 18dp leadingIcon, which is why it is its own member (input only).
+    val avatarName = node.stringOr("avatar")
+    val avatar: (@Composable () -> Unit)? = if (avatarName.isNotEmpty()) {
+        { Icon(IconMap.get(avatarName), null,
+            Modifier.size(InputChipDefaults.AvatarSize)) }
+    } else null
+    // §17.4 `content_spacing`: the gap between the chip's own slots —
+    // FilterChipDefaults.horizontalArrangement, not a modifier.
+    val spacing = node["content_spacing"]?.numOrNull()
     when (node.stringOr("variant")) {
         "elevated" -> ElevatedFilterChip(selected, click, label, m, enabled,
             leadingIcon = lead, trailingIcon = trail)
         "input" -> InputChip(selected, click, label, m, enabled,
-            leadingIcon = lead, trailingIcon = trail)
-        else -> FilterChip(selected, click, label, m, enabled,
-            leadingIcon = lead, trailingIcon = trail)
+            leadingIcon = lead, avatar = avatar, trailingIcon = trail)
+        else ->
+            if (spacing != null)
+                FilterChip(selected, click, label, m, enabled,
+                    leadingIcon = lead, trailingIcon = trail,
+                    horizontalArrangement =
+                        FilterChipDefaults.horizontalArrangement(
+                            spacing.toFloat().dp))
+            else FilterChip(selected, click, label, m, enabled,
+                leadingIcon = lead, trailingIcon = trail)
     }
 }
 

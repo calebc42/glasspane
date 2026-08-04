@@ -1550,21 +1550,33 @@ half with neither is refused."
                  :enabled enabled))
 
 (cl-defun jetpacs-chip (label &key on-tap selected icon trailing-icon
-                              variant enabled)
+                              variant avatar content-spacing enabled)
   "A chip labeled LABEL (SPEC §17.4).
 ON-TAP an ActionDescriptor; SELECTED/ENABLED booleans; ICON and
 TRAILING-ICON identifiers occupying the leading and trailing slots;
-VARIANT flat(default)/elevated/input."
+VARIANT flat(default)/elevated/input.
+
+AVATAR is InputChip's 24dp circular slot — distinct from the 18dp
+leading ICON — and needs `:variant \"input\"'.  CONTENT-SPACING is the
+gap between a FilterChip's own slots, the interior arrangement no
+modifier-level attribute could reach."
   (jetpacs--require-string label ":label")
   (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
   (when selected (jetpacs--check-bool selected ":selected"))
   (when icon (jetpacs--check-identifier icon ":icon"))
   (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing_icon"))
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--chip-variants ":variant")))
+  (when avatar
+    (jetpacs--check-identifier avatar ":avatar")
+    (unless (equal variant "input")
+      (error "jetpacs-chip: :avatar needs :variant \"input\" (SPEC 17.4)")))
+  (when content-spacing
+    (jetpacs--check-number content-spacing ":content-spacing" 0 nil))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "chip" :label label :on_tap on-tap
                  :selected selected :icon icon :trailing_icon trailing-icon
-                 :variant variant :enabled enabled))
+                 :variant variant :avatar avatar
+                 :content_spacing content-spacing :enabled enabled))
 
 (cl-defun jetpacs-assist-chip (label &key on-tap icon variant enabled)
   "An assist chip labeled LABEL (SPEC §17.4).

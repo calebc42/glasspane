@@ -1,5 +1,20 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
+> **Ledger state as of 2026-08-04 (ninth pass) — 265/279 built, 14
+> remain. G-51 IS CLOSED, ON HARDWARE.** state.changed grew an opt-in
+> caret (SPEC 14.6.1): a text-valued stateful node authored with
+> report_caret reports value + caret and caret-only moves; on the
+> editable dropdown the member also hands the completion arithmetic to
+> the author (local filter stands down, a pick dispatches without
+> touching the field). menus is complete 7/7: MultiAutocomplete filters
+> its popup through a real Emacs round trip and splices picks via
+> reset_input_ids — the device found both remaining bugs (the catalog
+> client hooks never attached on a device boot, latent for
+> window.changed too; and §13.6 draft protection correctly blocking the
+> splice until the push carried the reset). The fn verb contract is now
+> complete: nullary or unary (injected value), return plist = re-push
+> arguments.
+>
 > **Ledger state as of 2026-08-04 (eighth pass, the DX audit) —
 > 264/279 built, 15 remain. THE SPRINT IS CLOSED.** The DX pass named
 > the idioms the sprint kept writing by hand (jetpacs-bool, spacer

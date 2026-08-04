@@ -55,16 +55,23 @@
 ;; nodes now: the five actions measure INSIDE the pill and fold into
 ;; the more_vert menu at layout time, in either orientation.
 ;;
-;; STILL GENUINELY MISSING (3):
+;; The two *WithFab samples are LIVE now, and the unblock was a
+;; re-reading, not a member: `floating_toolbar_fab' is an authored node,
+;; so the FAB's tap flips a sample flag and the next snapshot re-authors
+;; `floating_toolbar_expanded' -- authored presentation state, the
+;; rails' discipline, expanded starting true like upstream's remember.
+;; The old reason ("expanded has no on-change descriptor to drive")
+;; predated the flag verb; the state never needed a device-side binding
+;; because the toggle originates in an authored affordance.
+;;
+;; STILL GENUINELY MISSING:
 ;;
 ;;   * floatingToolbarVerticalNestedScroll -- `floating_toolbar_scroll' is
 ;;     exitAlwaysScrollBehavior, which SLIDES the pill off an edge.  The
 ;;     Expandable samples show the other motion: a collapse to the leading
-;;     content and back as the list scrolls.  No member carries it, and
-;;     `floating_toolbar_expanded' is a static value.
-;;   * a BINDING for `floating_toolbar_expanded' -- it has no on-change
-;;     descriptor, so the FAB that toggles it in the two *WithFab samples
-;;     has nothing to drive.
+;;     content and back AS THE LIST SCROLLS.  No member carries that
+;;     scroll-driven collapse; the flag verb cannot help here, because
+;;     the trigger is a device-side scroll, not an authored affordance.
 ;;
 ;; The two Expandable samples are triaged apart, and the split is a
 ;; judgment about what each one shows rather than about the wire: the

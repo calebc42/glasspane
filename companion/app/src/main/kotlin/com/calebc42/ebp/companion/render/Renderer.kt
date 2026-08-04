@@ -266,9 +266,9 @@ class RenderCtx(
 
     val inDialog: Boolean get() = dialog != null
 
-    fun state(id: String, value: JsonElement?) {
+    fun state(id: String, value: JsonElement?, caret: Int? = null) {
         if (dialog != null) dialog.fields[id] = value // SPEC 18.1: local only
-        else bridge.state(surface, id, value)
+        else bridge.state(surface, id, value, caret)
     }
 
     /** §17.7 toolbar `command` -> edit.command with the live editor context. */

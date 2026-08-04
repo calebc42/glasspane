@@ -334,7 +334,8 @@ handler mutates MORE than one remembered value in a single gesture
 (check an item AND switch modes; clear every checkbox on exit) registers
 the whole mutation here and authors `jetpacs-m3-fn-action\=' on the
 affordance.  The verb funcalls it and re-pushes, so the flow stays the
-real Emacs-owns-the-model round trip.")
+real Emacs-owns-the-model round trip.  A UNARY mutation receives the
+event\='s injected value (SPEC 14.3) — an option pick\='s label.")
 
 (defun jetpacs-m3-fn-action (key)
   "A descriptor running the registered sample mutation KEY."
@@ -904,7 +905,11 @@ no user in front of it."
          (surface (plist-get params :surface)))
     (if (null fn)
         'rejected
-      (funcall fn)
+      ;; A nullary mutation runs as itself; a unary one receives the
+      ;; event's injected value (SPEC 14.3) — an option pick's label.
+      (if (zerop (cdr (func-arity fn)))
+          (funcall fn)
+        (funcall fn (plist-get args :value)))
       (jetpacs-flow-continue
        (lambda ()
          (condition-case err
@@ -957,6 +962,19 @@ arrive before the welcome mirror on an old Companion."
     (or (plist-get window (if (eq axis :width) :width_class :height_class))
         (if (eq axis :width) "compact" "medium"))))
 
+(defvar jetpacs-m3-state-watchers (make-hash-table :test #'equal)
+  "Stateful-node ID -> function (VALUE CARET) watching its live reports.
+The read-side sibling of the verb registries: a sample whose subject is
+REACTING to what the user types (the caret-completion field) registers
+here, and the core's one state-changed hook fans out.  The watcher runs
+inside the notification's dispatch — mutate module state and schedule a
+re-push through `jetpacs-flow-continue', never block.")
+
+(defun jetpacs-m3--on-state-changed (client surface _revision id value)
+  "Fan a state report out to the watching sample, with its caret."
+  (when-let* ((fn (gethash id jetpacs-m3-state-watchers)))
+    (funcall fn value (ebp-client-input-caret client surface id))))
+
 (defun jetpacs-m3--on-window-changed (_client _window)
   "Re-author the catalog for the new size class (SPEC 20.1.1)."
   (jetpacs-flow-continue
@@ -972,7 +990,9 @@ Idempotent: re-evaluation replaces the handlers and RESETS the screen
 stack to Home, which is the documented live-reload path."
   (when (jetpacs-connected-p)
     (cl-pushnew #'jetpacs-m3--on-window-changed
-                (ebp-client-window-changed-functions (jetpacs-client))))
+                (ebp-client-window-changed-functions (jetpacs-client)))
+    (cl-pushnew #'jetpacs-m3--on-state-changed
+                (ebp-client-state-changed-functions (jetpacs-client))))
   (with-jetpacs-owner jetpacs-m3-owner
     (jetpacs-defaction "m3catalog.open" #'jetpacs-m3--on-open)
     (jetpacs-defaction "m3catalog.example" #'jetpacs-m3--on-example)

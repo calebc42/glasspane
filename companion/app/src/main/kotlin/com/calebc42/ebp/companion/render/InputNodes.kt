@@ -155,6 +155,8 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -1681,17 +1683,48 @@ internal fun RenderDropdown(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         }
         return v
     }
+    // SPEC 14.6.1: report_caret switches the editable form to a
+    // TextFieldValue so the SELECTION is observable — every edit reports
+    // value + caret, and a caret-only move reports too.
+    val reportCaret = editable && node.boolOr("report_caret")
     var value by rememberSaveable(ctx.surface, id, ctx.epochOf(id),
         key = "dd:${ctx.surface}:$id:${ctx.epochOf(id)}") {
         mutableStateOf((ctx.storeValue(id) as? JsonPrimitive)
             ?.takeIf { it.isString }?.content ?: node.stringOr("value"))
+    }
+    var field by remember(ctx.surface, id, ctx.epochOf(id)) {
+        mutableStateOf(TextFieldValue(value, TextRange(value.length)))
     }
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { if (enabled) expanded = it },
         modifier = m) {
-        OutlinedTextField(
+        if (reportCaret) OutlinedTextField(
+            value = field,
+            onValueChange = { new ->
+                val caretMovedOnly = new.text == field.text &&
+                    new.selection != field.selection
+                val textChanged = new.text != field.text
+                field = new
+                if (textChanged) value = new.text
+                if (textChanged || caretMovedOnly)
+                    ctx.state(id, JsonPrimitive(new.text),
+                        caret = new.selection.start)
+            },
+            enabled = enabled,
+            singleLine = true,
+            label = node.stringOr("label").takeIf { it.isNotEmpty() }
+                ?.let { { Text(it) } },
+            placeholder = node.stringOr("hint").takeIf { it.isNotEmpty() }
+                ?.let { { Text(it) } },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryEditable)
+                .fillMaxWidth())
+        else OutlinedTextField(
             value = if (editable) value else labelOf(value),
             onValueChange = {
                 if (editable) {
@@ -1716,7 +1749,10 @@ internal fun RenderDropdown(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         // The editable filter is Companion-local presentation: the options
         // shown are those whose label CONTAINS the draft, case-insensitive
         // (upstream's own filter), and the authored list is never mutated.
-        val shown = if (editable && value.isNotEmpty())
+        // SPEC 14.6.1: report_caret hands the completion arithmetic to the
+        // author — the author re-authors `options` from the reported token,
+        // so the local filter stands down.
+        val shown = if (editable && !reportCaret && value.isNotEmpty())
             options.filter {
                 (it as? JsonObject)?.stringOr("label")
                     ?.contains(value, ignoreCase = true) == true
@@ -1734,13 +1770,21 @@ internal fun RenderDropdown(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                     onClick = {
                         // Editable publishes the LABEL (it becomes the field
                         // text); plain publishes the option VALUE (§14.6
-                        // state first, then on_change).
+                        // state first, then on_change). Under report_caret
+                        // the pick dispatches WITHOUT touching the field —
+                        // the author splices the completed token and
+                        // re-authors `value` (SPEC 14.6.1).
                         val published = if (editable) label else optValue
-                        value = published
                         expanded = false
-                        ctx.state(id, JsonPrimitive(published))
-                        if (onChange != null)
-                            ctx.action(onChange, JsonPrimitive(published))
+                        if (reportCaret) {
+                            if (onChange != null)
+                                ctx.action(onChange, JsonPrimitive(published))
+                        } else {
+                            value = published
+                            ctx.state(id, JsonPrimitive(published))
+                            if (onChange != null)
+                                ctx.action(onChange, JsonPrimitive(published))
+                        }
                     },
                     contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding)
             }

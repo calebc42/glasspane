@@ -547,7 +547,8 @@ class CompanionEngine(
     private val syncingDirty = LinkedHashSet<Pair<String, String>>()
 
     @Synchronized
-    fun publishState(surface: String, id: String, value: JsonElement?) {
+    fun publishState(surface: String, id: String, value: JsonElement?,
+                     caret: Int? = null) {
         // SPEC 14.6: a password node MUST NOT emit state.changed, and
         // only stateful nodes in the accepted snapshot have a wire
         // address at all.
@@ -567,6 +568,9 @@ class CompanionEngine(
             put("revision_seen", revision)
             put("id", id)
             put("value", value ?: JsonNull)
+            // SPEC 14.6.1: transient presentation context, present only for
+            // a node authored with report_caret.
+            caret?.let { put("caret", it) }
         }))
     }
 

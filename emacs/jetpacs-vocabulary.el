@@ -75,7 +75,7 @@
     ("pane_scaffold" ("detail" "list") ("extra" "variant"))
     ("navigation_rail" ("items") ("arrangement" "expanded" "header" "hide_on_collapse" "on_expand_change" "variant"))
     ("search_bar" ("id") ("children" "enabled" "hint" "leading_icon" "on_change" "on_search" "trailing_icon" "value" "variant"))
-    ("dropdown" ("id" "options") ("editable" "enabled" "hint" "label" "on_change" "value"))
+    ("dropdown" ("id" "options") ("editable" "enabled" "hint" "label" "on_change" "report_caret" "value"))
     ("segmented_button" ("id" "options") ("enabled" "multi_select" "on_change" "value"))
     ("app_bar_row" ("items") ("max_items" "overflow_icon"))
     ("app_bar_column" ("items") ("max_items" "overflow_icon"))

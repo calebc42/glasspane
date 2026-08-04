@@ -1372,7 +1372,7 @@ submit with the query injected), :on-change (per keystroke),
                    :enabled enabled)))
 
 (cl-defun jetpacs-dropdown (id options &key value label hint editable
-                               on-change enabled)
+                               on-change report-caret enabled)
   "An exposed dropdown identified by ID over OPTIONS (SPEC §17.4).
 M3's ExposedDropdownMenuBox: the popup anchored to a FIELD, which
 `jetpacs-menu' (popup off its own icon) and `jetpacs-text-input' (no
@@ -1383,7 +1383,14 @@ label, and VALUE is an option value — enum_list's schema exactly.
 EDITABLE: the field is a real text field whose TEXT is the value,
 published per keystroke, and the popup filters the options to those
 whose label contains it — locally, no round trip.  LABEL and HINT are
-the field's own slots; ON-CHANGE dispatches on an option pick."
+the field's own slots; ON-CHANGE dispatches on an option pick.
+
+REPORT-CARET (editable only) is the SPEC 14.6.1 completion contract:
+every state report carries the caret index and caret-only moves report
+too; the local containment filter stands down (author OPTIONS from the
+reported token instead); and an option pick dispatches ON-CHANGE
+WITHOUT touching the field — splice the completed token yourself and
+re-author VALUE."
   (jetpacs--check-identifier id ":id")
   (when value
     (unless (or (stringp value) (numberp value) (memq value '(t :json-false)))
@@ -1397,11 +1404,16 @@ the field's own slots; ON-CHANGE dispatches on an option pick."
   (when hint (jetpacs--require-string hint ":hint"))
   (when editable (jetpacs--check-bool editable ":editable"))
   (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when report-caret
+    (unless editable
+      (error "jetpacs-dropdown: :report-caret needs :editable (SPEC 14.6.1)"))
+    (jetpacs--check-bool report-caret ":report-caret"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "dropdown"
                  :id id :options (vconcat options) :value value
                  :label label :hint hint :editable editable
-                 :on_change on-change :enabled enabled))
+                 :on_change on-change :report_caret report-caret
+                 :enabled enabled))
 
 (cl-defun jetpacs-segmented-button (id options &key value multi-select
                                        on-change enabled)

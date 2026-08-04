@@ -350,8 +350,9 @@ class DeviceBridge(
     }
 
     /** SPEC 14.6: renderer edit -> draft + state.changed publication. */
-    fun state(surface: String, id: String, value: JsonElement?) {
-        dispatchExecutor.execute { engine?.publishState(surface, id, value) }
+    fun state(surface: String, id: String, value: JsonElement?,
+              caret: Int? = null) {
+        dispatchExecutor.execute { engine?.publishState(surface, id, value, caret) }
     }
 
     // A tiny scope for the fire-and-forget cache bind (SPEC 17.2 identity

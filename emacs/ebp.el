@@ -581,6 +581,9 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; SPEC 14.6: latest input values by (surface . id), and this side's
   ;; reset history for the P1 #2 reconciliation rule.
   (input-values (make-hash-table :test #'equal))
+  ;; SPEC 14.6.1: (surface . id) -> the last reported caret index, for
+  ;; nodes authored with report_caret. Transient presentation context.
+  (input-carets (make-hash-table :test #'equal))
   (reset-history (make-hash-table :test #'equal))
   state-changed-functions ; called with (client surface revision id value)
   ;; SPEC 20.1.1: the last-reported window geometry plist
@@ -1579,6 +1582,11 @@ application's seam for re-authoring layout for the new size class."
   (dolist (fn (ebp-client-window-changed-functions client))
     (funcall fn client params)))
 
+(defun ebp-client-input-caret (client surface id)
+  "The last SPEC 14.6.1 caret reported for SURFACE/ID, or nil.
+Only a node authored with `report_caret' ever reports one."
+  (gethash (cons surface id) (ebp-client-input-carets client)))
+
 (defun ebp-client--handle-state-changed (client params)
   "The `state.changed' receiver (SPEC 14.6 + P1 #2).
 An old `revision_seen' is never an error: the value is adopted unless a
@@ -1591,6 +1599,10 @@ later snapshot explicitly reset that ID."
           (message "ebp: state.changed for reset %s/%s discarded" surface id)
         (puthash (cons surface id) (plist-get params :value)
                  (ebp-client-input-values client))
+        ;; SPEC 14.6.1: the caret rides only when the node asked for it.
+        (when-let* ((caret (plist-get params :caret)))
+          (puthash (cons surface id) caret
+                   (ebp-client-input-carets client)))
         (dolist (fn (ebp-client-state-changed-functions client))
           (funcall fn client surface revision id
                    (plist-get params :value)))))))

@@ -13,13 +13,15 @@
 ;; group contributes over the buttons inside it is CONTAINER BEHAVIOUR —
 ;; the neighbour-squeeze animation, the measure-time overflow into a
 ;; menu, and the connected leading/middle/trailing corner shapes that
-;; make the members read as one control.  None of that is on the wire:
-;; there is no `button_group' node type, `row', `column' and `flow_row'
-;; carry only spacing/align/arrange (plus scroll/fill), and the `button'
-;; node's :shape is the two-value round/square enum — no per-corner
-;; CornerSize, and the universal :corner attribute decorates the
-;; modifier outside minimumInteractiveComponentSize, i.e. the 48dp touch
-;; box rather than the button's own container.
+;; make the members read as one control.
+;;
+;; The plain sample recreates on the `button_group' node — the 51st
+;; type — which owns the first two halves outright: M3's ButtonGroup
+;; couples the press animation across its clickableItems and moves what
+;; does not fit into the overflow menu at MEASURE time, a width Emacs
+;; never sees.  The three CONNECTED samples remain out: their items are
+;; toggles with a shared selection and the morphing connected shapes,
+;; not clickableItems, and neither half is on the wire yet.
 ;;
 ;; Three of the four samples are built from `ToggleButton', and half of
 ;; that pair HAS now landed: `button' takes :checked and :on-change, and
@@ -43,12 +45,13 @@
 ;; never change appearance demonstrate neither the multi-select nor the
 ;; group — a lookalike, not a recreation.
 ;;
-;; So all four examples still say what is missing; three of the four
-;; reasons had to be rewritten, because "no wire member holds the
-;; checked state" is no longer true.
+;; So the three connected examples still say what is missing; their
+;; reasons were rewritten once already, because "no wire member holds
+;; the checked state" stopped being true when button gained :checked.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'jetpacs-widgets)
 (require 'jetpacs-m3-core)
 
@@ -88,8 +91,14 @@
     "ButtonGroup examples"
     :source jetpacs-m3-button-groups--source
     :expressive t
-    :unsupported
-    "There is no button_group node type: the row node carries only spacing, align, arrange, scroll and fill, so neither the press animation this container exists to add nor the measure-time move of the clickableItems that do not fit into a ButtonGroupDefaults.OverflowIndicator menu can be asked for from Emacs, and Emacs cannot compute that split because it never sees the available width.")
+    :build (lambda ()
+             ;; Ten numbered clickableItems: the press animation couples
+             ;; neighbours and the overflow fold happens at measure time.
+             (jetpacs-button-group
+              (cl-loop for i from 0 below 10
+                       collect (jetpacs-button-group-item
+                                (number-to-string i)
+                                (jetpacs-m3-demo (format "Button %d" i)))))))
    (jetpacs-m3-example
     "SingleSelectConnectedButtonGroupWithFlowLayoutSample"
     "ButtonGroup examples"

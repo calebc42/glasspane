@@ -35,7 +35,7 @@
 ;; `jetpacs-m3-top-app-bar--centered-bar' is a full-width `box' with the
 ;; icon row behind a centered title.
 ;;
-;; TRIAGE.  Nine of the fifteen are recreated: the four Simple bars
+;; TRIAGE.  Ten of the fifteen are recreated: the four Simple bars
 ;; (title, subtitle, centered, centered with subtitle), the four whose
 ;; subject is a scroll behavior the wire spells exactly -- PinnedTopAppBar
 ;; (pinned), EnterAlwaysTopAppBar (enter_always) and the Medium and Large
@@ -45,16 +45,18 @@
 ;; at measure time (upstream's ADDITIONAL window-class cap stays a stated
 ;; seam: no wire message reports a size class to cap by).
 ;;
-;; The remaining six are not layout and not a bare behavior:
+;; What remains is not layout and not a bare behavior (the reversed-grid
+;; bullet below records a recreation's stated seams, not a gap):
 ;; * PinnedTopAppBarWithPreScrolledLazyColumn and
 ;;   EnterAlwaysTopAppBarWithReverseScrolling are both about ARGUMENTS to
 ;;   the behavior -- a lazyListState, a scrollState with reverseScrolling
 ;;   -- and `scroll_behavior' is a bare enum, so the Companion always
 ;;   constructs the behavior with none.  The first also wants a list node
 ;;   opened at item 30, which nothing carries.
-;; * PinnedTopAppBarWithReversedLazyGrid wants a lazy-grid node that does
-;;   not exist, and a custom isScrollingContentAtStart the enum has no
-;;   room for.
+;; * PinnedTopAppBarWithReversedLazyGrid rides the `lazy_grid' node now,
+;;   with its two seams stated on the example: the bounded height a lazy
+;;   container needs in this body, and the bar recolor tracking
+;;   nested-scroll deltas rather than the grid's own scrollableState.
 ;; * The two Flexible bars want a subtitle and a centered title on a
 ;;   medium/large bar: only the SMALL style takes `top_bar_subtitle' and
 ;;   no style carries a title alignment -- the asymmetry is AppBar.kt's
@@ -161,6 +163,22 @@ icons, since M3 stacks the two in one column."
     (jetpacs-text title :style "title" :max-lines 1)
     :alignment "center")
    :fill_fraction 1.0))
+
+(defun jetpacs-m3-top-app-bar--reversed-grid ()
+  "Upstream PinnedTopAppBarWithReversedLazyGrid's body.
+A LazyVerticalGrid at GridCells.Adaptive(100dp) with reverseLayout, so
+the numbers grow from the BOTTOM and scrolling up recolors the pinned
+bar.  The bounded :height is the lazy-container rule inside the Example
+screen's scrolling body."
+  (jetpacs-with-attrs
+   (apply #'jetpacs-lazy-grid
+          (append (cl-loop for i from 0 below 75
+                           collect (jetpacs-with-attrs
+                                    (jetpacs-text (format "Item %d" i))
+                                    :key (format "grid-item-%d" i)
+                                    :pad (list :horizontal 8)))
+                  (list :min-item-width 100 :reverse t :spacing 8)))
+   :height 480))
 
 (defun jetpacs-m3-top-app-bar--adaptive (back)
   "Upstream SimpleTopAppBarWithAdaptiveActions: an AppBarRow of five.
@@ -309,8 +327,18 @@ Its \"Subtitle\" is `:top-bar-subtitle' on the example, not a node here."
     "PinnedTopAppBarWithReversedLazyGrid"
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
-    :unsupported
-    "There is no lazy-grid node -- nothing carries LazyVerticalGrid, GridCells.Adaptive or reverseLayout -- and the scaffold node's scroll_behavior is a bare enum (pinned, enter_always, exit_until_collapsed) with no place for the custom isScrollingContentAtStart a reversed grid needs to keep the bar's color correct, which is the very thing this sample exists to show.")
+    ;; The lazy_grid node carries LazyVerticalGrid, GridCells.Adaptive
+    ;; and reverseLayout now.  Two seams stated: the grid rides inside
+    ;; the Example screen's scrolling body, so it needs the bounded
+    ;; :height a lazy container demands there; and upstream hands
+    ;; pinnedScrollBehavior the grid's own scrollableState so the bar's
+    ;; color is exact over reversed content, while the Companion
+    ;; constructs the behavior bare — the recolor tracks nested-scroll
+    ;; deltas, not the grid's true at-start reading.
+    :top-bar #'jetpacs-m3-top-app-bar--pinned
+    :top-bar-style "small"
+    :scroll-behavior "pinned"
+    :build #'jetpacs-m3-top-app-bar--reversed-grid)
    (jetpacs-m3-example
     "EnterAlwaysTopAppBar"
     "Top app bar examples"

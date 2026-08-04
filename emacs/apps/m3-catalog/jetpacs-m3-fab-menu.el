@@ -17,27 +17,56 @@
 ;; LazyColumn whose scroll position drives
 ;; `Modifier.animateFloatingActionButton' to scale the whole thing away.
 ;;
-;; A FAB is screen chrome and this Example screen's `:fab' slot is right
-;; there (see `jetpacs-m3-slot-keys') -- it is how
-;; FloatingActionButtonSample and the two default-size Extended FAB
-;; samples are recreated.  But that slot holds ONE node and has no
-;; expanded member, and the wire has no fab-menu node type at all:
-;; M3-COMPONENT-LOOKUP wraps FloatingActionButton as `scaffold.fab' and
-;; DropdownMenu as `menu', and neither is this.  A `menu' in the fab
-;; slot would be a popup hung off an icon button -- a different
-;; composable wearing this sample's actions -- and a `column' of six
-;; buttons would be the menu permanently expanded, with no toggle left
-;; to demonstrate.  Both are lookalikes, so the example is unsupported
-;; and says which members are missing.
+;; The sample recreates on the `fab_menu' node -- the 50th type, which
+;; exists because of this module -- placed in this Example screen's own
+;; `:fab' slot (a FAB is screen chrome; see `jetpacs-m3-slot-keys').
+;; The node IS the pair of composables: the toggle FAB morphs Add to
+;; Close across its own checked progress, the six item pills unfold
+;; above it, an item tap collapses the menu and dispatches, and the
+;; expansion is Companion-local presentation -- the same split as
+;; search_bar, since a menu that snapped shut on every re-push would be
+;; unusable.
+;;
+;; One seam stated: upstream also scales the whole FAB away as the list
+;; scrolls (animateFloatingActionButton over the LazyColumn's
+;; firstVisibleItemIndex).  That hide-on-scroll half has no member yet
+;; -- it is the same gap AnimatedFloatingActionButtonSample names on
+;; the Floating action buttons page -- so this FAB stays put while the
+;; body scrolls under it.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'jetpacs-widgets)
 (require 'jetpacs-m3-core)
 
 (defconst jetpacs-m3-fab-menu--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/FloatingActionButtonMenuSamples.kt"
   "Upstream FloatingActionButtonMenuExampleSourceUrl.")
+
+(defun jetpacs-m3-fab-menu--fab ()
+  "The sample's FAB menu: six mail actions above the Add/Close toggle."
+  (jetpacs-fab-menu
+   (list (jetpacs-fab-menu-item "Reply" "message" (jetpacs-m3-demo "Reply"))
+         (jetpacs-fab-menu-item "Reply all" "people"
+                                (jetpacs-m3-demo "Reply all"))
+         (jetpacs-fab-menu-item "Forward" "contacts"
+                                (jetpacs-m3-demo "Forward"))
+         (jetpacs-fab-menu-item "Snooze" "snooze" (jetpacs-m3-demo "Snooze"))
+         (jetpacs-fab-menu-item "Archive" "archive"
+                                (jetpacs-m3-demo "Archive"))
+         (jetpacs-fab-menu-item "Label" "label" (jetpacs-m3-demo "Label")))))
+
+(defun jetpacs-m3-fab-menu--content ()
+  "The list the menu floats over: upstream's \"List item - N\" rows."
+  (apply #'jetpacs-lazy-column
+         (append
+          (cl-loop for i from 0 below 50
+                   collect (jetpacs-with-attrs
+                            (jetpacs-text (format "List item - %d" i))
+                            :key (format "fab-menu-item-%d" i)
+                            :pad (list :horizontal 16)))
+          (list :spacing 8 :content-padding 8))))
 
 (jetpacs-m3-defcomponent "fab-menu"
   :name "FAB Menu"
@@ -53,8 +82,8 @@
     "FAB Menu examples"
     :source jetpacs-m3-fab-menu--source
     :expressive t
-    :unsupported
-    "There is no fab-menu node type and no toggle-FAB node: the scaffold fab slot takes ONE node with no expanded or checked member, so the wire cannot ask for six FloatingActionButtonMenuItem pills unfolding above a ToggleFloatingActionButton whose icon animates from Add to Close across checkedProgress.  The menu node is a DropdownMenu popup anchored to its own icon, which is a different composable, and animateFloatingActionButton hides the FAB from the LazyColumn's firstVisibleItemIndex, a scroll position that never reaches Emacs.")
+    :build #'jetpacs-m3-fab-menu--content
+    :slots (list :fab #'jetpacs-m3-fab-menu--fab))
    ))
 
 (provide 'jetpacs-m3-fab-menu)

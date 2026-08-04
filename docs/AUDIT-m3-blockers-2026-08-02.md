@@ -1,7 +1,24 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
-> **Ledger state as of 2026-08-04 — 221/279 built, 58 remain, 52 node
-> types.** The Tier-3 node lane is CLOSED: G-93 `fab_menu` (50th), G-94
+> **Ledger state as of 2026-08-04 (second pass) — 233/279 built, 46
+> remain.** The member lane advanced: G-48 (the sheet slot, both forms —
+> bottom-sheet 3/3), G-49 route b + G-41 (the confirm OBJECT and surface
+> in the dialog profile — dialogs 3/3, no lookalikes), G-54/G-55
+> (enum_list radio + children — radio-buttons 2/2, lists 11/12),
+> G-16/G-17 (chips complete at 13/13). The catalog harness also grew
+> LIVE sample state: m3catalog.flag flips a named boolean and re-pushes,
+> :scaffold may be a function read at build time, and m3catalog.dialog
+> raises a registered §18.1 spec — the modal sheet is the first
+> recreation whose flow is the real Emacs-owns-the-model round trip.
+> Still open in the member lane: G-12 (expanded FABs ×4, wants the
+> body-scroll signal seam shared with G-69), G-35 pairing, G-39/79 menu
+> groups, G-42/70 (ExitAlways bottom bar), G-44/45 (two_rows ×3),
+> G-61/62 (month_grid dates ×2), G-63/65 (connected toggles ×3), G-66
+> (MaterialShapes), G-68, G-71/72 (drawer/rails ×3), togglebuttons
+> Round ×1; then the protocol tier (G-51/74/76/77/78/92/96..98) and 3
+> truly impossible.
+>
+> Earlier that day — 221/279, 52 node types: The Tier-3 node lane is CLOSED: G-93 `fab_menu` (50th), G-94
 > `button_group` (51st) and G-95 `lazy_grid` (52nd) landed, consumed by
 > fab-menu 1/1, button-groups 1/4 (the three connected-toggle samples
 > still need G-04+G-63/G-65's shared selection and morphing shapes) and

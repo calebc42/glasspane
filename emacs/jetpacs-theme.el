@@ -98,6 +98,49 @@ reconnect."
                     (not (eq val 'off)))
            (jetpacs-theme--push-mode))))
 
+(defcustom jetpacs-theme-dynamic nil
+  "When non-nil, ask for the device\='s wallpaper-derived Material You
+palette as the BASE scheme (SPEC 18.4 `dynamic\=').  Emacs could never
+send that palette as colors — it derives from the wallpaper, which
+never reaches Emacs — so this is a request, honored where the platform
+has dynamic color and the baseline scheme standing in elsewhere.
+Pushed colors still overlay the base.  Applies immediately on a live
+connection through Customize or `setopt\='."
+  :type 'boolean
+  :set (lambda (sym val)
+         (set-default sym val)
+         (when (and (featurep 'jetpacs-theme) (jetpacs-connected-p))
+           (jetpacs-theme--push-mode))))
+
+(defcustom jetpacs-theme-font-scale nil
+  "A number 0.4..2.0 scaling every text node together, or nil.
+nil follows the device\='s own font-size setting (SPEC 18.4
+`font_scale\=' absent).  One number for the whole surface — a per-node
+member would be the wrong shape.  Applies immediately on a live
+connection through Customize or `setopt\='."
+  :type '(choice (const :tag "Follow the device" nil)
+                 (number :tag "Scale factor (0.4..2.0)"))
+  :set (lambda (sym val)
+         (when (and val (not (and (numberp val) (<= 0.4 val 2.0))))
+           (error "jetpacs-theme-font-scale must be nil or a number in 0.4..2.0"))
+         (set-default sym val)
+         (when (and (featurep 'jetpacs-theme) (jetpacs-connected-p))
+           (jetpacs-theme--push-mode))))
+
+(defcustom jetpacs-theme-layout-direction 'system
+  "The Companion\='s layout direction (SPEC 18.4 `layout_direction\=').
+`system\=' follows the device (the member stays absent — the same
+tri-state convention as `dark\='); `ltr\='/`rtl\=' force it, mirroring
+every start/end pad, arrange and align on the surface.  Applies
+immediately on a live connection through Customize or `setopt\='."
+  :type '(choice (const :tag "Follow the system" system)
+                 (const :tag "Left to right" ltr)
+                 (const :tag "Right to left" rtl))
+  :set (lambda (sym val)
+         (set-default sym val)
+         (when (and (featurep 'jetpacs-theme) (jetpacs-connected-p))
+           (jetpacs-theme--push-mode))))
+
 ;;;; Color plumbing (ported verbatim; the JC-1 tty lesson lives in --rgb)
 
 (defun jetpacs-theme--rgb (color)
@@ -441,9 +484,23 @@ theme, between the decision to push and the push."
                           (funcall jetpacs-theme-payload-function)
                         (jetpacs-theme--frame-args))))
       (condition-case err
-          (apply #'ebp-client-theme-set (jetpacs-client) args)
+          (apply #'ebp-client-theme-set (jetpacs-client)
+                 ;; 18.4: every push is a COMPLETE replacement, so the
+                 ;; presentation trio rides every frame — dropping it
+                 ;; from one push would silently reset all three.
+                 (append args (jetpacs-theme--trio-args)))
         (error (message "jetpacs-theme: push failed: %s"
                         (jetpacs--error-label err)))))))
+
+(defun jetpacs-theme--trio-args ()
+  "The SPEC 18.4 device-presentation trio, appended to every push.
+Each member stays ABSENT at its default so the device/system setting
+rules — the tri-state `dark' convention."
+  `(,@(when jetpacs-theme-dynamic '(:dynamic t))
+    ,@(when jetpacs-theme-font-scale
+        `(:font-scale ,jetpacs-theme-font-scale))
+    ,@(unless (eq jetpacs-theme-layout-direction 'system)
+        `(:layout-direction ,(symbol-name jetpacs-theme-layout-direction)))))
 
 (defun jetpacs-theme--push-mode (&rest _)
   "Debounced push of the current mode's frame.

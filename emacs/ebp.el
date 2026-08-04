@@ -1835,7 +1835,9 @@ acknowledgement and carries no result."
 
 ;;;; Themes (SPEC 18.4), the client half
 
-(cl-defun ebp-client-theme-set (client &key (dark 'system) colors syntax)
+(cl-defun ebp-client-theme-set (client &key (dark 'system) colors syntax
+                                       (dynamic 'system) font-scale
+                                       layout-direction)
   "Push a complete theme replacement (SPEC 18.4).  DARK selects polarity:
 t forces dark, `:false' (or `:json-false') forces light, and the default
 `system' omits the member so the Companion follows the device setting
@@ -1845,7 +1847,23 @@ Companion's native scheme.  Each call fully replaces the previously
 pushed theme.  Values are normalized to the live connection's jsonrpc
 sentinels (`:json-false' / nil); the reference encoder's `:false' and
 `:null' are accepted here but never handed to jsonrpc.el, which rejects
-them."
+them.
+
+DYNAMIC t asks for the device's wallpaper-derived Material You palette
+as the BASE scheme where the platform has one — Emacs could never send
+that as COLORS, since it derives from the wallpaper; pushed roles still
+overlay it.  FONT-SCALE is a number 0.4..2.0 scaling every text node
+together; LAYOUT-DIRECTION is \"ltr\" or \"rtl\" mirroring the whole
+layout.  All three follow the device/system setting when omitted — the
+same tri-state convention as DARK."
+  (when font-scale
+    (unless (and (numberp font-scale) (<= 0.4 font-scale 2.0))
+      (error "ebp-client-theme-set: :font-scale must be a number in 0.4..2.0, got %S"
+             font-scale)))
+  (when layout-direction
+    (unless (member layout-direction '("ltr" "rtl"))
+      (error "ebp-client-theme-set: :layout-direction must be \"ltr\" or \"rtl\", got %S"
+             layout-direction)))
   (ebp-client-notify
    client 'theme.set
    `(,@(pcase dark
@@ -1854,6 +1872,14 @@ them."
          ((or :false :json-false) '(:dark :json-false))
          (_ (error "ebp-client-theme-set: :dark must be t, :false, or \
 omitted (system); got %S" dark)))
+     ,@(pcase dynamic
+         ('system nil)
+         ('t '(:dynamic t))
+         ((or :false :json-false) '(:dynamic :json-false))
+         (_ (error "ebp-client-theme-set: :dynamic must be t, :false, or \
+omitted (system); got %S" dynamic)))
+     ,@(when font-scale `(:font_scale ,font-scale))
+     ,@(when layout-direction `(:layout_direction ,layout-direction))
      ,@(when colors `(:colors ,(if (memq colors '(null :null)) nil colors)))
      ,@(when syntax `(:syntax ,(if (memq syntax '(null :null)) nil syntax))))))
 

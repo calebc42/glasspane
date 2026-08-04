@@ -2001,10 +2001,22 @@ class CompanionEngine(
         // NULL-then-cast dance needed.
         val colors = params["colors"] as? JsonObject
         val syntax = params["syntax"] as? JsonObject
+        // 18.4 presentation trio: dynamic (wallpaper-derived base scheme),
+        // font_scale (0.4..2.0, one number for the whole surface),
+        // layout_direction (ltr|rtl). Absent — or any invalid spelling —
+        // follows the device/system, the same tri-state as `dark`.
+        val dynamic = params.boolOrNull("dynamic")
+        val fontScale: Double? = params["font_scale"]?.asDoubleOrNull()
+            ?.takeIf { it in 0.4..2.0 }
+        val direction: String? = params.stringOrNull("layout_direction")
+            ?.takeIf { it == "ltr" || it == "rtl" }
         theme = buildJsonObject {
             put("dark", dark?.let(::JsonPrimitive) ?: JsonNull)
             put("colors", colors ?: JsonNull)
             put("syntax", syntax ?: JsonNull)
+            put("dynamic", dynamic?.let(::JsonPrimitive) ?: JsonNull)
+            put("font_scale", fontScale?.let(::JsonPrimitive) ?: JsonNull)
+            put("layout_direction", direction?.let(::JsonPrimitive) ?: JsonNull)
         }
         themeListener?.invoke(dark, colors, syntax)
     }

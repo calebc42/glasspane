@@ -8,10 +8,13 @@
 // holder exposed through LocalExtendedColors and resolved by ColorModel.
 package com.calebc42.ebp.companion.render
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -19,6 +22,11 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.serialization.json.JsonObject
 
 /** SPEC 18.4: the `success`/`warning` roles, which Material has no slot for. */
@@ -116,9 +124,15 @@ fun buildExtendedColors(colors: JsonObject?, dark: Boolean): ExtendedColors {
 
 /**
  * The one theme entry point. [payload] is the persisted §18.4 theme
- * (`{dark, colors, syntax}`) or null for the native scheme. `dark` decides
- * polarity (present forces it, absent follows the system); `colors` mirrors
- * the Emacs palette. `syntax` is read separately by the editor (W9-h2).
+ * (`{dark, colors, syntax, dynamic, font_scale, layout_direction}`) or null
+ * for the native scheme. `dark` decides polarity (present forces it, absent
+ * follows the system); `colors` mirrors the Emacs palette. `dynamic` selects
+ * the wallpaper-derived Material You base where the platform has one — Emacs
+ * could never supply that as `colors`, since the palette derives from the
+ * device wallpaper. `font_scale` (0.4..2.0) scales every text node together
+ * through LocalDensity; `layout_direction` (ltr|rtl) mirrors the whole layout,
+ * absent following the system for both — the tri-state `dark` convention.
+ * `syntax` is read separately by the editor (W9-h2).
  */
 @Composable
 fun EbpTheme(payload: JsonObject?, content: @Composable () -> Unit) {
@@ -131,15 +145,41 @@ fun EbpTheme(payload: JsonObject?, content: @Composable () -> Unit) {
         else -> isSystemInDarkTheme()
     }
     val colors = payload?.objOrNull("colors")
-    val scheme = buildColorScheme(colors, if (dark) darkColorScheme() else lightColorScheme())
+    // §18.4 `dynamic`: the wallpaper-derived scheme as the BASE, where the
+    // platform has one (S+); the pushed roles still overlay it, and below S
+    // the baseline scheme stands in.
+    val context = LocalContext.current
+    val base = if (payload?.boolOrNull("dynamic") == true &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else {
+        if (dark) darkColorScheme() else lightColorScheme()
+    }
+    val scheme = buildColorScheme(colors, base)
     val extended = buildExtendedColors(colors, dark)
     // SPEC 18.4: the pushed `syntax` SyntaxStyle map overlays the polarity
     // palette; the editor/text nodes read it from LocalSyntaxColors.
     val syntax = emacsSyntaxColors(
         payload?.objOrNull("syntax"), SyntaxColors.forBackground(dark))
+    // §18.4 `font_scale`: one number scaling every text node together —
+    // a per-node member would be the wrong shape. Clamped to 0.4..2.0;
+    // absent follows the device's own setting.
+    val density = LocalDensity.current
+    val fontScale = payload?.get("font_scale")?.numOrNull()
+        ?.toFloat()?.coerceIn(0.4f, 2.0f)
+    // §18.4 `layout_direction`: absent follows the system, deliberately
+    // mirroring the tri-state `dark` rather than inventing a convention.
+    val direction = when (payload?.stringOr("layout_direction")) {
+        "ltr" -> LayoutDirection.Ltr
+        "rtl" -> LayoutDirection.Rtl
+        else -> LocalLayoutDirection.current
+    }
     CompositionLocalProvider(
         LocalExtendedColors provides extended,
         LocalSyntaxColors provides syntax,
+        LocalDensity provides (fontScale?.let { Density(density.density, it) }
+            ?: density),
+        LocalLayoutDirection provides direction,
     ) {
         MaterialTheme(colorScheme = scheme, content = content)
     }

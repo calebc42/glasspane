@@ -110,7 +110,12 @@ three to five sibling places, never document actions."
                     (list :align "center" :spacing 4)))
    :body body :fab fab :drawer drawer :bottom-bar bottom-bar
    :on-refresh on-refresh :floating-toolbar floating-toolbar
-   scaffold))
+   ;; The M3-catalog sprint proved the styled bars end to end, so chrome
+   ;; wears the REAL M3 small top bar by default now — proper insets,
+   ;; the drawer hamburger as its navigationIcon, and a scroll behavior
+   ;; one :scaffold keyword away.  cl-defun keeps the FIRST duplicate
+   ;; keyword, so an explicit :top-bar-style in SCAFFOLD still wins.
+   (append scaffold (list :top-bar-style "small"))))
 
 (cl-defun jetpacs-chrome-row (title &key subtitle icon leading trailing
                                     on-tap on-long-tap key)

@@ -981,13 +981,28 @@ handles the buffer-local `t' marker a bare dolist would funcall."
   (jetpacs-shell-push))
 
 (defun jetpacs-shell-notify (text &optional surface-or-owner)
-  "Queue TEXT as SURFACE-OR-OWNER's next-push snackbar; latest wins.
-SURFACE-OR-OWNER defaults through `jetpacs-shell--resolve-surface' —
-with the dispatch binding the acting owner (E2a), a handler's feedback
-lands on that owner's surface without naming it.  The Companion
-re-shows a snackbar only when its text changes."
-  (puthash (jetpacs-shell--resolve-surface surface-or-owner)
-           text jetpacs-shell--snackbars))
+  "Show TEXT as a snackbar — the SPEC 18.2.1 raise when granted.
+On a session with presentation.snackbar granted this raises
+IMMEDIATELY in whatever scaffold is on screen: no re-push, no
+injection, and multi_view needs no special casing because nothing is
+spliced into a tree.  (The injection path below is the machinery whose
+view-targeting bug once degraded every chrome snackbar to a toast —
+the raise retires that whole class where the grant exists.)
+
+Without the grant it queues TEXT as SURFACE-OR-OWNER's next-push
+snackbar, latest wins.  SURFACE-OR-OWNER defaults through
+`jetpacs-shell--resolve-surface' — with the dispatch binding the
+acting owner (E2a), a handler's feedback lands on that owner's surface
+without naming it.  The Companion re-shows a snackbar only when its
+text changes."
+  (if (and (jetpacs-connected-p)
+           (jetpacs-granted-p "presentation.snackbar"))
+      (condition-case err
+          (ebp-client-snackbar-show (jetpacs-client) text)
+        (error (message "jetpacs-shell: snackbar raise failed: %s"
+                        (jetpacs--error-label err))))
+    (puthash (jetpacs-shell--resolve-surface surface-or-owner)
+             text jetpacs-shell--snackbars)))
 
 ;;;; Reconnect (SPEC 10.3 step 3, installed by `jetpacs-connect')
 

@@ -980,6 +980,7 @@ Doubles as a drain point: a paused reader resumes at the low-water mark."
 (defconst ebp--method-capabilities
   '((dialog\.show       . "surfaces.dialog")
     (toast\.show        . "presentation.toast")
+    (snackbar\.show     . "presentation.snackbar")
     (pie_menu\.show     . "presentation.pie-menu")
     (pie_menu\.dismiss  . "presentation.pie-menu")
     (theme\.set         . "theme")

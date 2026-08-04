@@ -186,8 +186,9 @@ Companion app, then M-x jetpacs-start")
    :client-name "device-emacs" :client-version emacs-version
    :pairing-id "101112131415161718191a1b1c1d1e1f"
    :token (ebp-decode-pairing-token "AAECAwQFBgcICQoLDA0ODw")
-   :wants '("theme" "presentation.toast" "surfaces.dialog"
-            "reminders.owner" "offline.wake" "editor.sync")
+   :wants '("theme" "presentation.toast" "presentation.snackbar"
+            "surfaces.dialog" "reminders.owner" "offline.wake"
+            "editor.sync")
    :receipt-file (expand-file-name "jetpacs-receipts.sqlite"
                                    user-emacs-directory)
    :ready-function (lambda (_c) (jetpacs-hub))))

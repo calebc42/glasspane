@@ -184,6 +184,24 @@ re-`jetpacs-defaction' takes effect without re-registering.")
   "The live client, or signal."
   (or jetpacs--client (error "jetpacs: no client attached")))
 
+(defun jetpacs-window ()
+  "The client's SPEC 20.1.1 window plist, or nil before any report.
+Keys: :width_dp :height_dp :width_class :height_class — from the
+welcome mirror and every `window.changed' since."
+  (and (jetpacs-connected-p)
+       (ebp-client-window (jetpacs-client))))
+
+(defun jetpacs-window-class (axis)
+  "The SPEC 20.1.1 size class for AXIS (:width or :height), a string.
+compact/medium/expanded at the Material breakpoints.  Falls back to
+compact width / medium height before any report — the phone-shaped
+guess, honest for a first paint that may arrive before the welcome
+mirror on an old Companion.  Hoisted from the M3 catalog: branching a
+layout on the size class is platform behavior, not sample machinery."
+  (or (plist-get (jetpacs-window)
+                 (if (eq axis :width) :width_class :height_class))
+      (if (eq axis :width) "compact" "medium")))
+
 (defun jetpacs-connected-p ()
   "Non-nil when the attached client is past the SPEC 10.3 barrier."
   (and jetpacs--client (eq (ebp-client-state jetpacs--client) 'ready)))

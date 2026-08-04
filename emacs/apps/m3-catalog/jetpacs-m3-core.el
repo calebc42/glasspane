@@ -361,26 +361,6 @@ this before it had a name."
   "The descriptor selecting index I of the PREFIX selection."
   (jetpacs-m3-fn-action (format "%s-%d" prefix i)))
 
-(defmacro jetpacs-m3-defselection (var prefix count &optional docstring)
-  "Define VAR as a selectedIndex driven by COUNT fn-verb mutations.
-Upstream's \=`var selectedIndex by remember { mutableIntStateOf(0) }\='
-as one declaration: VAR starts at 0, and PREFIX-0 .. PREFIX-(COUNT-1)
-register in `jetpacs-m3-fn-registry\=', each setting VAR to its index.
-Author the tap with `jetpacs-m3-selection-action\=' and read the checked
-state as (jetpacs-bool (= i VAR)) — three samples hand-rolled exactly
-this before it had a name."
-  (declare (indent 2))
-  `(progn
-     (defvar ,var 0 ,docstring)
-     (dotimes (i ,count)
-       (puthash (format "%s-%d" ,prefix i)
-                (let ((i i)) (lambda () (setq ,var i)))
-                jetpacs-m3-fn-registry))))
-
-(defun jetpacs-m3-selection-action (prefix i)
-  "The descriptor selecting index I of the PREFIX selection."
-  (jetpacs-m3-fn-action (format "%s-%d" prefix i)))
-
 (defvar jetpacs-m3-dialog-registry (make-hash-table :test #'equal)
   "Dialog KEY -> nullary builder returning a SPEC §18.1 dialog spec.
 A sample whose subject is a MODAL DIALOG registers its spec here and
@@ -959,15 +939,8 @@ snackbar, which is where upstream's onDismissRequest writes too."
        (jetpacs-chrome-reset-screens (or surface jetpacs-m3-owner))))
     'accepted))
 
-(defun jetpacs-m3-window-class (axis)
-  "The SPEC 20.1.1 size class for AXIS (:width or :height), a string.
-Falls back to compact width / medium height before any report — the
-phone-shaped guess, and the honest one for a first paint that may
-arrive before the welcome mirror on an old Companion."
-  (let ((window (and (jetpacs-connected-p)
-                     (ebp-client-window (jetpacs-client)))))
-    (or (plist-get window (if (eq axis :width) :width_class :height_class))
-        (if (eq axis :width) "compact" "medium"))))
+(defalias 'jetpacs-m3-window-class #'jetpacs-window-class
+  "The base `jetpacs-window-class', where this helper was hoisted.")
 
 (defvar jetpacs-m3-state-watchers (make-hash-table :test #'equal)
   "Stateful-node ID -> function (VALUE CARET) watching its live reports.

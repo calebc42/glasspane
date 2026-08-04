@@ -31,10 +31,12 @@
 ;; subsequence-matches, and the matched letters are not underlined —
 ;; option labels are plain strings, not spans.
 ;;
-;; One remains out.  MultiAutocomplete completes the comma-separated
-;; token AROUND THE CARET, and no wire message reports a text_input's
-;; caret back to Emacs — the write-side `selection' member seeds it,
-;; but the read side is the missing half.
+;; MultiAutocomplete — the last one out — rides SPEC 14.6.1 now: the
+;; editable dropdown authored with `report_caret' reports value + caret
+;; (caret-only moves included), Emacs computes the comma-separated token
+;; around the caret and re-authors the OPTIONS filtered for it, and a
+;; pick arrives as a unary fn mutation that splices the completed token
+;; and re-authors the value.  The component is complete.
 
 ;;; Code:
 
@@ -136,6 +138,96 @@ their icon."
                            :variant "filled")
       :spacing 8))))
 
+(defvar jetpacs-m3-menus--auto-authored ""
+  "The :value Emacs authors for the completion field; changes on PICK only.
+Re-authoring it per keystroke would bump the value epoch and fight the
+keyboard — the live draft stays device-held and arrives as reports.")
+
+(defvar jetpacs-m3-menus--auto-text ""
+  "The live field text, from SPEC 14.6.1 reports.")
+
+(defvar jetpacs-m3-menus--auto-caret 0
+  "The live caret index, from SPEC 14.6.1 reports.")
+
+(defvar jetpacs-m3-menus--auto-timer nil
+  "Debounce for the re-push while typing.")
+
+(defun jetpacs-m3-menus--auto-token ()
+  "The comma-separated token surrounding the caret: (START END . TEXT).
+Upstream\='s arithmetic exactly: the span between the commas around the
+caret, trimmed."
+  (let* ((text jetpacs-m3-menus--auto-text)
+         (caret (min jetpacs-m3-menus--auto-caret (length text)))
+         (start (if-let* ((comma (cl-position ?, text :end caret :from-end t)))
+                    (1+ comma) 0))
+         (end (or (cl-position ?, text :start caret) (length text))))
+    (cons start (cons end (string-trim (substring text start end))))))
+
+(defun jetpacs-m3-menus--auto-options ()
+  "The dessert options filtered by the caret token, upstream\='s filter."
+  (let ((token (cddr (jetpacs-m3-menus--auto-token))))
+    (if (string-empty-p token)
+        jetpacs-m3-menus--desserts
+      (cl-remove-if-not
+       (lambda (option)
+         (string-match-p (regexp-quote (downcase token))
+                         (downcase (plist-get option :label))))
+       jetpacs-m3-menus--desserts))))
+
+;; The read side: every report (typing OR a bare caret move) lands here;
+;; the debounced re-push re-authors the filtered options.
+(puthash "menus-multiauto"
+         (lambda (value caret)
+           (when (stringp value) (setq jetpacs-m3-menus--auto-text value))
+           (when (integerp caret) (setq jetpacs-m3-menus--auto-caret caret))
+           (when (timerp jetpacs-m3-menus--auto-timer)
+             (cancel-timer jetpacs-m3-menus--auto-timer))
+           (setq jetpacs-m3-menus--auto-timer
+                 (run-at-time
+                  0.15 nil
+                  (lambda ()
+                    (setq jetpacs-m3-menus--auto-timer nil)
+                    (condition-case err
+                        (jetpacs-shell-push jetpacs-m3-owner)
+                      (error (message "jetpacs-m3: autocomplete refresh failed: %s"
+                                      (jetpacs--error-label err))))))))
+         jetpacs-m3-state-watchers)
+
+;; The pick: a UNARY fn mutation receiving the picked label — splice it
+;; over the caret token and re-author the value (SPEC 14.6.1).
+(puthash "menus-auto-pick"
+         (lambda (picked)
+           (when (stringp picked)
+             (pcase-let* ((`(,start ,end . ,_) (jetpacs-m3-menus--auto-token))
+                          (text jetpacs-m3-menus--auto-text)
+                          (suffix (substring text end)))
+               (setq jetpacs-m3-menus--auto-authored
+                     (concat (substring text 0 start)
+                             (when (> start 0) " ")
+                             picked
+                             (if (string-empty-p (string-trim suffix))
+                                 ", " suffix))
+                     jetpacs-m3-menus--auto-text
+                     jetpacs-m3-menus--auto-authored
+                     jetpacs-m3-menus--auto-caret
+                     (length jetpacs-m3-menus--auto-authored)))))
+         jetpacs-m3-fn-registry)
+
+(defun jetpacs-m3-menus--multi-autocomplete ()
+  "Upstream MultiAutocompleteExposedDropdownMenuSample, live on the caret.
+The field reports value + caret (SPEC 14.6.1); Emacs computes the
+comma-separated token around the caret and re-authors the OPTIONS
+filtered for it; a pick splices the completed token and re-authors the
+value.  Stated seam: the re-seeded field places its caret at the end,
+where upstream restores it after the completed token — identical when
+completing the last token, visible when completing a middle one."
+  (jetpacs-dropdown "menus-multiauto" (jetpacs-m3-menus--auto-options)
+                    :editable t :report-caret t
+                    :value jetpacs-m3-menus--auto-authored
+                    :label "Flavors"
+                    :hint "cupcake, donut, ..."
+                    :on-change (jetpacs-m3-fn-action "menus-auto-pick")))
+
 (jetpacs-m3-defcomponent "menus"
   :name "Menus"
   :description
@@ -188,8 +280,7 @@ their icon."
     "MultiAutocompleteExposedDropdownMenuSample"
     "Menus examples"
     :source jetpacs-m3-menus--source
-    :unsupported
-    "The dropdown node carries the anchored popup now, but this sample completes the comma-separated token AROUND THE CARET, and no wire message reports a text_input caret back to Emacs: the selection member seeds the initial TextRange and nothing reads one back, so the token arithmetic this sample exists for has no input.")
+    :build #'jetpacs-m3-menus--multi-autocomplete)
    ))
 
 (provide 'jetpacs-m3-menus)

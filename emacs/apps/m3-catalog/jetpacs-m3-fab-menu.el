@@ -27,12 +27,12 @@
 ;; search_bar, since a menu that snapped shut on every re-push would be
 ;; unusable.
 ;;
-;; One seam stated: upstream also scales the whole FAB away as the list
-;; scrolls (animateFloatingActionButton over the LazyColumn's
-;; firstVisibleItemIndex).  That hide-on-scroll half has no member yet
-;; -- it is the same gap AnimatedFloatingActionButtonSample names on
-;; the Floating action buttons page -- so this FAB stays put while the
-;; body scrolls under it.
+;; One seam stated: upstream also scales the whole FAB away as the
+;; list scrolls, EXCEPT while the menu is open (visible = fabVisible ||
+;; fabMenuExpanded).  The scaffold's `:fab-hide-on-scroll' exists now,
+;; but its wrap cannot see the menu's Companion-local expanded state,
+;; so authoring it here would hide an OPEN menu mid-read — the sample
+;; leaves it off and keeps the menu, which is its subject.
 
 ;;; Code:
 

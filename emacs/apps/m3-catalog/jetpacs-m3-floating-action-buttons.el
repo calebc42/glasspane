@@ -52,14 +52,16 @@
 ;; nothing to do with the container: it adds the scroll-driven SHOW AND
 ;; HIDE of `Modifier.animateFloatingActionButton'.  `scaffold' has no
 ;; visibility member (its optional set ends at `on_refresh') and
-;; `RenderScaffold' renders the fab unconditionally, so nothing on the
-;; wire can ASK for the behaviour -- note that this is a missing request,
-;; not missing data: upstream derives `visible' locally with
-;; `derivedStateOf' over the list's own state, and the Companion holds
-;; that same state in `RenderLazyColumn'.
+;; `:fab-hide-on-scroll' is that request now: the scaffold wraps the
+;; slot's occupant in Modifier.animateFloatingActionButton driven by
+;; the body's own scroll signal, so the FAB scales away as the list
+;; leaves its start and returns with it -- the derived form, computed
+;; on the device exactly as upstream computes it.  All five samples
+;; build.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'jetpacs-widgets)
 (require 'jetpacs-m3-core)
 
@@ -142,8 +144,20 @@ token there."
     "Floating action button examples"
     :source jetpacs-m3-floating-action-buttons--source
     :expressive t
-    :unsupported
-    "The medium container this one wears composes fine now; the animation it exists for cannot be asked for. The scaffold node has no fab visibility member — its members are top_bar, body, bottom_bar, fab, floating_toolbar, drawer, snackbar, snackbar_action and on_refresh — so the fab is always rendered as given, with no Modifier.animateFloatingActionButton around it. The gap is a missing request rather than missing data: upstream derives the visible flag on the device, from the list's own scroll state, which the Companion equally holds. Until the wire carries a member asking for it, the FAB never scales away as the list scrolls past its first item.")
+    ;; :fab-hide-on-scroll IS Modifier.animateFloatingActionButton on the
+    ;; slot's occupant, driven by the body's own scroll signal — the FAB
+    ;; scales away as the list leaves its start and returns with it, the
+    ;; derived form upstream also computes on the device.
+    :build (lambda ()
+             (apply #'jetpacs-column
+                    (append
+                     (cl-loop for i from 0 below 100
+                              collect (jetpacs-with-attrs
+                                       (jetpacs-text (format "Item %d" i))
+                                       :pad (list :horizontal 16)))
+                     (list :spacing 8 :fill t))))
+    :slots (list :fab #'jetpacs-m3-floating-action-buttons--medium)
+    :scaffold (list :fab-hide-on-scroll t))
    (jetpacs-m3-example
     "MediumFloatingActionButtonSample"
     "Floating action button examples"

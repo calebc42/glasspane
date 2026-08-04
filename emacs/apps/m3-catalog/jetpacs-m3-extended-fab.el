@@ -35,12 +35,16 @@
 ;; Companion resolves it to stays the Companion's business, exactly as
 ;; the container already is.
 ;;
-;; The remaining four are the animated ones, whose subject is the
-;; EXPANDED state derived from a LazyColumn's scroll position, and the
-;; wire has no member for it.
+;; The animated four ride `:expanded "auto"': the Companion derives
+;; the expanded state from the scaffold body's OWN scroll — expanded
+;; while it rests at its start, collapsing to the icon as it moves —
+;; which is exactly upstream's firstVisibleItemIndex derivation, done
+;; device-locally so no per-scroll traffic ever crosses the wire.  All
+;; twelve build.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'jetpacs-widgets)
 (require 'jetpacs-m3-core)
 
@@ -48,9 +52,22 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/FloatingActionButtonSamples.kt"
   "Upstream ExtendedFABExampleSourceUrl.")
 
-(defconst jetpacs-m3-extended-fab--expanded-note
-  "No node placed in the scaffold fab slot has an expanded member, and nothing on the wire reports a list's scroll position back to Emacs: the collapse to an icon-only FAB once the first visible item scrolls past is state this sample derives on the device."
-  "Why every animated extended-FAB sample is unsupported.")
+(defun jetpacs-m3-extended-fab--animated (label size)
+  "An Animated sample's FAB: LABEL at SIZE, collapsing on scroll.
+`:expanded \"auto\"' derives from the body's own scroll — icon+label at
+the top, icon-only once it moves."
+  (jetpacs-button label (jetpacs-m3-demo label)
+                  :icon "add" :variant "filled" :size size
+                  :expanded "auto"))
+
+(defun jetpacs-m3-extended-fab--content ()
+  "The list the Animated samples scroll under their collapsing FAB."
+  (apply #'jetpacs-column
+         (append (cl-loop for i from 0 below 100
+                          collect (jetpacs-with-attrs
+                                   (jetpacs-text (format "Item %d" i))
+                                   :pad (list :horizontal 16)))
+                 (list :spacing 8 :fill t))))
 
 (defun jetpacs-m3-extended-fab--icon-and-text ()
   "Upstream ExtendedFloatingActionButtonSample, as this screen's FAB.
@@ -173,25 +190,37 @@ icon slot."
     "AnimatedExtendedFloatingActionButtonSample"
     "Extended FAB examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/FloatingActionButtonSamples.kt"
-    :unsupported jetpacs-m3-extended-fab--expanded-note)
+    :build #'jetpacs-m3-extended-fab--content
+    :slots (list :fab (lambda ()
+                        (jetpacs-m3-extended-fab--animated
+                         "Extended FAB" nil))))
    (jetpacs-m3-example
     "SmallAnimatedExtendedFloatingActionButtonSample"
     "Extended FAB examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/FloatingActionButtonSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-extended-fab--expanded-note)
+    :build #'jetpacs-m3-extended-fab--content
+    :slots (list :fab (lambda ()
+                        (jetpacs-m3-extended-fab--animated
+                         "Small Extended FAB" "small"))))
    (jetpacs-m3-example
     "MediumAnimatedExtendedFloatingActionButtonSample"
     "Extended FAB examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/FloatingActionButtonSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-extended-fab--expanded-note)
+    :build #'jetpacs-m3-extended-fab--content
+    :slots (list :fab (lambda ()
+                        (jetpacs-m3-extended-fab--animated
+                         "Medium Extended FAB" "medium"))))
    (jetpacs-m3-example
     "LargeAnimatedExtendedFloatingActionButtonSample"
     "Extended FAB examples"
     :source "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/FloatingActionButtonSamples.kt"
     :expressive t
-    :unsupported jetpacs-m3-extended-fab--expanded-note)
+    :build #'jetpacs-m3-extended-fab--content
+    :slots (list :fab (lambda ()
+                        (jetpacs-m3-extended-fab--animated
+                         "Large Extended FAB" "large"))))
    ))
 
 (provide 'jetpacs-m3-extended-fab)

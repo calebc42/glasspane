@@ -868,7 +868,7 @@ class CompanionEngine(
      * scaffold slots and the envelope/decoration slots. */
     private val NODE_SLOT_MEMBERS = setOf(
         "top_bar", "body", "bottom_bar", "fab", "floating_toolbar", "drawer",
-        "header", "trailing", "empty")
+        "header", "trailing", "empty", "footer")
 
     // Per-surface synchronized editors: surface -> (identity -> document),
     // where identity is the SPEC 16.1 presentation identity (key else id).

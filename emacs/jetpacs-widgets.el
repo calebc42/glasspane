@@ -1696,27 +1696,59 @@ long press."
                    :title title :action_label action-label
                    :on_action on-action :shown shown)))
 
-(cl-defun jetpacs-menu-item (label on-tap &key icon enabled)
-  "A MenuItem {label, on_tap, icon?, enabled?} for `jetpacs-menu' (SPEC §17.4)."
+(cl-defun jetpacs-menu-item (label on-tap &key icon enabled supporting-text
+                                   trailing-icon checked checked-icon)
+  "A MenuItem for `jetpacs-menu' (SPEC §17.4).
+Besides LABEL, ON-TAP, :icon and :enabled: :supporting-text is a second
+line under the label; :trailing-icon sits at the row end.  :checked (t or
+:json-false) makes the item CHECKABLE — checked is authored presentation
+state like a chip\='s :selected, so ON-TAP should flip your own state and
+rebuild; while checked, :checked-icon (default check) replaces the
+leading icon, and a tap keeps the popup open the way M3 checkable menus
+do."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-tap ":on-tap")
   (when icon (jetpacs--check-identifier icon ":icon"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node nil :label label :on_tap on-tap :icon icon :enabled enabled))
+  (when supporting-text (jetpacs--require-string supporting-text ":supporting-text"))
+  (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing-icon"))
+  (when checked (jetpacs--check-bool checked ":checked"))
+  (when checked-icon (jetpacs--check-identifier checked-icon ":checked-icon"))
+  (jetpacs--node nil :label label :on_tap on-tap :icon icon :enabled enabled
+                 :supporting_text supporting-text :trailing_icon trailing-icon
+                 :checked checked :checked_icon checked-icon))
+
+(cl-defun jetpacs-menu-group (label items)
+  "A menu group {label, items} for `jetpacs-menu' :groups (SPEC §17.4).
+LABEL heads the group over a divider; ITEMS are `jetpacs-menu-item's."
+  (when label (jetpacs--require-string label ":label"))
+  (unless (consp items)
+    (error "jetpacs-menu-group: items must be a non-empty list"))
+  (jetpacs--node nil :label label :items (vconcat items)))
 
 (defconst jetpacs--menu-initial-scrolls '("start" "end"))
 
-(cl-defun jetpacs-menu (items &key icon initial-scroll enabled)
+(cl-defun jetpacs-menu (items &key icon initial-scroll enabled groups footer)
   "A menu of ITEMS (from `jetpacs-menu-item') (SPEC §17.4).
+Exactly one of ITEMS and :groups (a list of `jetpacs-menu-group's) —
+pass ITEMS nil when grouping.  :footer is a node rendered inside the
+popup below the items; include or omit it per your own state (the
+grouped sample\='s conditional button row is exactly this).
 INITIAL-SCROLL is start (default) or end: where the popup opens when the
 item list is longer than the screen."
+  (when (eq (null items) (null groups))
+    (error "jetpacs-menu: exactly one of ITEMS and :groups (SPEC 17.4)"))
   (when icon (jetpacs--check-identifier icon ":icon"))
   (when initial-scroll
     (setq initial-scroll (jetpacs--check-enum initial-scroll
                                               jetpacs--menu-initial-scrolls
                                               ":initial-scroll")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "menu" :items (vconcat items) :icon icon
+  (when (and footer (not (jetpacs--root-node-p footer)))
+    (error "jetpacs-menu: :footer must be a node (SPEC 17.4)"))
+  (jetpacs--node "menu" :items (and items (vconcat items))
+                 :groups (and groups (vconcat groups))
+                 :footer footer :icon icon
                  :initial_scroll initial-scroll :enabled enabled))
 
 (defconst jetpacs--text-input-variants '("outlined" "filled"))

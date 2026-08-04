@@ -701,6 +701,38 @@ object SpecValidator {
                         throw ContentInvalid("$path.year", "must be a non-negative integer")
                 }
             }
+            "menu" -> {
+                // SPEC 17.4: a menu carries exactly one of items|groups. A
+                // MenuItem needs a label wherever it sits; a group is
+                // {label?, items} with a non-empty item array.
+                val hasItems = "items" in node
+                val hasGroups = "groups" in node
+                if (hasItems == hasGroups)
+                    throw ContentInvalid(path, "menu carries exactly one of items|groups")
+                fun checkItems(arr: kotlinx.serialization.json.JsonArray, at: String) {
+                    for (i in arr.indices) {
+                        val item = arr[i] as? JsonObject
+                            ?: throw ContentInvalid("$at[$i]", "must be a MenuItem object")
+                        if (item.stringOrNull("label") == null)
+                            throw ContentInvalid("$at[$i].label", "MenuItem label must be a string")
+                    }
+                }
+                if (hasGroups) {
+                    val groups = node.arrOrNull("groups")
+                        ?: throw ContentInvalid("$path.groups", "must be an array")
+                    for (g in groups.indices) {
+                        val grp = groups[g] as? JsonObject
+                            ?: throw ContentInvalid("$path.groups[$g]", "must be a group object")
+                        val gi = grp.arrOrNull("items")
+                            ?: throw ContentInvalid("$path.groups[$g].items", "group items must be an array")
+                        if (gi.size == 0)
+                            throw ContentInvalid("$path.groups[$g].items", "group items must be non-empty")
+                        checkItems(gi, "$path.groups[$g].items")
+                    }
+                } else {
+                    node.arrOrNull("items")?.let { checkItems(it, "$path.items") }
+                }
+            }
             "reorderable_list" -> {
                 // SPEC 17.3: every item has a unique key or id — else invalid.
                 val items = node.arrOrNull("items")

@@ -35,6 +35,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.AlertDialog
@@ -46,6 +48,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.DropdownMenuGroup
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
@@ -500,9 +506,17 @@ internal fun RenderAssistChip(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 /** §17.4 menu: an overflow icon opening a dropdown; each item dispatches its
  * on_tap and closes the menu. */
 @Composable
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 internal fun RenderMenu(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     var open by remember { mutableStateOf(false) }
     val items = node.arrOrNull("items")
+    val groups = node.arrOrNull("groups")
+    val scrollState = rememberScrollState()
+    // `initial_scroll: end` — the literal upstream effect: every open lands
+    // the popup at the bottom of a list longer than the screen.
+    if (node.stringOr("initial_scroll") == "end") {
+        LaunchedEffect(open) { if (open) scrollState.scrollTo(scrollState.maxValue) }
+    }
     Box(modifier = m) {
         IconButton(
             onClick = { open = true },
@@ -510,25 +524,95 @@ internal fun RenderMenu(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             Icon(IconMap.get(node.stringOr("icon", "more_vert")),
                 contentDescription = "More")
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = open, onDismissRequest = { open = false },
+            scrollState = scrollState) {
+            if (groups != null) for (g in 0 until groups.size) {
+                val group = groups[g] as? JsonObject ?: continue
+                if (g > 0) Spacer(Modifier.height(MenuDefaults.GroupSpacing))
+                DropdownMenuGroup(shapes = MenuDefaults.groupShape(g, groups.size)) {
+                    val label = group.stringOr("label")
+                    if (label.isNotEmpty()) {
+                        Text(label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .padding(MenuDefaults.DropdownMenuGroupLabelHorizontalPadding)
+                                .padding(vertical = 8.dp))
+                        HorizontalDivider(
+                            modifier = Modifier.padding(MenuDefaults.HorizontalDividerPadding))
+                    }
+                    val gi = group.arrOrNull("items")
+                    if (gi != null) for (i in 0 until gi.size) {
+                        (gi[i] as? JsonObject)?.let { item ->
+                            MenuItemRow(item, ctx, i, gi.size) { open = false }
+                        }
+                    }
+                }
+            }
             if (items != null) for (i in 0 until items.size) {
                 val item = items[i] as? JsonObject ?: continue
-                val itemIcon = item.stringOr("icon")
-                // SPEC 17.4: a disabled MenuItem shows the disabled affordance
-                // and MUST NOT dispatch.
-                val itemEnabled = item.boolOr("enabled", true)
-                DropdownMenuItem(
-                    text = { Text(item.stringOr("label")) },
-                    enabled = itemEnabled,
-                    onClick = {
-                        open = false
-                        if (itemEnabled) item.objOrNull("on_tap")?.let { onButton(it, ctx) }
-                    },
-                    leadingIcon = if (itemIcon.isNotEmpty()) {
-                        { Icon(IconMap.get(itemIcon), null, Modifier.size(18.dp)) }
-                    } else null)
+                MenuItemRow(item, ctx, null, 0) { open = false }
             }
+            // The footer is popup content below the items — the client
+            // includes or omits it per its own state (SPEC 17.4).
+            node.objOrNull("footer")?.let { RenderNode(it, ctx) }
         }
+    }
+}
+
+/** One MenuItem row. `checked` present selects the M3 expressive checkable
+ * overload: checked is AUTHORED presentation state (the client flips it on
+ * the next snapshot, like chip.selected), checked_icon replaces the leading
+ * icon while checked, and a toggle keeps the popup open the way upstream
+ * checkable menus do. INDEX/COUNT carry the group item shapes when grouped. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun MenuItemRow(
+    item: JsonObject, ctx: RenderCtx,
+    index: Int?, count: Int, closeMenu: () -> Unit,
+) {
+    // SPEC 17.4: a disabled MenuItem shows the disabled affordance and MUST
+    // NOT dispatch.
+    val itemEnabled = item.boolOr("enabled", true)
+    val itemIcon = item.stringOr("icon")
+    val trailingIcon = item.stringOr("trailing_icon")
+    val supporting = item.stringOr("supporting_text")
+    val leading: (@Composable () -> Unit)? = if (itemIcon.isNotEmpty()) {
+        { Icon(IconMap.get(itemIcon), null, Modifier.size(18.dp)) }
+    } else null
+    val trailing: (@Composable () -> Unit)? = if (trailingIcon.isNotEmpty()) {
+        { Icon(IconMap.get(trailingIcon), null, Modifier.size(18.dp)) }
+    } else null
+    val supportingText: (@Composable () -> Unit)? = if (supporting.isNotEmpty()) {
+        { Text(supporting) }
+    } else null
+    if ("checked" in item) {
+        val checkedIcon = item.stringOr("checked_icon", "check")
+        DropdownMenuItem(
+            text = { Text(item.stringOr("label")) },
+            checked = item.boolOr("checked", false),
+            onCheckedChange = {
+                if (itemEnabled) item.objOrNull("on_tap")?.let { onButton(it, ctx) }
+            },
+            supportingText = supportingText,
+            shapes = if (index != null) MenuDefaults.itemShape(index, count)
+                else MenuDefaults.itemShape(0, 1),
+            leadingIcon = leading,
+            checkedLeadingIcon = {
+                Icon(IconMap.get(checkedIcon), null, Modifier.size(18.dp))
+            },
+            trailingIcon = trailing,
+            enabled = itemEnabled)
+    } else {
+        DropdownMenuItem(
+            text = { Text(item.stringOr("label")) },
+            enabled = itemEnabled,
+            onClick = {
+                closeMenu()
+                if (itemEnabled) item.objOrNull("on_tap")?.let { onButton(it, ctx) }
+            },
+            leadingIcon = leading,
+            trailingIcon = trailing)
     }
 }
 

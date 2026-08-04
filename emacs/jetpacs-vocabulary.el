@@ -57,7 +57,7 @@
     ("icon_button" ("icon" "on_tap") ("badge" "checked" "checked_icon" "color" "content_description" "enabled" "on_change" "shape" "size" "variant" "width_mode"))
     ("chip" ("label") ("avatar" "content_spacing" "enabled" "icon" "on_tap" "selected" "trailing_icon" "variant"))
     ("assist_chip" ("label") ("enabled" "icon" "on_tap" "variant"))
-    ("menu" ("items") ("enabled" "icon" "initial_scroll"))
+    ("menu" () ("enabled" "footer" "groups" "icon" "initial_scroll" "items"))
     ("text_input" ("id") ("autofocus" "clear_on_submit" "content_padding" "enabled" "filter" "hide_keyboard_on_submit" "hint" "is_error" "keyboard" "label" "leading_icon" "mask" "max_length" "max_lines" "min_lines" "monospace" "on_change" "on_submit" "password" "prefix" "selection" "single_line" "suffix" "supporting_text" "syntax" "trailing_icon" "value" "variant"))
     ("editor" ("id") ("autofocus" "chromeless" "complete" "document" "enabled" "line_numbers" "on_enter" "on_save" "publish_state" "read_only" "syntax" "toolbar" "value"))
     ("checkbox" ("id") ("checked" "enabled" "label" "on_change" "state" "stroke"))

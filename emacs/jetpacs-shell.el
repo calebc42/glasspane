@@ -980,7 +980,7 @@ handles the buffer-local `t' marker a bare dolist would funcall."
   (jetpacs-shell--run-isolated 'jetpacs-shell-refresh-hook)
   (jetpacs-shell-push))
 
-(defun jetpacs-shell-notify (text &optional surface-or-owner)
+(defun jetpacs-shell-notify (text &optional surface-or-owner &rest keys)
   "Show TEXT as a snackbar — the SPEC 18.2.1 raise when granted.
 On a session with presentation.snackbar granted this raises
 IMMEDIATELY in whatever scaffold is on screen: no re-push, no
@@ -989,8 +989,16 @@ spliced into a tree.  (The injection path below is the machinery whose
 view-targeting bug once degraded every chrome snackbar to a toast —
 the raise retires that whole class where the grant exists.)
 
+KEYS ride the raise: :action-label STR puts the action button on the
+snackbar and :on-action FN (nullary) runs when the user taps it — the
+M3 \"Undo\" pattern, dispatched like any other handler when the
+snackbar leaves the screen; :duration is \"short\" (the default),
+\"long\" or \"indefinite\".
+
 Without the grant it queues TEXT as SURFACE-OR-OWNER's next-push
-snackbar, latest wins.  SURFACE-OR-OWNER defaults through
+snackbar, latest wins — TEXT ALONE: an action the session cannot
+deliver on time is dropped with its timing, never queued to fire
+stale.  SURFACE-OR-OWNER defaults through
 `jetpacs-shell--resolve-surface' — with the dispatch binding the
 acting owner (E2a), a handler's feedback lands on that owner's surface
 without naming it.  The Companion re-shows a snackbar only when its
@@ -998,7 +1006,15 @@ text changes."
   (if (and (jetpacs-connected-p)
            (jetpacs-granted-p "presentation.snackbar"))
       (condition-case err
-          (ebp-client-snackbar-show (jetpacs-client) text)
+          (let ((on-action (plist-get keys :on-action)))
+            (ebp-client-snackbar-show
+             (jetpacs-client) text
+             :action-label (plist-get keys :action-label)
+             :duration (plist-get keys :duration)
+             :callback (and on-action
+                            (lambda (result _error)
+                              (when (equal result "action")
+                                (funcall on-action))))))
         (error (message "jetpacs-shell: snackbar raise failed: %s"
                         (jetpacs--error-label err))))
     (puthash (jetpacs-shell--resolve-surface surface-or-owner)

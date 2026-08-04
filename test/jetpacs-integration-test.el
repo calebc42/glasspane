@@ -157,5 +157,44 @@ so outstanding accumulates for real and the ceiling does its own work."
         (jetpacs-detach)
         (jetpacs-test-reset-state)))))
 
+
+;;;; The notify raise (SPEC 18.2.1) — shell x ebp seam
+
+(ert-deftest jetpacs-integration-notify-raise-carries-the-action ()
+  "`jetpacs-shell-notify' hands :action-label/:duration through to the
+raise and dispatches :on-action exactly when the reply says the user
+tapped the button — dismissed and errored raises run nothing."
+  (let (sent fired)
+    (cl-letf (((symbol-function 'jetpacs-connected-p) (lambda () t))
+              ((symbol-function 'jetpacs-granted-p) (lambda (_cap) t))
+              ((symbol-function 'jetpacs-client) (lambda () 'client))
+              ((symbol-function 'ebp-client-snackbar-show)
+               (cl-function
+                (lambda (_client message &key action-label duration callback)
+                  (setq sent (list message action-label duration callback))))))
+      (jetpacs-shell-notify "saved" nil
+                            :action-label "Undo"
+                            :on-action (lambda () (setq fired t)))
+      (should (equal (nth 0 sent) "saved"))
+      (should (equal (nth 1 sent) "Undo"))
+      (should-not (nth 2 sent))
+      (funcall (nth 3 sent) "dismissed" nil)
+      (should-not fired)
+      (funcall (nth 3 sent) "action" nil)
+      (should fired))))
+
+(ert-deftest jetpacs-integration-notify-queue-drops-the-action ()
+  "Ungranted, notify queues TEXT alone: the action is dropped with its
+timing rather than queued to fire stale on some later push."
+  (cl-letf (((symbol-function 'jetpacs-connected-p) (lambda () nil)))
+    (with-jetpacs-owner "notifydemo"
+      (jetpacs-shell-notify "saved" "notifydemo"
+                            :action-label "Undo"
+                            :on-action #'ignore))
+    (unwind-protect
+        (should (equal (gethash "app:notifydemo" jetpacs-shell--snackbars)
+                       "saved"))
+      (remhash "app:notifydemo" jetpacs-shell--snackbars))))
+
 (provide 'jetpacs-integration-test)
 ;;; jetpacs-integration-test.el ends here

@@ -39,13 +39,12 @@
 ;; draws, not to a member Emacs asks for; `animate_shape' exists because
 ;; a plain `Button' has no morph unless one is passed.
 ;;
-;; One sample does author a bespoke shape set and is the one gap:
-;; SquareToggleButtonSample inverts the defaults, square at rest and
-;; ROUND once checked, which is why the catalog names the example
-;; RoundToggleButtonSample.  `shape' selects the resting shape; nothing
-;; on the wire selects a shape for the checked state, so the morph the
-;; example is named for cannot be asked for.  (Preserved as data: the
-;; example named "RoundToggleButtonSample" invokes
+;; The bespoke shape set rides two members now: on a toggle, `:shape'
+;; names the RESTING shape and `:checked-shape' the one it morphs to
+;; while checked, so the inverted square-at-rest/round-checked set —
+;; ToggleButtonShapes(squareShape, pressedShape, roundShape) — is asked
+;; for by saying each half once.  All ten build.  (Preserved as data:
+;; the example named "RoundToggleButtonSample" invokes
 ;; `SquareToggleButtonSample'.)
 ;;
 ;; Two details of ToggleButtonWithIconSample and its four sized
@@ -148,8 +147,21 @@ otherwise; `edit' is the outlined vector, the state it starts in."
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :unsupported
-    "This example invokes SquareToggleButtonSample, which inverts M3's default toggle shapes: ToggleButtonShapes(squareShape, pressedShape, roundShape) is square at rest and ROUND once checked, the morph the catalog names the example for. The button node carries :shape, which selects the resting shape, and :checked, which now carries the toggling -- but no wire member selects a shape for the checked state, so the inversion cannot be asked for and a recreation would sit square in both states.")
+    :build (lambda ()
+             ;; The inverted set, one member per shape: :shape names the
+             ;; resting square, :checked-shape the round it morphs to —
+             ;; ToggleButtonShapes(squareShape, pressedShape, roundShape)
+             ;; exactly.  (The catalog names this RoundToggleButtonSample
+             ;; while invoking SquareToggleButtonSample; preserved as
+             ;; data.)
+             (jetpacs-with-attrs
+              (jetpacs-button "Round Toggle Button"
+                              (jetpacs-m3-demo "Round Toggle Button")
+                              :checked :json-false
+                              :on-change (jetpacs-m3-demo "Round Toggle Button")
+                              :shape "square"
+                              :checked-shape "round")
+              :id "togglebuttons-round")))
    (jetpacs-m3-example
     "ElevatedToggleButtonSample"
     "ToggleButton examples"

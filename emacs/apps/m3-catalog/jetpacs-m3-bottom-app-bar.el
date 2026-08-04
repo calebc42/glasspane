@@ -40,6 +40,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'jetpacs-widgets)
 (require 'jetpacs-m3-core)
 
@@ -192,8 +193,31 @@ sample sets as the bar\\='s containerColor."
     "ExitAlwaysBottomAppBar"
     "Bottom app bar examples"
     :source jetpacs-m3-bottom-app-bar--source
-    :unsupported
-    "The scaffold node has no scroll-behavior member: exitAlwaysScrollBehavior hides the bottom bar as the body scrolls up and brings it back on the way down, and that behavior is this sample's whole difference from BottomAppBarWithFAB.")
+    :expressive t
+    ;; :bottom-bar-behavior "exit_always" IS exitAlwaysScrollBehavior —
+    ;; the bar hides going up and returns coming down, riding a real M3
+    ;; BottomAppBar — and :fab-position "end_overlay" rides the Add FAB
+    ;; OVER it, the pairing this sample exists for.
+    :build (lambda ()
+             (apply #'jetpacs-column
+                    (append
+                     (cl-loop for i from 0 below 100
+                              collect (jetpacs-with-attrs
+                                       (jetpacs-text (format "Item %d" i))
+                                       :pad (list :horizontal 16)))
+                     (list :spacing 8 :fill t))))
+    :slots (list :bottom-bar
+                 (lambda ()
+                   (jetpacs-row
+                    (jetpacs-m3-bottom-app-bar--action "check" "Check")
+                    (jetpacs-m3-bottom-app-bar--action "edit" "Edit")
+                    :spacing 4))
+                 :fab
+                 (lambda ()
+                   (jetpacs-button "Add" (jetpacs-m3-demo "Add")
+                                   :icon "add" :variant "filled")))
+    :scaffold (list :bottom-bar-behavior "exit_always"
+                    :fab-position "end_overlay"))
    (jetpacs-m3-example
     "ExitAlwaysBottomAppBarSpacedAround"
     "Bottom app bar examples"

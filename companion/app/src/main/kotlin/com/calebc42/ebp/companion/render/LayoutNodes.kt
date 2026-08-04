@@ -20,7 +20,9 @@
 package com.calebc42.ebp.companion.render
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -128,6 +130,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
@@ -575,8 +579,24 @@ internal fun RenderTabs(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                             else if ("badge" in item && leading)
                                 { { badged { Text(item.stringOr("label")) } } }
                             else { { Text(item.stringOr("label")) } }
+                        // §17.3 `content`: the tab draws the authored node
+                        // instead of text/icon, `label` staying the
+                        // accessibility name; `selected_content` is the face
+                        // while selected — the device swaps the two authored
+                        // nodes, the two_rows discipline again.
+                        val contentNode = item.objOrNull("content")
                         val tab: @Composable () -> Unit = {
-                            if (leading)
+                            if (contentNode != null) {
+                                val shown = if (selected == i)
+                                    item.objOrNull("selected_content") ?: contentNode
+                                else contentNode
+                                Tab(selected = selected == i, onClick = onClick,
+                                    modifier = Modifier.semantics {
+                                        contentDescription = item.stringOr("label")
+                                    }) {
+                                    RenderNode(shown, ctx.child(shown, i))
+                                }
+                            } else if (leading)
                                 LeadingIconTab(
                                     selected = selected == i, onClick = onClick,
                                     text = textSlot ?: {}, icon = iconSlot)
@@ -603,11 +623,31 @@ internal fun RenderTabs(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                 // content-width rounded one. Naming them explicitly also
                 // retires the deprecated TabRow/ScrollableTabRow calls.
                 val primary = node.stringOr("style") == "primary"
+                // §17.3 `indicator`: outline is the bounded FancyIndicator
+                // vocabulary — a 2dp border in a RoundedCornerShape(5dp),
+                // inset from the selected tab's bounds, still animated by the
+                // standard tabIndicatorOffset. underline/absent keeps each
+                // row's own default.
+                val indSpec = node.objOrNull("indicator")
+                val outline = indSpec?.stringOr("kind") == "outline"
+                val indColor = resolveColor(
+                    indSpec?.stringOr("color")?.takeIf { it.isNotEmpty() })
+                    ?: MaterialTheme.colorScheme.primary
+                val indInset = (indSpec?.doubleOr("inset", 5.0) ?: 5.0).dp
                 if (node.boolOr("scrollable")) {
                     if (primary) PrimaryScrollableTabRow(selectedTabIndex = selected) { tabs() }
                     else SecondaryScrollableTabRow(selectedTabIndex = selected) { tabs() }
                 } else {
                     if (primary) PrimaryTabRow(selectedTabIndex = selected) { tabs() }
+                    else if (outline) SecondaryTabRow(
+                        selectedTabIndex = selected,
+                        indicator = {
+                            Box(Modifier.tabIndicatorOffset(selected)
+                                .fillMaxSize()
+                                .padding(indInset)
+                                .border(BorderStroke(2.dp, indColor),
+                                    RoundedCornerShape(5.dp)))
+                        }) { tabs() }
                     else SecondaryTabRow(selectedTabIndex = selected) { tabs() }
                 }
             }

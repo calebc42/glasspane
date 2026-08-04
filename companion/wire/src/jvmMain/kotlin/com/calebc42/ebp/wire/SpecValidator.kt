@@ -866,6 +866,22 @@ object SpecValidator {
                 ?: throw ContentInvalid("$path.items[$i]", "must be a TabItem object")
             if (item.stringOrNull("label") == null)
                 throw ContentInvalid("$path.items[$i].label", "TabItem label must be a string")
+            // SPEC 17.3: content replaces the tab's drawn face (label stays
+            // the accessibility name); selected_content is the face while
+            // selected and rides on content.
+            if ("selected_content" in item && "content" !in item)
+                throw ContentInvalid("$path.items[$i]",
+                    "selected_content needs content")
+            for (k in listOf("content", "selected_content")) {
+                if (k in item && item.objOrNull(k)?.stringOrNull("t") == null)
+                    throw ContentInvalid("$path.items[$i].$k", "must be a node")
+            }
+        }
+        node.objOrNull("indicator")?.let { ind ->
+            val kind = ind.stringOrNull("kind")
+            if (kind != "underline" && kind != "outline")
+                throw ContentInvalid("$path.indicator.kind",
+                    "must be underline or outline")
         }
         if ("initial" in node) {
             val init = node["initial"]?.asDoubleOrNull()

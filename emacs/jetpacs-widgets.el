@@ -1035,7 +1035,7 @@ ActionDescriptor.  ITEMS is a list of node plists."
 (defconst jetpacs--tab-icon-positions '("above" "leading"))
 
 (cl-defun jetpacs-tab-item (&optional label &key icon icon-position badge
-                                      tooltip)
+                                      tooltip content selected-content)
   "A TabItem for `jetpacs-tabs' (SPEC §17.3).
 
 LABEL may be omitted WHEN ICON is present, which is how M3 draws its
@@ -1044,7 +1044,11 @@ empty label still fills the text slot and forces the 72dp two-line tab
 with a blank line in it.
 
 ICON-POSITION is above (default) or leading — the latter is M3's
-LeadingIconTab, a single row of icon then label.  BADGE is a string or
+LeadingIconTab, a single row of icon then label.  CONTENT, a node,
+replaces the drawn face entirely (LABEL stays required as the
+accessibility name), and SELECTED-CONTENT is the face while this tab
+is selected — the device swaps the two on its own live selection.
+BADGE is a string or
 number drawn over the tab, empty meaning the bare attention dot.
 TOOLTIP is the plain tooltip M3 wants over an icon-only tab, anchored
 above; a screen reader hears the icon's fallback name either way, so
@@ -1061,14 +1065,25 @@ the tooltip is the SIGHTED user's label, not a replacement for one."
       (error "jetpacs-tab-item: :icon-position needs an :icon (SPEC 17.3)")))
   (when badge (jetpacs--check-badge badge))
   (when tooltip (jetpacs--require-string tooltip ":tooltip"))
+  (when selected-content
+    (unless content
+      (error "jetpacs-tab-item: :selected-content needs :content (SPEC 17.3)")))
+  (when content
+    (unless label
+      (error "jetpacs-tab-item: :content needs a :label as the accessibility name (SPEC 17.3)")))
+  (dolist (pair (list (cons ":content" content)
+                      (cons ":selected-content" selected-content)))
+    (when (and (cdr pair) (not (jetpacs--root-node-p (cdr pair))))
+      (error "jetpacs-tab-item: %s must be a node (SPEC 17.3)" (car pair))))
   (jetpacs--node nil :label label :icon icon
                  :icon_position icon-position :badge badge
-                 :tooltip tooltip))
+                 :tooltip tooltip :content content
+                 :selected_content selected-content))
 
 (defconst jetpacs--tab-styles '("primary" "secondary"))
 
 (cl-defun jetpacs-tabs (items children &key initial scrollable pager-only
-                              on-change id style)
+                              on-change id style indicator)
   "A tab strip: parallel ITEMS (TabItems) and CHILDREN (Nodes) (SPEC §17.3).
 The two lists MUST have equal non-zero length.  INITIAL is a 0-based index
 below the count; SCROLLABLE/PAGER-ONLY are booleans (t or :json-false);
@@ -1076,7 +1091,13 @@ ON-CHANGE an ActionDescriptor; ID a §4.4 identifier.
 
 STYLE is primary or secondary (default): M3's PrimaryTabRow draws the
 content-width rounded indicator, SecondaryTabRow the full-width one the
-Companion has always drawn."
+Companion has always drawn.
+
+INDICATOR restyles the secondary row's indicator: a plist (:kind
+\"underline\"|\"outline\" :color COLOR :inset DP).  outline is the
+bounded FancyIndicator picture -- a 2dp border in a 5dp-rounded
+rectangle inset from the selected tab's bounds, still animated by the
+standard offset."
   (let ((ni (length items)) (nc (length children)))
     (when (or (zerop ni) (/= ni nc))
       (error "jetpacs-tabs: items and children must be equal non-zero length (SPEC 17.3): %d vs %d"
@@ -1087,6 +1108,16 @@ Companion has always drawn."
     (when id (jetpacs--check-identifier id ":id"))
     (when on-change (jetpacs--check-descriptor on-change ":on-change"))
     (when style (setq style (jetpacs--check-enum style jetpacs--tab-styles ":style")))
+    (when indicator
+      (let ((kind (plist-get indicator :kind))
+            (color (plist-get indicator :color))
+            (inset (plist-get indicator :inset)))
+        (setq kind (jetpacs--check-enum kind '("underline" "outline")
+                                        ":indicator :kind"))
+        (when color (jetpacs--check-color color))
+        (when inset (jetpacs--check-number inset ":indicator :inset" 0 nil))
+        (setq indicator (jetpacs--node nil :kind kind :color color
+                                       :inset inset))))
     (jetpacs--node "tabs"
                    :items (vconcat items)
                    :children (vconcat children)
@@ -1095,6 +1126,7 @@ Companion has always drawn."
                    :pager_only pager-only
                    :on_change on-change
                    :style style
+                   :indicator indicator
                    :id id)))
 
 (cl-defun jetpacs-table-cell (spans &key on-tap on-long-tap)

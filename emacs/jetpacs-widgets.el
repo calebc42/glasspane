@@ -2448,7 +2448,9 @@ builds the range and re-pushes."
   (jetpacs--check-descriptor (plist-get v :on_tap) ":on_tap")
   v)
 
-(defconst jetpacs--top-bar-styles '("small" "center" "medium" "large"))
+(defconst jetpacs--top-bar-styles
+  '("small" "center" "medium" "large"
+    "medium_flexible" "large_flexible" "two_rows"))
 (defconst jetpacs--toolbar-orientations '("horizontal" "vertical"))
 (defconst jetpacs--toolbar-placements
   '("bottom_center" "bottom_start" "bottom_end" "center_start" "center_end"))
@@ -2473,7 +2475,9 @@ builds the range and re-pushes."
                                  sheet sheet-peek-height sheet-state
                                  on-sheet-change fab-hide-on-scroll
                                  drawer-variant bottom-bar-behavior
-                                 fab-position)
+                                 fab-position
+                                 top-bar-expanded top-bar-collapsed-height
+                                 top-bar-expanded-height top-bar-centered)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
@@ -2495,9 +2499,17 @@ with the new state and holds locally until the authored value changes,
 so a re-push cannot slam the sheet back open under the finger.
 
 TOP-BAR-STYLE asks for a REAL M3 TopAppBar around TOP-BAR — small,
-center(-aligned), medium or large — instead of the plain status-bar-padded
-row the Companion draws when it is absent.  Omitting it is exactly today's
-rendering, which is why every existing caller is untouched.
+center(-aligned), medium, large, medium_flexible, large_flexible or
+two_rows — instead of the plain status-bar-padded row the Companion draws
+when it is absent.  Omitting it is exactly today's rendering, which is why
+every existing caller is untouched.
+
+The flexible styles take TOP-BAR-SUBTITLE and TOP-BAR-CENTERED (title and
+subtitle centered), and fold from TOP-BAR-EXPANDED-HEIGHT down to
+TOP-BAR-COLLAPSED-HEIGHT (dp; omit either for the M3 per-style default).
+A two_rows bar additionally swaps TOP-BAR-EXPANDED — a second Node shown
+while expanded — for the plain TOP-BAR as it folds, so an
+expanded/collapsed content swap needs no collapse fraction on the wire.
 
 SCROLL-BEHAVIOR (pinned, enter_always, exit_until_collapsed) needs
 TOP-BAR-STYLE: it is the M3 behavior the bar and the body's nested scroll
@@ -2577,6 +2589,22 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                                              ":top-bar-style")))
   (when top-bar-subtitle
     (jetpacs--require-string top-bar-subtitle ":top-bar-subtitle"))
+  (when top-bar-expanded
+    (unless (jetpacs--root-node-p top-bar-expanded)
+      (error "jetpacs-scaffold: :top-bar-expanded must be a node, got %S"
+             top-bar-expanded))
+    (unless (equal top-bar-style "two_rows")
+      (error "jetpacs-scaffold: :top-bar-expanded needs :top-bar-style two_rows (SPEC 17.6)")))
+  (when top-bar-collapsed-height
+    (jetpacs--check-number top-bar-collapsed-height ":top-bar-collapsed-height" 0 nil)
+    (unless top-bar-style
+      (error "jetpacs-scaffold: :top-bar-collapsed-height needs :top-bar-style (SPEC 17.6)")))
+  (when top-bar-expanded-height
+    (jetpacs--check-number top-bar-expanded-height ":top-bar-expanded-height" 0 nil)
+    (unless top-bar-style
+      (error "jetpacs-scaffold: :top-bar-expanded-height needs :top-bar-style (SPEC 17.6)")))
+  (when top-bar-centered
+    (jetpacs--check-bool top-bar-centered ":top-bar-centered"))
   (when scroll-behavior
     (setq scroll-behavior (jetpacs--check-enum scroll-behavior
                                                jetpacs--scroll-behaviors
@@ -2631,6 +2659,10 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                  :fab_position fab-position
                  :top_bar_style top-bar-style
                  :top_bar_subtitle top-bar-subtitle
+                 :top_bar_expanded top-bar-expanded
+                 :top_bar_collapsed_height top-bar-collapsed-height
+                 :top_bar_expanded_height top-bar-expanded-height
+                 :top_bar_centered top-bar-centered
                  :scroll_behavior scroll-behavior))
 
 ;;;; SurfaceSpec shapes (§13.4)

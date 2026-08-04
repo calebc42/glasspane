@@ -38,7 +38,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.MediumFlexibleTopAppBar
+import androidx.compose.material3.TwoRowsTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedTextField
@@ -1038,11 +1041,61 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                             }
                     }
                     val subtitle = node.stringOr("top_bar_subtitle")
+                    // §17.6 heights: authored dp overrides the per-style M3
+                    // default; -1 marks "unauthored" (dp members are >= 0).
+                    val collapsedH = node.doubleOr("top_bar_collapsed_height", -1.0)
+                    val expandedH = node.doubleOr("top_bar_expanded_height", -1.0)
+                    val titleAlign =
+                        if (node.boolOr("top_bar_centered")) Alignment.CenterHorizontally
+                        else Alignment.Start
+                    val subtitleSlot: (@Composable () -> Unit)? =
+                        if (subtitle.isNotEmpty()) { { Text(subtitle) } } else null
                     // Only the small TopAppBar takes a `subtitle`; the
                     // center-aligned one carries the alignment instead, so a
                     // subtitled centre bar is the small overload with
                     // titleHorizontalAlignment rather than a different bar.
                     when {
+                        topBarStyle == "medium_flexible" -> MediumFlexibleTopAppBar(
+                            title = title, subtitle = subtitleSlot,
+                            navigationIcon = nav,
+                            titleHorizontalAlignment = titleAlign,
+                            collapsedHeight = if (collapsedH >= 0) collapsedH.dp
+                                else TopAppBarDefaults.MediumAppBarCollapsedHeight,
+                            expandedHeight = if (expandedH >= 0) expandedH.dp
+                                else if (subtitle.isNotEmpty())
+                                    TopAppBarDefaults.MediumFlexibleAppBarWithSubtitleExpandedHeight
+                                else TopAppBarDefaults.MediumFlexibleAppBarWithoutSubtitleExpandedHeight,
+                            scrollBehavior = scrollBehavior)
+                        topBarStyle == "large_flexible" -> LargeFlexibleTopAppBar(
+                            title = title, subtitle = subtitleSlot,
+                            navigationIcon = nav,
+                            titleHorizontalAlignment = titleAlign,
+                            collapsedHeight = if (collapsedH >= 0) collapsedH.dp
+                                else TopAppBarDefaults.LargeAppBarCollapsedHeight,
+                            expandedHeight = if (expandedH >= 0) expandedH.dp
+                                else if (subtitle.isNotEmpty())
+                                    TopAppBarDefaults.LargeFlexibleAppBarWithSubtitleExpandedHeight
+                                else TopAppBarDefaults.LargeFlexibleAppBarWithoutSubtitleExpandedHeight,
+                            scrollBehavior = scrollBehavior)
+                        // §17.6 two_rows: the title slot takes the EXPANDED
+                        // flag — the bar swaps `top_bar_expanded` for the
+                        // plain `top_bar` as it folds, so the string swap
+                        // upstream's CustomTwoRowsTopAppBar demonstrates
+                        // needs no collapse fraction on the wire.
+                        topBarStyle == "two_rows" -> TwoRowsTopAppBar(
+                            title = { expanded ->
+                                val n = if (expanded)
+                                    node.objOrNull("top_bar_expanded") ?: topBar
+                                else topBar
+                                n?.let { RenderNode(it, ctx.child(it, 0)) }
+                            },
+                            navigationIcon = nav,
+                            titleHorizontalAlignment = titleAlign,
+                            collapsedHeight = if (collapsedH >= 0) collapsedH.dp
+                                else TopAppBarDefaults.MediumAppBarCollapsedHeight,
+                            expandedHeight = if (expandedH >= 0) expandedH.dp
+                                else TopAppBarDefaults.MediumFlexibleAppBarWithSubtitleExpandedHeight,
+                            scrollBehavior = scrollBehavior)
                         subtitle.isNotEmpty() && topBarStyle != "medium" &&
                             topBarStyle != "large" ->
                             TopAppBar(title = title, subtitle = { Text(subtitle) },

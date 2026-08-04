@@ -47,6 +47,7 @@ import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DockedSearchBar
 import androidx.compose.material3.DisplayMode
@@ -87,6 +88,7 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.RangeSliderState
 import androidx.compose.material3.SearchBar
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -1050,10 +1052,50 @@ internal fun RenderDateButton(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         modifier = m) { Text(node.stringOr("label")) }
     if (show) {
         val initialMillis = remember { parseIsoDateUtc(node.stringOr("value")) }
+        // §17.4 day-level bounds: the declarative predicate is the ONLY form
+        // the wire can carry — SelectableDates is a Kotlin lambda — and the
+        // weekday rule covers every navigable month, which a per-date list
+        // could not.
+        val minMillis = remember { parseIsoDateUtc(node.stringOr("min_date")) }
+        val maxMillis = remember { parseIsoDateUtc(node.stringOr("max_date")) }
+        val disabledDays = node.arrOrNull("disabled_weekdays")
+            ?.mapNotNull { it.numOrNull()?.toInt() } ?: emptyList()
+        val bounded = minMillis != null || maxMillis != null ||
+            disabledDays.isNotEmpty()
+        val selectable = if (!bounded) DatePickerDefaults.AllDates
+            else object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    if (minMillis != null && utcTimeMillis < minMillis) return false
+                    // max_date is an inclusive DAY.
+                    if (maxMillis != null &&
+                        utcTimeMillis >= maxMillis + 86_400_000L) return false
+                    if (disabledDays.isNotEmpty()) {
+                        val c = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                        c.timeInMillis = utcTimeMillis
+                        // 0 = Sunday, matching the contract.
+                        if (c.get(Calendar.DAY_OF_WEEK) - 1 in disabledDays)
+                            return false
+                    }
+                    return true
+                }
+                override fun isSelectableYear(year: Int): Boolean {
+                    val minYear = minMillis?.let {
+                        Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                            .apply { timeInMillis = it }.get(Calendar.YEAR)
+                    }
+                    val maxYear = maxMillis?.let {
+                        Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                            .apply { timeInMillis = it }.get(Calendar.YEAR)
+                    }
+                    return (minYear == null || year >= minYear) &&
+                        (maxYear == null || year <= maxYear)
+                }
+            }
         val state = rememberDatePickerState(
             initialSelectedDateMillis = initialMillis,
             initialDisplayMode = if (node.stringOr("mode") == "input")
-                DisplayMode.Input else DisplayMode.Picker)
+                DisplayMode.Input else DisplayMode.Picker,
+            selectableDates = selectable)
         DatePickerDialog(
             onDismissRequest = { show = false },
             confirmButton = {

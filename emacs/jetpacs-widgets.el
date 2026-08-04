@@ -1891,16 +1891,35 @@ choice.  ALLOW-ADD is a chips-only affordance and refuses both."
                  :children (and children (vconcat children))
                  :on_change on-change :enabled enabled))
 
-(cl-defun jetpacs-date-button (label on-pick &key value mode enabled)
+(cl-defun jetpacs-date-button (label on-pick &key value mode
+                                     min-date max-date disabled-weekdays
+                                     enabled)
   "A date-picker button labeled LABEL dispatching ON-PICK (SPEC §17.4).
-VALUE is a YYYY-MM-DD string."
+VALUE is a YYYY-MM-DD string.  MIN-DATE/MAX-DATE and DISABLED-WEEKDAYS
+\(0..6 integers, 0 = Sunday) become the dialog's SelectableDates
+predicate — the declarative form is the only one the wire can carry,
+and the weekday rule covers every navigable month, which a per-date
+list could not."
   (jetpacs--require-string label ":label")
   (jetpacs--check-descriptor on-pick ":on-pick")
   (when value (jetpacs--check-date value))
   (when mode (setq mode (jetpacs--check-enum mode '("calendar" "input") ":mode")))
+  (when min-date (jetpacs--check-date min-date))
+  (when max-date (jetpacs--check-date max-date))
+  (when (and min-date max-date (string> min-date max-date))
+    (error "jetpacs-date-button: :min-date must not follow :max-date (SPEC 17.4)"))
+  (when disabled-weekdays
+    (unless (and (listp disabled-weekdays)
+                 (cl-every (lambda (d) (and (integerp d) (<= 0 d 6)))
+                           disabled-weekdays)
+                 (= (length disabled-weekdays)
+                    (length (cl-remove-duplicates disabled-weekdays))))
+      (error "jetpacs-date-button: :disabled-weekdays must be distinct integers 0..6 (SPEC 17.4)"))
+    (setq disabled-weekdays (vconcat disabled-weekdays)))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (jetpacs--node "date_button" :label label :on_pick on-pick :value value
-                 :mode mode :enabled enabled))
+                 :mode mode :min_date min-date :max_date max-date
+                 :disabled_weekdays disabled-weekdays :enabled enabled))
 
 (cl-defun jetpacs-time-button (label on-pick &key value display-mode enabled)
   "A time-picker button labeled LABEL dispatching ON-PICK (SPEC §17.4).
@@ -2271,22 +2290,56 @@ DOTS is an integer 0..3; COLOR a §16.6 color."
   (jetpacs--node nil :dots dots :color color))
 
 (cl-defun jetpacs-month-grid (month &key marks selected min-month max-month
+                                    min-date max-date disabled-weekdays
+                                    range-start range-end
                                     on-day-tap on-month-change children)
   "A month grid for MONTH, a `YYYY-MM' string (SPEC §17.5).
 MARKS is an alist of (YYYY-MM-DD . mark) from `jetpacs-month-mark'; SELECTED
-a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
+a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max).
+
+MIN-DATE/MAX-DATE and DISABLED-WEEKDAYS (0..6 integers, 0 = Sunday) are
+the DAY-level bounds: an excluded day renders disabled and never
+dispatches ON-DAY-TAP, while the month bounds keep gating only the
+arrows.  RANGE-START/RANGE-END shade the inclusive span with rounded
+end caps — both-or-neither, start not after end, mutually exclusive
+with SELECTED; ON-DAY-TAP still dispatches each tapped day, so Emacs
+builds the range and re-pushes."
   (jetpacs--check-year-month month ":month")
   (when selected (jetpacs--check-date selected))
   (when min-month (jetpacs--check-year-month min-month ":min_month"))
   (when max-month (jetpacs--check-year-month max-month ":max_month"))
   (when (and min-month max-month (string> min-month max-month))
     (error "jetpacs-month-grid: :min-month must not follow :max-month (SPEC 17.5)"))
+  (when min-date (jetpacs--check-date min-date))
+  (when max-date (jetpacs--check-date max-date))
+  (when (and min-date max-date (string> min-date max-date))
+    (error "jetpacs-month-grid: :min-date must not follow :max-date (SPEC 17.5)"))
+  (when disabled-weekdays
+    (unless (and (listp disabled-weekdays)
+                 (cl-every (lambda (d) (and (integerp d) (<= 0 d 6)))
+                           disabled-weekdays)
+                 (= (length disabled-weekdays)
+                    (length (cl-remove-duplicates disabled-weekdays))))
+      (error "jetpacs-month-grid: :disabled-weekdays must be distinct integers 0..6 (SPEC 17.5)"))
+    (setq disabled-weekdays (vconcat disabled-weekdays)))
+  (when (or range-start range-end)
+    (unless (and range-start range-end)
+      (error "jetpacs-month-grid: :range-start and :range-end come together (SPEC 17.5)"))
+    (when selected
+      (error "jetpacs-month-grid: a range is mutually exclusive with :selected (SPEC 17.5)"))
+    (jetpacs--check-date range-start)
+    (jetpacs--check-date range-end)
+    (when (string> range-start range-end)
+      (error "jetpacs-month-grid: :range-start must not follow :range-end (SPEC 17.5)")))
   (when on-day-tap (jetpacs--check-descriptor on-day-tap ":on-day-tap"))
   (when on-month-change (jetpacs--check-descriptor on-month-change ":on-month-change"))
   (jetpacs--node "month_grid"
                  :month month
                  :marks (and marks (jetpacs--marks->map marks))
                  :selected selected :min_month min-month :max_month max-month
+                 :min_date min-date :max_date max-date
+                 :disabled_weekdays disabled-weekdays
+                 :range_start range-start :range_end range-end
                  :on_day_tap on-day-tap :on_month_change on-month-change
                  :children (and children (vconcat children))))
 

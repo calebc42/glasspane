@@ -25,9 +25,13 @@
 ;; appears on tap rather than standing in the body (`month_grid', the
 ;; inline node, draws a calendar only).
 ;;
-;; The other two exist to demonstrate something neither node has a
-;; member for: a per-day SelectableDates predicate, and a two-ended
-;; range (DateRangePicker is unwrapped).
+;; The day-level bounds close the last two.  `date_button' takes
+;; `:min-date'/`:max-date'/`:disabled-weekdays' — the SelectableDates
+;; predicate in its only wire-carryable form, a declaration — and
+;; `month_grid' takes the same bounds plus `:range-start'/`:range-end',
+;; the two-ended selection shaded as one span with rounded caps.  The
+;; range sample's live flow is ordinary EBP (each on_day_tap dispatch
+;; lets Emacs rebuild the range); the demo verb stands in here.
 
 ;;; Code:
 
@@ -105,8 +109,14 @@ upstream.  The caption is the sample's own selection readout."
     "DatePickerWithDateSelectableDatesSample"
     "Date picker examples"
     :source jetpacs-m3-date-pickers--source
-    :unsupported
-    "Neither the date_button node nor the month_grid node has a selectable-dates member: the SelectableDates predicate this sample exists to show, which blocks every Saturday and Sunday and every year before 2023, cannot be put on the wire, because month_grid bounds whole months with min_month and max_month and nothing finer.")
+    :build (lambda ()
+             ;; The SelectableDates predicate, declaratively: weekends
+             ;; blocked (0 = Sunday, 6 = Saturday) and no year before
+             ;; 2023 — the dialog greys and refuses them itself.
+             (jetpacs-date-button "Select date"
+                                  (jetpacs-m3-demo "Selected date timestamp")
+                                  :min-date "2023-01-01"
+                                  :disabled-weekdays (list 0 6))))
    (jetpacs-m3-example
     "DateInputSample"
     "Date picker examples"
@@ -116,8 +126,24 @@ upstream.  The caption is the sample's own selection readout."
     "DateRangePickerSample"
     "Date picker examples"
     :source jetpacs-m3-date-pickers--source
-    :unsupported
-    "There is no date-range node type: the date_button node picks ONE day and has no start or end member, and month_grid has a single selected date, so the two-ended selection DateRangePicker exists to show cannot be expressed on the wire.")
+    :build (lambda ()
+             ;; The two-ended selection: range_start/range_end shade the
+             ;; inclusive span with rounded caps.  The live flow is
+             ;; ordinary EBP — on_day_tap dispatches each tapped day and
+             ;; Emacs rebuilds the range on the next push; here the tap
+             ;; reports through the demo verb.
+             (jetpacs-column
+              (jetpacs-with-attrs
+               (jetpacs-month-grid "2020-01"
+                                   :range-start "2020-01-04"
+                                   :range-end "2020-01-10"
+                                   :on-day-tap (jetpacs-m3-demo
+                                                "Saved range (timestamps)"))
+               :padding 16)
+              (jetpacs-with-attrs
+               (jetpacs-text "Saved range (timestamps): 1578096000000..1578614400000")
+               :align_self "center")
+              :spacing 8 :fill t)))
    ))
 
 (provide 'jetpacs-m3-date-pickers)

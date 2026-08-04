@@ -286,6 +286,16 @@ internal fun RenderMonthGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val selected = node.stringOr("selected")
     val minMonth = node.stringOr("min_month").ifEmpty { null }
     val maxMonth = node.stringOr("max_month").ifEmpty { null }
+    // §17.5 day-level bounds: out-of-range and listed weekdays render
+    // disabled and never dispatch; min_month/max_month keep gating only
+    // the month arrows, as before. The range pair shades the inclusive
+    // span; ISO dates compare as strings.
+    val minDate = node.stringOr("min_date").ifEmpty { null }
+    val maxDate = node.stringOr("max_date").ifEmpty { null }
+    val disabledWeekdays = node.arrOrNull("disabled_weekdays")
+        ?.mapNotNull { it.numOrNull()?.toInt() } ?: emptyList()
+    val rangeStart = node.stringOr("range_start").ifEmpty { null }
+    val rangeEnd = node.stringOr("range_end").ifEmpty { null }
     val onDayTap = node.objOrNull("on_day_tap")
     val onMonthChange = node.objOrNull("on_month_change")
 
@@ -360,11 +370,26 @@ internal fun RenderMonthGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                                 Spacer(Modifier.weight(1f).aspectRatio(1f))
                             } else {
                                 val date = "%s-%02d".format(shownMonth, day)
+                                // 0 = Sunday, matching the contract.
+                                val weekday = (weekStart - 1 + col) % 7
+                                val dayEnabled =
+                                    (minDate == null || date >= minDate) &&
+                                    (maxDate == null || date <= maxDate) &&
+                                    weekday !in disabledWeekdays
+                                val inRange = rangeStart != null && rangeEnd != null &&
+                                    date >= rangeStart && date <= rangeEnd
                                 MonthGridDay(day, date, marks?.objOrNull(date),
                                     date == today, date == selected,
-                                    // §17.5 ISO date
-                                    onDayTap?.let { { ctx.action(it, JsonPrimitive(date)) } },
-                                    Modifier.weight(1f))
+                                    // §17.5 ISO date; a disabled day never
+                                    // dispatches.
+                                    if (dayEnabled) onDayTap?.let {
+                                        { ctx.action(it, JsonPrimitive(date)) }
+                                    } else null,
+                                    Modifier.weight(1f),
+                                    enabled = dayEnabled,
+                                    inRange = inRange,
+                                    rangeCap = inRange &&
+                                        (date == rangeStart || date == rangeEnd))
                             }
                         }
                     }
@@ -378,6 +403,7 @@ internal fun RenderMonthGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 private fun MonthGridDay(
     day: Int, date: String, mark: JsonObject?, isToday: Boolean, isSelected: Boolean,
     onTap: (() -> Unit)?, modifier: Modifier,
+    enabled: Boolean = true, inRange: Boolean = false, rangeCap: Boolean = false,
 ) {
     // C6: `dots` is validated integral BY VALUE upstream (asDoubleOrNull +
     // Math.floor), so "dots": 2.0 is accepted traffic and must still read 2.
@@ -385,10 +411,17 @@ private fun MonthGridDay(
     val dotColor = resolveColor(mark?.stringOr("color")?.takeIf { it.isNotEmpty() })
         ?: MaterialTheme.colorScheme.primary
     val desc = date + if (dots > 0) ", $dots marked" else ""
+    // A range's interior cells fill edge to edge (the span reads as one
+    // band); its two caps and a plain selection stay circles.
+    val filled = isSelected || rangeCap
     Box(
-        modifier.aspectRatio(1f).padding(2.dp).clip(CircleShape).then(
+        modifier.aspectRatio(1f).padding(if (inRange && !rangeCap) 0.dp else 2.dp)
+            .then(if (inRange && !rangeCap)
+                Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
+            else Modifier)
+            .clip(CircleShape).then(
             when {
-                isSelected -> Modifier.background(MaterialTheme.colorScheme.primary)
+                filled -> Modifier.background(MaterialTheme.colorScheme.primary)
                 isToday -> Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
                 else -> Modifier
             }).then(if (onTap != null) Modifier.clickable { onTap() } else Modifier)
@@ -396,12 +429,16 @@ private fun MonthGridDay(
         contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(day.toString(), style = MaterialTheme.typography.bodySmall,
-                color = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                else MaterialTheme.colorScheme.onSurface)
+                color = when {
+                    filled -> MaterialTheme.colorScheme.onPrimary
+                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    inRange -> MaterialTheme.colorScheme.onSecondaryContainer
+                    else -> MaterialTheme.colorScheme.onSurface
+                })
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 repeat(dots) {
                     Box(Modifier.size(4.dp).clip(CircleShape).background(
-                        if (isSelected) MaterialTheme.colorScheme.onPrimary else dotColor))
+                        if (filled) MaterialTheme.colorScheme.onPrimary else dotColor))
                 }
             }
         }

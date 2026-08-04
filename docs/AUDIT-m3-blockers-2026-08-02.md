@@ -1,7 +1,18 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
-> **Ledger state as of 2026-08-04 (third pass) — 235/279 built, 44
-> remain.** G-61/G-62 landed too: date_button carries the
+> **Ledger state as of 2026-08-04 (fourth pass) — 240/279 built, 39
+> remain.** G-12 and G-69 landed on one shared seam: BodyScrollSignal, a
+> CompositionLocal the scaffold provides around its BODY, published by
+> the body's scrolling containers (at-start, reverseLayout included,
+> always derived on the device) and read by `button.expanded "auto"`
+> and `scaffold.fab_hide_on_scroll` — extended-fab complete at 12/12,
+> floating-action-buttons at 5/5. The fab-menu hide-on-scroll seam is
+> deliberately left open there (the wrap cannot see the menu's local
+> expanded state, and hiding an open menu would be worse than not
+> hiding). Still open: G-35, G-39/79, G-42/70, G-44/45, G-63/65, G-66,
+> G-68, G-71/72, togglebuttons Round, the protocol tier, 3 impossible.
+>
+> Earlier (third pass) — 235/279: G-61/G-62 landed too: date_button carries the
 > SelectableDates predicate declaratively (min_date/max_date/
 > disabled_weekdays, 0 = Sunday) and month_grid takes the same
 > day-level bounds plus range_start/range_end, shading the span with

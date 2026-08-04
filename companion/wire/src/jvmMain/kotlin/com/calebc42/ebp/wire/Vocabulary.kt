@@ -23,7 +23,7 @@ val STATEFUL_NODE_TYPES: Set<String> = setOf(
     // `checked` is present — see the `editor` precedent.
     "button", "icon_button")
 
-val ACTION_HOOK_KEYS: Set<String> = setOf("on_tap", "on_change", "on_submit", "on_save", "on_enter", "on_pick", "on_reorder", "on_refresh", "on_long_tap", "on_add_row", "on_add_col", "on_day_tap", "on_month_change", "on_point_tap", "on_trigger", "header_action")
+val ACTION_HOOK_KEYS: Set<String> = setOf("on_tap", "on_change", "on_submit", "on_save", "on_enter", "on_pick", "on_reorder", "on_refresh", "on_sheet_change", "on_long_tap", "on_add_row", "on_add_col", "on_day_tap", "on_month_change", "on_point_tap", "on_trigger", "header_action")
 
 val OFFLINE_POLICIES: Set<String> = setOf("drop", "queue", "wake")
 const val OFFLINE_DEFAULT = "drop"
@@ -67,7 +67,7 @@ val NODE_SCHEMA: Map<String, NodeRow> = mapOf(
     "chart" to NodeRow(setOf("series"), setOf("kind", "height", "y_range", "summary", "on_point_tap", "children")),
     "canvas" to NodeRow(setOf("width", "height", "ops"), setOf("children")),
     "month_grid" to NodeRow(setOf("month"), setOf("marks", "selected", "min_month", "max_month", "on_day_tap", "on_month_change", "children")),
-    "scaffold" to NodeRow(setOf(), setOf("top_bar", "body", "bottom_bar", "fab", "floating_toolbar", "drawer", "snackbar", "snackbar_action", "on_refresh", "top_bar_style", "top_bar_subtitle", "scroll_behavior", "floating_toolbar_orientation", "floating_toolbar_expanded", "floating_toolbar_placement", "floating_toolbar_fab", "floating_toolbar_scroll", "floating_toolbar_exit_direction", "refresh_indicator", "is_refreshing", "snackbar_duration", "snackbar_dismiss", "snackbar_max_lines")),
+    "scaffold" to NodeRow(setOf(), setOf("top_bar", "body", "bottom_bar", "fab", "floating_toolbar", "drawer", "snackbar", "snackbar_action", "on_refresh", "top_bar_style", "top_bar_subtitle", "scroll_behavior", "floating_toolbar_orientation", "floating_toolbar_expanded", "floating_toolbar_placement", "floating_toolbar_fab", "floating_toolbar_scroll", "floating_toolbar_exit_direction", "refresh_indicator", "is_refreshing", "snackbar_duration", "snackbar_dismiss", "snackbar_max_lines", "sheet", "sheet_peek_height", "sheet_state", "on_sheet_change")),
     "tooltip" to NodeRow(setOf("children", "text"), setOf("position", "caret", "caret_width", "caret_height", "rich", "title", "action_label", "on_action", "shown")),
     "split_button" to NodeRow(setOf("on_tap"), setOf("label", "icon", "variant", "size", "trailing_icon", "trailing_label", "trailing_description", "checked", "on_change", "on_trailing_tap", "items", "enabled")),
     "pane_scaffold" to NodeRow(setOf("list", "detail"), setOf("extra", "variant")),
@@ -212,6 +212,9 @@ val FIELD_TYPES: Map<String, String> = mapOf(
     "selection" to "two-number-array",
     "series" to "chart-series-array",
     "shadow_elevation" to "dp",
+    "sheet" to "node",
+    "sheet_peek_height" to "dp",
+    "sheet_state" to "string",
     "shown" to "boolean",
     "single_line" to "boolean",
     "size" to "varies-per-node",

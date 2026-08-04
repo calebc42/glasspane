@@ -255,7 +255,11 @@ class DeviceBridge(
     // The dispatch is PARKED here; `resolveConfirm' releases or drops it.
     data class PendingConfirm(
         val prompt: String, val surface: String, val descriptor: JsonObject,
-        val value: JsonElement?, val injected: JsonObject?, val fields: JsonObject?)
+        val value: JsonElement?, val injected: JsonObject?, val fields: JsonObject?,
+        // §14.1: the object form's optional face — a bare-string confirm
+        // leaves all four null and the host draws what it always drew.
+        val title: String? = null, val icon: String? = null,
+        val confirmLabel: String? = null, val dismissLabel: String? = null)
 
     private val _pendingConfirm = MutableStateFlow<PendingConfirm?>(null)
     val pendingConfirm: StateFlow<PendingConfirm?> get() = _pendingConfirm
@@ -271,12 +275,19 @@ class DeviceBridge(
     private fun parkIfConfirmed(surface: String, descriptor: JsonObject,
                                 value: JsonElement?, injected: JsonObject?,
                                 fields: JsonObject?): Boolean {
-        val prompt = descriptor.stringOr("confirm")
+        // §14.1: `confirm` is a bare string, or the object form
+        // {text, title?, icon?, confirm_label?, dismiss_label?}.
+        val obj = descriptor.objOrNull("confirm")
+        val prompt = obj?.stringOr("text") ?: descriptor.stringOr("confirm")
         if (prompt.isEmpty()) return false
         // One outstanding confirmation: the modal is what the user is
         // looking at, so a second tap cannot reach another descriptor.
-        _pendingConfirm.value =
-            PendingConfirm(prompt, surface, descriptor, value, injected, fields)
+        _pendingConfirm.value = PendingConfirm(
+            prompt, surface, descriptor, value, injected, fields,
+            title = obj?.stringOr("title")?.takeIf { it.isNotEmpty() },
+            icon = obj?.stringOr("icon")?.takeIf { it.isNotEmpty() },
+            confirmLabel = obj?.stringOr("confirm_label")?.takeIf { it.isNotEmpty() },
+            dismissLabel = obj?.stringOr("dismiss_label")?.takeIf { it.isNotEmpty() })
         return true
     }
 

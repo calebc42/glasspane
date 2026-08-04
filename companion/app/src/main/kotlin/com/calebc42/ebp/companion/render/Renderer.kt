@@ -1187,6 +1187,47 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
             }
         }
     }
+    // §17.6 `sheet` + `sheet_peek_height`: the PERSISTENT form. The whole
+    // chrome nests inside BottomSheetScaffold's content so the sheet rests
+    // at its peek over everything and drags between peek and expanded;
+    // nested scroll from a lazy_column inside the sheet comes free. User
+    // drags report through on_sheet_change with the settled state name.
+    val persistentSheet = node.objOrNull("sheet")
+        ?.takeIf { "sheet_peek_height" in node }
+    val sheetWrap: @Composable (@Composable () -> Unit) -> Unit =
+        if (persistentSheet == null) { content -> content() }
+        else { content ->
+            val peek = (safeDp(node.doubleOr("sheet_peek_height", 0.0)) ?: 0f).dp
+            val onSheetChange = node.objOrNull("on_sheet_change")
+            val sheetScaffoldState =
+                androidx.compose.material3.rememberBottomSheetScaffoldState(
+                    bottomSheetState =
+                        androidx.compose.material3.rememberStandardBottomSheetState(
+                            initialValue =
+                                if (node.stringOr("sheet_state") == "expanded")
+                                    androidx.compose.material3.SheetValue.Expanded
+                                else androidx.compose.material3.SheetValue.PartiallyExpanded))
+            val settled = sheetScaffoldState.bottomSheetState.currentValue
+            var reported by remember { mutableStateOf(settled) }
+            LaunchedEffect(settled) {
+                if (settled != reported) {
+                    reported = settled
+                    onSheetChange?.let {
+                        ctx.action(it, JsonPrimitive(when (settled) {
+                            androidx.compose.material3.SheetValue.Expanded -> "expanded"
+                            androidx.compose.material3.SheetValue.Hidden -> "hidden"
+                            else -> "partial"
+                        }))
+                    }
+                }
+            }
+            androidx.compose.material3.BottomSheetScaffold(
+                sheetContent = {
+                    RenderNode(persistentSheet, ctx.child(persistentSheet, 7))
+                },
+                sheetPeekHeight = peek,
+                scaffoldState = sheetScaffoldState) { _ -> content() }
+        }
     if (drawer != null) {
         androidx.compose.material3.ModalNavigationDrawer(
             drawerState = drawerState,
@@ -1195,8 +1236,35 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                     modifier = Modifier.fillMaxWidth(0.75f)) {
                     RenderNode(drawer, ctx.child(drawer, 5))
                 }
-            }) { scaffold() }
-    } else scaffold()
+            }) { sheetWrap { scaffold() } }
+    } else sheetWrap { scaffold() }
+    // §17.6 `sheet`: the bottom-sheet slot. With `sheet_peek_height` absent
+    // this is the MODAL form — an overlay composing after the scaffold, shown
+    // while the AUTHORED sheet_state says so. A user dismissal dispatches
+    // on_sheet_change("hidden") and holds locally until the authored value
+    // CHANGES, so a re-push cannot slam the sheet back open (the tooltip.shown
+    // discipline). The persistent form wraps the body inside RenderScaffold's
+    // Scaffold — see the sheetWrap seam there.
+    val sheet = node.objOrNull("sheet")
+    if (sheet != null && "sheet_peek_height" !in node) {
+        val authored = node.stringOr("sheet_state")
+        val onSheetChange = node.objOrNull("on_sheet_change")
+        var dismissedWhile by remember { mutableStateOf<String?>(null) }
+        val show = authored.isNotEmpty() && authored != "hidden" &&
+            dismissedWhile != authored
+        if (show) {
+            val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+                skipPartiallyExpanded = authored == "expanded")
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = {
+                    dismissedWhile = authored
+                    onSheetChange?.let { ctx.action(it, JsonPrimitive("hidden")) }
+                },
+                sheetState = sheetState) {
+                RenderNode(sheet, ctx.child(sheet, 7))
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------ actions

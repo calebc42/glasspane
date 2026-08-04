@@ -57,7 +57,11 @@ object NodeSupport {
      * the collection being completed. */
     val DIALOG_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider", "button",
-        "text_input", "editor") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES
+        "text_input", "editor",
+        // G-41: `shape` and `elevation` live on exactly one node, and
+        // BasicAlertDialog's whole subject is the CALLER-supplied Surface —
+        // without this a dialog spec could never carry its own container.
+        "surface") + CONTENT_NODE_TYPES + INPUT_NODE_TYPES
 
     val NOTIFICATION_NODE_TYPES: Set<String> = sortedSetOf(
         "text", "row", "column", "box", "spacer", "divider")

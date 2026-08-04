@@ -69,7 +69,7 @@
     ("chart" ("series") ("children" "height" "kind" "on_point_tap" "summary" "y_range"))
     ("canvas" ("height" "ops" "width") ("children"))
     ("month_grid" ("month") ("children" "marks" "max_month" "min_month" "on_day_tap" "on_month_change" "selected"))
-    ("scaffold" () ("body" "bottom_bar" "drawer" "fab" "floating_toolbar" "floating_toolbar_exit_direction" "floating_toolbar_expanded" "floating_toolbar_fab" "floating_toolbar_orientation" "floating_toolbar_placement" "floating_toolbar_scroll" "is_refreshing" "on_refresh" "refresh_indicator" "scroll_behavior" "snackbar" "snackbar_action" "snackbar_dismiss" "snackbar_duration" "snackbar_max_lines" "top_bar" "top_bar_style" "top_bar_subtitle"))
+    ("scaffold" () ("body" "bottom_bar" "drawer" "fab" "floating_toolbar" "floating_toolbar_exit_direction" "floating_toolbar_expanded" "floating_toolbar_fab" "floating_toolbar_orientation" "floating_toolbar_placement" "floating_toolbar_scroll" "is_refreshing" "on_refresh" "on_sheet_change" "refresh_indicator" "scroll_behavior" "sheet" "sheet_peek_height" "sheet_state" "snackbar" "snackbar_action" "snackbar_dismiss" "snackbar_duration" "snackbar_max_lines" "top_bar" "top_bar_style" "top_bar_subtitle"))
     ("tooltip" ("children" "text") ("action_label" "caret" "caret_height" "caret_width" "on_action" "position" "rich" "shown" "title"))
     ("split_button" ("on_tap") ("checked" "enabled" "icon" "items" "label" "on_change" "on_trailing_tap" "size" "trailing_description" "trailing_icon" "trailing_label" "variant"))
     ("pane_scaffold" ("detail" "list") ("extra" "variant"))

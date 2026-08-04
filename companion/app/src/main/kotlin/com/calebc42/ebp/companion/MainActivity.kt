@@ -102,14 +102,28 @@ private fun ConfirmHost(bridge: DeviceBridge) {
     pending?.let { p ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { bridge.resolveConfirm(false) },
+            // §14.1 object form: the face is authored; a bare string keeps
+            // exactly the dialog this host always drew.
+            icon = p.icon?.let {
+                {
+                    androidx.compose.material3.Icon(
+                        com.calebc42.ebp.companion.render.IconMap.get(it),
+                        contentDescription = null)
+                }
+            },
+            title = p.title?.let { { Text(it) } },
             text = { Text(p.prompt) },
             confirmButton = {
                 androidx.compose.material3.TextButton(
-                    onClick = { bridge.resolveConfirm(true) }) { Text("OK") }
+                    onClick = { bridge.resolveConfirm(true) }) {
+                    Text(p.confirmLabel ?: "OK")
+                }
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(
-                    onClick = { bridge.resolveConfirm(false) }) { Text("Cancel") }
+                    onClick = { bridge.resolveConfirm(false) }) {
+                    Text(p.dismissLabel ?: "Cancel")
+                }
             })
     }
 }

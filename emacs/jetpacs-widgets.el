@@ -526,8 +526,31 @@ field-id strings.  Statically invalid input signals an error at build time."
      (t (error "jetpacs-action: unknown offline policy `%s' (SPEC 14.1)" effective)))
     (when dedupe (jetpacs--check-identifier dedupe ":dedupe"))
     (when confirm
-      (unless (and (stringp confirm) (not (string-empty-p confirm)))
-        (error "jetpacs-action: :confirm must be a non-empty string (SPEC 14.1), got %S" confirm)))
+      ;; §14.1: a bare string, or the object form
+      ;; {:text REQ, :title, :icon, :confirm-label, :dismiss-label} — the
+      ;; face of the AlertDialog the Companion parks the dispatch behind.
+      (cond
+       ((stringp confirm)
+        (when (string-empty-p confirm)
+          (error "jetpacs-action: :confirm must be a non-empty string (SPEC 14.1)")))
+       ((and (consp confirm) (keywordp (car confirm)))
+        (let ((text (plist-get confirm :text)))
+          (unless (and (stringp text) (not (string-empty-p text)))
+            (error "jetpacs-action: :confirm object needs a non-empty :text (SPEC 14.1)")))
+        (cl-loop for (key value) on confirm by #'cddr
+                 do (pcase key
+                      (:text)
+                      ((or :title :confirm-label :dismiss-label)
+                       (jetpacs--require-string value (symbol-name key)))
+                      (:icon (jetpacs--check-identifier value ":icon"))
+                      (_ (error "jetpacs-action: unknown :confirm key %S (SPEC 14.1)" key))))
+        (setq confirm (jetpacs--node nil
+                                     :text (plist-get confirm :text)
+                                     :title (plist-get confirm :title)
+                                     :icon (plist-get confirm :icon)
+                                     :confirm_label (plist-get confirm :confirm-label)
+                                     :dismiss_label (plist-get confirm :dismiss-label))))
+       (t (error "jetpacs-action: :confirm must be a string or a plist (SPEC 14.1), got %S" confirm))))
     (when capture-fields (jetpacs--check-capture-fields capture-fields))
     (when args
       (unless (and (consp args) (keywordp (car args)))
@@ -2270,7 +2293,9 @@ a YYYY-MM-DD date; MIN-MONTH/MAX-MONTH `YYYY-MM' bounds (min not after max)."
                                  floating-toolbar-exit-direction
                                  refresh-indicator is-refreshing
                                  snackbar-duration snackbar-dismiss
-                                 snackbar-max-lines)
+                                 snackbar-max-lines
+                                 sheet sheet-peek-height sheet-state
+                                 on-sheet-change)
   "A scaffold (application chrome) node (SPEC §17.6).
 TOP-BAR/BODY/BOTTOM-BAR/FAB/FLOATING-TOOLBAR/DRAWER are Nodes; SNACKBAR a
 string; SNACKBAR-ACTION a `jetpacs-snackbar-action'; ON-REFRESH a descriptor.
@@ -2282,6 +2307,14 @@ need ON-REFRESH.  SNACKBAR-DURATION (short, long, indefinite) and
 SNACKBAR-DISMISS (the trailing X, implied by indefinite) shape the
 snackbar's stay; SNACKBAR-MAX-LINES clamps its visible message while a
 screen reader still hears the whole string.
+
+SHEET is the bottom-sheet slot, a Node.  With SHEET-PEEK-HEIGHT it is
+the PERSISTENT BottomSheetScaffold form, resting at its peek over the
+chrome; without, it is MODAL, shown while SHEET-STATE (hidden, partial,
+expanded) says so.  SHEET-STATE is authored presentation state exactly
+like a tooltip's :shown — a user dismissal dispatches ON-SHEET-CHANGE
+with the new state and holds locally until the authored value changes,
+so a re-push cannot slam the sheet back open under the finger.
 
 TOP-BAR-STYLE asks for a REAL M3 TopAppBar around TOP-BAR — small,
 center(-aligned), medium or large — instead of the plain status-bar-padded
@@ -2326,6 +2359,20 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
     (jetpacs--check-bool snackbar-dismiss ":snackbar-dismiss"))
   (when snackbar-max-lines
     (jetpacs--check-integer snackbar-max-lines ":snackbar-max-lines" 1 nil))
+  (when (and sheet (not (jetpacs--root-node-p sheet)))
+    (error "jetpacs-scaffold: :sheet must be a node, got %S" sheet))
+  (when sheet-peek-height
+    (unless sheet
+      (error "jetpacs-scaffold: :sheet-peek-height styles a sheet it does not author (SPEC 17.6)"))
+    (jetpacs--check-number sheet-peek-height ":sheet-peek-height" 1 nil))
+  (when sheet-state
+    (unless sheet
+      (error "jetpacs-scaffold: :sheet-state styles a sheet it does not author (SPEC 17.6)"))
+    (setq sheet-state (jetpacs--check-enum sheet-state
+                                           '("hidden" "partial" "expanded")
+                                           ":sheet-state")))
+  (when on-sheet-change
+    (jetpacs--check-descriptor on-sheet-change ":on-sheet-change"))
   (when top-bar-style
     (setq top-bar-style (jetpacs--check-enum top-bar-style
                                              jetpacs--top-bar-styles
@@ -2378,6 +2425,8 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                  :on_refresh on-refresh
                  :refresh_indicator refresh-indicator
                  :is_refreshing is-refreshing
+                 :sheet sheet :sheet_peek_height sheet-peek-height
+                 :sheet_state sheet-state :on_sheet_change on-sheet-change
                  :top_bar_style top-bar-style
                  :top_bar_subtitle top-bar-subtitle
                  :scroll_behavior scroll-behavior))
@@ -2477,10 +2526,12 @@ The AUTHORITATIVE set for a connection is its welcome `surface_profiles'.")
 
 (defconst jetpacs-dialog-node-types
   (append '("text" "row" "column" "box" "spacer" "divider" "button" "text_input"
-            "editor")
+            "editor" "surface")
           jetpacs-content-node-types jetpacs-input-node-types)
-  "The reference companion's advertised `dialog' node_types (31; no
-scaffold/layout/viz).
+  "The reference companion's advertised `dialog' node_types (34).
+`surface' is in the set because `shape' and `elevation' live on exactly
+one node and BasicAlertDialog's whole subject is the CALLER-supplied
+Surface — without it a dialog spec could never carry its own container.
 `editor' is in the set because JC-4b added it to the Companion's
 `DIALOG_NODE_TYPES' (NodeSupport.kt) so a dialog could host the capf
 picker.  This constant is the REFERENCE union used by

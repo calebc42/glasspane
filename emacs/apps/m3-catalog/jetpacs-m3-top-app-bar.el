@@ -15,13 +15,16 @@
 ;; 75.
 ;;
 ;; EVERY BAR HERE IS A REAL M3 TopAppBar.  `:top-bar-style' (small,
-;; center, medium, large) makes the Example screen's scaffold render an
-;; actual TopAppBar / CenterAlignedTopAppBar / MediumTopAppBar /
-;; LargeTopAppBar instead of the plain status-bar-padded Row it draws
-;; without one, `:top-bar-subtitle' is the second line M3 puts under the
-;; title, and `:scroll-behavior' (pinned, enter_always,
-;; exit_until_collapsed) also puts Modifier.nestedScroll on the Scaffold,
-;; so the bar genuinely recolors, hides or folds as the body scrolls.
+;; center, medium, large, medium_flexible, large_flexible, two_rows)
+;; makes the Example screen's scaffold render an actual TopAppBar /
+;; CenterAlignedTopAppBar / MediumTopAppBar / LargeTopAppBar /
+;; MediumFlexibleTopAppBar / LargeFlexibleTopAppBar / TwoRowsTopAppBar
+;; instead of the plain status-bar-padded Row it draws without one,
+;; `:top-bar-subtitle' is the second line M3 puts under the title (the
+;; flexible styles center both under `top_bar_centered'), and
+;; `:scroll-behavior' (pinned, enter_always, exit_until_collapsed) also
+;; puts Modifier.nestedScroll on the Scaffold, so the bar genuinely
+;; recolors, hides or folds as the body scrolls.
 ;;
 ;; What that bar does NOT have is an actions slot, and its navigationIcon
 ;; is the Companion's own drawer hamburger, which the Example screen has
@@ -35,7 +38,7 @@
 ;; `jetpacs-m3-top-app-bar--centered-bar' is a full-width `box' with the
 ;; icon row behind a centered title.
 ;;
-;; TRIAGE.  Ten of the fifteen are recreated: the four Simple bars
+;; TRIAGE.  Thirteen of the fifteen are recreated: the four Simple bars
 ;; (title, subtitle, centered, centered with subtitle), the four whose
 ;; subject is a scroll behavior the wire spells exactly -- PinnedTopAppBar
 ;; (pinned), EnterAlwaysTopAppBar (enter_always) and the Medium and Large
@@ -43,7 +46,13 @@
 ;; styles) -- and SimpleTopAppBarWithAdaptiveActions on the `app_bar_row'
 ;; node, which folds the actions that do not fit into the more_vert menu
 ;; at measure time (upstream's ADDITIONAL window-class cap stays a stated
-;; seam: no wire message reports a size class to cap by).
+;; seam: no wire message reports a size class to cap by); the two
+;; Flexible bars on the flexible styles, subtitled and centered; and
+;; CustomTwoRowsTopAppBar on the two_rows style, whose title slot takes
+;; the expanded flag on the DEVICE -- `top_bar' while folded,
+;; `top_bar_expanded' while open, 64dp/156dp authored heights -- so the
+;; string swap upstream demonstrates crosses the wire as two nodes and
+;; no collapse fraction ever needs a reporting channel.
 ;;
 ;; What remains is not layout and not a bare behavior (the reversed-grid
 ;; bullet below records a recreation's stated seams, not a gap):
@@ -57,12 +66,6 @@
 ;;   with its two seams stated on the example: the bounded height a lazy
 ;;   container needs in this body, and the bar recolor tracking
 ;;   nested-scroll deltas rather than the grid's own scrollableState.
-;; * The two Flexible bars want a subtitle and a centered title on a
-;;   medium/large bar: only the SMALL style takes `top_bar_subtitle' and
-;;   no style carries a title alignment -- the asymmetry is AppBar.kt's
-;;   own.
-;; * CustomTwoRowsTopAppBar has no node at all, and no collapse fraction
-;;   is reported back to Emacs to author its title swap against.
 ;;
 ;; Upstream wraps every IconButton in a TooltipBox with a PlainTooltip
 ;; repeating its label, anchored TooltipAnchorPosition.Above.  That is the
@@ -79,10 +82,6 @@
 (defconst jetpacs-m3-top-app-bar--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/AppBarSamples.kt"
   "Upstream TopAppBarExampleSourceUrl.")
-
-(defconst jetpacs-m3-top-app-bar--flexible-note
-  "The centered title and the subtitle are already recreated by the two Simple samples; what is left is the flexible bar folding from its expanded height down to one row while a centered subtitle stays under the centered title.  The wire's bar styles do not reach that: only the small style takes top_bar_subtitle -- \"medium\" and \"large\" ignore it, which is the asymmetry AppBar.kt itself has -- and no style carries a title-alignment member, so a medium or large bar draws a plain start-aligned title and no second line.  The catalog harness cannot ask an example for a bar style in the first place."
-  "Why both ExitUntilCollapsed...Flexible... samples are unsupported.")
 
 (defconst jetpacs-m3-top-app-bar--item-count 76
   "How many rows upstream scrolls under every bar: (0..75).")
@@ -253,6 +252,33 @@ Its \"Subtitle\" is `:top-bar-subtitle' on the example, not a node here."
   (jetpacs-m3-top-app-bar--bar back "Large TopAppBar"
                                (jetpacs-m3-top-app-bar--favorite)))
 
+(defun jetpacs-m3-top-app-bar--two-rows (back)
+  "CustomTwoRowsTopAppBar\='s COLLAPSED row: the title pair at 64dp.
+The two_rows bar draws this node while folded and swaps in
+`jetpacs-m3-top-app-bar--two-rows-expanded' while expanded -- the
+string swap upstream demonstrates, as two authored nodes."
+  (jetpacs-row
+   (jetpacs-m3-back-button back)
+   (jetpacs-with-attrs
+    (jetpacs-column
+     (jetpacs-text "Collapsed TopAppBar" :style "title" :max-lines 1)
+     (jetpacs-text "Collapsed Subtitle" :style "caption"
+                   :color "on_surface_variant"))
+    :weight 1)
+   :align "center" :spacing 4 :fill t))
+
+(defconst jetpacs-m3-top-app-bar--two-rows-expanded
+  (jetpacs-column
+   (jetpacs-text "Expanded TopAppBar" :style "title" :max-lines 1)
+   (jetpacs-with-attrs
+    (jetpacs-text "Expanded Subtitle" :style "caption"
+                  :color "on_surface_variant")
+    :pad (list :bottom 24)))
+  "CustomTwoRowsTopAppBar\='s EXPANDED rows: upstream\='s title lambda over
+its subtitle lambda, the 24dp bottom padding included.  No way back here
+is deliberate -- the collapsed node carries it, and folding the bar is
+one scroll away.")
+
 (jetpacs-m3-defcomponent "top-app-bar"
   :name "Top app bar"
   :description
@@ -368,7 +394,12 @@ Its \"Subtitle\" is `:top-bar-subtitle' on the example, not a node here."
     "ExitUntilCollapsedCenterAlignedMediumFlexibleTopAppBar with subtitle"
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
-    :unsupported jetpacs-m3-top-app-bar--flexible-note)
+    :top-bar #'jetpacs-m3-top-app-bar--medium
+    :top-bar-style "medium_flexible"
+    :top-bar-subtitle "Subtitle"
+    :scroll-behavior "exit_until_collapsed"
+    :scaffold (list :top-bar-centered t)
+    :build #'jetpacs-m3-top-app-bar--content)
    (jetpacs-m3-example
     "ExitUntilCollapsedLargeTopAppBar"
     "Top app bar examples"
@@ -382,14 +413,24 @@ Its \"Subtitle\" is `:top-bar-subtitle' on the example, not a node here."
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :expressive t
-    :unsupported jetpacs-m3-top-app-bar--flexible-note)
+    :top-bar #'jetpacs-m3-top-app-bar--large
+    :top-bar-style "large_flexible"
+    :top-bar-subtitle "Subtitle"
+    :scroll-behavior "exit_until_collapsed"
+    :scaffold (list :top-bar-centered t)
+    :build #'jetpacs-m3-top-app-bar--content)
    (jetpacs-m3-example
     "CustomTwoRowsTopAppBar"
     "Top app bar examples"
     :source jetpacs-m3-top-app-bar--source
     :expressive t
-    :unsupported
-    "There is no two-rows top-bar node: TwoRowsTopAppBar takes a collapsedHeight and an expandedHeight and hands its title and subtitle an expanded flag, swapping \"Expanded TopAppBar\" for \"Collapsed TopAppBar\" as it folds, and no wire member reports a collapse fraction back to Emacs to author that swap against.")
+    :top-bar #'jetpacs-m3-top-app-bar--two-rows
+    :top-bar-style "two_rows"
+    :scroll-behavior "exit_until_collapsed"
+    :scaffold (list :top-bar-expanded jetpacs-m3-top-app-bar--two-rows-expanded
+                    :top-bar-collapsed-height 64
+                    :top-bar-expanded-height 156)
+    :build #'jetpacs-m3-top-app-bar--content)
    ))
 
 (provide 'jetpacs-m3-top-app-bar)

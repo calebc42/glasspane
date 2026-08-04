@@ -13,6 +13,52 @@ import java.util.Base64
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
+/**
+ * An opaque HMAC capability for one pairing credential.
+ *
+ * A production implementation may close over a non-exportable
+ * [javax.crypto.SecretKey] and initialize a fresh [Mac] for every invocation;
+ * neither the engine nor this contract needs the key's encoded bytes.
+ */
+fun interface CompanionHmacKeyHandle {
+    fun hmacSha256(message: ByteArray): ByteArray
+}
+
+/** The deliberately non-null result of resolving a pairing credential. */
+sealed interface CompanionProofKeyResult {
+    /** A known pairing. The key remains behind an operation-only handle. */
+    data class Known(val key: CompanionHmacKeyHandle) : CompanionProofKeyResult
+
+    /**
+     * An unknown pairing. The engine asks the provider for its fixed dummy
+     * handle, so this result still takes the same proof-computation path and
+     * cryptographic provider as [Known].
+     */
+    data class Unknown(val dummyKey: CompanionHmacKeyHandle) : CompanionProofKeyResult
+}
+
+/**
+ * Resolves a pairing ID to an opaque proof key capability.
+ *
+ * Android hosts can implement this over AndroidKeyStore without exporting
+ * raw key bytes. [CompanionProofKeyResult.Unknown] requires a fixed dummy
+ * credential from that same provider, so the engine cannot accidentally fall
+ * back to a distinguishable software-only path.
+ */
+fun interface CompanionProofProvider {
+    fun resolve(pairingId: String): CompanionProofKeyResult
+}
+
+/** Source-compatible adapter for the original in-memory token map. */
+class InMemoryCompanionProofProvider(
+    private val pairings: Map<String, ByteArray>,
+) : CompanionProofProvider {
+    override fun resolve(pairingId: String): CompanionProofKeyResult =
+        pairings[pairingId]?.let { token ->
+            CompanionProofKeyResult.Known(EbpAuth.inMemoryKeyHandle(token))
+        } ?: CompanionProofKeyResult.Unknown(EbpAuth.fixedDummyKeyHandle())
+}
+
 object EbpAuth {
     private val NONCE = Regex("[0-9a-f]{32}")
     private val PROOF = Regex("[0-9a-f]{64}")
@@ -41,12 +87,12 @@ object EbpAuth {
     /** SPEC 9.3 client proof over the exact ASCII concatenation. */
     fun clientProof(token: ByteArray, pairingId: String,
                     clientNonce: String, serverNonce: String): String =
-        hmacSha256(token, "EBP/2 client:$pairingId:$clientNonce:$serverNonce").toHex()
+        hmacSha256(token, clientProofMessage(pairingId, clientNonce, serverNonce)).toHex()
 
     /** SPEC 9.3 companion proof; note the swapped nonce order. */
     fun serverProof(token: ByteArray, pairingId: String,
                     clientNonce: String, serverNonce: String): String =
-        hmacSha256(token, "EBP/2 companion:$pairingId:$serverNonce:$clientNonce").toHex()
+        hmacSha256(token, serverProofMessage(pairingId, clientNonce, serverNonce)).toHex()
 
     /**
      * SPEC 9.2: the fixed dummy key the unknown-pairing-ID path verifies
@@ -55,6 +101,13 @@ object EbpAuth {
      * attacker can produce matches against it.
      */
     val DUMMY_PROOF_KEY: ByteArray = ByteArray(16)
+
+    // Deliberately independent of the publicly mutable compatibility array.
+    private val DEFAULT_DUMMY_PROOF_KEY_HANDLE: CompanionHmacKeyHandle =
+        inMemoryKeyHandle(ByteArray(16))
+
+    internal fun fixedDummyKeyHandle(): CompanionHmacKeyHandle =
+        DEFAULT_DUMMY_PROOF_KEY_HANDLE
 
     /**
      * SPEC 9.3: compare two fixed-length ASCII identifiers without leaking
@@ -82,6 +135,44 @@ object EbpAuth {
             serverProof(token, pairingId, clientNonce, serverNonce)
                 .toByteArray(Charsets.US_ASCII))
 
+    /**
+     * Engine-side proof verification over an opaque key capability. The
+     * fixed-length presented and expected values are compared with
+     * [MessageDigest.isEqual], just like the raw-token compatibility API.
+     */
+    internal fun verifyClientProof(
+        proof: String,
+        key: CompanionHmacKeyHandle,
+        pairingId: String,
+        clientNonce: String,
+        serverNonce: String,
+    ): Boolean {
+        val expected = key.hmacSha256(
+            clientProofMessage(pairingId, clientNonce, serverNonce)
+                .toByteArray(Charsets.US_ASCII),
+        )
+        require(expected.size == 32) { "HMAC-SHA256 provider returned ${expected.size} bytes" }
+        return isValidProof(proof) && MessageDigest.isEqual(
+            proof.toByteArray(Charsets.US_ASCII),
+            expected.toHex().toByteArray(Charsets.US_ASCII),
+        )
+    }
+
+    /** Server proof is requested only after the client proof was accepted. */
+    internal fun serverProof(
+        key: CompanionHmacKeyHandle,
+        pairingId: String,
+        clientNonce: String,
+        serverNonce: String,
+    ): String {
+        val proof = key.hmacSha256(
+            serverProofMessage(pairingId, clientNonce, serverNonce)
+                .toByteArray(Charsets.US_ASCII),
+        )
+        require(proof.size == 32) { "HMAC-SHA256 provider returned ${proof.size} bytes" }
+        return proof.toHex()
+    }
+
     /** SPEC 9.2 `session.hello` params (the Companion validates these). */
     fun helloParams(clientName: String, clientVersion: String, pairingId: String,
                     clientNonce: String, wants: List<String>): JsonObject =
@@ -106,10 +197,30 @@ object EbpAuth {
             put("client_proof", clientProof(token, pairingId, clientNonce, serverNonce))
         }
 
+    internal fun inMemoryKeyHandle(key: ByteArray): CompanionHmacKeyHandle {
+        val ownedKey = key.copyOf()
+        return CompanionHmacKeyHandle { message -> hmacSha256(ownedKey, message) }
+    }
+
+    private fun clientProofMessage(
+        pairingId: String,
+        clientNonce: String,
+        serverNonce: String,
+    ): String = "EBP/2 client:$pairingId:$clientNonce:$serverNonce"
+
+    private fun serverProofMessage(
+        pairingId: String,
+        clientNonce: String,
+        serverNonce: String,
+    ): String = "EBP/2 companion:$pairingId:$serverNonce:$clientNonce"
+
     private fun hmacSha256(key: ByteArray, message: String): ByteArray =
+        hmacSha256(key, message.toByteArray(Charsets.US_ASCII))
+
+    private fun hmacSha256(key: ByteArray, message: ByteArray): ByteArray =
         Mac.getInstance("HmacSHA256").run {
             init(SecretKeySpec(key, "HmacSHA256"))
-            doFinal(message.toByteArray(Charsets.US_ASCII))
+            doFinal(message)
         }
 
     private fun ByteArray.toHex(): String =

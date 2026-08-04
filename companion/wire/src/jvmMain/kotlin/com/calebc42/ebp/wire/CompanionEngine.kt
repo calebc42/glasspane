@@ -39,6 +39,12 @@ data class CompanionConfig(
     val sensitiveSubstitutionApproved: Boolean = false,
     /** Nonce source, injectable for tests. */
     val nonceSource: () -> String = EbpAuth::generateNonce,
+    /**
+     * Operation-only authentication seam. The default preserves the original
+     * in-memory pairing map API; Android hosts can instead resolve
+     * non-exportable AndroidKeyStore-backed HMAC handles.
+     */
+    val proofProvider: CompanionProofProvider? = null,
 )
 
 class CompanionEngine(
@@ -75,6 +81,9 @@ class CompanionEngine(
         capabilityHandler = config.capabilityHandler),
     private val sink: (ByteArray) -> Unit,
 ) : LiveSession {
+    private val proofProvider: CompanionProofProvider =
+        config.proofProvider ?: InMemoryCompanionProofProvider(config.pairings)
+
     var state: SessionState = SessionState.CONNECTED
         private set
     var closeReason: String? = null
@@ -2238,8 +2247,11 @@ class CompanionEngine(
         // Short-circuiting on `token != null` skipped the HMAC entirely and
         // separated the two branches by exactly one HMAC of timing, on a
         // loopback transport where the attacker's clock is the local one.
-        val token = config.pairings[pendingPairingId]
-        val keyed = token ?: EbpAuth.DUMMY_PROOF_KEY
+        val proofKey = proofProvider.resolve(pendingPairingId!!)
+        val keyed = when (proofKey) {
+            is CompanionProofKeyResult.Known -> proofKey.key
+            is CompanionProofKeyResult.Unknown -> proofKey.dummyKey
+        }
         val proofOk = EbpAuth.verifyClientProof(proof, keyed, pid, cn, sn)
         // Fixed-length hex identifiers compare without early exit too (§9.3
         // applies the same rule to this path); `&` not `&&` so no branch is
@@ -2247,12 +2259,18 @@ class CompanionEngine(
         val ok = EbpAuth.constantTimeEquals(pid, pendingPairingId) and
             EbpAuth.constantTimeEquals(cn, pendingClientNonce) and
             EbpAuth.constantTimeEquals(sn, pendingServerNonce) and
-            (token != null) and proofOk
+            (proofKey is CompanionProofKeyResult.Known) and proofOk
         if (!ok) {
             respondError(id, 1203, "Authentication failed", "auth-failed")
             return close("auth failed")
         }
-        respondResult(id, buildWelcome(token!!))
+        // The second HMAC is unreachable until both the client proof and the
+        // challenged-session identifiers have verified. A KeyStore-backed
+        // handle therefore never signs a server proof for a rejected client.
+        check(proofKey is CompanionProofKeyResult.Known)
+        val serverProof = EbpAuth.serverProof(
+            proofKey.key, pendingPairingId!!, pendingClientNonce!!, pendingServerNonce!!)
+        respondResult(id, buildWelcome(serverProof))
         state = sessionStep(state, SessionEvent.AUTH_VERIFIED) ?: state
     }
 
@@ -2261,12 +2279,11 @@ class CompanionEngine(
     private var lastWants: List<String> = emptyList()
     private var sessionBoundarySeq = Long.MAX_VALUE
 
-    private fun buildWelcome(token: ByteArray): JsonObject {
+    private fun buildWelcome(serverProof: String): JsonObject {
         granted = lastWants.filter { it in config.supportedCapabilities }
         sessionBoundarySeq = queue.boundarySeq()
         return buildJsonObject {
-            put("server_proof", EbpAuth.serverProof(
-                token, pendingPairingId!!, pendingClientNonce!!, pendingServerNonce!!))
+            put("server_proof", serverProof)
             put("protocol", 2)
             put("server", buildJsonObject {
                 put("name", config.serverName)

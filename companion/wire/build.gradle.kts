@@ -13,17 +13,21 @@ kotlin {
     jvm()
 
     sourceSets {
-        jvmMain.dependencies {
+        commonMain.dependencies {
+            api(projects.ebpKmp)
             // RF-2b: `api`, not `implementation` — JsonElement appears in
             // :wire's public signatures consumed by :app. Tree API only; no
             // serialization compiler plugin, zero @Serializable.
             api(libs.kotlinx.serialization.json)
+        }
+        jvmMain.dependencies {
             // org.json left this module at C4 (jvmMain) and C5 (jvmTest): with
             // the jar off both classpaths, a stray re-imported org.json symbol
             // is a compile error, not a silent regression.
         }
         jvmTest.dependencies {
             implementation(libs.junit)
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }

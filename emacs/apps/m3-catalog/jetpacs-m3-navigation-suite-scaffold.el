@@ -24,31 +24,29 @@
 ;; own upstream description says the sample "is better experienced in a
 ;; resizable emulator or foldable device".
 ;;
-;; Neither half of that is on the wire.  `jetpacs-m3-adaptive' no longer
-;; stands on the same floor -- the `pane_scaffold' node adapts its panes
-;; by window size, and two of its samples build on that -- but a pane
-;; scaffold is BODY content, and what this component needs is a
-;; navigation container in the CHROME.  The `scaffold' node (SPEC §17.6)
-;; has exactly top_bar, body, bottom_bar, fab, floating_toolbar, drawer,
-;; snackbar, snackbar_action, on_refresh and their styling members --
-;; fixed chrome slots, with
-;; no navigation-suite slot, no suite type and no rail.  And nothing
-;; ever tells Emacs the window size class: a Node tree is built with no
-;; idea how wide the window it lands in is, so there is nothing for a
-;; suite type to be computed FROM either.
+;; Both halves are on the wire now, and the recreation is the honest
+;; shape of the thing: the CHOICE lives in Emacs.  SPEC 20.1.1's
+;; `window.changed' reports {width_dp, height_dp, width_class,
+;; height_class} — sent once after auth, again on rotation/fold/resize,
+;; and mirrored in the welcome so the FIRST snapshot is already right —
+;; and the `scaffold' node grew a `rail' slot on the start edge beside
+;; the body.  Emacs reads the class, fills `bottom_bar' or `rail' from
+;; the same three items, and re-pushes when the geometry changes (the
+;; core's `jetpacs-m3--on-window-changed' hook), which is precisely the
+;; swap NavigationSuiteScaffold performs on-device.  The rail slot
+;; hosts the ordinary `navigation_rail' node, so the collapsed, the
+;; expanded and the items-centered forms are its own variant, expanded
+;; and arrangement members — no suite type ever crosses the wire.
 ;;
-;; A row of three favorite icon buttons in this screen's `:bottom-bar'
-;; slot would render, and would be exactly the lookalike the fidelity
-;; rule forbids: it is what `jetpacs-m3-navigation-bar' already is, it
-;; can never become the rail, and it would demonstrate none of the
-;; adapting that is the entire subject here.  Two for two unsupported.
+;; Live state: the shared selectedIndex rides the fn verb (tapping
+;; Artists re-authors all three items in whichever container is up),
+;; and the Hide-navigation toggle is a sample flag that simply omits
+;; both slots.  Stated seams: upstream\='s ShortNavigationBarMedium is
+;; recreated as the composed bottom bar (no navigation_bar node
+;; exists, and its "medium" tallness is not carried), and the bar\='s
+;; items swap favorite/favorite_border by hand where a real
+;; NavigationBarItem would animate.
 ;;
-;; The samples share a second miss past that floor.  Both hold a
-;; `rememberNavigationSuiteScaffoldState' and offer a "Hide/show
-;; navigation component" button calling `state.toggle()'; the scaffold
-;; node has no visibility member for any of its slots, so a slot is
-;; either authored into the tree or it is not there.
-
 ;;; Code:
 
 (require 'jetpacs-widgets)
@@ -57,6 +55,89 @@
 (defconst jetpacs-m3-navigation-suite-scaffold--source
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3-adaptive-navigation-suitesamples/src/main/java/androidx/compose/material3-adaptive-navigation-suite/samples/NavigationSuiteScaffoldSamples.kt"
   "Upstream NavigationSuiteScaffoldExampleSourceUrl.")
+
+(defconst jetpacs-m3-nav-suite--items '("Songs" "Artists" "Playlists")
+  "Upstream's three destinations; every item wears the favorite heart.")
+
+(defvar jetpacs-m3-nav-suite--selected 0
+  "The shared selectedIndex, upstream verbatim.")
+
+(dotimes (i 3)
+  (puthash (format "nav-suite-select-%d" i)
+           (let ((i i))
+             (lambda () (setq jetpacs-m3-nav-suite--selected i)))
+           jetpacs-m3-fn-registry))
+
+(defun jetpacs-m3-nav-suite--rail (expanded arrangement)
+  "The rail form of the three destinations, selection live on the fn verb."
+  (jetpacs-navigation-rail
+   (cl-loop for label in jetpacs-m3-nav-suite--items
+            for i from 0
+            collect (jetpacs-rail-item
+                     label "favorite"
+                     (jetpacs-m3-fn-action (format "nav-suite-select-%d" i))
+                     :selected (if (= i jetpacs-m3-nav-suite--selected)
+                                   t :json-false)))
+   :variant "wide"
+   :expanded (if expanded t :json-false)
+   :arrangement arrangement))
+
+(defun jetpacs-m3-nav-suite--bar ()
+  "The bottom-bar form: three tappable icon+label columns, evenly spread."
+  (apply #'jetpacs-row
+         (append
+          (cl-loop
+           for label in jetpacs-m3-nav-suite--items
+           for i from 0
+           collect (jetpacs-box
+                    (jetpacs-column
+                     (jetpacs-icon (if (= i jetpacs-m3-nav-suite--selected)
+                                       "favorite" "favorite_border")
+                                   :color (if (= i jetpacs-m3-nav-suite--selected)
+                                              "primary" "on_surface_variant"))
+                     (jetpacs-text label :style "caption")
+                     :align "center" :spacing 2)
+                    :on-tap (jetpacs-m3-fn-action
+                             (format "nav-suite-select-%d" i))))
+          (list :arrange "space_evenly" :align "center" :fill t))))
+
+(defun jetpacs-m3-nav-suite--body (type)
+  "Upstream's body: the current suite TYPE, visibility, and the toggle."
+  (lambda ()
+    (jetpacs-column
+     (jetpacs-text (format "Current NavigationSuiteType: %s" type))
+     (jetpacs-text (format "Navigation visible: %s"
+                           (if (jetpacs-m3-flag "nav-suite-hidden") "no" "yes")))
+     (jetpacs-button (if (jetpacs-m3-flag "nav-suite-hidden")
+                         "Show navigation" "Hide navigation")
+                     (jetpacs-m3-flag-action "nav-suite-hidden"))
+     :align "center" :spacing 12)))
+
+(defun jetpacs-m3-nav-suite--scaffold (type)
+  "The suite slots for TYPE, honoring the hide toggle.
+bar -> the bottom_bar slot; rail/rail_expanded -> the rail slot; the
+centered variant carries arrangement center down the rail."
+  (unless (jetpacs-m3-flag "nav-suite-hidden")
+    (pcase type
+      ("bar" (list :bottom-bar (jetpacs-m3-nav-suite--bar)))
+      ("rail" (list :rail (jetpacs-m3-nav-suite--rail nil "start")))
+      ("rail_expanded"
+       (list :rail (jetpacs-m3-nav-suite--rail t "center")))
+      ("rail_centered"
+       (list :rail (jetpacs-m3-nav-suite--rail nil "center"))))))
+
+(defun jetpacs-m3-nav-suite--auto-type ()
+  "NavigationSuiteScaffoldDefaults.navigationSuiteType, on our classes:
+compact width is the navigation bar, anything wider the collapsed rail."
+  (if (equal (jetpacs-m3-window-class :width) "compact") "bar" "rail"))
+
+(defun jetpacs-m3-nav-suite--custom-type ()
+  "The custom sample's own branching, quoted from upstream: a compact
+HEIGHT takes the medium bar, an expanded width the expanded rail, and
+compact/medium widths the collapsed rail — items centered down it."
+  (cond ((equal (jetpacs-m3-window-class :height) "compact") "bar")
+        ((equal (jetpacs-m3-window-class :width) "expanded") "rail_expanded")
+        (t "rail_centered")))
 
 (jetpacs-m3-defcomponent "navigation-suite-scaffold"
   :name "Navigation Suite Scaffold"
@@ -72,15 +153,23 @@
     "Navigation suite scaffold examples"
     :source jetpacs-m3-navigation-suite-scaffold--source
     :expressive t
-    :unsupported
-    "There is no navigation-suite node and no window-size-class message: the scaffold node's slots are the fixed top_bar, body, bottom_bar, fab, floating_toolbar and drawer, with no suite type and no navigation rail, and nothing on the wire ever tells Emacs how wide the window is, so the automatic swap between a bottom navigation bar and a wide navigation rail that this sample exists to demonstrate cannot be asked for.")
+    :build (lambda ()
+             (funcall (jetpacs-m3-nav-suite--body
+                       (jetpacs-m3-nav-suite--auto-type))))
+    :scaffold (lambda ()
+                (jetpacs-m3-nav-suite--scaffold
+                 (jetpacs-m3-nav-suite--auto-type))))
    (jetpacs-m3-example
     "NavigationSuiteScaffoldCustomConfigSample"
     "Navigation suite scaffold examples"
     :source jetpacs-m3-navigation-suite-scaffold--source
     :expressive t
-    :unsupported
-    "Neither half is on the wire: no message carries WindowWidthSizeClass or WindowHeightSizeClass to Emacs for this sample to branch on, and there is no navigation-suite node whose type it could then set to WideNavigationRailCollapsed, ShortNavigationBarMedium or WideNavigationRailExpanded, nor any member for the navigationItemVerticalArrangement that centers the items down the rail.")
+    :build (lambda ()
+             (funcall (jetpacs-m3-nav-suite--body
+                       (jetpacs-m3-nav-suite--custom-type))))
+    :scaffold (lambda ()
+                (jetpacs-m3-nav-suite--scaffold
+                 (jetpacs-m3-nav-suite--custom-type))))
    ))
 
 (provide 'jetpacs-m3-navigation-suite-scaffold)

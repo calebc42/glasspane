@@ -37,17 +37,25 @@
 ;; The third — MultiSelect… — wants exactly five independent booleans,
 ;; which is precisely what :checked carries, so the state model does
 ;; survive.  What does not survive is every way the user would SEE it: a
-;; checked `button' draws exactly like an unchecked one, `button' has no
-;; :checked-icon member (only `icon_button' does), and IconMap resolves
-;; every wire icon name through `Icons.Outlined.<Name>', so the
-;; Outlined-to-Filled glyph swap all three samples drive from checked
-;; has no filled name to swap to.  Five buttons that pop a toast and
-;; never change appearance demonstrate neither the multi-select nor the
-;; group — a lookalike, not a recreation.
+;; checked `button' used to draw exactly like an unchecked one; now the
+;; connected family is on the wire and all three connected samples are
+;; live.  `shape_role' (leading/middle/trailing across, top/bottom down)
+;; selects the M3 connected shape set with its caps and its press and
+;; checked morphs; `checked_icon' with the `_filled' icon-name suffix
+;; carries the Outlined-at-rest/Filled-while-checked glyph swap; and
+;; `column.overlap' is the -6dp interlock the vertical group needs,
+;; SPEC 16.5 keeping `spacing' itself non-negative.
 ;;
-;; So the three connected examples still say what is missing; their
-;; reasons were rewritten once already, because "no wire member holds
-;; the checked state" stopped being true when button gained :checked.
+;; The two selection models split exactly along the state's OWNER.
+;; Multi-select is five independent device-held booleans -- authored
+;; `:checked :json-false' once, flipped on the device, upstream's
+;; mutableStateListOf.  Single-select is upstream's ONE selectedIndex,
+;; and one value fanned across five nodes can only live in Emacs: each
+;; toggle authors `:checked' FROM module state and dispatches the fn
+;; verb, whose mutation sets the index and re-pushes -- checking Work
+;; really does clear the other four, one gesture, one round trip.
+;; Role.RadioButton semantics stay a stated seam: the wire has no
+;; member for a11y roles on a toggle.
 
 ;;; Code:
 
@@ -59,23 +67,97 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ButtonGroupSamples.kt"
   "Upstream ButtonGroupsExampleSourceUrl.")
 
-(defconst jetpacs-m3-button-groups--connected-shape-note
-  "The connected look has no member either: button.shape is the two-value round/square enum, nothing carries ButtonGroupDefaults.connectedLeadingButtonShapes, connectedMiddleButtonShapes or connectedTrailingButtonShapes, and the per-corner :corner attribute decorates the 48dp touch box rather than the button's own container, so the members cannot be made to read as one control."
-  "The half of the triage both connected samples share.")
+(defconst jetpacs-m3-button-groups--options
+  '(("Work" . "work") ("Restaurant" . "restaurant") ("Coffee" . "coffee")
+    ("Search" . "search") ("Home" . "home"))
+  "The five connected options: (label . icon), upstream order.")
 
-(defconst jetpacs-m3-button-groups--single-note
-  (concat
-   "The button node now carries checked and on_change, so each of the five options holds its own state on the device — but nothing groups them: there is no button_group node and no wire member that makes several toggles one selection, so checking Work cannot clear the other four, and that mutual exclusion (upstream marks every button Role.RadioButton, driven from one selectedIndex) is the single-select this sample exists to demonstrate. "
-   jetpacs-m3-button-groups--connected-shape-note
-   " Nor would the selection be visible: a checked button draws exactly like an unchecked one, the button node has no checked_icon member (only icon_button has one), and IconMap resolves every wire icon name through Icons.Outlined, so the Outlined-to-Filled swap each option makes when checked has no filled glyph to name.")
-  "Why SingleSelectConnectedButtonGroupWithFlowLayoutSample is unsupported.")
+(defvar jetpacs-m3-button-groups--selected 0
+  "SingleSelectConnected\='s one selectedIndex, upstream verbatim.")
 
-(defconst jetpacs-m3-button-groups--multi-note
-  (concat
-   "This sample's selection model is five independent booleans, and the button node's new checked and on_change members carry exactly that, so the state survives — what does not survive is every way the user would see it. A checked button draws exactly like an unchecked one, the button node has no checked_icon member (only icon_button has one), and IconMap resolves every wire icon name through Icons.Outlined.<Name>, so the Outlined-to-Filled swap each option makes when checked has no filled glyph to name. "
-   jetpacs-m3-button-groups--connected-shape-note
-   " Five buttons that pop a toast and never change appearance would demonstrate neither the multi-select nor the group.")
-  "Why MultiSelectConnectedButtonGroupWithFlowLayoutSample is unsupported.")
+(dotimes (i 5)
+  (puthash (format "button-groups-single-%d" i)
+           (let ((i i))
+             (lambda () (setq jetpacs-m3-button-groups--selected i)))
+           jetpacs-m3-fn-registry))
+
+(defvar jetpacs-m3-button-groups--vertical-selected 0
+  "VerticalButtonGroupSample\='s selectedIndex.")
+
+(dotimes (i 5)
+  (puthash (format "button-groups-vertical-%d" i)
+           (let ((i i))
+             (lambda () (setq jetpacs-m3-button-groups--vertical-selected i)))
+           jetpacs-m3-fn-registry))
+
+(defun jetpacs-m3-button-groups--connected (n i label icon &rest opts)
+  "Connected toggle I of N: LABEL, ICON, the positional shape role.
+OPTS carry the sample\='s own :checked / :on-change / :id."
+  (apply #'jetpacs-button label (jetpacs-m3-demo label)
+         :icon icon
+         :checked-icon (concat icon "_filled")
+         :shape-role (cond ((= i 0) "leading")
+                           ((= i (1- n)) "trailing")
+                           (t "middle"))
+         opts))
+
+(defun jetpacs-m3-button-groups--single ()
+  "Upstream SingleSelectConnectedButtonGroupWithFlowLayoutSample.
+One selectedIndex in module state; every tap runs the fn verb and the
+next snapshot re-authors all five checked values, so checking Work
+really does clear the other four."
+  (jetpacs-flow-row
+   (cl-loop
+    for (label . icon) in jetpacs-m3-button-groups--options
+    for i from 0
+    collect (jetpacs-with-attrs
+             (jetpacs-m3-button-groups--connected
+              5 i label icon
+              :checked (if (= i jetpacs-m3-button-groups--selected)
+                           t :json-false)
+              :on-change (jetpacs-m3-fn-action
+                          (format "button-groups-single-%d" i)))
+             :id (format "button-groups-single-%d" i)))
+   :spacing 2 :run-spacing 2))
+
+(defun jetpacs-m3-button-groups--multi ()
+  "Upstream MultiSelectConnectedButtonGroupWithFlowLayoutSample.
+Five INDEPENDENT device-held booleans -- authored unchecked once and
+flipped on the device, which is exactly upstream\='s mutableStateListOf."
+  (jetpacs-flow-row
+   (cl-loop
+    for (label . icon) in jetpacs-m3-button-groups--options
+    for i from 0
+    collect (jetpacs-with-attrs
+             (jetpacs-m3-button-groups--connected
+              5 i label icon
+              :checked :json-false
+              :on-change (jetpacs-m3-demo label))
+             :id (format "button-groups-multi-%d" i)))
+   :spacing 2 :run-spacing 2))
+
+(defun jetpacs-m3-button-groups--vertical ()
+  "Upstream VerticalButtonGroupSample: five toggles interlocked by -6dp.
+shape_role top/middle/bottom carries the vertical caps; the single
+selectedIndex lives in module state on the fn verb, like the
+single-select row."
+  (apply #'jetpacs-column
+         (append
+          (cl-loop
+           for i from 0 below 5
+           collect (jetpacs-with-attrs
+                    (jetpacs-button
+                     (format "Button %d" (1+ i))
+                     (jetpacs-m3-demo (format "Button %d" (1+ i)))
+                     :checked (if (= i jetpacs-m3-button-groups--vertical-selected)
+                                  t :json-false)
+                     :on-change (jetpacs-m3-fn-action
+                                 (format "button-groups-vertical-%d" i))
+                     :shape-role (cond ((= i 0) "top")
+                                       ((= i 4) "bottom")
+                                       (t "middle")))
+                    :id (format "button-groups-vertical-%d" i)))
+          (list :overlap 6))))
 
 (jetpacs-m3-defcomponent "button-groups"
   :name "Button Groups"
@@ -104,20 +186,19 @@
     "ButtonGroup examples"
     :source jetpacs-m3-button-groups--source
     :expressive t
-    :unsupported jetpacs-m3-button-groups--single-note)
+    :build #'jetpacs-m3-button-groups--single)
    (jetpacs-m3-example
     "MultiSelectConnectedButtonGroupWithFlowLayoutSample"
     "ButtonGroup examples"
     :source jetpacs-m3-button-groups--source
     :expressive t
-    :unsupported jetpacs-m3-button-groups--multi-note)
+    :build #'jetpacs-m3-button-groups--multi)
    (jetpacs-m3-example
     "VerticalButtonGroupSample"
     "ButtonGroup examples"
     :source jetpacs-m3-button-groups--source
     :expressive t
-    :unsupported
-    "The button node now carries checked and on_change, but the vertical group needs the rest, and none of it is on the wire: nothing binds several toggles into one selection, so the single selectedIndex this sample drives cannot be expressed; no member takes a RoundedCornerShape whose top or bottom corners are copied to CornerSize(100) for the end caps, nor ButtonGroupDefaults.connectedButtonCheckedShape (button.shape is the two-value round/square enum, and the per-corner :corner attribute decorates the 48dp touch box rather than the button's own container); and the column node's spacing member is validated as a non-negative dp, so the Arrangement.spacedBy((-6).dp) overlap that visually connects the five buttons cannot be asked for.")
+    :build #'jetpacs-m3-button-groups--vertical)
    ))
 
 (provide 'jetpacs-m3-button-groups)

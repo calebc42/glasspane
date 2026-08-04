@@ -1,7 +1,18 @@
 # AUDIT — every m3-catalog blocker, triaged (2026-08-02)
 
-> **Ledger state as of 2026-08-03 (second pass) — 218/279 built, 61
-> remain.** The node wave landed too: G-89 `dropdown` (45th), G-91
+> **Ledger state as of 2026-08-04 — 221/279 built, 58 remain, 52 node
+> types.** The Tier-3 node lane is CLOSED: G-93 `fab_menu` (50th), G-94
+> `button_group` (51st) and G-95 `lazy_grid` (52nd) landed, consumed by
+> fab-menu 1/1, button-groups 1/4 (the three connected-toggle samples
+> still need G-04+G-63/G-65's shared selection and morphing shapes) and
+> top-app-bar 10/15 (the reversed grid, with its behavior-state seam
+> stated). What remains is the member lane (G-12 expanded FABs, G-16/17
+> chips, G-35 pairing, G-39/79 menu groups, G-41/42, G-44/45 two_rows,
+> G-48 sheet, G-49 dialogs, G-54/55 radio lists, G-61/62 dates,
+> G-63/64/65, G-66 shapes, G-68..G-72) and the protocol tier
+> (G-51, G-74/76/77/78, G-92, G-96..98) plus 3 truly impossible.
+>
+> Earlier, 2026-08-03 (second pass) — 218/279: G-89 `dropdown` (45th), G-91
 > `segmented_button` (46th — the node owns the fused seam, so G-64
 > negative spacing is no longer needed for it), G-88 `app_bar_row` +
 > `app_bar_column` (47th/48th), and G-87 `carousel` (49th, keyline

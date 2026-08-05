@@ -1232,6 +1232,52 @@ locally with a synthetic 1201 editor-too-large; nothing reaches the wire."
       (should (equal (caar sent) 'edit.apply))
       (should (= (plist-get (cdar sent) :len) 7)))))
 
+(ert-deftest ebp-test-editor-golden-scalar-splices ()
+  "SPEC 19.1/19.3: goldens/editor.golden replays through the delta mirror.
+Positions and lengths count Unicode scalar values — Emacs chars — never
+UTF-16 code units or graphemes; a refused splice resyncs once and leaves
+the mirrored text untouched.  The same corpus drives validate.py's
+reference reducer and the Companion's EditorGoldenReplayTest, so both
+endpoints are pinned to identical splice arithmetic."
+  (dolist (line (split-string
+                 (let ((coding-system-for-read 'utf-8))
+                   (with-temp-buffer
+                     (insert-file-contents
+                      (expand-file-name "goldens/editor.golden" ebp-test--ebp))
+                     (buffer-string)))
+                 "\n" t))
+    (let* ((case (json-parse-string
+                  (substring line (1+ (string-match " " line)))
+                  :object-type 'plist :array-type 'list))
+           (client (ebp-client-create
+                    :receipt-file (make-temp-file "ebp-test-receipts")))
+           (session (make-string 32 ?0))
+           (resyncs 0) (seq 0))
+      (cl-letf (((symbol-function 'ebp-client-edit-resync)
+                 (lambda (&rest _) (cl-incf resyncs))))
+        (ebp-client--handle-edit-open
+         client (list :document "doc:golden" :editor_id "body"
+                      :session session :seq 0
+                      :text (plist-get case :text) :cursor 0))
+        (dolist (op (plist-get case :ops))
+          (ebp-client--handle-edit-delta
+           client (list :document "doc:golden" :editor_id "body"
+                        :session session :seq (1+ seq)
+                        :start (plist-get op :start)
+                        :del (plist-get op :del)
+                        :text (plist-get op :text)
+                        :len (plist-get op :len)))
+          (when (eq (plist-get op :applies) t) (cl-incf seq)))
+        (should (equal (ebp-client-editor-text client "doc:golden" "body")
+                       (plist-get case :final)))
+        ;; `length' on an Emacs string counts chars = scalar values.
+        (should (= (length (plist-get case :final))
+                   (plist-get case :scalars)))
+        (should (= resyncs
+                   (cl-count-if (lambda (op)
+                                  (not (eq (plist-get op :applies) t)))
+                                (plist-get case :ops))))))))
+
 (ert-deftest ebp-test-triggers-set-when-gate ()
   "SPEC 21.3 (amendments #75, #90): a `when' type must be advertised in
 device.state_types; predicate-only time.window is always authorable; an

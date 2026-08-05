@@ -428,6 +428,101 @@ one button each; nil offers a one-character field."
       (jetpacs-dialog--ask-char prompt (append chars nil))
     (apply orig prompt chars args)))
 
+;;;; Labeled-choice prompts (PLAN-poc1-parity P2)
+
+(defun jetpacs-dialog--ask-buttons (prompt buttons)
+  "Bridge PROMPT with one labeled button per (LABEL . VALUE) in BUTTONS.
+Returns the submitted VALUE string; a dismissal quits like C-g."
+  (let ((v (jetpacs-dialog--submitted-value
+            (jetpacs-dialog--ask
+             (jetpacs-dialog--frame
+              prompt
+              (apply #'jetpacs-column
+                     (mapcan
+                      (lambda (b)
+                        (list (jetpacs-button (car b)
+                                              (jetpacs-dialog-submit
+                                               :value (cdr b))
+                                              :variant "outlined")
+                              (jetpacs-with-attrs (jetpacs-spacer) :height 8)))
+                      buttons)))))))
+    (if (stringp v) v (keyboard-quit))))
+
+(defun jetpacs-dialog--read-multiple-choice (orig prompt choices &rest args)
+  "Bridge `read-multiple-choice': a button per NAME, the full entry back."
+  (if (jetpacs-dialog--bridge-p)
+      (let ((v (jetpacs-dialog--ask-buttons
+                prompt
+                (mapcar (lambda (c) (cons (capitalize (cadr c))
+                                          (string (car c))))
+                        choices))))
+        (or (and (= (length v) 1) (assq (aref v 0) choices))
+            (keyboard-quit)))
+    (apply orig prompt choices args)))
+
+(defun jetpacs-dialog--read-answer (orig question answers)
+  "Bridge `read-answer': a button per LONG answer, the LONG string back."
+  (if (jetpacs-dialog--bridge-p)
+      (let ((v (jetpacs-dialog--ask-buttons
+                question
+                (mapcar (lambda (a) (cons (capitalize (car a)) (car a)))
+                        answers))))
+        (if (assoc v answers) v (keyboard-quit)))
+    (funcall orig question answers)))
+
+(defun jetpacs-dialog--read-char-from-minibuffer (orig prompt
+                                                       &optional chars
+                                                       &rest args)
+  "Bridge modern core's single-char reader.
+A CHARS allowlist renders as buttons via the char bridge; without one
+it degrades to a one-character field."
+  (if (jetpacs-dialog--bridge-p)
+      (jetpacs-dialog--ask-char prompt (append chars nil))
+    (apply orig prompt chars args)))
+
+;;;; Raw event readers (PLAN-poc1-parity P2)
+;; `read-event', `read-key', and the key-sequence pair read keyboard
+;; events directly, bypassing every prompt bridge above — from the phone
+;; they would hang (query-replace lands here via `perform-replace').
+;; POC 1's device-tested verdict stands: deliberately crude — the read
+;; becomes an answerable key-description prompt ("y", "C-c"), and an
+;; unanswerable one quits rather than blocks.
+
+(defun jetpacs-dialog--raw-bridge-p (&optional seconds)
+  "Non-nil when a raw event read should bridge rather than run natively.
+Never while a keyboard macro drives commands (`jetpacs-keymap' executes
+through `execute-kbd-macro'), events are already queued, or the read is
+timed (SECONDS non-nil: `read-event' used as a sleep)."
+  (and (jetpacs-dialog--bridge-p)
+       (not executing-kbd-macro)
+       (not unread-command-events)
+       (not seconds)))
+
+(defun jetpacs-dialog--ask-key (prompt)
+  "Prompt for a key description and return its `kbd' parse, or quit."
+  (let* ((reply (jetpacs-dialog--ask-string
+                 (if (stringp prompt) prompt "Key input expected: ")))
+         (keys (and (not (string-empty-p reply))
+                    (ignore-errors (kbd reply)))))
+    (if (and keys (> (length keys) 0)) keys (keyboard-quit))))
+
+(defun jetpacs-dialog--read-event (orig &rest args)
+  ;; read-event: (&optional PROMPT INHERIT-INPUT-METHOD SECONDS);
+  ;; read-key's ARGS simply have no third element.
+  (if (jetpacs-dialog--raw-bridge-p (nth 2 args))
+      (aref (jetpacs-dialog--ask-key (nth 0 args)) 0)
+    (apply orig args)))
+
+(defun jetpacs-dialog--read-key-sequence (orig &rest args)
+  (if (jetpacs-dialog--raw-bridge-p)
+      (jetpacs-dialog--ask-key (or (nth 0 args) "Key sequence: "))
+    (apply orig args)))
+
+(defun jetpacs-dialog--read-key-sequence-vector (orig &rest args)
+  (if (jetpacs-dialog--raw-bridge-p)
+      (vconcat (jetpacs-dialog--ask-key (or (nth 0 args) "Key sequence: ")))
+    (apply orig args)))
+
 ;;;; The capf picker (JC-4b): a dialog-hosted synchronized editor
 
 (defcustom jetpacs-dialog-picker-candidates 12
@@ -726,7 +821,14 @@ number of actions taken (the original's contract)."
     (read-char-choice . jetpacs-dialog--read-char-choice)
     (completing-read . jetpacs-dialog--completing-read)
     (completing-read-multiple . jetpacs-dialog--completing-read-multiple)
-    (map-y-or-n-p . jetpacs-dialog--map-y-or-n-p))
+    (map-y-or-n-p . jetpacs-dialog--map-y-or-n-p)
+    (read-multiple-choice . jetpacs-dialog--read-multiple-choice)
+    (read-answer . jetpacs-dialog--read-answer)
+    (read-char-from-minibuffer . jetpacs-dialog--read-char-from-minibuffer)
+    (read-event . jetpacs-dialog--read-event)
+    (read-key . jetpacs-dialog--read-event)
+    (read-key-sequence . jetpacs-dialog--read-key-sequence)
+    (read-key-sequence-vector . jetpacs-dialog--read-key-sequence-vector))
   "The advised prompt functions and their bridges.")
 
 (defun jetpacs-dialog-install ()

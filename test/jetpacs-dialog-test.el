@@ -837,5 +837,62 @@ path, so the 14.1 policy gate runs there too."
       (jetpacs-detach)
       (jetpacs-test-reset-state))))
 
+;;;; PLAN-poc1-parity P2: labeled choices and raw event readers
+
+(ert-deftest jetpacs-dialog-read-multiple-choice-round-trip ()
+  "Each NAME becomes a button; the submitted char picks the full entry."
+  (jetpacs-dialog-test--with-flow '("submitted" (:value "w") nil)
+    (should (equal (read-multiple-choice "Day? "
+                                         '((?w "wednesday") (?f "friday")))
+                   '(?w "wednesday")))
+    (let ((spec (car jetpacs-dialog-test--specs)) labels)
+      (jetpacs-dialog-test--walk
+       spec (lambda (n) (when-let* ((l (plist-get n :label))) (push l labels))))
+      (should (member "Wednesday" labels))
+      (should (member "Friday" labels)))))
+
+(ert-deftest jetpacs-dialog-read-answer-round-trip ()
+  "The submitted LONG answer string comes back verbatim."
+  (jetpacs-dialog-test--with-flow '("submitted" (:value "never") nil)
+    (should (equal (read-answer "Overwrite? "
+                                '(("yes" ?y "do it")
+                                  ("never" ?! "not ever")))
+                   "never"))))
+
+(ert-deftest jetpacs-dialog-read-char-from-minibuffer-uses-allowlist ()
+  "A CHARS allowlist renders buttons and returns the chosen char."
+  (jetpacs-dialog-test--with-flow '("submitted" (:value "n") nil)
+    (should (eq (read-char-from-minibuffer "Continue? " '(?y ?n)) ?n))))
+
+(ert-deftest jetpacs-dialog-read-event-parses-key-description ()
+  "A bridged raw read returns the first event of the kbd parse."
+  (jetpacs-dialog-test--with-flow '("submitted" (:fields (:in "C-c")) nil)
+    (should (eq (read-event "Key: ") ?\C-c))))
+
+(ert-deftest jetpacs-dialog-read-key-sequence-parses-description ()
+  "The sequence readers return the kbd parse (vector form vconcats)."
+  (jetpacs-dialog-test--with-flow '("submitted" (:fields (:in "C-x C-s")) nil)
+    (should (equal (read-key-sequence "Keys: ") (kbd "C-x C-s")))
+    (should (equal (read-key-sequence-vector "Keys: ")
+                   (vconcat (kbd "C-x C-s"))))))
+
+(ert-deftest jetpacs-dialog-raw-gate-never-bridges-macros ()
+  "The raw gate refuses under macros, queued events, or a timed read.
+POC 1's device-tested exclusions: bridging any of these either breaks
+`jetpacs-keymap' command execution or turns a sleep into a dialog."
+  (jetpacs-dialog-test--with-flow '("submitted" (:value t) nil)
+    (should (jetpacs-dialog--raw-bridge-p))
+    (let ((executing-kbd-macro [?a]))
+      (should-not (jetpacs-dialog--raw-bridge-p)))
+    (let ((unread-command-events (list ?q)))
+      (should-not (jetpacs-dialog--raw-bridge-p)))
+    (should-not (jetpacs-dialog--raw-bridge-p 2.0))))
+
+(ert-deftest jetpacs-dialog-read-multiple-choice-dismissal-quits ()
+  "A dismissed choice dialog quits like C-g, never returns junk."
+  (jetpacs-dialog-test--with-flow '("dismissed" nil nil)
+    (should (jetpacs-dialog-test--quits
+             (read-multiple-choice "Day? " '((?w "wednesday")))))))
+
 (provide 'jetpacs-dialog-test)
 ;;; jetpacs-dialog-test.el ends here

@@ -26,6 +26,8 @@
 (require 'jetpacs-results)
 (require 'jetpacs-tablist)
 (require 'jetpacs-package-browser)
+(require 'jetpacs-settings)
+(require 'jetpacs-customize)
 (require 'jetpacs-hypertext)
 ;; …and the apps.
 (require 'jetpacs-theme)

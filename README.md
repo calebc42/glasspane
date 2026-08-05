@@ -17,10 +17,11 @@ implementation references.
   its divergence-map audit
   (`../llm-poc/docs/AUDIT-ebp2-divergence-map.md`). It is guidance and organ
   donor: read it, port from it, do not merge it.
-- **`slop-fork/main`** — the current local rewrite and eventual rebase target.
-- **`slop-fork/v3`** (this tree/worktree) — the POC 3 rebuild, kept separate
-  until the current m3-fidelity work is fully merged; rebase onto local
-  `slop-fork/main` once at that boundary, not during the architecture reset.
+- **`slop-fork/v2`** (worktree `../llm-poc-2`) — the POC 2 line, closed at
+  the end of the M3 catalog sprint and cherry-picked commit-for-commit into
+  this branch. Like poc-v1 it is now reference, not a merge source.
+- **`slop-fork/main`** (this tree/worktree) — the POC 3 rebuild: the
+  Room-first architecture carrying the ported POC 2 sprint.
 - **`main`** — the clean-room hand-rebuild track. Sealed from both
   slop-fork lines; nothing here is merged there and nothing there is read
   from here.

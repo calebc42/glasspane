@@ -46,6 +46,19 @@
 (defvar-local ebp-sync--inflight nil
   "Non-nil while one `edit.apply' awaits its result.")
 
+;; Diagnostics rider state (the rider itself lives at the bottom of the
+;; file; the vars sit here because attach/detach manage their lifecycle).
+(defvar-local ebp-sync--diag-timer nil)
+(defvar-local ebp-sync--diag-stamp 'unset
+  "(SESSION SEQ DIAGS) of the last push.  The seq is part of the stamp
+on purpose: content-identical diagnostics recomputed after an edit must
+still go out — the Companion discarded the old seq's squiggles, and
+without a re-send they would never reappear.")
+(defvar-local ebp-sync--diag-quiet 0
+  "Consecutive settled collections with nothing new.  Async backends
+publish late; a bounded chase (three quiet rounds) catches them at zero
+steady-state cost.")
+
 (defun ebp-sync--scalar-clean-p (s)
   "Non-nil when S is losslessly representable as Unicode scalar values.
 Emacs buffers can carry raw bytes (chars above #x10FFFF); those cannot
@@ -268,17 +281,6 @@ constrained setups to keep sync without diagnostics."
   "Seconds after an edit settles before diagnostics are pushed.
 Long enough for flymake's own idle timeout plus a typical backend run."
   :type 'number :group 'ebp)
-
-(defvar-local ebp-sync--diag-timer nil)
-(defvar-local ebp-sync--diag-stamp 'unset
-  "(SESSION SEQ DIAGS) of the last push.  The seq is part of the stamp
-on purpose: content-identical diagnostics recomputed after an edit must
-still go out — the Companion discarded the old seq's squiggles, and
-without a re-send they would never reappear.")
-(defvar-local ebp-sync--diag-quiet 0
-  "Consecutive settled collections with nothing new.  Async backends
-publish late; a bounded chase (three quiet rounds) catches them at zero
-steady-state cost.")
 
 (defun ebp-sync--severity (type)
   "Map a flymake TYPE to a SPEC 19.5 severity string."

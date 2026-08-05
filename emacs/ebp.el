@@ -596,6 +596,12 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; scalar values, so splice positions are char positions directly.
   (editors (make-hash-table :test #'equal))
   edit-change-functions ; called with (client document editor-id text)
+  ;; SPEC 19.3: called with (client document editor-id start del text)
+  ;; for each ACCEPTED inbound delta, BEFORE edit-change-functions, with
+  ;; the splice in scalar (= char) positions.  A buffer bridge needs the
+  ;; splice itself — replaying full text per delta would discard point
+  ;; and marker adjustment.
+  edit-splice-functions
   ;; SPEC 19.3 (amendment #71): called with (client document editor-id
   ;; seed-text prior-text) when edit.open arrives, so the application can
   ;; compare the seed against its real document and reconcile explicitly.
@@ -649,6 +655,8 @@ receipts default to `ebp-receipts' under `user-emacs-directory' —
                                  #'ebp-client--handle-window-changed)
     (when-let* ((fn (plist-get config :edit-change-function)))
       (push fn (ebp-client-edit-change-functions client)))
+    (when-let* ((fn (plist-get config :edit-splice-function)))
+      (push fn (ebp-client-edit-splice-functions client)))
     (when-let* ((fn (plist-get config :edit-open-function)))
       (push fn (ebp-client-edit-open-functions client)))
     (when-let* ((fn (plist-get config :after-replay-function)))
@@ -1670,6 +1678,8 @@ view stale and resync once."
                   (progn
                     (setf (plist-get ed :text) new
                           (plist-get ed :seq) (plist-get params :seq))
+                    (dolist (fn (ebp-client-edit-splice-functions client))
+                      (funcall fn client doc eid start del ins))
                     (ebp-client--editor-changed client doc eid))
                 (ebp-client-edit-resync client doc eid)))
           (ebp-client-edit-resync client doc eid))))))

@@ -31,6 +31,7 @@
 
 (require 'cl-lib)
 (require 'ebp)
+(require 'flymake)
 (require 'track-changes)
 
 (defvar ebp-sync--table (make-hash-table :test #'equal)
@@ -100,6 +101,9 @@ Safe to call when not attached.  The tracker is unregistered
 (track-changes requires this on close, document change, mode disable,
 and buffer death)."
   (with-current-buffer (or buffer (current-buffer))
+    (when ebp-sync--diag-timer
+      (cancel-timer ebp-sync--diag-timer)
+      (setq ebp-sync--diag-timer nil))
     (when ebp-sync--tracker
       (track-changes-unregister ebp-sync--tracker)
       (setq ebp-sync--tracker nil))
@@ -159,7 +163,9 @@ reseeds the buffer."
              (with-current-buffer buffer
                (setq ebp-sync--inflight nil)
                (if (and (null error) (equal status "applied"))
-                   (ebp-sync--pump buffer)
+                   (progn
+                     (ebp-sync--pump buffer)
+                     (ebp-sync--arm-diagnostics buffer))
                  ;; Refused, stale, or transport error: local pending
                  ;; state is no longer trustworthy.  One resync; the
                  ;; reseed adopts the Companion's text.
@@ -191,7 +197,8 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
                     (goto-char (1+ start))
                     (insert text)))
                 ;; Consume our own known change so it is not echoed.
-                (track-changes-fetch ebp-sync--tracker #'ignore))
+                (track-changes-fetch ebp-sync--tracker #'ignore)
+                (ebp-sync--arm-diagnostics buf))
             ;; Write protection is honored, never overridden (SPEC 19.3);
             ;; the refusing side recovers through resync.
             (error (ebp-sync--resync buf))))))))
@@ -219,7 +226,9 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
             (delete-region (point-min) (point-max))
             (insert seed-text)))
         (when ebp-sync--tracker
-          (track-changes-fetch ebp-sync--tracker #'ignore))))))
+          (track-changes-fetch ebp-sync--tracker #'ignore))
+        (setq ebp-sync--diag-stamp 'unset)
+        (ebp-sync--arm-diagnostics buf)))))
 
 (defun ebp-sync--on-change (client document editor-id text)
   "Detach when the session closes (TEXT nil after `edit.close')."
@@ -236,6 +245,94 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
     (when ebp-sync--client
       (ebp-client-edit-resync ebp-sync--client ebp-sync--document
                               ebp-sync--editor-id))))
+
+;; ---------------------------------------------------- diagnostics rider --
+
+;; SPEC 19.5: flymake results ride the synced session as
+;; `diagnostics.show' notifications — latest-wins, stamped with the seq
+;; they were computed against so the Companion refuses to draw squiggles
+;; over text that has moved on.  Annotations never delay text sync: the
+;; push is a fire-and-forget notification from a settle timer.
+;; (Behavior reference: POC 1's jetpacs-sync.el; its shadow-buffer
+;; backend surgery is gone because this bridge binds real buffers, where
+;; the mode's own flymake backends already work.)
+
+(defcustom ebp-sync-diagnostics t
+  "When non-nil, run flymake over synced buffers and push results.
+Checks may spawn subprocesses (byte-compile, external linters), which
+costs CPU on the machine running Emacs — set to nil on battery-
+constrained setups to keep sync without diagnostics."
+  :type 'boolean :group 'ebp)
+
+(defcustom ebp-sync-diagnostics-delay 3.0
+  "Seconds after an edit settles before diagnostics are pushed.
+Long enough for flymake's own idle timeout plus a typical backend run."
+  :type 'number :group 'ebp)
+
+(defvar-local ebp-sync--diag-timer nil)
+(defvar-local ebp-sync--diag-stamp 'unset
+  "(SESSION SEQ DIAGS) of the last push.  The seq is part of the stamp
+on purpose: content-identical diagnostics recomputed after an edit must
+still go out — the Companion discarded the old seq's squiggles, and
+without a re-send they would never reappear.")
+(defvar-local ebp-sync--diag-quiet 0
+  "Consecutive settled collections with nothing new.  Async backends
+publish late; a bounded chase (three quiet rounds) catches them at zero
+steady-state cost.")
+
+(defun ebp-sync--severity (type)
+  "Map a flymake TYPE to a SPEC 19.5 severity string."
+  (pcase (condition-case nil
+             (flymake--lookup-type-property type 'flymake-category)
+           (error nil))
+    ('flymake-error "error")
+    ('flymake-note "info")
+    (_ "warning")))
+
+(defun ebp-sync--diag->wire (d)
+  "One flymake diagnostic D as SPEC 19.5 members, 0-based scalar offsets."
+  (list :start (1- (flymake-diagnostic-beg d))
+        :end (1- (flymake-diagnostic-end d))
+        :severity (ebp-sync--severity (flymake-diagnostic-type d))
+        :message (or (flymake-diagnostic-text d) "")))
+
+(defun ebp-sync--arm-diagnostics (buffer)
+  "(Re)start BUFFER's settle timer after an accepted text change."
+  (with-current-buffer buffer
+    (when (and ebp-sync-diagnostics ebp-sync--client)
+      (unless flymake-mode (flymake-mode 1))
+      (setq ebp-sync--diag-quiet 0)
+      (when ebp-sync--diag-timer (cancel-timer ebp-sync--diag-timer))
+      (setq ebp-sync--diag-timer
+            (run-at-time ebp-sync-diagnostics-delay nil
+                         #'ebp-sync--push-diagnostics buffer)))))
+
+(defun ebp-sync--push-diagnostics (buffer)
+  "Push BUFFER's current diagnostics when they changed since last push."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let ((ed (and ebp-sync--client
+                     (gethash (cons ebp-sync--document ebp-sync--editor-id)
+                              (ebp-client-editors ebp-sync--client)))))
+        (when ed
+          (let* ((diags (mapcar #'ebp-sync--diag->wire (flymake-diagnostics)))
+                 (stamp (list (plist-get ed :session)
+                              (plist-get ed :seq) diags))
+                 (changed (not (equal stamp ebp-sync--diag-stamp))))
+            (when changed
+              (setq ebp-sync--diag-stamp stamp)
+              (ebp-client-notify
+               ebp-sync--client 'diagnostics.show
+               (list :editor_id ebp-sync--editor-id
+                     :session (plist-get ed :session)
+                     :seq (plist-get ed :seq)
+                     :diagnostics (vconcat diags))))
+            (setq ebp-sync--diag-quiet
+                  (if changed 0 (1+ ebp-sync--diag-quiet)))
+            (when (< ebp-sync--diag-quiet 3)
+              (setq ebp-sync--diag-timer
+                    (run-at-time ebp-sync-diagnostics-delay nil
+                                 #'ebp-sync--push-diagnostics buffer)))))))))
 
 (provide 'ebp-sync)
 ;;; ebp-sync.el ends here

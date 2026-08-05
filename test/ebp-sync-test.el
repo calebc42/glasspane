@@ -147,5 +147,46 @@ local pending state drops and one resync goes out."
     (insert "more")
     (should-not sent)))
 
+(ert-deftest ebp-sync-diagnostics-shape-dedupe-and-seq-restamp ()
+  "SPEC 19.5: the push carries 0-based scalar offsets under the live
+session/seq; unchanged content is not re-sent, but a seq advance
+re-sends identical content (the Companion discarded the old seq's)."
+  (ebp-sync-test--with "text"
+    (let ((notified nil))
+      (cl-letf (((symbol-function 'ebp-client-notify)
+                 (lambda (_c method params)
+                   (push (cons method params) notified)))
+                ((symbol-function 'flymake-diagnostics)
+                 (lambda (&rest _)
+                   (list (flymake-make-diagnostic
+                          (current-buffer) 1 5 :warning "Spelling")))))
+        (ebp-sync--push-diagnostics (current-buffer))
+        (should (= 1 (length notified)))
+        (pcase-let ((`(,method . ,params) (car notified)))
+          (should (eq method 'diagnostics.show))
+          (should (equal (plist-get params :editor_id) "body"))
+          (should (= (plist-get params :seq) 0))
+          (let ((d (aref (plist-get params :diagnostics) 0)))
+            (should (= (plist-get d :start) 0))
+            (should (= (plist-get d :end) 4))
+            (should (equal (plist-get d :severity) "warning"))
+            (should (equal (plist-get d :message) "Spelling"))))
+        ;; Same content, same seq: deduped.
+        (ebp-sync--push-diagnostics (current-buffer))
+        (should (= 1 (length notified)))
+        ;; Same content, advanced seq: goes out again.
+        (let ((ed (gethash (cons "doc:1" "body")
+                           (ebp-client-editors client))))
+          (setf (plist-get ed :seq) 1))
+        (ebp-sync--push-diagnostics (current-buffer))
+        (should (= 2 (length notified)))
+        (should (= (plist-get (cdar notified) :seq) 1))))))
+
+(ert-deftest ebp-sync-severity-mapping ()
+  "Flymake note becomes SPEC 19.5 `info' — `note' is not a wire severity."
+  (should (equal (ebp-sync--severity :error) "error"))
+  (should (equal (ebp-sync--severity :warning) "warning"))
+  (should (equal (ebp-sync--severity :note) "info")))
+
 (provide 'ebp-sync-test)
 ;;; ebp-sync-test.el ends here

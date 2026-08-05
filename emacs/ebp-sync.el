@@ -58,6 +58,10 @@ without a re-send they would never reappear.")
   "Consecutive settled collections with nothing new.  Async backends
 publish late; a bounded chase (three quiet rounds) catches them at zero
 steady-state cost.")
+(defvar-local ebp-sync--font-timer nil)
+(defvar-local ebp-sync--font-stamp 'unset
+  "(SESSION SEQ RUNS) of the last fontify push; seq in the stamp for
+the same reason as diagnostics — the Companion hid the old seq's runs.")
 
 (defun ebp-sync--scalar-clean-p (s)
   "Non-nil when S is losslessly representable as Unicode scalar values.
@@ -117,6 +121,9 @@ and buffer death)."
     (when ebp-sync--diag-timer
       (cancel-timer ebp-sync--diag-timer)
       (setq ebp-sync--diag-timer nil))
+    (when ebp-sync--font-timer
+      (cancel-timer ebp-sync--font-timer)
+      (setq ebp-sync--font-timer nil))
     (when ebp-sync--tracker
       (track-changes-unregister ebp-sync--tracker)
       (setq ebp-sync--tracker nil))
@@ -178,7 +185,7 @@ reseeds the buffer."
                (if (and (null error) (equal status "applied"))
                    (progn
                      (ebp-sync--pump buffer)
-                     (ebp-sync--arm-diagnostics buffer))
+                     (ebp-sync--arm-annotations buffer))
                  ;; Refused, stale, or transport error: local pending
                  ;; state is no longer trustworthy.  One resync; the
                  ;; reseed adopts the Companion's text.
@@ -211,7 +218,7 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
                     (insert text)))
                 ;; Consume our own known change so it is not echoed.
                 (track-changes-fetch ebp-sync--tracker #'ignore)
-                (ebp-sync--arm-diagnostics buf))
+                (ebp-sync--arm-annotations buf))
             ;; Write protection is honored, never overridden (SPEC 19.3);
             ;; the refusing side recovers through resync.
             (error (ebp-sync--resync buf))))))))
@@ -240,8 +247,9 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
             (insert seed-text)))
         (when ebp-sync--tracker
           (track-changes-fetch ebp-sync--tracker #'ignore))
-        (setq ebp-sync--diag-stamp 'unset)
-        (ebp-sync--arm-diagnostics buf)))))
+        (setq ebp-sync--diag-stamp 'unset
+              ebp-sync--font-stamp 'unset)
+        (ebp-sync--arm-annotations buf)))))
 
 (defun ebp-sync--on-change (client document editor-id text)
   "Detach when the session closes (TEXT nil after `edit.close')."
@@ -298,6 +306,11 @@ Long enough for flymake's own idle timeout plus a typical backend run."
         :severity (ebp-sync--severity (flymake-diagnostic-type d))
         :message (or (flymake-diagnostic-text d) "")))
 
+(defun ebp-sync--arm-annotations (buffer)
+  "(Re)arm both annotation riders after an accepted text change."
+  (ebp-sync--arm-diagnostics buffer)
+  (ebp-sync--arm-fontify buffer))
+
 (defun ebp-sync--arm-diagnostics (buffer)
   "(Re)start BUFFER's settle timer after an accepted text change."
   (with-current-buffer buffer
@@ -335,6 +348,124 @@ Long enough for flymake's own idle timeout plus a typical backend run."
               (setq ebp-sync--diag-timer
                     (run-at-time ebp-sync-diagnostics-delay nil
                                  #'ebp-sync--push-diagnostics buffer)))))))))
+
+;; -------------------------------------------------------- fontify rider --
+
+;; SPEC 19.5: the buffer's real font-lock state ships as `fontify.show'
+;; ROLE runs — sorted, non-overlapping, seq-stamped — and the Companion
+;; styles each role from the active theme.  POC 1 sent literal colors
+;; per span; the role indirection is what lets one push look right in
+;; both light and dark themes.
+
+(defcustom ebp-sync-fontify t
+  "When non-nil, push font-lock results over synced sessions.
+The editor then shows the user's real major-mode highlighting."
+  :type 'boolean :group 'ebp)
+
+(defcustom ebp-sync-fontify-delay 0.2
+  "Seconds after an accepted change before fontification is pushed.
+Short: font-lock is cheap at `ebp-sync-fontify-max-chars' scale, and a
+long delay leaves freshly typed code visibly unstyled."
+  :type 'number :group 'ebp)
+
+(defcustom ebp-sync-fontify-max-chars 65536
+  "Buffers larger than this skip fontify pushes.
+Sync and diagnostics still work; only the highlighting stays local."
+  :type 'natnum :group 'ebp)
+
+(defconst ebp-sync--face-roles
+  '((font-lock-comment-face . "comment")
+    (font-lock-comment-delimiter-face . "comment")
+    (font-lock-doc-face . "string")
+    (font-lock-string-face . "string")
+    (font-lock-keyword-face . "keyword")
+    (font-lock-builtin-face . "keyword")
+    (font-lock-function-name-face . "function")
+    (font-lock-function-call-face . "function")
+    (font-lock-constant-face . "constant")
+    (font-lock-variable-name-face . "variable")
+    (font-lock-variable-use-face . "variable")
+    (font-lock-type-face . "type")
+    (font-lock-number-face . "number")
+    (font-lock-operator-face . "operator")
+    (font-lock-preprocessor-face . "preprocessor")
+    (outline-1 . "heading") (outline-2 . "heading")
+    (outline-3 . "heading") (outline-4 . "heading")
+    (outline-5 . "heading") (outline-6 . "heading")
+    (outline-7 . "heading") (outline-8 . "heading")
+    (link . "link")
+    (org-todo . "todo")
+    (org-done . "done")
+    (org-tag . "tag"))
+  "Built-in faces to contract `syntax_roles'.
+Only faces Emacs itself ships (font-lock, outline, org, `link') appear;
+anything else resolves through its `:inherit' chain or ships unstyled.")
+
+(defun ebp-sync--face-role (face)
+  "The syntax role for text property FACE, or nil for unstyled.
+FACE may be a symbol, an anonymous plist, or a list of either; the
+first element that reaches a known face — directly or through
+`:inherit' — wins."
+  (catch 'role
+    (dolist (f (if (and (listp face) (not (keywordp (car-safe face))))
+                   face (list face)))
+      (while (and f (symbolp f))
+        (when-let* ((role (cdr (assq f ebp-sync--face-roles))))
+          (throw 'role role))
+        (let ((parent (and (facep f) (face-attribute f :inherit))))
+          (setq f (if (consp parent) (car parent) parent)
+                f (and (symbolp f) (not (eq f 'unspecified)) f)))))
+    nil))
+
+(defun ebp-sync--fontify-runs ()
+  "The buffer's face runs as SPEC 19.5 wire plists.
+Sorted and non-overlapping by construction (a walk over face property
+changes); adjacent same-role runs merge; unstyled stretches ship
+nothing."
+  (ignore-errors (font-lock-ensure))
+  (let ((pos (point-min)) runs)
+    (while (< pos (point-max))
+      (let ((next (next-single-property-change pos 'face nil (point-max)))
+            (role (ebp-sync--face-role (get-text-property pos 'face))))
+        (when role
+          (let ((prev (car runs)))
+            (if (and prev (equal (plist-get prev :role) role)
+                     (= (plist-get prev :end) (1- pos)))
+                (setf (car runs) (plist-put prev :end (1- next)))
+              (push (list :start (1- pos) :end (1- next) :role role)
+                    runs))))
+        (setq pos next)))
+    (nreverse runs)))
+
+(defun ebp-sync--arm-fontify (buffer)
+  "(Re)start BUFFER's fontify push timer after an accepted change."
+  (with-current-buffer buffer
+    (when (and ebp-sync-fontify ebp-sync--client)
+      (when ebp-sync--font-timer (cancel-timer ebp-sync--font-timer))
+      (setq ebp-sync--font-timer
+            (run-at-time ebp-sync-fontify-delay nil
+                         #'ebp-sync--push-fontify buffer)))))
+
+(defun ebp-sync--push-fontify (buffer)
+  "Push BUFFER's fontification when it changed since the last push."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let ((ed (and ebp-sync--client
+                     (<= (buffer-size) ebp-sync-fontify-max-chars)
+                     (gethash (cons ebp-sync--document ebp-sync--editor-id)
+                              (ebp-client-editors ebp-sync--client)))))
+        (when ed
+          (let* ((runs (ebp-sync--fontify-runs))
+                 (stamp (list (plist-get ed :session)
+                              (plist-get ed :seq) runs)))
+            (unless (equal stamp ebp-sync--font-stamp)
+              (setq ebp-sync--font-stamp stamp)
+              (ebp-client-notify
+               ebp-sync--client 'fontify.show
+               (list :editor_id ebp-sync--editor-id
+                     :session (plist-get ed :session)
+                     :seq (plist-get ed :seq)
+                     :runs (vconcat runs))))))))))
 
 (provide 'ebp-sync)
 ;;; ebp-sync.el ends here

@@ -188,5 +188,71 @@ re-sends identical content (the Companion discarded the old seq's)."
   (should (equal (ebp-sync--severity :warning) "warning"))
   (should (equal (ebp-sync--severity :note) "info")))
 
+(ert-deftest ebp-sync-face-role-resolution ()
+  "Direct hits, list normalization, :inherit chains, unknown -> nil."
+  (should (equal (ebp-sync--face-role 'font-lock-keyword-face) "keyword"))
+  (should (equal (ebp-sync--face-role '(font-lock-string-face bold)) "string"))
+  (make-face 'ebp-sync-test--derived)
+  (set-face-attribute 'ebp-sync-test--derived nil
+                      :inherit 'font-lock-keyword-face)
+  (should (equal (ebp-sync--face-role 'ebp-sync-test--derived) "keyword"))
+  (should-not (ebp-sync--face-role nil))
+  (should-not (ebp-sync--face-role 'bold)))
+
+(ert-deftest ebp-sync-fontify-runs-are-sorted-roles ()
+  "Real font-lock output: sorted, non-overlapping, contract roles only."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert "(defun foo ())\n;; a comment\n\"a string\"\n")
+    (let ((runs (ebp-sync--fontify-runs))
+          (allowed '("comment" "string" "keyword" "function" "constant"
+                     "variable" "type" "number" "operator" "preprocessor"
+                     "heading" "link" "todo" "done" "tag"))
+          (last-end -1))
+      (should runs)
+      (dolist (r runs)
+        (should (member (plist-get r :role) allowed))
+        (should (>= (plist-get r :start) last-end))
+        (should (> (plist-get r :end) (plist-get r :start)))
+        (setq last-end (plist-get r :end)))
+      (should (cl-find "keyword" runs
+                       :key (lambda (r) (plist-get r :role)) :test #'equal))
+      (should (cl-find "comment" runs
+                       :key (lambda (r) (plist-get r :role)) :test #'equal)))))
+
+(ert-deftest ebp-sync-fontify-push-dedupe-and-cap ()
+  "Seq-stamped dedupe like diagnostics; oversized buffers push nothing."
+  (ebp-sync-test--with "(defun foo ())"
+    (let ((notified nil))
+      (cl-letf (((symbol-function 'ebp-client-notify)
+                 (lambda (_c method params)
+                   (push (cons method params) notified)))
+                ((symbol-function 'ebp-sync--fontify-runs)
+                 (lambda () (list (list :start 1 :end 6 :role "keyword")))))
+        (ebp-sync--push-fontify (current-buffer))
+        (should (= 1 (length notified)))
+        (pcase-let ((`(,method . ,params) (car notified)))
+          (should (eq method 'fontify.show))
+          (should (= (plist-get params :seq) 0))
+          (let ((r (aref (plist-get params :runs) 0)))
+            (should (= (plist-get r :start) 1))
+            (should (equal (plist-get r :role) "keyword"))))
+        ;; Unchanged: deduped.  Seq advance: re-sent.
+        (ebp-sync--push-fontify (current-buffer))
+        (should (= 1 (length notified)))
+        (let ((ed (gethash (cons "doc:1" "body")
+                           (ebp-client-editors client))))
+          (setf (plist-get ed :seq) 1))
+        (ebp-sync--push-fontify (current-buffer))
+        (should (= 2 (length notified)))
+        ;; Over the size cap nothing goes out, even with changes.
+        (let ((ebp-sync-fontify-max-chars 3))
+          (setf (plist-get (gethash (cons "doc:1" "body")
+                                    (ebp-client-editors client))
+                           :seq)
+                2)
+          (ebp-sync--push-fontify (current-buffer))
+          (should (= 2 (length notified))))))))
+
 (provide 'ebp-sync-test)
 ;;; ebp-sync-test.el ends here

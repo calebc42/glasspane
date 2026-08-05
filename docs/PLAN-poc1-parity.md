@@ -23,11 +23,12 @@ dependencies.
 |---|---|---|
 | `core/jetpacs-sync.el` (923 lines) | `emacs/ebp-sync.el` (new) + additive `ebp.el` splice hook | The Step 3 recipe in `ARCHITECTURE-POC3.md` is normative: built-in `track-changes.el`, deferred signal, `:disjoint t`, one op contending for `seq + 1`, resync boundaries never guessed. `goldens/editor.golden` pins the splice arithmetic on both endpoints. |
 | — diagnostics/fontify/eldoc riders | follow-up after the core loop | The wire frames exist; the flymake/fontify push layer ports once buffer sync is stable. |
-| `core/jetpacs-witheditor.el` (197) | port after core sync | Magit-commit-from-phone; small, rides on sync. |
+| `core/jetpacs-witheditor.el` (197) | NOT a goal (owner decision 2026-08-04) | git and magit are not shipped with Emacs, so magit-commit-from-phone cannot be a Jetpacs goal. No port needed anyway: the generic bridge syncs any buffer, so a user who installs magit gets with-editor buffers on the phone by attaching them — user-land, never named by Jetpacs. |
 
 Exit gate: edit a real buffer from the tablet and from Emacs concurrently;
 the golden corpus replays; a forced desync recovers via one `edit.resync`
-with no wrong edit.
+with no wrong edit. Built-ins-only holds throughout: track-changes,
+flymake, font-lock, org, outline — nothing Emacs does not ship.
 
 ## P2 — the command fabric
 

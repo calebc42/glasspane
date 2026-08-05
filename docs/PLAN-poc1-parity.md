@@ -44,7 +44,7 @@ completable from the phone.
 
 | POC 1 source | POC 3 target | Notes |
 |---|---|---|
-| `core/jetpacs-apps.el` (378) + `jetpacs-app-store.el`, `jetpacs-hosts.el`, `jetpacs-config.el` | port first in P3 | The registry seam the skins hang off; multi-app isolation (`appid.*` views) is already normative. |
+| `core/jetpacs-apps.el` (378) + `jetpacs-app-store.el`, `jetpacs-hosts.el`, `jetpacs-config.el` | needs a design pass, not a mechanical port | POC 1 grouped a central view registry; POC 3's chrome went dock-as-data in the BASE harvest (`jetpacs-chrome-dock-items-function`), so app identity must group destinations, not views. The skins below do not wait for it: POC 1's single-app contract means the launcher machinery is dormant until a second app exists. |
 | `core/jetpacs-settings.el` (555) + `jetpacs-customize.el` (359) | port | custom.el stays the backend seam. |
 | `core/jetpacs-package-browser.el` (247) | port | Tablist Tier 0.5 renderer already ported. |
 | `core/jetpacs-project.el` (357), `core/jetpacs-sql.el` (199) | port | Independent skins, any order. |

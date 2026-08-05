@@ -28,6 +28,8 @@
 (require 'jetpacs-package-browser)
 (require 'jetpacs-settings)
 (require 'jetpacs-customize)
+(require 'jetpacs-project)
+(require 'jetpacs-sql)
 (require 'jetpacs-hypertext)
 ;; …and the apps.
 (require 'jetpacs-theme)

@@ -18,6 +18,7 @@
 (require 'jetpacs-navigate)
 (require 'jetpacs-chrome)
 (require 'jetpacs-dialog)
+(require 'jetpacs-transient)
 (require 'jetpacs-complete)
 ;; …the mode skins (additive: they register for their major modes)…
 (require 'jetpacs-comint)

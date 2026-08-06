@@ -127,8 +127,10 @@
                               ((listp v) (mapc #'walk v)))))))
         (walk (jetpacs-app-store--row (car (jetpacs-app-store--scan)))))
       (should confirm)
-      (should (string-match-p "full permissions"
-                              (plist-get confirm :text))))))
+      ;; The STRING form until the Companion accepts the ratified
+      ;; object form (conformance drift, tracked).
+      (should (stringp confirm))
+      (should (string-match-p "full permissions" confirm)))))
 
 (ert-deftest jetpacs-apps-drawer-entry-consolidates ()
   "One collapsible: Manage Apps and App Launcher, collapsed by default."

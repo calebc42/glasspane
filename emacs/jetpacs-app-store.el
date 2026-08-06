@@ -182,11 +182,12 @@ lesson)."
         (jetpacs-action
          "apps.install" :args `(:bundle ,name)
          :when-offline "drop"
-         ;; §14.1: installing is running code; the gate says so.
-         :confirm `(:title "Install app?"
-                    :text ,(format "Installing runs %s with your Emacs's full permissions."
-                                   name)
-                    :confirm-label "Install"))
+         ;; §14.1: installing is running code; the gate says so.  The
+         ;; STRING form: the deployed Companion's validator does not yet
+         ;; accept the ratified object form (conformance drift, tracked)
+         ;; and refused the whole surface over it.
+         :confirm (format "Installing runs %s with your Emacs's full permissions. Install it?"
+                          name))
         :content-description (format "Install %s" name)))
      :key (jetpacs-wire-id "as" name))))
 

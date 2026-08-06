@@ -44,7 +44,36 @@ completable from the phone.
 
 | POC 1 source | POC 3 target | Notes |
 |---|---|---|
-| `core/jetpacs-apps.el` (378) + `jetpacs-app-store.el`, `jetpacs-hosts.el`, `jetpacs-config.el` | needs a design pass, not a mechanical port | POC 1 grouped a central view registry; POC 3's chrome went dock-as-data in the BASE harvest (`jetpacs-chrome-dock-items-function`), so app identity must group destinations, not views. The skins below do not wait for it: POC 1's single-app contract means the launcher machinery is dormant until a second app exists. |
+| `core/jetpacs-apps.el` (378) + `jetpacs-app-store.el`, `jetpacs-hosts.el`, `jetpacs-config.el` | DESIGNED + landed as `jetpacs-apps.el` (see below); app-store/hosts/config stay unported | POC 1 grouped a central view registry; POC 3's chrome went dock-as-data in the BASE harvest, so app identity groups DESTINATIONS. |
+
+### The app-identity design (executed)
+
+POC 1's contract, restated for dock-as-data chrome:
+
+1. **An app is a named group of owned surfaces plus its dock
+   destinations.** `jetpacs-defapp` claims both. Destinations use the
+   exact `jetpacs-chrome-dock-items-function` item shape — the app layer
+   is a *composer* of that seam, never a second vocabulary.
+2. **The core destinations stay host-authored.** The device init used to
+   `setq` the chrome seam directly with its Home/Files/Eval items; it now
+   seeds `jetpacs-apps-core-dock-items` and the app layer installs itself
+   on the chrome seam once. Core destinations show in every app — the
+   dock-as-data restatement of "views not claimed by any app show
+   everywhere".
+3. **The single-app contract holds.** With zero registered apps the
+   composed dock is byte-identical to the seeded core items; with one,
+   its destinations merge after core and nothing else appears. The
+   launcher machinery — the Apps grid surface and the trailing "Apps"
+   destination — exists only from the second app on.
+4. **One broken app costs its own destinations, never the dock.** Each
+   app's item builder runs under its own condition-case, the same
+   isolation the session-hook blanking bug taught.
+5. **Not ported on purpose:** `jetpacs-app-store.el` (bundle install
+   flows belong to the distribution lane), `jetpacs-hosts.el` (multi-host
+   is a POC 1 concept the EBP pairing model supersedes), and
+   `jetpacs-config.el` (POC 3 keeps custom-file ownership with the
+   owner). Settings-section owner filtering waits for a second real app
+   to need it.
 | `core/jetpacs-settings.el` (555) + `jetpacs-customize.el` (359) | port | custom.el stays the backend seam. |
 | `core/jetpacs-package-browser.el` (247) | port | Tablist Tier 0.5 renderer already ported. |
 | `core/jetpacs-project.el` (357), `core/jetpacs-sql.el` (199) | port | Independent skins, any order. |

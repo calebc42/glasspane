@@ -98,6 +98,9 @@ emacs -Q --batch -L emacs -l test/jetpacs-settings-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-project-sql-test.el \
   -f ert-run-tests-batch-and-exit
 
+emacs -Q --batch -L emacs -l test/jetpacs-apps-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JC-5 completion harvester exit gate (the :edit-complete-function seam).
 emacs -Q --batch -L emacs -l test/jetpacs-complete-test.el \
   -f ert-run-tests-batch-and-exit

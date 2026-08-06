@@ -30,6 +30,7 @@
 (require 'jetpacs-customize)
 (require 'jetpacs-project)
 (require 'jetpacs-sql)
+(require 'jetpacs-apps)
 (require 'jetpacs-hypertext)
 ;; …and the apps.
 (require 'jetpacs-theme)
@@ -116,7 +117,10 @@ dock renders on every owner's surface."
                 :on-tap (jetpacs-action "hub.open" :args '(:buffer "*ielm*"))
                 :selected (eq sel 'eval)))))
 
-(setq jetpacs-chrome-dock-items-function #'jetpacs-hub--dock-items)
+;; The hub's destinations are the HOST-authored core dock: the app
+;; layer composes them with per-app destinations (single-app contract:
+;; with fewer than two apps this renders exactly these items).
+(setq jetpacs-apps-core-dock-items #'jetpacs-hub--dock-items)
 
 (defun jetpacs-hub--screen (_back)
   (jetpacs-chrome-screen

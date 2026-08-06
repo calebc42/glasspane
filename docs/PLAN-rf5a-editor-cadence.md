@@ -153,6 +153,14 @@ file would be unguarded. E2 extends the guard to require every
 `emacs/ebp*.el` feature (derived from the glob, not a hand-kept list — the
 same lesson the byte-compile guard already records), so RF-4b's
 `ebp-data.el` is covered by construction.
+[correction 2026-08-06, PLAN-ebp-org-split G9: this E2 item is DISCHARGED —
+another plan reached the guard first. G1 (69bb5ee) rewrote run-tests.sh:6-21
+as a POSIX loop over the `emacs/ebp*.el` glob, one `emacs -Q --batch` process
+per file, with the count asserted and the offender predicate widened past
+`fboundp` to variables, faces, error conditions, group documentation,
+`custom-group` parent links and loaded features. `ebp-editor.el` and
+`ebp-data.el` are guarded the day they land, exactly as this paragraph asks.
+Nothing else in RF-5a's E2 is affected.]
 
 ### 4.2 Observer core (consumer-generic)
 

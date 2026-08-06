@@ -20,15 +20,15 @@ failure mode is the guard's own recorded lesson).
 
 | Checkpoint | SHA | Status |
 |---|---|---|
-| G1 guard generalized | — | pending |
-| G2 doctrine into ARCHITECTURE | — | pending |
-| G3 ebp-path.el | — | pending |
-| G4 token scope explicit | — | pending |
-| G5 teardown-owner public | — | pending |
-| G6 ebp-org.el phase 1 | — | pending |
-| G7 ebp-org.el phase 2 + shim | — | pending |
-| G8 adapter suite | — | pending |
-| G9 ledger closed | — | pending |
+| G1 guard generalized | 69bb5ee | landed |
+| G2 doctrine into ARCHITECTURE | caf6eb6 | landed |
+| G3 ebp-path.el | bfdd893 | landed |
+| G4 token scope explicit | a12e633 | landed |
+| G5 teardown-owner public | c7f856c | landed |
+| G6 ebp-org.el phase 1 | 7ad108c | landed |
+| G7 ebp-org.el phase 2 + shim | 27d0a44 | landed |
+| G8 adapter suite | 6f424e0 | landed |
+| G9 ledger closed | (this commit) | landed |
 
 ## The measured shape (all numbers verified twice: design + adversarial pass)
 
@@ -193,3 +193,45 @@ named in bed8ef4's lineage.
    assertion (G8).
 3. Test files are never byte-compiled — the suite moves carry manual sweeps,
    and smokes are grep-swept (they are run by nothing).
+
+## CORRECTIONS (2026-08-06, written at G9)
+
+Everything above is left as it was written — it is the record of what was
+believed before the work. This is the record of what execution found.
+
+- **files.el had THIRTEEN `jetpacs-path-refused` condition-case arms, not
+  fourteen.** Thirteen arms plus the `signal` at :902 make the fourteen
+  occurrences a grep counts; the measurement above counted occurrences and
+  called them arms.
+- **`ebp-path.el` is 119 lines, not ~55.** The three functions are about 55
+  lines of code; the rest is the JA-6 promotion paragraph and the docstrings
+  that moved with them. A pure file carries its reasons, and the estimate
+  costed the code alone.
+- **The `--check-file` caller census, which the plan never stated, is
+  :215/:459/:472/:578/:1740** in jetpacs-org.el as it stood at caf6eb6. Five
+  callers, all of them in phase-2 territory — which is what made "everything
+  that depends on neither `--check-file` nor the cache" a cut a human could
+  verify by eye rather than a promise.
+- **Reset fixtures numbered SIX, not five: the plan's list omitted
+  test/jetpacs-org-outline-test.el:31.** Seven sites counting the surfaces
+  bridge itself. Found by grep at G7; the hazard is exactly that a fixture
+  missed here resets nothing and says nothing, so the list in a plan is the
+  wrong instrument and the grep is the right one.
+- **Render's teardown registration is one hop LONGER, not absent.** The
+  load-graph ruling predicted `(require 'jetpacs-org-render)` would stop
+  registering the sweep; it still registers it, by
+  render → jetpacs-org-dialogs → jetpacs-org. The prediction was drawn from
+  render's own require list, which is correct as far as it goes and one file
+  short. G8 pins the membership and both source links.
+- **The ci.yml suite count was DROPPED rather than corrected** (G2). A number
+  that must be kept right in a file no test reads is a stale line with a
+  date on it; deleting it is the only fix that holds.
+- **Consumer churn: confirmed at exactly 67 production lines** — dialogs 38,
+  habits 14, vulpea 5, outline 4, render 4, surfaces 2, each file as
+  measured. The one number in this plan that survived contact unchanged.
+- **The `locate-library` scan idiom has a stated limit.** The outline
+  no-base-require pin (and G8's chain check, which borrows it) scans ONE
+  directory — the one the located library sits in — so `emacs/apps/*/` is
+  outside its reach, and it reads whatever copy of the tree is first on
+  `load-path`. The byte-compile and delineation guards cover the apps tree
+  by glob; these pins do not, and must not be read as if they did.

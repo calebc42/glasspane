@@ -468,6 +468,45 @@ class SurfaceStoreTest {
                 put("ttl_s", 86400); put("confirm", "Sure?")
             }),
             null, null, null).status)
+        // SPEC 14.1 (amendment #168): the object form — text required and
+        // non-empty, face members typed, an unknown member rejects.
+        rejects(s, button(buildJsonObject {
+            put("action", "a.b")
+            putJsonObject("confirm") { put("title", "Careful") }
+        }), "non-empty string")
+        rejects(s, button(buildJsonObject {
+            put("action", "a.b")
+            putJsonObject("confirm") { put("text", "") }
+        }), "non-empty string")
+        rejects(s, button(buildJsonObject {
+            put("action", "a.b")
+            putJsonObject("confirm") { put("text", "Sure?"); put("title", 5) }
+        }), "must be a string")
+        rejects(s, button(buildJsonObject {
+            put("action", "a.b")
+            putJsonObject("confirm") { put("text", "Sure?"); put("prompt", "x") }
+        }), "unknown confirm member")
+        rejects(s, button(buildJsonObject {
+            put("action", "a.b")
+            putJsonObject("confirm") { put("text", "Sure?"); put("icon", "no spaces") }
+        }), "identifier")
+        // Both accepted forms: the minimal {text} and the full face.
+        assertEquals("applied", s.update("app:ok2", 1,
+            button(buildJsonObject {
+                put("action", "a.b")
+                putJsonObject("confirm") { put("text", "Sure?") }
+            }),
+            null, null, null).status)
+        assertEquals("applied", s.update("app:ok3", 1,
+            button(buildJsonObject {
+                put("action", "a.b")
+                putJsonObject("confirm") {
+                    put("text", "Delete this note?"); put("title", "Delete note")
+                    put("icon", "delete"); put("confirm_label", "Delete")
+                    put("dismiss_label", "Keep")
+                }
+            }),
+            null, null, null).status)
     }
 
     @Test

@@ -9,7 +9,7 @@
 ;; vector, a builder call whose canonical serialization must be
 ;; byte-identical to the golden line -- offline, deterministic, no device.
 ;; JW-0 covers the ActionDescriptor / builtin vectors (widgets.golden
-;; 61-71) plus the canonical-serializer, funnel, universal-rider, color,
+;; 61-71, 100) plus the canonical-serializer, funnel, universal-rider, color,
 ;; and action-validation invariants.  Node-type vectors (00-60) land with
 ;; their rungs.  Contract-sync tests guard the catalogs against drift and
 ;; seed the 39-type coverage floor.
@@ -47,7 +47,7 @@
      (expand-file-name "../ebp/contract.json" jetpacs-test--dir))
     (json-parse-buffer :object-type 'alist :array-type 'list)))
 
-;;;; Byte-parity: ActionDescriptor / builtin vectors (widgets.golden 61-71)
+;;;; Byte-parity: ActionDescriptor / builtin vectors (widgets.golden 61-71, 100)
 
 (ert-deftest jetpacs-widgets/action-goldens ()
   "Every action/builtin vector in widgets.golden builds byte-identically."
@@ -72,7 +72,14 @@
       (chk "68" (jetpacs-trigger-fire "manual-sync"))
       (chk "69" (jetpacs-dialog-submit :value "ok"))
       (chk "70" (jetpacs-dialog-submit :capture-fields '("name")))
-      (chk "71" (jetpacs-dialog-dismiss)))))
+      (chk "71" (jetpacs-dialog-dismiss))
+      ;; §14.1 object-form confirm (amendment #168): the authored face.
+      (chk "100" (jetpacs-action "demo.guarded"
+                                 :confirm '(:text "Delete this note?"
+                                            :title "Delete note"
+                                            :icon "delete"
+                                            :confirm-label "Delete"
+                                            :dismiss-label "Keep"))))))
 
 ;;;; Byte-parity: Content-family nodes (widgets.golden 00-16, JW-1)
 

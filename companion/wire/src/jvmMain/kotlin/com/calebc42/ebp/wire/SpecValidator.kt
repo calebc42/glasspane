@@ -72,6 +72,11 @@ private val INJECTED_MEMBERS: Map<String, Set<String>> = mapOf(
     "swipe_end.on_trigger" to setOf("direction"),
 )
 
+// SPEC 14.1 (amendment #168): the object-form confirm face's closed member
+// set — text is the confirmation itself, the rest author the dialog.
+private val CONFIRM_MEMBERS =
+    setOf("text", "title", "icon", "confirm_label", "dismiss_label")
+
 object SpecValidator {
 
     /**
@@ -1188,12 +1193,11 @@ object SpecValidator {
                 if (d != Math.floor(d) || d.isInfinite() || d < 1.0 || d > 604800.0)
                     throw ContentInvalid("$path.ttl_s", "must be an integer 1..604800")
             }
-            // SPEC 14.1: confirm is a non-empty string when present.
-            if ("confirm" in obj) {
-                val c = obj.stringOrNull("confirm")
-                if (c == null || c.isEmpty())
-                    throw ContentInvalid("$path.confirm", "must be a non-empty string")
-            }
+            // SPEC 14.1 (amendment #168): confirm is a non-empty string, or
+            // the object form {text, title?, icon?, confirm_label?,
+            // dismiss_label?} — the face of the parked confirmation.
+            if ("confirm" in obj)
+                validateConfirm(obj["confirm"], "$path.confirm")
             // SPEC 14.3: a remote descriptor on a value-producing hook MUST
             // NOT author the member the Companion injects.
             INJECTED_MEMBERS[hook]?.let { injected ->
@@ -1243,5 +1247,35 @@ object SpecValidator {
             if (key !in row.required && key !in row.optional && key != "builtin"
                 && key != "action")
                 throw ContentInvalid("$path.$key", "unknown action member")
+    }
+
+    /** SPEC 14.1 (amendment #168): `confirm` is a non-empty string or the
+     * authored face {text, title?, icon?, confirm_label?, dismiss_label?}.
+     * A bare string is equivalent to {text}; an unknown face member rejects
+     * exactly as an unknown descriptor member does. */
+    private fun validateConfirm(c: JsonElement?, path: String) {
+        val face = c as? JsonObject
+        if (face == null) {
+            val s = c?.asStringOrNull()
+            if (s == null || s.isEmpty())
+                throw ContentInvalid(path,
+                    "must be a non-empty string or a confirm object")
+            return
+        }
+        for (k in face.keys)
+            if (k !in CONFIRM_MEMBERS)
+                throw ContentInvalid("$path.$k", "unknown confirm member")
+        val text = face.stringOrNull("text")
+        if (text == null || text.isEmpty())
+            throw ContentInvalid("$path.text", "must be a non-empty string")
+        for (m in listOf("title", "confirm_label", "dismiss_label"))
+            if (m in face && face.stringOrNull(m) == null)
+                throw ContentInvalid("$path.$m", "must be a string")
+        if ("icon" in face) {
+            val icon = face.stringOrNull("icon")
+            if (icon == null || !IDENTIFIER.matches(icon) ||
+                icon.toByteArray(Charsets.UTF_8).size > WireLimits.MAX_IDENTIFIER_OCTETS)
+                throw ContentInvalid("$path.icon", "must be an identifier")
+        }
     }
 }

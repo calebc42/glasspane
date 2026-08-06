@@ -209,6 +209,16 @@ back strands the user in a three-deep stack."
                       component index (jetpacs-view-switch "home")))))
           (should (string-match-p "\"builtin\":\"view.switch\"" json))))))
 
+;;;; The floor seam
+
+(ert-deftest jetpacs-m3-ready-hook-is-wired ()
+  "The catalog subscribes ITSELF to the floor's READY ladder.
+This is the seam that lets an app ship out of tree: the floor no
+longer names `jetpacs-m3--on-ready' anywhere, so the only thing
+attaching the catalog's client hooks at READY is the `add-hook' the
+app runs at load -- and this is the only suite that loads the app."
+  (should (memq #'jetpacs-m3--on-ready jetpacs-ready-functions)))
+
 ;;;; The verbs
 
 (ert-deftest jetpacs-m3-open-rejects-and-stales-correctly ()

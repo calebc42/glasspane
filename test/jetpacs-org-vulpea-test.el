@@ -66,5 +66,18 @@ case-insensitively; regexp searches title+properties, NOT the body."
   (should-not (jetpacs-org-note-query-supported-p '(and (clocked))))
   (should (jetpacs-org-note-query-supported-p nil)))
 
+;;;; The namespace (C-1)
+
+(ert-deftest jetpacs-org-vulpea-owns-its-private-names ()
+  "The arm stopped squatting base's private namespace.
+`jetpacs-org--note-get' read as a `jetpacs-org' internal while living
+in the arm — the one file base must never require.  Renamed hard, with
+no alias (house tradition: one name all the way down), so the absence
+is as load-bearing as the presence.  The arm's PUBLIC `jetpacs-org-note-*'
+names stay unprefixed on purpose: a second index backend implements
+the same two entry points."
+  (should (fboundp 'jetpacs-org-vulpea--note-get))
+  (should-not (fboundp 'jetpacs-org--note-get)))
+
 (provide 'jetpacs-org-vulpea-test)
 ;;; jetpacs-org-vulpea-test.el ends here

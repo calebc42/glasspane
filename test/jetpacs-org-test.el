@@ -122,6 +122,31 @@ against the documented status map never sees `jetpacs-path-refused'."
                       (progn (jetpacs-org--check-file f) :no-signal)
                     (jetpacs-org-unavailable (cadr err))))))))
 
+(ert-deftest jetpacs-org-file-allowed-p-is-total ()
+  "The predicate form NEVER signals — that is its whole reason to exist.
+`jetpacs-org--check-file' splits three conditions apart because a
+caller that ANSWERS a request routes each to a different status; a
+caller that merely wants to know whether it may READ a path wants one
+boolean, and every one of them had written the same wrong
+`condition-case' catching `jetpacs-org-refused' alone.  All three
+conditions come back nil here: out of policy (refused), a MISSING file
+inside the roots (unresolved — the ordinary missing-image link), and a
+collapsed allowlist (unavailable)."
+  (jetpacs-org-test--with-fixture f "* H\n"
+    ;; Allowed: the truename, not merely t.
+    (should (equal (jetpacs-org-file-allowed-p f) (file-truename f)))
+    ;; Inside the roots but GONE: `jetpacs-org-unresolved' -> nil.
+    (should-not (jetpacs-org-file-allowed-p
+                 (expand-file-name "ja4-never-written.png"
+                                   (file-name-directory f))))
+    ;; Outside the roots, and not even absolute: `jetpacs-org-refused'.
+    (should-not (jetpacs-org-file-allowed-p "/etc/passwd"))
+    (should-not (jetpacs-org-file-allowed-p "relative.org"))
+    ;; The whole allowlist collapsed: `jetpacs-org-unavailable' -> nil,
+    ;; for a file that is otherwise perfectly readable.
+    (let ((jetpacs-org-roots '("/nonexistent-root-xyz")))
+      (should-not (jetpacs-org-file-allowed-p f)))))
+
 (ert-deftest jetpacs-org-resolve-refuses-remote-before-any-stat ()
   "Defect 5: `file-remote-p' runs FIRST — the stat IS the connection.
 A remote ref is refused with ZERO stat-family calls."
@@ -948,6 +973,75 @@ through a grammar that promises path-free results."
     (should (equal (jetpacs-org-test--titles
                     (jetpacs-org-parse-query "(priority > \"B\")"))
                    '("Urgent thing")))))
+
+;;;; The interpreter as a public seam (C-2)
+
+(ert-deftest jetpacs-org-matches-p-drives-a-plain-closure-accessor ()
+  "The testability claim, cashed: no org buffer, no note index, no
+`org-mode' — just a closure over an alist.  GET is the seam and the
+grammar is shared, so an out-of-tree arm plugs its own entries in
+exactly this way; every tree below is VETTED through the real
+`jetpacs-org-parse-query', which is the contract callers must honor."
+  (let* ((entry '((todo . "TODO")
+                  (done . nil)
+                  (tags "work")
+                  (title . "Call Bob")
+                  (properties ("KIND" . "call"))))
+         (get (lambda (what &rest args)
+                (if (eq what 'property)
+                    (cdr (assoc (car args) (alist-get 'properties entry)))
+                  (alist-get what entry)))))
+    ;; The five WHATs this accessor serves, through the public entry.
+    (should (jetpacs-org-matches-p
+             (jetpacs-org-parse-query "(todo \"TODO\")") get))
+    (should (jetpacs-org-matches-p
+             (jetpacs-org-parse-query "(tags \"work\")") get))
+    (should (jetpacs-org-matches-p
+             (jetpacs-org-parse-query "(heading \"Bob\")") get))
+    (should (jetpacs-org-matches-p
+             (jetpacs-org-parse-query "(property \"KIND\" \"call\")") get))
+    (should (jetpacs-org-matches-p
+             (jetpacs-org-parse-query "(not (done))") get))
+    ;; The conjunction, and the decoys it must exclude.
+    (should (jetpacs-org-matches-p
+             (jetpacs-org-parse-query
+              "(and (todo \"TODO\") (tags \"work\") (not (done)))")
+             get))
+    (should-not (jetpacs-org-matches-p
+                 (jetpacs-org-parse-query "(done)") get))
+    (should-not (jetpacs-org-matches-p
+                 (jetpacs-org-parse-query "(tags \"money\")") get))
+    (should-not (jetpacs-org-matches-p
+                 (jetpacs-org-parse-query "(property \"KIND\" \"mail\")") get))
+    ;; A question the accessor cannot serve never matches — it does not
+    ;; blow up: an arm advertises its coverage, it does not implement all
+    ;; ten to be usable.
+    (should-not (jetpacs-org-matches-p
+                 (jetpacs-org-parse-query "(level 1)") get))))
+
+(ert-deftest jetpacs-org-matches-p-unvetted-head-names-only-the-head ()
+  "An unvetted TREE is a programming error, and it says so: a plain
+`error' — never `jetpacs-org-refused', which SPEC 14.4 would make a
+PERMANENT verdict against the user's query for a bug in the calling
+code — naming the head symbol and NOTHING else.  Query material is
+user data (SPEC 23.3), so no leaf of the tree may ride in the message."
+  (let* ((err (should-error
+               (jetpacs-org-matches-p '(clocked "JA4SNEAKPAYLOAD") #'ignore)
+               :type 'error))
+         (msg (error-message-string err)))
+    (should (eq (car err) 'error))
+    (should (string-search "unsupported clause head" msg))
+    (should (string-search "clocked" msg))
+    (should-not (string-search "JA4SNEAKPAYLOAD" msg))
+    (should-not (string-search "JA4SNEAKPAYLOAD" (format "%S" err))))
+  ;; A tree that is not even a clause answers with its TYPE, still no echo.
+  (let* ((err (should-error
+               (jetpacs-org-matches-p "JA4SNEAKPAYLOAD" #'ignore)
+               :type 'error))
+         (msg (error-message-string err)))
+    (should (string-search "unsupported clause head" msg))
+    (should (string-search "string" msg))
+    (should-not (string-search "JA4SNEAKPAYLOAD" msg))))
 
 ;;;; Shared primitives (O3)
 

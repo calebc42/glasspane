@@ -227,6 +227,39 @@ wipe) must not survive."
     (should-not (jetpacs-event-stale-p
                  '(:surface "app:new" :revision_seen 0)))))
 
+(defun jetpacs-floor-test--exploding-before-replay-member (_client)
+  "A `jetpacs-before-replay-functions' member that always signals."
+  (error "floor probe: the before-replay member exploded"))
+
+(ert-deftest jetpacs-floor-before-replay-isolates-a-failing-member ()
+  "A signalling subscriber must not take the SPEC 10.3 barrier with it.
+`ebp-client--on-welcome' calls the before-replay seam BARE: a signal
+escaping it skipped the `queue.replay' request entirely and left the
+session SYNCING forever — no replay, no READY, no recovery short of a
+reconnect.  The probe is pinned at depth -100 so it runs FIRST, ahead
+of the shell's required-root push.
+
+The seed is the other half: it is hard-coded into
+`jetpacs--before-replay' AHEAD of the hook, by structure and not by
+depth, so no member can sort in front of the kernel state the members
+themselves read."
+  (jetpacs-floor-test--with-client (client)
+    (setf (ebp-client-surfaces client)
+          '(:app:demo (:revision 60 :present t)))
+    (add-hook 'jetpacs-before-replay-functions
+              #'jetpacs-floor-test--exploding-before-replay-member -100)
+    (unwind-protect
+        ;; Escaping here IS the failure — no `should-error' wrapper.
+        (let ((inhibit-message t))
+          (jetpacs--before-replay client))
+      (remove-hook 'jetpacs-before-replay-functions
+                   #'jetpacs-floor-test--exploding-before-replay-member))
+    ;; …and the seed still landed: below the floor is stale, at it fresh.
+    (should (jetpacs-event-stale-p
+             '(:surface "app:demo" :revision_seen 42)))
+    (should-not (jetpacs-event-stale-p
+                 '(:surface "app:demo" :revision_seen 60)))))
+
 (ert-deftest jetpacs-floor-replayed-event-against-old-snapshot-is-stale ()
   "A8 P1 end to end: the barrier seed reaches a real replayed dispatch.
 `jetpacs--before-replay' is what `jetpacs-connect' installs; SPEC 10.3

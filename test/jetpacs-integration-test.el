@@ -33,6 +33,11 @@
 ;; branch, which is the one no other suite reaches.
 (require 'jetpacs-chrome)
 (require 'jetpacs-navigate)
+;; Required LAST on purpose: theme subscribes to `jetpacs-ready-functions'
+;; at depth -50 after the shell (90) and chrome (default) are already on
+;; it, so the ordering assertions below exercise the late-loader case —
+;; `add-hook' re-sorts by depth on every add, in either load order.
+(require 'jetpacs-theme)
 
 ;;;; The drill seam (T1)
 
@@ -195,6 +200,117 @@ timing rather than queued to fire stale on some later push."
         (should (equal (gethash "app:notifydemo" jetpacs-shell--snackbars)
                        "saved"))
       (remhash "app:notifydemo" jetpacs-shell--snackbars))))
+
+;;;; The READY ladder (A-2) and its sibling (A-3)
+
+;; The ladder the floor used to spell as an fboundp chain is now
+;; `jetpacs-ready-functions', and every module subscribes at LOAD.  That
+;; makes membership and ORDER properties of the loaded set — which only
+;; this suite has, because it is the only process that loads the
+;; application layer together.  Every other suite sees whichever one
+;; module it required and would stay green with the rest deleted.
+
+(defun jetpacs-integration-test--client ()
+  "A bare client struct for driving the floor's hooks by hand."
+  (ebp-client-create
+   :receipt-file (make-temp-file "jetpacs-integration-receipts")))
+
+(defun jetpacs-integration-test--exploding-ready-member (_client)
+  "A `jetpacs-ready-functions' member that always signals."
+  (error "integration probe: the ready member exploded"))
+
+(ert-deftest jetpacs-integration-ready-hook-carries-every-loaded-module ()
+  "Each loaded module puts its own READY work on the hook.
+The floor no longer names a single module, so a deleted `add-hook' is
+green in the module's OWN suite (nothing there drains the hook) and
+green everywhere else (nothing there loads the module).  This is where
+it fails."
+  (should (memq #'jetpacs-shell--on-ready jetpacs-ready-functions))
+  (should (memq #'jetpacs-theme--on-ready jetpacs-ready-functions))
+  (should (memq #'jetpacs-chrome--on-ready jetpacs-ready-functions)))
+
+(ert-deftest jetpacs-integration-ready-hook-orders-theme-before-shell ()
+  "The palette frame is pinned AHEAD of the content drain, statically.
+Theme sits at depth -50 and the shell drain at 90, so a screen drained
+at READY paints in the palette this session already sent — the 0.2 s
+wrong-palette flash the depths exist to kill.  Asserted on the GLOBAL
+value: the depth lives there, and a let-bound literal would discard it
+and pass on list order alone."
+  (let ((theme (cl-position #'jetpacs-theme--on-ready jetpacs-ready-functions))
+        (shell (cl-position #'jetpacs-shell--on-ready jetpacs-ready-functions)))
+    (should theme)
+    (should shell)
+    (should (< theme shell))))
+
+(ert-deftest jetpacs-integration-ready-hook-runs-theme-before-shell ()
+  "The dynamic half: the drain CALLS them in that order.
+`add-hook' stores symbols, so `run-hook-wrapped' inside
+`jetpacs-run-isolated' funcalls them through their `symbol-function' —
+which is what lets a `cl-letf' log the real dispatch rather than
+re-reading the same list the static test already read."
+  (let ((log '())
+        ;; chrome's member runs for real between the two; keep its memo
+        ;; out of the global.
+        (jetpacs-chrome--window-classes nil)
+        (client (jetpacs-integration-test--client)))
+    (cl-letf (((symbol-function 'jetpacs-theme--on-ready)
+               (lambda (_client) (push 'theme log)))
+              ((symbol-function 'jetpacs-shell--on-ready)
+               (lambda (_client) (push 'shell log))))
+      (jetpacs--on-client-ready client))
+    (should (equal (nreverse log) '(theme shell)))))
+
+(ert-deftest jetpacs-integration-ready-hook-isolates-a-failing-member ()
+  "One member's signal must not cost the session everything after it.
+Pinned at depth -100 so the probe runs FIRST: without the isolation in
+`jetpacs-run-isolated' the whole ladder — palette, chrome seed, and the
+shell's drain of the pushes SYNCING refused — dies on the first
+subscriber that breaks."
+  (let ((pushed '())
+        (drained nil)
+        ;; No client is attached, so the palette send is a no-op anyway;
+        ;; pinning the mode keeps it one whatever ran before this test.
+        (jetpacs-theme-mode 'off)
+        (jetpacs-chrome--window-classes nil)
+        (jetpacs-shell--repush-pending '("app:integrationdrain"))
+        (client (jetpacs-integration-test--client)))
+    (add-hook 'jetpacs-ready-functions
+              #'jetpacs-integration-test--exploding-ready-member -100)
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-shell-push)
+                   (lambda (surface &rest _) (push surface pushed) 1)))
+          ;; Escaping here IS the failure — no `should-error' wrapper.
+          (let ((inhibit-message t))
+            (jetpacs--on-client-ready client))
+          (setq drained (null jetpacs-shell--repush-pending)))
+      (remove-hook 'jetpacs-ready-functions
+                   #'jetpacs-integration-test--exploding-ready-member))
+    ;; The drain ran, past the member that blew up ahead of it.
+    (should drained)
+    (should (equal pushed '("app:integrationdrain")))))
+
+(ert-deftest jetpacs-integration-connect-installs-the-ready-bridge ()
+  "`jetpacs-connect' hands ebp the NAMED bridge, and only one of it.
+Named rather than a closure so this `memq' is possible at all — the
+audit deleted the old inline install with every suite green.
+`cl-pushnew' is the other half: a reconnect that re-installs on the
+same client must not drain the ladder twice."
+  (let ((client (jetpacs-integration-test--client)))
+    (should-not (ebp-client-ready-functions client))
+    (jetpacs--install-ready-hooks client)
+    (should (memq #'jetpacs--on-client-ready
+                  (ebp-client-ready-functions client)))
+    (jetpacs--install-ready-hooks client)
+    (should (= 1 (cl-count #'jetpacs--on-client-ready
+                           (ebp-client-ready-functions client))))))
+
+(ert-deftest jetpacs-integration-before-replay-hook-is-wired ()
+  "The shell's SPEC 10.3 step-3 push rides the floor's sibling ladder.
+The floor used to reach for `jetpacs-shell--before-replay' by name; now
+the shell subscribes, and nothing but this suite would notice the
+`add-hook' go missing."
+  (should (memq #'jetpacs-shell--before-replay
+                jetpacs-before-replay-functions)))
 
 (provide 'jetpacs-integration-test)
 ;;; jetpacs-integration-test.el ends here

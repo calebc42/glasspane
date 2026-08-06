@@ -308,6 +308,42 @@ touch, not what the file may mention."
       (let ((nodes (jetpacs-org-render (jetpacs-org-render-test--buffer f))))
         (should-not (jetpacs-org-render-test--nodes-of nodes "image"))))))
 
+(ert-deftest jetpacs-org-render-missing-image-file-degrades ()
+  "A link to a file that is not there degrades; it does not SIGNAL.
+The most ordinary thing an org document can contain — a link to a
+renamed or not-yet-created image — raises `jetpacs-org-unresolved',
+and the data: URI path caught `jetpacs-org-refused' alone, so the
+condition escaped up through the whole upgrade scan.  The blast radius
+is the DOCUMENT, not the link: `jetpacs-org-render' catches an
+escaping scan and falls back to a pure Tier-0 render, so one dead link
+silently cost every OTHER native node in the file.  Hence the table —
+it is the witness that the scan ran to the end.
+
+Driven with the rich profile ATTACHED on purpose: the advertisement
+gates refuse ahead of the allowlist otherwise, and the assertions
+would pass without the seam ever being reached."
+  (jetpacs-org-render-test--with-client
+      (:profiles jetpacs-org-render-test--rich-profile)
+    (jetpacs-org-render-test--with-file f
+        (concat "| Name | N |\n|------+---|\n| a    | 1 |\n\n"
+                "#+CAPTION: The caption\n"
+                "[[file:./does-not-exist.png][A picture]]\n")
+      (let* ((nodes (jetpacs-org-render (jetpacs-org-render-test--buffer f)))
+             (text (mapconcat
+                    (lambda (n)
+                      (mapconcat (lambda (s) (or (plist-get s :text) ""))
+                                 (append (plist-get n :spans) nil) ""))
+                    (jetpacs-org-render-test--nodes-of nodes "rich_text")
+                    "\n")))
+        ;; The dead link degrades to text…
+        (should-not (jetpacs-org-render-test--nodes-of nodes "image"))
+        (should (string-search "The caption" text))
+        (should (string-search "A picture" text))
+        ;; …and it costs the document NOTHING else: the native table
+        ;; ahead of it survived the scan.
+        (should (= 1 (length (jetpacs-org-render-test--nodes-of
+                              nodes "table"))))))))
+
 (ert-deftest jetpacs-org-render-image-non-regular-file-guarded ()
   "The `file-regular-p' guard is consulted before any read — a FIFO
 under a root would hang `insert-file-contents' forever (JA-6 P1-4)."

@@ -62,7 +62,7 @@ gate (GATE 2 included).  Chrome's synthesized non-node failure fires
 it too, with the bare symbol `wrong-type-argument' as ERR — no signal
 exists there, so no backtrace does either.  CONTEXT is a plist with
 :surface, plus :screen / :phase where the site knows them.  Members
-run isolated (`jetpacs-shell--run-isolated'): the loud path stays
+run isolated (`jetpacs-run-isolated'): the loud path stays
 exactly as it was — scrubbed per SPEC 23.3 — whatever a member does.
 The seam exists so a flight recorder (`jetpacs-devtools') can keep
 what `jetpacs-error-label' drops.")
@@ -72,8 +72,8 @@ what `jetpacs-error-label' drops.")
 Called from inside a HANDLER-BIND handler while ERR is propagating —
 the isolation is what keeps a broken recorder member from changing
 which error the catch site sees."
-  (jetpacs-shell--run-isolated 'jetpacs-shell-builder-error-functions
-                               context err))
+  (jetpacs-run-isolated 'jetpacs-shell-builder-error-functions
+                        context err))
 
 (defvar jetpacs-shell--snackbars (make-hash-table :test #'equal)
   "SURFACE id -> queued snackbar text for its next push; latest wins.
@@ -312,17 +312,11 @@ re-registering push when that matters."
       (remhash surface jetpacs--applied-revisions)
       (remhash surface jetpacs-shell--current-view)
       (remhash surface jetpacs-shell--unasserted-view))
-    ;; `run-hook-wrapped', not `dolist': a buffer-local `add-hook' puts
-    ;; `t' in the value, and `(funcall t owner)' would be swallowed by
-    ;; the isolation below — silently dropping every GLOBAL subscriber.
-    (run-hook-wrapped
-     'jetpacs-teardown-functions
-     (lambda (fn)
-       (condition-case err
-           (funcall fn owner)
-         (error (message "jetpacs: teardown hook failed: %s"
-                         (jetpacs-error-label err))))
-       nil)))
+    ;; `jetpacs-run-isolated', not a hand-rolled `dolist': a buffer-local
+    ;; `add-hook' puts `t' in the value, and `(funcall t owner)' would be
+    ;; swallowed by the isolation — silently dropping every GLOBAL
+    ;; subscriber.  `run-hook-wrapped' inside the floor helper handles it.
+    (jetpacs-run-isolated 'jetpacs-teardown-functions owner))
   owner)
 
 (defun jetpacs-shell--schedule-repush (surface)
@@ -973,7 +967,7 @@ spec (SPEC 13.4)" current-view)))
                   (unless snack-in-scaffold
                     (ignore-errors (jetpacs-toast snack)))
                   (setq snack nil))
-                (jetpacs-shell--run-isolated 'jetpacs-shell-after-push-hook))
+                (jetpacs-run-isolated 'jetpacs-shell-after-push-hook))
               revision)
           ;; A failed push showed nothing: the feedback must survive.
           (when snack
@@ -1006,24 +1000,9 @@ the caller degrades to a toast as before."
           (puthash vid (append root (list :snackbar snack)) copy)
           (plist-put (copy-sequence spec) :views copy)))))))
 
-(defun jetpacs-shell--run-isolated (hook &rest args)
-  "Run HOOK's functions with ARGS, each isolated; log failures by SYMBOL.
-Isolation is not optional on any hook reachable from inside the jsonrpc
-dispatch extent: the effect is already committed when the hook runs —
-for the push hooks the frame is ON THE WIRE — and an escaping signal
-answers `rejected', which SPEC 14.4 makes PERMANENT.  `run-hook-wrapped'
-handles the buffer-local `t' marker a bare dolist would funcall."
-  (apply #'run-hook-wrapped hook
-         (lambda (fn &rest a)
-           (condition-case err (apply fn a)
-             (error (message "jetpacs: %s hook failed: %s"
-                             hook (jetpacs-error-label err))))
-           nil)
-         args))
-
 (defun jetpacs-shell-refresh (&rest _)
   "Run `jetpacs-shell-refresh-hook', then push.  Hook-safe arity."
-  (jetpacs-shell--run-isolated 'jetpacs-shell-refresh-hook)
+  (jetpacs-run-isolated 'jetpacs-shell-refresh-hook)
   (jetpacs-shell-push))
 
 (defun jetpacs-shell-notify (text &optional surface-or-owner &rest keys)
@@ -1206,8 +1185,8 @@ SHOULD-omit)."
       (if (not (and (stringp view) (stringp surface)))
           'rejected
         (jetpacs-shell--record-view surface view)
-        (jetpacs-shell--run-isolated 'jetpacs-shell-view-change-functions
-                                     surface view)
+        (jetpacs-run-isolated 'jetpacs-shell-view-change-functions
+                              surface view)
         'accepted))))
 
 ;;;; Seams

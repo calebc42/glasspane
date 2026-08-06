@@ -1185,6 +1185,21 @@ array string, or a single string; anything else is discarded."
      ((stringp value) (list value))
      (t nil))))
 
+(defun jetpacs-run-isolated (hook &rest args)
+  "Run HOOK's functions with ARGS, each isolated; log failures by SYMBOL.
+Isolation is not optional on any hook reachable from inside the jsonrpc
+dispatch extent: the effect is already committed when the hook runs —
+for the push hooks the frame is ON THE WIRE — and an escaping signal
+answers `rejected', which SPEC 14.4 makes PERMANENT.  `run-hook-wrapped'
+handles the buffer-local `t' marker a bare dolist would funcall."
+  (apply #'run-hook-wrapped hook
+         (lambda (fn &rest a)
+           (condition-case err (apply fn a)
+             (error (message "jetpacs: %s hook failed: %s"
+                             hook (jetpacs-error-label err))))
+           nil)
+         args))
+
 (defvar jetpacs-teardown-functions nil
   "Abnormal hook run with (OWNER) at the end of `jetpacs-teardown-owner'.
 The attachment point for module-private per-owner state (reminders

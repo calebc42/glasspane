@@ -1306,8 +1306,8 @@ Runs inside a device flow."
                     ;; PERMANENT, and the Companion would re-deliver a
                     ;; save that already landed.  (Caught by the F4 gate:
                     ;; a broken subscriber flipped an accepted save.)
-                    (jetpacs-shell--run-isolated 'jetpacs-files-after-save-hook
-                                                 true)
+                    (jetpacs-run-isolated 'jetpacs-files-after-save-hook
+                                          true)
                     (jetpacs-shell-notify
                      (if (and user-init-file
                               (file-exists-p user-init-file)

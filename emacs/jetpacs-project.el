@@ -108,16 +108,11 @@ around the interactive drives so no stale event hijacks a prompt."
 ;;;; Cards and screens
 
 (defun jetpacs-project--entry (icon title caption action)
-  "A hub row: leading ICON, TITLE/CAPTION, a chevron; tap runs ACTION."
-  (jetpacs-card
-   (jetpacs-row
-    (jetpacs-icon icon)
-    (jetpacs-with-attrs
-     (jetpacs-column (jetpacs-text title :style "label")
-                     (jetpacs-text caption :style "caption"))
-     :weight 1)
-    (jetpacs-icon "chevron_right"))
-   :on-tap action))
+  "A hub-grade row: leading ICON, TITLE/CAPTION, a chevron; ACTION on tap."
+  (jetpacs-chrome-row title :subtitle caption :icon icon
+                      :trailing (jetpacs-icon "chevron_right")
+                      :on-tap action
+                      :key (jetpacs-wire-id "pj" title)))
 
 (defun jetpacs-project--header (root)
   (if root
@@ -169,14 +164,12 @@ around the interactive drives so no stale event hijacks a prompt."
                                              :when-offline "drop")))))
 
 (defun jetpacs-project--file-card (root file)
-  (let ((rel (file-relative-name file root)))
-    (jetpacs-card
-     (jetpacs-row
-      (jetpacs-icon "description")
-      (jetpacs-with-attrs (jetpacs-text rel :style "body" :max-lines 2)
-                          :weight 1))
-     :on-tap (jetpacs-action "project.open-file"
-                             :args `(:file ,file) :when-offline "drop"))))
+  (jetpacs-chrome-row (file-relative-name file root)
+                      :icon "description"
+                      :on-tap (jetpacs-action "project.open-file"
+                                              :args `(:file ,file)
+                                              :when-offline "drop")
+                      :key (jetpacs-wire-id "pf" file)))
 
 (defun jetpacs-project--find-nodes ()
   (let ((root (jetpacs-project--root)))
@@ -221,23 +214,18 @@ around the interactive drives so no stale event hijacks a prompt."
 
 (defun jetpacs-project--switch-card (root current)
   (let ((activep (jetpacs-project--same-root-p root current)))
-    (jetpacs-card
-     (jetpacs-row
-      (jetpacs-icon "folder")
-      (jetpacs-with-attrs
-       (jetpacs-column
-        (jetpacs-text (file-name-nondirectory (directory-file-name root))
-                      :style "label")
-        (jetpacs-text (abbreviate-file-name (directory-file-name root))
-                      :style "caption"))
-       :weight 1)
-      (if activep
-          (jetpacs-icon "check_circle" :color "primary")
-        (jetpacs-icon "chevron_right")))
+    (jetpacs-chrome-row
+     (file-name-nondirectory (directory-file-name root))
+     :subtitle (abbreviate-file-name (directory-file-name root))
+     :icon "folder"
+     :trailing (if activep
+                   (jetpacs-icon "check_circle" :color "primary")
+                 (jetpacs-icon "chevron_right"))
      :on-tap (unless activep
                (jetpacs-action "project.switch"
                                :args `(:root ,root)
-                               :when-offline "drop")))))
+                               :when-offline "drop"))
+     :key (jetpacs-wire-id "pr" root))))
 
 (defun jetpacs-project--switch-nodes ()
   (let ((roots (jetpacs-project--known-roots))
@@ -251,25 +239,19 @@ around the interactive drives so no stale event hijacks a prompt."
 
 (defun jetpacs-project--view ()
   ;; A scaffold so chrome docks the view switcher.
-  (jetpacs-scaffold
-   :body
+  (jetpacs-chrome-screen
+   (pcase jetpacs-project--screen
+     ('find "Find file")
+     ('switch "Switch project")
+     (_ "Project"))
    (apply #'jetpacs-lazy-column
-          (cons
-          (jetpacs-row
-           (unless (eq jetpacs-project--screen 'dashboard)
-             (jetpacs-icon-button "arrow_back"
-                                  (jetpacs-action "project.show"
-                                                  :when-offline "drop")
-                                  :content-description "Back to the dashboard"))
-           (jetpacs-text (pcase jetpacs-project--screen
-                           ('find "Find file")
-                           ('switch "Switch project")
-                           (_ "Project"))
-                         :style "title"))
-           (pcase jetpacs-project--screen
-             ('find (jetpacs-project--find-nodes))
-             ('switch (jetpacs-project--switch-nodes))
-             (_ (jetpacs-project--dashboard-nodes)))))))
+          (pcase jetpacs-project--screen
+            ('find (jetpacs-project--find-nodes))
+            ('switch (jetpacs-project--switch-nodes))
+            (_ (jetpacs-project--dashboard-nodes))))
+   ;; Sub-screens ride the top bar's own back slot.
+   :back (unless (eq jetpacs-project--screen 'dashboard)
+           (jetpacs-action "project.show" :when-offline "drop"))))
 
 ;;;; Actions
 
@@ -378,6 +360,12 @@ open follows the same shape)."
                                 (jetpacs-action "project.show"
                                                 :when-offline "drop")))))
 (declare-function jetpacs-settings-add-link "jetpacs-settings" (order builder))
+
+(defvar jetpacs-launcher-row-icons)
+(with-eval-after-load 'jetpacs-launcher
+  (setf (alist-get (concat "app:" jetpacs-project-surface)
+                   jetpacs-launcher-row-icons nil nil #'equal)
+        "dashboard"))
 
 (provide 'jetpacs-project)
 ;;; jetpacs-project.el ends here

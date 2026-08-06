@@ -106,9 +106,10 @@
     (let ((labels nil))
       (cl-labels ((walk (n)
                     (when (and (equal (plist-get n :t) "text")
-                               (equal (plist-get n :style) "label"))
+                               (member (plist-get n :text)
+                                       '("Alpha" "Zeta")))
                       (push (plist-get n :text) labels))
-                    ;; The view is a scaffold now: descend :body too.
+                    ;; The view is a chrome screen: descend :body too.
                     (when-let* ((body (plist-get n :body))) (walk body))
                     (mapc #'walk (append (plist-get n :children) nil))))
         (walk (jetpacs-apps--view)))

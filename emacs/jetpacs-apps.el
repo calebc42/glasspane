@@ -124,33 +124,26 @@ single-app contract."
 
 (defun jetpacs-apps--card (entry)
   (pcase-let ((`(,id . ,plist) entry))
-    (jetpacs-card
-     (jetpacs-row
-      (jetpacs-icon (plist-get plist :icon))
-      (jetpacs-with-attrs
-       (jetpacs-column
-        (jetpacs-text (plist-get plist :label) :style "label")
-        (jetpacs-text (or (jetpacs-apps--home-surface entry) "")
-                      :style "caption"))
-       :weight 1)
-      (if (equal id (car (jetpacs-apps-current)))
-          (jetpacs-icon "check_circle" :color "primary")
-        (jetpacs-icon "chevron_right")))
-     :on-tap (jetpacs-action "app.open" :args `(:app ,id)
-                             :when-offline "drop"))))
+    (jetpacs-chrome-row (plist-get plist :label)
+                        :subtitle (jetpacs-apps--home-surface entry)
+                        :icon (plist-get plist :icon)
+                        :trailing (if (equal id (car (jetpacs-apps-current)))
+                                      (jetpacs-icon "check_circle"
+                                                    :color "primary")
+                                    (jetpacs-icon "chevron_right"))
+                        :on-tap (jetpacs-action "app.open" :args `(:app ,id)
+                                                :when-offline "drop")
+                        :key (jetpacs-wire-id "ap" id))))
 
 (defun jetpacs-apps--view ()
-  ;; A scaffold so chrome docks the view switcher.
-  (jetpacs-scaffold
-   :body
+  (jetpacs-chrome-screen
+   "Apps"
    (apply #'jetpacs-lazy-column
-          (cons (jetpacs-text "Apps" :style "title")
-                (if (null jetpacs-apps--registry)
-                    (list (jetpacs-empty-state
-                           :icon "apps" :title "No apps registered"
-                           :caption
-                           "Apps appear here as their bundles load."))
-                  (mapcar #'jetpacs-apps--card jetpacs-apps--registry))))))
+          (if (null jetpacs-apps--registry)
+              (list (jetpacs-empty-state
+                     :icon "apps" :title "No apps registered"
+                     :caption "Apps appear here as their bundles load."))
+            (mapcar #'jetpacs-apps--card jetpacs-apps--registry)))))
 
 ;;;; Actions
 

@@ -301,12 +301,10 @@ owner for the app-identity layer to filter once it exists."
    (mapcar (lambda (e) (funcall (cadr e))) jetpacs-settings-links)))
 
 (defun jetpacs-settings--view ()
-  "The settings root: a scaffold, so chrome docks the view switcher."
-  (jetpacs-scaffold
-   :body
-   (apply #'jetpacs-lazy-column
-          (cons (jetpacs-text "Settings" :style "title")
-                (jetpacs-settings-sections)))))
+  "The settings root screen: the platform's own top bar and dock."
+  (jetpacs-chrome-screen
+   "Settings"
+   (apply #'jetpacs-lazy-column (jetpacs-settings-sections))))
 
 (defun jetpacs-settings-refresh ()
   "Re-push the settings surface (deferred; safe from dispatch)."
@@ -354,6 +352,12 @@ through their submit action instead."
                               (lambda (_back) (jetpacs-settings--view))))
 (jetpacs-defaction "settings.set" #'jetpacs-settings--action-set)
 (jetpacs-defaction "settings.reset" #'jetpacs-settings--action-reset)
+
+(defvar jetpacs-launcher-row-icons)
+(with-eval-after-load 'jetpacs-launcher
+  (setf (alist-get (concat "app:" jetpacs-settings-surface)
+                   jetpacs-launcher-row-icons nil nil #'equal)
+        "settings"))
 
 (provide 'jetpacs-settings)
 ;;; jetpacs-settings.el ends here

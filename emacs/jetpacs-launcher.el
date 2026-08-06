@@ -26,6 +26,7 @@
 (require 'jetpacs-async)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
+(require 'subr-x)
 (require 'jetpacs-chrome)
 
 (defconst jetpacs-launcher-owner "jetpacs.launcher"
@@ -41,10 +42,24 @@ list is stable across pushes."
          (jetpacs-shell-roots))
         (lambda (a b) (string< (car a) (car b)))))
 
+(defvar jetpacs-launcher-row-icons nil
+  "Alist of SURFACE (\"app:…\" form) -> icon name for switch rows.
+Modules may seed their surface's icon; unlisted surfaces get \"apps\".")
+
+(defun jetpacs-launcher--pretty (owner surface)
+  "A human title for a switch row: the name sans namespace, capitalized.
+\"jetpacs.settings\" reads as \"Settings\"; an unowned surface keeps
+its id (better an honest id than a wrongly prettified one)."
+  (if owner
+      (capitalize (string-remove-prefix "jetpacs." owner))
+    surface))
+
 (defun jetpacs-launcher--row (surface owner)
   "One tappable row for SURFACE (registered by OWNER, maybe nil)."
-  (jetpacs-chrome-row (or owner surface)
-                      :icon "apps"
+  (jetpacs-chrome-row (jetpacs-launcher--pretty owner surface)
+                      :icon (or (cdr (assoc surface
+                                            jetpacs-launcher-row-icons))
+                                "apps")
                       :subtitle (and owner surface)
                       :on-tap (jetpacs-action "jetpacs.launcher.open"
                                               :args (list :surface surface))

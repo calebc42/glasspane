@@ -124,20 +124,15 @@ the documented cost of not enumerating every defcustom up front.")
 (defun jetpacs-customize--group-card (sym)
   "A tappable card descending into group SYM."
   (let ((doc (get sym 'group-documentation)))
-    (jetpacs-card
-     (jetpacs-row
-      (jetpacs-with-attrs
-       (apply #'jetpacs-column
-              (delq nil
-                    (list (jetpacs-text (symbol-name sym) :style "label")
-                          (when doc
-                            (jetpacs-text (car (split-string doc "\n"))
-                                          :style "caption")))))
-       :weight 1)
-      (jetpacs-icon "chevron_right"))
-     :on-tap (jetpacs-action "customize.browse"
-                             :args `(:group ,(symbol-name sym))
-                             :when-offline "drop"))))
+    (jetpacs-chrome-row (symbol-name sym)
+                        :subtitle (and doc (car (split-string doc "\n")))
+                        :icon "tune"
+                        :trailing (jetpacs-icon "chevron_right")
+                        :on-tap (jetpacs-action "customize.browse"
+                                                :args `(:group
+                                                        ,(symbol-name sym))
+                                                :when-offline "drop")
+                        :key (jetpacs-wire-id "cg" (symbol-name sym)))))
 
 (defun jetpacs-customize--crumbs ()
   "Breadcrumbs: link-styled ancestors, bold current; taps pop back."
@@ -218,39 +213,35 @@ the documented cost of not enumerating every defcustom up front.")
   ;; A scaffold so chrome docks the view switcher; lazy_column, not
   ;; column: a plain column taller than the screen is unreachable
   ;; below the fold.
-  (jetpacs-scaffold
-   :body
+  (jetpacs-chrome-screen
+   "Customize"
    (apply #'jetpacs-lazy-column
-         (append
-          (list
-           (jetpacs-row
-            (unless (and (null (cdr jetpacs-customize--path))
-                         (not (jetpacs-customize--flat-p)))
-              (jetpacs-icon-button "arrow_back"
-                                   (jetpacs-action "customize.up"
-                                                   :when-offline "drop")
-                                   :content-description "Up one level"))
-            (jetpacs-text "Customize" :style "title"))
-           ;; The framing: Settings is the curated experience; this
-           ;; browser is the escape hatch to everything else, and
-           ;; "everything else" is desktop-oriented.
-           (jetpacs-text
-            (concat "These are desktop Emacs's own options — many won't "
-                    "affect the phone experience. Curated options live "
-                    "in Settings.")
-            :style "caption")
-           (jetpacs-text-input "customize-search"
-                               :value jetpacs-customize--search
-                               :label "Search all variables" :single-line t
-                               :on-submit (jetpacs-action "customize.search"))
-           (jetpacs-flow-row
-            (jetpacs-chip "Modified"
-                          :selected jetpacs-customize--modified-only
-                          :on-tap (jetpacs-action "customize.modified-filter"
-                                                  :when-offline "drop"))))
-          (if (jetpacs-customize--flat-p)
-              (jetpacs-customize--flat-nodes)
-            (jetpacs-customize--group-nodes))))))
+          (append
+           (list
+            ;; The framing: Settings is the curated experience; this
+            ;; browser is the escape hatch to everything else, and
+            ;; "everything else" is desktop-oriented.
+            (jetpacs-text
+             (concat "These are desktop Emacs's own options — many won't "
+                     "affect the phone experience. Curated options live "
+                     "in Settings.")
+             :style "caption")
+            (jetpacs-text-input "customize-search"
+                                :value jetpacs-customize--search
+                                :label "Search all variables" :single-line t
+                                :on-submit (jetpacs-action "customize.search"))
+            (jetpacs-flow-row
+             (jetpacs-chip "Modified"
+                           :selected jetpacs-customize--modified-only
+                           :on-tap (jetpacs-action "customize.modified-filter"
+                                                   :when-offline "drop"))))
+           (if (jetpacs-customize--flat-p)
+               (jetpacs-customize--flat-nodes)
+             (jetpacs-customize--group-nodes))))
+   ;; Up rides the top bar's own back slot, like every drill in the app.
+   :back (when (or (jetpacs-customize--flat-p)
+                   (cdr jetpacs-customize--path))
+           (jetpacs-action "customize.up" :when-offline "drop"))))
 
 (defun jetpacs-customize--refresh ()
   "Re-push the browser surface (deferred; safe from dispatch)."
@@ -357,16 +348,19 @@ the documented cost of not enumerating every defcustom up front.")
 ;; Entry: a card in the settings screen leading here.
 (jetpacs-settings-add-link
  20 (lambda ()
-      (jetpacs-card
-       (jetpacs-row
-        (jetpacs-icon "tune")
-        (jetpacs-with-attrs
-         (jetpacs-column
-          (jetpacs-text "Customize" :style "label")
-          (jetpacs-text "Browse and edit any Emacs option" :style "caption"))
-         :weight 1)
-        (jetpacs-icon "chevron_right"))
-       :on-tap (jetpacs-action "customize.show" :when-offline "drop"))))
+      (jetpacs-chrome-row "Customize"
+                          :subtitle "Browse and edit any Emacs option"
+                          :icon "tune"
+                          :trailing (jetpacs-icon "chevron_right")
+                          :on-tap (jetpacs-action "customize.show"
+                                                  :when-offline "drop")
+                          :key "link-customize")))
+
+(defvar jetpacs-launcher-row-icons)
+(with-eval-after-load 'jetpacs-launcher
+  (setf (alist-get (concat "app:" jetpacs-customize-surface)
+                   jetpacs-launcher-row-icons nil nil #'equal)
+        "tune"))
 
 (provide 'jetpacs-customize)
 ;;; jetpacs-customize.el ends here

@@ -24,6 +24,7 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-tablist)
+(require 'jetpacs-chrome)
 
 ;; Soft-coupled entry card; the browser works without the settings module.
 (declare-function jetpacs-settings-add-link "jetpacs-settings" (order builder))
@@ -261,17 +262,13 @@ outcome."
 (with-eval-after-load 'jetpacs-settings
   (jetpacs-settings-add-link
    10 (lambda ()
-        (jetpacs-card
-         (jetpacs-row
-          (jetpacs-icon "archive")
-          (jetpacs-with-attrs
-           (jetpacs-column
-            (jetpacs-text "Packages" :style "label")
-            (jetpacs-text "Install and manage Emacs packages"
-                          :style "caption"))
-           :weight 1)
-          (jetpacs-icon "chevron_right"))
-         :on-tap (jetpacs-action "packages.show" :when-offline "drop")))))
+        (jetpacs-chrome-row "Packages"
+                            :subtitle "Install and manage Emacs packages"
+                            :icon "archive"
+                            :trailing (jetpacs-icon "chevron_right")
+                            :on-tap (jetpacs-action "packages.show"
+                                                    :when-offline "drop")
+                            :key "link-packages"))))
 
 (defun jetpacs-package-browser-unload-function ()
   "Unload hygiene: drop the skin hooks."

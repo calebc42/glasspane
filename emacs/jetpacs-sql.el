@@ -44,15 +44,11 @@
 ;;;; Cards
 
 (defun jetpacs-sql--entry (icon title caption action)
-  (jetpacs-card
-   (jetpacs-row
-    (jetpacs-icon icon)
-    (jetpacs-with-attrs
-     (jetpacs-column (jetpacs-text title :style "label")
-                     (jetpacs-text caption :style "caption"))
-     :weight 1)
-    (jetpacs-icon "chevron_right"))
-   :on-tap action))
+  "A hub-grade row: leading ICON, TITLE/CAPTION, a chevron; ACTION on tap."
+  (jetpacs-chrome-row title :subtitle caption :icon icon
+                      :trailing (jetpacs-icon "chevron_right")
+                      :on-tap action
+                      :key (jetpacs-wire-id "sq" title)))
 
 (defun jetpacs-sql--session-nodes ()
   "Nodes for a live SQLi session, or nil when none is running."
@@ -120,20 +116,9 @@
             (mapcar #'jetpacs-sql--product-card products)))))
 
 (defun jetpacs-sql--view ()
-  ;; A scaffold so chrome docks the view switcher.
-  (jetpacs-scaffold
-   :body
+  (jetpacs-chrome-screen
+   (if (eq jetpacs-sql--screen 'new) "New connection" "Databases")
    (apply #'jetpacs-lazy-column
-          (cons
-          (jetpacs-row
-           (unless (eq jetpacs-sql--screen 'hub)
-             (jetpacs-icon-button "arrow_back"
-                                  (jetpacs-action "sql.show"
-                                                  :when-offline "drop")
-                                  :content-description "Back to the hub"))
-           (jetpacs-text (if (eq jetpacs-sql--screen 'new)
-                             "New connection" "Databases")
-                         :style "title"))
           (if (eq jetpacs-sql--screen 'new)
               (jetpacs-sql--new-nodes)
             (append
@@ -144,7 +129,10 @@
                                        "Start a REPL for a database product"
                                        (jetpacs-action
                                         "sql.new-screen"
-                                        :when-offline "drop")))))))))
+                                        :when-offline "drop"))))))
+   ;; The picker rides the top bar's own back slot.
+   :back (when (eq jetpacs-sql--screen 'new)
+           (jetpacs-action "sql.show" :when-offline "drop"))))
 
 (defun jetpacs-sql--refresh ()
   (jetpacs-flow-continue
@@ -238,6 +226,12 @@ or quit costs the navigation, never the session."
                             (jetpacs-action "sql.show"
                                             :when-offline "drop")))))
 (declare-function jetpacs-settings-add-link "jetpacs-settings" (order builder))
+
+(defvar jetpacs-launcher-row-icons)
+(with-eval-after-load 'jetpacs-launcher
+  (setf (alist-get (concat "app:" jetpacs-sql-surface)
+                   jetpacs-launcher-row-icons nil nil #'equal)
+        "storage"))
 
 (provide 'jetpacs-sql)
 ;;; jetpacs-sql.el ends here

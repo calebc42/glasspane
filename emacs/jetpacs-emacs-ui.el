@@ -54,8 +54,12 @@
 ;; with the dialog advice installed.
 (require 'jetpacs-dialog)
 
-(defconst jetpacs-emacs-ui-owner "jetpacs.emacs"
-  "The base owner of the general-client surface (R1: base's prefix).")
+(defconst jetpacs-emacs-ui-owner "hub"
+  "The surface hosting the general-client screens: the HUB itself.
+Jetpacs IS Emacs (owner decision 2026-08-06) — there is no separate
+\"Emacs\" app to open, so buffer drills, the Messages tail, and palette
+results land on the home stack.  The host defines the hub root; this
+module only pushes screens onto it.")
 
 (defconst jetpacs-emacs-ui--surface (concat "app:" jetpacs-emacs-ui-owner))
 
@@ -578,8 +582,20 @@ push — the top-buffer check keys the watch to this app's own stack."
 ;; --- Actions -----------------------------------------------------------------
 
 (with-jetpacs-owner jetpacs-emacs-ui-owner
-  (jetpacs-chrome-define-root jetpacs-emacs-ui-owner "hub"
-                              #'jetpacs-emacs-ui--hub-screen)
+  ;; No root of its own: the HOST defines the hub root, and the former
+  ;; standalone "Emacs" hub survives as the Buffers screen, one drill
+  ;; down on the home stack.
+  (jetpacs-defaction "jetpacs.emacs.buffers"
+    (lambda (_args _params)
+      (jetpacs-flow-continue
+       (lambda ()
+         (condition-case err
+             (jetpacs-chrome-push-screen jetpacs-emacs-ui-owner "buffers"
+                                         #'jetpacs-emacs-ui--hub-screen)
+           (error (message "jetpacs-emacs-ui: buffers push failed: %s"
+                           (jetpacs--error-label err))))))
+      'accepted)
+    :any-surface t)
 
   (jetpacs-defaction "jetpacs.emacs.view"
     (lambda (args params)

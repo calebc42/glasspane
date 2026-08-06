@@ -33,6 +33,8 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-navigate)
+(require 'jetpacs-apps)
 
 (defconst jetpacs-app-store-surface "jetpacs.app-store"
   "The Manage Apps screen's root surface (owner and surface name).")
@@ -179,37 +181,66 @@ lesson)."
      :icon (if installed "check_circle" "apps")
      :trailing
      (if installed
-         (jetpacs-icon-button
-          "delete"
-          (jetpacs-action "apps.uninstall" :args `(:bundle ,name)
-                          :when-offline "drop")
-          :content-description (format "Uninstall %s" name))
+         ;; Installed rows carry the whole lifecycle: edit the adopted
+         ;; source, or uninstall (launching lives on the Running rows —
+         ;; a bundle that registered an app via `jetpacs-defapp').
+         (list
+          (jetpacs-icon-button
+           "edit"
+           (jetpacs-action "apps.edit" :args `(:bundle ,name)
+                           :when-offline "drop")
+           :content-description (format "Edit %s" name))
+          (jetpacs-icon-button
+           "delete"
+           (jetpacs-action "apps.uninstall" :args `(:bundle ,name)
+                           :when-offline "drop")
+           :content-description (format "Uninstall %s" name)))
        (jetpacs-icon-button
         "download"
         (jetpacs-action
          "apps.install" :args `(:bundle ,name)
          :when-offline "drop"
-         ;; §14.1: installing is running code; the gate says so.  The
-         ;; STRING form: the deployed Companion's validator does not yet
-         ;; accept the ratified object form (conformance drift, tracked)
-         ;; and refused the whole surface over it.
-         :confirm (format "Installing runs %s with your Emacs's full permissions. Install it?"
-                          name))
+         ;; §14.1 object form (amendment #168): installing is running
+         ;; code; the gate says so, wearing an authored face.
+         :confirm (list :title "Install app?"
+                        :icon "download"
+                        :text (format "Installing runs %s with your Emacs's full permissions."
+                                      name)
+                        :confirm-label "Install"
+                        :dismiss-label "Cancel"))
         :content-description (format "Install %s" name)))
      :key (jetpacs-wire-id "as" name))))
 
 (defun jetpacs-app-store--view ()
-  (let ((entries (jetpacs-app-store--scan)))
+  "The combined Apps view (owner decision 2026-08-06 pass 2):
+installing, removing, editing, and launching in one screen.  Running =
+Tier 1 apps registered via `jetpacs-defapp' (tap to launch); Installed
+= adopted bundles (edit/uninstall); Available = staged bundles
+(install, behind the consent gate)."
+  (let* ((entries (jetpacs-app-store--scan))
+         (installed (cl-remove-if-not
+                     (lambda (e) (plist-get e :installed)) entries))
+         (available (cl-remove-if
+                     (lambda (e) (plist-get e :installed)) entries)))
     (jetpacs-chrome-screen
-     "Manage Apps"
+     "Apps"
      (apply #'jetpacs-lazy-column
-            (if (null entries)
-                (list (jetpacs-empty-state
-                       :icon "apps" :title "No staged bundles"
-                       :caption
-                       (format "Drop a bundle .el into %s and refresh."
-                               (car jetpacs-app-store-staging-dirs))))
-              (mapcar #'jetpacs-app-store--row entries)))
+            (append
+             (when jetpacs-apps--registry
+               (cons (jetpacs-section-header "Running")
+                     (mapcar #'jetpacs-apps--card jetpacs-apps--registry)))
+             (when installed
+               (cons (jetpacs-section-header "Installed")
+                     (mapcar #'jetpacs-app-store--row installed)))
+             (when available
+               (cons (jetpacs-section-header "Available")
+                     (mapcar #'jetpacs-app-store--row available)))
+             (unless (or jetpacs-apps--registry entries)
+               (list (jetpacs-empty-state
+                      :icon "apps" :title "No apps"
+                      :caption
+                      (format "Drop a bundle .el into %s and refresh."
+                              (car jetpacs-app-store-staging-dirs)))))))
      :on-refresh (jetpacs-action "apps.refresh-store" :when-offline "drop"))))
 
 (defun jetpacs-app-store--refresh ()
@@ -222,6 +253,25 @@ lesson)."
 (defun jetpacs-app-store--action-refresh (_args _params)
   (jetpacs-app-store--refresh)
   'accepted)
+
+(defun jetpacs-app-store--action-edit (args _params)
+  "Open an installed bundle's adopted source on the buffer substrate.
+Editing the adopted copy is live-reloadable by reinstalling; the wire
+still only names a bundle from the installed list, never a path."
+  (let ((name (plist-get args :bundle)))
+    (if (not (member name jetpacs-app-store-installed))
+        'rejected
+      (let ((path (expand-file-name name (jetpacs-app-store--adopt-dir))))
+        (if (not (file-readable-p path))
+            'rejected
+          (jetpacs-flow-continue
+           (lambda ()
+             (condition-case err
+                 (jetpacs-navigate-buffer
+                  (buffer-name (find-file-noselect path)))
+               (error (jetpacs-toast (format "Edit failed: %s"
+                                             (error-message-string err)))))))
+          'accepted)))))
 
 (defun jetpacs-app-store--action-install (args _params)
   (let ((entry (jetpacs-app-store--entry (plist-get args :bundle))))
@@ -260,16 +310,17 @@ lesson)."
 (jetpacs-defaction "apps.refresh-store" #'jetpacs-app-store--action-refresh)
 (jetpacs-defaction "apps.install" #'jetpacs-app-store--action-install)
 (jetpacs-defaction "apps.uninstall" #'jetpacs-app-store--action-uninstall)
+(jetpacs-defaction "apps.edit" #'jetpacs-app-store--action-edit)
 
 (defvar jetpacs-launcher-row-icons)
 (defvar jetpacs-launcher-row-labels)
 (with-eval-after-load 'jetpacs-launcher
   (setf (alist-get (concat "app:" jetpacs-app-store-surface)
                    jetpacs-launcher-row-icons nil nil #'equal)
-        "download")
+        "apps")
   (setf (alist-get (concat "app:" jetpacs-app-store-surface)
                    jetpacs-launcher-row-labels nil nil #'equal)
-        "Manage Apps"))
+        "Apps"))
 
 (provide 'jetpacs-app-store)
 ;;; jetpacs-app-store.el ends here

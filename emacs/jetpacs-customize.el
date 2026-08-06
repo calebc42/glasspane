@@ -345,16 +345,8 @@ the documented cost of not enumerating every defcustom up front.")
 (jetpacs-defaction "customize.set" #'jetpacs-customize--action-set)
 (jetpacs-defaction "customize.reset" #'jetpacs-customize--action-reset)
 
-;; Entry: a card in the settings screen leading here.
-(jetpacs-settings-add-link
- 20 (lambda ()
-      (jetpacs-chrome-row "Customize"
-                          :subtitle "Browse and edit any Emacs option"
-                          :icon "tune"
-                          :trailing (jetpacs-icon "chevron_right")
-                          :on-tap (jetpacs-action "customize.show"
-                                                  :when-offline "drop")
-                          :key "link-customize")))
+;; No settings-screen entry card: the drawer's Settings entry nests
+;; Customize directly (one affordance per destination).
 
 (defvar jetpacs-launcher-row-icons)
 (with-eval-after-load 'jetpacs-launcher

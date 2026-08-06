@@ -55,10 +55,31 @@
 ;; and 279 examples of the node vocabulary, on its own surface.  Reach
 ;; it from the Apps button, or M-x jetpacs-m3-catalog.
 (require 'jetpacs-m3-catalog)
+;; The live editor loop (parity P1): buffer sync + its riders.
+(require 'ebp-sync)
 
 ;; Mirror the device Emacs theme onto the chrome; `system'/`dark'/`off'
 ;; are the other choices (see `jetpacs-theme-mode').
 (setq jetpacs-theme-mode 'mirror)
+
+;; The curated settings content (owner: POC 1's settings had the right
+;; content in the wrong shape).  Registered at boot so a queued toggle
+;; replays even before the screen first renders.
+(jetpacs-settings-register-section
+ "Appearance"
+ '((jetpacs-theme-mode :label "Companion theme")))
+(jetpacs-settings-register-section
+ "Editor"
+ '((ebp-sync-diagnostics :label "Push diagnostics")
+   (ebp-sync-fontify :label "Push syntax highlighting")))
+(jetpacs-settings-register-section
+ "Clipboard"
+ '((jetpacs-clip-auto-refresh :label "Auto-refresh the kill ring")
+   (jetpacs-clip-max-entries :label "Kill-ring entries shown")))
+(jetpacs-settings-register-section
+ "Files"
+ '((jetpacs-files-shared-storage :label "Shared storage access")
+   (jetpacs-files-max-rows :label "Directory rows shown")))
 
 ;; Every kill re-pushing the clip view would CLAIM THE SCREEN (one app
 ;; surface, last push wins).  Reach the kill ring with
@@ -82,19 +103,26 @@
 ;; the REPL.
 
 (defun jetpacs-hub--drawer ()
-  ;; lazy_column: nine launcher rows plus Theme outgrew the fold on the
-  ;; tablet, and a plain column cannot scroll (the P3 smoke found
-  ;; jetpacs.sql and Theme unreachable).
-  ;; POC 1's Manage-apps button and conditional App-drawer return as
-  ;; ONE expandable first entry (owner decision 2026-08-06); the drawer
-  ;; no longer inlines every switchable surface.
+  ;; The drawer IA (owner decision 2026-08-06, pass 2): Settings hoisted
+  ;; first with Customize/Theme/Packages nested under it, then a single
+  ;; Apps row opening the combined view (an App = a Tier 1 elisp package
+  ;; built ON jetpacs — platform surfaces are not apps), then everyday
+  ;; destinations with no other affordance.  lazy_column: a plain column
+  ;; cannot scroll past the fold.
   (jetpacs-lazy-column
-   (jetpacs-apps-drawer-entry)
+   (jetpacs-settings-drawer-entry)
+   (jetpacs-apps-drawer-row)
    (jetpacs-divider)
    (jetpacs-chrome-row
-    "Theme" :subtitle "toggle modus light/dark"
-    :on-tap (jetpacs-action "jetpacs.theme.modus-toggle")
-    :key "drawer-theme")
+    "Org" :subtitle "agenda and notes" :icon "event_note"
+    :on-tap (jetpacs-action "jetpacs.launcher.open"
+                            :args '(:surface "app:jetpacs.org"))
+    :key "drawer-org")
+   (jetpacs-chrome-row
+    "Clipboard" :subtitle "the kill ring" :icon "content_paste"
+    :on-tap (jetpacs-action "jetpacs.launcher.open"
+                            :args '(:surface "app:jetpacs.clip"))
+    :key "drawer-clip")
    :spacing 8))
 
 ;; The Eval screen is the *ielm* drill on the hub stack; the B5 minter
@@ -137,6 +165,12 @@ dock renders on every owner's surface."
     (jetpacs-hub--row "Scratch" "lisp playground" "*scratch*")
     (jetpacs-hub--row "Messages" "the Emacs log" "*Messages*")
     (jetpacs-hub--row "Shell" "comint, with input" "*shell*")
+    ;; The general client's buffer list, one drill down — Jetpacs IS
+    ;; Emacs, so there is no separate "Emacs" surface to open.
+    (jetpacs-chrome-row "Buffers" :subtitle "every live buffer"
+                        :icon "view_list"
+                        :on-tap (jetpacs-action "jetpacs.emacs.buffers")
+                        :key "hubrow-buffers")
     (jetpacs-text "Kill ring: M-x jetpacs-clip-show   ·   home: M-x jetpacs-hub"
                   :style "caption")
     :spacing 8)

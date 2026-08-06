@@ -115,5 +115,14 @@
         (walk (jetpacs-apps--view)))
       (should (equal (nreverse labels) '("Alpha" "Zeta"))))))
 
+(ert-deftest jetpacs-apps-drawer-row-opens-the-combined-view ()
+  "Pass 2: one plain Apps row targeting the app-store surface."
+  (let ((row (jetpacs-apps-drawer-row)))
+    (should (equal (plist-get row :t) "card"))
+    (let ((tap (plist-get row :on_tap)))
+      (should (equal (plist-get tap :action) "jetpacs.launcher.open"))
+      (should (equal (plist-get (plist-get tap :args) :surface)
+                     "app:jetpacs.app-store")))))
+
 (provide 'jetpacs-apps-test)
 ;;; jetpacs-apps-test.el ends here

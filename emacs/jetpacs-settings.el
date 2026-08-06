@@ -353,6 +353,49 @@ through their submit action instead."
 (jetpacs-defaction "settings.set" #'jetpacs-settings--action-set)
 (jetpacs-defaction "settings.reset" #'jetpacs-settings--action-reset)
 
+(defun jetpacs-settings-drawer-entry ()
+  "The drawer's Settings entry (owner decision 2026-08-06 pass 2):
+one collapsible hoisting Settings to the drawer with its satellites —
+Customize, Theme, Packages — nested under it.  Collapsed by default."
+  (jetpacs-collapsible
+   "drawer-settings"
+   ;; A plain row: the whole header line is the expand target (a Card
+   ;; here swallows taps everywhere but the chevron).
+   (jetpacs-row
+    (jetpacs-icon "settings")
+    (jetpacs-with-attrs
+     (jetpacs-column (jetpacs-text "Settings")
+                     (jetpacs-text "App and Emacs options" :style "caption")
+                     :spacing 2)
+     :weight 1))
+   (jetpacs-chrome-row "All settings"
+                       :subtitle "Curated options and satellites"
+                       :icon "settings"
+                       :on-tap (jetpacs-action
+                                "jetpacs.launcher.open"
+                                :args `(:surface
+                                        ,(concat "app:"
+                                                 jetpacs-settings-surface)))
+                       :key "drawer-settings-all")
+   (jetpacs-chrome-row "Customize"
+                       :subtitle "Browse and edit any Emacs option"
+                       :icon "tune"
+                       :on-tap (jetpacs-action "customize.show"
+                                               :when-offline "drop")
+                       :key "drawer-settings-customize")
+   (jetpacs-chrome-row "Theme"
+                       :subtitle "Toggle modus light/dark"
+                       :icon "palette"
+                       :on-tap (jetpacs-action "jetpacs.theme.modus-toggle")
+                       :key "drawer-settings-theme")
+   (jetpacs-chrome-row "Packages"
+                       :subtitle "Install and manage Emacs packages"
+                       :icon "archive"
+                       :on-tap (jetpacs-action "packages.show"
+                                               :when-offline "drop")
+                       :key "drawer-settings-packages")
+   :collapsed t))
+
 (defvar jetpacs-launcher-row-icons)
 (with-eval-after-load 'jetpacs-launcher
   (setf (alist-get (concat "app:" jetpacs-settings-surface)

@@ -138,10 +138,15 @@
                               ((listp v) (mapc #'walk v)))))))
         (walk (jetpacs-app-store--row (car (jetpacs-app-store--scan)))))
       (should confirm)
-      ;; The STRING form until the Companion accepts the ratified
-      ;; object form (conformance drift, tracked).
-      (should (stringp confirm))
-      (should (string-match-p "full permissions" confirm)))))
+      ;; The ratified §14.1 OBJECT form (amendment #168): an authored
+      ;; face over the consent text.
+      (should (consp confirm))
+      (let ((text (plist-get confirm :text)))
+        (should (stringp text))
+        (should (string-match-p "full permissions" text)))
+      (should (stringp (plist-get confirm :title)))
+      (should (stringp (plist-get confirm :confirm_label)))
+      (should (stringp (plist-get confirm :dismiss_label))))))
 
 (ert-deftest jetpacs-apps-drawer-entry-consolidates ()
   "One collapsible: Manage Apps and App Launcher, collapsed by default."
@@ -161,6 +166,51 @@
     (should (member "Apps" labels))
     (should (member "Manage Apps" labels))
     (should (member "App Launcher" labels))))
+
+;;;; The combined Apps view (pass 2)
+
+(ert-deftest jetpacs-app-store-combined-view-sections ()
+  "Running (registered apps), Installed, and Available section as one
+screen; each renders only when it has members."
+  (jetpacs-app-store-test--env
+    (jetpacs-app-store-test--stage
+     stage "staged.el" ";;; staged.el --- Staged -*- lexical-binding: t; -*-")
+    (jetpacs-app-store-test--stage
+     stage "mine.el" ";;; mine.el --- Mine -*- lexical-binding: t; -*-")
+    (setq jetpacs-app-store-installed '("mine.el"))
+    (let ((jetpacs-apps--registry
+           '(("noter" . (:label "Noter" :icon "apps"
+                         :surfaces ("noter.main") :order 100))))
+          (jetpacs-apps--current nil)
+          (headers nil))
+      (cl-labels ((walk (n)
+                    (when (equal (plist-get n :t) "section_header")
+                      (push (plist-get n :title) headers))
+                    (dolist (slot '(:children :body :header))
+                      (let ((v (plist-get n slot)))
+                        (cond ((vectorp v) (mapc #'walk (append v nil)))
+                              ((and v (listp v) (keywordp (car v)))
+                               (walk v))
+                              ((listp v) (mapc #'walk v)))))))
+        (walk (jetpacs-app-store--view)))
+      (should (member "Running" headers))
+      (should (member "Installed" headers))
+      (should (member "Available" headers)))))
+
+(ert-deftest jetpacs-app-store-edit-opens-the-adopted-source ()
+  "apps.edit validates the installed list and navigates to the source."
+  (jetpacs-app-store-test--env
+    (should (eq (jetpacs-app-store--action-edit '(:bundle "ghost.el") nil)
+                'rejected))
+    (jetpacs-app-store-test--stage
+     stage "mine.el" ";;; mine.el --- Mine -*- lexical-binding: t; -*-")
+    (jetpacs-app-store--action-install '(:bundle "mine.el") nil)
+    (let ((navigated nil))
+      (cl-letf (((symbol-function 'jetpacs-navigate-buffer)
+                 (lambda (target &rest _) (setq navigated target))))
+        (should (eq (jetpacs-app-store--action-edit '(:bundle "mine.el") nil)
+                    'accepted))
+        (should (equal navigated "mine.el"))))))
 
 (provide 'jetpacs-app-store-test)
 ;;; jetpacs-app-store-test.el ends here

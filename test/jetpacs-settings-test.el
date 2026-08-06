@@ -155,5 +155,28 @@
       (should (eq (jetpacs-customize--action-browse '(:group "no-such") nil)
                   'rejected)))))
 
+(ert-deftest jetpacs-settings-drawer-entry-nests-the-satellites ()
+  "Pass 2: Settings hoisted, Customize/Theme/Packages nested under it."
+  (let ((entry (jetpacs-settings-drawer-entry))
+        (labels nil) (actions nil))
+    (should (equal (plist-get entry :t) "collapsible"))
+    (should (eq (plist-get entry :collapsed) t))
+    (cl-labels ((walk (n)
+                  (when (equal (plist-get n :t) "text")
+                    (push (plist-get n :text) labels))
+                  (when-let* ((tap (plist-get n :on_tap)))
+                    (push (plist-get tap :action) actions))
+                  (dolist (slot '(:children :header :trailing))
+                    (let ((v (plist-get n slot)))
+                      (cond ((vectorp v) (mapc #'walk (append v nil)))
+                            ((and v (listp v) (keywordp (car v))) (walk v))
+                            ((listp v) (mapc #'walk v)))))))
+      (walk entry))
+    (dolist (l '("Settings" "All settings" "Customize" "Theme" "Packages"))
+      (should (member l labels)))
+    (dolist (a '("jetpacs.launcher.open" "customize.show"
+                 "jetpacs.theme.modus-toggle" "packages.show"))
+      (should (member a actions)))))
+
 (provide 'jetpacs-settings-test)
 ;;; jetpacs-settings-test.el ends here

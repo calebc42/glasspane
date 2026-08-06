@@ -257,18 +257,8 @@ outcome."
 (jetpacs-defaction "packages.upgrade-all" #'jetpacs-pkg--action-upgrade-all)
 (jetpacs-defaction "packages.describe" #'jetpacs-pkg--action-describe)
 
-;; Entry card on the settings screen (order 10, ahead of Customize).
-;; Soft-coupled: the browser works without the settings module loaded.
-(with-eval-after-load 'jetpacs-settings
-  (jetpacs-settings-add-link
-   10 (lambda ()
-        (jetpacs-chrome-row "Packages"
-                            :subtitle "Install and manage Emacs packages"
-                            :icon "archive"
-                            :trailing (jetpacs-icon "chevron_right")
-                            :on-tap (jetpacs-action "packages.show"
-                                                    :when-offline "drop")
-                            :key "link-packages"))))
+;; No settings-screen entry card: the drawer's Settings entry nests
+;; Packages directly (one affordance per destination).
 
 (defun jetpacs-package-browser-unload-function ()
   "Unload hygiene: drop the skin hooks."

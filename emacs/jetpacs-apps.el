@@ -117,8 +117,7 @@ single-app contract."
    (when (jetpacs-apps--multi-p)
      (list (list :label "Apps" :icon "apps"
                  :on-tap (jetpacs-action "app.grid" :when-offline "drop")
-                 :selected (equal surface
-                                  (concat "app:" jetpacs-apps-surface)))))))
+                 :selected (equal surface "app:jetpacs.app-store"))))))
 
 ;;;; The Apps grid
 
@@ -145,7 +144,21 @@ single-app contract."
                      :caption "Apps appear here as their bundles load."))
             (mapcar #'jetpacs-apps--card jetpacs-apps--registry)))))
 
-;;;; The drawer's consolidated Apps entry
+;;;; The drawer's Apps entry
+
+(defun jetpacs-apps-drawer-row ()
+  "The drawer's single Apps entry (owner decision 2026-08-06 pass 2):
+one plain row opening the combined Apps view, where installing,
+removing, editing, and launching all live.  An App is a Tier 1 elisp
+package built ON jetpacs — platform surfaces are not apps and are not
+listed there."
+  (jetpacs-chrome-row "Apps"
+                      :subtitle "Install, manage, and launch"
+                      :icon "apps"
+                      :on-tap (jetpacs-action
+                               "jetpacs.launcher.open"
+                               :args '(:surface "app:jetpacs.app-store"))
+                      :key "drawer-apps"))
 
 (defun jetpacs-apps-drawer-entry ()
   "One expandable drawer entry consolidating POC 1's two (owner
@@ -181,9 +194,11 @@ Launcher\".  Collapsed by default so the drawer stays one line."
 ;;;; Actions
 
 (defun jetpacs-apps--action-grid (_args _params)
+  ;; The dock's Apps destination lands on the combined Apps view (the
+  ;; app-store surface) — the grid folded into it (pass 2).
   (jetpacs-flow-continue
    (lambda ()
-     (ignore-errors (jetpacs-shell-push jetpacs-apps-surface))))
+     (ignore-errors (jetpacs-shell-push "jetpacs.app-store"))))
   'accepted)
 
 (defun jetpacs-apps--action-open (args _params)
@@ -196,12 +211,11 @@ Launcher\".  Collapsed by default so the drawer stays one line."
         (jetpacs-flow-continue
          (lambda ()
            (ignore-errors
-             (jetpacs-shell-push (or home jetpacs-apps-surface))))))
+             (jetpacs-shell-push (or home "jetpacs.app-store"))))))
       'accepted)))
 
-(with-jetpacs-owner "jetpacs.apps"
-  (jetpacs-chrome-define-root jetpacs-apps-surface "home"
-                              (lambda (_back) (jetpacs-apps--view))))
+;; No root of its own (pass 2): the grid folded into the combined Apps
+;; view on the app-store surface; `jetpacs-apps--card' renders there.
 (jetpacs-defaction "app.grid" #'jetpacs-apps--action-grid)
 (jetpacs-defaction "app.open" #'jetpacs-apps--action-open)
 

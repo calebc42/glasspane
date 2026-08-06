@@ -70,7 +70,7 @@ the rule — never the :title/:body values (SPEC 23.3)."
         (body (plist-get reminder :body))
         (at-ms (plist-get reminder :at_ms))
         (tap (plist-get reminder :on_tap)))
-    (unless (and (stringp id) (jetpacs--identifier-p id))
+    (unless (and (stringp id) (jetpacs-identifier-p id))
       (error "jetpacs: reminder :id must be a SPEC 4.4 identifier"))
     (unless (and (stringp title) (not (string-empty-p title)))
       (error "jetpacs: reminder :title must be a non-empty string"))
@@ -81,9 +81,9 @@ the rule — never the :title/:body values (SPEC 23.3)."
                      "INTEGER of epoch millis — floats reject the whole "
                      "set on the wire; use (round (* 1000 (float-time)))")))
     ;; The SPEC 4.2 ceiling too: an over-2^53 integer is content-invalid.
-    (jetpacs--check-integer at-ms ":at_ms" 0 nil)
+    (jetpacs-check-integer at-ms ":at_ms" 0 nil)
     (when tap
-      (jetpacs--check-descriptor tap ":on_tap")
+      (jetpacs-check-descriptor tap ":on_tap")
       (unless (plist-member tap :action)
         (error "jetpacs: reminder :on_tap must be a remote action, not a builtin (SPEC 18.6)"))
       (let ((args (plist-get tap :args)))
@@ -103,7 +103,7 @@ the rule — never the :title/:body values (SPEC 23.3)."
            (format "reminder :on_tap action %S is not registered; a tap will be rejected until it is"
                    action)
            :warning))))
-    (jetpacs--node nil :id id :title title :body body :at_ms at-ms
+    (jetpacs-make-node nil :id id :title title :body body :at_ms at-ms
                    :on_tap tap)))
 
 (cl-defun jetpacs-reminders-set (reminders &key owner callback)

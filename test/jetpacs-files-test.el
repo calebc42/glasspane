@@ -352,7 +352,7 @@ never a `jetpacs-path-refused' a handler would answer to the device."
                  4))
       ;; Every row key is a minted SPEC 4.4 identifier.
       (dolist (key (jetpacs-files-test--collect cards :key))
-        (should (jetpacs--identifier-p key))))))
+        (should (jetpacs-identifier-p key))))))
 
 (ert-deftest jetpacs-files-skin-up-row-only-within-roots ()
   (jetpacs-files-test--with-tree root
@@ -398,7 +398,7 @@ never a `jetpacs-path-refused' a handler would answer to the device."
     (should (cl-some (lambda (s) (string-match-p "unencodable" s))
                      (jetpacs-files-test--collect card :text)))
     (let ((key (car (jetpacs-files-test--collect card :key))))
-      (should (jetpacs--identifier-p key)))))
+      (should (jetpacs-identifier-p key)))))
 
 (ert-deftest jetpacs-files-skin-rides-the-render-dispatch ()
   "`jetpacs-render-buffer' on a dired buffer lands in this skin."

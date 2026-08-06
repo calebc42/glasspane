@@ -88,7 +88,7 @@
                 (progn
                   (jetpacs-check-profile node 'app)
                   (jetpacs-node->canonical-json node)
-                  (let ((ids (jetpacs--collect-node-ids node nil)))
+                  (let ((ids (jetpacs-collect-node-ids node nil)))
                     (unless (= (length ids)
                                (length (delete-dups (copy-sequence ids))))
                       (push (format "%s/%s: duplicate node ids %S"

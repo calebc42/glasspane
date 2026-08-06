@@ -147,8 +147,8 @@ both live inside that node; and SCROLL-BEHAVIOR needs TOP-BAR-STYLE, which
 
 UNSUPPORTED is a sentence naming the wire member or node type the
 sample would need; the example then drills into \"Not supported\"."
-  (jetpacs--require-string name "example name")
-  (jetpacs--require-string description "example description")
+  (jetpacs-require-string name "example name")
+  (jetpacs-require-string description "example description")
   (let ((recreated (or build slots top-bar)))
     (unless (or (and recreated (not unsupported))
                 (and unsupported (not recreated)))
@@ -173,11 +173,11 @@ sample would need; the example then drills into \"Not supported\"."
           (error "jetpacs-m3: example %S slot %S has the wrong type"
                  name key)))))
   (when unsupported
-    (jetpacs--require-string unsupported ":unsupported"))
-  (when top-bar-style (jetpacs--require-string top-bar-style ":top-bar-style"))
+    (jetpacs-require-string unsupported ":unsupported"))
+  (when top-bar-style (jetpacs-require-string top-bar-style ":top-bar-style"))
   (when top-bar-subtitle
-    (jetpacs--require-string top-bar-subtitle ":top-bar-subtitle"))
-  (when scroll-behavior (jetpacs--require-string scroll-behavior ":scroll-behavior"))
+    (jetpacs-require-string top-bar-subtitle ":top-bar-subtitle"))
+  (when scroll-behavior (jetpacs-require-string scroll-behavior ":scroll-behavior"))
   ;; The guard covers BOTH doors: the sugar keyword and the generic plist.
   ;; A FUNCTION-valued scaffold (live sample state read at build time)
   ;; cannot be inspected here; its members are validated by
@@ -245,9 +245,9 @@ NAME, DESCRIPTION, GUIDELINES, DOCS, SOURCE and ADDITIONAL-INFO are
 upstream's `Component' fields; EXAMPLES is a list of `jetpacs-m3-example'
 plists in upstream order.  Re-registering an id REPLACES it in place, so
 a module can be re-evaluated live without duplicating or reordering."
-  (jetpacs--check-identifier id "component id")
-  (jetpacs--require-string name "component name")
-  (jetpacs--require-string description "component description")
+  (jetpacs-check-identifier id "component id")
+  (jetpacs-require-string name "component name")
+  (jetpacs-require-string description "component description")
   (let ((component (list :id id :name name :description description
                          :guidelines guidelines :docs docs :source source
                          :additional-info additional-info
@@ -557,7 +557,7 @@ A sample that signals costs its own screen body and nothing else: the
 catalog must stay navigable when one recreation is wrong."
   (condition-case err
       (let ((node (funcall thunk)))
-        (unless (jetpacs--root-node-p node)
+        (unless (jetpacs-root-node-p node)
           (error "sample builder returned %S" node))
         node)
     (error
@@ -634,7 +634,7 @@ instead, because a Node tree cannot nest a scaffold."
                          (lambda () (funcall top-bar back)))
                :body body
                ;; §17.6 top-bar members ride the same scaffold; nil values are
-               ;; dropped by `jetpacs--node', so an unstyled example is
+               ;; dropped by `jetpacs-make-node', so an unstyled example is
                ;; byte-identical to before.
                (append extra-scaffold slots))
       (apply #'jetpacs-chrome-screen (plist-get example :name) body

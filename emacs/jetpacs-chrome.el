@@ -149,7 +149,7 @@ bug this port fixes."
                   :weight 1))
          (lead (or leading (and icon (jetpacs-icon icon))))
          (trail (cond ((null trailing) nil)
-                      ((jetpacs--root-node-p trailing) (list trailing))
+                      ((jetpacs-root-node-p trailing) (list trailing))
                       (t trailing)))
          (card (jetpacs-card
                 (list (apply #'jetpacs-row
@@ -169,7 +169,7 @@ must cost the dock, never every chrome surface in the process."
   (when jetpacs-chrome-dock-function
     (condition-case err
         (let ((n (funcall jetpacs-chrome-dock-function surface)))
-          (and (jetpacs--root-node-p n) n))
+          (and (jetpacs-root-node-p n) n))
       (error (message "jetpacs-chrome: dock builder failed: %s"
                       (jetpacs-error-label err))
              nil))))
@@ -330,7 +330,7 @@ minter's count), so a LATER screen's minted id routes around an earlier
 screen's literal.  Minted ids are already unique by construction — the
 signal here means a LITERAL authored id collided, and the caller turns
 it into that screen's error card."
-  (let ((ids (jetpacs--collect-node-ids node nil))
+  (let ((ids (jetpacs-collect-node-ids node nil))
         (mine (make-hash-table :test #'equal)))
     (dolist (id ids)
       (when (or (gethash id seen) (gethash id mine))
@@ -381,7 +381,7 @@ together, on every rebuild."
                              ;; The dock joins BEFORE the gates so what is
                              ;; checked is what ships; `append' copies, so
                              ;; the builder's own node is never mutated.
-                             (when (and dock (jetpacs--root-node-p n)
+                             (when (and dock (jetpacs-root-node-p n)
                                         (equal (plist-get n :t) "scaffold")
                                         (not (plist-member n (car dock))))
                                (setq n (append n (list (car dock)
@@ -390,7 +390,7 @@ together, on every rebuild."
                              (jetpacs-chrome--claim-screen-ids n seen)
                              n))
                        (error (setq fail err) nil))))
-          (unless (or fail (jetpacs--root-node-p node))
+          (unless (or fail (jetpacs-root-node-p node))
             (setq fail 'wrong-type-argument)
             ;; A non-node RETURN synthesizes its failure — no signal, no
             ;; builder stack — so the seam is told directly; the bare
@@ -417,7 +417,7 @@ together, on every rebuild."
 Call under `with-jetpacs-owner' — the shell records the owner and
 re-binds it around every build.  Returns the surface id."
   (let ((surface (jetpacs-shell--resolve-surface surface-or-owner)))
-    (jetpacs--check-identifier id "screen id")
+    (jetpacs-check-identifier id "screen id")
     (puthash surface (list (cons id builder)) jetpacs-chrome--stacks)
     (jetpacs-shell-define-root surface
                                (lambda () (jetpacs-chrome--build surface))
@@ -443,7 +443,7 @@ that happened in between."
   (let ((stack (gethash surface jetpacs-chrome--stacks)))
     (unless stack
       (error "jetpacs-chrome: no chrome stack for %s" surface))
-    (jetpacs--check-identifier id "screen id")
+    (jetpacs-check-identifier id "screen id")
     (let* ((tail (cl-member id stack :key #'car :test #'equal))
            (new (cons (cons id builder) (if tail (cdr tail) stack)))
            ;; The bound applies HERE, before the single puthash, so the

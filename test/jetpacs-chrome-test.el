@@ -817,7 +817,7 @@ whole update, and 13.2 froze the surface on the old snapshot."
                              (jetpacs-claim-node-id "field")
                              :hint "drill")
                         :back back)))))
-      (let ((ids (sort (jetpacs--collect-node-ids (cadr (car recs)) nil)
+      (let ((ids (sort (jetpacs-collect-node-ids (cadr (car recs)) nil)
                        #'string<)))
         (should (equal ids '("field" "field-1")))))))
 
@@ -845,7 +845,7 @@ and the first claimant ships untouched."
                               (jetpacs-chrome-test--view-json recs "detail")))
       ;; And the assembled document carries the id exactly once.
       (should (= 1 (cl-count "search"
-                             (jetpacs--collect-node-ids (cadr (car recs)) nil)
+                             (jetpacs-collect-node-ids (cadr (car recs)) nil)
                              :test #'equal))))))
 
 (ert-deftest jetpacs-chrome-gate-1d-is-the-non-chrome-floor ()
@@ -873,7 +873,7 @@ name stores t, and a real base equal to one must not reach
         (long (make-string 128 ?a)))
     (should (equal (jetpacs-claim-node-id long) long))
     (let ((second (jetpacs-claim-node-id long)))
-      (should (jetpacs--identifier-p second))
+      (should (jetpacs-identifier-p second))
       (should (<= (length second) 128))
       (should (string-suffix-p "-1" second))))
   (let ((jetpacs-node-id-claims (make-hash-table :test #'equal)))
@@ -903,7 +903,7 @@ suffixes instead of colliding into a card."
       (should-not (string-match-p "failed to build"
                                   (jetpacs-chrome-test--view-json
                                    recs "detail")))
-      (let ((ids (sort (jetpacs--collect-node-ids (cadr (car recs)) nil)
+      (let ((ids (sort (jetpacs-collect-node-ids (cadr (car recs)) nil)
                        #'string<)))
         (should (equal ids '("comint-x" "comint-x-1")))))))
 

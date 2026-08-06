@@ -135,7 +135,7 @@
   "Each screen is a root node that canonicalizes without signalling."
   (dolist (cell (jetpacs-m3-test--screens))
     (let ((node (cdr cell)))
-      (should (jetpacs--root-node-p node))
+      (should (jetpacs-root-node-p node))
       (should (equal (plist-get node :t) "scaffold"))
       (should (stringp (jetpacs-node->canonical-json node))))))
 
@@ -169,9 +169,9 @@ screens, the exact stack `jetpacs-chrome--build' composes."
          for index from 0
          do (let* ((example-screen
                     (jetpacs-m3-example-screen component index nil))
-                   (ids (append (jetpacs--collect-node-ids home nil)
-                                (jetpacs--collect-node-ids screen nil)
-                                (jetpacs--collect-node-ids
+                   (ids (append (jetpacs-collect-node-ids home nil)
+                                (jetpacs-collect-node-ids screen nil)
+                                (jetpacs-collect-node-ids
                                  example-screen nil))))
               (should (equal (sort (copy-sequence ids) #'string<)
                              (sort (delete-dups (copy-sequence ids))

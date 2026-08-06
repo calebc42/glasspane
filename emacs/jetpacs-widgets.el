@@ -87,14 +87,14 @@ row to the §16.5 table).")
   (rx bos (any "A-Za-z0-9") (** 0 127 (any "A-Za-z0-9" "._:/-")) eos)
   "A SPEC §4.4 identifier: 1-128 ASCII, begins letter/digit, [A-Za-z0-9._:/-].")
 
-(defun jetpacs--identifier-p (s)
+(defun jetpacs-identifier-p (s)
   "Non-nil when S is a valid SPEC §4.4 identifier."
   (and (stringp s) (string-match-p jetpacs--identifier-re s)))
 
-(defun jetpacs--check-identifier (s what)
+(defun jetpacs-check-identifier (s what)
   "Signal an error unless S is a §4.4 identifier; WHAT names the field.
 Returns S."
-  (unless (jetpacs--identifier-p s)
+  (unless (jetpacs-identifier-p s)
     (error "jetpacs: %s %S is not a valid identifier (SPEC 4.4)" what s))
   s)
 
@@ -113,7 +113,7 @@ STABLE across renders and sessions on purpose (draft preservation);
 byte-identical to the JC-3c comint minter for PREFIX \"comint\", so live
 comint drafts survive the promotion.  Callers: comint input rows, and
 the coming files editor ids / witheditor state ids / hosts buffers."
-  (jetpacs--check-identifier prefix "wire-id prefix")
+  (jetpacs-check-identifier prefix "wire-id prefix")
   (when (> (length prefix) 100)
     (error "jetpacs: wire-id prefix longer than 100 chars"))
   (unless (stringp name)
@@ -128,7 +128,7 @@ the coming files editor ids / witheditor state ids / hosts buffers."
                                       (max 0 (- 118 (length prefix)))))))
     (format "%s-%s-%s" prefix stem hash)))
 
-(defun jetpacs--require-string (s what)
+(defun jetpacs-require-string (s what)
   "Signal an error unless S is a string; WHAT names the field.  Returns S."
   (unless (stringp s)
     (error "jetpacs: %s must be a string, got %S" what s))
@@ -173,7 +173,7 @@ Accepts a hex form or any §4.4 identifier (a theme role -- KNOWN or
 unknown, since an unknown role is legal and the Companion falls back)."
   (unless (and (stringp v)
                (or (string-match-p jetpacs--hex-color-re v)
-                   (jetpacs--identifier-p v)))
+                   (jetpacs-identifier-p v)))
     (error "jetpacs: color %S must be a theme role or #hex (SPEC 16.6)" v))
   v)
 
@@ -195,7 +195,7 @@ Runs VAL-FN on each (KEY VALUE); WHAT names the field."
 (defun jetpacs--check-attr (k v)
   "Validate universal attribute K's value V (SPEC §16.5); signal on invalid."
   (pcase k
-    ((or :key :id) (jetpacs--check-identifier v k))
+    ((or :key :id) (jetpacs-check-identifier v k))
     ((or :scroll_here :clip) (jetpacs--check-bool v k))
     ((or :fill_fraction :alpha) (jetpacs--check-number v k 0 1))
     ((or :aspect_ratio :weight) (jetpacs--check-number v k nil nil t))
@@ -222,11 +222,11 @@ Runs VAL-FN on each (KEY VALUE); WHAT names the field."
   "Signal an error unless FIELDS is a list of DISTINCT §4.4 identifiers (§14.1)."
   (unless (listp fields)
     (error "jetpacs: capture_fields must be a list of id strings (SPEC 14.1), got %S" fields))
-  (dolist (f fields) (jetpacs--check-identifier f "capture field"))
+  (dolist (f fields) (jetpacs-check-identifier f "capture field"))
   (unless (= (length fields) (length (delete-dups (copy-sequence fields))))
     (error "jetpacs: capture_fields must be distinct (SPEC 14.1), got %S" fields)))
 
-(defun jetpacs--check-descriptor (v what)
+(defun jetpacs-check-descriptor (v what)
   "Signal unless V is an ActionDescriptor: a plist carrying exactly one of
 :action or :builtin (SPEC §14).  WHAT names the field.  Returns V."
   (unless (and (consp v) (keywordp (car v))
@@ -264,7 +264,7 @@ the field.  Returns the normalized string form."
 (defconst jetpacs--max-safe-integer 9007199254740991
   "The §4.2 EBP integer ceiling (2^53 - 1); integers must lie in ±this.")
 
-(defun jetpacs--check-integer (v what min max)
+(defun jetpacs-check-integer (v what min max)
   "Signal unless V is an integer within inclusive [MIN,MAX] (nil = unbounded);
 WHAT names the field.  The §4.2 ceiling (`jetpacs--max-safe-integer') is
 always enforced regardless of MAX.  Returns V."
@@ -332,7 +332,7 @@ runtime concern (JW-7)."
 
 ;;;; The node funnel
 
-(defun jetpacs--node (type &rest kvs)
+(defun jetpacs-make-node (type &rest kvs)
   "Build a node plist of TYPE from KVS, alternating KEYWORD VALUE pairs.
 Pairs whose VALUE is nil are omitted, so optional members read as plain
 keyword arguments at the call site.  Emit JSON false as the value
@@ -346,15 +346,15 @@ sub-specs (action descriptors, spans, table cells) that carry no type."
     (setq body (nreverse body))
     (if type (cons :t (cons type body)) body)))
 
-(defun jetpacs--node-p (x)
+(defun jetpacs-node-p (x)
   "Non-nil when X is a single node/sub-spec plist (car is a keyword).
 A list *of* nodes has a cons as its car instead, which is what lets
 `jetpacs--as-children' tell one node from a list of children."
   (and (consp x) (keywordp (car x))))
 
-(defun jetpacs--root-node-p (x)
+(defun jetpacs-root-node-p (x)
   "Non-nil when X is a typed Node: a plist whose head is `:t' (§16.1).
-Stricter than `jetpacs--node-p', which also accepts `:t'-less sub-specs
+Stricter than `jetpacs-node-p', which also accepts `:t'-less sub-specs
 \(action descriptors, spans, table cells).  Use where a root Node is required."
   (and (consp x) (eq (car x) :t)))
 
@@ -420,7 +420,7 @@ b))' and `(jetpacs-row a b)' mean the same."
                        (let ((only (car args)))
                          (or (null only)
                              (and (proper-list-p only)
-                                  (cl-every #'jetpacs--node-p only)))))
+                                  (cl-every #'jetpacs-node-p only)))))
                   (car args)
                 args)))
     (vconcat (remq nil kids))))
@@ -429,7 +429,7 @@ b))' and `(jetpacs-row a b)' mean the same."
 
 (defun jetpacs-bool (value)
   "VALUE as a wire boolean: any non-nil is t, nil is `:json-false'.
-The wire distinguishes ABSENT (elisp nil, which `jetpacs--node' drops)
+The wire distinguishes ABSENT (elisp nil, which `jetpacs-make-node' drops)
 from FALSE (`:json-false'), so a plain elisp boolean cannot ride a
 member directly — every caller authoring live state wrote
 \=`(if x t :json-false)' by hand.  This is that idiom with a name:
@@ -521,7 +521,7 @@ string); `queue'/`wake' require TTL-S to be an integer in 1..604800, and
 `drop' forbids both TTL-S and DEDUPE.  DEDUPE is an identifier, CONFIRM a
 non-empty string, ARGS a member plist, CAPTURE-FIELDS a list of distinct
 field-id strings.  Statically invalid input signals an error at build time."
-  (unless (and (jetpacs--identifier-p name) (string-search "." name))
+  (unless (and (jetpacs-identifier-p name) (string-search "." name))
     (error "jetpacs-action: action name %S must be a §4.4 namespaced identifier containing a dot (SPEC 14.1)" name))
   (let* ((policy (and when-offline (format "%s" when-offline)))
          (effective (or policy "drop")))
@@ -534,7 +534,7 @@ field-id strings.  Statically invalid input signals an error at build time."
       (when ttl-s (error "jetpacs-action: :ttl-s is invalid for `drop' (SPEC 14.1)"))
       (when dedupe (error "jetpacs-action: :dedupe is invalid for `drop' (SPEC 14.1)")))
      (t (error "jetpacs-action: unknown offline policy `%s' (SPEC 14.1)" effective)))
-    (when dedupe (jetpacs--check-identifier dedupe ":dedupe"))
+    (when dedupe (jetpacs-check-identifier dedupe ":dedupe"))
     (when confirm
       ;; §14.1: a bare string, or the object form
       ;; {:text REQ, :title, :icon, :confirm-label, :dismiss-label} — the
@@ -551,10 +551,10 @@ field-id strings.  Statically invalid input signals an error at build time."
                  do (pcase key
                       (:text)
                       ((or :title :confirm-label :dismiss-label)
-                       (jetpacs--require-string value (symbol-name key)))
-                      (:icon (jetpacs--check-identifier value ":icon"))
+                       (jetpacs-require-string value (symbol-name key)))
+                      (:icon (jetpacs-check-identifier value ":icon"))
                       (_ (error "jetpacs-action: unknown :confirm key %S (SPEC 14.1)" key))))
-        (setq confirm (jetpacs--node nil
+        (setq confirm (jetpacs-make-node nil
                                      :text (plist-get confirm :text)
                                      :title (plist-get confirm :title)
                                      :icon (plist-get confirm :icon)
@@ -565,7 +565,7 @@ field-id strings.  Statically invalid input signals an error at build time."
     (when args
       (unless (and (consp args) (keywordp (car args)))
         (error "jetpacs-action: :args must be a member plist, got %S" args)))
-    (jetpacs--node nil
+    (jetpacs-make-node nil
                    :action name
                    :args args
                    :when_offline policy
@@ -577,42 +577,42 @@ field-id strings.  Statically invalid input signals an error at build time."
 (defun jetpacs-view-switch (view)
   "A `view.switch' builtin action selecting multi-view VIEW (SPEC §14.2).
 VIEW is a §4.4 identifier."
-  (jetpacs--check-identifier view ":view")
-  (jetpacs--node nil :builtin "view.switch" :view view))
+  (jetpacs-check-identifier view ":view")
+  (jetpacs-make-node nil :builtin "view.switch" :view view))
 
 (defun jetpacs-clipboard-copy (text)
   "A `clipboard.copy' builtin action copying string TEXT (SPEC §14.2)."
-  (jetpacs--require-string text ":text")
-  (jetpacs--node nil :builtin "clipboard.copy" :text text))
+  (jetpacs-require-string text ":text")
+  (jetpacs-make-node nil :builtin "clipboard.copy" :text text))
 
 (cl-defun jetpacs-share (text &key title)
   "A `share.send' builtin action sharing string TEXT with optional TITLE (§14.2)."
-  (jetpacs--require-string text ":text")
-  (when title (jetpacs--require-string title ":title"))
-  (jetpacs--node nil :builtin "share.send" :text text :title title))
+  (jetpacs-require-string text ":text")
+  (when title (jetpacs-require-string title ":title"))
+  (jetpacs-make-node nil :builtin "share.send" :text text :title title))
 
 (defun jetpacs-settings-open ()
   "A `companion.settings.open' builtin action (SPEC §14.2)."
-  (jetpacs--node nil :builtin "companion.settings.open"))
+  (jetpacs-make-node nil :builtin "companion.settings.open"))
 
 (defun jetpacs-trigger-fire (id)
   "A `trigger.fire' builtin action firing the manual trigger ID (SPEC §14.2).
 ID is a §4.4 identifier."
-  (jetpacs--check-identifier id ":id")
-  (jetpacs--node nil :builtin "trigger.fire" :id id))
+  (jetpacs-check-identifier id ":id")
+  (jetpacs-make-node nil :builtin "trigger.fire" :id id))
 
 (cl-defun jetpacs-dialog-submit (&key value capture-fields)
   "A `dialog.submit' builtin action (SPEC §14.2).
 VALUE is the submitted scalar (any non-secret JSON value); CAPTURE-FIELDS a
 list of distinct field ids to gather."
   (when capture-fields (jetpacs--check-capture-fields capture-fields))
-  (jetpacs--node nil :builtin "dialog.submit"
+  (jetpacs-make-node nil :builtin "dialog.submit"
                  :value value
                  :capture_fields (and capture-fields (vconcat capture-fields))))
 
 (defun jetpacs-dialog-dismiss ()
   "A `dialog.dismiss' builtin action (SPEC §14.2)."
-  (jetpacs--node nil :builtin "dialog.dismiss"))
+  (jetpacs-make-node nil :builtin "dialog.dismiss"))
 
 ;;;; Content nodes (§17.2)
 ;;
@@ -625,13 +625,13 @@ STYLE is body/title/headline/caption/label/mono; FONT-WEIGHT a weight name
 or a number 100..900; COLOR a §16.6 color; SELECTABLE non-nil to allow
 selection; MAX-LINES a positive-integer clamp; SYNTAX a §4.4 identifier
 naming a highlighter."
-  (jetpacs--require-string text ":text")
+  (jetpacs-require-string text ":text")
   (when style (setq style (jetpacs--check-enum style jetpacs--text-styles ":style")))
   (when font-weight (jetpacs--check-font-weight font-weight))
   (when color (jetpacs--check-color color))
-  (when max-lines (jetpacs--check-integer max-lines ":max_lines" 1 nil))
-  (when syntax (jetpacs--check-identifier syntax ":syntax"))
-  (jetpacs--node "text"
+  (when max-lines (jetpacs-check-integer max-lines ":max_lines" 1 nil))
+  (when syntax (jetpacs-check-identifier syntax ":syntax"))
+  (jetpacs-make-node "text"
                  :text text
                  :style style
                  :font_weight font-weight
@@ -645,12 +645,12 @@ naming a highlighter."
 Plain-text TEXT; FONT-WEIGHT a name or 100..900; ITALIC/UNDERLINE/MONO
 non-nil to enable; COLOR/BG §16.6 colors; ON-TAP an ActionDescriptor that
 makes the run a link."
-  (jetpacs--require-string text ":text")
+  (jetpacs-require-string text ":text")
   (when font-weight (jetpacs--check-font-weight font-weight))
   (when color (jetpacs--check-color color))
   (when bg (jetpacs--check-color bg))
-  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
-  (jetpacs--node nil
+  (when on-tap (jetpacs-check-descriptor on-tap ":on-tap"))
+  (jetpacs-make-node nil
                  :text text
                  :font_weight font-weight
                  :italic (jetpacs--flag italic)
@@ -664,19 +664,19 @@ makes the run a link."
   "A rich-text node rendering SPANS, a list from `jetpacs-span' (SPEC §17.2).
 STYLE is the base text style."
   (when style (setq style (jetpacs--check-enum style jetpacs--text-styles ":style")))
-  (jetpacs--node "rich_text" :spans (vconcat spans) :style style))
+  (jetpacs-make-node "rich_text" :spans (vconcat spans) :style style))
 
 (cl-defun jetpacs-icon (name &key size color badge content-description)
   "An icon node named NAME, a string (SPEC §17.2; amendment 64).
 An unresolved NAME renders a placeholder or nothing, so any string is
 valid input.  SIZE a non-negative dp; COLOR a §16.6 color; BADGE a string
 or number; CONTENT-DESCRIPTION an accessibility label."
-  (jetpacs--require-string name ":name")
+  (jetpacs-require-string name ":name")
   (when size (jetpacs--check-number size ":size" 0 nil))
   (when color (jetpacs--check-color color))
   (when badge (jetpacs--check-badge badge))
-  (when content-description (jetpacs--require-string content-description ":content_description"))
-  (jetpacs--node "icon" :name name :size size :color color :badge badge
+  (when content-description (jetpacs-require-string content-description ":content_description"))
+  (jetpacs-make-node "icon" :name name :size size :color color :badge badge
                  :content_description content-description))
 
 (cl-defun jetpacs-image (url &key content-scale content-description)
@@ -688,40 +688,40 @@ Size it with the universal `width'/`height'/`aspect_ratio' via
   (jetpacs--check-image-url url)
   (when content-scale
     (setq content-scale (jetpacs--check-enum content-scale '("fit" "crop" "fill") ":content_scale")))
-  (when content-description (jetpacs--require-string content-description ":content_description"))
-  (jetpacs--node "image" :url url :content_scale content-scale
+  (when content-description (jetpacs-require-string content-description ":content_description"))
+  (jetpacs-make-node "image" :url url :content_scale content-scale
                  :content_description content-description))
 
 (cl-defun jetpacs-date-stamp (&key day month month-index year time)
   "A date-stamp node (SPEC §17.2); at least one member SHOULD be present.
 DAY is an integer 1..31, MONTH-INDEX 1..12, YEAR a non-negative integer;
 MONTH and TIME are display strings."
-  (when day (jetpacs--check-integer day ":day" 1 31))
-  (when month (jetpacs--require-string month ":month"))
-  (when month-index (jetpacs--check-integer month-index ":month_index" 1 12))
-  (when year (jetpacs--check-integer year ":year" 0 nil))
-  (when time (jetpacs--require-string time ":time"))
-  (jetpacs--node "date_stamp" :day day :month month :month_index month-index
+  (when day (jetpacs-check-integer day ":day" 1 31))
+  (when month (jetpacs-require-string month ":month"))
+  (when month-index (jetpacs-check-integer month-index ":month_index" 1 12))
+  (when year (jetpacs-check-integer year ":year" 0 nil))
+  (when time (jetpacs-require-string time ":time"))
+  (jetpacs-make-node "date_stamp" :day day :month month :month_index month-index
                  :year year :time time))
 
 (cl-defun jetpacs-section-header (title &key trailing)
   "A section-header node titled TITLE (a string) (SPEC §17.2).
 Optional TRAILING is a single node shown at the header's end."
-  (jetpacs--require-string title ":title")
-  (jetpacs--node "section_header" :title title :trailing trailing))
+  (jetpacs-require-string title ":title")
+  (jetpacs-make-node "section_header" :title title :trailing trailing))
 
 (cl-defun jetpacs-empty-state (&key icon title caption action-label on-tap)
   "An empty-state placeholder (SPEC §17.2).
 ICON is a §4.4 identifier; TITLE/CAPTION/ACTION-LABEL are strings; ON-TAP
 an ActionDescriptor.  ACTION-LABEL and ON-TAP are both-or-neither."
-  (when icon (jetpacs--check-identifier icon ":icon"))
-  (when title (jetpacs--require-string title ":title"))
-  (when caption (jetpacs--require-string caption ":caption"))
-  (when action-label (jetpacs--require-string action-label ":action_label"))
+  (when icon (jetpacs-check-identifier icon ":icon"))
+  (when title (jetpacs-require-string title ":title"))
+  (when caption (jetpacs-require-string caption ":caption"))
+  (when action-label (jetpacs-require-string action-label ":action_label"))
   (unless (eq (null action-label) (null on-tap))
     (error "jetpacs-empty-state: :action-label and :on-tap are both-or-neither (SPEC 17.2)"))
-  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
-  (jetpacs--node "empty_state" :icon icon :title title :caption caption
+  (when on-tap (jetpacs-check-descriptor on-tap ":on-tap"))
+  (jetpacs-make-node "empty_state" :icon icon :title title :caption caption
                  :action_label action-label :on_tap on-tap))
 
 (defconst jetpacs--progress-variants
@@ -738,16 +738,16 @@ VARIANT is one of `jetpacs--progress-variants' (circular by default);
 VALUE a number 0..1 (omit for indeterminate)."
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--progress-variants ":variant")))
   (when value (jetpacs--check-number value ":value" 0 1))
-  (jetpacs--node "progress" :variant variant :value value))
+  (jetpacs-make-node "progress" :variant variant :value value))
 
 (cl-defun jetpacs-badge (label &key icon color children)
   "A badge node showing string LABEL (SPEC §17.2).
 An empty LABEL renders an attention dot.  ICON is a §4.4 identifier; COLOR
 a §16.6 color; CHILDREN a list of nodes the badge annotates."
-  (jetpacs--require-string label ":label")
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs-require-string label ":label")
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (when color (jetpacs--check-color color))
-  (jetpacs--node "badge" :label label :icon icon :color color
+  (jetpacs-make-node "badge" :label label :icon icon :color color
                  :children (and children (vconcat children))))
 
 ;;;; Layout nodes (§17.3)
@@ -810,7 +810,7 @@ a static row wants universal padding instead)."
     (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
     (when scroll (jetpacs--check-bool scroll ":scroll"))
     (when fill (jetpacs--check-bool fill ":fill"))
-    (jetpacs--node "row"
+    (jetpacs-make-node "row"
                    :children (jetpacs--as-children (car split))
                    :spacing spacing :overlap overlap
                    :content_padding content-padding
@@ -842,7 +842,7 @@ which the children interlock, mutually exclusive with :spacing (see
     (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
     (when scroll (jetpacs--check-bool scroll ":scroll"))
     (when fill (jetpacs--check-bool fill ":fill"))
-    (jetpacs--node "column"
+    (jetpacs-make-node "column"
                    :children (jetpacs--as-children (car split))
                    :reverse_scroll reverse-scroll
                    :spacing spacing :overlap overlap :align align :arrange arrange
@@ -862,7 +862,7 @@ Trailing options: :spacing, :run-spacing (dp), :align (top/center/bottom),
     (when run-spacing (jetpacs--check-number run-spacing ":run_spacing" 0 nil))
     (when align (setq align (jetpacs--check-enum align jetpacs--flow-aligns ":align")))
     (when arrange (setq arrange (jetpacs--check-enum arrange jetpacs--arranges ":arrange")))
-    (jetpacs--node "flow_row"
+    (jetpacs-make-node "flow_row"
                    :children (jetpacs--as-children (car split))
                    :spacing spacing :run_spacing run-spacing
                    :align align :arrange arrange)))
@@ -879,9 +879,9 @@ Trailing options: :alignment (top_start..bottom_end), :on-tap, and
          (on-long-tap (plist-get opts :on-long-tap)))
     (when alignment
       (setq alignment (jetpacs--check-enum alignment jetpacs--box-alignments ":alignment")))
-    (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
-    (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
-    (jetpacs--node "box"
+    (when on-tap (jetpacs-check-descriptor on-tap ":on-tap"))
+    (when on-long-tap (jetpacs-check-descriptor on-long-tap ":on-long-tap"))
+    (jetpacs-make-node "box"
                    :children (jetpacs--as-children (car split))
                    :alignment alignment
                    :on_tap on-tap
@@ -906,7 +906,7 @@ container needs :shadow-elevation to actually float."
     (when shape (setq shape (jetpacs--check-enum shape jetpacs--surface-shapes ":shape")))
     (when elevation (jetpacs--check-number elevation ":elevation" 0 nil))
     (when shadow (jetpacs--check-number shadow ":shadow_elevation" 0 nil))
-    (jetpacs--node "surface"
+    (jetpacs-make-node "surface"
                    :children (jetpacs--as-children (car split))
                    :color color :shape shape :elevation elevation
                    :shadow_elevation shadow)))
@@ -920,7 +920,7 @@ Trailing options: :spacing (dp), :content-padding (dp)."
          (content-padding (plist-get opts :content-padding)))
     (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
     (when content-padding (jetpacs--check-number content-padding ":content_padding" 0 nil))
-    (jetpacs--node "lazy_column"
+    (jetpacs-make-node "lazy_column"
                    :children (jetpacs--as-children (car split))
                    :spacing spacing :content_padding content-padding)))
 
@@ -930,7 +930,7 @@ The three ARE the §16.5 universal attributes — a spacer is nothing but
 its size, so they ride here as keywords instead of demanding a
 `jetpacs-with-attrs' wrap; any other universal still attaches the
 usual way, and each value gets the same §16.5 validation."
-  (apply #'jetpacs-with-attrs (jetpacs--node "spacer")
+  (apply #'jetpacs-with-attrs (jetpacs-make-node "spacer")
          (append (when width (list :width width))
                  (when height (list :height height))
                  (when weight (list :weight weight)))))
@@ -940,17 +940,17 @@ usual way, and each value gets the same §16.5 validation."
 COLOR is a §16.6 color; THICKNESS a non-negative dp."
   (when color (jetpacs--check-color color))
   (when thickness (jetpacs--check-number thickness ":thickness" 0 nil))
-  (jetpacs--node "divider" :color color :thickness thickness))
+  (jetpacs-make-node "divider" :color color :thickness thickness))
 
 (cl-defun jetpacs-swipe (label &key icon color on-trigger)
   "A swipe side {label, icon?, color?, on_trigger} for card/collapsible (§17.3).
 LABEL is a string; ICON a §4.4 identifier; COLOR a §16.6 color; ON-TRIGGER
 an ActionDescriptor dispatched at most once per gesture."
-  (jetpacs--require-string label ":label")
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs-require-string label ":label")
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (when color (jetpacs--check-color color))
-  (jetpacs--check-descriptor on-trigger ":on-trigger")   ; required (§17.3)
-  (jetpacs--node nil :label label :icon icon :color color :on_trigger on-trigger))
+  (jetpacs-check-descriptor on-trigger ":on-trigger")   ; required (§17.3)
+  (jetpacs-make-node nil :label label :icon icon :color color :on_trigger on-trigger))
 
 (defconst jetpacs--card-variants '("filled" "elevated" "outlined"))
 
@@ -968,16 +968,16 @@ wide layout always, on every screen.
 VARIANT is list_detail (default) or supporting, which is M3's other pane
 ROLE assignment (a main pane with a supporting one), not a different
 layout engine."
-  (unless (jetpacs--root-node-p list)
+  (unless (jetpacs-root-node-p list)
     (error "jetpacs-pane-scaffold: LIST must be a node, got %S" list))
-  (unless (jetpacs--root-node-p detail)
+  (unless (jetpacs-root-node-p detail)
     (error "jetpacs-pane-scaffold: DETAIL must be a node, got %S" detail))
-  (when (and extra (not (jetpacs--root-node-p extra)))
+  (when (and extra (not (jetpacs-root-node-p extra)))
     (error "jetpacs-pane-scaffold: :extra must be a node, got %S" extra))
   (when variant
     (setq variant (jetpacs--check-enum variant jetpacs--pane-scaffold-variants
                                        ":variant")))
-  (jetpacs--node "pane_scaffold" :list list :detail detail
+  (jetpacs-make-node "pane_scaffold" :list list :detail detail
                  :extra extra :variant variant))
 
 (defun jetpacs-card (&rest args)
@@ -993,13 +993,13 @@ Companion has always drawn)."
          (swipe-start (plist-get opts :swipe-start))
          (swipe-end (plist-get opts :swipe-end))
          (variant (plist-get opts :variant)))
-    (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
-    (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
+    (when on-tap (jetpacs-check-descriptor on-tap ":on-tap"))
+    (when on-long-tap (jetpacs-check-descriptor on-long-tap ":on-long-tap"))
     (when swipe-start (jetpacs--check-swipe swipe-start ":swipe-start"))
     (when swipe-end (jetpacs--check-swipe swipe-end ":swipe-end"))
     (when variant
       (setq variant (jetpacs--check-enum variant jetpacs--card-variants ":variant")))
-    (jetpacs--node "card"
+    (jetpacs-make-node "card"
                    :children (jetpacs--as-children (car split))
                    :on_tap on-tap
                    :on_long_tap on-long-tap
@@ -1011,8 +1011,8 @@ Companion has always drawn)."
   "A collapsible section with required ID and HEADER node, plus children (§17.3).
 Trailing options: :collapsed (t or :json-false), :on-long-tap, :swipe-start,
 :swipe-end."
-  (jetpacs--check-identifier id ":id")
-  (unless (jetpacs--node-p header)
+  (jetpacs-check-identifier id ":id")
+  (unless (jetpacs-node-p header)
     (error "jetpacs-collapsible: HEADER must be a node, got %S" header))
   (let* ((split (jetpacs--children-and-opts args "collapsible"))
          (opts (cdr split))
@@ -1021,10 +1021,10 @@ Trailing options: :collapsed (t or :json-false), :on-long-tap, :swipe-start,
          (swipe-start (plist-get opts :swipe-start))
          (swipe-end (plist-get opts :swipe-end)))
     (when collapsed (jetpacs--check-bool collapsed ":collapsed"))
-    (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
+    (when on-long-tap (jetpacs-check-descriptor on-long-tap ":on-long-tap"))
     (when swipe-start (jetpacs--check-swipe swipe-start ":swipe-start"))
     (when swipe-end (jetpacs--check-swipe swipe-end ":swipe-end"))
-    (jetpacs--node "collapsible"
+    (jetpacs-make-node "collapsible"
                    :id id :header header
                    :children (jetpacs--as-children (car split))
                    :collapsed collapsed
@@ -1044,8 +1044,8 @@ ActionDescriptor.  ITEMS is a list of node plists."
         (when (member k seen)
           (error "jetpacs-reorderable-list: duplicate item key/id %S (SPEC 17.3)" k))
         (push k seen))))
-  (when on-reorder (jetpacs--check-descriptor on-reorder ":on-reorder"))
-  (jetpacs--node "reorderable_list"
+  (when on-reorder (jetpacs-check-descriptor on-reorder ":on-reorder"))
+  (jetpacs-make-node "reorderable_list"
                  :items (vconcat items)
                  :on_reorder on-reorder))
 
@@ -1070,8 +1070,8 @@ number drawn over the tab, empty meaning the bare attention dot.
 TOOLTIP is the plain tooltip M3 wants over an icon-only tab, anchored
 above; a screen reader hears the icon's fallback name either way, so
 the tooltip is the SIGHTED user's label, not a replacement for one."
-  (when label (jetpacs--require-string label ":label"))
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when label (jetpacs-require-string label ":label"))
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (unless (or label icon)
     (error "jetpacs-tab-item: a tab needs a :label, an :icon, or both (SPEC 17.3)"))
   (when icon-position
@@ -1081,7 +1081,7 @@ the tooltip is the SIGHTED user's label, not a replacement for one."
     (unless icon
       (error "jetpacs-tab-item: :icon-position needs an :icon (SPEC 17.3)")))
   (when badge (jetpacs--check-badge badge))
-  (when tooltip (jetpacs--require-string tooltip ":tooltip"))
+  (when tooltip (jetpacs-require-string tooltip ":tooltip"))
   (when selected-content
     (unless content
       (error "jetpacs-tab-item: :selected-content needs :content (SPEC 17.3)")))
@@ -1090,9 +1090,9 @@ the tooltip is the SIGHTED user's label, not a replacement for one."
       (error "jetpacs-tab-item: :content needs a :label as the accessibility name (SPEC 17.3)")))
   (dolist (pair (list (cons ":content" content)
                       (cons ":selected-content" selected-content)))
-    (when (and (cdr pair) (not (jetpacs--root-node-p (cdr pair))))
+    (when (and (cdr pair) (not (jetpacs-root-node-p (cdr pair))))
       (error "jetpacs-tab-item: %s must be a node (SPEC 17.3)" (car pair))))
-  (jetpacs--node nil :label label :icon icon
+  (jetpacs-make-node nil :label label :icon icon
                  :icon_position icon-position :badge badge
                  :tooltip tooltip :content content
                  :selected_content selected-content))
@@ -1119,11 +1119,11 @@ standard offset."
     (when (or (zerop ni) (/= ni nc))
       (error "jetpacs-tabs: items and children must be equal non-zero length (SPEC 17.3): %d vs %d"
              ni nc))
-    (when initial (jetpacs--check-integer initial ":initial" 0 (1- ni)))
+    (when initial (jetpacs-check-integer initial ":initial" 0 (1- ni)))
     (when scrollable (jetpacs--check-bool scrollable ":scrollable"))
     (when pager-only (jetpacs--check-bool pager-only ":pager-only"))
-    (when id (jetpacs--check-identifier id ":id"))
-    (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+    (when id (jetpacs-check-identifier id ":id"))
+    (when on-change (jetpacs-check-descriptor on-change ":on-change"))
     (when style (setq style (jetpacs--check-enum style jetpacs--tab-styles ":style")))
     (when indicator
       (let ((kind (plist-get indicator :kind))
@@ -1133,9 +1133,9 @@ standard offset."
                                         ":indicator :kind"))
         (when color (jetpacs--check-color color))
         (when inset (jetpacs--check-number inset ":indicator :inset" 0 nil))
-        (setq indicator (jetpacs--node nil :kind kind :color color
+        (setq indicator (jetpacs-make-node nil :kind kind :color color
                                        :inset inset))))
-    (jetpacs--node "tabs"
+    (jetpacs-make-node "tabs"
                    :items (vconcat items)
                    :children (vconcat children)
                    :initial initial
@@ -1149,28 +1149,28 @@ standard offset."
 (cl-defun jetpacs-table-cell (spans &key on-tap on-long-tap)
   "A table cell {spans, on_tap?, on_long_tap?} (SPEC §17.3).
 SPANS is a list from `jetpacs-span'."
-  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
-  (when on-long-tap (jetpacs--check-descriptor on-long-tap ":on-long-tap"))
-  (jetpacs--node nil :spans (vconcat spans) :on_tap on-tap :on_long_tap on-long-tap))
+  (when on-tap (jetpacs-check-descriptor on-tap ":on-tap"))
+  (when on-long-tap (jetpacs-check-descriptor on-long-tap ":on-long-tap"))
+  (jetpacs-make-node nil :spans (vconcat spans) :on_tap on-tap :on_long_tap on-long-tap))
 
 (defun jetpacs-table-row (kind &rest cells)
   "A table row of KIND `data' or `header' with CELLS (SPEC §17.3).
 CELLS are from `jetpacs-table-cell'.  For a rule row use `jetpacs-table-rule'."
-  (jetpacs--node nil
+  (jetpacs-make-node nil
                  :kind (jetpacs--check-enum kind '("data" "header") ":kind")
                  :cells (jetpacs--as-children cells)))
 
 (defun jetpacs-table-rule ()
   "A table `rule' row, a horizontal separator with no cells (SPEC §17.3)."
-  (jetpacs--node nil :kind "rule"))
+  (jetpacs-make-node nil :kind "rule"))
 
 (cl-defun jetpacs-table (rows &key aligns on-add-row on-add-col)
   "A table of ROWS (from `jetpacs-table-row'/`jetpacs-table-rule') (SPEC §17.3).
 ALIGNS is a list of start/center/end (one per column); :on-add-row and
 :on-add-col are ActionDescriptors."
-  (when on-add-row (jetpacs--check-descriptor on-add-row ":on-add-row"))
-  (when on-add-col (jetpacs--check-descriptor on-add-col ":on-add-col"))
-  (jetpacs--node "table"
+  (when on-add-row (jetpacs-check-descriptor on-add-row ":on-add-row"))
+  (when on-add-col (jetpacs-check-descriptor on-add-col ":on-add-col"))
+  (jetpacs-make-node "table"
                  :rows (vconcat rows)
                  :aligns (and aligns
                               (vconcat (mapcar (lambda (a)
@@ -1240,15 +1240,15 @@ the group itself is a row or column of such toggles (:spacing 2 across,
 
 COLOR is a §16.6 color recoloring a TEXT button\\='s content (needs
 :variant \"text\"); the filled variants keep their role containers."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-descriptor on-tap ":on-tap")
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-descriptor on-tap ":on-tap")
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--button-variants ":variant")))
   (when size (setq size (jetpacs--check-enum size jetpacs--button-sizes ":size")))
   (when shape (setq shape (jetpacs--check-enum shape jetpacs--button-shapes ":shape")))
   (when animate-shape (jetpacs--check-bool animate-shape ":animate_shape"))
   (when checked (jetpacs--check-bool checked ":checked"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
   (when expanded
     ;; §17.4: t/absent is icon+label; :json-false the icon-only FAB;
     ;; "auto" derives from the scaffold body's own scroll — expanded
@@ -1273,7 +1273,7 @@ COLOR is a §16.6 color recoloring a TEXT button\\='s content (needs
   (when checked-icon
     (unless checked
       (error "jetpacs-button: :checked-icon needs :checked (SPEC 17.4)"))
-    (jetpacs--check-identifier checked-icon ":checked-icon"))
+    (jetpacs-check-identifier checked-icon ":checked-icon"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (when color
     ;; §17.4: color recolors a TEXT button's content (the custom-snackbar
@@ -1282,7 +1282,7 @@ COLOR is a §16.6 color recoloring a TEXT button\\='s content (needs
     (unless (equal variant "text")
       (error "jetpacs-button: :color needs :variant \"text\" (SPEC 17.4)"))
     (jetpacs--check-color color))
-  (jetpacs--node "button" :label label :on_tap on-tap
+  (jetpacs-make-node "button" :label label :on_tap on-tap
                  :icon icon :variant variant :size size :shape shape
                  :animate_shape animate-shape
                  :checked checked :on_change on-change
@@ -1304,9 +1304,9 @@ so no universal attribute could reach it.
 CHECKED makes this a toggle (device-held, keyed on `:id', which such a
 node then REQUIRES); CHECKED-ICON is the identifier drawn while checked,
 and ON-CHANGE receives the flipped boolean."
-  (jetpacs--check-identifier icon ":icon")
-  (jetpacs--check-descriptor on-tap ":on-tap")
-  (when content-description (jetpacs--require-string content-description ":content_description"))
+  (jetpacs-check-identifier icon ":icon")
+  (jetpacs-check-descriptor on-tap ":on-tap")
+  (when content-description (jetpacs-require-string content-description ":content_description"))
   (when badge (jetpacs--check-badge badge))
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--icon-button-variants ":variant")))
   (when size (setq size (jetpacs--check-enum size jetpacs--icon-button-sizes ":size")))
@@ -1316,11 +1316,11 @@ and ON-CHANGE receives the flipped boolean."
                                           jetpacs--icon-button-width-modes
                                           ":width-mode")))
   (when checked (jetpacs--check-bool checked ":checked"))
-  (when checked-icon (jetpacs--check-identifier checked-icon ":checked_icon"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when checked-icon (jetpacs-check-identifier checked-icon ":checked_icon"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
   (when color (jetpacs--check-color color))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "icon_button" :icon icon :on_tap on-tap
+  (jetpacs-make-node "icon_button" :icon icon :on_tap on-tap
                  :content_description content-description :badge badge
                  :variant variant :size size :shape shape
                  :width_mode width-mode
@@ -1343,7 +1343,7 @@ Trailing options: :value (the seeded query), :hint (the placeholder),
 the expanded results go, not what they are), :on-search (dispatched on
 submit with the query injected), :on-change (per keystroke),
 :leading-icon and :trailing-icon, :enabled."
-  (jetpacs--check-identifier id ":id")
+  (jetpacs-check-identifier id ":id")
   (let* ((split (jetpacs--children-and-opts args "search_bar"))
          (opts (cdr split))
          (value (plist-get opts :value))
@@ -1354,17 +1354,17 @@ submit with the query injected), :on-change (per keystroke),
          (leading-icon (plist-get opts :leading-icon))
          (trailing-icon (plist-get opts :trailing-icon))
          (enabled (plist-get opts :enabled)))
-    (when value (jetpacs--require-string value ":value"))
-    (when hint (jetpacs--require-string hint ":hint"))
+    (when value (jetpacs-require-string value ":value"))
+    (when hint (jetpacs-require-string hint ":hint"))
     (when variant
       (setq variant (jetpacs--check-enum variant jetpacs--search-bar-variants
                                          ":variant")))
-    (when on-search (jetpacs--check-descriptor on-search ":on-search"))
-    (when on-change (jetpacs--check-descriptor on-change ":on-change"))
-    (when leading-icon (jetpacs--check-identifier leading-icon ":leading-icon"))
-    (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing-icon"))
+    (when on-search (jetpacs-check-descriptor on-search ":on-search"))
+    (when on-change (jetpacs-check-descriptor on-change ":on-change"))
+    (when leading-icon (jetpacs-check-identifier leading-icon ":leading-icon"))
+    (when trailing-icon (jetpacs-check-identifier trailing-icon ":trailing-icon"))
     (when enabled (jetpacs--check-bool enabled ":enabled"))
-    (jetpacs--node "search_bar" :id id
+    (jetpacs-make-node "search_bar" :id id
                    :children (jetpacs--as-children (car split))
                    :value value :hint hint :variant variant
                    :on_search on-search :on_change on-change
@@ -1391,7 +1391,7 @@ too; the local containment filter stands down (author OPTIONS from the
 reported token instead); and an option pick dispatches ON-CHANGE
 WITHOUT touching the field — splice the completed token yourself and
 re-author VALUE."
-  (jetpacs--check-identifier id ":id")
+  (jetpacs-check-identifier id ":id")
   (when value
     (unless (or (stringp value) (numberp value) (memq value '(t :json-false)))
       (error "jetpacs-dropdown: :value must be a string, number, or boolean, got %S" value))
@@ -1400,16 +1400,16 @@ re-author VALUE."
                            (mapcar (lambda (o) (plist-get o :value)) options)
                            :test #'jetpacs--json-equal))
       (error "jetpacs-dropdown: value %S is not among options (SPEC 17.4)" value)))
-  (when label (jetpacs--require-string label ":label"))
-  (when hint (jetpacs--require-string hint ":hint"))
+  (when label (jetpacs-require-string label ":label"))
+  (when hint (jetpacs-require-string hint ":hint"))
   (when editable (jetpacs--check-bool editable ":editable"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
   (when report-caret
     (unless editable
       (error "jetpacs-dropdown: :report-caret needs :editable (SPEC 14.6.1)"))
     (jetpacs--check-bool report-caret ":report-caret"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "dropdown"
+  (jetpacs-make-node "dropdown"
                  :id id :options (vconcat options) :value value
                  :label label :hint hint :editable editable
                  :on_change on-change :report_caret report-caret
@@ -1424,9 +1424,9 @@ the renderer's own, which is why this is a node and not a styling of
 `jetpacs-enum-list'.  The value schema mirrors enum_list exactly: VALUE
 is one option value, or (with MULTI-SELECT) a list/vector of distinct
 option values.  An option's :icon draws before its label."
-  (jetpacs--check-identifier id ":id")
+  (jetpacs-check-identifier id ":id")
   (when multi-select (jetpacs--check-bool multi-select ":multi-select"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (when (and (eq multi-select t) value)
     (cond ((listp value) (setq value (vconcat value)))
@@ -1444,7 +1444,7 @@ option values.  An option's :icon draws before its label."
       (dolist (s (if (vectorp value) (append value nil) (list value)))
         (unless (cl-member s option-vals :test #'jetpacs--json-equal)
           (error "jetpacs-segmented-button: value %S is not among options (SPEC 17.4)" s)))))
-  (jetpacs--node "segmented_button"
+  (jetpacs-make-node "segmented_button"
                  :id id :options (vconcat options) :value value
                  :multi_select multi-select
                  :on_change on-change :enabled enabled))
@@ -1453,11 +1453,11 @@ option values.  An option's :icon draws before its label."
   "One item of an app-bar overflow strip (SPEC §17.3).
 LABEL is required — it is the item's menu row when it overflows and its
 accessible name inline; ICON is what renders while it fits."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-identifier icon ":icon")
-  (jetpacs--check-descriptor on-tap ":on-tap")
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-identifier icon ":icon")
+  (jetpacs-check-descriptor on-tap ":on-tap")
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node nil :label label :icon icon :on_tap on-tap :enabled enabled))
+  (jetpacs-make-node nil :label label :icon icon :on_tap on-tap :enabled enabled))
 
 (defun jetpacs--app-bar-strip (type items opts)
   "The shared body of `jetpacs-app-bar-row'/`-column': TYPE over ITEMS."
@@ -1466,9 +1466,9 @@ accessible name inline; ICON is what renders while it fits."
     (unless items
       (error "jetpacs-%s: items must be non-empty (SPEC 17.3)"
              (string-replace "_" "-" type)))
-    (when overflow-icon (jetpacs--check-identifier overflow-icon ":overflow-icon"))
-    (when max-items (jetpacs--check-integer max-items ":max-items" 1 nil))
-    (jetpacs--node type
+    (when overflow-icon (jetpacs-check-identifier overflow-icon ":overflow-icon"))
+    (when max-items (jetpacs-check-integer max-items ":max-items" 1 nil))
+    (jetpacs-make-node type
                    :items (vconcat items)
                    :overflow_icon overflow-icon
                    :max_items max-items)))
@@ -1477,10 +1477,10 @@ accessible name inline; ICON is what renders while it fits."
   "One item of a `jetpacs-fab-menu' (SPEC §17.3).
 Both LABEL and ICON are required — an M3 FAB menu item always carries
 the pair; ON-TAP is its ActionDescriptor."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-identifier icon ":icon")
-  (jetpacs--check-descriptor on-tap ":on-tap")
-  (jetpacs--node nil :label label :icon icon :on_tap on-tap))
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-identifier icon ":icon")
+  (jetpacs-check-descriptor on-tap ":on-tap")
+  (jetpacs-make-node nil :label label :icon icon :on_tap on-tap))
 
 (cl-defun jetpacs-fab-menu (items &key icon close-icon)
   "M3's FloatingActionButtonMenu: a checkable FAB unfolding ITEMS above it.
@@ -1491,9 +1491,9 @@ that snapped shut on every re-push would be unusable.  Meant for the
 scaffold's fab slot."
   (unless items
     (error "jetpacs-fab-menu: items must be non-empty (SPEC 17.3)"))
-  (when icon (jetpacs--check-identifier icon ":icon"))
-  (when close-icon (jetpacs--check-identifier close-icon ":close-icon"))
-  (jetpacs--node "fab_menu"
+  (when icon (jetpacs-check-identifier icon ":icon"))
+  (when close-icon (jetpacs-check-identifier close-icon ":close-icon"))
+  (jetpacs-make-node "fab_menu"
                  :items (vconcat items)
                  :icon icon :close_icon close-icon))
 
@@ -1501,11 +1501,11 @@ scaffold's fab slot."
   "One item of a `jetpacs-button-group' (SPEC §17.3).
 LABEL is required — it is the button's text inline and its menu row when
 it overflows; ICON is optional, unlike an app-bar item's."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-descriptor on-tap ":on-tap")
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-descriptor on-tap ":on-tap")
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node nil :label label :on_tap on-tap :icon icon
+  (jetpacs-make-node nil :label label :on_tap on-tap :icon icon
                  :enabled enabled))
 
 (cl-defun jetpacs-button-group (items &key overflow-icon)
@@ -1515,8 +1515,8 @@ into an overflow menu at MEASURE time — the same never-ask-Emacs width
 rule as `jetpacs-app-bar-row'.  OVERFLOW-ICON renames the indicator."
   (unless items
     (error "jetpacs-button-group: items must be non-empty (SPEC 17.3)"))
-  (when overflow-icon (jetpacs--check-identifier overflow-icon ":overflow-icon"))
-  (jetpacs--node "button_group"
+  (when overflow-icon (jetpacs-check-identifier overflow-icon ":overflow-icon"))
+  (jetpacs-make-node "button_group"
                  :items (vconcat items)
                  :overflow_icon overflow-icon))
 
@@ -1535,7 +1535,7 @@ inside a scrolling column."
          (reverse (plist-get opts :reverse))
          (spacing (plist-get opts :spacing))
          (content-padding (plist-get opts :content-padding)))
-    (when columns (jetpacs--check-integer columns ":columns" 1 nil))
+    (when columns (jetpacs-check-integer columns ":columns" 1 nil))
     (when min-item-width
       (jetpacs--check-number min-item-width ":min-item-width" 1 nil))
     (when (and columns min-item-width)
@@ -1544,7 +1544,7 @@ inside a scrolling column."
     (when spacing (jetpacs--check-number spacing ":spacing" 0 nil))
     (when content-padding
       (jetpacs--check-number content-padding ":content-padding" 0 nil))
-    (jetpacs--node "lazy_grid"
+    (jetpacs-make-node "lazy_grid"
                    :children (jetpacs--as-children (car split))
                    :columns columns
                    :min_item_width min-item-width
@@ -1583,7 +1583,7 @@ breathes with the keylines)."
     (when content-padding
       (jetpacs--check-number content-padding ":content-padding" 0 nil))
     (when item-corner (jetpacs--check-number item-corner ":item-corner" 0 nil))
-    (jetpacs--node "carousel"
+    (jetpacs-make-node "carousel"
                    :children (jetpacs--as-children (car split))
                    :strategy strategy
                    :item_width item-width
@@ -1616,13 +1616,13 @@ indicator; MAX-ITEMS caps the inline count below what would fit."
 LABEL and ICON are required — a rail destination without both is not
 navigable — and SELECTED marks the current one.  BADGE is a string or
 number over the icon, empty meaning the bare attention dot."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-identifier icon ":icon")
-  (jetpacs--check-descriptor on-tap ":on-tap")
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-identifier icon ":icon")
+  (jetpacs-check-descriptor on-tap ":on-tap")
   (when selected (jetpacs--check-bool selected ":selected"))
   (when badge (jetpacs--check-badge badge))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node nil :label label :icon icon :on_tap on-tap
+  (jetpacs-make-node nil :label label :icon icon :on_tap on-tap
                  :selected selected :badge badge :enabled enabled))
 
 (cl-defun jetpacs-navigation-rail (items &key variant expanded arrangement
@@ -1655,13 +1655,13 @@ the menu button that toggles a wide rail."
     (unless (equal variant "modal")
       (error "jetpacs-navigation-rail: :hide-on-collapse needs :variant \"modal\" (SPEC 17.4)")))
   (when on-expand-change
-    (jetpacs--check-descriptor on-expand-change ":on-expand-change"))
+    (jetpacs-check-descriptor on-expand-change ":on-expand-change"))
   (when arrangement
     (setq arrangement (jetpacs--check-enum arrangement jetpacs--rail-arrangements
                                            ":arrangement")))
-  (when (and header (not (jetpacs--root-node-p header)))
+  (when (and header (not (jetpacs-root-node-p header)))
     (error "jetpacs-navigation-rail: :header must be a node, got %S" header))
-  (jetpacs--node "navigation_rail" :items (vconcat items)
+  (jetpacs-make-node "navigation_rail" :items (vconcat items)
                  :variant variant :expanded expanded
                  :hide_on_collapse hide-on-collapse
                  :on_expand_change on-expand-change
@@ -1699,24 +1699,24 @@ A node carrying CHECKED is stateful and REQUIRES a unique `:id' (§16.1).
 LABEL may be nil WHEN ICON is present — the icon-only LeadingButton form,
 whose accessible name falls back to the icon identifier — but a leading
 half with neither is refused."
-  (if label (jetpacs--require-string label ":label")
+  (if label (jetpacs-require-string label ":label")
     (unless icon
       (error "jetpacs-split-button: the leading half needs a :label, an icon, or both (SPEC 17.4)")))
-  (jetpacs--check-descriptor on-tap ":on-tap")
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs-check-descriptor on-tap ":on-tap")
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (when variant
     (setq variant (jetpacs--check-enum variant jetpacs--split-button-variants ":variant")))
   (when size
     (setq size (jetpacs--check-enum size jetpacs--split-button-sizes ":size")))
-  (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing-icon"))
-  (when trailing-label (jetpacs--require-string trailing-label ":trailing-label"))
+  (when trailing-icon (jetpacs-check-identifier trailing-icon ":trailing-icon"))
+  (when trailing-label (jetpacs-require-string trailing-label ":trailing-label"))
   (when trailing-description
-    (jetpacs--require-string trailing-description ":trailing-description"))
+    (jetpacs-require-string trailing-description ":trailing-description"))
   (when checked (jetpacs--check-bool checked ":checked"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
-  (when on-trailing-tap (jetpacs--check-descriptor on-trailing-tap ":on-trailing-tap"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
+  (when on-trailing-tap (jetpacs-check-descriptor on-trailing-tap ":on-trailing-tap"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "split_button" :label label :on_tap on-tap
+  (jetpacs-make-node "split_button" :label label :on_tap on-tap
                  :icon icon :variant variant :size size
                  :trailing_icon trailing-icon :trailing_label trailing-label
                  :trailing_description trailing-description
@@ -1736,20 +1736,20 @@ AVATAR is InputChip's 24dp circular slot — distinct from the 18dp
 leading ICON — and needs `:variant \"input\"'.  CONTENT-SPACING is the
 gap between a FilterChip's own slots, the interior arrangement no
 modifier-level attribute could reach."
-  (jetpacs--require-string label ":label")
-  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
+  (jetpacs-require-string label ":label")
+  (when on-tap (jetpacs-check-descriptor on-tap ":on-tap"))
   (when selected (jetpacs--check-bool selected ":selected"))
-  (when icon (jetpacs--check-identifier icon ":icon"))
-  (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing_icon"))
+  (when icon (jetpacs-check-identifier icon ":icon"))
+  (when trailing-icon (jetpacs-check-identifier trailing-icon ":trailing_icon"))
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--chip-variants ":variant")))
   (when avatar
-    (jetpacs--check-identifier avatar ":avatar")
+    (jetpacs-check-identifier avatar ":avatar")
     (unless (equal variant "input")
       (error "jetpacs-chip: :avatar needs :variant \"input\" (SPEC 17.4)")))
   (when content-spacing
     (jetpacs--check-number content-spacing ":content-spacing" 0 nil))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "chip" :label label :on_tap on-tap
+  (jetpacs-make-node "chip" :label label :on_tap on-tap
                  :selected selected :icon icon :trailing_icon trailing-icon
                  :variant variant :avatar avatar
                  :content_spacing content-spacing :enabled enabled))
@@ -1757,12 +1757,12 @@ modifier-level attribute could reach."
 (cl-defun jetpacs-assist-chip (label &key on-tap icon variant enabled)
   "An assist chip labeled LABEL (SPEC §17.4).
 VARIANT flat(default)/elevated/suggestion/elevated_suggestion."
-  (jetpacs--require-string label ":label")
-  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs-require-string label ":label")
+  (when on-tap (jetpacs-check-descriptor on-tap ":on-tap"))
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (when variant (setq variant (jetpacs--check-enum variant jetpacs--assist-chip-variants ":variant")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "assist_chip" :label label :on_tap on-tap :icon icon
+  (jetpacs-make-node "assist_chip" :label label :on_tap on-tap :icon icon
                  :variant variant :enabled enabled))
 
 (defconst jetpacs--tooltip-positions
@@ -1783,7 +1783,7 @@ that pointer, valid only with :caret), :rich (M3's RichTooltip rather
 than the plain one), :title and :action-label/:on-action (rich only),
 and :shown, which asks the Companion to display the tooltip without the
 long press."
-  (jetpacs--require-string text ":text")
+  (jetpacs-require-string text ":text")
   (let* ((split (jetpacs--children-and-opts args "tooltip"))
          (opts (cdr split))
          (position (plist-get opts :position))
@@ -1807,13 +1807,13 @@ long press."
       (jetpacs--check-number caret-width ":caret-width" 0 nil)
       (jetpacs--check-number caret-height ":caret-height" 0 nil))
     (when rich (jetpacs--check-bool rich ":rich"))
-    (when title (jetpacs--require-string title ":title"))
-    (when action-label (jetpacs--require-string action-label ":action-label"))
-    (when on-action (jetpacs--check-descriptor on-action ":on-action"))
+    (when title (jetpacs-require-string title ":title"))
+    (when action-label (jetpacs-require-string action-label ":action-label"))
+    (when on-action (jetpacs-check-descriptor on-action ":on-action"))
     (when shown (jetpacs--check-bool shown ":shown"))
     (when (and action-label (not on-action))
       (error "jetpacs-tooltip: :action-label needs :on-action (SPEC 17.2)"))
-    (jetpacs--node "tooltip"
+    (jetpacs-make-node "tooltip"
                    :children (jetpacs--as-children (car split))
                    :text text :position position :caret caret
                    :caret_width caret-width :caret_height caret-height
@@ -1831,25 +1831,25 @@ state like a chip\='s :selected, so ON-TAP should flip your own state and
 rebuild; while checked, :checked-icon (default check) replaces the
 leading icon, and a tap keeps the popup open the way M3 checkable menus
 do."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-descriptor on-tap ":on-tap")
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-descriptor on-tap ":on-tap")
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (when supporting-text (jetpacs--require-string supporting-text ":supporting-text"))
-  (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing-icon"))
+  (when supporting-text (jetpacs-require-string supporting-text ":supporting-text"))
+  (when trailing-icon (jetpacs-check-identifier trailing-icon ":trailing-icon"))
   (when checked (jetpacs--check-bool checked ":checked"))
-  (when checked-icon (jetpacs--check-identifier checked-icon ":checked-icon"))
-  (jetpacs--node nil :label label :on_tap on-tap :icon icon :enabled enabled
+  (when checked-icon (jetpacs-check-identifier checked-icon ":checked-icon"))
+  (jetpacs-make-node nil :label label :on_tap on-tap :icon icon :enabled enabled
                  :supporting_text supporting-text :trailing_icon trailing-icon
                  :checked checked :checked_icon checked-icon))
 
 (cl-defun jetpacs-menu-group (label items)
   "A menu group {label, items} for `jetpacs-menu' :groups (SPEC §17.4).
 LABEL heads the group over a divider; ITEMS are `jetpacs-menu-item's."
-  (when label (jetpacs--require-string label ":label"))
+  (when label (jetpacs-require-string label ":label"))
   (unless (consp items)
     (error "jetpacs-menu-group: items must be a non-empty list"))
-  (jetpacs--node nil :label label :items (vconcat items)))
+  (jetpacs-make-node nil :label label :items (vconcat items)))
 
 (defconst jetpacs--menu-initial-scrolls '("start" "end"))
 
@@ -1863,15 +1863,15 @@ INITIAL-SCROLL is start (default) or end: where the popup opens when the
 item list is longer than the screen."
   (when (eq (null items) (null groups))
     (error "jetpacs-menu: exactly one of ITEMS and :groups (SPEC 17.4)"))
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (when initial-scroll
     (setq initial-scroll (jetpacs--check-enum initial-scroll
                                               jetpacs--menu-initial-scrolls
                                               ":initial-scroll")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (when (and footer (not (jetpacs--root-node-p footer)))
+  (when (and footer (not (jetpacs-root-node-p footer)))
     (error "jetpacs-menu: :footer must be a node (SPEC 17.4)"))
-  (jetpacs--node "menu" :items (and items (vconcat items))
+  (jetpacs-make-node "menu" :items (and items (vconcat items))
                  :groups (and groups (vconcat groups))
                  :footer footer :icon icon
                  :initial_scroll initial-scroll :enabled enabled))
@@ -1901,19 +1901,19 @@ distinct from the universal padding, which is margin.  MASK is a display
 template over the stored value (every `#' consumes one stored character,
 everything else is literal filler that never enters the value); FILTER
 reverts characters outside digits/alnum at the keystroke, locally."
-  (jetpacs--check-identifier id ":id")
-  (when value (jetpacs--require-string value ":value"))
-  (when hint (jetpacs--require-string hint ":hint"))
-  (when label (jetpacs--require-string label ":label"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
-  (when on-submit (jetpacs--check-descriptor on-submit ":on-submit"))
+  (jetpacs-check-identifier id ":id")
+  (when value (jetpacs-require-string value ":value"))
+  (when hint (jetpacs-require-string hint ":hint"))
+  (when label (jetpacs-require-string label ":label"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
+  (when on-submit (jetpacs-check-descriptor on-submit ":on-submit"))
   (when single-line (jetpacs--check-bool single-line ":single-line"))
-  (when min-lines (jetpacs--check-integer min-lines ":min_lines" 1 nil))
-  (when max-lines (jetpacs--check-integer max-lines ":max_lines" 1 nil))
+  (when min-lines (jetpacs-check-integer min-lines ":min_lines" 1 nil))
+  (when max-lines (jetpacs-check-integer max-lines ":max_lines" 1 nil))
   (when (and min-lines max-lines (> min-lines max-lines))
     (error "jetpacs-text-input: :min-lines must not exceed :max-lines (SPEC 17.4)"))
   (when monospace (jetpacs--check-bool monospace ":monospace"))
-  (when syntax (jetpacs--check-identifier syntax ":syntax"))
+  (when syntax (jetpacs-check-identifier syntax ":syntax"))
   (when password (jetpacs--check-bool password ":password"))
   (when keyboard (setq keyboard (jetpacs--check-enum keyboard jetpacs--keyboards ":keyboard")))
   (when autofocus (jetpacs--check-bool autofocus ":autofocus"))
@@ -1922,19 +1922,19 @@ reverts characters outside digits/alnum at the keystroke, locally."
   (when variant
     (setq variant (jetpacs--check-enum variant jetpacs--text-input-variants ":variant")))
   (when is-error (jetpacs--check-bool is-error ":is_error"))
-  (when supporting-text (jetpacs--require-string supporting-text ":supporting_text"))
-  (when prefix (jetpacs--require-string prefix ":prefix"))
-  (when suffix (jetpacs--require-string suffix ":suffix"))
-  (when leading-icon (jetpacs--check-identifier leading-icon ":leading_icon"))
-  (when trailing-icon (jetpacs--check-identifier trailing-icon ":trailing_icon"))
-  (when max-length (jetpacs--check-integer max-length ":max_length" 1 nil))
+  (when supporting-text (jetpacs-require-string supporting-text ":supporting_text"))
+  (when prefix (jetpacs-require-string prefix ":prefix"))
+  (when suffix (jetpacs-require-string suffix ":suffix"))
+  (when leading-icon (jetpacs-check-identifier leading-icon ":leading_icon"))
+  (when trailing-icon (jetpacs-check-identifier trailing-icon ":trailing_icon"))
+  (when max-length (jetpacs-check-integer max-length ":max_length" 1 nil))
   (when selection
     (unless (and (listp selection) (= 2 (length selection)))
       (error "jetpacs-text-input: :selection must be (START END) (SPEC 17.4)"))
     (let ((start (nth 0 selection)) (end (nth 1 selection))
           (len (length (or value ""))))
-      (jetpacs--check-integer start ":selection start" 0 nil)
-      (jetpacs--check-integer end ":selection end" 0 nil)
+      (jetpacs-check-integer start ":selection start" 0 nil)
+      (jetpacs-check-integer end ":selection end" 0 nil)
       (unless (<= start end len)
         (error "jetpacs-text-input: :selection needs START <= END <= value length (SPEC 17.4)")))
     (setq selection (vconcat selection)))
@@ -1945,7 +1945,7 @@ reverts characters outside digits/alnum at the keystroke, locally."
   (when content-padding
     (jetpacs--check-number content-padding ":content-padding" 0 nil))
   (when mask
-    (jetpacs--require-string mask ":mask")
+    (jetpacs-require-string mask ":mask")
     (unless (string-search "#" mask)
       (error "jetpacs-text-input: :mask needs at least one `#' slot (SPEC 17.4)"))
     (when (or (eq password t) syntax)
@@ -1968,7 +1968,7 @@ reverts characters outside digits/alnum at the keystroke, locally."
       (error "jetpacs-text-input: password :clear-on-submit must be absent or false (SPEC 17.4)")))
   (when (and (eq clear-on-submit t) on-submit (plist-member on-submit :builtin))
     (error "jetpacs-text-input: :clear-on-submit is invalid when :on-submit is a builtin (SPEC 17.4)"))
-  (jetpacs--node "text_input"
+  (jetpacs-make-node "text_input"
                  :id id :value value :hint hint :label label
                  :on_change on-change :on_submit on-submit
                  :single_line single-line :min_lines min-lines :max_lines max-lines
@@ -1998,7 +1998,7 @@ exclusive with CHECKED — it changes what `state.changed' carries for ID
 from a boolean to the enum string, which is a different value schema
 under §13.6.  STROKE is a plist (:width DP :cap CAP :join JOIN), every
 key optional, reaching M3's checkmarkStroke/outlineStroke pair."
-  (jetpacs--check-identifier id ":id")
+  (jetpacs-check-identifier id ":id")
   (when checked (jetpacs--check-bool checked ":checked"))
   (when state
     (when checked
@@ -2015,23 +2015,23 @@ key optional, reaching M3's checkmarkStroke/outlineStroke pair."
                   (:join (jetpacs--check-enum value jetpacs--stroke-joins
                                               ":stroke :join"))
                   (_ (error "jetpacs-checkbox: unknown :stroke key %S" key)))))
-  (when label (jetpacs--require-string label ":label"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when label (jetpacs-require-string label ":label"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "checkbox" :id id :checked checked :state state
+  (jetpacs-make-node "checkbox" :id id :checked checked :state state
                  :stroke stroke :label label
                  :on_change on-change :enabled enabled))
 
 (cl-defun jetpacs-switch (id &key checked label on-change thumb-icon enabled)
   "A switch identified by ID (SPEC §17.4).
 CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
-  (jetpacs--check-identifier id ":id")
+  (jetpacs-check-identifier id ":id")
   (when checked (jetpacs--check-bool checked ":checked"))
-  (when label (jetpacs--require-string label ":label"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when label (jetpacs-require-string label ":label"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (when thumb-icon (jetpacs--check-identifier thumb-icon ":thumb_icon"))
-  (jetpacs--node "switch" :id id :checked checked :label label
+  (when thumb-icon (jetpacs-check-identifier thumb-icon ":thumb_icon"))
+  (jetpacs-make-node "switch" :id id :checked checked :label label
                  :thumb_icon thumb-icon
                  :on_change on-change :enabled enabled))
 
@@ -2040,11 +2040,11 @@ CHECKED/ENABLED booleans (t or :json-false); ON-CHANGE an ActionDescriptor."
 VALUE is a string, number, or boolean (t or :json-false).  ICON is an
 identifier a `jetpacs-segmented-button' segment draws before its label
 under the checked crossfade; `enum_list' and `dropdown' ignore it."
-  (jetpacs--require-string label ":label")
+  (jetpacs-require-string label ":label")
   (unless (or (stringp value) (numberp value) (memq value '(t :json-false)))
     (error "jetpacs-enum-option: value must be a string, number, or boolean, got %S" value))
-  (when icon (jetpacs--check-identifier icon ":icon"))
-  (jetpacs--node nil :label label :value value :icon icon))
+  (when icon (jetpacs-check-identifier icon ":icon"))
+  (jetpacs-make-node nil :label label :value value :icon icon))
 
 (defconst jetpacs--enum-list-variants '("chips" "radio"))
 
@@ -2061,10 +2061,10 @@ under MULTI-SELECT), the same state path throughout.  CHILDREN is a
 node list PARALLEL to OPTIONS: each option becomes one whole selectable
 row with its child as the body — how a list row becomes one exclusive
 choice.  ALLOW-ADD is a chips-only affordance and refuses both."
-  (jetpacs--check-identifier id ":id")
+  (jetpacs-check-identifier id ":id")
   (when multi-select (jetpacs--check-bool multi-select ":multi-select"))
   (when allow-add (jetpacs--check-bool allow-add ":allow-add"))
-  (when on-change (jetpacs--check-descriptor on-change ":on-change"))
+  (when on-change (jetpacs-check-descriptor on-change ":on-change"))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (when variant
     (setq variant (jetpacs--check-enum variant jetpacs--enum-list-variants
@@ -2074,7 +2074,7 @@ choice.  ALLOW-ADD is a chips-only affordance and refuses both."
       (error "jetpacs-enum-list: :children must parallel :options, got %d for %d (SPEC 17.4)"
              (length children) (length options)))
     (dolist (child children)
-      (unless (jetpacs--root-node-p child)
+      (unless (jetpacs-root-node-p child)
         (error "jetpacs-enum-list: every :children entry must be a node, got %S" child))))
   (when (and (eq allow-add t) (or (equal variant "radio") children))
     (error "jetpacs-enum-list: :allow-add is a chips-only affordance (SPEC 17.4)"))
@@ -2092,7 +2092,7 @@ choice.  ALLOW-ADD is a chips-only affordance and refuses both."
       (dolist (s (if (vectorp value) (append value nil) (list value)))
         (unless (cl-member s option-vals :test #'jetpacs--json-equal)
           (error "jetpacs-enum-list: value %S is not among options (SPEC 17.4)" s)))))
-  (jetpacs--node "enum_list"
+  (jetpacs-make-node "enum_list"
                  :id id :options (vconcat options) :value value
                  :multi_select multi-select :allow_add allow-add
                  :variant variant
@@ -2108,8 +2108,8 @@ VALUE is a YYYY-MM-DD string.  MIN-DATE/MAX-DATE and DISABLED-WEEKDAYS
 predicate — the declarative form is the only one the wire can carry,
 and the weekday rule covers every navigable month, which a per-date
 list could not."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-descriptor on-pick ":on-pick")
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-descriptor on-pick ":on-pick")
   (when value (jetpacs--check-date value))
   (when mode (setq mode (jetpacs--check-enum mode '("calendar" "input") ":mode")))
   (when min-date (jetpacs--check-date min-date))
@@ -2125,22 +2125,22 @@ list could not."
       (error "jetpacs-date-button: :disabled-weekdays must be distinct integers 0..6 (SPEC 17.4)"))
     (setq disabled-weekdays (vconcat disabled-weekdays)))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "date_button" :label label :on_pick on-pick :value value
+  (jetpacs-make-node "date_button" :label label :on_pick on-pick :value value
                  :mode mode :min_date min-date :max_date max-date
                  :disabled_weekdays disabled-weekdays :enabled enabled))
 
 (cl-defun jetpacs-time-button (label on-pick &key value display-mode enabled)
   "A time-picker button labeled LABEL dispatching ON-PICK (SPEC §17.4).
 VALUE is an HH:MM string in local civil time."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-descriptor on-pick ":on-pick")
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-descriptor on-pick ":on-pick")
   (when value (jetpacs--check-time value))
   (when display-mode
     (setq display-mode (jetpacs--check-enum display-mode
                                             '("picker" "input" "switchable")
                                             ":display-mode")))
   (when enabled (jetpacs--check-bool enabled ":enabled"))
-  (jetpacs--node "time_button" :label label :on_pick on-pick :value value
+  (jetpacs-make-node "time_button" :label label :on_pick on-pick :value value
                  :display_mode display-mode :enabled enabled))
 
 (defconst jetpacs--slider-tracks '("default" "centered"))
@@ -2164,8 +2164,8 @@ COLOR-END tints the end thumb alone (needs VALUE-END).  VALUE-LABEL
 shows the in-flight position over the thumb — presentation only, the
 dispatch still happens once on commit.  TRACK-ICON-START/END name icons
 drawn at both edges of each track segment, active/inactive tinted."
-  (jetpacs--check-identifier id ":id")
-  (jetpacs--check-descriptor on-change ":on-change")
+  (jetpacs-check-identifier id ":id")
+  (jetpacs-check-descriptor on-change ":on-change")
   (when enabled (jetpacs--check-bool enabled ":enabled"))
   (when track (setq track (jetpacs--check-enum track jetpacs--slider-tracks ":track")))
   (when orientation
@@ -2178,11 +2178,11 @@ drawn at both edges of each track segment, active/inactive tinted."
       (error "jetpacs-slider: :color-end needs :value-end (SPEC 17.4)"))
     (jetpacs--check-color color-end))
   (when value-label (jetpacs--check-bool value-label ":value-label"))
-  (when thumb-icon (jetpacs--check-identifier thumb-icon ":thumb_icon"))
+  (when thumb-icon (jetpacs-check-identifier thumb-icon ":thumb_icon"))
   (when track-icon-start
-    (jetpacs--check-identifier track-icon-start ":track_icon_start"))
+    (jetpacs-check-identifier track-icon-start ":track_icon_start"))
   (when track-icon-end
-    (jetpacs--check-identifier track-icon-end ":track_icon_end"))
+    (jetpacs-check-identifier track-icon-end ":track_icon_end"))
   (cond
    (values
     (when (or min max)
@@ -2211,7 +2211,7 @@ drawn at both edges of each track segment, active/inactive tinted."
   (when (and value value-end (numberp value) (numberp value-end)
              (> value value-end))
     (error "jetpacs-slider: :value must not exceed :value-end (SPEC 17.4)"))
-  (jetpacs--node "slider"
+  (jetpacs-make-node "slider"
                  :id id :on_change on-change :value value :value_end value-end
                  :min min :max max :values (and values (vconcat values))
                  :track track :orientation orientation
@@ -2231,7 +2231,7 @@ drawn at both edges of each track segment, active/inactive tinted."
 A snippet MUST contain at most one `${input:...}' token.  Only the 3-char
 `$${' escapes the following `${', and a token's prompt body runs to its
 closing `}' and is not rescanned."
-  (jetpacs--require-string s ":snippet")
+  (jetpacs-require-string s ":snippet")
   (let ((i 0) (n (length s)) (count 0))
     (while (< i n)
       (cond
@@ -2261,8 +2261,8 @@ closing `}' and is not rescanned."
       (error "jetpacs: :long-press must contain exactly one non-menu op (SPEC 17.7)"))
     (pcase (car present)
       (:snippet (jetpacs--check-snippet (plist-get lp :snippet)))
-      (:on_tap (jetpacs--check-descriptor (plist-get lp :on_tap) ":on_tap"))
-      (:command (jetpacs--check-identifier (plist-get lp :command) ":command"))
+      (:on_tap (jetpacs-check-descriptor (plist-get lp :on_tap) ":on_tap"))
+      (:command (jetpacs-check-identifier (plist-get lp :command) ":command"))
       (:line (jetpacs--check-enum (plist-get lp :line) jetpacs--line-ops ":line"))))
   lp)
 
@@ -2275,16 +2275,16 @@ MUST have LABEL or ICON plus exactly one primary op: :snippet (a string),
 :placement (cursor/line-start/block) and :long-press (one non-menu op plist)."
   (unless (or label icon)
     (error "jetpacs-toolbar-item: needs :label or :icon (SPEC 17.7)"))
-  (when label (jetpacs--require-string label ":label"))
-  (when icon (jetpacs--check-identifier icon ":icon"))
+  (when label (jetpacs-require-string label ":label"))
+  (when icon (jetpacs-check-identifier icon ":icon"))
   (let ((ops (delq nil (list (and snippet :snippet) (and on-tap :on-tap)
                              (and menu :menu) (and command :command)
                              (and line :line)))))
     (unless (= (length ops) 1)
       (error "jetpacs-toolbar-item: needs exactly one primary op, got %S (SPEC 17.7)" ops)))
   (when snippet (jetpacs--check-snippet snippet))
-  (when on-tap (jetpacs--check-descriptor on-tap ":on-tap"))
-  (when command (jetpacs--check-identifier command ":command"))
+  (when on-tap (jetpacs-check-descriptor on-tap ":on-tap"))
+  (when command (jetpacs-check-identifier command ":command"))
   (when line (setq line (jetpacs--check-enum line jetpacs--line-ops ":line")))
   (when placement (setq placement (jetpacs--check-enum placement jetpacs--placements ":placement")))
   (when menu
@@ -2292,7 +2292,7 @@ MUST have LABEL or ICON plus exactly one primary op: :snippet (a string),
       (when (plist-member mi :menu)
         (error "jetpacs-toolbar-item: a :menu item must not itself contain :menu (SPEC 17.7)"))))
   (when long-press (jetpacs--check-long-press long-press))
-  (jetpacs--node nil
+  (jetpacs-make-node nil
                  :label label :icon icon
                  :snippet snippet :on_tap on-tap
                  :menu (and menu (vconcat menu))
@@ -2318,13 +2318,13 @@ Without DOCUMENT it is a local input node; with DOCUMENT it is a synchronized
 editor (emit only when `editor.sync' is granted).  COMPLETE and a toolbar
 `command' op each require DOCUMENT.  TOOLBAR is a registered identifier string
 or a list of `jetpacs-toolbar-item's.  Booleans take t or :json-false."
-  (jetpacs--check-identifier id ":id")
-  (when document (jetpacs--check-identifier document ":document"))
-  (when value (jetpacs--require-string value ":value"))
-  (when on-save (jetpacs--check-descriptor on-save ":on-save"))
-  (when on-enter (jetpacs--check-descriptor on-enter ":on-enter"))
+  (jetpacs-check-identifier id ":id")
+  (when document (jetpacs-check-identifier document ":document"))
+  (when value (jetpacs-require-string value ":value"))
+  (when on-save (jetpacs-check-descriptor on-save ":on-save"))
+  (when on-enter (jetpacs-check-descriptor on-enter ":on-enter"))
   (when read-only (jetpacs--check-bool read-only ":read-only"))
-  (when syntax (jetpacs--check-identifier syntax ":syntax"))
+  (when syntax (jetpacs-check-identifier syntax ":syntax"))
   (when line-numbers (jetpacs--check-bool line-numbers ":line-numbers"))
   (when complete (jetpacs--check-bool complete ":complete"))
   (when chromeless (jetpacs--check-bool chromeless ":chromeless"))
@@ -2335,13 +2335,13 @@ or a list of `jetpacs-toolbar-item's.  Booleans take t or :json-false."
     (error "jetpacs-editor: :complete requires :document (SPEC 17.4)"))
   (cond
    ((null toolbar))
-   ((stringp toolbar) (jetpacs--check-identifier toolbar ":toolbar"))
-   ((and (listp toolbar) (jetpacs--node-p (car toolbar)))
+   ((stringp toolbar) (jetpacs-check-identifier toolbar ":toolbar"))
+   ((and (listp toolbar) (jetpacs-node-p (car toolbar)))
     (when (and (not document) (jetpacs--toolbar-has-command-p toolbar))
       (error "jetpacs-editor: a toolbar :command op requires :document (SPEC 17.4/17.7)"))
     (setq toolbar (vconcat toolbar)))
    (t (error "jetpacs-editor: :toolbar must be a registered id string or a list of toolbar items, got %S" toolbar)))
-  (jetpacs--node "editor"
+  (jetpacs-make-node "editor"
                  :id id :document document :value value
                  :on_save on-save :on_enter on-enter
                  :read_only read-only :syntax syntax :line_numbers line-numbers
@@ -2360,14 +2360,14 @@ X and Y are finite numbers; META is a JSON-data object (a plist)."
   (jetpacs--check-number y ":y" nil nil)
   (when (and meta (not (and (consp meta) (keywordp (car meta)))))
     (error "jetpacs-chart-point: :meta must be an object plist (SPEC 17.5), got %S" meta))
-  (jetpacs--node nil :x x :y y :meta meta))
+  (jetpacs-make-node nil :x x :y y :meta meta))
 
 (cl-defun jetpacs-chart-series (points &key name color)
   "A ChartSeries {points, name?, color?} (SPEC §17.5).
 POINTS is a list from `jetpacs-chart-point'."
-  (when name (jetpacs--require-string name ":name"))
+  (when name (jetpacs-require-string name ":name"))
   (when color (jetpacs--check-color color))
-  (jetpacs--node nil :points (vconcat points) :name name :color color))
+  (jetpacs-make-node nil :points (vconcat points) :name name :color color))
 
 (cl-defun jetpacs-chart (series &key kind height y-range summary on-point-tap
                                 children)
@@ -2383,9 +2383,9 @@ string; ON-POINT-TAP an ActionDescriptor; CHILDREN a fallback node list."
                  (jetpacs--finite-number-p (nth 1 y-range))
                  (< (nth 0 y-range) (nth 1 y-range)))
       (error "jetpacs-chart: :y-range must be [min max] with min < max (SPEC 17.5)")))
-  (when summary (jetpacs--require-string summary ":summary"))
-  (when on-point-tap (jetpacs--check-descriptor on-point-tap ":on-point-tap"))
-  (jetpacs--node "chart"
+  (when summary (jetpacs-require-string summary ":summary"))
+  (when on-point-tap (jetpacs-check-descriptor on-point-tap ":on-point-tap"))
+  (jetpacs-make-node "chart"
                  :series (vconcat series) :kind kind :height height
                  :y_range (and y-range (vconcat y-range))
                  :summary summary :on_point_tap on-point-tap
@@ -2396,7 +2396,7 @@ string; ON-POINT-TAP an ActionDescriptor; CHILDREN a fallback node list."
   (dolist (c (list x1 y1 x2 y2)) (jetpacs--check-number c "line coordinate" nil nil))
   (when color (jetpacs--check-color color))
   (when width (jetpacs--check-number width ":width" 0 nil))
-  (jetpacs--node nil :op "line" :x1 x1 :y1 y1 :x2 x2 :y2 y2 :color color :width width))
+  (jetpacs-make-node nil :op "line" :x1 x1 :y1 y1 :x2 x2 :y2 y2 :color color :width width))
 
 (cl-defun jetpacs-canvas-rect (x y width height &key color fill stroke-width)
   "A canvas `rect' op (SPEC §17.5).  WIDTH/HEIGHT non-negative; FILL a Color."
@@ -2406,7 +2406,7 @@ string; ON-POINT-TAP an ActionDescriptor; CHILDREN a fallback node list."
   (when color (jetpacs--check-color color))
   (when fill (jetpacs--check-color fill))
   (when stroke-width (jetpacs--check-number stroke-width ":stroke_width" 0 nil))
-  (jetpacs--node nil :op "rect" :x x :y y :width width :height height
+  (jetpacs-make-node nil :op "rect" :x x :y y :width width :height height
                  :color color :fill fill :stroke_width stroke-width))
 
 (cl-defun jetpacs-canvas-circle (cx cy radius &key color fill stroke-width)
@@ -2416,14 +2416,14 @@ string; ON-POINT-TAP an ActionDescriptor; CHILDREN a fallback node list."
   (when color (jetpacs--check-color color))
   (when fill (jetpacs--check-color fill))
   (when stroke-width (jetpacs--check-number stroke-width ":stroke_width" 0 nil))
-  (jetpacs--node nil :op "circle" :cx cx :cy cy :radius radius
+  (jetpacs-make-node nil :op "circle" :cx cx :cy cy :radius radius
                  :color color :fill fill :stroke_width stroke-width))
 
 (cl-defun jetpacs-canvas-point (x y)
   "A CanvasPoint {x, y} for `jetpacs-canvas-path' (SPEC §17.5)."
   (jetpacs--check-number x ":x" nil nil)
   (jetpacs--check-number y ":y" nil nil)
-  (jetpacs--node nil :x x :y y))
+  (jetpacs-make-node nil :x x :y y))
 
 (cl-defun jetpacs-canvas-path (points &key color fill stroke-width closed)
   "A canvas `path' op over POINTS (from `jetpacs-canvas-point') (SPEC §17.5)."
@@ -2431,17 +2431,17 @@ string; ON-POINT-TAP an ActionDescriptor; CHILDREN a fallback node list."
   (when fill (jetpacs--check-color fill))
   (when stroke-width (jetpacs--check-number stroke-width ":stroke_width" 0 nil))
   (when closed (jetpacs--check-bool closed ":closed"))
-  (jetpacs--node nil :op "path" :points (vconcat points)
+  (jetpacs-make-node nil :op "path" :points (vconcat points)
                  :color color :fill fill :stroke_width stroke-width :closed closed))
 
 (cl-defun jetpacs-canvas-text (x y text &key color size)
   "A canvas `text' op drawing TEXT at (X, Y) (SPEC §17.5)."
   (jetpacs--check-number x ":x" nil nil)
   (jetpacs--check-number y ":y" nil nil)
-  (jetpacs--require-string text ":text")
+  (jetpacs-require-string text ":text")
   (when color (jetpacs--check-color color))
   (when size (jetpacs--check-number size ":size" 0 nil))
-  (jetpacs--node nil :op "text" :x x :y y :text text :color color :size size))
+  (jetpacs-make-node nil :op "text" :x x :y y :text text :color color :size size))
 
 (cl-defun jetpacs-canvas (width height ops &key children)
   "A canvas of WIDTH x HEIGHT drawing OPS (SPEC §17.5).
@@ -2449,7 +2449,7 @@ WIDTH and HEIGHT MUST be positive; OPS is a list of canvas ops
 \(`jetpacs-canvas-line' etc.); CHILDREN is a fallback node list."
   (jetpacs--check-number width ":width" nil nil t)
   (jetpacs--check-number height ":height" nil nil t)
-  (jetpacs--node "canvas" :width width :height height :ops (vconcat ops)
+  (jetpacs-make-node "canvas" :width width :height height :ops (vconcat ops)
                  :children (and children (vconcat children))))
 
 (defun jetpacs--check-year-month (value what)
@@ -2470,7 +2470,7 @@ DOTS is a required integer 0..3; COLOR an optional §16.6 color."
     (while p
       (let ((k (pop p)) (v (pop p)))
         (pcase k
-          (:dots (setq has-dots t) (jetpacs--check-integer v ":dots" 0 3))
+          (:dots (setq has-dots t) (jetpacs-check-integer v ":dots" 0 3))
           (:color (jetpacs--check-color v))
           (_ (error "jetpacs-month-grid: unknown mark member %S (SPEC 17.5)" k)))))
     (unless has-dots
@@ -2493,9 +2493,9 @@ Signals on an invalid or duplicate date key or an invalid mark value."
 (cl-defun jetpacs-month-mark (dots &key color)
   "A month_grid mark {dots, color?} (SPEC §17.5).
 DOTS is an integer 0..3; COLOR a §16.6 color."
-  (jetpacs--check-integer dots ":dots" 0 3)
+  (jetpacs-check-integer dots ":dots" 0 3)
   (when color (jetpacs--check-color color))
-  (jetpacs--node nil :dots dots :color color))
+  (jetpacs-make-node nil :dots dots :color color))
 
 (cl-defun jetpacs-month-grid (month &key marks selected min-month max-month
                                     min-date max-date disabled-weekdays
@@ -2539,9 +2539,9 @@ builds the range and re-pushes."
     (jetpacs--check-date range-end)
     (when (string> range-start range-end)
       (error "jetpacs-month-grid: :range-start must not follow :range-end (SPEC 17.5)")))
-  (when on-day-tap (jetpacs--check-descriptor on-day-tap ":on-day-tap"))
-  (when on-month-change (jetpacs--check-descriptor on-month-change ":on-month-change"))
-  (jetpacs--node "month_grid"
+  (when on-day-tap (jetpacs-check-descriptor on-day-tap ":on-day-tap"))
+  (when on-month-change (jetpacs-check-descriptor on-month-change ":on-month-change"))
+  (jetpacs-make-node "month_grid"
                  :month month
                  :marks (and marks (jetpacs--marks->map marks))
                  :selected selected :min_month min-month :max_month max-month
@@ -2555,9 +2555,9 @@ builds the range and re-pushes."
 
 (cl-defun jetpacs-snackbar-action (label on-tap)
   "A scaffold snackbar action {label, on_tap} (SPEC §17.6)."
-  (jetpacs--require-string label ":label")
-  (jetpacs--check-descriptor on-tap ":on-tap")
-  (jetpacs--node nil :label label :on_tap on-tap))
+  (jetpacs-require-string label ":label")
+  (jetpacs-check-descriptor on-tap ":on-tap")
+  (jetpacs-make-node nil :label label :on_tap on-tap))
 
 (defun jetpacs--check-snackbar-action (v)
   "Signal unless V is a scaffold snackbar_action {label, on_tap} (§17.6)."
@@ -2565,7 +2565,7 @@ builds the range and re-pushes."
                (stringp (plist-get v :label))
                (plist-member v :on_tap))
     (error "jetpacs-scaffold: :snackbar-action must be {label, on_tap} (use jetpacs-snackbar-action), got %S" v))
-  (jetpacs--check-descriptor (plist-get v :on_tap) ":on_tap")
+  (jetpacs-check-descriptor (plist-get v :on_tap) ":on_tap")
   v)
 
 (defconst jetpacs--top-bar-styles
@@ -2655,11 +2655,11 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                       (cons ":bottom-bar" bottom-bar) (cons ":fab" fab)
                       (cons ":floating-toolbar" floating-toolbar)
                       (cons ":drawer" drawer)))
-    (when (and (cdr pair) (not (jetpacs--root-node-p (cdr pair))))
+    (when (and (cdr pair) (not (jetpacs-root-node-p (cdr pair))))
       (error "jetpacs-scaffold: %s must be a node, got %S" (car pair) (cdr pair))))
-  (when snackbar (jetpacs--require-string snackbar ":snackbar"))
+  (when snackbar (jetpacs-require-string snackbar ":snackbar"))
   (when snackbar-action (jetpacs--check-snackbar-action snackbar-action))
-  (when on-refresh (jetpacs--check-descriptor on-refresh ":on-refresh"))
+  (when on-refresh (jetpacs-check-descriptor on-refresh ":on-refresh"))
   (when refresh-indicator
     (setq refresh-indicator (jetpacs--check-enum refresh-indicator
                                                  jetpacs--refresh-indicators
@@ -2677,16 +2677,16 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
   (when snackbar-dismiss
     (jetpacs--check-bool snackbar-dismiss ":snackbar-dismiss"))
   (when snackbar-max-lines
-    (jetpacs--check-integer snackbar-max-lines ":snackbar-max-lines" 1 nil))
-  (when (and rail (not (jetpacs--root-node-p rail)))
+    (jetpacs-check-integer snackbar-max-lines ":snackbar-max-lines" 1 nil))
+  (when (and rail (not (jetpacs-root-node-p rail)))
     (error "jetpacs-scaffold: :rail must be a node, got %S" rail))
   (when snackbar-content
-    (unless (jetpacs--root-node-p snackbar-content)
+    (unless (jetpacs-root-node-p snackbar-content)
       (error "jetpacs-scaffold: :snackbar-content must be a node, got %S"
              snackbar-content))
     (unless snackbar
       (error "jetpacs-scaffold: :snackbar-content needs :snackbar — the string stays the message and the accessible text (SPEC 17.6)")))
-  (when (and sheet (not (jetpacs--root-node-p sheet)))
+  (when (and sheet (not (jetpacs-root-node-p sheet)))
     (error "jetpacs-scaffold: :sheet must be a node, got %S" sheet))
   (when sheet-peek-height
     (unless sheet
@@ -2699,7 +2699,7 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                                            '("hidden" "partial" "expanded")
                                            ":sheet-state")))
   (when on-sheet-change
-    (jetpacs--check-descriptor on-sheet-change ":on-sheet-change"))
+    (jetpacs-check-descriptor on-sheet-change ":on-sheet-change"))
   (when fab-hide-on-scroll
     (jetpacs--check-bool fab-hide-on-scroll ":fab-hide-on-scroll")
     (unless fab
@@ -2725,9 +2725,9 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
                                              jetpacs--top-bar-styles
                                              ":top-bar-style")))
   (when top-bar-subtitle
-    (jetpacs--require-string top-bar-subtitle ":top-bar-subtitle"))
+    (jetpacs-require-string top-bar-subtitle ":top-bar-subtitle"))
   (when top-bar-expanded
-    (unless (jetpacs--root-node-p top-bar-expanded)
+    (unless (jetpacs-root-node-p top-bar-expanded)
       (error "jetpacs-scaffold: :top-bar-expanded must be a node, got %S"
              top-bar-expanded))
     (unless (equal top-bar-style "two_rows")
@@ -2769,10 +2769,10 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
           (jetpacs--check-enum floating-toolbar-exit-direction
                                jetpacs--toolbar-exit-directions
                                ":floating-toolbar-exit-direction")))
-  (when (and floating-toolbar-fab (not (jetpacs--root-node-p floating-toolbar-fab)))
+  (when (and floating-toolbar-fab (not (jetpacs-root-node-p floating-toolbar-fab)))
     (error "jetpacs-scaffold: :floating-toolbar-fab must be a node, got %S"
            floating-toolbar-fab))
-  (jetpacs--node "scaffold"
+  (jetpacs-make-node "scaffold"
                  :floating_toolbar_orientation floating-toolbar-orientation
                  :floating_toolbar_expanded floating-toolbar-expanded
                  :floating_toolbar_placement floating-toolbar-placement
@@ -2815,12 +2815,12 @@ EXIT-DIRECTION lets it slide away as the body scrolls."
 VIEWS is a non-empty alist of (VIEW-ID . root-node) with §4.4-identifier ids;
 INITIAL-VIEW MUST name an existing view."
   (unless views (error "jetpacs-multi-view: views must be non-empty (SPEC 13.4)"))
-  (jetpacs--check-identifier initial-view ":initial-view")
+  (jetpacs-check-identifier initial-view ":initial-view")
   (let ((h (make-hash-table :test 'equal)) (ids '()))
     (dolist (cell views)
       (let ((id (car cell)))
-        (jetpacs--check-identifier id "view id")
-        (unless (jetpacs--root-node-p (cdr cell))
+        (jetpacs-check-identifier id "view id")
+        (unless (jetpacs-root-node-p (cdr cell))
           (error "jetpacs-multi-view: view %S value must be a root node" id))
         (when (gethash id h)
           (error "jetpacs-multi-view: duplicate view id %S" id))
@@ -2828,25 +2828,25 @@ INITIAL-VIEW MUST name an existing view."
         (push id ids)))
     (unless (member initial-view ids)
       (error "jetpacs-multi-view: initial_view %S names no existing view (SPEC 13.4)" initial-view))
-    (jetpacs--node nil :views h :initial_view initial-view)))
+    (jetpacs-make-node nil :views h :initial_view initial-view)))
 
 (cl-defun jetpacs-notification-surface (body &key meta)
   "A `notification:*' SurfaceSpec {body, meta?} (SPEC §13.4; META is §18.5).
 BODY is a Node."
-  (unless (jetpacs--root-node-p body)
+  (unless (jetpacs-root-node-p body)
     (error "jetpacs-notification-surface: BODY must be a root node, got %S" body))
-  (jetpacs--node nil :body body :meta meta))
+  (jetpacs-make-node nil :body body :meta meta))
 
 (cl-defun jetpacs-widget-surface (title body &key empty header-action)
   "A `widget:*' SurfaceSpec {title, body, empty?, header_action?} (SPEC §13.4).
 TITLE is a string; BODY and EMPTY are Nodes; HEADER-ACTION a descriptor."
-  (jetpacs--require-string title ":title")
-  (unless (jetpacs--root-node-p body)
+  (jetpacs-require-string title ":title")
+  (unless (jetpacs-root-node-p body)
     (error "jetpacs-widget-surface: BODY must be a root node, got %S" body))
-  (when (and empty (not (jetpacs--root-node-p empty)))
+  (when (and empty (not (jetpacs-root-node-p empty)))
     (error "jetpacs-widget-surface: :empty must be a root node, got %S" empty))
-  (when header-action (jetpacs--check-descriptor header-action ":header-action"))
-  (jetpacs--node nil :title title :body body :empty empty :header_action header-action))
+  (when header-action (jetpacs-check-descriptor header-action ":header-action"))
+  (jetpacs-make-node nil :title title :body body :empty empty :header_action header-action))
 
 ;;;; Hypertext block sequences
 
@@ -2856,7 +2856,7 @@ Each element MUST be a root node (has `:t').  Accepts nodes as `&rest' or
 as a single list."
   (let ((kids (jetpacs--as-children nodes)))
     (mapc (lambda (n)
-            (unless (jetpacs--root-node-p n)
+            (unless (jetpacs-root-node-p n)
               (error "jetpacs-hypertext: each element must be a root node, got %S" n)))
           kids)
     kids))
@@ -2939,7 +2939,7 @@ state attached.")
 (defun jetpacs--suffixed-id (base n)
   "BASE with suffix -N, truncated so the result is a SPEC 4.4 identifier.
 `jetpacs-wire-id' can already return exactly 128 chars, so appending
-without truncating would produce an id `jetpacs--check-identifier'
+without truncating would produce an id `jetpacs-check-identifier'
 rejects — costing the screen at build time."
   (let ((suffix (format "-%d" n)))
     (concat (substring base 0 (min (length base) (- 128 (length suffix))))
@@ -2978,7 +2978,7 @@ authored base the claim table suffixed would 1201 the push."
       base
     (and (gethash base jetpacs-node-id-claims) base)))
 
-(defun jetpacs--collect-node-ids (value acc)
+(defun jetpacs-collect-node-ids (value acc)
   "Accumulate every TYPED node's `:id' in VALUE into ACC (a list).
 Only plists carrying a string `:t' contribute: a `trigger.fire' builtin
 descriptor also has an `:id' (`jetpacs-trigger-fire') and it is a
@@ -2990,10 +2990,10 @@ descend through their cdr."
   (cond
    ((vectorp value)
     (let ((a acc))
-      (mapc (lambda (v) (setq a (jetpacs--collect-node-ids v a))) value) a))
+      (mapc (lambda (v) (setq a (jetpacs-collect-node-ids v a))) value) a))
    ((hash-table-p value)
     (let ((a acc))
-      (maphash (lambda (_k v) (setq a (jetpacs--collect-node-ids v a)))
+      (maphash (lambda (_k v) (setq a (jetpacs-collect-node-ids v a)))
                value)
       a))
    ((and (consp value) (keywordp (car value)))
@@ -3003,11 +3003,11 @@ descend through their cdr."
         (let ((k (pop p)) (v (pop p)))
           (when (and typed (eq k :id) (stringp v)) (push v a))
           (unless (memq k jetpacs--opaque-members)
-            (setq a (jetpacs--collect-node-ids v a)))))
+            (setq a (jetpacs-collect-node-ids v a)))))
       a))
    ((consp value)
-    (let ((a (jetpacs--collect-node-ids (car value) acc)))
-      (jetpacs--collect-node-ids (cdr value) a)))
+    (let ((a (jetpacs-collect-node-ids (car value) acc)))
+      (jetpacs-collect-node-ids (cdr value) a)))
    (t acc)))
 
 (defun jetpacs--collect-node-types (value acc)

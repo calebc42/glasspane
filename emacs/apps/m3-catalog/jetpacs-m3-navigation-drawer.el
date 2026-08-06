@@ -80,7 +80,7 @@ reports, like every other recreated handler.
 
 PREFIX namespaces the `:key'.  A §16.1 `key' is presentation identity
 scoped to its parent, not a document-unique `id' (only `:id' is
-collected by `jetpacs--collect-node-ids'), so two sheets could legally
+collected by `jetpacs-collect-node-ids'), so two sheets could legally
 share one -- but the modal and permanent sheets are different parents on
 different screens, and distinct prefixes keep them independently
 reconcilable."

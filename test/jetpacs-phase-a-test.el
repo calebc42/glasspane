@@ -212,14 +212,14 @@ WHOLE render died on every REPL anyone actually uses."
                   "*inferior-python*" "shell<2>" "*shell*<tramp>"
                   " *hidden*" "«weird»"))
     (let ((id (jetpacs-comint--input-id name)))
-      (should (jetpacs--identifier-p id))
+      (should (jetpacs-identifier-p id))
       ;; And it builds without signalling.
       (should (jetpacs-text-input id :hint "x"))))
   ;; Sanitizing is lossy, so the hash must keep collisions apart.
   (should-not (equal (jetpacs-comint--input-id "*shell*")
                      (jetpacs-comint--input-id "-shell-")))
   ;; A pathological name still fits the 128-char ceiling.
-  (should (jetpacs--identifier-p
+  (should (jetpacs-identifier-p
            (jetpacs-comint--input-id (make-string 400 ?*)))))
 
 (ert-deftest jetpacs-phase-a-comint-live-render-survives ()

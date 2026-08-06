@@ -429,7 +429,7 @@ same positional fallback."
         (should-not (equal id-a id-b))
         ;; The FIRST claimant keeps the stable id (and its fold state).
         (should (equal id-a (md5 (format "%S" '(same)))))
-        (should (jetpacs--identifier-p id-b))))
+        (should (jetpacs-identifier-p id-b))))
     ;; ...and a synthesized suffix never collides with a real id either.
     (let ((jetpacs-node-id-claims (make-hash-table :test #'equal)))
       (puthash "x" 1 jetpacs-node-id-claims)
@@ -437,7 +437,7 @@ same positional fallback."
       (cl-letf (((symbol-function 'magit-section-ident)
                  (lambda (_s) (error "no ident"))))
         ;; Falls back to "sec-POS"; force the base to be the taken "x".
-        (should (jetpacs--identifier-p
+        (should (jetpacs-identifier-p
                  (let ((jetpacs-node-id-claims jetpacs-node-id-claims))
                    (jetpacs-sections--id
                     (jetpacs-sections-test--fake-sec 1 2 9 nil)))))))))

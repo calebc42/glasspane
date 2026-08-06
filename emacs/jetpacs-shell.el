@@ -710,7 +710,7 @@ backstop, and for a plain root it is the only floor.  A duplicate is a
 1201 for the ENTIRE update, and 13.2 then retains the old snapshot: the
 sender MUST is loud."
   (dolist (s (delq nil (list spec stale-spec)))
-    (let ((ids (jetpacs--collect-node-ids s nil))
+    (let ((ids (jetpacs-collect-node-ids s nil))
           (seen (make-hash-table :test #'equal)))
       (dolist (id ids)
         (when (gethash id seen)

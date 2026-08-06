@@ -225,7 +225,7 @@ Load-time seam installs (all `with-eval-after-load`, so the floor stands alone):
 | S14 | `(add-hook 'jetpacs-queue-drained-hook #'jetpacs-shell-refresh)` (shell:811) | **no ebp analogue** | ebp does §15.3 replay (`--on-welcome` / `--schedule-replay-retry`, `replay-summary`) but exposes **no** replay-complete seam. Drop the post-replay refresh in JC-0, or request a hook from ebp.el. Do not reimplement replay above the boundary. |
 | S15 | `(y-or-n-p confirm)` in the dispatcher, prompt from `jetpacs--confirm-index` | **nothing — pass `:confirm` on the descriptor** | §14.1 / §2.5-3. `jetpacs-widgets.el:450` validates `:confirm` as a non-empty string; the whole confirm index is already gone. Re-prompting is a **double** prompt. |
 | S16 | `(jetpacs-async-reset)` from `jetpacs-test-reset-state` | keep the `fboundp`-guarded fixture seam **and** call it from `jetpacs-detach` | New under ebp: poc's session was process-global, so a cache outliving a connection was invisible. Each `ebp-connect` mints a fresh client; without this, ready values and in-flight loaders from a dead session bleed into the new one. |
-| S17 | poc spec shape `((views . ALIST-of-symbol) (initial_view . STR))` | `(jetpacs-multi-view VIEWS INITIAL-VIEW)` → `(:views HASH-TABLE :initial_view "id")`; single-root = **the root node itself** | View values must satisfy `jetpacs--root-node-p` (a `:t`-headed plist) — delete the `((children . [scaffold]))` wrapper. `:views` is an **`equal` hash-table**, not a plist: the variant test is `(plist-member spec :views)`, the accessor is `gethash`. |
+| S17 | poc spec shape `((views . ALIST-of-symbol) (initial_view . STR))` | `(jetpacs-multi-view VIEWS INITIAL-VIEW)` → `(:views HASH-TABLE :initial_view "id")`; single-root = **the root node itself** | View values must satisfy `jetpacs-root-node-p` (a `:t`-headed plist) — delete the `((children . [scaffold]))` wrapper. `:views` is an **`equal` hash-table**, not a plist: the variant test is `(plist-member spec :views)`, the accessor is `gethash`. |
 
 ---
 
@@ -242,7 +242,7 @@ Load-time seam installs (all `with-eval-after-load`, so the floor stands alone):
   (jetpacs-defaction "grocy.consume" (lambda (args params) … 'accepted)))
 ```
 
-- `NAME` — a string. **Must contain a dot** (§4.4 + `jetpacs-action` build-time check). `jetpacs-defaction` re-validates it with `jetpacs--check-identifier` and errors early, so a name that would fail at descriptor-build time fails at registration time instead.
+- `NAME` — a string. **Must contain a dot** (§4.4 + `jetpacs-action` build-time check). `jetpacs-defaction` re-validates it with `jetpacs-check-identifier` and errors early, so a name that would fail at descriptor-build time fails at registration time instead.
 - `FN` — a function of **two** positional arguments `(ARGS PARAMS)`. This is deliberately the same arity as poc's `(args payload)`, so ported bodies compile unchanged; only the `alist-get` reads become `plist-get` and an explicit status return is added.
   - `ARGS` = `(plist-get params :args)` — a keyword plist, or nil.
   - `PARAMS` = the **full** event.action params plist (satisfies §2.5-2).
@@ -252,7 +252,7 @@ Load-time seam installs (all `with-eval-after-load`, so the floor stands alone):
 
 ```
 jetpacs-defaction NAME FN
-  1. (jetpacs--check-identifier NAME "action") and require a "." in NAME
+  1. (jetpacs-check-identifier NAME "action") and require a "." in NAME
   2. (jetpacs--claim "action" NAME)                  ; ownership bookkeeping
   3. (puthash NAME FN jetpacs-action-handlers)       ; the load-time staging table
   4. when a client is attached:

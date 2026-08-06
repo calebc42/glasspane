@@ -711,15 +711,15 @@ serializer every future rung depends on before those rungs exist."
 ;;;; The node funnel
 
 (ert-deftest jetpacs-widgets/node-nil-drop ()
-  (should (equal (jetpacs--node "text" :text "hi" :color nil :max_lines 2)
+  (should (equal (jetpacs-make-node "text" :text "hi" :color nil :max_lines 2)
                  '(:t "text" :text "hi" :max_lines 2))))
 
 (ert-deftest jetpacs-widgets/node-false-kept ()
-  (should (equal (jetpacs--node "chip" :label "x" :selected :json-false)
+  (should (equal (jetpacs-make-node "chip" :label "x" :selected :json-false)
                  '(:t "chip" :label "x" :selected :json-false))))
 
 (ert-deftest jetpacs-widgets/node-typeless ()
-  (should (equal (jetpacs--node nil :builtin "dialog.dismiss")
+  (should (equal (jetpacs-make-node nil :builtin "dialog.dismiss")
                  '(:builtin "dialog.dismiss"))))
 
 ;;;; Container child helpers
@@ -783,18 +783,18 @@ serializer every future rung depends on before those rungs exist."
 ;;;; §4.4 identifier + §14.1 domain validation (build-time strictness)
 
 (ert-deftest jetpacs-widgets/identifier-p ()
-  (should (jetpacs--identifier-p "demo.full"))
-  (should (jetpacs--identifier-p "manual-sync"))
-  (should (jetpacs--identifier-p "demo:full"))
-  (should (jetpacs--identifier-p "a/b_c.d"))
-  (should (jetpacs--identifier-p "a"))
-  (should (jetpacs--identifier-p (make-string 128 ?a)))
-  (should-not (jetpacs--identifier-p ".leading"))     ; must begin letter/digit
-  (should-not (jetpacs--identifier-p "has space"))
-  (should-not (jetpacs--identifier-p "bad!"))
-  (should-not (jetpacs--identifier-p (make-string 129 ?a))) ; > 128
-  (should-not (jetpacs--identifier-p ""))
-  (should-not (jetpacs--identifier-p 42)))
+  (should (jetpacs-identifier-p "demo.full"))
+  (should (jetpacs-identifier-p "manual-sync"))
+  (should (jetpacs-identifier-p "demo:full"))
+  (should (jetpacs-identifier-p "a/b_c.d"))
+  (should (jetpacs-identifier-p "a"))
+  (should (jetpacs-identifier-p (make-string 128 ?a)))
+  (should-not (jetpacs-identifier-p ".leading"))     ; must begin letter/digit
+  (should-not (jetpacs-identifier-p "has space"))
+  (should-not (jetpacs-identifier-p "bad!"))
+  (should-not (jetpacs-identifier-p (make-string 129 ?a))) ; > 128
+  (should-not (jetpacs-identifier-p ""))
+  (should-not (jetpacs-identifier-p 42)))
 
 (ert-deftest jetpacs-widgets/action-name-grammar ()
   (should-error (jetpacs-action "nodot"))
@@ -982,7 +982,7 @@ Undocumented until now, which is why callers reached for
   (dolist (name '("*shell*" "*ielm*" "*Async Shell Command*" "shell<2>"
                   " *hidden*" "«weird»" "/ssh:host:/e/x.el" ""))
     (let ((id (jetpacs-wire-id "files" name)))
-      (should (jetpacs--identifier-p id))
+      (should (jetpacs-identifier-p id))
       (should (<= (length id) 128)))))
 
 (ert-deftest jetpacs-widgets/wire-id-golden-and-comint-compatible ()
@@ -1010,7 +1010,7 @@ Undocumented until now, which is why callers reached for
                      (jetpacs-wire-id "hosts" "n"))))
 
 (ert-deftest jetpacs-widgets/wire-id-ceiling-and-bad-prefix ()
-  (should (jetpacs--identifier-p
+  (should (jetpacs-identifier-p
            (jetpacs-wire-id "witheditor" (make-string 400 ?*))))
   (should-error (jetpacs-wire-id "has space" "n"))
   (should-error (jetpacs-wire-id (make-string 101 ?p) "n"))

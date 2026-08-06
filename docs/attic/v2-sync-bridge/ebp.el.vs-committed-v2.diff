@@ -1,0 +1,202 @@
+--- /tmp/claude-1000/-home-calebc42-pkb-projects-jetpacs-jetpacs--claude-worktrees-wsl-work-reorientation-d8266e/e4360100-6c44-45ef-b7ef-e61201664187/scratchpad/v2-ebp.el	2026-08-06 10:57:16.475521589 -0600
++++ /home/calebc42/pkb/projects/jetpacs/rescued-from-windows-20260806/jetpacs-poc/llm-poc-2/emacs/ebp.el	2026-08-06 10:58:38.309269411 -0600
+@@ -581,16 +581,8 @@
+   ;; SPEC 14.6: latest input values by (surface . id), and this side's
+   ;; reset history for the P1 #2 reconciliation rule.
+   (input-values (make-hash-table :test #'equal))
+-  ;; SPEC 14.6.1: (surface . id) -> the last reported caret index, for
+-  ;; nodes authored with report_caret. Transient presentation context.
+-  (input-carets (make-hash-table :test #'equal))
+   (reset-history (make-hash-table :test #'equal))
+   state-changed-functions ; called with (client surface revision id value)
+-  ;; SPEC 20.1.1: the last-reported window geometry plist
+-  ;; (:width_dp :height_dp :width_class :height_class), from the welcome
+-  ;; mirror and every window.changed since.
+-  window
+-  window-changed-functions ; called with (client window-plist)
+   ;; SPEC 19: Emacs's mirror of synchronized editors, (doc . id) ->
+   ;; plist (:session :seq :text :cursor).  Emacs chars ARE Unicode
+   ;; scalar values, so splice positions are char positions directly.
+@@ -645,8 +637,6 @@
+                                  #'ebp-client--handle-event-action)
+     (ebp-client-register-handler client "state.changed"
+                                  #'ebp-client--handle-state-changed)
+-    (ebp-client-register-handler client "window.changed"
+-                                 #'ebp-client--handle-window-changed)
+     (when-let* ((fn (plist-get config :edit-change-function)))
+       (push fn (ebp-client-edit-change-functions client)))
+     (when-let* ((fn (plist-get config :edit-open-function)))
+@@ -980,7 +970,6 @@
+ (defconst ebp--method-capabilities
+   '((dialog\.show       . "surfaces.dialog")
+     (toast\.show        . "presentation.toast")
+-    (snackbar\.show     . "presentation.snackbar")
+     (pie_menu\.show     . "presentation.pie-menu")
+     (pie_menu\.dismiss  . "presentation.pie-menu")
+     (theme\.set         . "theme")
+@@ -1208,10 +1197,7 @@
+           (ebp-client-limits client) (plist-get result :limits)
+           (ebp-client-input-state client) (plist-get result :input_state)
+           ;; SPEC 20.1: absorb the device report (nil unless a module granted).
+-          (ebp-client-device client) (plist-get result :device)
+-          ;; SPEC 20.1.1: the welcome's window mirror, so the FIRST
+-          ;; snapshot can be authored for the right size class.
+-          (ebp-client-window client) (plist-get result :window))
++          (ebp-client-device client) (plist-get result :device))
+     ;; Reported floors cover snapshots AND tombstones (SPEC 10.2/13.3).
+     (cl-loop for (key entry) on (plist-get result :surfaces) by #'cddr
+              do (puthash (substring (symbol-name key) 1)
+@@ -1575,19 +1561,6 @@
+                   (member id (cdr entry))))
+            (gethash surface (ebp-client-reset-history client))))
+ 
+-(defun ebp-client--handle-window-changed (client params)
+-  "The `window.changed' receiver (SPEC 20.1.1).
+-Stores the geometry plist and runs `window-changed-functions' — the
+-application's seam for re-authoring layout for the new size class."
+-  (setf (ebp-client-window client) params)
+-  (dolist (fn (ebp-client-window-changed-functions client))
+-    (funcall fn client params)))
+-
+-(defun ebp-client-input-caret (client surface id)
+-  "The last SPEC 14.6.1 caret reported for SURFACE/ID, or nil.
+-Only a node authored with `report_caret' ever reports one."
+-  (gethash (cons surface id) (ebp-client-input-carets client)))
+-
+ (defun ebp-client--handle-state-changed (client params)
+   "The `state.changed' receiver (SPEC 14.6 + P1 #2).
+ An old `revision_seen' is never an error: the value is adopted unless a
+@@ -1600,10 +1573,6 @@
+           (message "ebp: state.changed for reset %s/%s discarded" surface id)
+         (puthash (cons surface id) (plist-get params :value)
+                  (ebp-client-input-values client))
+-        ;; SPEC 14.6.1: the caret rides only when the node asked for it.
+-        (when-let* ((caret (plist-get params :caret)))
+-          (puthash (cons surface id) caret
+-                   (ebp-client-input-carets client)))
+         (dolist (fn (ebp-client-state-changed-functions client))
+           (funcall fn client surface revision id
+                    (plist-get params :value)))))))
+@@ -1784,6 +1753,37 @@
+                     (ebp-client-editors client))
+            (ebp-client--editor-changed client document editor-id)))))))
+ 
++(defun ebp-client-diagnostics-show (client document editor-id diagnostics &optional seq-override)
++  "SPEC 19: push structured Flymake diagnostics for an editor session."
++  (when-let* ((ed (gethash (cons document editor-id) (ebp-client-editors client))))
++    (ebp-client-notify
++     client 'diagnostics.show
++     (list :document document :editor_id editor-id
++           :session (plist-get ed :session)
++           :seq (or seq-override (plist-get ed :seq))
++           :diagnostics (if (vectorp diagnostics) diagnostics (vconcat diagnostics))))))
++
++(defun ebp-client-fontify-show (client document editor-id runs &optional seq-override)
++  "SPEC 19: push font-lock style spans for an editor session.
++RUNS is an array or list of spans; must be sorted and non-overlapping."
++  (when-let* ((ed (gethash (cons document editor-id) (ebp-client-editors client))))
++    (ebp-client-notify
++     client 'fontify.show
++     (list :document document :editor_id editor-id
++           :session (plist-get ed :session)
++           :seq (or seq-override (plist-get ed :seq))
++           :runs (if (vectorp runs) runs (vconcat runs))))))
++
++(defun ebp-client-eldoc-show (client document editor-id text &optional seq-override)
++  "SPEC 19: push ElDoc documentation string above the editor keyboard."
++  (when-let* ((ed (gethash (cons document editor-id) (ebp-client-editors client))))
++    (ebp-client-notify
++     client 'eldoc.show
++     (list :document document :editor_id editor-id
++           :session (plist-get ed :session)
++           :seq (or seq-override (plist-get ed :seq))
++           :text (or text "")))))
++
+ ;;;; Surface push (SPEC 13.1-13.3), the client half
+ 
+ (defun ebp-client--surface-floor (client surface)
+@@ -1866,9 +1866,7 @@
+ 
+ ;;;; Themes (SPEC 18.4), the client half
+ 
+-(cl-defun ebp-client-theme-set (client &key (dark 'system) colors syntax
+-                                       (dynamic 'system) font-scale
+-                                       layout-direction)
++(cl-defun ebp-client-theme-set (client &key (dark 'system) colors syntax)
+   "Push a complete theme replacement (SPEC 18.4).  DARK selects polarity:
+ t forces dark, `:false' (or `:json-false') forces light, and the default
+ `system' omits the member so the Companion follows the device setting
+@@ -1878,23 +1876,7 @@
+ pushed theme.  Values are normalized to the live connection's jsonrpc
+ sentinels (`:json-false' / nil); the reference encoder's `:false' and
+ `:null' are accepted here but never handed to jsonrpc.el, which rejects
+-them.
+-
+-DYNAMIC t asks for the device's wallpaper-derived Material You palette
+-as the BASE scheme where the platform has one — Emacs could never send
+-that as COLORS, since it derives from the wallpaper; pushed roles still
+-overlay it.  FONT-SCALE is a number 0.4..2.0 scaling every text node
+-together; LAYOUT-DIRECTION is \"ltr\" or \"rtl\" mirroring the whole
+-layout.  All three follow the device/system setting when omitted — the
+-same tri-state convention as DARK."
+-  (when font-scale
+-    (unless (and (numberp font-scale) (<= 0.4 font-scale 2.0))
+-      (error "ebp-client-theme-set: :font-scale must be a number in 0.4..2.0, got %S"
+-             font-scale)))
+-  (when layout-direction
+-    (unless (member layout-direction '("ltr" "rtl"))
+-      (error "ebp-client-theme-set: :layout-direction must be \"ltr\" or \"rtl\", got %S"
+-             layout-direction)))
++them."
+   (ebp-client-notify
+    client 'theme.set
+    `(,@(pcase dark
+@@ -1903,14 +1885,6 @@
+          ((or :false :json-false) '(:dark :json-false))
+          (_ (error "ebp-client-theme-set: :dark must be t, :false, or \
+ omitted (system); got %S" dark)))
+-     ,@(pcase dynamic
+-         ('system nil)
+-         ('t '(:dynamic t))
+-         ((or :false :json-false) '(:dynamic :json-false))
+-         (_ (error "ebp-client-theme-set: :dynamic must be t, :false, or \
+-omitted (system); got %S" dynamic)))
+-     ,@(when font-scale `(:font_scale ,font-scale))
+-     ,@(when layout-direction `(:layout_direction ,layout-direction))
+      ,@(when colors `(:colors ,(if (memq colors '(null :null)) nil colors)))
+      ,@(when syntax `(:syntax ,(if (memq syntax '(null :null)) nil syntax))))))
+ 
+@@ -2059,33 +2033,6 @@
+    ;; which SPEC 18.1 concludes with 1301 and dismisses the dialog.
+    (or (ebp-client--user-paced-timeout ebp-dialog-timeout) 'none)))
+ 
+-(cl-defun ebp-client-snackbar-show (client message &key action-label
+-                                           duration callback)
+-  "Raise an event-driven snackbar (SPEC 18.2.1) and hear how it went.
+-MESSAGE shows in the snackbar host of the surface currently presented;
+-ACTION-LABEL adds the action button; DURATION is short (default), long
+-or indefinite.  CALLBACK receives (RESULT ERROR): RESULT is the string
+-dismissed or action when the snackbar leaves the screen — the
+-SnackbarResult an application branches on — and ERROR the JSON-RPC
+-error plist if the raise failed.  The static scaffold snackbar members
+-remain the authored-tree form; this is the out-of-band raise."
+-  (when duration
+-    (unless (member duration '("short" "long" "indefinite"))
+-      (error "ebp-client-snackbar-show: :duration must be short, long, or indefinite, got %S"
+-             duration)))
+-  (ebp-client--request
+-   client 'snackbar.show
+-   `(:message ,message
+-     ,@(when action-label `(:action_label ,action-label))
+-     ,@(when duration `(:duration ,duration)))
+-   (lambda (result error)
+-     (when callback
+-       (funcall callback (and result (plist-get result :result)) error)))
+-   ;; SPEC 18.2.1: the reply arrives when the snackbar LEAVES the screen,
+-   ;; which an indefinite snackbar makes user-paced — same policy as a
+-   ;; dialog: floor a configured ceiling at 60 s.
+-   (or (ebp-client--user-paced-timeout ebp-dialog-timeout) 'none)))
+-
+ ;;;; TCP transport (SPEC 5.2): jsonrpc-process-connection, unmodified
+ 
+ ;;;###autoload

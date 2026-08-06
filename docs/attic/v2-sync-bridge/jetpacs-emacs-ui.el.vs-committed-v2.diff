@@ -1,0 +1,118 @@
+--- /tmp/claude-1000/-home-calebc42-pkb-projects-jetpacs-jetpacs--claude-worktrees-wsl-work-reorientation-d8266e/e4360100-6c44-45ef-b7ef-e61201664187/scratchpad/v2-ui.el	2026-08-06 10:57:16.487522119 -0600
++++ /home/calebc42/pkb/projects/jetpacs/rescued-from-windows-20260806/jetpacs-poc/llm-poc-2/emacs/jetpacs-emacs-ui.el	2026-08-06 10:58:38.317269772 -0600
+@@ -40,6 +40,7 @@
+ 
+ (require 'cl-lib)
+ (require 'imenu)
++(require 'track-changes)
+ (require 'jetpacs-widgets)
+ (require 'jetpacs-surfaces)
+ (require 'jetpacs-commands)
+@@ -488,25 +489,25 @@
+ ;; --- Live refresh ------------------------------------------------------------
+ 
+ (defcustom jetpacs-emacs-ui-live-refresh t
+-  "When non-nil, the drilled-in buffer re-pushes as it changes."
++  "When non-nil, the viewed buffer re-pushes reactively as it changes."
+   :type 'boolean :group 'jetpacs)
+ 
+ (defcustom jetpacs-emacs-ui-live-interval 1.0
+-  "Seconds between change polls of the viewed buffer."
++  "Seconds to debounce live refresh pushes after a buffer change."
+   :type 'number :group 'jetpacs)
+ 
+ (defcustom jetpacs-emacs-ui-live-max-failures 3
+-  "Consecutive failed live pushes before the watch gives up.
++  "Consecutive failed live pushes before the reactive watch gives up.
+ The tick re-read after a push absorbs what the push logged
+ SYNCHRONOUSLY, but `surface.update' concludes asynchronously — a
+ failure logged from its callback lands in *Messages* after the
+-snapshot, and when *Messages* is the watched buffer that is a 1 Hz
+-self-sustaining loop.  A bound is the honest guard: the tick trick
+-cannot see a message that has not been written yet."
++snapshot, and when *Messages* is watched that creates a self-sustaining
++refresh loop.  A consecutive-failure bound is the honest guard."
+   :type 'natnum :group 'jetpacs)
+ 
+ (defvar jetpacs-emacs-ui--live-failures 0)
+ (defvar jetpacs-emacs-ui--live-timer nil)
++(defvar jetpacs-emacs-ui--live-tracker nil)
+ (defvar jetpacs-emacs-ui--live-buffer nil)
+ (defvar jetpacs-emacs-ui--live-tick nil)
+ 
+@@ -518,13 +519,28 @@
+ (defun jetpacs-emacs-ui--live-stop ()
+   (when (timerp jetpacs-emacs-ui--live-timer)
+     (cancel-timer jetpacs-emacs-ui--live-timer))
++  (when jetpacs-emacs-ui--live-tracker
++    (when-let* ((buf (and jetpacs-emacs-ui--live-buffer
++                          (get-buffer jetpacs-emacs-ui--live-buffer))))
++      (when (buffer-live-p buf)
++        (with-current-buffer buf
++          (ignore-errors (track-changes-unregister jetpacs-emacs-ui--live-tracker))))))
+   (setq jetpacs-emacs-ui--live-timer nil
++        jetpacs-emacs-ui--live-tracker nil
+         jetpacs-emacs-ui--live-buffer nil
+         jetpacs-emacs-ui--live-tick nil
+         jetpacs-emacs-ui--live-failures 0))
+ 
++(defun jetpacs-emacs-ui--on-change (_tid)
++  "Signal triggered by `track-changes' when the viewed buffer modifies."
++  (unless (timerp jetpacs-emacs-ui--live-timer)
++    (setq jetpacs-emacs-ui--live-timer
++          (run-at-time jetpacs-emacs-ui-live-interval nil
++                       #'jetpacs-emacs-ui--live-poll))))
++
+ (defun jetpacs-emacs-ui--live-poll ()
+   "Push when the watched buffer changed; stop when no longer relevant."
++  (setq jetpacs-emacs-ui--live-timer nil)
+   (let ((buf (and jetpacs-emacs-ui--live-buffer
+                   (get-buffer jetpacs-emacs-ui--live-buffer))))
+     (if (not (and jetpacs-emacs-ui-live-refresh
+@@ -533,6 +549,11 @@
+                   (equal jetpacs-emacs-ui--live-buffer
+                          (jetpacs-emacs-ui--top-buffer))))
+         (jetpacs-emacs-ui--live-stop)
++      (when jetpacs-emacs-ui--live-tracker
++        (with-current-buffer buf
++          (ignore-errors
++            (track-changes-fetch jetpacs-emacs-ui--live-tracker
++                                 (lambda (_ _ _) nil)))))
+       (let ((tick (buffer-chars-modified-tick buf)))
+         (when (and jetpacs-emacs-ui--live-tick
+                    (/= tick jetpacs-emacs-ui--live-tick))
+@@ -547,16 +568,11 @@
+               (message "jetpacs-emacs-ui: live refresh stopped after %d \
+ failed pushes" jetpacs-emacs-ui--live-failures)
+               (jetpacs-emacs-ui--live-stop)))
+-          ;; Re-read AFTER the push: rendering *Messages* logs into
+-          ;; *Messages*, and reading the tick first would turn that
+-          ;; self-append into an endless refresh loop.
+           (setq tick (buffer-chars-modified-tick buf)))
+         (setq jetpacs-emacs-ui--live-tick tick)))))
+ 
+ (defun jetpacs-emacs-ui--reconcile-live-watch ()
+-  "After any push: watch our top screen's buffer, or stop.
+-On `jetpacs-shell-after-push-hook', which fires for EVERY surface's
+-push — the top-buffer check keys the watch to this app's own stack."
++  "After any push: reactively track top screen buffer via `track-changes'."
+   (let ((name (and jetpacs-emacs-ui-live-refresh
+                    (jetpacs-connected-p)
+                    (jetpacs-emacs-ui--top-buffer))))
+@@ -566,11 +582,11 @@
+      (t (jetpacs-emacs-ui--live-stop)
+         (when-let* ((buf (get-buffer name)))
+           (setq jetpacs-emacs-ui--live-buffer name
+-                jetpacs-emacs-ui--live-tick (buffer-chars-modified-tick buf)
+-                jetpacs-emacs-ui--live-timer
+-                (run-at-time jetpacs-emacs-ui-live-interval
+-                             jetpacs-emacs-ui-live-interval
+-                             #'jetpacs-emacs-ui--live-poll)))))))
++                jetpacs-emacs-ui--live-tick (buffer-chars-modified-tick buf))
++          (with-current-buffer buf
++            (setq jetpacs-emacs-ui--live-tracker
++                  (track-changes-register #'jetpacs-emacs-ui--on-change
++                                          :immediate nil))))))))
+ 
+ (add-hook 'jetpacs-shell-after-push-hook
+           #'jetpacs-emacs-ui--reconcile-live-watch)

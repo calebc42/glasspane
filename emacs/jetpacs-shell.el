@@ -53,6 +53,25 @@ generation sweep.")
 (defvar jetpacs-shell-refresh-hook nil
   "Normal hook run before a cache-bypassing push; drop memo caches here.")
 
+(defvar jetpacs-shell-builder-error-functions nil
+  "Abnormal hook: (CONTEXT ERR) for a builder or gate signal, pre-unwind.
+Fired from HANDLER-BIND context — the stack is still standing, so a
+member can take a real backtrace — by the chrome per-screen catch, the
+surface build catch, and the push gates.  CONTEXT is a plist with
+:surface, plus :screen / :phase where the site knows them.  Members
+run isolated (`jetpacs-shell--run-isolated'): the loud path stays
+exactly as it was — scrubbed per SPEC 23.3 — whatever a member does.
+The seam exists so a flight recorder (`jetpacs-devtools') can keep
+what `jetpacs--error-label' drops.")
+
+(defun jetpacs-shell--note-builder-error (context err)
+  "Run the builder-error seam for CONTEXT and ERR; never signals.
+Called from inside a HANDLER-BIND handler while ERR is propagating —
+the isolation is what keeps a broken recorder member from changing
+which error the catch site sees."
+  (jetpacs-shell--run-isolated 'jetpacs-shell-builder-error-functions
+                               context err))
+
 (defvar jetpacs-shell--snackbars (make-hash-table :test #'equal)
   "SURFACE id -> queued snackbar text for its next push; latest wins.
 Keyed by surface because D1 gives every owner its own: one global slot
@@ -393,7 +412,12 @@ repush or async flush carries no ambient owner of its own."
             ;; joins it, so two renders of one buffer in one document
             ;; route around each other instead of shipping a duplicate.
             (jetpacs-node-id-claims (make-hash-table :test #'equal)))
-        (funcall (plist-get plist :builder)))
+        ;; The recorder seam fires HERE, stack intact — after the unwind
+        ;; below, a backtrace would show the catch site, not the crash.
+        (handler-bind ((error (lambda (e)
+                                (jetpacs-shell--note-builder-error
+                                 (list :surface surface) e))))
+          (funcall (plist-get plist :builder))))
     (error
      (jetpacs-shell--error-spec surface
                                 (format "Error building %s" surface)
@@ -852,14 +876,20 @@ as spec (SPEC 13.4/13.5)"))
                 (unless (gethash current-view (plist-get spec :views))
                   (error "jetpacs: current_view %S names no view in this \
 spec (SPEC 13.4)" current-view)))
-              ;; GATE 1, GATE 3, GATE 4.
-              (jetpacs-shell--gate-spec client surface spec stale-spec)
-              (jetpacs-shell--gate-capability client surface)
-              (jetpacs-shell--gate-amendments client spec)
-              (jetpacs-shell--gate-size client spec stale-spec)
-              (jetpacs-shell--gate-ids spec stale-spec)
-              (when stale-spec
-                (jetpacs-shell--gate-amendments client stale-spec))
+              ;; GATE 1, GATE 3, GATE 4.  The recorder seam sees a gate
+              ;; failure with its stack; the signal continues to the
+              ;; caller unchanged (the sender MUSTs stay loud).
+              (handler-bind ((error (lambda (e)
+                                      (jetpacs-shell--note-builder-error
+                                       (list :surface surface :phase 'gate)
+                                       e))))
+                (jetpacs-shell--gate-spec client surface spec stale-spec)
+                (jetpacs-shell--gate-capability client surface)
+                (jetpacs-shell--gate-amendments client spec)
+                (jetpacs-shell--gate-size client spec stale-spec)
+                (jetpacs-shell--gate-ids spec stale-spec)
+                (when stale-spec
+                  (jetpacs-shell--gate-amendments client stale-spec)))
               ;; Snackbar rides the scaffold slot when the root is one —
               ;; injected only after every gate passed, and drained only
               ;; after the send, so a refused push keeps the feedback.

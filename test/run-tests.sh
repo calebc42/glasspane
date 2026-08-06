@@ -136,6 +136,13 @@ emacs -Q --batch -L emacs -l test/jetpacs-navigate-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-chrome-test.el \
   -f ert-run-tests-batch-and-exit
 
+# Devtools exit gate: the push-loop profiler (build wall clock, push
+# sizes, last spec, the storm predicate) and the failure flight
+# recorder — keeping locally, bounded, and OFF BY DEFAULT what SPEC
+# 23.3 scrubs off the wire, with the wire's scrubbing asserted too.
+emacs -Q --batch -L emacs -l test/jetpacs-devtools-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-4 exit gate: the org engine — refs/tokens (D-4), resolve guards,
 # the cache key, mutations, and (from O2/O3) the query grammar and
 # capture primitives.

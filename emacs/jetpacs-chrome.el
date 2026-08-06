@@ -370,17 +370,25 @@ together, on every rebuild."
                (bytes (cdr-safe budget))
                (fail nil)
                (node (condition-case err
-                         (let ((n (funcall (cdr entry) back)))
-                           ;; The dock joins BEFORE the gates so what is
-                           ;; checked is what ships; `append' copies, so
-                           ;; the builder's own node is never mutated.
-                           (when (and dock (jetpacs--root-node-p n)
-                                      (equal (plist-get n :t) "scaffold")
-                                      (not (plist-member n (car dock))))
-                             (setq n (append n (list (car dock) (cdr dock)))))
-                           (jetpacs-chrome--gate-view surface n)
-                           (jetpacs-chrome--claim-screen-ids n seen)
-                           n)
+                         ;; The recorder seam fires HERE, stack intact —
+                         ;; the catch below unwinds the crash away.
+                         (handler-bind
+                             ((error (lambda (e)
+                                       (jetpacs-shell--note-builder-error
+                                        (list :surface surface :screen id)
+                                        e))))
+                           (let ((n (funcall (cdr entry) back)))
+                             ;; The dock joins BEFORE the gates so what is
+                             ;; checked is what ships; `append' copies, so
+                             ;; the builder's own node is never mutated.
+                             (when (and dock (jetpacs--root-node-p n)
+                                        (equal (plist-get n :t) "scaffold")
+                                        (not (plist-member n (car dock))))
+                               (setq n (append n (list (car dock)
+                                                       (cdr dock)))))
+                             (jetpacs-chrome--gate-view surface n)
+                             (jetpacs-chrome--claim-screen-ids n seen)
+                             n))
                        (error (setq fail err) nil))))
           (unless (or fail (jetpacs--root-node-p node))
             (setq fail 'wrong-type-argument))

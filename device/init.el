@@ -20,6 +20,7 @@
 (require 'jetpacs-dialog)
 (require 'jetpacs-transient)
 (require 'jetpacs-complete)
+(require 'jetpacs-devtools)   ; the push profiler + failure flight recorder
 ;; …the mode skins (additive: they register for their major modes)…
 (require 'jetpacs-comint)
 (require 'jetpacs-sections)
@@ -72,6 +73,11 @@
  "Editor"
  '((ebp-sync-diagnostics :label "Push diagnostics")
    (ebp-sync-fontify :label "Push syntax highlighting")))
+;; The SPEC 23.3 explicit developer setting: full failure detail stays
+;; local and bounded, and only while this is on.
+(jetpacs-settings-register-section
+ "Devtools"
+ '((jetpacs-devtools-recording :label "Record failure details")))
 (jetpacs-settings-register-section
  "Clipboard"
  '((jetpacs-clip-auto-refresh :label "Auto-refresh the kill ring")
@@ -131,6 +137,10 @@ Clipboard, the Messages log, and the buffer switcher."
     "Shell" :subtitle "comint, with input" :icon "terminal"
     :on-tap (jetpacs-action "hub.open" :args '(:buffer "*shell*"))
     :key "drawer-tools-shell")
+   (jetpacs-chrome-row
+    "Devtools" :subtitle "push loop, failures" :icon "build"
+    :on-tap (jetpacs-action "hub.open" :args '(:buffer "*jetpacs-devtools*"))
+    :key "drawer-tools-devtools")
    :collapsed t))
 
 (defun jetpacs-hub--drawer ()
@@ -268,6 +278,10 @@ Feeds * ** *** the way ielm does, so follow-up expressions can chain."
              (save-window-excursion (shell)))
            (when (and (equal name "*ielm*") (not (get-buffer name)))
              (save-window-excursion (ielm)))
+           ;; The devtools report regenerates on every open — stale
+           ;; instrumentation is worse than none.
+           (when (equal name "*jetpacs-devtools*")
+             (jetpacs-devtools-report-buffer))
            (condition-case err
                (jetpacs-navigate-buffer name "app:hub")
              (error (message "hub.open: %s" (jetpacs--error-label err))))))

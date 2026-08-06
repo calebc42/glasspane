@@ -235,7 +235,7 @@
     (jetpacs-device-test--resolve 0 1)
     (should (jetpacs-reminders "a")))
   ;; The --with macro's teardown ran jetpacs-test-reset-state, which must
-  ;; have swept the device tables through the fboundp hook.
+  ;; have swept the device tables through `jetpacs-reset-functions'.
   (should-not (jetpacs-reminders "a")))
 
 

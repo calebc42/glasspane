@@ -192,6 +192,9 @@ product decision the caller makes explicitly via
   (remhash owner jetpacs-device--reminder-sets))
 
 (add-hook 'jetpacs-teardown-functions #'jetpacs-device--on-teardown)
+;; The teardown sweep is per-owner and LOCAL-only by the rule above; the
+;; reset seam is the whole-session one a fixture wants between tests.
+(add-hook 'jetpacs-reset-functions #'jetpacs-device-reset)
 
 (provide 'jetpacs-device)
 ;;; jetpacs-device.el ends here

@@ -189,9 +189,10 @@ emacs -Q --batch -L emacs -l test/jetpacs-devtools-test.el \
 # own jetpacs-teardown-owner and looks for the swept token on the other
 # side (the add-hook is the whole file, and calling the sweep directly —
 # what every other suite does — stays green with it deleted); it proves
-# the floor's fboundp probe still finds ebp-org-reset; and it pins the
-# render -> dialogs -> shim chain that carries the registration onto the
-# device.  Three jobs, and all three of them break SILENTLY.
+# the floor's reset seam still reaches ebp-org-reset, which the shim puts
+# on jetpacs-reset-functions because the engine may not name a floor
+# symbol; and it pins the render -> dialogs -> shim chain that carries
+# the registrations onto the device.  Three jobs, all three SILENT.
 emacs -Q --batch -L emacs -l test/jetpacs-org-test.el \
   -f ert-run-tests-batch-and-exit
 

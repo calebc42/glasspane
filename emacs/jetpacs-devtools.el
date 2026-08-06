@@ -365,6 +365,10 @@ jetpacs-devtools-toggle-recording)")))
 (add-hook 'jetpacs-shell-builder-error-functions
           #'jetpacs-devtools--record-failure)
 
+;; The floor's reset seam: instrumentation is per-session state like any
+;; other, so a fixture that resets the floor drops the records too.
+(add-hook 'jetpacs-reset-functions #'jetpacs-devtools-reset)
+
 (unless (advice-member-p #'jetpacs-devtools--time-build 'jetpacs-shell--build)
   (advice-add 'jetpacs-shell--build :around #'jetpacs-devtools--time-build))
 (unless (advice-member-p #'jetpacs-devtools--observe-push

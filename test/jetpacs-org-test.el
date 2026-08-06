@@ -16,8 +16,10 @@
 ;;    the first test calls only the floor's own `jetpacs-teardown-owner'
 ;;    and looks for the token afterwards.
 ;; 2. The reset bridge.  `jetpacs-test-reset-state' reaches the engine
-;;    through an `fboundp' probe, and a probe that finds nothing does
-;;    not complain — resets simply stop happening.  Asserted positively.
+;;    off `jetpacs-reset-functions', and the adapter is what puts
+;;    `ebp-org-reset' there — the engine may not name a floor symbol.
+;;    A missing member does not complain; resets simply stop happening.
+;;    Asserted positively, and by EFFECT rather than by membership.
 ;; 3. The require chain.  The plan expected `jetpacs-org-render' to lose
 ;;    transitive registration; it survives, one hop longer.  Pinned, in
 ;;    the membership and in the source links that produce it.
@@ -68,13 +70,14 @@ assertion the registration cannot be deleted under."
     (should-not (ebp-org-token-ref tok :owner jetpacs-org-test--owner))))
 
 (ert-deftest jetpacs-org-reset-bridge-reaches-the-engine ()
-  "The floor's `fboundp' probe finds `ebp-org-reset', proved by effect.
-`jetpacs-test-reset-state' does not require the engine — it asks
-whether the function exists and skips it if not, so the NAME is
-load-bearing in the silent direction: rename it without editing the
-probe and every fixture in the tree quietly stops resetting engine
-state between tests.  A membership check would not catch that; the
-cleared table does."
+  "The floor's reset seam reaches `ebp-org-reset', proved by effect.
+`jetpacs-test-reset-state' does not require the engine — it drains
+`jetpacs-reset-functions', and the adapter's `add-hook' is the only
+thing in the tree that puts the engine's reset on it.  Delete that line
+and every fixture quietly stops resetting engine state between tests,
+with nothing to say so.  Asserted here through the floor's own entry
+point, not the hook variable: a membership check passes on a hook the
+floor forgot to drain, and the cleared table does not."
   (jetpacs-org-test--with-token tok
     (jetpacs-test-reset-state)
     (should-not (ebp-org-token-ref tok :owner jetpacs-org-test--owner))))
@@ -101,16 +104,21 @@ render-only load path loses its sweep with nothing to say so."
         (goto-char (point-min))
         (should (search-forward (cdr link) nil t))))))
 
-(ert-deftest jetpacs-org-unload-takes-back-only-the-registration ()
+(ert-deftest jetpacs-org-unload-takes-back-only-the-registrations ()
   "The adapter's other half: it removes what it added, and only that.
-The engine's tables are `ebp-org-unload-function''s business, so the
-sweep function is still defined afterwards — this file never owned it."
+BOTH registrations are the adapter's — the teardown sweep and the reset
+— so both come back off.  The engine's tables are
+`ebp-org-unload-function''s business, so both functions are still
+defined afterwards; this file never owned either of them."
   (unwind-protect
       (progn
         (jetpacs-org-unload-function)
         (should-not (memq #'ebp-org-teardown-owner jetpacs-teardown-functions))
-        (should (fboundp 'ebp-org-teardown-owner)))
-    (add-hook 'jetpacs-teardown-functions #'ebp-org-teardown-owner)))
+        (should-not (memq #'ebp-org-reset jetpacs-reset-functions))
+        (should (fboundp 'ebp-org-teardown-owner))
+        (should (fboundp 'ebp-org-reset)))
+    (add-hook 'jetpacs-teardown-functions #'ebp-org-teardown-owner)
+    (add-hook 'jetpacs-reset-functions #'ebp-org-reset)))
 
 (provide 'jetpacs-org-test)
 ;;; jetpacs-org-test.el ends here

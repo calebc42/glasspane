@@ -1186,11 +1186,15 @@ completed archive — and the spent sheet is abandoned."
     (jetpacs-org-dialogs-reset)))
 
 (add-hook 'jetpacs-teardown-functions #'jetpacs-org-dialogs--on-teardown)
+;; Two seams, one reset: teardown fires only for THIS owner, the floor's
+;; reset seam fires for every fixture that resets the floor at all.
+(add-hook 'jetpacs-reset-functions #'jetpacs-org-dialogs-reset)
 
 (defun jetpacs-org-dialogs-unload-function ()
-  "Unload hygiene: deregister the verbs and the teardown subscriber."
+  "Unload hygiene: deregister the verbs and the hook subscribers."
   (remove-hook 'jetpacs-teardown-functions
                #'jetpacs-org-dialogs--on-teardown)
+  (remove-hook 'jetpacs-reset-functions #'jetpacs-org-dialogs-reset)
   (jetpacs-undefaction "jetpacs.org.footnote")
   (jetpacs-undefaction "jetpacs.org.heading")
   (jetpacs-undefaction "jetpacs.org.archive")

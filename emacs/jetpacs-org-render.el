@@ -860,8 +860,11 @@ from their own state on the deferred re-push."
   (setq jetpacs-org-render--latex-timer nil)
   (clrhash jetpacs-org-render--files-mode))
 
+(add-hook 'jetpacs-reset-functions #'jetpacs-org-render-reset)
+
 (defun jetpacs-org-render-unload-function ()
   "Unload hygiene: deregister the skin, the verbs and the seams."
+  (remove-hook 'jetpacs-reset-functions #'jetpacs-org-render-reset)
   (setq jetpacs-render-buffer-functions
         (assq-delete-all 'org-mode jetpacs-render-buffer-functions))
   (jetpacs-undefaction "jetpacs.org.checkbox")

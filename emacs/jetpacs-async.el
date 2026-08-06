@@ -264,5 +264,12 @@ Called on app teardown, so a torn-down app leaks no loads."
     (cancel-timer jetpacs-async--push-timer))
   (setq jetpacs-async--push-timer nil))
 
+;; The floor's reset seam.  Registered here rather than named by
+;; `jetpacs-test-reset-state', so this module's reset survives a rename;
+;; `add-hook' on a not-yet-defined hook is deliberate — this file loads
+;; BEFORE `jetpacs-surfaces' (see the forward declarations above) and the
+;; `defvar' there leaves an already-populated value alone.
+(add-hook 'jetpacs-reset-functions #'jetpacs-async-reset)
+
 (provide 'jetpacs-async)
 ;;; jetpacs-async.el ends here

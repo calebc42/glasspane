@@ -28,6 +28,11 @@
 (require 'jetpacs-shell)
 (require 'jetpacs-buffer)
 (require 'jetpacs-device)
+;; The org ADAPTER, for the reset registration it carries: `ebp-org.el'
+;; may not name a floor symbol, so its reset reaches
+;; `jetpacs-reset-functions' through this shim or not at all — and only
+;; a process that has both the floor and the shim can see that.
+(require 'jetpacs-org)
 ;; Order matters and is the point: chrome's `with-eval-after-load' fires
 ;; when navigate arrives.  Requiring chrome FIRST exercises the backfill
 ;; branch, which is the one no other suite reaches.
@@ -311,6 +316,25 @@ the shell subscribes, and nothing but this suite would notice the
 `add-hook' go missing."
   (should (memq #'jetpacs-shell--before-replay
                 jetpacs-before-replay-functions)))
+
+;;;; The reset ladder — the fourth and last
+
+(ert-deftest jetpacs-integration-reset-hook-carries-every-loaded-module ()
+  "Each loaded module puts its own reset on `jetpacs-reset-functions'.
+The floor used to spell this as an fboundp ladder that named seven
+module resets, so a rename on either side just stopped resets running.
+Membership is the replacement, and it is only a property of a process
+that loads more than one of them: a module's own suite never drains the
+hook, and every other suite lacks the module.
+
+`ebp-org-reset' is the one that proves the tier rule.  The engine may
+not name a `jetpacs-' symbol — the delineation guard loads
+`emacs/ebp-org.el' alone and fails on the first one — so the
+registration belongs to the jetpacs-side shim `jetpacs-org.el', and
+this is the assertion that the shim actually made it."
+  (should (memq #'jetpacs-async-reset jetpacs-reset-functions))
+  (should (memq #'jetpacs-device-reset jetpacs-reset-functions))
+  (should (memq #'ebp-org-reset jetpacs-reset-functions)))
 
 (provide 'jetpacs-integration-test)
 ;;; jetpacs-integration-test.el ends here

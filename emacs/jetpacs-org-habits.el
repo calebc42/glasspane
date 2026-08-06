@@ -265,11 +265,14 @@ loud `rejected'."
   "Reset habits-module state (the test seam).
 The module keeps none of its own — the memo lives in the org cache
 namespace `habits' and the tokens in the engine's table — but the
-reset ladder names this function so future state has a home."
+registration below gives future state a home already wired."
   nil)
 
+(add-hook 'jetpacs-reset-functions #'jetpacs-org-habits-reset)
+
 (defun jetpacs-org-habits-unload-function ()
-  "Unload hygiene: deregister the verbs and the chrome root."
+  "Unload hygiene: deregister the verbs, the reset and the chrome root."
+  (remove-hook 'jetpacs-reset-functions #'jetpacs-org-habits-reset)
   (jetpacs-undefaction "jetpacs.org.habit.done")
   (jetpacs-undefaction "jetpacs.org.habit.open")
   (jetpacs-chrome-remove jetpacs-org-habits-owner)

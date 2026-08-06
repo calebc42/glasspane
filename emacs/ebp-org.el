@@ -1798,11 +1798,12 @@ target from a record."
 
 (defun ebp-org-reset ()
   "Reset engine state: cache, stat memo, tokens (fresh nonce), timers.
-The application floor reaches this by `fboundp' probe rather than by
-require, so that a build without the engine simply skips it.  That
-makes the NAME load-bearing in the silent direction: rename it without
-editing the probe and resets stop happening, with nothing anywhere to
-say so."
+Public because the application floor's fixture seam drains it: it is a
+member of `jetpacs-reset-functions', put there by `jetpacs-org.el' —
+this file may not name a floor symbol, so it supplies the reset and
+never registers it.  The old arrangement was an `fboundp' probe on this
+NAME, which made a rename silently stop every reset in the tree; the
+membership is assertable, so it does not any more."
   (clrhash ebp-org--cache)
   (setq ebp-org--cache-generation nil
         ebp-org--stamp-memo nil)

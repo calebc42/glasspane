@@ -1199,6 +1199,35 @@ every existing subscriber, and the hook loop isolates errors — so the
 break would be SILENT and would stop every module's sweep, not just
 the one being fixed.")
 
+(defvar jetpacs-reset-functions nil
+  "Normal hook run to drop module state, for tests and teardown.
+The test-and-teardown reset seam.  `jetpacs-test-reset-state' clears the
+kernel's own tables — nothing outside this file knows they exist — and
+then drains this, which is the rewrite's answer to the LAST of the poc's
+fboundp ladders: the floor named seven module resets by symbol and
+skipped whichever the build had not loaded, so renaming one stopped
+resets happening with nothing anywhere to say so.
+
+Members are NULLARY.  A reset is a module talking to itself: no owner,
+no client, nothing the floor could pass it that it does not already
+know.  They run ISOLATED via `jetpacs-run-isolated', so a module whose
+reset breaks costs its own state and not every fixture after it in the
+suite.  Order is not a property here — each member clears tables its own
+file owns and nobody else reads.
+
+Registered at LOAD by the owning module, in its OWN file, for the reason
+`jetpacs-ready-functions' and `jetpacs-teardown-functions' record: the
+floor names no module, so a build without one simply has no member for
+it.
+
+An `ebp-' file NEVER touches this hook.  The ebp tier is wire and Emacs
+only and may not name a `jetpacs-' symbol at all — the delineation guard
+in test/run-tests.sh loads each `emacs/ebp*.el' alone and fails on the
+first jetpacs-flavored symbol it finds — so an engine's reset is
+registered by its jetpacs-side shim/adapter: `jetpacs-org.el' adds
+`ebp-org-reset', exactly as it adds `ebp-org-teardown-owner', and
+`ebp-org.el' is untouched by either.")
+
 (defun jetpacs--owners ()
   "Every owner id with a live registration (interactive completion)."
   (let (owners)
@@ -1208,23 +1237,14 @@ the one being fixed.")
     owners))
 
 (defun jetpacs-test-reset-state ()
-  "Reset floor state for tests and teardown."
+  "Reset floor state for tests and teardown.
+Two halves, and only the first is this file's business: the kernel's own
+tables (and the shell's, boundp-guarded — surfaces loads without it),
+cleared here because nothing else knows they exist; then every module's
+reset, drained off `jetpacs-reset-functions', which each module put
+there itself at load."
   (clrhash jetpacs--state-handlers)
   (clrhash jetpacs--applied-revisions)
-  (when (fboundp 'jetpacs-async-reset)
-    (jetpacs-async-reset))
-  (when (fboundp 'jetpacs-devtools-reset)
-    (jetpacs-devtools-reset))
-  (when (fboundp 'jetpacs-device-reset)
-    (jetpacs-device-reset))
-  (when (fboundp 'ebp-org-reset)
-    (ebp-org-reset))
-  (when (fboundp 'jetpacs-org-render-reset)
-    (jetpacs-org-render-reset))
-  (when (fboundp 'jetpacs-org-dialogs-reset)
-    (jetpacs-org-dialogs-reset))
-  (when (fboundp 'jetpacs-org-habits-reset)
-    (jetpacs-org-habits-reset))
   (when (boundp 'jetpacs-shell--snackbars)
     (clrhash jetpacs-shell--snackbars))
   (when (boundp 'jetpacs-shell--refusal-counts)
@@ -1247,7 +1267,8 @@ the one being fixed.")
   (when (boundp 'jetpacs-shell--current-view)
     (clrhash jetpacs-shell--current-view))
   (when (boundp 'jetpacs-shell--unasserted-view)
-    (clrhash jetpacs-shell--unasserted-view)))
+    (clrhash jetpacs-shell--unasserted-view))
+  (jetpacs-run-isolated 'jetpacs-reset-functions))
 
 (provide 'jetpacs-surfaces)
 ;;; jetpacs-surfaces.el ends here

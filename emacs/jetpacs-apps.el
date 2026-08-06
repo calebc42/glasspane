@@ -154,8 +154,16 @@ return as \"Apps\" expanding into \"Manage Apps\" and \"App
 Launcher\".  Collapsed by default so the drawer stays one line."
   (jetpacs-collapsible
    "drawer-apps"
-   (jetpacs-chrome-row "Apps" :icon "apps"
-                       :subtitle "Manage and switch")
+   ;; A plain row, not a chrome-row: the renderer makes the whole
+   ;; header line the expand/collapse target, and a Card surface over
+   ;; it swallows taps everywhere but the chevron.
+   (jetpacs-row
+    (jetpacs-icon "apps")
+    (jetpacs-with-attrs
+     (jetpacs-column (jetpacs-text "Apps")
+                     (jetpacs-text "Manage and switch" :style "caption")
+                     :spacing 2)
+     :weight 1))
    (jetpacs-chrome-row "Manage Apps"
                        :subtitle "Install and remove app bundles"
                        :icon "download"

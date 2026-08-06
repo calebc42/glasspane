@@ -75,7 +75,7 @@
              (not (autoloadp (symbol-function
                               'userlock--ask-user-about-supersession-threat))))
   (load "userlock" nil t))
-(require 'jetpacs-surfaces)             ; owner floor: teardown, current-owner
+(require 'jetpacs-surfaces)             ; owner floor: teardown only now
 
 (defgroup jetpacs-org nil
   "The Jetpacs org extraction and mutation engine."
@@ -512,7 +512,17 @@ the buffer it has."
             ;; callers pushed it to a device snackbar.
             (signal 'jetpacs-org-unresolved nil))))))
 
-;;;; Wire tokens — the D-4 opaque per-owner replace-set table
+;;;; Wire tokens — the D-4 opaque per-scope replace-set table
+;;
+;; OWNER here is an opaque scope KEY.  This table never resolves it,
+;; never validates it against the floor and only ever compares it with
+;; `equal'; it partitions the mint, gates the lookup and names the
+;; teardown sweep, and that is the whole of its meaning.  So every entry
+;; point takes it as an ARGUMENT.  Scope is what the CALLER knows — a
+;; surface builder knows which surface it is minting for; a timer, a
+;; process filter and a batch run know nothing, and reading whatever
+;; owner happened to be current would silently file their tokens under
+;; someone else's scope, or under nobody's.
 
 (defconst jetpacs-org-token-set-max 512
   "Refs per (owner,set); minting beyond signals (a build-time error).")
@@ -534,10 +544,12 @@ the buffer it has."
 
 (cl-defun jetpacs-org-ref-tokens (refs &key (set "default") owner)
   "Mint one opaque token per REF, REPLACING the (OWNER,SET) entry.
-OWNER defaults to `jetpacs-current-owner'; neither is an error.  Every
-token previously minted for this (owner,set) dies at install — a
-re-render re-mints, so the table size stays equal to the live sets and
-a swept token is a plain miss (the `results.visit' replace-set shape).
+OWNER is required and is passed as `:owner', never inherited: it is
+the caller's own scope key (see the section comment above), and the
+caller minting the refs is the only one that knows it.  Every token
+previously minted for this (owner,set) dies at install — a re-render
+re-mints, so the table size stays equal to the live sets and a swept
+token is a plain miss (the `results.visit' replace-set shape).
 ATOMIC (JA-4 audit P1-8): every ref is validated FIRST; the replace
 sweep and the install of BOTH tables run together only once nothing
 can signal — a failed mint leaves the tables and the live generation
@@ -548,60 +560,67 @@ A ref whose :file fails the resolve policy signals at MINT time:
 statically invalid input fails at build, not at tap — as does a REF
 that is not a plist carrying :file at all (P1-12).  Returns tokens in
 REFS order."
-  (let ((owner (or owner jetpacs-current-owner)))
-    (unless (stringp owner)
-      (error "jetpacs-org-ref-tokens: no owner (bind via with-jetpacs-owner or pass :owner)"))
-    (when (> (length refs) jetpacs-org-token-set-max)
-      (error "jetpacs-org-ref-tokens: %d refs exceeds the %d per-set cap"
-             (length refs) jetpacs-org-token-set-max))
-    (let ((key (cons owner set)))
-      (unless (gethash key jetpacs-org--token-sets)
-        (let ((sets 0))
-          (maphash (lambda (k _v) (when (equal (car k) owner)
-                                    (setq sets (1+ sets))))
-                   jetpacs-org--token-sets)
-          (when (>= sets jetpacs-org-token-sets-max)
-            (error "jetpacs-org-ref-tokens: owner %s exceeds %d sets"
-                   owner jetpacs-org-token-sets-max))))
-      ;; Pass 1 — validate EVERY ref while both tables stay untouched.
-      (dolist (ref refs)
-        ;; SHAPE first (JA-4 audit P1-12): `(plist-get "Alpha" :file)'
-        ;; returns nil rather than signalling, so a list of display
-        ;; STRINGS — exactly what a mis-keyed query used to hand back —
-        ;; sailed past the policy check below and became live tokens.
-        ;; The offending value is not echoed (23.3): it may be user text
-        ;; or a path.
-        (unless (and (plistp ref) (plist-member ref :file))
-          (error "jetpacs-org-ref-tokens: not a ref plist (%s)" (type-of ref)))
-        (let ((file (plist-get ref :file)))
-          (when (and (stringp file) (not (string-empty-p file)))
-            (jetpacs-org--check-file file))))
-      ;; Pass 2 — mint locally; still no table writes.
-      (let ((entries
-             (mapcar (lambda (ref)
-                       (cons (format "o%s-%x" jetpacs-org--token-nonce
-                                     (cl-incf jetpacs-org--token-counter))
-                             ref))
-                     refs)))
-        ;; Pass 3 — the replace sweep + BOTH installs, signal-free.
-        (dolist (old (gethash key jetpacs-org--token-sets))
-          (remhash old jetpacs-org--tokens))
-        (dolist (entry entries)
-          (puthash (car entry)
-                   (list :owner owner :set set :ref (cdr entry))
-                   jetpacs-org--tokens))
-        (puthash key (mapcar #'car entries) jetpacs-org--token-sets)
-        (mapcar #'car entries)))))
+  (unless (stringp owner)
+    (error "jetpacs-org-ref-tokens: no owner (pass :owner)"))
+  (when (> (length refs) jetpacs-org-token-set-max)
+    (error "jetpacs-org-ref-tokens: %d refs exceeds the %d per-set cap"
+           (length refs) jetpacs-org-token-set-max))
+  (let ((key (cons owner set)))
+    (unless (gethash key jetpacs-org--token-sets)
+      (let ((sets 0))
+        (maphash (lambda (k _v) (when (equal (car k) owner)
+                                  (setq sets (1+ sets))))
+                 jetpacs-org--token-sets)
+        (when (>= sets jetpacs-org-token-sets-max)
+          (error "jetpacs-org-ref-tokens: owner %s exceeds %d sets"
+                 owner jetpacs-org-token-sets-max))))
+    ;; Pass 1 — validate EVERY ref while both tables stay untouched.
+    (dolist (ref refs)
+      ;; SHAPE first (JA-4 audit P1-12): `(plist-get "Alpha" :file)'
+      ;; returns nil rather than signalling, so a list of display
+      ;; STRINGS — exactly what a mis-keyed query used to hand back —
+      ;; sailed past the policy check below and became live tokens.
+      ;; The offending value is not echoed (23.3): it may be user text
+      ;; or a path.
+      (unless (and (plistp ref) (plist-member ref :file))
+        (error "jetpacs-org-ref-tokens: not a ref plist (%s)" (type-of ref)))
+      (let ((file (plist-get ref :file)))
+        (when (and (stringp file) (not (string-empty-p file)))
+          (jetpacs-org--check-file file))))
+    ;; Pass 2 — mint locally; still no table writes.
+    (let ((entries
+           (mapcar (lambda (ref)
+                     (cons (format "o%s-%x" jetpacs-org--token-nonce
+                                   (cl-incf jetpacs-org--token-counter))
+                           ref))
+                   refs)))
+      ;; Pass 3 — the replace sweep + BOTH installs, signal-free.
+      (dolist (old (gethash key jetpacs-org--token-sets))
+        (remhash old jetpacs-org--tokens))
+      (dolist (entry entries)
+        (puthash (car entry)
+                 (list :owner owner :set set :ref (cdr entry))
+                 jetpacs-org--tokens))
+      (puthash key (mapcar #'car entries) jetpacs-org--token-sets)
+      (mapcar #'car entries))))
 
 (cl-defun jetpacs-org-token-ref (token &key owner)
-  "TOKEN -> its ref plist, or nil.
+  "TOKEN -> its ref plist within OWNER's scope, or nil.
 nil for an unknown token, an owner mismatch, a swept set, or a
 non-string TOKEN — all of which a handler answers as `stale' (14.5:
 the list moved under the user; re-present, never mis-jump).  The
-handler distinguishes arg-SHAPE errors (`rejected') itself."
+handler distinguishes arg-SHAPE errors (`rejected') itself.
+OWNER is required and is passed as `:owner', never inherited, and its
+check sits INSIDE the TOKEN gate on purpose.  A junk token is device
+input and keeps answering `stale'; a missing owner is a bug in the
+CALLER, and it cannot be allowed to look like one.  With no owner
+every `equal' below fails, so every lookup misses and every tap on a
+live surface answers `stale' — a screen that has quietly stopped
+working, with nothing in any log to say so.  So it signals instead."
   (when (stringp token)
-    (let ((owner (or owner jetpacs-current-owner))
-          (entry (gethash token jetpacs-org--tokens)))
+    (unless (stringp owner)
+      (error "jetpacs-org-token-ref: no owner (pass :owner)"))
+    (let ((entry (gethash token jetpacs-org--tokens)))
       (when (and entry (equal (plist-get entry :owner) owner))
         (plist-get entry :ref)))))
 

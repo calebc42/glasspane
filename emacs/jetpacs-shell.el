@@ -289,7 +289,7 @@ drafts until the Companion republishes — pass `:reset-input-ids' on a
 re-registering push when that matters."
   (interactive (list (completing-read "Tear down owner: "
                                       (jetpacs--owners) nil t)))
-  (unless (jetpacs--valid-owner-p owner)
+  (unless (jetpacs-valid-owner-p owner)
     (error "jetpacs: invalid owner %S (a D1 owner name, not a surface id)"
            owner))
   (dolist (name (jetpacs--owned-names "action" owner))
@@ -742,7 +742,7 @@ its document text must not exceed `max_editor_bytes'."
           (lambda (p)
             ;; One authority for the 14.1 policy gate: the floor helper
             ;; every other descriptor emitter calls too.
-            (jetpacs--gate-descriptor-policy p client)
+            (jetpacs-gate-descriptor-policy p client)
             (when (and (equal (plist-get p :t) "editor")
                        (plist-get p :document))
               ;; The grant check must NOT hang off max-bytes: that limit is

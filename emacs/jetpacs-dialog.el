@@ -114,7 +114,7 @@ SPEC 18.1: every node in a dialog spec MUST be advertised by the
     ;; SPEC 14.1: a dialog button's descriptor reaches the wire by this
     ;; path, not the shell's, so the policy gate must run here too.
     (dolist (key '(:on_tap :on_long_tap :on_change :on_submit :on_enter))
-      (jetpacs--gate-descriptor-policy (plist-get node key)))
+      (jetpacs-gate-descriptor-policy (plist-get node key)))
     (mapc #'jetpacs-dialog--gate-spec (plist-get node :children))
     node))
 

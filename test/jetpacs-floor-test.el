@@ -842,12 +842,12 @@ emitter inherits it — not just the one that pushes documents."
     (let ((wake (jetpacs-action "a.b" :when-offline 'wake :ttl-s 60))
           (queue (jetpacs-action "a.b" :when-offline 'queue :ttl-s 60)))
       ;; Ungranted: wake refused, queue fine.
-      (should-error (jetpacs--gate-descriptor-policy wake))
-      (should-not (jetpacs--gate-descriptor-policy queue))
-      (should-not (jetpacs--gate-descriptor-policy nil))
+      (should-error (jetpacs-gate-descriptor-policy wake))
+      (should-not (jetpacs-gate-descriptor-policy queue))
+      (should-not (jetpacs-gate-descriptor-policy nil))
       ;; Granted: allowed.
       (setf (ebp-client-granted client) ["theme" "offline.wake"])
-      (should-not (jetpacs--gate-descriptor-policy wake)))))
+      (should-not (jetpacs-gate-descriptor-policy wake)))))
 
 (ert-deftest jetpacs-floor-advertised-p-fails-closed-on-a-live-client ()
   "P1-5 chain: with NO client the predicates assume the richer form, but

@@ -94,7 +94,7 @@ the rule — never the :title/:body values (SPEC 23.3)."
       ;; SPEC 18.6 routes a tap through Section 14's normal pipeline using
       ;; the AUTHORED offline policy, so 14.1's wake gate governs here —
       ;; and this path never touches the shell's document gate.
-      (jetpacs--gate-descriptor-policy tap)
+      (jetpacs-gate-descriptor-policy tap)
       (let ((action (plist-get tap :action)))
         (when (and (stringp action)
                    (not (gethash action jetpacs-action-handlers)))
@@ -126,7 +126,7 @@ Legal from SYNCING on (the method's states are S,R), so this is not
 gated on `jetpacs-connected-p'."
   (let* ((owner (or owner jetpacs-current-owner))
          (normalized '()))
-    (unless (jetpacs--valid-owner-p owner)
+    (unless (jetpacs-valid-owner-p owner)
       (error "jetpacs: reminders need a valid owner (with-jetpacs-owner or :owner)"))
     (let ((seen (make-hash-table :test #'equal)))
       (dolist (r (append reminders nil))

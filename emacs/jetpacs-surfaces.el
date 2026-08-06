@@ -73,7 +73,7 @@ D1 an owner is a permanent wire identifier — SPEC 13.5 keys the
 device's persisted snapshot by surface id, so a collision is not a
 local shadowing but two packages fighting over one device surface.")
 
-(defun jetpacs--valid-owner-p (owner)
+(defun jetpacs-valid-owner-p (owner)
   "Non-nil when OWNER can name the surface `app:<owner>' (decision D1).
 A SPEC 4.4 name component without `:' or `/' (so an owner is never
 mistaken for a full surface id), short enough that the prefixed id fits
@@ -88,7 +88,7 @@ ID is validated as a D1 owner (a wire identifier) at entry, so an
 illegal owner fails at registration time, never as a push-time 1201."
   (declare (indent 1) (debug (form body)))
   `(let ((jetpacs-current-owner ,id))
-     (unless (jetpacs--valid-owner-p jetpacs-current-owner)
+     (unless (jetpacs-valid-owner-p jetpacs-current-owner)
        (error "jetpacs: invalid owner %S (want a SPEC 4.4 name, no `:'/`/')"
               jetpacs-current-owner))
      ,@body))
@@ -101,7 +101,7 @@ A different-owner clash warns, or errors under
 `jetpacs-strict-namespaces'.  Same-owner re-registration is silent.
 No-op (no record) when no owner is bound."
   (when jetpacs-current-owner
-    (unless (jetpacs--valid-owner-p jetpacs-current-owner)
+    (unless (jetpacs-valid-owner-p jetpacs-current-owner)
       (error "jetpacs: invalid owner %S (want a SPEC 4.4 name, no `:'/`/')"
              jetpacs-current-owner))
     (let* ((key (cons kind name))
@@ -702,7 +702,7 @@ does not bridge."
    ((not (stringp surface))
     (error "jetpacs: invalid flow surface %S (SPEC 13.1)" surface))
    ((not (string-search ":" surface))
-    (unless (jetpacs--valid-owner-p surface)
+    (unless (jetpacs-valid-owner-p surface)
       (error "jetpacs: invalid flow owner %S (D1)" surface))
     (concat "app:" surface))
    ((and (string-match-p "\\`\\(app\\|notification\\|widget\\|tile\\):." surface)
@@ -1064,7 +1064,7 @@ a nil TARGET, which means app) is core and always present in a
 conforming welcome."
   (memq target '(:dialog :notification :widget :tile)))
 
-(defun jetpacs--gate-descriptor-policy (descriptor &optional client)
+(defun jetpacs-gate-descriptor-policy (descriptor &optional client)
   "Signal when DESCRIPTOR authors an offline policy this session lacks.
 SPEC 14.1 (amendment #85): a sender MUST NOT author `wake' without the
 `offline.wake' grant.  EVERY descriptor emitter must call this, not

@@ -88,12 +88,6 @@
 
 ;;;; The hub — the screen you land on and come home to
 
-(defun jetpacs-hub--row (title subtitle buffer)
-  (jetpacs-chrome-row title :subtitle subtitle :icon "description"
-                      :key (jetpacs-wire-id "hubrow" buffer)
-                      :on-tap (jetpacs-action "hub.open"
-                                              :args (list :buffer buffer))))
-
 ;; The hub chrome follows docs/CHROME-VOCABULARY.md: the DRAWER (left,
 ;; behind the Companion's hamburger) holds app destinations, the TOP BAR
 ;; keeps M-x top-right, and the view switcher — Home / Files / Eval,
@@ -129,6 +123,14 @@ Clipboard, the Messages log, and the buffer switcher."
     "Buffers" :subtitle "every live buffer" :icon "view_list"
     :on-tap (jetpacs-action "jetpacs.emacs.buffers")
     :key "drawer-tools-buffers")
+   (jetpacs-chrome-row
+    "Scratch" :subtitle "lisp playground" :icon "description"
+    :on-tap (jetpacs-action "hub.open" :args '(:buffer "*scratch*"))
+    :key "drawer-tools-scratch")
+   (jetpacs-chrome-row
+    "Shell" :subtitle "comint, with input" :icon "terminal"
+    :on-tap (jetpacs-action "hub.open" :args '(:buffer "*shell*"))
+    :key "drawer-tools-shell")
    :collapsed t))
 
 (defun jetpacs-hub--drawer ()
@@ -145,57 +147,105 @@ Clipboard, the Messages log, and the buffer switcher."
    (jetpacs-settings-drawer-entry)
    :spacing 8))
 
-;; The Eval screen is the *ielm* drill on the hub stack; the B5 minter
-;; is stable across renders, so its id is computable here.
-(defvar jetpacs-hub--eval-screen (jetpacs-wire-id "drill" "*ielm*"))
-
 (defun jetpacs-hub--dock-items (surface)
   "The persistent view switcher's destinations, as data.
-Chrome wears these as the bottom bar on compact/medium widths and as a
-navigation rail on expanded (SPEC 20.1.1).  The selected destination
-follows where the user actually is: the files surface, the hub's Eval
-drill, or the hub itself.  Every descriptor here is a global verb — the
-dock renders on every owner's surface."
+Home IS the Eval REPL now (owner decision 2026-08-06: no hub screen),
+so the dock is two destinations: Home and Files."
   (let ((sel (cond ((equal surface "app:jetpacs.files") 'files)
-                   ((not (equal surface "app:hub")) nil)
-                   ((equal (car (jetpacs-chrome-stack surface))
-                           jetpacs-hub--eval-screen)
-                    'eval)
-                   (t 'home))))
+                   ((equal surface "app:hub") 'home))))
     (list (list :label "Home" :icon "home"
                 :on-tap (jetpacs-action "hub.home")
                 :selected (eq sel 'home))
           (list :label "Files" :icon "folder_open"
                 :on-tap (jetpacs-action "jetpacs.launcher.open"
                                         :args '(:surface "app:jetpacs.files"))
-                :selected (eq sel 'files))
-          (list :label "Eval" :icon "code"
-                :on-tap (jetpacs-action "hub.open" :args '(:buffer "*ielm*"))
-                :selected (eq sel 'eval)))))
+                :selected (eq sel 'files)))))
 
 ;; The hub's destinations are the HOST-authored core dock: the app
 ;; layer composes them with per-app destinations (single-app contract:
 ;; with fewer than two apps this renders exactly these items).
 (setq jetpacs-apps-core-dock-items #'jetpacs-hub--dock-items)
 
+;;;; Home IS the Eval REPL (owner decision 2026-08-06: no hub screen —
+;;;; the core is a command-runner, a file explorer, and this).  POC 1's
+;;;; Eval feel, improved: history cards newest-first with copy and
+;;;; re-run, error results styled as errors, a pinned elisp input that
+;;;; can never be pushed off-screen, and *scratch*-style multi-form
+;;;; evaluation with * ** *** holding the last three results.
+
+(defvar jetpacs-hub--eval-history nil
+  "REPL history, newest first: (INPUT OUTPUT ERRORP).")
+
+(defvar jetpacs-hub--eval-history-max 50)
+(defvar jetpacs-hub--eval-output-max 2000)
+
+(defun jetpacs-hub--eval-card (idx entry)
+  (pcase-let* ((`(,input ,output ,errorp) entry)
+               (shown (if (> (length output) jetpacs-hub--eval-output-max)
+                          (concat (substring
+                                   output 0 jetpacs-hub--eval-output-max)
+                                  " …")
+                        output)))
+    (jetpacs-card
+     (jetpacs-column
+      (jetpacs-row
+       (jetpacs-with-attrs
+        (jetpacs-text (concat "λ> " input) :style "label" :max-lines 2)
+        :weight 1)
+       (jetpacs-icon-button "content_copy" (jetpacs-clipboard-copy output)
+                            :content-description "Copy result")
+       (jetpacs-icon-button "play_arrow"
+                            (jetpacs-action "hub.eval"
+                                            :args (list :value input))
+                            :content-description "Re-run"))
+      (jetpacs-text shown :style "mono" :selectable t
+                    :color (and errorp "error")))
+     :key (jetpacs-wire-id "ev" (format "%d" idx)))))
+
 (defun jetpacs-hub--screen (_back)
-  (jetpacs-chrome-screen
-   "Jetpacs"
-   (jetpacs-column
-    (jetpacs-hub--row "Scratch" "lisp playground" "*scratch*")
-    (jetpacs-hub--row "Messages" "the Emacs log" "*Messages*")
-    (jetpacs-hub--row "Shell" "comint, with input" "*shell*")
-    ;; The general client's buffer list, one drill down — Jetpacs IS
-    ;; Emacs, so there is no separate "Emacs" surface to open.
-    (jetpacs-chrome-row "Buffers" :subtitle "every live buffer"
-                        :icon "view_list"
-                        :on-tap (jetpacs-action "jetpacs.emacs.buffers")
-                        :key "hubrow-buffers")
-    (jetpacs-text "Kill ring: M-x jetpacs-clip-show   ·   home: M-x jetpacs-hub"
-                  :style "caption")
-    :spacing 8)
-   :actions (list (jetpacs-emacs-ui-mx-button))
-   :drawer (jetpacs-hub--drawer)))
+  (let ((i -1))
+    (jetpacs-chrome-screen
+     "Jetpacs"
+     (jetpacs-column
+      (jetpacs-with-attrs
+       (if jetpacs-hub--eval-history
+           (apply #'jetpacs-lazy-column
+                  (mapcar (lambda (e)
+                            (jetpacs-hub--eval-card (cl-incf i) e))
+                          jetpacs-hub--eval-history))
+         (jetpacs-empty-state
+          :icon "code" :title "Elisp REPL"
+          :caption (concat "Results appear here, newest first.  "
+                           "* ** and *** hold the last three results.")))
+       :weight 1)
+      (jetpacs-divider)
+      (jetpacs-with-attrs
+       (jetpacs-row
+        (jetpacs-with-attrs
+         (jetpacs-editor "hub-eval" :chromeless t :publish-state t
+                         :syntax "elisp"
+                         :on-enter (jetpacs-action "hub.eval"))
+         :weight 1)
+        (jetpacs-icon-button "send" (jetpacs-action "hub.eval")
+                             :content-description "Eval"))
+       :pad 8))
+     :actions (list (jetpacs-emacs-ui-mx-button))
+     :drawer (jetpacs-hub--drawer))))
+
+(defun jetpacs-hub--eval-forms (input)
+  "Evaluate every form in INPUT like *scratch* would; the last value.
+Feeds * ** *** the way ielm does, so follow-up expressions can chain."
+  (let ((last nil))
+    (with-temp-buffer
+      (insert input)
+      (goto-char (point-min))
+      (condition-case nil
+          (while t (setq last (eval (read (current-buffer)) t)))
+        (end-of-file nil)))
+    (set '*** (and (boundp '**) (symbol-value '**)))
+    (set '** (and (boundp '*) (symbol-value '*)))
+    (set '* last)
+    last))
 
 (with-jetpacs-owner "hub"
   (jetpacs-chrome-define-root "hub" "home" #'jetpacs-hub--screen
@@ -225,6 +275,34 @@ dock renders on every owner's surface."
       (jetpacs-flow-continue
        (lambda () (jetpacs-chrome-reset-screens "hub")))
       'accepted)
+    :any-surface t)
+
+  (jetpacs-defaction "hub.eval"
+    ;; The REPL submit: the send button and re-run arrive without a
+    ;; value and read the editor's published state; on-enter and the
+    ;; re-run button carry :value.  Evaluation is continuation work —
+    ;; user code can take arbitrarily long, prompt, or signal.
+    (lambda (args _params)
+      (let ((input (or (plist-get args :value)
+                       (jetpacs-ui-state "hub-eval"))))
+        (if (not (and (stringp input)
+                      (not (string-blank-p input))))
+            'rejected
+          (jetpacs-flow-continue
+           (lambda ()
+             (let (output errorp)
+               (condition-case err
+                   (setq output (prin1-to-string
+                                 (jetpacs-hub--eval-forms input)))
+                 (error (setq output (error-message-string err)
+                              errorp t))
+                 (quit (setq output "Quit" errorp t)))
+               (push (list input output errorp) jetpacs-hub--eval-history)
+               (setq jetpacs-hub--eval-history
+                     (seq-take jetpacs-hub--eval-history
+                               jetpacs-hub--eval-history-max))
+               (ignore-errors (jetpacs-shell-push "hub")))))
+          'accepted)))
     :any-surface t))
 
 ;;;; Connection

@@ -252,7 +252,7 @@ a swept token is a plain miss the handler answers as `stale'."
                                               :set "s" :owner "gone")))
            (theirs (car (jetpacs-org-ref-tokens (list ref)
                                                 :set "s" :owner "stays"))))
-      (jetpacs-org--on-teardown "gone")
+      (jetpacs-org-teardown-owner "gone")
       (should-not (jetpacs-org-token-ref mine :owner "gone"))
       (should (jetpacs-org-token-ref theirs :owner "stays")))))
 
@@ -608,7 +608,7 @@ generation exactly as they were."
       (should (equal (jetpacs-org-token-ref old :owner "ja4") ref))
       (should (= (hash-table-count jetpacs-org--tokens) 1))
       ;; And teardown still reaches everything.
-      (jetpacs-org--on-teardown "ja4")
+      (jetpacs-org-teardown-owner "ja4")
       (should (= (hash-table-count jetpacs-org--tokens) 0))
       (should-not (jetpacs-org-token-ref old :owner "ja4")))))
 

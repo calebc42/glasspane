@@ -624,8 +624,17 @@ working, with nothing in any log to say so.  So it signals instead."
       (when (and entry (equal (plist-get entry :owner) owner))
         (plist-get entry :ref)))))
 
-(defun jetpacs-org--on-teardown (owner)
-  "Sweep OWNER's token sets with its registration (live-reload hygiene)."
+(defun jetpacs-org-teardown-owner (owner)
+  "Sweep OWNER's token sets with its registration (live-reload hygiene).
+PUBLIC, and named for what it does rather than for when it happens: any
+scope owner may drop its own tokens by calling this, and the sweep is
+the token table's business alone — it reads no floor state and answers
+to the same opaque scope key the mint took.
+WHO CALLS IT is the caller's business, not this function's.  today the
+only caller is the `jetpacs-teardown-functions' registration below, in
+this same file; that add-hook and its remove-hook in the unload
+function are one pair and move together to the shim at G7, leaving the
+sweep behind with the engine."
   (let (dead)
     (maphash (lambda (key _tokens)
                (when (equal (car key) owner) (push key dead)))
@@ -635,7 +644,7 @@ working, with nothing in any log to say so.  So it signals instead."
         (remhash token jetpacs-org--tokens))
       (remhash key jetpacs-org--token-sets))))
 
-(add-hook 'jetpacs-teardown-functions #'jetpacs-org--on-teardown)
+(add-hook 'jetpacs-teardown-functions #'jetpacs-org-teardown-owner)
 
 ;;;; Mutations
 
@@ -1788,7 +1797,7 @@ target from a record."
 
 (defun jetpacs-org-unload-function ()
   "Unload hygiene."
-  (remove-hook 'jetpacs-teardown-functions #'jetpacs-org--on-teardown)
+  (remove-hook 'jetpacs-teardown-functions #'jetpacs-org-teardown-owner)
   (jetpacs-org-reset)
   nil)
 

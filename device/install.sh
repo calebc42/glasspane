@@ -6,9 +6,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 adb shell mkdir -p /sdcard/Documents/jetpacs
 # emacs/apps/<app>/*.el is FLATTENED into the same directory: the device
-# load-path is one directory (device/init.el), and every module already
-# carries a globally unique `jetpacs-' file name, so the subdirectory is
-# a repo-side grouping only.
+# load-path is one directory (device/init.el), and every module's file
+# name is already globally unique across the whole tree -- `jetpacs-' for
+# the application layer, `ebp-' for the wire-and-Emacs layer -- so the
+# subdirectory is a repo-side grouping only.
 for f in emacs/*.el emacs/apps/*/*.el device/init.el; do
   adb push "$f" /sdcard/Documents/jetpacs/ >/dev/null
 done

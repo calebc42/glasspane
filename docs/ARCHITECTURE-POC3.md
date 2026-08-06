@@ -17,6 +17,25 @@ implementation. `:wire` retains transport, framing, and protocol code and
 depends on `:ebp-kmp`. Neither module may depend on Jetpacs packages, Room,
 Navigation, Compose, Android, or Jetpacs cache policy.
 
+The same boundary governs the elisp tree, and there it is carried by the file
+and symbol prefix. The rule is ratified (bed8ef4, `refactor(complete):
+ebp-complete - the capf bridge is wire and Emacs only`):
+
+> `jetpacs-` names what cannot exist without Kotlin, Android, and Compose;
+> `ebp-` names what only ever touches the wire and Emacs.
+
+The boundary test for a module is its contract, not its subject matter: a
+contract phrased in the node/surface vocabulary is Compose-shaped and takes
+`jetpacs-`; a contract phrased in wire methods and Emacs state takes `ebp-`.
+The prefix is an enforced claim rather than a label. An `ebp-` file must load
+alone in a bare `emacs -Q --batch` with only this tree on the load path, and
+its require closure must be vanilla Emacs plus other `ebp-` files — no Jetpacs
+feature, and nothing Jetpacs-flavored left behind: no function, variable, face,
+error condition, group documentation, or `:group 'jetpacs` parent link. The
+delineation guard in `test/run-tests.sh` proves exactly that, one process per
+file, over the `emacs/ebp*.el` glob rather than a hand-kept list, so a file
+making the claim is guarded the day it lands.
+
 Jetpacs is one implementation of EBP. The long-term product target is the
 Compose Catalog authored in Emacs/Elisp and transferred as EBP documents. The
 Android app is a dumb renderer: it selects a document from Jetpacs' durable Room

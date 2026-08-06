@@ -102,26 +102,47 @@
 ;; derives from comint-mode, so the comint skin's pinned input row is
 ;; the REPL.
 
-(defun jetpacs-hub--drawer ()
-  ;; The drawer IA (owner decision 2026-08-06, pass 2): Settings hoisted
-  ;; first with Customize/Theme/Packages nested under it, then a single
-  ;; Apps row opening the combined view (an App = a Tier 1 elisp package
-  ;; built ON jetpacs — platform surfaces are not apps), then everyday
-  ;; destinations with no other affordance.  lazy_column: a plain column
-  ;; cannot scroll past the fold.
-  (jetpacs-lazy-column
-   (jetpacs-settings-drawer-entry)
-   (jetpacs-apps-drawer-row)
-   (jetpacs-divider)
-   ;; No Org row: org activates like a major mode does — when the user
-   ;; opens an org FILE (the render skin is registered; a .org tapped in
-   ;; Files opens rendered).  Files itself lives in the nav-bar dock,
-   ;; never the drawer (owner decisions 2026-08-06, pass 3).
+(defun jetpacs-hub--tools-entry ()
+  "The drawer's Tools nest: the everyday utilities under one header —
+Clipboard, the Messages log, and the buffer switcher."
+  (jetpacs-collapsible
+   "drawer-tools"
+   ;; A plain row: the header line is the expand target.
+   (jetpacs-row
+    (jetpacs-icon "build")
+    (jetpacs-with-attrs
+     (jetpacs-column (jetpacs-text "Tools")
+                     (jetpacs-text "Clipboard, logs, buffers"
+                                   :style "caption")
+                     :spacing 2)
+     :weight 1))
    (jetpacs-chrome-row
     "Clipboard" :subtitle "the kill ring" :icon "content_paste"
     :on-tap (jetpacs-action "jetpacs.launcher.open"
                             :args '(:surface "app:jetpacs.clip"))
-    :key "drawer-clip")
+    :key "drawer-tools-clip")
+   (jetpacs-chrome-row
+    "Messages" :subtitle "the Emacs log" :icon "description"
+    :on-tap (jetpacs-action "hub.open" :args '(:buffer "*Messages*"))
+    :key "drawer-tools-messages")
+   (jetpacs-chrome-row
+    "Buffers" :subtitle "every live buffer" :icon "view_list"
+    :on-tap (jetpacs-action "jetpacs.emacs.buffers")
+    :key "drawer-tools-buffers")
+   :collapsed t))
+
+(defun jetpacs-hub--drawer ()
+  ;; The drawer IA (owner decisions 2026-08-06, pass 4): Apps first,
+  ;; then the Tools nest, then — below the divider, settings-last like
+  ;; every Android app — the Settings nest.  An App = a Tier 1 elisp
+  ;; package built ON jetpacs; org activates like a major mode (on file
+  ;; open, never a destination); Files lives in the nav-bar dock only.
+  ;; lazy_column: a plain column cannot scroll past the fold.
+  (jetpacs-lazy-column
+   (jetpacs-apps-drawer-row)
+   (jetpacs-hub--tools-entry)
+   (jetpacs-divider)
+   (jetpacs-settings-drawer-entry)
    :spacing 8))
 
 ;; The Eval screen is the *ielm* drill on the hub stack; the B5 minter

@@ -3,22 +3,49 @@
 set -e
 cd "$(dirname "$0")/.."
 
-# Delineation guard (REWRITE-PLAN "The ebp.el boundary"): ebp.el loads
-# alone and defines nothing jetpacs-flavored.
-emacs -Q --batch -L emacs --eval '
+# Delineation guard (REWRITE-PLAN "The ebp.el boundary", widened by the
+# ratified naming rule of 2026-08-06): EVERY ebp file loads alone, in a
+# process of its own, and defines nothing jetpacs-flavored.  The offender
+# predicate covers functions, variables, faces, error conditions, group
+# documentation, custom-group parent links (what a stray `:group (quote
+# jetpacs)' actually leaves behind) and loaded features — a prefix is a
+# claim about the require closure, not a spelling convention.
+#
+# A GLOB, not a name list, for the reason the byte-compile loop below
+# (:58-66) records from the other direction: its predecessor was a
+# hand-kept 16-name list that silently omitted jetpacs-modus.el, so
+# "unguarded" was the default for anything added later.  Coverage here is
+# derived from emacs/ebp*.el and the count is asserted, so a new ebp file
+# is guarded the day it lands and a glob that matches nothing cannot pass
+# by saying nothing.
+ebp_guard_count=0
+for f in emacs/ebp*.el; do
+  EBP_GUARD_FEATURE="$(basename "$f" .el)" \
+  emacs -Q --batch -L emacs --eval '
 (progn
-  (require (quote ebp))
+  (require (intern (getenv "EBP_GUARD_FEATURE")))
   (let (offenders)
     (mapatoms
      (lambda (sym)
        (when (and (string-prefix-p "jetpacs" (symbol-name sym))
-                  (or (fboundp sym) (boundp sym)))
+                  (or (fboundp sym) (boundp sym) (facep sym)
+                      (get sym (quote error-conditions))
+                      (get sym (quote group-documentation))
+                      (get sym (quote custom-group))
+                      (memq sym features)))
          (push sym offenders))))
     (when offenders
-      (message "delineation guard: jetpacs symbols after loading ebp.el: %S"
-               offenders)
+      (message "delineation guard: jetpacs symbols after loading %s.el: %S"
+               (getenv "EBP_GUARD_FEATURE") offenders)
       (kill-emacs 1))
-    (message "delineation guard: ebp.el loads alone, no jetpacs symbols")))'
+    (message "delineation guard: %s.el loads alone, no jetpacs symbols"
+             (getenv "EBP_GUARD_FEATURE"))))'
+  ebp_guard_count=$((ebp_guard_count + 1))
+done
+if [ "$ebp_guard_count" -lt 5 ]; then
+  echo "delineation guard: emacs/ebp*.el matched $ebp_guard_count files, expected at least 5" >&2
+  exit 1
+fi
 
 # Byte-compile guard: free-variable and undefined-function warnings are
 # treated as errors (catches unescaped-quote docstrings and typos before

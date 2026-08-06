@@ -1087,6 +1087,8 @@ required surface pushes ahead of replay."
           (error (message "jetpacs: reconnect push of %s failed: %s"
                           surface (jetpacs-error-label err))))))))
 
+(add-hook 'jetpacs-before-replay-functions #'jetpacs-shell--before-replay)
+
 ;;;; view.switched (SPEC 14.2 / 24.2)
 
 (defvar jetpacs-shell-view-change-functions nil

@@ -981,12 +981,14 @@ outrun by it just as surely as by a later snapshot."
 Ordering is the point: `queue.replay' (step 4) delivers retained
 `event.action' requests while the session is still SYNCING, so
 everything a replayed handler consults must be in place before this
-function returns — the applied-revision seed first, then the shell's
-tombstone flush and required-root pushes when `jetpacs-shell' is
-loaded."
+function returns — the applied-revision seed first, then
+`jetpacs-before-replay-functions'.
+
+The seed is hard-coded and FIRST by structure, not by depth: it is
+kernel state the hook members read, so no member may be able to sort
+ahead of it."
   (jetpacs--seed-applied-revisions client)
-  (when (fboundp 'jetpacs-shell--before-replay)
-    (jetpacs-shell--before-replay client)))
+  (jetpacs-run-isolated 'jetpacs-before-replay-functions client))
 
 (defun jetpacs-event-stale-p (params)
   "Non-nil when PARAMS' event was created against an outdated snapshot.
@@ -1202,6 +1204,22 @@ handles the buffer-local `t' marker a bare dolist would funcall."
                              hook (jetpacs-error-label err))))
            nil)
          args))
+
+(defvar jetpacs-before-replay-functions nil
+  "Abnormal hook run with (CLIENT) before `queue.replay' is requested.
+The SPEC 10.3 step-3 attachment point: everything a replayed
+`event.action' handler will consult must be in place before the drain
+returns, because step 4 delivers those events while the session is
+still SYNCING.  Drained by `jetpacs--before-replay', after it seeds the
+applied revisions.  Lives on the floor (not the shell) so subscribers
+need no shell edge; arity FIXED at (CLIENT), same reasoning as
+`jetpacs-ready-functions'.
+
+Members run ISOLATED, and that is a fix, not a nicety:
+`ebp-client--on-welcome' calls the seam BARE, so a signal escaping a
+member skipped the `queue.replay' request entirely and left the session
+in SYNCING forever — no replay, no READY, no recovery short of a
+reconnect.")
 
 (defvar jetpacs-ready-functions nil
   "Abnormal hook run with (CLIENT) when a session reaches READY.

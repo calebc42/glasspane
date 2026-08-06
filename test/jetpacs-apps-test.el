@@ -108,6 +108,8 @@
                     (when (and (equal (plist-get n :t) "text")
                                (equal (plist-get n :style) "label"))
                       (push (plist-get n :text) labels))
+                    ;; The view is a scaffold now: descend :body too.
+                    (when-let* ((body (plist-get n :body))) (walk body))
                     (mapc #'walk (append (plist-get n :children) nil))))
         (walk (jetpacs-apps--view)))
       (should (equal (nreverse labels) '("Alpha" "Zeta"))))))

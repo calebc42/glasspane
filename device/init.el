@@ -78,7 +78,10 @@
 ;; the REPL.
 
 (defun jetpacs-hub--drawer ()
-  (apply #'jetpacs-column
+  ;; lazy_column: nine launcher rows plus Theme outgrew the fold on the
+  ;; tablet, and a plain column cannot scroll (the P3 smoke found
+  ;; jetpacs.sql and Theme unreachable).
+  (apply #'jetpacs-lazy-column
          (append
           (list (jetpacs-text "Apps" :style "title"))
           (jetpacs-launcher-rows "app:hub")

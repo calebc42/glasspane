@@ -300,10 +300,12 @@ owner for the app-identity layer to filter once it exists."
    (mapcar (lambda (e) (funcall (cadr e))) jetpacs-settings-links)))
 
 (defun jetpacs-settings--view ()
-  "The settings root surface document."
-  (apply #'jetpacs-column
-         (cons (jetpacs-text "Settings" :style "title")
-               (jetpacs-settings-sections))))
+  "The settings root: a scaffold, so chrome docks the view switcher."
+  (jetpacs-scaffold
+   :body
+   (apply #'jetpacs-lazy-column
+          (cons (jetpacs-text "Settings" :style "title")
+                (jetpacs-settings-sections)))))
 
 (defun jetpacs-settings-refresh ()
   "Re-push the settings surface (deferred; safe from dispatch)."

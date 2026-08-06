@@ -249,8 +249,11 @@ around the interactive drives so no stale event hijacks a prompt."
               roots))))
 
 (defun jetpacs-project--view ()
-  (apply #'jetpacs-lazy-column
-         (cons
+  ;; A scaffold so chrome docks the view switcher.
+  (jetpacs-scaffold
+   :body
+   (apply #'jetpacs-lazy-column
+          (cons
           (jetpacs-row
            (unless (eq jetpacs-project--screen 'dashboard)
              (jetpacs-icon-button "arrow_back"
@@ -262,10 +265,10 @@ around the interactive drives so no stale event hijacks a prompt."
                            ('switch "Switch project")
                            (_ "Project"))
                          :style "title"))
-          (pcase jetpacs-project--screen
-            ('find (jetpacs-project--find-nodes))
-            ('switch (jetpacs-project--switch-nodes))
-            (_ (jetpacs-project--dashboard-nodes))))))
+           (pcase jetpacs-project--screen
+             ('find (jetpacs-project--find-nodes))
+             ('switch (jetpacs-project--switch-nodes))
+             (_ (jetpacs-project--dashboard-nodes)))))))
 
 ;;;; Actions
 

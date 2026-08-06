@@ -140,14 +140,17 @@ single-app contract."
                              :when-offline "drop"))))
 
 (defun jetpacs-apps--view ()
-  (apply #'jetpacs-lazy-column
-         (cons (jetpacs-text "Apps" :style "title")
-               (if (null jetpacs-apps--registry)
-                   (list (jetpacs-empty-state
-                          :icon "apps" :title "No apps registered"
-                          :caption
-                          "Apps appear here as their bundles load."))
-                 (mapcar #'jetpacs-apps--card jetpacs-apps--registry)))))
+  ;; A scaffold so chrome docks the view switcher.
+  (jetpacs-scaffold
+   :body
+   (apply #'jetpacs-lazy-column
+          (cons (jetpacs-text "Apps" :style "title")
+                (if (null jetpacs-apps--registry)
+                    (list (jetpacs-empty-state
+                           :icon "apps" :title "No apps registered"
+                           :caption
+                           "Apps appear here as their bundles load."))
+                  (mapcar #'jetpacs-apps--card jetpacs-apps--registry))))))
 
 ;;;; Actions
 

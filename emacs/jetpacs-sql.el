@@ -119,8 +119,11 @@
             (mapcar #'jetpacs-sql--product-card products)))))
 
 (defun jetpacs-sql--view ()
-  (apply #'jetpacs-lazy-column
-         (cons
+  ;; A scaffold so chrome docks the view switcher.
+  (jetpacs-scaffold
+   :body
+   (apply #'jetpacs-lazy-column
+          (cons
           (jetpacs-row
            (unless (eq jetpacs-sql--screen 'hub)
              (jetpacs-icon-button "arrow_back"
@@ -140,7 +143,7 @@
                                        "Start a REPL for a database product"
                                        (jetpacs-action
                                         "sql.new-screen"
-                                        :when-offline "drop"))))))))
+                                        :when-offline "drop")))))))))
 
 (defun jetpacs-sql--refresh ()
   (jetpacs-flow-continue

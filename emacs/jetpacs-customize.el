@@ -214,9 +214,12 @@ the documented cost of not enumerating every defcustom up front.")
        (jetpacs-customize--cap-note total "variables")))))
 
 (defun jetpacs-customize--view ()
-  ;; lazy_column, not column: a plain column taller than the screen is
-  ;; unreachable below the fold.
-  (apply #'jetpacs-lazy-column
+  ;; A scaffold so chrome docks the view switcher; lazy_column, not
+  ;; column: a plain column taller than the screen is unreachable
+  ;; below the fold.
+  (jetpacs-scaffold
+   :body
+   (apply #'jetpacs-lazy-column
          (append
           (list
            (jetpacs-row
@@ -246,7 +249,7 @@ the documented cost of not enumerating every defcustom up front.")
                                                   :when-offline "drop"))))
           (if (jetpacs-customize--flat-p)
               (jetpacs-customize--flat-nodes)
-            (jetpacs-customize--group-nodes)))))
+            (jetpacs-customize--group-nodes))))))
 
 (defun jetpacs-customize--refresh ()
   "Re-push the browser surface (deferred; safe from dispatch)."

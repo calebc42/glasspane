@@ -391,7 +391,12 @@ together, on every rebuild."
                              n))
                        (error (setq fail err) nil))))
           (unless (or fail (jetpacs--root-node-p node))
-            (setq fail 'wrong-type-argument))
+            (setq fail 'wrong-type-argument)
+            ;; A non-node RETURN synthesizes its failure — no signal, no
+            ;; builder stack — so the seam is told directly; the bare
+            ;; symbol is the whole story there is to keep.
+            (jetpacs-shell--note-builder-error
+             (list :surface surface :screen id) fail))
           (when fail
             ;; The dead screen SPENT budget it never ships; hand it back,
             ;; or one broken screen silently truncates the healthy ones

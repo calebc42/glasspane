@@ -54,10 +54,13 @@ generation sweep.")
   "Normal hook run before a cache-bypassing push; drop memo caches here.")
 
 (defvar jetpacs-shell-builder-error-functions nil
-  "Abnormal hook: (CONTEXT ERR) for a builder or gate signal, pre-unwind.
-Fired from HANDLER-BIND context — the stack is still standing, so a
-member can take a real backtrace — by the chrome per-screen catch, the
-surface build catch, and the push gates.  CONTEXT is a plist with
+  "Abnormal hook: (CONTEXT ERR) for a builder or gate failure, pre-unwind.
+Signal sites fire it from HANDLER-BIND context — the stack is still
+standing, so a member can take a real backtrace: the chrome per-screen
+catch, the surface build catch, the stale-builder call, and every push
+gate (GATE 2 included).  Chrome's synthesized non-node failure fires
+it too, with the bare symbol `wrong-type-argument' as ERR — no signal
+exists there, so no backtrace does either.  CONTEXT is a plist with
 :surface, plus :screen / :phase where the site knows them.  Members
 run isolated (`jetpacs-shell--run-isolated'): the loud path stays
 exactly as it was — scrubbed per SPEC 23.3 — whatever a member does.
@@ -858,36 +861,44 @@ a queued `jetpacs-shell-notify' snackbar is requeued for the next push."
                    (stale-spec
                     (or stale-spec
                         (when-let* ((fn (plist-get entry :stale-builder)))
-                          (funcall fn))))
+                          ;; A builder like any other: the seam sees its
+                          ;; crash with the stack standing.
+                          (handler-bind
+                              ((error (lambda (e)
+                                        (jetpacs-shell--note-builder-error
+                                         (list :surface surface) e))))
+                            (funcall fn)))))
                    (stale-after-s (or stale-after-s
                                       (plist-get entry :stale-after-s))))
-              ;; GATE 2 first half: stale_spec discipline (SPEC 13.5).
-              (when stale-spec
-                (unless (eq (not (plist-member spec :views))
-                            (not (plist-member stale-spec :views)))
-                  (error "jetpacs: stale_spec must be the same variant \
-as spec (SPEC 13.4/13.5)"))
-                (setq stale-spec
-                      (jetpacs-shell--validate-stripped
-                       stale-spec
-                       (jetpacs-shell--strip-stateful stale-spec))))
-              ;; GATE 2 second half: `current_view' is valid ONLY for a
-              ;; multi-view `app:*' spec (SPEC 13.4), and must name a view
-              ;; that exists — a stale name is content-invalid.
-              (unless (and (plist-member spec :views)
-                           (eq (jetpacs-shell--surface-target surface) :app))
-                (setq current-view nil))
-              (when current-view
-                (unless (gethash current-view (plist-get spec :views))
-                  (error "jetpacs: current_view %S names no view in this \
-spec (SPEC 13.4)" current-view)))
-              ;; GATE 1, GATE 3, GATE 4.  The recorder seam sees a gate
-              ;; failure with its stack; the signal continues to the
-              ;; caller unchanged (the sender MUSTs stay loud).
+              ;; The gates, in check order — ALL of them under the
+              ;; recorder seam, GATE 2 included; the signal continues to
+              ;; the caller unchanged (the sender MUSTs stay loud).
               (handler-bind ((error (lambda (e)
                                       (jetpacs-shell--note-builder-error
                                        (list :surface surface :phase 'gate)
                                        e))))
+                ;; GATE 2 first half: stale_spec discipline (SPEC 13.5).
+                (when stale-spec
+                  (unless (eq (not (plist-member spec :views))
+                              (not (plist-member stale-spec :views)))
+                    (error "jetpacs: stale_spec must be the same variant \
+as spec (SPEC 13.4/13.5)"))
+                  (setq stale-spec
+                        (jetpacs-shell--validate-stripped
+                         stale-spec
+                         (jetpacs-shell--strip-stateful stale-spec))))
+                ;; GATE 2 second half: `current_view' is valid ONLY for a
+                ;; multi-view `app:*' spec (SPEC 13.4), and must name a
+                ;; view that exists — a stale name is content-invalid.
+                (unless (and (plist-member spec :views)
+                             (eq (jetpacs-shell--surface-target surface)
+                                 :app))
+                  (setq current-view nil))
+                (when current-view
+                  (unless (gethash current-view (plist-get spec :views))
+                    (error "jetpacs: current_view %S names no view in this \
+spec (SPEC 13.4)" current-view)))
+                ;; GATE 1, GATE 3, GATE 4.
                 (jetpacs-shell--gate-spec client surface spec stale-spec)
                 (jetpacs-shell--gate-capability client surface)
                 (jetpacs-shell--gate-amendments client spec)

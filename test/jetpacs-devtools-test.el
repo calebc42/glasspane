@@ -161,19 +161,117 @@ it carries the error SYMBOL, never the datum (SPEC 23.3)."
 (ert-deftest jetpacs-devtools-profiler-times-and-keeps-spec ()
   (jetpacs-devtools-test--with (jetpacs-devtools-test--client)
     (jetpacs-devtools-test--recording recs
+      (let ((jetpacs-devtools-recording t))
+        (jetpacs-devtools-test--define-root "devt")
+        ;; Defining only registers; the build the profiler times happens
+        ;; on a push.
+        (jetpacs-chrome-push-screen
+         "devt" "detail"
+         (lambda (back) (jetpacs-chrome-screen "Detail" (jetpacs-text "d")
+                                               :back back)))
+        (should recs)
+        (let ((rec (gethash "app:devt" jetpacs-devtools--builds)))
+          (should rec)
+          (should (>= (plist-get rec :count) 1))
+          (should (numberp (plist-get rec :last-ms))))
+        ;; The spec is payload: retained because recording is ON here.
+        (should (jetpacs-devtools-last-spec "app:devt"))))))
+
+(ert-deftest jetpacs-devtools-spec-retention-rides-the-developer-setting ()
+  "Payload retention is recorder-gated: with recording off, timings land
+but the built spec is NOT kept (SPEC 23.3 — a spec embeds payload)."
+  (jetpacs-devtools-test--with (jetpacs-devtools-test--client)
+    (jetpacs-devtools-test--recording recs
       (jetpacs-devtools-test--define-root "devt")
-      ;; Defining only registers; the build the profiler times happens
-      ;; on a push.
       (jetpacs-chrome-push-screen
        "devt" "detail"
        (lambda (back) (jetpacs-chrome-screen "Detail" (jetpacs-text "d")
                                              :back back)))
       (should recs)
-      (let ((rec (gethash "app:devt" jetpacs-devtools--builds)))
-        (should rec)
-        (should (>= (plist-get rec :count) 1))
-        (should (numberp (plist-get rec :last-ms))))
-      (should (jetpacs-devtools-last-spec "app:devt")))))
+      (should (gethash "app:devt" jetpacs-devtools--builds))
+      (should-not (jetpacs-devtools-last-spec "app:devt")))))
+
+(ert-deftest jetpacs-devtools-shell-build-failure-recorded ()
+  "The surface build catch fires the seam: a plain define-root builder
+crash (notification/widget/non-chrome surfaces reach ONLY this seam)
+records with :phase build."
+  (let ((jetpacs-devtools-recording t)
+        (jetpacs-devtools--records nil)
+        (jetpacs-devtools--specs (make-hash-table :test 'equal)))
+    (jetpacs-shell--build
+     "app:plain" (list :builder (lambda () (error "boom: %s" "shell-datum"))))
+    (let ((rec (car jetpacs-devtools--records)))
+      (should rec)
+      (should (equal (plist-get rec :surface) "app:plain"))
+      (should (eq (plist-get rec :phase) 'build))
+      (should (string-match-p "shell-datum" (plist-get rec :message)))
+      (should (> (length (plist-get rec :backtrace)) 0)))))
+
+(ert-deftest jetpacs-devtools-non-node-screen-recorded ()
+  "A builder that RETURNS a non-node never signals; the chrome catch
+synthesizes the failure and must still tell the seam."
+  (jetpacs-devtools-test--with (jetpacs-devtools-test--client)
+    (jetpacs-devtools-test--recording recs
+      (let ((jetpacs-devtools-recording t))
+        (jetpacs-devtools-test--define-root "devt")
+        (jetpacs-chrome-push-screen "devt" "nilscreen" (lambda (_back) nil))
+        (should recs)
+        (let ((rec (car jetpacs-devtools--records)))
+          (should rec)
+          (should (equal (plist-get rec :screen) "nilscreen"))
+          (should (eq (plist-get rec :symbol) 'wrong-type-argument))
+          ;; No signal happened — a backtrace here would show the catch
+          ;; site, not the builder, so none is kept.
+          (should (string-empty-p (plist-get rec :backtrace))))))))
+
+(ert-deftest jetpacs-devtools-gate2-failure-recorded ()
+  "GATE 2 is a push gate like the others: a current_view naming no view
+signals out AND records with :phase gate."
+  (jetpacs-devtools-test--with (jetpacs-devtools-test--client)
+    (jetpacs-devtools-test--recording recs
+      (let ((jetpacs-devtools-recording t))
+        (should-error
+         (jetpacs-shell-push
+          "app:devt"
+          :spec (jetpacs-multi-view (list (cons "home" (jetpacs-text "h")))
+                                    "home")
+          :current-view "gone"))
+        (let ((rec (car jetpacs-devtools--records)))
+          (should rec)
+          (should (eq (plist-get rec :phase) 'gate)))))))
+
+(ert-deftest jetpacs-devtools-settings-path-off-clears ()
+  "The Companion Settings toggle goes through the defcustom's :set —
+turning recording off by THAT door must clear retention too."
+  (let ((jetpacs-devtools--records nil)
+        (jetpacs-devtools--specs (make-hash-table :test 'equal)))
+    (unwind-protect
+        (progn
+          (funcall (get 'jetpacs-devtools-recording 'custom-set)
+                   'jetpacs-devtools-recording t)
+          (jetpacs-devtools--record-failure '(:surface "s") '(error "x"))
+          (puthash "app:s" (jetpacs-text "payload") jetpacs-devtools--specs)
+          (should jetpacs-devtools--records)
+          (funcall (get 'jetpacs-devtools-recording 'custom-set)
+                   'jetpacs-devtools-recording nil)
+          (should-not jetpacs-devtools--records)
+          (should (zerop (hash-table-count jetpacs-devtools--specs))))
+      (set-default 'jetpacs-devtools-recording nil)
+      (jetpacs-devtools-reset))))
+
+(ert-deftest jetpacs-devtools-storm-history-scales-to-threshold ()
+  "A threshold above the old 64-entry cap can still trip: the history
+sizes itself to the threshold."
+  (let ((jetpacs-devtools--pushes (make-hash-table :test 'equal))
+        (jetpacs-devtools--push-times nil)
+        (jetpacs-devtools-storm-threshold 100)
+        (jetpacs-devtools--storm-warned-at 0)
+        (warned nil))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (&rest _) (setq warned t))))
+      (dotimes (_ 120) (jetpacs-devtools--note-push "app:x" (jetpacs-text "h")))
+      (should (>= (length jetpacs-devtools--push-times) 100))
+      (should warned))))
 
 (ert-deftest jetpacs-devtools-note-push-tallies-and-sizes ()
   (let ((jetpacs-devtools--pushes (make-hash-table :test 'equal))

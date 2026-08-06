@@ -9,11 +9,13 @@
 ;; grown a flight recorder.  Two halves, separately switched:
 ;;
 ;; PROFILER (`jetpacs-devtools-profile', on by default) — per-surface
-;; builder wall clock, the last spec each surface pushed (a reference,
-;; not a copy), outbound push counts and serialized sizes, and the
-;; push-storm tripwire for the builder-that-retriggers-itself class of
-;; bug.  Timing and size metadata carry no payload, so SPEC 23.3 does
-;; not constrain this half; the cost is a few float ops per push.
+;; builder wall clock, outbound push counts and serialized sizes, and
+;; the push-storm tripwire for the builder-that-retriggers-itself
+;; class of bug.  Timings, counts, and sizes are metadata, so SPEC
+;; 23.3 does not constrain them — but sizing is not free: each push is
+;; serialized once more to measure it (the GATE 5 measure), single-
+;; digit milliseconds at typical spec sizes and tens of milliseconds
+;; near the frame budget.  Disable the profile if that matters.
 ;;
 ;; FLIGHT RECORDER (`jetpacs-devtools-recording', OFF by default) —
 ;; the home the scrubbed error path never had.  SPEC 23.3 makes every
@@ -24,7 +26,12 @@
 ;; `jetpacs-shell-builder-error-functions' seam, which fires from
 ;; HANDLER-BIND context — the stack is still standing — so it can keep
 ;; what the label drops: the full condition, a real backtrace, and the
-;; failing screen's identity, as inspectable Lisp data.
+;; failing screen's identity, as inspectable Lisp data.  The last spec
+;; each surface built rides the same setting: a spec EMBEDS payload
+;; (the clip view renders the kill ring, buffer drills render buffer
+;; text), so retaining one is payload capture, not metadata — it is
+;; kept only while the recorder is on, and dropped with the records
+;; when it turns off.
 ;;
 ;; The recorder is §23.3's "explicit developer setting" made literal:
 ;; detailed payload capture is legal ONLY behind such a setting, and
@@ -50,23 +57,31 @@
   :group 'jetpacs)
 
 (defcustom jetpacs-devtools-profile t
-  "When non-nil, record builder timings, push sizes, and last specs.
-Metadata only — no payload, so SPEC 23.3 leaves this half
-unconstrained.  Disable only if a profiler fingers the recorder
-itself."
+  "When non-nil, record builder timings, push counts, and push sizes.
+Metadata only — no payload, so SPEC 23.3 leaves it unconstrained.
+Sizing serializes each pushed spec once more (see the Commentary for
+the real cost); disable if a profiler fingers the recorder itself."
   :type 'boolean :group 'jetpacs-devtools)
 
 (defcustom jetpacs-devtools-recording nil
-  "When non-nil, keep full detail for every builder and gate failure.
+  "When non-nil, keep full detail for builder and gate failures.
 This is the SPEC 23.3 \"explicit developer setting\": while enabled,
 the flight recorder retains each failure's condition object,
 `error-message-string' (which may embed the offending datum), a
-backtrace, and the failing surface/screen — locally, in bounded
-storage, never on the wire and never in a log.  OFF by default, as
-23.3 requires.  Toggle with `jetpacs-devtools-toggle-recording' (which
-also clears the records on the way off) or from the device Settings
-screen."
-  :type 'boolean :group 'jetpacs-devtools)
+backtrace, the failing surface/screen, and each surface's last built
+spec — locally, in bounded storage, never on the wire and never in a
+log.  OFF by default, as 23.3 requires.  Turning it off — by any
+path: `jetpacs-devtools-toggle-recording', the device Settings
+screen, or `setopt' — clears everything it retained; the :set below
+is what makes the Settings path keep that promise."
+  :type 'boolean :group 'jetpacs-devtools
+  :set (lambda (sym val)
+         (set-default sym val)
+         (unless val
+           (when (boundp 'jetpacs-devtools--records)
+             (setq jetpacs-devtools--records nil))
+           (when (boundp 'jetpacs-devtools--specs)
+             (clrhash jetpacs-devtools--specs)))))
 
 (defcustom jetpacs-devtools-record-limit 32
   "Most failure records kept; older entries fall off (SPEC 23.3 size bound)."
@@ -82,7 +97,8 @@ Old entries are dropped whenever a record lands or the report renders."
 that trigger the push-storm warning.  A settled app pushes on user
 action and data change; a builder that re-triggers every build pushes
 continuously — the storm warning is the tripwire for that class of
-bug."
+bug.  The push history sizes itself to this threshold, so any value
+can trip."
   :type 'natnum :group 'jetpacs-devtools)
 
 (defcustom jetpacs-devtools-storm-window 10
@@ -98,13 +114,17 @@ bug."
   "Surface -> plist (:last-ms N :max-ms N :count N :at TIME).")
 
 (defvar jetpacs-devtools--specs (make-hash-table :test 'equal)
-  "Surface -> the spec its builder last produced (a reference, not a copy).")
+  "Surface -> the spec its builder last produced (a reference, not a copy).
+Payload, not metadata: filled only while `jetpacs-devtools-recording'
+is on, cleared when it turns off.")
 
 (defvar jetpacs-devtools--pushes (make-hash-table :test 'equal)
   "Surface -> plist (:last-bytes N-or-nil :count N :at TIME).")
 
 (defvar jetpacs-devtools--push-times nil
-  "Recent push times (floats), newest first, capped at 63.")
+  "Recent push times (floats), newest first.
+Capped at (max 64 `jetpacs-devtools-storm-threshold') entries, so the
+storm check always has enough history to reach its threshold.")
 
 (defvar jetpacs-devtools--storm-warned-at 0
   "Last storm warning time, rate-limiting to one per window.")
@@ -140,39 +160,46 @@ developer setting gates the retention)."
                 :message (if (consp err) (error-message-string err)
                            (format "%s" err))
                 :backtrace
-                (let ((bt (ignore-errors
-                            (backtrace-to-string
-                             (backtrace-get-frames
-                              'jetpacs-devtools--record-failure)))))
-                  (if (and bt (> (length bt) jetpacs-devtools--backtrace-max))
-                      (substring bt 0 jetpacs-devtools--backtrace-max)
-                    (or bt ""))))
+                ;; A bare-symbol ERR is a synthesized failure (chrome's
+                ;; non-node check): no signal happened, so the frames
+                ;; here would be the CATCH SITE's loop, not the builder
+                ;; — a misleading trace is worse than none.
+                (if (not (consp err)) ""
+                  (let ((bt (ignore-errors
+                              (backtrace-to-string
+                               (backtrace-get-frames
+                                'jetpacs-devtools--record-failure)))))
+                    (if (and bt (> (length bt)
+                                   jetpacs-devtools--backtrace-max))
+                        (substring bt 0 jetpacs-devtools--backtrace-max)
+                      (or bt "")))))
           jetpacs-devtools--records)
     (jetpacs-devtools--prune-records)))
 
 (defun jetpacs-devtools-toggle-recording ()
-  "Flip the failure recorder; dropping to off clears the records.
-The clear is the 23.3 lifetime bound honored eagerly — disabling the
-developer setting ends the retention it authorized."
+  "Flip the failure recorder; dropping to off clears everything it kept.
+The clear rides the defcustom's :set — the same path the device
+Settings toggle takes — so disabling the developer setting ends the
+retention it authorized no matter which door it goes through."
   (interactive)
-  (setq jetpacs-devtools-recording (not jetpacs-devtools-recording))
-  (unless jetpacs-devtools-recording
-    (setq jetpacs-devtools--records nil))
+  (customize-set-variable 'jetpacs-devtools-recording
+                          (not jetpacs-devtools-recording))
   (message "jetpacs-devtools: failure recording %s"
            (if jetpacs-devtools-recording "ON" "off")))
 
 ;; --- The profiler (advice, zero footprint elsewhere) ------------------------
 
 (defun jetpacs-devtools--time-build (orig surface plist)
-  "Around `jetpacs-shell--build': wall clock + last spec, keyed by SURFACE.
-The build result is retained as a reference — pretty-print it with
-`jetpacs-devtools-last-spec' and `pp'.  Recording failures never
-alters the build: the measurement half is condition-cased away from
-the value path."
+  "Around `jetpacs-shell--build': wall clock, keyed by SURFACE.
+The timing is metadata and rides `jetpacs-devtools-profile'; the
+built spec is PAYLOAD, so its retention (for
+`jetpacs-devtools-last-spec' + `pp') rides the recorder's developer
+setting instead.  Measurement never alters the build: it is
+condition-cased away from the value path."
   (let ((t0 (float-time))
         (spec (funcall orig surface plist)))
-    (when jetpacs-devtools-profile
-      (ignore-errors
+    (ignore-errors
+      (when jetpacs-devtools-profile
         (let ((ms (* 1000 (- (float-time) t0)))
               (rec (gethash surface jetpacs-devtools--builds)))
           (puthash surface (list :last-ms ms
@@ -180,8 +207,9 @@ the value path."
                                                      0.0))
                                  :count (1+ (or (plist-get rec :count) 0))
                                  :at (current-time))
-                   jetpacs-devtools--builds)
-          (puthash surface spec jetpacs-devtools--specs))))
+                   jetpacs-devtools--builds)))
+      (when jetpacs-devtools-recording
+        (puthash surface spec jetpacs-devtools--specs)))
     spec))
 
 (defun jetpacs-devtools--storm-p (times now threshold window)
@@ -207,7 +235,8 @@ gate itself budgets against."
                                :at (current-time))
                  jetpacs-devtools--pushes)
         (push now jetpacs-devtools--push-times)
-        (let ((tail (nthcdr 63 jetpacs-devtools--push-times)))
+        (let ((tail (nthcdr (max 63 (1- jetpacs-devtools-storm-threshold))
+                            jetpacs-devtools--push-times)))
           (when tail (setcdr tail nil)))
         (when (and (jetpacs-devtools--storm-p
                     jetpacs-devtools--push-times now
@@ -235,7 +264,9 @@ gate itself budgets against."
 (defun jetpacs-devtools-last-spec (surface)
   "The spec SURFACE's builder last produced, or nil.
 The raw material for \"what did the Companion actually receive\"
-questions; pretty-print it with `pp'."
+questions; pretty-print it with `pp'.  Retained only while
+`jetpacs-devtools-recording' is on — a spec embeds payload, so it
+lives under the same developer setting as the failure records."
   (gethash surface jetpacs-devtools--specs))
 
 (defun jetpacs-devtools-reset ()
@@ -318,8 +349,8 @@ jetpacs-devtools-toggle-recording)")))
                               (plist-get (cdr row) :last-ms)
                               (plist-get (cdr row) :max-ms)
                               (plist-get (cdr row) :count))))))
-        (insert "\nLast spec per surface: (pp (jetpacs-devtools-last-spec \
-SURFACE))\n"))
+        (insert "\nLast spec per surface (retained while recording is on): \
+(pp (jetpacs-devtools-last-spec SURFACE))\n"))
       (special-mode))
     buf))
 

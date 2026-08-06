@@ -981,6 +981,8 @@ running twice is harmless."
   (cl-pushnew #'jetpacs-m3--on-state-changed
               (ebp-client-state-changed-functions client)))
 
+(add-hook 'jetpacs-ready-functions #'jetpacs-m3--on-ready)
+
 (defun jetpacs-m3-register ()
   "Register the catalog's owner, verbs and root screen.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen

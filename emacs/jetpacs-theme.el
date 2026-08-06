@@ -554,7 +554,7 @@ one `eq' here per `load-theme' and nothing else."
 
 (defun jetpacs-theme--on-ready (_client)
   "Per-client READY hook: paint the chrome for the configured mode.
-Wired by `jetpacs-connect' under `fboundp' — READY fires after the
+On `jetpacs-ready-functions' at depth -50 — READY fires after the
 welcome absorbed the grant set, so the gate inside the send is
 answerable.  SYNCHRONOUS, not debounced: the debounce exists for
 `load-theme''s disable+enable pair, and deferring the FIRST frame was a
@@ -562,6 +562,11 @@ answerable.  SYNCHRONOUS, not debounced: the debounce exists for
 the shell (\"chrome is painted before content arrives\") was not
 actually delivered until this sent inline."
   (jetpacs-theme--send-now))
+
+;; Pinned EARLY: the palette frame must precede the shell's content
+;; drain, or the first screen paints in the wrong palette for 0.2 s.
+;; The pair's other end is the shell drain at depth 90.
+(add-hook 'jetpacs-ready-functions #'jetpacs-theme--on-ready -50)
 
 (defun jetpacs-theme--on-teardown (owner)
   "Cancel the pending debounce when the theme owner is torn down."

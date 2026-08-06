@@ -654,5 +654,7 @@ pins builder closures and answers a later drill with false success."
 
 (add-hook 'jetpacs-teardown-functions #'jetpacs-chrome--on-teardown)
 
+(add-hook 'jetpacs-ready-functions #'jetpacs-chrome--on-ready)
+
 (provide 'jetpacs-chrome)
 ;;; jetpacs-chrome.el ends here

@@ -473,12 +473,15 @@ CONFIG is `ebp-client-create' config; this wrapper owns
 \(`jetpacs--before-replay': the applied-revision seed, then the SPEC
 10.3 step-3 required-root push when `jetpacs-shell' is loaded); a
 caller value for either is shadowed.  Everything else passes through.
-When `jetpacs-shell' is loaded, a ready hook drains the pushes SYNCING
-refused (`jetpacs-shell--on-ready').  Pushed after create, it runs
-AHEAD of the caller's :ready-function — the drained effects predate
-READY, so they belong before whatever the application does there.
-Adding it post-connect is safe: READY needs round trips that cannot
-complete before this function returns.
+The floor's READY bridge (`jetpacs--on-client-ready', which drains
+`jetpacs-ready-functions') is installed on the new client here.  Pushed
+after create — NOT passed as `:ready-function', which
+`ebp-client-create' pushes first — it lands in front and so runs AHEAD
+of the caller's :ready-function.  That is the contract: the palette
+frame and the pushes SYNCING refused predate READY, so they belong
+before whatever the application does there.  Adding it post-connect is
+safe: READY needs round trips that cannot complete before this function
+returns.
 
 When `jetpacs-complete' is loaded and CONFIG carries no
 `:edit-complete-function', the JC-5 buffer harvester
@@ -497,21 +500,21 @@ borrows the slot per prompt either way (it restores whatever it found)."
     (jetpacs-attach client)))
 
 (defun jetpacs--install-ready-hooks (client)
-  "Install the per-client READY hooks the loaded modules provide.
+  "Install the floor's READY bridge on CLIENT.
+One `cl-pushnew' of the named bridge `jetpacs--on-client-ready': every
+module now subscribes to `jetpacs-ready-functions' at load time, so the
+floor no longer names a single module — the ladder it replaces did.
 Named (rather than inline in `jetpacs-connect') so a suite can pin the
 wiring — the audit found both theme wirings deletable with every test
-green.  ready-functions run in list order = reverse push order, so
-theme pushed after shell runs BEFORE the shell drain: chrome is painted
-before content arrives — and `jetpacs-theme--on-ready' sends its first
-frame synchronously, which is what makes that ordering true."
-  (when (fboundp 'jetpacs-shell--on-ready)
-    (push #'jetpacs-shell--on-ready (ebp-client-ready-functions client)))
-  (when (fboundp 'jetpacs-theme--on-ready)
-    (push #'jetpacs-theme--on-ready (ebp-client-ready-functions client)))
-  (when (fboundp 'jetpacs-m3--on-ready)
-    (push #'jetpacs-m3--on-ready (ebp-client-ready-functions client)))
-  (when (fboundp 'jetpacs-chrome--on-ready)
-    (push #'jetpacs-chrome--on-ready (ebp-client-ready-functions client))))
+green; `cl-pushnew' makes a second install idempotent.  Ordering is no
+longer this function's business: it moved to the `add-hook' depths
+(theme at -50, the shell drain at 90).
+
+The attach asymmetry is DELIBERATE.  Installing here — and only from
+`jetpacs-connect' — leaves `jetpacs-attach' alone on purpose: the
+loopback suites attach real clients, and a bridge installed there would
+newly fire theme's SYNCHRONOUS `theme.set' inside every one of them."
+  (cl-pushnew #'jetpacs--on-client-ready (ebp-client-ready-functions client)))
 
 ;;;; Actions (the SPEC 14 shim over `ebp-client-register-action')
 
@@ -1199,6 +1202,34 @@ handles the buffer-local `t' marker a bare dolist would funcall."
                              hook (jetpacs-error-label err))))
            nil)
          args))
+
+(defvar jetpacs-ready-functions nil
+  "Abnormal hook run with (CLIENT) when a session reaches READY.
+The attachment point for per-session wiring — the palette frame, the
+shell's drain of the pushes SYNCING refused, client-hook attachment —
+the rewrite's answer to the poc's fboundp ladder.  Drained by
+`jetpacs--on-client-ready', which `jetpacs-connect' installs on the
+client; each fn runs isolated, so one failure logs its error SYMBOL and
+the rest still run.  Lives on the floor (not the shell) so subscribers
+need no shell edge: a module adds itself at load time and the floor
+never names it.
+
+Order is the `add-hook' DEPTH, not the load order: theme sits at -50 so
+the palette precedes the shell drain at 90, and a default-depth
+subscriber lands between them.
+
+The arity is FIXED at (CLIENT).  Widening an established abnormal hook
+breaks SILENTLY — as `jetpacs-teardown-surfaces' records, a second
+argument signals `wrong-number-of-arguments' in every existing
+subscriber, and the isolation here swallows it.  Context rides a
+dynamic variable, never a second argument.")
+
+(defun jetpacs--on-client-ready (client)
+  "Drain `jetpacs-ready-functions' with CLIENT.
+The bridge from ebp's per-client `ready-functions' to the floor's
+global hook.  Named, not a closure, so a suite can `memq' the wiring on
+a client."
+  (jetpacs-run-isolated 'jetpacs-ready-functions client))
 
 (defvar jetpacs-teardown-functions nil
   "Abnormal hook run with (OWNER) at the end of `jetpacs-teardown-owner'.

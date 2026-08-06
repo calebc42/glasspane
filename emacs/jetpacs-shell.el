@@ -344,11 +344,11 @@ registrations."
 
 (defun jetpacs-shell--on-ready (_client)
   "Drain pushes that SYNCING refused, now that the session is READY.
-Installed by `jetpacs-connect'.  Replayed events conclude before
-`session.ready' (SPEC 10.3 step 4 precedes step 5), so every effect
-push a replayed handler deferred has already been queued by the time
-this runs; each drained push re-renders the CURRENT state through the
-registered builder, so collapsed duplicates are harmless."
+On `jetpacs-ready-functions' at depth 90.  Replayed events conclude
+before `session.ready' (SPEC 10.3 step 4 precedes step 5), so every
+effect push a replayed handler deferred has already been queued by the
+time this runs; each drained push re-renders the CURRENT state through
+the registered builder, so collapsed duplicates are harmless."
   (let ((surfaces (nreverse jetpacs-shell--repush-pending)))
     (setq jetpacs-shell--repush-pending nil)
     (dolist (s surfaces)
@@ -356,6 +356,12 @@ registered builder, so collapsed duplicates are harmless."
           (jetpacs-shell-push s)
         (error (message "jetpacs: READY drain push of %s failed: %s"
                         s (jetpacs-error-label err)))))))
+
+;; Pinned LATE: the content drain runs after everything else on READY.
+;; The pair's other end is theme at depth -50 — the palette frame must
+;; land first, or the drained screens paint in the wrong palette.  Both
+;; ends pinned so a default-depth subscriber lands BETWEEN them.
+(add-hook 'jetpacs-ready-functions #'jetpacs-shell--on-ready 90)
 
 (defun jetpacs-shell--drop-pending (surface)
   "Forget SURFACE's queued repush; stop the timer once nothing is queued.

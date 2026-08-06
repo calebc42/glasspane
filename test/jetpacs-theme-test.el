@@ -392,10 +392,7 @@ missing witness."
 enable/disable-theme hooks and the ready-hook install.  Pin all three."
   (should (memq #'jetpacs-theme--on-theme-change enable-theme-functions))
   (should (memq #'jetpacs-theme--on-theme-change disable-theme-functions))
-  (let ((client (jetpacs-theme-test--client)))
-    (jetpacs--install-ready-hooks client)
-    (should (memq #'jetpacs-theme--on-ready
-                  (ebp-client-ready-functions client)))))
+  (should (memq #'jetpacs-theme--on-ready jetpacs-ready-functions)))
 
 (ert-deftest jetpacs-theme-modus-module-is-hook-free ()
   "`jetpacs-modus' is the JA-10 substrate: requiring it must observably

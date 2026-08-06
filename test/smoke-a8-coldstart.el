@@ -168,11 +168,14 @@ before the step-3 push's confirmation can raise it."
           :after-replay-function
           (lambda (_c summary) (setq smoke-a8--replay-summary summary))
           :ready-function (lambda (_c) (setq smoke-a8--ready t)))))
-    ;; Mirror `jetpacs-connect' exactly: it also installs the READY drain
-    ;; for pushes SYNCING refused.  Forgetting this here is how the drain
-    ;; check first "failed" on hardware — harness, not product.
-    (when (fboundp 'jetpacs-shell--on-ready)
-      (push #'jetpacs-shell--on-ready (ebp-client-ready-functions client)))
+    ;; Mirror `jetpacs-connect' exactly: it also installs the floor's
+    ;; READY bridge, which drains `jetpacs-ready-functions' — the shell's
+    ;; drain of the pushes SYNCING refused, the palette frame, and every
+    ;; other module's ready wiring.  Forgetting this here is how the drain
+    ;; check first "failed" on hardware — harness, not product.  Call the
+    ;; real installer: a hand-push would cover one module and silently
+    ;; skip the rest.
+    (jetpacs--install-ready-hooks client)
     (jetpacs-attach client)))
 
 (defun smoke-a8--drain (secs &optional stop-fn)

@@ -113,11 +113,10 @@
    (jetpacs-settings-drawer-entry)
    (jetpacs-apps-drawer-row)
    (jetpacs-divider)
-   (jetpacs-chrome-row
-    "Org" :subtitle "agenda and notes" :icon "event_note"
-    :on-tap (jetpacs-action "jetpacs.launcher.open"
-                            :args '(:surface "app:jetpacs.org"))
-    :key "drawer-org")
+   ;; No Org row: org activates like a major mode does — when the user
+   ;; opens an org FILE (the render skin is registered; a .org tapped in
+   ;; Files opens rendered).  Files itself lives in the nav-bar dock,
+   ;; never the drawer (owner decisions 2026-08-06, pass 3).
    (jetpacs-chrome-row
     "Clipboard" :subtitle "the kill ring" :icon "content_paste"
     :on-tap (jetpacs-action "jetpacs.launcher.open"

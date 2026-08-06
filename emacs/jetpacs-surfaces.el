@@ -483,15 +483,18 @@ before whatever the application does there.  Adding it post-connect is
 safe: READY needs round trips that cannot complete before this function
 returns.
 
-When `jetpacs-complete' is loaded and CONFIG carries no
-`:edit-complete-function', the JC-5 buffer harvester
-`jetpacs-complete-edit-complete' becomes the client-wide completion
-answer.  An explicit caller value wins, and `jetpacs-dialog''s picker
-borrows the slot per prompt either way (it restores whatever it found)."
-  (when (fboundp 'jetpacs-complete-edit-complete)
+When `ebp-complete' is loaded and CONFIG carries no
+`:edit-complete-function', its JC-5 buffer harvester
+`ebp-complete-edit-complete' becomes the client-wide completion
+answer.  An `fboundp' seam, not a require: the harvester is an `ebp-'
+module — wire and Emacs only, no node vocabulary — that this floor
+adopts when present and never depends on.  An explicit caller value
+wins, and `jetpacs-dialog''s picker borrows the slot per prompt either
+way (it restores whatever it found)."
+  (when (fboundp 'ebp-complete-edit-complete)
     (unless (plist-member config :edit-complete-function)
       (setq config (append config (list :edit-complete-function
-                                        #'jetpacs-complete-edit-complete)))))
+                                        #'ebp-complete-edit-complete)))))
   (let ((client (apply #'ebp-connect host port
                        :state-changed-function #'jetpacs--on-state-changed
                        :before-replay-function #'jetpacs--before-replay

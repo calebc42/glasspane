@@ -1,10 +1,20 @@
-;;; jetpacs-complete.el --- Emacs as the device editor's completion server -*- lexical-binding: t; -*-
+;;; ebp-complete.el --- Emacs as the completion server for EBP editors -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Package-Requires: ((emacs "30.1"))
 
 ;;; Commentary:
 
+;; `ebp-' by the ratified rule (2026-08-06): `jetpacs-' is for what
+;; cannot exist without Kotlin, Android, and Compose; `ebp-' is for what
+;; only ever touches the wire and Emacs.  This file is the second kind
+;; and always was — it requires `cl-lib' and nothing else, and its whole
+;; contract is a SPEC 19.3 shape (`edit.complete' in, {label,
+;; annotation?, insert?} out) harvested from Emacs's own capf machinery.
+;; Not one node, builder, or surface appears below.  The prefix said
+;; otherwise for a while; now it does not, and the delineation guard can
+;; hold it to that.
+;;
 ;; JC-5 of docs/PLAN-jetpacs-consumers.md: REBUILD the direction, PORT
 ;; the harvester.
 ;;
@@ -42,34 +52,37 @@
 ;; a conformant Companion must REJECT an unknown member, so emitting it
 ;; would poison every reply that carried one.
 ;;
-;; During a JC-4b picker prompt, `jetpacs-dialog' borrows the client's
-;; `:edit-complete-function' slot and restores it at conclusion — this
-;; harvester is the resting default underneath (`jetpacs-connect'
-;; installs it when the caller supplied nothing), answering for real
-;; synchronized editors; the dialog answers for its own picker document.
+;; Who installs the harvester is the layer above's business: this
+;; module names no caller and requires none.  For the reader — Jetpacs
+;; makes it the connect-time default (`jetpacs-connect', when the caller
+;; supplied nothing), and during a JC-4b picker prompt `jetpacs-dialog'
+;; borrows the client's `:edit-complete-function' slot and restores it
+;; at conclusion.  So this harvester is the resting default answering
+;; for real synchronized editors; the dialog answers for its own picker
+;; document.
 
 ;;; Code:
 
 (require 'cl-lib)
 
-(defgroup jetpacs-complete nil
+(defgroup ebp-complete nil
   "Emacs completion served to Companion editors."
-  :group 'jetpacs)
+  :group 'ebp)
 
-(defcustom jetpacs-complete-enabled t
-  "When non-nil, `jetpacs-complete-edit-complete' harvests candidates.
+(defcustom ebp-complete-enabled t
+  "When non-nil, `ebp-complete-edit-complete' harvests candidates.
 Set to nil to answer every completion request with an empty candidate
 list (the device clears its dropdown); the round trips themselves stop
 only when editor nodes are pushed without their `:complete' flag."
   :type 'boolean)
 
-(defcustom jetpacs-complete-max-candidates 30
+(defcustom ebp-complete-max-candidates 30
   "Maximum number of candidates returned per completion request.
 The device dropdown shows a handful; anything past this cap is wasted
 bytes on the wire."
   :type 'natnum)
 
-(defcustom jetpacs-complete-debug nil
+(defcustom ebp-complete-debug nil
   "When non-nil, echo each completion request to *Messages*.
 Logs the document, the resolved prefix, and the candidate count — a
 live trace of the bridge working without a device on logcat.  The
@@ -79,13 +92,13 @@ prefix is user content, which is why this is opt-in and nil by default
 
 ;;;; Shadow buffers
 
-(defvar jetpacs-complete-shadow-setup-hook nil
+(defvar ebp-complete-shadow-setup-hook nil
   "Normal hook run in a shadow buffer once, at its creation.
 The place to add buffer-local `completion-at-point-functions' or other
 completion sources for device documents.  The buffer's (hook-delayed)
 major mode is already set when it runs.")
 
-(defun jetpacs-complete--mode-for (document)
+(defun ebp-complete--mode-for (document)
   "The major mode DOCUMENT would get from `auto-mode-alist', or
 `fundamental-mode'.  Never visits anything — the mode is chosen from
 the id alone.  Honors `major-mode-remap', so a config that remaps to
@@ -95,24 +108,24 @@ tree-sitter modes gets them in the hidden shadows too."
       (setq mode (major-mode-remap mode)))
     (if (and (symbolp mode) mode (fboundp mode)) mode 'fundamental-mode)))
 
-(defun jetpacs-complete--shadow-buffer (document)
+(defun ebp-complete--shadow-buffer (document)
   "Get or create the hidden shadow buffer for DOCUMENT.
 The buffer carries DOCUMENT's major mode so the right capfs are live,
 but mode hooks are delayed: no LSP client, flycheck, or other machinery
 spins up over a throwaway completion buffer.  The leading space in the
 name keeps it out of buffer lists and disables undo."
-  (let ((name (format " *jetpacs-complete: %s*" document)))
+  (let ((name (format " *ebp-complete: %s*" document)))
     (or (get-buffer name)
         (with-current-buffer (get-buffer-create name)
           (condition-case nil
-              (delay-mode-hooks (funcall (jetpacs-complete--mode-for document)))
+              (delay-mode-hooks (funcall (ebp-complete--mode-for document)))
             (error (delay-mode-hooks (fundamental-mode))))
-          (run-hooks 'jetpacs-complete-shadow-setup-hook)
+          (run-hooks 'ebp-complete-shadow-setup-hook)
           (current-buffer)))))
 
 ;;;; Candidate harvesting
 
-(defun jetpacs-complete--capf-data ()
+(defun ebp-complete--capf-data ()
   "Run the buffer's capfs at point; return (BEG END TABLE . PROPS) or nil.
 A capf that signals — e.g. text-mode's `ispell-completion-at-point'
 with no dictionary installed — counts as producing nothing, so the
@@ -124,7 +137,7 @@ generic word fallback still gets its turn."
     (when (and (consp res) (consp (cdr res)) (numberp (cadr res)))
       (cdr res))))
 
-(defun jetpacs-complete--word-fallback ()
+(defun ebp-complete--word-fallback ()
   "Dabbrev-style fallback: words in the buffer sharing the token at point.
 Returns (PREFIX . CANDIDATES) or nil.  Used when no capf produces
 anything — plain text, org prose, unknown modes — so the dropdown is
@@ -145,22 +158,22 @@ never uselessly empty in a buffer full of repeated identifiers."
               (cl-pushnew (match-string-no-properties 0) cands :test #'equal))))
         (when cands (cons prefix (nreverse cands)))))))
 
-(defun jetpacs-complete--annotate (fn cand)
+(defun ebp-complete--annotate (fn cand)
   "Apply annotation function FN to CAND, trimmed; nil when absent or failing."
   (when fn
     (let ((a (condition-case nil (funcall fn cand) (error nil))))
       (when (and (stringp a) (not (string-empty-p (string-trim a))))
         (string-trim a)))))
 
-(defun jetpacs-complete--collect ()
+(defun ebp-complete--collect ()
   "Harvest completions at point in the current buffer.
 Returns (PREFIX . CANDIDATES) or nil.  Each candidate is a plist
 \(:label L) plus optional :annotation and :insert — the SPEC 19.3
 candidate object, ready for `ebp-client--handle-edit-complete' to
 vector-wrap and serialize.  Candidates are sorted shortest-first (the
 likeliest next keystroke saver), capped at
-`jetpacs-complete-max-candidates'."
-  (let* ((data (jetpacs-complete--capf-data))
+`ebp-complete-max-candidates'."
+  (let* ((data (ebp-complete--capf-data))
          (beg (nth 0 data))
          (table (nth 2 data))
          (props (nthcdr 3 data))
@@ -169,7 +182,7 @@ likeliest next keystroke saver), capped at
          ;; from its display label — a wikilink chip shows "[[Title" but
          ;; lands "[[id:…][Title]]" in the buffer.  Feeds SPEC 19.3's
          ;; `insert' member, which defaults to `label' when omitted.
-         (insert-fn (plist-get props :jetpacs-insert-function))
+         (insert-fn (plist-get props :ebp-insert-function))
          ;; The device replaces text *before* the cursor, so the prefix
          ;; is [BEG, point) even when the capf's END extends past point
          ;; (SPEC 19.3: the prefix is the substring immediately before
@@ -192,7 +205,7 @@ likeliest next keystroke saver), capped at
                   cands)))
     ;; Empty capf result -> generic word fallback (org prose, unknown modes).
     (unless cands
-      (when-let* ((fb (jetpacs-complete--word-fallback)))
+      (when-let* ((fb (ebp-complete--word-fallback)))
         (setq prefix (car fb) cands (cdr fb)
               ann-fn nil insert-fn nil)))
     (when cands
@@ -207,7 +220,7 @@ likeliest next keystroke saver), capped at
         (cons prefix
               (mapcar (lambda (c)
                         (let ((node (list :label c)))
-                          (when-let* ((a (jetpacs-complete--annotate ann-fn c)))
+                          (when-let* ((a (ebp-complete--annotate ann-fn c)))
                             (setq node (append node (list :annotation a))))
                           (let ((ins (and insert-fn
                                           (condition-case nil
@@ -216,23 +229,23 @@ likeliest next keystroke saver), capped at
                             (when (and (stringp ins) (not (equal ins c)))
                               (setq node (append node (list :insert ins)))))
                           node))
-                      (seq-take cands jetpacs-complete-max-candidates)))))))
+                      (seq-take cands ebp-complete-max-candidates)))))))
 
-(defun jetpacs-complete-in-text (document text cursor)
+(defun ebp-complete-in-text (document text cursor)
   "Complete DOCUMENT's TEXT at CURSOR (0-based Unicode scalar offset).
 Replays TEXT into DOCUMENT's shadow buffer and harvests candidates
 there.  Emacs characters ARE scalar values, so CURSOR maps to a buffer
 position directly.  Returns (PREFIX . CANDIDATES) or nil.  Separated
 from the seam function so tests can call it directly."
-  (with-current-buffer (jetpacs-complete--shadow-buffer document)
+  (with-current-buffer (ebp-complete--shadow-buffer document)
     (erase-buffer)
     (insert text)
     (goto-char (min (1+ (max 0 (truncate cursor))) (point-max)))
-    (jetpacs-complete--collect)))
+    (ebp-complete--collect)))
 
 ;;;; The ebp seam
 
-(defun jetpacs-complete-edit-complete (document _editor-id text cursor)
+(defun ebp-complete-edit-complete (document _editor-id text cursor)
   "Answer `edit.complete' for DOCUMENT from its shadow buffer.
 The `ebp-client-create' `:edit-complete-function' contract: called with
 \(DOCUMENT EDITOR-ID TEXT CURSOR) only after ebp.el matched the query's
@@ -242,26 +255,27 @@ Returns (PREFIX . CANDIDATES) or nil; ebp turns nil into the empty
 reply, which is how the device clears its dropdown.
 
 A harvest error also degrades to the empty reply — a broken capf must
-cost a missing dropdown, never a `-32603' on the wire.  Install as the
-connect-time default via `jetpacs-connect', or directly:
+cost a missing dropdown, never a `-32603' on the wire.  Install it at
+connect time:
   (ebp-connect HOST PORT :edit-complete-function
-               #\\='jetpacs-complete-edit-complete …)"
-  (when (and jetpacs-complete-enabled (stringp text) (numberp cursor))
+               #\\='ebp-complete-edit-complete …)
+Jetpacs's `jetpacs-connect' does exactly that by default."
+  (when (and ebp-complete-enabled (stringp text) (numberp cursor))
     (let ((result (condition-case err
-                      (jetpacs-complete-in-text document text cursor)
+                      (ebp-complete-in-text document text cursor)
                     ;; The error SYMBOL only (SPEC 23.3):
                     ;; `error-message-string' embeds the datum, and the
                     ;; datum here is buffer content.
-                    (error (message "jetpacs-complete: harvest failed (%s)"
+                    (error (message "ebp-complete: harvest failed (%s)"
                                     (car err))
                            nil))))
-      (when jetpacs-complete-debug
+      (when ebp-complete-debug
         (if result
-            (message "jetpacs-complete: %s prefix=%S -> %d candidate(s)"
+            (message "ebp-complete: %s prefix=%S -> %d candidate(s)"
                      document (car result) (length (cdr result)))
-          (message "jetpacs-complete: %s -> nothing to offer at cursor"
+          (message "ebp-complete: %s -> nothing to offer at cursor"
                    document)))
       result)))
 
-(provide 'jetpacs-complete)
-;;; jetpacs-complete.el ends here
+(provide 'ebp-complete)
+;;; ebp-complete.el ends here

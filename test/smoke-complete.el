@@ -27,7 +27,7 @@
 (require 'jetpacs-async)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
-(require 'jetpacs-complete)
+(require 'ebp-complete)
 
 (defvar smoke-jc5--fails 0)
 (defun smoke-jc5--check (label ok &optional detail)
@@ -69,7 +69,7 @@ word fallback cannot produce it — only the capf path can.")
 
 ;; Count harvester answers, so the smoke proves WHICH source answered
 ;; (the JC-4b vacuous-pass lesson: assert the path, not just the outcome).
-(advice-add 'jetpacs-complete-edit-complete :around
+(advice-add 'ebp-complete-edit-complete :around
             (lambda (orig &rest args)
               (cl-incf smoke-jc5--harvests)
               (let ((r (apply orig args)))
@@ -106,7 +106,7 @@ word fallback cannot produce it — only the capf path can.")
   (smoke-jc5--check "jetpacs-connect wired the harvester by default"
                     (eq (plist-get (ebp-client-config client)
                                    :edit-complete-function)
-                        #'jetpacs-complete-edit-complete))
+                        #'ebp-complete-edit-complete))
 
   (when smoke-jc5--ready
     (with-jetpacs-owner "jc5" (jetpacs-shell-push "jc5"))

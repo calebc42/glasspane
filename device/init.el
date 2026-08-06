@@ -19,7 +19,6 @@
 (require 'jetpacs-chrome)
 (require 'jetpacs-dialog)
 (require 'jetpacs-transient)
-(require 'jetpacs-complete)
 (require 'jetpacs-devtools)   ; the push profiler + failure flight recorder
 ;; …the mode skins (additive: they register for their major modes)…
 (require 'jetpacs-comint)
@@ -56,8 +55,13 @@
 ;; and 279 examples of the node vocabulary, on its own surface.  Reach
 ;; it from the Apps button, or M-x jetpacs-m3-catalog.
 (require 'jetpacs-m3-catalog)
-;; The live editor loop (parity P1): buffer sync + its riders.
+;; The live editor loop (parity P1), and the `ebp-' half of the stack:
+;; wire and Emacs only, no node vocabulary.  Buffer sync with its
+;; riders, then the capf completion server answering `edit.complete' —
+;; `jetpacs-connect' looks for it at dial time, so requiring it HERE is
+;; what turns device completion on.
 (require 'ebp-sync)
+(require 'ebp-complete)
 
 ;; Mirror the device Emacs theme onto the chrome; `system'/`dark'/`off'
 ;; are the other choices (see `jetpacs-theme-mode').

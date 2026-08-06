@@ -108,7 +108,10 @@ emacs -Q --batch -L emacs -l test/jetpacs-home-test.el \
   -f ert-run-tests-batch-and-exit
 
 # JC-5 completion harvester exit gate (the :edit-complete-function seam).
-emacs -Q --batch -L emacs -l test/jetpacs-complete-test.el \
+# ebp-complete.el is wire-and-Emacs only, but this suite also pins
+# jetpacs-connect's fboundp seam, so it loads the application layer and
+# belongs down here rather than with the ebp-agnostic suites above.
+emacs -Q --batch -L emacs -l test/ebp-complete-test.el \
   -f ert-run-tests-batch-and-exit
 
 # JA-1 theme + modus exit gate (docs/PLAN-jetpacs-apps.md).

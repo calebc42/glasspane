@@ -174,7 +174,8 @@ single-app contract."
       'accepted)))
 
 (with-jetpacs-owner "jetpacs.apps"
-  (jetpacs-shell-define-root jetpacs-apps-surface #'jetpacs-apps--view))
+  (jetpacs-chrome-define-root jetpacs-apps-surface "home"
+                              (lambda (_back) (jetpacs-apps--view))))
 (jetpacs-defaction "app.grid" #'jetpacs-apps--action-grid)
 (jetpacs-defaction "app.open" #'jetpacs-apps--action-open)
 

@@ -27,6 +27,7 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-navigate)
 (require 'jetpacs-shell)
+(require 'jetpacs-chrome)
 
 (defconst jetpacs-sql-surface "jetpacs.sql"
   "The SQL hub's root surface (owner and surface name).")
@@ -219,7 +220,8 @@ or quit costs the navigation, never the session."
       'accepted)))
 
 (with-jetpacs-owner "jetpacs.sql"
-  (jetpacs-shell-define-root jetpacs-sql-surface #'jetpacs-sql--view))
+  (jetpacs-chrome-define-root jetpacs-sql-surface "home"
+                              (lambda (_back) (jetpacs-sql--view))))
 (jetpacs-defaction "sql.show" #'jetpacs-sql--action-show)
 (jetpacs-defaction "sql.new-screen" #'jetpacs-sql--action-new-screen)
 (jetpacs-defaction "sql.connect" #'jetpacs-sql--action-connect)

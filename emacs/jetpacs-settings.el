@@ -35,6 +35,7 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
+(require 'jetpacs-chrome)
 
 (defconst jetpacs-settings-surface "jetpacs.settings"
   "The settings root surface (owner and surface name).")
@@ -349,8 +350,8 @@ through their submit action instead."
           (jetpacs-settings-refresh)))))
 
 (with-jetpacs-owner "jetpacs.settings"
-  (jetpacs-shell-define-root jetpacs-settings-surface
-                             #'jetpacs-settings--view))
+  (jetpacs-chrome-define-root jetpacs-settings-surface "home"
+                              (lambda (_back) (jetpacs-settings--view))))
 (jetpacs-defaction "settings.set" #'jetpacs-settings--action-set)
 (jetpacs-defaction "settings.reset" #'jetpacs-settings--action-reset)
 

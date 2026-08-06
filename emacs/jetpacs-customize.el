@@ -28,6 +28,7 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-settings)
 (require 'jetpacs-shell)
+(require 'jetpacs-chrome)
 
 (defconst jetpacs-customize-surface "jetpacs.customize"
   "The customize browser's root surface (owner and surface name).")
@@ -341,8 +342,8 @@ the documented cost of not enumerating every defcustom up front.")
       'accepted)))
 
 (with-jetpacs-owner "jetpacs.customize"
-  (jetpacs-shell-define-root jetpacs-customize-surface
-                             #'jetpacs-customize--view))
+  (jetpacs-chrome-define-root jetpacs-customize-surface "home"
+                              (lambda (_back) (jetpacs-customize--view))))
 (jetpacs-defaction "customize.show" #'jetpacs-customize--action-show)
 (jetpacs-defaction "customize.browse" #'jetpacs-customize--action-browse)
 (jetpacs-defaction "customize.up" #'jetpacs-customize--action-up)

@@ -31,6 +31,7 @@
 (require 'jetpacs-navigate)
 (require 'jetpacs-files)
 (require 'jetpacs-shell)
+(require 'jetpacs-chrome)
 
 (defconst jetpacs-project-surface "jetpacs.project"
   "The project dashboard's root surface (owner and surface name).")
@@ -354,8 +355,8 @@ open follows the same shape)."
       'accepted)))
 
 (with-jetpacs-owner "jetpacs.project"
-  (jetpacs-shell-define-root jetpacs-project-surface
-                             #'jetpacs-project--view))
+  (jetpacs-chrome-define-root jetpacs-project-surface "home"
+                              (lambda (_back) (jetpacs-project--view))))
 (jetpacs-defaction "project.show" #'jetpacs-project--action-show)
 (jetpacs-defaction "project.find-file" #'jetpacs-project--action-find-file)
 (jetpacs-defaction "project.open-file" #'jetpacs-project--action-open-file)

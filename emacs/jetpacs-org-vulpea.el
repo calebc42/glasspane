@@ -13,7 +13,7 @@
 ;; glasspane / orgseq territory), at which point it migrates to the app
 ;; repo.  NO base module may ever require it.
 ;;
-;; What base provides instead is the seam: `jetpacs-org--matches-p' is
+;; What base provides instead is the seam: `jetpacs-org-matches-p' is
 ;; accessor-pluggable, and this file is its first above-base consumer —
 ;; the same vetted grammar evaluated off the vulpea index (no file
 ;; visit) rather than at point.  vulpea is never required at load;
@@ -93,7 +93,7 @@
 The same grammar as `jetpacs-org-entry-matches-p', evaluated entirely
 off the vulpea index (no file visit); the `regexp' term searches
 title + properties here (the body is not indexed)."
-  (jetpacs-org--matches-p
+  (jetpacs-org-matches-p
    tree (lambda (what &rest args)
           (apply #'jetpacs-org-vulpea--note-get note what args))))
 

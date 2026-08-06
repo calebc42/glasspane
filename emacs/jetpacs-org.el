@@ -756,7 +756,7 @@ TYPE is one of `text', `checkbox', `date', `enum', `number', `list'."
   '(and or not todo done tags priority heading regexp property level
         scheduled deadline habit)
   "The head symbols of the built-in query grammar — the INTERPRETER'S
-coverage set (the vulpea arm checks its accessor against it).  This is
+coverage set (an arm checks its accessor against it).  This is
 NOT the wire allowlist: the sexp arm vets against
 `jetpacs-org--wire-query-terms', which drops `regexp'.")
 
@@ -1023,19 +1023,51 @@ Empty ARGS means mere presence of the stamp."
   "The priority character of the heading at point, or nil."
   (save-excursion (org-back-to-heading t) (nth 3 (org-heading-components))))
 
-(defun jetpacs-org--matches-p (tree get)
+(defun jetpacs-org-matches-p (tree get)
   "Non-nil when the entry read through accessor GET matches query TREE.
-The ONE interpreter of the built-in grammar.  GET is
-\(funcall GET WHAT &rest ARGS) with WHAT one of:
-  todo / done / tags / priority / title / level / property NAME /
-  planning WHICH / habit / regexp-match RE.
-The fallthrough is an INTERNAL invariant: `jetpacs-org--vet-query'
-admits only interpretable heads, so an unsupported term here means a
-caller bypassed `jetpacs-org-parse-query' with a hand-built tree."
+The ONE interpreter of the built-in grammar, and the engine's
+extension point: TREE is a vetted query sexp, GET is an accessor that
+reads whatever the caller's entries actually live in.  Base plugs in
+the org entry at point (`jetpacs-org-entry-matches-p'); the vulpea
+arm plugs in a note-index record; a test plugs in a plain closure over
+an alist.  The grammar is shared, the accessor is the seam.
+
+GET is called as (funcall GET WHAT &rest ARGS), with WHAT one of the
+ten accessor questions:
+  todo             the todo keyword string, or nil;
+  done             non-nil when the entry sits in a done state;
+  tags             the list of tag strings;
+  priority         the priority CHARACTER (?A), or nil;
+  title            the heading text, a string;
+  level            the outline level, an integer;
+  property NAME    the value of property NAME, or nil;
+  planning WHICH   the raw stamp string for WHICH, \"SCHEDULED\" or
+                   \"DEADLINE\";
+  habit            non-nil when the entry is a habit;
+  regexp-match RE  non-nil when RE matches the entry's text.
+An accessor that answers nil for a question it cannot serve simply
+never matches the terms built on it.
+
+An accessor may APPROXIMATE, deliberately.  The vulpea arm's
+`regexp-match' searches title + properties and not the body, because
+the note index does not carry the body and visiting the file to be
+exact would throw away the entire point of an index read.  An arm
+advertises the coverage it does support by checking its accessor
+against `jetpacs-org-note-query-terms'; the approximation is
+documented AT the arm, never hidden inside it.
+
+CALLERS MUST VET TREE FIRST, with `jetpacs-org-parse-query'.  This
+function interprets; it does not validate.  An unvetted head falls
+through to a plain `error' naming ONLY the head symbol — query
+material is user data and never rides in an error.  That fallthrough
+is deliberately NOT `jetpacs-org-refused': under SPEC 14.4 a refusal
+is a durable answer ABOUT THE REQUEST, so routing a caller's
+programming error through it would record a permanent verdict against
+the user's query for a bug in the calling code."
   (pcase tree
-    (`(and . ,cs) (cl-every (lambda (c) (jetpacs-org--matches-p c get)) cs))
-    (`(or . ,cs) (and (cl-some (lambda (c) (jetpacs-org--matches-p c get)) cs) t))
-    (`(not ,c) (not (jetpacs-org--matches-p c get)))
+    (`(and . ,cs) (cl-every (lambda (c) (jetpacs-org-matches-p c get)) cs))
+    (`(or . ,cs) (and (cl-some (lambda (c) (jetpacs-org-matches-p c get)) cs) t))
+    (`(not ,c) (not (jetpacs-org-matches-p c get)))
     (`(todo . ,kws)
      (let ((st (funcall get 'todo)))
        (and st (if kws (and (member st kws) t)
@@ -1080,7 +1112,7 @@ caller bypassed `jetpacs-org-parse-query' with a hand-built tree."
     ;; `jetpacs-org-parse-query' reaches here — an internal-invariant
     ;; breach.  The head symbol (or the tree's type) only, never the
     ;; tree itself: query material is user data.
-    (_ (error "jetpacs-org--matches-p: unsupported clause head %s"
+    (_ (error "jetpacs-org-matches-p: unsupported clause head %s"
               (if (and (consp tree) (symbolp (car tree)))
                   (car tree)
                 (type-of tree))))))
@@ -1108,12 +1140,15 @@ caller bypassed `jetpacs-org-parse-query' with a hand-built tree."
 
 (defun jetpacs-org-entry-matches-p (tree)
   "Non-nil when the org entry at point matches query sexp TREE."
-  (jetpacs-org--matches-p tree #'jetpacs-org--point-get))
+  (jetpacs-org-matches-p tree #'jetpacs-org--point-get))
 
 ;; The vulpea note-index arm lives in jetpacs-org-vulpea.el (Tier-1
 ;; staging, NEVER required by base): base is vanilla Emacs, vulpea is
 ;; not built-in.  Base keeps only the seam it plugs into — the
-;; accessor-pluggable `jetpacs-org--matches-p' above.
+;; accessor-pluggable `jetpacs-org-matches-p' above.  The accessor is
+;; the extension point; `jetpacs-org--point-get' stays PRIVATE behind
+;; the public `jetpacs-org-entry-matches-p', because reading the entry
+;; at point is base's own arm, not a name anyone plugs into.
 
 ;;;; High-level query
 

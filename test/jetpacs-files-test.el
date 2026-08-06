@@ -49,10 +49,10 @@ host machine's /sdcard-alikes into the allowlist."
   path)
 
 (defun jetpacs-files-test--refusal (thunk)
-  "The `jetpacs-path-refused' reason symbol THUNK signals, or `:no-signal'."
+  "The `ebp-path-refused' reason symbol THUNK signals, or `:no-signal'."
   (condition-case err
       (progn (funcall thunk) :no-signal)
-    (jetpacs-path-refused (cadr err))))
+    (ebp-path-refused (cadr err))))
 
 (defun jetpacs-files-test--collect (node key)
   "Every value of KEY in the plist tree NODE, in order."
@@ -125,7 +125,7 @@ autoloads TRAMP, and the library load stats plenty of LOCAL files.)"
         (should (eq 'remote
                     (jetpacs-files-test--refusal
                      (lambda ()
-                       (jetpacs-check-path "/ssh:evil:/x" (list root))))))
+                       (ebp-check-path "/ssh:evil:/x" (list root))))))
         (should (= stats 0))))))
 
 (ert-deftest jetpacs-files-guard-prefix-is-not-containment ()
@@ -138,11 +138,11 @@ accidentally safe, and a test using it cannot tell the two apart)."
     (let ((org (concat root "org"))     ; no trailing slash
           (evil (jetpacs-files-test--touch (concat root "org-evil/x"))))
       (jetpacs-files-test--touch (concat root "org/inside"))
-      (should (equal (jetpacs-check-path (concat root "org/inside") (list org))
+      (should (equal (ebp-check-path (concat root "org/inside") (list org))
                      (file-truename (concat root "org/inside"))))
       (should (eq 'outside-roots
                   (jetpacs-files-test--refusal
-                   (lambda () (jetpacs-check-path evil (list org)))))))))
+                   (lambda () (ebp-check-path evil (list org)))))))))
 
 (ert-deftest jetpacs-files-guard-symlink-inside-root-refused ()
   "A symlink SITTING inside a root but POINTING outside cannot smuggle
@@ -158,8 +158,8 @@ a path past the boundary — both sides are truenamed."
             (should (eq 'outside-roots
                         (jetpacs-files-test--refusal
                          (lambda ()
-                           (jetpacs-check-path (concat root "link/secret")
-                                               (list root)))))))
+                           (ebp-check-path (concat root "link/secret")
+                                           (list root)))))))
         (delete-directory outside t)))))
 
 (ert-deftest jetpacs-files-guard-symlinked-root-authorizes-real-tree ()
@@ -172,8 +172,8 @@ a path past the boundary — both sides are truenamed."
             (jetpacs-files-test--touch (concat real "f"))
             (make-symbolic-link (directory-file-name real)
                                 (concat root "sroot"))
-            (should (equal (jetpacs-check-path (concat real "f")
-                                               (list (concat root "sroot")))
+            (should (equal (ebp-check-path (concat real "f")
+                                           (list (concat root "sroot")))
                            (file-truename (concat real "f")))))
         (delete-directory real t)))))
 
@@ -187,16 +187,16 @@ a path past the boundary — both sides are truenamed."
       (should (eq 'not-a-directory
                   (jetpacs-files-test--refusal
                    (lambda ()
-                     (jetpacs-check-path f (list root) :require 'directory)))))
+                     (ebp-check-path f (list root) :require 'directory)))))
       (should (eq 'not-a-directory
                   (jetpacs-files-test--refusal
                    (lambda ()
-                     (jetpacs-check-path (concat root "missing") (list root)
-                                         :require 'directory)))))
-      (should (equal (jetpacs-check-path sub (list root) :require 'directory)
+                     (ebp-check-path (concat root "missing") (list root)
+                                     :require 'directory)))))
+      (should (equal (ebp-check-path sub (list root) :require 'directory)
                      (file-truename sub)))
       ;; The landing case: a directory contains itself.
-      (should (equal (jetpacs-check-path root (list root) :require 'directory)
+      (should (equal (ebp-check-path root (list root) :require 'directory)
                      (file-truename root))))))
 
 (ert-deftest jetpacs-files-guard-require-absent ()
@@ -211,18 +211,18 @@ binds — including a target smuggled through an in-root symlink."
             (should (eq 'exists
                         (jetpacs-files-test--refusal
                          (lambda ()
-                           (jetpacs-check-path f (list root) :require 'absent)))))
+                           (ebp-check-path f (list root) :require 'absent)))))
             ;; A new tail under a root passes and comes back truenamed.
-            (should (equal (jetpacs-check-path (concat root "new") (list root)
-                                               :require 'absent)
+            (should (equal (ebp-check-path (concat root "new") (list root)
+                                           :require 'absent)
                            (concat (file-name-as-directory
                                     (file-truename root))
                                    "new")))
             ;; A deep new tail passes too (mkdir -p semantics are the
             ;; caller's business; containment is ours).
-            (should (stringp (jetpacs-check-path (concat root "a/b/c")
-                                                 (list root)
-                                                 :require 'absent)))
+            (should (stringp (ebp-check-path (concat root "a/b/c")
+                                             (list root)
+                                             :require 'absent)))
             ;; Containment is checked on the RESOLVED name, so an
             ;; in-root symlink cannot smuggle a create/rename TARGET out.
             (make-symbolic-link (directory-file-name outside)
@@ -230,17 +230,17 @@ binds — including a target smuggled through an in-root symlink."
             (should (eq 'outside-roots
                         (jetpacs-files-test--refusal
                          (lambda ()
-                           (jetpacs-check-path (concat root "link/new")
-                                               (list root)
-                                               :require 'absent)))))
+                           (ebp-check-path (concat root "link/new")
+                                           (list root)
+                                           :require 'absent)))))
             ;; And an absent path outside any root is refused as
             ;; containment, never reported on via `exists'.
             (should (eq 'outside-roots
                         (jetpacs-files-test--refusal
                          (lambda ()
-                           (jetpacs-check-path (concat outside "new")
-                                               (list root)
-                                               :require 'absent))))))
+                           (ebp-check-path (concat outside "new")
+                                           (list root)
+                                           :require 'absent))))))
         (delete-directory outside t)))))
 
 (ert-deftest jetpacs-files-guard-require-nil-is-containment-only ()
@@ -254,35 +254,35 @@ the same file as `unreadable'."
           (progn
             (should (eq 'unreadable
                         (jetpacs-files-test--refusal
-                         (lambda () (jetpacs-check-path f (list root))))))
-            (should (equal (jetpacs-check-path f (list root) :require nil)
+                         (lambda () (ebp-check-path f (list root))))))
+            (should (equal (ebp-check-path f (list root) :require nil)
                            (file-truename f))))
         (set-file-modes f #o600)))))
 
 (ert-deftest jetpacs-files-guard-unknown-require-is-a-caller-error ()
   "An unknown :require is a BUG at the call site — a plain `error',
-never a `jetpacs-path-refused' a handler would answer to the device."
+never a `ebp-path-refused' a handler would answer to the device."
   (jetpacs-files-test--with-tree root
-    (should-error (jetpacs-check-path root (list root) :require 'writable)
+    (should-error (ebp-check-path root (list root) :require 'writable)
                   :type 'error)
-    (should-not (eq 'jetpacs-path-refused
+    (should-not (eq 'ebp-path-refused
                     (car (should-error
-                          (jetpacs-check-path root (list root)
-                                              :require 'writable)))))))
+                          (ebp-check-path root (list root)
+                                          :require 'writable)))))))
 
 (ert-deftest jetpacs-files-guard-no-roots-stays-distinct ()
   "Unconfigured and out-of-policy are different conditions."
   (jetpacs-files-test--with-tree root
     (should (eq 'no-roots
                 (jetpacs-files-test--refusal
-                 (lambda () (jetpacs-check-path root '())))))
+                 (lambda () (ebp-check-path root '())))))
     (should (eq 'no-roots
                 (jetpacs-files-test--refusal
                  (lambda ()
-                   (jetpacs-check-path root '("/nonexistent-root-xyz"))))))
+                   (ebp-check-path root '("/nonexistent-root-xyz"))))))
     (should (eq 'outside-roots
                 (jetpacs-files-test--refusal
-                 (lambda () (jetpacs-check-path "/etc" (list root))))))))
+                 (lambda () (ebp-check-path "/etc" (list root))))))))
 
 ;;;; The /sdcard probe and the effective roots
 
@@ -716,8 +716,8 @@ the sandbox must not let the scan read what open would refuse."
             (should (equal (plist-get jetpacs-files--grep-request :query)
                            "needle"))
             (should (equal (plist-get jetpacs-files--grep-request :dir)
-                           (jetpacs-check-path root (list root)
-                                               :require 'directory)))
+                           (ebp-check-path root (list root)
+                                           :require 'directory)))
             (should (null screens))
             (jetpacs-files-test--pump)
             (should (equal screens
@@ -1071,7 +1071,7 @@ flow to run the op."
           (should (null ran))
           (jetpacs-files-test--pump)
           (should (equal ran
-                         (list (cons (jetpacs-check-path
+                         (list (cons (ebp-check-path
                                       root (list root) :require 'directory)
                                      "app:jetpacs.files")))))))))
 

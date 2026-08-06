@@ -131,7 +131,7 @@ reading the raw variable must not change where a relative entry points
 \(Batch-3 P2: it previously resolved against the AMBIENT
 `default-directory' at every consumer).  The expansion is pure string
 work, so a remote name minted by a remote `org-directory' is still
-caught by the `jetpacs-local-paths' filter that runs AFTERWARDS — the
+caught by the `ebp-local-paths' filter that runs AFTERWARDS — the
 order is load-bearing.
 
 `org-agenda-files' the FUNCTION calls `file-directory-p' on each raw
@@ -140,9 +140,9 @@ than calling it: by the time the function returns, a remote entry has
 already been dialled.  JA-4 audit P1-7 — one /ssh: entry made every
 resolve, every mint and every cache-key computation attempt a TRAMP
 connection inside the socket filter, with a 60-second timeout."
-  (jetpacs-local-paths
+  (ebp-local-paths
    (mapcar (lambda (entry)
-             ;; Guard the shape: `jetpacs-local-paths' tolerates (and
+             ;; Guard the shape: `ebp-local-paths' tolerates (and
              ;; drops) garbage entries, and "" must not silently become
              ;; org-directory itself.
              (if (and (stringp entry) (not (string-empty-p entry)))
@@ -152,7 +152,7 @@ connection inside the socket filter, with a 60-second timeout."
              (ignore-errors (org-agenda-files))))))
 
 (defun jetpacs-org--roots ()
-  "The effective allowlist, raw — `jetpacs-check-path' truenames it.
+  "The effective allowlist, raw — `ebp-check-path' truenames it.
 Explicit `jetpacs-org-roots' entries anchor to `org-directory'
 \(Batch-3 P2: a relative entry previously resolved against the AMBIENT
 `default-directory' — whatever buffer the socket filter had current);
@@ -170,7 +170,7 @@ LOCAL agenda files, already absolute after the same anchoring."
 
 (defun jetpacs-org--check-file (file)
   "FILE validated against `jetpacs-org-roots', as a truename, or signal.
-The guard itself is `jetpacs-check-path' on the floor (JA-6 shares it);
+The guard itself is `ebp-check-path', shared (JA-6 promoted it out);
 this wrapper supplies the org root set and re-signals in the module's
 STATUS-SPLIT conditions (JA-4 audit P1-10 — `rejected' deletes the
 Companion's durable record, so a transient condition must never land
@@ -183,8 +183,8 @@ there):
 - `jetpacs-org-unresolved' (handler: stale): the file is GONE —
   content drift, the Companion re-presents (14.5)."
   (condition-case err
-      (jetpacs-check-path file (jetpacs-org--roots))
-    (jetpacs-path-refused
+      (ebp-check-path file (jetpacs-org--roots))
+    (ebp-path-refused
      (pcase (cadr err)
        ('no-roots (signal 'jetpacs-org-unavailable (cdr err)))
        ('unreadable

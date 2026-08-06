@@ -102,9 +102,10 @@ primitive may receive a remote NAME on any of the three hot paths."
           (should (null touched)))))))
 
 (ert-deftest jetpacs-org-check-file-rides-the-floor-guard ()
-  "The sandbox itself lives on the floor (JA-6 shares it); this module
-supplies roots and re-signals in its own condition, so a handler written
-against the documented status map never sees `jetpacs-path-refused'."
+  "The sandbox itself is shared, not this module's (JA-6 promoted it out);
+this module supplies roots and re-signals in its own condition, so a
+handler written against the documented status map never sees
+`ebp-path-refused'."
   (jetpacs-org-test--with-fixture f "* H\n"
     (should (equal (jetpacs-org--check-file f) (file-truename f)))
     (dolist (bad '("relative.org" "/ssh:evil:/x.org" "/etc/passwd"))
@@ -112,7 +113,7 @@ against the documented status map never sees `jetpacs-path-refused'."
                   (condition-case err
                       (progn (jetpacs-org--check-file bad) :no-signal)
                     (jetpacs-org-refused (car err))
-                    (jetpacs-path-refused (car err))))))
+                    (ebp-path-refused (car err))))))
     ;; An unconfigured root set is distinguishable from out-of-policy —
     ;; and RETRYABLE (JA-4 audit P1-10): unmounted storage must never
     ;; delete a durable record.

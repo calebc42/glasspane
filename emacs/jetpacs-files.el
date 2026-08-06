@@ -21,9 +21,9 @@
 ;; The security shape, stated once: RENDERING IS NOT THE BOUNDARY,
 ;; ACTING IS.  Cards carry raw absolute paths in `:args' because a
 ;; descriptor is just a description; every path that comes BACK over
-;; the wire re-enters through `jetpacs-check-path' (the floor guard
-;; this rung shares with jetpacs-org — JA-4 audit P1-7 is why it lives
-;; on the floor), which rejects remote names before any stat, resolves
+;; the wire re-enters through `ebp-check-path' (the shared path guard
+;; this rung and jetpacs-org both require — JA-4 audit P1-7 is why it
+;; is shared), which rejects remote names before any stat, resolves
 ;; symlinks on both sides, and compares path components.  A dired
 ;; buffer for a directory outside the roots still renders — Emacs is
 ;; showing it, so the device may see it — but every tap on it answers
@@ -67,7 +67,7 @@ A permanent wire identifier under the base-reserved `jetpacs.' prefix
                   "~/"))
   "Directories the files browser is confined to, raw.
 Navigation, opening, and (in later phases) every file operation are
-refused outside these — `jetpacs-check-path' is the boundary, and it
+refused outside these — `ebp-check-path' is the boundary, and it
 filters and truenames these entries itself, so remote or dangling
 entries are inert rather than harmful.  The /sdcard probe extends this
 set at runtime without mutating it; see `jetpacs-files--roots'."
@@ -203,17 +203,17 @@ Probed once.  Unlike the poc this does NOT mutate `jetpacs-files-roots'
 
 (defun jetpacs-files--roots ()
   "The effective allowlist: configuration plus the probed shared dir.
-Raw — `jetpacs-check-path' filters and truenames it."
+Raw — `ebp-check-path' filters and truenames it."
   (append jetpacs-files-roots
           (and-let* ((shared (jetpacs-files-shared-dir))) (list shared))))
 
 (cl-defun jetpacs-files--check (path &optional (require 'readable))
-  "PATH through the floor guard against the effective roots.
-REQUIRE as in `jetpacs-check-path'; the default applies only when the
+  "PATH through the shared path guard against the effective roots.
+REQUIRE as in `ebp-check-path'; the default applies only when the
 argument is OMITTED — an explicit nil means containment-only, and an
 `(or ... \\='readable)' here once silently turned delete's nil into a
 readability stat."
-  (jetpacs-check-path path (jetpacs-files--roots) :require require))
+  (ebp-check-path path (jetpacs-files--roots) :require require))
 
 (defun jetpacs-files--current-dir ()
   "The directory the view shows — the cd state or the landing."
@@ -300,7 +300,7 @@ ceiling behavior."
                                   :on-tap (jetpacs-action "jetpacs.files.cd"
                                                           :args (list :dir parent))
                                   :key "files-up")))
-        (jetpacs-path-refused nil)))))
+        (ebp-path-refused nil)))))
 
 (defun jetpacs-files--listing (buffer)
   "Paths listed in dired BUFFER, bounded: (PATHS . TRUNCATED-P).
@@ -404,7 +404,7 @@ landing configuration never went through a handler."
                        :on-submit (jetpacs-action "jetpacs.files.grep")))
                 (and shared (list shared))
                 cards)))
-    (jetpacs-path-refused
+    (ebp-path-refused
      (jetpacs-empty-state :icon "info"
                           :title "Can't open folder"
                           :caption (format "refused: %s" (cadr err))))
@@ -899,7 +899,7 @@ an explicit nil is containment-only on both sides."
   (let* ((dfn (directory-file-name (expand-file-name path)))
          (parent (file-name-directory dfn)))
     (when (null parent)                 ; "/" — never an op target
-      (signal 'jetpacs-path-refused (list 'outside-roots)))
+      (signal 'ebp-path-refused (list 'outside-roots)))
     (concat (file-name-as-directory (jetpacs-files--check parent nil))
             (file-name-nondirectory dfn))))
 
@@ -933,7 +933,7 @@ link — rename(2) — never followed."
                           'absent)))
             (rename-file src target)
             (jetpacs-shell-notify (format "Renamed to %s" new) surface))
-        (jetpacs-path-refused
+        (ebp-path-refused
          (jetpacs-files--op-notify-refused "Rename" (cadr err) surface))
         (error (jetpacs-shell-notify
                 (format "Rename failed: %s" (jetpacs-error-label err))
@@ -964,7 +964,7 @@ link, never followed."
             (rename-file src target)
             (jetpacs-shell-notify
              (format "Moved to %s" (abbreviate-file-name destdir)) surface))
-        (jetpacs-path-refused
+        (ebp-path-refused
          (jetpacs-files--op-notify-refused "Move" (cadr err) surface))
         (error (jetpacs-shell-notify
                 (format "Move failed: %s" (jetpacs-error-label err))
@@ -988,7 +988,7 @@ natively — the copy is a REGULAR file with the target's content."
                  (jetpacs-scalar-text
                   (file-name-nondirectory (directory-file-name target))))
          surface))
-    (jetpacs-path-refused
+    (ebp-path-refused
      (jetpacs-files--op-notify-refused "Duplicate" (cadr err) surface))
     (error (jetpacs-shell-notify
             (format "Duplicate failed: %s" (jetpacs-error-label err))
@@ -1057,7 +1057,7 @@ Runs inside a device flow."
                     (make-directory target)
                   (write-region "" nil target nil 'silent))
                 (jetpacs-shell-notify (format "Created %s" name) surface))
-            (jetpacs-path-refused
+            (ebp-path-refused
              (jetpacs-files--op-notify-refused "Create" (cadr err) surface))
             (error (jetpacs-shell-notify
                     (format "Create failed: %s" (jetpacs-error-label err))
@@ -1095,7 +1095,7 @@ Runs inside a device flow."
               (setq jetpacs-files--dir (file-name-as-directory true))
               (jetpacs-files--repush surface)
               'accepted)
-          (jetpacs-path-refused
+          (ebp-path-refused
            (jetpacs-shell-notify (format "Folder refused: %s" (cadr err))
                                  surface)
            'rejected)))))
@@ -1121,7 +1121,7 @@ Runs inside a device flow."
                 (jetpacs-flow-continue
                  (lambda () (jetpacs-files--edit-open true surface))))
               'accepted)
-          (jetpacs-path-refused
+          (ebp-path-refused
            (jetpacs-shell-notify (format "File refused: %s" (cadr err))
                                  surface)
            'rejected)))))
@@ -1152,7 +1152,7 @@ Runs inside a device flow."
                 (jetpacs-flow-continue
                  (lambda () (jetpacs-files--ops-menu-show act surface)))
                 'accepted)
-            (jetpacs-path-refused
+            (ebp-path-refused
              (jetpacs-files--op-notify-refused "Menu" (cadr err) surface)
              'rejected)))))))
 
@@ -1191,7 +1191,7 @@ Runs inside a device flow."
                  surface)
                 (jetpacs-files--repush surface)
                 'accepted)))
-          (jetpacs-path-refused
+          (ebp-path-refused
            (jetpacs-files--op-notify-refused "Delete" (cadr err) surface)
            'rejected)
           (error
@@ -1215,7 +1215,7 @@ Runs inside a device flow."
                 (jetpacs-flow-continue
                  (lambda () (jetpacs-files--op-new dir surface)))
                 'accepted)
-            (jetpacs-path-refused
+            (ebp-path-refused
              (jetpacs-files--op-notify-refused "Create" (cadr err) surface)
              'rejected)))))))
 
@@ -1321,7 +1321,7 @@ Runs inside a device flow."
                      surface)
                     (jetpacs-files--repush surface)
                     'accepted)))))
-          (jetpacs-path-refused
+          (ebp-path-refused
            (jetpacs-files--op-notify-refused "Save" (cadr err) surface)
            'rejected)
           (error
@@ -1363,7 +1363,7 @@ Runs inside a device flow."
                      (error (message "jetpacs-files: search push failed: %s"
                                      (jetpacs-error-label e2))))))
                 'accepted)
-            (jetpacs-path-refused
+            (ebp-path-refused
              (jetpacs-shell-notify (format "Folder refused: %s" (cadr err))
                                    surface)
              'rejected))))))))

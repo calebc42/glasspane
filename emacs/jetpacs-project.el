@@ -285,7 +285,7 @@ open follows the same shape)."
             (jetpacs-flow-continue
              (lambda () (jetpacs-files--edit-open true nil)))
             'accepted)
-        (jetpacs-path-refused 'rejected)))))
+        (ebp-path-refused 'rejected)))))
 
 (defun jetpacs-project--action-grep (_args _params)
   (jetpacs-project--view-buffer-of

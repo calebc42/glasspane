@@ -228,10 +228,14 @@ or quit costs the navigation, never the session."
 (declare-function jetpacs-settings-add-link "jetpacs-settings" (order builder))
 
 (defvar jetpacs-launcher-row-icons)
+(defvar jetpacs-launcher-row-labels)
 (with-eval-after-load 'jetpacs-launcher
   (setf (alist-get (concat "app:" jetpacs-sql-surface)
                    jetpacs-launcher-row-icons nil nil #'equal)
-        "storage"))
+        "storage")
+  (setf (alist-get (concat "app:" jetpacs-sql-surface)
+                   jetpacs-launcher-row-labels nil nil #'equal)
+        "SQL"))
 
 (provide 'jetpacs-sql)
 ;;; jetpacs-sql.el ends here

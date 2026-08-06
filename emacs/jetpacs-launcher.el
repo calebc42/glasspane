@@ -46,13 +46,20 @@ list is stable across pushes."
   "Alist of SURFACE (\"app:…\" form) -> icon name for switch rows.
 Modules may seed their surface's icon; unlisted surfaces get \"apps\".")
 
+(defvar jetpacs-launcher-row-labels nil
+  "Alist of SURFACE (\"app:…\" form) -> display label for switch rows.
+Modules seed these where the namespace-stripped `capitalize' guess is
+wrong — initialisms, mostly: \"Sql\" must read \"SQL\".")
+
 (defun jetpacs-launcher--pretty (owner surface)
-  "A human title for a switch row: the name sans namespace, capitalized.
-\"jetpacs.settings\" reads as \"Settings\"; an unowned surface keeps
-its id (better an honest id than a wrongly prettified one)."
-  (if owner
-      (capitalize (string-remove-prefix "jetpacs." owner))
-    surface))
+  "A human title for a switch row: a seeded label, else the name sans
+namespace, capitalized.  \"jetpacs.settings\" reads as \"Settings\"; an
+unowned surface keeps its id (better an honest id than a wrongly
+prettified one)."
+  (or (cdr (assoc surface jetpacs-launcher-row-labels))
+      (if owner
+          (capitalize (string-remove-prefix "jetpacs." owner))
+        surface)))
 
 (defun jetpacs-launcher--row (surface owner)
   "One tappable row for SURFACE (registered by OWNER, maybe nil)."

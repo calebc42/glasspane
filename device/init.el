@@ -199,8 +199,13 @@ so the dock is two destinations: Home and Files."
                                             :args (list :value input))
                             :content-description "Re-run"))
       (jetpacs-text shown :style "mono" :selectable t
-                    :color (and errorp "error")))
-     :key (jetpacs-wire-id "ev" (format "%d" idx)))))
+                    :color (and errorp "error"))))))
+
+(defun jetpacs-hub--eval-card-keyed (idx entry)
+  "The history card with its reconciliation key attached the legal way:
+:key is a universal attribute, not a card member."
+  (jetpacs-with-attrs (jetpacs-hub--eval-card idx entry)
+                      :key (jetpacs-wire-id "ev" (format "%d" idx))))
 
 (defun jetpacs-hub--screen (_back)
   (let ((i -1))
@@ -211,7 +216,7 @@ so the dock is two destinations: Home and Files."
        (if jetpacs-hub--eval-history
            (apply #'jetpacs-lazy-column
                   (mapcar (lambda (e)
-                            (jetpacs-hub--eval-card (cl-incf i) e))
+                            (jetpacs-hub--eval-card-keyed (cl-incf i) e))
                           jetpacs-hub--eval-history))
          (jetpacs-empty-state
           :icon "code" :title "Elisp REPL"

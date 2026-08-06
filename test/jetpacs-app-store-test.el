@@ -148,25 +148,6 @@
       (should (stringp (plist-get confirm :confirm_label)))
       (should (stringp (plist-get confirm :dismiss_label))))))
 
-(ert-deftest jetpacs-apps-drawer-entry-consolidates ()
-  "One collapsible: Manage Apps and App Launcher, collapsed by default."
-  (let ((entry (jetpacs-apps-drawer-entry))
-        (labels nil))
-    (should (equal (plist-get entry :t) "collapsible"))
-    (should (eq (plist-get entry :collapsed) t))
-    (cl-labels ((walk (n)
-                  (when (equal (plist-get n :t) "text")
-                    (push (plist-get n :text) labels))
-                  (dolist (slot '(:children :header :trailing))
-                    (let ((v (plist-get n slot)))
-                      (cond ((vectorp v) (mapc #'walk (append v nil)))
-                            ((and v (listp v) (keywordp (car v))) (walk v))
-                            ((listp v) (mapc #'walk v)))))))
-      (walk entry))
-    (should (member "Apps" labels))
-    (should (member "Manage Apps" labels))
-    (should (member "App Launcher" labels))))
-
 ;;;; The combined Apps view (pass 2)
 
 (ert-deftest jetpacs-app-store-combined-view-sections ()

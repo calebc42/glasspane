@@ -160,37 +160,6 @@ listed there."
                                :args '(:surface "app:jetpacs.app-store"))
                       :key "drawer-apps"))
 
-(defun jetpacs-apps-drawer-entry ()
-  "One expandable drawer entry consolidating POC 1's two (owner
-decision 2026-08-06): the Manage-apps button and the app switcher
-return as \"Apps\" expanding into \"Manage Apps\" and \"App
-Launcher\".  Collapsed by default so the drawer stays one line."
-  (jetpacs-collapsible
-   "drawer-apps"
-   ;; A plain row, not a chrome-row: the renderer makes the whole
-   ;; header line the expand/collapse target, and a Card surface over
-   ;; it swallows taps everywhere but the chevron.
-   (jetpacs-row
-    (jetpacs-icon "apps")
-    (jetpacs-with-attrs
-     (jetpacs-column (jetpacs-text "Apps")
-                     (jetpacs-text "Manage and switch" :style "caption")
-                     :spacing 2)
-     :weight 1))
-   (jetpacs-chrome-row "Manage Apps"
-                       :subtitle "Install and remove app bundles"
-                       :icon "download"
-                       :on-tap (jetpacs-action
-                                "jetpacs.launcher.open"
-                                :args '(:surface "app:jetpacs.app-store"))
-                       :key "drawer-manage-apps")
-   (jetpacs-chrome-row "App Launcher"
-                       :subtitle "Switch between apps"
-                       :icon "swap_horiz"
-                       :on-tap (jetpacs-action "jetpacs.launcher.show")
-                       :key "drawer-app-launcher")
-   :collapsed t))
-
 ;;;; Actions
 
 (defun jetpacs-apps--action-grid (_args _params)

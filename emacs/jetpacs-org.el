@@ -12,30 +12,38 @@
 ;; module requires no widgets and builds no nodes; JA-5's skin and any
 ;; Tier-1 (the D-1 block editor, glasspane at its port rung) consume it.
 ;;
+;; THE ENGINE IS MOVING OUT (docs/PLAN-ebp-org-split.md).  By the rule
+;; ratified 2026-08-06 — `jetpacs-' names what cannot exist without
+;; Kotlin, Android, and Compose; `ebp-' names what only ever touches the
+;; wire and Emacs — none of this is jetpacs work, and it now lives in
+;; `ebp-org.el'.  G6 has taken the grammar and the primitives; what is
+;; left below is the half that still reads through the root allowlist,
+;; the cache, or a mutation, and it follows at G7, where this file
+;; becomes a ~40-line registration shim carrying the teardown hook and
+;; nothing callable.  Names here re-point to `ebp-org-' as their code
+;; crosses; there are no aliases, by house rule.
+;;
 ;; Ported from poc-v1's jetpacs-org.el engine ranges, NOT transliterated.
 ;; Twelve poc defects are fixed here rather than restored — the audit
 ;; map lives in the JA-4 plan; the load-bearing ones are named at their
-;; fix sites.  Do not "restore" any of the following from the source:
+;; fix sites.  (The query reader's obarray poisoning and the bare-symbol
+;; error discipline moved to `ebp-org.el' with the code that fixes
+;; them.)  Do not "restore" either of the following from the source:
 ;;
-;;   - `(read q)' on a wire string (obarray poisoning, measured; and an
-;;     RCE hand-off when org-ql is installed).  The sexp arm reads under
-;;     a throwaway obarray and vets against an allowlist (O2).
 ;;   - `org-id-find' in ref resolution: its miss path runs a FULL org-id
 ;;     rescan and falls back to the ambient current buffer — inside the
 ;;     socket filter.  Resolution never calls it.
 ;;   - the raw `save-buffer' idle timer: supersession and file locks both
 ;;     PROMPT, and a prompt in a timer wedges a daemon.  The save path
 ;;     refuses loudly instead.
-;;   - absolute paths in error messages: refs carry paths, errors do not
-;;     (D-4; `jetpacs-error-label' prints symbols only).
 ;;
 ;; THE WIRE CONTRACT (D-4, ratified + amended 2026-07-27): refs are
 ;; Emacs-side plists and NEVER cross the wire; the wire carries opaque
 ;; per-owner tokens minted against a replace-set table (the
 ;; `results.visit' :index contract generalized).  Status mapping for
-;; handlers (`jetpacs-org-refusal-disposition' computes it): token miss
-;; -> `stale'; `jetpacs-org-unresolved' -> `stale';
-;; `jetpacs-org-refused' -> `rejected'; `jetpacs-org-unavailable' ->
+;; handlers (`ebp-org-refusal-disposition' computes it): token miss
+;; -> `stale'; `ebp-org-unresolved' -> `stale';
+;; `ebp-org-refused' -> `rejected'; `ebp-org-unavailable' ->
 ;; `jetpacs-retry-later' (1500 event-retry — the durable record
 ;; survives redelivery).  The glasspane alist->plist
 ;; migration deliberately did NOT ride this rung — glasspane cannot load
@@ -43,76 +51,12 @@
 
 ;;; Code:
 
-(require 'cl-lib)
-(require 'subr-x)
-(require 'org)
-(require 'org-id)                       ; org-id-locations / find-id-in-file
-(require 'org-capture)                  ; O3: templates, capture-run
-(require 'org-table)                    ; O3: org-table-current-begin-pos defvar
-;; Batch 3 (P1-6): loaded EAGERLY, never lazily.  `org-timestamp-change'
-;; autoloads org-clock (via `org-clock-update-time-maybe') in the middle
-;; of the first repeatered toggle, and org-clock.el's load runs the
-;; `org-logind-dbus-session-path' defvar D-Bus probe — whose wait loop
-;; pumps `read-event', which under `inhibit-interaction' signals a raw
-;; `inhibited-interaction' out of the mutation extent (measured on a
-;; system bus; the clamp cannot stub `read-event' without breaking that
-;; same D-Bus machinery).  Loading here runs the probe at module load,
-;; where interaction is legal.
-(require 'org-clock)
-;; Batch 3 (P1-6): the C modification guard calls the AUTOLOADED
-;; `userlock--ask-user-about-supersession-threat' (emacs-30.1
-;; src/filelock.c); if userlock.el loads lazily inside the clamp, its
-;; defuns CLOBBER the clamp's `ask-user-about-supersession-threat'
-;; rebind mid-extent and the stock batch branch errors ("Cannot resolve
-;; conflict in batch mode") instead of the D2 status.  With the library
-;; already loaded, `cl-letf' rebinds stick — and the wrapper's
-;; content-unchanged check still absorbs a same-content mtime drift
-;; before any question is asked.  `load', not `require': userlock.el
-;; is a no-provide preloadable library, and the fboundp gate skips the
-;; load when a dump already carries it (an autoload STUB does not
-;; count — it is exactly the hazard).
-(unless (and (fboundp 'userlock--ask-user-about-supersession-threat)
-             (not (autoloadp (symbol-function
-                              'userlock--ask-user-about-supersession-threat))))
-  (load "userlock" nil t))
+(require 'ebp-org)                      ; the engine itself
 (require 'jetpacs-surfaces)             ; owner floor: teardown only now
 
 (defgroup jetpacs-org nil
   "The Jetpacs org extraction and mutation engine."
   :group 'jetpacs)
-
-;;;; Errors — the handler status boundary
-
-(define-error 'jetpacs-org-refused "jetpacs-org: ref refused")
-(define-error 'jetpacs-org-unresolved "jetpacs-org: heading not found")
-(define-error 'jetpacs-org-unavailable "jetpacs-org: resource unavailable")
-
-(defun jetpacs-org-refusal-disposition (err)
-  "The SPEC 14.4/14.5 disposition for a signalled engine condition ERR.
-ERR is the (CONDITION . DATA) cons a `condition-case' binds (JA-4
-audit P1-10: `rejected' makes the Companion DELETE the durable record,
-so only permanent conditions may map there).  Returns:
-- `rejected' for `jetpacs-org-refused' — the path itself is out of
-  policy (`not-absolute', `remote', `outside-roots'), permanently
-  invalid;
-- `stale' for `jetpacs-org-unresolved' — content drift (heading gone,
-  file gone, ambiguous duplicates); the Companion re-presents (14.5);
-- `retry' for `jetpacs-org-unavailable' — transient environment
-  \(`unreadable', `no-roots', `no-agenda-files': an unmounted vault
-  comes back).  NOT a handler status: call `jetpacs-retry-later',
-  which concludes the action with `1500 event-retry' so the record
-  survives redelivery;
-- nil for anything else (not an engine condition — let it propagate).
-The handler shape this buys:
-  (condition-case err (…engine call… \\='accepted)
-    ((jetpacs-org-refused jetpacs-org-unavailable jetpacs-org-unresolved)
-     (pcase (jetpacs-org-refusal-disposition err)
-       (\\='retry (jetpacs-retry-later))
-       (status status))))"
-  (pcase (car-safe err)
-    ('jetpacs-org-refused 'rejected)
-    ('jetpacs-org-unresolved 'stale)
-    ('jetpacs-org-unavailable 'retry)))
 
 ;;;; The root allowlist
 
@@ -175,30 +119,30 @@ this wrapper supplies the org root set and re-signals in the module's
 STATUS-SPLIT conditions (JA-4 audit P1-10 — `rejected' deletes the
 Companion's durable record, so a transient condition must never land
 there):
-- `jetpacs-org-refused' (handler: rejected): `not-absolute', `remote',
+- `ebp-org-refused' (handler: rejected): `not-absolute', `remote',
   `outside-roots' — the path itself is out of policy;
-- `jetpacs-org-unavailable' (handler: `jetpacs-retry-later'):
+- `ebp-org-unavailable' (handler: `jetpacs-retry-later'):
   `unreadable' on an EXISTING file (an I/O condition), and `no-roots'
   \(the whole allowlist collapsed — an unmounted vault comes back);
-- `jetpacs-org-unresolved' (handler: stale): the file is GONE —
+- `ebp-org-unresolved' (handler: stale): the file is GONE —
   content drift, the Companion re-presents (14.5)."
   (condition-case err
       (ebp-check-path file (jetpacs-org--roots))
     (ebp-path-refused
      (pcase (cadr err)
-       ('no-roots (signal 'jetpacs-org-unavailable (cdr err)))
+       ('no-roots (signal 'ebp-org-unavailable (cdr err)))
        ('unreadable
         (if (file-exists-p file)
-            (signal 'jetpacs-org-unavailable (cdr err))
-          (signal 'jetpacs-org-unresolved (list 'file-missing))))
-       (_ (signal 'jetpacs-org-refused (cdr err)))))))
+            (signal 'ebp-org-unavailable (cdr err))
+          (signal 'ebp-org-unresolved (list 'file-missing))))
+       (_ (signal 'ebp-org-refused (cdr err)))))))
 
 (defun jetpacs-org-file-allowed-p (file)
   "FILE's truename when it is inside the org roots and readable, else nil.
 The TOTAL form of `jetpacs-org--check-file'.  Every condition that
-checker raises — `jetpacs-org-refused' (the path is out of policy),
-`jetpacs-org-unresolved' (the file is GONE) and
-`jetpacs-org-unavailable' (unreadable, or the whole allowlist
+checker raises — `ebp-org-refused' (the path is out of policy),
+`ebp-org-unresolved' (the file is GONE) and
+`ebp-org-unavailable' (unreadable, or the whole allowlist
 collapsed) — comes back as a plain nil.  This function never signals.
 
 The signalling checker exists for callers that ANSWER a request and
@@ -206,54 +150,15 @@ must tell the three apart, because each routes to a different STATUS
 \(23.1 rejected / 14.5 stale / retry-later).  Every other caller only
 wants to know whether it may read a path, and those callers had all
 written the same wrong thing: a `condition-case' catching
-`jetpacs-org-refused' and nothing else, so the other two conditions
+`ebp-org-refused' and nothing else, so the other two conditions
 escaped.  That is how a link to a missing image file — plain
-`jetpacs-org-unresolved', the most ordinary thing a document can
+`ebp-org-unresolved', the most ordinary thing a document can
 contain — signalled out through the whole render instead of degrading
 to the link's text."
   (condition-case nil
       (jetpacs-org--check-file file)
-    ((jetpacs-org-refused jetpacs-org-unresolved jetpacs-org-unavailable)
+    ((ebp-org-refused ebp-org-unresolved ebp-org-unavailable)
      nil)))
-
-;;;; The D2 IO clamp
-
-(defmacro jetpacs-org--with-clamped-io (&rest body)
-  "Run BODY with every interactive file-IO escape clamped (D2).
-Drift and every other would-be question become a STATUS — a
-`jetpacs-org-refused' signal carrying a one-symbol data list per the
-floor's 23.3 convention (`file-drifted', `needs-interactive') — never
-a prompt: these extents run inside the socket filter or a timer, where
-a prompt wedges a daemon with nobody to answer it.
-
-The variables silence what variables can: `query-about-changed-file'
-nil the changed-on-disk reread question in `find-file-noselect',
-`large-file-warning-threshold' nil the size confirmation,
-`enable-local-variables' :safe the unsafe-local-variable prompt.  The
-rebinds catch what variables cannot: supersession
-\(`ask-user-about-supersession-threat', raised by the FIRST buffer
-modification against a drifted file), the `y-or-n-p'/`yes-or-no-p'
-family (write-protected saves, `require-final-newline', the
-`org-auto-repeat-maybe' `++' catch-up question), and
-`read-char-exclusive' (`org-check-agenda-file' on a file that vanishes
-between the existence filter and the map — the filter/prepare race)."
-  (declare (indent 0) (debug t))
-  `(let ((query-about-changed-file nil)
-         (large-file-warning-threshold nil)
-         (enable-local-variables :safe))
-     (cl-letf (((symbol-function 'ask-user-about-supersession-threat)
-                (lambda (_fn)
-                  (signal 'jetpacs-org-refused (list 'file-drifted))))
-               ((symbol-function 'y-or-n-p)
-                (lambda (&rest _)
-                  (signal 'jetpacs-org-refused (list 'needs-interactive))))
-               ((symbol-function 'yes-or-no-p)
-                (lambda (&rest _)
-                  (signal 'jetpacs-org-refused (list 'needs-interactive))))
-               ((symbol-function 'read-char-exclusive)
-                (lambda (&rest _)
-                  (signal 'jetpacs-org-refused (list 'needs-interactive)))))
-       ,@body)))
 
 ;;;; Cache layer
 
@@ -433,8 +338,8 @@ inside the socket filter is whatever happened to be current."
 
 (defun jetpacs-org-resolve-ref (ref)
   "Resolve REF (a plist from `jetpacs-org-ref-at-point') to a marker.
-Signals `jetpacs-org-refused' on policy (absolute/remote/roots/
-readable — handler answer: `rejected') and `jetpacs-org-unresolved'
+Signals `ebp-org-refused' on policy (absolute/remote/roots/
+readable — handler answer: `rejected') and `ebp-org-unresolved'
 when the heading is genuinely gone OR AMBIGUOUS (content drift —
 handler answer: `stale', the Companion re-presents; SPEC 14.5 mandates
 stale over a guess).  Resolution: id in the validated file, id via
@@ -442,7 +347,7 @@ stale over a guess).  Resolution: id in the validated file, id via
 MANDATORY headline check, then a headline scan that resolves only a
 UNIQUE match (JA-4 audit P1-9 — the poc took the first duplicate and
 mutated a heading the user never tapped).  Files open QUIETLY
-\(NOWARN, under `jetpacs-org--with-clamped-io'): a changed-on-disk
+\(NOWARN, under `ebp-org--with-clamped-io'): a changed-on-disk
 question cannot reach the dispatch extent — resolution answers from
 the buffer it has."
   (let ((id (plist-get ref :id))
@@ -454,7 +359,7 @@ the buffer it has."
     ;; trusted-position path fails and the headline scan may resolve the
     ;; wrong heading among duplicate titles.
     (when (numberp pos) (setq pos (truncate pos)))
-    (jetpacs-org--with-clamped-io
+    (ebp-org--with-clamped-io
       (let* ((true (and (stringp file) (not (string-empty-p file))
                         (jetpacs-org--check-file file)))
              (marker
@@ -470,7 +375,7 @@ the buffer it has."
                                 (mapped-true
                                  (condition-case nil
                                      (jetpacs-org--check-file mapped)
-                                   (jetpacs-org-refused nil))))
+                                   (ebp-org-refused nil))))
                       (jetpacs-org--find-in-file-by-id id mapped-true)))
                ;; 3. Trusted position — only while the headline claim
                ;;    still holds.  MANDATORY (JA-4 audit P1-9, defect
@@ -491,7 +396,7 @@ the buffer it has."
                                         headline)
                              (copy-marker (point))))))))
                ;; 4. Headline scan — a UNIQUE match resolves; duplicates
-               ;;    fall through to `jetpacs-org-unresolved' (stale,
+               ;;    fall through to `ebp-org-unresolved' (stale,
                ;;    SPEC 14.5).  The poc took the FIRST match among
                ;;    duplicate titles and mutated a heading the user
                ;;    never tapped (P1-9).
@@ -510,7 +415,7 @@ the buffer it has."
             ;; The SYMBOL path only: no filename, no headline text — the
             ;; poc formatted the absolute path into this error and
             ;; callers pushed it to a device snackbar.
-            (signal 'jetpacs-org-unresolved nil))))))
+            (signal 'ebp-org-unresolved nil))))))
 
 ;;;; Wire tokens — the D-4 opaque per-scope replace-set table
 ;;
@@ -660,7 +565,7 @@ and on a WRITE-PROTECTED file, `ask-user-about-lock' on a foreign
 lock, and the `require-final-newline' question — and a prompt inside a
 timer wedges a daemon with nobody to answer it.  The two cheap cases
 are answered by inspection below; the save itself runs under
-`jetpacs-org--with-clamped-io', so anything that would still ask
+`ebp-org--with-clamped-io', so anything that would still ask
 \(write-protected, final-newline, a drift landing after the modtime
 check) becomes a message-refusal — a signal must never escape a timer."
   (when (buffer-live-p buf)
@@ -676,8 +581,8 @@ check) becomes a message-refusal — a signal must never escape a timer."
           (message "jetpacs-org: NOT saving %s — locked by another \
 process" (buffer-name buf)))
          (t (condition-case nil
-                (jetpacs-org--with-clamped-io (save-buffer))
-              (jetpacs-org-refused
+                (ebp-org--with-clamped-io (save-buffer))
+              (ebp-org-refused
                (message "jetpacs-org: NOT saving %s — needs interactive \
 input" (buffer-name buf))))))))))
 
@@ -694,12 +599,12 @@ Widening is load-bearing: the poc mutated without it, and a narrowed
 buffer whose restriction excluded the marker silently edited the wrong
 position.  The marker is released after use.  The WHOLE extent —
 resolve, BODY, invalidate, defer — runs under
-`jetpacs-org--with-clamped-io' (D2): supersession against a drifted
+`ebp-org--with-clamped-io' (D2): supersession against a drifted
 file, the `++' repeater catch-up question, a changed-on-disk reread —
-every would-be prompt surfaces as `jetpacs-org-refused', a status the
+every would-be prompt surfaces as `ebp-org-refused', a status the
 handler answers."
   (declare (indent 2))
-  `(jetpacs-org--with-clamped-io
+  `(ebp-org--with-clamped-io
      (let ((marker (jetpacs-org-resolve-ref ,ref)))
        (unwind-protect
            (with-current-buffer (marker-buffer marker)
@@ -738,9 +643,9 @@ and the skip is surfaced — and recorded in
 `jetpacs-org-toggle-todo-cancelled-note' so JA-5's `capture_fields'
 note dialog can pick it up.  The note is only ONE of the interactive
 hazards on this path: `jetpacs-org-with-mutation' runs the whole
-toggle under `jetpacs-org--with-clamped-io', so the rest — the `++'
+toggle under `ebp-org--with-clamped-io', so the rest — the `++'
 repeater catch-up question, supersession, changed-on-disk — surface
-as `jetpacs-org-refused'."
+as `ebp-org-refused'."
   (setq jetpacs-org-toggle-todo-cancelled-note nil)
   (jetpacs-org-with-mutation ref namespace
     (org-todo state)
@@ -777,430 +682,6 @@ this is undocumented org behavior we depend on)."
           (org-add-planning-info nil nil type)
         (org-add-planning-info type date-str)))))
 
-;;;; Typed extraction
-
-(defun jetpacs-org-entry-typed-value (prop type)
-  "Extract the value of PROP at point according to TYPE.
-TYPE is one of `text', `checkbox', `date', `enum', `number', `list'."
-  (let ((val (org-entry-get (point) prop)))
-    (pcase type
-      ('checkbox (equal val "[X]"))
-      ('date (and val (not (string-empty-p val)) val))
-      ('number (and val (string-to-number val)))
-      ('enum
-       ;; A PROP_ALL constraint, when present, is enforced.
-       (let ((allowed (org-entry-get (point) (concat prop "_ALL") t)))
-         (if allowed
-             (let ((options (split-string allowed "[ \t]+" t)))
-               (if (member val options) val nil))
-           (and val (not (string-empty-p val)) val))))
-      ('list
-       (and val (split-string val "[, \t]+" t)))
-      (_ (or val "")))))
-
-;;;; Query parser — the wire-facing grammar (O2)
-
-(defconst jetpacs-org-ql-literals '(today nil t < <= > >= =)
-  "Symbols with grammar meaning that vetting must not stringify.")
-
-(defconst jetpacs-org-note-query-terms
-  '(and or not todo done tags priority heading regexp property level
-        scheduled deadline habit)
-  "The head symbols of the built-in query grammar — the INTERPRETER'S
-coverage set (an arm checks its accessor against it).  This is
-NOT the wire allowlist: the sexp arm vets against
-`jetpacs-org--wire-query-terms', which drops `regexp'.")
-
-(defconst jetpacs-org--wire-query-terms
-  '(and or not todo done tags priority heading property level
-        scheduled deadline habit)
-  "The SPEC 23.2 sexp-arm allowlist: a wire query may name these heads
-and nothing else.  `regexp' is deliberately absent (JA-4 audit P1-2 /
-SPEC #137) — a wire (regexp …) hands the peer a raw regexp engine
-\(ReDoS at will); `heading' regexp-quotes and covers the use case, and
-the token arm mints its `regexp' clauses from canonical quoted material
-without passing through the vetter.")
-
-(defconst jetpacs-org--query-max-depth 8)
-(defconst jetpacs-org--query-max-nodes 128)
-(defconst jetpacs-org--query-max-chars 200
-  "Cap on a wire query string and on any single string leaf inside one.
-Matches `jetpacs-files-grep-max-query-chars' (SPEC #138 spirit): the
-peer gets a search box, not a buffer upload.")
-
-(defun jetpacs-org--read-query (q)
-  "Read exactly ONE form from wire string Q, obarray-safely.
-The read runs under a THROWAWAY obarray (the ebp.el E4b move): a bare
-`read' on a wire string interns every distinct symbol in every query
-ever sent into the global obarray, permanently — measured, not
-theoretical.  `read-circle' is nil so #1=#1# dies as a reader error
-instead of looping the interpreter.  Trailing content after the form is
-refused: a smuggled second form must never parse as
-accepted-and-ignored."
-  (let* ((obarray (obarray-make))
-         (read-circle nil)
-         (parse (condition-case nil
-                    (read-from-string q)
-                  (error (user-error "Malformed query"))))
-         (rest (string-trim (substring q (cdr parse)))))
-    (unless (string-empty-p rest)
-      (user-error "Malformed query (trailing content)"))
-    (car parse)))
-
-(defun jetpacs-org--vet-query (form)
-  "Vet, normalize and RE-HOME sexp query FORM in one schema-checked walk.
-Output invariant (enforced, not aspirational): heads are the canonical
-interned symbols of `jetpacs-org--wire-query-terms'; every string is a
-FRESH propertyless copy no longer than `jetpacs-org--query-max-chars'
-\(JA-4 audit P1-3 — the reader mints propertized strings from #(…) wire
-text, with throwaway symbols riding in the property list); every other
-atom is an integer or a canonical grammar literal (the comparators,
-`today', the :on/:from/:to keywords); and every clause carries
-schema-checked arity — so the throwaway-obarray symbols from
-`jetpacs-org--read-query' die here and the interpreter fallthroughs are
-internal invariants.  `quote' wrappers of the exact 2-element (quote X)
-shape are unwrapped (the reader minted them from \\='(...) input; the
-loose unwrap silently discarded trailing forms); bare symbols in string
-position become fresh strings, exactly as the poc normalizer did.
-Everything else — floats, vectors, records, byte-code objects (the
-reader will happily mint one from #[...]), hash-table forms, stray
-keywords, a wire `regexp' head — is refused outright.  Arity and type
-violations refuse as \"Malformed HEAD clause\": the head symbol at
-most, NEVER the query text (23.3), and cap violations never echo the
-query either (it is user data)."
-  (let ((nodes 0))
-    (cl-labels
-        ((visit (depth)
-           (when (> depth jetpacs-org--query-max-depth)
-             (user-error "Query too deep"))
-           (when (> (cl-incf nodes) jetpacs-org--query-max-nodes)
-             (user-error "Query too large")))
-         (unq (x)
-           ;; Exact 2-element (quote X) only — the shape the reader
-           ;; mints from 'X.
-           (while (and (consp x) (symbolp (car x))
-                       (equal (symbol-name (car x)) "quote")
-                       (consp (cdr x)) (null (cddr x)))
-             (setq x (cadr x)))
-           x)
-         (bounded (s)
-           (when (> (length s) jetpacs-org--query-max-chars)
-             (user-error "Query too large"))
-           ;; Fresh copy even for `symbol-name' output — that string is
-           ;; the symbol's OWN name storage, never to be shared.
-           (substring-no-properties s))
-         (bad (head)
-           (user-error "Malformed %s clause" head))
-         (str (x depth)
-           ;; A string-position leaf: fresh bounded string out.
-           (visit depth)
-           (setq x (unq x))
-           (cond
-            ((stringp x) (bounded x))
-            ((and (symbolp x) (string-prefix-p ":" (symbol-name x)))
-             (user-error "Unsupported query keyword"))
-            ((symbolp x) (bounded (symbol-name x)))
-            (t (user-error "Unsupported query value"))))
-         (int (x head depth)
-           (visit depth)
-           (unless (integerp x) (bad head))
-           x)
-         (clause (x depth)
-           (setq x (unq x))
-           (visit depth)
-           (unless (and (consp x) (symbolp (car x)) (proper-list-p x))
-             (user-error "Malformed query clause"))
-           (let* ((name (symbol-name (car x)))
-                  (head (cl-find name jetpacs-org--wire-query-terms
-                                 :key #'symbol-name :test #'equal))
-                  (args (cdr x))
-                  (n (length args)))
-             (unless head
-               (user-error "Unsupported query term"))
-             (cons
-              head
-              (pcase head
-                ((or 'and 'or)
-                 (unless (>= n 1) (bad head))
-                 (mapcar (lambda (a) (clause a (1+ depth))) args))
-                ('not
-                 (unless (= n 1) (bad head))
-                 (list (clause (car args) (1+ depth))))
-                ((or 'todo 'tags 'heading)
-                 (mapcar (lambda (a) (str a (1+ depth))) args))
-                ((or 'done 'habit)
-                 (when args (bad head))
-                 nil)
-                ('priority
-                 (let* ((cmps '("<" "<=" ">" ">=" "="))
-                        (op (and (= n 2) (symbolp (car args))
-                                 (car (member (symbol-name (car args))
-                                              cmps)))))
-                   (if op
-                       ;; (OP VAL): comparator + a string-or-int bound.
-                       (let ((val (cadr args)))
-                         (visit (1+ depth))
-                         (visit (1+ depth))
-                         (unless (or (stringp val) (integerp val))
-                           (bad head))
-                         (list (intern op)
-                               (if (stringp val) (bounded val) val)))
-                     ;; Member form: string leaves, no comparator names.
-                     (mapcar (lambda (a)
-                               (when (and (symbolp a)
-                                          (member (symbol-name a) cmps))
-                                 (bad head))
-                               (str a (1+ depth)))
-                             args))))
-                ('property
-                 (unless (<= 1 n 2) (bad head))
-                 (let ((pname (str (car args) (1+ depth))))
-                   ;; ALLTAGS/FILE/ITEM/… are path or derived data with
-                   ;; dedicated heads; refusing them loses nothing and
-                   ;; (property "FILE") would leak absolute paths.
-                   (when (member (upcase pname) org-special-properties)
-                     (user-error "Unsupported property name"))
-                   (cons pname
-                         (and (cdr args)
-                              (list (str (cadr args) (1+ depth)))))))
-                ('level
-                 (unless (<= 1 n 2) (bad head))
-                 (mapcar (lambda (a) (int a head (1+ depth))) args))
-                ((or 'scheduled 'deadline)
-                 (unless (cl-evenp n) (bad head))
-                 (let (out)
-                   (while args
-                     (let ((k (pop args)) (v (pop args)))
-                       (visit (1+ depth))
-                       (visit (1+ depth))
-                       (unless (and (symbolp k)
-                                    (member (symbol-name k)
-                                            '(":on" ":from" ":to")))
-                         (bad head))
-                       (push (intern (symbol-name k)) out)
-                       (push (cond
-                              ((integerp v) v)
-                              ((and (symbolp v)
-                                    (equal (symbol-name v) "today"))
-                               'today)
-                              ((and (stringp v)
-                                    (string-match-p
-                                     "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}"
-                                     v))
-                               (bounded v))
-                              (t (bad head)))
-                             out)))
-                   (nreverse out))))))))
-      (clause form 0))))
-
-(defun jetpacs-org--query-tokens (q)
-  "Split query Q on whitespace, keeping \"quoted phrases\" whole.
-The empty quoted phrase (\"\") is DROPPED, not returned: downstream it
-minted a match-everything (regexp \"\") clause (JA-4 audit P1-4).  The
-\\\\S-+ arm can never produce an empty match."
-  (let ((pos 0) (tokens nil))
-    (while (string-match "\"\\([^\"]*\\)\"\\|\\S-+" q pos)
-      (let ((tok (or (match-string 1 q) (match-string 0 q))))
-        (unless (string-empty-p tok) (push tok tokens)))
-      (setq pos (match-end 0)))
-    (nreverse tokens)))
-
-(defun jetpacs-org-parse-query (query)
-  "Parse the search QUERY string into a vetted query sexp, or nil if empty.
-Accepts three input shapes:
-- a query sexp:    (and (todo \"TODO\") (tags \"work\"))
-- filter tokens:   todo:TODO,NEXT tags:work priority:A
-- free text:       \"exact phrase\" or bare words
-The sexp arm is wire-hardened (SPEC 23.2): obarray-safe read, head and
-leaf allowlists, arity/type schema, depth/size caps — see
-`jetpacs-org--vet-query'.  The token and free-text arms never touch the
-reader.  BOTH arms sit behind the `jetpacs-org--query-max-chars' length
-cap (JA-4 audit P1-4 — the caps previously governed the sexp arm only):
-an over-length QUERY refuses as \"Query too long\" before the reader or
-the tokenizer sees it.  Signals `user-error' on anything malformed.
-A query of nothing but empty phrases parses to nil (empty query), never
-to (regexp \"\") and never to a bare (and)."
-  (let ((q (string-trim (or query ""))))
-    (cond
-     ((string-empty-p q) nil)
-     ((> (length q) jetpacs-org--query-max-chars)
-      (user-error "Query too long"))
-     ((string-match-p "\\`'?(" q)
-      (jetpacs-org--vet-query (jetpacs-org--read-query q)))
-     (t
-      (let ((clauses
-             (mapcar
-              (lambda (tok)
-                (cond
-                 ((string-prefix-p "todo:" tok)
-                  `(todo ,@(split-string (substring tok 5) "," t)))
-                 ((string-prefix-p "tags:" tok)
-                  `(tags ,@(split-string (substring tok 5) "," t)))
-                 ((string-prefix-p "priority:" tok)
-                  `(priority ,@(split-string (substring tok 9) "," t)))
-                 (t `(regexp ,(regexp-quote tok)))))
-              (jetpacs-org--query-tokens q))))
-        ;; Unreachable under the 200-char cap; pins the size invariant
-        ;; on this arm if the bound ever moves.
-        (when (> (length clauses) jetpacs-org--query-max-nodes)
-          (user-error "Query too large"))
-        (cond ((cdr clauses) `(and ,@clauses))
-              (t (car clauses))))))))
-
-;;;; The query interpreter
-
-(defun jetpacs-org--planning-day (spec)
-  "Resolve a query date SPEC to an absolute day number."
-  (cond
-   ((eq spec 'today) (time-to-days (current-time)))
-   ((integerp spec) (+ (time-to-days (current-time)) spec))
-   ((stringp spec) (time-to-days (org-time-string-to-time spec)))
-   ;; Unreachable for vetted input; never echo the spec (user data).
-   (t (user-error "Unsupported query date"))))
-
-(defun jetpacs-org--planning-match-spec (stamp args)
-  "Match raw planning STAMP string against ARGS plist (:on / :from / :to).
-Empty ARGS means mere presence of the stamp."
-  (and (stringp stamp) (not (string-empty-p stamp))
-       (let ((day (time-to-days (org-time-string-to-time stamp)))
-             (on (plist-get args :on))
-             (from (plist-get args :from))
-             (to (plist-get args :to)))
-         (and (or (not on) (equal day (jetpacs-org--planning-day on)))
-              (or (not from) (>= day (jetpacs-org--planning-day from)))
-              (or (not to) (<= day (jetpacs-org--planning-day to)))))))
-
-(defun jetpacs-org--entry-priority ()
-  "The priority character of the heading at point, or nil."
-  (save-excursion (org-back-to-heading t) (nth 3 (org-heading-components))))
-
-(defun jetpacs-org-matches-p (tree get)
-  "Non-nil when the entry read through accessor GET matches query TREE.
-The ONE interpreter of the built-in grammar, and the engine's
-extension point: TREE is a vetted query sexp, GET is an accessor that
-reads whatever the caller's entries actually live in.  Base plugs in
-the org entry at point (`jetpacs-org-entry-matches-p'); the vulpea
-arm plugs in a note-index record; a test plugs in a plain closure over
-an alist.  The grammar is shared, the accessor is the seam.
-
-GET is called as (funcall GET WHAT &rest ARGS), with WHAT one of the
-ten accessor questions:
-  todo             the todo keyword string, or nil;
-  done             non-nil when the entry sits in a done state;
-  tags             the list of tag strings;
-  priority         the priority CHARACTER (?A), or nil;
-  title            the heading text, a string;
-  level            the outline level, an integer;
-  property NAME    the value of property NAME, or nil;
-  planning WHICH   the raw stamp string for WHICH, \"SCHEDULED\" or
-                   \"DEADLINE\";
-  habit            non-nil when the entry is a habit;
-  regexp-match RE  non-nil when RE matches the entry's text.
-An accessor that answers nil for a question it cannot serve simply
-never matches the terms built on it.
-
-An accessor may APPROXIMATE, deliberately.  The vulpea arm's
-`regexp-match' searches title + properties and not the body, because
-the note index does not carry the body and visiting the file to be
-exact would throw away the entire point of an index read.  An arm
-advertises the coverage it does support by checking its accessor
-against `jetpacs-org-note-query-terms'; the approximation is
-documented AT the arm, never hidden inside it.
-
-CALLERS MUST VET TREE FIRST, with `jetpacs-org-parse-query'.  This
-function interprets; it does not validate.  An unvetted head falls
-through to a plain `error' naming ONLY the head symbol — query
-material is user data and never rides in an error.  That fallthrough
-is deliberately NOT `jetpacs-org-refused': under SPEC 14.4 a refusal
-is a durable answer ABOUT THE REQUEST, so routing a caller's
-programming error through it would record a permanent verdict against
-the user's query for a bug in the calling code."
-  (pcase tree
-    (`(and . ,cs) (cl-every (lambda (c) (jetpacs-org-matches-p c get)) cs))
-    (`(or . ,cs) (and (cl-some (lambda (c) (jetpacs-org-matches-p c get)) cs) t))
-    (`(not ,c) (not (jetpacs-org-matches-p c get)))
-    (`(todo . ,kws)
-     (let ((st (funcall get 'todo)))
-       (and st (if kws (and (member st kws) t)
-                 (not (funcall get 'done))))))
-    (`(done) (and (funcall get 'done) t))
-    (`(tags . ,tags)
-     (let ((have (funcall get 'tags)))
-       (if tags (and (cl-some (lambda (tg) (member tg have)) tags) t)
-         (and have t))))
-    (`(priority ,(and op (pred symbolp)) ,val)
-     (let ((pr (funcall get 'priority))
-           (want (if (stringp val) (string-to-char val) val)))
-       ;; org urgency runs A > B > C — the higher priority is the
-       ;; smaller character, so the comparator flips against the chars.
-       (and pr (pcase op
-                 ('< (> pr want)) ('<= (>= pr want))
-                 ('> (< pr want)) ('>= (<= pr want))
-                 ('= (= pr want))
-                 ;; Unreachable for vetted input; no echo.
-                 (_ (user-error "Unsupported priority comparator"))))))
-    (`(priority . ,ps)
-     (let ((pr (funcall get 'priority)))
-       (if ps (and pr (member (char-to-string pr) ps) t)
-         (and pr t))))
-    (`(heading . ,texts)
-     (let ((hl (or (funcall get 'title) ""))
-           (case-fold-search t))
-       (cl-every (lambda (s) (string-match-p (regexp-quote s) hl)) texts)))
-    (`(regexp . ,res)
-     (cl-every (lambda (re) (funcall get 'regexp-match re)) res))
-    (`(property ,name . ,val)
-     (let ((v (funcall get 'property name)))
-       (if val (equal v (car val)) (and v t))))
-    (`(level ,n) (eql (funcall get 'level) n))
-    (`(level ,n ,m) (let ((l (funcall get 'level))) (and l (<= n l m))))
-    (`(scheduled . ,args)
-     (jetpacs-org--planning-match-spec (funcall get 'planning "SCHEDULED") args))
-    (`(deadline . ,args)
-     (jetpacs-org--planning-match-spec (funcall get 'planning "DEADLINE") args))
-    (`(habit) (and (funcall get 'habit) t))
-    ;; `error', not `user-error': only a hand-built tree that bypassed
-    ;; `jetpacs-org-parse-query' reaches here — an internal-invariant
-    ;; breach.  The head symbol (or the tree's type) only, never the
-    ;; tree itself: query material is user data.
-    (_ (error "jetpacs-org-matches-p: unsupported clause head %s"
-              (if (and (consp tree) (symbolp (car tree)))
-                  (car tree)
-                (type-of tree))))))
-
-(defun jetpacs-org--point-get (what &rest args)
-  "The grammar accessor over the org entry AT POINT."
-  (pcase what
-    ('todo (org-get-todo-state))
-    ('done (let ((st (org-get-todo-state)))
-             (and st (member st org-done-keywords) t)))
-    ('tags (org-get-tags nil t))
-    ('priority (jetpacs-org--entry-priority))
-    ('title (nth 4 (org-heading-components)))
-    ('level (org-current-level))
-    ('property (org-entry-get (point) (car args)))
-    ('planning (org-entry-get (point) (car args)))
-    ;; `org-is-habit-p' tests only the STYLE=habit property; repeater
-    ;; validity is enforced later by `org-habit-parse-todo'.
-    ('habit (and (fboundp 'org-is-habit-p) (org-is-habit-p)))
-    ('regexp-match
-     ;; The point haystack is the entry's body up to the next heading.
-     (let ((end (save-excursion (outline-next-heading) (point)))
-           (case-fold-search t))
-       (save-excursion (re-search-forward (car args) end t))))))
-
-(defun jetpacs-org-entry-matches-p (tree)
-  "Non-nil when the org entry at point matches query sexp TREE."
-  (jetpacs-org-matches-p tree #'jetpacs-org--point-get))
-
-;; The vulpea note-index arm lives in jetpacs-org-vulpea.el (Tier-1
-;; staging, NEVER required by base): base is vanilla Emacs, vulpea is
-;; not built-in.  Base keeps only the seam it plugs into — the
-;; accessor-pluggable `jetpacs-org-matches-p' above.  The accessor is
-;; the extension point; `jetpacs-org--point-get' stays PRIVATE behind
-;; the public `jetpacs-org-entry-matches-p', because reading the entry
-;; at point is base's own arm, not a name anyone plugs into.
-
 ;;;; High-level query
 
 (defun jetpacs-org--query-files ()
@@ -1209,7 +690,7 @@ Routes through `jetpacs-org-agenda-files' — the SAME P1-7 floor filter
 the roots and the cache stamp use — then drops entries whose files are
 gone (JA-4 audit P1-5: `org-check-agenda-file' messages the ABSOLUTE
 path and blocks on `read-char-exclusive' for a missing file).  An
-EMPTY result signals the RETRYABLE `jetpacs-org-unavailable' (P1-10:
+EMPTY result signals the RETRYABLE `ebp-org-unavailable' (P1-10:
 an unmounted vault comes back — never `rejected', which deletes the
 durable record) with the distinct data symbol `no-agenda-files' (vs
 the floor's `no-roots'): a nil scope handed to `org-map-entries' means
@@ -1219,7 +700,7 @@ files — the stamp already treats raw entries as files, and the query
 matches the module's own semantics, not the `org-agenda-files'
 function's."
   (or (cl-remove-if-not #'file-exists-p (jetpacs-org-agenda-files))
-      (signal 'jetpacs-org-unavailable (list 'no-agenda-files))))
+      (signal 'ebp-org-unavailable (list 'no-agenda-files))))
 
 (defun jetpacs-org--run-query (tree action)
   "Run vetted query TREE over the agenda files, calling ACTION at matches.
@@ -1235,10 +716,10 @@ P1-5)."
         ;; actually close P1-5.
         (org-agenda-skip-unavailable-files t)
         items)
-    (jetpacs-org--with-clamped-io
+    (ebp-org--with-clamped-io
       (org-map-entries
        (lambda ()
-         (when (jetpacs-org-entry-matches-p tree)
+         (when (ebp-org-entry-matches-p tree)
            (push (funcall action) items)))
        nil files))
     (nreverse items)))
@@ -1275,371 +756,7 @@ point, never as an fboundp fork here."
       (jetpacs-org-with-cache namespace (cons key printed)
         (jetpacs-org--run-query tree action)))))
 
-;;;; Shared org primitives (O3)
-;; Timestamp field extractors, headless capture, the LOGBOOK parser,
-;; planning-repeater surgery, and the #+TBLFM resolver — opinion-free
-;; org machinery any Tier-1 can lean on.  Nothing here knows about
-;; agendas or PKM.  (`file.add-heading' is deliberately absent — it
-;; lands with JA-5's dialog module.  The outline model landed at JA-5a,
-;; further down this file; its card VIEW is Tier-1 staging.)
-
-(defun jetpacs-org-ts-date (ts)
-  "Return the YYYY-MM-DD date inside org timestamp string TS, or nil."
-  (when (and (stringp ts)
-             (string-match "\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)" ts))
-    (match-string 1 ts)))
-
-(defun jetpacs-org-ts-time (ts)
-  "Return the HH:MM time inside org timestamp string TS, or nil."
-  (when (and (stringp ts)
-             (string-match "\\([0-9]\\{1,2\\}:[0-9]\\{2\\}\\)" ts))
-    (match-string 1 ts)))
-
-(defun jetpacs-org-ts-repeater (ts)
-  "Return the repeater cookie (e.g. \"+1w\", \".+2d\") inside TS, or nil.
-Repeaters only — delay cookies (-1d) deliberately do not match."
-  (when (and (stringp ts)
-             (string-match "\\([.+]?\\+[0-9]+[hdwmy]\\)" ts))
-    (match-string 1 ts)))
-
-(defun jetpacs-org-clocked-in-p (pos)
-  "Whether the heading at POS in the current buffer is the clocked task."
-  (and (bound-and-true-p org-clock-hd-marker)
-       (marker-buffer org-clock-hd-marker)
-       (eq (marker-buffer org-clock-hd-marker) (current-buffer))
-       (save-excursion
-         (goto-char pos)
-         (= (line-beginning-position)
-            (save-excursion (goto-char org-clock-hd-marker)
-                            (line-beginning-position))))))
-
-;;;; Headless capture
-;; D-5 (reversed): `jetpacs-org-capture-run' is the SUBSTRATE the
-;; rescheduled template-builder rung will stand on — the API here is a
-;; consumer contract, not an implementation detail.  The poc carried a
-;; byte-identical second copy of the prompts extractor 1,750 lines away;
-;; ONE survives (D-5's dedupe, executed).
-
-(defun jetpacs-org-capture-prompts (template-string)
-  "Return the ordered field names to collect for TEMPLATE-STRING.
-Each `%^{NAME}' or `%^{NAME|default}' contributes NAME (the default is
-dropped from the label but honoured at fill time).  A `%?' body
-position adds a leading \"Headline\" field.  Duplicates are removed."
-  (let (prompts (start 0))
-    (while (string-match "%\\^{\\([^}]+\\)}" template-string start)
-      ;; Capture the match BEFORE `split-string' runs — it calls
-      ;; `string-match' internally and would clobber the match data,
-      ;; leaving `match-end' wrong and the loop spinning forever.
-      (let ((spec (match-string 1 template-string))
-            (end (match-end 0)))
-        (push (string-trim (car (split-string spec "|"))) prompts)
-        (setq start end)))
-    (setq prompts (nreverse prompts))
-    (delete-dups
-     (if (string-match-p "%\\?" template-string)
-         (cons "Headline" prompts)
-       prompts))))
-
-(defun jetpacs-org-capture-templates ()
-  "The capture templates as plists (:key :description :prompts).
-PROMPTS is a vector of field-name strings.  Plist-native — the poc's
-alist projection was a poc-wire shape; JA-5 builds its own nodes from
-this."
-  (mapcar (lambda (tmpl)
-            (let ((key (nth 0 tmpl))
-                  (desc (nth 1 tmpl))
-                  (template-string (nth 4 tmpl)))
-              (list :key key
-                    :description desc
-                    :prompts (vconcat
-                              (jetpacs-org-capture-prompts
-                               (if (stringp template-string)
-                                   template-string
-                                 ""))))))
-          org-capture-templates))
-
-;;;; Wire values are DATA, never template source (SPEC 23.2, amendment #139)
-
-(defvar jetpacs-org--capture-nonce nil
-  "Per-run salt for capture sentinels, bound by `jetpacs-org-capture-run'.")
-
-(defun jetpacs-org--capture-sentinel (n)
-  "An inert placeholder standing in for substituted value N.
-Pure alphanumeric ON PURPOSE: it must pass through every `org-capture'
-expansion sweep untouched, so it may contain none of % ^ [ ] < > ( ) :
-and must not read as a link, a timestamp, or a property."
-  (format "JPCAPZ%sX%dZ" (or jetpacs-org--capture-nonce "0") n))
-
-(defun jetpacs-org--capture-restore (bindings)
-  "Replace each sentinel in BINDINGS with its raw value, in this buffer.
-Runs from `org-capture-before-finalize-hook' — AFTER org has finished
-every expansion.  That ordering IS the security property: a value can
-only be interpreted if it is present while an interpreter runs, so it
-is absent until none will.
-
-Two details are load-bearing:
-- ONE pass over an alternation, never a loop per binding.  Sequential
-  passes rescan already-substituted text, so one value could be re-read
-  as another value's sentinel.
-- `replace-match' with LITERAL non-nil.  Otherwise the VALUE is read as
-  a replacement template and a literal \\=\\1 or & in user text edits the
-  buffer — the same defect one layer down."
-  (when bindings
-    (save-excursion
-      (let ((re (regexp-opt (mapcar #'car bindings))))
-        (goto-char (point-min))
-        (while (re-search-forward re nil t)
-          (replace-match (cdr (assoc (match-string 0) bindings)) t t))))))
-
-(defun jetpacs-org-capture-fill (tmpl values)
-  "Fill org capture TMPL from VALUES; return the cons (TEXT . BINDINGS).
-VALUES is STRING-keyed (`assoc') — deliberately outside the alist->plist
-migration; the keys are the human field names the prompts extractor
-produced.  TEXT carries an inert sentinel everywhere a WIRE-supplied
-value belongs, and BINDINGS maps each sentinel to its raw value for
-`jetpacs-org--capture-restore' to install once expansion is over.
-
-The values are deliberately NOT substituted here.  `org-capture' expands
-whatever template it is handed, so a value pasted in beforehand is
-indistinguishable from template the user wrote: `%(sexp)' in a phone
-field would reach `org-eval', and `%[PATH]' would read a local file into
-the user's org file (JA-4 audit P1-1, both reproduced).  There is no
-escaping alternative — org-capture has NO literal-percent escape
-\(verified against emacs-30.1 lisp/org/org-capture.el: every %% there is
-inside a `format' string), and its expansion is a series of independent
-regexp sweeps with no quoting syntax to hide behind.
-
-A template DEFAULT is the user's own configuration, so it is substituted
-directly and keeps org's semantics; only peer-supplied text is deferred.
-Any interactive escape that survives (`%^t', `%^g', a valueless
-`%^{…}') is stripped, so `org-capture' can never block on a minibuffer
-prompt the phone cannot answer."
-  (let* ((bindings '())
-         (n 0)
-         (stash (lambda (v)
-                  (let ((s (jetpacs-org--capture-sentinel (cl-incf n))))
-                    (push (cons s (or v "")) bindings)
-                    s)))
-         (headline (or (cdr (assoc "Headline" values)) "")))
-    ;; %? — free-form body position, a wire value.
-    (setq tmpl (replace-regexp-in-string
-                "%\\?" (lambda (_) (funcall stash headline)) tmpl t t))
-    ;; %^{NAME|default} — scan the template's own tokens so NAME always
-    ;; matches what `jetpacs-org-capture-prompts' produced.
-    (setq tmpl (replace-regexp-in-string
-                "%\\^{\\([^}]*\\)}"
-                (lambda (m)
-                  ;; M is the whole \"%^{…}\" match; parse it directly —
-                  ;; match-data is unreliable inside this callback.
-                  (let* ((spec (substring m 3 -1))
-                         (bar (string-search "|" spec))
-                         (name (string-trim
-                                (if bar (substring spec 0 bar) spec)))
-                         (default (and bar (substring spec (1+ bar))))
-                         (val (cdr (assoc name values))))
-                    (cond ((and (stringp val) (not (string-empty-p val)))
-                           (funcall stash val))
-                          ((stringp default) default)
-                          (t ""))))
-                tmpl t t))
-    (cons (replace-regexp-in-string "%\\^.?" "" tmpl t t) bindings)))
-
-(defun jetpacs-org-capture-run (template-key values &optional extra-body)
-  "Run capture for TEMPLATE-KEY with VALUES alist (NAME -> user input).
-EXTRA-BODY, when non-empty, is appended below the filled template — the
-carrier for text shared from another app.  An unknown TEMPLATE-KEY
-SIGNALS: the poc silently no-opped, which read as a capture that
-vanished."
-  (let ((jetpacs-org--capture-nonce (format "%08x" (random (expt 2 32))))
-        (entry (assoc template-key org-capture-templates))
-        (bindings '()))
-    ;; A 2-element entry is a legal PREFIX GROUP, not a template
-    ;; (\"b\" \"Templates for marking stuff to buy\") — indexing nth 4 on
-    ;; one signalled wrong-type-argument.
-    (unless (and entry (> (length entry) 4))
-      (user-error "No capture template %S" template-key))
-    (let* ((tmpl (nth 4 entry))
-           (filled (if (stringp tmpl)
-                       (let ((pair (jetpacs-org-capture-fill tmpl values)))
-                         (setq bindings (cdr pair))
-                         (car pair))
-                     tmpl))
-           ;; EXTRA-BODY is wire text too — the share-sheet carrier is the
-           ;; one field an arbitrary other app controls verbatim — so it
-           ;; gets a sentinel rather than being concatenated raw.
-           (filled (if (and (stringp filled)
-                            (stringp extra-body)
-                            (not (string-empty-p (string-trim extra-body))))
-                       (let ((s (jetpacs-org--capture-sentinel
-                                 (1+ (length bindings)))))
-                         (push (cons s (string-trim extra-body)) bindings)
-                         (concat filled "\n" s))
-                     filled))
-           (new-entry (copy-sequence entry))
-           ;; `plist-put' on a COPIED tail, never `append': org reads
-           ;; :immediate-finish with `plist-get', which returns the FIRST
-           ;; occurrence — the poc APPENDED, so a template carrying its
-           ;; own `:immediate-finish nil' won and the capture buffer
-           ;; waited forever for a C-c C-c nobody can press.
-           (props (plist-put (copy-sequence (nthcdr 5 entry))
-                             :immediate-finish t)))
-      (setcar (nthcdr 4 new-entry) filled)
-      (setcdr (nthcdr 4 new-entry) props)
-      ;; `org-capture-entry' short-circuits template selection inside
-      ;; `org-capture', so binding it to the FILLED copy is what makes
-      ;; the pre-filled template the one that actually runs.  (Binding
-      ;; the original re-ran the raw %^{…} prompts and double-asked the
-      ;; user through the bridge.)
-      (let* ((org-capture-entry new-entry)
-             (restore (lambda () (jetpacs-org--capture-restore bindings)))
-             ;; LET-bound, so it unwinds on a signal with no cleanup
-             ;; branch.  If a capture somehow does not finish
-             ;; synchronously the sentinels stay visible in the file:
-             ;; garbage text, never execution — the right way to fail.
-             (org-capture-before-finalize-hook
-              (cons restore org-capture-before-finalize-hook)))
-        ;; Safety net: if any escape slips through, never let
-        ;; `org-capture' block forever on a minibuffer the phone can't
-        ;; answer — `with-timeout' fires even inside a synchronous read.
-        (with-timeout (30 (message "jetpacs-org: capture timed out (a \
-prompt was left unanswered)"))
-          (org-capture))))))
-
-;;;; The LOGBOOK parser
-
-(defun jetpacs-org-parse-logbook (text)
-  "Parse LOGBOOK drawer TEXT into a list of entry plists.
-Clock lines yield (:type clock :start … [:end :duration | :active]);
-notes (:type note :timestamp :content); state changes (:type state :to
-[:from] :timestamp :has-note :content).  Keywords match
-case-insensitively — explicitly, like org-element, never via the
-ambient `case-fold-search'."
-  (let ((case-fold-search t)
-        (lines (split-string text "\n" t "[ \t]+"))
-        entries current-entry)
-    (dolist (line lines)
-      (cond
-       ((string-match "^CLOCK: \\[\\(.*?\\)\\]--\\[\\(.*?\\)\\] =>[ \t]+\\(.*\\)$" line)
-        (when current-entry (push current-entry entries))
-        (setq current-entry (list :type 'clock :start (match-string 1 line)
-                                  :end (match-string 2 line)
-                                  :duration (match-string 3 line))))
-       ((string-match "^CLOCK: \\[\\(.*?\\)\\]$" line)
-        (when current-entry (push current-entry entries))
-        (setq current-entry (list :type 'clock :start (match-string 1 line)
-                                  :active t)))
-       ((string-match "^- Note taken on \\(\\[.*?\\]\\) \\\\\\\\$" line)
-        (when current-entry (push current-entry entries))
-        (setq current-entry (list :type 'note :timestamp (match-string 1 line)
-                                  :content "")))
-       ((string-match "^- State \"\\(.*?\\)\"[ \t]+from \"\\(.*?\\)\"[ \t]+\\(\\[.*?\\]\\)\\(\\(?: \\\\\\\\\\)?\\)$" line)
-        (when current-entry (push current-entry entries))
-        (setq current-entry (list :type 'state :to (match-string 1 line)
-                                  :from (match-string 2 line)
-                                  :timestamp (match-string 3 line)
-                                  :has-note (not (string-empty-p (match-string 4 line)))
-                                  :content "")))
-       ((string-match "^- State \"\\(.*?\\)\"[ \t]+\\(\\[.*?\\]\\)\\(\\(?: \\\\\\\\\\)?\\)$" line)
-        (when current-entry (push current-entry entries))
-        (setq current-entry (list :type 'state :to (match-string 1 line)
-                                  :timestamp (match-string 2 line)
-                                  :has-note (not (string-empty-p (match-string 3 line)))
-                                  :content "")))
-       (t
-        ;; Continuation line.  `:content' is ABSENT on both clock shapes
-        ;; — the poc read nil and concat'd a spurious leading newline.
-        (when current-entry
-          (let ((content (or (plist-get current-entry :content) "")))
-            (setq current-entry
-                  (plist-put current-entry :content
-                             (if (string-empty-p content)
-                                 line
-                               (concat content "\n" line)))))))))
-    (when current-entry (push current-entry entries))
-    (nreverse entries)))
-
-(defun jetpacs-org-logbook-entries (pos)
-  "Return structured logbook entries for heading at POS, or nil.
-Drawer delimiters match case-insensitively (\":logbook:\" is valid
-org), explicitly rather than via ambient `case-fold-search'."
-  (save-excursion
-    (goto-char pos)
-    (let ((case-fold-search t)
-          (end (save-excursion (org-end-of-meta-data t) (point))))
-      (goto-char pos)
-      (when (re-search-forward "^[ \t]*:LOGBOOK:[ \t]*$" end t)
-        (let ((start (match-end 0)))
-          (when (re-search-forward "^[ \t]*:END:[ \t]*$" end t)
-            (jetpacs-org-parse-logbook
-             (buffer-substring-no-properties start
-                                             (match-beginning 0)))))))))
-
-;;;; Planning-repeater surgery
-
-(defun jetpacs-org-set-repeater (type repeater)
-  "Rewrite the repeater cookie on the TYPE planning timestamp at point.
-TYPE is \"SCHEDULED\" or \"DEADLINE\"; REPEATER like \"+1w\" (nil
-removes).  A heading without a TYPE timestamp is a no-op — and so is an
-UNTERMINATED one: the poc's `search-forward' had no NOERROR arg, so a
-timestamp missing its closer signalled `search-failed' out of the
-function instead of declining."
-  (save-excursion
-    (org-back-to-heading t)
-    (let ((bound (save-excursion (outline-next-heading) (point))))
-      (when (re-search-forward (concat type ":[ \t]*\\([<[]\\)") bound t)
-        (let* ((beg (match-beginning 1))
-               (close (if (equal (match-string 1) "<") ">" "]"))
-               (end (progn (goto-char beg)
-                           (search-forward close bound t))))
-          (when end
-            (let* ((ts (buffer-substring-no-properties beg end))
-                   (stripped (replace-regexp-in-string
-                              "[ \t]+[.+]?\\+[0-9]+[hdwmy]" "" ts))
-                   (new (if repeater
-                            (concat (substring stripped 0 -1) " " repeater
-                                    (substring stripped -1))
-                          stripped)))
-              (delete-region beg end)
-              (goto-char beg)
-              (insert new))))))))
-
-;;;; The #+TBLFM resolver
-
-(defun jetpacs-org-table-field-formula ()
-  "The #+TBLFM entry (LHS . RHS) computing the field at point, or nil.
-Field formulas (@R$C, with @< / @> resolved to concrete rows) win over
-column formulas ($C), mirroring org's own recalculation.  Point must be
-inside a table.  The LHS comes back exactly as written in the #+TBLFM
-line, so callers can `assoc' it in `org-table-get-stored-formulas'
-output to update the formula in place.  Formulas keyed by field name
-are not resolved — those cells stay value-editable."
-  (org-table-analyze)
-  (let* ((line (count-lines org-table-current-begin-pos
-                            (line-beginning-position)))
-         (dline (org-table-line-to-dline line))
-         (col (org-table-current-column))
-         (stored (org-table-get-stored-formulas t))
-         (norm (lambda (kv)
-                 (or (ignore-errors
-                       (org-table-formula-handle-first/last-rc (car kv)))
-                     (car kv)))))
-    (when (and dline col (> col 0))
-      (or (cl-find (format "@%d$%d" dline col) stored :key norm :test #'equal)
-          (cl-find (format "$%d" col) stored :key norm :test #'equal)))))
-
-;;;; The clock formatter and the file-save seam
-
-(defun jetpacs-org-format-clock-time (start end)
-  "Human line for a clock span: same-day collapses to one date."
-  (condition-case nil
-      (let ((s-date (substring start 0 10))
-            (s-time (substring start -5))
-            (e-date (substring end 0 10))
-            (e-time (substring end -5)))
-        (if (equal s-date e-date)
-            (format "%s, %s to %s" s-date s-time e-time)
-          (format "%s %s to %s %s" s-date s-time e-date e-time)))
-    (error (format "%s to %s" start end))))
+;;;; The file-save seam
 
 (defun jetpacs-org--default-file-save (_buffer)
   "Invalidate the org memo and schedule a save for the current buffer.
@@ -1761,7 +878,7 @@ Skipped levels nest under the nearest shallower ancestor."
 (defun jetpacs-org-file-toplevel-records (file)
   "Capped level-1 heading records for org FILE, tagged :file and :buffer.
 FILE goes through the root allowlist first — signals
-`jetpacs-org-refused' outside `jetpacs-org-roots', exactly like every
+`ebp-org-refused' outside `jetpacs-org-roots', exactly like every
 other engine entry point (the poc read any path handed to it).  The
 extra :file/:buffer members let a consumer mint a heading ref or a tap
 target from a record."

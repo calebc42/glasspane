@@ -720,7 +720,7 @@ malformed-planning trap from org_parser)."
 
 (ert-deftest jetpacs-org-dialogs-log-note-follows-a-cancelled-note ()
   "A toggle that cancels a free-text note is followed by the note
-dialog; Save writes a LOGBOOK line `jetpacs-org-parse-logbook' reads
+dialog; Save writes a LOGBOOK line `ebp-org-parse-logbook' reads
 back; dismissing keeps today's cancel."
   (jetpacs-org-dialogs-test--with-env
     (jetpacs-org-dialogs-test--with-file f
@@ -751,7 +751,7 @@ back; dismissing keeps today's cancel."
              ;; The engine's parser reads the line back as a note.
              (goto-char (point-min))
              (search-forward "* DONE Parent")
-             (let ((entries (jetpacs-org-logbook-entries (point))))
+             (let ((entries (ebp-org-logbook-entries (point))))
                (should (seq-find
                         (lambda (e)
                           (and (eq (plist-get e :type) 'note)

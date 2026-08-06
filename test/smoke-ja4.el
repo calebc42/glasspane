@@ -2,7 +2,7 @@
 
 ;; Four hardware claims over ONE connection, one throwaway owner "ja4":
 ;;   Q1 query: a device tap runs the vetted grammar ((todo "TODO")
-;;      through `jetpacs-org-parse-query') over a generated fixture
+;;      through `ebp-org-parse-query') over a generated fixture
 ;;      file and the hit count renders from a token-minted set.  The
 ;;      handler mints TWICE into the same (owner,set) — the replace
 ;;      sweep makes mint A's tokens the stale bait for Q4.
@@ -10,7 +10,7 @@
 ;;      state note flushed inline (DONE(!) + org-log-into-drawer); the
 ;;      fixture FILE re-read from disk carries "* DONE" and the
 ;;      `- State "DONE"' LOGBOOK line.
-;;   Q3 capture: `jetpacs-org-capture-run' through the filled-copy
+;;   Q3 capture: `ebp-org-capture-run' through the filled-copy
 ;;      binding lands the phone-supplied title in the file, no %^
 ;;      residue, no lingering CAPTURE- buffer.
 ;;   Q4 stale: a tap whose args carry a swept (pre-re-mint) token
@@ -20,13 +20,13 @@
 ;; JA-4 audit Batch 4 (P1-8/P1-9/P1-10) moved the token/status
 ;; contract; this harness asserts the NEW shape:
 ;;   - Q1 additionally proves the ATOMIC mint on the live flow: a mint
-;;      whose last ref is hostile signals `jetpacs-org-refused' and
+;;      whose last ref is hostile signals `ebp-org-refused' and
 ;;      leaves mint B's live generation resolving (pre-Batch-4 that
 ;;      mint DESTROYED the live set and Q2's tap would answer stale).
 ;;   - ja4.toggle maps engine conditions through
-;;      `jetpacs-org-refusal-disposition' — rejected / stale /
+;;      `ebp-org-refusal-disposition' — rejected / stale /
 ;;      retry->`jetpacs-retry-later' — instead of a hand-kept
-;;      condition-case pair that predates `jetpacs-org-unavailable'.
+;;      condition-case pair that predates `ebp-org-unavailable'.
 ;;
 ;; Batch has no command loop, so idleness never begins and
 ;; `run-with-idle-timer' saves never fire on their own; the harness
@@ -109,7 +109,7 @@
 
   (jetpacs-defaction "ja4.query"
     (lambda (_args _params)
-      (let* ((tree (jetpacs-org-parse-query "(todo \"TODO\")"))
+      (let* ((tree (ebp-org-parse-query "(todo \"TODO\")"))
              (refs (jetpacs-org-query "ja4" "refs" tree
                                       #'jetpacs-org-ref-at-point))
              (mint-a (jetpacs-org-ref-tokens refs :set "q" :owner "ja4"))
@@ -137,9 +137,9 @@
               (progn (jetpacs-org-toggle-todo ref "ja4" "DONE")
                      (setq smoke-j4--toggled t)
                      'accepted)
-            ((jetpacs-org-refused jetpacs-org-unavailable
-                                  jetpacs-org-unresolved)
-             (pcase (jetpacs-org-refusal-disposition err)
+            ((ebp-org-refused ebp-org-unavailable
+                                  ebp-org-unresolved)
+             (pcase (ebp-org-refusal-disposition err)
                ('retry (jetpacs-retry-later))
                (status status))))))))
 
@@ -148,7 +148,7 @@
       (jetpacs-flow-continue
        (lambda ()
          (condition-case err
-             (jetpacs-org-capture-run "j" '(("Title" . "From the phone")
+             (ebp-org-capture-run "j" '(("Title" . "From the phone")
                                             ("Headline" . "captured on device")))
            (error (message "smoke-ja4: capture failed: %s"
                            (error-message-string err))))))
@@ -203,7 +203,7 @@
                      (let ((live (jetpacs-org-token-ref
                                   smoke-j4--live-token :owner "ja4")))
                        (and live
-                            (eq 'jetpacs-org-refused
+                            (eq 'ebp-org-refused
                                 (condition-case err
                                     (progn
                                       (jetpacs-org-ref-tokens

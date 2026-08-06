@@ -311,8 +311,8 @@ touch, not what the file may mention."
 (ert-deftest jetpacs-org-render-missing-image-file-degrades ()
   "A link to a file that is not there degrades; it does not SIGNAL.
 The most ordinary thing an org document can contain — a link to a
-renamed or not-yet-created image — raises `jetpacs-org-unresolved',
-and the data: URI path caught `jetpacs-org-refused' alone, so the
+renamed or not-yet-created image — raises `ebp-org-unresolved',
+and the data: URI path caught `ebp-org-refused' alone, so the
 condition escaped up through the whole upgrade scan.  The blast radius
 is the DOCUMENT, not the link: `jetpacs-org-render' catches an
 escaping scan and falls back to a pure Tier-0 render, so one dead link

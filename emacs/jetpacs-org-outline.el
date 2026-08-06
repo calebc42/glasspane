@@ -70,7 +70,7 @@ the descriptor, because no buffer render is standing behind this list."
   "A file's top-level headings as a list of cards (poc 2618-2642).
 Records come from ITEMS, else ITEMS-FN, else
 `jetpacs-org-file-toplevel-records' on FILE (root-checked — signals
-`jetpacs-org-refused' outside the allowlist).  CARD-FN (else
+`ebp-org-refused' outside the allowlist).  CARD-FN (else
 `jetpacs-org-outline-card-function', else the default card) builds
 each row; HEADER/FOOTER bracket the list; the empty state uses the
 EMPTY-* members.  The records' buffer gets one exposure supersession

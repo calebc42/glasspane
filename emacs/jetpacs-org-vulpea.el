@@ -13,7 +13,7 @@
 ;; glasspane / orgseq territory), at which point it migrates to the app
 ;; repo.  NO base module may ever require it.
 ;;
-;; What base provides instead is the seam: `jetpacs-org-matches-p' is
+;; What base provides instead is the seam: `ebp-org-matches-p' is
 ;; accessor-pluggable, and this file is its first above-base consumer —
 ;; the same vetted grammar evaluated off the vulpea index (no file
 ;; visit) rather than at point.  vulpea is never required at load;
@@ -90,10 +90,10 @@
 
 (defun jetpacs-org-note-matches-p (tree note)
   "Non-nil when `vulpea-note' NOTE matches query sexp TREE.
-The same grammar as `jetpacs-org-entry-matches-p', evaluated entirely
+The same grammar as `ebp-org-entry-matches-p', evaluated entirely
 off the vulpea index (no file visit); the `regexp' term searches
 title + properties here (the body is not indexed)."
-  (jetpacs-org-matches-p
+  (ebp-org-matches-p
    tree (lambda (what &rest args)
           (apply #'jetpacs-org-vulpea--note-get note what args))))
 
@@ -105,7 +105,7 @@ Empty (nil) TREE — no filter — is trivially supported."
     (`(and . ,cs) (cl-every #'jetpacs-org-note-query-supported-p cs))
     (`(or . ,cs) (cl-every #'jetpacs-org-note-query-supported-p cs))
     (`(not ,c) (jetpacs-org-note-query-supported-p c))
-    (`(,head . ,_) (and (memq head jetpacs-org-note-query-terms) t))
+    (`(,head . ,_) (and (memq head ebp-org-note-query-terms) t))
     (_ nil)))
 
 ;;;; The note-index entry points
@@ -142,7 +142,7 @@ them.  Callers gate on `jetpacs-org-vulpea-available-p'."
 (defun jetpacs-org-vulpea-query (source &optional tree)
   "Notes of SOURCE matching query sexp TREE, off the vulpea index.
 A nil TREE admits every note of the scope.  TREE must stay inside
-`jetpacs-org-note-query-terms' — check
+`ebp-org-note-query-terms' — check
 `jetpacs-org-note-query-supported-p' first."
   (let ((notes (jetpacs-org-vulpea-source-notes source)))
     (if tree

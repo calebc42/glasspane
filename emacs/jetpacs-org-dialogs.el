@@ -368,7 +368,7 @@ candidate list first (23.2)."
                    (org-map-entries
                     (lambda () (org-entry-delete (point) "ID")))))))
            (jetpacs-org-dialogs--refresh params)))
-      (jetpacs-org-unresolved
+      (ebp-org-unresolved
        (jetpacs-org-dialogs--notify "That heading is gone" params)
        (jetpacs-org-dialogs--refresh params))
       (error
@@ -536,7 +536,7 @@ rest — and org's fast tag selection cannot bridge)."
 ;; `:dialog_id' must be the session's current dialog.
 ;;
 ;; Delay cookies (-1d) are deliberately absent: the engine has no
-;; delay writer (only `jetpacs-org-set-repeater'), and they stay
+;; delay writer (only `ebp-org-set-repeater'), and they stay
 ;; plain-text-editable — the Orgro two-tier line.  Habit min/max
 ;; repeaters (+1w/2w) seed their leading part and round-trip the rest
 ;; untouched only when the repeater fields are unedited.
@@ -576,7 +576,7 @@ UNSUPPORTED repeater (hourly unit) seeds `none' and is carried whole
 in :rep-raw, a habit's /max tail in :rep-tail, a delay cookie in
 :delay — the body rewrite re-appends all three, so opening the editor
 never destroys cookie data it cannot represent."
-  (let* ((rep (and stamp (jetpacs-org-ts-repeater stamp)))
+  (let* ((rep (and stamp (ebp-org-ts-repeater stamp)))
          (parts (and rep
                      (string-match
                       "\\`\\(\\.\\+\\|\\+\\+\\|\\+\\)\\([0-9]+\\)\\([hdwmy]\\)\\'"
@@ -585,7 +585,7 @@ never destroys cookie data it cannot represent."
                            (match-string 2 rep)
                            (match-string 3 rep))))
          (supported (member (nth 2 parts) '("d" "w" "m" "y")))
-         (time (and stamp (jetpacs-org-ts-time stamp)))
+         (time (and stamp (ebp-org-ts-time stamp)))
          (rep-tail (and stamp supported
                         (string-match "[.+]?\\+[0-9]+[hdwmy]\\(/[0-9]+[hdwmy]\\)"
                                       stamp)
@@ -598,7 +598,7 @@ never destroys cookie data it cannot represent."
          (delay (and stamp
                      (string-match " \\(--?[0-9]+[hdwmy]\\)" stamp)
                      (match-string 1 stamp))))
-    (list :date (or (and stamp (jetpacs-org-ts-date stamp))
+    (list :date (or (and stamp (ebp-org-ts-date stamp))
                     (format-time-string "%Y-%m-%d"))
           :time (and time (if (= (length time) 4) (concat "0" time) time))
           :rep-type (if supported (nth 0 parts) "none")
@@ -838,12 +838,12 @@ FIELDS carries the captured repeater members keyed by node id."
                   ;; The two-step cookie write pinned at JA-4:
                   ;; `org-add-planning-info' drops repeaters.
                   (jetpacs-org-with-mutation ref 'org
-                    (jetpacs-org-set-repeater which rep))))
+                    (ebp-org-set-repeater which rep))))
                ("clear"
                 (jetpacs-org-set-planning ref 'org which nil)))))
           ('body
            (jetpacs-org-dialogs--ts-body-write target session value)))
-      (jetpacs-org-unresolved
+      (ebp-org-unresolved
        (jetpacs-org-dialogs--notify "That heading is gone" params))
       (error
        (message "jetpacs-org-dialogs: timestamp %s failed: %s"
@@ -942,7 +942,7 @@ Reads `jetpacs-org-toggle-todo-cancelled-note' (the JA-5e engine seam)."
                  (jetpacs-org-with-mutation ref 'org
                    ;; org's own drawer placement (creates LOGBOOK per
                    ;; `org-log-into-drawer'); the format is the one
-                   ;; `jetpacs-org-parse-logbook' reads back.
+                   ;; `ebp-org-parse-logbook' reads back.
                    (goto-char (org-log-beginning t))
                    (insert
                     (format "- Note taken on %s \\\\\n  %s\n"
@@ -1146,8 +1146,8 @@ completed archive — and the spent sheet is abandoned."
                 (jetpacs-org-dialogs--notify "Archived" eff)
                 (jetpacs-org-dialogs--refresh eff)
                 'accepted)
-            (jetpacs-org-unresolved 'stale)
-            (jetpacs-org-refused 'rejected)
+            (ebp-org-unresolved 'stale)
+            (ebp-org-refused 'rejected)
             (error (message "jetpacs-org-dialogs: archive failed: %s"
                             (jetpacs-error-label err))
                    'rejected))))))))

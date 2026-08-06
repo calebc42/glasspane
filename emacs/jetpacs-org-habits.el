@@ -214,8 +214,8 @@ loud `rejected'."
                                       (plist-get params :surface))
                 (jetpacs-buffer-defer-refresh (plist-get params :surface))
                 'accepted)
-            (jetpacs-org-unresolved 'stale)
-            (jetpacs-org-refused 'rejected)
+            (ebp-org-unresolved 'stale)
+            (ebp-org-refused 'rejected)
             (error
              (message "jetpacs-org-habits: done failed: %s"
                       (jetpacs-error-label err))
@@ -242,8 +242,8 @@ loud `rejected'."
                        (jetpacs-navigate-buffer (marker-buffer m))
                      (set-marker m nil))))
                 'accepted)
-            (jetpacs-org-unresolved 'stale)
-            (jetpacs-org-refused 'rejected))))))))
+            (ebp-org-unresolved 'stale)
+            (ebp-org-refused 'rejected))))))))
 
 (with-jetpacs-owner jetpacs-org-habits-owner
   (jetpacs-defaction "jetpacs.org.habit.done" #'jetpacs-org-habits--done)

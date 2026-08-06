@@ -48,36 +48,41 @@ case-insensitively; regexp searches title+properties, NOT the body."
                  :todo "DONE" :closed nil :tags '("work")
                  :priority "B" :title "Call Bob" :level 1
                  :properties '(("STYLE" . "habit") ("KIND" . "call")))))
-      (should (jetpacs-org-note-matches-p '(done) note))
-      (should (jetpacs-org-note-matches-p '(priority "B") note))
-      (should (jetpacs-org-note-matches-p '(property "kind" "call") note))
-      (should (jetpacs-org-note-matches-p '(habit) note))
+      (should (ebp-org-note-matches-p '(done) note))
+      (should (ebp-org-note-matches-p '(priority "B") note))
+      (should (ebp-org-note-matches-p '(property "kind" "call") note))
+      (should (ebp-org-note-matches-p '(habit) note))
       ;; Title+properties haystack: hits the title...
-      (should (jetpacs-org-note-matches-p '(regexp "Bob") note))
+      (should (ebp-org-note-matches-p '(regexp "Bob") note))
       ;; ...and never a body (none indexed).
-      (should-not (jetpacs-org-note-matches-p '(regexp "body-text") note)))
+      (should-not (ebp-org-note-matches-p '(regexp "body-text") note)))
     ;; CLOSED-stamp done-ness without a done keyword.
-    (should (jetpacs-org-note-matches-p
+    (should (ebp-org-note-matches-p
              '(done) (jetpacs-org-test-note :closed "[2026-07-01]")))))
 
 (ert-deftest jetpacs-org-note-query-routing ()
-  (should (jetpacs-org-note-query-supported-p
+  (should (ebp-org-note-query-supported-p
            '(and (todo "X") (not (tags "y")))))
-  (should-not (jetpacs-org-note-query-supported-p '(and (clocked))))
-  (should (jetpacs-org-note-query-supported-p nil)))
+  (should-not (ebp-org-note-query-supported-p '(and (clocked))))
+  (should (ebp-org-note-query-supported-p nil)))
 
 ;;;; The namespace (C-1)
 
 (ert-deftest jetpacs-org-vulpea-owns-its-private-names ()
-  "The arm stopped squatting base's private namespace.
-`jetpacs-org--note-get' read as a `jetpacs-org' internal while living
-in the arm — the one file base must never require.  Renamed hard, with
-no alias (house tradition: one name all the way down), so the absence
-is as load-bearing as the presence.  The arm's PUBLIC `jetpacs-org-note-*'
-names stay unprefixed on purpose: a second index backend implements
-the same two entry points."
+  "The arm stopped squatting the engine's private namespace.
+`jetpacs-org--note-get' read as an engine internal while living in the
+arm — the one file base must never require.  Renamed hard, with no
+alias (house tradition: one name all the way down), so the absence is
+as load-bearing as the presence.  BOTH spellings of the squat are
+pinned absent: the engine's private namespace was `jetpacs-org--' when
+the arm was written and is `ebp-org--' since the split, and a rename
+that un-squats one only by moving into the other would be no fix at
+all.  The arm's PUBLIC `ebp-org-note-*' names sit on the engine's
+prefix on purpose: a second index backend implements the same two
+entry points."
   (should (fboundp 'jetpacs-org-vulpea--note-get))
-  (should-not (fboundp 'jetpacs-org--note-get)))
+  (should-not (fboundp 'jetpacs-org--note-get))
+  (should-not (fboundp 'ebp-org--note-get)))
 
 (provide 'jetpacs-org-vulpea-test)
 ;;; jetpacs-org-vulpea-test.el ends here

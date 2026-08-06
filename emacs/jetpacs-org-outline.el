@@ -21,7 +21,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'jetpacs-org)
+(require 'ebp-org)                      ; the outline MODEL; this file is the view
 (require 'jetpacs-widgets)
 (require 'jetpacs-buffer)
 (require 'jetpacs-chrome)
@@ -69,16 +69,16 @@ the descriptor, because no buffer render is standing behind this list."
                                          empty-caption)
   "A file's top-level headings as a list of cards (poc 2618-2642).
 Records come from ITEMS, else ITEMS-FN, else
-`jetpacs-org-file-toplevel-records' on FILE (root-checked — signals
+`ebp-org-file-toplevel-records' on FILE (root-checked — signals
 `ebp-org-refused' outside the allowlist).  CARD-FN (else
 `jetpacs-org-outline-card-function', else the default card) builds
 each row; HEADER/FOOTER bracket the list; the empty state uses the
 EMPTY-* members.  The records' buffer gets one exposure supersession
 so a re-render retires stale positions."
-  (let* ((records (jetpacs-org-outline-cap
+  (let* ((records (ebp-org-outline-cap
                    (or items
                        (and items-fn (funcall items-fn))
-                       (and file (jetpacs-org-file-toplevel-records file)))))
+                       (and file (ebp-org-file-toplevel-records file)))))
          (card-fn (or card-fn jetpacs-org-outline-card-function
                       #'jetpacs-org-outline--default-card)))
     (when-let* ((name (plist-get (car records) :buffer)))

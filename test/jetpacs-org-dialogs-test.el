@@ -64,7 +64,7 @@
   `(let* ((dir (file-name-as-directory
                 (file-truename (make-temp-file "ja5d" t))))
           (,var (expand-file-name "fixture.org" dir))
-          (jetpacs-org-roots (list dir)))
+          (ebp-org-roots (list dir)))
      (with-temp-file ,var (insert ,content))
      (unwind-protect
          (progn ,@body)
@@ -74,7 +74,7 @@
            (kill-buffer buf)))
        (delete-directory dir t)
        (jetpacs-buffer-forget-exposed)
-       (jetpacs-org-reset))))
+       (ebp-org-reset))))
 
 (defun jetpacs-org-dialogs-test--buffer (file)
   (let ((buf (find-file-noselect file)))
@@ -88,7 +88,7 @@
     (org-with-wide-buffer
      (goto-char (point-min))
      (search-forward headline)
-     (jetpacs-org-ref-at-point))))
+     (ebp-org-ref-at-point))))
 
 (defconst jetpacs-org-dialogs-test--params '(:surface "app:ja5d")
   "Minimal event params for driving handlers and dispatches.")
@@ -205,7 +205,7 @@ directly), so this pin is the conformance guarantee."
                        (with-current-buffer buf (buffer-string))))))))
 
 (ert-deftest jetpacs-org-dialogs-cycle-todo-through-the-engine ()
-  "The todo arm rides `jetpacs-org-toggle-todo' (never raw `org-todo')."
+  "The todo arm rides `ebp-org-toggle-todo' (never raw `org-todo')."
   (jetpacs-org-dialogs-test--with-env
     (jetpacs-org-dialogs-test--with-file f
         jetpacs-org-dialogs-test--sheet-fixture
@@ -779,7 +779,7 @@ armed case defers to the flow and answers accepted."
                        jetpacs-org-dialogs-test--params)))
           ;; A file outside the org roots.
           (jetpacs-org-add-heading-descriptor name)
-          (let ((jetpacs-org-roots
+          (let ((ebp-org-roots
                  (list (file-name-as-directory
                         (make-temp-file "ja5f-other" t)))))
             (should (eq 'rejected
@@ -802,7 +802,7 @@ answer is a loud no-op."
     (jetpacs-org-dialogs-test--with-file f "* Existing\nbody"
       (let* ((buf (jetpacs-org-dialogs-test--buffer f))
              (saved nil)
-             (jetpacs-org-file-save-function
+             (ebp-org-file-save-function
               (lambda (b) (setq saved (buffer-name b)))))
         (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
                    (lambda () t))

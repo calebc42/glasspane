@@ -23,20 +23,25 @@
 ;;
 ;; NAMING, decided deliberately.  This file's PRIVATE helpers carry the
 ;; arm's own `jetpacs-org-vulpea--' prefix: an arm that defines a
-;; symbol in base's private namespace (`jetpacs-org--…') squats a name
-;; base owns, and the collision lands silently the moment base grows
-;; its own.  The two PUBLIC entry points below deliberately do NOT
-;; take the arm's prefix — `jetpacs-org-note-matches-p' and
-;; `jetpacs-org-note-query-supported-p' name the note-index PROTOCOL,
+;; symbol in the engine's private namespace (`ebp-org--…') squats a
+;; name the engine owns, and the collision lands silently the moment
+;; the engine grows its own.  The two PUBLIC entry points below
+;; deliberately do NOT take the arm's prefix — `ebp-org-note-matches-p'
+;; and `ebp-org-note-query-supported-p' name the note-index PROTOCOL,
 ;; not vulpea: a second index backend (a plain org-id scan, a sqlite
 ;; cache) implements those same two names and swaps in underneath its
 ;; callers unchanged.  Do not "fix" them to `jetpacs-org-vulpea-'.
+;; They took the engine's prefix at the ebp-org split for the reason
+;; the engine did — a protocol over a vetted query sexp and an index
+;; record is wire-and-Emacs work.  The FILE keeps its staging name and
+;; its `jetpacs-org-vulpea-' symbols; it migrates to the app repo with
+;; its Tier-1 rung, and that is a different move.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'org)                          ; org-done-keywords
-(require 'jetpacs-org)                  ; the interpreter seam + allowlist
+(require 'ebp-org)                      ; the interpreter seam + allowlist
 
 (declare-function vulpea-note-todo "ext:vulpea-note" (note))
 (declare-function vulpea-note-closed "ext:vulpea-note" (note))
@@ -88,7 +93,7 @@
            (case-fold-search t))
        (string-match-p (car args) hay)))))
 
-(defun jetpacs-org-note-matches-p (tree note)
+(defun ebp-org-note-matches-p (tree note)
   "Non-nil when `vulpea-note' NOTE matches query sexp TREE.
 The same grammar as `ebp-org-entry-matches-p', evaluated entirely
 off the vulpea index (no file visit); the `regexp' term searches
@@ -97,14 +102,14 @@ title + properties here (the body is not indexed)."
    tree (lambda (what &rest args)
           (apply #'jetpacs-org-vulpea--note-get note what args))))
 
-(defun jetpacs-org-note-query-supported-p (tree)
+(defun ebp-org-note-query-supported-p (tree)
   "Non-nil when query sexp TREE uses only index-evaluable terms.
 Empty (nil) TREE — no filter — is trivially supported."
   (pcase tree
     ('nil t)
-    (`(and . ,cs) (cl-every #'jetpacs-org-note-query-supported-p cs))
-    (`(or . ,cs) (cl-every #'jetpacs-org-note-query-supported-p cs))
-    (`(not ,c) (jetpacs-org-note-query-supported-p c))
+    (`(and . ,cs) (cl-every #'ebp-org-note-query-supported-p cs))
+    (`(or . ,cs) (cl-every #'ebp-org-note-query-supported-p cs))
+    (`(not ,c) (ebp-org-note-query-supported-p c))
     (`(,head . ,_) (and (memq head ebp-org-note-query-terms) t))
     (_ nil)))
 
@@ -143,10 +148,10 @@ them.  Callers gate on `jetpacs-org-vulpea-available-p'."
   "Notes of SOURCE matching query sexp TREE, off the vulpea index.
 A nil TREE admits every note of the scope.  TREE must stay inside
 `ebp-org-note-query-terms' — check
-`jetpacs-org-note-query-supported-p' first."
+`ebp-org-note-query-supported-p' first."
   (let ((notes (jetpacs-org-vulpea-source-notes source)))
     (if tree
-        (cl-remove-if-not (lambda (n) (jetpacs-org-note-matches-p tree n)) notes)
+        (cl-remove-if-not (lambda (n) (ebp-org-note-matches-p tree n)) notes)
       notes)))
 
 (provide 'jetpacs-org-vulpea)

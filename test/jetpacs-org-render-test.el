@@ -30,7 +30,7 @@
 
 (defmacro jetpacs-org-render-test--with-file (var content &rest body)
   "Write CONTENT to a temp .org file in a fresh root; bind VAR; run BODY.
-The file's directory becomes the sole `jetpacs-org-roots' entry and
+The file's directory becomes the sole `ebp-org-roots' entry and
 gains an `img.png' (the constant 1x1 PNG).  The visiting buffer is
 renamed deterministically so descriptor args and exposure keys are
 byte-stable.  State is reset around BODY."
@@ -38,7 +38,7 @@ byte-stable.  State is reset around BODY."
   `(let* ((dir (file-name-as-directory
                 (file-truename (make-temp-file "ja5-render" t))))
           (,var (expand-file-name "fixture.org" dir))
-          (jetpacs-org-roots (list dir)))
+          (ebp-org-roots (list dir)))
      (with-temp-file ,var (insert ,content))
      (let ((coding-system-for-write 'binary))
        (write-region jetpacs-org-render-test--png nil
@@ -50,7 +50,7 @@ byte-stable.  State is reset around BODY."
          (kill-buffer buf))
        (delete-directory dir t)
        (jetpacs-buffer-forget-exposed)
-       (jetpacs-org-reset))))
+       (ebp-org-reset))))
 
 (defun jetpacs-org-render-test--buffer (file)
   "The org buffer visiting FILE, fontified, deterministically named."
@@ -292,7 +292,7 @@ touch, not what the file may mention."
     ;; now sits outside the allowlist, so its image must not resolve.
     (let* ((other (file-name-as-directory
                    (file-truename (make-temp-file "ja5-other" t))))
-           (jetpacs-org-roots (list other)))
+           (ebp-org-roots (list other)))
       (unwind-protect
           (let ((nodes (jetpacs-org-render
                         (jetpacs-org-render-test--buffer f))))
@@ -517,7 +517,7 @@ through org itself, and the deferred save lands the change on disk."
          (should (search-forward "[2/2]" nil t))))
       ;; Flush the idle save by hand (batch has no idle time) and
       ;; confirm the mutation reached disk.
-      (jetpacs-org--save-now buf)
+      (ebp-org--save-now buf)
       (with-temp-buffer
         (insert-file-contents f)
         (goto-char (point-min))
@@ -811,7 +811,7 @@ list and the FAB whose descriptor was minted WITH its record."
 
 (ert-deftest jetpacs-org-render-files-after-save-busts-cache ()
   (let ((busted 0))
-    (cl-letf (((symbol-function 'jetpacs-org-cache-invalidate)
+    (cl-letf (((symbol-function 'ebp-org-cache-invalidate)
                (lambda (&rest _) (cl-incf busted))))
       (jetpacs-org-render--files-after-save "/x/notes.org")
       (jetpacs-org-render--files-after-save "/x/notes.txt")

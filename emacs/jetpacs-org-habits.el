@@ -15,7 +15,7 @@
 ;; `org-habit-*-face' customization flows through.  A broken habit (a
 ;; `:STYLE: habit' heading whose repeater rots) passes `org-is-habit-p'
 ;; but makes `org-habit-parse-todo' SIGNAL — it is skipped, never
-;; fatal.  The file walk derives from `jetpacs-org-agenda-files' and
+;; fatal.  The file walk derives from `ebp-org-agenda-files' and
 ;; NEVER calls `org-agenda-files' or `org-map-entries' with the
 ;; `agenda' scope — the raw walk stats remote names inside the socket
 ;; filter (JA-4 audit P1-7) and a missing file drives
@@ -26,7 +26,7 @@
 ;; (A2) — a refused spend drops the strip, never the push.  DONE rides
 ;; a durable descriptor (queue + ttl + per-habit dedupe: marking a
 ;; habit done must survive a tunnel) through
-;; `jetpacs-org-toggle-todo', whose inline log-note flush writes the
+;; `ebp-org-toggle-todo', whose inline log-note flush writes the
 ;; `- State "DONE"' line `org-habit-done-dates' counts; the `++'
 ;; catch-up path can PROMPT (`org-auto-repeat-maybe', JA-4 audit P1-6,
 ;; open) — the handler catches `inhibited-interaction' and answers a
@@ -39,7 +39,10 @@
 (require 'subr-x)
 (require 'org)
 (require 'org-habit)
-(require 'jetpacs-org)
+(require 'ebp-org)
+(require 'jetpacs-org)                  ; NOT the engine: the shim, for its load
+                                        ; effect — it registers the engine's token
+                                        ; sweep on `jetpacs-teardown-functions'
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-buffer)
@@ -89,9 +92,9 @@
 (defun jetpacs-org-habits--collect ()
   "Every habit across the LOCAL agenda files, memoised.
 Each item: (:ref R :title S :todo K :done-today BOOL :cells CELLS)."
-  (jetpacs-org-with-cache 'habits "all"
+  (ebp-org-with-cache 'habits "all"
     (let (out)
-      (dolist (file (jetpacs-org-agenda-files))
+      (dolist (file (ebp-org-agenda-files))
         (when (and (stringp file) (file-readable-p file))
           (with-current-buffer (find-file-noselect file t)
             (unless (derived-mode-p 'org-mode) (org-mode))
@@ -106,7 +109,7 @@ Each item: (:ref R :title S :todo K :done-today BOOL :cells CELLS)."
                               (cells (ignore-errors
                                        (jetpacs-org-habits--graph habit))))
                     (let ((comps (org-heading-components)))
-                      (push (list :ref (jetpacs-org-ref-at-point)
+                      (push (list :ref (ebp-org-ref-at-point)
                                   :title (or (nth 4 comps) "")
                                   :todo (nth 2 comps)
                                   :done-today
@@ -174,7 +177,7 @@ has none."
   "Builder for the habits root screen."
   (let* ((items (jetpacs-org-habits--collect))
          (tokens (and items
-                      (jetpacs-org-ref-tokens
+                      (ebp-org-ref-tokens
                        (mapcar (lambda (i) (plist-get i :ref)) items)
                        :set "habits" :owner jetpacs-org-habits-owner))))
     (jetpacs-chrome-screen
@@ -203,13 +206,13 @@ loud `rejected'."
      ((not (stringp token)) 'rejected)
      ((jetpacs-event-stale-p params) 'stale)
      (t
-      (let ((ref (jetpacs-org-token-ref
+      (let ((ref (ebp-org-token-ref
                   token :owner jetpacs-org-habits-owner)))
         (if (null ref)
             'stale
           (condition-case err
               (progn
-                (jetpacs-org-toggle-todo ref 'habits "DONE")
+                (ebp-org-toggle-todo ref 'habits "DONE")
                 (jetpacs-shell-notify "Habit done"
                                       (plist-get params :surface))
                 (jetpacs-buffer-defer-refresh (plist-get params :surface))
@@ -230,12 +233,12 @@ loud `rejected'."
      ((not (stringp token)) 'rejected)
      ((jetpacs-event-stale-p params) 'stale)
      (t
-      (let ((ref (jetpacs-org-token-ref
+      (let ((ref (ebp-org-token-ref
                   token :owner jetpacs-org-habits-owner)))
         (if (null ref)
             'stale
           (condition-case nil
-              (let ((m (jetpacs-org-resolve-ref ref)))
+              (let ((m (ebp-org-resolve-ref ref)))
                 (jetpacs-flow-continue
                  (lambda ()
                    (unwind-protect

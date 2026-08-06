@@ -17,7 +17,7 @@
 ;; Emacs while the device shows `accepted').
 ;;
 ;; The sheet's mutations ride the JA-4 engine: Cycle TODO through
-;; `jetpacs-org-toggle-todo' (NEVER raw `org-todo' — its log note
+;; `ebp-org-toggle-todo' (NEVER raw `org-todo' — its log note
 ;; arrives on `post-command-hook', which never fires in the socket
 ;; filter), Set TODO/Priority as native chained dialogs (`org-priority'
 ;; and org's fast tag selection read chars with NO prompt argument, so
@@ -36,7 +36,10 @@
 (require 'subr-x)
 (require 'org)
 (require 'org-archive)
-(require 'jetpacs-org)
+(require 'ebp-org)
+(require 'jetpacs-org)                  ; NOT the engine: the shim, for its load
+                                        ; effect — it registers the engine's token
+                                        ; sweep on `jetpacs-teardown-functions'
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-buffer)
@@ -101,7 +104,7 @@ same way — AUDIT-ja5)."
     (org-with-wide-buffer
      (goto-char (min (max (point-min) pos) (point-max)))
      (when (org-at-heading-p)
-       (jetpacs-org-ref-at-point)))))
+       (ebp-org-ref-at-point)))))
 
 ;;;; The footnote dialog (poc 1578-1694)
 
@@ -240,7 +243,7 @@ the buffer's live state."
       (jetpacs-org-dialogs--refresh params))
      ((null client) nil)
      (t
-      (let* ((token (car (jetpacs-org-ref-tokens
+      (let* ((token (car (ebp-org-ref-tokens
                           (list ref) :set "sheet"
                           :owner jetpacs-org-dialogs-owner)))
              (request-id
@@ -299,7 +302,7 @@ candidate list first (23.2)."
     (condition-case err
         (pcase value
           ("todo"
-           (jetpacs-org-toggle-todo ref 'org nil)
+           (ebp-org-toggle-todo ref 'org nil)
            (jetpacs-org-dialogs--maybe-log-note ref params)
            (jetpacs-org-dialogs--refresh params))
           ((or "schedule" "deadline")
@@ -313,7 +316,7 @@ candidate list first (23.2)."
                             (jetpacs-org-dialogs--ts-open
                              (list :kind 'planning :ref ref :which which)
                              (condition-case nil
-                                 (let ((m (jetpacs-org-resolve-ref ref)))
+                                 (let ((m (ebp-org-resolve-ref ref)))
                                    (unwind-protect
                                        (with-current-buffer (marker-buffer m)
                                          (org-with-wide-buffer
@@ -340,7 +343,7 @@ candidate list first (23.2)."
           ("narrow"
            ;; The poc's lesson kept: never inside `org-with-wide-buffer'
            ;; — it would restore the restriction and undo the narrow.
-           (let ((m (jetpacs-org-resolve-ref ref)))
+           (let ((m (ebp-org-resolve-ref ref)))
              (unwind-protect
                  (with-current-buffer (marker-buffer m)
                    (widen)
@@ -352,7 +355,7 @@ candidate list first (23.2)."
            (with-current-buffer buf (widen))
            (jetpacs-org-dialogs--refresh params))
           ("duplicate"
-           (jetpacs-org-with-mutation ref 'org
+           (ebp-org-with-mutation ref 'org
              (org-back-to-heading t)
              (let* ((beg (point))
                     (end (progn (org-end-of-subtree t t) (point)))
@@ -408,10 +411,10 @@ reads chars with no prompt argument and would hang under a flow."
                  (progn
                    (cond
                     ((equal v "__none__")
-                     (jetpacs-org-toggle-todo ref 'org 'none))
+                     (ebp-org-toggle-todo ref 'org 'none))
                     ;; 23.2: only a keyword the buffer defines NOW.
                     ((member v (with-current-buffer buf org-todo-keywords-1))
-                     (jetpacs-org-toggle-todo ref 'org v)))
+                     (ebp-org-toggle-todo ref 'org v)))
                    (jetpacs-org-dialogs--maybe-log-note ref params))
                (error (message "jetpacs-org-dialogs: set-todo failed: %s"
                                (jetpacs-error-label err))
@@ -453,11 +456,11 @@ bridge advice never sees (emacs-30.1 org.el:11172)."
                (condition-case err
                    (cond
                     ((equal v "__remove__")
-                     (jetpacs-org-with-mutation ref 'org
+                     (ebp-org-with-mutation ref 'org
                        (org-priority 'remove)))
                     ((and (stringp v) (= 1 (length v))
                           (<= hi (aref v 0) lo))
-                     (jetpacs-org-with-mutation ref 'org
+                     (ebp-org-with-mutation ref 'org
                        (org-priority (aref v 0)))))
                  (error (message "jetpacs-org-dialogs: priority failed: %s"
                                  (jetpacs-error-label err))
@@ -474,7 +477,7 @@ model: a structured gesture for the common case, plain text for the
 rest — and org's fast tag selection cannot bridge)."
   (when-let* ((client (jetpacs-client)))
     (let* ((seed (condition-case nil
-                     (let ((m (jetpacs-org-resolve-ref ref)))
+                     (let ((m (ebp-org-resolve-ref ref)))
                        (unwind-protect
                            (with-current-buffer (marker-buffer m)
                              (org-with-wide-buffer
@@ -513,7 +516,7 @@ rest — and org's fast tag selection cannot bridge)."
                  (if (and tags (null good))
                      (jetpacs-org-dialogs--notify "No valid tags in that"
                                                   params)
-                   (jetpacs-org-with-mutation ref 'org
+                   (ebp-org-with-mutation ref 'org
                      (org-set-tags good)))
                (error (message "jetpacs-org-dialogs: tags failed: %s"
                                (jetpacs-error-label err))
@@ -834,13 +837,13 @@ FIELDS carries the captured repeater members keyed by node id."
                                             (concat " "
                                                     (plist-get session :time))
                                           ""))))
-                  (jetpacs-org-set-planning ref 'org which datetime)
+                  (ebp-org-set-planning ref 'org which datetime)
                   ;; The two-step cookie write pinned at JA-4:
                   ;; `org-add-planning-info' drops repeaters.
-                  (jetpacs-org-with-mutation ref 'org
+                  (ebp-org-with-mutation ref 'org
                     (ebp-org-set-repeater which rep))))
                ("clear"
-                (jetpacs-org-set-planning ref 'org which nil)))))
+                (ebp-org-set-planning ref 'org which nil)))))
           ('body
            (jetpacs-org-dialogs--ts-body-write target session value)))
       (ebp-org-unresolved
@@ -903,16 +906,16 @@ snackbar, the stale-tap ethic."
                 (when (and (eq (char-before beg) ?\s)
                            (memq (char-after beg) '(?\s ?\n nil)))
                   (delete-char -1))))
-             (jetpacs-org-cache-invalidate)
-             (when buffer-file-name (jetpacs-org-defer-save)))))))))
+             (ebp-org-cache-invalidate)
+             (when buffer-file-name (ebp-org-defer-save)))))))))
 
 ;;;; The log-note dialog (the base docstring's promised follow-up)
 
 (defun jetpacs-org-dialogs--maybe-log-note (ref params)
   "When the last toggle cancelled a free-text note, ask for it.
-Reads `jetpacs-org-toggle-todo-cancelled-note' (the JA-5e engine seam)."
-  (when jetpacs-org-toggle-todo-cancelled-note
-    (setq jetpacs-org-toggle-todo-cancelled-note nil)
+Reads `ebp-org-toggle-todo-cancelled-note' (the JA-5e engine seam)."
+  (when ebp-org-toggle-todo-cancelled-note
+    (setq ebp-org-toggle-todo-cancelled-note nil)
     (run-at-time 0 nil
                  (lambda ()
                    (jetpacs-org-dialogs--show-log-note ref params)))))
@@ -939,7 +942,7 @@ Reads `jetpacs-org-toggle-todo-cancelled-note' (the JA-5e engine seam)."
            (when (and (stringp text)
                       (not (string-blank-p text)))
              (condition-case err
-                 (jetpacs-org-with-mutation ref 'org
+                 (ebp-org-with-mutation ref 'org
                    ;; org's own drawer placement (creates LOGBOOK per
                    ;; `org-log-into-drawer'); the format is the one
                    ;; `ebp-org-parse-logbook' reads back.
@@ -965,14 +968,14 @@ bridges to the device picker.  Saving afterward is org's own answer —
 this module never sees."
   (jetpacs-org-dialogs--with-prompting
    (lambda ()
-     (let ((m (jetpacs-org-resolve-ref ref)))
+     (let ((m (ebp-org-resolve-ref ref)))
        (unwind-protect
            (with-current-buffer (marker-buffer m)
              (org-with-wide-buffer
               (goto-char m)
               (call-interactively #'org-refile)))
          (set-marker m nil)))
-     (jetpacs-org-cache-invalidate)
+     (ebp-org-cache-invalidate)
      (org-save-all-org-buffers)
      (jetpacs-org-dialogs--notify "Refiled" params)
      (jetpacs-org-dialogs--refresh params))
@@ -1015,7 +1018,7 @@ and newline-flattened — a multi-line title would smuggle structure."
                     "\n"))
            ;; The seam the engine publishes for exactly this tail: apps
            ;; rebind it for a synchronous save + index refresh.
-           (funcall jetpacs-org-file-save-function (current-buffer)))
+           (funcall ebp-org-file-save-function (current-buffer)))
          (jetpacs-org-dialogs--notify "Heading added" params))
        (jetpacs-org-dialogs--refresh params)))
    params))
@@ -1034,7 +1037,7 @@ and newline-flattened — a multi-line title would smuggle structure."
      ((not (with-current-buffer buf
              (and buffer-file-name
                   (file-writable-p buffer-file-name)
-                  (jetpacs-org-file-allowed-p buffer-file-name))))
+                  (ebp-org-file-allowed-p buffer-file-name))))
       'rejected)
      (t
       (jetpacs-flow-continue
@@ -1117,7 +1120,7 @@ completed archive — and the spent sheet is abandoned."
      ((not (stringp token)) 'rejected)
      ((jetpacs-event-stale-p params) 'stale)
      (t
-      (let* ((ref (jetpacs-org-token-ref
+      (let* ((ref (ebp-org-token-ref
                    token :owner jetpacs-org-dialogs-owner))
              ;; Dialog-context events carry :dialog_id, never :surface
              ;; (14.4 exclusive contexts) — feedback and the re-push
@@ -1133,7 +1136,7 @@ completed archive — and the spent sheet is abandoned."
             'stale
           (condition-case err
               (progn
-                (jetpacs-org-with-mutation ref 'org
+                (ebp-org-with-mutation ref 'org
                   (let ((org-archive-subtree-save-file-p t))
                     (org-archive-subtree)))
                 (when-let* ((sheet jetpacs-org-dialogs--sheet)

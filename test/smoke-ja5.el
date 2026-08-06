@@ -47,7 +47,9 @@
 (require 'jetpacs-navigate)
 (require 'jetpacs-launcher)
 (require 'jetpacs-files)
-(require 'jetpacs-org)
+(require 'ebp-org)
+(require 'jetpacs-org)                  ; the shim: its add-hook is what makes
+                                        ; `jetpacs-teardown-owner' sweep tokens
 (require 'jetpacs-org-render)   ; pulls jetpacs-org-dialogs
 (require 'jetpacs-org-toolbar)
 (require 'jetpacs-org-habits)
@@ -93,7 +95,7 @@
 
 ;; Roots SLASHLESS — how users write config, and the banked JA-6 trap:
 ;; a trailing-slash root defeats the files guard's containment.
-(setq jetpacs-org-roots (list (directory-file-name smoke-j5--dir))
+(setq ebp-org-roots (list (directory-file-name smoke-j5--dir))
       org-agenda-files (list smoke-j5--habits)
       jetpacs-files-roots (list (directory-file-name smoke-j5--dir))
       ;; The browser LANDS in default-dir (its default ~/ sits outside
@@ -105,7 +107,7 @@
 
 (defun smoke-j5--flush-idle-saves ()
   (dolist (tm (copy-sequence timer-idle-list))
-    (when (eq (timer--function tm) #'jetpacs-org--save-now)
+    (when (eq (timer--function tm) #'ebp-org--save-now)
       (cancel-timer tm)
       (apply (timer--function tm) (timer--args tm)))))
 

@@ -1,78 +1,124 @@
-;;; jetpacs-org-test.el --- JA-4 exit gate: the org engine -*- lexical-binding: t; -*-
+;;; ebp-org-test.el --- JA-4 exit gate: the org engine -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
 ;; The JA-4 exit gate (docs/PLAN-jetpacs-apps.md JA-4) plus the biting
 ;; regressions for the twelve poc defects fixed at the port.  Fixtures
 ;; are temp .org files (the hypertext-test shape) with
-;; `jetpacs-org-roots' let-bound to the temp directory — resolve-ref's
+;; `ebp-org-roots' let-bound to the temp directory — resolve-ref's
 ;; root allowlist refuses everything else by design, so EVERY test that
-;; resolves goes through `jetpacs-org-test--with-fixture'.
+;; resolves goes through `ebp-org-test--with-fixture'.
+;;
+;; This process loads NO application layer, and asserts it below.  That
+;; is the placement rule for the pure block of run-tests.sh (the
+;; ebp-complete precedent), and here it is also the claim under test:
+;; the engine earned the `ebp-' prefix by needing nothing above it, so
+;; a suite that reached for one jetpacs symbol would be reporting a
+;; boundary breach as a passing test.
 
 ;;; Code:
 
 (require 'ert)
 (require 'cl-lib)
-(require 'jetpacs-org)
+(require 'ebp-org)
 
-(defmacro jetpacs-org-test--with-fixture (var content &rest body)
+(defmacro ebp-org-test--with-no-prompts (&rest body)
+  "Run BODY under the floor's D2 no-prompts regime, reproduced HERE.
+The dispatch extent binds `inhibit-interaction' and stubs the readers
+that ignore it; several tests below pin what the engine's own clamp
+does INSIDE that regime — that a would-be question becomes an
+`ebp-org-refused' status rather than a raw `inhibited-interaction' or a
+hang.  The regime is therefore an INPUT to these tests, and the suite
+builds its own: requiring the floor to obtain it would make the engine
+suite load the application layer, which is the one thing this file is
+not allowed to do.  The reader list mirrors `jetpacs--blocking-readers'
+\(jetpacs-surfaces.el), where its per-name justification lives; if that
+list grows, this copy is deliberately allowed to lag — it is a fixture,
+not a second guard."
+  (declare (indent 0) (debug t))
+  `(let ((inhibit-interaction t)
+         (use-dialog-box nil))
+     (cl-letf ,(mapcar
+                (lambda (sym)
+                  `((symbol-function ',sym)
+                    (lambda (&rest _)
+                      (signal 'inhibited-interaction
+                              (list ,(symbol-name sym))))))
+                '(read-key-sequence read-key-sequence-vector read-key
+                  map-y-or-n-p recursive-edit read-multiple-choice
+                  x-popup-dialog))
+       ,@body)))
+
+(ert-deftest ebp-org-suite-loads-no-application-layer ()
+  "The engine's own suite must not drag jetpacs in.
+`ebp-' is a claim about the require closure, and the delineation guard
+proves it for the MODULE.  This proves it for the TEST process, which
+is where a convenience require would actually appear: one
+`jetpacs-surfaces' for a macro, and the suite would still be green
+while the boundary it exists to defend was gone."
+  (let ((offenders (cl-remove-if-not
+                    (lambda (f) (string-prefix-p "jetpacs" (symbol-name f)))
+                    features)))
+    (should (equal offenders nil))))
+
+(defmacro ebp-org-test--with-fixture (var content &rest body)
   "Write CONTENT to a temp .org file, bind VAR to its truename, run BODY.
-Binds `jetpacs-org-roots' to the file's directory so resolve-ref admits
+Binds `ebp-org-roots' to the file's directory so resolve-ref admits
 it, visits are cleaned up, and engine state is reset around BODY."
   (declare (indent 2))
   `(let* ((,var (file-truename
                  (make-temp-file "ja4-fixture" nil ".org" ,content)))
-          (jetpacs-org-roots (list (file-name-directory ,var))))
+          (ebp-org-roots (list (file-name-directory ,var))))
      (unwind-protect
          (progn ,@body)
        (when-let* ((buf (find-buffer-visiting ,var)))
          (with-current-buffer buf (set-buffer-modified-p nil))
          (kill-buffer buf))
        (delete-file ,var)
-       (jetpacs-org-reset))))
+       (ebp-org-reset))))
 
-(defvar jetpacs-org-test--sexp-ran nil
+(defvar ebp-org-test--sexp-ran nil
   "Set by a hostile capture payload if the escape ever fails.")
 
-(defconst jetpacs-org-test--two-headings
+(defconst ebp-org-test--two-headings
   "* TODO First heading\nBody one.\n* Second heading\n:PROPERTIES:\n:ID: ja4-test-id-1\n:END:\nBody two.\n")
 
-(defun jetpacs-org-test--ref-to (file headline)
+(defun ebp-org-test--ref-to (file headline)
   "A ref plist for HEADLINE in FILE, minted through the real API."
   (with-current-buffer (find-file-noselect file)
     (org-mode)
     (org-with-wide-buffer
      (goto-char (point-min))
      (search-forward headline)
-     (jetpacs-org-ref-at-point))))
+     (ebp-org-ref-at-point))))
 
 ;;;; Refs and resolution
 
-(ert-deftest jetpacs-org-ref-roundtrip-and-float-pos ()
+(ert-deftest ebp-org-ref-roundtrip-and-float-pos ()
   "A minted ref resolves back to its heading; a float :pos (the JSON
 round-trip shape) still takes the trusted-position path."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "First heading")))
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "First heading")))
       ;; nth 4 of org-heading-components excludes the TODO keyword.
       (should (equal (plist-get ref :headline) "First heading"))
-      (let ((m (jetpacs-org-resolve-ref ref)))
+      (let ((m (ebp-org-resolve-ref ref)))
         (should (markerp m))
         (set-marker m nil))
       ;; Float pos coerces rather than falling to the headline scan.
       (let* ((fref (plist-put (copy-sequence ref) :pos
                               (float (plist-get ref :pos))))
-             (m (jetpacs-org-resolve-ref fref)))
+             (m (ebp-org-resolve-ref fref)))
         (should (markerp m))
         (set-marker m nil)))))
 
-(ert-deftest jetpacs-org-configuration-never-dials-a-remote-name ()
+(ert-deftest ebp-org-configuration-never-dials-a-remote-name ()
   "JA-4 audit P1-7: the remote guard was applied to the ref's own name but
 NOT to the configuration the guard reads.  `org-agenda-files' calls
 `file-directory-p' on every raw entry, so one /ssh: entry dialled TRAMP
 on every resolve, every mint, and — via the cache stamp — every query,
 inside the socket filter against a 60s timeout.  No stat-family
 primitive may receive a remote NAME on any of the three hot paths."
-  (jetpacs-org-test--with-fixture f "* TODO H\n"
+  (ebp-org-test--with-fixture f "* TODO H\n"
     (let ((touched '()))
       (cl-letf* ((watch (lambda (real)
                           (lambda (&rest args)
@@ -94,38 +140,38 @@ primitive may receive a remote NAME on any of the three hot paths."
                (org-agenda-files (list f "/ssh:evil:/remote.org"))
                ;; nil forces the DERIVED root set — the path that read
                ;; configuration without filtering it.
-               (jetpacs-org-roots nil))
-          (jetpacs-org-cache-invalidate)
-          (jetpacs-org--files-stamp)      ; hot path 1: the cache key
-          (jetpacs-org--roots)            ; hot path 2: the allowlist
-          (jetpacs-org--check-file f)     ; hot path 3: every resolve/mint
+               (ebp-org-roots nil))
+          (ebp-org-cache-invalidate)
+          (ebp-org--files-stamp)      ; hot path 1: the cache key
+          (ebp-org--roots)            ; hot path 2: the allowlist
+          (ebp-org--check-file f)     ; hot path 3: every resolve/mint
           (should (null touched)))))))
 
-(ert-deftest jetpacs-org-check-file-rides-the-floor-guard ()
+(ert-deftest ebp-org-check-file-rides-the-floor-guard ()
   "The sandbox itself is shared, not this module's (JA-6 promoted it out);
 this module supplies roots and re-signals in its own condition, so a
 handler written against the documented status map never sees
 `ebp-path-refused'."
-  (jetpacs-org-test--with-fixture f "* H\n"
-    (should (equal (jetpacs-org--check-file f) (file-truename f)))
+  (ebp-org-test--with-fixture f "* H\n"
+    (should (equal (ebp-org--check-file f) (file-truename f)))
     (dolist (bad '("relative.org" "/ssh:evil:/x.org" "/etc/passwd"))
       (should (eq 'ebp-org-refused
                   (condition-case err
-                      (progn (jetpacs-org--check-file bad) :no-signal)
+                      (progn (ebp-org--check-file bad) :no-signal)
                     (ebp-org-refused (car err))
                     (ebp-path-refused (car err))))))
     ;; An unconfigured root set is distinguishable from out-of-policy —
     ;; and RETRYABLE (JA-4 audit P1-10): unmounted storage must never
     ;; delete a durable record.
     (should (eq 'no-roots
-                (let ((jetpacs-org-roots '("/nonexistent-root-xyz")))
+                (let ((ebp-org-roots '("/nonexistent-root-xyz")))
                   (condition-case err
-                      (progn (jetpacs-org--check-file f) :no-signal)
+                      (progn (ebp-org--check-file f) :no-signal)
                     (ebp-org-unavailable (cadr err))))))))
 
-(ert-deftest jetpacs-org-file-allowed-p-is-total ()
+(ert-deftest ebp-org-file-allowed-p-is-total ()
   "The predicate form NEVER signals — that is its whole reason to exist.
-`jetpacs-org--check-file' splits three conditions apart because a
+`ebp-org--check-file' splits three conditions apart because a
 caller that ANSWERS a request routes each to a different status; a
 caller that merely wants to know whether it may READ a path wants one
 boolean, and every one of them had written the same wrong
@@ -133,22 +179,22 @@ boolean, and every one of them had written the same wrong
 conditions come back nil here: out of policy (refused), a MISSING file
 inside the roots (unresolved — the ordinary missing-image link), and a
 collapsed allowlist (unavailable)."
-  (jetpacs-org-test--with-fixture f "* H\n"
+  (ebp-org-test--with-fixture f "* H\n"
     ;; Allowed: the truename, not merely t.
-    (should (equal (jetpacs-org-file-allowed-p f) (file-truename f)))
+    (should (equal (ebp-org-file-allowed-p f) (file-truename f)))
     ;; Inside the roots but GONE: `ebp-org-unresolved' -> nil.
-    (should-not (jetpacs-org-file-allowed-p
+    (should-not (ebp-org-file-allowed-p
                  (expand-file-name "ja4-never-written.png"
                                    (file-name-directory f))))
     ;; Outside the roots, and not even absolute: `ebp-org-refused'.
-    (should-not (jetpacs-org-file-allowed-p "/etc/passwd"))
-    (should-not (jetpacs-org-file-allowed-p "relative.org"))
+    (should-not (ebp-org-file-allowed-p "/etc/passwd"))
+    (should-not (ebp-org-file-allowed-p "relative.org"))
     ;; The whole allowlist collapsed: `ebp-org-unavailable' -> nil,
     ;; for a file that is otherwise perfectly readable.
-    (let ((jetpacs-org-roots '("/nonexistent-root-xyz")))
-      (should-not (jetpacs-org-file-allowed-p f)))))
+    (let ((ebp-org-roots '("/nonexistent-root-xyz")))
+      (should-not (ebp-org-file-allowed-p f)))))
 
-(ert-deftest jetpacs-org-resolve-refuses-remote-before-any-stat ()
+(ert-deftest ebp-org-resolve-refuses-remote-before-any-stat ()
   "Defect 5: `file-remote-p' runs FIRST — the stat IS the connection.
 A remote ref is refused with ZERO stat-family calls."
   (let ((stats 0))
@@ -163,49 +209,49 @@ A remote ref is refused with ZERO stat-family calls."
                 (funcall record (symbol-function 'file-attributes))))
       (should (eq 'ebp-org-refused
                   (condition-case err
-                      (progn (jetpacs-org-resolve-ref
+                      (progn (ebp-org-resolve-ref
                               '(:id nil :file "/ssh:evil:/x.org"
                                 :pos 1 :headline "h"))
                              :no-signal)
                     (ebp-org-refused (car err)))))
       (should (= stats 0)))))
 
-(ert-deftest jetpacs-org-resolve-refuses-outside-roots ()
-  "Defect 5: a path outside `jetpacs-org-roots' is refused, and by path
+(ert-deftest ebp-org-resolve-refuses-outside-roots ()
+  "Defect 5: a path outside `ebp-org-roots' is refused, and by path
 COMPONENTS — /tmp-evil is not under /tmp."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
     ;; Same file, but the allowlist points elsewhere.
-    (let ((jetpacs-org-roots (list (file-truename
+    (let ((ebp-org-roots (list (file-truename
                                     (make-temp-file "ja4-other" t)))))
       (should (eq 'ebp-org-refused
                   (condition-case err
-                      (progn (jetpacs-org-resolve-ref
+                      (progn (ebp-org-resolve-ref
                               (list :id nil :file f :pos 1 :headline ""))
                              :no-signal)
                     (ebp-org-refused (car err))))))))
 
-(ert-deftest jetpacs-org-resolve-never-triggers-an-org-id-rescan ()
+(ert-deftest ebp-org-resolve-never-triggers-an-org-id-rescan ()
   "Defect 5: the poc's `org-id-find' ran a FULL org-id rescan on a miss.
 A bogus :id with a good position must resolve via the position and the
 rescan trap must never fire."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
     (cl-letf (((symbol-function 'org-id-update-id-locations)
                (lambda (&rest _) (error "RESCAN — the org-id-find path"))))
-      (let* ((ref (jetpacs-org-test--ref-to f "First heading"))
+      (let* ((ref (ebp-org-test--ref-to f "First heading"))
              (bogus (plist-put (copy-sequence ref) :id "no-such-id"))
-             (m (jetpacs-org-resolve-ref bogus)))
+             (m (ebp-org-resolve-ref bogus)))
         (should (markerp m))
         (set-marker m nil)))))
 
-(ert-deftest jetpacs-org-errors-carry-no-paths ()
+(ert-deftest ebp-org-errors-carry-no-paths ()
   "Defect 12: neither refusal nor unresolved errors embed the path."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
     (dolist (ref (list (list :id nil :file "/ssh:h:/secret.org"
                              :pos 1 :headline "h")
                        (list :id nil :file f :pos 999999
                              :headline "No Such Heading Anywhere")))
       (let ((err (condition-case e
-                     (progn (jetpacs-org-resolve-ref ref) nil)
+                     (progn (ebp-org-resolve-ref ref) nil)
                    (error e))))
         (should err)
         (should-not (string-search "secret" (format "%S" err)))
@@ -214,68 +260,68 @@ rescan trap must never fire."
 
 ;;;; Tokens (D-4)
 
-(ert-deftest jetpacs-org-tokens-are-opaque-and-owner-scoped ()
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let* ((ref (jetpacs-org-test--ref-to f "First heading"))
-           (tokens (jetpacs-org-ref-tokens (list ref)
+(ert-deftest ebp-org-tokens-are-opaque-and-owner-scoped ()
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let* ((ref (ebp-org-test--ref-to f "First heading"))
+           (tokens (ebp-org-ref-tokens (list ref)
                                            :set "s1" :owner "ja4a")))
       (should (= (length tokens) 1))
       ;; No path material in the token string.
       (should-not (string-search (file-name-nondirectory f) (car tokens)))
       ;; Resolves for its owner...
-      (should (equal (jetpacs-org-token-ref (car tokens) :owner "ja4a")
+      (should (equal (ebp-org-token-ref (car tokens) :owner "ja4a")
                      ref))
       ;; ...and for nobody else, nor for garbage input.
-      (should-not (jetpacs-org-token-ref (car tokens) :owner "ja4b"))
-      (should-not (jetpacs-org-token-ref 42 :owner "ja4a"))
-      (should-not (jetpacs-org-token-ref "o-forged-1" :owner "ja4a")))))
+      (should-not (ebp-org-token-ref (car tokens) :owner "ja4b"))
+      (should-not (ebp-org-token-ref 42 :owner "ja4a"))
+      (should-not (ebp-org-token-ref "o-forged-1" :owner "ja4a")))))
 
-(ert-deftest jetpacs-org-token-remint-sweeps-the-old-generation ()
+(ert-deftest ebp-org-token-remint-sweeps-the-old-generation ()
   "The replace-set contract: re-minting a set kills its old tokens —
 a swept token is a plain miss the handler answers as `stale'."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let* ((ref (jetpacs-org-test--ref-to f "First heading"))
-           (old (car (jetpacs-org-ref-tokens (list ref)
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let* ((ref (ebp-org-test--ref-to f "First heading"))
+           (old (car (ebp-org-ref-tokens (list ref)
                                              :set "s" :owner "ja4")))
-           (new (car (jetpacs-org-ref-tokens (list ref)
+           (new (car (ebp-org-ref-tokens (list ref)
                                              :set "s" :owner "ja4"))))
       (should-not (equal old new))
-      (should-not (jetpacs-org-token-ref old :owner "ja4"))
-      (should (jetpacs-org-token-ref new :owner "ja4"))
+      (should-not (ebp-org-token-ref old :owner "ja4"))
+      (should (ebp-org-token-ref new :owner "ja4"))
       ;; Table size stayed = the live set.
-      (should (= (hash-table-count jetpacs-org--tokens) 1)))))
+      (should (= (hash-table-count ebp-org--tokens) 1)))))
 
-(ert-deftest jetpacs-org-token-teardown-sweeps-the-owner ()
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let* ((ref (jetpacs-org-test--ref-to f "First heading"))
-           (mine (car (jetpacs-org-ref-tokens (list ref)
+(ert-deftest ebp-org-token-teardown-sweeps-the-owner ()
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let* ((ref (ebp-org-test--ref-to f "First heading"))
+           (mine (car (ebp-org-ref-tokens (list ref)
                                               :set "s" :owner "gone")))
-           (theirs (car (jetpacs-org-ref-tokens (list ref)
+           (theirs (car (ebp-org-ref-tokens (list ref)
                                                 :set "s" :owner "stays"))))
-      (jetpacs-org-teardown-owner "gone")
-      (should-not (jetpacs-org-token-ref mine :owner "gone"))
-      (should (jetpacs-org-token-ref theirs :owner "stays")))))
+      (ebp-org-teardown-owner "gone")
+      (should-not (ebp-org-token-ref mine :owner "gone"))
+      (should (ebp-org-token-ref theirs :owner "stays")))))
 
-(ert-deftest jetpacs-org-token-mint-validates-refs ()
+(ert-deftest ebp-org-token-mint-validates-refs ()
   "A policy-violating ref signals at MINT time, not at tap time."
-  (should-error (jetpacs-org-ref-tokens
+  (should-error (ebp-org-ref-tokens
                  (list '(:id nil :file "/ssh:h:/x.org" :pos 1 :headline ""))
                  :set "s" :owner "ja4")
                 :type 'ebp-org-refused))
 
 ;;;; The cache
 
-(ert-deftest jetpacs-org-cache-hit-miss-invalidate ()
+(ert-deftest ebp-org-cache-hit-miss-invalidate ()
   "The with-cache gate: one body run, a hit, re-run on invalidate,
 re-run on date roll."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
     (let ((runs 0)
           (org-agenda-files (list f)))
-      (cl-flet ((probe () (jetpacs-org-with-cache "ja4t" (list 'k)
+      (cl-flet ((probe () (ebp-org-with-cache "ja4t" (list 'k)
                             (cl-incf runs))))
         (probe) (probe)
         (should (= runs 1))
-        (jetpacs-org-cache-invalidate "ja4t")
+        (ebp-org-cache-invalidate "ja4t")
         (probe)
         (should (= runs 2))
         ;; Date roll busts the key.
@@ -284,82 +330,82 @@ re-run on date roll."
           (probe))
         (should (= runs 3))))))
 
-(ert-deftest jetpacs-org-cache-key-sees-subsecond-and-membership ()
+(ert-deftest ebp-org-cache-key-sees-subsecond-and-membership ()
   "Defect 9: full-resolution stamps — two writes inside one float tick
 yield distinct keys, and DROPPING a file changes the key even when the
 remaining max mtime is unchanged (the poc's max-float was blind to
 both)."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
     (let ((g (file-truename
               (make-temp-file "ja4-second" nil ".org" "* Other\n"))))
       (unwind-protect
           (progn
             ;; Distinct sub-second mtimes on the same integer second.
             (set-file-times f (encode-time '(0 0 0 1 1 2026 nil nil 0)))
-            (let ((jetpacs-org--stamp-memo nil)
+            (let ((ebp-org--stamp-memo nil)
                   (org-agenda-files (list f)))
-              (let ((k1 (jetpacs-org--cache-key "ns")))
+              (let ((k1 (ebp-org--cache-key "ns")))
                 (set-file-times
                  f (time-add (encode-time '(0 0 0 1 1 2026 nil nil 0))
                              '(0 0 500000 0)))    ; +0.5ms, same second
-                (setq jetpacs-org--stamp-memo nil)
-                (let ((k2 (jetpacs-org--cache-key "ns")))
+                (setq ebp-org--stamp-memo nil)
+                (let ((k2 (ebp-org--cache-key "ns")))
                   (should-not (equal k1 k2)))))
             ;; Membership: drop a file whose mtime is NOT the max.
             (set-file-times g (encode-time '(0 0 0 1 1 2020 nil nil 0)))
-            (let ((jetpacs-org--stamp-memo nil))
+            (let ((ebp-org--stamp-memo nil))
               (let* ((org-agenda-files (list f g))
-                     (k-both (jetpacs-org--cache-key "ns")))
-                (setq jetpacs-org--stamp-memo nil)
+                     (k-both (ebp-org--cache-key "ns")))
+                (setq ebp-org--stamp-memo nil)
                 (let* ((org-agenda-files (list f))
-                       (k-one (jetpacs-org--cache-key "ns")))
+                       (k-one (ebp-org--cache-key "ns")))
                   (should-not (equal k-both k-one))))))
         (delete-file g)))))
 
-(ert-deftest jetpacs-org-cache-stat-memo-bounds-the-sweep ()
+(ert-deftest ebp-org-cache-stat-memo-bounds-the-sweep ()
   "Defect 9: consecutive lookups within the TTL run ONE stat sweep;
 invalidate clears the memo so a mutation is never masked."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
     (let ((stats 0)
           (org-agenda-files (list f))
-          (jetpacs-org--stamp-memo nil))
+          (ebp-org--stamp-memo nil))
       (cl-letf* ((real (symbol-function 'file-attributes))
                  ((symbol-function 'file-attributes)
                   (lambda (&rest args) (cl-incf stats) (apply real args))))
-        (jetpacs-org--cache-key "ns")
-        (jetpacs-org--cache-key "ns")
+        (ebp-org--cache-key "ns")
+        (ebp-org--cache-key "ns")
         (should (= stats 1))
-        (jetpacs-org-cache-invalidate)
-        (jetpacs-org--cache-key "ns")
+        (ebp-org-cache-invalidate)
+        (ebp-org--cache-key "ns")
         (should (= stats 2))))))
 
 ;;;; Mutations
 
-(ert-deftest jetpacs-org-with-mutation-escapes-narrowing ()
+(ert-deftest ebp-org-with-mutation-escapes-narrowing ()
   "Defect 8: a mutation lands on ITS heading even when the buffer is
 narrowed to a different one, and the narrowing survives."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "Second heading")))
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "Second heading")))
       (with-current-buffer (find-file-noselect f)
         (widen)
         (goto-char (point-min))
         (org-narrow-to-subtree)             ; narrowed to First
         (let ((before (cons (point-min) (point-max))))
-          (jetpacs-org-set-property ref "ja4t" "MOOD" "good")
+          (ebp-org-set-property ref "ja4t" "MOOD" "good")
           (should (equal before (cons (point-min) (point-max)))))
         (org-with-wide-buffer
          (goto-char (point-min))
          (search-forward "Second heading")
          (should (equal (org-entry-get (point) "MOOD") "good")))))))
 
-(ert-deftest jetpacs-org-toggle-todo-flushes-a-time-note ()
+(ert-deftest ebp-org-toggle-todo-flushes-a-time-note ()
   "Exit-gate half A: under `org-log-done' `time', the toggle writes the
 CLOSED stamp inline and leaves NO pending note machinery."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "First heading"))
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "First heading"))
           (org-log-done 'time)
           (org-todo-keywords '((sequence "TODO" "DONE"))))
-      (jetpacs-org-toggle-todo ref "ja4t" "DONE")
+      (ebp-org-toggle-todo ref "ja4t" "DONE")
       (with-current-buffer (find-file-noselect f)
         (org-with-wide-buffer
          (goto-char (point-min))
@@ -367,17 +413,17 @@ CLOSED stamp inline and leaves NO pending note machinery."
       (should-not (bound-and-true-p org-log-setup))
       (should-not (memq 'org-add-log-note post-command-hook)))))
 
-(ert-deftest jetpacs-org-toggle-todo-never-pops-a-note-buffer ()
+(ert-deftest ebp-org-toggle-todo-never-pops-a-note-buffer ()
   "Defect 2: under `org-log-done' `note' the poc popped a modal
 *Org Note* nobody on the device can C-c C-c, and the LOGBOOK line was
 never written.  The gate cancels instead: no note buffer, no pending
 setup, no hook left armed."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "First heading"))
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "First heading"))
           (org-log-done 'note)
           (org-todo-keywords '((sequence "TODO" "DONE")))
           (inhibit-message t))
-      (jetpacs-org-toggle-todo ref "ja4t" "DONE")
+      (ebp-org-toggle-todo ref "ja4t" "DONE")
       (should-not (get-buffer "*Org Note*"))
       (should-not (bound-and-true-p org-log-setup))
       (should-not (memq 'org-add-log-note post-command-hook))
@@ -387,17 +433,17 @@ setup, no hook left armed."
          (goto-char (point-min))
          (should (looking-at-p "\\* DONE ")))))))
 
-(ert-deftest jetpacs-org-set-planning-roundtrip ()
+(ert-deftest ebp-org-set-planning-roundtrip ()
   "The undocumented `org-add-planning-info' idioms this module depends
 on, pinned: symbol type to set, trailing remove-arg to clear."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "First heading")))
-      (jetpacs-org-set-planning ref "ja4t" "SCHEDULED" "<2026-08-01 Sat>")
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "First heading")))
+      (ebp-org-set-planning ref "ja4t" "SCHEDULED" "<2026-08-01 Sat>")
       (with-current-buffer (find-file-noselect f)
         (org-with-wide-buffer
          (goto-char (point-min))
          (should (search-forward "SCHEDULED: <2026-08-01" nil t))))
-      (jetpacs-org-set-planning ref "ja4t" "SCHEDULED" nil)
+      (ebp-org-set-planning ref "ja4t" "SCHEDULED" nil)
       (with-current-buffer (find-file-noselect f)
         (org-with-wide-buffer
          (goto-char (point-min))
@@ -405,23 +451,23 @@ on, pinned: symbol type to set, trailing remove-arg to clear."
 
 ;;;; The deferred save
 
-(ert-deftest jetpacs-org-defer-save-debounces ()
+(ert-deftest ebp-org-defer-save-debounces ()
   "Defect 3: five mutations arm ONE timer, not five."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
     (with-current-buffer (find-file-noselect f)
-      (dotimes (_ 5) (jetpacs-org-defer-save))
-      (should (timerp jetpacs-org--save-timer))
+      (dotimes (_ 5) (ebp-org-defer-save))
+      (should (timerp ebp-org--save-timer))
       ;; Idle timers live on `timer-idle-list', not `timer-list'.
       (should (= 1 (cl-count-if
                     (lambda (tm) (eq (timer--function tm)
-                                     #'jetpacs-org--save-now))
+                                     #'ebp-org--save-now))
                     timer-idle-list))))))
 
-(ert-deftest jetpacs-org-defer-save-refuses-superseded-file ()
+(ert-deftest ebp-org-defer-save-refuses-superseded-file ()
   "Defect 3: the save body must refuse a superseded file rather than
 reach `basic-save-buffer's `yes-or-no-p' — a prompt in a timer wedges a
 daemon."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
     (let ((buf (find-file-noselect f))
           (inhibit-message t))
       (with-current-buffer buf
@@ -433,7 +479,7 @@ daemon."
                  (lambda (&rest _) (error "PROMPT reached in a timer")))
                 ((symbol-function 'ask-user-about-supersession-threat)
                  (lambda (&rest _) (error "PROMPT reached in a timer"))))
-        (jetpacs-org--save-now buf))
+        (ebp-org--save-now buf))
       ;; Refused: still modified, disk content untouched.
       (should (buffer-modified-p buf))
       (with-temp-buffer
@@ -443,7 +489,7 @@ daemon."
 
 ;;;; D2 / file guards (JA-4 audit Batch 3: P1-5, P1-6, relative roots)
 
-(ert-deftest jetpacs-org-query-skips-a-vanished-agenda-file ()
+(ert-deftest ebp-org-query-skips-a-vanished-agenda-file ()
   "JA-4 audit P1-5: the `agenda' scope marched every configured entry
 through `org-check-agenda-file', which MESSAGES the absolute path and
 blocks on `read-char-exclusive' when the file is missing.  The query
@@ -451,42 +497,42 @@ scope is now the existence-filtered explicit list; an EMPTY set signals
 the RETRYABLE `ebp-org-unavailable' with the distinct
 `no-agenda-files' data (P1-10) instead of silently scanning whatever
 buffer was current (a nil `org-map-entries' scope means exactly that)."
-  (jetpacs-org-test--with-fixture f "* TODO Alive\nbody\n"
+  (ebp-org-test--with-fixture f "* TODO Alive\nbody\n"
     (let ((missing (concat (file-name-directory f) "ja4-vanished.org"))
           (org-directory (file-name-directory f))
           (org-todo-keywords '((sequence "TODO" "|" "DONE")))
           (inhibit-message t))
       (let ((org-agenda-files (list f missing)))
-        (should (equal (jetpacs-with-no-prompts
-                        (jetpacs-org-query
+        (should (equal (ebp-org-test--with-no-prompts
+                        (ebp-org-query
                          "ja4t" "titles" '(todo "TODO")
                          (lambda () (nth 4 (org-heading-components)))))
                        '("Alive"))))
-      (jetpacs-org-cache-invalidate)
+      (ebp-org-cache-invalidate)
       ;; Nothing left after the filter: a status, never a buffer scan.
       (let* ((org-agenda-files (list missing))
              (err (should-error
-                   (jetpacs-with-no-prompts
-                    (jetpacs-org-query "ja4t" "titles" '(todo "TODO")
+                   (ebp-org-test--with-no-prompts
+                    (ebp-org-query "ja4t" "titles" '(todo "TODO")
                                        #'ignore))
                    :type 'ebp-org-unavailable)))
         (should (equal (cdr err) '(no-agenda-files)))))))
 
-(ert-deftest jetpacs-org-resolve-opens-quietly-when-the-file-drifted ()
+(ert-deftest ebp-org-resolve-opens-quietly-when-the-file-drifted ()
   "JA-4 audit P1-6, the open sites: with a live buffer whose file
 changed on disk, `find-file-noselect' without NOWARN asks whether to
 reread — `yes-or-no-p' inside the dispatch extent.  Resolution opens
 quietly and answers from the buffer it has."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "First heading")))
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "First heading")))
       ;; Drift the disk behind the visiting buffer's back.
-      (with-temp-file f (insert jetpacs-org-test--two-headings "* Late\n"))
+      (with-temp-file f (insert ebp-org-test--two-headings "* Late\n"))
       (set-file-times f (time-add (current-time) 2))
-      (let ((m (jetpacs-with-no-prompts (jetpacs-org-resolve-ref ref))))
+      (let ((m (ebp-org-test--with-no-prompts (ebp-org-resolve-ref ref))))
         (should (markerp m))
         (set-marker m nil)))))
 
-(ert-deftest jetpacs-org-mutation-answers-drift-as-a-status ()
+(ert-deftest ebp-org-mutation-answers-drift-as-a-status ()
   "JA-4 audit P1-6, supersession: the first buffer modification against
 a drifted file raises `ask-user-about-supersession-threat'.  Under the
 clamp that is a `ebp-org-refused' STATUS (`file-drifted') the
@@ -494,44 +540,44 @@ handler answers `rejected' — not a question, and not a raw
 `inhibited-interaction'.  The disk content must genuinely DIFFER: in
 30.1 `userlock--check-content-unchanged' silently absorbs a
 same-content mtime drift before the threat is ever raised."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "First heading")))
-      (with-temp-file f (insert jetpacs-org-test--two-headings
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "First heading")))
+      (with-temp-file f (insert ebp-org-test--two-headings
                                 "* Drifted\n"))
       (set-file-times f (time-add (current-time) 2))
       (let ((err (should-error
-                  (jetpacs-with-no-prompts
-                   (jetpacs-org-set-property ref "ja4t" "MOOD" "x"))
+                  (ebp-org-test--with-no-prompts
+                   (ebp-org-set-property ref "ja4t" "MOOD" "x"))
                   :type 'ebp-org-refused)))
         (should (equal (cdr err) '(file-drifted)))))))
 
-(ert-deftest jetpacs-org-toggle-todo-refuses-the-catchup-repeater-prompt ()
+(ert-deftest ebp-org-toggle-todo-refuses-the-catchup-repeater-prompt ()
   "JA-4 audit P1-6, the repeater: `org-auto-repeat-maybe' asks
 `y-or-n-p' after ten catch-up shifts of a `++' repeater (emacs-30.1
 org.el, nshiftmax).  Under the clamp the toggle refuses as a status
 instead of hanging the extent on a question."
-  (jetpacs-org-test--with-fixture f
+  (ebp-org-test--with-fixture f
       (format "* TODO H\nSCHEDULED: <%s ++1d>\n"
               (format-time-string
                "%Y-%m-%d %a"
                (time-subtract (current-time) (days-to-time 30))))
-    (let ((ref (jetpacs-org-test--ref-to f "H"))
+    (let ((ref (ebp-org-test--ref-to f "H"))
           (org-todo-keywords '((sequence "TODO" "|" "DONE")))
           (org-log-done nil)
           (inhibit-message t))
       (let ((err (should-error
-                  (jetpacs-with-no-prompts
-                   (jetpacs-org-toggle-todo ref "ja4t" "DONE"))
+                  (ebp-org-test--with-no-prompts
+                   (ebp-org-toggle-todo ref "ja4t" "DONE"))
                   :type 'ebp-org-refused)))
         (should (equal (cdr err) '(needs-interactive)))))))
 
-(ert-deftest jetpacs-org-save-path-never-prompts ()
+(ert-deftest ebp-org-save-path-never-prompts ()
   "JA-4 audit P1-6, the save arm: `basic-save-buffer' raises
 `yes-or-no-p' on a write-protected file; inside the deferred-save timer
 that must be a message-refusal — a signal must never escape a timer
 body, and a prompt wedges the daemon."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "First heading"))
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "First heading"))
           (modes (file-modes f))
           (before (with-temp-buffer (insert-file-contents f)
                                     (buffer-string)))
@@ -539,13 +585,13 @@ body, and a prompt wedges the daemon."
       (unwind-protect
           (progn
             ;; The public mutation arms the ONE deferred-save timer.
-            (jetpacs-org-set-property ref "ja4t" "MOOD" "good")
+            (ebp-org-set-property ref "ja4t" "MOOD" "good")
             (let* ((buf (find-buffer-visiting f))
-                   (tm (buffer-local-value 'jetpacs-org--save-timer buf)))
+                   (tm (buffer-local-value 'ebp-org--save-timer buf)))
               (should (timerp tm))
               (set-file-modes f #o444)
               ;; Batch never runs idle timers; fire the body BY HAND.
-              (jetpacs-with-no-prompts
+              (ebp-org-test--with-no-prompts
                (apply (timer--function tm) (timer--args tm)))
               ;; Refused as a message: buffer still modified, disk
               ;; untouched.
@@ -555,12 +601,12 @@ body, and a prompt wedges the daemon."
                              before))))
         (set-file-modes f modes)))))
 
-(ert-deftest jetpacs-org-relative-root-anchors-to-org-directory ()
-  "Batch-3 P2: a relative `jetpacs-org-roots' or agenda entry anchors
+(ert-deftest ebp-org-relative-root-anchors-to-org-directory ()
+  "Batch-3 P2: a relative `ebp-org-roots' or agenda entry anchors
 to `org-directory' — matching `org-agenda-files's own expansion — never
 to the AMBIENT `default-directory' of whatever buffer the socket
 filter happened to have current."
-  (jetpacs-org-test--with-fixture f "* H\n"
+  (ebp-org-test--with-fixture f "* H\n"
     (let* ((fixture-dir (file-name-directory f))
            (decoy (file-name-as-directory
                    (file-truename (make-temp-file "ja4-decoy" t)))))
@@ -568,56 +614,56 @@ filter happened to have current."
           (progn
             ;; Anchored: the decoy default-directory must not matter.
             (let ((org-directory fixture-dir)
-                  (jetpacs-org-roots '("."))
+                  (ebp-org-roots '("."))
                   (default-directory decoy))
-              (should (equal (jetpacs-org--check-file f) f)))
+              (should (equal (ebp-org--check-file f) f)))
             ;; And the anchor really is org-directory: point it at the
             ;; decoy and the SAME file is refused.
             (let ((org-directory decoy)
-                  (jetpacs-org-roots '("."))
+                  (ebp-org-roots '("."))
                   (default-directory fixture-dir))
-              (should-error (jetpacs-org--check-file f)
+              (should-error (ebp-org--check-file f)
                             :type 'ebp-org-refused))
             ;; Agenda entries expand against org-directory too.
             (let ((org-directory fixture-dir)
                   (org-agenda-files (list (file-name-nondirectory f))))
-              (should (equal (jetpacs-org-agenda-files)
+              (should (equal (ebp-org-agenda-files)
                              (list (concat fixture-dir
                                            (file-name-nondirectory f)))))))
         (delete-directory decoy t)))))
 
 ;;;; The token/status contract (JA-4 audit Batch 4: P1-8, P1-9, P1-10)
 
-(ert-deftest jetpacs-org-token-mint-is-atomic ()
+(ert-deftest ebp-org-token-mint-is-atomic ()
   "JA-4 audit P1-8: the poc swept the old generation and half-installed
 the new one BEFORE validating every ref — a failed mint orphaned tokens
 past both sweeps (unreachable by replace, by teardown, by the set cap)
 and killed the surface's live tokens all at once.  The mint is now
 all-or-nothing: a failed mint leaves both tables and the live
 generation exactly as they were."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let* ((ref (jetpacs-org-test--ref-to f "First heading"))
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let* ((ref (ebp-org-test--ref-to f "First heading"))
            (bad '(:id nil :file "/ssh:evil:/x.org" :pos 1 :headline ""))
-           (old (car (jetpacs-org-ref-tokens (list ref)
+           (old (car (ebp-org-ref-tokens (list ref)
                                              :set "s" :owner "ja4"))))
-      (should-error (jetpacs-org-ref-tokens (list ref bad)
+      (should-error (ebp-org-ref-tokens (list ref bad)
                                             :set "s" :owner "ja4")
                     :type 'ebp-org-refused)
       ;; The failed mint changed NOTHING: the prior generation still
       ;; resolves and no orphan entered the token table.
-      (should (equal (jetpacs-org-token-ref old :owner "ja4") ref))
-      (should (= (hash-table-count jetpacs-org--tokens) 1))
+      (should (equal (ebp-org-token-ref old :owner "ja4") ref))
+      (should (= (hash-table-count ebp-org--tokens) 1))
       ;; And teardown still reaches everything.
-      (jetpacs-org-teardown-owner "ja4")
-      (should (= (hash-table-count jetpacs-org--tokens) 0))
-      (should-not (jetpacs-org-token-ref old :owner "ja4")))))
+      (ebp-org-teardown-owner "ja4")
+      (should (= (hash-table-count ebp-org--tokens) 0))
+      (should-not (ebp-org-token-ref old :owner "ja4")))))
 
-(ert-deftest jetpacs-org-ambiguous-ref-answers-stale-not-a-guess ()
+(ert-deftest ebp-org-ambiguous-ref-answers-stale-not-a-guess ()
   "JA-4 audit P1-9 (SPEC 14.5): two identical `* TODO Review' headings,
 a token minted for the SECOND, the desktop user edits the first — the
 queued tap must answer stale (`ebp-org-unresolved'), never resolve
 the first title match and mutate a heading the user did not tap."
-  (jetpacs-org-test--with-fixture f
+  (ebp-org-test--with-fixture f
       (concat "* TODO Review\n" (make-string 200 ?p) "\n"
               "* TODO Review\nbody two\n")
     (let* ((ref (with-current-buffer (find-file-noselect f)
@@ -626,8 +672,8 @@ the first title match and mutate a heading the user did not tap."
                    (goto-char (point-min))
                    (search-forward "* TODO Review")
                    (search-forward "* TODO Review")
-                   (jetpacs-org-ref-at-point))))
-           (token (car (jetpacs-org-ref-tokens (list ref)
+                   (ebp-org-ref-at-point))))
+           (token (car (ebp-org-ref-tokens (list ref)
                                                :set "s" :owner "ja4")))
            (before (with-temp-buffer (insert-file-contents f)
                                      (buffer-string))))
@@ -640,9 +686,9 @@ the first title match and mutate a heading the user did not tap."
          (delete-region (point) (+ (point) 180))))
       ;; The queued tap: the token still hands back the ref, and the
       ;; mutation answers stale — never a first-match guess.
-      (let ((tapped (jetpacs-org-token-ref token :owner "ja4")))
+      (let ((tapped (ebp-org-token-ref token :owner "ja4")))
         (should (equal tapped ref))
-        (should-error (jetpacs-org-set-property tapped "ja4t" "MOOD" "x")
+        (should-error (ebp-org-set-property tapped "ja4t" "MOOD" "x")
                       :type 'ebp-org-unresolved))
       ;; NEITHER heading was mutated, and nothing reached the disk.
       (with-current-buffer (find-file-noselect f)
@@ -653,19 +699,19 @@ the first title match and mutate a heading the user did not tap."
                                        (buffer-string))
                      before)))))
 
-(ert-deftest jetpacs-org-resolve-headline-gate-is-mandatory ()
+(ert-deftest ebp-org-resolve-headline-gate-is-mandatory ()
   "JA-4 audit P1-9 defect (b): an empty :headline is a CLAIM (\"this
-heading has no title\" — `jetpacs-org-ref-at-point' mints \"\" for
+heading has no title\" — `ebp-org-ref-at-point' mints \"\" for
 those), never a bypass of the trusted-position drift gate."
-  (jetpacs-org-test--with-fixture f "* TODO\nbody\n* TODO Titled\nmore\n"
+  (ebp-org-test--with-fixture f "* TODO\nbody\n* TODO Titled\nmore\n"
     (with-current-buffer (find-file-noselect f)
       (org-mode)
       (org-with-wide-buffer
        (goto-char (point-min))
        ;; A ref to the TITLE-LESS heading still resolves through pos.
-       (let ((bare (jetpacs-org-ref-at-point)))
+       (let ((bare (ebp-org-ref-at-point)))
          (should (equal (plist-get bare :headline) ""))
-         (let ((m (jetpacs-org-resolve-ref bare)))
+         (let ((m (ebp-org-resolve-ref bare)))
            (should (markerp m))
            (should (= (marker-position m) (point-min)))
            (set-marker m nil)))
@@ -676,43 +722,43 @@ those), never a bypass of the trusted-position drift gate."
        (let ((tampered (list :id nil :file f
                              :pos (line-beginning-position)
                              :headline "")))
-         (should-error (jetpacs-org-resolve-ref tampered)
+         (should-error (ebp-org-resolve-ref tampered)
                        :type 'ebp-org-unresolved))))))
 
-(ert-deftest jetpacs-org-status-split-and-dispositions ()
+(ert-deftest ebp-org-status-split-and-dispositions ()
   "JA-4 audit P1-10: `rejected' means the Companion DELETES the durable
 record (SPEC 14.4), so only permanent conditions may map there.
 Transient environment goes to `ebp-org-unavailable' (1500
 event-retry via `jetpacs-retry-later'); a vanished file is content
 drift (`ebp-org-unresolved' -> stale); and
 `ebp-org-refusal-disposition' hands handler authors the map."
-  (jetpacs-org-test--with-fixture f "* H\n"
+  (ebp-org-test--with-fixture f "* H\n"
     ;; unreadable on an EXISTING file (an I/O condition) -> unavailable.
     (let ((modes (file-modes f)))
       (unwind-protect
           (progn
             (set-file-modes f 0)
-            (let ((err (should-error (jetpacs-org--check-file f)
+            (let ((err (should-error (ebp-org--check-file f)
                                      :type 'ebp-org-unavailable)))
               (should (equal (cdr err) '(unreadable)))))
         (set-file-modes f modes)))
     ;; An empty EFFECTIVE root set (unmounted storage) -> unavailable.
-    (let ((jetpacs-org-roots (list (concat (file-name-directory f)
+    (let ((ebp-org-roots (list (concat (file-name-directory f)
                                            "no-such-root/"))))
-      (should-error (jetpacs-org--check-file f)
+      (should-error (ebp-org--check-file f)
                     :type 'ebp-org-unavailable))
     ;; A vanished file is content drift -> unresolved (stale).
     (let ((gone (concat (file-name-directory f) "vanished.org")))
-      (should-error (jetpacs-org-resolve-ref
+      (should-error (ebp-org-resolve-ref
                      (list :id nil :file gone :pos 1 :headline "H"))
                     :type 'ebp-org-unresolved))
     ;; not-absolute / remote / outside-roots stay permanently rejected.
     (dolist (bad (list "relative.org" "/ssh:evil:/x.org"))
-      (should-error (jetpacs-org--check-file bad)
+      (should-error (ebp-org--check-file bad)
                     :type 'ebp-org-refused))
-    (let ((jetpacs-org-roots (list (file-truename
+    (let ((ebp-org-roots (list (file-truename
                                     (make-temp-file "ja4-other" t)))))
-      (should-error (jetpacs-org--check-file f)
+      (should-error (ebp-org--check-file f)
                     :type 'ebp-org-refused)))
   ;; The disposition map handler authors get for free.
   (should (eq (ebp-org-refusal-disposition
@@ -728,8 +774,8 @@ drift (`ebp-org-unresolved' -> stale); and
 
 ;;;; Typed extraction
 
-(ert-deftest jetpacs-org-typed-values ()
-  (jetpacs-org-test--with-fixture f
+(ert-deftest ebp-org-typed-values ()
+  (ebp-org-test--with-fixture f
       "* H\n:PROPERTIES:\n:DONE_BOX: [X]\n:COUNT: 42\n:KIND: b\n:KIND_ALL: a b c\n:BAD: z\n:BAD_ALL: a b c\n:LABELS: x, y z\n:END:\n"
     (with-current-buffer (find-file-noselect f)
       (org-mode)
@@ -745,78 +791,78 @@ drift (`ebp-org-unresolved' -> stale); and
 
 ;;;; The query grammar (O2)
 
-(defconst jetpacs-org-test--agenda
+(defconst ebp-org-test--agenda
   "* TODO Pay the bill :money:\nSCHEDULED: <2026-08-01 Sat>\nelectric company\n* NEXT Call Alice :work:\n* DONE Old chore :money:\nCLOSED: [2026-07-01 Wed]\n* Plain notes\nnothing actionable\n* TODO [#A] Urgent thing :work:\n"
   "Decoy-laden: every clause below matches SOME entry; only the
 conjunction picks exactly one — an accidentally-OR interpreter fails.")
 
-(defmacro jetpacs-org-test--with-agenda (var &rest body)
+(defmacro ebp-org-test--with-agenda (var &rest body)
   (declare (indent 1))
-  `(jetpacs-org-test--with-fixture ,var jetpacs-org-test--agenda
+  `(ebp-org-test--with-fixture ,var ebp-org-test--agenda
      (let ((org-agenda-files (list ,var))
            (org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE"))))
        ,@body)))
 
-(defun jetpacs-org-test--titles (tree)
+(defun ebp-org-test--titles (tree)
   "Run TREE end-to-end through the REAL entry point; titles returned."
-  (jetpacs-org-query "ja4-test" "titles" tree
+  (ebp-org-query "ja4-test" "titles" tree
                      (lambda () (nth 4 (org-heading-components)))))
 
-(ert-deftest jetpacs-org-grammar-sexp-conjunction ()
+(ert-deftest ebp-org-grammar-sexp-conjunction ()
   "Exit gate G1 (sexp): decoys match single clauses; the conjunction
 picks exactly one entry."
-  (jetpacs-org-test--with-agenda f
-    (should (equal (jetpacs-org-test--titles
+  (ebp-org-test--with-agenda f
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query
                      "(and (todo \"TODO\") (tags \"money\"))"))
                    '("Pay the bill")))
     ;; OR spans; NOT excludes.
-    (should (= 2 (length (jetpacs-org-test--titles
+    (should (= 2 (length (ebp-org-test--titles
                           (ebp-org-parse-query
                            "(and (todo) (tags \"work\"))")))))
-    (should (equal (jetpacs-org-test--titles
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query
                      "(and (tags \"money\") (not (done)))"))
                    '("Pay the bill")))))
 
-(ert-deftest jetpacs-org-grammar-tokens ()
+(ert-deftest ebp-org-grammar-tokens ()
   "Exit gate G1 (tokens) incl. `priority:' — present in the grammar,
 omitted by the plan's gate text."
-  (jetpacs-org-test--with-agenda f
-    (should (equal (jetpacs-org-test--titles
+  (ebp-org-test--with-agenda f
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query "todo:TODO tags:work"))
                    '("Urgent thing")))
-    (should (equal (jetpacs-org-test--titles
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query "priority:A"))
                    '("Urgent thing")))
-    (jetpacs-org-cache-invalidate)
-    (should (equal (jetpacs-org-test--titles
+    (ebp-org-cache-invalidate)
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query "todo:TODO,NEXT tags:work"))
                    '("Call Alice" "Urgent thing")))))
 
-(ert-deftest jetpacs-org-grammar-freetext ()
+(ert-deftest ebp-org-grammar-freetext ()
   "Exit gate G1 (free text): quoted phrase + bare word, body haystack."
-  (jetpacs-org-test--with-agenda f
-    (should (equal (jetpacs-org-test--titles
+  (ebp-org-test--with-agenda f
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query "\"electric company\""))
                    '("Pay the bill")))
-    (should (equal (jetpacs-org-test--titles
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query "nothing"))
                    '("Plain notes")))))
 
-(ert-deftest jetpacs-org-grammar-planning-window ()
+(ert-deftest ebp-org-grammar-planning-window ()
   "The :on/:from/:to plist arm over scheduled stamps."
-  (jetpacs-org-test--with-agenda f
-    (should (equal (jetpacs-org-test--titles
+  (ebp-org-test--with-agenda f
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query
                      "(scheduled :on \"2026-08-01\")"))
                    '("Pay the bill")))
-    (jetpacs-org-cache-invalidate)
-    (should-not (jetpacs-org-test--titles
+    (ebp-org-cache-invalidate)
+    (should-not (ebp-org-test--titles
                  (ebp-org-parse-query
                   "(scheduled :from \"2026-09-01\")")))))
 
-(ert-deftest jetpacs-org-query-vet-rejects-hostile-input ()
+(ert-deftest ebp-org-query-vet-rejects-hostile-input ()
   "Defect 4 (SPEC 23.2): the rejects family, each through the REAL
 `ebp-org-parse-query'."
   (dolist (q '("(delete-file \"/etc/passwd\")"     ; unknown head
@@ -842,7 +888,7 @@ omitted by the plan's gate text."
                                     (number-sequence 1 100) " ")))
                 :type 'user-error))
 
-(ert-deftest jetpacs-org-query-vet-is-obarray-clean ()
+(ert-deftest ebp-org-query-vet-is-obarray-clean ()
   "Defect 4, the measured half: a hostile query's symbols never reach
 the global obarray — even when the query is REFUSED."
   (should-not (intern-soft "ja4-gpzz-never-interned"))
@@ -856,7 +902,7 @@ the global obarray — even when the query is REFUSED."
                  '(todo "ja4-gpzz-arg-sym")))
   (should-not (intern-soft "ja4-gpzz-arg-sym")))
 
-(ert-deftest jetpacs-org-query-vet-normalizes-like-the-poc ()
+(ert-deftest ebp-org-query-vet-normalizes-like-the-poc ()
   "Quote unwrapping, literal preservation, bare-symbol stringification."
   (should (equal (ebp-org-parse-query "'(todo TODO)")
                  '(todo "TODO")))
@@ -867,19 +913,19 @@ the global obarray — even when the query is REFUSED."
   ;; Re-homed heads are the CANONICAL symbols (eq, not just equal).
   (should (eq (car (ebp-org-parse-query "(todo \"X\")")) 'todo)))
 
-(defun jetpacs-org-test--tree-canonical-p (x)
+(defun ebp-org-test--tree-canonical-p (x)
   "Non-nil when every symbol in tree X is the canonical global intern
 and every string carries zero text properties over its whole length."
   (cond
-   ((consp x) (and (jetpacs-org-test--tree-canonical-p (car x))
-                   (jetpacs-org-test--tree-canonical-p (cdr x))))
+   ((consp x) (and (ebp-org-test--tree-canonical-p (car x))
+                   (ebp-org-test--tree-canonical-p (cdr x))))
    ((symbolp x) (eq x (intern-soft (symbol-name x))))
    ((stringp x)
     (cl-loop for i below (length x)
              always (null (text-properties-at i x))))
    (t t)))
 
-(ert-deftest jetpacs-org-query-vet-refuses-wire-regexp ()
+(ert-deftest ebp-org-query-vet-refuses-wire-regexp ()
   "JA-4 audit P1-2 (SPEC #137): `regexp' is interpreter vocabulary, not
 wire vocabulary — a wire (regexp …) hands the peer a raw regexp engine
 \(ReDoS at will).  `heading' regexp-quotes and covers the use case, and
@@ -892,7 +938,7 @@ the token arm still mints its own regexp clauses from quoted material."
   ;; Positive control: free text still routes through the token arm.
   (should (equal (ebp-org-parse-query "foo") '(regexp "foo"))))
 
-(ert-deftest jetpacs-org-query-vet-strips-text-properties ()
+(ert-deftest ebp-org-query-vet-strips-text-properties ()
   "JA-4 audit P1-3: the reader mints PROPERTIZED strings from #(…) wire
 text, with throwaway-obarray symbols riding in the property list; the
 vetter's output invariant promises fresh propertyless strings, so
@@ -900,9 +946,9 @@ enforce it end to end through the public entry point."
   (let ((tree (ebp-org-parse-query
                "(todo #(\"x\" 0 1 (ja4-smug ja4-val)))")))
     (should (equal tree '(todo "x")))
-    (should (jetpacs-org-test--tree-canonical-p tree)))
+    (should (ebp-org-test--tree-canonical-p tree)))
   ;; Symbols in the output are the canonical global interns.
-  (should (jetpacs-org-test--tree-canonical-p
+  (should (ebp-org-test--tree-canonical-p
            (ebp-org-parse-query
             "(and (todo KW) (scheduled :from today))"))))
 
@@ -933,7 +979,7 @@ match-everything (regexp \"\") clause."
               :type 'user-error)))
     (should (equal (cadr err) "Query too deep"))))
 
-(ert-deftest jetpacs-org-query-vet-checks-arity-and-types ()
+(ert-deftest ebp-org-query-vet-checks-arity-and-types ()
   "The per-head arity/type schema, and its refusal wording: the head
 symbol at most, NEVER the query text (SPEC 23.3)."
   (pcase-dolist (`(,q . ,msg)
@@ -951,7 +997,7 @@ symbol at most, NEVER the query text (SPEC 23.3)."
     (should (equal (cadr err) "Malformed level clause"))
     (should-not (string-search "SNEAKPAYLOAD" (format "%S" err)))))
 
-(ert-deftest jetpacs-org-query-vet-refuses-special-properties ()
+(ert-deftest ebp-org-query-vet-refuses-special-properties ()
   "Every `org-special-properties' name is path/derived data with a
 dedicated grammar head; (property \"FILE\") would leak absolute paths
 through a grammar that promises path-free results."
@@ -967,11 +1013,11 @@ through a grammar that promises path-free results."
   (should (equal (ebp-org-parse-query "(property \"MOOD\")")
                  '(property "MOOD"))))
 
-(ert-deftest jetpacs-org-priority-comparator-inverts ()
+(ert-deftest ebp-org-priority-comparator-inverts ()
   "org urgency runs A > B > C: the comparator flips against the chars."
-  (jetpacs-org-test--with-agenda f
+  (ebp-org-test--with-agenda f
     ;; "higher than B" must return the #A entry.
-    (should (equal (jetpacs-org-test--titles
+    (should (equal (ebp-org-test--titles
                     (ebp-org-parse-query "(priority > \"B\")"))
                    '("Urgent thing")))))
 
@@ -1046,7 +1092,7 @@ user data (SPEC 23.3), so no leaf of the tree may ride in the message."
 
 ;;;; Shared primitives (O3)
 
-(ert-deftest jetpacs-org-ts-extractors ()
+(ert-deftest ebp-org-ts-extractors ()
   (should (equal (ebp-org-ts-date "<2026-08-01 Sat 14:30 +1w>")
                  "2026-08-01"))
   (should (equal (ebp-org-ts-time "<2026-08-01 Sat 14:30 +1w>")
@@ -1083,27 +1129,27 @@ expansion); a template default is the user's own config and is inlined."
                                            (cdr b) text t t)))
     (should (equal text "* mine H\n "))))
 
-(ert-deftest jetpacs-org-capture-values-are-data-not-template ()
+(ert-deftest ebp-org-capture-values-are-data-not-template ()
   "JA-4 audit P1-1.  A wire value is substituted only AFTER org-capture
 has finished expanding, so no peer text can become template source:
 `%(sexp)' must not evaluate, `%[PATH]' must not read a file, and a
 literal \\=\\1 or & must not act as replacement-template syntax.  The
 regression half matters as much: the USER'S OWN template escapes must
 still work, or the fix has bought safety by removing the feature."
-  (jetpacs-org-test--with-fixture target "* Inbox\n"
+  (ebp-org-test--with-fixture target "* Inbox\n"
     (let ((secret (expand-file-name "ja4-secret.txt"
                                     (file-name-directory target))))
       (unwind-protect
           (progn
             (with-temp-file secret (insert "TOP-SECRET-PAYLOAD\n"))
-            (setq jetpacs-org-test--sexp-ran nil)
+            (setq ebp-org-test--sexp-ran nil)
             (let ((org-capture-templates
                    `(("t" "T" entry (file ,target) "* TODO %^{Title}\n%?")
                      ;; The user's own template, exercising org's power.
                      ("u" "U" entry (file ,target)
                       "* TODO %^{Title} :: %(concat \"tmpl\" \"-sexp-ok\")\n%?"))))
               (ebp-org-capture-run
-               "t" `(("Title" . "hi %(progn (setq jetpacs-org-test--sexp-ran t) \"OWNED\")")
+               "t" `(("Title" . "hi %(progn (setq ebp-org-test--sexp-ran t) \"OWNED\")")
                      ("Headline" . "body")))
               (ebp-org-capture-run
                "t" `(("Title" . ,(format "x %%[%s]" secret)) ("Headline" . "b")))
@@ -1111,13 +1157,13 @@ still work, or the fix has bought safety by removing the feature."
                "t" '(("Title" . "back\\1slash & amp") ("Headline" . "b")))
               (ebp-org-capture-run
                "t" '(("Title" . "shared") ("Headline" . "b"))
-               "shared %(setq jetpacs-org-test--sexp-ran 'VIA-EXTRA-BODY)")
+               "shared %(setq ebp-org-test--sexp-ran 'VIA-EXTRA-BODY)")
               (ebp-org-capture-run
                "u" '(("Title" . "legit") ("Headline" . "b"))))
             (let ((text (with-temp-buffer (insert-file-contents target)
                                           (buffer-string))))
               ;; Nothing from the wire ran, in either carrier.
-              (should-not jetpacs-org-test--sexp-ran)
+              (should-not ebp-org-test--sexp-ran)
               (should (string-search "hi %(progn" text))
               (should (string-search "shared %(setq" text))
               ;; No local file was read into the user's org file.
@@ -1142,7 +1188,7 @@ still work, or the fix has bought safety by removing the feature."
 values land, no residue, no lingering capture buffer, and the
 filled-copy binding holds (defaults would show if the ORIGINAL entry
 re-ran its prompts)."
-  (jetpacs-org-test--with-fixture target "* Inbox\n"
+  (ebp-org-test--with-fixture target "* Inbox\n"
     (let ((org-capture-templates
            `(("t" "Task" entry (file+headline ,target "Inbox")
               "* TODO %^{Title|default-title}\n%?"
@@ -1203,7 +1249,7 @@ grow a spurious leading newline off a nil."
                    "stray continuation"))))
 
 (ert-deftest ebp-org-logbook-entries-reads-the-drawer ()
-  (jetpacs-org-test--with-fixture f
+  (ebp-org-test--with-fixture f
       "* TODO H\n:LOGBOOK:\n- State \"DONE\" [2026-07-01 Tue]\n:END:\nBody.\n"
     (with-current-buffer (find-file-noselect f)
       (org-mode)
@@ -1215,7 +1261,7 @@ grow a spurious leading newline off a nil."
 (ert-deftest ebp-org-set-repeater-roundtrip-and-unterminated ()
   "Add, replace, remove — and defect 6: an unterminated timestamp is a
 NO-OP, byte-identical buffer, instead of search-failed escaping."
-  (jetpacs-org-test--with-fixture f
+  (ebp-org-test--with-fixture f
       "* TODO H\nSCHEDULED: <2026-08-01 Sat>\n* Broken\nSCHEDULED: <2026-08-01\n"
     (with-current-buffer (find-file-noselect f)
       (org-mode)
@@ -1239,9 +1285,9 @@ NO-OP, byte-identical buffer, instead of search-failed escaping."
          (should (equal (buffer-string) before))))
       (set-buffer-modified-p nil))))
 
-(ert-deftest jetpacs-org-tblfm-field-over-column ()
+(ert-deftest ebp-org-tblfm-field-over-column ()
   "Field formulas (@R$C) beat column formulas ($C), mirroring org."
-  (jetpacs-org-test--with-fixture f
+  (ebp-org-test--with-fixture f
       "| a | b |\n|---+---|\n| 1 | 2 |\n| 3 | 4 |\n#+TBLFM: @3$2=@3$1*2::$2=$1+1\n"
     (with-current-buffer (find-file-noselect f)
       (org-mode)
@@ -1267,21 +1313,21 @@ NO-OP, byte-identical buffer, instead of search-failed escaping."
 
 ;;;; The outline model (JA-5a, amendment A3)
 
-(defconst jetpacs-org-test--outline-fixture
+(defconst ebp-org-test--outline-fixture
   (concat "* One\nBody.\n"
           "** TODO [#A] Sub :tag:\nDEADLINE: <2026-01-01 Thu>\nSub body.\n"
           "* DONE Two\n"
           "*** Skip\n")
   "Two roots, a decorated child, and a SKIPPED level under Two.")
 
-(ert-deftest jetpacs-org-outline-collect-records-fields ()
+(ert-deftest ebp-org-outline-collect-records-fields ()
   "Collection walks every heading; records carry the decoded fields.
 `include-first' picks up a heading sitting exactly at BEG."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--outline-fixture
+  (ebp-org-test--with-fixture f ebp-org-test--outline-fixture
     (with-current-buffer (find-file-noselect f)
       (org-mode)
       (org-with-wide-buffer
-       (let ((recs (jetpacs-org-outline-collect (point-min) (point-max) nil)))
+       (let ((recs (ebp-org-outline-collect (point-min) (point-max) nil)))
          (should (= 4 (length recs)))
          (let ((one (nth 0 recs)) (sub (nth 1 recs)) (two (nth 2 recs)))
            (should (equal (plist-get one :title) "One"))
@@ -1298,19 +1344,19 @@ NO-OP, byte-identical buffer, instead of search-failed escaping."
        ;; include-first from a heading's own bol.
        (goto-char (point-min))
        (search-forward "** TODO")
-       (let ((recs (jetpacs-org-outline-collect
+       (let ((recs (ebp-org-outline-collect
                     (line-beginning-position) (point-max) t)))
          (should (equal (plist-get (car recs) :title) "Sub")))))))
 
-(ert-deftest jetpacs-org-outline-tree-nests-and-handles-skips ()
+(ert-deftest ebp-org-outline-tree-nests-and-handles-skips ()
   "Nesting follows :level; a skipped level (* -> ***) nests under the
 nearest shallower ancestor rather than being dropped."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--outline-fixture
+  (ebp-org-test--with-fixture f ebp-org-test--outline-fixture
     (with-current-buffer (find-file-noselect f)
       (org-mode)
       (org-with-wide-buffer
-       (let* ((recs (jetpacs-org-outline-collect (point-min) (point-max) nil))
-              (tree (jetpacs-org-outline-tree recs)))
+       (let* ((recs (ebp-org-outline-collect (point-min) (point-max) nil))
+              (tree (ebp-org-outline-tree recs)))
          (should (= 2 (length tree)))
          (should (equal (plist-get (nth 0 tree) :title) "One"))
          (should (equal (plist-get (car (plist-get (nth 0 tree) :children))
@@ -1321,46 +1367,46 @@ nearest shallower ancestor rather than being dropped."
                                    :title)
                         "Skip")))))))
 
-(ert-deftest jetpacs-org-outline-cap-truncates ()
-  (let ((jetpacs-org-outline-max-headings 2))
-    (should (= 2 (length (jetpacs-org-outline-cap '(a b c d)))))
-    (should (equal '(a) (jetpacs-org-outline-cap '(a))))))
+(ert-deftest ebp-org-outline-cap-truncates ()
+  (let ((ebp-org-outline-max-headings 2))
+    (should (= 2 (length (ebp-org-outline-cap '(a b c d)))))
+    (should (equal '(a) (ebp-org-outline-cap '(a))))))
 
-(ert-deftest jetpacs-org-file-toplevel-records-root-checked ()
+(ert-deftest ebp-org-file-toplevel-records-root-checked ()
   "Top-level records come back tagged :file/:buffer and only level 1;
-a path outside `jetpacs-org-roots' is REFUSED, not read — the poc read
+a path outside `ebp-org-roots' is REFUSED, not read — the poc read
 any path handed to it."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--outline-fixture
-    (let ((tops (jetpacs-org-file-toplevel-records f)))
+  (ebp-org-test--with-fixture f ebp-org-test--outline-fixture
+    (let ((tops (ebp-org-file-toplevel-records f)))
       (should (= 2 (length tops)))
       (should (cl-every (lambda (r) (= 1 (plist-get r :level))) tops))
       (should (equal (plist-get (car tops) :file) f))
       (should (stringp (plist-get (car tops) :buffer))))
     ;; Outside the allowlist: refusal, before any read.
-    (let ((jetpacs-org-roots (list (make-temp-file "ja5-other" t))))
-      (should-error (jetpacs-org-file-toplevel-records f)
+    (let ((ebp-org-roots (list (make-temp-file "ja5-other" t))))
+      (should-error (ebp-org-file-toplevel-records f)
                     :type 'ebp-org-refused))))
 
 ;;;; The cache (JA-4 audit Batch 5: P1-11, P1-12, eviction)
 
-(ert-deftest jetpacs-org-cache-sees-an-unsaved-buffer-edit ()
+(ert-deftest ebp-org-cache-sees-an-unsaved-buffer-edit ()
   "JA-4 audit P1-11: freshness was derived entirely from the DISK
 mtime while EVERY cached value is produced by `org-map-entries' reading
 the BUFFER.  An org buffer edited in Emacs and not yet written — the
 normal state of a working buffer, and precisely the state
-`jetpacs-org-with-mutation' deliberately leaves for the debounce
+`ebp-org-with-mutation' deliberately leaves for the debounce
 window — did not move the key at all, so the phone re-rendered from
 positions that no longer exist and a tap then mutated the WRONG
 heading.  The stamp now carries `buffer-chars-modified-tick' for every
 visiting buffer."
-  (jetpacs-org-test--with-fixture f "* TODO Alpha\n"
+  (ebp-org-test--with-fixture f "* TODO Alpha\n"
     (let ((org-agenda-files (list f))
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       ;; Open the file FIRST: the buffer SET is then identical across
       ;; both queries, so only the edit itself can move the stamp.
       (find-file-noselect f)
       (cl-flet ((titles ()
-                  (jetpacs-org-query
+                  (ebp-org-query
                    "ja4t" "titles" '(todo "TODO")
                    (lambda () (nth 4 (org-heading-components))))))
         (should (equal (titles) '("Alpha")))
@@ -1375,47 +1421,47 @@ visiting buffer."
         ;; ...and the repeated query still sees the edit.
         (should (equal (titles) '("Alpha" "Beta")))))))
 
-(ert-deftest jetpacs-org-query-keys-on-the-caller-supplied-key ()
+(ert-deftest ebp-org-query-keys-on-the-caller-supplied-key ()
   "JA-4 audit P1-12: the key was (date, stamp, namespace, tree) while
 the cached VALUE is `(mapcar ACTION matches)', so a second caller with
 the same tree and a DIFFERENT action silently received the first
 caller's payload.  That is a D-4 breach, not merely a cache bug: JA-5
 asks one tree for display titles and for refs, and whichever ran
 second got the other list — ref plists (absolute paths) to a text
-consumer, bare strings to `jetpacs-org-ref-tokens', whose per-ref
+consumer, bare strings to `ebp-org-ref-tokens', whose per-ref
 policy check `(plist-get \"Alpha\" :file)' then skipped silently.  KEY
 is now mandatory and enters the cache key above the tree."
-  (jetpacs-org-test--with-fixture f "* TODO Alpha\n"
+  (ebp-org-test--with-fixture f "* TODO Alpha\n"
     (let ((org-agenda-files (list f))
           (org-todo-keywords '((sequence "TODO" "|" "DONE")))
           (tree '(todo "TODO")))
       (find-file-noselect f)            ; stable buffer set across all three
-      (let ((titles (jetpacs-org-query
+      (let ((titles (ebp-org-query
                      "ja4t" "titles" tree
                      (lambda () (nth 4 (org-heading-components)))))
-            (refs (jetpacs-org-query "ja4t" "refs" tree
-                                     #'jetpacs-org-ref-at-point)))
+            (refs (ebp-org-query "ja4t" "refs" tree
+                                     #'ebp-org-ref-at-point)))
         (should (equal titles '("Alpha")))
         (should (plistp (car refs)))
         (should (equal (plist-get (car refs) :headline) "Alpha"))
         ;; ...and the memo still MEMOISES: the same key hits, so the
         ;; #'ignore action never runs.
-        (should (equal (jetpacs-org-query "ja4t" "titles" tree #'ignore)
+        (should (equal (ebp-org-query "ja4t" "titles" tree #'ignore)
                        '("Alpha"))))
       ;; A key is not optional — the whole point is that it cannot be
       ;; forgotten into a collision.
-      (should-error (jetpacs-org-query "ja4t" nil tree #'ignore)))))
+      (should-error (ebp-org-query "ja4t" nil tree #'ignore)))))
 
-(ert-deftest jetpacs-org-query-key-ignores-print-length ()
+(ert-deftest ebp-org-query-key-ignores-print-length ()
   "JA-4 audit P1-12, the printer half: the tree entered the key through
 `format \"%S\"', which honours `print-length'/`print-level' — a caller
 with either bound collided two DIFFERENT trees onto one entry.  The
 serialisation now switches truncation off explicitly."
-  (jetpacs-org-test--with-agenda f
+  (ebp-org-test--with-agenda f
     (find-file-noselect f)
     (let ((print-length 2) (print-level 2))
       (cl-flet ((run (tree)
-                  (jetpacs-org-query
+                  (ebp-org-query
                    "ja4t" "titles" tree
                    (lambda () (nth 4 (org-heading-components))))))
         ;; Truncated to `print-length' 2 both trees print identically.
@@ -1424,54 +1470,54 @@ serialisation now switches truncation off explicitly."
         (should (equal (run '(and (todo "TODO") (tags "work")))
                        '("Urgent thing")))))))
 
-(ert-deftest jetpacs-org-ref-tokens-refuses-a-non-plist-ref ()
+(ert-deftest ebp-org-ref-tokens-refuses-a-non-plist-ref ()
   "JA-4 audit P1-12, the downstream half: `(plist-get \"Alpha\" :file)'
 returns nil rather than signalling, so a list of DISPLAY STRINGS handed
 to the mint (exactly what the missing action key delivered) sailed past
 the per-ref policy check and became live tokens.  A ref that is not a
 plist carrying :file is now an error — and the offending value is NOT
 echoed (23.3)."
-  (jetpacs-org-test--with-fixture f jetpacs-org-test--two-headings
-    (let ((ref (jetpacs-org-test--ref-to f "First heading")))
+  (ebp-org-test--with-fixture f ebp-org-test--two-headings
+    (let ((ref (ebp-org-test--ref-to f "First heading")))
       (let ((err (should-error
-                  (jetpacs-org-ref-tokens '("First heading" "Second heading")
+                  (ebp-org-ref-tokens '("First heading" "Second heading")
                                           :set "s" :owner "ja4"))))
         (should-not (string-search "First heading" (format "%S" err))))
       ;; A plist that is not a REF (no :file) is refused too: its
       ;; policy check would silently be a no-op.
-      (should-error (jetpacs-org-ref-tokens
+      (should-error (ebp-org-ref-tokens
                      (list '(:id nil :pos 1 :headline "x"))
                      :set "s" :owner "ja4"))
       ;; Nothing was minted by either attempt, and a real ref still mints.
-      (should (= (hash-table-count jetpacs-org--tokens) 0))
-      (should (= 1 (length (jetpacs-org-ref-tokens
+      (should (= (hash-table-count ebp-org--tokens) 0))
+      (should (= 1 (length (ebp-org-ref-tokens
                             (list ref) :set "s" :owner "ja4")))))))
 
-(ert-deftest jetpacs-org-cache-evicts-instead-of-growing ()
+(ert-deftest ebp-org-cache-evicts-instead-of-growing ()
   "JA-4 audit P2 (Cache): every distinct stamp minted a NEW key
 generation and nothing ever evicted, while the key embeds wire-supplied
 query text — N hostile queries retained N entries for the process
 lifetime.  A stamp change now drops the superseded generation
 wholesale, and the live generation is capped."
-  (jetpacs-org-test--with-fixture f "* TODO Alpha\n"
+  (ebp-org-test--with-fixture f "* TODO Alpha\n"
     (let ((org-agenda-files (list f)))
       (find-file-noselect f)
-      (jetpacs-org-cache-invalidate)     ; a known-empty starting table
-      (should (= 1 (jetpacs-org-with-cache "ja4t" (list 'k) 1)))
-      (should (= 1 (hash-table-count jetpacs-org--cache)))
+      (ebp-org-cache-invalidate)     ; a known-empty starting table
+      (should (= 1 (ebp-org-with-cache "ja4t" (list 'k) 1)))
+      (should (= 1 (hash-table-count ebp-org--cache)))
       ;; An unsaved buffer edit moves the stamp (P1-11), so this is a
       ;; new generation: the body re-runs AND the old entry is gone.
       (with-current-buffer (find-buffer-visiting f)
         (org-with-wide-buffer
          (goto-char (point-max))
          (insert "* TODO Beta\n")))
-      (should (= 2 (jetpacs-org-with-cache "ja4t" (list 'k) 2)))
-      (should (= 1 (hash-table-count jetpacs-org--cache)))
+      (should (= 2 (ebp-org-with-cache "ja4t" (list 'k) 2)))
+      (should (= 1 (hash-table-count ebp-org--cache)))
       ;; The LIVE generation is bounded too.
-      (dotimes (i (* 2 jetpacs-org-cache-max))
-        (jetpacs-org-with-cache "ja4t" (list 'k i) i))
-      (should (<= (hash-table-count jetpacs-org--cache)
-                  jetpacs-org-cache-max)))))
+      (dotimes (i (* 2 ebp-org-cache-max))
+        (ebp-org-with-cache "ja4t" (list 'k i) i))
+      (should (<= (hash-table-count ebp-org--cache)
+                  ebp-org-cache-max)))))
 
-(provide 'jetpacs-org-test)
-;;; jetpacs-org-test.el ends here
+(provide 'ebp-org-test)
+;;; ebp-org-test.el ends here

@@ -84,6 +84,16 @@ emacs -Q --batch -L emacs -l test/ebp-wire-test.el \
 emacs -Q --batch -L emacs -l test/ebp-sync-test.el \
   -f ert-run-tests-batch-and-exit
 
+# JA-4 exit gate: the org engine — refs/tokens (D-4), resolve guards,
+# the cache key, mutations, and (from O2/O3) the query grammar and
+# capture primitives.  It sits in THIS block by the placement rule the
+# ebp-complete comment below records from the other side: a suite lives
+# with the pure ones iff its process loads no application layer.  This
+# one asserts that about itself (ebp-org-suite-loads-no-application-
+# layer), so the rule is checked rather than remembered.
+emacs -Q --batch -L emacs -l test/ebp-org-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # Application-layer builder suite (jetpacs-widgets; requires ebp, so it is
 # absent from the delineation guard above).
 emacs -Q --batch -L emacs -l test/jetpacs-widgets-test.el \
@@ -173,11 +183,10 @@ emacs -Q --batch -L emacs -l test/jetpacs-chrome-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-devtools-test.el \
   -f ert-run-tests-batch-and-exit
 
-# JA-4 exit gate: the org engine — refs/tokens (D-4), resolve guards,
-# the cache key, mutations, and (from O2/O3) the query grammar and
-# capture primitives.
-emacs -Q --batch -L emacs -l test/jetpacs-org-test.el \
-  -f ert-run-tests-batch-and-exit
+# (The JA-4 org engine suite moved UP to the Jetpacs-free block with the
+# engine itself.  What belongs here instead is the adapter's own gate —
+# jetpacs-org.el is a registration and nothing else, and the
+# registration has never been covered end to end.  G8 fills this slot.)
 
 # Vulpea arm (Tier-1 staging — jetpacs-org-vulpea.el, never required by
 # base): synthetic-struct accessor semantics + index-evaluable routing.

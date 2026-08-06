@@ -8,7 +8,7 @@
 ;; whose ops spend the A2 aggregate; DONE rides a durable descriptor
 ;; and advances the repeater through the engine (the catch-up prompt
 ;; hazard answered as a loud rejected); tokens keep old screens honest;
-;; and a grep pin keeps the file walk on `jetpacs-org-agenda-files' —
+;; and a grep pin keeps the file walk on `ebp-org-agenda-files' —
 ;; never the raw remote-dialling forms.
 
 ;;; Code:
@@ -23,7 +23,7 @@
   `(let* ((dir (file-name-as-directory
                 (file-truename (make-temp-file "ja5g" t))))
           (,var (expand-file-name "habits.org" dir))
-          (jetpacs-org-roots (list dir))
+          (ebp-org-roots (list dir))
           (org-agenda-files (list ,var)))
      (with-temp-file ,var (insert ,content))
      (unwind-protect
@@ -32,7 +32,7 @@
          (with-current-buffer buf (set-buffer-modified-p nil))
          (kill-buffer buf))
        (delete-directory dir t)
-       (jetpacs-org-reset))))
+       (ebp-org-reset))))
 
 (defconst jetpacs-org-habits-test--fixture
   (concat "* TODO Water plants\n"
@@ -93,7 +93,7 @@ marking a habit done must survive a tunnel."
   (jetpacs-org-habits-test--with-file f jetpacs-org-habits-test--fixture
     (jetpacs-org-habits-test--with-colors
       (let* ((items (jetpacs-org-habits--collect))
-             (tokens (jetpacs-org-ref-tokens
+             (tokens (ebp-org-ref-tokens
                       (mapcar (lambda (i) (plist-get i :ref)) items)
                       :set "habits" :owner jetpacs-org-habits-owner))
              (card (jetpacs-org-habits--card (car items) (car tokens)))
@@ -119,7 +119,7 @@ stays TODO (the repeater resets it) and SCHEDULED advances."
   (jetpacs-org-habits-test--with-file f jetpacs-org-habits-test--fixture
     (jetpacs-org-habits-test--with-colors
       (let* ((items (jetpacs-org-habits--collect))
-             (tokens (jetpacs-org-ref-tokens
+             (tokens (ebp-org-ref-tokens
                       (mapcar (lambda (i) (plist-get i :ref)) items)
                       :set "habits" :owner jetpacs-org-habits-owner)))
         (should (eq 'accepted
@@ -141,11 +141,11 @@ loud rejected, never a wedge."
   (jetpacs-org-habits-test--with-file f jetpacs-org-habits-test--fixture
     (jetpacs-org-habits-test--with-colors
       (let* ((items (jetpacs-org-habits--collect))
-             (tokens (jetpacs-org-ref-tokens
+             (tokens (ebp-org-ref-tokens
                       (mapcar (lambda (i) (plist-get i :ref)) items)
                       :set "habits" :owner jetpacs-org-habits-owner))
              (notified nil))
-        (cl-letf (((symbol-function 'jetpacs-org-toggle-todo)
+        (cl-letf (((symbol-function 'ebp-org-toggle-todo)
                    (lambda (&rest _) (signal 'inhibited-interaction nil)))
                   ((symbol-function 'jetpacs-shell-notify)
                    (lambda (text &optional _s) (push text notified))))
@@ -161,11 +161,11 @@ loud rejected, never a wedge."
     (jetpacs-org-habits-test--with-colors
       (let* ((items (jetpacs-org-habits--collect))
              (refs (mapcar (lambda (i) (plist-get i :ref)) items))
-             (old (car (jetpacs-org-ref-tokens
+             (old (car (ebp-org-ref-tokens
                         refs :set "habits"
                         :owner jetpacs-org-habits-owner))))
         ;; A re-mint (the next screen build) sweeps the old set.
-        (jetpacs-org-ref-tokens refs :set "habits"
+        (ebp-org-ref-tokens refs :set "habits"
                                 :owner jetpacs-org-habits-owner)
         (should (eq 'stale (jetpacs-org-habits--open
                             (list :token old)
@@ -181,13 +181,13 @@ none do, the launcher soft-couple in the top bar when loaded."
     (jetpacs-org-habits-test--with-colors
       (should (jetpacs-org-habits--screen nil))))
   (let ((org-agenda-files nil)
-        (jetpacs-org-roots (list temporary-file-directory)))
+        (ebp-org-roots (list temporary-file-directory)))
     (unwind-protect
         (should (jetpacs-org-habits--screen nil))
-      (jetpacs-org-reset))))
+      (ebp-org-reset))))
 
 (ert-deftest jetpacs-org-habits-never-dials-the-raw-agenda ()
-  "Grep pin: the module walks `jetpacs-org-agenda-files' only — a raw
+  "Grep pin: the module walks `ebp-org-agenda-files' only — a raw
 `(org-agenda-files' call or an `org-map-entries' `agenda' scope
 re-opens the remote-stat and missing-file-prompt holes (JA-4 audit
 P1-7/P1-5)."

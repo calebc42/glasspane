@@ -64,14 +64,19 @@
 (require 'subr-x)
 (require 'org)
 (require 'org-element)
-(require 'jetpacs-org)
+(require 'ebp-org)                      ; the engine, NOT jetpacs-org's shim:
+                                        ; the skin reads and invalidates, and
+                                        ; registers nothing with the floor
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-buffer)
 (require 'jetpacs-hypertext)
 (require 'jetpacs-async)
 ;; The dialog handlers must exist before any descriptor naming them can
-;; render — loading the skin alone must never mint a dead tap.
+;; render — loading the skin alone must never mint a dead tap.  Note the
+;; second effect: dialogs requires the jetpacs-org shim, so requiring
+;; this file still installs the engine's teardown sweep — one hop longer
+;; than before the split, and no longer this file's doing.
 (require 'jetpacs-org-dialogs)
 
 ;;;; Options
@@ -206,7 +211,7 @@ per-image + frame-budget fit.  The encode passes NO-LINE-BREAK: RFC
                  (if buffer-file-name
                      (file-name-directory buffer-file-name)
                    default-directory)))
-           (checked (jetpacs-org-file-allowed-p abs)))
+           (checked (ebp-org-file-allowed-p abs)))
       (when (and checked (file-regular-p checked))
         (when-let* ((data (jetpacs-hypertext-file-bytes checked))
                     (type (jetpacs-hypertext-sniff-type data)))
@@ -714,8 +719,8 @@ to the pure Tier-0 render."
              'stale
            (goto-char pos)
            (org-toggle-checkbox)     ; statistics cookies update via org
-           (jetpacs-org-cache-invalidate)
-           (when buffer-file-name (jetpacs-org-defer-save))
+           (ebp-org-cache-invalidate)
+           (when buffer-file-name (ebp-org-defer-save))
            (jetpacs-buffer-defer-refresh (plist-get params :surface))
            'accepted)))))))
 
@@ -798,7 +803,7 @@ to the pure Tier-0 render."
 (defun jetpacs-org-render--files-after-save (truename)
   "The after-save hook: a device-side org save busts the engine memo."
   (when (jetpacs-org-render--org-path-p truename)
-    (jetpacs-org-cache-invalidate)))
+    (ebp-org-cache-invalidate)))
 
 (defun jetpacs-org-render--view-mode (args params)
   "Flip the per-path view mode.  The worst a forged path can do is

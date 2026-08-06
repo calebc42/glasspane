@@ -6,7 +6,7 @@
 ;;      file and the hit count renders from a token-minted set.  The
 ;;      handler mints TWICE into the same (owner,set) — the replace
 ;;      sweep makes mint A's tokens the stale bait for Q4.
-;;   Q2 toggle: token -> ref -> `jetpacs-org-toggle-todo' with the
+;;   Q2 toggle: token -> ref -> `ebp-org-toggle-todo' with the
 ;;      state note flushed inline (DONE(!) + org-log-into-drawer); the
 ;;      fixture FILE re-read from disk carries "* DONE" and the
 ;;      `- State "DONE"' LOGBOOK line.
@@ -42,7 +42,9 @@
 (require 'jetpacs-async)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
-(require 'jetpacs-org)
+(require 'ebp-org)
+(require 'jetpacs-org)                  ; the shim: its add-hook is what makes
+                                        ; `jetpacs-teardown-owner' sweep tokens
 
 (defvar smoke-j4--fails 0)
 (defun smoke-j4--check (label ok &optional detail)
@@ -62,7 +64,7 @@
 (defvar smoke-j4--file (expand-file-name "ja4.org" smoke-j4--dir))
 (with-temp-file smoke-j4--file
   (insert "* TODO Water the plants\n* TODO Fix the gate\n* DONE Old chore\n"))
-(setq jetpacs-org-roots (list smoke-j4--dir)
+(setq ebp-org-roots (list smoke-j4--dir)
       org-agenda-files (list smoke-j4--file)
       org-todo-keywords '((sequence "TODO" "|" "DONE(!)"))
       org-log-into-drawer t
@@ -74,7 +76,7 @@
 
 (defun smoke-j4--flush-idle-saves ()
   (dolist (tm (copy-sequence timer-idle-list))
-    (when (eq (timer--function tm) #'jetpacs-org--save-now)
+    (when (eq (timer--function tm) #'ebp-org--save-now)
       (cancel-timer tm)
       (apply (timer--function tm) (timer--args tm)))))
 
@@ -110,10 +112,10 @@
   (jetpacs-defaction "ja4.query"
     (lambda (_args _params)
       (let* ((tree (ebp-org-parse-query "(todo \"TODO\")"))
-             (refs (jetpacs-org-query "ja4" "refs" tree
-                                      #'jetpacs-org-ref-at-point))
-             (mint-a (jetpacs-org-ref-tokens refs :set "q" :owner "ja4"))
-             (mint-b (jetpacs-org-ref-tokens refs :set "q" :owner "ja4")))
+             (refs (ebp-org-query "ja4" "refs" tree
+                                      #'ebp-org-ref-at-point))
+             (mint-a (ebp-org-ref-tokens refs :set "q" :owner "ja4"))
+             (mint-b (ebp-org-ref-tokens refs :set "q" :owner "ja4")))
         (setq smoke-j4--stale-token (car mint-a)   ; swept by mint B
               smoke-j4--live-token (car mint-b)
               smoke-j4--count (length refs)
@@ -128,13 +130,13 @@
 
   (jetpacs-defaction "ja4.toggle"
     (lambda (args _params)
-      (let ((ref (jetpacs-org-token-ref (plist-get args :token) :owner "ja4")))
+      (let ((ref (ebp-org-token-ref (plist-get args :token) :owner "ja4")))
         (if (null ref) 'stale
           ;; The Batch-4 status map, via the helper the engine ships:
           ;; rejected / stale come back as statuses; retry concludes
           ;; the action with 1500 event-retry (the record survives).
           (condition-case err
-              (progn (jetpacs-org-toggle-todo ref "ja4" "DONE")
+              (progn (ebp-org-toggle-todo ref "ja4" "DONE")
                      (setq smoke-j4--toggled t)
                      'accepted)
             ((ebp-org-refused ebp-org-unavailable
@@ -156,7 +158,7 @@
 
   (jetpacs-defaction "ja4.stale"
     (lambda (args _params)
-      (let ((ref (jetpacs-org-token-ref (plist-get args :token) :owner "ja4")))
+      (let ((ref (ebp-org-token-ref (plist-get args :token) :owner "ja4")))
         (setq smoke-j4--stale-answer (if ref 'accepted 'stale))
         smoke-j4--stale-answer))))
 
@@ -189,24 +191,24 @@
                           (not (string-search smoke-j4--file
                                               smoke-j4--live-token))))
     (smoke-j4--check "live token resolves to a fixture ref"
-                     (let ((ref (jetpacs-org-token-ref smoke-j4--live-token
+                     (let ((ref (ebp-org-token-ref smoke-j4--live-token
                                                        :owner "ja4")))
                        (and ref (equal (plist-get ref :file)
                                        (file-truename smoke-j4--file)))))
     (smoke-j4--check "pre-re-mint token already swept (replace sweep)"
-                     (null (jetpacs-org-token-ref smoke-j4--stale-token
+                     (null (ebp-org-token-ref smoke-j4--stale-token
                                                   :owner "ja4")))
     ;; Batch 4 / P1-8: a FAILED mint into the same (owner,set) is
     ;; all-or-nothing — it must leave mint B's live generation intact,
     ;; or Q2's tap below would answer stale against a dead token.
     (smoke-j4--check "failed mint leaves the live generation intact"
-                     (let ((live (jetpacs-org-token-ref
+                     (let ((live (ebp-org-token-ref
                                   smoke-j4--live-token :owner "ja4")))
                        (and live
                             (eq 'ebp-org-refused
                                 (condition-case err
                                     (progn
-                                      (jetpacs-org-ref-tokens
+                                      (ebp-org-ref-tokens
                                        (list live
                                              '(:id nil
                                                :file "/ssh:evil:/x.org"
@@ -214,7 +216,7 @@
                                        :set "q" :owner "ja4")
                                       'no-signal)
                                   (error (car err))))
-                            (and (jetpacs-org-token-ref
+                            (and (ebp-org-token-ref
                                   smoke-j4--live-token :owner "ja4")
                                  t))))
     (smoke-j4--drain 3)
@@ -260,7 +262,7 @@
     (jetpacs-teardown-owner "ja4")
     (smoke-j4--drain 2)
     (smoke-j4--check "teardown swept the live token"
-                     (null (jetpacs-org-token-ref smoke-j4--live-token
+                     (null (ebp-org-token-ref smoke-j4--live-token
                                                   :owner "ja4"))))
 
   (ebp-client-close client 'smoke-done))

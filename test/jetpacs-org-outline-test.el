@@ -19,7 +19,7 @@
   `(let* ((dir (file-name-as-directory
                 (file-truename (make-temp-file "ja5h" t))))
           (,var (expand-file-name "outline.org" dir))
-          (jetpacs-org-roots (list dir)))
+          (ebp-org-roots (list dir)))
      (with-temp-file ,var (insert ,content))
      (unwind-protect
          (progn ,@body)
@@ -28,7 +28,7 @@
          (kill-buffer buf))
        (delete-directory dir t)
        (jetpacs-buffer-forget-exposed)
-       (jetpacs-org-reset))))
+       (ebp-org-reset))))
 
 (defconst jetpacs-org-outline-test--fixture
   (concat "* TODO Alpha\nDEADLINE: <2026-08-01 Sat>\nbody\n"
@@ -39,7 +39,7 @@
 (ert-deftest jetpacs-org-outline-card-exposes-heading-verb ()
   "The default card mints the sheet descriptor AND its record together."
   (jetpacs-org-outline-test--with-file f jetpacs-org-outline-test--fixture
-    (let* ((recs (jetpacs-org-file-toplevel-records f))
+    (let* ((recs (ebp-org-file-toplevel-records f))
            (card (jetpacs-org-outline--default-card (car recs)))
            (rec (car recs)))
       (should (equal (plist-get card :t) "card"))
@@ -66,7 +66,7 @@ and the empty state."
     (let ((body (jetpacs-org-outline-body f)))
       (should (equal (plist-get body :t) "lazy_column"))
       (should (= 3 (length (append (plist-get body :children) nil)))))
-    (let ((jetpacs-org-outline-max-headings 1))
+    (let ((ebp-org-outline-max-headings 1))
       (let ((body (jetpacs-org-outline-body f)))
         (should (= 1 (length (append (plist-get body :children) nil))))))
     ;; The card seam.
@@ -88,10 +88,14 @@ the vulpea precedent, pinned."
     (ignore loaded)
     ;; This suite required it explicitly; the pin is that NO base
     ;; module's require chain does — asserted by grepping the sources.
+    ;; BOTH prefixes: after the ebp-org split half of base is `ebp-',
+    ;; and a `jetpacs-'-only regexp would scan half the tree while
+    ;; still passing — a pin whose scan set narrows silently is the
+    ;; failure mode, not the guard.
     (dolist (module (directory-files
                      (file-name-directory
                       (locate-library "jetpacs-org-outline.el" t))
-                     t "\\`jetpacs-.*\\.el\\'"))
+                     t "\\`\\(jetpacs\\|ebp\\)-.*\\.el\\'"))
       (unless (member (file-name-nondirectory module)
                       '("jetpacs-org-outline.el"))
         (with-temp-buffer

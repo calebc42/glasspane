@@ -123,7 +123,7 @@
            (condition-case err
                (with-jetpacs-owner "ja4" (jetpacs-shell-push "ja4"))
              (error (message "smoke-ja4: re-push failed: %s"
-                             (jetpacs--error-label err))))))
+                             (jetpacs-error-label err))))))
         'accepted)))
 
   (jetpacs-defaction "ja4.toggle"

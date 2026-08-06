@@ -413,7 +413,7 @@ landing configuration never went through a handler."
      ;; in place; the chrome error screen is for builder BUGS.
      (jetpacs-empty-state :icon "info"
                           :title "Can't open folder"
-                          :caption (format "error: %s" (jetpacs--error-label err))))))
+                          :caption (format "error: %s" (jetpacs-error-label err))))))
 
 (declare-function jetpacs-launcher-button "jetpacs-launcher" ())
 
@@ -743,7 +743,7 @@ desktop edits would otherwise look broken."
     (error
      (jetpacs-shell-notify "Could not open that file" surface)
      (message "jetpacs-files: open failed: %s"
-              (jetpacs--error-label err)))))
+              (jetpacs-error-label err)))))
 
 (defun jetpacs-files--edit-open (true surface)
   "Open TRUE in the plain editor, or fall back to the read view.
@@ -794,7 +794,7 @@ the file back in it."
           (jetpacs-chrome-push-screen surface "edit"
                                       #'jetpacs-files--edit-screen)
         (error (message "jetpacs-files: edit push failed: %s"
-                        (jetpacs--error-label err))))))
+                        (jetpacs-error-label err))))))
     reason))
 
 (defun jetpacs-files--edit-screen (back)
@@ -908,7 +908,7 @@ an explicit nil is containment-only on both sides."
   (condition-case err
       (jetpacs-shell-push surface)
     (error (message "jetpacs-files: op push failed: %s"
-                    (jetpacs--error-label err)))))
+                    (jetpacs-error-label err)))))
 
 (defun jetpacs-files--op-rename (path surface)
   "Rename PATH within its directory; the new name is a bridged prompt.
@@ -936,7 +936,7 @@ link — rename(2) — never followed."
         (jetpacs-path-refused
          (jetpacs-files--op-notify-refused "Rename" (cadr err) surface))
         (error (jetpacs-shell-notify
-                (format "Rename failed: %s" (jetpacs--error-label err))
+                (format "Rename failed: %s" (jetpacs-error-label err))
                 surface))))))
   (jetpacs-files--op-finish surface))
 
@@ -967,7 +967,7 @@ link, never followed."
         (jetpacs-path-refused
          (jetpacs-files--op-notify-refused "Move" (cadr err) surface))
         (error (jetpacs-shell-notify
-                (format "Move failed: %s" (jetpacs--error-label err))
+                (format "Move failed: %s" (jetpacs-error-label err))
                 surface)))))
   (jetpacs-files--op-finish surface))
 
@@ -991,7 +991,7 @@ natively — the copy is a REGULAR file with the target's content."
     (jetpacs-path-refused
      (jetpacs-files--op-notify-refused "Duplicate" (cadr err) surface))
     (error (jetpacs-shell-notify
-            (format "Duplicate failed: %s" (jetpacs--error-label err))
+            (format "Duplicate failed: %s" (jetpacs-error-label err))
             surface)))
   (jetpacs-files--op-finish surface))
 
@@ -1060,7 +1060,7 @@ Runs inside a device flow."
             (jetpacs-path-refused
              (jetpacs-files--op-notify-refused "Create" (cadr err) surface))
             (error (jetpacs-shell-notify
-                    (format "Create failed: %s" (jetpacs--error-label err))
+                    (format "Create failed: %s" (jetpacs-error-label err))
                     surface))))))))
   (jetpacs-files--op-finish surface))
 
@@ -1078,7 +1078,7 @@ Runs inside a device flow."
      (condition-case err
          (jetpacs-shell-push surface)
        (error (message "jetpacs-files: push failed: %s"
-                       (jetpacs--error-label err)))))))
+                       (jetpacs-error-label err)))))))
 
 (with-jetpacs-owner "jetpacs.files"
 
@@ -1196,7 +1196,7 @@ Runs inside a device flow."
            'rejected)
           (error
            (jetpacs-shell-notify
-            (format "Delete failed: %s" (jetpacs--error-label err)) surface)
+            (format "Delete failed: %s" (jetpacs-error-label err)) surface)
            'rejected)))))
 
   (jetpacs-defaction "jetpacs.files.new"
@@ -1289,7 +1289,7 @@ Runs inside a device flow."
                                            :preserve-modes))
                         (error
                          (message "jetpacs-files: buffer refresh failed: %s"
-                                  (jetpacs--error-label rerr)))))
+                                  (jetpacs-error-label rerr)))))
                     ;; Effect durable -> accepted (14.4).  Keep the edit
                     ;; state coherent for the NEXT save: a fresh stamp,
                     ;; seed = what the device now shows, the coding
@@ -1326,7 +1326,7 @@ Runs inside a device flow."
            'rejected)
           (error
            (jetpacs-shell-notify
-            (format "Save failed: %s" (jetpacs--error-label err)) surface)
+            (format "Save failed: %s" (jetpacs-error-label err)) surface)
            'rejected)))))
 
   (jetpacs-defaction "jetpacs.files.grep"
@@ -1361,7 +1361,7 @@ Runs inside a device flow."
                        (jetpacs-chrome-push-screen
                         surface "grep" #'jetpacs-files--grep-screen)
                      (error (message "jetpacs-files: search push failed: %s"
-                                     (jetpacs--error-label e2))))))
+                                     (jetpacs-error-label e2))))))
                 'accepted)
             (jetpacs-path-refused
              (jetpacs-shell-notify (format "Folder refused: %s" (cadr err))

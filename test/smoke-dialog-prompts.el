@@ -91,7 +91,7 @@ the host container scrolls — which is the prerequisite under test.")
                                   smoke-dp--scroll-options nil t)))
               (_ (error "unknown phase")))
           (quit 'quit)
-          (error (list 'error (jetpacs--error-label err)))))
+          (error (list 'error (jetpacs-error-label err)))))
   (message "ANSWERED"))
 
 (with-jetpacs-owner "dp"

@@ -81,7 +81,7 @@ wedging silently, and a flow error surfaces as a symbol, never text
     (condition-case err
         (funcall fn)
       (error (message "jetpacs-org-dialogs: flow failed: %s"
-                      (jetpacs--error-label err))
+                      (jetpacs-error-label err))
              (jetpacs-org-dialogs--notify "That did not work" params)))))
 
 (defun jetpacs-org-dialogs--ref-label (ref)
@@ -373,7 +373,7 @@ candidate list first (23.2)."
        (jetpacs-org-dialogs--refresh params))
       (error
        (message "jetpacs-org-dialogs: %s failed: %s"
-                value (jetpacs--error-label err))
+                value (jetpacs-error-label err))
        (jetpacs-org-dialogs--notify "That did not work" params)
        (jetpacs-org-dialogs--refresh params)))))
 
@@ -414,7 +414,7 @@ reads chars with no prompt argument and would hang under a flow."
                      (jetpacs-org-toggle-todo ref 'org v)))
                    (jetpacs-org-dialogs--maybe-log-note ref params))
                (error (message "jetpacs-org-dialogs: set-todo failed: %s"
-                               (jetpacs--error-label err))
+                               (jetpacs-error-label err))
                       (jetpacs-org-dialogs--notify "That did not work"
                                                    params)))
              (jetpacs-org-dialogs--refresh params))))))))
@@ -460,7 +460,7 @@ bridge advice never sees (emacs-30.1 org.el:11172)."
                      (jetpacs-org-with-mutation ref 'org
                        (org-priority (aref v 0)))))
                  (error (message "jetpacs-org-dialogs: priority failed: %s"
-                                 (jetpacs--error-label err))
+                                 (jetpacs-error-label err))
                         (jetpacs-org-dialogs--notify "That did not work"
                                                      params)))
                (jetpacs-org-dialogs--refresh params)))))))))
@@ -516,7 +516,7 @@ rest — and org's fast tag selection cannot bridge)."
                    (jetpacs-org-with-mutation ref 'org
                      (org-set-tags good)))
                (error (message "jetpacs-org-dialogs: tags failed: %s"
-                               (jetpacs--error-label err))
+                               (jetpacs-error-label err))
                       (jetpacs-org-dialogs--notify "That did not work"
                                                    params)))
              (jetpacs-org-dialogs--refresh params))))))))
@@ -847,7 +847,7 @@ FIELDS carries the captured repeater members keyed by node id."
        (jetpacs-org-dialogs--notify "That heading is gone" params))
       (error
        (message "jetpacs-org-dialogs: timestamp %s failed: %s"
-                value (jetpacs--error-label err))
+                value (jetpacs-error-label err))
        (jetpacs-org-dialogs--notify "That did not work" params)))
     (jetpacs-org-dialogs--refresh params)))
 
@@ -951,7 +951,7 @@ Reads `jetpacs-org-toggle-todo-cancelled-note' (the JA-5e engine seam)."
                              "\n" "\n  "
                              (jetpacs-scalar-text (string-trim text))))))
                (error (message "jetpacs-org-dialogs: note failed: %s"
-                               (jetpacs--error-label err))
+                               (jetpacs-error-label err))
                       (jetpacs-org-dialogs--notify "That did not work"
                                                    params)))
              (jetpacs-org-dialogs--refresh params))))))))
@@ -1151,7 +1151,7 @@ completed archive — and the spent sheet is abandoned."
             (jetpacs-org-unresolved 'stale)
             (jetpacs-org-refused 'rejected)
             (error (message "jetpacs-org-dialogs: archive failed: %s"
-                            (jetpacs--error-label err))
+                            (jetpacs-error-label err))
                    'rejected))))))))
 
 ;; Ownerless, the render skin's precedent: an org buffer renders on

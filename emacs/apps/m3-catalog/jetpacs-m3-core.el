@@ -562,11 +562,11 @@ catalog must stay navigable when one recreation is wrong."
         node)
     (error
      (message "jetpacs-m3: sample %s failed: %s"
-              label (jetpacs--error-label err))
+              label (jetpacs-error-label err))
      (jetpacs-empty-state
       :icon "error"
       :title "Sample failed to build"
-      :caption (jetpacs--error-label err)))))
+      :caption (jetpacs-error-label err)))))
 
 (defun jetpacs-m3--slot-hint (slots)
   "A caption naming the SLOTS an example claims, for a body-less sample."
@@ -744,7 +744,7 @@ no user in front of it."
   (condition-case err
       (jetpacs-chrome-push-screen surface id builder)
     (error (message "jetpacs-m3: push of %s failed: %s"
-                    id (jetpacs--error-label err))
+                    id (jetpacs-error-label err))
            (jetpacs-shell-notify "That screen could not be shown" surface))))
 
 (defun jetpacs-m3-show-component (id &optional surface)
@@ -843,7 +843,7 @@ no user in front of it."
          (condition-case err
              (jetpacs-shell-push (or surface jetpacs-m3-owner))
            (error (message "jetpacs-m3: refresh failed: %s"
-                           (jetpacs--error-label err))))))
+                           (jetpacs-error-label err))))))
       'accepted)))
 
 (defun jetpacs-m3--on-pin (args params)
@@ -881,7 +881,7 @@ ungranted queue fallback shows the text alone."
          (condition-case err
              (jetpacs-shell-push (or surface jetpacs-m3-owner))
            (error (message "jetpacs-m3: flag refresh failed: %s"
-                           (jetpacs--error-label err))))))
+                           (jetpacs-error-label err))))))
       'accepted)))
 
 (defun jetpacs-m3--on-fn (args params)
@@ -908,7 +908,7 @@ ungranted queue fallback shows the text alone."
                (apply #'jetpacs-shell-push (or surface jetpacs-m3-owner)
                       push-args)
              (error (message "jetpacs-m3: fn refresh failed: %s"
-                             (jetpacs--error-label err)))))))
+                             (jetpacs-error-label err)))))))
       'accepted)))
 
 (defun jetpacs-m3--on-dialog (args params)
@@ -934,7 +934,7 @@ snackbar, which is where upstream's onDismissRequest writes too."
                            (format "Dialog %s" (or status "cancelled"))
                            surface)))
            (error (message "jetpacs-m3: dialog %s failed: %s" key
-                           (jetpacs--error-label err))))))
+                           (jetpacs-error-label err))))))
       'accepted)))
 
 (defun jetpacs-m3--on-home (_args params)
@@ -968,7 +968,7 @@ re-push through `jetpacs-flow-continue', never block.")
      (condition-case err
          (jetpacs-shell-push jetpacs-m3-owner)
        (error (message "jetpacs-m3: window refresh failed: %s"
-                       (jetpacs--error-label err)))))))
+                       (jetpacs-error-label err)))))))
 
 (defun jetpacs-m3--on-ready (client)
   "Attach the catalog's client hooks when the connection comes up.

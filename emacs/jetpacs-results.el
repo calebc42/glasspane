@@ -268,7 +268,7 @@ push would refresh the wrong surface under decision D1."
                          (funcall jetpacs-buffer-refresh-function surface)
                        (error
                         (message "jetpacs-results: region push failed: %s"
-                                 (jetpacs--error-label err)))))))))
+                                 (jetpacs-error-label err)))))))))
 
 (defun jetpacs-results-region-nodes ()
   "Nodes for the last visited region, or nil when none is armed.

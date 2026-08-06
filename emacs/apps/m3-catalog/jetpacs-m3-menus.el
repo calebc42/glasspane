@@ -190,7 +190,7 @@ caret, trimmed."
                     (condition-case err
                         (jetpacs-shell-push jetpacs-m3-owner)
                       (error (message "jetpacs-m3: autocomplete refresh failed: %s"
-                                      (jetpacs--error-label err))))))))
+                                      (jetpacs-error-label err))))))))
          jetpacs-m3-state-watchers)
 
 ;; The pick: a UNARY fn mutation receiving the picked label — splice it

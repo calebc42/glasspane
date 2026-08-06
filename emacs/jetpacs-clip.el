@@ -157,7 +157,7 @@ OS clipboard and PUSH onto the ring inside a builder (the write-ban)."
     (condition-case err
         (jetpacs-shell-push jetpacs-clip-owner)
       (error (message "jetpacs-clip: push failed: %s"
-                      (jetpacs--error-label err))))))
+                      (jetpacs-error-label err))))))
 
 (defun jetpacs-clip--schedule-refresh ()
   "Debounced refresh; kill storms collapse to one push."
@@ -200,7 +200,7 @@ kill-new).  Behaviorally invisible to a disconnected desktop Emacs."
            (condition-case err
                (jetpacs-shell-push surface)
              (error (message "jetpacs-clip: refresh push failed: %s"
-                             (jetpacs--error-label err))))))
+                             (jetpacs-error-label err))))))
         'accepted))))
 
 (advice-add 'kill-new :after #'jetpacs-clip--after-kill)

@@ -236,7 +236,7 @@ below us in the same document), so the view verb is re-exposed here."
          jetpacs-emacs-ui-owner id
          (lambda (back) (jetpacs-emacs-ui--buffer-screen name back)))
       (error (message "jetpacs-emacs-ui: buffer screen push failed: %s"
-                      (jetpacs--error-label err))))))
+                      (jetpacs-error-label err))))))
 
 ;; --- The Messages screen -----------------------------------------------------
 
@@ -329,7 +329,7 @@ before it may be gone after."
       ;; SPEC 23.3: the SYMBOL only — a flow error must not put document
       ;; text on the wire, and it must not die unreported in a timer.
       (error (message "jetpacs-emacs-ui: flow failed: %s"
-                      (jetpacs--error-label err))
+                      (jetpacs-error-label err))
              (jetpacs-shell-notify "That did not work"
                                    jetpacs-emacs-ui-owner)))))
 
@@ -437,7 +437,7 @@ origin is the buffer on screen, which is what the user means by
                        (setq failed t)
                        (jetpacs-shell-notify
                         (format "M-x %s: %s" choice
-                                (jetpacs--error-label err))
+                                (jetpacs-error-label err))
                         jetpacs-emacs-ui-owner)))))
              (landed (if (buffer-live-p origin)
                          (with-current-buffer origin (funcall run))
@@ -486,7 +486,7 @@ origin is the buffer on screen, which is what the user means by
                  cmd
                  (lambda (err)
                    (message "jetpacs-emacs-ui: %S failed: %s"
-                            target (jetpacs--error-label err)))))))
+                            target (jetpacs-error-label err)))))))
           (jetpacs-buffer-defer-refresh jetpacs-emacs-ui--surface))))))
 
 ;; --- Live refresh ------------------------------------------------------------
@@ -593,7 +593,7 @@ push — the top-buffer check keys the watch to this app's own stack."
              (jetpacs-chrome-push-screen jetpacs-emacs-ui-owner "buffers"
                                          #'jetpacs-emacs-ui--hub-screen)
            (error (message "jetpacs-emacs-ui: buffers push failed: %s"
-                           (jetpacs--error-label err))))))
+                           (jetpacs-error-label err))))))
       'accepted)
     :any-surface t)
 
@@ -620,7 +620,7 @@ offered (SPEC 23.1)")
              (jetpacs-chrome-push-screen jetpacs-emacs-ui-owner "messages"
                                          #'jetpacs-emacs-ui--messages-screen)
            (error (message "jetpacs-emacs-ui: messages push failed: %s"
-                           (jetpacs--error-label err))))))
+                           (jetpacs-error-label err))))))
       'accepted))
 
   (jetpacs-defaction "jetpacs.emacs.mx"

@@ -48,7 +48,7 @@
 ;; so this file byte-compiles clean and can load before them.
 (defvar jetpacs-current-owner)                 ; jetpacs-surfaces.el
 (declare-function jetpacs-shell-push "jetpacs-shell" (&optional owner))
-(declare-function jetpacs--error-label "jetpacs-surfaces" (err))
+(declare-function jetpacs-error-label "jetpacs-surfaces" (err))
 
 (cl-defstruct (jetpacs-async--entry (:constructor jetpacs-async--entry-make)
                                     (:copier nil))
@@ -113,7 +113,7 @@ reported rather than silently dropped."
           (condition-case err
               (jetpacs-shell-push owner)
             (error (message "jetpacs-async: repush of %s failed: %s"
-                            owner (jetpacs--error-label err)))))))))
+                            owner (jetpacs-error-label err)))))))))
 
 ;; --- The loader ------------------------------------------------------------
 

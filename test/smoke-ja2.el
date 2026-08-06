@@ -66,7 +66,7 @@
                   (jetpacs-chrome-screen "Detail" (jetpacs-text "drilled")
                                          :back back)))
              (error (message "smoke-ja2: drill push failed: %s"
-                             (jetpacs--error-label err))))))
+                             (jetpacs-error-label err))))))
         'accepted))))
 
 ;; P5/P6 second owner.

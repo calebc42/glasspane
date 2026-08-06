@@ -218,7 +218,7 @@ loud `rejected'."
             (jetpacs-org-refused 'rejected)
             (error
              (message "jetpacs-org-habits: done failed: %s"
-                      (jetpacs--error-label err))
+                      (jetpacs-error-label err))
              (jetpacs-shell-notify "That needs the desktop (a prompt)"
                                    (plist-get params :surface))
              'rejected))))))))

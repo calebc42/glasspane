@@ -84,11 +84,11 @@ not the enum fast path.")
             (completing-read "Pick: " smoke-pk--collection nil t)
           (quit 'quit)
           ;; The full error and a backtrace: a smoke is a diagnostic, and
-          ;; `jetpacs--error-label' deliberately drops the datum (SPEC 23.3)
+          ;; `jetpacs-error-label' deliberately drops the datum (SPEC 23.3)
           ;; which is exactly what a failure here needs.
           (error (message "PICKER-ERROR %S\n%s" err
                           (with-output-to-string (backtrace)))
-                 (list 'error (jetpacs--error-label err)))))
+                 (list 'error (jetpacs-error-label err)))))
   (message "ANSWERED"))
 
 (with-jetpacs-owner "pk"

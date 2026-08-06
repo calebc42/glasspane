@@ -171,7 +171,7 @@ must cost the dock, never every chrome surface in the process."
         (let ((n (funcall jetpacs-chrome-dock-function surface)))
           (and (jetpacs--root-node-p n) n))
       (error (message "jetpacs-chrome: dock builder failed: %s"
-                      (jetpacs--error-label err))
+                      (jetpacs-error-label err))
              nil))))
 
 (defun jetpacs-chrome--dock-tab (item)
@@ -241,7 +241,7 @@ data form can swap, because only data can be re-authored into a rail."
                                     (list :align "center" :fill t)))
                      :height 80))))
         (error (message "jetpacs-chrome: dock items failed: %s"
-                        (jetpacs--error-label err))
+                        (jetpacs-error-label err))
                nil)))))
 
 (defvar jetpacs-chrome--window-classes nil
@@ -292,7 +292,7 @@ has the Companion PERSIST this text on the device."
                         (list (jetpacs-text
                                (format "Screen %s failed to build" id)
                                :style "title")
-                              (jetpacs-text (jetpacs--error-label err)
+                              (jetpacs-text (jetpacs-error-label err)
                                             :style "body"))
                         (when b (list (jetpacs-button "Back" b)))
                         (list :spacing 8))))))
@@ -405,7 +405,7 @@ together, on every rebuild."
               (setcar budget spans)
               (setcdr budget bytes))
             (message "jetpacs-chrome: screen %s failed to build: %s"
-                     id (jetpacs--error-label fail))
+                     id (jetpacs-error-label fail))
             (setq node (jetpacs-chrome--error-screen surface id back fail)))
           (push (cons id node) views)
           (setq prev-id id)))
@@ -490,7 +490,7 @@ logged, and the requeued push renders the truncated stack."
      ;; naming them is not a SPEC 23.3 exposure, and a bare error label
      ;; alone ("error") locates nothing.
      (message "jetpacs-chrome: push of %s (view %s) failed: %s"
-              surface view (jetpacs--error-label err))
+              surface view (jetpacs-error-label err))
      nil)))
 
 (defun jetpacs-chrome-push-screen (surface-or-owner id builder)
@@ -613,7 +613,7 @@ refused" surface)
                       (funcall undo)
                       (jetpacs-shell--schedule-repush surface)
                       (message "jetpacs-chrome: drill push of %s (view %s) \
-failed: %s" surface id (jetpacs--error-label err))))))
+failed: %s" surface id (jetpacs-error-label err))))))
     t))
 
 (defvar jetpacs-navigate-drill-function)

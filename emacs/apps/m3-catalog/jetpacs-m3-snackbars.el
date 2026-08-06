@@ -134,7 +134,7 @@ the pill here is its own surface."
                               (t (format "Snackbar # %d dismissed" n)))
                         jetpacs-m3-owner)))
                   (error (message "jetpacs-m3: snackbar raise failed: %s"
-                                  (jetpacs--error-label err))))))))
+                                  (jetpacs-error-label err))))))))
          jetpacs-m3-fn-registry)
 
 (defun jetpacs-m3-snackbars--coroutines-fab ()

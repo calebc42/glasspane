@@ -490,7 +490,7 @@ theme, between the decision to push and the push."
                  ;; from one push would silently reset all three.
                  (append args (jetpacs-theme--trio-args)))
         (error (message "jetpacs-theme: push failed: %s"
-                        (jetpacs--error-label err)))))))
+                        (jetpacs-error-label err)))))))
 
 (defun jetpacs-theme--trio-args ()
   "The SPEC 18.4 device-presentation trio, appended to every push.
@@ -595,7 +595,7 @@ actually delivered until this sent inline."
         (condition-case err
             (progn (modus-themes-toggle) 'accepted)
           (error (message "jetpacs-theme: modus.toggle failed: %s"
-                          (jetpacs--error-label err))
+                          (jetpacs-error-label err))
                  'rejected))))
     ;; A GLOBAL VERB: theme owns no surface, and ANY surface may render
     ;; its button — without this the dispatch's D1 scope would reject

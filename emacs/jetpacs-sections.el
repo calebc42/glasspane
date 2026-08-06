@@ -438,7 +438,7 @@ cards.  Falls through to Tier 0 when the buffer has no section root."
                       (jetpacs-sections--emit root name budget)
                     (error
                      (message "jetpacs-sections: tree walk failed (%s); \
-falling back to Tier 0" (jetpacs--error-label err))
+falling back to Tier 0" (jetpacs-error-label err))
                      nil))))
               (jetpacs-buffer-render buf)))))))
 
@@ -626,7 +626,7 @@ command" key))
          binding
          (lambda (err)
            (message "jetpacs-sections: %s failed: %s"
-                    key (jetpacs--error-label err))))))))
+                    key (jetpacs-error-label err))))))))
   (jetpacs-sections--refresh params))
 
 (defvar jetpacs-sections--dialog-seq 0

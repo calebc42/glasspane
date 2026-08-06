@@ -138,7 +138,7 @@ from any surface's drawer."
              (condition-case err
                  (jetpacs-shell-push target)
                (error (message "jetpacs-launcher: switch failed: %s"
-                               (jetpacs--error-label err))))))
+                               (jetpacs-error-label err))))))
           'accepted)))
     ;; A GLOBAL VERB since the drawer convention: `jetpacs-launcher-rows'
     ;; renders these descriptors inside other owners' drawers, so the
@@ -157,7 +157,7 @@ from any surface's drawer."
          (condition-case err
              (jetpacs-shell-push jetpacs-launcher-owner)
            (error (message "jetpacs-launcher: show failed: %s"
-                           (jetpacs--error-label err))))))
+                           (jetpacs-error-label err))))))
       'accepted)
     :any-surface t))
 

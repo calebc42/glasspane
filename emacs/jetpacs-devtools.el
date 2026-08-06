@@ -19,7 +19,7 @@
 ;;
 ;; FLIGHT RECORDER (`jetpacs-devtools-recording', OFF by default) —
 ;; the home the scrubbed error path never had.  SPEC 23.3 makes every
-;; loud channel print only the error SYMBOL (`jetpacs--error-label'):
+;; loud channel print only the error SYMBOL (`jetpacs-error-label'):
 ;; the app card, *Messages*, the wire.  The morning this module was
 ;; born, that policy reduced a device-only home failure to the string
 ;; "error" with nowhere to look.  The recorder listens on the shell's

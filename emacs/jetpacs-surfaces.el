@@ -272,7 +272,7 @@ Signals `jetpacs-path-refused' with a one-symbol data list — `not-absolute',
 `remote', `no-roots', `outside-roots', `unreadable', `not-a-directory' or
 `exists'.  The symbol travels alone ON PURPOSE: an error raised here is
 answered toward the device, and a path in its data is a §23.1 leak
-\(`jetpacs--error-label' prints symbols).
+\(`jetpacs-error-label' prints symbols).
 
 REQUIRE selects the existence test applied AFTER containment, which is
 the only part that differs between callers:
@@ -604,7 +604,7 @@ diff'; `Info-toc' reads files).  Those stay the caller's judgement."
                 jetpacs--blocking-readers)
        ,@body)))
 
-(defun jetpacs--error-label (err)
+(defun jetpacs-error-label (err)
   "A loggable label for ERR that cannot carry payload data.
 SPEC 23.3 (amendment #74) forbids SMS bodies and senders, call numbers,
 calendar titles, clipboard contents, and captured trigger fire data from
@@ -869,7 +869,7 @@ dispatch extent; answering rejected.  Handlers MUST NOT block (decision D2) \
        ;; Action name and error SYMBOL only: amendment #74 keeps the datum
        ;; (a trigger's fire data reaches handlers through `args') out of logs.
        (message "jetpacs: action %s failed: %s"
-                (plist-get params :action) (jetpacs--error-label err))
+                (plist-get params :action) (jetpacs-error-label err))
        'rejected))))
 
 (defun jetpacs--action-shim (name)
@@ -1156,7 +1156,7 @@ the jsonrpc dispatch extent."
           (funcall fn value))
       ;; The datum here is the user's input value — never log it (23.3).
       (error (message "jetpacs: state handler for %s failed: %s"
-                      id (jetpacs--error-label err))))))
+                      id (jetpacs-error-label err))))))
 
 (defun jetpacs-ui-state (id &optional surface)
   "The latest reconciled value for stateful node ID — read-through only.

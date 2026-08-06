@@ -65,7 +65,7 @@ exists there, so no backtrace does either.  CONTEXT is a plist with
 run isolated (`jetpacs-shell--run-isolated'): the loud path stays
 exactly as it was — scrubbed per SPEC 23.3 — whatever a member does.
 The seam exists so a flight recorder (`jetpacs-devtools') can keep
-what `jetpacs--error-label' drops.")
+what `jetpacs-error-label' drops.")
 
 (defun jetpacs-shell--note-builder-error (context err)
   "Run the builder-error seam for CONTEXT and ERR; never signals.
@@ -321,7 +321,7 @@ re-registering push when that matters."
        (condition-case err
            (funcall fn owner)
          (error (message "jetpacs: teardown hook failed: %s"
-                         (jetpacs--error-label err))))
+                         (jetpacs-error-label err))))
        nil)))
   owner)
 
@@ -346,7 +346,7 @@ registrations."
                    (condition-case err
                        (jetpacs-shell-push s)
                      (error (message "jetpacs: repush of %s failed: %s"
-                                     s (jetpacs--error-label err))))))))))))
+                                     s (jetpacs-error-label err))))))))))))
 
 (defun jetpacs-shell--on-ready (_client)
   "Drain pushes that SYNCING refused, now that the session is READY.
@@ -361,7 +361,7 @@ registered builder, so collapsed duplicates are harmless."
       (condition-case err
           (jetpacs-shell-push s)
         (error (message "jetpacs: READY drain push of %s failed: %s"
-                        s (jetpacs--error-label err)))))))
+                        s (jetpacs-error-label err)))))))
 
 (defun jetpacs-shell--drop-pending (surface)
   "Forget SURFACE's queued repush; stop the timer once nothing is queued.
@@ -429,7 +429,7 @@ repush or async flush carries no ambient owner of its own."
      ;; enabled recorder holds the full story locally.
      (jetpacs-shell--error-spec surface
                                 (format "Error building %s" surface)
-                                (jetpacs--error-label err)))))
+                                (jetpacs-error-label err)))))
 
 ;;;; Spec walkers (the `jetpacs--opaque-members' discipline: never descend
 ;;;; into :args/:meta/:value, so application data is never misread)
@@ -1017,7 +1017,7 @@ handles the buffer-local `t' marker a bare dolist would funcall."
          (lambda (fn &rest a)
            (condition-case err (apply fn a)
              (error (message "jetpacs: %s hook failed: %s"
-                             hook (jetpacs--error-label err))))
+                             hook (jetpacs-error-label err))))
            nil)
          args))
 
@@ -1062,7 +1062,7 @@ text changes."
                               (when (equal result "action")
                                 (funcall on-action))))))
         (error (message "jetpacs-shell: snackbar raise failed: %s"
-                        (jetpacs--error-label err))))
+                        (jetpacs-error-label err))))
     (puthash (jetpacs-shell--resolve-surface surface-or-owner)
              text jetpacs-shell--snackbars)))
 
@@ -1094,13 +1094,13 @@ required surface pushes ahead of replay."
           (error
            (cl-pushnew surface jetpacs-shell--pending-removals :test #'equal)
            (message "jetpacs: deferred removal of %s failed: %s"
-                    surface (jetpacs--error-label err))))))
+                    surface (jetpacs-error-label err))))))
     (pcase-dolist (`(,surface . ,entry) jetpacs-shell--roots)
       (when (plist-get entry :required)
         (condition-case err
             (jetpacs-shell-push surface)
           (error (message "jetpacs: reconnect push of %s failed: %s"
-                          surface (jetpacs--error-label err))))))))
+                          surface (jetpacs-error-label err))))))))
 
 ;;;; view.switched (SPEC 14.2 / 24.2)
 

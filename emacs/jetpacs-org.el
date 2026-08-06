@@ -27,7 +27,7 @@
 ;;     PROMPT, and a prompt in a timer wedges a daemon.  The save path
 ;;     refuses loudly instead.
 ;;   - absolute paths in error messages: refs carry paths, errors do not
-;;     (D-4; `jetpacs--error-label' prints symbols only).
+;;     (D-4; `jetpacs-error-label' prints symbols only).
 ;;
 ;; THE WIRE CONTRACT (D-4, ratified + amended 2026-07-27): refs are
 ;; Emacs-side plists and NEVER cross the wire; the wire carries opaque

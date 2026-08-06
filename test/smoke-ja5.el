@@ -142,7 +142,7 @@
          (condition-case err
              (jetpacs-shell-push "jetpacs.org")
            (error (message "smoke-ja5: habits push failed: %s"
-                           (jetpacs--error-label err))))))
+                           (jetpacs-error-label err))))))
       'accepted)))
 
 ;;; The run.
@@ -170,7 +170,7 @@
                     (condition-case err
                         (progn (jetpacs-shell-push "ja5") t)
                       (error (message "push signal: %s"
-                                      (jetpacs--error-label err))
+                                      (jetpacs-error-label err))
                              nil)))))
       (smoke-j5--check "S1 skin surface accepted (table+rule+image)"
                        pushed))

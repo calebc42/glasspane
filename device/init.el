@@ -284,7 +284,7 @@ Feeds * ** *** the way ielm does, so follow-up expressions can chain."
              (jetpacs-devtools-report-buffer))
            (condition-case err
                (jetpacs-navigate-buffer name "app:hub")
-             (error (message "hub.open: %s" (jetpacs--error-label err))))))
+             (error (message "hub.open: %s" (jetpacs-error-label err))))))
         'accepted))
     :any-surface t)
 

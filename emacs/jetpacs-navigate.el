@@ -145,7 +145,7 @@ handler of a surfaceless event); refusing to guess")
                                   (or label (buffer-name buf)))
                        (error
                         (message "jetpacs-navigate: drill host failed: %s"
-                                 (jetpacs--error-label err))
+                                 (jetpacs-error-label err))
                         nil)))
                 target
               (jetpacs-shell-notify "No navigation host" target)
@@ -181,9 +181,9 @@ belongs in the handler (synchronous, or `jetpacs-retry-later')."
               (cond
                (caught
                 (message "jetpacs-navigate: thunk failed: %s"
-                         (jetpacs--error-label caught))
+                         (jetpacs-error-label caught))
                 (jetpacs-shell-notify
-                 (format "Failed: %s" (jetpacs--error-label caught))
+                 (format "Failed: %s" (jetpacs-error-label caught))
                  target)
                 nil)
                ;; The temp-buffer origin makes "stayed put" unambiguous:

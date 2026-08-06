@@ -20,6 +20,17 @@
 ;; callers gate on `jetpacs-org-vulpea-available-p'.  The "ext:"
 ;; pseudo-file keeps `byte-compile-error-on-warn' honest without vulpea
 ;; on the load path (the sections/magit-section shape).
+;;
+;; NAMING, decided deliberately.  This file's PRIVATE helpers carry the
+;; arm's own `jetpacs-org-vulpea--' prefix: an arm that defines a
+;; symbol in base's private namespace (`jetpacs-org--…') squats a name
+;; base owns, and the collision lands silently the moment base grows
+;; its own.  The two PUBLIC entry points below deliberately do NOT
+;; take the arm's prefix — `jetpacs-org-note-matches-p' and
+;; `jetpacs-org-note-query-supported-p' name the note-index PROTOCOL,
+;; not vulpea: a second index backend (a plain org-id scan, a sqlite
+;; cache) implements those same two names and swaps in underneath its
+;; callers unchanged.  Do not "fix" them to `jetpacs-org-vulpea-'.
 
 ;;; Code:
 
@@ -41,7 +52,7 @@
 (declare-function vulpea-db-query "ext:vulpea-db" (&optional pred))
 (declare-function vulpea-db-query-by-directory "ext:vulpea-db" (dir &optional level))
 
-(defun jetpacs-org--note-get (note what &rest args)
+(defun jetpacs-org-vulpea--note-get (note what &rest args)
   "The grammar accessor over a `vulpea-note' NOTE (index only, no visit)."
   (pcase what
     ('todo (vulpea-note-todo note))
@@ -83,7 +94,8 @@ The same grammar as `jetpacs-org-entry-matches-p', evaluated entirely
 off the vulpea index (no file visit); the `regexp' term searches
 title + properties here (the body is not indexed)."
   (jetpacs-org--matches-p
-   tree (lambda (what &rest args) (apply #'jetpacs-org--note-get note what args))))
+   tree (lambda (what &rest args)
+          (apply #'jetpacs-org-vulpea--note-get note what args))))
 
 (defun jetpacs-org-note-query-supported-p (tree)
   "Non-nil when query sexp TREE uses only index-evaluable terms.

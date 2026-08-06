@@ -1034,9 +1034,7 @@ and newline-flattened — a multi-line title would smuggle structure."
      ((not (with-current-buffer buf
              (and buffer-file-name
                   (file-writable-p buffer-file-name)
-                  (condition-case nil
-                      (jetpacs-org--check-file buffer-file-name)
-                    (jetpacs-org-refused nil)))))
+                  (jetpacs-org-file-allowed-p buffer-file-name))))
       'rejected)
      (t
       (jetpacs-flow-continue

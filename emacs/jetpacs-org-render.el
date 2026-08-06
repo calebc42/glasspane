@@ -206,9 +206,7 @@ per-image + frame-budget fit.  The encode passes NO-LINE-BREAK: RFC
                  (if buffer-file-name
                      (file-name-directory buffer-file-name)
                    default-directory)))
-           (checked (condition-case nil
-                        (jetpacs-org--check-file abs)
-                      (jetpacs-org-refused nil))))
+           (checked (jetpacs-org-file-allowed-p abs)))
       (when (and checked (file-regular-p checked))
         (when-let* ((data (jetpacs-hypertext-file-bytes checked))
                     (type (jetpacs-hypertext-sniff-type data)))

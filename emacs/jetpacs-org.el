@@ -193,6 +193,29 @@ there):
           (signal 'jetpacs-org-unresolved (list 'file-missing))))
        (_ (signal 'jetpacs-org-refused (cdr err)))))))
 
+(defun jetpacs-org-file-allowed-p (file)
+  "FILE's truename when it is inside the org roots and readable, else nil.
+The TOTAL form of `jetpacs-org--check-file'.  Every condition that
+checker raises — `jetpacs-org-refused' (the path is out of policy),
+`jetpacs-org-unresolved' (the file is GONE) and
+`jetpacs-org-unavailable' (unreadable, or the whole allowlist
+collapsed) — comes back as a plain nil.  This function never signals.
+
+The signalling checker exists for callers that ANSWER a request and
+must tell the three apart, because each routes to a different STATUS
+\(23.1 rejected / 14.5 stale / retry-later).  Every other caller only
+wants to know whether it may read a path, and those callers had all
+written the same wrong thing: a `condition-case' catching
+`jetpacs-org-refused' and nothing else, so the other two conditions
+escaped.  That is how a link to a missing image file — plain
+`jetpacs-org-unresolved', the most ordinary thing a document can
+contain — signalled out through the whole render instead of degrading
+to the link's text."
+  (condition-case nil
+      (jetpacs-org--check-file file)
+    ((jetpacs-org-refused jetpacs-org-unresolved jetpacs-org-unavailable)
+     nil)))
+
 ;;;; The D2 IO clamp
 
 (defmacro jetpacs-org--with-clamped-io (&rest body)

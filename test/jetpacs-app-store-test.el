@@ -58,6 +58,17 @@
     (should-not (jetpacs-app-store--entry "/etc/passwd"))
     (should-not (jetpacs-app-store--entry "ghost.el"))))
 
+(ert-deftest jetpacs-app-store-foundation-is-never-listed ()
+  "A staged copy of the platform itself is not an installable app."
+  (jetpacs-app-store-test--env
+    (jetpacs-app-store-test--stage stage "jetpacs-core.el" ";;; core")
+    (jetpacs-app-store-test--stage stage "jetpacs-core.el.txt" ";;; core")
+    (jetpacs-app-store-test--stage stage "notes.el" ";;; notes.el ---")
+    (let ((names (mapcar (lambda (e) (plist-get e :name))
+                         (jetpacs-app-store--scan))))
+      (should (equal names '("notes.el"))))
+    (should-not (jetpacs-app-store--entry "jetpacs-core.el"))))
+
 (ert-deftest jetpacs-app-store-install-adopts-and-persists ()
   "Install copies into the adopt dir, loads, records, persists."
   (jetpacs-app-store-test--env

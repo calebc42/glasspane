@@ -55,6 +55,12 @@ Download is where self-distributed bundles land (possibly renamed
 (defun jetpacs-app-store--adopt-dir ()
   (expand-file-name "jetpacs/apps/" user-emacs-directory))
 
+(defconst jetpacs-app-store--foundation-files
+  '("jetpacs-core.el" "jetpacs-init.el" "init.el")
+  "Foundation bundles: not apps, never listed.
+POC 1's rule, kept — a staged copy of the platform itself must not be
+installable over the running one.")
+
 ;;;; The scan
 
 (defun jetpacs-app-store--canonical (file)
@@ -81,9 +87,10 @@ would install."
       (when (file-directory-p dir)
         (dolist (path (directory-files dir t "\\.el\\(\\.txt\\)?\\'"))
           (let ((name (jetpacs-app-store--canonical path)))
-            (let ((prev (gethash name best)))
-              (when (or (null prev) (file-newer-than-file-p path prev))
-                (puthash name path best)))))))
+            (unless (member name jetpacs-app-store--foundation-files)
+              (let ((prev (gethash name best)))
+                (when (or (null prev) (file-newer-than-file-p path prev))
+                  (puthash name path best))))))))
     (let (entries)
       (maphash
        (lambda (name path)

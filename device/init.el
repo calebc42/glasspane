@@ -31,6 +31,10 @@
 (require 'jetpacs-project)
 (require 'jetpacs-sql)
 (require 'jetpacs-apps)
+(require 'jetpacs-app-store)
+;; Load bundles the Manage Apps screen installed in past sessions —
+;; each isolated, so one broken bundle never costs the boot.
+(jetpacs-app-store-boot)
 (require 'jetpacs-hypertext)
 ;; …and the apps.
 (require 'jetpacs-theme)
@@ -81,16 +85,17 @@
   ;; lazy_column: nine launcher rows plus Theme outgrew the fold on the
   ;; tablet, and a plain column cannot scroll (the P3 smoke found
   ;; jetpacs.sql and Theme unreachable).
-  (apply #'jetpacs-lazy-column
-         (append
-          (list (jetpacs-text "Apps" :style "title"))
-          (jetpacs-launcher-rows "app:hub")
-          (list (jetpacs-divider)
-                (jetpacs-chrome-row
-                 "Theme" :subtitle "toggle modus light/dark"
-                 :on-tap (jetpacs-action "jetpacs.theme.modus-toggle")
-                 :key "drawer-theme")
-                :spacing 8))))
+  ;; POC 1's Manage-apps button and conditional App-drawer return as
+  ;; ONE expandable first entry (owner decision 2026-08-06); the drawer
+  ;; no longer inlines every switchable surface.
+  (jetpacs-lazy-column
+   (jetpacs-apps-drawer-entry)
+   (jetpacs-divider)
+   (jetpacs-chrome-row
+    "Theme" :subtitle "toggle modus light/dark"
+    :on-tap (jetpacs-action "jetpacs.theme.modus-toggle")
+    :key "drawer-theme")
+   :spacing 8))
 
 ;; The Eval screen is the *ielm* drill on the hub stack; the B5 minter
 ;; is stable across renders, so its id is computable here.

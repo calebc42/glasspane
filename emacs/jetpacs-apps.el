@@ -145,6 +145,31 @@ single-app contract."
                      :caption "Apps appear here as their bundles load."))
             (mapcar #'jetpacs-apps--card jetpacs-apps--registry)))))
 
+;;;; The drawer's consolidated Apps entry
+
+(defun jetpacs-apps-drawer-entry ()
+  "One expandable drawer entry consolidating POC 1's two (owner
+decision 2026-08-06): the Manage-apps button and the app switcher
+return as \"Apps\" expanding into \"Manage Apps\" and \"App
+Launcher\".  Collapsed by default so the drawer stays one line."
+  (jetpacs-collapsible
+   "drawer-apps"
+   (jetpacs-chrome-row "Apps" :icon "apps"
+                       :subtitle "Manage and switch")
+   (jetpacs-chrome-row "Manage Apps"
+                       :subtitle "Install and remove app bundles"
+                       :icon "download"
+                       :on-tap (jetpacs-action
+                                "jetpacs.launcher.open"
+                                :args '(:surface "app:jetpacs.app-store"))
+                       :key "drawer-manage-apps")
+   (jetpacs-chrome-row "App Launcher"
+                       :subtitle "Switch between apps"
+                       :icon "swap_horiz"
+                       :on-tap (jetpacs-action "jetpacs.launcher.show")
+                       :key "drawer-app-launcher")
+   :collapsed t))
+
 ;;;; Actions
 
 (defun jetpacs-apps--action-grid (_args _params)

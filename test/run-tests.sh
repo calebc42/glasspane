@@ -183,10 +183,17 @@ emacs -Q --batch -L emacs -l test/jetpacs-chrome-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-devtools-test.el \
   -f ert-run-tests-batch-and-exit
 
-# (The JA-4 org engine suite moved UP to the Jetpacs-free block with the
-# engine itself.  What belongs here instead is the adapter's own gate —
-# jetpacs-org.el is a registration and nothing else, and the
-# registration has never been covered end to end.  G8 fills this slot.)
+# The org ADAPTER's gate (the JA-4 engine suite moved UP to the
+# Jetpacs-free block with the engine itself).  jetpacs-org.el exports no
+# callable symbol, so this suite asserts EFFECTS: it drives the floor's
+# own jetpacs-teardown-owner and looks for the swept token on the other
+# side (the add-hook is the whole file, and calling the sweep directly —
+# what every other suite does — stays green with it deleted); it proves
+# the floor's fboundp probe still finds ebp-org-reset; and it pins the
+# render -> dialogs -> shim chain that carries the registration onto the
+# device.  Three jobs, and all three of them break SILENTLY.
+emacs -Q --batch -L emacs -l test/jetpacs-org-test.el \
+  -f ert-run-tests-batch-and-exit
 
 # Vulpea arm (Tier-1 staging — jetpacs-org-vulpea.el, never required by
 # base): synthetic-struct accessor semantics + index-evaluable routing.

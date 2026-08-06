@@ -92,6 +92,17 @@
           (should (string-match-p "failed to build" json))
           (should-not (string-match-p "the-datum" json)))))))
 
+(ert-deftest jetpacs-devtools-shell-degrade-ships-the-label-only ()
+  "The whole-surface degrade spec is wire-bound and Companion-persisted:
+it carries the error SYMBOL, never the datum (SPEC 23.3)."
+  (let* ((spec (jetpacs-shell--build
+                "app:x"
+                (list :builder (lambda () (error "leak: %s" "sms-body")))))
+         (json (jetpacs-node->canonical-json spec)))
+    (should (string-match-p "Error building" json))
+    (should (string-match-p "error" json))
+    (should-not (string-match-p "sms-body" json))))
+
 (ert-deftest jetpacs-devtools-recorder-off-keeps-nothing ()
   (jetpacs-devtools-test--with (jetpacs-devtools-test--client)
     (jetpacs-devtools-test--recording recs

@@ -419,9 +419,14 @@ repush or async flush carries no ambient owner of its own."
                                  (list :surface surface) e))))
           (funcall (plist-get plist :builder))))
     (error
+     ;; The label, never `error-message-string': a degrade spec crosses
+     ;; the wire and the Companion PERSISTS it (SPEC 13.2) — the two
+     ;; places SPEC 23.3 exists to keep payload out of.  The detail is
+     ;; not lost: the seam above fired before this unwind, so an
+     ;; enabled recorder holds the full story locally.
      (jetpacs-shell--error-spec surface
                                 (format "Error building %s" surface)
-                                (error-message-string err)))))
+                                (jetpacs--error-label err)))))
 
 ;;;; Spec walkers (the `jetpacs--opaque-members' discipline: never descend
 ;;;; into :args/:meta/:value, so application data is never misread)

@@ -228,7 +228,7 @@ so the dock is two destinations: Home and Files."
          :weight 1)
         (jetpacs-icon-button "send" (jetpacs-action "hub.eval")
                              :content-description "Eval"))
-       :pad 8))
+       :padding 8))
      :actions (list (jetpacs-emacs-ui-mx-button))
      :drawer (jetpacs-hub--drawer))))
 

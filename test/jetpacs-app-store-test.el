@@ -234,7 +234,22 @@ another program's business."
   (jetpacs-app-store-test--env
     (jetpacs-app-store-test--stage
      stage "mine.el" ";;; mine.el --- Mine -*- lexical-binding: t; -*-")
-    (jetpacs-app-store-test--install-mine)
+    ;; Backdate the adopted bundle before the editor stamps it.  The
+    ;; staleness gate compares mtimes, and the kernel hands out file
+    ;; timestamps from the COARSE clock — one tick per jiffy, 4ms on
+    ;; the kernel this suite runs under — while install, open and save
+    ;; here take about 3ms end to end.  So the open-time stamp and the
+    ;; post-save stamp landed inside the SAME tick on roughly half of
+    ;; runs, came back byte-identical, and the stale leg below answered
+    ;; `accepted'.  A minute of backdating puts the two stamps in
+    ;; different ticks whatever the tick is.  It weakens nothing: the
+    ;; save still writes through the real verb and the gate still
+    ;; compares what production recorded — the test just stops racing
+    ;; the filesystem clock.  (The files rung's twin of this assertion
+    ;; buys the same margin with `sleep-for'; this one costs no wall
+    ;; clock and does not assume the tick is under 20ms.)
+    (set-file-times (jetpacs-app-store-test--install-mine)
+                    (time-subtract (current-time) 60))
     (jetpacs-app-store--action-edit '(:bundle "mine.el") nil)
     (let* ((path (plist-get jetpacs-app-store--edit :path))
            (stamp (plist-get jetpacs-app-store--edit :mtime))

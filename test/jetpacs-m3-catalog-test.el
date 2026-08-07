@@ -70,7 +70,13 @@
   "The stub generator's triage marker; none may survive.")
 
 (defun jetpacs-m3-test--screens ()
-  "Every screen the app can build: a list of (LABEL . NODE)."
+  "Every screen the app can build: a list of (LABEL . NODE).
+The source screens are here for the same reason the example screens
+are: \"View elisp\" is reachable from the menu of every example that has
+a `:build', so its screen is one the app can show and must satisfy the
+same gates.  Its body is the ONE piece of catalog content nobody
+authored as nodes — it is a file read at build time — which is exactly
+why it must be swept rather than trusted."
   (let ((screens (list (cons "home" (jetpacs-m3-home-screen nil))
                        (cons "theme" (jetpacs-m3-theme-screen nil)))))
     (dolist (component jetpacs-m3-components)
@@ -78,11 +84,15 @@
         (push (cons (concat "component:" id)
                     (jetpacs-m3-component-screen component nil))
               screens)
-        (cl-loop for _example in (plist-get component :examples)
+        (cl-loop for example in (plist-get component :examples)
                  for index from 0
                  do (push (cons (format "example:%s/%d" id index)
                                 (jetpacs-m3-example-screen component index nil))
-                          screens))))
+                          screens)
+                    (when (plist-get example :build)
+                      (push (cons (format "source:%s/%d" id index)
+                                  (jetpacs-m3-source-screen component index nil))
+                            screens)))))
     (nreverse screens)))
 
 ;;;; Fidelity: the inventory is upstream's
@@ -208,6 +218,125 @@ back strands the user in a three-deep stack."
                      (jetpacs-m3-example-screen
                       component index (jetpacs-view-switch "home")))))
           (should (string-match-p "\"builtin\":\"view.switch\"" json))))))
+
+;;;; "View elisp": the example shows its own source
+
+(ert-deftest jetpacs-m3-example-menu-carries-view-elisp ()
+  "The Example more-menu gains \"View elisp\" WITHOUT losing upstream's
+\"View source code\" — the two answer different questions, the Kotlin
+this was ported from and the elisp it was ported to.  An example with
+no `:build' has no defun to show and gets the upstream seven alone."
+  (let* ((component (jetpacs-m3-component "switches"))
+         (json (jetpacs-node->canonical-json
+                (jetpacs-m3-example-screen component 0 nil))))
+    (should (string-match-p "View elisp" json))
+    (should (string-match-p "View source code" json))
+    (should (string-match-p "\"action\":\"m3catalog.source\"" json)))
+  ;; Home, the component screen and the theme screen never carry it.
+  (dolist (node (list (jetpacs-m3-home-screen nil)
+                      (jetpacs-m3-theme-screen nil)
+                      (jetpacs-m3-component-screen
+                       (jetpacs-m3-component "switches") nil)))
+    (should-not (string-match-p "View elisp"
+                                (jetpacs-node->canonical-json node))))
+  ;; A `:build'-less example: the row is absent, the upstream one stays.
+  (let ((found nil))
+    (dolist (component jetpacs-m3-components)
+      (cl-loop
+       for example in (plist-get component :examples)
+       for index from 0
+       unless (or (plist-get example :build) (plist-get example :top-bar))
+       do (setq found t)
+          (let ((json (jetpacs-node->canonical-json
+                       (jetpacs-m3-example-screen component index nil))))
+            (should-not (string-match-p "View elisp" json))
+            (should (string-match-p "View source code" json)))))
+    (should found)))
+
+(ert-deftest jetpacs-m3-source-extraction-returns-the-authored-defun ()
+  "The modules load from SOURCE .el, so the defining text is recoverable
+VERBATIM — docstring, indentation and all — not reconstructed."
+  (let* ((example (nth 0 (plist-get (jetpacs-m3-component "switches")
+                                    :examples)))
+         (source (jetpacs-m3-example-source (plist-get example :build)))
+         (text (plist-get source :text)))
+    (should (string-prefix-p "(defun jetpacs-m3-" text))
+    (should (string-match-p "jetpacs-m3-switches--basic" text))
+    ;; The docstring came along, which is what "verbatim" buys.
+    (should (string-match-p "Upstream SwitchSample" text))
+    ;; And it is a COMPLETE form, not a truncated head: it reads back.
+    (let ((form (car (read-from-string text))))
+      (should (eq (car form) 'defun))
+      (should (eq (nth 1 form) 'jetpacs-m3-switches--basic)))
+    (should (string-match-p "jetpacs-m3-switches\\.el"
+                            (plist-get source :caption)))))
+
+(ert-deftest jetpacs-m3-source-extraction-falls-back-to-the-closure ()
+  "No findable source file means the LOADED CLOSURE, captioned as such.
+An uninterned symbol is the honest fixture: nothing put it in
+`load-history', which is the same position a REPL-defined builder is
+in.  The screen still has something true to show."
+  (let ((sym (make-symbol "jetpacs-m3-test--no-source-anywhere")))
+    (fset sym (lambda () (jetpacs-text "nowhere")))
+    (let ((source (jetpacs-m3-example-source sym)))
+      (should (> (length (plist-get source :text)) 0))
+      (should (string-match-p "nowhere" (plist-get source :text)))
+      (should (string-match-p "LOADED CLOSURE" (plist-get source :caption)))))
+  ;; An inline-lambda `:build' (37 of the catalog's builders) takes the
+  ;; same path — there is no symbol to look up in the first place.
+  (let ((source (jetpacs-m3-example-source (lambda () nil))))
+    (should (> (length (plist-get source :text)) 0))
+    (should (string-match-p "LOADED CLOSURE" (plist-get source :caption))))
+  ;; And a non-function never signals; it just has nothing to say.
+  (should (stringp (plist-get (jetpacs-m3-example-source nil) :text))))
+
+(ert-deftest jetpacs-m3-source-extraction-is-capped ()
+  "The cap is defensive, announced in the text, and never a failure.
+Nothing authored comes near it — the longest catalog builder is under
+2000 characters against a 20000 cap — so this drives it with a builder
+whose printed form is deliberately enormous."
+  (should (= jetpacs-m3-source-max-chars 20000))
+  (let ((sym (make-symbol "jetpacs-m3-test--enormous")))
+    (fset sym `(lambda () ,(make-string (* 4 jetpacs-m3-source-max-chars) ?x)))
+    (let ((text (plist-get (jetpacs-m3-example-source sym) :text)))
+      (should (string-match-p "truncated at 20000 characters" text))
+      ;; The cap plus the notice, nothing like the 80000 it started at.
+      (should (< (length text) (+ jetpacs-m3-source-max-chars 200)))))
+  ;; Every real example stays under it untruncated.
+  (dolist (component jetpacs-m3-components)
+    (dolist (example (plist-get component :examples))
+      (when (plist-get example :build)
+        (should-not (string-match-p
+                     "truncated at"
+                     (plist-get (jetpacs-m3-example-source
+                                 (plist-get example :build))
+                                :text)))))))
+
+(ert-deftest jetpacs-m3-source-screen-offers-copy-and-a-way-back ()
+  "The leaf viewer's two affordances: the back arrow and \"Copy sexp\",
+the latter riding the `clipboard.copy' builtin rather than a verb, so
+it works with Emacs busy."
+  (let* ((component (jetpacs-m3-component "switches"))
+         (json (jetpacs-node->canonical-json
+                (jetpacs-m3-source-screen component 0
+                                          (jetpacs-view-switch "home")))))
+    (should (string-match-p "\"builtin\":\"clipboard.copy\"" json))
+    (should (string-match-p "Copy sexp" json))
+    (should (string-match-p "\"builtin\":\"view.switch\"" json))
+    ;; Mono and selectable: the screen exists to be read and taken.
+    (should (string-match-p "\"style\":\"mono\"" json))
+    (should (string-match-p "\"selectable\":true" json))
+    ;; A leaf: no pin, because `jetpacs-m3-catalog' cannot reopen an
+    ;; `s-' id, and no more-menu, because the menu is what got us here.
+    (should-not (string-match-p "m3catalog.pin" json))
+    (should-not (string-match-p "View elisp" json))))
+
+(ert-deftest jetpacs-m3-source-verb-rejects-and-stales-correctly ()
+  (should (eq 'rejected (jetpacs-m3--on-source '(:component 7 :index 0) nil)))
+  (should (eq 'rejected (jetpacs-m3--on-source
+                         '(:component "switches" :index "0") nil)))
+  (should (eq 'stale (jetpacs-m3--on-source
+                      '(:component "nope" :index 0) nil))))
 
 ;;;; The floor seam
 

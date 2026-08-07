@@ -31,6 +31,10 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+;; `find-function-search-for-symbol' backs the "View elisp" screen: the
+;; catalog modules load from SOURCE .el (device/install.sh pushes the
+;; flat directory), so an example's builder can show its own defun.
+(require 'find-func)
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
@@ -297,6 +301,10 @@ wire."
   "The chrome screen id of component ID's example INDEX."
   (format "e-%s-%d" id index))
 
+(defun jetpacs-m3-source-screen-id (id index)
+  "The chrome screen id of the elisp source of component ID's example INDEX."
+  (format "s-%s-%d" id index))
+
 ;;;; Verbs authored into the tree
 
 (defun jetpacs-m3-demo (message &optional duration)
@@ -375,11 +383,99 @@ is the one legal door to an Emacs-raised dialog.")
   "A descriptor raising the registered dialog KEY."
   (jetpacs-action "m3catalog.dialog" :args (list :key key)))
 
+;;;; The example's own source (the "View elisp" screen)
+
+(defconst jetpacs-m3-source-max-chars 20000
+  "Cap on the elisp text one \"View elisp\" screen shows.
+Measured, not guessed: the catalog's 202 named example builders average
+496 characters and the longest (`jetpacs-m3-menus--grouped') is 1796, so
+nothing authored here comes within an order of magnitude — a long defun
+is fine at catalog scale, which is the whole point of not capping
+tighter.  The cap exists for the two lengths NOBODY authored: the
+`pp-to-string' fallback, where a closure's printed form has no length
+anyone chose, and a live-coded builder that grew between reloads.
+Truncation is announced in the text and never fails the push.")
+
+(defun jetpacs-m3--defun-text (sym)
+  "SYM's defining text, read VERBATIM from the file it was loaded from.
+nil when there is no such file to open — a builder defined at a REPL, an
+uninterned symbol, a `load-history' that lost the entry.
+
+The catalog is one of the few things in this tree that can do this at
+all: `device/install.sh' pushes the modules as SOURCE .el into a flat
+directory, so the text the author wrote is still on the device and
+`find-function-search-for-symbol' has a file to open.  Comments,
+docstring and indentation come back exactly as written, which is the
+difference between this and the `pp' fallback."
+  (condition-case nil
+      (when-let* ((file (symbol-file sym 'defun))
+                  (found (find-function-search-for-symbol sym nil file))
+                  (buffer (car found))
+                  (position (cdr found)))
+        (with-current-buffer buffer
+          (save-excursion
+            (save-restriction
+              ;; The buffer may be somebody's narrowed working copy.
+              (widen)
+              (goto-char position)
+              (buffer-substring-no-properties
+               position (progn (forward-sexp 1) (point)))))))
+    ;; A missing library, an unbalanced defun, a symbol `find-func' cannot
+    ;; place: every one of them means "no authored text", not "no screen".
+    (error nil)))
+
+(defun jetpacs-m3-example-source (build)
+  "BUILD's elisp as a plist (:text TEXT :caption CAPTION).
+BUILD is an example's `:build' — normally a named symbol, occasionally
+an inline lambda (37 of the catalog's 239 builders are).  Never nil and
+never empty: there are three answers and this returns whichever applies.
+
+  the AUTHORED text, when `jetpacs-m3--defun-text' finds the file;
+  the LOADED CLOSURE, `pp-to-string' of the function object, captioned
+    as such because it is emphatically NOT what anyone typed — macros
+    are expanded, comments are gone, `cl-loop' has become a `while';
+  a bare note, when BUILD is not a function at all.
+
+TEXT is capped at `jetpacs-m3-source-max-chars' with the truncation
+spelled out in the text itself."
+  (let* ((authored (and (symbolp build) (jetpacs-m3--defun-text build)))
+         (closure (and (not authored)
+                       (cond ((symbolp build)
+                              (and (fboundp build) (symbol-function build)))
+                             ((functionp build) build))))
+         (text (or authored
+                   (and closure (pp-to-string closure))
+                   "This example has no elisp builder to show."))
+         (caption
+          (cond
+           (authored (format "%s — as authored"
+                             (file-name-nondirectory
+                              (symbol-file build 'defun))))
+           (closure
+            "The LOADED CLOSURE, not the authored text: this builder's \
+source file could not be found, so what follows is the function object \
+Emacs is running — macros expanded, comments gone.")
+           (t "No builder."))))
+    (when (> (length text) jetpacs-m3-source-max-chars)
+      (setq text (concat (substring text 0 jetpacs-m3-source-max-chars)
+                         (format "\n\n;; ... truncated at %d characters."
+                                 jetpacs-m3-source-max-chars))))
+    (list :text text :caption caption)))
+
 (defun jetpacs-m3--open (id)
   (jetpacs-action "m3catalog.open" :args (list :component id)))
 
 (defun jetpacs-m3--open-example (id index)
   (jetpacs-action "m3catalog.example"
+                  :args (list :component id :index index)))
+
+(defun jetpacs-m3--open-source (id index)
+  "A descriptor opening the elisp of component ID's example INDEX.
+Addressed by component and index, like every other catalog navigation
+verb — NOT by symbol name.  A verb that took a symbol off the wire and
+resolved it would let any tap name any function in the image; the pair
+here can only ever address an example that exists."
+  (jetpacs-action "m3catalog.source"
                   :args (list :component id :index index)))
 
 (defun jetpacs-m3--link (url)
@@ -398,22 +494,34 @@ that reaches a browser, and it is companion-local."
     (jetpacs-menu-item label (jetpacs-m3-demo "No link for this component")
                        :enabled :json-false)))
 
-(defun jetpacs-m3--more-menu (guidelines docs source)
-  "The upstream MoreMenu: three component links plus the four fixed ones."
+(defun jetpacs-m3--more-menu (guidelines docs source &optional elisp)
+  "The upstream MoreMenu: three component links plus the four fixed ones.
+ELISP, when given, is the descriptor of the ONE row that is not
+upstream's: \"View elisp\", added on the Example screen beside \"View
+source code\".  Both stay, because they answer different questions —
+upstream's shares a cs.android.com URL for the Kotlin this example was
+ported FROM, and requires a browser and a network to read; this one
+shows the elisp it was ported TO, read off the device out of the file
+that is running.  The `code' icon marks it as the local one; its seven
+siblings are link-outs and carry none."
   (jetpacs-menu
-   (list (jetpacs-m3--menu-item "View design guidelines" guidelines)
-         (jetpacs-m3--menu-item "View developer docs" docs)
-         (jetpacs-m3--menu-item "View source code" source)
-         (jetpacs-m3--menu-item "Report an issue" jetpacs-m3-issue-url)
-         (jetpacs-m3--menu-item "Terms of service" jetpacs-m3-terms-url)
-         (jetpacs-m3--menu-item "Privacy policy" jetpacs-m3-privacy-url)
-         (jetpacs-m3--menu-item "Open source licenses"
-                                jetpacs-m3-licenses-url))
+   (append
+    (list (jetpacs-m3--menu-item "View design guidelines" guidelines)
+          (jetpacs-m3--menu-item "View developer docs" docs)
+          (jetpacs-m3--menu-item "View source code" source))
+    (when elisp
+      (list (jetpacs-menu-item "View elisp" elisp :icon "code")))
+    (list (jetpacs-m3--menu-item "Report an issue" jetpacs-m3-issue-url)
+          (jetpacs-m3--menu-item "Terms of service" jetpacs-m3-terms-url)
+          (jetpacs-m3--menu-item "Privacy policy" jetpacs-m3-privacy-url)
+          (jetpacs-m3--menu-item "Open source licenses"
+                                 jetpacs-m3-licenses-url)))
    :icon "more_vert"))
 
-(defun jetpacs-m3--actions (screen-id &optional guidelines docs source)
+(defun jetpacs-m3--actions (screen-id &optional guidelines docs source elisp)
   "The top-bar trailing actions: pin, theme, more.
-SCREEN-ID is what the pin pins (upstream pins a nav route)."
+SCREEN-ID is what the pin pins (upstream pins a nav route); ELISP rides
+into the more-menu (see `jetpacs-m3--more-menu')."
   (list (let ((pinned (equal jetpacs-m3-favorite screen-id)))
           (jetpacs-icon-button
            "push_pin"
@@ -429,7 +537,7 @@ SCREEN-ID is what the pin pins (upstream pins a nav route)."
         (jetpacs-icon-button
          "palette" (jetpacs-action "m3catalog.theme")
          :content-description "Change theme")
-        (jetpacs-m3--more-menu guidelines docs source)))
+        (jetpacs-m3--more-menu guidelines docs source elisp)))
 
 (defun jetpacs-m3--expr-badge ()
   "The \"Expr\" marker upstream draws as a corner banner."
@@ -615,7 +723,15 @@ instead, because a Node tree cannot nest a scaffold."
          (actions (jetpacs-m3--actions id
                                        (plist-get component :guidelines)
                                        (plist-get component :docs)
-                                       (plist-get example :source)))
+                                       (plist-get example :source)
+                                       ;; Only an example with a `:build'
+                                       ;; has a defun to show; a slots-only
+                                       ;; or `:unsupported' one gets the
+                                       ;; upstream seven and no more.
+                                       (and (plist-get example :build)
+                                            (jetpacs-m3--open-source
+                                             (plist-get component :id)
+                                             index))))
          ;; A function-valued :scaffold reads live sample state (flags)
          ;; at BUILD time, which is what lets a verb-driven re-push move
          ;; a sheet or a spinner authored in the screen's own chrome.
@@ -641,6 +757,36 @@ instead, because a Node tree cannot nest a scaffold."
              :back back :actions actions
              :scaffold extra-scaffold
              slots))))
+
+;;;; The elisp source screen
+
+(defun jetpacs-m3-source-screen (component index back)
+  "The \"View elisp\" screen for COMPONENT's example INDEX.
+A LEAF viewer, and its top bar says so: the back arrow, the title, and
+nothing else.  No pin — `jetpacs-m3-catalog' reopens a pinned screen by
+parsing `c-'/`e-'/`theme' out of its id, and a fourth id shape would
+pin to a screen the entry point cannot restore.  No theme, no
+more-menu: the menu is what got the user here.
+
+The copy affordance is a labelled button rather than a bar icon
+because the thing it copies is a sexp and the label is the only place
+to say so."
+  (let* ((example (nth index (plist-get component :examples)))
+         (source (jetpacs-m3-example-source (plist-get example :build)))
+         (text (plist-get source :text)))
+    (jetpacs-chrome-screen
+     (plist-get example :name)
+     (jetpacs-with-attrs
+      (jetpacs-column
+       (jetpacs-button "Copy sexp" (jetpacs-clipboard-copy text)
+                       :icon "content_copy" :variant "tonal")
+       (jetpacs-text (plist-get source :caption) :style "caption")
+       ;; Mono and SELECTABLE: the point of the screen is reading and
+       ;; taking the text, and a selection is the second way to take it.
+       (jetpacs-text text :style "mono" :selectable t)
+       :scroll t :spacing 12 :fill t)
+      :padding 16)
+     :back back)))
 
 ;;;; Theme
 
@@ -765,6 +911,21 @@ no user in front of it."
                         (lambda (back)
                           (jetpacs-m3-example-screen component index back))))))
 
+(defun jetpacs-m3-show-source (id index &optional surface)
+  "Push the elisp of component ID's example INDEX onto SURFACE.
+This is the one path that goes FOUR deep (Home, Component, Example,
+source), past `jetpacs-chrome-max-screens'.  That is handled, not
+overlooked: `jetpacs-chrome--stack-insert' evicts from the MIDDLE, so
+the Component screen drops and back still walks source -> Example ->
+Home."
+  (when-let* ((component (jetpacs-m3-component id)))
+    (when (and (integerp index)
+               (< -1 index (length (plist-get component :examples))))
+      (jetpacs-m3--push (or surface jetpacs-m3-owner)
+                        (jetpacs-m3-source-screen-id id index)
+                        (lambda (back)
+                          (jetpacs-m3-source-screen component index back))))))
+
 (defun jetpacs-m3-show-theme (&optional surface)
   "Push the theme screen onto SURFACE."
   (jetpacs-m3--push (or surface jetpacs-m3-owner) "theme"
@@ -793,6 +954,18 @@ no user in front of it."
      ((null (jetpacs-m3-component id)) 'stale)
      (t (jetpacs-flow-continue
          (lambda () (jetpacs-m3-show-example id index surface)))
+        'accepted))))
+
+(defun jetpacs-m3--on-source (args params)
+  "Show an example's own elisp (the catalog's addition to MoreMenu)."
+  (let ((id (plist-get args :component))
+        (index (plist-get args :index))
+        (surface (plist-get params :surface)))
+    (cond
+     ((not (and (stringp id) (integerp index))) 'rejected)
+     ((null (jetpacs-m3-component id)) 'stale)
+     (t (jetpacs-flow-continue
+         (lambda () (jetpacs-m3-show-source id index surface)))
         'accepted))))
 
 (defun jetpacs-m3--on-theme (_args params)
@@ -992,6 +1165,7 @@ stack to Home, which is the documented live-reload path."
   (with-jetpacs-owner jetpacs-m3-owner
     (jetpacs-defaction "m3catalog.open" #'jetpacs-m3--on-open)
     (jetpacs-defaction "m3catalog.example" #'jetpacs-m3--on-example)
+    (jetpacs-defaction "m3catalog.source" #'jetpacs-m3--on-source)
     (jetpacs-defaction "m3catalog.theme" #'jetpacs-m3--on-theme)
     (jetpacs-defaction "m3catalog.pref" #'jetpacs-m3--on-pref)
     (jetpacs-defaction "m3catalog.pin" #'jetpacs-m3--on-pin)
@@ -1005,7 +1179,8 @@ stack to Home, which is the documented live-reload path."
 
 (defun jetpacs-m3-unregister ()
   "Deregister the catalog verbs and its chrome root."
-  (dolist (verb '("m3catalog.open" "m3catalog.example" "m3catalog.theme"
+  (dolist (verb '("m3catalog.open" "m3catalog.example" "m3catalog.source"
+                  "m3catalog.theme"
                   "m3catalog.pref" "m3catalog.pin" "m3catalog.demo"
                   "m3catalog.flag" "m3catalog.dialog" "m3catalog.home"))
     (jetpacs-undefaction verb))

@@ -78,7 +78,8 @@
 (jetpacs-settings-register-section
  "Editor"
  '((ebp-sync-diagnostics :label "Push diagnostics")
-   (ebp-sync-fontify :label "Push syntax highlighting")))
+   (ebp-sync-fontify :label "Push syntax highlighting")
+   (ebp-sync-eldoc :label "Push documentation")))
 ;; The SPEC 23.3 explicit developer setting: full failure detail stays
 ;; local and bounded, and only while this is on.
 (jetpacs-settings-register-section

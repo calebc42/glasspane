@@ -298,5 +298,96 @@ re-sends identical content (the Companion discarded the old seq's)."
           (ebp-sync--push-fontify (current-buffer))
           (should (= 2 (length notified))))))))
 
+(ert-deftest ebp-sync-eldoc-push-shape-dedupe-and-seq-restamp ()
+  "SPEC 19.5: eldoc.show carries {editor_id, session, seq, text} and NO
+document; unchanged text is not re-sent, a seq advance re-sends it."
+  (ebp-sync-test--with "text"
+    (let ((notified nil))
+      (cl-letf (((symbol-function 'ebp-client-notify)
+                 (lambda (_c method params)
+                   (push (cons method params) notified))))
+        (ebp-sync--push-eldoc (current-buffer) "foo: (foo ARG)")
+        (should (= 1 (length notified)))
+        (pcase-let ((`(,method . ,params) (car notified)))
+          (should (eq method 'eldoc.show))
+          (should (equal (plist-get params :editor_id) "body"))
+          (should (= (plist-get params :seq) 0))
+          (should (equal (plist-get params :text) "foo: (foo ARG)"))
+          (should-not (plist-member params :document)))
+        ;; Same text, same seq: deduped.
+        (ebp-sync--push-eldoc (current-buffer) "foo: (foo ARG)")
+        (should (= 1 (length notified)))
+        ;; Same text, advanced seq: goes out again.
+        (let ((ed (gethash (cons "doc:1" "body")
+                           (ebp-client-editors client))))
+          (setf (plist-get ed :seq) 1))
+        (ebp-sync--push-eldoc (current-buffer) "foo: (foo ARG)")
+        (should (= 2 (length notified)))
+        (should (= (plist-get (cdar notified) :seq) 1))))))
+
+(ert-deftest ebp-sync-eldoc-clears-on-empty ()
+  "Leaving a symbol is a transition, not a no-op: nil pushes the empty
+string so the phone's doc line blanks.  A second nil is deduped."
+  (ebp-sync-test--with "text"
+    (let ((notified nil))
+      (cl-letf (((symbol-function 'ebp-client-notify)
+                 (lambda (_c method params)
+                   (push (cons method params) notified))))
+        (ebp-sync--push-eldoc (current-buffer) "foo: (foo ARG)")
+        (ebp-sync--push-eldoc (current-buffer) nil)
+        (should (= 2 (length notified)))
+        (should (equal (plist-get (cdar notified) :text) ""))
+        (ebp-sync--push-eldoc (current-buffer) nil)
+        (should (= 2 (length notified)))))))
+
+(ert-deftest ebp-sync-eldoc-runs-every-backend-and-formats ()
+  "Sync returns and async callbacks both collect; each doc contributes
+its FIRST line, `:thing' prefixes it, and the join is backend order."
+  (ebp-sync-test--with "text"
+    (let ((notified nil)
+          (eldoc-documentation-functions
+           (list (lambda (_cb) "car: (car LIST)\nsecond line")
+                 (lambda (cb) (funcall cb "the sig" :thing "cdr") t))))
+      (cl-letf (((symbol-function 'ebp-client-notify)
+                 (lambda (_c method params)
+                   (push (cons method params) notified))))
+        (ebp-sync--run-eldoc (current-buffer))
+        (should notified)
+        (should (equal (plist-get (cdar notified) :text)
+                       "car: (car LIST)  •  cdr: the sig"))))))
+
+(ert-deftest ebp-sync-eldoc-caret-gates-on-selection-and-toggle ()
+  "A selection drag is not a request for documentation, and the toggle
+switches the rider off entirely.  A collapsed caret moves point without
+leaving it moved."
+  (ebp-sync-test--with "(car x)"
+    (let* ((notified nil)
+           (seen nil)
+           (eldoc-documentation-functions
+            (list (lambda (_cb) (setq seen (point)) "doc"))))
+      (cl-letf (((symbol-function 'ebp-client-notify)
+                 (lambda (_c method params)
+                   (push (cons method params) notified))))
+        (goto-char (point-min))
+        ;; A non-collapsed caret pushes nothing.
+        (ebp-sync--on-caret client "doc:1" "body" 2 1 4)
+        (should-not notified)
+        ;; The toggle off pushes nothing.
+        (let ((ebp-sync-eldoc nil))
+          (ebp-sync--on-caret client "doc:1" "body" 2 nil nil))
+        (should-not notified)
+        ;; A collapsed caret runs the backends at cursor+1 and restores.
+        (ebp-sync--on-caret client "doc:1" "body" 2 nil nil)
+        (should (= 1 (length notified)))
+        (should (= seen 3))
+        (should (= (point) (point-min)))))))
+
+(ert-deftest ebp-sync-eldoc-format-caps-at-200-columns ()
+  "The line is bounded for the strip it renders into."
+  (let ((long (make-string 400 ?x)))
+    (should (= 200 (string-width (ebp-sync--format-docs
+                                  (list (cons long nil))))))
+    (should-not (ebp-sync--format-docs nil))))
+
 (provide 'ebp-sync-test)
 ;;; ebp-sync-test.el ends here

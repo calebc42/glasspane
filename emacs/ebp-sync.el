@@ -34,6 +34,7 @@
 
 (require 'cl-lib)
 (require 'ebp)
+(require 'eldoc)
 (require 'flymake)
 (require 'track-changes)
 
@@ -65,6 +66,10 @@ steady-state cost.")
 (defvar-local ebp-sync--font-stamp 'unset
   "(SESSION SEQ RUNS) of the last fontify push; seq in the stamp for
 the same reason as diagnostics — the Companion hid the old seq's runs.")
+(defvar-local ebp-sync--eldoc-stamp 'unset
+  "(SESSION SEQ TEXT) of the last eldoc push.  No timer beside it: the
+rider answers each caret report inline, because SPEC 19.3 puts the
+throttling duty on the Companion, at the source.")
 
 (defun ebp-sync--scalar-clean-p (s)
   "Non-nil when S is losslessly representable as Unicode scalar values.
@@ -119,6 +124,8 @@ Returns the buffer, or signals if it carries non-scalar bytes."
                 (ebp-client-edit-open-functions client))
     (cl-pushnew #'ebp-sync--on-change
                 (ebp-client-edit-change-functions client))
+    (cl-pushnew #'ebp-sync--on-caret
+                (ebp-client-edit-caret-functions client))
     (add-hook 'kill-buffer-hook #'ebp-sync-detach nil t)
     ;; Arm the riders here too.  They gate on `ebp-sync--client', so an
     ;; attach that FOLLOWS `edit.open' otherwise pushes nothing until the
@@ -291,7 +298,8 @@ adopts as before."
         (when ebp-sync--tracker
           (track-changes-fetch ebp-sync--tracker #'ignore))
         (setq ebp-sync--diag-stamp 'unset
-              ebp-sync--font-stamp 'unset)
+              ebp-sync--font-stamp 'unset
+              ebp-sync--eldoc-stamp 'unset)
         (ebp-sync--arm-annotations buf)))))
 
 (defun ebp-sync--on-change (client document editor-id text)
@@ -509,6 +517,108 @@ nothing."
                      :session (plist-get ed :session)
                      :seq (plist-get ed :seq)
                      :runs (vconcat runs))))))))))
+
+;; ---------------------------------------------------------- eldoc rider --
+
+;; SPEC 19.5: the caret report is answered with the buffer's OWN eldoc
+;; backends, pushed as `eldoc.show'.  The third rider and the only one
+;; that is not driven by a text change — documentation is a question
+;; about a position, so its trigger is `edit.caret' and there is no
+;; settle timer: SPEC 19.3 puts throttling on the Companion, at the
+;; source.  (Behavior reference: POC 1's jetpacs-sync.el, which ran the
+;; same inline.)
+
+(defcustom ebp-sync-eldoc t
+  "When non-nil, answer the editor's caret reports with eldoc content.
+The phone shows the result (e.g. an elisp function signature with the
+current argument) in a line above the keyboard.  Every backend on
+`eldoc-documentation-functions' runs; asynchronous ones — eglot's LSP
+hover — re-deliver when their reply lands."
+  :type 'boolean :group 'ebp)
+
+(defun ebp-sync--format-docs (docs)
+  "Join collected eldoc DOCS into one capped line, or nil when empty.
+Each doc is (STRING . PLIST); rendered as \"THING: FIRST-LINE\".  Only
+the first line of each survives — a multi-line docstring does not fit a
+strip above a phone keyboard — and the 200 is display COLUMNS, so wide
+glyphs count double.  A product bound, not a SPEC one: `eldoc.show'
+caps only at `max_frame_bytes'."
+  (when docs
+    (truncate-string-to-width
+     (mapconcat
+      (lambda (d)
+        (let ((line (car (split-string (substring-no-properties (car d))
+                                       "\n")))
+              (thing (plist-get (cdr d) :thing)))
+          (if thing (format "%s: %s" thing line) line)))
+      (reverse docs) "  •  ")
+     200)))
+
+(defun ebp-sync--push-eldoc (buffer text)
+  "Push TEXT as BUFFER's eldoc line when it changed since the last push.
+Safe to call any number of times per caret round: synchronous backends
+deliver during the round, async ones whenever their reply lands, and
+the phone simply renders the latest.  A nil TEXT is a real transition,
+not a no-op — it pushes the empty string so the doc line CLEARS when
+the caret leaves a symbol; the stamp suppresses the repeat."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      ;; The mirror entry is the first gate on purpose.  No entry means
+      ;; no session, and `ebp-client-notify' fails CLOSED — it signals
+      ;; `ebp-ungranted' for a method the session has not granted, and a
+      ;; signal raised here would abort the rest of the caret fan-out.
+      (let ((ed (and ebp-sync--client
+                     (gethash (cons ebp-sync--document ebp-sync--editor-id)
+                              (ebp-client-editors ebp-sync--client)))))
+        (when ed
+          (let ((stamp (list (plist-get ed :session)
+                             (plist-get ed :seq) text)))
+            (unless (equal stamp ebp-sync--eldoc-stamp)
+              (setq ebp-sync--eldoc-stamp stamp)
+              (ebp-client-notify
+               ebp-sync--client 'eldoc.show
+               (list :editor_id ebp-sync--editor-id
+                     :session (plist-get ed :session)
+                     :seq (plist-get ed :seq)
+                     :text (or text ""))))))))))
+
+(defun ebp-sync--run-eldoc (buffer)
+  "Run BUFFER's eldoc backends at point and deliver the result.
+`run-hook-wrapped' with a wrapper returning nil runs EVERY backend
+rather than stopping at the first, and `condition-case' per backend
+keeps one throwing backend from killing the round.  The collecting
+closure captures only strings — never the buffer — so a late async
+reply is safe long after point has moved on."
+  (let (docs)
+    (run-hook-wrapped
+     'eldoc-documentation-functions
+     (lambda (fn)
+       (condition-case nil
+           (let ((r (funcall fn (lambda (doc &rest plist)
+                                  (when (stringp doc)
+                                    (push (cons doc plist) docs)
+                                    (ebp-sync--push-eldoc
+                                     buffer (ebp-sync--format-docs docs)))))))
+             (when (stringp r) (push (cons r nil) docs)))
+         (error nil))
+       nil))                            ; nil → run every backend
+    (ebp-sync--push-eldoc buffer (ebp-sync--format-docs docs))))
+
+(defun ebp-sync--on-caret (client document editor-id cursor sel-start sel-end)
+  "Answer an accepted caret report with documentation at that position.
+Two gates: the `ebp-sync-eldoc' toggle, and a COLLAPSED caret — a
+selection drag is not a request for documentation.  Point is restored;
+CURSOR is a 0-based scalar offset and Emacs point is 1-based."
+  (let ((buf (and ebp-sync-eldoc
+                  (not (and (numberp sel-start) (numberp sel-end)
+                            (/= sel-start sel-end)))
+                  (numberp cursor)
+                  (ebp-sync--buffer client document editor-id))))
+    (when buf
+      (with-current-buffer buf
+        (save-excursion
+          (goto-char (min (1+ (max 0 (truncate cursor))) (point-max)))
+          (ebp-sync--run-eldoc buf))))))
 
 (provide 'ebp-sync)
 ;;; ebp-sync.el ends here

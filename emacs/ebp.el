@@ -606,6 +606,12 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; seed-text prior-text) when edit.open arrives, so the application can
   ;; compare the seed against its real document and reconcile explicitly.
   edit-open-functions
+  ;; SPEC 19.3: called with (client document editor-id cursor sel-start
+  ;; sel-end) for each ACCEPTED edit.caret.  Presentation context, never
+  ;; a text change — an application rides it to answer with documentation
+  ;; at point.  SEL-START/SEL-END are nil unless the report carried the
+  ;; pair; a collapsed caret is the one a doc lookup is a request for.
+  edit-caret-functions
   ready-functions ; abnormal hook: called with the client on READY
   ;; SPEC 15.3: the latest replay summary and the bounded-backoff timer
   ;; that retries while `remaining' is nonzero.
@@ -659,6 +665,8 @@ receipts default to `ebp-receipts' under `user-emacs-directory' —
       (push fn (ebp-client-edit-splice-functions client)))
     (when-let* ((fn (plist-get config :edit-open-function)))
       (push fn (ebp-client-edit-open-functions client)))
+    (when-let* ((fn (plist-get config :edit-caret-function)))
+      (push fn (ebp-client-edit-caret-functions client)))
     (when-let* ((fn (plist-get config :after-replay-function)))
       (push fn (ebp-client-after-replay-functions client)))
     (ebp-client-register-handler client "edit.open"
@@ -1685,13 +1693,24 @@ view stale and resync once."
           (ebp-client-edit-resync client doc eid))))))
 
 (defun ebp-client--handle-edit-caret (client params)
-  "SPEC 19.3: best-effort caret; accepted only on session/seq match."
-  (let ((ed (gethash (cons (plist-get params :document)
-                           (plist-get params :editor_id))
-                     (ebp-client-editors client))))
+  "SPEC 19.3: best-effort caret; accepted only on session/seq match.
+The selection pair is optional and paired; it is stored beside the
+cursor and handed to `edit-caret-functions', because \"is this a
+collapsed caret\" is the question a documentation rider asks first and
+it had nowhere to read the answer from."
+  (let* ((doc (plist-get params :document))
+         (eid (plist-get params :editor_id))
+         (ed (gethash (cons doc eid) (ebp-client-editors client))))
     (when (and ed (equal (plist-get ed :session) (plist-get params :session))
                (= (plist-get ed :seq) (plist-get params :seq)))
-      (setf (plist-get ed :cursor) (plist-get params :cursor)))))
+      (let ((cursor (plist-get params :cursor))
+            (sel-start (plist-get params :sel_start))
+            (sel-end (plist-get params :sel_end)))
+        (setf (plist-get ed :cursor) cursor
+              (plist-get ed :sel_start) sel-start
+              (plist-get ed :sel_end) sel-end)
+        (dolist (fn (ebp-client-edit-caret-functions client))
+          (funcall fn client doc eid cursor sel-start sel-end))))))
 
 (defun ebp-client--handle-edit-close (client params)
   "SPEC 19.3: release the mirrored session."

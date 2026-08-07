@@ -169,6 +169,18 @@ NAME is the sample's own upstream name, which
   "Upstream PlainTooltipWithCaretEndOfAnchor (TooltipAnchorPosition.End)."
   (jetpacs-m3-tooltips--plain-caret "end"))
 
+(defun jetpacs-m3-tooltips--custom-caret ()
+  "Upstream PlainTooltipWithCustomCaret: caretShape(DpSize(24.dp, 12.dp)).
+\"Add to favorites\" over the Favorite anchor, like the six positional
+caret samples, because the ARGUMENT to `caretShape' is the only axis
+this one varies.  `:caret-width' and `:caret-height' are that argument:
+they come as a pair and only beside `:caret t', the default-shaped
+pointer they resize."
+  ;; The sample IS the argument to caretShape: DpSize(24.dp, 12.dp).
+  (jetpacs-tooltip "Add to favorites"
+                   (jetpacs-m3-tooltips--anchor "favorite")
+                   :caret t :caret-width 24 :caret-height 12))
+
 (defun jetpacs-m3-tooltips--rich-plain ()
   "Upstream RichTooltipSample."
   (jetpacs-m3-tooltips--rich))
@@ -181,6 +193,16 @@ NAME is the sample's own upstream name, which
 (defun jetpacs-m3-tooltips--rich-caret ()
   "Upstream RichTooltipWithCaretSample."
   (jetpacs-m3-tooltips--rich :caret t))
+
+(defun jetpacs-m3-tooltips--rich-custom-caret ()
+  "Upstream RichTooltipWithCustomCaretSample: caretShape(DpSize(32.dp, 16.dp)).
+The rich twin of `jetpacs-m3-tooltips--custom-caret': the shared
+RichTooltip of `jetpacs-m3-tooltips--rich' -- Permissions subhead, body
+and Request Access button over the Info anchor -- with its caret sized
+by the sample's own DpSize rather than left at the default."
+  ;; The rich twin: caretShape(DpSize(32.dp, 16.dp)).
+  (jetpacs-m3-tooltips--rich :caret t
+                             :caret-width 32 :caret-height 16))
 
 (jetpacs-m3-defcomponent "tooltips"
   :name "Tooltips"
@@ -235,11 +257,7 @@ NAME is the sample's own upstream name, which
     "PlainTooltipWithCustomCaret"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :build (lambda ()
-             ;; The sample IS the argument to caretShape: DpSize(24.dp, 12.dp).
-             (jetpacs-tooltip "Add to favorites"
-                              (jetpacs-m3-tooltips--anchor "favorite")
-                              :caret t :caret-width 24 :caret-height 12)))
+    :build #'jetpacs-m3-tooltips--custom-caret)
    (jetpacs-m3-example
     "RichTooltipSample"
     "Tooltips examples"
@@ -259,10 +277,7 @@ NAME is the sample's own upstream name, which
     "RichTooltipWithCustomCaretSample"
     "Tooltips examples"
     :source jetpacs-m3-tooltips--source
-    :build (lambda ()
-             ;; The rich twin: caretShape(DpSize(32.dp, 16.dp)).
-             (jetpacs-m3-tooltips--rich :caret t
-                                        :caret-width 32 :caret-height 16)))
+    :build #'jetpacs-m3-tooltips--rich-custom-caret)
    ))
 
 (provide 'jetpacs-m3-tooltips)

@@ -91,6 +91,20 @@ above every one, reading \"Favorite\"."
    :id id
    :on-change (jetpacs-m3-demo "Icon tab selected")))
 
+(defun jetpacs-m3-tabs--primary-icon ()
+  "Upstream PrimaryIconTabs: three Favorite tabs, primary indicator.
+The icon-only trio as strip \"tabs-primary-icon\"; `:style \"primary\"'
+is PrimaryTabRow, whose indicator sits under the tab CONTENT -- here a
+48dp glyph and nothing else -- rather than under the whole tab."
+  (jetpacs-m3-tabs--icon-only "tabs-primary-icon" "primary"))
+
+(defun jetpacs-m3-tabs--secondary-icon ()
+  "Upstream SecondaryIconTabs: the same three, under the secondary style.
+Strip \"tabs-secondary-icon\" at `:style \"secondary\"' -- SecondaryTabRow
+and its full-width indicator, which is the only thing standing between
+this sample and PrimaryIconTabs."
+  (jetpacs-m3-tabs--icon-only "tabs-secondary-icon" "secondary"))
+
 (defun jetpacs-m3-tabs--leading-icon ()
   "Upstream LeadingIconTabs: icon before label, a 999+ badge on the title.
 `:icon-position \"leading\"' is M3's LeadingIconTab, and its `:badge'
@@ -210,8 +224,7 @@ tab's bounds -- still animated by the standard offset."
     "PrimaryIconTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :build (lambda () (jetpacs-m3-tabs--icon-only "tabs-primary-icon"
-                                                  "primary")))
+    :build #'jetpacs-m3-tabs--primary-icon)
    (jetpacs-m3-example
     "SecondaryTextTabs"
     "Tabs examples"
@@ -221,8 +234,7 @@ tab's bounds -- still animated by the standard offset."
     "SecondaryIconTabs"
     "Tabs examples"
     :source jetpacs-m3-tabs--source
-    :build (lambda () (jetpacs-m3-tabs--icon-only "tabs-secondary-icon"
-                                                  "secondary")))
+    :build #'jetpacs-m3-tabs--secondary-icon)
    (jetpacs-m3-example
     "TextAndIconTabs"
     "Tabs examples"

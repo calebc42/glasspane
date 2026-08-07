@@ -71,6 +71,21 @@ state is `rememberDatePickerState()' with no pre-selection, so no
   (jetpacs-date-button "Select date"
                        (jetpacs-m3-demo "Selected date timestamp")))
 
+(defun jetpacs-m3-date-pickers--selectable-dates ()
+  "Upstream DatePickerWithDateSelectableDatesSample: the SelectableDates object.
+Upstream hands `rememberDatePickerState' a SelectableDates whose
+`isSelectableDate' blocks Sunday and Saturday and whose
+`isSelectableYear' allows only year > 2022.  A predicate cannot cross
+the wire, so `date_button' takes that pair as a DECLARATION instead --
+`:disabled-weekdays' (0 = Sunday, 6 = Saturday) and `:min-date' -- and
+the dialog greys and refuses them itself.  The bounds live on a
+DatePickerState and the wire's only door to one is the dialog behind
+`date_button', the same seam DateInputSample states."
+  (jetpacs-date-button "Select date"
+                       (jetpacs-m3-demo "Selected date timestamp")
+                       :min-date "2023-01-01"
+                       :disabled-weekdays (list 0 6)))
+
 (defun jetpacs-m3-date-pickers--input ()
   "Upstream DateInputSample: DisplayMode.Input, the typed date-entry field.
 `:mode \"input\"' seeds the dialog's DatePickerState with it, so the tap
@@ -83,6 +98,29 @@ upstream.  The caption is the sample's own selection readout."
                         :mode "input")
    (jetpacs-with-attrs
     (jetpacs-text "Entered date timestamp: no input")
+    :align_self "center")
+   :spacing 8 :fill t))
+
+(defun jetpacs-m3-date-pickers--range ()
+  "Upstream DateRangePickerSample: the two-ended selection, Jan 4 to Jan 10.
+DateRangePicker is not a node type; `month_grid' carries
+`:range-start' and `:range-end', which shade the inclusive span as one
+run with rounded caps -- the part of the sample there is to see.  The
+live flow is ordinary EBP: on_day_tap dispatches each tapped day and
+Emacs rebuilds the range on the next push, so the demo verb stands in
+for that here.  The caption is upstream's own \"Saved range
+\(timestamps)\" snackbar, which its Save button raises once both ends
+are set."
+  (jetpacs-column
+   (jetpacs-with-attrs
+    (jetpacs-month-grid "2020-01"
+                        :range-start "2020-01-04"
+                        :range-end "2020-01-10"
+                        :on-day-tap (jetpacs-m3-demo
+                                     "Saved range (timestamps)"))
+    :padding 16)
+   (jetpacs-with-attrs
+    (jetpacs-text "Saved range (timestamps): 1578096000000..1578614400000")
     :align_self "center")
    :spacing 8 :fill t))
 
@@ -109,14 +147,7 @@ upstream.  The caption is the sample's own selection readout."
     "DatePickerWithDateSelectableDatesSample"
     "Date picker examples"
     :source jetpacs-m3-date-pickers--source
-    :build (lambda ()
-             ;; The SelectableDates predicate, declaratively: weekends
-             ;; blocked (0 = Sunday, 6 = Saturday) and no year before
-             ;; 2023 — the dialog greys and refuses them itself.
-             (jetpacs-date-button "Select date"
-                                  (jetpacs-m3-demo "Selected date timestamp")
-                                  :min-date "2023-01-01"
-                                  :disabled-weekdays (list 0 6))))
+    :build #'jetpacs-m3-date-pickers--selectable-dates)
    (jetpacs-m3-example
     "DateInputSample"
     "Date picker examples"
@@ -126,24 +157,7 @@ upstream.  The caption is the sample's own selection readout."
     "DateRangePickerSample"
     "Date picker examples"
     :source jetpacs-m3-date-pickers--source
-    :build (lambda ()
-             ;; The two-ended selection: range_start/range_end shade the
-             ;; inclusive span with rounded caps.  The live flow is
-             ;; ordinary EBP — on_day_tap dispatches each tapped day and
-             ;; Emacs rebuilds the range on the next push; here the tap
-             ;; reports through the demo verb.
-             (jetpacs-column
-              (jetpacs-with-attrs
-               (jetpacs-month-grid "2020-01"
-                                   :range-start "2020-01-04"
-                                   :range-end "2020-01-10"
-                                   :on-day-tap (jetpacs-m3-demo
-                                                "Saved range (timestamps)"))
-               :padding 16)
-              (jetpacs-with-attrs
-               (jetpacs-text "Saved range (timestamps): 1578096000000..1578614400000")
-               :align_self "center")
-              :spacing 8 :fill t)))
+    :build #'jetpacs-m3-date-pickers--range)
    ))
 
 (provide 'jetpacs-m3-date-pickers)

@@ -300,6 +300,26 @@ time; VERTICAL picks `app_bar_column', the strip stood on end."
     (if vertical (jetpacs-app-bar-column items)
       (jetpacs-app-bar-row items))))
 
+(defun jetpacs-m3-floating-toolbar--overflow-row ()
+  "Upstream OverflowingHorizontalFloatingToolbarSample: the pill that folds.
+HorizontalFloatingToolbar gives its trailingContent an `AppBarRow' of
+five clickableItems, and where they end up is the whole sample: the
+strip measures INSIDE the pill and folds whatever does not fit into the
+more_vert menu at layout time.  That width is one Emacs never sees,
+which is why `app_bar_row' is a node rather than a list trimmed here.
+`floating_toolbar_orientation' horizontal is what makes the slot the
+pill the five actions have to fit into."
+  (jetpacs-m3-floating-toolbar--overflow-strip nil))
+
+(defun jetpacs-m3-floating-toolbar--overflow-column ()
+  "Upstream OverflowingVerticalFloatingToolbarSample: the same fold, on end.
+VerticalFloatingToolbar takes the identical five clickableItems as an
+`AppBarColumn', and `app_bar_column' is that strip stood on end: it
+measures against the pill's HEIGHT and folds the tail into the more_vert
+menu the same way.  Orientation is the only difference from the
+horizontal sample, which is upstream's only difference too."
+  (jetpacs-m3-floating-toolbar--overflow-strip t))
+
 (defun jetpacs-m3-floating-toolbar--as-scaffold-fab ()
   "Upstream HorizontalFloatingToolbarAsScaffoldFabSample, in the fab slot.
 Upstream hands the whole toolbar to `Scaffold(floatingActionButton =)'
@@ -360,7 +380,7 @@ for an inexact one is not a win, so the composition stays."
     :expressive t
     :build #'jetpacs-m3-floating-toolbar--list-content
     :slots (list :floating-toolbar
-                 (lambda () (jetpacs-m3-floating-toolbar--overflow-strip nil)))
+                 #'jetpacs-m3-floating-toolbar--overflow-row)
     :floating-toolbar-orientation "horizontal")
    (jetpacs-m3-example
     "ScrollableHorizontalFloatingToolbarSample"
@@ -389,7 +409,7 @@ for an inexact one is not a win, so the composition stays."
     :expressive t
     :build #'jetpacs-m3-floating-toolbar--list-content
     :slots (list :floating-toolbar
-                 (lambda () (jetpacs-m3-floating-toolbar--overflow-strip t)))
+                 #'jetpacs-m3-floating-toolbar--overflow-column)
     :floating-toolbar-orientation "vertical")
    (jetpacs-m3-example
     "ScrollableVerticalFloatingToolbarSample"

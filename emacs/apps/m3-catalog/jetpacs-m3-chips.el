@@ -98,6 +98,22 @@ label plus the trailing arrow, which is the pair the sample is about."
                 :on-tap (jetpacs-m3-demo "Filter chip")
                 :trailing-icon "arrow_drop_down"))
 
+(defun jetpacs-m3-chips--filter-with-custom-spacing ()
+  "Upstream FilterChipWithCustomSpacingSample: FilterChipSample, tightened.
+`:content-spacing' is FilterChipDefaults.horizontalArrangement -- the
+gap INSIDE the chip's own content row, between its leading icon and its
+label, not the gap between one chip and the next.  That member is the
+whole of what separates this sample from FilterChipSample."
+  ;; FilterChipDefaults.horizontalArrangement(4.dp), verbatim.
+  ;; The authoring caveat the audit flagged: upstream's leading
+  ;; icon exists only while selected, so the sample seeds both
+  ;; :selected and :icon or the member would render invisibly.
+  (jetpacs-chip "Filter chip"
+                :on-tap (jetpacs-m3-demo "Filter chip")
+                :selected t
+                :icon "done"
+                :content-spacing 4))
+
 (defun jetpacs-m3-chips--input ()
   "Upstream InputChipSample: an InputChip over `mutableStateOf(false)'.
 Bare label, no avatar and no trailing dismiss -- `chip' with
@@ -105,6 +121,18 @@ Bare label, no avatar and no trailing dismiss -- `chip' with
   (jetpacs-chip "Input Chip"
                 :on-tap (jetpacs-m3-demo "Input Chip")
                 :variant "input"))
+
+(defun jetpacs-m3-chips--input-with-avatar ()
+  "Upstream InputChipWithAvatarSample: InputChipSample, wearing a Person.
+`:avatar' is the InputChip's own 24dp circular slot -- a different slot
+from the 18dp leadingIcon that `:icon' fills -- so the size and the
+circle are the sample."
+  ;; The circular InputChipDefaults.AvatarSize Person — the one
+  ;; thing separating this from InputChipSample.
+  (jetpacs-chip "Input chip"
+                :on-tap (jetpacs-m3-demo "Input chip")
+                :variant "input"
+                :avatar "person"))
 
 (defun jetpacs-m3-chips--suggestion ()
   "Upstream SuggestionChipSample: a bare SuggestionChip, no graphic."
@@ -214,16 +242,7 @@ VerticalDivider is dropped: the divider node is HorizontalDivider."
     "FilterChipWithCustomSpacingSample"
     "Chips examples"
     :source jetpacs-m3-chips--source
-    :build (lambda ()
-             ;; FilterChipDefaults.horizontalArrangement(4.dp), verbatim.
-             ;; The authoring caveat the audit flagged: upstream's leading
-             ;; icon exists only while selected, so the sample seeds both
-             ;; :selected and :icon or the member would render invisibly.
-             (jetpacs-chip "Filter chip"
-                           :on-tap (jetpacs-m3-demo "Filter chip")
-                           :selected t
-                           :icon "done"
-                           :content-spacing 4)))
+    :build #'jetpacs-m3-chips--filter-with-custom-spacing)
    (jetpacs-m3-example
     "InputChipSample"
     "Chips examples"
@@ -233,13 +252,7 @@ VerticalDivider is dropped: the divider node is HorizontalDivider."
     "InputChipWithAvatarSample"
     "Chips examples"
     :source jetpacs-m3-chips--source
-    :build (lambda ()
-             ;; The circular InputChipDefaults.AvatarSize Person — the one
-             ;; thing separating this from InputChipSample.
-             (jetpacs-chip "Input chip"
-                           :on-tap (jetpacs-m3-demo "Input chip")
-                           :variant "input"
-                           :avatar "person")))
+    :build #'jetpacs-m3-chips--input-with-avatar)
    (jetpacs-m3-example
     "SuggestionChipSample"
     "Chips examples"

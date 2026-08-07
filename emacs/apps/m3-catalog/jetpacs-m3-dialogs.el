@@ -93,6 +93,23 @@ IS onDismissRequest."
     :padding 16)
    :shape "rounded" :elevation 6))
 
+(defun jetpacs-m3-dialogs--basic ()
+  "Upstream BasicAlertDialogSample: the button that raises the §18.1 dialog.
+Registers `jetpacs-m3-dialogs--basic-spec' -- the caller-supplied
+Surface, which is this sample's whole subject -- under \"basic\" in
+`jetpacs-m3-dialog-registry', then authors upstream's own \"Open
+dialog\" Button; its verb shows the spec through `ebp-client-dialog-show'
+outside the dispatch extent.  Upstream's `openDialog' remember starts
+TRUE, so the dialog is up on entry; here it opens from the button,
+because a dialog is a REQUEST and cannot be authored open by a
+snapshot."
+  (puthash "basic" #'jetpacs-m3-dialogs--basic-spec
+           jetpacs-m3-dialog-registry)
+  (jetpacs-with-attrs
+   (jetpacs-button "Open dialog"
+                   (jetpacs-m3-dialog-action "basic"))
+   :align_self "center"))
+
 (jetpacs-m3-defcomponent "dialogs"
   :name "Dialogs"
   :description
@@ -116,13 +133,7 @@ IS onDismissRequest."
     "BasicAlertDialogSample"
     "Dialog examples"
     :source jetpacs-m3-dialogs--source
-    :build (lambda ()
-             (puthash "basic" #'jetpacs-m3-dialogs--basic-spec
-                      jetpacs-m3-dialog-registry)
-             (jetpacs-with-attrs
-              (jetpacs-button "Open dialog"
-                              (jetpacs-m3-dialog-action "basic"))
-              :align_self "center")))
+    :build #'jetpacs-m3-dialogs--basic)
    ))
 
 (provide 'jetpacs-m3-dialogs)

@@ -54,6 +54,19 @@ one thing that separates this sample from TimePickerSample."
   (jetpacs-time-button "Set Time" (jetpacs-m3-demo "Entered time")
                        :display-mode "input"))
 
+(defun jetpacs-m3-time-picker--switchable ()
+  "Upstream TimePickerSwitchableSample: the same screen, the dialog toggling.
+Upstream assembles TimePickerDialog by hand with `modeToggleButton =
+TimePickerDialogDefaults.DisplayModeToggle' and swaps TimePicker for
+TimeInput as its own `displayMode' flips.  `:display-mode
+\"switchable\"' is that whole arrangement as one enum value: the
+Companion raises M3's TimePickerDialog carrying the toggle, and the
+mid-dialog flip between dial and typed input is its own.  Everything
+else is TimePickerSample -- the centered \"Set Time\" button, Ok and
+Cancel, and the \"Entered time\" report on the way back."
+  (jetpacs-time-button "Set Time" (jetpacs-m3-demo "Entered time")
+                       :display-mode "switchable"))
+
 (jetpacs-m3-defcomponent "time-picker"
   :name "Time Picker"
   :description
@@ -77,12 +90,7 @@ one thing that separates this sample from TimePickerSample."
     "TimePickerSwitchableSample"
     "Time Picker examples"
     :source jetpacs-m3-time-picker--source
-    :build (lambda ()
-             ;; TimePickerDialog + DisplayModeToggle: the mid-dialog flip
-             ;; between dial and typed input is the Companion's, driven by
-             ;; the one enum value.
-             (jetpacs-time-button "Set Time" (jetpacs-m3-demo "Entered time")
-                                  :display-mode "switchable")))
+    :build #'jetpacs-m3-time-picker--switchable)
    ))
 
 (provide 'jetpacs-m3-time-picker)

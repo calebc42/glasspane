@@ -37,6 +37,42 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/SegmentedButtonSamples.kt"
   "Upstream SegmentedButtonExampleSourceUrl.")
 
+(defun jetpacs-m3-segmented-button--single-select ()
+  "Upstream SegmentedButtonSingleSelectSample: Day/Month/Week, one chosen.
+Upstream starts at selectedIndex 0 -- \"Day\" -- so `:value' does.  What
+the sample spells out per option and the node owns instead is
+`SegmentedButtonDefaults.itemShape(index, count)': the start/middle/end
+corner math that fuses three buttons into one track.  Here that leaves
+only what varies -- the id the selection is held on, the three options,
+and which starts selected."
+  (jetpacs-segmented-button
+   "segmented-single"
+   (list (jetpacs-enum-option "Day" "day")
+         (jetpacs-enum-option "Month" "month")
+         (jetpacs-enum-option "Week" "week"))
+   :value "day"
+   :on-change (jetpacs-m3-demo "Segmented button")))
+
+(defun jetpacs-m3-segmented-button--multi-select ()
+  "Upstream SegmentedButtonMultiSelectSample: any number of the three checked.
+`:multi-select t' is upstream's MultiChoiceSegmentedButtonRow, and it is
+the whole difference: the value becomes an array rather than one option
+value, and with no `:value' it starts empty, as upstream's empty
+checkedList does.  The icons ride the option records -- an option
+`:icon' renders under `SegmentedButtonDefaults.Icon(active =)', which
+crossfades it into the checkmark as that option is checked, exactly
+upstream's icon slot."
+  (jetpacs-segmented-button
+   "segmented-multi"
+   (list (jetpacs-enum-option "Favorites" "favorites"
+                              :icon "star_border")
+         (jetpacs-enum-option "Trending" "trending"
+                              :icon "trending_up")
+         (jetpacs-enum-option "Saved" "saved"
+                              :icon "bookmark_border"))
+   :multi-select t
+   :on-change (jetpacs-m3-demo "Segmented button")))
+
 (jetpacs-m3-defcomponent "segmented-button"
   :name "Segmented Button"
   :description
@@ -50,32 +86,12 @@
     "SegmentedButtonSingleSelectSample"
     "Segmented Button examples"
     :source jetpacs-m3-segmented-button--source
-    :build (lambda ()
-             ;; Upstream starts at selectedIndex 0 — "Day" selected.
-             (jetpacs-segmented-button
-              "segmented-single"
-              (list (jetpacs-enum-option "Day" "day")
-                    (jetpacs-enum-option "Month" "month")
-                    (jetpacs-enum-option "Week" "week"))
-              :value "day"
-              :on-change (jetpacs-m3-demo "Segmented button"))))
+    :build #'jetpacs-m3-segmented-button--single-select)
    (jetpacs-m3-example
     "SegmentedButtonMultiSelectSample"
     "Segmented Button examples"
     :source jetpacs-m3-segmented-button--source
-    :build (lambda ()
-             ;; Upstream starts with nothing checked; each option's icon
-             ;; crossfades into the checkmark as it is checked.
-             (jetpacs-segmented-button
-              "segmented-multi"
-              (list (jetpacs-enum-option "Favorites" "favorites"
-                                         :icon "star_border")
-                    (jetpacs-enum-option "Trending" "trending"
-                                         :icon "trending_up")
-                    (jetpacs-enum-option "Saved" "saved"
-                                         :icon "bookmark_border"))
-              :multi-select t
-              :on-change (jetpacs-m3-demo "Segmented button"))))
+    :build #'jetpacs-m3-segmented-button--multi-select)
    ))
 
 (provide 'jetpacs-m3-segmented-button)

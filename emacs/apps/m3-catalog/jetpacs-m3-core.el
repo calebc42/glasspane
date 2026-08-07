@@ -748,20 +748,27 @@ catalog must stay navigable when one recreation is wrong."
 
 (defun jetpacs-m3--example-builder (example)
   "The function symbol whose docstring documents EXAMPLE, or nil.
-`:build' is the sample proper and answers for most examples.  An example
-that IS screen chrome has no body builder at all — its subject lives in
-`:top-bar' or in a `:slots' entry — and those answer for it rather than
-leaving seventy of the catalog's examples silent.
+
+CHROME FIRST, and that order is the whole point.  When a sample IS
+screen chrome it claims this screen's `:top-bar' or a scaffold slot —
+`jetpacs-m3-example-screen' explains why — and in exactly those examples
+the `:build' is NOT the sample.  It is the backdrop: a list for the bar
+to collapse over, content for the toolbar to float above, and it is
+usually a helper several examples share.  Asking `:build' first there
+answers the wrong question, and answers it plausibly enough to go
+unnoticed: a search-bar sample would describe itself as \"the Scaffold
+content both scaffold samples share\".  So the subject is whatever
+claimed the chrome, and `:build' answers only when nothing did.
 
 Only a SYMBOL can answer: an inline lambda has no docstring to read, and
 `:snackbar' (a string) and `:on-refresh' (a descriptor) are not functions
 at all, so the `fboundp' test is load-bearing rather than defensive."
   (cl-find-if (lambda (fn) (and fn (symbolp fn) (fboundp fn)))
-              (append (list (plist-get example :build)
-                            (plist-get example :top-bar))
+              (append (list (plist-get example :top-bar))
                       (cl-loop for (_key value)
                                on (plist-get example :slots) by #'cddr
-                               collect value))))
+                               collect value)
+                      (list (plist-get example :build)))))
 
 (defun jetpacs-m3-example-doc (example)
   "EXAMPLE's builder docstring as display text, or nil when it has none.

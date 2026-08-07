@@ -29,6 +29,40 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/RadioButtonSamples.kt"
   "Upstream RadioButtonsExampleSourceUrl.")
 
+(defun jetpacs-m3-radio-buttons--pair ()
+  "Upstream RadioButtonSample: two bare RadioButtons in one selectableGroup.
+One is selected and only one can be; the group is the whole point, and
+`enum_list' is a group by construction, so the pair is one node with one
+`:value'.  This is where the Commentary's label seam shows: upstream's
+two buttons carry no text at all and are named only by
+contentDescription, while an `enum_list' option always carries its label
+-- so \"Selected\" and \"Unselected\" are visible names here as well as
+accessible ones."
+  (jetpacs-enum-list
+   "radio-buttons-pair"
+   (list (jetpacs-enum-option "Selected" "selected")
+         (jetpacs-enum-option "Unselected" "unselected"))
+   :variant "radio"
+   :value "selected"
+   :on-change (jetpacs-m3-demo "Radio button")))
+
+(defun jetpacs-m3-radio-buttons--group ()
+  "Upstream RadioGroupSample: \"Calls\", \"Missed\", \"Friends\", first selected.
+The sample exists to teach the hoist -- each row is `selectable' with
+`role = Role.RadioButton' and the button itself takes `onClick = null',
+so a screen reader announces the row once rather than the button and its
+label twice.  `enum_list' `:variant \"radio\"' is that arrangement done
+in the renderer, so the sample is just the three options and which one
+starts selected."
+  (jetpacs-enum-list
+   "radio-buttons-group"
+   (list (jetpacs-enum-option "Calls" "calls")
+         (jetpacs-enum-option "Missed" "missed")
+         (jetpacs-enum-option "Friends" "friends"))
+   :variant "radio"
+   :value "calls"
+   :on-change (jetpacs-m3-demo "Radio group")))
+
 (jetpacs-m3-defcomponent "radio-buttons"
   :name "Radio buttons"
   :description
@@ -42,31 +76,12 @@
     "RadioButtonSample"
     "Radio buttons examples"
     :source jetpacs-m3-radio-buttons--source
-    :build (lambda ()
-             ;; Upstream: two bare RadioButtons in one selectableGroup,
-             ;; one selected — the Commentary records the label seam.
-             (jetpacs-enum-list
-              "radio-buttons-pair"
-              (list (jetpacs-enum-option "Selected" "selected")
-                    (jetpacs-enum-option "Unselected" "unselected"))
-              :variant "radio"
-              :value "selected"
-              :on-change (jetpacs-m3-demo "Radio button"))))
+    :build #'jetpacs-m3-radio-buttons--pair)
    (jetpacs-m3-example
     "RadioGroupSample"
     "Radio buttons examples"
     :source jetpacs-m3-radio-buttons--source
-    :build (lambda ()
-             ;; radioOptions = listOf("Calls", "Missed", "Friends"),
-             ;; the first selected.
-             (jetpacs-enum-list
-              "radio-buttons-group"
-              (list (jetpacs-enum-option "Calls" "calls")
-                    (jetpacs-enum-option "Missed" "missed")
-                    (jetpacs-enum-option "Friends" "friends"))
-              :variant "radio"
-              :value "calls"
-              :on-change (jetpacs-m3-demo "Radio group"))))
+    :build #'jetpacs-m3-radio-buttons--group)
    ))
 
 (provide 'jetpacs-m3-radio-buttons)

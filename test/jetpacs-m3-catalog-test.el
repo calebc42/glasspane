@@ -509,22 +509,39 @@ the only thing on that screen written by whoever actually drew it."
     (should (cl-some (lambda (s) (string-match-p "Upstream SwitchSample" s))
                      texts))))
 
+(defun jetpacs-m3-test--anonymous-example ()
+  "A (COMPONENT INDEX EXAMPLE) triple whose `:build' is an inline lambda.
+Synthetic, and deliberately NOT registered: the catalog no longer has
+one to find, every module having been swept to named builders so the
+Example screen can show a docstring and the authored source.  The
+screen code must still survive a builder with no symbol -- a
+REPL-defined one arrives exactly that way -- so the fixture is built
+here rather than borrowed from whichever module last owed the debt."
+  (let ((component
+         (list :id "test-anonymous"
+               :name "Anonymous"
+               :description "Synthetic component; never registered."
+               :examples
+               (list (jetpacs-m3-example
+                      "AnonymousBuilderSample" "Anonymous examples"
+                      :build (lambda () (jetpacs-text "no docstring")))))))
+    (list component 0 (car (plist-get component :examples)))))
+
 (ert-deftest jetpacs-m3-doc-block-is-absent-when-there-is-nothing-to-say ()
   "No docstring, no block — never an empty heading.
 An inline lambda has none to read and an `:unsupported' example has no
 builder at all; both must reach the screen without a bare \"Elisp\"
 title standing over nothing."
-  (dolist (probe (list (lambda (e) (and (plist-get e :build)
-                                        (not (symbolp (plist-get e :build)))))
-                       (lambda (e) (plist-get e :unsupported))))
-    (let ((found (jetpacs-m3-test--example-where probe)))
-      (should found)
-      (pcase-let ((`(,component ,index ,example) found))
-        (should-not (jetpacs-m3-example-doc example))
-        (should-not (member "Elisp"
-                            (jetpacs-m3-test--texts
-                             (jetpacs-m3-example-screen
-                              component index nil))))))))
+  (dolist (found (list (jetpacs-m3-test--anonymous-example)
+                       (jetpacs-m3-test--example-where
+                        (lambda (e) (plist-get e :unsupported)))))
+    (should found)
+    (pcase-let ((`(,component ,index ,example) found))
+      (should-not (jetpacs-m3-example-doc example))
+      (should-not (member "Elisp"
+                          (jetpacs-m3-test--texts
+                           (jetpacs-m3-example-screen
+                            component index nil)))))))
 
 (ert-deftest jetpacs-m3-doc-falls-back-to-the-chrome-builder ()
   "An example that IS screen chrome documents itself through its slot.
@@ -537,6 +554,33 @@ silent on a screen whose whole point is to explain the sample."
                                  (jetpacs-m3--example-builder e))))))
     (should found)
     (should (stringp (jetpacs-m3-example-doc (nth 2 found))))))
+
+(ert-deftest jetpacs-m3-doc-prefers-the-chrome-over-the-backdrop ()
+  "When a sample IS chrome, its `:build' is scenery and must not answer.
+The search-bar scaffold samples are the case that proved it: their
+`:build' is a helper two examples share to give the collapsing bar a
+hundred lines to scroll, so asking `:build' first made a screen about a
+full-screen search bar describe itself as \"the Scaffold content both
+scaffold samples share\" — wrong, and plausible enough to go unnoticed."
+  (let ((found (jetpacs-m3-test--example-where
+                (lambda (e)
+                  (and (symbolp (plist-get e :build)) (plist-get e :build)
+                       (symbolp (plist-get e :top-bar)) (plist-get e :top-bar))))))
+    (should found)
+    (let ((example (nth 2 found)))
+      (should (eq (jetpacs-m3--example-builder example)
+                  (plist-get example :top-bar)))))
+  ;; The same rule for a scaffold SLOT, which is the larger population.
+  (let ((found (jetpacs-m3-test--example-where
+                (lambda (e)
+                  (and (symbolp (plist-get e :build)) (plist-get e :build)
+                       (null (plist-get e :top-bar))
+                       (cl-loop for (_k v) on (plist-get e :slots) by #'cddr
+                                thereis (and v (symbolp v) (fboundp v))))))))
+    (should found)
+    (let ((example (nth 2 found)))
+      (should-not (eq (jetpacs-m3--example-builder example)
+                      (plist-get example :build))))))
 
 (ert-deftest jetpacs-m3-example-doc-never-signals ()
   "A docstring nobody can read costs its block and nothing else.

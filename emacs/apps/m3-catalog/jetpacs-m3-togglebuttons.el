@@ -85,6 +85,24 @@ the same message, because a toggle dispatches `on_change' in its place."
   "Upstream ToggleButtonSample: ToggleButton(checked, onCheckedChange)."
   (jetpacs-m3-togglebuttons--toggle "togglebuttons-basic" "Button"))
 
+(defun jetpacs-m3-togglebuttons--round ()
+  "Upstream RoundToggleButtonSample: the inverted set, one member per shape.
+`:shape' names the resting square and `:checked-shape' the round it
+morphs to while checked -- ToggleButtonShapes(squareShape, pressedShape,
+roundShape) asked for by saying each half once.  Node
+\"togglebuttons-round\" is where the device holds the flipped boolean,
+starting from upstream's false.  (The catalog names this example
+RoundToggleButtonSample while invoking `SquareToggleButtonSample';
+preserved as data.)"
+  (jetpacs-with-attrs
+   (jetpacs-button "Round Toggle Button"
+                   (jetpacs-m3-demo "Round Toggle Button")
+                   :checked :json-false
+                   :on-change (jetpacs-m3-demo "Round Toggle Button")
+                   :shape "square"
+                   :checked-shape "round")
+   :id "togglebuttons-round"))
+
 (defun jetpacs-m3-togglebuttons--elevated ()
   "Upstream ElevatedToggleButtonSample: ElevatedToggleButton."
   (jetpacs-m3-togglebuttons--toggle "togglebuttons-elevated" "Elevated Button"
@@ -147,21 +165,7 @@ otherwise; `edit' is the outlined vector, the state it starts in."
     "ToggleButton examples"
     :source jetpacs-m3-togglebuttons--source
     :expressive t
-    :build (lambda ()
-             ;; The inverted set, one member per shape: :shape names the
-             ;; resting square, :checked-shape the round it morphs to —
-             ;; ToggleButtonShapes(squareShape, pressedShape, roundShape)
-             ;; exactly.  (The catalog names this RoundToggleButtonSample
-             ;; while invoking SquareToggleButtonSample; preserved as
-             ;; data.)
-             (jetpacs-with-attrs
-              (jetpacs-button "Round Toggle Button"
-                              (jetpacs-m3-demo "Round Toggle Button")
-                              :checked :json-false
-                              :on-change (jetpacs-m3-demo "Round Toggle Button")
-                              :shape "square"
-                              :checked-shape "round")
-              :id "togglebuttons-round")))
+    :build #'jetpacs-m3-togglebuttons--round)
    (jetpacs-m3-example
     "ElevatedToggleButtonSample"
     "ToggleButton examples"

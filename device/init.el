@@ -21,6 +21,7 @@
 (require 'jetpacs-transient)
 (require 'jetpacs-devtools)   ; the push profiler + failure flight recorder
 ;; …the mode skins (additive: they register for their major modes)…
+(require 'jetpacs-repl)      ; the Elisp REPL this home screen IS
 (require 'jetpacs-comint)
 (require 'jetpacs-sections)
 (require 'jetpacs-results)
@@ -199,98 +200,30 @@ so the dock is two destinations: Home and Files."
 ;;;; can never be pushed off-screen, and *scratch*-style multi-form
 ;;;; evaluation with * ** *** holding the last three results.
 
-(defvar jetpacs-hub--eval-history nil
-  "REPL history, newest first: (INPUT OUTPUT ERRORP).")
-
-(defvar jetpacs-hub--eval-history-max 50)
-(defvar jetpacs-hub--eval-output-max 2000)
-
-(defun jetpacs-hub--eval-card (idx entry)
-  (pcase-let* ((`(,input ,output ,errorp) entry)
-               (shown (if (> (length output) jetpacs-hub--eval-output-max)
-                          (concat (substring
-                                   output 0 jetpacs-hub--eval-output-max)
-                                  " …")
-                        output)))
-    (jetpacs-card
-     (jetpacs-column
-      (jetpacs-row
-       (jetpacs-with-attrs
-        (jetpacs-text (concat "λ> " input) :style "label" :max-lines 2)
-        :weight 1)
-       (jetpacs-icon-button "content_copy" (jetpacs-clipboard-copy output)
-                            :content-description "Copy result")
-       (jetpacs-icon-button "play_arrow"
-                            (jetpacs-action "hub.eval"
-                                            :args (list :value input))
-                            :content-description "Re-run"))
-      (jetpacs-text shown :style "mono" :selectable t
-                    :color (and errorp "error"))))))
-
-(defun jetpacs-hub--eval-card-keyed (idx entry)
-  "The history card with its reconciliation key attached the legal way:
-:key is a universal attribute, not a card member."
-  (jetpacs-with-attrs (jetpacs-hub--eval-card idx entry)
-                      :key (jetpacs-wire-id "ev" (format "%d" idx))))
+(defconst jetpacs-hub--repl "hub"
+  "The hub's `jetpacs-repl' session id.")
 
 (defun jetpacs-hub--screen (_back)
-  (let ((i -1))
-    (jetpacs-chrome-screen
-     "Jetpacs"
-     (jetpacs-column
-      (jetpacs-with-attrs
-       (if jetpacs-hub--eval-history
-           (apply #'jetpacs-lazy-column
-                  (mapcar (lambda (e)
-                            (jetpacs-hub--eval-card-keyed (cl-incf i) e))
-                          jetpacs-hub--eval-history))
-         (jetpacs-empty-state
-          :icon "code" :title "Elisp REPL"
-          :caption (concat "Results appear here, newest first.  "
-                           "* ** and *** hold the last three results.")))
-       :weight 1)
-      (jetpacs-divider)
-      (jetpacs-with-attrs
-       (jetpacs-row
-        (jetpacs-with-attrs
-         ;; A SYNCHRONIZED §19 editor, not a local draft.  `:document'
-         ;; makes the Companion open an edit session on the next push,
-         ;; so the text arrives as deltas into `ebp.el''s mirror and
-         ;; `hub.eval' reads it from there.  `:publish-state' is gone on
-         ;; purpose: this Companion registers a node as stateful only
-         ;; when publish_state is true AND it carries no document, so
-         ;; leaving it would be inert and misleading.  The document id
-         ;; ends `.el' because `ebp-complete--mode-for' matches the
-         ;; DOCUMENT against `auto-mode-alist' to pick the shadow's
-         ;; major mode — that is what makes the elisp capfs answer.
-         ;; Caveat: while a bridged `completing-read' dialog is open the
-         ;; picker borrows the client-wide `:edit-complete-function' and
-         ;; answers empty for every other document, so this dropdown
-         ;; goes quiet for the life of that prompt.
-         (jetpacs-editor "hub-eval" :document "scratch.el" :complete t
-                         :chromeless t :syntax "elisp"
-                         :on-enter (jetpacs-action "hub.eval"))
-         :weight 1)
-        (jetpacs-icon-button "send" (jetpacs-action "hub.eval")
-                             :content-description "Eval"))
-       :padding 8))
-     :actions (list (jetpacs-emacs-ui-mx-button))
-     :drawer (jetpacs-hub--drawer))))
-
-(defun jetpacs-hub--eval-forms (input)
-  "Evaluate every form in INPUT like *scratch* would; the last value.
-Feeds * ** *** the way ielm does, so follow-up expressions can chain."
-  (let ((last nil))
-    (with-temp-buffer
-      (insert input)
-      (goto-char (point-min))
-      (condition-case nil
-          (while t (setq last (eval (read (current-buffer)) t)))
-        (end-of-file nil)))
-    (set '*** (and (boundp '**) (symbol-value '**)))
-    (set '** (and (boundp '*) (symbol-value '*)))
-    (set '* last)
-    last))
+  (jetpacs-chrome-screen
+   "Jetpacs"
+   (jetpacs-column
+    (jetpacs-with-attrs
+     (if-let* ((cards (jetpacs-repl-cards jetpacs-hub--repl :verb "hub.eval")))
+         (apply #'jetpacs-lazy-column cards)
+       (jetpacs-repl-empty-state))
+     :weight 1)
+    (jetpacs-divider)
+    ;; A SYNCHRONIZED §19 editor, not a local draft: `:document' makes
+    ;; the Companion open an edit session on the next push, so the text
+    ;; arrives as deltas into `ebp.el''s mirror and `hub.eval' reads it
+    ;; from there.  Caveat, unchanged by the move: while a bridged
+    ;; `completing-read' dialog is open the picker borrows the
+    ;; client-wide `:edit-complete-function' and answers empty for every
+    ;; other document, so this dropdown goes quiet for that prompt.
+    (jetpacs-repl-input-row :editor-id "hub-eval" :document "scratch.el"
+                            :verb "hub.eval"))
+   :actions (list (jetpacs-emacs-ui-mx-button))
+   :drawer (jetpacs-hub--drawer)))
 
 (with-jetpacs-owner "hub"
   (jetpacs-chrome-define-root "hub" "home" #'jetpacs-hub--screen
@@ -343,18 +276,8 @@ Feeds * ** *** the way ielm does, so follow-up expressions can chain."
             'rejected
           (jetpacs-flow-continue
            (lambda ()
-             (let (output errorp)
-               (condition-case err
-                   (setq output (prin1-to-string
-                                 (jetpacs-hub--eval-forms input)))
-                 (error (setq output (error-message-string err)
-                              errorp t))
-                 (quit (setq output "Quit" errorp t)))
-               (push (list input output errorp) jetpacs-hub--eval-history)
-               (setq jetpacs-hub--eval-history
-                     (seq-take jetpacs-hub--eval-history
-                               jetpacs-hub--eval-history-max))
-               (ignore-errors (jetpacs-shell-push "hub")))))
+             (jetpacs-repl-run jetpacs-hub--repl input)
+             (ignore-errors (jetpacs-shell-push "hub"))))
           'accepted)))
     :any-surface t))
 

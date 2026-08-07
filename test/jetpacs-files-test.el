@@ -1751,6 +1751,64 @@ so an inbound handler can run arbitrary file I/O underneath it.  The
               (with-current-buffer buf (set-buffer-modified-p nil))
               (kill-buffer buf))))))))
 
+(ert-deftest jetpacs-files-save-synced-writes-the-whole-buffer ()
+  "A NARROWED synced buffer saves the whole file, not the accessible
+portion.  `write-region' and `buffer-substring-no-properties' both honor
+the restriction, so under a narrowing the save wrote only the visible
+region over the file, cleared the modified flag (destroying the user's
+recovery path), and re-stamped the reconnect seed to the truncated text.
+Narrowing a file buffer is ordinary Emacs — `jetpacs-org-render' even
+renders a widen affordance for it — so this was reachable, silent, and
+unrecoverable."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (let* ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
+             (f (concat root "f.txt"))
+             (whole "AAA\nBBB\nCCC\n")
+             (jetpacs-files--edit nil))
+        (write-region whole nil f nil 'silent)
+        (let* ((true (file-truename f))
+               (buf (find-file-noselect true)))
+          (unwind-protect
+              (cl-letf (((symbol-function 'jetpacs-shell-notify) #'ignore)
+                        ((symbol-function 'jetpacs-shell-push)
+                         (lambda (&rest _) 1))
+                        ((symbol-function 'ebp-sync-buffer)
+                         (lambda (_c _d _e) buf))
+                        ((symbol-function 'ebp-sync-flush) #'ignore))
+                (with-current-buffer buf
+                  (goto-char (point-min))
+                  (narrow-to-region 5 9)
+                  (should (equal (buffer-string) "BBB\n")))
+                (setq jetpacs-files--edit
+                      (list :path true :seed whole
+                            :mtime (jetpacs-files--mtime-stamp true)
+                            :coding nil
+                            :document "doc:f.txt" :editor-id "body"))
+                (should (eq (jetpacs--dispatch
+                             client `(:action "jetpacs.files.save"
+                                      :surface "app:jetpacs.files"
+                                      :args (:path ,true
+                                             :mtime ,(jetpacs-files--mtime-stamp true)
+                                             :value ,whole))
+                             handler)
+                            'accepted))
+                ;; The file keeps the lines outside the restriction...
+                (with-temp-buffer
+                  (insert-file-contents true)
+                  (should (equal (buffer-string) whole)))
+                ;; ...and so does the reconnect seed, which must describe
+                ;; what actually landed on disk or the next `edit.open'
+                ;; reseeds the device from truncated text.
+                (should (equal (plist-get jetpacs-files--edit :seed) whole))
+                ;; The restriction itself is the user's, and survives.
+                (with-current-buffer buf
+                  (should (equal (buffer-string) "BBB\n"))))
+            (with-current-buffer buf
+              (widen)
+              (set-buffer-modified-p nil))
+            (kill-buffer buf)))))))
+
 (ert-deftest jetpacs-files-save-survives-a-broken-seam ()
   "A save whose after-save subscriber SIGNALS still answers `accepted'.
 The write is already durable when the seam runs; letting the signal

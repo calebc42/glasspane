@@ -1505,10 +1505,22 @@ Runs inside a device flow."
                           ;; Emacs itself changed since the device's last
                           ;; delta.
                           (with-current-buffer synced
-                            (setq written (buffer-substring-no-properties
-                                           (point-min) (point-max)))
-                            (write-region (point-min) (point-max) true
-                                          nil 'silent)
+                            ;; WIDEN, or a narrowed buffer saves only its
+                            ;; accessible portion OVER the whole file:
+                            ;; both `buffer-substring-no-properties' and
+                            ;; `write-region' honor the restriction.  The
+                            ;; snapshot is inside the widen too — the
+                            ;; seed must describe what actually landed on
+                            ;; disk, or the next reseed hands the device
+                            ;; truncated text.  The flag and the modtime
+                            ;; are buffer-global and stay outside; the
+                            ;; user's own restriction is restored.
+                            (save-restriction
+                              (widen)
+                              (setq written (buffer-substring-no-properties
+                                             (point-min) (point-max)))
+                              (write-region (point-min) (point-max) true
+                                            nil 'silent))
                             (set-buffer-modified-p nil)
                             (set-visited-file-modtime))
                         (write-region value nil true nil 'silent)))

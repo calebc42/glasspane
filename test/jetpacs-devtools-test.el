@@ -307,5 +307,128 @@ sizes itself to the threshold."
                               (buffer-substring-no-properties
                                (point-min) (point-max)))))))
 
+;;;; The inspector (capture on demand)
+
+(ert-deftest jetpacs-devtools-inspect-verb-declares-its-schema ()
+  "The verb dogfoods the `:args'/`:doc' registry it asks other apps to
+use: one required `surface' of type text, and a line saying what it
+does.  A global verb, too — devtools owns zero surfaces and the
+affordance sits in the hub's drawer."
+  (let ((schema (jetpacs-action-schema "jetpacs.devtools.inspect")))
+    (should schema)
+    (should (equal (plist-get schema :args)
+                   '((:name surface :type "text" :required t))))
+    (should (stringp (plist-get schema :doc)))
+    (should (plist-get schema :any-surface)))
+  ;; The picker half declares itself too (no args: the surface is the
+  ;; thing it asks for).
+  (let ((schema (jetpacs-action-schema "jetpacs.devtools.inspect-pick")))
+    (should schema)
+    (should-not (plist-get schema :args))
+    (should (stringp (plist-get schema :doc)))
+    (should (plist-get schema :any-surface))))
+
+(ert-deftest jetpacs-devtools-inspect-builds-fresh-and-renders-the-datum ()
+  "The handler produces a live buffer that OPENS with the datum: point-min
+is the spec's own paren, and a node member of the registered root is in
+it.  Built fresh — the recorder is OFF here, so a cache-reading
+inspector would have had nothing to show."
+  (jetpacs-devtools-test--with (jetpacs-devtools-test--client)
+    (jetpacs-devtools-test--recording _recs
+      (jetpacs-devtools-test--define-root "devt")
+      (let ((navigated nil))
+        (cl-letf (((symbol-function 'jetpacs-navigate-buffer)
+                   (lambda (target &rest _) (setq navigated target)))
+                  ((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (funcall fn))))
+          (should (eq (jetpacs-devtools--action-inspect
+                       '(:surface "app:devt") '(:surface "app:devt"))
+                      'accepted))
+          (let ((buf (get-buffer "*jetpacs-inspect: app:devt*")))
+            (should (buffer-live-p buf))
+            (should (eq navigated buf))
+            (with-current-buffer buf
+              (let ((text (buffer-substring-no-properties
+                           (point-min) (point-max))))
+                ;; The datum first: no preamble to step over.
+                (should (string-prefix-p "(" text))
+                ;; A known node member of the built root.
+                (should (string-match-p ":t \"scaffold\"" text))
+                (should (string-match-p "Hub" text))
+                ;; The push-back recipe rides along as a comment.
+                (should (string-match-p "jetpacs-shell-push" text))))
+            (kill-buffer buf)))))))
+
+(ert-deftest jetpacs-devtools-inspect-does-not-read-the-recorder-cache ()
+  "CAPTURE ON DEMAND: the retention is recording-gated and may be off, so
+the inspector builds instead of reading.  A poisoned cache entry proves
+which one it did — and the inspection leaves the instrumentation
+untouched, creating no retention of its own."
+  (jetpacs-devtools-test--with (jetpacs-devtools-test--client)
+    (jetpacs-devtools-test--recording _recs
+      (jetpacs-devtools-test--define-root "devt")
+      (puthash "app:devt" (jetpacs-text "STALE-CACHED-SPEC")
+               jetpacs-devtools--specs)
+      (let ((spec (jetpacs-devtools-capture-spec "app:devt")))
+        (should spec)
+        (let ((json (jetpacs-node->canonical-json spec)))
+          (should (string-match-p "Hub" json))
+          (should-not (string-match-p "STALE-CACHED-SPEC" json))))
+      ;; Measurement-neutral: nothing recorded, nothing counted.
+      (should (equal (gethash "app:devt" jetpacs-devtools--specs)
+                     (jetpacs-text "STALE-CACHED-SPEC")))
+      (should-not (gethash "app:devt" jetpacs-devtools--builds))
+      ;; A bare owner spells the same root (the REPL convenience).
+      (should (jetpacs-devtools-capture-spec "devt")))))
+
+(ert-deftest jetpacs-devtools-inspect-cap-truncates-and-says-so ()
+  "An oversized spec is CUT, never silently: the announcement names the
+cap and points at the REPL for the whole datum."
+  ;; The registry bound directly: no client, no wire, no teardown — the
+  ;; inspector reads `jetpacs-shell-roots' and builds, and that is all
+  ;; this needs to be true of.
+  (let ((jetpacs-shell--roots
+         (list (cons "app:big"
+                     (list :builder (lambda ()
+                                      (jetpacs-text (make-string 4000 ?x)))
+                           :owner "big"))))
+        (jetpacs-devtools-inspect-max 512))
+    (let ((buf (jetpacs-devtools-inspect-buffer "app:big")))
+      (should (buffer-live-p buf))
+      (with-current-buffer buf
+        (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+          (should (string-prefix-p "(" text))
+          (should (string-match-p "TRUNCATED at 512 of" text))
+          (should (string-match-p "jetpacs-devtools-capture-spec" text))))
+      (kill-buffer buf))))
+
+(ert-deftest jetpacs-devtools-inspect-unknown-surface-rejects-quietly ()
+  "A surface nothing registers is a PERMANENT no (SPEC 14.4 `rejected'),
+answered inside the extent — never a signal escaping the dispatch, and
+never a deferred continuation with nothing to build."
+  (jetpacs-devtools-test--with (jetpacs-devtools-test--client)
+    (let ((deferred 0))
+      (cl-letf (((symbol-function 'jetpacs-flow-continue)
+                 (lambda (_fn) (cl-incf deferred))))
+        (should (eq (jetpacs-devtools--action-inspect
+                     '(:surface "app:nope") '(:surface "app:hub"))
+                    'rejected))
+        (should (eq (jetpacs-devtools--action-inspect
+                     '(:surface 42) '(:surface "app:hub"))
+                    'rejected))
+        (should (zerop deferred))))
+    ;; And through the real dispatch, which is where "does not signal
+    ;; out of the extent" actually means something.
+    (should (eq (jetpacs--dispatch
+                 (jetpacs-client)
+                 '(:action "jetpacs.devtools.inspect"
+                   :surface "app:hub" :args (:surface "app:nope"))
+                 (gethash "jetpacs.devtools.inspect" jetpacs-action-handlers))
+                'rejected))
+    (should-not (get-buffer "*jetpacs-inspect: app:nope*"))
+    ;; The renderer half degrades the same way: nil, no buffer, no signal.
+    (should-not (jetpacs-devtools-inspect-buffer "app:nope"))
+    (should-not (jetpacs-devtools-capture-spec nil))))
+
 (provide 'jetpacs-devtools-test)
 ;;; jetpacs-devtools-test.el ends here

@@ -108,7 +108,8 @@
 
 (defun jetpacs-hub--tools-entry ()
   "The drawer's Tools nest: the everyday utilities under one header —
-Clipboard, the Messages log, and the buffer switcher."
+Clipboard, the Messages log, the buffer switcher, and the two devtools
+rows: the push-loop report, and Inspect a screen."
   (jetpacs-collapsible
    "drawer-tools"
    ;; A plain row: the header line is the expand target.
@@ -145,6 +146,14 @@ Clipboard, the Messages log, and the buffer switcher."
     "Devtools" :subtitle "push loop, failures" :icon "build"
     :on-tap (jetpacs-action "hub.open" :args '(:buffer "*jetpacs-devtools*"))
     :key "drawer-tools-devtools")
+   ;; The homoiconic loop, one tap in: the verb picks a live surface
+   ;; through the bridged picker, builds its spec fresh, and shows the
+   ;; Lisp on the phone.  Copy the sexp into the Eval REPL two screens
+   ;; away, edit it, and `jetpacs-shell-push' it back with :spec.
+   (jetpacs-chrome-row
+    "Inspect a screen" :subtitle "its spec, as Lisp" :icon "data_object"
+    :on-tap (jetpacs-action "jetpacs.devtools.inspect-pick")
+    :key "drawer-tools-inspect")
    :collapsed t))
 
 (defun jetpacs-hub--drawer ()

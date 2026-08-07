@@ -43,14 +43,37 @@
 ;; trigger source (SPEC 21.4) is live is the developer's own call —
 ;; the setting exists so that call is explicit.
 ;;
-;; Zero wire cost either way: this module observes one seam and two
-;; advised functions and never sends anything itself.
+;; INSPECTOR (`jetpacs-devtools-inspect', no setting at all) — the
+;; third half, and the only one that answers "what is this screen
+;; MADE of".  A Jetpacs screen is a Lisp datum: the builder returns a
+;; spec, the spec is a plist of plists and vectors, and the device is
+;; a rendering of it.  The inspector closes that loop for a human —
+;; build the spec fresh, pretty-print it into a buffer, and show the
+;; buffer through the Tier-0 renderer so the data is readable ON THE
+;; PHONE, then hand it straight back with `jetpacs-shell-push'
+;; `:spec'.  Inspect, edit the sexp, push it: the whole round trip and
+;; not one line of new machinery on the return leg.
+;;
+;; It is CAPTURE ON DEMAND, and that is a deliberate refusal of the
+;; retention above.  `jetpacs-devtools--specs' already holds a spec
+;; per surface — but only while the recorder is on, which is a
+;; developer setting that is OFF by default and may be off right now,
+;; and what it holds is the spec of some PAST build.  Reading it would
+;; make the inspector answer "nothing" on a healthy session and answer
+;; STALE on a recording one.  So the inspector builds; the retention
+;; is the flight recorder's business and stays that way.
+;;
+;; Zero wire cost for the first two: this module observes one seam and
+;; two advised functions and never sends anything itself.  The
+;; inspector sends exactly what any drill-in sends — a buffer.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'backtrace)
+(require 'pp)
 (require 'jetpacs-shell)
+(require 'jetpacs-navigate)
 
 (defgroup jetpacs-devtools nil
   "Instrumentation for the Jetpacs push loop."
@@ -107,6 +130,16 @@ can trip."
 
 (defconst jetpacs-devtools--backtrace-max 12000
   "Octets of backtrace kept per record — part of the 23.3 size bound.")
+
+(defconst jetpacs-devtools-inspect-max 65536
+  "Octets of pretty-printed spec `jetpacs-devtools-inspect-buffer' shows.
+A DEFENSIVE cap, not a wire bound — nothing here crosses the wire; the
+Tier-0 renderer pages the buffer onto the device like any other, and
+budgets it there.  What this bounds is the local buffer: a spec is
+whatever a builder returned, a builder is user code, and an unbounded
+`pp' of a pathological one is a wedged Emacs on a phone.  A cut is
+ANNOUNCED in the buffer, never silent, and the full datum is always one
+`jetpacs-devtools-capture-spec' call away in the REPL.")
 
 ;; --- State ------------------------------------------------------------------
 
@@ -358,6 +391,196 @@ jetpacs-devtools-toggle-recording)")))
   "Render and display the devtools report."
   (interactive)
   (display-buffer (jetpacs-devtools-report-buffer)))
+
+;; --- The inspector: the spec is data, and the data is yours ------------------
+
+(defun jetpacs-devtools--resolve-root (surface)
+  "The live root id SURFACE names, or nil when nothing registers one.
+`jetpacs-shell-roots' is the PUBLIC read of the registry — the same one
+the launcher builds its app list from, so \"a surface you can inspect\"
+and \"a surface you can switch to\" are the same set by construction.
+An exact id wins; a bare owner falls back to its D1 `app:<owner>'
+spelling, so a REPL caller may type `\"hub\"'."
+  (and (stringp surface)
+       (let ((roots (jetpacs-shell-roots)))
+         (cond ((assoc surface roots) surface)
+               ((assoc (concat "app:" surface) roots) (concat "app:" surface))))))
+
+(defun jetpacs-devtools-capture-spec (surface)
+  "Build SURFACE's registered root FRESH, right now, and return the spec.
+Nil when nothing registers SURFACE.
+
+CAPTURE ON DEMAND.  This deliberately does NOT read
+`jetpacs-devtools--specs' (nor its accessor `jetpacs-devtools-last-spec'):
+that retention is RECORDING-GATED and the recorder is off by default —
+so it may hold nothing at all, and when it holds something it holds the
+spec of a PAST build.  \"What does this screen look like as data, now\"
+is a question a build answers and a cache does not.
+
+The capture route is `jetpacs-shell--build' called with the registry's
+own entry plist — literally the two lines `jetpacs-shell-push' runs
+before it reaches the gates.  That is the LEAST new seam available:
+zero new code in the shell, and the spec you read here is the spec the
+device would be sent, degrade included (a crashing builder yields its
+error view rather than signalling out of an inspection).  Calling the
+root's `:builder' directly would have to re-create by hand the three
+things that build wraps it in — the registered owner binding, the ONE
+per-document id-claim table, and the degrade — which is more new code
+for a spec that is no longer the one the phone gets.  Devtools is
+already the module that reaches into this function; it advises it.
+
+The measurement is left ALONE: the profiler and the recorder are bound
+off across the build, so an inspection does not land in the wall-clock
+tally, does not count toward the push-storm history, and — the part
+that matters under SPEC 23.3 — creates no payload retention of its own.
+Inspecting is reading, not recording."
+  (when-let* ((id (jetpacs-devtools--resolve-root surface))
+              (entry (alist-get id jetpacs-shell--roots nil nil #'equal)))
+    (let ((jetpacs-devtools-profile nil)
+          (jetpacs-devtools-recording nil))
+      (jetpacs-shell--build id entry))))
+
+(defun jetpacs-devtools-inspect-buffer (surface)
+  "Pretty-print SURFACE's freshly built spec into a buffer; return it.
+Nil when nothing registers SURFACE.  The buffer is
+\"*jetpacs-inspect: SURFACE*\" and it OPENS WITH THE DATUM: point-min is
+the spec's own open paren, so `C-M-f', `C-x C-e', and a plain kill of
+the whole form all work without stepping over a preamble.  The prose —
+provenance, the push-back recipe, any truncation notice — trails below
+as Lisp comments.
+
+The loop the prose describes needs no code on its return leg:
+
+    ;; on the phone, or here
+    (jetpacs-devtools-inspect \"app:hub\")
+    ;; edit the sexp — retitle the top bar, drop a node, add a button
+    (jetpacs-shell-push \"app:hub\" :spec EDITED)
+
+`jetpacs-shell-push' has taken a `:spec' override since the first cut,
+so the edited datum goes back exactly the way the builder's would have.
+Homoiconic all the way down: the screen is a value, and a value can be
+read, changed, and returned."
+  (when-let* ((id (jetpacs-devtools--resolve-root surface)))
+    (let* ((spec (jetpacs-devtools-capture-spec id))
+           (text (pp-to-string spec))
+           (full (string-bytes text))
+           (cut (> full jetpacs-devtools-inspect-max))
+           (buf (get-buffer-create (format "*jetpacs-inspect: %s*" id))))
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          ;; Chars never outnumber octets, so a char-count substring is
+          ;; always inside the octet cap.
+          (insert (if cut (substring text 0 jetpacs-devtools-inspect-max) text))
+          (unless (bolp) (insert "\n"))
+          (when cut
+            (insert (format "\n;; TRUNCATED at %d of %d octets \
+(jetpacs-devtools-inspect-max).\n\
+;; The form above is INCOMPLETE — read the whole datum with\n\
+;;   (pp (jetpacs-devtools-capture-spec %S))\n"
+                            jetpacs-devtools-inspect-max full id)))
+          (insert (format "\n;; %s — built %s, fresh (never a cached spec).\n\
+;; The spec is DATA and the data is yours: edit the form above, then\n\
+;;   (jetpacs-shell-push %S :spec EDITED)\n\
+;; and the phone renders what you wrote.\n"
+                          id (format-time-string "%F %T") id)))
+        ;; Data, not a program: `lisp-data-mode' fontifies and indents it
+        ;; without pretending the plist is a call form.  Left WRITABLE on
+        ;; purpose — editing this buffer is half the point.
+        (lisp-data-mode)
+        (goto-char (point-min)))
+      buf)))
+
+(defun jetpacs-devtools-inspect (surface &optional target)
+  "Show SURFACE's freshly built spec as Lisp, on the device and here.
+Builds through `jetpacs-devtools-capture-spec', renders through
+`jetpacs-devtools-inspect-buffer', and presents the result with
+`jetpacs-navigate-buffer' — so the Tier-0 buffer renderer makes the
+data phone-visible for free, exactly the way the Tools drawer's
+*Messages* row already reads the Emacs log.  TARGET is the surface to
+drill onto; nil takes the device flow's own (the surface the user
+tapped from).
+
+Returns the buffer, or nil when nothing registers SURFACE.  Never
+signals: this is reachable from an action handler's continuation.
+
+Interactively, completion is over the live root registry — on the
+device that prompt is the Companion's own picker, because the dialog
+bridge answers `completing-read' there."
+  (interactive
+   (list (completing-read "Inspect surface: "
+                          (sort (mapcar #'car (jetpacs-shell-roots)) #'string<)
+                          nil t)))
+  (let ((buf (jetpacs-devtools-inspect-buffer surface)))
+    (cond
+     (buf (jetpacs-navigate-buffer buf target) buf)
+     (t (jetpacs-shell-notify (format "No live surface named %s"
+                                      (jetpacs-scalar-text (format "%s" surface)))
+                              target)
+        nil))))
+
+(defun jetpacs-devtools--action-inspect (args params)
+  "Handler for `jetpacs.devtools.inspect': ARGS `:surface', built now.
+Resolution happens INSIDE the extent so an unknown name answers a
+clean `rejected' — SPEC 14.4's permanent no — rather than deferring
+work that has nothing to do.  The build and the drill are D2
+continuation work: a builder is user code and may take as long as it
+likes."
+  (let ((surface (plist-get args :surface))
+        (target (plist-get params :surface)))
+    (if (not (jetpacs-devtools--resolve-root surface))
+        'rejected
+      (jetpacs-flow-continue
+       (lambda ()
+         (condition-case err
+             (jetpacs-devtools-inspect surface target)
+           (error (message "jetpacs-devtools: inspect failed: %s"
+                           (jetpacs-error-label err))))))
+      'accepted)))
+
+(defun jetpacs-devtools--action-inspect-pick (_args params)
+  "Handler for `jetpacs.devtools.inspect-pick': choose, then inspect.
+The affordance's half of the pair — the Tools drawer row carries no
+surface, because the interesting surface is whichever one is live when
+you tap it.  The picker is a BRIDGED `completing-read' over the root
+registry, raised from a `jetpacs-flow-continue' continuation for the
+reason D2 exists: inside the dispatch extent prompting is banned, and
+outside it the flow identity the continuation carries is what tells the
+dialog floor to render the picker on the phone instead of a minibuffer
+nobody is looking at."
+  (let ((target (plist-get params :surface)))
+    (jetpacs-flow-continue
+     (lambda ()
+       (let ((names (sort (mapcar #'car (jetpacs-shell-roots)) #'string<)))
+         (if (null names)
+             (jetpacs-shell-notify "No live surfaces to inspect" target)
+           (let ((choice (condition-case nil
+                             (completing-read "Inspect surface: " names nil t)
+                           (quit ""))))
+             (unless (string-empty-p choice)
+               (condition-case err
+                   (jetpacs-devtools-inspect choice target)
+                 (error (message "jetpacs-devtools: inspect failed: %s"
+                                 (jetpacs-error-label err))))))))))
+    'accepted))
+
+;; GLOBAL VERBS.  Devtools owns the actions and ZERO surfaces — the
+;; affordance is a row in the hub's drawer, and an inspection is
+;; legitimate from any screen — so the D1 scope exemption is declared
+;; explicitly, the way `jetpacs.theme.modus-toggle' declares it.  The
+;; :args/:doc schema is dogfooded here rather than described: the
+;; inspector is the self-hosting program's own tool, and an action
+;; editor reading `jetpacs-action-schema' can lay out this form.
+(with-jetpacs-owner "jetpacs.devtools"
+  (jetpacs-defaction "jetpacs.devtools.inspect"
+                     #'jetpacs-devtools--action-inspect
+                     :any-surface t
+                     :args '((:name surface :type "text" :required t))
+                     :doc "Show a live surface's spec, built fresh, as Lisp.")
+  (jetpacs-defaction "jetpacs.devtools.inspect-pick"
+                     #'jetpacs-devtools--action-inspect-pick
+                     :any-surface t
+                     :doc "Pick a live surface, then inspect its spec."))
 
 ;; The seam member is always installed; `jetpacs-devtools-recording'
 ;; gates the retention, so a live session pays one nil test per failure

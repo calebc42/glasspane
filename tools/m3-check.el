@@ -34,6 +34,27 @@
         (puthash (match-string 1) t names)))
     names))
 
+(defconst jetpacs-m3-check--icon-keys
+  '(:icon :trailing_icon :leading_icon :checked_icon :thumb_icon
+    :track_icon_start :track_icon_end :overflow_icon :close_icon)
+  "Every wire member whose value NAMES an icon.
+This read `(:icon)' alone, so eight of the nine went unchecked and 19 of
+the catalog's icon literals were never looked up.  README rule 7 says
+flatly that a misspelled icon renders a placeholder on device and that
+this gate fails on one instead — for those nineteen it simply did not,
+which is exactly the case rule 7 exists for.")
+
+(defun jetpacs-m3-check--icon-base (name)
+  "NAME without a `_filled' suffix the DEVICE resolves for itself.
+`IconMap.get' strips that suffix and returns the Filled vector, so
+`jetpacs-m3-button-groups' composes `(concat icon \"_filled\")' on
+purpose and the reference table has no row for the result.  Checking the
+BASE is what lets the widened gate above be honest instead of going red
+on ten correct names."
+  (if (string-suffix-p "_filled" name)
+      (substring name 0 (- (length name) (length "_filled")))
+    name))
+
 (defun jetpacs-m3-check--collect-icons (value acc)
   "Every icon-ish string in VALUE, accumulated into ACC."
   (cond
@@ -43,7 +64,8 @@
     (let ((p value) (a acc))
       (while p
         (let ((k (pop p)) (v (pop p)))
-          (when (and (memq k '(:icon)) (stringp v)) (push v a))
+          (when (and (memq k jetpacs-m3-check--icon-keys) (stringp v))
+            (push (jetpacs-m3-check--icon-base v) a))
           (setq a (jetpacs-m3-check--collect-icons v a))))
       a))
    ((consp value)
@@ -93,7 +115,25 @@
                                (length (delete-dups (copy-sequence ids))))
                       (push (format "%s/%s: duplicate node ids %S"
                                     id (car cell) ids)
-                            problems)))
+                            problems))
+                    ;; README rule 6: a stateful id must be unique across
+                    ;; the WHOLE app, and the slug prefix is the only thing
+                    ;; making that true.  Nothing checked it — uniqueness
+                    ;; was verified per screen and per document, never
+                    ;; between two examples — so the rule was a convention
+                    ;; the modules mostly followed.  A prefix check is what
+                    ;; turns it into a gate, and it is cheap: an id that
+                    ;; starts with its own component can only collide with
+                    ;; that component.
+                    (dolist (node-id ids)
+                      (unless (or (string-prefix-p id node-id)
+                                  ;; The chrome's own ids belong to the
+                                  ;; app, not to any one component.
+                                  (string-prefix-p "m3-" node-id))
+                        (push (format "%s/%s: node id %S is not prefixed \
+with its component slug (README rule 6)"
+                                      id (car cell) node-id)
+                              problems))))
                   (dolist (icon (delete-dups
                                  (jetpacs-m3-check--collect-icons node nil)))
                     (unless (gethash icon icons)

@@ -46,7 +46,7 @@ corner math that fuses three buttons into one track.  Here that leaves
 only what varies -- the id the selection is held on, the three options,
 and which starts selected."
   (jetpacs-segmented-button
-   "segmented-single"
+   "segmented-button-single"
    (list (jetpacs-enum-option "Day" "day")
          (jetpacs-enum-option "Month" "month")
          (jetpacs-enum-option "Week" "week"))
@@ -63,7 +63,7 @@ checkedList does.  The icons ride the option records -- an option
 crossfades it into the checkmark as that option is checked, exactly
 upstream's icon slot."
   (jetpacs-segmented-button
-   "segmented-multi"
+   "segmented-button-multi"
    (list (jetpacs-enum-option "Favorites" "favorites"
                               :icon "star_border")
          (jetpacs-enum-option "Trending" "trending"

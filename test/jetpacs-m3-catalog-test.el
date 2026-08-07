@@ -230,8 +230,14 @@ back strands the user in a three-deep stack."
 (ert-deftest jetpacs-m3-example-menu-carries-view-elisp ()
   "The Example more-menu gains \"View elisp\" WITHOUT losing upstream's
 \"View source code\" — the two answer different questions, the Kotlin
-this was ported from and the elisp it was ported to.  An example with
-no `:build' has no defun to show and gets the upstream seven alone."
+this was ported from and the elisp it was ported to.  The row is offered
+whenever there is a defun to show, which is whenever
+`jetpacs-m3--example-builder' finds one; only an `:unsupported' example,
+which has no builder at all, gets the upstream seven alone.
+
+It was once gated on `:build', which silently denied it to the 26
+examples whose sample is a scaffold SLOT — they have a defun, and a good
+one, and no way to reach it."
   (let* ((component (jetpacs-m3-component "switches"))
          (json (jetpacs-node->canonical-json
                 (jetpacs-m3-example-screen component 0 nil))))
@@ -245,19 +251,31 @@ no `:build' has no defun to show and gets the upstream seven alone."
                        (jetpacs-m3-component "switches") nil)))
     (should-not (string-match-p "View elisp"
                                 (jetpacs-node->canonical-json node))))
-  ;; A `:build'-less example: the row is absent, the upstream one stays.
+  ;; A slots-only example HAS a defun and now gets the row.
   (let ((found nil))
     (dolist (component jetpacs-m3-components)
       (cl-loop
        for example in (plist-get component :examples)
        for index from 0
-       unless (or (plist-get example :build) (plist-get example :top-bar))
+       when (and (null (plist-get example :build))
+                 (null (plist-get example :top-bar))
+                 (jetpacs-m3--example-builder example))
        do (setq found t)
           (let ((json (jetpacs-node->canonical-json
                        (jetpacs-m3-example-screen component index nil))))
-            (should-not (string-match-p "View elisp" json))
+            (should (string-match-p "View elisp" json))
             (should (string-match-p "View source code" json)))))
-    (should found)))
+    (should found))
+  ;; An `:unsupported' example has no builder, so no row — and upstream's
+  ;; stays, because the Kotlin it was ported from still exists to read.
+  (let ((found (jetpacs-m3-test--example-where
+                (lambda (e) (plist-get e :unsupported)))))
+    (should found)
+    (pcase-let ((`(,component ,index ,_example) found))
+      (let ((json (jetpacs-node->canonical-json
+                   (jetpacs-m3-example-screen component index nil))))
+        (should-not (string-match-p "View elisp" json))
+        (should (string-match-p "View source code" json))))))
 
 (ert-deftest jetpacs-m3-source-extraction-returns-the-authored-defun ()
   "The modules load from SOURCE .el, so the defining text is recoverable
@@ -555,32 +573,50 @@ silent on a screen whose whole point is to explain the sample."
     (should found)
     (should (stringp (jetpacs-m3-example-doc (nth 2 found))))))
 
-(ert-deftest jetpacs-m3-doc-prefers-the-chrome-over-the-backdrop ()
-  "When a sample IS chrome, its `:build' is scenery and must not answer.
-The search-bar scaffold samples are the case that proved it: their
-`:build' is a helper two examples share to give the collapsing bar a
-hundred lines to scroll, so asking `:build' first made a screen about a
-full-screen search bar describe itself as \"the Scaffold content both
-scaffold samples share\" — wrong, and plausible enough to go unnoticed."
-  (let ((found (jetpacs-m3-test--example-where
-                (lambda (e)
-                  (and (symbolp (plist-get e :build)) (plist-get e :build)
-                       (symbolp (plist-get e :top-bar)) (plist-get e :top-bar))))))
+(ert-deftest jetpacs-m3-doc-names-this-example-not-its-sibling ()
+  "The builder that NAMES the example is the one written for it.
+Neither plist key wins positionally, and both mistakes are live in this
+catalog.  Chrome-as-backdrop: the search-bar samples share a `:build'
+that only gives the collapsing bar a hundred lines to scroll, so asking
+`:build' made a full-screen-search-bar screen call itself \"the Scaffold
+content both scaffold samples share\".  And the mirror image:
+`PinnedTopAppBarWithReversedLazyGrid' shares its `:top-bar' with a
+SIBLING example and owns only its body, so asking the chrome made that
+screen name the sibling's upstream sample and show the sibling's defun.
+
+Both read plausibly, which is exactly why the docstring — not the key —
+has to decide."
+  ;; The backdrop direction.
+  (let* ((component (jetpacs-m3-component "search-bars"))
+         (example (nth 1 (plist-get component :examples))))
+    (should (eq (jetpacs-m3--example-builder example)
+                (plist-get example :top-bar))))
+  ;; The sibling direction: shared chrome, unique body.
+  (let* ((component (jetpacs-m3-component "top-app-bar"))
+         (found (cl-loop for e in (plist-get component :examples)
+                         when (equal (plist-get e :name)
+                                     "PinnedTopAppBarWithReversedLazyGrid")
+                         return e)))
     (should found)
-    (let ((example (nth 2 found)))
-      (should (eq (jetpacs-m3--example-builder example)
-                  (plist-get example :top-bar)))))
-  ;; The same rule for a scaffold SLOT, which is the larger population.
-  (let ((found (jetpacs-m3-test--example-where
-                (lambda (e)
-                  (and (symbolp (plist-get e :build)) (plist-get e :build)
-                       (null (plist-get e :top-bar))
-                       (cl-loop for (_k v) on (plist-get e :slots) by #'cddr
-                                thereis (and v (symbolp v) (fboundp v))))))))
-    (should found)
-    (let ((example (nth 2 found)))
-      (should-not (eq (jetpacs-m3--example-builder example)
-                      (plist-get example :build))))))
+    (should (eq (jetpacs-m3--example-builder found)
+                (plist-get found :build)))))
+
+(ert-deftest jetpacs-m3-doc-strings-name-their-own-sample ()
+  "A screen must not describe a DIFFERENT upstream sample than its own.
+Naming the wrong sibling is the failure mode here — it is never obviously
+wrong on screen, so it needs a count.  The exceptions are builders
+genuinely shared by several samples, whose docstring describes the shared
+thing; that population is allowed but not allowed to GROW silently."
+  (let (mismatched)
+    (dolist (component jetpacs-m3-components)
+      (dolist (example (plist-get component :examples))
+        (unless (plist-get example :unsupported)
+          (let ((doc (jetpacs-m3-example-doc example))
+                (name (plist-get example :name)))
+            (unless (and doc (string-search name doc))
+              (push (format "%s/%s" (plist-get component :id) name)
+                    mismatched))))))
+    (should (<= (length mismatched) 15))))
 
 (ert-deftest jetpacs-m3-example-doc-never-signals ()
   "A docstring nobody can read costs its block and nothing else.

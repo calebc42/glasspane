@@ -96,7 +96,7 @@ the expansion goes; nil is the node's full_screen default."
 (defun jetpacs-m3-search-bars--simple ()
   "Upstream SimpleSearchBarSample: the bar alone, centered in the body.
 Its expansion is ExpandedFullScreenSearchBar, the node's default."
-  (jetpacs-m3-search-bars--bar "sb-simple"))
+  (jetpacs-m3-search-bars--bar "search-bars-simple"))
 
 (defun jetpacs-m3-search-bars--tipped (icon label)
   "ICON as an IconButton under LABEL's plain tooltip.
@@ -125,7 +125,7 @@ it, and node \"sb-full\" takes the node's full_screen default --
 ExpandedFullScreenSearchBar, whose results cover the Menu and Account
 buttons rather than sliding them away as upstream's AnimatedVisibility
 does."
-  (jetpacs-m3-search-bars--app-bar "sb-full" "full_screen" back))
+  (jetpacs-m3-search-bars--app-bar "search-bars-full" "full_screen" back))
 
 (defun jetpacs-m3-search-bars--docked-app-bar (back)
   "Upstream DockedSearchBarScaffoldSample: the same bar, results docked.
@@ -133,7 +133,7 @@ The same AppBarWithSearch carrying BACK; what separates this sample from
 its full-screen twin is the variant on node \"sb-docked\" -- \"docked\"
 hangs the expanded results at the field's own measured width instead of
 giving them the screen."
-  (jetpacs-m3-search-bars--app-bar "sb-docked" "docked" back))
+  (jetpacs-m3-search-bars--app-bar "search-bars-docked" "docked" back))
 
 (defun jetpacs-m3-search-bars--content ()
   "The Scaffold content both scaffold samples share: \"Text 0\"..\"Text 99\".

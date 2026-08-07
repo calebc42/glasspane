@@ -1194,6 +1194,163 @@ ceiling; offline it is the custom ceiling alone."
                       (jetpacs-files-test--collect
                        (jetpacs-files--edit-screen nil) :t))))))
 
+(defun jetpacs-files-test--sync-client ()
+  "A client that can host the SYNCHRONIZED rung: `editor.sync' granted,
+`editor' advertised for the app target, and a §19 `max_editor_bytes'."
+  (let ((client (jetpacs-files-test--client)))
+    (setf (ebp-client-granted client) '("editor.sync")
+          (ebp-client-limits client) '(:max_editor_bytes 65536)
+          (ebp-client-profiles client)
+          `(:app (:node_types ,(vconcat jetpacs-files-test--app-types
+                                        ["editor"])
+                  :builtins ["view.switch"] :features [])))
+    client))
+
+(ert-deftest jetpacs-files-edit-open-climbs-to-the-synced-rung ()
+  "The top rung is the DEFAULT for a file that qualifies: the buffer is
+attached BEFORE the push and never in the builder, the record carries
+the session keys, and the document id keeps its extension."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--sync-client)
+      (let ((f (concat root "lib.el"))
+            (screens '()) (attached '())
+            (jetpacs-files--edit nil))
+        (write-region "(defun f ())\n" nil f nil 'silent)
+        (unwind-protect
+            (cl-letf (((symbol-function 'jetpacs-chrome-push-screen)
+                       (lambda (surface id builder)
+                         ;; ATTACH BEFORE THE PUSH: the record is
+                         ;; already complete when the builder could run.
+                         (push (list surface id builder) screens)
+                         (should (plist-get jetpacs-files--edit :document))
+                         1))
+                      ((symbol-function 'ebp-sync-attach)
+                       (lambda (_c doc eid buf) (push (list doc eid buf) attached)
+                         buf)))
+              (let ((true (file-truename f)))
+                (should-not (jetpacs-files--edit-open true "app:jetpacs.files"))
+                (should (= (length screens) 1))
+                (should (= (length attached) 1))
+                (pcase-let ((`(,doc ,eid ,buf) (car attached)))
+                  ;; The mint keeps the extension — it is what
+                  ;; `ebp-complete--mode-for' matches against
+                  ;; `auto-mode-alist' to pick the shadow's mode.
+                  (should (string-prefix-p "doc:" doc))
+                  (should (string-suffix-p ".el" doc))
+                  ;; The editor id MUST be the node id: that is what the
+                  ;; Companion stamps into every §19 frame, so a routing
+                  ;; key registered under anything else never matches and
+                  ;; the whole session lands nowhere (found on device).
+                  (should (equal eid (jetpacs-wire-id "fedit" true)))
+                  (should (buffer-live-p buf))
+                  (should (equal (buffer-file-name buf) true))
+                  (with-current-buffer buf
+                    ;; Phone keystrokes must not litter #autosave# files.
+                    (should-not buffer-auto-save-file-name))
+                  (should (eq buf (plist-get jetpacs-files--edit :buffer))))
+                ;; And the builder emits a node under exactly that id.
+                (should (member (plist-get jetpacs-files--edit :editor-id)
+                                (jetpacs-files-test--collect
+                                 (jetpacs-files--edit-screen nil) :id)))
+                ;; The screen the builder produces carries the session.
+                (let ((screen (jetpacs-files--edit-screen nil)))
+                  (should (member (plist-get jetpacs-files--edit :document)
+                                  (jetpacs-files-test--collect screen :document)))
+                  (should (member "elisp"
+                                  (jetpacs-files-test--collect screen :syntax)))
+                  ;; The reconnect seed still rides (SPEC 19.3), and so
+                  ;; does on_save.
+                  (should (equal (jetpacs-files-test--collect screen :value)
+                                 '("(defun f ())\n")))
+                  (should (member "jetpacs.files.save"
+                                  (jetpacs-files-test--collect screen :action))))
+                ;; Building again attaches NOTHING: the chrome rebuilds
+                ;; the whole stack per push, and a binding remade there
+                ;; would discard unflushed edits every time.
+                (jetpacs-files--edit-screen nil)
+                (should (= (length attached) 1))))
+          (when-let* ((buf (plist-get jetpacs-files--edit :buffer)))
+            (when (buffer-live-p buf)
+              (with-current-buffer buf (set-buffer-modified-p nil))
+              (kill-buffer buf))))))))
+
+(ert-deftest jetpacs-files-edit-open-degrades-to-the-plain-rung ()
+  "Each way down the ladder: the toggle off, the capability ungranted,
+and past `max_editor_bytes' but within the plain cap.  All three land
+on the PLAIN editor — no document, no attach, still editable."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--sync-client)
+      (let ((f (concat root "lib.el"))
+            (attached 0)
+            (jetpacs-files--edit nil))
+        (write-region "(defun f ())\n" nil f nil 'silent)
+        (cl-letf (((symbol-function 'jetpacs-chrome-push-screen)
+                   (lambda (&rest _) 1))
+                  ((symbol-function 'ebp-sync-attach)
+                   (lambda (_c _d _e buf) (cl-incf attached) buf)))
+          (let ((true (file-truename f)))
+            (let ((jetpacs-files-sync-editor nil))
+              (should-not (jetpacs-files--edit-open true "app:jetpacs.files"))
+              (should-not (plist-get jetpacs-files--edit :document)))
+            (setf (ebp-client-granted client) nil)
+            (should-not (jetpacs-files--edit-open true "app:jetpacs.files"))
+            (should-not (plist-get jetpacs-files--edit :document))
+            (setf (ebp-client-granted client) '("editor.sync"))
+            ;; Past the §19 bound but inside the plain one: the plain
+            ;; editor, not a lost editor.
+            (setf (ebp-client-limits client) '(:max_editor_bytes 4))
+            (should-not (jetpacs-files--edit-open true "app:jetpacs.files"))
+            (should-not (plist-get jetpacs-files--edit :document))
+            (should (= attached 0))))))))
+
+(ert-deftest jetpacs-files-edit-open-sync-keeps-unsaved-desktop-edits ()
+  "The desktop-modified refusal belongs to the rungs that would LOSE
+the text.  The synchronized rung seeds from the BUFFER, so it opens —
+and the seed is the buffer's text, which is what makes the Companion's
+reseed a no-op instead of a silent revert."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--sync-client)
+      (let ((f (concat root "lib.el"))
+            (jetpacs-files--edit nil))
+        (write-region "(defun f ())\n" nil f nil 'silent)
+        (let ((buf (find-file-noselect (file-truename f))))
+          (unwind-protect
+              (cl-letf (((symbol-function 'jetpacs-chrome-push-screen)
+                         (lambda (&rest _) 1))
+                        ((symbol-function 'ebp-sync-attach)
+                         (lambda (_c _d _e b) b)))
+                (with-current-buffer buf
+                  (goto-char (point-max)) (insert ";; local\n"))
+                (should-not (jetpacs-files--edit-open (file-truename f)
+                                                      "app:jetpacs.files"))
+                (should (plist-get jetpacs-files--edit :document))
+                (should (equal (plist-get jetpacs-files--edit :seed)
+                               "(defun f ())\n;; local\n"))
+                ;; Without sync the same buffer refuses, as before.
+                (let ((jetpacs-files-sync-editor nil)
+                      (navigated '()))
+                  (cl-letf (((symbol-function 'jetpacs-navigate-buffer)
+                             (lambda (b &rest _) (push b navigated)))
+                            ((symbol-function 'jetpacs-shell-notify) #'ignore))
+                    (should (eq (jetpacs-files--edit-open (file-truename f)
+                                                          "app:jetpacs.files")
+                                'desktop-modified)))))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf)))))))
+
+(ert-deftest jetpacs-files-document-id-is-extension-preserving ()
+  "NOT `jetpacs-wire-id': that appends the sha1 LAST, and the document
+id is what `ebp-complete--mode-for' matches against `auto-mode-alist'."
+  (let ((el (jetpacs-files--document-id "/home/x/init.el"))
+        (none (jetpacs-files--document-id "/home/x/README")))
+    (should (string-prefix-p "doc:" el))
+    (should (string-suffix-p ".el" el))
+    (should (equal el (jetpacs-files--document-id "/home/x/init.el")))
+    (should-not (equal el (jetpacs-files--document-id "/home/y/init.el")))
+    (should-not (string-match-p "\\." (substring none 4)))
+    ;; A legal SPEC 4.4 identifier: begins alnum, allowed charset only.
+    (should (string-match-p "\\`doc:[a-z0-9]+\\(\\.[A-Za-z0-9]+\\)?\\'" el))))
+
 (ert-deftest jetpacs-files-save-guards-then-writes ()
   (jetpacs-files-test--with-tree root
     (jetpacs-files-test--attached (jetpacs-files-test--client)

@@ -91,7 +91,8 @@
    (jetpacs-clip-max-entries :label "Kill-ring entries shown")))
 (jetpacs-settings-register-section
  "Files"
- '((jetpacs-files-shared-storage :label "Shared storage access")
+ '((jetpacs-files-sync-editor :label "Live editing")
+   (jetpacs-files-shared-storage :label "Shared storage access")
    (jetpacs-files-max-rows :label "Directory rows shown")))
 
 ;; Every kill re-pushing the clip view would CLAIM THE SCREEN (one app

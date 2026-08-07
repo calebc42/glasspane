@@ -104,6 +104,16 @@ bound is the absolute ceiling a generous Companion cannot raise.
 Larger files open read-only through the buffer host."
   :type 'integer :group 'jetpacs)
 
+(defcustom jetpacs-files-sync-editor t
+  "When non-nil, eligible files open in the synchronized SPEC 19 editor.
+The device then edits a REAL Emacs buffer: keystrokes arrive as
+splices, the buffer's own completions, flymake diagnostics, font-lock
+colours and eldoc ride back, and a save writes the buffer.  Set to nil
+to keep the plain seed-and-save editor, which every file that does not
+qualify — oversize, binary, or opened while a modified desktop buffer
+holds it — still gets."
+  :type 'boolean :group 'jetpacs)
+
 (defcustom jetpacs-files-max-rows 300
   "Ceiling on entry rows one directory snapshot renders.
 Beyond it a caption reports how many entries were not shown.  The cap
@@ -129,13 +139,16 @@ one files surface under D1, so one variable is the whole state.")
 
 (defvar jetpacs-files--edit nil
   "The file the editor screen shows:
-\(:path TRUENAME :seed S :mtime T :coding C).  C is the coding system
+\(:path TRUENAME :seed S :mtime T :coding C) plus, on the SYNCHRONIZED
+rung, (:document D :editor-id E :buffer B).  C is the coding system
 the file was READ with — the save writes it back in the same one.
 Written by `jetpacs-files--edit-open' after eligibility passed, and by
-a successful save (fresh seed and stamp, coding carried forward).  The
-screen BUILDER reads only this — never the disk — so a re-push while editing
-re-renders the same seed, and what actually shows is the Companion's
-SPEC 13.6 draft: the user's typing.")
+a successful save (fresh seed and stamp, everything else carried
+forward).  The screen BUILDER reads only this — never the disk — so a
+re-push while editing re-renders the same seed, and what actually shows
+is the Companion's SPEC 13.6 draft: the user's typing.  Under sync the
+seed is a RECONNECT seed only (SPEC 19.3: `value' seeds a NEW session
+and a later snapshot MUST NOT replace live text).")
 
 (defvar jetpacs-files-after-save-hook nil
   "Run with the saved truename after `jetpacs.files.save' lands on disk.
@@ -164,10 +177,14 @@ poc used this for the HTML \"open rendered\" and org \"Outline\"
 buttons.")
 
 (defvar jetpacs-files-editor-toolbar-function nil
-  "Function of (PATH) returning the plain editor's `:toolbar', or nil.
+  "Function of (PATH) returning the editor's `:toolbar', or nil.
 A registered toolbar id string or a list of `jetpacs-toolbar-item's;
-validation rides `jetpacs-editor' (a `:command' op still requires a
-synchronized `:document', which the plain editor never has).")
+validation rides `jetpacs-editor'.  A `:command' op requires a
+synchronized `:document' — the SYNCHRONIZED rung now has one, so
+`jetpacs-editor' no longer refuses those items there.  Do NOT ship them
+yet: `edit.command' arrives as an event.action for which Emacs has no
+handler at all, so the op would reach a dead letter.  `:snippet' and
+`:line' never contact Emacs and work on both rungs.")
 
 (defvar jetpacs-files-editor-fab-function nil
   "Function of (PATH) returning the edit screen's FAB node, or nil.
@@ -682,16 +699,28 @@ asking (back tapped, new query pushed) lets the sweep cancel the scan."
    :back back))
 
 
-;;;; The plain editor (F4)
+;;;; The editor (F4) — a three-rung ladder
 ;;
-;; The `value'+`on_save' editor decision D-1 shipped this rung with:
-;; NOT the synchronized §19 editor (that is G4, explicitly deferred) —
-;; the whole file seeds the node once, the device edits locally, and a
-;; save comes back as ONE event carrying the full content.  Two wire
-;; bounds follow from that shape (`jetpacs-files--editor-cap'), and an
-;; mtime stamp rides the descriptor so a save over a file that changed
-;; underneath answers `stale' instead of clobbering it.  Files the
-;; editor cannot host honestly fall back to the read-only buffer host.
+;; SYNCHRONIZED -> PLAIN -> READ VIEW, and the top rung is the DEFAULT
+;; for files that qualify.  G4 (the editor<->buffer binding decision D-1
+;; deferred) lands here: the device edits a real Emacs buffer through
+;; `ebp-sync', so keystrokes are splices, the buffer's own completions,
+;; flymake diagnostics, font-lock colours and eldoc ride back, and the
+;; save writes the buffer.
+;;
+;; The PLAIN rung is not obsolete and is not a fallback for failure — it
+;; is the honest answer for the files sync cannot host: the two bounds
+;; `jetpacs-files--editor-cap' derives exist because the seed rides the
+;; surface push and the save returns as ONE event, and NEITHER is true
+;; under sync, where the seed is a reconnect seed and edits are deltas.
+;; The governing bound there is `max_editor_bytes' (SPEC 19, amendment
+;; #84), which is larger.  So a file between the two ceilings stays on
+;; the plain editor rather than losing an editor entirely.
+;;
+;; An mtime stamp rides the save descriptor on both rungs, so a save
+;; over a file that changed underneath answers `stale' instead of
+;; clobbering it.  Files neither rung can host honestly fall back to the
+;; read-only buffer host.
 
 (defun jetpacs-files--editor-cap ()
   "Byte ceiling for a file the plain editor may host.
@@ -714,6 +743,47 @@ push anyway)."
     (if wire
         (min jetpacs-files-max-bytes (max 1024 (/ (- wire 16384) 4)))
       jetpacs-files-max-bytes)))
+
+(defun jetpacs-files--sync-cap (client)
+  "Byte ceiling for a file the SYNCHRONIZED editor may host.
+The §19 bound, not the plain editor's: `max_editor_bytes' (SPEC 19,
+amendment #84 — REQUIRED when `editor.sync' is granted, at least 65536)
+governs the document, and `ebp-client-edit-apply' already enforces it
+locally on every splice with a synthetic 1201 `editor-too-large'.  The
+plain rung's /4 JSON-escape division and its `max_event_bytes' term do
+not apply: the seed is a reconnect seed and the save reads the buffer.
+Still bounded by `jetpacs-files-max-bytes', the absolute ceiling a
+generous Companion cannot raise."
+  (let ((limit (plist-get (ebp-client-limits client) :max_editor_bytes)))
+    (and limit (min jetpacs-files-max-bytes limit))))
+
+(defun jetpacs-files--document-id (true)
+  "The SPEC 19 document identifier for TRUE — EXTENSION-PRESERVING.
+Deliberately NOT `jetpacs-wire-id', which appends the sha1 LAST: the
+document id is what `ebp-complete--mode-for' matches against
+`auto-mode-alist' to pick the shadow's major mode, so a hash-tailed id
+silently downgrades every synced file to `fundamental-mode' and no
+completions.  The hash keeps ids unique and path-free (SPEC 19.3
+requires an Emacs-assigned id, never a raw Companion-supplied path);
+`:' and `.' are legal SPEC 4.4 characters and the id begins alnum."
+  (concat "doc:" (substring (sha1 true) 0 16)
+          (or (file-name-extension true t) "")))
+
+(defun jetpacs-files--syntax-for (true)
+  "The SPEC 17.4 `syntax' language for TRUE, or nil.
+First-paint only: once a buffer is attached, Emacs's own font-lock runs
+arrive as `fontify.show' and WIN over the client tokenizer.  It still
+matters — it is what colours the editor before the first push lands,
+and the whole of it for a plain-rung file."
+  (pcase (downcase (or (file-name-extension true) ""))
+    ((or "el" "elc") "elisp")
+    ("org" "org")
+    ("py" "python")
+    ("rs" "rust")
+    ((or "sh" "bash") "shell")
+    ((or "c" "h") "c")
+    ((or "cc" "cpp" "hpp") "cpp")
+    (_ nil)))
 
 (defun jetpacs-files--mtime-stamp (path)
   "PATH's modification time as an opaque comparable string, or nil.
@@ -761,10 +831,77 @@ desktop edits would otherwise look broken."
      (message "jetpacs-files: open failed: %s"
               (jetpacs-error-label err)))))
 
+(defun jetpacs-files--sync-cap-for (true)
+  "The synchronized rung's byte ceiling for TRUE, or nil when it is off.
+Nil means the ladder skips straight to the plain rung: the toggle is
+off, no client is attached, `editor.sync' is not granted, this
+Companion does not advertise the `editor' node, or it negotiated no
+`max_editor_bytes'."
+  (ignore true)
+  (when-let* ((client (and jetpacs-files-sync-editor (jetpacs-client))))
+    (and (jetpacs-granted-p "editor.sync" client)
+         (jetpacs-node-advertised-p "editor" :app)
+         (jetpacs-files--sync-cap client))))
+
+(defun jetpacs-files--sync-attach (true)
+  "Upgrade TRUE's already-recorded edit to the SYNCHRONIZED rung, or not.
+NEVER SIGNALS.  The synchronized rung is an upgrade over an editor that
+already works, so anything that goes wrong here degrades to the plain
+one rather than costing the user the screen.
+
+Runs from `jetpacs-files--edit-open' and NEVER from the screen builder:
+`jetpacs-chrome--build' rebuilds the whole stack on every push, so an
+attach in the builder would re-run its detach/erase/adopt on every
+re-push — including the save handler's — and drop unflushed edits each
+time.  Attaching BEFORE the push also lands the routing entry before
+the Companion opens the session on node presence, so `edit.open' finds
+a bound buffer and the annotation riders arm on the reseed."
+  (condition-case err
+      (let* ((doc (jetpacs-files--document-id true))
+             ;; The editor id on the wire is the NODE id, because that is
+             ;; what the Companion stamps into `edit.open'/`edit.delta'.
+             ;; Minted here from the same base the builder claims, so the
+             ;; routing key `ebp-sync-attach' registers is the key the
+             ;; frames arrive under — a mismatch here is silent and total:
+             ;; the session opens, the phone edits, and nothing ever
+             ;; reaches the buffer.
+             (eid (jetpacs-wire-id "fedit" true))
+             ;; Device-originated opens apply only :safe file-local
+             ;; variables — the same rule the read fallback applies.
+             (buf (let ((enable-local-variables
+                         (and enable-local-variables :safe)))
+                    (find-file-noselect true)))
+             (seed (with-current-buffer buf
+                     ;; POC 1's prepare-real-buffer discipline: phone
+                     ;; keystrokes must not litter #autosave# files —
+                     ;; the phone's explicit Save owns persistence.
+                     (setq-local buffer-auto-save-file-name nil)
+                     (buffer-substring-no-properties
+                      (point-min) (point-max)))))
+        ;; The BUFFER is the seed, not the disk: a visiting buffer with
+        ;; unsaved desktop edits is exactly the case sync handles best,
+        ;; and seeding from its own text is what makes the reseed a
+        ;; no-op instead of a silent revert.
+        (unless (or (string-search "\0" seed)
+                    (not (jetpacs-files--wire-safe-p seed)))
+          (ebp-sync-attach (jetpacs-client) doc eid buf)
+          (setq jetpacs-files--edit
+                (list :path true :seed seed
+                      :mtime (plist-get jetpacs-files--edit :mtime)
+                      :coding (plist-get jetpacs-files--edit :coding)
+                      :document doc :editor-id eid :buffer buf))
+          t))
+    (error
+     (message "jetpacs-files: live editing unavailable: %s"
+              (jetpacs-error-label err))
+     nil)))
+
 (defun jetpacs-files--edit-open (true surface)
-  "Open TRUE in the plain editor, or fall back to the read view.
+  "Open TRUE in an editor, or fall back to the read view.
+Three rungs, best first: the SYNCHRONIZED SPEC 19 editor over a real
+buffer, the PLAIN seed-and-save editor, and the read-only buffer host.
 Runs in a flow continuation.  Returns the fallback reason symbol, or
-nil when the editor screen was pushed.  A non-regular file (FIFO,
+nil when an editor screen was pushed.  A non-regular file (FIFO,
 socket, device) is refused OUTRIGHT — both this read and the
 fallback's `find-file-noselect' would block in open(2) forever, and
 no in-process timer can interrupt that.  A PATH the wire cannot carry
@@ -775,17 +912,25 @@ is likewise never editable through it — the round-trip would corrupt
 exactly the bytes `jetpacs-scalar-text' replaces — and a NUL marks a
 binary whose \"text\" is not worth a seed.  The file's own coding is
 captured off the read and stored with the seed, so the save can write
-the file back in it."
+the file back in it.
+
+The SIZE gate takes whichever rung reaches higher, because the two
+ceilings measure different things (see the section Commentary), and a
+modified desktop buffer refuses only the rungs that would LOSE its
+text — the synchronized rung seeds from the buffer, so it keeps them."
   (let* ((cap (jetpacs-files--editor-cap))
+         (sync-cap (jetpacs-files--sync-cap-for true))
          (size (or (file-attribute-size (file-attributes true)) 0))
+         (syncable (and sync-cap (<= size sync-cap)))
          (buf (get-file-buffer true))
          (coding nil)
          (reason
           (cond
            ((not (file-regular-p true)) 'not-a-file)
            ((not (jetpacs-files--wire-safe-p true)) 'unencodable)
-           ((> size cap) 'oversize)
-           ((and buf (buffer-modified-p buf)) 'desktop-modified)
+           ((> size (max cap (or sync-cap 0))) 'oversize)
+           ((and buf (buffer-modified-p buf) (not syncable))
+            'desktop-modified)
            (t (let ((content (with-temp-buffer
                                (insert-file-contents true)
                                (setq coding last-coding-system-used)
@@ -793,10 +938,21 @@ the file back in it."
                 (cond
                  ((string-search "\0" content) 'binary)
                  ((not (jetpacs-files--wire-safe-p content)) 'unencodable)
+                 ((> size cap)
+                  ;; Past the plain rung's ceiling: sync or nothing.
+                  (setq jetpacs-files--edit
+                        (list :path true :seed content
+                              :mtime (jetpacs-files--mtime-stamp true)
+                              :coding coding))
+                  (if (and syncable (jetpacs-files--sync-attach true))
+                      nil
+                    (setq jetpacs-files--edit nil)
+                    'oversize))
                  (t (setq jetpacs-files--edit
                           (list :path true :seed content
                                 :mtime (jetpacs-files--mtime-stamp true)
                                 :coding coding))
+                    (when syncable (jetpacs-files--sync-attach true))
                     nil)))))))
     (cond
      ;; NEVER the fallback for a non-regular file: its
@@ -814,17 +970,43 @@ the file back in it."
     reason))
 
 (defun jetpacs-files--edit-screen (back)
-  "Builder for the pushed editor screen, the four app seams applied."
+  "Builder for the pushed editor screen, the four app seams applied.
+Reads the edit record and NEVER attaches: the chrome rebuilds the whole
+stack on every push, so a binding made here would be remade — and its
+predecessor's unflushed edits discarded — on every re-push.
+
+The NODE id stays `jetpacs-wire-id': it is the SPEC 16.1 presentation
+identity that keeps the session alive across surface replacements.  The
+DOCUMENT id is a separate, extension-preserving mint, for the reason
+`jetpacs-files--document-id' records.  `:value' rides along even under
+sync, because SPEC 19.3 keeps it as a seed for a NEW session — the
+reconnect-over-a-cached-snapshot case — while forbidding a later
+snapshot from replacing live text."
   (let ((req jetpacs-files--edit))
     (if (null req)
         (jetpacs-chrome-screen
          "Edit" (jetpacs-empty-state :icon "info" :title "Nothing being edited")
          :back back)
       (let* ((path (plist-get req :path))
+             (document (plist-get req :document))
              (body (or (run-hook-with-args-until-success
                         'jetpacs-files-editor-body-functions path)
                        (jetpacs-editor
-                        (jetpacs-claim-node-id (jetpacs-wire-id "fedit" path))
+                        ;; The SAME base the sync attach registered its
+                        ;; routing key under (see `jetpacs-files--sync-attach').
+                        (jetpacs-claim-node-id
+                         (or (plist-get req :editor-id)
+                             (jetpacs-wire-id "fedit" path)))
+                        :document document
+                        ;; An `fboundp'/`boundp' seam, never a require:
+                        ;; `jetpacs-connect' adopts the capf harvester
+                        ;; when it is loaded, and asking for completions
+                        ;; nothing can answer only buys round trips.
+                        :complete (and document
+                                       (fboundp 'ebp-complete-edit-complete)
+                                       (bound-and-true-p ebp-complete-enabled)
+                                       t)
+                        :syntax (jetpacs-files--syntax-for path)
                         :value (plist-get req :seed)
                         :toolbar (and jetpacs-files-editor-toolbar-function
                                       (funcall jetpacs-files-editor-toolbar-function
@@ -1426,6 +1608,22 @@ Runs inside a device flow."
   (jetpacs-client-or-error)
   (jetpacs-shell-push jetpacs-files-owner))
 
+(defun jetpacs-files-reset ()
+  "Release a synchronized editor binding the session outlived.
+A BELT, not the mechanism: the Companion sends `edit.close' on node
+removal, document change or presentation-identity change, and ebp-sync
+detaches from that.  This catches the case no close can cover — the
+session ended under the editor — so a stray tracker never survives into
+the next connection.  The BUFFER survives on purpose: it is the user's
+file buffer, and it was theirs before the phone ever saw it."
+  (when-let* ((req jetpacs-files--edit)
+              (buf (plist-get req :buffer)))
+    (when (buffer-live-p buf)
+      (ebp-sync-detach buf)))
+  (setq jetpacs-files--edit nil))
+
+(add-hook 'jetpacs-reset-functions #'jetpacs-files-reset)
+
 (defun jetpacs-files-unload-function ()
   "Unload hygiene: the skin registration and the owner's surfaces.
 `jetpacs-teardown-owner' also clears the owner's async entries, which
@@ -1433,6 +1631,7 @@ cancels any in-flight scan."
   (setq jetpacs-render-buffer-functions
         (assq-delete-all 'dired-mode jetpacs-render-buffer-functions))
   (setq jetpacs-files--grep-request nil)
+  (remove-hook 'jetpacs-reset-functions #'jetpacs-files-reset)
   (jetpacs-teardown-owner jetpacs-files-owner)
   nil)
 

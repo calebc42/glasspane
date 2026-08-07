@@ -217,8 +217,13 @@ class EditorTest {
     fun annotationsGateOnSessionAndSeq() {
         val out = mutableListOf<JsonObject>()
         val engine = engine(out)
-        val seen = mutableListOf<Pair<String, Long>>()
-        engine.annotationListener = { kind, _, p -> seen.add(kind to p.reqLong("seq")) }
+        // The DOCUMENT is asserted along with kind and seq: §19.5 payloads
+        // carry only `editor_id`, so the document the listener reports comes
+        // from the resolved session and nowhere else.
+        val seen = mutableListOf<Triple<String, String, Long>>()
+        engine.annotationListener = { kind, doc, _, p ->
+            seen.add(Triple(kind, doc, p.reqLong("seq")))
+        }
         val s = engine.openEditor("doc:1", "body", "abc")
         engine.localEditorEdit("doc:1", "body", ScalarPos(0), 0, "x") // seq -> 1
         fun annot(method: String, session: String, seq: Long) =
@@ -234,7 +239,8 @@ class EditorTest {
         annot("fontify.show", s.sessionId, 0)
         // Wrong session: discarded.
         annot("diagnostics.show", "beefbeef".repeat(4), 1)
-        assertEquals(listOf("diagnostics.show" to 1L, "eldoc.show" to 1L), seen)
+        assertEquals(listOf(Triple("diagnostics.show", "doc:1", 1L),
+                            Triple("eldoc.show", "doc:1", 1L)), seen)
     }
 
     // -------------------------------------------------- lifecycle / gate
@@ -275,7 +281,7 @@ class EditorTest {
         val engine = engine(out)
         val s = engine.openEditor("doc:1", "body", "hello") // 5 scalars
         var delivered = 0
-        engine.annotationListener = { _, _, _ -> delivered++ }
+        engine.annotationListener = { _, _, _, _ -> delivered++ }
         fun diagnostics(vararg entries: JsonObject) =
             engine.feed(frame(buildJsonObject {
                 put("jsonrpc", "2.0")
@@ -310,7 +316,7 @@ class EditorTest {
         val engine = engine(out)
         val s = engine.openEditor("doc:1", "body", "hello")
         var delivered = 0
-        engine.annotationListener = { _, _, _ -> delivered++ }
+        engine.annotationListener = { _, _, _, _ -> delivered++ }
         fun runs(vararg entries: JsonObject) =
             engine.feed(frame(buildJsonObject {
                 put("jsonrpc", "2.0")

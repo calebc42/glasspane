@@ -1521,8 +1521,13 @@ class CompanionEngine(
     /** Re-render hook: the session's shadow changed from an inbound apply or
      * a resync (the host editor must reflect it). */
     var editorListener: ((EditorSession) -> Unit)? = null
-    /** Annotation hook: (kind, editorId, payload) after a session/seq match. */
-    var annotationListener: ((String, String, JsonObject) -> Unit)? = null
+    /** Annotation hook: (kind, document, editorId, payload) after a session/seq
+     * match. The DOCUMENT rides along because §19.5 payloads carry only
+     * `editor_id` while a display keys its editor state by (document,
+     * editorId) — the same key `editors` and every host-side map use. The
+     * resolved session knows it; without it a consumer would have to invent a
+     * second keying scheme for annotations alone. */
+    var annotationListener: ((String, String, String, JsonObject) -> Unit)? = null
 
     private fun findEditor(session: String): EditorSession? =
         editors.values.firstOrNull { it.sessionId == session &&
@@ -1953,7 +1958,7 @@ class CompanionEngine(
             }))
             return
         }
-        annotationListener?.invoke(method, eid, params)
+        annotationListener?.invoke(method, s.document, eid, params)
     }
 
     private val DIAGNOSTIC_SEVERITIES = setOf("error", "warning", "info", "hint")

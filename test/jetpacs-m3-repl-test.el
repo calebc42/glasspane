@@ -146,5 +146,87 @@ start using."
                      (jetpacs-m3-repl-document "switches" 1)))
   (should (string-suffix-p ".el" (jetpacs-m3-repl-document "switches" 0))))
 
+;;;; Knobs
+
+(ert-deftest jetpacs-m3-repl-knobs-come-from-the-validators ()
+  "The schema is read off the builder, never written down here."
+  (let ((schema (jetpacs-m3-repl-knob-schema 'jetpacs-button)))
+    (should (equal '("filled" "tonal" "elevated" "outlined" "text")
+                   (nth 2 (assq :variant schema))))
+    (should (eq 'bool (nth 1 (assq :enabled schema))))
+    ;; The lisp keyword, not the wire spelling.  `jetpacs-button' checks
+    ;; ":animate_shape" for a parameter called `animate-shape', and a
+    ;; knob under the wire name is a keyword the constructor refuses.
+    (should (assq :animate-shape schema))
+    (should-not (assq :animate_shape schema))
+    ;; Every derived knob is a keyword the constructor really takes.
+    (let ((accepted (jetpacs-m3-repl--key-params
+                     (car (read-from-string
+                           (jetpacs-m3--defun-text 'jetpacs-button))))))
+      (dolist (knob schema) (should (memq (car knob) accepted))))))
+
+(ert-deftest jetpacs-m3-repl-every-offered-knob-actually-builds ()
+  "THE property: no knob is offered that this sample cannot take.
+The arglist says which keywords a constructor accepts and cannot say
+which COMBINATIONS it accepts — several members are conditional on
+another — so knobs are filtered by trial against each sample's own
+arguments.  This sweeps every offered knob at every value it offers,
+across the whole catalog, because an error card is what the user gets
+otherwise."
+  (let (failures (turns 0) (examples 0))
+    (dolist (component jetpacs-m3-components)
+      (cl-loop
+       for _example in (plist-get component :examples)
+       for index from 0
+       do (when-let* ((call (jetpacs-m3-repl--call component index)))
+            (cl-incf examples)
+            (dolist (knob (jetpacs-m3-repl-knobs-for call))
+              (dolist (value (pcase (nth 1 knob)
+                               ('enum (nth 2 knob))
+                               ('bool (list t :json-false))))
+                (cl-incf turns)
+                (unless (condition-case nil
+                            (jetpacs-root-node-p
+                             (eval (jetpacs-m3-repl--apply-knobs
+                                    call (list (car knob) value))
+                                   t))
+                          (error nil))
+                  (push (list (plist-get component :id) index
+                              (car knob) value)
+                        failures)))))))
+    (should (> examples 50))
+    (should (> turns 500))
+    (should-not failures)))
+
+(ert-deftest jetpacs-m3-repl-a-knob-re-renders-through-the-builder ()
+  "Turning a knob re-evaluates the sample's OWN call with the member on."
+  (jetpacs-m3-repl-test--clean
+    (clrhash jetpacs-m3-repl--knobs)
+    (should (eq 'accepted
+                (jetpacs-m3-repl--on-knob
+                 '(:component "buttons" :index 1 :key ":variant"
+                   :value "outlined") nil)))
+    (let ((node (jetpacs-m3-repl-override "buttons" 1)))
+      (should (equal "button" (plist-get node :t)))
+      (should (equal "outlined" (plist-get node :variant)))
+      ;; The sample's own other arguments survive untouched.
+      (should (equal "Button" (plist-get node :label))))
+    ;; Reset discards the knob as well as the override.
+    (jetpacs-m3-repl--on-reset '(:component "buttons" :index 1) nil)
+    (should-not (jetpacs-m3-repl-override "buttons" 1))
+    (should-not (gethash (jetpacs-m3-example-screen-id "buttons" 1)
+                         jetpacs-m3-repl--knobs))))
+
+(ert-deftest jetpacs-m3-repl-a-knob-refuses-a-value-off-the-wire ()
+  "The value is injected by the device and checked against the schema."
+  (should (eq 'rejected (jetpacs-m3-repl--on-knob
+                         '(:component "buttons" :index 1 :key ":variant"
+                           :value "nonsense") nil)))
+  (should (eq 'stale (jetpacs-m3-repl--on-knob
+                      '(:component "buttons" :index 1 :key ":no-such-knob"
+                        :value "x") nil)))
+  (should (eq 'rejected (jetpacs-m3-repl--on-knob
+                         '(:component "buttons" :index 1) nil))))
+
 (provide 'jetpacs-m3-repl-test)
 ;;; jetpacs-m3-repl-test.el ends here

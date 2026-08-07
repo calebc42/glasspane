@@ -22,10 +22,13 @@
 ;; refused or stale apply, a write-protected buffer, or a remote splice
 ;; racing unsent local edits each drop local pending state and request
 ;; one `edit.resync'; the reseed arrives as `edit.open' and the buffer
-;; adopts it.  Never guess a splice, never send a blind whole-document
-;; replacement (SPEC 19.3).  Local edits still queued when a race forces
-;; resync are lost by design — bounded by one command's coalesced edit —
-;; because replaying them against adopted foreign text WOULD be a guess.
+;; adopts it — unless the seed is already its text (nothing to do) or
+;; the buffer is write-protected, which answers with the restoring
+;; `edit.apply' instead.  Never guess a splice, never send a blind
+;; whole-document replacement (SPEC 19.3).  Local edits still queued
+;; when a race forces resync are lost by design — bounded by one
+;; command's coalesced edit — because replaying them against adopted
+;; foreign text WOULD be a guess.
 
 ;;; Code:
 
@@ -76,6 +79,13 @@ If the mirror already holds a session, the buffer adopts its text.
 Returns the buffer, or signals if it carries non-scalar bytes."
   (with-current-buffer (or buffer (current-buffer))
     (when ebp-sync--tracker (ebp-sync-detach))
+    ;; Detach by KEY as well as by buffer: the `puthash' below overwrites
+    ;; the routing entry, and a previous holder of this key would keep its
+    ;; tracker and its locals — still sending `edit.apply' for a session
+    ;; `ebp-sync--buffer' no longer routes back to.
+    (let ((prior (ebp-sync--buffer client document editor-id)))
+      (when (and prior (not (eq prior (current-buffer))))
+        (ebp-sync-detach prior)))
     (let ((seed (ebp-client-editor-text client document editor-id)))
       (when seed
         (unless (ebp-sync--scalar-clean-p seed)
@@ -110,6 +120,11 @@ Returns the buffer, or signals if it carries non-scalar bytes."
     (cl-pushnew #'ebp-sync--on-change
                 (ebp-client-edit-change-functions client))
     (add-hook 'kill-buffer-hook #'ebp-sync-detach nil t)
+    ;; Arm the riders here too.  They gate on `ebp-sync--client', so an
+    ;; attach that FOLLOWS `edit.open' otherwise pushes nothing until the
+    ;; first keystroke on either side; an attach that precedes it costs
+    ;; only an early `flymake-mode' and one push the mirror lookup drops.
+    (ebp-sync--arm-annotations (current-buffer))
     (current-buffer)))
 
 (defun ebp-sync-detach (&optional buffer)
@@ -197,6 +212,14 @@ reseeds the buffer."
   (let ((buf (gethash (list client document editor-id) ebp-sync--table)))
     (and (buffer-live-p buf) buf)))
 
+;;;###autoload
+(defun ebp-sync-buffer (client document editor-id)
+  "The live buffer bound to CLIENT's DOCUMENT/EDITOR-ID session, or nil.
+The public form of the routing lookup: an application asking \"is this
+editor backed by a real buffer\" — and therefore whether the buffer or
+the frame's `value' is authoritative — must not reach into a `--' name."
+  (ebp-sync--buffer client document editor-id))
+
 (defun ebp-sync--on-splice (client document editor-id start del text)
   "Apply an accepted inbound `edit.delta' splice to the bound buffer.
 An unsent local edit racing this splice makes local positions a guess —
@@ -236,15 +259,35 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
                                 (buffer-substring-no-properties beg end)))))))))
 
 (defun ebp-sync--on-open (client document editor-id seed-text _prior)
-  "Adopt a reseed (fresh session or post-resync) into the bound buffer."
+  "Adopt a reseed (fresh session or post-resync) into the bound buffer.
+Three answers, not one.  An IDENTICAL seed is not re-inserted: a real
+file buffer usually already holds exactly this text (the phone was
+seeded from it), and the no-op replacement would mark a clean buffer
+modified and hand eglot a phantom change.  A WRITE-PROTECTED buffer
+does not adopt at all — `ebp-sync--on-splice' already refuses the
+splice, and force-adopting the reseed afterwards handed the device the
+win anyway; SPEC 19.3 makes the refusing endpoint issue, at the fresh
+seq, the `edit.apply' that restores its own authoritative text (and
+such an editor SHOULD be presented `read_only').  Everything else
+adopts as before."
   (let ((buf (ebp-sync--buffer client document editor-id)))
     (when buf
       (with-current-buffer buf
         (setq ebp-sync--queue nil ebp-sync--inflight nil)
-        (let ((inhibit-read-only t))
-          (save-excursion
-            (delete-region (point-min) (point-max))
-            (insert seed-text)))
+        (let ((mine (buffer-substring-no-properties (point-min) (point-max))))
+          (cond
+           ((equal seed-text mine))
+           (buffer-read-only
+            ;; One restoring apply, no retry: a refusal leaves the mirror
+            ;; where it is and the next reseed asks again — never a loop.
+            (when (ebp-sync--scalar-clean-p mine)
+              (ebp-client-edit-apply client document editor-id
+                                     0 (length seed-text) mine)))
+           (t
+            (let ((inhibit-read-only t))
+              (save-excursion
+                (delete-region (point-min) (point-max))
+                (insert seed-text))))))
         (when ebp-sync--tracker
           (track-changes-fetch ebp-sync--tracker #'ignore))
         (setq ebp-sync--diag-stamp 'unset

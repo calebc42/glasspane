@@ -131,6 +131,50 @@ local pending state drops and one resync goes out."
     (ebp-sync-flush)
     (should-not (cl-find 'edit.apply sent :key #'car))))
 
+(ert-deftest ebp-sync-reseed-identical-leaves-buffer-unmodified ()
+  "An equal seed is not re-inserted: a clean file buffer stays clean."
+  (ebp-sync-test--with "same text"
+    (set-buffer-modified-p nil)
+    (ebp-client--handle-edit-open
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?b) :seq 0
+                  :text "same text" :cursor 0))
+    (should (equal (buffer-string) "same text"))
+    (should-not (buffer-modified-p))))
+
+(ert-deftest ebp-sync-reseed-refuses-a-write-protected-buffer ()
+  "SPEC 19.3: write protection is not overridden by the reseed.  The
+buffer keeps its text and answers with the restoring edit.apply."
+  (ebp-sync-test--with "mine"
+    (setq buffer-read-only t)
+    (ebp-client--handle-edit-open
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?b) :seq 0
+                  :text "theirs" :cursor 0))
+    (should (equal (buffer-string) "mine"))
+    (let ((applies (cl-remove-if-not (lambda (s) (eq (car s) 'edit.apply))
+                                     sent)))
+      (should (= 1 (length applies)))
+      (pcase-let ((`(,_m ,params ,_cb) (car applies)))
+        (should (= (plist-get params :start) 0))
+        (should (= (plist-get params :del) 6))   ; the whole seed
+        (should (equal (plist-get params :text) "mine"))
+        (should (= (plist-get params :seq) 1))))))
+
+(ert-deftest ebp-sync-second-attach-on-a-key-detaches-the-first ()
+  "One buffer per (client, document, editor-id): the previous holder is
+released by KEY, so no orphan tracker keeps sending for a session the
+routing table no longer points at."
+  (ebp-sync-test--with "text"
+    (let ((first (current-buffer)))
+      (with-temp-buffer
+        (let ((second (current-buffer)))
+          (ebp-sync-attach client "doc:1" "body")
+          (should (eq (ebp-sync-buffer client "doc:1" "body") second))
+          (with-current-buffer first
+            (should-not ebp-sync--tracker)
+            (should-not ebp-sync--client)))))))
+
 (ert-deftest ebp-sync-close-detaches ()
   "edit.close releases the buffer binding and its tracker."
   (ebp-sync-test--with "text"

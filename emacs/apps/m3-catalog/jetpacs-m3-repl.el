@@ -113,8 +113,15 @@ empty box over a component whose vocabulary you do not know yet."
           "Edit the sample and send it. A node replaces what is above.")
       :style "caption")
      (jetpacs-divider)
+     ;; ARGS is what makes the verb multi-session: the send button
+     ;; dispatches with no value and reads the mirror, so this pair is
+     ;; the only thing on that dispatch saying WHICH example it is for.
+     ;; Without it every send was rejected in silence — found on
+     ;; hardware, by a Playground whose button did nothing.
      (jetpacs-with-attrs
-      (if-let* ((cards (jetpacs-repl-cards session :verb "m3catalog.repl")))
+      (if-let* ((cards (jetpacs-repl-cards
+                        session :verb "m3catalog.repl"
+                        :args (list :component id :index index))))
           (apply #'jetpacs-lazy-column cards)
         (jetpacs-repl-empty-state))
       :weight 1)
@@ -122,6 +129,7 @@ empty box over a component whose vocabulary you do not know yet."
       :editor-id (jetpacs-m3-repl-editor-id id index)
       :document (jetpacs-m3-repl-document id index)
       :verb "m3catalog.repl"
+      :args (list :component id :index index)
       :value (jetpacs-m3-repl--seed component index))
      :spacing 8 :fill t)))
 

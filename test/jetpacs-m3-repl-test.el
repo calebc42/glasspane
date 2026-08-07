@@ -54,6 +54,29 @@ sheet, and the Playground rides an in-body `collapsible' instead."
       (should (string-match-p "collapsible" json))
       (should-not (string-match-p "\"sheet_peek_height\":96" json)))))
 
+(ert-deftest jetpacs-m3-repl-every-dispatch-says-which-example ()
+  "THE bug the offline tests all missed and the device found in a tap.
+The send button dispatches with NO value — it reads the synchronized
+mirror — so the `:component'/`:index' pair is the only thing on that
+dispatch saying which example it is for.  Without it `--on-eval' gets a
+nil component, answers `rejected', and the button does NOTHING AT ALL:
+no card, no error, no snackbar.  Every offline test passed because they
+all called the verb directly with args the UI was never sending.
+
+So: assert it of the authored TREE, which is what the device gets."
+  (let* ((json (jetpacs-m3-repl-test--json "buttons" 10))
+         (dispatches (let (out (start 0))
+                       (while (string-match "\"action\":\"m3catalog\\.repl\"" json start)
+                         (push (match-beginning 0) out)
+                         (setq start (match-end 0)))
+                       out)))
+    (should dispatches)
+    ;; Every m3catalog.repl dispatch in the panel carries the pair.
+    (dolist (at dispatches)
+      (let ((window (substring json at (min (length json) (+ at 200)))))
+        (should (string-match-p "\"component\":\"buttons\"" window))
+        (should (string-match-p "\"index\":10" window))))))
+
 (ert-deftest jetpacs-m3-repl-a-node-becomes-the-sample ()
   "The print step of this REPL is a rendering — that is the point."
   (jetpacs-m3-repl-test--clean

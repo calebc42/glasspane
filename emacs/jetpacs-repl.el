@@ -134,10 +134,15 @@ during a long evaluation should leave the loop standing."
 
 ;;;; The chrome
 
-(cl-defun jetpacs-repl-card (entry &key index verb)
+(cl-defun jetpacs-repl-card (entry &key index verb args)
   "One history ENTRY as a card: the input, the result, copy and re-run.
 VERB is the action name re-run dispatches, carrying the input as
-`:value'; INDEX is only for the reconciliation key."
+`:value' ON TOP OF ARGS; INDEX is only for the reconciliation key.
+
+ARGS is what tells a MULTI-SESSION verb which session it is answering
+for.  The hub needs none — it has one REPL — but a caller with a session
+per subject does, and leaving it out is a silent rejection at the far
+end rather than an error here."
   (pcase-let* ((`(,input ,output ,errorp) entry)
                (shown (if (> (length output) jetpacs-repl-output-max)
                           (concat (substring output 0 jetpacs-repl-output-max)
@@ -156,25 +161,32 @@ VERB is the action name re-run dispatches, carrying the input as
         (jetpacs-icon-button "content_copy" (jetpacs-clipboard-copy output)
                              :content-description "Copy result")
         (jetpacs-icon-button "play_arrow"
-                             (jetpacs-action verb :args (list :value input))
+                             (jetpacs-action
+                              verb :args (append args (list :value input)))
                              :content-description "Re-run"))
        (jetpacs-text shown :style "mono" :selectable t
                      :color (and errorp "error"))))
      :key (jetpacs-wire-id "replcard" (format "%d" (or index 0))))))
 
-(cl-defun jetpacs-repl-cards (session &key verb)
+(cl-defun jetpacs-repl-cards (session &key verb args)
   "SESSION's history as cards, newest first — a LIST of nodes."
   (cl-loop for entry in (jetpacs-repl-history session)
            for index from 0
-           collect (jetpacs-repl-card entry :index index :verb verb)))
+           collect (jetpacs-repl-card entry :index index :verb verb :args args)))
 
-(cl-defun jetpacs-repl-input-row (&key editor-id document verb value)
+(cl-defun jetpacs-repl-input-row (&key editor-id document verb value args)
   "The pinned input row: an elisp editor and the button that submits it.
 
 DOCUMENT must end `.el' — see the Commentary; that suffix is what makes
 Emacs answer `edit.complete' with real elisp candidates.  VERB is the
-action both the editor's Enter and the send button dispatch.  VALUE
-seeds the field.
+action both the editor's Enter and the send button dispatch, carrying
+ARGS.  VALUE seeds the field.
+
+ARGS is not optional decoration for a caller with more than one session.
+The send button dispatches with NO value — it reads the mirror — so ARGS
+is the only thing on that dispatch saying WHICH session it is for, and
+omitting it makes the far end reject every send in silence.  Found on
+hardware, by a Playground whose button did nothing at all.
 
 The send button is FILLED.  Authored bare it is, per
 `jetpacs-icon-button''s own docstring, \"the plain, container-less icon
@@ -189,10 +201,10 @@ look like one."
     (jetpacs-with-attrs
      (apply #'jetpacs-editor editor-id
             :document document :complete t :chromeless t :syntax "elisp"
-            :on-enter (jetpacs-action verb)
+            :on-enter (jetpacs-action verb :args args)
             (and value (list :value value)))
      :weight 1)
-    (jetpacs-icon-button "send" (jetpacs-action verb)
+    (jetpacs-icon-button "send" (jetpacs-action verb :args args)
                          :variant "filled"
                          :content-description "Eval"))
    :padding 8))

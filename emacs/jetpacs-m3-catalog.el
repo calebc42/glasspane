@@ -79,6 +79,10 @@
 (require 'jetpacs-m3-material-shapes)
 (require 'jetpacs-m3-swipe-to-dismiss)
 (jetpacs-m3-register)
+;; The Playground, AFTER the registration: it is not a component but a
+;; section over all of them, and it reaches the Example screen through
+;; the core's own seam rather than by the core knowing it exists.
+(require 'jetpacs-m3-repl)
 
 ;;;###autoload
 (defun jetpacs-m3-catalog ()

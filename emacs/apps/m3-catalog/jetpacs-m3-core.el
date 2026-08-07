@@ -838,6 +838,28 @@ block and nothing else."
          (not (string-blank-p text))
          (string-trim text))))
 
+(defvar jetpacs-m3-example-extras-function nil
+  "Seam: what an Example screen carries BESIDES its sample, or nil.
+
+Called with (COMPONENT INDEX SHEET-FREE-P) and returning a plist:
+
+  :scaffold PLIST  appended to the screen's own scaffold members;
+  :body     NODES  appended to the body column, under the doc block;
+  :override NODE   shown INSTEAD of the sample.
+
+`jetpacs-m3-repl' is the caller — the Playground.  It is a seam rather
+than a `require' because the dependency runs the wrong way for one: the
+Playground is built out of the core's own screens and registries, and
+the core has no business knowing it exists.  A catalog with the module
+absent is the catalog exactly as it was.
+
+SHEET-FREE-P says whether the example has already claimed the scaffold's
+`sheet'.  It has to be told, because the failure is silent either way:
+`jetpacs-scaffold' is a `cl-defun' and a duplicate keyword keeps the
+FIRST, so appending loses the Playground on those examples and
+prepending clobbers the sample they exist to show, and no gate can see
+either.")
+
 (defun jetpacs-m3-builder-doc (builder)
   "BUILDER's docstring as display text, or nil.  Never signals."
   (when-let* ((raw (ignore-errors (documentation builder)))
@@ -950,14 +972,29 @@ instead, because a Node tree cannot nest a scaffold."
          ;; because the doc block is absent for an inline lambda and for
          ;; every `:unsupported' example, and an absent child must not
          ;; become a nil one.
+         ;; The Playground seam.  SHEET-FREE-P is the merge rule made
+         ;; explicit: `jetpacs-scaffold' is a `cl-defun', so a duplicate
+         ;; keyword keeps the FIRST — the example's own `:sheet' would
+         ;; silently win and the Playground would vanish, or, prepended,
+         ;; silently clobber the sample.  Neither signals.  So the seam
+         ;; is TOLD whether the slot is free and answers accordingly.
+         (extras (and jetpacs-m3-example-extras-function
+                      (funcall jetpacs-m3-example-extras-function
+                               component index
+                               (not (plist-member extra-scaffold :sheet)))))
          (body (jetpacs-with-attrs
                 (apply #'jetpacs-column
                        (append
-                        (list (jetpacs-m3--example-body example))
+                        (list (or (plist-get extras :override)
+                                  (jetpacs-m3--example-body example)))
                         (when-let* ((doc (jetpacs-m3--doc-block example)))
                           (list doc))
+                        (plist-get extras :body)
                         (list :scroll t :align "center" :spacing 16 :fill t)))
                 :padding 16))
+         ;; The example's own members stay FIRST, so `cl-defun''s
+         ;; first-wins is what enforces "the sample keeps its slot".
+         (extra-scaffold (append extra-scaffold (plist-get extras :scaffold)))
          (slots (jetpacs-m3--example-slots example)))
     (if top-bar
         (apply #'jetpacs-scaffold

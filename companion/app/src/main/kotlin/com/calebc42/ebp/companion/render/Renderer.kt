@@ -722,6 +722,7 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val readOnly = node.boolOr("read_only", false)
     val enabled = node.boolOr("enabled", true)
     val onSave = node.objOrNull("on_save")
+    val onEnter = node.objOrNull("on_enter")
     // A TextFieldValue (not a bare String) so the toolbar can read the live
     // selection/caret for ${selection}, placements, line ops, and edit.command.
     // SPEC 16.1/13.6: the draft keys on the wire address (surface+id), not the
@@ -827,6 +828,12 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                 localDate = ::localDateStamp,
                 localTime = ::localTimeStamp)
         }
+        // SPEC 17.4 `on_enter`: dispatches the descriptor with the full editor
+        // value (§14.3, the same injection `on_save` uses). The IME action is
+        // gated on the member being PRESENT: an editor is multi-line by
+        // construction (minLines = 3), and ImeAction.Done replaces the soft
+        // keyboard's newline key — so a file editor that authors no `on_enter`
+        // must keep Default and its Return key.
         OutlinedTextField(
             value = value,
             readOnly = readOnly,
@@ -834,6 +841,17 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             visualTransformation = transform,
             onValueChange = commit,
             minLines = 3,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                imeAction =
+                    if (onEnter != null) androidx.compose.ui.text.input.ImeAction.Done
+                    else androidx.compose.ui.text.input.ImeAction.Default),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                // §17.4: a read-only or disabled editor MUST NOT dispatch —
+                // the same rule the commit path and the save button pin.
+                onDone = {
+                    if (enabled && !readOnly)
+                        onEnter?.let { ctx.action(it, JsonPrimitive(value.text)) }
+                }),
             modifier = Modifier.fillMaxWidth())
         // SPEC 17.4 `on_save`: the save affordance for a value+on_save
         // editor — dispatches the descriptor with the LIVE text injected

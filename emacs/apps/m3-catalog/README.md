@@ -1,4 +1,4 @@
-# The Material 3 Expressive Catalog, in Elisp
+# The Material 3 Compose Catalog, in Elisp
 
 A faithful re-creation of
 `resources/android/Compose-Material-3-Expressive-Catalog` as a Jetpacs

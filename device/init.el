@@ -51,9 +51,11 @@
 ;; `jetpacs.org' owner: reach it from the Apps button.
 (require 'jetpacs-org-render)
 (require 'jetpacs-org-habits)
-;; The Material 3 Expressive Catalog (owner `m3catalog'): 41 components
-;; and 279 examples of the node vocabulary, on its own surface.  Reach
-;; it from the Apps button, or M-x jetpacs-m3-catalog.
+;; The Material 3 Compose Catalog (owner `m3catalog'): 41 components
+;; and 279 examples of the node vocabulary, on its own surface.  It is
+;; also the tree's first `jetpacs-defapp' registration, so its "Catalog"
+;; destination composes into every dock.  Reach it there, from the Apps
+;; button, or M-x jetpacs-m3-catalog.
 (require 'jetpacs-m3-catalog)
 ;; The live editor loop (parity P1), and the `ebp-' half of the stack:
 ;; wire and Emacs only, no node vocabulary.  Buffer sync with its

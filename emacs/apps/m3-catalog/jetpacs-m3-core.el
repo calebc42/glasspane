@@ -1,13 +1,13 @@
-;;; jetpacs-m3-core.el --- M3 Expressive Catalog: model + chrome -*- lexical-binding: t; -*-
+;;; jetpacs-m3-core.el --- Material 3 Compose Catalog: model + chrome -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Package-Requires: ((emacs "30.1"))
 
 ;;; Commentary:
 
-;; The Tier-1 skeleton of the Compose Material 3 Expressive Catalog
-;; recreated in Elisp: the component registry, the three screens, and
-;; the verbs.  Component content lives in the sibling
+;; The Tier-1 skeleton of the Material 3 Compose Catalog -- the Jetpacs
+;; component vocabulary -- recreated in Elisp: the component registry,
+;; the three screens, and the verbs.  Component content lives in the sibling
 ;; `jetpacs-m3-<slug>.el' modules, one per catalog component, each
 ;; calling `jetpacs-m3-defcomponent'.
 ;;
@@ -53,6 +53,24 @@ application, not base chrome.")
 
 (defconst jetpacs-m3-title "Compose Material 3"
   "The Home top-bar title (upstream R.string.compose_material_3).")
+
+(defconst jetpacs-m3-identity
+  "Material 3 Compose Catalog — the Jetpacs component vocabulary"
+  "The catalog's full identity, ratified 2026-08-06.
+\"m3\" and \"Jetpacs\" are synonymous: Material 3 IS the design language,
+and this app is the vocabulary itself rather than a demo beside it
+\(docs/ARCHITECTURE-POC3.md, the M3 doctrine).  It rides the root
+screen's BODY; the dock and drawer label stays the short \"Catalog\".")
+
+(defconst jetpacs-m3-material-version "1.5.0-alpha16"
+  "The Material 3 version this catalog is authored against.
+NOT the source of truth — `companion/gradle/libs.versions.toml''s
+`material3' entry is, and this constant restates it so the phone can
+say which Material it is showing.  The two are asserted equal by
+test/jetpacs-m3-catalog-test.el, so bumping the toml without bumping
+this goes RED: the Material version moves UNANIMOUSLY, in the toml,
+here, and in the doctrine paragraph that names them
+\(docs/ARCHITECTURE-POC3.md).")
 
 (defconst jetpacs-m3-component-icon "widgets"
   "The icon every component card shows.
@@ -592,12 +610,26 @@ into the more-menu (see `jetpacs-m3--more-menu')."
               rows)))
     (nreverse rows)))
 
+(defun jetpacs-m3--identity-header ()
+  "The root screen's description: who this app is, and which Material.
+It rides the BODY rather than the top bar because the bar already
+carries upstream's own title and its trailing actions, and a
+sixty-character title there is exactly the flex trap
+`jetpacs-chrome-screen' documents.  The version is read from
+`jetpacs-m3-material-version', which the suite pins to the toml."
+  (jetpacs-column
+   (jetpacs-text jetpacs-m3-identity :style "title")
+   (jetpacs-text (format "Material 3 %s" jetpacs-m3-material-version)
+                 :style "caption")
+   :spacing 2))
+
 (defun jetpacs-m3-home-screen (back)
-  "The catalog root screen: every component as a tile."
+  "The catalog root screen: the identity, then every component as a tile."
   (jetpacs-chrome-screen
    jetpacs-m3-title
    (apply #'jetpacs-lazy-column
-          (append (jetpacs-m3--home-rows (jetpacs-m3-visible-components))
+          (append (list (jetpacs-m3--identity-header))
+                  (jetpacs-m3--home-rows (jetpacs-m3-visible-components))
                   (list :spacing 8 :content-padding 12)))
    :back back
    :actions (jetpacs-m3--actions "home")))

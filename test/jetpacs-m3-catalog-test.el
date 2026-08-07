@@ -23,6 +23,11 @@
 (require 'jetpacs-apps)
 (require 'jetpacs-m3-catalog)
 
+(defconst jetpacs-m3-test--root
+  (expand-file-name ".." (file-name-directory
+                          (or load-file-name buffer-file-name)))
+  "Repo root, captured at LOAD time — nil inside a test body.")
+
 (defconst jetpacs-m3-test--inventory
   '(("adaptive" "Adaptive" 7)
     ("badge" "Badge" 1)
@@ -348,6 +353,43 @@ longer names `jetpacs-m3--on-ready' anywhere, so the only thing
 attaching the catalog's client hooks at READY is the `add-hook' the
 app runs at load -- and this is the only suite that loads the app."
   (should (memq #'jetpacs-m3--on-ready jetpacs-ready-functions)))
+
+;;;; Material 3 is the design language, and the version is PINNED
+
+(ert-deftest jetpacs-m3-material-version-matches-the-toml ()
+  "THE UNANIMOUS-UPDATE MECHANISM.  Material is Jetpacs' design language
+and its version has ONE source of truth --
+companion/gradle/libs.versions.toml's `material3' entry.
+`jetpacs-m3-material-version' restates it so the phone can say which
+Material it is showing, and this test reads the toml off disk and
+asserts the two are equal.  Bumping the toml without bumping the
+constant therefore goes RED: the version moves in the toml, in the
+constant, and in the doctrine paragraph of docs/ARCHITECTURE-POC3.md,
+or it does not move."
+  (let ((toml (expand-file-name "companion/gradle/libs.versions.toml"
+                                jetpacs-m3-test--root))
+        (version nil))
+    (should (file-readable-p toml))
+    (with-temp-buffer
+      (insert-file-contents toml)
+      (goto-char (point-min))
+      ;; Line-anchored: [libraries] also carries a `version.ref =
+      ;; "material3"', which is a REFERENCE to this entry, not a version.
+      (should (re-search-forward "^material3 *= *\"\\([^\"]+\\)\"" nil t))
+      (setq version (match-string 1)))
+    (should (equal version jetpacs-m3-material-version))))
+
+(ert-deftest jetpacs-m3-home-screen-carries-the-identity ()
+  "The root screen says who this app is and which Material it is.
+The dock and drawer label stays the short \"Catalog\"; the full ratified
+identity lives in the root screen's body, where a sixty-character
+string is not a top-bar flex trap."
+  (let ((json (jetpacs-node->canonical-json (jetpacs-m3-home-screen nil))))
+    (should (string-match-p (regexp-quote (json-serialize
+                                           jetpacs-m3-identity))
+                            json))
+    (should (string-match-p (regexp-quote jetpacs-m3-material-version)
+                            json))))
 
 ;;;; App identity: `jetpacs-defapp''s first caller
 

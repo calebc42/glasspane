@@ -42,6 +42,27 @@ Android app is a dumb renderer: it selects a document from Jetpacs' durable Room
 implementation of accepted EBP state, renders it, and returns typed EBP
 actions. It must not compile a second Kotlin copy of the catalog.
 
+Material 3 IS the design language, and "m3" and "Jetpacs" are synonymous
+(ratified 2026-08-06). Jetpacs leans into Material Design exactly as it leans
+into Kotlin, Android, and Compose: the node vocabulary is Material's
+vocabulary, and there is no design-system abstraction layer between them —
+nor is one wanted. A different design system does not mean a Jetpacs option;
+it means a different Companion implementation, which is precisely what EBP
+being design-agnostic already buys. An abstraction here would cost the
+fidelity that makes the catalog a usable component reference and buy an
+indirection nobody would ever take.
+
+The Material VERSION is pinned, with ONE source of truth:
+`companion/gradle/libs.versions.toml`'s `material3` entry, currently
+`1.5.0-alpha16`. A major bump — a future Material 4 — is one deliberate,
+coordinated change, made in three places updated UNANIMOUSLY: that toml
+entry, the catalog's `jetpacs-m3-material-version` constant, and this
+paragraph. The constant is not a second source of truth; it restates the toml
+so the phone can say which Material it is showing, and
+`test/jetpacs-m3-catalog-test.el` reads the toml at test time and asserts the
+two are equal — so bumping one without the other goes red rather than
+shipping a catalog that lies about its own version.
+
 Durable delivery crosses two independent failure domains. Jetpacs commits
 outgoing events to a Room 3 transactional outbox. Emacs commits received
 EventIds plus recoverable application work to its own `ebp-sqlite.el` inbox

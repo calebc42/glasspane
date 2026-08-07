@@ -266,11 +266,13 @@ emacs -Q --batch -L emacs -l test/ebp-wire-test.el -l test/jetpacs-integration-t
 emacs -Q --batch -L emacs -l test/jetpacs-phase-a-test.el \
   -f ert-run-tests-batch-and-exit
 
-# The M3 Expressive Catalog (Tier-1 app) exit gate: the upstream
+# The Material 3 Compose Catalog (Tier-1 app) exit gate: the upstream
 # inventory — 41 components, 279 examples, upstream order — plus a build
 # of EVERY screen it can show, each checked for the §16.2 profile, §16.1
 # id uniqueness, and canonical serialization.  Nothing else in the tree
-# exercises this much of the builder surface at once.
+# exercises this much of the builder surface at once.  It also holds the
+# Material version pin: the toml is read off disk and asserted equal to
+# `jetpacs-m3-material-version', so the two move unanimously or go red.
 emacs -Q --batch -L emacs -L emacs/apps/m3-catalog \
   -l test/jetpacs-m3-catalog-test.el \
   -f ert-run-tests-batch-and-exit

@@ -1,13 +1,16 @@
-;;; jetpacs-m3-catalog.el --- The Compose M3 Expressive Catalog -*- lexical-binding: t; -*-
+;;; jetpacs-m3-catalog.el --- The Material 3 Compose Catalog -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Package-Requires: ((emacs "30.1"))
 
 ;;; Commentary:
 
-;; A Tier-1 application recreating the Compose Material 3 Expressive
-;; Catalog (resources/android/Compose-Material-3-Expressive-Catalog)
-;; entirely in Elisp: 41 components, 279 examples, three screens deep.
+;; The Material 3 Compose Catalog -- the Jetpacs component vocabulary.
+;; A Tier-1 application recreating upstream's Compose Material 3
+;; Expressive Catalog (resources/android/Compose-Material-3-Expressive-
+;; Catalog) entirely in Elisp: 41 components, 279 examples, three
+;; screens deep.  Material 3 is not a theme this app demonstrates; it
+;; is the design language Jetpacs IS (docs/ARCHITECTURE-POC3.md).
 ;;
 ;; This file is the ENTRY POINT and nothing else -- the model, the
 ;; screens and the verbs live in `jetpacs-m3-core', and each component

@@ -469,5 +469,101 @@ contract."
       (should (eq (cdr cell)
                   (nth (car cell) (plist-get component :examples)))))))
 
+;;;; The example's own doc string
+
+(defun jetpacs-m3-test--texts (node)
+  "Every `text' member anywhere in NODE's tree, as a list of strings."
+  (let (out)
+    (cl-labels
+        ((walk (x)
+           (cond
+            ((vectorp x) (mapc #'walk x))
+            ((and (consp x) (keywordp (car x)))
+             (cl-loop for (key value) on x by #'cddr
+                      do (when (and (eq key :text) (stringp value))
+                           (push value out))
+                         (walk value)))
+            ((consp x) (mapc #'walk x)))))
+      (walk node))
+    (nreverse out)))
+
+(defun jetpacs-m3-test--example-where (predicate)
+  "The first (COMPONENT INDEX EXAMPLE) whose EXAMPLE satisfies PREDICATE.
+Found rather than hard-coded: these are populations whose membership the
+catalog keeps changing, and a test naming one by slug rots the day that
+sample is rewritten."
+  (cl-loop for component in jetpacs-m3-components
+           thereis (cl-loop for example in (plist-get component :examples)
+                            for index from 0
+                            when (funcall predicate example)
+                            return (list component index example))))
+
+(ert-deftest jetpacs-m3-example-screen-carries-the-builder-docstring ()
+  "The Example screen says what M3 calls this AND what the elisp says.
+Upstream's `:description' is product copy; the builder's docstring is
+the only thing on that screen written by whoever actually drew it."
+  (let* ((component (jetpacs-m3-component "switches"))
+         (texts (jetpacs-m3-test--texts
+                 (jetpacs-m3-example-screen component 0 nil))))
+    (should (member "Elisp" texts))
+    (should (cl-some (lambda (s) (string-match-p "Upstream SwitchSample" s))
+                     texts))))
+
+(ert-deftest jetpacs-m3-doc-block-is-absent-when-there-is-nothing-to-say ()
+  "No docstring, no block — never an empty heading.
+An inline lambda has none to read and an `:unsupported' example has no
+builder at all; both must reach the screen without a bare \"Elisp\"
+title standing over nothing."
+  (dolist (probe (list (lambda (e) (and (plist-get e :build)
+                                        (not (symbolp (plist-get e :build)))))
+                       (lambda (e) (plist-get e :unsupported))))
+    (let ((found (jetpacs-m3-test--example-where probe)))
+      (should found)
+      (pcase-let ((`(,component ,index ,example) found))
+        (should-not (jetpacs-m3-example-doc example))
+        (should-not (member "Elisp"
+                            (jetpacs-m3-test--texts
+                             (jetpacs-m3-example-screen
+                              component index nil))))))))
+
+(ert-deftest jetpacs-m3-doc-falls-back-to-the-chrome-builder ()
+  "An example that IS screen chrome documents itself through its slot.
+Seventy examples have no `:build' — their subject is a top bar or a
+scaffold slot — and reading only `:build' would leave every one of them
+silent on a screen whose whole point is to explain the sample."
+  (let ((found (jetpacs-m3-test--example-where
+                (lambda (e) (and (null (plist-get e :build))
+                                 (null (plist-get e :unsupported))
+                                 (jetpacs-m3--example-builder e))))))
+    (should found)
+    (should (stringp (jetpacs-m3-example-doc (nth 2 found))))))
+
+(ert-deftest jetpacs-m3-example-doc-never-signals ()
+  "A docstring nobody can read costs its block and nothing else.
+`documentation' reads a doc file and can fail on a stripped or moved
+function, and this runs while a screen is being BUILT — losing the app
+over a comment would be an absurd way to lose it."
+  (should-not (jetpacs-m3-example-doc
+               (list :build (make-symbol "jetpacs-m3-test--never-defined"))))
+  (should-not (jetpacs-m3-example-doc (list :build "not a function")))
+  (should-not (jetpacs-m3-example-doc nil)))
+
+(ert-deftest jetpacs-m3-doc-strings-cover-every-named-builder ()
+  "The authoring brief has required a docstring per sample from the start.
+This is the count that says whether that is actually TRUE, so a new
+module which skips one is caught here rather than by a blank space on a
+phone.  The examples with no named builder at all are the inline
+lambdas, which have no symbol to carry a docstring."
+  (let (missing)
+    (dolist (component jetpacs-m3-components)
+      (cl-loop for example in (plist-get component :examples)
+               for index from 0
+               when (and (not (plist-get example :unsupported))
+                         (jetpacs-m3--example-builder example)
+                         (not (jetpacs-m3-example-doc example)))
+               do (push (format "%s/%d" (plist-get component :id) index)
+                        missing)))
+    (should-not missing)))
+
 (provide 'jetpacs-m3-catalog-test)
 ;;; jetpacs-m3-catalog-test.el ends here

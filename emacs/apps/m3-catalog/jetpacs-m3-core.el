@@ -733,6 +733,69 @@ catalog must stay navigable when one recreation is wrong."
      (slots (jetpacs-m3--slot-hint slots))
      (t (jetpacs-m3--slot-hint nil)))))
 
+;;;; The example's own doc string
+
+;; Every screen in this app describes its subject in UPSTREAM's words —
+;; `:description' is Google's product copy, and fidelity is why.  But the
+;; thing actually on the glass was drawn by an elisp builder that
+;; documents itself, and the authoring brief has required that docstring
+;; from the first module ("Put each sample in its own `defun
+;; jetpacs-m3-<slug>--<name>' … with a docstring naming the upstream
+;; sample").  Nearly every one of the catalog's builders carries one and
+;; none of them had ever reached the device.  So both descriptions ride
+;; the Example screen now: what M3 says this component is, and what the
+;; elisp says this sample does.
+
+(defun jetpacs-m3--example-builder (example)
+  "The function symbol whose docstring documents EXAMPLE, or nil.
+`:build' is the sample proper and answers for most examples.  An example
+that IS screen chrome has no body builder at all — its subject lives in
+`:top-bar' or in a `:slots' entry — and those answer for it rather than
+leaving seventy of the catalog's examples silent.
+
+Only a SYMBOL can answer: an inline lambda has no docstring to read, and
+`:snackbar' (a string) and `:on-refresh' (a descriptor) are not functions
+at all, so the `fboundp' test is load-bearing rather than defensive."
+  (cl-find-if (lambda (fn) (and fn (symbolp fn) (fboundp fn)))
+              (append (list (plist-get example :build)
+                            (plist-get example :top-bar))
+                      (cl-loop for (_key value)
+                               on (plist-get example :slots) by #'cddr
+                               collect value))))
+
+(defun jetpacs-m3-example-doc (example)
+  "EXAMPLE's builder docstring as display text, or nil when it has none.
+Run through `substitute-command-keys', so the `\\=`quoted symbols\\='
+every docstring in this tree is written with arrive as the curly quotes
+Emacs would show in *Help* rather than as raw grave accents.
+
+Never signals.  `documentation' reads a doc file for a preloaded
+function and can fail on a stripped or moved one, and this is called
+while a screen is being built — a docstring nobody can read costs its
+block and nothing else."
+  (when-let* ((sym (jetpacs-m3--example-builder example))
+              (raw (ignore-errors (documentation sym)))
+              (text (ignore-errors (substitute-command-keys raw))))
+    (and (stringp text)
+         (not (string-blank-p text))
+         (string-trim text))))
+
+(defun jetpacs-m3--doc-block (example)
+  "EXAMPLE's elisp docstring as a titled block, or nil when it has none."
+  (when-let* ((doc (jetpacs-m3-example-doc example)))
+    (jetpacs-with-attrs
+     (jetpacs-column
+      (jetpacs-text "Elisp" :style "title")
+      ;; Selectable for the same reason the \"View elisp\" screen's text
+      ;; is: reading it on the phone and then taking it somewhere are two
+      ;; different wants, and selection serves the second without a verb.
+      (jetpacs-text doc :style "caption" :selectable t)
+      :spacing 4)
+     ;; The sample is CENTERED in this column and prose is not — a ragged
+     ;; paragraph centred line by line is the kind of thing that looks
+     ;; deliberate and reads terribly — so the block claims the start edge.
+     :align_self "start")))
+
 (defun jetpacs-m3--example-slots (example)
   "EXAMPLE's scaffold slots as a `jetpacs-scaffold' keyword plist."
   (let ((label (plist-get example :name))
@@ -774,9 +837,17 @@ instead, because a Node tree cannot nest a scaffold."
          (extra-scaffold (let ((s (plist-get example :scaffold)))
                            (if (functionp s) (funcall s) s)))
          (top-bar (plist-get example :top-bar))
+         ;; The sample, then what its builder says about itself.  `apply'
+         ;; because the doc block is absent for an inline lambda and for
+         ;; every `:unsupported' example, and an absent child must not
+         ;; become a nil one.
          (body (jetpacs-with-attrs
-                (jetpacs-column (jetpacs-m3--example-body example)
-                                :scroll t :align "center" :spacing 16 :fill t)
+                (apply #'jetpacs-column
+                       (append
+                        (list (jetpacs-m3--example-body example))
+                        (when-let* ((doc (jetpacs-m3--doc-block example)))
+                          (list doc))
+                        (list :scroll t :align "center" :spacing 16 :fill t)))
                 :padding 16))
          (slots (jetpacs-m3--example-slots example)))
     (if top-bar

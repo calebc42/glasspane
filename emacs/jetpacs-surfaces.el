@@ -814,13 +814,69 @@ dispatch; a global verb (base's `jetpacs.theme.modus-toggle': owned,
 owns ZERO surfaces, any surface may render its button) declares the
 exception EXPLICITLY rather than having the gate infer it.")
 
+(defvar jetpacs--action-schemas (make-hash-table :test #'equal)
+  "Action name -> (:args ARGS :doc DOC), the INTROSPECTION record.
+A sibling table, like `jetpacs--any-surface-actions' — deliberately not
+folded into `jetpacs-action-handlers', whose value is the bare handler
+function that `jetpacs--action-shim' funcalls at dispatch and that every
+suite in the tree `gethash'es directly.  Metadata never gates dispatch,
+so it must not sit in the path that does.
+
+Read it through `jetpacs-action-schema'.  EMACS-SIDE ONLY: nothing here
+reaches the wire — SPEC 14 advertises an action by NAME and the phone
+never asks what shape its arguments are.  The audience is the
+self-hosting program: completion, action editors, builder UIs, all of
+which run in this process.")
+
 (defun jetpacs-owned-surface-p (surface owner)
   "Non-nil when SURFACE is OWNER's D1 primary or claimed under it."
   (and (stringp surface) (stringp owner)
        (or (equal surface (concat "app:" owner))
            (and (member surface (jetpacs--owned-names "surface" owner)) t))))
 
-(cl-defun jetpacs-defaction (name fn &key any-surface)
+(defun jetpacs--check-action-args (name args)
+  "Signal unless ARGS is a well-formed arg schema for action NAME.
+STRUCTURE only.  The `:type' VOCABULARY is deliberately open — poc-v1
+shipped \"text\" \"number\" \"enum\" \"date\" \"ref\" \"bool\" and an app is
+free to mint its own, because the consumer of a type is the editor the
+app itself authors.  A closed enum here would make the floor the
+authority on a vocabulary it has no stake in."
+  (unless (proper-list-p args)
+    (error "jetpacs: action %s :args must be a list of plists, got %S"
+           name args))
+  (dolist (arg args)
+    (unless (and (keywordp (car-safe arg))
+                 (let ((n (proper-list-p arg))) (and n (cl-evenp n))))
+      (error "jetpacs: action %s :args entry %S is not a plist" name arg))
+    (unless (symbolp (plist-get arg :name))
+      (error "jetpacs: action %s arg %S needs a symbol :name" name arg))
+    (unless (plist-get arg :name)
+      (error "jetpacs: action %s has an arg with no :name (%S)" name arg))
+    (let ((type (plist-get arg :type)))
+      (when (and (plist-member arg :type) (not (stringp type)))
+        (error "jetpacs: action %s arg %s :type must be a string, got %S"
+               name (plist-get arg :name) type)))
+    ;; A PLAIN Lisp boolean, not the wire's `:json-false' — this record
+    ;; never leaves the process, and accepting the wire spelling would
+    ;; make a truth test on `:required' silently answer \"yes\".
+    (let ((required (plist-get arg :required)))
+      (unless (memq required '(nil t))
+        (error "jetpacs: action %s arg %s :required must be t or nil, got %S"
+               name (plist-get arg :name) required)))))
+
+(defun jetpacs-action-schema (name)
+  "The introspection record for the registered action NAME, or nil.
+A plist (:args ARGS :doc DOC :any-surface BOOL); nil for a name nothing
+has registered, which is how a caller tells \"no such action\" from \"an
+action that declared no schema\" (the latter answers with nil :args and
+nil :doc).  See `jetpacs-defaction' for the shape of ARGS."
+  (when (gethash name jetpacs-action-handlers)
+    (let ((schema (gethash name jetpacs--action-schemas)))
+      (list :args (plist-get schema :args)
+            :doc (plist-get schema :doc)
+            :any-surface (and (gethash name jetpacs--any-surface-actions) t)))))
+
+(cl-defun jetpacs-defaction (name fn &key any-surface args doc)
   "Register FN as the handler for the remote action NAME; returns NAME.
 A function, not a macro: FN is a value, `(lambda (args params) ...)'.
 ARGS is the event's `:args' plist (jsonrpc decode: nested keyword
@@ -840,7 +896,28 @@ When registered under `with-jetpacs-owner', the dispatch REJECTS an
 event whose wire surface is not the owner's (SPEC 14.4 validates the
 surface context BEFORE invoking behavior).  ANY-SURFACE non-nil
 declares a GLOBAL VERB exempt from that scope — for an owner-attributed
-action whose button any surface may legitimately render."
+action whose button any surface may legitimately render.
+
+ARGS and DOC are the action's INTROSPECTION schema, poc-v1's typed arg
+declarations returning to the floor.  ARGS is a list of plists, one per
+argument the handler reads out of the event:
+
+    :args \\='((:name value :type \"text\" :required t)
+            (:name date  :type \"date\"))
+
+each carrying a symbol `:name' and optionally a string `:type' and a
+plain-boolean `:required'.  DOC is a one-line description.  Both are
+validated at REGISTRATION time and loudly — a malformed schema is a
+code bug in the app, and a schema that only fails when some editor
+tries to read it fails in the wrong place, months later.  The `:type'
+VOCABULARY stays OPEN: poc-v1's set (\"text\" \"number\" \"enum\" \"date\"
+\"ref\" \"bool\") is a convention, not a closed enum, because the thing
+that interprets a type is the editor the app itself authors.
+
+Metadata NEVER gates dispatch — a schemaless registration is as valid
+as it ever was, and a re-registration that omits ARGS and DOC CLEARS
+the stale ones, the same rule ANY-SURFACE follows.  Nothing here
+crosses the wire; read it back with `jetpacs-action-schema'."
   (unless (and (stringp name) (string-search "." name)
                (string-match-p "\\`[A-Za-z0-9][A-Za-z0-9._:/-]*\\'" name)
                (<= (string-bytes name) 128))
@@ -848,11 +925,19 @@ action whose button any surface may legitimately render."
            name))
   (unless (functionp fn)
     (error "jetpacs: action %s handler must be a function" name))
+  ;; Validated BEFORE the claim: a malformed schema must leave the
+  ;; registry exactly as it found it, not half-register the name.
+  (jetpacs--check-action-args name args)
+  (when (and doc (not (stringp doc)))
+    (error "jetpacs: action %s :doc must be a string, got %S" name doc))
   (jetpacs--claim "action" name)
   (puthash name fn jetpacs-action-handlers)
   (if any-surface
       (puthash name t jetpacs--any-surface-actions)
     (remhash name jetpacs--any-surface-actions))
+  (if (or args doc)
+      (puthash name (list :args args :doc doc) jetpacs--action-schemas)
+    (remhash name jetpacs--action-schemas))
   (when jetpacs--client
     (ebp-client-register-action jetpacs--client name
                                 (jetpacs--action-shim name)))
@@ -862,6 +947,7 @@ action whose button any surface may legitimately render."
   "Remove the action NAME from the staging table and any live client."
   (remhash name jetpacs-action-handlers)
   (remhash name jetpacs--any-surface-actions)
+  (remhash name jetpacs--action-schemas)
   (when jetpacs--client
     (remhash name (ebp-client-actions jetpacs--client)))
   (jetpacs--unclaim "action" name))

@@ -1219,6 +1219,113 @@ gate would reject every one."
       (jetpacs-undefaction "acme.global"))))
 
 
+;;;; E2c: the action's introspection schema (:args / :doc)
+
+(ert-deftest jetpacs-floor-action-schema-round-trips ()
+  "A typed registration reads back through the accessor, verbatim.
+poc-v1's arg schemas are what an action editor, a completion source or
+a builder UI reads to know an action has a `value' it must supply; the
+registry lost them in the rebuild and this is the round trip that says
+they are back."
+  (jetpacs-floor-test--with-client (_client)
+    (with-jetpacs-owner "journal"
+      (jetpacs-defaction "journal.capture" (lambda (_a _p) 'accepted)
+                         :args '((:name value :type "text" :required t)
+                                 (:name date :type "date"))
+                         :doc "Append text to the current journal day."))
+    (should (equal (jetpacs-action-schema "journal.capture")
+                   '(:args ((:name value :type "text" :required t)
+                            (:name date :type "date"))
+                     :doc "Append text to the current journal day."
+                     :any-surface nil)))
+    ;; A global verb reports the flag alongside its schema.
+    (with-jetpacs-owner "journal"
+      (jetpacs-defaction "journal.toggle" (lambda (_a _p) 'accepted)
+                         :any-surface t :doc "Flip the journal view."))
+    (should (equal (jetpacs-action-schema "journal.toggle")
+                   '(:args nil :doc "Flip the journal view." :any-surface t)))
+    ;; An unregistered name is nil — distinguishable from a registered
+    ;; action that simply declared nothing.
+    (should-not (jetpacs-action-schema "journal.nothing-here"))
+    (jetpacs-undefaction "journal.capture")
+    (jetpacs-undefaction "journal.toggle")))
+
+(ert-deftest jetpacs-floor-action-schema-rejects-malformed-args ()
+  "The schema is validated at REGISTRATION, loudly, and atomically.
+A malformed schema is a code bug in the app; deferred to the first
+editor that reads it, it would surface months later and nowhere near
+the defaction that wrote it.  The name must stay UNREGISTERED after a
+refusal — a half-registered action is worse than none."
+  (jetpacs-floor-test--with-client (_client)
+    (dolist (bad '("not a list"
+                   ((:name "value"))          ; :name is not a symbol
+                   ((:type "text"))           ; no :name at all
+                   ((:name))                  ; not even a plist
+                   ((:name value :type date)) ; :type is not a string
+                   ((:name value :required "yes")))) ; not a boolean
+      (should-error (jetpacs-defaction "acme.bad" (lambda (_a _p) 'accepted)
+                                       :args bad))
+      (should-not (gethash "acme.bad" jetpacs-action-handlers)))
+    ;; DOC is a string when present.
+    (should-error (jetpacs-defaction "acme.bad" (lambda (_a _p) 'accepted)
+                                     :doc 7))
+    (should-not (gethash "acme.bad" jetpacs-action-handlers))
+    ;; The type VOCABULARY is open on purpose: an app-defined string
+    ;; passes, because the thing that reads a type is the app's editor.
+    (jetpacs-defaction "acme.ok" (lambda (_a _p) 'accepted)
+                       :args '((:name recipe :type "grocy-recipe-ref")))
+    (should (equal (plist-get (jetpacs-action-schema "acme.ok") :args)
+                   '((:name recipe :type "grocy-recipe-ref"))))
+    (jetpacs-undefaction "acme.ok")))
+
+(ert-deftest jetpacs-floor-action-schema-survives-the-attach-replay ()
+  "The schema outlives the session, like the staging table it rides
+beside.  Registrations are load-time forms replayed into every new
+client; metadata that evaporated on a reconnect would leave the
+introspection answering differently before and after a dropped socket.
+Nothing about it reaches the wire — the replay is the ALLOWLIST."
+  (jetpacs-floor-test--with-client (_client)
+    (with-jetpacs-owner "journal"
+      (jetpacs-defaction "journal.capture" (lambda (_a _p) 'accepted)
+                         :args '((:name value :type "text" :required t))
+                         :doc "Append text."))
+    (jetpacs-detach)
+    (let ((next (jetpacs-floor-test--client)))
+      (jetpacs-attach next)
+      (should (gethash "journal.capture" (ebp-client-actions next)))
+      (should (equal (jetpacs-action-schema "journal.capture")
+                     '(:args ((:name value :type "text" :required t))
+                       :doc "Append text." :any-surface nil))))
+    (jetpacs-undefaction "journal.capture")))
+
+(ert-deftest jetpacs-floor-schemaless-registration-still-dispatches ()
+  "Back-compat: metadata never gates anything.  Every action in the
+tree predates the schema and declares none — they register, dispatch
+and report an EMPTY schema rather than nil, which is how a caller
+tells them from a name nobody registered.  And a re-registration that
+omits the schema CLEARS the stale one, the rule `:any-surface' already
+follows."
+  (jetpacs-floor-test--with-client (client)
+    (let ((runs 0))
+      (jetpacs-defaction "plain.tap" (lambda (_a _p) (cl-incf runs) 'accepted))
+      (should (equal (jetpacs-action-schema "plain.tap")
+                     '(:args nil :doc nil :any-surface nil)))
+      (should (eq (jetpacs--dispatch client '(:action "plain.tap")
+                                     (gethash "plain.tap"
+                                              jetpacs-action-handlers))
+                  'accepted))
+      (should (= runs 1))
+      ;; Schema on, then off again.
+      (jetpacs-defaction "plain.tap" (lambda (_a _p) 'accepted)
+                         :doc "Now documented.")
+      (should (equal (plist-get (jetpacs-action-schema "plain.tap") :doc)
+                     "Now documented."))
+      (jetpacs-defaction "plain.tap" (lambda (_a _p) 'accepted))
+      (should-not (plist-get (jetpacs-action-schema "plain.tap") :doc))
+      (jetpacs-undefaction "plain.tap")
+      (should-not (jetpacs-action-schema "plain.tap")))))
+
+
 ;;;; E2e: hook isolation and the per-surface snackbar
 
 (ert-deftest jetpacs-floor-after-push-hook-is-isolated ()

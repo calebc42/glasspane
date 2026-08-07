@@ -80,7 +80,8 @@ cross the wire (SPEC 19.1), so they refuse sync instead of corrupting."
 ;;;###autoload
 (defun ebp-sync-attach (client document editor-id &optional buffer)
   "Bind BUFFER (default current) to CLIENT's DOCUMENT/EDITOR-ID session.
-If the mirror already holds a session, the buffer adopts its text.
+If the mirror already holds a session, and its text DIFFERS from the
+buffer's, the buffer adopts it; an identical seed is not re-inserted.
 Returns the buffer, or signals if it carries non-scalar bytes."
   (with-current-buffer (or buffer (current-buffer))
     (when ebp-sync--tracker (ebp-sync-detach))
@@ -95,9 +96,17 @@ Returns the buffer, or signals if it carries non-scalar bytes."
       (when seed
         (unless (ebp-sync--scalar-clean-p seed)
           (error "ebp-sync: mirror text is not scalar-clean"))
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert seed))))
+        ;; THE SAME EQUALITY GUARD `ebp-sync--on-open' carries, for the
+        ;; same reason: a real-file buffer usually already holds exactly
+        ;; the mirror's text, and re-inserting it is a no-op that costs
+        ;; the user a modified flag and hands eglot a phantom change.
+        ;; Adoption over a DIFFERENT seed is still this function's
+        ;; contract — only the identity case is skipped.
+        (unless (equal seed (buffer-substring-no-properties
+                             (point-min) (point-max)))
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert seed)))))
     (setq ebp-sync--client client
           ebp-sync--document document
           ebp-sync--editor-id editor-id

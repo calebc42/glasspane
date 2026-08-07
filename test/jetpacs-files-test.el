@@ -1563,6 +1563,106 @@ orthogonal to sync and still answers `stale'."
             (with-current-buffer buf (set-buffer-modified-p nil))
             (kill-buffer buf)))))))
 
+(ert-deftest jetpacs-files-save-synced-leaves-the-buffer-unmodified ()
+  "The whole synchronized round trip with NOTHING about sync stubbed —
+a real `ebp-sync-attach', a real inbound `edit.delta', the real save
+verb — because the sibling above stubs `ebp-sync-buffer' and
+`ebp-sync-flush' and therefore never runs a line of the bridge.  On
+device the flag came back `t' after a save that had cleared it, and the
+stubs are why no suite could see it.
+
+The buffer must be clean at every point where nothing has been typed:
+after an attach that finds the session already open (a reconnect, or a
+second open of a file whose editor is still on a present surface), and
+after each save.  A DEVICE KEYSTROKE is the one thing that legitimately
+marks it, and that is asserted too — a guard that clamped the flag
+would pass everything else here and lose the user's edits."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--sync-client)
+      (let* ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
+             (f (concat root "f.el"))
+             (doc "doc:f.el") (eid "fedit-1")
+             (session (make-string 32 ?a))
+             (sent '())
+             (jetpacs-files--edit nil))
+        (write-region "(defun f ())\n" nil f nil 'silent)
+        (let* ((true (file-truename f))
+               (buf nil))
+          (unwind-protect
+              (cl-letf (((symbol-function 'ebp-client--request)
+                         (lambda (_c method params cb &optional _t)
+                           (push (list method params cb) sent) nil))
+                        ;; The annotation riders fire from timers the pump
+                        ;; below runs; unstubbed they reach jsonrpc and
+                        ;; spray "Error running timer" through the gate log.
+                        ((symbol-function 'ebp-client-notify)
+                         (lambda (_c method params)
+                           (push (list method params nil) sent) nil))
+                        ((symbol-function 'jetpacs-shell-notify) #'ignore)
+                        ((symbol-function 'jetpacs-shell-push)
+                         (lambda (&rest _) 1)))
+                ;; The Companion has the session open over the file's own
+                ;; text — the state every reconnect and every re-open of a
+                ;; live editor arrives in.
+                (ebp-client--handle-edit-open
+                 client (list :document doc :editor_id eid :session session
+                              :seq 0 :text "(defun f ())\n" :cursor 0))
+                (setq buf (find-file-noselect true))
+                (ebp-sync-attach client doc eid buf)
+                ;; ATTACH MUST NOT DIRTY A BUFFER THAT ALREADY AGREES.
+                (with-current-buffer buf (should-not (buffer-modified-p)))
+                (setq jetpacs-files--edit
+                      (list :path true :seed "(defun f ())\n"
+                            :mtime (jetpacs-files--mtime-stamp true)
+                            :coding nil
+                            :document doc :editor-id eid :buffer buf))
+                ;; One device keystroke: this SHOULD leave the flag set.
+                (ebp-client--handle-edit-delta
+                 client (list :document doc :editor_id eid :session session
+                              :seq 1 :start 12 :del 0 :text "x" :len 14))
+                (with-current-buffer buf
+                  (should (buffer-modified-p))
+                  (should (equal (buffer-string) "(defun f ())x\n")))
+                (should (eq (jetpacs--dispatch
+                             client `(:action "jetpacs.files.save"
+                                      :surface "app:jetpacs.files"
+                                      :args (:path ,true
+                                             :mtime ,(jetpacs-files--mtime-stamp true)
+                                             :value "(defun f ())x\n"))
+                             handler)
+                            'accepted))
+                (with-temp-buffer
+                  (insert-file-contents true)
+                  (should (equal (buffer-string) "(defun f ())x\n")))
+                (with-current-buffer buf (should-not (buffer-modified-p)))
+                ;; The post-save legs the device actually runs, in order:
+                ;; the annotation timers the keystroke armed, a reseed
+                ;; carrying the text the save recorded, and a re-attach
+                ;; over the still-live session.  None of them is a user
+                ;; edit, so none of them may set the flag.
+                (jetpacs-files-test--pump)
+                (with-current-buffer buf (should-not (buffer-modified-p)))
+                (ebp-client--handle-edit-open
+                 client (list :document doc :editor_id eid
+                              :session (make-string 32 ?b) :seq 0
+                              :text (plist-get jetpacs-files--edit :seed)
+                              :cursor 0))
+                (with-current-buffer buf (should-not (buffer-modified-p)))
+                (ebp-sync-attach client doc eid buf)
+                (with-current-buffer buf (should-not (buffer-modified-p)))
+                ;; And a genuinely DIFFERENT seed still adopts — the guard
+                ;; skips the no-op, it does not stop the bridge working.
+                (ebp-client--handle-edit-open
+                 client (list :document doc :editor_id eid
+                              :session (make-string 32 ?c) :seq 0
+                              :text "(defun g ())\n" :cursor 0))
+                (ebp-sync-attach client doc eid buf)
+                (with-current-buffer buf
+                  (should (equal (buffer-string) "(defun g ())\n"))))
+            (when (buffer-live-p buf)
+              (with-current-buffer buf (set-buffer-modified-p nil))
+              (kill-buffer buf))))))))
+
 (ert-deftest jetpacs-files-save-survives-a-broken-seam ()
   "A save whose after-save subscriber SIGNALS still answers `accepted'.
 The write is already durable when the seam runs; letting the signal

@@ -161,6 +161,26 @@ buffer keeps its text and answers with the restoring edit.apply."
         (should (equal (plist-get params :text) "mine"))
         (should (= (plist-get params :seq) 1))))))
 
+(ert-deftest ebp-sync-attach-over-an-agreeing-buffer-leaves-it-unmodified ()
+  "The reseed's equality guard, on the OTHER adoption path.  Attach over
+a mirror that already holds the buffer's text must not re-insert it: a
+reconnect, or a second open of an editor whose session is still live,
+otherwise marks a clean file buffer modified with byte-identical text —
+and the flag then outlives the save that had just cleared it.  A
+DIFFERENT seed still adopts; the guard skips a no-op, it does not
+disable attach."
+  (ebp-sync-test--with "same text"
+    (set-buffer-modified-p nil)
+    (ebp-sync-attach client "doc:1" "body")
+    (should (equal (buffer-string) "same text"))
+    (should-not (buffer-modified-p))
+    (ebp-client--handle-edit-open
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?b) :seq 0
+                  :text "other text" :cursor 0))
+    (ebp-sync-attach client "doc:1" "body")
+    (should (equal (buffer-string) "other text"))))
+
 (ert-deftest ebp-sync-second-attach-on-a-key-detaches-the-first ()
   "One buffer per (client, document, editor-id): the previous holder is
 released by KEY, so no orphan tracker keeps sending for a session the

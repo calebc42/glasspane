@@ -43,6 +43,9 @@
 ;; dock destination through the app-identity layer, not by reaching for
 ;; the chrome seam itself.
 (require 'jetpacs-apps)
+;; `jetpacs-emacs-ui-mx-button' — M-x in the top bar, the chrome-as-a-
+;; projection-of-commands rule this app was the one not keeping.
+(require 'jetpacs-emacs-ui)
 ;; `jetpacs-theme-mode' backs the ThemePicker's System/Light/Dark row.
 (require 'jetpacs-theme)
 
@@ -565,9 +568,18 @@ siblings are link-outs and carry none."
    :icon "more_vert"))
 
 (defun jetpacs-m3--actions (screen-id &optional guidelines docs source elisp)
-  "The top-bar trailing actions: pin, theme, more.
+  "The top-bar trailing actions: pin, theme, M-x, more.
 SCREEN-ID is what the pin pins (upstream pins a nav route); ELISP rides
-into the more-menu (see `jetpacs-m3--more-menu')."
+into the more-menu (see `jetpacs-m3--more-menu').
+
+M-x is HERE because docs/CHROME-VOCABULARY.md says chrome is a
+projection of commands and puts M-x top-right on a top app bar, and
+`jetpacs-emacs-ui-mx-button' exists precisely so \"any app may embed\"
+it.  The catalog is the app that did not, which meant the one screen in
+this tree devoted to a command vocabulary had no way to run a command.
+It sits inside the icon group and left of the overflow, because the
+kebab is conventionally outermost and upstream's seven menu rows are
+still what that menu is for."
   (list (let ((pinned (equal jetpacs-m3-favorite screen-id)))
           (jetpacs-icon-button
            "push_pin"
@@ -583,6 +595,7 @@ into the more-menu (see `jetpacs-m3--more-menu')."
         (jetpacs-icon-button
          "palette" (jetpacs-action "m3catalog.theme")
          :content-description "Change theme")
+        (jetpacs-emacs-ui-mx-button)
         (jetpacs-m3--more-menu guidelines docs source elisp)))
 
 (defun jetpacs-m3--expr-badge ()
@@ -1467,6 +1480,45 @@ the screens of whatever surface sent it)."
                 :on-tap (jetpacs-action "jetpacs.launcher.open"
                                         :args (list :surface home))
                 :selected (equal surface home)))))
+
+;;;###autoload
+(defun jetpacs-m3-open (name)
+  "Drill into the catalog component called NAME, by name.
+The M-x projection of tapping a Home tile.  Completing over the
+component NAMES rather than the slugs, because the name is what the grid
+shows and what upstream calls the thing; the slug is a wire id."
+  (interactive
+   (list (completing-read
+          "Component: "
+          (mapcar (lambda (c) (plist-get c :name)) jetpacs-m3-components)
+          nil t)))
+  (if-let* ((component (cl-find name jetpacs-m3-components
+                                :key (lambda (c) (plist-get c :name))
+                                :test #'equal)))
+      (jetpacs-m3-show-component (plist-get component :id))
+    (user-error "jetpacs-m3: no component named %s" name)))
+
+;;;###autoload
+(defun jetpacs-m3-pin (screen-id)
+  "Pin SCREEN-ID, or unpin it when it is already the favourite.
+The M-x projection of the top bar's pin.  Reads the ids the entry point
+can actually restore — `home', `theme', and the `c-'/`e-' screens — so a
+pin made here is one `jetpacs-m3-catalog' will honour."
+  (interactive
+   (list (completing-read
+          "Pin screen: "
+          (append (list "home" "theme")
+                  (cl-loop for c in jetpacs-m3-components
+                           collect (jetpacs-m3-component-screen-id
+                                    (plist-get c :id))))
+          nil t nil nil jetpacs-m3-favorite)))
+  (setq jetpacs-m3-favorite
+        (unless (equal jetpacs-m3-favorite screen-id) screen-id))
+  (when (jetpacs-connected-p)
+    (ignore-errors (jetpacs-shell-push jetpacs-m3-owner)))
+  (message "jetpacs-m3: %s" (if jetpacs-m3-favorite
+                                (format "pinned %s" jetpacs-m3-favorite)
+                              "unpinned")))
 
 (defconst jetpacs-m3-verbs
   '(("m3catalog.open"    . jetpacs-m3--on-open)

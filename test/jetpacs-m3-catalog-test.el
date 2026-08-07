@@ -698,5 +698,40 @@ the image — the reasoning `jetpacs-m3--open-source' already records."
   (should-not (jetpacs-m3-builder-doc (make-symbol "jetpacs-m3-test--nope")))
   (should-not (jetpacs-m3-builder-doc nil)))
 
+;;;; M-x parity (docs/CHROME-VOCABULARY.md: chrome projects commands)
+
+(ert-deftest jetpacs-m3-every-screen-can-run-a-command ()
+  "M-x is on the top bar of every screen that has one.
+The vocabulary's rule is that every chrome affordance maps to a command
+reachable without it, and the catalog was the app that shipped no way to
+run one — on the screen whose whole subject is a command vocabulary."
+  (dolist (node (list (jetpacs-m3-home-screen nil)
+                      (jetpacs-m3-theme-screen nil)
+                      (jetpacs-m3-component-screen
+                       (jetpacs-m3-component "switches") nil)
+                      (jetpacs-m3-example-screen
+                       (jetpacs-m3-component "switches") 0 nil)))
+    (should (string-match-p "\"action\":\"jetpacs\\.emacs\\.mx\""
+                            (jetpacs-node->canonical-json node))))
+  ;; NOT the source screen: it is a leaf viewer whose bar is a back
+  ;; arrow and a title, and `bfca1ba' made that a deliberate rule.
+  (should-not (string-match-p
+               "\"action\":\"jetpacs\\.emacs\\.mx\""
+               (jetpacs-node->canonical-json
+                (jetpacs-m3-source-screen
+                 (jetpacs-m3-component "switches") 0 nil)))))
+
+(ert-deftest jetpacs-m3-chrome-affordances-have-commands ()
+  "Each thing the chrome can do is also an `M-x' away."
+  (dolist (command '(jetpacs-m3-catalog
+                     jetpacs-m3-open
+                     jetpacs-m3-pin
+                     jetpacs-m3-repl-eval
+                     jetpacs-m3-repl-reset
+                     jetpacs-m3-repl-reset-all))
+    (should (commandp command))
+    ;; A command a user meets in `M-x' with no docstring is a defect.
+    (should (documentation command))))
+
 (provide 'jetpacs-m3-catalog-test)
 ;;; jetpacs-m3-catalog-test.el ends here

@@ -453,6 +453,59 @@ turning a whole screen into an error card."
                              (jetpacs-error-label err))))))
         'accepted))))
 
+(defun jetpacs-m3-repl--read-example (prompt)
+  "Read a component and example index interactively, as (COMPONENT INDEX)."
+  (let* ((name (completing-read
+                prompt
+                (mapcar (lambda (c) (plist-get c :name)) jetpacs-m3-components)
+                nil t))
+         (component (cl-find name jetpacs-m3-components
+                             :key (lambda (c) (plist-get c :name))
+                             :test #'equal))
+         (examples (plist-get component :examples))
+         (pick (completing-read
+                "Example: "
+                (cl-loop for e in examples collect (plist-get e :name))
+                nil t)))
+    (list component
+          (cl-position pick examples
+                       :key (lambda (e) (plist-get e :name)) :test #'equal))))
+
+;;;###autoload
+(defun jetpacs-m3-repl-eval (component index form)
+  "Evaluate FORM as COMPONENT's example INDEX and show the result there.
+The M-x projection of the Playground's send button, and the reason it
+exists is not symmetry: the device prompt is a phone keyboard, and a
+form worth more than a few words is one you would rather type here.
+Both doors reach the same session, so the history is the same history.
+
+A node becomes the sample; anything else lands in a card, exactly as on
+the device."
+  (interactive
+   (append (jetpacs-m3-repl--read-example "Component: ")
+           (list (read-string "Eval in the Playground: "))))
+  (let ((id (plist-get component :id)))
+    (pcase-let ((`(,value ,output ,errorp)
+                 (jetpacs-repl-run (jetpacs-m3-repl-session id index) form)))
+      (when (and (not errorp) (jetpacs-root-node-p value))
+        (puthash (jetpacs-m3-example-screen-id id index) value
+                 jetpacs-m3-repl--overrides))
+      (when (jetpacs-connected-p)
+        (ignore-errors (jetpacs-shell-push jetpacs-m3-owner)))
+      (message "%s" output))))
+
+;;;###autoload
+(defun jetpacs-m3-repl-reset (component index)
+  "Discard COMPONENT's example INDEX overrides — the Reset row, as a command."
+  (interactive (jetpacs-m3-repl--read-example "Reset component: "))
+  (let ((screen (jetpacs-m3-example-screen-id
+                 (plist-get component :id) index)))
+    (remhash screen jetpacs-m3-repl--overrides)
+    (remhash screen jetpacs-m3-repl--knobs)
+    (when (jetpacs-connected-p)
+      (ignore-errors (jetpacs-shell-push jetpacs-m3-owner)))
+    (message "jetpacs-m3: %s is upstream's again" screen)))
+
 ;;;###autoload
 (defun jetpacs-m3-repl-reset-all ()
   "Discard every Playground override — M-x parity for the Reset rows.

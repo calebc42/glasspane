@@ -19,15 +19,20 @@
           (jetpacs-app-store-staging-dirs (list stage))
           (jetpacs-app-store-file (expand-file-name "apps.el" home))
           (jetpacs-app-store-installed nil)
-          (toasts nil) (pushed 0))
+          (jetpacs-app-store--edit nil)
+          (toasts nil) (notices nil) (pushed 0))
      (cl-letf (((symbol-function 'jetpacs-flow-continue)
                 (lambda (fn) (funcall fn)))
                ((symbol-function 'jetpacs-toast)
                 (cl-function (lambda (text &key duration-s)
                                (ignore duration-s) (push text toasts))))
+               ((symbol-function 'jetpacs-shell-notify)
+                (lambda (text &rest _) (push text notices)))
+               ((symbol-function 'jetpacs-chrome-push-screen)
+                (lambda (&rest _) (cl-incf pushed)))
                ((symbol-function 'jetpacs-shell-push)
                 (lambda (&rest _) (cl-incf pushed))))
-       (ignore toasts pushed)
+       (ignore toasts notices pushed)
        (unwind-protect (progn ,@body)
          (delete-directory stage t)
          (delete-directory home t)))))
@@ -178,20 +183,129 @@ screen; each renders only when it has members."
       (should (member "Installed" headers))
       (should (member "Available" headers)))))
 
-(ert-deftest jetpacs-app-store-edit-opens-the-adopted-source ()
-  "apps.edit validates the installed list and navigates to the source."
+;;;; The writable editor, scoped to the adopt dir
+
+(defun jetpacs-app-store-test--editor (node)
+  "The first `editor' node in NODE, or nil."
+  (let ((found nil))
+    (cl-labels ((walk (n)
+                  (when (and (null found) (listp n) (keywordp (car n)))
+                    (when (equal (plist-get n :t) "editor") (setq found n))
+                    (cl-loop for (_k v) on n by #'cddr do (walk v)))
+                  (cond ((vectorp n) (mapc #'walk (append n nil)))
+                        ((and (consp n) (not (keywordp (car n))))
+                         (mapc #'walk n)))))
+      (walk node))
+    found))
+
+(defun jetpacs-app-store-test--install-mine ()
+  "Stage and install \"mine.el\"; returns its adopted path."
+  (jetpacs-app-store--action-install '(:bundle "mine.el") nil)
+  (expand-file-name "mine.el" (jetpacs-app-store--adopt-dir)))
+
+(ert-deftest jetpacs-app-store-edit-screen-carries-a-writable-editor ()
+  "apps.edit seeds the edit record and the screen renders the plain
+`value'+`on_save' editor — no `:document': synchronizing a buffer is
+another program's business."
   (jetpacs-app-store-test--env
     (should (eq (jetpacs-app-store--action-edit '(:bundle "ghost.el") nil)
                 'rejected))
     (jetpacs-app-store-test--stage
      stage "mine.el" ";;; mine.el --- Mine -*- lexical-binding: t; -*-")
-    (jetpacs-app-store--action-install '(:bundle "mine.el") nil)
-    (let ((navigated nil))
-      (cl-letf (((symbol-function 'jetpacs-navigate-buffer)
-                 (lambda (target &rest _) (setq navigated target))))
-        (should (eq (jetpacs-app-store--action-edit '(:bundle "mine.el") nil)
-                    'accepted))
-        (should (equal navigated "mine.el"))))))
+    (let ((adopted (jetpacs-app-store-test--install-mine)))
+      (should (eq (jetpacs-app-store--action-edit '(:bundle "mine.el") nil)
+                  'accepted))
+      (should (equal (plist-get jetpacs-app-store--edit :name) "mine.el"))
+      (should (string-match-p "Mine" (plist-get jetpacs-app-store--edit :seed)))
+      (let ((editor (jetpacs-app-store-test--editor
+                     (jetpacs-app-store--edit-screen nil))))
+        (should editor)
+        (should-not (plist-get editor :document))
+        (should (equal (plist-get editor :value)
+                       (plist-get jetpacs-app-store--edit :seed)))
+        (let ((save (plist-get editor :on_save)))
+          (should (equal (plist-get save :action) "jetpacs.app-store.save"))
+          (should (equal (plist-get (plist-get save :args) :path)
+                         (file-truename adopted)))
+          (should (stringp (plist-get (plist-get save :args) :mtime))))))))
+
+(ert-deftest jetpacs-app-store-save-writes-inside-the-adopt-dir ()
+  "The save verb writes the bundle and says the reload waits for a boot."
+  (jetpacs-app-store-test--env
+    (jetpacs-app-store-test--stage
+     stage "mine.el" ";;; mine.el --- Mine -*- lexical-binding: t; -*-")
+    (jetpacs-app-store-test--install-mine)
+    (jetpacs-app-store--action-edit '(:bundle "mine.el") nil)
+    (let* ((path (plist-get jetpacs-app-store--edit :path))
+           (stamp (plist-get jetpacs-app-store--edit :mtime))
+           (new ";;; mine.el --- Mine, edited -*- lexical-binding: t; -*-\n"))
+      (should (eq (jetpacs-app-store--action-save
+                   (list :path path :mtime stamp :value new) nil)
+                  'accepted))
+      (should (equal new (with-temp-buffer
+                           (insert-file-contents path) (buffer-string))))
+      (should (cl-find-if (lambda (s) (string-match-p "next boot" s)) notices))
+      ;; The record carried forward: the STALE stamp is refused, the
+      ;; fresh one the save recorded is not.
+      (should (eq (jetpacs-app-store--action-save
+                   (list :path path :mtime stamp :value new) nil)
+                  'stale))
+      (should (eq (jetpacs-app-store--action-save
+                   (list :path path
+                         :mtime (plist-get jetpacs-app-store--edit :mtime)
+                         :value new)
+                   nil)
+                  'accepted)))))
+
+(ert-deftest jetpacs-app-store-save-refuses-outside-the-adopt-dir ()
+  "THE CONTAINMENT PIN.  The path rides the wire, so a path outside the
+adopt dir is refused loudly and nothing is written — the app-store's
+save route is scoped to the directory it adopts into and is not a
+second Files editor."
+  (jetpacs-app-store-test--env
+    (jetpacs-app-store-test--stage
+     stage "mine.el" ";;; mine.el --- Mine -*- lexical-binding: t; -*-")
+    (jetpacs-app-store-test--install-mine)
+    (jetpacs-app-store--action-edit '(:bundle "mine.el") nil)
+    (dolist (outside (list (expand-file-name "escape.el" home)
+                           (expand-file-name "staged.el" stage)
+                           (expand-file-name
+                            "../escape.el" (jetpacs-app-store--adopt-dir))
+                           "/etc/jetpacs-escape.el"))
+      (should (eq (jetpacs-app-store--action-save
+                   (list :path outside
+                         :mtime (plist-get jetpacs-app-store--edit :mtime)
+                         :value "(setq jetpacs-app-store-test--escaped t)")
+                   nil)
+                  'rejected))
+      (should-not (file-exists-p outside)))
+    (should (cl-find-if (lambda (s) (string-prefix-p "Save refused:" s))
+                        notices))
+    ;; A relative path is not absolute, and never became one.
+    (should (eq (jetpacs-app-store--action-save
+                 '(:path "mine.el" :mtime "0.0" :value "x") nil)
+                'rejected))))
+
+(ert-deftest jetpacs-app-store-edit-refuses-an-oversize-bundle ()
+  "A bundle past the cap is refused, not silently downgraded."
+  (jetpacs-app-store-test--env
+    (jetpacs-app-store-test--stage
+     stage "mine.el" ";;; mine.el --- Mine -*- lexical-binding: t; -*-")
+    (jetpacs-app-store-test--install-mine)
+    (let ((jetpacs-app-store-max-bytes 8))
+      (should (eq (jetpacs-app-store--action-edit '(:bundle "mine.el") nil)
+                  'rejected))
+      (should-not jetpacs-app-store--edit)
+      (should (cl-find "Too large to edit here" notices :test #'equal)))
+    ;; And the save leg bounds the write independently of the seed.
+    (jetpacs-app-store--action-edit '(:bundle "mine.el") nil)
+    (let ((jetpacs-app-store-max-bytes 8))
+      (should (eq (jetpacs-app-store--action-save
+                   (list :path (plist-get jetpacs-app-store--edit :path)
+                         :mtime (plist-get jetpacs-app-store--edit :mtime)
+                         :value "a much longer replacement body")
+                   nil)
+                  'rejected)))))
 
 (provide 'jetpacs-app-store-test)
 ;;; jetpacs-app-store-test.el ends here

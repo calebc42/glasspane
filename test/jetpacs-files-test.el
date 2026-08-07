@@ -1334,6 +1334,78 @@ ceiling; offline it is the custom ceiling alone."
             (should (equal (car notes)
                            "Saved init — restart Emacs to apply config changes")))))))))
 
+(ert-deftest jetpacs-files-save-synced-leg-writes-the-buffer ()
+  "Under SPEC 19 sync the BUFFER is the authority, not the frame's
+`value': the save flushes, writes the buffer, never reverts (a re-read
+is a change track-changes would echo as a spurious edit.apply), and the
+desktop-modified refusal does not apply — a synced buffer is
+intentionally modified by every device keystroke.  The mtime gate is
+orthogonal to sync and still answers `stale'."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--client)
+      (let* ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
+             (f (concat root "f.el"))
+             (notes '()) (flushed '()) (reverted 0)
+             (jetpacs-files--edit nil))
+        (write-region "old\n" nil f nil 'silent)
+        (let* ((true (file-truename f))
+               (buf (find-file-noselect true)))
+          (unwind-protect
+              (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                         (lambda (text &optional _s) (push text notes)))
+                        ((symbol-function 'jetpacs-shell-push)
+                         (lambda (&rest _) 1))
+                        ((symbol-function 'ebp-sync-buffer)
+                         (lambda (_c _d _e) buf))
+                        ((symbol-function 'ebp-sync-flush)
+                         (lambda (&optional b) (push b flushed)))
+                        ((symbol-function 'revert-buffer)
+                         (lambda (&rest _) (cl-incf reverted))))
+                (with-current-buffer buf
+                  (erase-buffer)
+                  (insert "from the buffer\n"))
+                (setq jetpacs-files--edit
+                      (list :path true :seed "old\n"
+                            :mtime (jetpacs-files--mtime-stamp true)
+                            :coding nil
+                            :document "doc:abc.el" :editor-id "body"))
+                ;; The device's `value' DISAGREES on purpose: the buffer
+                ;; is the superset, and it is what lands on disk.
+                (should (eq (jetpacs--dispatch
+                             client `(:action "jetpacs.files.save"
+                                      :surface "app:jetpacs.files"
+                                      :args (:path ,true
+                                             :mtime ,(jetpacs-files--mtime-stamp true)
+                                             :value "from the device\n"))
+                             handler)
+                            'accepted))
+                (with-temp-buffer
+                  (insert-file-contents true)
+                  (should (equal (buffer-string) "from the buffer\n")))
+                (should (equal flushed (list buf)))
+                (should (= reverted 0))
+                (with-current-buffer buf
+                  (should-not (buffer-modified-p)))
+                ;; The seed record follows the buffer, and the session
+                ;; keys survive the re-stamp (they are the builder's).
+                (should (equal (plist-get jetpacs-files--edit :seed)
+                               "from the buffer\n"))
+                (should (equal (plist-get jetpacs-files--edit :document)
+                               "doc:abc.el"))
+                ;; A stale stamp still refuses, sync or no sync.
+                (should (eq (jetpacs--dispatch
+                             client `(:action "jetpacs.files.save"
+                                      :surface "app:jetpacs.files"
+                                      :args (:path ,true :mtime "0.0"
+                                             :value "clobber\n"))
+                             handler)
+                            'stale))
+                (with-temp-buffer
+                  (insert-file-contents true)
+                  (should (equal (buffer-string) "from the buffer\n"))))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf)))))))
+
 (ert-deftest jetpacs-files-save-survives-a-broken-seam ()
   "A save whose after-save subscriber SIGNALS still answers `accepted'.
 The write is already durable when the seam runs; letting the signal

@@ -46,6 +46,7 @@
 
 (require 'cl-lib)
 (require 'dired)
+(require 'ebp-sync)
 (require 'jetpacs-widgets)
 (require 'jetpacs-async)
 (require 'jetpacs-surfaces)
@@ -723,6 +724,21 @@ is gone) can never equal a stamp."
                    (file-attributes path))))
     (format-time-string "%s.%6N" mt)))
 
+(defun jetpacs-files--synced-buffer (true)
+  "The live buffer bound to TRUE's SPEC 19 editor session, or nil.
+Nil is the PLAIN leg, where the frame's `value' is the whole content
+and the save writes it.  Non-nil is the SYNCHRONIZED leg, where the
+buffer is the authority and `value' is a mirror of it — every device
+keystroke already arrived as an `edit.apply', so a save is a write, not
+a transfer.  Keyed off the current edit record, so a save for some
+other path never finds a session."
+  (let ((req jetpacs-files--edit))
+    (when (and req (equal (plist-get req :path) true))
+      (when-let* ((client (jetpacs-client))
+                  (doc (plist-get req :document))
+                  (eid (plist-get req :editor-id)))
+        (ebp-sync-buffer client doc eid)))))
+
 (defun jetpacs-files--read-fallback (true surface reason)
   "Show TRUE through the buffer host; explain REASON when it surprises.
 `binary' and `unencodable' stay quiet — a read view is simply what
@@ -1256,8 +1272,18 @@ Runs inside a device flow."
                 (jetpacs-files--op-notify-refused "Save" 'unwritable surface)
                 'rejected)
                (t
-                (let ((buf (get-file-buffer true)))
-                  (if (and buf (buffer-modified-p buf))
+                (let* ((buf (get-file-buffer true))
+                       ;; The leg selector.  Nil until an editor screen
+                       ;; actually attaches a buffer, so this whole
+                       ;; branch is today's plain save, unchanged.
+                       (synced (jetpacs-files--synced-buffer true))
+                       (written value))
+                  ;; The desktop-modified refusal belongs to the PLAIN
+                  ;; leg ALONE.  A synchronized buffer is INTENTIONALLY
+                  ;; modified — that is what every device keystroke does
+                  ;; to it — so leaving this gate unscoped would refuse
+                  ;; every synced save forever.
+                  (if (and (null synced) buf (buffer-modified-p buf))
                       (progn
                         (jetpacs-shell-notify
                          "Unsaved desktop edits — not saved" surface)
@@ -1275,14 +1301,34 @@ Runs inside a device flow."
                            (and (equal (plist-get jetpacs-files--edit :path)
                                        true)
                                 (plist-get jetpacs-files--edit :coding))))
-                      (write-region value nil true nil 'silent))
+                      (if synced
+                          ;; SYNCHRONIZED: flush first, so an edit the
+                          ;; tracker has seen but not yet sent is IN the
+                          ;; text being written, then write the BUFFER.
+                          ;; Not `value': the buffer is the superset —
+                          ;; it also carries whatever Emacs itself
+                          ;; changed since the device's last delta.
+                          (with-current-buffer synced
+                            (ebp-sync-flush synced)
+                            (setq written (buffer-substring-no-properties
+                                           (point-min) (point-max)))
+                            (write-region (point-min) (point-max) true
+                                          nil 'silent)
+                            (set-buffer-modified-p nil)
+                            (set-visited-file-modtime))
+                        (write-region value nil true nil 'silent)))
                     ;; Only once the write is durable does a visiting
                     ;; (already-unmodified) buffer get refreshed:
                     ;; `revert-buffer' re-reads, widens, updates the
                     ;; visited modtime and clears the modified flag.  A
                     ;; refresh failure must NOT flip a durable
                     ;; `accepted' (14.4 makes the answer permanent).
-                    (when buf
+                    ;; NEVER on the synced leg: a re-read is a buffer
+                    ;; change track-changes sees as a local edit and
+                    ;; echoes back as a spurious `edit.apply'.  The
+                    ;; write above already cleared the flag and stamped
+                    ;; the modtime, which is all the revert was for.
+                    (when (and buf (null synced))
                       (condition-case rerr
                           (with-current-buffer buf
                             (revert-buffer :ignore-auto :noconfirm
@@ -1291,15 +1337,19 @@ Runs inside a device flow."
                          (message "jetpacs-files: buffer refresh failed: %s"
                                   (jetpacs-error-label rerr)))))
                     ;; Effect durable -> accepted (14.4).  Keep the edit
-                    ;; state coherent for the NEXT save: a fresh stamp,
-                    ;; seed = what the device now shows, the coding
-                    ;; carried forward.
+                    ;; state coherent for the NEXT save: a fresh stamp
+                    ;; and the text just written.  Under sync that text
+                    ;; is only a RECONNECT SEED — SPEC.md:3199-3201 makes
+                    ;; `value' seed a NEW session and forbids a later
+                    ;; snapshot from replacing live text — so the record
+                    ;; is edited in place rather than rebuilt, and the
+                    ;; session keys the builder emits survive.
                     (when (equal (plist-get jetpacs-files--edit :path) true)
                       (setq jetpacs-files--edit
-                            (list :path true :seed value
-                                  :mtime (jetpacs-files--mtime-stamp true)
-                                  :coding (plist-get jetpacs-files--edit
-                                                     :coding))))
+                            (plist-put
+                             (plist-put (copy-sequence jetpacs-files--edit)
+                                        :seed written)
+                             :mtime (jetpacs-files--mtime-stamp true))))
                     ;; ISOLATED: the write is already durable, so a
                     ;; third-party seam subscriber that signals must not
                     ;; turn this into `rejected' — SPEC 14.4 makes that

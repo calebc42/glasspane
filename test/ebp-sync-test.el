@@ -409,5 +409,243 @@ leaving it moved."
                                   (list (cons long nil))))))
     (should-not (ebp-sync--format-docs nil))))
 
+;;;; Narrowing: the §19 mirror is the DOCUMENT, never the visible part
+
+;; The module header has always said "Synced buffers must not be
+;; narrowed" and nothing enforced it.  These pin the enforcement: every
+;; operation runs WIDENED, wire offsets stay absolute (origin 1), and a
+;; restriction that CAN survive is restored.  A restriction that cannot
+;; — the full-document adopt deletes the very text its markers are
+;; anchored in — is documented rather than faked.
+
+(defconst ebp-sync-test--doc "AAA\nBBB\nCCC\n"
+  "Twelve chars; positions 5..8 are the middle line, \"BBB\\n\".")
+
+(defun ebp-sync-test--whole ()
+  "The whole buffer regardless of the restriction in force."
+  (save-restriction (widen) (buffer-string)))
+
+(ert-deftest ebp-sync-attach-compares-the-whole-document ()
+  "Attach's equality guard reads the DOCUMENT, not the visible region.
+Unwidened it compared \"BBB\\n\" against a mirror holding the whole file,
+called that a difference, and adopted — and the adopt path replaces the
+WHOLE buffer, so a re-attach over a narrowed buffer marked it modified
+and dropped the user's restriction for a seed it already held."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (set-buffer-modified-p nil)
+    (narrow-to-region 5 9)
+    (should (equal (buffer-string) "BBB\n"))
+    (ebp-sync-attach client "doc:1" "body")
+    (should (equal (ebp-sync-test--whole) ebp-sync-test--doc))
+    (should-not (buffer-modified-p))
+    ;; The restriction is the user's and nothing here replaced any text.
+    (should (buffer-narrowed-p))
+    (should (equal (buffer-string) "BBB\n"))))
+
+(ert-deftest ebp-sync-inbound-splice-lands-at-an-absolute-position ()
+  "A delta whose target lies OUTSIDE the restriction still lands.
+`delete-region' validates against the accessible portion, so an
+unwidened splice signalled `args-out-of-range' and degraded to
+`edit.resync' — for every keystroke the phone made outside the region.
+The mirror had already advanced, so the two diverged and the resync's
+reseed could not repair it."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (narrow-to-region 5 9)
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 1
+                  :start 0 :del 3 :text "ZZZ" :len 12))
+    (should (equal (ebp-sync-test--whole) "ZZZ\nBBB\nCCC\n"))
+    (should-not (cl-find 'edit.resync sent :key #'car))
+    ;; Mirror and buffer agree — the whole point of the coordinate system.
+    (should (equal (ebp-client-editor-text client "doc:1" "body")
+                   (ebp-sync-test--whole)))))
+
+(ert-deftest ebp-sync-splice-restores-the-restriction-and-point ()
+  "A splice the user cannot see does not disturb what they can.
+`save-restriction' restores through markers, so a splice BEFORE the
+region leaves the same characters visible; `save-excursion' keeps point
+on the same character.  Text motion moves both — that is correct, and
+the assertion is on the CHARACTERS, not the numbers."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (narrow-to-region 5 9)
+    (goto-char 6)                       ; the middle B
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 1
+                  :start 0 :del 3 :text "Z" :len 10))
+    (should (equal (ebp-sync-test--whole) "Z\nBBB\nCCC\n"))
+    (should (buffer-narrowed-p))
+    (should (equal (buffer-string) "BBB\n"))
+    ;; Same character, two positions earlier: bounds and point tracked
+    ;; the two characters the splice removed ahead of them.
+    (should (= (point) 4))
+    (should (= (char-after) ?B))))
+
+(ert-deftest ebp-sync-narrowed-session-survives-a-delta-outside-it ()
+  "The tracker constraint, which no arithmetic fix reaches.
+`track-changes' asserts `(<= (point-min) beg end (point-max))' UNWIDENED
+around its own bookkeeping, and its state is created with the ACCESSIBLE
+bounds in force at registration.  So the register must run widened (or
+the first out-of-region change signals `cl-assertion-failed' however
+carefully the splice itself widens), and every fetch must run widened
+(or our OWN widened splice poisons the shared state).  Both are proven
+here, in that order, because only the FIRST change after a registration
+reaches the register: a fetch that reports a change re-creates the state
+with the bounds then in force, and a fetch with nothing pending does
+not (measured)."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (set-buffer-modified-p nil)
+    (narrow-to-region 5 9)
+    (ebp-sync-attach client "doc:1" "body")   ; registers under the narrowing
+    (should (buffer-narrowed-p))
+    ;; PHASE 1 — the REGISTER pin.  The very first change is outside the
+    ;; restriction, and nothing has re-created the tracker state.
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 1
+                  :start 0 :del 3 :text "Q" :len 10))
+    (should (equal (ebp-sync-test--whole) "Q\nBBB\nCCC\n"))
+    (should-not (cl-find 'edit.resync sent :key #'car))
+    (should (buffer-narrowed-p))
+    (should (equal (buffer-string) "BBB\n"))
+    ;; PHASE 2 — the FETCH pins.  A local edit inside the region, sent
+    ;; and applied, then another delta outside it.
+    (goto-char 4)
+    (insert "Z")
+    (ebp-sync-flush)
+    (pcase-let ((`(,_m ,_p ,cb) (car sent)))
+      (funcall cb '(:status "applied" :seq 2) nil))
+    (should (equal (ebp-client-editor-text client "doc:1" "body")
+                   "Q\nBZBB\nCCC\n"))
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 3
+                  :start 0 :del 1 :text "XY" :len 12))
+    (should (equal (ebp-sync-test--whole) "XY\nBZBB\nCCC\n"))
+    (should-not (cl-find 'edit.resync sent :key #'car))
+    (should (buffer-narrowed-p))
+    ;; And the tracker is still usable afterwards.
+    (goto-char (point-max))
+    (insert "!")
+    (ebp-sync-flush)
+    (should (cl-find 'edit.apply sent :key #'car))))
+
+(ert-deftest ebp-sync-a-foreign-edit-outside-the-region-does-not-escape ()
+  "A package editing outside the user's restriction is ordinary Emacs —
+org, a formatter, `whitespace-cleanup' all do it under their own widen.
+The pending-change fetch that opens `ebp-sync--on-splice' sits OUTSIDE
+that function's `condition-case', so unwidened it did not degrade to a
+resync: `cl-assertion-failed' escaped into ebp.el's notification
+dispatch and took the rest of the hook fan-out with it.  The race is
+real and its answer is one resync; the signal was never part of it."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (narrow-to-region 5 9)
+    (save-restriction (widen) (goto-char 1) (insert "Z"))
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 1
+                  :start 0 :del 1 :text "!" :len 12))
+    (should (cl-find 'edit.resync sent :key #'car))))
+
+(ert-deftest ebp-sync-local-edit-reports-whole-document-offsets ()
+  "CHARACTERIZATION, green before and after: the outbound leg is already
+the coordinate system of record.  `track-changes' reports ABSOLUTE
+buffer positions, so `(1- beg)' is a document offset under any
+restriction.  Pinned so a later \"fix\" toward region-relative offsets
+goes red instead of silently re-opening the whole defect."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (narrow-to-region 5 9)
+    (goto-char 6)
+    (insert "Z")
+    (ebp-sync-flush)
+    (pcase-let ((`(,method ,params ,_cb) (car sent)))
+      (should (eq method 'edit.apply))
+      (should (= (plist-get params :start) 5))
+      (should (= (plist-get params :del) 0))
+      (should (equal (plist-get params :text) "Z"))
+      (should (= (plist-get params :len) 13)))))
+
+(ert-deftest ebp-sync-reseed-replaces-the-whole-document ()
+  "The reseed adopts over the DOCUMENT.  Unwidened, `delete-region'
+between `(point-min)' and `(point-max)' emptied only the visible region
+and the insert refilled it — so the Companion's whole document was
+spliced INTO the narrow region and the invisible prefix and suffix
+survived around it.  The restriction cannot come back: its markers were
+anchored in the text this replaced, so the buffer is left WIDE, which is
+the honest outcome rather than an arbitrary window into foreign text."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (narrow-to-region 5 9)
+    (ebp-client--handle-edit-open
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?b) :seq 0
+                  :text "WHOLE\nNEW\n" :cursor 0))
+    (should (equal (ebp-sync-test--whole) "WHOLE\nNEW\n"))
+    (should-not (buffer-narrowed-p))))
+
+(ert-deftest ebp-sync-write-protected-reseed-restores-the-whole-document ()
+  "The refusing leg answers with the DOCUMENT, not the visible region.
+SPEC 19.3 has the write-protected endpoint restore its own authoritative
+text at the fresh seq.  Unwidened it sent the accessible portion as
+`0 (length seed) mine' — a whole-document replacement built from a
+fragment, which truncates the DEVICE's document to whatever the user
+happened to be narrowed to."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (narrow-to-region 5 9)
+    (setq buffer-read-only t)
+    (ebp-client--handle-edit-open
+     client (list :document "doc:1" :editor_id "body"
+                  :session (make-string 32 ?b) :seq 0
+                  :text "theirs" :cursor 0))
+    (should (equal (ebp-sync-test--whole) ebp-sync-test--doc))
+    (let ((applies (cl-remove-if-not (lambda (s) (eq (car s) 'edit.apply))
+                                     sent)))
+      (should (= 1 (length applies)))
+      (pcase-let ((`(,_m ,params ,_cb) (car applies)))
+        (should (= (plist-get params :start) 0))
+        (should (= (plist-get params :del) 6))
+        (should (equal (plist-get params :text) ebp-sync-test--doc))))))
+
+(ert-deftest ebp-sync-caret-answers-at-the-absolute-position ()
+  "The one site that misplaces SILENTLY.  `goto-char' clamps to BOTH
+accessible bounds without signalling, so every caret the phone reported
+below the restriction collapsed onto `point-min' and eldoc answered
+confidently about the wrong symbol."
+  (ebp-sync-test--with ebp-sync-test--doc
+    (let* ((seen nil)
+           (eldoc-documentation-functions
+            (list (lambda (_cb) (push (point) seen) "doc"))))
+      (cl-letf (((symbol-function 'ebp-client-notify) #'ignore))
+        (narrow-to-region 5 9)
+        (ebp-sync--on-caret client "doc:1" "body" 0 nil nil)     ; -> 1
+        (ebp-sync--on-caret client "doc:1" "body" 11 nil nil)    ; -> 12
+        (should (equal (nreverse seen) '(1 12)))
+        ;; Point and the restriction are the user's, both restored.
+        (should (buffer-narrowed-p))
+        (should (equal (buffer-string) "BBB\n"))))))
+
+(ert-deftest ebp-sync-fontify-runs-cover-the-whole-document ()
+  "The fontify rider walks the DOCUMENT.  Its offsets were always
+absolute, so nothing was ever misplaced — but `font-lock-ensure' and the
+walk were both bounded by the restriction, so the phone lost every
+highlight outside the visible region while showing the whole file."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert ";; head\n(defun f ())\n;; tail\n")
+    (narrow-to-region 9 22)             ; just the defun line
+    (let ((runs (ebp-sync--fontify-runs)))
+      ;; The leading comment is at buffer 1..8 = wire offset 0.
+      (should (cl-find-if (lambda (r) (and (= (plist-get r :start) 0)
+                                           (equal (plist-get r :role)
+                                                  "comment")))
+                          runs))
+      ;; ...and the trailing one at buffer 22.. = wire offset 21.
+      (should (cl-find-if (lambda (r) (and (= (plist-get r :start) 21)
+                                           (equal (plist-get r :role)
+                                                  "comment")))
+                          runs))
+      ;; The user's restriction is untouched by a read-only walk.
+      (should (buffer-narrowed-p)))))
+
 (provide 'ebp-sync-test)
 ;;; ebp-sync-test.el ends here

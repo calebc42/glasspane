@@ -876,12 +876,27 @@ a bound buffer and the annotation riders arm on the reseed."
                      ;; keystrokes must not litter #autosave# files —
                      ;; the phone's explicit Save owns persistence.
                      (setq-local buffer-auto-save-file-name nil)
-                     (buffer-substring-no-properties
-                      (point-min) (point-max)))))
+                     ;; WIDEN, the same way the save at the other end
+                     ;; does.  THIS LINE DECIDES WHAT THE §19 MIRROR
+                     ;; MEANS, and every offset on the wire — the
+                     ;; outbound `(1- beg)', diagnostics, fontify runs,
+                     ;; the inbound splice — is a whole-DOCUMENT offset.
+                     ;; Seeded from the accessible portion instead, the
+                     ;; mirror was a fragment while the coordinates
+                     ;; stayed absolute: not an edge case, a guaranteed
+                     ;; shift of `(1- (point-min))' on every splice.
+                     (save-restriction
+                       (widen)
+                       (buffer-substring-no-properties
+                        (point-min) (point-max))))))
         ;; The BUFFER is the seed, not the disk: a visiting buffer with
         ;; unsaved desktop edits is exactly the case sync handles best,
         ;; and seeding from its own text is what makes the reseed a
-        ;; no-op instead of a silent revert.
+        ;; no-op instead of a silent revert.  The gates below read the
+        ;; same widened seed on purpose: a NUL or an unencodable char
+        ;; hidden outside the restriction otherwise passed the check
+        ;; that exists to keep it out of the round trip, and the widened
+        ;; save then wrote exactly those bytes.
         (unless (or (string-search "\0" seed)
                     (not (jetpacs-files--wire-safe-p seed)))
           (ebp-sync-attach (jetpacs-client) doc eid buf)

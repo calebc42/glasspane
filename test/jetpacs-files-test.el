@@ -1809,6 +1809,73 @@ unrecoverable."
               (set-buffer-modified-p nil))
             (kill-buffer buf)))))))
 
+(ert-deftest jetpacs-files-sync-attach-seeds-the-whole-buffer ()
+  "The §19 seed is the DOCUMENT.  This one line decides what the mirror
+MEANS: unwidened it snapshotted the accessible portion, so a narrowed
+buffer seeded the Companion with the visible region while every offset
+on the wire — outbound `(1- beg)', diagnostics, fontify runs, the
+inbound splice — stayed a whole-document offset.  The shift was total
+and guaranteed, `(1- (point-min))' on every splice, and it reached the
+device again through the editor node's reconnect `:value'.  The user's
+restriction is theirs and survives a read."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--sync-client)
+      (let* ((f (concat root "f.txt"))
+             (whole "AAA\nBBB\nCCC\n")
+             (jetpacs-files--edit nil))
+        (write-region whole nil f nil 'silent)
+        (let* ((true (file-truename f))
+               (buf (find-file-noselect true)))
+          (unwind-protect
+              (cl-letf (((symbol-function 'ebp-sync-attach)
+                         (lambda (_c _d _e b) b)))
+                (with-current-buffer buf
+                  (narrow-to-region 5 9)
+                  (should (equal (buffer-string) "BBB\n")))
+                (should (jetpacs-files--sync-attach true))
+                (should (equal (plist-get jetpacs-files--edit :seed) whole))
+                ;; SPEC 19.3's new-session seed rides the editor node.
+                (should (equal (jetpacs-files-test--collect
+                                (jetpacs-files--edit-screen nil) :value)
+                               (list whole)))
+                (with-current-buffer buf
+                  (should (buffer-narrowed-p))
+                  (should (equal (buffer-string) "BBB\n"))))
+            (with-current-buffer buf
+              (widen)
+              (set-buffer-modified-p nil))
+            (kill-buffer buf)))))))
+
+(ert-deftest jetpacs-files-sync-attach-gates-on-the-whole-buffer ()
+  "The wire-safety gates inspect the same DOCUMENT the save writes.
+They read the seed, so an unwidened seed let a NUL living outside the
+restriction pass the check that exists to keep it out of the round trip
+— and the widened save at the other end then wrote exactly those bytes.
+Refusing here degrades to the plain rung, which is the whole point of
+the ladder."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--sync-client)
+      (let* ((f (concat root "f.txt"))
+             (attached 0)
+             (jetpacs-files--edit nil))
+        (write-region "AAA\nBBB\nCCC\n" nil f nil 'silent)
+        (let* ((true (file-truename f))
+               (buf (find-file-noselect true)))
+          (unwind-protect
+              (cl-letf (((symbol-function 'ebp-sync-attach)
+                         (lambda (_c _d _e b) (cl-incf attached) b)))
+                (with-current-buffer buf
+                  (goto-char (point-max))
+                  (insert "\0")
+                  (narrow-to-region 5 9))
+                (should-not (jetpacs-files--sync-attach true))
+                (should (= attached 0))
+                (should-not (plist-get jetpacs-files--edit :document)))
+            (with-current-buffer buf
+              (widen)
+              (set-buffer-modified-p nil))
+            (kill-buffer buf)))))))
+
 (ert-deftest jetpacs-files-save-survives-a-broken-seam ()
   "A save whose after-save subscriber SIGNALS still answers `accepted'.
 The write is already durable when the seam runs; letting the signal

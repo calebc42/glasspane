@@ -15,8 +15,21 @@
 ;;     the tracker so they are never echoed back.
 ;;
 ;; Positions are Unicode scalar values = Emacs chars; `start' is the
-;; zero-based splice start, so buffer position = start + 1.  Synced
-;; buffers must not be narrowed.
+;; zero-based splice start, so buffer position = start + 1.
+;;
+;; THE DOCUMENT IS THE WHOLE BUFFER.  A narrowing is a VIEW, and the
+;; §19 document never is one: it has no wire representation, no
+;; `edit.close' to signal when it changes, and the file the save writes
+;; is whole.  So every operation here runs under `save-restriction' +
+;; `widen' — the seed comparison, both adoptions, every content
+;; snapshot, both annotation walks, the caret's `goto-char', and every
+;; `track-changes' touch (register included: the tracker's state is
+;; created with the ACCESSIBLE bounds in force, and one created narrowed
+;; asserts on the first change outside that restriction, however
+;; carefully the change itself widens).  A restriction that can survive
+;; is restored; one whose anchoring text a full adoption deletes cannot
+;; be, and the buffer is left wide rather than showing an arbitrary
+;; window into foreign text.
 ;;
 ;; Resynchronization is the ONLY recovery: a fetch reporting `error', a
 ;; refused or stale apply, a write-protected buffer, or a remote splice
@@ -102,11 +115,23 @@ Returns the buffer, or signals if it carries non-scalar bytes."
         ;; the user a modified flag and hands eglot a phantom change.
         ;; Adoption over a DIFFERENT seed is still this function's
         ;; contract — only the identity case is skipped.
-        (unless (equal seed (buffer-substring-no-properties
-                             (point-min) (point-max)))
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (insert seed)))))
+        ;;
+        ;; ONE `save-restriction' spans the comparison AND the adoption,
+        ;; because they must answer about the same text.  Unwidened, the
+        ;; guard compared the visible region against a whole-document
+        ;; mirror, called that a difference, and adopted — replacing the
+        ;; whole buffer with text it already held, marking it modified
+        ;; and dropping the user's restriction.  `delete-region' rather
+        ;; than `erase-buffer': same result here (erase-buffer widens
+        ;; too), but inside a `save-restriction' the widen must be the
+        ;; visible one, not a side effect of the primitive.
+        (save-restriction
+          (widen)
+          (unless (equal seed (buffer-substring-no-properties
+                               (point-min) (point-max)))
+            (let ((inhibit-read-only t))
+              (delete-region (point-min) (point-max))
+              (insert seed))))))
     (setq ebp-sync--client client
           ebp-sync--document document
           ebp-sync--editor-id editor-id
@@ -119,12 +144,21 @@ Returns the buffer, or signals if it carries non-scalar bytes."
           ;; The closure anchors the buffer: on the :disjoint pre-warning
           ;; the fetch MUST happen before the signal returns, and the
           ;; plain deferred call shares the same flush.
+          ;;
+          ;; REGISTERED WIDE.  `track-changes' seeds its state from the
+          ;; ACCESSIBLE bounds at registration and then asserts against
+          ;; them; a tracker registered under a narrowing signals
+          ;; `cl-assertion-failed' on the first change outside that
+          ;; restriction — including OUR OWN widened inbound splice —
+          ;; and no arithmetic anywhere else can reach that.
           ebp-sync--tracker (let ((buf (current-buffer)))
-                              (track-changes-register
-                               (lambda (_id &optional _distance)
-                                 (when (buffer-live-p buf)
-                                   (ebp-sync-flush buf)))
-                               :disjoint t)))
+                              (save-restriction
+                                (widen)
+                                (track-changes-register
+                                 (lambda (_id &optional _distance)
+                                   (when (buffer-live-p buf)
+                                     (ebp-sync-flush buf)))
+                                 :disjoint t))))
     (puthash (list client document editor-id) (current-buffer)
              ebp-sync--table)
     (cl-pushnew #'ebp-sync--on-splice
@@ -174,21 +208,29 @@ The fetch callback only copies and enqueues — no buffer modification,
 no I/O (the track-changes contract for the disjoint callback)."
   (with-current-buffer (or buffer (current-buffer))
     (when ebp-sync--tracker
-      (track-changes-fetch
-       ebp-sync--tracker
-       (lambda (beg end before)
-         (if (or (eq before 'error)
-                 (track-changes-inconsistent-state-p))
-             (ebp-sync--resync (current-buffer))
-           (let ((text (buffer-substring-no-properties beg end)))
-             (if (and (ebp-sync--scalar-clean-p text)
-                      (or (stringp before) (null before)))
-                 (setq ebp-sync--queue
-                       (nconc ebp-sync--queue
-                              (list (list (1- beg)
-                                          (length (or before ""))
-                                          text))))
-               (ebp-sync--resync (current-buffer)))))))
+      ;; The widen wraps the FETCH, not the callback: `track-changes'
+      ;; asserts `(<= (point-min) beg end (point-max))' before it hands
+      ;; the change over, so by the time the callback runs the signal
+      ;; has already fired.  BEG/END are absolute buffer positions
+      ;; either way, which is why `(1- beg)' below needs no arithmetic
+      ;; change — only a buffer wide enough to read them out of.
+      (save-restriction
+        (widen)
+        (track-changes-fetch
+         ebp-sync--tracker
+         (lambda (beg end before)
+           (if (or (eq before 'error)
+                   (track-changes-inconsistent-state-p))
+               (ebp-sync--resync (current-buffer))
+             (let ((text (buffer-substring-no-properties beg end)))
+               (if (and (ebp-sync--scalar-clean-p text)
+                        (or (stringp before) (null before)))
+                   (setq ebp-sync--queue
+                         (nconc ebp-sync--queue
+                                (list (list (1- beg)
+                                            (length (or before ""))
+                                            text))))
+                 (ebp-sync--resync (current-buffer))))))))
       (ebp-sync--pump (current-buffer)))))
 
 (defun ebp-sync--pump (buffer)
@@ -250,13 +292,28 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
             (ebp-sync--resync buf)
           (condition-case nil
               (progn
+                ;; START is a DOCUMENT offset, so `(1+ start)' is an
+                ;; absolute buffer position and needs no rebasing — but
+                ;; `delete-region' validates against the accessible
+                ;; portion and signals for a target outside it, which
+                ;; turned every phone keystroke outside the user's
+                ;; restriction into a resync the reseed could not
+                ;; repair.  `save-excursion' outermost, per its own
+                ;; docstring; neither it nor `atomic-change-group' saves
+                ;; the restriction.
                 (atomic-change-group
                   (save-excursion
-                    (delete-region (1+ start) (+ 1 start del))
-                    (goto-char (1+ start))
-                    (insert text)))
-                ;; Consume our own known change so it is not echoed.
-                (track-changes-fetch ebp-sync--tracker #'ignore)
+                    (save-restriction
+                      (widen)
+                      (delete-region (1+ start) (+ 1 start del))
+                      (goto-char (1+ start))
+                      (insert text))))
+                ;; Consume our own known change so it is not echoed —
+                ;; widened, because the change we just made may lie
+                ;; outside the restriction we just restored.
+                (save-restriction
+                  (widen)
+                  (track-changes-fetch ebp-sync--tracker #'ignore))
                 (ebp-sync--arm-annotations buf))
             ;; Write protection is honored, never overridden (SPEC 19.3);
             ;; the refusing side recovers through resync.
@@ -265,14 +322,17 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
 (defun ebp-sync--fetch-pending-into-queue ()
   "Pull any not-yet-signaled tracker changes into the outbound queue."
   (when ebp-sync--tracker
-    (track-changes-fetch
-     ebp-sync--tracker
-     (lambda (beg end before)
-       (setq ebp-sync--queue
-             (nconc ebp-sync--queue
-                    (list (list (1- beg)
-                                (if (stringp before) (length before) 0)
-                                (buffer-substring-no-properties beg end)))))))))
+    (save-restriction
+      (widen)
+      (track-changes-fetch
+       ebp-sync--tracker
+       (lambda (beg end before)
+         (setq ebp-sync--queue
+               (nconc ebp-sync--queue
+                      (list (list (1- beg)
+                                  (if (stringp before) (length before) 0)
+                                  (buffer-substring-no-properties
+                                   beg end))))))))))
 
 (defun ebp-sync--on-open (client document editor-id seed-text _prior)
   "Adopt a reseed (fresh session or post-resync) into the bound buffer.
@@ -290,7 +350,17 @@ adopts as before."
     (when buf
       (with-current-buffer buf
         (setq ebp-sync--queue nil ebp-sync--inflight nil)
-        (let ((mine (buffer-substring-no-properties (point-min) (point-max))))
+        ;; MINE is the DOCUMENT.  It answers three questions and all
+        ;; three are whole-document ones: is the seed already our text,
+        ;; is our text carriable, and — on the refusing leg — what does
+        ;; the device's whole document become.  Taken from the
+        ;; accessible portion, that last one sent `0 (length seed) mine'
+        ;; built from a fragment and truncated the DEVICE's document to
+        ;; whatever the user happened to be narrowed to.
+        (let ((mine (save-restriction
+                      (widen)
+                      (buffer-substring-no-properties
+                       (point-min) (point-max)))))
           (cond
            ((equal seed-text mine))
            (buffer-read-only
@@ -300,12 +370,23 @@ adopts as before."
               (ebp-client-edit-apply client document editor-id
                                      0 (length seed-text) mine)))
            (t
+            ;; The SAME adoption `ebp-sync-attach' performs, and now the
+            ;; same shape: unwidened this emptied only the visible region
+            ;; and refilled it, splicing the Companion's whole document
+            ;; INTO the narrowing with the invisible prefix and suffix
+            ;; left around it.  The restriction does not come back — its
+            ;; markers were anchored in the text this deletes — and that
+            ;; is the honest outcome for a whole-document replacement.
             (let ((inhibit-read-only t))
               (save-excursion
-                (delete-region (point-min) (point-max))
-                (insert seed-text))))))
+                (save-restriction
+                  (widen)
+                  (delete-region (point-min) (point-max))
+                  (insert seed-text)))))))
         (when ebp-sync--tracker
-          (track-changes-fetch ebp-sync--tracker #'ignore))
+          (save-restriction
+            (widen)
+            (track-changes-fetch ebp-sync--tracker #'ignore)))
         (setq ebp-sync--diag-stamp 'unset
               ebp-sync--font-stamp 'unset
               ebp-sync--eldoc-stamp 'unset)
@@ -322,7 +403,9 @@ adopts as before."
   (with-current-buffer buffer
     (setq ebp-sync--queue nil ebp-sync--inflight nil)
     (when ebp-sync--tracker
-      (track-changes-fetch ebp-sync--tracker #'ignore))
+      (save-restriction
+        (widen)
+        (track-changes-fetch ebp-sync--tracker #'ignore)))
     (when ebp-sync--client
       (ebp-client-edit-resync ebp-sync--client ebp-sync--document
                               ebp-sync--editor-id))))
@@ -481,21 +564,26 @@ first element that reaches a known face — directly or through
   "The buffer's face runs as SPEC 19.5 wire plists.
 Sorted and non-overlapping by construction (a walk over face property
 changes); adjacent same-role runs merge; unstyled stretches ship
-nothing."
-  (ignore-errors (font-lock-ensure))
-  (let ((pos (point-min)) runs)
-    (while (< pos (point-max))
-      (let ((next (next-single-property-change pos 'face nil (point-max)))
-            (role (ebp-sync--face-role (get-text-property pos 'face))))
-        (when role
-          (let ((prev (car runs)))
-            (if (and prev (equal (plist-get prev :role) role)
-                     (= (plist-get prev :end) (1- pos)))
-                (setf (car runs) (plist-put prev :end (1- next)))
-              (push (list :start (1- pos) :end (1- next) :role role)
-                    runs))))
-        (setq pos next)))
-    (nreverse runs)))
+nothing.  WIDENED: the offsets were always absolute, so nothing was
+ever misplaced here — but `font-lock-ensure' and the walk both stopped
+at the restriction, and the phone renders the whole document, so
+everything outside the user's narrowing arrived unstyled."
+  (save-restriction
+    (widen)
+    (ignore-errors (font-lock-ensure))
+    (let ((pos (point-min)) runs)
+      (while (< pos (point-max))
+        (let ((next (next-single-property-change pos 'face nil (point-max)))
+              (role (ebp-sync--face-role (get-text-property pos 'face))))
+          (when role
+            (let ((prev (car runs)))
+              (if (and prev (equal (plist-get prev :role) role)
+                       (= (plist-get prev :end) (1- pos)))
+                  (setf (car runs) (plist-put prev :end (1- next)))
+                (push (list :start (1- pos) :end (1- next) :role role)
+                      runs))))
+          (setq pos next)))
+      (nreverse runs))))
 
 (defun ebp-sync--arm-fontify (buffer)
   "(Re)start BUFFER's fontify push timer after an accepted change."
@@ -625,9 +713,19 @@ CURSOR is a 0-based scalar offset and Emacs point is 1-based."
                   (ebp-sync--buffer client document editor-id))))
     (when buf
       (with-current-buffer buf
+        ;; The one site that misplaced SILENTLY: `goto-char' clamps to
+        ;; BOTH accessible bounds without signalling, so every caret the
+        ;; phone reported below the restriction collapsed onto
+        ;; `point-min' and eldoc answered confidently about the wrong
+        ;; symbol.  The widen spans `ebp-sync--run-eldoc' too — the
+        ;; backends read around point and their syntax context is
+        ;; bounded by the restriction, and leaving the restriction with
+        ;; point outside it would silently clamp point right back.
         (save-excursion
-          (goto-char (min (1+ (max 0 (truncate cursor))) (point-max)))
-          (ebp-sync--run-eldoc buf))))))
+          (save-restriction
+            (widen)
+            (goto-char (min (1+ (max 0 (truncate cursor))) (point-max)))
+            (ebp-sync--run-eldoc buf)))))))
 
 (provide 'ebp-sync)
 ;;; ebp-sync.el ends here

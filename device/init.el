@@ -252,8 +252,22 @@ so the dock is two destinations: Home and Files."
       (jetpacs-with-attrs
        (jetpacs-row
         (jetpacs-with-attrs
-         (jetpacs-editor "hub-eval" :chromeless t :publish-state t
-                         :syntax "elisp"
+         ;; A SYNCHRONIZED §19 editor, not a local draft.  `:document'
+         ;; makes the Companion open an edit session on the next push,
+         ;; so the text arrives as deltas into `ebp.el''s mirror and
+         ;; `hub.eval' reads it from there.  `:publish-state' is gone on
+         ;; purpose: this Companion registers a node as stateful only
+         ;; when publish_state is true AND it carries no document, so
+         ;; leaving it would be inert and misleading.  The document id
+         ;; ends `.el' because `ebp-complete--mode-for' matches the
+         ;; DOCUMENT against `auto-mode-alist' to pick the shadow's
+         ;; major mode — that is what makes the elisp capfs answer.
+         ;; Caveat: while a bridged `completing-read' dialog is open the
+         ;; picker borrows the client-wide `:edit-complete-function' and
+         ;; answers empty for every other document, so this dropdown
+         ;; goes quiet for the life of that prompt.
+         (jetpacs-editor "hub-eval" :document "scratch.el" :complete t
+                         :chromeless t :syntax "elisp"
                          :on-enter (jetpacs-action "hub.eval"))
          :weight 1)
         (jetpacs-icon-button "send" (jetpacs-action "hub.eval")
@@ -312,13 +326,17 @@ Feeds * ** *** the way ielm does, so follow-up expressions can chain."
     :any-surface t)
 
   (jetpacs-defaction "hub.eval"
-    ;; The REPL submit: the send button and re-run arrive without a
-    ;; value and read the editor's published state; on-enter and the
-    ;; re-run button carry :value.  Evaluation is continuation work —
-    ;; user code can take arbitrarily long, prompt, or signal.
+    ;; The REPL submit: the send button arrives without a value and
+    ;; reads the SYNCHRONIZED mirror — the editor carries `:document',
+    ;; so it is no longer a stateful draft and `jetpacs-ui-state' would
+    ;; be nil forever.  `on-enter' and the re-run button carry :value.
+    ;; Evaluation is continuation work — user code can take arbitrarily
+    ;; long, prompt, or signal.
     (lambda (args _params)
       (let ((input (or (plist-get args :value)
-                       (jetpacs-ui-state "hub-eval"))))
+                       (when-let* ((client (jetpacs-client)))
+                         (ebp-client-editor-text
+                          client "scratch.el" "hub-eval")))))
         (if (not (and (stringp input)
                       (not (string-blank-p input))))
             'rejected

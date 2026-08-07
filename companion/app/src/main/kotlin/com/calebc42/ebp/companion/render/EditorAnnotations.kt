@@ -349,6 +349,30 @@ fun annotationSpans(
 }
 
 /**
+ * The diagnostic the caret is standing in, or null.
+ *
+ * The doc line shows ONE thing, and a diagnostic under the caret outranks
+ * documentation: a user who moved the caret onto a squiggle is asking what is
+ * wrong there, not what the symbol means. The same content gate as the
+ * squiggles applies — a batch whose text has moved on describes offsets that
+ * no longer mean what they said, and the wrong error is worse than none.
+ * Severity breaks a tie, so an error is never hidden behind a hint.
+ */
+fun diagnosticAt(diags: DiagSet?, src: String, caret: Int): DiagRange? {
+    if (diags == null || diags.text != src) return null
+    return diags.diags
+        .filter { caret >= it.start && caret <= it.end }
+        .minByOrNull { severityRank(it.severity) }
+}
+
+private fun severityRank(severity: String): Int = when (severity) {
+    "error" -> 0
+    "warning" -> 1
+    "info" -> 2
+    else -> 3
+}
+
+/**
  * The editor's whole styling pipeline as one identity [VisualTransformation]:
  * never changes the character count, so cursor, selection and IME behave
  * exactly as on a plain field.

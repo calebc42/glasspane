@@ -42,6 +42,7 @@ import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.TwoRowsTopAppBar
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedTextField
@@ -818,6 +819,20 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val wantsCompletion = node.boolOr("complete", false)
     val offers by ctx.bridge.completionOffers.collectAsState()
     val offer = if (wantsCompletion) offers[document to id] else null
+    // SPEC 19.3: report the caret so the other endpoint can answer a POSITION.
+    // Keyed on the selection, so it re-runs exactly when the selection moves
+    // and a no-op re-composition reports nothing; the delay coalesces a drag
+    // or an arrow-key run into one report, which is the throttling §19.3 asks
+    // the Companion to do AT THE SOURCE — an intermediate position never
+    // emitted is not §22.2 conflation. Until this existed, every Emacs-side
+    // feature keyed on the device caret saw offset 0 for the session's life.
+    if (document.isNotEmpty()) {
+        LaunchedEffect(document, id, value.selection) {
+            kotlinx.coroutines.delay(90)
+            ctx.bridge.editorCaret(document, id, value.selection.end,
+                value.selection.start, value.selection.end)
+        }
+    }
     if (wantsCompletion && document.isNotEmpty() && !readOnly && enabled) {
         LaunchedEffect(document, id, value.text) {
             if (value.text.isEmpty()) return@LaunchedEffect
@@ -871,7 +886,48 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                     if (enabled && !readOnly)
                         onEnter?.let { ctx.action(it, JsonPrimitive(value.text)) }
                 }),
+            // A code editor that renders in the body font undermines every
+            // fontify run Emacs sends: alignment is half of what font-lock
+            // communicates. POC 1's editor was monospaced; this one was not.
+            textStyle = LocalTextStyle.current.copy(
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
             modifier = Modifier.fillMaxWidth())
+        // SPEC 19.5: the doc line, between the field and the keyboard. A
+        // diagnostic under the caret WINS — a user who moved onto a squiggle
+        // is asking what is wrong there — and eldoc answers otherwise. Shown
+        // only for a collapsed caret, because a selection drag is not a
+        // question about a position. A plain row rather than a popup, for the
+        // reason the completion rows below record.
+        if (document.isNotEmpty() && value.selection.collapsed) {
+            val caretDiag = diagnosticAt(annotations?.diags, value.text,
+                value.selection.start)
+            val eldoc = annotations?.eldoc?.text?.takeIf { it.isNotEmpty() }
+            if (caretDiag != null || eldoc != null) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    if (caretDiag != null) {
+                        Text("●",
+                            color = diagColors.forSeverity(caretDiag.severity),
+                            style = MaterialTheme.typography.labelSmall)
+                        Spacer(Modifier.width(6.dp))
+                        Text(caretDiag.message,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    } else {
+                        Text(eldoc!!,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily =
+                                    androidx.compose.ui.text.font.FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
         // SPEC 17.4 `on_save`: the save affordance for a value+on_save
         // editor — dispatches the descriptor with the LIVE text injected
         // as `value` (§14.3, the same injection as text_input's
@@ -1403,16 +1459,51 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
         else { content ->
             val peek = (safeDp(node.doubleOr("sheet_peek_height", 0.0)) ?: 0f).dp
             val onSheetChange = node.objOrNull("on_sheet_change")
+            val authored = node.stringOr("sheet_state")
             val sheetScaffoldState =
                 androidx.compose.material3.rememberBottomSheetScaffoldState(
                     bottomSheetState =
                         androidx.compose.material3.rememberStandardBottomSheetState(
                             initialValue =
-                                if (node.stringOr("sheet_state") == "expanded")
+                                if (authored == "expanded")
                                     androidx.compose.material3.SheetValue.Expanded
                                 else androidx.compose.material3.SheetValue.PartiallyExpanded))
             val settled = sheetScaffoldState.bottomSheetState.currentValue
             var reported by remember { mutableStateOf(settled) }
+            // §17.6: `sheet_state` is AUTHORED presentation state, so a change
+            // to it must MOVE the sheet. It was read once as `initialValue` and
+            // never again, which made every later push inert — Emacs could not
+            // open or collapse a persistent sheet, although both the comment
+            // below and `jetpacs-scaffold's docstring promise exactly that.
+            //
+            // Keyed on the AUTHORED value alone, so a user's drag is never
+            // fought: only an author's change drives. `hidden` is deliberately
+            // not handled here — the persistent form's resting state IS its
+            // peek (`skipHiddenState` defaults true, and making Hidden
+            // reachable would let a downward fling dismiss a sheet the author
+            // never said could go away). Hiding belongs to the MODAL form
+            // below, which is selected by omitting `sheet_peek_height`.
+            var driven by remember { mutableStateOf(authored) }
+            LaunchedEffect(authored) {
+                if (authored.isEmpty() || authored == driven) return@LaunchedEffect
+                driven = authored
+                val want = if (authored == "expanded")
+                    androidx.compose.material3.SheetValue.Expanded
+                else androidx.compose.material3.SheetValue.PartiallyExpanded
+                // The drive is not a user gesture, so claim it as already
+                // reported: otherwise settling there dispatches
+                // `on_sheet_change` straight back at the author who asked for
+                // it, and a handler that re-pushes would loop.
+                reported = want
+                // An animation interrupted by a drag or a recomposition throws
+                // CancellationException; the sheet is a decoration and must
+                // never take the render down with it.
+                runCatching {
+                    if (want == androidx.compose.material3.SheetValue.Expanded)
+                        sheetScaffoldState.bottomSheetState.expand()
+                    else sheetScaffoldState.bottomSheetState.partialExpand()
+                }
+            }
             LaunchedEffect(settled) {
                 if (settled != reported) {
                     reported = settled
@@ -1427,7 +1518,14 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
             }
             androidx.compose.material3.BottomSheetScaffold(
                 sheetContent = {
-                    RenderNode(persistentSheet, ctx.child(persistentSheet, 7))
+                    // The scaffold BODY gets `imePadding` (see RenderScaffold);
+                    // sheet content sits outside that Scaffold entirely, so
+                    // without this the soft keyboard covers whatever the sheet
+                    // is holding — and a sheet is exactly where a text field
+                    // or an editor tends to live.
+                    Box(modifier = Modifier.imePadding()) {
+                        RenderNode(persistentSheet, ctx.child(persistentSheet, 7))
+                    }
                 },
                 sheetPeekHeight = peek,
                 scaffoldState = sheetScaffoldState) { _ -> content() }
@@ -1495,7 +1593,12 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                     onSheetChange?.let { ctx.action(it, JsonPrimitive("hidden")) }
                 },
                 sheetState = sheetState) {
-                RenderNode(sheet, ctx.child(sheet, 7))
+                // Same reason as the persistent form: a modal sheet composes
+                // OUTSIDE the Scaffold that carries `imePadding`, so without
+                // this the keyboard covers its content.
+                Box(modifier = Modifier.imePadding()) {
+                    RenderNode(sheet, ctx.child(sheet, 7))
+                }
             }
         }
     }

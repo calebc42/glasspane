@@ -206,4 +206,22 @@ class EditorAnnotationsTest {
         assertEquals("!", s.inserted)
         assertNull(textSplice("same", "same"))
     }
+
+    // -------------------------------------------------------- doc line
+
+    @Test
+    fun diagnosticAtPicksTheCaretAndOutranksBySeverity() {
+        val src = "hello world"
+        // Overlapping entries: the caret sits in both, the ERROR wins so a
+        // real problem is never hidden behind a hint.
+        val diags = parseDiagnostics(
+            diagParams(diag(0, 5, "hint"), diag(0, 5, "error")), src)!!
+        assertEquals("error", diagnosticAt(diags, src, 2)!!.severity)
+        // Outside every range: nothing to say, and eldoc gets the line.
+        assertNull(diagnosticAt(diags, src, 9))
+        // Same content gate as the squiggles: a batch whose text has moved on
+        // describes offsets that no longer mean what they said.
+        assertNull(diagnosticAt(diags, "hello world!", 2))
+        assertNull(diagnosticAt(null, src, 2))
+    }
 }

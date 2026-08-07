@@ -36,6 +36,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -532,6 +533,29 @@ class DeviceBridge(
         }
     }
 
+    // SPEC 19.3: the last caret REPORTED per editor, so a repeat costs
+    // nothing. The spec puts throttling on the Companion, at the source, and
+    // says an intermediate position never emitted is not §22.2 conflation —
+    // a position already emitted is not a new one at all.
+    private val lastCaret = ConcurrentHashMap<Pair<String, String>, Triple<Int, Int, Int>>()
+
+    /** SPEC 19.3: report the caret for a synchronized editor. Best-effort
+     * presentation context — never a text change — and the one signal that
+     * lets an Emacs-side rider answer a POSITION rather than an edit: without
+     * it every caret-keyed feature (eldoc, diagnostics targeting, completion
+     * context) sees offset 0 for the life of the session. Positions are
+     * Compose UTF-16; the engine converts against the shadow (LD-4). */
+    fun editorCaret(document: String, editorId: String,
+                    cursor: Int, selStart: Int, selEnd: Int) {
+        val key = document to editorId
+        val next = Triple(cursor, selStart, selEnd)
+        if (lastCaret.put(key, next) == next) return
+        dispatchExecutor.execute {
+            engine?.localEditorCaret(document, editorId, Utf16Pos(cursor),
+                Utf16Pos(selStart), Utf16Pos(selEnd))
+        }
+    }
+
     /** SPEC 17.7: a toolbar `command` -> non-durable edit.command
      * event.action. Positions are Compose UTF-16; the engine converts to
      * scalars against the shadow (LD-4). */
@@ -751,6 +775,7 @@ class DeviceBridge(
             // the map bounded — entries are per (document, editor_id)).
             _editorMirrors.value = emptyMap()
             _editorAnnotations.value = emptyMap()
+            lastCaret.clear()
             // Atomic compare-and-clear: only if a newer connection has not
             // already superseded this one in the slot (SPEC 5.2 newest-wins).
             CompanionStores.clearLiveSession(engine)

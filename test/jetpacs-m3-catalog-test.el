@@ -20,6 +20,7 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'jetpacs-apps)
 (require 'jetpacs-m3-catalog)
 
 (defconst jetpacs-m3-test--inventory
@@ -347,6 +348,48 @@ longer names `jetpacs-m3--on-ready' anywhere, so the only thing
 attaching the catalog's client hooks at READY is the `add-hook' the
 app runs at load -- and this is the only suite that loads the app."
   (should (memq #'jetpacs-m3--on-ready jetpacs-ready-functions)))
+
+;;;; App identity: `jetpacs-defapp''s first caller
+
+(ert-deftest jetpacs-m3-catalog-registers-as-an-app ()
+  "Requiring the catalog REGISTERS it: the app registry is non-vacuous,
+and this is the only suite that can say so — `jetpacs-defapp' had zero
+callers before the catalog became one."
+  (let ((entry (assoc jetpacs-m3-owner jetpacs-apps--registry)))
+    (should entry)
+    (should (equal (plist-get (cdr entry) :label) "Catalog"))
+    (should (member jetpacs-m3-owner (plist-get (cdr entry) :surfaces)))
+    ;; The home surface is the one the chrome root was defined on, so
+    ;; `app.open' lands somewhere that exists.
+    (should (equal (jetpacs-apps--home-surface entry) jetpacs-m3-owner))))
+
+(ert-deftest jetpacs-m3-catalog-dock-composes-after-the-core ()
+  "The composed dock is the HOST's core items plus the catalog's, in
+that order — and with exactly one registered app the launcher grid
+stays off (`jetpacs-apps--multi-p' nil), which is the single-app
+contract."
+  (let ((jetpacs-apps-core-dock-items
+         (lambda (_surface)
+           (list (list :label "Home" :icon "home")
+                 (list :label "Files" :icon "folder_open")))))
+    (should-not (jetpacs-apps--multi-p))
+    (should (equal (car (jetpacs-apps-current)) jetpacs-m3-owner))
+    (should (equal (mapcar (lambda (i) (plist-get i :label))
+                           (jetpacs-apps-dock-items "app:hub"))
+                   '("Home" "Files" "Catalog")))
+    ;; The destination reads selected only on the catalog's own surface.
+    (let ((home (jetpacs-shell-surface-for jetpacs-m3-owner)))
+      (cl-flet ((catalog-item (surface)
+                  (cl-find "Catalog" (jetpacs-apps-dock-items surface)
+                           :key (lambda (i) (plist-get i :label))
+                           :test #'equal)))
+        (should-not (plist-get (catalog-item "app:hub") :selected))
+        (should (plist-get (catalog-item home) :selected))
+        ;; A GLOBAL verb: the tap arrives from any surface the dock
+        ;; renders on, and it names the catalog's surface explicitly.
+        (let ((tap (plist-get (catalog-item "app:hub") :on-tap)))
+          (should (equal (plist-get tap :action) "jetpacs.launcher.open"))
+          (should (equal (plist-get (plist-get tap :args) :surface) home)))))))
 
 ;;;; The verbs
 

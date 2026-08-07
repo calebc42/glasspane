@@ -39,6 +39,10 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+;; `jetpacs-defapp': the catalog claims its surface and contributes its
+;; dock destination through the app-identity layer, not by reaching for
+;; the chrome seam itself.
+(require 'jetpacs-apps)
 ;; `jetpacs-theme-mode' backs the ThemePicker's System/Light/Dark row.
 (require 'jetpacs-theme)
 
@@ -1156,10 +1160,36 @@ running twice is harmless."
 
 (add-hook 'jetpacs-ready-functions #'jetpacs-m3--on-ready)
 
+(defun jetpacs-m3--dock-items (surface)
+  "The catalog's dock destination, in the chrome seam's item shape.
+A function rather than a literal list so `:selected' can track SURFACE:
+the destination renders in every dock the app layer composes, and it
+must read selected exactly on the catalog's own surface.
+
+`jetpacs.launcher.open' rather than a catalog verb: the tap arrives
+from whatever surface the user is looking at, so it needs a GLOBAL verb
+\(the catalog's own `m3catalog.home' is owner-scoped, and would reset
+the screens of whatever surface sent it)."
+  (let ((home (jetpacs-shell-surface-for jetpacs-m3-owner)))
+    (list (list :label "Catalog"
+                :icon jetpacs-m3-component-icon
+                :on-tap (jetpacs-action "jetpacs.launcher.open"
+                                        :args (list :surface home))
+                :selected (equal surface home)))))
+
 (defun jetpacs-m3-register ()
-  "Register the catalog's owner, verbs and root screen.
+  "Register the catalog's owner, verbs, root screen — and the APP.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
-stack to Home, which is the documented live-reload path."
+stack to Home, which is the documented live-reload path;
+`jetpacs-defapp' replaces its registry entry in place.
+
+THE CATALOG IS `jetpacs-defapp''s first caller, and the hub is not.
+The app-identity design's own point 2 keeps core destinations
+HOST-authored: the hub IS the host, and it seeds them through
+`jetpacs-apps-core-dock-items'.  Registering the hub as an app as well
+would double-count it — its destinations would compose in twice, once
+as core and once as the current app's.  An app is a Tier 1 elisp
+package built ON jetpacs; this is the first one there is."
   (when (jetpacs-connected-p)
     (jetpacs-m3--on-ready (jetpacs-client)))
   (with-jetpacs-owner jetpacs-m3-owner
@@ -1175,15 +1205,24 @@ stack to Home, which is the documented live-reload path."
     (jetpacs-defaction "m3catalog.dialog" #'jetpacs-m3--on-dialog)
     (jetpacs-defaction "m3catalog.home" #'jetpacs-m3--on-home)
     (jetpacs-chrome-define-root jetpacs-m3-owner "home"
-                                #'jetpacs-m3-home-screen)))
+                                #'jetpacs-m3-home-screen))
+  ;; After the root exists: the app claims a surface that is really
+  ;; there, and its dock destination names one the launcher's
+  ;; membership guard will recognize.
+  (jetpacs-defapp jetpacs-m3-owner
+                  :label "Catalog"
+                  :icon jetpacs-m3-component-icon
+                  :surfaces (list jetpacs-m3-owner)
+                  :dock #'jetpacs-m3--dock-items))
 
 (defun jetpacs-m3-unregister ()
-  "Deregister the catalog verbs and its chrome root."
+  "Deregister the catalog verbs, its chrome root, and its app identity."
   (dolist (verb '("m3catalog.open" "m3catalog.example" "m3catalog.source"
                   "m3catalog.theme"
                   "m3catalog.pref" "m3catalog.pin" "m3catalog.demo"
                   "m3catalog.flag" "m3catalog.dialog" "m3catalog.home"))
     (jetpacs-undefaction verb))
+  (jetpacs-apps-unregister jetpacs-m3-owner)
   (jetpacs-chrome-remove jetpacs-m3-owner))
 
 (provide 'jetpacs-m3-core)

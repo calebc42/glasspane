@@ -642,6 +642,108 @@ class EditorTest {
         assertEquals(1, out.method("edit.open").size)
     }
 
+    // ------------------------------------------- the slot walk (SPEC 13.4/17)
+
+    /** Like [engine], but advertising the container node types whose slots the
+     * walk has to descend. */
+    private fun slotEngine(out: MutableList<JsonObject>): CompanionEngine {
+        val engine = CompanionEngine(CompanionConfig(
+            serverName = "kat", serverVersion = "1",
+            pairings = mapOf(katPid to katToken),
+            supportedCapabilities = setOf("editor.sync"),
+            surfaceProfiles = buildJsonObject {
+                putJsonObject("app") {
+                    put("node_types", JsonArray(
+                        listOf("text", "editor", "scaffold", "navigation_rail",
+                               "pane_scaffold", "column")
+                            .map(::JsonPrimitive)))
+                    put("builtins", JsonArray(emptyList()))
+                    put("features", JsonArray(emptyList()))
+                }
+            },
+            limits = testLimits("max_editor_sessions" to 8, "max_editor_bytes" to 65_536),
+            nonceSource = { katSn })) { bytes ->
+            FrameDecoder().let { d -> d.feed(bytes) { out.add(it) } }
+        }
+        engine.feed(frame(request("h1", "session.hello",
+            EbpAuth.helloParams("t", "1", katPid, katCn, wants = listOf("editor.sync")))))
+        engine.feed(frame(request("h2", "auth.response",
+            EbpAuth.authParams(katPid, katCn, katSn, katToken))))
+        engine.feed(frame(request("r1", "session.ready", JsonObject(emptyMap()))))
+        return engine
+    }
+
+    private fun pushEditorIn(engine: CompanionEngine, id: String, slot: String,
+                             container: String, document: String) =
+        engine.feed(frame(request(id, "surface.update", buildJsonObject {
+            put("surface", "app:main"); put("revision", 1)
+            putJsonObject("spec") {
+                put("t", container)
+                putJsonObject(slot) {
+                    put("t", "editor"); put("id", "repl")
+                    put("document", document); put("value", "(jetpacs-button)")
+                }
+            }
+        })))
+
+    @Test
+    fun everyContractNodeSlotIsWalkedForSyncedEditors() {
+        // REGRESSION. NODE_SLOT_MEMBERS was hand-listed and had drifted five
+        // members behind `field_types`: `sheet`, `rail`, `list`, `detail` and
+        // `extra` were absent, so an editor in any of them opened NO session —
+        // silently. No edit.open, no edit.delta, `editorText` nil forever,
+        // while the field still typed locally. A REPL in a bottom sheet looked
+        // alive and sent nothing. The set is derived from FIELD_TYPES now;
+        // this pins the behaviour the derivation exists for.
+        val slots = FIELD_TYPES.filterValues { it == "node" }.keys
+        assertTrue("the contract must still type slots as `node`", slots.size >= 16)
+        for (slot in slots) {
+            val out = mutableListOf<JsonObject>()
+            // The container's own type is irrelevant to the walk — only the
+            // MEMBER NAME selects descent — so one container serves them all.
+            pushEditorIn(slotEngine(out), "s-$slot", slot, "scaffold", "doc:$slot")
+            val open = out.method("edit.open")
+            assertEquals("slot `$slot` opened no editor session", 1, open.size)
+            assertEquals("doc:$slot",
+                open.single().reqObj("params").reqString("document"))
+        }
+    }
+
+    @Test
+    fun aSheetEditorSyncsBothWays() {
+        // The bottom-sheet case end to end, because it is the one the Catalog
+        // Playground rides: the session opens AND a local edit mirrors out.
+        val out = mutableListOf<JsonObject>()
+        val engine = slotEngine(out)
+        pushEditorIn(engine, "s1", "sheet", "scaffold", "scratch.el")
+        assertEquals("applied", out.replyTo("s1").reqObj("result").reqString("status"))
+        assertEquals(1, out.method("edit.open").size)
+        assertTrue(engine.localEditorEdit("scratch.el", "repl", ScalarPos(0), 0, "x"))
+        assertEquals(1, out.method("edit.delta").size)
+    }
+
+    @Test
+    fun anEditorInAnOpaqueMemberStillOpensNothing() {
+        // The other half of the walk's contract, unchanged by the derivation:
+        // §14.1 leaves an action's `args` opaque, so an `{"t":"editor"}` buried
+        // there is not a node position and must not open a session.
+        val out = mutableListOf<JsonObject>()
+        slotEngine(out).feed(frame(request("s1", "surface.update", buildJsonObject {
+            put("surface", "app:main"); put("revision", 1)
+            putJsonObject("spec") {
+                put("t", "text"); put("text", "hi")
+                putJsonObject("on_tap") {
+                    put("action", "demo.tap")
+                    putJsonObject("args") {
+                        put("t", "editor"); put("id", "ghost")
+                        put("document", "doc:ghost")
+                    }
+                }
+            }
+        })))
+        assertTrue(out.method("edit.open").isEmpty())
+    }
+
     @Test
     fun advertisingEditorSyncRequiresMaxEditorBytes() {
         // SPEC 4.5 (amendment #84): max_editor_bytes is REQUIRED when

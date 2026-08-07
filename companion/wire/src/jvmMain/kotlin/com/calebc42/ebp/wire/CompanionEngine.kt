@@ -865,16 +865,36 @@ class CompanionEngine(
         }
     }
 
-    /** SPEC 16/17: members whose value is an ARRAY of child nodes. `tabs.items`
-     * is deliberately absent — those are TabItem label objects, not nodes. */
-    private val NODE_ARRAY_MEMBERS = setOf("children", "items")
+    /** SPEC 16/17: members whose value is an ARRAY of child nodes.
+     *
+     * The `node-array` half is DERIVED, for the same reason [NODE_SLOT_MEMBERS]
+     * is: a member the contract adds and this set forgets is a silently dead
+     * editor session. `items` cannot be derived — the contract types it
+     * `varies-per-node`, because a `tabs.items` entry is a TabItem label object
+     * and a `menu.items` entry is a menu item, neither of them a node. The
+     * `t`-guard in the walk below is what keeps those out. */
+    private val NODE_ARRAY_MEMBERS: Set<String> =
+        FIELD_TYPES.filterValues { it == "node-array" }.keys + "items"
 
     /** SPEC 13.4/17: members whose value is a single child node — the
-     * scaffold slots and the envelope/decoration slots. */
-    private val NODE_SLOT_MEMBERS = setOf(
-        "top_bar", "body", "bottom_bar", "fab", "floating_toolbar", "drawer",
-        "header", "trailing", "empty", "footer", "top_bar_expanded",
-        "snackbar_content")
+     * scaffold slots and the envelope/decoration slots.
+     *
+     * DERIVED from the generated `FIELD_TYPES`, never hand-listed. The hand
+     * list this replaces had drifted five members behind the contract —
+     * `sheet`, `rail`, `list`, `detail` and `extra` were all missing — and the
+     * failure was SILENT and total: an `editor` with a `document` in any of
+     * them was never seen by [scanSyncedEditors], so no session opened, no
+     * `edit.complete` was ever issued, and `edit.delta` never flowed, while the
+     * field still accepted typing locally. A REPL in a bottom sheet looked
+     * alive and sent nothing. Deriving costs one filter and makes the drift
+     * impossible: `VocabularyDriftTest` already pins `FIELD_TYPES` to
+     * `ebp/contract.json`. */
+    private val NODE_SLOT_MEMBERS: Set<String> =
+        FIELD_TYPES.filterValues { it == "node" }.keys +
+            // `empty` is a SPEC 22 widget-surface member, not a NODE member, so
+            // the contract's node field types do not carry it. This walk covers
+            // widget specs too, so it is unioned in by hand rather than lost.
+            "empty"
 
     // Per-surface synchronized editors: surface -> (identity -> document),
     // where identity is the SPEC 16.1 presentation identity (key else id).

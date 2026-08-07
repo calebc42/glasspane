@@ -200,6 +200,7 @@ VerticalDivider is dropped: the divider node is HorizontalDivider."
    :fill_fraction 1.0))
 
 (jetpacs-m3-defcomponent "chips"
+  :builders (list #'jetpacs-chip #'jetpacs-assist-chip)
   :name "Chips"
   :description
   "Chips allow users to enter information, make selections, filter content, or trigger actions."

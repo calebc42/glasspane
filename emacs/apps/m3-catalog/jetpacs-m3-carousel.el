@@ -136,6 +136,7 @@ clips statically at the same extraLarge corner."
    :height 221))
 
 (jetpacs-m3-defcomponent "carousel"
+  :builders (list #'jetpacs-carousel)
   :name "Carousel"
   :description
   "Carousels contain a collection of items that move horizontally or vertically."

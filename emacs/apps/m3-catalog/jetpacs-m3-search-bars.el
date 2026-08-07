@@ -147,6 +147,7 @@ and a lazily-composed list has no bounded height inside one."
                  (list :spacing 8 :fill t))))
 
 (jetpacs-m3-defcomponent "search-bars"
+  :builders (list #'jetpacs-search-bar)
   :name "Search bars"
   :description
   "Search bars allow users to enter a keyword or phrase and get relevant information."

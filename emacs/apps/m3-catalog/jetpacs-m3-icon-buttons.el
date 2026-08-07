@@ -178,6 +178,7 @@ The container is the variant member; it does not itself change with
                                         "outlined"))
 
 (jetpacs-m3-defcomponent "icon-buttons"
+  :builders (list #'jetpacs-icon-button)
   :name "Icon buttons"
   :description
   "Icon buttons allow users to take actions and make choices with a single tap."

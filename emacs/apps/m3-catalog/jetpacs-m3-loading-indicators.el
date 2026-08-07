@@ -107,6 +107,7 @@ cross the wire."
           (list :spacing 8 :content-padding 8))))
 
 (jetpacs-m3-defcomponent "loading-indicators"
+  :builders (list #'jetpacs-progress)
   :name "Loading indicators"
   :description
   "Loading indicators express an unspecified wait time or display the length of a loading process."

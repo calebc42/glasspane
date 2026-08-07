@@ -124,6 +124,7 @@ sheet, and \"Scaffold Content\" is."
   (jetpacs-text "Scaffold Content"))
 
 (jetpacs-m3-defcomponent "bottom-sheet"
+  :builders (list #'jetpacs-scaffold)
   :name "Bottom Sheet"
   :description
   "Bottom sheets are surfaces containing supplementary content, anchored to the bottom of the screen."

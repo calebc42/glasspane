@@ -207,6 +207,7 @@ tab's bounds -- still animated by the standard offset."
    :indicator (list :kind "outline")))
 
 (jetpacs-m3-defcomponent "tabs"
+  :builders (list #'jetpacs-tabs #'jetpacs-tab-item)
   :name "Tabs"
   :description
   "Tabs organize content across different screens, data sets, and other interactions."

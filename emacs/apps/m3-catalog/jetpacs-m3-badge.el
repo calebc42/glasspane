@@ -67,6 +67,7 @@ an empty Badge (the attention dot), then \"8\", then \"999+\"."
    :arrange "space_evenly" :align "center" :fill t))
 
 (jetpacs-m3-defcomponent "badge"
+  :builders (list #'jetpacs-badge)
   :name "Badge"
   :description
   "A badge can contain dynamic information, such as the presence of a new notification or a number of pending requests. Badges can be icon only or contain a short text."

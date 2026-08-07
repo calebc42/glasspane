@@ -125,6 +125,7 @@ are set."
    :spacing 8 :fill t))
 
 (jetpacs-m3-defcomponent "date-pickers"
+  :builders (list #'jetpacs-date-button)
   :name "Date pickers"
   :description
   "Date pickers let users select a date or range of dates."

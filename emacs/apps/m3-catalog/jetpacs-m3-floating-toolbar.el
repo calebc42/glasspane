@@ -355,6 +355,7 @@ for an inexact one is not a win, so the composition stays."
    :color "primary_container" :shape "circle" :elevation 6))
 
 (jetpacs-m3-defcomponent "floating-toolbar"
+  :builders (list #'jetpacs-scaffold)
   :name "Floating Toolbar"
   :description
   "A floating toolbar displays key actions above the content."

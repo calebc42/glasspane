@@ -163,6 +163,7 @@ the sibling."
    "nav-suite-hidden-custom"))
 
 (jetpacs-m3-defcomponent "navigation-suite-scaffold"
+  :builders (list #'jetpacs-scaffold #'jetpacs-navigation-rail)
   :name "Navigation Suite Scaffold"
   :description
   "The Navigation Suite Scaffold wraps the provided content and places the adequate provided navigation component on the screen according to the current NavigationSuiteType. \n\nNote: this sample is better experienced in a resizable emulator or foldable device."

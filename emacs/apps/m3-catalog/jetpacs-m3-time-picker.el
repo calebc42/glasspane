@@ -68,6 +68,7 @@ Cancel, and the \"Entered time\" report on the way back."
                        :display-mode "switchable"))
 
 (jetpacs-m3-defcomponent "time-picker"
+  :builders (list #'jetpacs-time-button)
   :name "Time Picker"
   :description
   "Time picker allows the user to choose time of day."

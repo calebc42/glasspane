@@ -198,6 +198,8 @@ sample sets as the bar\\='s containerColor."
                    :color "primary_container"))
 
 (jetpacs-m3-defcomponent "bottom-app-bar"
+  :builders (list #'jetpacs-scaffold #'jetpacs-app-bar-row
+              #'jetpacs-app-bar-item)
   :name "Bottom App Bar"
   :description
   "A bottom app bar displays navigation and key actions at the bottom of mobile screens."

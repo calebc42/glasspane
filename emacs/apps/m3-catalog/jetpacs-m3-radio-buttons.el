@@ -64,6 +64,7 @@ starts selected."
    :on-change (jetpacs-m3-demo "Radio group")))
 
 (jetpacs-m3-defcomponent "radio-buttons"
+  :builders (list #'jetpacs-enum-list #'jetpacs-enum-option)
   :name "Radio buttons"
   :description
   "Radio buttons allow the user to select one option from a set."

@@ -645,5 +645,58 @@ lambdas, which have no symbol to carry a docstring."
                         missing)))
     (should-not missing)))
 
+;;;; The component's node builders
+
+(ert-deftest jetpacs-m3-every-component-names-its-builders ()
+  "All 41 map onto the node vocabulary, and every symbol is real.
+`jetpacs-m3-defcomponent' signals on an unbound one, so this is really
+asking that none was left empty — a component with no `:builders' shows
+a Description and then nothing about how to build the thing."
+  (dolist (component jetpacs-m3-components)
+    (let ((builders (plist-get component :builders)))
+      (should builders)
+      (dolist (builder builders)
+        (should (fboundp builder))
+        ;; A node builder, not a verb or a helper that wandered in.
+        (should (string-prefix-p "jetpacs-" (symbol-name builder)))
+        (should-not (string-prefix-p "jetpacs-m3-" (symbol-name builder)))))))
+
+(ert-deftest jetpacs-m3-component-screen-carries-the-builder-docs ()
+  "Upstream says what the component IS; the builder says what you write."
+  (let* ((component (jetpacs-m3-component "buttons"))
+         (texts (jetpacs-m3-test--texts
+                 (jetpacs-m3-component-screen component nil))))
+    (should (member "Description" texts))
+    (should (member "Elisp" texts))
+    (should (member "jetpacs-button" texts))
+    ;; The real docstring, not a placeholder.
+    (should (cl-some (lambda (s) (string-match-p "SPEC" s)) texts))
+    (should (member "Describe jetpacs-button" texts))))
+
+(ert-deftest jetpacs-m3-describe-is-addressed-by-index-never-by-symbol ()
+  "The wire names a POSITION in a component's own list, never a symbol.
+Resolving a symbol off the wire would let any tap describe anything in
+the image — the reasoning `jetpacs-m3--open-source' already records."
+  (let ((json (jetpacs-node->canonical-json
+               (jetpacs-m3-component-screen
+                (jetpacs-m3-component "buttons") nil))))
+    (should (string-match-p "\"action\":\"m3catalog.describe\"" json))
+    (should (string-match-p "\"component\":\"buttons\"" json))
+    ;; The args carry an index and NOT a function name.
+    (should-not (string-match-p "\"builder\":" json)))
+  ;; Out-of-range, unknown component and non-integer index are refused
+  ;; without ever reaching `describe-function'.
+  (should (eq 'stale (jetpacs-m3--on-describe
+                      '(:component "buttons" :index 99) nil)))
+  (should (eq 'stale (jetpacs-m3--on-describe
+                      '(:component "no-such-component" :index 0) nil)))
+  (should (eq 'rejected (jetpacs-m3--on-describe
+                         '(:component "buttons" :index "0") nil)))
+  (should (eq 'rejected (jetpacs-m3--on-describe '(:index 0) nil))))
+
+(ert-deftest jetpacs-m3-builder-doc-never-signals ()
+  (should-not (jetpacs-m3-builder-doc (make-symbol "jetpacs-m3-test--nope")))
+  (should-not (jetpacs-m3-builder-doc nil)))
+
 (provide 'jetpacs-m3-catalog-test)
 ;;; jetpacs-m3-catalog-test.el ends here

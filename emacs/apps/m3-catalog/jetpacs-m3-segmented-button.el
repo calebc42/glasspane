@@ -74,6 +74,7 @@ upstream's icon slot."
    :on-change (jetpacs-m3-demo "Segmented button")))
 
 (jetpacs-m3-defcomponent "segmented-button"
+  :builders (list #'jetpacs-segmented-button #'jetpacs-enum-option)
   :name "Segmented Button"
   :description
   "Segmented buttons help people select options, switch views, or sort elements."

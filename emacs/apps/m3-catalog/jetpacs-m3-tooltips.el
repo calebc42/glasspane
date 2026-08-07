@@ -205,6 +205,7 @@ by the sample's own DpSize rather than left at the default."
                              :caret-width 32 :caret-height 16))
 
 (jetpacs-m3-defcomponent "tooltips"
+  :builders (list #'jetpacs-tooltip)
   :name "Tooltips"
   :description
   "Tooltips call user attention to an anchor component."

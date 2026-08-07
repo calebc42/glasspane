@@ -112,6 +112,7 @@ this family's boxes stay distinct on the wire from the plain family's
    "rounded" jetpacs-m3-checkboxes--rounded-stroke))
 
 (jetpacs-m3-defcomponent "checkboxes"
+  :builders (list #'jetpacs-checkbox)
   :name "Checkboxes"
   :description
   "Checkboxes allow the user to select one or more items from a set or turn an option on or off."

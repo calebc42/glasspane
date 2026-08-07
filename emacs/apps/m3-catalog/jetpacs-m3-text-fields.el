@@ -258,6 +258,7 @@ carrying that size."
    :height 120))
 
 (jetpacs-m3-defcomponent "text-fields"
+  :builders (list #'jetpacs-text-input)
   :name "Text fields"
   :description
   "Text fields let users enter and edit text."

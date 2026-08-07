@@ -166,6 +166,7 @@ single-select row."
           (list :overlap 6))))
 
 (jetpacs-m3-defcomponent "button-groups"
+  :builders (list #'jetpacs-button-group #'jetpacs-button-group-item)
   :name "Button Groups"
   :description
   "button groups is a container for material components that adds an animation on press"

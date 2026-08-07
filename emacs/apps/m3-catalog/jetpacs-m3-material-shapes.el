@@ -73,6 +73,7 @@ through the clip; same pixels, different owner."
           (list :columns 4 :spacing 4))))
 
 (jetpacs-m3-defcomponent "material-shapes"
+  :builders (list #'jetpacs-surface #'jetpacs-lazy-grid)
   :name "Material Shapes"
   :description
   "Material Shapes are used to define the shape of components."

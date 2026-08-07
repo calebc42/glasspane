@@ -199,6 +199,7 @@ active track has no width yet and grows out either way as it is dragged."
    :spacing 8 :fill t))
 
 (jetpacs-m3-defcomponent "sliders"
+  :builders (list #'jetpacs-slider)
   :name "Sliders"
   :description
   "Sliders allow users to make selections from a range of values."

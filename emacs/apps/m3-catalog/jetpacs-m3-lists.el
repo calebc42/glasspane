@@ -422,6 +422,7 @@ mutation runs in Emacs and the next snapshot re-authors all three rows."
    (mapcar #'jetpacs-m3-lists--mode-change-item (number-sequence 0 2))))
 
 (jetpacs-m3-defcomponent "lists"
+  :builders (list #'jetpacs-row #'jetpacs-surface)
   :name "Lists"
   :description
   "Lists are continuous, vertical indexes of text or images."

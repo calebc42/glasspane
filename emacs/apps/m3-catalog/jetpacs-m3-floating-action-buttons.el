@@ -138,6 +138,7 @@ exactly as upstream derives it."
           (list :spacing 8 :fill t))))
 
 (jetpacs-m3-defcomponent "floating-action-buttons"
+  :builders (list #'jetpacs-scaffold #'jetpacs-button)
   :name "Floating action buttons"
   :description
   "The FAB represents the most important action on a screen. It puts key actions within reach."

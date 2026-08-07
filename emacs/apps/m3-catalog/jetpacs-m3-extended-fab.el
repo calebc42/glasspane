@@ -169,6 +169,7 @@ and `:expanded \"auto\"' drops the label as the hundred items move."
   (jetpacs-m3-extended-fab--animated "Large Extended FAB" "large"))
 
 (jetpacs-m3-defcomponent "extended-fab"
+  :builders (list #'jetpacs-scaffold #'jetpacs-button)
   :name "Extended FAB"
   :description
   "Extended FABs help people take primary actions. They're wider than FABs to accommodate a text label and larger target area."

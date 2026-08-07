@@ -257,6 +257,8 @@ completing the last token, visible when completing a middle one."
                     :on-change (jetpacs-m3-fn-action "menus-auto-pick")))
 
 (jetpacs-m3-defcomponent "menus"
+  :builders (list #'jetpacs-menu #'jetpacs-menu-item
+              #'jetpacs-menu-group #'jetpacs-dropdown)
   :name "Menus"
   :description
   "Menus display a list of choices on temporary surfaces."

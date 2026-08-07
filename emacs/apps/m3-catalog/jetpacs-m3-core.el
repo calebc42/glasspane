@@ -265,18 +265,42 @@ sample would need; the example then drills into \"Not supported\"."
         :unsupported unsupported))
 
 (cl-defun jetpacs-m3-defcomponent (id &key name description guidelines docs
-                                      source additional-info examples)
+                                      source additional-info examples
+                                      builders)
   "Register catalog component ID (a §4.4 identifier used in screen ids).
 NAME, DESCRIPTION, GUIDELINES, DOCS, SOURCE and ADDITIONAL-INFO are
 upstream's `Component' fields; EXAMPLES is a list of `jetpacs-m3-example'
 plists in upstream order.  Re-registering an id REPLACES it in place, so
-a module can be re-evaluated live without duplicating or reordering."
+a module can be re-evaluated live without duplicating or reordering.
+
+BUILDERS names the `jetpacs-' NODE BUILDERS this M3 component is made of
+— `jetpacs-button' for Buttons, `jetpacs-scaffold' for Bottom Sheet —
+and the Component screen shows each one's docstring under upstream's
+description.  It is authored, not derived, and it has to be: a count of
+which constructors a module's samples CALL is dominated by scenery
+(`jetpacs-column' appears everywhere and means nothing), and the answer
+for a third of the catalog is `jetpacs-scaffold', which the samples
+never call at all because the Example screen builds the scaffold around
+them.  Which component a sample IS is a judgement.
+
+The mapping is 1:1 with M3 only at the vocabulary layer, exactly as
+docs/CHROME-VOCABULARY.md says: `scaffold' bundles eight-odd composables
+and `jetpacs-text-input' serves two M3 text fields, so a component
+legitimately names several builders, and several components legitimately
+name one."
   (jetpacs-check-identifier id "component id")
   (jetpacs-require-string name "component name")
   (jetpacs-require-string description "component description")
+  ;; A builder that does not exist would show an empty block on a screen
+  ;; nobody looks at twice; signalling here fails the module's own gate
+  ;; instead, which is where a typo is cheap.
+  (dolist (builder builders)
+    (unless (and (symbolp builder) (fboundp builder))
+      (error "jetpacs-m3: component %s names an unbound builder %S" id builder)))
   (let ((component (list :id id :name name :description description
                          :guidelines guidelines :docs docs :source source
                          :additional-info additional-info
+                         :builders builders
                          :examples examples)))
     (if-let* ((prior (gethash id jetpacs-m3--by-id)))
         (setq jetpacs-m3-components
@@ -663,8 +687,9 @@ sixty-character title there is exactly the flex trap
                     (jetpacs-icon jetpacs-m3-component-icon :size 108)
                     :align_self "center" :padding 24)
                    (jetpacs-text "Description" :style "title")
-                   (jetpacs-text (plist-get component :description))
-                   (jetpacs-with-attrs (jetpacs-spacer) :height 16)
+                   (jetpacs-text (plist-get component :description)))
+             (jetpacs-m3--builders-block component)
+             (list (jetpacs-with-attrs (jetpacs-spacer) :height 16)
                    (jetpacs-text "Examples" :style "title"))
              (if cells
                  (mapcar (lambda (cell)
@@ -812,6 +837,53 @@ block and nothing else."
     (and (stringp text)
          (not (string-blank-p text))
          (string-trim text))))
+
+(defun jetpacs-m3-builder-doc (builder)
+  "BUILDER's docstring as display text, or nil.  Never signals."
+  (when-let* ((raw (ignore-errors (documentation builder)))
+              (text (ignore-errors (substitute-command-keys raw))))
+    (and (stringp text) (not (string-blank-p text)) (string-trim text))))
+
+(defun jetpacs-m3--builders-block (component)
+  "COMPONENT's node builders, each with its docstring — a LIST of nodes.
+Empty when the component names none, so the `append' that splices this
+into the screen closes over nothing.
+
+This is the other half of what the Example screen does one level down.
+There, upstream's `:description' says what M3 calls the component and
+the sample's docstring says what that one example demonstrates.  Here,
+upstream's says what the component IS and these say what YOU WRITE to
+get one — which is the question a catalog of a node vocabulary exists to
+answer, and the one it could not answer until now."
+  (when-let* ((builders (plist-get component :builders)))
+    (append
+     (list (jetpacs-with-attrs (jetpacs-spacer) :height 16)
+           (jetpacs-text "Elisp" :style "title"))
+     (cl-loop
+      for builder in builders
+      for index from 0
+      append (list
+              (jetpacs-text (symbol-name builder)
+                            :style "label" :font-weight "bold")
+              (jetpacs-text (or (jetpacs-m3-builder-doc builder)
+                                "This builder has no docstring.")
+                            :style "caption" :selectable t)
+              ;; The full *Help* is one tap away rather than inlined:
+              ;; `describe-function' also carries the arglist, the
+              ;; source link and the customization notes, and
+              ;; `jetpacs-hypertext' already renders help-mode to the
+              ;; device.  Addressed by (component, index) like every
+              ;; other verb here — never by symbol name, which would let
+              ;; a tap describe anything in the image.
+              (jetpacs-chrome-row
+               (format "Describe %s" builder)
+               :subtitle "Opens the *Help* buffer, on the hub"
+               :icon "help"
+               :on-tap (jetpacs-action
+                        "m3catalog.describe"
+                        :args (list :component (plist-get component :id)
+                                    :index index))
+               :key (format "desc-%s-%d" (plist-get component :id) index)))))))
 
 (defun jetpacs-m3--doc-block (example)
   "EXAMPLE's elisp docstring as a titled block, or nil when it has none."
@@ -1116,6 +1188,44 @@ Home."
          (lambda () (jetpacs-m3-show-source id index surface)))
         'accepted))))
 
+(defun jetpacs-m3--on-describe (args params)
+  "Describe one of a component's node builders in a real *Help* buffer.
+Addressed by (component, index) into that component's own `:builders',
+so the wire can only ever name a builder the catalog already claims —
+resolving a SYMBOL off the wire would let any tap describe anything in
+the image, which is the reasoning `jetpacs-m3--open-source' records.
+
+The *Help* buffer drills on the HUB, not here: `jetpacs-hypertext'
+registers the help-mode renderer and buffer drills belong to the buffer
+app.  So this LEAVES the catalog, the snackbar says where it went, and
+`M-x jetpacs-m3-catalog' is the way back — which the row's own subtitle
+states rather than letting the screen vanish unexplained."
+  (let* ((id (plist-get args :component))
+         (index (plist-get args :index))
+         (surface (plist-get params :surface))
+         (component (and (stringp id) (jetpacs-m3-component id)))
+         (builder (and component (integerp index)
+                       (nth index (plist-get component :builders)))))
+    (cond
+     ((not (and (stringp id) (integerp index))) 'rejected)
+     ((null component) 'stale)
+     ((not (and builder (fboundp builder))) 'stale)
+     (t (jetpacs-flow-continue
+         (lambda ()
+           (condition-case err
+               (progn
+                 (save-window-excursion (describe-function builder))
+                 (jetpacs-navigate-buffer "*Help*" "app:hub")
+                 (jetpacs-shell-notify
+                  (format "%s — on the hub; M-x jetpacs-m3-catalog to come back"
+                          builder)
+                  surface))
+             (error (message "jetpacs-m3: describe %s failed: %s"
+                             builder (jetpacs-error-label err))
+                    (jetpacs-shell-notify "That help buffer could not be shown"
+                                          surface)))))
+        'accepted))))
+
 (defun jetpacs-m3--on-theme (_args params)
   "Open the theme screen (upstream onThemeClick)."
   (let ((surface (plist-get params :surface)))
@@ -1325,6 +1435,7 @@ the screens of whatever surface sent it)."
   '(("m3catalog.open"    . jetpacs-m3--on-open)
     ("m3catalog.example" . jetpacs-m3--on-example)
     ("m3catalog.source"  . jetpacs-m3--on-source)
+    ("m3catalog.describe" . jetpacs-m3--on-describe)
     ("m3catalog.theme"   . jetpacs-m3--on-theme)
     ("m3catalog.pref"    . jetpacs-m3--on-pref)
     ("m3catalog.pin"     . jetpacs-m3--on-pin)

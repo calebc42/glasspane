@@ -146,6 +146,7 @@ otherwise; `edit' is the outlined vector, the state it starts in."
                                     :icon "edit" :size "xlarge"))
 
 (jetpacs-m3-defcomponent "togglebuttons"
+  :builders (list #'jetpacs-button)
   :name "ToggleButtons"
   :description
   "Toggle buttons provide a selectable button that animates on press."

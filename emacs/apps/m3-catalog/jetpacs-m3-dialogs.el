@@ -111,6 +111,7 @@ snapshot."
    :align_self "center"))
 
 (jetpacs-m3-defcomponent "dialogs"
+  :builders (list #'jetpacs-dialog-submit #'jetpacs-dialog-dismiss)
   :name "Dialogs"
   :description
   "Dialogs provide important prompts in a user flow."

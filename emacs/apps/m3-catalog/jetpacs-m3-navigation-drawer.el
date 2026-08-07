@@ -162,6 +162,7 @@ and the hamburger the Companion synthesizes for the slot."
    :align "center" :fill t))
 
 (jetpacs-m3-defcomponent "navigation-drawer"
+  :builders (list #'jetpacs-scaffold)
   :name "Navigation drawer"
   :description
   "Navigation drawers provide ergonomic access to destinations in an app."

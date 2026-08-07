@@ -181,6 +181,7 @@ taking its destination label as its contentDescription."
    80))
 
 (jetpacs-m3-defcomponent "navigation-bar"
+  :builders (list #'jetpacs-scaffold #'jetpacs-app-bar-item)
   :name "Navigation bar"
   :description
   "Navigation bars offer a persistent and convenient way to switch between primary destinations in an app."

@@ -82,6 +82,7 @@ Its onClick is an empty lambda upstream; here the tap reports itself."
                           :on-tap (jetpacs-m3-demo "Clickable")))
 
 (jetpacs-m3-defcomponent "card"
+  :builders (list #'jetpacs-card)
   :name "Card"
   :description
   "Cards contain content and actions that relate information about a subject."

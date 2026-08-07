@@ -176,6 +176,7 @@ Button\"."
                                    :icon "edit" :size "xlarge"))
 
 (jetpacs-m3-defcomponent "split-button"
+  :builders (list #'jetpacs-split-button)
   :name "Split Button"
   :description
   "Split buttons let user perform additional actions besides the main action"

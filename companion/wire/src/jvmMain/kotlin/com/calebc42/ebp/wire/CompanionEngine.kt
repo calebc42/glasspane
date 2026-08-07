@@ -1521,6 +1521,10 @@ class CompanionEngine(
     /** Re-render hook: the session's shadow changed from an inbound apply or
      * a resync (the host editor must reflect it). */
     var editorListener: ((EditorSession) -> Unit)? = null
+    /** Close hook: (document, editorId) after the session is gone. The
+     * counterpart to [editorListener] — a display that publishes per-editor
+     * state on every apply needs the one event that ENDS it. */
+    var editorClosedListener: ((String, String) -> Unit)? = null
     /** Annotation hook: (kind, document, editorId, payload) after a session/seq
      * match. The DOCUMENT rides along because §19.5 payloads carry only
      * `editor_id` while a display keys its editor state by (document,
@@ -1695,6 +1699,13 @@ class CompanionEngine(
     @Synchronized
     fun closeEditor(document: String, editorId: String) {
         val s = editors.remove(document to editorId) ?: return
+        // The display keys its per-editor state — mirror text, completion
+        // offers, annotations — by this same (document, editorId) tuple, and a
+        // close is the ONLY event that ends it. Without this hook every one of
+        // those maps outlives its session until transport loss clears the lot:
+        // stale text seeding a reopened editor, and unbounded growth across a
+        // long connection that opens many editors.
+        editorClosedListener?.invoke(document, editorId)
         if (s.state == EditorSession.State.CLOSED) return
         s.state = EditorSession.State.CLOSED
         if (state == SessionState.READY)

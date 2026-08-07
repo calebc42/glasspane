@@ -8,8 +8,14 @@
 // with onboarding). Not a secret and not a deployment configuration.
 package com.calebc42.ebp.companion
 
+import com.calebc42.ebp.companion.render.DiagSet
+import com.calebc42.ebp.companion.render.EldocLine
+import com.calebc42.ebp.companion.render.FontifySet
 import com.calebc42.ebp.companion.render.ImageCache
 import com.calebc42.ebp.companion.render.objOrNull
+import com.calebc42.ebp.companion.render.parseDiagnostics
+import com.calebc42.ebp.companion.render.parseEldoc
+import com.calebc42.ebp.companion.render.parseFontify
 import com.calebc42.ebp.companion.render.stringOr
 import com.calebc42.ebp.wire.CompanionEngine
 import com.calebc42.ebp.wire.CompanionConfig
@@ -51,6 +57,21 @@ data class EditorMirror(
     val selEndU: Int,
     val seq: Long,
     val epoch: Long,
+)
+
+/**
+ * SPEC 19.5: everything Emacs has said ABOUT one synchronized editor, as
+ * opposed to its text. Latest-wins per kind: a new `fontify.show` replaces the
+ * previous runs outright (that is the §19.5 contract, not a merge), and the
+ * three kinds are independent — a diagnostics push must not blank the
+ * fontification. `epoch` bumps on every replacement so a composable can key its
+ * transformation on it and rebuild exactly once per push.
+ */
+data class EditorAnnotationState(
+    val fontify: FontifySet? = null,
+    val diags: DiagSet? = null,
+    val eldoc: EldocLine? = null,
+    val epoch: Long = 0,
 )
 
 /** SPEC 19.3: one candidate. `insert` is already defaulted to `label`. */
@@ -393,6 +414,53 @@ class DeviceBridge(
             _editorMirrors.value + ((s.document to s.editorId) to m)
     }
 
+    // SPEC 19.5: annotations, keyed (document, editor_id) exactly like the
+    // mirrors beside them — which is why the wire listener carries the
+    // document at all. RenderEditor collects this and rebuilds its
+    // transformation on the epoch.
+    private val annotationEpoch = AtomicLong(0)
+    private val _editorAnnotations =
+        MutableStateFlow<Map<Pair<String, String>, EditorAnnotationState>>(emptyMap())
+    val editorAnnotations: StateFlow<Map<Pair<String, String>, EditorAnnotationState>>
+        get() = _editorAnnotations
+
+    /**
+     * Absorb one validated §19.5 batch. The engine has already refused
+     * anything whose session or seq does not match the live editor and
+     * range-checked every entry, so the remaining work is the domain change:
+     * scalar offsets to UTF-16 against the SHADOW those offsets index.
+     *
+     * The shadow is read from the engine rather than from the mirror map,
+     * because a mirror is only published when the text CHANGES — an editor
+     * that has been open and idle has no mirror entry at all, and that is
+     * exactly the state a first fontify push arrives in.
+     */
+    private fun absorbAnnotation(
+        method: String, document: String, editorId: String, params: JsonObject,
+    ) {
+        val e = engine ?: return
+        val text = e.withEditor(document, editorId) { it.shadow } ?: return
+        val key = document to editorId
+        val prior = _editorAnnotations.value[key] ?: EditorAnnotationState()
+        val next = when (method) {
+            "fontify.show" -> prior.copy(fontify = parseFontify(params, text))
+            "diagnostics.show" -> prior.copy(diags = parseDiagnostics(params, text))
+            "eldoc.show" -> prior.copy(eldoc = parseEldoc(params))
+            else -> return
+        }
+        _editorAnnotations.value = _editorAnnotations.value +
+            (key to next.copy(epoch = annotationEpoch.incrementAndGet()))
+    }
+
+    /** Drop every display-side trace of one editor. The engine's close hook is
+     * the only event that ends a session short of transport loss. */
+    private fun forgetEditor(document: String, editorId: String) {
+        val key = document to editorId
+        _editorMirrors.value = _editorMirrors.value - key
+        _completionOffers.value = _completionOffers.value - key
+        _editorAnnotations.value = _editorAnnotations.value - key
+    }
+
     // SPEC 19.3 (JC-4b): completion offers, keyed (document, editor_id).
     // RenderEditor collects this and shows a dropdown; an offer is REPLACED
     // by the next one and cleared when its editor's text moves, so a stale
@@ -631,6 +699,18 @@ class DeviceBridge(
         // moved and the display did not, and the next keystroke diffed
         // against a stale base. Fires under the engine monitor.
         engine.editorListener = { s -> publishMirror(s) }
+        // SPEC 19.5: diagnostics/fontify/eldoc have been validated, accepted
+        // and then dropped into a null listener for the life of this tree —
+        // no error, no log, no user-visible signal. They land here now.
+        engine.annotationListener = { method, document, editorId, params ->
+            absorbAnnotation(method, document, editorId, params)
+        }
+        // SPEC 19: the session ended (node removed, document changed, identity
+        // changed). Drop the display's copy with it — a reopened editor must
+        // not inherit the last one's text, offers, or squiggles.
+        engine.editorClosedListener = { document, editorId ->
+            forgetEditor(document, editorId)
+        }
         // SPEC 18.1: an oversized submit keeps the dialog up; tell the user to
         // shorten the input (password erasure in the renderer is a follow-on).
         engine.dialogOverflowListener = { onToast("Input too large — please shorten it") }
@@ -670,6 +750,7 @@ class DeviceBridge(
             // mirror outlives the connection that produced it (also keeps
             // the map bounded — entries are per (document, editor_id)).
             _editorMirrors.value = emptyMap()
+            _editorAnnotations.value = emptyMap()
             // Atomic compare-and-clear: only if a newer connection has not
             // already superseded this one in the slot (SPEC 5.2 newest-wins).
             CompanionStores.clearLiveSession(engine)

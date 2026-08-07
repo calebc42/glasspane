@@ -74,6 +74,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.TextFieldValue
@@ -755,13 +756,31 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             }
         }
     }
-    // SPEC 18.4/17.4: a `syntax` language recolours the field in place via an
-    // identity VisualTransformation (never changes the character count, so the
-    // cursor/selection/IME behave exactly as on a plain field).
+    // SPEC 18.4/17.4/19.5: the field's colouring, as ONE identity
+    // VisualTransformation (never changes the character count, so the
+    // cursor/selection/IME behave exactly as on a plain field). Emacs's own
+    // fontify runs win where they apply; the client tokenizer is the fallback
+    // for first paint, big pastes, and every editor with a `syntax` language
+    // but no attached buffer at all; diagnostics draw over whichever won.
     val language = node.stringOr("syntax")
     val syntaxColors = LocalSyntaxColors.current
-    val transform = remember(language, syntaxColors) {
-        if (language.isEmpty()) VisualTransformation.None
+    val annotations = if (document.isEmpty()) null else {
+        val all by ctx.bridge.editorAnnotations.collectAsState()
+        all[document to id]
+    }
+    val diagColors = DiagnosticColors(
+        error = MaterialTheme.colorScheme.error,
+        warning = Color(0xFFC08A00),
+        info = MaterialTheme.colorScheme.primary,
+        hint = MaterialTheme.colorScheme.outline)
+    // Keyed on the annotation EPOCH rather than on the batches: a §19.5 push is
+    // latest-wins and bumps the epoch exactly once, so this rebuilds once per
+    // push and the transformation's own memo absorbs every layout pass between.
+    val transform = remember(language, syntaxColors, diagColors, annotations?.epoch) {
+        if (annotations != null)
+            AnnotationTransformation(annotations.fontify, annotations.diags,
+                language, syntaxColors, diagColors)
+        else if (language.isEmpty()) VisualTransformation.None
         else SyntaxTransformation(language, syntaxColors)
     }
     // Commit a new field state: mirror any TEXT change (§19.3 splice for a

@@ -189,6 +189,30 @@ class EditorTest {
         assertEquals("applied", out.replyTo("a2").reqObj("result").reqString("status"))
     }
 
+    @Test
+    fun closingAnEditorTellsTheDisplay() {
+        // The leak this fixes: `editorListener` fires on every apply, so a
+        // display accumulates per-editor state keyed (document, editorId) —
+        // and NOTHING ever told it a session ended. Every such map outlived
+        // its session until transport loss cleared the lot.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        val closed = mutableListOf<Pair<String, String>>()
+        engine.editorClosedListener = { d, e -> closed.add(d to e) }
+        engine.openEditor("doc:1", "body", "abc")
+        engine.openEditor("doc:2", "other", "xyz")
+        engine.closeEditor("doc:1", "body")
+        assertEquals(listOf("doc:1" to "body"), closed)
+        // Idempotent: a second close of a gone tuple reports nothing.
+        engine.closeEditor("doc:1", "body")
+        assertEquals(1, closed.size)
+        // And a reopened editor is a NEW session — the display must have
+        // dropped the old one rather than reusing its text.
+        engine.openEditor("doc:1", "body", "fresh")
+        engine.closeEditor("doc:1", "body")
+        assertEquals(2, closed.size)
+    }
+
     // -------------------------------------------------- edit.resync
 
     @Test

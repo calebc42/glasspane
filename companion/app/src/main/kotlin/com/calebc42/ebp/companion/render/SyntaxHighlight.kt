@@ -34,6 +34,14 @@ data class SyntaxColors(
     val keyword: Color,
     val function: Color,
     val constant: Color,
+    // `variable', `type' and `operator' carry no client tokenizer of their own
+    // — none of the six tokenizers below distinguishes them. They exist because
+    // Emacs DOES: ebp-sync maps font-lock-variable-name-face, -type-face and
+    // -operator-face onto these three §19.5 roles, so without them a third of
+    // a real fontify batch would arrive registered and land unstyled.
+    val variable: Color,
+    val type: Color,
+    val operator: Color,
     val number: Color,
     val link: Color,
     val meta: Color,
@@ -48,7 +56,10 @@ data class SyntaxColors(
             if (dark) SyntaxColors(
                 comment = Color(0xFF616E88), string = Color(0xFFA3BE8C),
                 keyword = Color(0xFF81A1C1), function = Color(0xFF88C0D0),
-                constant = Color(0xFFB48EAD), number = Color(0xFFB48EAD),
+                constant = Color(0xFFB48EAD),
+                variable = Color(0xFFD8DEE9), type = Color(0xFF8FBCBB),
+                operator = Color(0xFF81A1C1),
+                number = Color(0xFFB48EAD),
                 link = Color(0xFF88C0D0), meta = Color(0xFF7B88A1),
                 tag = Color(0xFF8FBCBB),
                 todo = Color(0xFFBF616A), done = Color(0xFFA3BE8C),
@@ -61,7 +72,10 @@ data class SyntaxColors(
             else SyntaxColors(
                 comment = Color(0xFF7B88A1), string = Color(0xFF4F6F3F),
                 keyword = Color(0xFF3B5B8C), function = Color(0xFF2E6E7E),
-                constant = Color(0xFF8A4B82), number = Color(0xFF8A4B82),
+                constant = Color(0xFF8A4B82),
+                variable = Color(0xFF4C566A), type = Color(0xFF1F6F5C),
+                operator = Color(0xFF3B5B8C),
+                number = Color(0xFF8A4B82),
                 link = Color(0xFF2E6E7E), meta = Color(0xFF5E6B82),
                 tag = Color(0xFF3F7A6E),
                 todo = Color(0xFFA01F2C), done = Color(0xFF4F6F3F),
@@ -107,6 +121,9 @@ fun emacsSyntaxColors(syntax: JsonObject?, fallback: SyntaxColors): SyntaxColors
         keyword = one("keyword", fallback.keyword),
         function = one("function", fallback.function),
         constant = one("constant", fallback.constant),
+        variable = one("variable", fallback.variable),
+        type = one("type", fallback.type),
+        operator = one("operator", fallback.operator),
         number = one("number", fallback.number),
         link = one("link", fallback.link),
         meta = one("preprocessor", fallback.meta),

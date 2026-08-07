@@ -1470,6 +1470,22 @@ Runs inside a device flow."
                         (jetpacs-shell-notify
                          "Unsaved desktop edits — not saved" surface)
                         'rejected)
+                    ;; SYNCHRONIZED: flush FIRST, so an edit the tracker
+                    ;; has seen but not yet sent is IN the text written
+                    ;; below.  Deliberately OUTSIDE the coding binding
+                    ;; that follows: that binding exists for the write
+                    ;; and must not span a send.  `process-send-string'
+                    ;; is re-entrant — a frame large enough to fill the
+                    ;; socket buffer blocks in `send_process', which
+                    ;; spins in `wait_reading_process_output', which runs
+                    ;; timers, and jsonrpc.el dispatches from timers — so
+                    ;; a flush inside the binding could run inbound
+                    ;; handlers with the edited file's coding still in
+                    ;; force over their own I/O.  The wire itself was
+                    ;; never at risk: `ebp-connect' pins the socket
+                    ;; `:coding utf-8-unix' at creation, and that, not
+                    ;; the ambient binding, is what encodes a frame.
+                    (when synced (ebp-sync-flush synced))
                     ;; THE WRITE COMES FIRST, and it is always
                     ;; `write-region' — never `save-buffer', whose
                     ;; recovery prompts signal `inhibited-interaction'
@@ -1484,14 +1500,11 @@ Runs inside a device flow."
                                        true)
                                 (plist-get jetpacs-files--edit :coding))))
                       (if synced
-                          ;; SYNCHRONIZED: flush first, so an edit the
-                          ;; tracker has seen but not yet sent is IN the
-                          ;; text being written, then write the BUFFER.
-                          ;; Not `value': the buffer is the superset —
-                          ;; it also carries whatever Emacs itself
-                          ;; changed since the device's last delta.
+                          ;; Write the BUFFER, not `value': the buffer is
+                          ;; the superset — it also carries whatever
+                          ;; Emacs itself changed since the device's last
+                          ;; delta.
                           (with-current-buffer synced
-                            (ebp-sync-flush synced)
                             (setq written (buffer-substring-no-properties
                                            (point-min) (point-max)))
                             (write-region (point-min) (point-max) true

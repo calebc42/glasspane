@@ -1663,6 +1663,94 @@ would pass everything else here and lose the user's edits."
               (with-current-buffer buf (set-buffer-modified-p nil))
               (kill-buffer buf))))))))
 
+(ert-deftest jetpacs-files-save-synced-sends-outside-the-coding-binding ()
+  "The synchronized save's flush must not run inside the write's
+`coding-system-for-write' binding.  The whole bridge is real down to
+`ebp-client--request', which is the last rung before jsonrpc.el and
+therefore the honest place to read the dynamic environment the outbound
+`edit.apply' is issued in: what it observes is what any encoder on that
+path would use.
+
+This is HARDENING, not a repair of a live corruption.  `ebp-connect'
+pins the socket `:coding utf-8-unix' at creation and Emacs consults
+`coding-system-for-write' for a process only THERE, never at
+`process-send-string' time, so today's frames are UTF-8 whatever is
+bound around them.  The binding is still wrong to hold across a send —
+it is ambient state leaking past the one write it was captured for, and
+the send is re-entrant (a frame that fills the socket buffer blocks in
+`send_process', which runs timers, which is how jsonrpc.el dispatches),
+so an inbound handler can run arbitrary file I/O underneath it.  The
+`write-region' keeps the binding; the wire does not."
+  (jetpacs-files-test--with-tree root
+    (jetpacs-files-test--attached (jetpacs-files-test--sync-client)
+      (let* ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
+             (f (concat root "f.el"))
+             (doc "doc:f.el") (eid "fedit-1")
+             (session (make-string 32 ?a))
+             (seed "(defun f ())\n")
+             (observed 'unset) (methods '())
+             (jetpacs-files--edit nil))
+        (write-region seed nil f nil 'silent)
+        (let* ((true (file-truename f))
+               (buf nil))
+          (unwind-protect
+              (cl-letf (((symbol-function 'ebp-client--request)
+                         (lambda (_c method _params _cb &optional _t)
+                           (push method methods)
+                           (when (eq method 'edit.apply)
+                             (setq observed coding-system-for-write))
+                           nil))
+                        ((symbol-function 'ebp-client-notify)
+                         (lambda (&rest _) nil))
+                        ((symbol-function 'jetpacs-shell-notify) #'ignore)
+                        ((symbol-function 'jetpacs-shell-push)
+                         (lambda (&rest _) 1)))
+                (ebp-client--handle-edit-open
+                 client (list :document doc :editor_id eid :session session
+                              :seq 0 :text seed :cursor 0))
+                (setq buf (find-file-noselect true))
+                (ebp-sync-attach client doc eid buf)
+                (setq jetpacs-files--edit
+                      (list :path true :seed seed
+                            :mtime (jetpacs-files--mtime-stamp true)
+                            ;; The file's own coding, captured at open —
+                            ;; the value the write legitimately needs and
+                            ;; the send legitimately must not see.
+                            :coding 'iso-latin-1
+                            :document doc :editor-id eid :buffer buf))
+                ;; A DESKTOP edit the tracker has seen but has not sent:
+                ;; the only state in which the save's flush actually
+                ;; reaches the wire, and therefore the only one that can
+                ;; observe the leak.  The non-ASCII char also proves the
+                ;; write kept its coding.
+                (with-current-buffer buf
+                  (goto-char (point-max))
+                  (insert ";; caf\N{LATIN SMALL LETTER E WITH ACUTE}\n"))
+                (should (eq (jetpacs--dispatch
+                             client `(:action "jetpacs.files.save"
+                                      :surface "app:jetpacs.files"
+                                      :args (:path ,true
+                                             :mtime ,(jetpacs-files--mtime-stamp true)
+                                             :value ,seed))
+                             handler)
+                            'accepted))
+                ;; The flush still HAPPENS — a hoist that simply dropped
+                ;; the send would satisfy the assertion below otherwise.
+                (should (memq 'edit.apply methods))
+                ;; ...and it is issued under the ambient coding, not the
+                ;; edited file's.
+                (should (eq observed nil))
+                ;; ...while the write itself still honors the file's own
+                ;; coding: latin-1 puts e-acute on disk as the single
+                ;; octet #xE9, which UTF-8 would have written as two.
+                (with-temp-buffer
+                  (set-buffer-multibyte nil)
+                  (insert-file-contents-literally true)
+                  (should (string-search "\xe9" (buffer-string)))))
+            (when (buffer-live-p buf)
+              (with-current-buffer buf (set-buffer-modified-p nil))
+              (kill-buffer buf))))))))
+
 (ert-deftest jetpacs-files-save-survives-a-broken-seam ()
   "A save whose after-save subscriber SIGNALS still answers `accepted'.
 The write is already durable when the seam runs; letting the signal

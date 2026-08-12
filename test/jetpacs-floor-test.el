@@ -1104,6 +1104,24 @@ fall back on either."
       (should (equal in-continuation "app:org.agenda"))
       (jetpacs-undefaction "org.agenda.open"))))
 
+(ert-deftest jetpacs-floor-flow-continuation-defers-under-a-live-harvest ()
+  "A continuation must not run inside a live completion harvest's
+dynamic extent: continuations may WAIT (a bridged prompt, hub.eval),
+and the harvest's `with-timeout' throw would unwind straight through
+one mid-round-trip — prompt abandoned, no rpc.cancel sent (R0 review).
+While `ebp-complete--live-harvest-active' is up the continuation
+reschedules; the moment it drops, the work runs."
+  (defvar ebp-complete--live-harvest-active)
+  (let ((ebp-complete--live-harvest-active t)
+        (ran :unset))
+    (jetpacs-flow-continue (lambda () (setq ran t)))
+    (cl-loop repeat 5 do (accept-process-output nil 0.03))
+    (should (eq ran :unset))
+    (setq ebp-complete--live-harvest-active nil)
+    (cl-loop repeat 20 until (not (eq ran :unset))
+             do (accept-process-output nil 0.03))
+    (should (eq ran t))))
+
 (ert-deftest jetpacs-floor-build-does-not-inherit-across-a-dispatch ()
   "The containment the dispatch binding makes necessary: an OWNERLESS
 root's builder must NOT run under the handler's owner, or a zero-arg

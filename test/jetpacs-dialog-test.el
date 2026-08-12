@@ -397,10 +397,10 @@ session/seq gate and the result shape are the live ones, not a mock's."
           (puthash (cons "doc:p" "pick")
                    (list :session "S1" :seq 3 :text "ca" :cursor 2)
                    (ebp-client-editors client))
-          (setf (ebp-client-config client)
-                (plist-put (ebp-client-config client)
-                           :edit-complete-function
-                           #'jetpacs-dialog--complete))
+          ;; Registered the way `--ask-picker' does since R0: a
+          ;; per-document override, never the client-wide config slot.
+          (puthash "doc:p" #'jetpacs-dialog--complete
+                   (ebp-client-edit-complete-overrides client))
           (let ((jetpacs-dialog--picker
                  '(:document "doc:p" :editor-id "pick"
                    :collection ("cabbage" "cactus" "cat" "dog")
@@ -412,8 +412,9 @@ session/seq gate and the result shape are the live ones, not a mock's."
               (should (equal (mapcar (lambda (c) (plist-get c :label))
                                      (append (plist-get result :candidates) nil))
                              '("cabbage" "cactus" "cat")))))
-          ;; A request for a DIFFERENT editor than the live picker's gets
-          ;; nothing — the hook is client-wide, the picker is not.
+          ;; A request for the REGISTERED document while the picker state
+          ;; names another one gets nothing — the self-guard is defense
+          ;; in depth under the per-document override, not dead code.
           (let ((jetpacs-dialog--picker
                  '(:document "doc:other" :editor-id "pick"
                    :collection ("cat") :predicate nil)))
@@ -458,10 +459,18 @@ prefix starts, and getting it wrong rewrites the whole path."
       ;; The prefix is "al", not "src/al".
       (should (equal (car r) "al")))))
 
+(defun jetpacs-dialog-test--app-hook (&rest _)
+  "The application's client-wide completion source, callable for real:
+the round-trip test completes ANOTHER document through it while the
+picker prompt is up, which a symbol placeholder could not answer."
+  (cons "app" (list (list :label "app-cand"))))
+
 (ert-deftest jetpacs-dialog-picker-round-trip-and-restore ()
   "The picker reads the MIRROR, not `capture_fields' — a synchronized
-editor is never a stateful node — and restores the client-wide
-completion hook it borrowed."
+editor is never a stateful node — and claims ONLY its own document in
+the override table (R0): the client-wide hook is untouched and other
+documents complete through it for the whole life of the prompt.  The
+old borrow answered them empty; this test fails against it."
   (let ((client (jetpacs-dialog-test--picker-client))
         (jetpacs-dialog-test--specs nil))
     (unwind-protect
@@ -469,16 +478,39 @@ completion hook it borrowed."
           (jetpacs-attach client)
           (setf (ebp-client-config client)
                 (plist-put (ebp-client-config client)
-                           :edit-complete-function 'app-hook))
+                           :edit-complete-function
+                           #'jetpacs-dialog-test--app-hook))
+          (puthash (cons "doc:other.txt" "e")
+                   (list :session "S9" :seq 0 :text "zz" :cursor 2)
+                   (ebp-client-editors client))
           (cl-letf (((symbol-function 'ebp-client-dialog-show)
                      (cl-function
                       (lambda (c _id spec &key callback &allow-other-keys)
                         (push spec jetpacs-dialog-test--specs)
-                        ;; The device types "cact": edit.delta reaches the
-                        ;; mirror hooks, which is how the picker shadows it.
                         (let ((doc (plist-get
                                     (jetpacs-dialog-test--find spec "editor")
                                     :document)))
+                          ;; MID-PROMPT, the R0 pins: the picker's
+                          ;; document routes to the picker source, the
+                          ;; client-wide slot is untouched, and another
+                          ;; document still completes through it — via
+                          ;; ebp's REAL handler.
+                          (should (eq (gethash
+                                       doc (ebp-client-edit-complete-overrides c))
+                                      #'jetpacs-dialog--complete))
+                          (should (eq (plist-get (ebp-client-config c)
+                                                 :edit-complete-function)
+                                      #'jetpacs-dialog-test--app-hook))
+                          (should (equal (plist-get
+                                          (ebp-client--handle-edit-complete
+                                           c '(:document "doc:other.txt"
+                                               :editor_id "e" :session "S9"
+                                               :seq 0 :cursor 2))
+                                          :prefix)
+                                         "app"))
+                          ;; The device types "cact": edit.delta reaches
+                          ;; the mirror hooks, which is how the picker
+                          ;; shadows it.
                           (dolist (fn (ebp-client-edit-change-functions c))
                             (funcall fn c doc "pick" "cact")))
                         (funcall callback "submitted" '(:value nil) nil)
@@ -495,12 +527,53 @@ completion hook it borrowed."
                      (car jetpacs-dialog-test--specs) "editor")))
             (should ed)
             (should (string-prefix-p "doc:jpick-" (plist-get ed :document)))
-            (should (eq (plist-get ed :complete) t)))
-          ;; Borrowed state is given back.
+            (should (eq (plist-get ed :complete) t))
+            ;; The claim is withdrawn at conclusion; the client-wide
+            ;; hook was never touched.
+            (should-not (gethash (plist-get ed :document)
+                                 (ebp-client-edit-complete-overrides client))))
           (should (eq (plist-get (ebp-client-config client)
                                  :edit-complete-function)
-                      'app-hook))
+                      #'jetpacs-dialog-test--app-hook))
           (should-not jetpacs-dialog--picker))
+      (jetpacs-detach) (jetpacs-test-reset-state))))
+
+(ert-deftest jetpacs-dialog-picker-dismissal-quits-and-withdraws-the-claim ()
+  "A dismissed picker quits like C-g AND runs the R0 cleanup on the
+QUIT path: the override-table claim is withdrawn and the change watch
+removed.  These are unwind-protect obligations only the submit path
+pinned before this test — a mutant moving the remhash to the normal
+exit tail passed the whole suite."
+  (let ((client (jetpacs-dialog-test--picker-client))
+        (jetpacs-dialog-test--specs nil))
+    (unwind-protect
+        (progn
+          (jetpacs-attach client)
+          (let ((watch-count (length (ebp-client-edit-change-functions
+                                      client))))
+            (cl-letf (((symbol-function 'ebp-client-dialog-show)
+                       (cl-function
+                        (lambda (_c _id spec &key callback
+                                 &allow-other-keys)
+                          (push spec jetpacs-dialog-test--specs)
+                          (funcall callback "dismissed" nil nil)
+                          9))))
+              (let ((jetpacs--device-flow '(:surface "app:demo")))
+                (should (jetpacs-dialog-test--quits
+                          (completing-read
+                           "Pick: "
+                           (cl-loop for i from 0 below 80
+                                    collect (format "cand-%02d" i))
+                           nil nil)))))
+            (let ((ed (jetpacs-dialog-test--find
+                       (car jetpacs-dialog-test--specs) "editor")))
+              (should ed)
+              (should-not (gethash (plist-get ed :document)
+                                   (ebp-client-edit-complete-overrides
+                                    client))))
+            (should (= (length (ebp-client-edit-change-functions client))
+                       watch-count))
+            (should-not jetpacs-dialog--picker)))
       (jetpacs-detach) (jetpacs-test-reset-state))))
 
 (ert-deftest jetpacs-dialog-picker-survives-the-closing-edit-close ()

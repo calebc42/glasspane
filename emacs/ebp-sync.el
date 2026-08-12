@@ -278,6 +278,24 @@ editor backed by a real buffer\" — and therefore whether the buffer or
 the frame's `value' is authoritative — must not reach into a `--' name."
   (ebp-sync--buffer client document editor-id))
 
+;;;###autoload
+(defun ebp-sync-attached-buffer (document editor-id)
+  "The live buffer attached to DOCUMENT/EDITOR-ID under any client, or nil.
+The table's keys carry the client, but the JC-0 single-client floor
+means (DOCUMENT . EDITOR-ID) names at most one session, so the scan is
+sound.  The clientless form exists for callers answering ebp's
+clientless `:edit-complete-function' contract — `ebp-complete's
+live-buffer arm above all — which hold a document and an editor id and
+nothing else."
+  (catch 'ebp-sync--attached
+    (maphash (lambda (key buf)
+               (when (and (equal (nth 1 key) document)
+                          (equal (nth 2 key) editor-id)
+                          (buffer-live-p buf))
+                 (throw 'ebp-sync--attached buf)))
+             ebp-sync--table)
+    nil))
+
 (defun ebp-sync--on-splice (client document editor-id start del text)
   "Apply an accepted inbound `edit.delta' splice to the bound buffer.
 An unsent local edit racing this splice makes local positions a guess —

@@ -264,10 +264,9 @@ so the dock is two destinations: Home and Files."
          ;; ends `.el' because `ebp-complete--mode-for' matches the
          ;; DOCUMENT against `auto-mode-alist' to pick the shadow's
          ;; major mode — that is what makes the elisp capfs answer.
-         ;; Caveat: while a bridged `completing-read' dialog is open the
-         ;; picker borrows the client-wide `:edit-complete-function' and
-         ;; answers empty for every other document, so this dropdown
-         ;; goes quiet for the life of that prompt.
+         ;; (Since R0 a bridged `completing-read' picker claims only its
+         ;; OWN document in ebp.el's override table, so this dropdown
+         ;; keeps answering while a prompt is up.)
          (jetpacs-editor "hub-eval" :document "scratch.el" :complete t
                          :chromeless t :syntax "elisp"
                          :on-enter (jetpacs-action "hub.eval"))

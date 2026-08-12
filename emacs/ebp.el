@@ -612,6 +612,13 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; at point.  SEL-START/SEL-END are nil unless the report carried the
   ;; pair; a collapsed caret is the one a doc lookup is a request for.
   edit-caret-functions
+  ;; SPEC 19.3: per-document completion sources, DOCUMENT -> fn with the
+  ;; `:edit-complete-function' contract (document editor-id text cursor).
+  ;; Consulted before the client-wide config function, so a prompt-scoped
+  ;; source (a dialog picker) claims exactly its own document instead of
+  ;; borrowing the client-wide slot — every other document keeps its
+  ;; completions for the life of the prompt.
+  (edit-complete-overrides (make-hash-table :test #'equal))
   ready-functions ; abnormal hook: called with the client on READY
   ;; SPEC 15.3: the latest replay summary and the bounded-backoff timer
   ;; that retries while `remaining' is nonzero.
@@ -1721,13 +1728,17 @@ it had nowhere to read the answer from."
 
 (defun ebp-client--handle-edit-complete (client params)
   "SPEC 19.3: answer a completion request from the application's
-`:edit-complete-function' (doc editor-id text cursor) -> (PREFIX . CANDS),
-each candidate a plist (:label :annotation? :insert?).  Session/seq must
+completion source: the document's `edit-complete-overrides' entry when
+one is registered, else the client-wide `:edit-complete-function'.
+Either way (doc editor-id text cursor) -> (PREFIX . CANDS), each
+candidate a plist (:label :annotation? :insert?).  Session/seq must
 match or the query is editor-stale."
   (let* ((doc (plist-get params :document))
          (eid (plist-get params :editor_id))
          (ed (gethash (cons doc eid) (ebp-client-editors client)))
-         (fn (plist-get (ebp-client-config client) :edit-complete-function)))
+         (fn (or (gethash doc (ebp-client-edit-complete-overrides client))
+                 (plist-get (ebp-client-config client)
+                            :edit-complete-function))))
     (unless (and ed (equal (plist-get ed :session) (plist-get params :session))
                  (= (plist-get ed :seq) (plist-get params :seq)))
       (ebp-client--error client 1201 "Editor stale" "content-invalid"

@@ -541,7 +541,8 @@ they disagreed the moment anything else opened a dialog first.")
 A plist (:document D :editor-id E :collection C :predicate P).  Bound
 for one prompt: `jetpacs-dialog--complete' reads it to answer
 `edit.complete' from the collection being completed, so no state has to
-be threaded through ebp.el's client-wide hook.")
+be threaded through the registration in ebp.el's per-document
+`edit-complete-overrides' table.")
 
 (defun jetpacs-dialog--complete (document editor-id text cursor)
   "Answer `edit.complete' for the live picker (SPEC 19.3).
@@ -601,10 +602,6 @@ instead, and the last shadow is what the user submitted."
          (jetpacs-dialog--picker
           (list :document document :editor-id editor-id
                 :collection collection :predicate predicate))
-         ;; ebp.el's completion hook is client-wide; bind it for this
-         ;; prompt only and restore whatever the application had.
-         (config (ebp-client-config client))
-         (prior-complete (plist-get config :edit-complete-function))
          (watch (lambda (_c doc eid text)
                   ;; A `stringp' check, not just an identity check, and it
                   ;; is load-bearing: `edit.close' fires this SAME hook
@@ -618,9 +615,14 @@ instead, and the last shadow is what the user submitted."
                   (when (and (equal doc document) (equal eid editor-id)
                              (stringp text))
                     (setq shadow text)))))
-    (setf (ebp-client-config client)
-          (plist-put (copy-sequence config) :edit-complete-function
-                     #'jetpacs-dialog--complete))
+    ;; Per-document claim (R0): the picker's document — and only it —
+    ;; routes to the picker source.  ebp.el consults the override table
+    ;; before the client-wide `:edit-complete-function', so a files
+    ;; editor or the hub REPL keeps its completions while the prompt is
+    ;; up; the old borrow of the client-wide slot answered them empty
+    ;; for the prompt's life.
+    (puthash document #'jetpacs-dialog--complete
+             (ebp-client-edit-complete-overrides client))
     (push watch (ebp-client-edit-change-functions client))
     (unwind-protect
         (let ((answer nil))
@@ -651,9 +653,7 @@ instead, and the last shadow is what the user submitted."
       (setq jetpacs-dialog--picker nil)
       (setf (ebp-client-edit-change-functions client)
             (delq watch (ebp-client-edit-change-functions client)))
-      (setf (ebp-client-config client)
-            (plist-put (ebp-client-config client) :edit-complete-function
-                       prior-complete)))))
+      (remhash document (ebp-client-edit-complete-overrides client)))))
 
 ;;;; completing-read: the enum fast path, then the picker
 

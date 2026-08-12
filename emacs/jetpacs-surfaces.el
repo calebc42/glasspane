@@ -599,18 +599,36 @@ allowed to resume."
                              (plist-get jetpacs--dispatch-params :surface)
                              :owner jetpacs-current-owner)))))
     (run-at-time 0 nil
-                 (lambda ()
-                   (let ((jetpacs--device-flow flow)
-                         ;; The OWNER rides the flow too, or D1 dies at the
-                         ;; timer boundary: the dispatch binding ends with
-                         ;; the extent, and the D2 deferred re-push — the
-                         ;; whole point of this seam — would resolve to the
-                         ;; shell default.  That is the reachable case, not
-                         ;; a corner: a SPEC 14.4 surfaceless event
-                         ;; (reminder/trigger/shortcut/pie) has no
-                         ;; `:surface' to fall back on either.
-                         (jetpacs-current-owner (plist-get flow :owner)))
-                     (funcall fn))))))
+                 (letrec ((run
+                           (lambda ()
+                             (if (bound-and-true-p
+                                  ebp-complete--live-harvest-active)
+                                 ;; A live completion harvest is waiting on
+                                 ;; this very stack with a timer armed to
+                                 ;; THROW.  A continuation may wait (a
+                                 ;; bridged prompt, hub.eval); running it
+                                 ;; here puts it on that throw's unwind
+                                 ;; path, and a timeout would abandon the
+                                 ;; prompt mid-round-trip with no
+                                 ;; rpc.cancel.  Postpone until the harvest
+                                 ;; is off the stack.
+                                 (run-at-time 0.05 nil run)
+                               (let ((jetpacs--device-flow flow)
+                                     ;; The OWNER rides the flow too, or D1
+                                     ;; dies at the timer boundary: the
+                                     ;; dispatch binding ends with the
+                                     ;; extent, and the D2 deferred re-push
+                                     ;; — the whole point of this seam —
+                                     ;; would resolve to the shell default.
+                                     ;; That is the reachable case, not a
+                                     ;; corner: a SPEC 14.4 surfaceless
+                                     ;; event (reminder/trigger/shortcut/
+                                     ;; pie) has no `:surface' to fall back
+                                     ;; on either.
+                                     (jetpacs-current-owner
+                                      (plist-get flow :owner)))
+                                 (funcall fn))))))
+                   run))))
 
 ;;;; Flow entry (JA-2/B3): ESTABLISHING a device flow, not inheriting one
 

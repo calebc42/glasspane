@@ -9,15 +9,18 @@
 ;; the session/seq gate, the 1201 refusal, and the reply shape are the
 ;; live ones, not a mock's.
 ;;
-;; ebp-complete.el itself needs only `cl-lib'; the jetpacs requires
-;; below are this SUITE's, for the one test pinning `jetpacs-connect'
-;; installing the harvester through its `fboundp' seam.
+;; ebp-complete.el itself needs only `cl-lib'; the jetpacs and ebp-sync
+;; requires below are this SUITE's — jetpacs for the one test pinning
+;; `jetpacs-connect' installing the harvester through its `fboundp'
+;; seam, ebp-sync for the R0 live-buffer arm, which routes through the
+;; real attach table.
 
 ;;; Code:
 
 (require 'ert)
 (require 'cl-lib)
 (require 'ebp)
+(require 'ebp-sync)
 (require 'jetpacs-widgets)
 (require 'jetpacs-async)
 (require 'jetpacs-surfaces)
@@ -170,7 +173,174 @@ matching nothing gets `fundamental-mode'."
                  'major-mode (ebp-complete--shadow-buffer "doc:jpick-77"))
                 'fundamental-mode))))
 
+;;;; The live-buffer arm (R0)
+
+(defmacro ebp-complete-test--with-live-buffer (textvar &rest body)
+  "Run BODY with a stub client, an attached live buffer, and the shadow
+stubbed to a witness.  Binds in BODY: `client', `buf' (holding TEXTVAR,
+attached as doc \"doc:r0-live.el\" / eid \"body\"), and `shadow-ran'
+\(set to the marker result when the shadow arm was consulted)."
+  (declare (indent 1))
+  `(let* ((client (ebp-client-create
+                   :receipt-file (make-temp-file "ebp-r0")))
+          (buf (generate-new-buffer " *ebp-r0 live*"))
+          (shadow-ran nil))
+     (ignore shadow-ran)
+     (unwind-protect
+         (with-current-buffer buf
+           (insert ,textvar)
+           (puthash (cons "doc:r0-live.el" "body")
+                    (list :session "S" :seq 0 :text ,textvar
+                          :cursor (length ,textvar))
+                    (ebp-client-editors client))
+           (ebp-sync-attach client "doc:r0-live.el" "body" buf)
+           (cl-letf (((symbol-function 'ebp-complete-in-text)
+                      (lambda (&rest _)
+                        (setq shadow-ran t)
+                        (cons "sh" (list (list :label "shadow-answer"))))))
+             ,@body))
+       (with-current-buffer buf (ebp-sync-detach))
+       (kill-buffer buf))))
+
+(ert-deftest ebp-complete-live-buffer-arm ()
+  "An attached buffer answers with ITS buffer-local capfs — the point
+of R0: sources only the live buffer has (eglot's capf in real life, a
+marker capf here) reach the device, and the shadow is not consulted."
+  (ebp-complete-test--with-live-buffer "prefix-li"
+    (setq-local completion-at-point-functions
+                (list (lambda ()
+                        (list (- (point) 9) (point)
+                              '("prefix-live-only-needle")))))
+    (let ((r (ebp-complete-edit-complete "doc:r0-live.el" "body"
+                                         "prefix-li" 9)))
+      (should (equal (car r) "prefix-li"))
+      (should (member "prefix-live-only-needle"
+                      (ebp-complete-test--labels (cdr r))))
+      (should-not shadow-ran))))
+
+(ert-deftest ebp-complete-live-arm-divergence-falls-back ()
+  "Buffer text differing from the mirror TEXT means every offset would
+lie (a mid-flush window) — the shadow answers from TEXT instead."
+  (ebp-complete-test--with-live-buffer "prefix-li"
+    (setq-local completion-at-point-functions
+                (list (lambda ()
+                        (list (- (point) 9) (point)
+                              '("prefix-live-only-needle")))))
+    (let ((r (ebp-complete-edit-complete "doc:r0-live.el" "body"
+                                         "prefix-liX" 10)))
+      (should shadow-ran)
+      (should (equal (ebp-complete-test--labels (cdr r))
+                     '("shadow-answer"))))))
+
+(ert-deftest ebp-complete-live-arm-empty-falls-through-to-shadow ()
+  "A live harvest that finds nothing lets the SHADOW answer.
+`ebp-complete-shadow-setup-hook' is this module's advertised extension
+point for device-document sources, and those sources exist ONLY in
+shadows — an attached buffer (which never ran the hook) must not
+silence them.  The R0 review caught nil-as-final doing exactly that."
+  (let* ((client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-r0-fall")))
+         (buf (generate-new-buffer " *ebp-r0 fall*"))
+         (doc "doc:r0-fall.hook")
+         (ebp-complete-shadow-setup-hook
+          (list (lambda ()
+                  (setq-local completion-at-point-functions
+                              (list (lambda ()
+                                      (list (max (point-min) (- (point) 3))
+                                            (point)
+                                            '("zzz-hook-needle")))))))))
+    (unwind-protect
+        (with-current-buffer buf
+          (insert "zzz")
+          (puthash (cons doc "body")
+                   (list :session "S" :seq 0 :text "zzz" :cursor 3)
+                   (ebp-client-editors client))
+          (ebp-sync-attach client doc "body" buf)
+          ;; The live buffer's only capf offers exactly what is typed:
+          ;; the sole-candidate rule empties the collect, and the word
+          ;; fallback has nothing else in the buffer.
+          (setq-local completion-at-point-functions
+                      (list (lambda ()
+                              (list (- (point) 3) (point) '("zzz")))))
+          (let ((r (ebp-complete-edit-complete doc "body" "zzz" 3)))
+            (should (member "zzz-hook-needle"
+                            (ebp-complete-test--labels (cdr r))))))
+      (with-current-buffer buf (ebp-sync-detach))
+      (kill-buffer buf)
+      (when-let* ((sb (get-buffer (format " *ebp-complete: %s*" doc))))
+        (kill-buffer sb)))))
+
+(ert-deftest ebp-complete-live-arm-is-not-reentrant ()
+  "A nested `edit.complete' arriving while a live harvest waits answers
+from the SHADOW.  Two stacked live harvests would share `with-timeout's
+macroexpansion-minted catch tag, and the outer timer's throw would be
+stolen by the inner catch, leaving the outer wait unbounded (R0
+review).  The latch sends the nested request down the pre-R0 path."
+  (ebp-complete-test--with-live-buffer "prefix-li"
+    (let ((nested-result 'unset))
+      (setq-local completion-at-point-functions
+                  (list (lambda ()
+                          ;; What a nested jsonrpc dispatch does
+                          ;; mid-wait: ask again for the same document.
+                          (when (eq nested-result 'unset)
+                            (setq nested-result
+                                  (ebp-complete-edit-complete
+                                   "doc:r0-live.el" "body" "prefix-li" 9)))
+                          (list (- (point) 9) (point)
+                                '("prefix-live-only-needle")))))
+      (let ((r (ebp-complete-edit-complete "doc:r0-live.el" "body"
+                                           "prefix-li" 9)))
+        (should (member "prefix-live-only-needle"
+                        (ebp-complete-test--labels (cdr r))))
+        (should (equal (ebp-complete-test--labels (cdr nested-result))
+                       '("shadow-answer")))))))
+
+(ert-deftest ebp-complete-live-arm-timeout-falls-back ()
+  "A blocking live capf (an LSP server thinking) is cut off by
+`ebp-complete-live-timeout' and the shadow answers.  The timeout is a
+throw, so it must escape `ebp-complete--capf-data's `condition-case' —
+this test fails if that wrapper ever learns to catch throws."
+  (ebp-complete-test--with-live-buffer "prefix-li"
+    (setq-local completion-at-point-functions
+                (list (lambda ()
+                        (let ((deadline (+ (float-time) 5)))
+                          (while (< (float-time) deadline)
+                            (accept-process-output nil 0.02)))
+                        (list (- (point) 9) (point) '("never-returned")))))
+    (let* ((ebp-complete-live-timeout 0.05)
+           (r (ebp-complete-edit-complete "doc:r0-live.el" "body"
+                                          "prefix-li" 9)))
+      (should shadow-ran)
+      (should (equal (ebp-complete-test--labels (cdr r))
+                     '("shadow-answer"))))))
+
 ;;;; The ebp seam
+
+(ert-deftest ebp-complete-override-beats-the-client-wide-default ()
+  "ebp.el consults `ebp-client-edit-complete-overrides' before the
+config's client-wide function, and only for the registered document —
+the R0 shape jetpacs-dialog's picker registration relies on.  Driven
+through the REAL `ebp-client--handle-edit-complete'."
+  (let ((client (ebp-client-create
+                 :receipt-file (make-temp-file "ebp-r0-override")
+                 :edit-complete-function
+                 (lambda (&rest _) (cons "d" (list (list :label "default")))))))
+    (dolist (doc '("doc:a" "doc:b"))
+      (puthash (cons doc "e") (list :session "S" :seq 0 :text "x" :cursor 1)
+               (ebp-client-editors client)))
+    (puthash "doc:a"
+             (lambda (&rest _) (cons "o" (list (list :label "override"))))
+             (ebp-client-edit-complete-overrides client))
+    (should (equal (plist-get (ebp-client--handle-edit-complete
+                               client '(:document "doc:a" :editor_id "e"
+                                        :session "S" :seq 0 :cursor 1))
+                              :prefix)
+                   "o"))
+    (should (equal (plist-get (ebp-client--handle-edit-complete
+                               client '(:document "doc:b" :editor_id "e"
+                                        :session "S" :seq 0 :cursor 1))
+                              :prefix)
+                   "d"))))
 
 (ert-deftest ebp-complete-seam-through-real-ebp-handler ()
   "The registered harvester answers ebp's real `edit.complete' handler:

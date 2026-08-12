@@ -647,5 +647,25 @@ highlight outside the visible region while showing the whole file."
       ;; The user's restriction is untouched by a read-only walk.
       (should (buffer-narrowed-p)))))
 
+(ert-deftest ebp-sync-attached-buffer-clientless-lookup ()
+  "`ebp-sync-attached-buffer' resolves (DOCUMENT . EDITOR-ID) with no
+client in hand — the form `ebp-complete's R0 live arm needs, sound
+under the single-client floor — and never returns a dead buffer."
+  (let ((live (generate-new-buffer " *ebp-sync-test live*"))
+        (dead (generate-new-buffer " *ebp-sync-test dead*"))
+        (k1 (list 'client-a "doc:acc" "body"))
+        (k2 (list 'client-a "doc:dead" "body")))
+    (unwind-protect
+        (progn
+          (puthash k1 live ebp-sync--table)
+          (puthash k2 dead ebp-sync--table)
+          (kill-buffer dead)
+          (should (eq (ebp-sync-attached-buffer "doc:acc" "body") live))
+          (should-not (ebp-sync-attached-buffer "doc:dead" "body"))
+          (should-not (ebp-sync-attached-buffer "doc:acc" "other")))
+      (remhash k1 ebp-sync--table)
+      (remhash k2 ebp-sync--table)
+      (when (buffer-live-p live) (kill-buffer live)))))
+
 (provide 'ebp-sync-test)
 ;;; ebp-sync-test.el ends here

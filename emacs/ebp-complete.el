@@ -52,18 +52,33 @@
 ;; a conformant Companion must REJECT an unknown member, so emitting it
 ;; would poison every reply that carried one.
 ;;
+;; R0 of the completion ladder (docs/PLAN-glasspane-completion.md): the
+;; shadow is not the only arm any more.  When `ebp-sync' holds a live
+;; attached buffer for the document — the jetpacs-files editor screen
+;; and the hub REPL attach exactly this way — the harvest runs THERE,
+;; because the live buffer carries completion sources the shadow can
+;; never have: an eglot-managed buffer's LSP capf above all, plus every
+;; buffer-local addition.  The shadow remains the answer for documents
+;; nothing attached (dialog seeds, never-visited ids) and the fallback
+;; when the live arm cannot answer (text diverged mid-flush, a slow
+;; backend overran `ebp-complete-live-timeout').
+;;
 ;; Who installs the harvester is the layer above's business: this
 ;; module names no caller and requires none.  For the reader — Jetpacs
 ;; makes it the connect-time default (`jetpacs-connect', when the caller
-;; supplied nothing), and during a JC-4b picker prompt `jetpacs-dialog'
-;; borrows the client's `:edit-complete-function' slot and restores it
-;; at conclusion.  So this harvester is the resting default answering
-;; for real synchronized editors; the dialog answers for its own picker
-;; document.
+;; supplied nothing), and a JC-4b picker prompt registers its own source
+;; for its own document in ebp.el's `edit-complete-overrides' table, so
+;; the harvester keeps answering for every other document while a
+;; prompt is up.
 
 ;;; Code:
 
 (require 'cl-lib)
+
+;; A seam, never a require: the live-buffer arm exists only when
+;; `ebp-sync' is loaded, and this module's whole dependency surface
+;; stays `cl-lib' (the delineation the commentary promises).
+(declare-function ebp-sync-attached-buffer "ebp-sync" (document editor-id))
 
 (defgroup ebp-complete nil
   "Emacs completion served to Companion editors."
@@ -81,6 +96,15 @@ only when editor nodes are pushed without their `:complete' flag."
 The device dropdown shows a handful; anything past this cap is wasted
 bytes on the wire."
   :type 'natnum)
+
+(defcustom ebp-complete-live-timeout 1.0
+  "Seconds the live-buffer arm may spend before the shadow answers.
+A live buffer's capfs can block — eglot's waits on a language server —
+and `edit.complete' is answered inside a jsonrpc request handler, so a
+thinking server must cost a degraded answer, never a stuck session.
+The bound is best-effort (`with-timeout'): a backend waiting on process
+output is interrupted; one spinning in C without yielding is not."
+  :type 'number)
 
 (defcustom ebp-complete-debug nil
   "When non-nil, echo each completion request to *Messages*.
@@ -243,16 +267,78 @@ from the seam function so tests can call it directly."
     (goto-char (min (1+ (max 0 (truncate cursor))) (point-max)))
     (ebp-complete--collect)))
 
+;;;; The live-buffer arm (R0)
+
+(defvar ebp-complete--live-harvest-active nil
+  "Non-nil while a live-buffer harvest is on the stack.
+Read by two parties, both by name only.  THIS module: a nested
+`edit.complete' dispatched while a harvest waits skips the live arm and
+answers from the shadow — two stacked harvests would share
+`with-timeout's macroexpansion-minted catch tag, and the outer timer's
+throw would be stolen by the inner catch, leaving the outer wait
+unbounded.  The JETPACS layer: `jetpacs-flow-continue' postpones its
+continuations while this is up, so a continuation that WAITS (a
+bridged prompt, hub.eval) is never on the timeout throw's unwind
+path.")
+
+(defun ebp-complete--live-harvest (document editor-id text cursor)
+  "Harvest in DOCUMENT/EDITOR-ID's live attached buffer, if it can.
+Returns (PREFIX . CANDIDATES), or nil to let the shadow answer: no
+attached buffer (`ebp-sync' not loaded, document not synchronized), a
+harvest already on the stack (`ebp-complete--live-harvest-active'),
+buffer text diverged from the mirror TEXT (CURSOR addresses TEXT; a
+buffer mid-flush holds different text and every offset would lie), the
+harvest overran `ebp-complete-live-timeout' — or it simply found
+nothing.  An empty live harvest is a fall-through, not an answer: the
+shadow additionally carries `ebp-complete-shadow-setup-hook' sources
+the live buffer never ran, and silencing those for attached documents
+would break this module's own extension contract.
+
+Point is moved under `save-excursion', and the harvest only reads — a
+capf that mutates its buffer is broken everywhere, not just here.
+
+Hazards of running capfs inside a jsonrpc REQUEST handler, bounded
+rather than eliminated.  A blocking backend (an LSP server thinking)
+is cut off by the timeout because its wait sits in
+`accept-process-output', which runs timers — one spinning in C without
+yielding is not cut off, the same limit `with-timeout' has everywhere.
+While a backend waits, the ebp process filter may dispatch nested
+work: an inbound `edit.delta' can move this very buffer under the
+harvest, costing at worst a garbage offer the Companion's SPEC 19.3
+selection gate discards; a nested `edit.complete' takes the shadow via
+the latch above; and user-facing continuations are kept OFF this
+extent entirely by `jetpacs-flow-continue's deferral, because the
+timeout throw unwinding through a waiting prompt would abandon it
+mid-round-trip."
+  (when-let* ((buf (and (not ebp-complete--live-harvest-active)
+                        (fboundp 'ebp-sync-attached-buffer)
+                        (ebp-sync-attached-buffer document editor-id))))
+    (let ((ebp-complete--live-harvest-active t))
+      (with-current-buffer buf
+        (save-excursion
+          (save-restriction
+            (widen)
+            (when (equal text (buffer-substring-no-properties
+                               (point-min) (point-max)))
+              (goto-char (min (1+ (max 0 (truncate cursor))) (point-max)))
+              (with-timeout (ebp-complete-live-timeout nil)
+                (ebp-complete--collect)))))))))
+
 ;;;; The ebp seam
 
-(defun ebp-complete-edit-complete (document _editor-id text cursor)
-  "Answer `edit.complete' for DOCUMENT from its shadow buffer.
+(defun ebp-complete-edit-complete (document editor-id text cursor)
+  "Answer `edit.complete' for DOCUMENT (SPEC 19.3).
 The `ebp-client-create' `:edit-complete-function' contract: called with
 \(DOCUMENT EDITOR-ID TEXT CURSOR) only after ebp.el matched the query's
 session and seq against the live mirror (a stale query was already
 refused `1201 editor-stale', SPEC 19.3), TEXT the full mirror text.
 Returns (PREFIX . CANDIDATES) or nil; ebp turns nil into the empty
 reply, which is how the device clears its dropdown.
+
+Dispatch order (R0): the live attached buffer when `ebp-sync' holds one
+whose text matches the mirror — eglot and every buffer-local capf
+answer there — falling through to DOCUMENT's shadow buffer whenever the
+live arm cannot answer or finds nothing, exactly as before R0.
 
 A harvest error also degrades to the empty reply — a broken capf must
 cost a missing dropdown, never a `-32603' on the wire.  Install it at
@@ -262,7 +348,9 @@ connect time:
 Jetpacs's `jetpacs-connect' does exactly that by default."
   (when (and ebp-complete-enabled (stringp text) (numberp cursor))
     (let ((result (condition-case err
-                      (ebp-complete-in-text document text cursor)
+                      (or (ebp-complete--live-harvest
+                           document editor-id text cursor)
+                          (ebp-complete-in-text document text cursor))
                     ;; The error SYMBOL only (SPEC 23.3):
                     ;; `error-message-string' embeds the datum, and the
                     ;; datum here is buffer content.

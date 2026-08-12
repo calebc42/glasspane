@@ -11,6 +11,10 @@
 (require 'ert)
 (require 'ebp)
 (require 'ebp-sync)
+;; Loaded HERE so the R1 eglot tests' `cl-letf' stubs land on top of the
+;; real definitions — `ebp-sync--ensure-eglot's own soft (require 'eglot)
+;; would otherwise load the file mid-test and overwrite the stubs.
+(require 'eglot)
 
 (defmacro ebp-sync-test--with (seed &rest body)
   "One attached buffer mirroring SEED, with `sent' capturing requests.
@@ -666,6 +670,291 @@ under the single-client floor — and never returns a dead buffer."
       (remhash k1 ebp-sync--table)
       (remhash k2 ebp-sync--table)
       (when (buffer-live-p live) (kill-buffer live)))))
+
+;;;; R1: the language tooling arm (PLAN-glasspane-completion.md)
+
+(defmacro ebp-sync-test--with-file-buffer (name content &rest body)
+  "Run BODY in a buffer visiting a temp file NAME-*.CONTENT, attached.
+Binds `client', `buf', and `file'.  The mirror seed equals CONTENT so
+attach never adopts.  Diagnostics are off — these tests exercise the
+tooling arm, not the rider."
+  (declare (indent 2))
+  `(let* ((file (make-temp-file ,name nil
+                                (if (string-suffix-p ".el" ,name) ".el" ".py")
+                                ,content))
+          (client (ebp-client-create
+                   :receipt-file (make-temp-file "ebp-r1")))
+          (ebp-sync-diagnostics nil)
+          (buf (let ((enable-local-variables nil))
+                 (find-file-noselect file))))
+     (unwind-protect
+         (with-current-buffer buf
+           (puthash (cons "doc:r1" "body")
+                    (list :session "S" :seq 0 :text ,content :cursor 0)
+                    (ebp-client-editors client))
+           ,@body)
+       (with-current-buffer buf
+         (ebp-sync-detach)
+         (set-buffer-modified-p nil))
+       (kill-buffer buf)
+       (delete-file file))))
+
+(ert-deftest ebp-sync-eglot-connects-directly-and-throttles ()
+  "Attach connects eglot DIRECTLY (never `eglot-ensure', whose connect
+waits on a `post-command-hook' that never fires headless), asynchronously
+\(`eglot-sync-connect' nil), at most once per 30s PER PROJECT — a second
+file of the same project inside a cold server's async-init window must
+not spawn a second server (the R1 review's headline: the server reaches
+`eglot-current-server' only after the initialize handshake, so during
+startup every project buffer passes the no-server gate).  A reopen past
+the window reconnects — the reaped-server path."
+  (ebp-sync-test--with-file-buffer "ebp-r1-eglot" "x = 1\n"
+    (clrhash ebp-sync--eglot-attempts)
+    (should (eq major-mode 'python-mode))
+    (let ((connects nil) (sync-seen 'unset))
+      (cl-letf (((symbol-function 'eglot-current-server) (lambda () nil))
+                ((symbol-function 'eglot--guess-contact)
+                 (lambda (&optional _) '(modes proj class contact ids)))
+                ((symbol-function 'eglot--connect)
+                 (lambda (&rest args)
+                   (setq sync-seen eglot-sync-connect)
+                   (push args connects))))
+        (ebp-sync-attach client "doc:r1" "body" buf)
+        (should (equal connects '((modes proj class contact ids))))
+        (should (eq sync-seen nil))
+        ;; Same open window, same buffer: throttled.
+        (ebp-sync-attach client "doc:r1" "body" buf)
+        (should (= (length connects) 1))
+        ;; Same open window, DIFFERENT buffer of the same project:
+        ;; still throttled — the stamp is project-keyed, not
+        ;; buffer-local.
+        (let* ((file2 (make-temp-file "ebp-r1-eglot-b" nil ".py" "y = 2\n"))
+               (buf2 (let ((enable-local-variables nil))
+                       (find-file-noselect file2))))
+          (unwind-protect
+              (with-current-buffer buf2
+                (puthash (cons "doc:r1b" "body")
+                         (list :session "S" :seq 0 :text "y = 2\n" :cursor 0)
+                         (ebp-client-editors client))
+                (ebp-sync-attach client "doc:r1b" "body" buf2)
+                (should (= (length connects) 1)))
+            (with-current-buffer buf2
+              (ebp-sync-detach)
+              (set-buffer-modified-p nil))
+            (kill-buffer buf2)
+            (delete-file file2)))
+        ;; Past the window: reconnect (revives an OS-reaped server).
+        (with-current-buffer buf
+          (puthash (ebp-sync--eglot-project-key) (- (float-time) 31)
+                   ebp-sync--eglot-attempts)
+          (ebp-sync-attach client "doc:r1" "body" buf)
+          (should (= (length connects) 2)))))))
+
+(ert-deftest ebp-sync-eglot-gate-refuses ()
+  "No connect for: a mode outside `ebp-sync-eglot-modes', the feature
+off, or a server already running."
+  (ebp-sync-test--with-file-buffer "ebp-r1-gate" "x = 1\n"
+    (clrhash ebp-sync--eglot-attempts)
+    (let ((connects nil))
+      (cl-letf (((symbol-function 'eglot-current-server) (lambda () nil))
+                ((symbol-function 'eglot--guess-contact)
+                 (lambda (&optional _) '(a b c d e)))
+                ((symbol-function 'eglot--connect)
+                 (lambda (&rest args) (push args connects))))
+        (let ((ebp-sync-eglot nil))
+          (ebp-sync-attach client "doc:r1" "body" buf))
+        (should-not connects)
+        (fundamental-mode)
+        (clrhash ebp-sync--eglot-attempts)
+        (ebp-sync-attach client "doc:r1" "body" buf)
+        (should-not connects)
+        (python-mode)
+        (clrhash ebp-sync--eglot-attempts)
+        (cl-letf (((symbol-function 'eglot-current-server)
+                   (lambda () 'live-server)))
+          (ebp-sync-attach client "doc:r1" "body" buf))
+        (should-not connects)))))
+
+(ert-deftest ebp-sync-elisp-backend-swap-and-restore ()
+  "Attach swaps `elisp-flymake-byte-compile' (spawns \"emacs -batch\" —
+impossible on Android, a subprocess per pause everywhere) for the
+in-process backend; detach restores stock.  checkdoc is untouched."
+  (ebp-sync-test--with-file-buffer "ebp-r1-swap.el" "(setq x 1)\n"
+    (should (eq major-mode 'emacs-lisp-mode))
+    (should (memq #'elisp-flymake-byte-compile flymake-diagnostic-functions))
+    ;; Platform-gated OFF (the desktop default): stock backend stays —
+    ;; its subprocess isolation is the safer trade wherever spawning
+    ;; works.
+    (let ((ebp-sync-elisp-inprocess nil))
+      (ebp-sync-attach client "doc:r1" "body" buf))
+    (should (memq #'elisp-flymake-byte-compile flymake-diagnostic-functions))
+    (should-not (memq #'ebp-sync--flymake-elisp flymake-diagnostic-functions))
+    (ebp-sync-detach)
+    ;; Gated ON (the Android default): swapped at attach, restored at
+    ;; detach.
+    (let ((ebp-sync-elisp-inprocess t))
+      (ebp-sync-attach client "doc:r1" "body" buf))
+    (should-not (memq #'elisp-flymake-byte-compile
+                      flymake-diagnostic-functions))
+    (should (memq #'ebp-sync--flymake-elisp flymake-diagnostic-functions))
+    (should (memq #'elisp-flymake-checkdoc flymake-diagnostic-functions))
+    (ebp-sync-detach)
+    (should (memq #'elisp-flymake-byte-compile flymake-diagnostic-functions))
+    (should-not (memq #'ebp-sync--flymake-elisp
+                      flymake-diagnostic-functions))))
+
+(ert-deftest ebp-sync-flymake-elisp-parens-and-warnings ()
+  "The in-process backend: unbalanced parens report an :error directly
+and the compile's useless end-of-file duplicate is dropped; balanced
+input reports real byte-compile warnings with no subprocess; an
+unescaped `?(' char literal false-positives the paren pre-scan but
+must NOT suppress the compile's real warnings (R1 review)."
+  (let ((trusted-content :all))
+    (with-temp-buffer
+      (insert "(defun ebp-r1-broken (")
+      (let (got)
+        (ebp-sync--flymake-elisp (lambda (diags) (setq got diags)))
+        (should (cl-find-if (lambda (d) (eq (flymake-diagnostic-type d)
+                                            :error))
+                            got))
+        (should-not (cl-find-if
+                     (lambda (d) (string-match-p
+                                  "End of file" (flymake-diagnostic-text d)))
+                     got))))
+    (with-temp-buffer
+      (insert ";;; -*- lexical-binding: t; -*-\n"
+              "(defun ebp-r1-warns () (ebp-r1-undefined-fn-xyz))\n")
+      (let (got)
+        (ebp-sync--flymake-elisp (lambda (diags) (setq got diags)))
+        (should (cl-find-if
+                 (lambda (d)
+                   (and (eq (flymake-diagnostic-type d) :warning)
+                        (string-match-p "ebp-r1-undefined-fn-xyz"
+                                        (flymake-diagnostic-text d))))
+                 got))))
+    (with-temp-buffer
+      (insert ";;; -*- lexical-binding: t; -*-\n"
+              "(defvar ebp-r1-char ?()\n"
+              "(defun ebp-r1-lit () (ebp-r1-undefined-fn-xyz))\n")
+      (let (got)
+        (ebp-sync--flymake-elisp (lambda (diags) (setq got diags)))
+        ;; The real warning survives the pre-scan's false positive.
+        (should (cl-find-if
+                 (lambda (d) (string-match-p "ebp-r1-undefined-fn-xyz"
+                                             (flymake-diagnostic-text d)))
+                 got))))))
+
+(ert-deftest ebp-sync-flymake-elisp-widens ()
+  "The backend reports against the DOCUMENT, not the restriction: a
+narrowed attached buffer must produce no spurious paren :error, its
+warnings at absolute positions, and keep its restriction — the wire
+ships whole-document offsets (the module invariant; the stock backend
+this swap replaces widens too)."
+  (let ((trusted-content :all))
+    (with-temp-buffer
+      (insert ";;; -*- lexical-binding: t; -*-\n"
+              "(defun ebp-r1-nrw () 1)\n"
+              "(car)\n")
+      (let ((car-symbol-pos (progn (goto-char (point-min))
+                                   (search-forward "(car)")
+                                   (1+ (match-beginning 0)))))
+        ;; Narrow MID-FORM inside the defun: an unwidened scan-sexps
+        ;; would signal here, and an unwidened compile would never see
+        ;; the (car) outside the restriction.
+        (narrow-to-region 40 50)
+        (let (got)
+          (ebp-sync--flymake-elisp (lambda (diags) (setq got diags)))
+          (should-not (cl-find-if (lambda (d) (eq (flymake-diagnostic-type d)
+                                                  :error))
+                                  got))
+          (let ((arity (cl-find-if
+                        (lambda (d) (string-match-p
+                                     "car" (flymake-diagnostic-text d)))
+                        got)))
+            (should arity)
+            (should (= (flymake-diagnostic-beg arity) car-symbol-pos)))
+          (should (buffer-narrowed-p)))))))
+
+(ert-deftest ebp-sync-flymake-elisp-untrusted-degrades ()
+  "Untrusted content (`trusted-content-p' nil — the same 30.1 gate the
+stock backend applies, since macro expansion IS evaluation) skips the
+compile and says so in one :note; paren errors still report."
+  (with-temp-buffer                     ; no file, hence untrusted
+    (insert "(car)")
+    (let (got)
+      (ebp-sync--flymake-elisp (lambda (diags) (setq got diags)))
+      (should (= (length got) 1))
+      (should (eq (flymake-diagnostic-type (car got)) :note))
+      (should (string-match-p "untrusted"
+                              (flymake-diagnostic-text (car got)))))))
+
+(ert-deftest ebp-sync-flymake-elisp-repl-cookie-shifts-positions ()
+  "A REPL buffer compiles under a prepended lexical-binding cookie —
+the no-cookie warning can never fire against a one-expression line —
+and warning positions shift back by the cookie's length."
+  (with-temp-buffer
+    (insert "(car)")
+    (setq ebp-sync-elisp-repl t)
+    (let ((trusted-content :all)
+          got)
+      (ebp-sync--flymake-elisp (lambda (diags) (setq got diags)))
+      (should got)
+      (dolist (d got)
+        (should-not (string-match-p "lexical-binding"
+                                    (flymake-diagnostic-text d))))
+      ;; bytecomp anchors the wrong-arity warning at the offending
+      ;; SYMBOL: raw position 34 in the cookie-carrying copy (32-char
+      ;; cookie + "("), shifted back to buffer position 2.  A dropped
+      ;; shift leaves 34, which clamps to the tiny buffer's end (6) —
+      ;; the pin bites either way.
+      (let ((arity (cl-find-if
+                    (lambda (d) (string-match-p "car" (flymake-diagnostic-text d)))
+                    got)))
+        (should arity)
+        (should (= (flymake-diagnostic-beg arity) 2))))))
+
+(ert-deftest ebp-sync-settle-kicks-flymake-start ()
+  "The explicit `flymake-start' kick fires from the SETTLE TIMER, never
+on the jsonrpc dispatch path: neither the attach-time arm nor the
+flymake enable runs a backend pass (a synchronous compile per
+keystroke inside the dispatch callback was the R1 review's hot-path
+finding), the settle push kicks exactly once — and a buffer whose mode
+installed no backends never pays for a pass."
+  (ebp-sync-test--with-file-buffer "ebp-r1-kick.el" "(setq x 1)\n"
+    (let ((ebp-sync-diagnostics t)
+          (ebp-sync-elisp-inprocess t)
+          (kicks 0))
+      (cl-letf (((symbol-function 'flymake-start)
+                 (lambda (&rest _) (cl-incf kicks)))
+                ((symbol-function 'ebp-client-notify)
+                 (lambda (&rest _) nil)))
+        (ebp-sync-attach client "doc:r1" "body" buf)
+        ;; Attach armed (enable included) with ZERO backend passes.
+        (should (= kicks 0))
+        (ebp-sync--arm-diagnostics buf)
+        (should (= kicks 0))
+        ;; The settle timer's push is the sole scheduler.
+        (ebp-sync--push-diagnostics buf)
+        (should (= kicks 1))
+        (when ebp-sync--diag-timer (cancel-timer ebp-sync--diag-timer)))))
+  ;; No backends -> no pass, even at settle.
+  (let* ((client (ebp-client-create :receipt-file (make-temp-file "ebp-r1k")))
+         (kicks 0))
+    (cl-letf (((symbol-function 'flymake-start)
+               (lambda (&rest _) (cl-incf kicks)))
+              ((symbol-function 'ebp-client-notify)
+               (lambda (&rest _) nil)))
+      (with-temp-buffer
+        (puthash (cons "doc:r1k" "b")
+                 (list :session "S" :seq 0 :text "" :cursor 0)
+                 (ebp-client-editors client))
+        (let ((ebp-sync-diagnostics t))
+          (ebp-sync-attach client "doc:r1k" "b")
+          (setq kicks 0)
+          (ebp-sync--push-diagnostics (current-buffer))
+          (should (= kicks 0))
+          (when ebp-sync--diag-timer (cancel-timer ebp-sync--diag-timer))
+          (ebp-sync-detach))))))
 
 (provide 'ebp-sync-test)
 ;;; ebp-sync-test.el ends here

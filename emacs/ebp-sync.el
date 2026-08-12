@@ -170,6 +170,12 @@ Returns the buffer, or signals if it carries non-scalar bytes."
     (cl-pushnew #'ebp-sync--on-caret
                 (ebp-client-edit-caret-functions client))
     (add-hook 'kill-buffer-hook #'ebp-sync-detach nil t)
+    ;; R1: the mode's language tooling arms with the session.  The
+    ;; elisp backend swap runs BEFORE the riders arm — the arm enables
+    ;; flymake and kicks the first check, which must never spawn
+    ;; "emacs -batch".  The eglot connect is async and throttled.
+    (ebp-sync--swap-elisp-backend)
+    (ebp-sync--ensure-eglot)
     ;; Arm the riders here too.  They gate on `ebp-sync--client', so an
     ;; attach that FOLLOWS `edit.open' otherwise pushes nothing until the
     ;; first keystroke on either side; an attach that precedes it costs
@@ -189,6 +195,9 @@ and buffer death)."
     (when ebp-sync--font-timer
       (cancel-timer ebp-sync--font-timer)
       (setq ebp-sync--font-timer nil))
+    ;; The backend swap is a property of the SESSION: desktop editing
+    ;; after detach sees the stock backend again.
+    (ebp-sync--restore-elisp-backend)
     (when ebp-sync--tracker
       (track-changes-unregister ebp-sync--tracker)
       (setq ebp-sync--tracker nil))
@@ -428,6 +437,251 @@ adopts as before."
       (ebp-client-edit-resync ebp-sync--client ebp-sync--document
                               ebp-sync--editor-id))))
 
+;; ------------------------------------------------- language tooling arm --
+;;
+;; POC 1 port (PLAN-glasspane-completion.md R1; behavior reference
+;; jetpacs-sync.el).  This bridge binds real buffers, so eglot needs no
+;; special buffer strategy — the LSP session lives in the very buffer
+;; being synced — but three of POC 1's mobile lessons apply verbatim:
+;;
+;; 1. `eglot-ensure' defers its connect to `post-command-hook'
+;;    (emacs-30.1 eglot.el:1455-1476), which never fires in an Emacs
+;;    driven headless through a socket.  Connect DIRECTLY, fully async.
+;; 2. Android's phantom-process killer reaps backgrounded language
+;;    servers.  Attach runs on every open, so the throttled connect
+;;    attempt there is what revives a reaped server the next time the
+;;    file opens on the device.
+;; 3. `elisp-flymake-byte-compile' spawns "emacs -batch" per check —
+;;    impossible on the Android port, where Emacs is a shared library
+;;    inside an app process with no executable to spawn, and a
+;;    subprocess per typing pause everywhere else once the arm below
+;;    kicks a check per edit.  Attached elisp buffers get an in-process
+;;    backend instead; detach restores the stock one.
+
+(defcustom ebp-sync-eglot t
+  "When non-nil, attaching an LSP-able buffer also connects eglot.
+Buffers whose `major-mode' is in `ebp-sync-eglot-modes' get a direct,
+asynchronous language-server connect at attach, so the device editor
+completes, squiggles, and documents with everything the desktop has.
+Servers must be findable on `exec-path' (on Android, Termux's usr/bin
+via the shared-uid build).  Set to nil to sync without language
+servers."
+  :type 'boolean :group 'ebp)
+
+(defcustom ebp-sync-eglot-modes
+  '(python-mode python-ts-mode sh-mode bash-ts-mode
+    c-mode c-ts-mode c++-mode c++-ts-mode rust-mode rust-ts-mode)
+  "Major modes whose attached buffers get an eglot connect attempt.
+Elisp and org are absent on purpose: their in-process backends are
+better than any language server, and never cost a subprocess."
+  :type '(repeat symbol) :group 'ebp)
+
+(declare-function eglot-current-server "eglot")
+(declare-function eglot--guess-contact "eglot")
+(declare-function eglot--connect "eglot")
+(defvar eglot-sync-connect)
+
+(declare-function project-root "project" (project))
+
+(defvar ebp-sync--eglot-attempts (make-hash-table :test #'equal)
+  "Project root -> float-time of the last eglot connect attempt.
+Keyed by PROJECT, never by buffer (the R1 review's headline): with
+`eglot-sync-connect' nil the server reaches `eglot-current-server'
+only after the async initialize handshake, so during a cold server's
+multi-second startup EVERY buffer of the project passes the no-server
+gate — a buffer-local stamp then lets a second file of the same
+project spawn a second server, leaking a process and silently
+splitting the project's buffers across two servers.  One pending
+connect per project is the actual invariant.  Never cleared: a stale
+stamp only delays a reconnect by its 30s window.")
+
+(defun ebp-sync--eglot-project-key ()
+  "The throttle key for the current buffer's eglot project.
+The same root eglot's own contact guess will use; projectless files
+fall back to their directory, which is also how eglot scopes its
+transient projects."
+  (expand-file-name
+   (or (when-let* ((pr (project-current))) (project-root pr))
+       default-directory)))
+
+(defun ebp-sync--ensure-eglot ()
+  "Connect the current buffer to its language server, if it should have one.
+NOT `eglot-ensure': that defers the connect to `post-command-hook',
+which never fires in an Emacs driven headless through a socket — the
+same trap as flymake's deferred start.  Connect directly instead,
+fully async (`eglot-sync-connect' nil) so attach never blocks on a
+cold server.  No server program, or a missing executable, degrades
+silently to the non-LSP experience.  The 30s per-PROJECT throttle
+(`ebp-sync--eglot-attempts') stops any open — same buffer reattached,
+same file revisited, a SECOND file of the same project — from racing a
+still-initializing connect into a second server process, while still
+letting a later open revive a server the OS reaped.
+Remote-before-stat: `file-remote-p' answers from the NAME, so a
+TRAMP-visiting buffer is refused before any stat can dial."
+  (when (and ebp-sync-eglot
+             (memq major-mode ebp-sync-eglot-modes)
+             buffer-file-name
+             (not (file-remote-p buffer-file-name))
+             (file-exists-p buffer-file-name)
+             (require 'eglot nil t)
+             (not (ignore-errors (eglot-current-server))))
+    (let ((key (ebp-sync--eglot-project-key)))
+      (when (> (- (float-time) (gethash key ebp-sync--eglot-attempts 0)) 30)
+        (puthash key (float-time) ebp-sync--eglot-attempts)
+        (condition-case err
+            (let ((eglot-sync-connect nil))
+              (apply #'eglot--connect (eglot--guess-contact)))
+          ;; The error SYMBOL only (SPEC 23.3): a contact guess embeds
+          ;; paths and command lines in the datum.
+          (error (message "ebp-sync: eglot connect failed (%s)"
+                          (car err))))))))
+
+(defcustom ebp-sync-elisp-inprocess (eq system-type 'android)
+  "When non-nil, attached elisp buffers use the in-process flymake backend.
+Default: only where Emacs cannot spawn itself — the Android port is a
+shared library inside an app process with no executable to run, and
+the phantom-process killer reaps children anyway.  Everywhere else the
+stock `elisp-flymake-byte-compile' keeps its subprocess isolation: the
+in-process backend runs macro expansion and `eval-when-compile' in the
+LIVE session, so a pathological form can wedge a headless Emacs (no
+C-g arrives over a socket) — a trade worth making only where the
+alternative is no compile diagnostics at all."
+  :type 'boolean :group 'ebp)
+
+(defvar-local ebp-sync--elisp-swapped nil
+  "Non-nil when attach swapped this buffer's elisp flymake backend.")
+
+(defvar-local ebp-sync-elisp-repl nil
+  "Non-nil in an attached buffer holding REPL input rather than a file.
+REPL input evaluates with lexical binding, so the diagnostics copy
+byte-compiles under a prepended `lexical-binding: t' cookie: warnings
+match eval semantics, and the no-cookie warning — noise against a
+one-expression REPL line — can never fire.  Positions shift back by
+the cookie's length.  A REPL attacher sets this before attach.")
+
+(defun ebp-sync--swap-elisp-backend ()
+  "Replace `elisp-flymake-byte-compile' with the in-process backend.
+Buffer-local and recorded, so `ebp-sync--restore-elisp-backend' can
+put the stock backend back at detach — the swap is a property of the
+SESSION, not of the buffer, and desktop editing after detach must see
+stock behavior.  `elisp-flymake-checkdoc' stays: it is in-process
+already."
+  (when (and ebp-sync-elisp-inprocess
+             (derived-mode-p 'emacs-lisp-mode)
+             (memq #'elisp-flymake-byte-compile flymake-diagnostic-functions)
+             (not ebp-sync--elisp-swapped))
+    (setq ebp-sync--elisp-swapped t)
+    (remove-hook 'flymake-diagnostic-functions #'elisp-flymake-byte-compile t)
+    (add-hook 'flymake-diagnostic-functions #'ebp-sync--flymake-elisp nil t)))
+
+(defun ebp-sync--restore-elisp-backend ()
+  "Reverse `ebp-sync--swap-elisp-backend', if it ran."
+  (when ebp-sync--elisp-swapped
+    (setq ebp-sync--elisp-swapped nil)
+    (remove-hook 'flymake-diagnostic-functions #'ebp-sync--flymake-elisp t)
+    (add-hook 'flymake-diagnostic-functions
+              #'elisp-flymake-byte-compile nil t)))
+
+(declare-function byte-compile-dest-file "bytecomp" (filename))
+(defvar byte-compile-log-warning-function)
+
+(defun ebp-sync--elisp-paren-diags ()
+  "Unbalanced-paren diagnostics for the current buffer, or nil."
+  (save-excursion
+    (condition-case err
+        (let ((pos (point-min)))
+          (while (setq pos (scan-sexps pos 1)))
+          nil)
+      (scan-error
+       (let* ((beg (min (max (point-min) (or (nth 2 err) (point-min)))
+                        (point-max)))
+              (end (min (max (1+ beg) (or (nth 3 err) beg)) (point-max))))
+         (list (flymake-make-diagnostic
+                (current-buffer) beg end :error
+                (or (nth 1 err) "Unbalanced parentheses"))))))))
+
+(defun ebp-sync--elisp-compile-diags ()
+  "In-process byte-compile diagnostics for the current buffer.
+Compiles a temp copy so nothing touches the user's files.  File
+buffers copy the text verbatim, so warning positions map straight
+back; REPL buffers (`ebp-sync-elisp-repl') get a `lexical-binding: t'
+cookie line prepended — matching how the REPL evaluates — and
+positions are shifted back by the cookie's length."
+  (require 'bytecomp)
+  (let* ((cookie (if ebp-sync-elisp-repl
+                     ";;; -*- lexical-binding: t; -*-\n"
+                   ""))
+         (shift (length cookie))
+         (src (concat cookie (buffer-substring-no-properties
+                              (point-min) (point-max))))
+         (buf (current-buffer))
+         (tmp (make-temp-file "ebp-sync-flymake" nil ".el"))
+         diags)
+    (unwind-protect
+        (let ((coding-system-for-write 'utf-8))
+          (write-region src nil tmp nil 'silent)
+          (let ((byte-compile-log-warning-function
+                 (lambda (string &optional position _fill level)
+                   (with-current-buffer buf
+                     (let* ((beg (min (max (point-min)
+                                           (- (if (numberp position) position 1)
+                                              shift))
+                                      (point-max)))
+                            ;; Underline the whole form at the position.
+                            (end (min (or (ignore-errors (scan-sexps beg 1))
+                                          (1+ beg))
+                                      (point-max))))
+                       (push (flymake-make-diagnostic
+                              buf beg (max end (min (1+ beg) (point-max)))
+                              (if (eq level :error) :error :warning)
+                              string)
+                             diags)))))
+                (inhibit-message t))
+            (ignore-errors (byte-compile-file tmp))))
+      (ignore-errors (delete-file tmp))
+      (ignore-errors (delete-file (byte-compile-dest-file tmp))))
+    (nreverse diags)))
+
+(defun ebp-sync--flymake-elisp (report-fn &rest _)
+  "Flymake backend for attached elisp buffers: no subprocesses, ever.
+Reports against the whole DOCUMENT (`save-restriction' + `widen', the
+module invariant — the stock backend this replaces widens too, and the
+wire ships absolute offsets).  Unbalanced parens report an :error
+directly, and the compile pass still runs — an unescaped `?(' char
+literal false-positives the pre-scan (write `?\\(') and must not cost
+the real warnings; the useless end-of-file error a truly unbalanced
+compile yields is dropped as the pre-scan's duplicate.  Untrusted
+content (`trusted-content-p' — the same 30.1 gate the stock backend
+applies, because macro expansion IS evaluation) skips the compile and
+says so in one :note.
+
+Deltas from the stock subprocess backend, stated so the decision is
+visible: compile-time evaluation (`eval-when-compile', macro
+expansion, top-level `require') runs in the LIVE session, and sibling
+`require's are not resolved (no \"-L .\" equivalent) — both are why
+`ebp-sync-elisp-inprocess' defaults to Android-only."
+  (funcall
+   report-fn
+   (save-restriction
+     (widen)
+     (let ((parens (ebp-sync--elisp-paren-diags)))
+       (if (not (trusted-content-p))
+           (cons (flymake-make-diagnostic
+                  (current-buffer) (point-min)
+                  (min (1+ (point-min)) (point-max)) :note
+                  (concat "byte-compile diagnostics disabled: untrusted "
+                          "content (see `trusted-content')"))
+                 parens)
+         (let ((compile (ebp-sync--elisp-compile-diags)))
+           (append parens
+                   (if parens
+                       (cl-remove-if
+                        (lambda (d)
+                          (string-match-p "End of file"
+                                          (flymake-diagnostic-text d)))
+                        compile)
+                     compile))))))))
+
 ;; ---------------------------------------------------- diagnostics rider --
 
 ;; SPEC 19.5: flymake results ride the synced session as
@@ -476,7 +730,14 @@ Long enough for flymake's own idle timeout plus a typical backend run."
   "(Re)start BUFFER's settle timer after an accepted text change."
   (with-current-buffer buffer
     (when (and ebp-sync-diagnostics ebp-sync--client)
-      (unless flymake-mode (flymake-mode 1))
+      (unless flymake-mode
+        ;; Enable WITHOUT flymake's enable-time check: the arm runs on
+        ;; the jsonrpc dispatch path (attach, accepted results), and a
+        ;; backend pass — stock spawns a compiler, in-process compiles
+        ;; right here — does not belong on it.  The settle timer's kick
+        ;; in `ebp-sync--push-diagnostics' is the sole scheduler.
+        (let ((flymake-start-on-flymake-mode nil))
+          (flymake-mode 1)))
       (setq ebp-sync--diag-quiet 0)
       (when ebp-sync--diag-timer (cancel-timer ebp-sync--diag-timer))
       (setq ebp-sync--diag-timer
@@ -491,6 +752,19 @@ Long enough for flymake's own idle timeout plus a typical backend run."
                      (gethash (cons ebp-sync--document ebp-sync--editor-id)
                               (ebp-client-editors ebp-sync--client)))))
         (when ed
+          ;; The explicit kick lives HERE, on the settle timer, never
+          ;; per edit: flymake's own idle/post-command rescheduling is
+          ;; unreliable while Emacs runs headless (POC 1 lesson), but a
+          ;; plain `run-at-time' timer — this one — fires fine, and
+          ;; settle cadence coalesces one backend pass per typing pause
+          ;; instead of one synchronous compile per keystroke inside
+          ;; the jsonrpc callback.  Synchronous backends (the
+          ;; in-process elisp one) report before `flymake-diagnostics'
+          ;; below reads; async ones are caught by the quiet-round
+          ;; chase.  Gated on real backends so a backend-less buffer
+          ;; (org, plain text) never pays for an empty pass.
+          (when (remq t flymake-diagnostic-functions)
+            (ignore-errors (flymake-start)))
           (let* ((diags (mapcar #'ebp-sync--diag->wire (flymake-diagnostics)))
                  (stamp (list (plist-get ed :session)
                               (plist-get ed :seq) diags))

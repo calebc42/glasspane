@@ -601,17 +601,21 @@ allowed to resume."
     (run-at-time 0 nil
                  (letrec ((run
                            (lambda ()
-                             (if (bound-and-true-p
-                                  ebp-complete--live-harvest-active)
-                                 ;; A live completion harvest is waiting on
-                                 ;; this very stack with a timer armed to
-                                 ;; THROW.  A continuation may wait (a
+                             (if (or (bound-and-true-p
+                                      ebp-complete--live-harvest-active)
+                                     (bound-and-true-p
+                                      ebp-sync--exit-fn-running))
+                                 ;; A throw-armed timeout extent is on
+                                 ;; this very stack: a live completion
+                                 ;; harvest, or a completion exit
+                                 ;; function (R2) resolving against its
+                                 ;; server.  A continuation may wait (a
                                  ;; bridged prompt, hub.eval); running it
                                  ;; here puts it on that throw's unwind
                                  ;; path, and a timeout would abandon the
                                  ;; prompt mid-round-trip with no
-                                 ;; rpc.cancel.  Postpone until the harvest
-                                 ;; is off the stack.
+                                 ;; rpc.cancel.  Postpone until the
+                                 ;; extent is off the stack.
                                  (run-at-time 0.05 nil run)
                                (let ((jetpacs--device-flow flow)
                                      ;; The OWNER rides the flow too, or D1

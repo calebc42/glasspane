@@ -314,6 +314,196 @@ this test fails if that wrapper ever learns to catch throws."
       (should (equal (ebp-complete-test--labels (cdr r))
                      '("shadow-answer"))))))
 
+;;;; The accept loop (R2)
+
+(defmacro ebp-complete-test--with-accept-setup (&rest body)
+  "A live attached buffer \"prefix-li\" whose capf carries an
+`:exit-function'.  Binds client, buf, sent (captured requests),
+exit-calls (each: (STRING PROP STATUS POINT))."
+  (declare (indent 0))
+  `(let* ((client (ebp-client-create :receipt-file (make-temp-file "r2")))
+          (buf (generate-new-buffer " *r2 accept*"))
+          (sent nil) (exit-calls nil))
+     (ignore sent exit-calls)
+     (unwind-protect
+         (with-current-buffer buf
+           (insert "prefix-li")
+           (puthash (cons "doc:r2.el" "body")
+                    (list :session "S" :seq 0 :text "prefix-li" :cursor 9)
+                    (ebp-client-editors client))
+           (ebp-sync-attach client "doc:r2.el" "body" buf)
+           (setq-local completion-at-point-functions
+                       (list (lambda ()
+                               (list (- (point) 9) (point)
+                                     (list (propertize "prefix-live-needle"
+                                                       'ebp-r2-item 'yes))
+                                     :exit-function
+                                     (lambda (s status)
+                                       (push (list (substring-no-properties s)
+                                                   (get-text-property
+                                                    0 'ebp-r2-item s)
+                                                   status (point)
+                                                   (bound-and-true-p
+                                                    ebp-complete--live-harvest-active))
+                                             exit-calls)
+                                       ;; The auto-import shape: a
+                                       ;; distant edit far from the
+                                       ;; completion.
+                                       (save-excursion
+                                         (goto-char (point-min))
+                                         (insert ";; import\n")))))))
+           (cl-letf (((symbol-function 'ebp-client--request)
+                      (lambda (_c method params cb &optional _t)
+                        (push (list method params cb) sent))))
+             ,@body))
+       (setq ebp-complete-live-offer nil)
+       (with-current-buffer buf (ebp-sync-detach))
+       (kill-buffer buf))))
+
+(ert-deftest ebp-complete-accept-runs-the-exit-function ()
+  "The R2 accept loop end to end through ebp's REAL handlers: a live
+harvest with an `:exit-function' capf mints the offer; the accept
+arrives as an ORDINARY `edit.delta' (the wire marks nothing); the exit
+function runs DEFERRED in the real buffer — with the PROPERTIZED
+candidate, `finished', and point after the completed text — and a
+distant edit it makes (auto-import) flushes back as ordinary
+`edit.apply' traffic.  No SPEC change anywhere in this loop."
+  (ebp-complete-test--with-accept-setup
+    (let ((r (ebp-complete-edit-complete "doc:r2.el" "body" "prefix-li" 9)))
+      (should (member "prefix-live-needle"
+                      (ebp-complete-test--labels (cdr r)))))
+    (should ebp-complete-live-offer)
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                  :seq 1 :start 0 :del 9 :text "prefix-live-needle"
+                  :len 18))
+    (should (equal (buffer-string) "prefix-live-needle"))
+    ;; Deferred: nothing ran inside the dispatch extent.
+    (should-not exit-calls)
+    (should-not ebp-complete-live-offer)
+    (cl-loop repeat 30 until exit-calls
+             do (accept-process-output nil 0.02))
+    (pcase-let ((`(,s ,item ,status ,pt ,guarded) (car exit-calls)))
+      (should (equal s "prefix-live-needle"))
+      (should (eq item 'yes))             ; text properties survived
+      (should (eq status 'finished))
+      (should (= pt 19))                  ; right after the completion
+      ;; The R0 guards cover this blocking extent too: a nested
+      ;; edit.complete would take the shadow, and flow continuations
+      ;; defer off the timeout throw's unwind path.
+      (should guarded))
+    (ebp-sync-flush buf)
+    (let ((apply-frame (cl-find 'edit.apply sent :key #'car)))
+      (should apply-frame)
+      (should (= (plist-get (nth 1 apply-frame) :start) 0))
+      (should (equal (plist-get (nth 1 apply-frame) :text) ";; import\n")))))
+
+(ert-deftest ebp-complete-accept-mismatch-clears-the-offer ()
+  "Any other splice for the offered document clears the offer: a typed
+character is not an accept, and a LATER accept-shaped splice must not
+fire a stale exit function."
+  (ebp-complete-test--with-accept-setup
+    (ebp-complete-edit-complete "doc:r2.el" "body" "prefix-li" 9)
+    (should ebp-complete-live-offer)
+    ;; The user types instead: plain insertion at the end.
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                  :seq 1 :start 9 :del 0 :text "x" :len 10))
+    (should-not ebp-complete-live-offer)
+    ;; The exact accept shape afterwards: no offer, no run.
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                  :seq 2 :start 0 :del 10 :text "prefix-live-needle"
+                  :len 18))
+    (cl-loop repeat 10 do (accept-process-output nil 0.02))
+    (should-not exit-calls)))
+
+(ert-deftest ebp-complete-accept-ambiguous-shape-never-fires ()
+  "Provenance by shape (R2 review): a splice whose deleted prefix and
+inserted text share NEITHER end scalar is exactly what paste,
+swipe-typing, and IME word commits produce — the Companion's minimal
+diff would have trimmed a shared end — so it must never run an exit
+function, even though a flex-matched tap could produce it too.
+Missing that rare tap is the safe direction."
+  (let* ((client (ebp-client-create :receipt-file (make-temp-file "r2a")))
+         (buf (generate-new-buffer " *r2 ambiguous*"))
+         (exit-calls nil))
+    (unwind-protect
+        (with-current-buffer buf
+          (insert "li")
+          (puthash (cons "doc:r2a.el" "body")
+                   (list :session "S" :seq 0 :text "li" :cursor 2)
+                   (ebp-client-editors client))
+          (ebp-sync-attach client "doc:r2a.el" "body" buf)
+          ;; A flex-style FUNCTION table (eglot's shape): it matches
+          ;; "XyzQw" against "li" itself — a plain list table would
+          ;; prefix-filter the candidate away and no offer would mint.
+          (setq-local completion-at-point-functions
+                      (list (lambda ()
+                              (list (- (point) 2) (point)
+                                    (lambda (str pred action)
+                                      (if (eq action t) '("XyzQw")
+                                        (complete-with-action
+                                         action '("XyzQw") str pred)))
+                                    :exit-function
+                                    (lambda (&rest args)
+                                      (push args exit-calls))))))
+          (ebp-complete-edit-complete "doc:r2a.el" "body" "li" 2)
+          (should ebp-complete-live-offer)
+          ;; The accept SHAPE — but "XyzQw" shares neither 'l' nor 'i'
+          ;; with the prefix, so it could be a paste.  Never fires.
+          (ebp-client--handle-edit-delta
+           client (list :document "doc:r2a.el" :editor_id "body"
+                        :session "S" :seq 1 :start 0 :del 2 :text "XyzQw"
+                        :len 5))
+          (should-not ebp-complete-live-offer)
+          (cl-loop repeat 10 do (accept-process-output nil 0.02))
+          (should-not exit-calls))
+      (setq ebp-complete-live-offer nil)
+      (with-current-buffer buf (ebp-sync-detach))
+      (kill-buffer buf))))
+
+(ert-deftest ebp-complete-accept-offer-lifecycle-claims ()
+  "Session lifecycle boundaries claim the offer (R2 review): a reseed
+replaces the text its coordinates described, and detach ends the
+session it belonged to."
+  (ebp-complete-test--with-accept-setup
+    (ebp-complete-edit-complete "doc:r2.el" "body" "prefix-li" 9)
+    (should ebp-complete-live-offer)
+    ;; A reseed (fresh session / post-resync edit.open).
+    (ebp-client--handle-edit-open
+     client (list :document "doc:r2.el" :editor_id "body"
+                  :session "T" :seq 0 :text "other" :cursor 0))
+    (should-not ebp-complete-live-offer)
+    ;; Re-mint, then detach.
+    (puthash (cons "doc:r2.el" "body")
+             (list :session "T" :seq 0 :text (buffer-string)
+                   :cursor 5)
+             (ebp-client-editors client))
+    (ebp-complete-edit-complete "doc:r2.el" "body" (buffer-string) 5)
+    (when ebp-complete-live-offer
+      (ebp-sync-detach buf)
+      (should-not ebp-complete-live-offer))))
+
+(ert-deftest ebp-complete-accept-rearm-on-latch ()
+  "A runner arriving while another exit function is on the stack
+RE-ARMS instead of dropping (R2 review) — the second completion's
+auto-import must not silently vanish — and the re-arm is capped."
+  (let ((buf (generate-new-buffer " *r2 rearm*"))
+        (scheduled nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (&rest args) (push args scheduled))))
+          (let ((ebp-sync--exit-fn-running t))
+            (ebp-sync--run-exit-fn buf 0 "x" "x" #'ignore 0)
+            (should (= (length scheduled) 1))
+            (should (equal (nth 0 (car scheduled)) 0.05))
+            (should (equal (car (last (car scheduled))) 1))
+            ;; Capped: a wedged exit function cannot re-arm forever.
+            (ebp-sync--run-exit-fn buf 0 "x" "x" #'ignore 20)
+            (should (= (length scheduled) 1))))
+      (kill-buffer buf))))
+
 ;;;; The ebp seam
 
 (ert-deftest ebp-complete-override-beats-the-client-wide-default ()

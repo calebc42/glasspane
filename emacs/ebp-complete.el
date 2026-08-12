@@ -189,6 +189,15 @@ never uselessly empty in a buffer full of repeated identifiers."
       (when (and (stringp a) (not (string-empty-p (string-trim a))))
         (string-trim a)))))
 
+(defvar ebp-complete--collect-extras nil
+  "Post-wire leftovers of the most recent `ebp-complete--collect'.
+A plist (:exit-fn FN :raw CANDIDATES) — the capf's `:exit-function'
+and the candidate strings BEFORE `substring-no-properties', whose text
+properties carry what an exit function reads (eglot's LSP item above
+all).  Set on every collect that ran a capf, nil otherwise; consumed
+by `ebp-complete--live-harvest' to mint the accept offer (R2).  The
+wire never sees any of it.")
+
 (defun ebp-complete--collect ()
   "Harvest completions at point in the current buffer.
 Returns (PREFIX . CANDIDATES) or nil.  Each candidate is a plist
@@ -227,6 +236,14 @@ likeliest next keystroke saver), capped at
                          (> (length cands) 500))
                     nil
                   cands)))
+    ;; The accept-offer leftovers (R2): recorded only for a REAL capf
+    ;; harvest — the word fallback has no exit function and its strings
+    ;; carry nothing — and BEFORE the wire strip below removes the text
+    ;; properties an exit function reads.
+    (setq ebp-complete--collect-extras
+          (and cands
+               (list :exit-fn (plist-get props :exit-function)
+                     :raw cands)))
     ;; Empty capf result -> generic word fallback (org prose, unknown modes).
     (unless cands
       (when-let* ((fb (ebp-complete--word-fallback)))
@@ -271,15 +288,55 @@ from the seam function so tests can call it directly."
 
 (defvar ebp-complete--live-harvest-active nil
   "Non-nil while a live-buffer harvest is on the stack.
-Read by two parties, both by name only.  THIS module: a nested
-`edit.complete' dispatched while a harvest waits skips the live arm and
-answers from the shadow — two stacked harvests would share
-`with-timeout's macroexpansion-minted catch tag, and the outer timer's
-throw would be stolen by the inner catch, leaving the outer wait
-unbounded.  The JETPACS layer: `jetpacs-flow-continue' postpones its
-continuations while this is up, so a continuation that WAITS (a
-bridged prompt, hub.eval) is never on the timeout throw's unwind
-path.")
+Also bound by `ebp-sync--run-exit-fn' (R2) around a completion exit
+function, which blocks the same way — the flag means \"a throw-armed
+bounded wait inside wire-driven code\".  Read by two parties, both by
+name only.  THIS module: a nested `edit.complete' dispatched while the
+extent waits skips the live arm and answers from the shadow — two
+stacked waits would share `with-timeout's macroexpansion-minted catch
+tag, and the outer timer's throw would be stolen by the inner catch,
+leaving the outer wait unbounded.  The JETPACS layer:
+`jetpacs-flow-continue' postpones its continuations while this is up,
+so a continuation that WAITS (a bridged prompt, hub.eval) is never on
+the timeout throw's unwind path.")
+
+(defvar ebp-complete-live-offer nil
+  "The most recent live-buffer completion offer carrying an exit function.
+A plist (:document D :editor-id E :buffer B :cursor C :prefix P
+:exit-fn FN :accepts ALIST), ALIST mapping each candidate's INSERTED
+text to its original propertized string (an exit function reads those
+properties — eglot's LSP item above all).  Minted by the live harvest
+when the winning capf supplied an `:exit-function'; consumed and
+cleared by `ebp-sync''s splice watch, which recognizes the Companion's
+accept — the wire deliberately does not mark one (SPEC 19.3: a tap is
+an ordinary local edit) — and finishes the completion in the real
+buffer, with every resulting edit riding the ordinary sync loop back
+to the device.")
+
+(defun ebp-complete--mint-offer (document editor-id buffer cursor result)
+  "Record RESULT as the live accept offer for BUFFER, or clear it.
+Only a harvest whose capf supplied an `:exit-function' mints one —
+without it an accept needs no finishing, and the splice watch has
+nothing to do."
+  (setq ebp-complete-live-offer
+        (when-let* ((result)
+                    (extras ebp-complete--collect-extras)
+                    (exit-fn (plist-get extras :exit-fn))
+                    (raw (plist-get extras :raw)))
+          (let (accepts)
+            (dolist (cand (cdr result))
+              (let* ((label (plist-get cand :label))
+                     (ins (or (plist-get cand :insert) label))
+                     (orig (cl-find-if
+                            (lambda (r) (equal (substring-no-properties r)
+                                               label))
+                            raw)))
+                (when orig (push (cons ins orig) accepts))))
+            (when accepts
+              (list :document document :editor-id editor-id
+                    :buffer buffer :cursor (truncate cursor)
+                    :prefix (car result) :exit-fn exit-fn
+                    :accepts accepts))))))
 
 (defun ebp-complete--live-harvest (document editor-id text cursor)
   "Harvest in DOCUMENT/EDITOR-ID's live attached buffer, if it can.
@@ -321,8 +378,11 @@ mid-round-trip."
             (when (equal text (buffer-substring-no-properties
                                (point-min) (point-max)))
               (goto-char (min (1+ (max 0 (truncate cursor))) (point-max)))
-              (with-timeout (ebp-complete-live-timeout nil)
-                (ebp-complete--collect)))))))))
+              (let ((r (with-timeout (ebp-complete-live-timeout nil)
+                         (ebp-complete--collect))))
+                (ebp-complete--mint-offer document editor-id
+                                          (current-buffer) cursor r)
+                r))))))))
 
 ;;;; The ebp seam
 
@@ -347,6 +407,10 @@ connect time:
                #\\='ebp-complete-edit-complete …)
 Jetpacs's `jetpacs-connect' does exactly that by default."
   (when (and ebp-complete-enabled (stringp text) (numberp cursor))
+    ;; A fresh request supersedes any standing accept offer: the
+    ;; dropdown it described is being replaced.  The live harvest mints
+    ;; the new one (or none).
+    (setq ebp-complete-live-offer nil)
     (let ((result (condition-case err
                       (or (ebp-complete--live-harvest
                            document editor-id text cursor)

@@ -135,13 +135,54 @@ everywhere else.
 After R0+R1: LSP completion + diagnostics + hover on device = v1
 parity for programming modes, pending the desktop-uds/device smoke.
 
-## R2 — exit-function + additionalTextEdits
+## R2 — exit-function + additionalTextEdits (LANDED)
 
-After the Companion's accept returns as `edit.delta`, run the capf
-`:exit-function` in the real buffer (snippet-stripped) and ship distant
-edits (auto-import) via `ebp-client-edit-apply` (§19.4). Also the
-`publishDiagnostics` event hook for push-latency parity. Never teach
-the Companion Range/TextEdit — coordinate authority stays withheld.
+The wire deliberately does not mark a completion accept (SPEC 19.3: a
+tap is an ordinary local edit), so Emacs INFERS it: the live harvest
+mints `ebp-complete-live-offer` when the winning capf supplied an
+`:exit-function` (keeping the PROPERTIZED candidate strings — eglot's
+LSP item rides text properties the wire strip would destroy), and
+`ebp-sync`'s splice watch recognizes the splice that replaces exactly
+the offered prefix at the offered cursor with an offered insert. Any
+other splice for that document clears the offer.
+
+The exit function runs DEFERRED off the jsonrpc dispatch (it may block
+— eglot resolves against its server), revalidated at fire time,
+latched non-reentrant (the R0 `with-timeout` tag lesson), bounded at
+1s. Whatever it edits — snippet-fallback text, `additionalTextEdits`
+auto-imports — flows back through the ordinary track-changes →
+`edit.apply` loop: NO special wire traffic, which is why R2 needs no
+SPEC change. The Companion never learns Range/TextEdit — coordinate
+authority stays withheld.
+
+Also landed: the `publishDiagnostics` push-latency hook (an
+`eglot-handle-notification :after` method: URI → attached buffer →
+collect at 0.5s instead of waiting out the 3s settle) and the
+`eglot-managed-mode-hook` arm (a server that comes up after attach
+ships its first diagnostics without waiting for an edit).
+
+Adversarial review (10 raw, 5 confirmed, all fixed same day):
+
+- **Provenance by shape.** The accept inference can be forged: paste,
+  swipe-typing, and IME word commits produce accept-shaped splices.
+  The Companion's typed path emits MINIMAL diffs while the tap path
+  emits the untrimmed prefix-replace, so the watch now additionally
+  requires the deleted prefix and inserted text to share their first
+  or last scalar — a shape the minimal diff could never emit, hence
+  provably a tap. Ambiguous shapes and the empty-prefix shape (del 0,
+  indistinguishable from insertion) never fire; missing a rare
+  flex-tap is the safe direction. The exact fix is a one-member wire
+  provenance marker (`accept: true` on the tap's delta) — a SPEC
+  amendment PARKED with R3-R5.
+- The offer is claimed at EVERY session lifecycle boundary
+  (`ebp-sync--claim-offer`): every splice for its document including
+  the resync branch, reseed, resync, detach.
+- The runner's blocking extent is covered by BOTH R0 guards: it binds
+  `ebp-complete--live-harvest-active` (nested `edit.complete` takes
+  the shadow — no request handler parks on the throw path) and
+  `jetpacs-flow-continue` also postpones on `ebp-sync--exit-fn-running`.
+- A latched second accept RE-ARMS (20 × 0.05s, revalidation makes a
+  stale run self-cancel) instead of silently dropping its auto-import.
 
 ## R3 — candidate `kind` (SPEC amendment) + icon render
 

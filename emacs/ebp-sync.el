@@ -202,6 +202,7 @@ and buffer death)."
       (track-changes-unregister ebp-sync--tracker)
       (setq ebp-sync--tracker nil))
     (when ebp-sync--client
+      (ebp-sync--claim-offer ebp-sync--document ebp-sync--editor-id)
       (remhash (list ebp-sync--client ebp-sync--document ebp-sync--editor-id)
                ebp-sync--table)
       (setq ebp-sync--client nil ebp-sync--document nil
@@ -312,39 +313,151 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
   (let ((buf (ebp-sync--buffer client document editor-id)))
     (when buf
       (with-current-buffer buf
-        ;; Anything the tracker has seen but we have not flushed is a
-        ;; local edit the Companion did not know about when it spliced.
-        (ebp-sync--fetch-pending-into-queue)
-        (if (or ebp-sync--queue ebp-sync--inflight)
-            (ebp-sync--resync buf)
-          (condition-case nil
-              (progn
-                ;; START is a DOCUMENT offset, so `(1+ start)' is an
-                ;; absolute buffer position and needs no rebasing — but
-                ;; `delete-region' validates against the accessible
-                ;; portion and signals for a target outside it, which
-                ;; turned every phone keystroke outside the user's
-                ;; restriction into a resync the reseed could not
-                ;; repair.  `save-excursion' outermost, per its own
-                ;; docstring; neither it nor `atomic-change-group' saves
-                ;; the restriction.
-                (atomic-change-group
-                  (save-excursion
-                    (save-restriction
-                      (widen)
-                      (delete-region (1+ start) (+ 1 start del))
-                      (goto-char (1+ start))
-                      (insert text))))
-                ;; Consume our own known change so it is not echoed —
-                ;; widened, because the change we just made may lie
-                ;; outside the restriction we just restored.
-                (save-restriction
-                  (widen)
-                  (track-changes-fetch ebp-sync--tracker #'ignore))
-                (ebp-sync--arm-annotations buf))
-            ;; Write protection is honored, never overridden (SPEC 19.3);
-            ;; the refusing side recovers through resync.
-            (error (ebp-sync--resync buf))))))))
+        ;; The offer is claimed on EVERY splice for its document — the
+        ;; resync branch below included, where the divergence is exactly
+        ;; what invalidates the offer's coordinates.
+        (let ((offer (ebp-sync--claim-offer document editor-id)))
+          ;; Anything the tracker has seen but we have not flushed is a
+          ;; local edit the Companion did not know about when it spliced.
+          (ebp-sync--fetch-pending-into-queue)
+          (if (or ebp-sync--queue ebp-sync--inflight)
+              (ebp-sync--resync buf)
+            (condition-case nil
+                (progn
+                  ;; START is a DOCUMENT offset, so `(1+ start)' is an
+                  ;; absolute buffer position and needs no rebasing — but
+                  ;; `delete-region' validates against the accessible
+                  ;; portion and signals for a target outside it, which
+                  ;; turned every phone keystroke outside the user's
+                  ;; restriction into a resync the reseed could not
+                  ;; repair.  `save-excursion' outermost, per its own
+                  ;; docstring; neither it nor `atomic-change-group' saves
+                  ;; the restriction.
+                  (atomic-change-group
+                    (save-excursion
+                      (save-restriction
+                        (widen)
+                        (delete-region (1+ start) (+ 1 start del))
+                        (goto-char (1+ start))
+                        (insert text))))
+                  ;; Consume our own known change so it is not echoed —
+                  ;; widened, because the change we just made may lie
+                  ;; outside the restriction we just restored.
+                  (save-restriction
+                    (widen)
+                    (track-changes-fetch ebp-sync--tracker #'ignore))
+                  (when offer
+                    (ebp-sync--maybe-finish-completion offer start del text))
+                  (ebp-sync--arm-annotations buf))
+              ;; Write protection is honored, never overridden (SPEC
+              ;; 19.3); the refusing side recovers through resync.
+              (error (ebp-sync--resync buf)))))))))
+
+;; ---------------------------------------------------- completion accept --
+
+(defvar ebp-complete-live-offer)        ; soft seams; ebp-complete
+(defvar ebp-complete--live-harvest-active) ; owns both
+
+(defvar ebp-sync--exit-fn-running nil
+  "Non-nil while a completion exit function runs.
+A latch AND a defer signal: a second accept's runner re-arms instead
+of stacking (`with-timeout' tags are minted at macroexpansion time —
+the R0 lesson), and `jetpacs-flow-continue' postpones continuations
+while this is up, exactly as it does for the live harvest, so a
+waiting bridged prompt is never on this extent's timeout-throw unwind
+path.")
+
+(defun ebp-sync--claim-offer (document editor-id)
+  "Take (and clear) the standing accept offer for DOCUMENT/EDITOR-ID.
+EVERY session event for the offered document claims it: whichever
+splice arrives — accept-shaped or not, even down the resync branch —
+the dropdown the offer described is gone, and reseed, resync, and
+detach invalidate its coordinates outright (the R2 review's lifetime
+finding)."
+  (when-let* ((offer (bound-and-true-p ebp-complete-live-offer)))
+    (when (and (equal document (plist-get offer :document))
+               (equal editor-id (plist-get offer :editor-id)))
+      (setq ebp-complete-live-offer nil)
+      offer)))
+
+(defun ebp-sync--maybe-finish-completion (offer start del text)
+  "Recognize OFFER's accept in an applied splice; schedule its finish.
+The wire deliberately does not mark a completion accept (SPEC 19.3: a
+tap is an ordinary local edit replacing the prefix), so Emacs infers
+it from shape — and the shape must be one ONLY a tap can produce.
+The tap path emits the UNTRIMMED prefix-replace, while typed commits
+arrive minimally diffed by the Companion: a splice whose deleted
+prefix and inserted text share their first or last scalar could never
+have survived that trim, so it is provably a tap.  Sharing neither end
+is ambiguous — paste, swipe-typing, and IME word commits produce
+exactly that shape — and ambiguity must not run an exit function over
+typed text; missing a rare genuine tap is the safe direction.  The
+empty-prefix shape (DEL 0) is inherently indistinguishable from an
+insertion and never fires.  (A wire provenance marker would make the
+inference exact; that is a SPEC amendment, parked with R3-R5.)
+
+Whatever the exit function edits (snippet-fallback text,
+`additionalTextEdits' auto-imports) flows back to the device through
+the ordinary track-changes -> `edit.apply' loop; no special wire
+traffic exists for any of it, which is why R2 needs no SPEC change."
+  (let* ((prefix (plist-get offer :prefix))
+         (cursor (plist-get offer :cursor))
+         (accept (assoc text (plist-get offer :accepts)))
+         (exit-fn (plist-get offer :exit-fn))
+         (buf (plist-get offer :buffer)))
+    (when (and accept
+               (> del 0)
+               (= del (length prefix))
+               (= start (- cursor del))
+               (eq buf (current-buffer))
+               (> (length text) 0)
+               (or (eq (aref text 0) (aref prefix 0))
+                   (eq (aref text (1- (length text)))
+                       (aref prefix (1- (length prefix))))))
+      ;; DEFERRED: the exit function may block (eglot resolves the item
+      ;; against its server), and this watch is inside the jsonrpc
+      ;; dispatch.
+      (run-at-time 0 nil #'ebp-sync--run-exit-fn
+                   buf start text (cdr accept) exit-fn 0))))
+
+(defun ebp-sync--run-exit-fn (buf start text raw exit-fn retries)
+  "Run EXIT-FN for the accepted RAW candidate in BUF, safely.
+Revalidates the accept region at fire time — the user may have typed
+since the splice — then funcalls EXIT-FN with RAW (the PROPERTIZED
+candidate) and `finished', point after the completed text
+\(`completion--done's convention), bounded by a 1s timeout.  A run
+arriving while another is on the stack RE-ARMS (up to 20 x 0.05s)
+rather than dropping — the revalidation makes a delayed run
+self-cancel if the buffer moved on.  Both R0 guards cover the blocking
+extent: `ebp-complete--live-harvest-active' routes a nested
+`edit.complete' to the shadow so no request handler parks on this
+stack, and (with `ebp-sync--exit-fn-running') `jetpacs-flow-continue'
+keeps waiting continuations off the timeout throw's unwind path."
+  (when (buffer-live-p buf)
+    (if ebp-sync--exit-fn-running
+        (when (< retries 20)
+          (run-at-time 0.05 nil #'ebp-sync--run-exit-fn
+                       buf start text raw exit-fn (1+ retries)))
+      (let ((ebp-sync--exit-fn-running t)
+            (ebp-complete--live-harvest-active t))
+        (with-current-buffer buf
+          (save-excursion
+            (save-restriction
+              (widen)
+              (let ((end (+ 1 start (length text))))
+                (when (and (<= end (point-max))
+                           (equal text (buffer-substring-no-properties
+                                        (1+ start) end)))
+                  ;; Exit functions expect point right after the
+                  ;; completed text (`completion--done').
+                  (goto-char end)
+                  (with-timeout (1.0 nil)
+                    (condition-case err
+                        (funcall exit-fn raw 'finished)
+                      ;; The error SYMBOL only (SPEC 23.3).
+                      (error
+                       (message "ebp-sync: exit function failed (%s)"
+                                (car err))))))))))))))
 
 (defun ebp-sync--fetch-pending-into-queue ()
   "Pull any not-yet-signaled tracker changes into the outbound queue."
@@ -376,6 +489,8 @@ adopts as before."
   (let ((buf (ebp-sync--buffer client document editor-id)))
     (when buf
       (with-current-buffer buf
+        ;; A reseed replaces the text the offer's coordinates described.
+        (ebp-sync--claim-offer document editor-id)
         (setq ebp-sync--queue nil ebp-sync--inflight nil)
         ;; MINE is the DOCUMENT.  It answers three questions and all
         ;; three are whole-document ones: is the seed already our text,
@@ -428,6 +543,7 @@ adopts as before."
 (defun ebp-sync--resync (buffer)
   "Drop local pending state and request one resynchronization."
   (with-current-buffer buffer
+    (ebp-sync--claim-offer ebp-sync--document ebp-sync--editor-id)
     (setq ebp-sync--queue nil ebp-sync--inflight nil)
     (when ebp-sync--tracker
       (save-restriction
@@ -783,6 +899,62 @@ Long enough for flymake's own idle timeout plus a typical backend run."
               (setq ebp-sync--diag-timer
                     (run-at-time ebp-sync-diagnostics-delay nil
                                  #'ebp-sync--push-diagnostics buffer)))))))))
+
+;; ------------------------------------------------ LSP publish -> collect --
+;;
+;; The settle chase alone loses a race on cold servers: a first publish
+;; can land after the quiet rounds stopped, and no squiggle then moves
+;; until the next keystroke (POC 1 lesson).  Event-driven instead: the
+;; moment eglot receives publishDiagnostics for a buffer this bridge
+;; attached, collect shortly after — the small delay lets eglot hand
+;; the report to flymake first.
+
+(declare-function eglot-uri-to-path "eglot" (uri))
+(declare-function eglot--uri-to-path "eglot" (uri))
+
+(defun ebp-sync--collect-soon (buffer)
+  "Schedule one near-term diagnostics push for BUFFER."
+  (with-current-buffer buffer
+    (when (and ebp-sync-diagnostics ebp-sync--client)
+      (setq ebp-sync--diag-quiet 0)
+      (when ebp-sync--diag-timer (cancel-timer ebp-sync--diag-timer))
+      (setq ebp-sync--diag-timer
+            (run-at-time 0.5 nil #'ebp-sync--push-diagnostics buffer)))))
+
+(defun ebp-sync--buffer-for-path (path)
+  "The attached live buffer visiting PATH, or nil."
+  (let ((true (ignore-errors (file-truename path))) found)
+    (when true
+      (maphash (lambda (_key buf)
+                 (when (and (not found) (buffer-live-p buf)
+                            (buffer-file-name buf)
+                            (equal (ignore-errors
+                                     (file-truename (buffer-file-name buf)))
+                                   true))
+                   (setq found buf)))
+               ebp-sync--table))
+    found))
+
+(with-eval-after-load 'eglot
+  ;; A server that came up (or adopted the buffer) AFTER attach arms
+  ;; the rider, so its first diagnostics ship without waiting for an
+  ;; edit.
+  (add-hook 'eglot-managed-mode-hook
+            (lambda ()
+              (when (and ebp-sync--client
+                         (ignore-errors (eglot-current-server)))
+                (ebp-sync--arm-diagnostics (current-buffer)))))
+  (cl-defmethod eglot-handle-notification :after
+    (_server (_method (eql textDocument/publishDiagnostics))
+             &key uri &allow-other-keys)
+    "Collect soon for the attached buffer the server just diagnosed."
+    (when ebp-sync-diagnostics
+      (when-let* ((path (ignore-errors
+                          (if (fboundp 'eglot-uri-to-path)
+                              (eglot-uri-to-path uri)
+                            (eglot--uri-to-path uri))))
+                  (buf (ebp-sync--buffer-for-path path)))
+        (ebp-sync--collect-soon buf)))))
 
 ;; -------------------------------------------------------- fontify rider --
 

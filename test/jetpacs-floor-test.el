@@ -1120,6 +1120,17 @@ reschedules; the moment it drops, the work runs."
     (setq ebp-complete--live-harvest-active nil)
     (cl-loop repeat 20 until (not (eq ran :unset))
              do (accept-process-output nil 0.03))
+    (should (eq ran t)))
+  ;; The R2 exit-function extent postpones the same way.
+  (defvar ebp-sync--exit-fn-running)
+  (let ((ebp-sync--exit-fn-running t)
+        (ran :unset))
+    (jetpacs-flow-continue (lambda () (setq ran t)))
+    (cl-loop repeat 5 do (accept-process-output nil 0.03))
+    (should (eq ran :unset))
+    (setq ebp-sync--exit-fn-running nil)
+    (cl-loop repeat 20 until (not (eq ran :unset))
+             do (accept-process-output nil 0.03))
     (should (eq ran t))))
 
 (ert-deftest jetpacs-floor-build-does-not-inherit-across-a-dispatch ()

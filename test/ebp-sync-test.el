@@ -956,5 +956,30 @@ installed no backends never pays for a pass."
           (when ebp-sync--diag-timer (cancel-timer ebp-sync--diag-timer))
           (ebp-sync-detach))))))
 
+(ert-deftest ebp-sync-publish-hook-collects-soon ()
+  "publishDiagnostics latency (R2): the :after method is REGISTERED on
+eglot's generic — a helper-only test would pass with the method
+unwired, the house lesson — and `ebp-sync--collect-soon' re-arms the
+attached buffer's push at the short delay with the quiet chase reset."
+  (should (cl-find-method #'eglot-handle-notification '(:after)
+                          '(t (eql textDocument/publishDiagnostics))))
+  (ebp-sync-test--with-file-buffer "ebp-r2-pub" "x = 1\n"
+    (let ((ebp-sync-diagnostics t))
+      (ebp-sync-attach client "doc:r1" "body" buf)
+      ;; The URI->buffer resolver reads the ATTACH table.
+      (should (eq (ebp-sync--buffer-for-path file) buf))
+      (should-not (ebp-sync--buffer-for-path "/nonexistent/nope.py"))
+      (when ebp-sync--diag-timer (cancel-timer ebp-sync--diag-timer))
+      (setq ebp-sync--diag-timer nil ebp-sync--diag-quiet 2)
+      (ebp-sync--collect-soon buf)
+      (should ebp-sync--diag-timer)
+      (should (= ebp-sync--diag-quiet 0))
+      ;; The short latency delay, not the 3s settle.
+      (should (< (- (float-time (timer--time ebp-sync--diag-timer))
+                    (float-time))
+                 1.0))
+      (cancel-timer ebp-sync--diag-timer)
+      (setq ebp-sync--diag-timer nil))))
+
 (provide 'ebp-sync-test)
 ;;; ebp-sync-test.el ends here

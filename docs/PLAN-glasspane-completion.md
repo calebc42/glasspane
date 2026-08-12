@@ -68,15 +68,72 @@ fresher offer in DeviceBridge's latest-write-wins map; taps on it are
 refused by selectCompletion's seq gate, so it self-heals on the next
 keystroke.
 
-## R1 — eglot lifecycle port (the v1 crown jewels)
+## R1 — eglot lifecycle port (the v1 crown jewels) (LANDED)
 
-Port from poc-v1 `core/jetpacs-sync.el`: the headless `eglot--connect`
-workaround (`eglot-ensure` defers to `post-command-hook`, which never
-fires headless; v1:169-190), reconnect-on-open with 30s throttle for
-OS-reaped servers (v1:192-205), the in-process elisp flymake backend
-(no `emacs -batch` subprocess on Android; v1:458-543), and the explicit
-`flymake-start` kick per edit (v1:354-360). After R0+R1: LSP completion
-+ diagnostics + hover on device = v1 parity for programming modes.
+Ported from poc-v1 `core/jetpacs-sync.el` into ebp-sync.el's new
+"language tooling arm" section, with four deliberate deltas from the
+reference:
+
+- v1's two-arm buffer strategy (real buffers for eglot modes, shadows
+  otherwise) is NOT ported — v3 binds real buffers universally, so
+  only the lifecycle logic was missing. `ebp-sync--ensure-eglot` runs
+  at every attach: direct async `eglot--connect` (the `eglot-ensure`
+  `post-command-hook` deferral never fires headless — verified at
+  emacs-30.1 eglot.el:1455-1476), 30s buffer-local throttle that both
+  prevents double-connect races and spaces the reopen attempts that
+  revive an OS-reaped server. Gated by `ebp-sync-eglot` +
+  `ebp-sync-eglot-modes` (elisp/org excluded on purpose).
+- The gate got a `file-remote-p`-before-`file-exists-p` guard v1
+  lacked — the house remote-before-stat invariant.
+- The in-process elisp flymake backend (paren scan + temp-copy
+  byte-compile, no `emacs -batch`) is swapped in at attach and
+  RESTORED at detach: v1 swapped inside jetpacs-owned shadows, but v3
+  binds the USER's buffer, so the swap is session-scoped.
+  `ebp-sync-elisp-repl` carries the REPL lexical-binding-cookie
+  variant for a future REPL attacher (the hub editor is not attached
+  yet).
+- The `flymake-start` kick per arm (headless idle timers unreliable)
+  is gated on real backends. Test lesson: `flymake-mode`'s own enable
+  calls `flymake-start` internally — a kick test must reset its
+  counter after attach or it counts stock behavior.
+
+Adversarial review (14 raw findings, 6 distinct confirmed, all fixed
+same day):
+
+- **The throttle is PROJECT-keyed** (`ebp-sync--eglot-attempts`), not
+  buffer-local: with `eglot-sync-connect` nil the server reaches
+  `eglot-current-server` only after the async initialize handshake, so
+  a buffer-local stamp let a second file of the same project spawn a
+  second server during cold init — leaked process, project silently
+  split across two servers. (A faithfully-ported v1 bug.)
+- The in-process backend **widens** — the stock backend it replaces
+  widens too, and the wire ships whole-document offsets; unwidened, a
+  narrowed buffer shipped spurious paren errors and misplaced
+  squiggles.
+- The `flymake-start` kick moved **off the dispatch path onto the
+  settle timer** (`ebp-sync--push-diagnostics`), and the flymake
+  enable is start-suppressed — a synchronous whole-buffer compile per
+  keystroke inside the jsonrpc callback was the hot-path finding; a
+  plain `run-at-time` timer fires fine headless, which was the whole
+  rationale.
+- The swap is **platform-gated** (`ebp-sync-elisp-inprocess`, default
+  Android-only): in-process compilation runs macro expansion in the
+  LIVE session and a pathological form can wedge a headless Emacs, so
+  stock's subprocess isolation stays wherever spawning works.
+- The in-process compile **mirrors stock's 30.1 `trusted-content-p`
+  gate** (macro expansion IS evaluation), degrading to paren diags +
+  one :note instead of stock's user-error.
+- The paren pre-scan **no longer suppresses compile diagnostics** (an
+  unescaped `?(` char literal false-positives it); the truly-unbalanced
+  case drops the compile's duplicate end-of-file error.
+
+Stated, accepted deltas (in the backend docstring): sibling `require`s
+unresolved (no "-L ." equivalent), and compile-time evaluation runs
+live on the Android path — both are why the gate defaults off
+everywhere else.
+
+After R0+R1: LSP completion + diagnostics + hover on device = v1
+parity for programming modes, pending the desktop-uds/device smoke.
 
 ## R2 — exit-function + additionalTextEdits
 

@@ -446,13 +446,14 @@ candidate for a future minimality clause, not blocking here.
    states; compat demoted to corollary), all accept emissions through
    the single `selectCompletion` funnel, pins in both directions,
    Emacs shape check retained as the last seam.
-2. ~~**#171 matching policy**~~ — **RESOLVED 2026-08-13 by design
-   review**: the emission-time re-proof against the Companion's active
-   predicate is normative; the predicate family is closed at two
-   (strict prefix / contains), and which is active is user-settable
-   presentation. Awaiting the owner's ratification of the restructured
-   section.
-3. **#172 doc cap** — 16384 octets is proposed; any preference?
+2. ~~**#171 matching policy**~~ — **RATIFIED 2026-08-13**: the
+   emission-time re-proof against the Companion's active predicate is
+   normative; the predicate family is closed at two (strict prefix /
+   contains), and which is active is user-settable presentation.
+3. ~~**#172 doc cap**~~ — **RATIFIED 2026-08-13**: 16384 octets,
+   truncating at a scalar boundary; pagination deliberately absent
+   (an `offset` param is a one-row amendment if ever wanted; a long
+   document belongs to `surface.update`). #172 is fully ratified.
 4. **Numbering** — #169–#172 assumed; renumber freely.
 5. **Sequencing** — ratify #170 alone first if R2's forgery fix should
    ship ahead of the UX rungs; #169 and #172 are independent of each

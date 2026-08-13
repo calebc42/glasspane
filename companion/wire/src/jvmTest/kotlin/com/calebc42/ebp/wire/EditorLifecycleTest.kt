@@ -702,4 +702,158 @@ class EditorLifecycleTest {
         assertEquals("B", out.method("edit.open").last()
             .reqObj("params").reqString("text"))
     }
+
+    // -------------------------- R5 (amendment #172): edit.candidate.doc
+
+    private fun answerDoc(engine: CompanionEngine, req: JsonObject,
+                          body: JsonObject) {
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", req["id"]!!)
+            put("result", body)
+        }))
+    }
+
+    @Test
+    fun candidateDocCarriesTheFrozenPairMidExtension() {
+        // The comparand is the RETAINED reply's (session, seq), supplied by
+        // the CALLER - never live engine state, whose seq has legitimately
+        // advanced past the reply's during a #171 extension. A live-state
+        // reading would emit a request Emacs must refuse, in exactly the
+        // window the method exists for.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        var frozen: Pair<String, Long>? = null
+        engine.requestCompletion("doc:1", "body") { _, _, session, seq, _ ->
+            frozen = session to seq }
+        val req = out.method("edit.complete").single()
+        answerDoc(engine, req, buildJsonObject {
+            put("prefix", "pri")
+            put("candidates", buildJsonArray {
+                addJsonObject { put("label", "printing") }
+            })
+        })
+        // A qualifying extension: the LIVE seq moves past the frozen pair.
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(3), 0, "n"))
+        assertEquals(1L, s.seq)
+        assertEquals(0L, frozen!!.second)
+        var concluded = 0
+        var doc: String? = null
+        assertTrue(engine.requestCandidateDoc("doc:1", "body",
+            frozen!!.first, frozen!!.second, 0) { d -> concluded++; doc = d })
+        val dreq = out.method("edit.candidate.doc").single()
+        val p = dreq["params"] as JsonObject
+        assertEquals(JsonPrimitive(frozen!!.first), p["session"])
+        assertEquals(JsonPrimitive(0), p["seq"])
+        assertEquals(JsonPrimitive(0), p["index"])
+        answerDoc(engine, dreq, buildJsonObject { put("doc", "Prints things.") })
+        assertEquals(1, concluded)
+        assertEquals("Prints things.", doc)
+    }
+
+    @Test
+    fun candidateDocExplicitEmptyDocIsAValidConclusion() {
+        // {"doc": ""} is the MAY-be-empty arm - a valid doc, not a discard:
+        // the universal degradation answer must reach the display layer as
+        // a conclusion, or its one-outstanding slot never frees.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        var concluded = 0
+        var doc: String? = "sentinel"
+        assertTrue(engine.requestCandidateDoc("doc:1", "body", "s", 0, 0) {
+            d -> concluded++; doc = d })
+        answerDoc(engine, out.method("edit.candidate.doc").single(),
+            buildJsonObject { put("doc", "") })
+        assertEquals(1, concluded)
+        assertEquals("", doc)
+    }
+
+    @Test
+    fun candidateDocMalformedRepliesConcludeWithNull() {
+        // Discard-whole mirrors requestCompletion - an unknown result
+        // member or a wrong-typed doc publishes nothing - but the
+        // conclusion still fires (null), splitting conclusion from
+        // publication (R5 review F8/F12).
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        val docs = mutableListOf<String?>()
+        assertTrue(engine.requestCandidateDoc("doc:1", "body", "s", 0, 0) {
+            d -> docs.add(d) })
+        answerDoc(engine, out.method("edit.candidate.doc").last(),
+            buildJsonObject { put("doc", "x"); put("extra", 1) })
+        assertTrue(engine.requestCandidateDoc("doc:1", "body", "s", 0, 1) {
+            d -> docs.add(d) })
+        answerDoc(engine, out.method("edit.candidate.doc").last(),
+            buildJsonObject { put("doc", 5) })
+        assertEquals(listOf<String?>(null, null), docs)
+    }
+
+    @Test
+    fun candidateDocErrorConcludesAndNeverWedges() {
+        // A 1201 (editor-stale, out-of-range) or -32601 (a pre-R5 Emacs)
+        // is a silent no-op for the DISPLAY but the request still
+        // concludes - without the callback, a one-outstanding slot marks
+        // in-flight forever and docs die for the editor (the wedge). A
+        // later highlight still issues.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        val docs = mutableListOf<String?>()
+        assertTrue(engine.requestCandidateDoc("doc:1", "body", "s", 7, 0) {
+            d -> docs.add(d) })
+        val dreq = out.method("edit.candidate.doc").single()
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", dreq["id"]!!)
+            put("error", buildJsonObject {
+                put("code", 1201)
+                put("message", "Editor stale")
+                put("data", buildJsonObject {
+                    put("kind", "content-invalid")
+                    put("reason", "editor-stale")
+                })
+            })
+        }))
+        assertEquals(listOf<String?>(null), docs)
+        // The conclusion freed the caller: a fresh request still emits.
+        assertTrue(engine.requestCandidateDoc("doc:1", "body", "s", 0, 0) {
+            d -> docs.add(d) })
+        assertEquals(2, out.method("edit.candidate.doc").size)
+    }
+
+    @Test
+    fun candidateDocAndCompletionGateOnOpenAndReady() {
+        // The OPEN+READY gate (R5 review F21: contract states are
+        // ["READY"], and requestCompletion's identical gate had no wire
+        // test either). SYNCING emits no frame; nor does a non-OPEN
+        // editor session; nor an unknown tuple.
+        val syncingOut = mutableListOf<JsonObject>()
+        val syncing = engine(syncingOut, toReady = false)
+        syncing.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        var fired = false
+        assertFalse(syncing.requestCandidateDoc("doc:1", "body", "s", 0, 0) {
+            fired = true })
+        syncing.requestCompletion("doc:1", "body") { _, _, _, _, _ ->
+            fired = true }
+        assertEquals(0, syncingOut.method("edit.candidate.doc").size)
+        assertEquals(0, syncingOut.method("edit.complete").size)
+        assertFalse(fired)
+
+        val out = mutableListOf<JsonObject>()
+        val ready = engine(out)
+        val s = ready.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        s.state = EditorSession.State.STALE
+        assertFalse(ready.requestCandidateDoc("doc:1", "body", "s", 0, 0) {
+            fired = true })
+        ready.requestCompletion("doc:1", "body") { _, _, _, _, _ ->
+            fired = true }
+        assertEquals(0, out.method("edit.candidate.doc").size)
+        assertEquals(0, out.method("edit.complete").size)
+        assertFalse(ready.requestCandidateDoc("doc:none", "body", "s", 0, 0) {
+            fired = true })
+        assertFalse(fired)
+    }
 }

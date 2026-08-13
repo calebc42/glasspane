@@ -766,6 +766,174 @@ auto-import must not silently vanish — and the re-arm is capped."
 
 ;;;; The ebp seam
 
+;;;; Candidate docs (amendment #172, R5): the harvester's provider
+
+(ert-deftest ebp-complete-doc-provider-serves-from-the-harvest-buffer ()
+  "R5's P1 pin, wire-riding by construction: jsonrpc dispatches every
+handler inside a `with-temp-buffer', where eglot's buffer-local server
+resolution would signal and every doc silently degrade to \"\" — so
+the provider must re-enter the HARVEST buffer around the doc-fn.  The
+fixture doc-fn DERIVES its doc from the candidate's text property (the
+PROPERTIZED original, not the wire strip) and from `current-buffer's
+name, and the test asserts that exact content in the RESULT: a bare
+`should' inside the closure would be swallowed by the provider's own
+condition-case (`ert-test-failed' derives from `error') and surface
+only as \"\".  The doc-fn answers elisp-mode's convention — the
+buffer NAME."
+  (ebp-complete-test--with-live-buffer "zz-"
+    (setq-local completion-at-point-functions
+                (list (lambda ()
+                        (list (- (point) 3) (point)
+                              (list (propertize "zz-doc-needle"
+                                                'ebp-doc "PROP"))
+                              :company-doc-buffer
+                              (lambda (cand)
+                                (let ((ctx (buffer-name (current-buffer)))
+                                      (prop (get-text-property
+                                             0 'ebp-doc cand)))
+                                  (with-current-buffer
+                                      (get-buffer-create " *r5 doc*")
+                                    (erase-buffer)
+                                    (insert (format "%s|%s" prop ctx))
+                                    (buffer-name))))))))
+    (puthash "doc:r0-live.el" #'ebp-complete-edit-complete
+             (ebp-client-edit-complete-overrides client))
+    (let ((reply (ebp-client--handle-edit-complete
+                  client '(:document "doc:r0-live.el" :editor_id "body"
+                           :session "S" :seq 0 :cursor 3))))
+      (should (equal (plist-get (aref (plist-get reply :candidates) 0)
+                                :label)
+                     "zz-doc-needle")))
+    (with-temp-buffer
+      (should (equal (plist-get
+                      (ebp-client--handle-candidate-doc
+                       client '(:document "doc:r0-live.el" :editor_id "body"
+                                :session "S" :seq 0 :index 0))
+                      :doc)
+                     (format "PROP|%s" (buffer-name buf)))))))
+
+(ert-deftest ebp-complete-doc-provider-aligns-with-the-shipped-list ()
+  "The originals vector pairs the SHIPPED order — sorted shortest-first,
+deduped, prefix-deleted — never the raw capf order (the mutant: armed
+at the extras snapshot instead of finalization).  Docs must follow the
+wire indices the Companion highlights."
+  (ebp-complete-test--with-live-buffer "pre"
+    (setq-local completion-at-point-functions
+                (list (lambda ()
+                        (list (- (point) 3) (point)
+                              ;; RAW order: longest first, a duplicate,
+                              ;; and the typed prefix itself.
+                              (list "pre-longest-zz" "pre-b" "pre-b"
+                                    "pre" "pre-a")
+                              :company-doc-buffer
+                              (lambda (cand)
+                                (with-current-buffer
+                                    (get-buffer-create " *r5 align*")
+                                  (erase-buffer)
+                                  (insert (format "doc-of:%s"
+                                                  (substring-no-properties
+                                                   cand)))
+                                  (current-buffer)))))))
+    (puthash "doc:r0-live.el" #'ebp-complete-edit-complete
+             (ebp-client-edit-complete-overrides client))
+    (let* ((reply (ebp-client--handle-edit-complete
+                   client '(:document "doc:r0-live.el" :editor_id "body"
+                            :session "S" :seq 0 :cursor 3)))
+           (labels (mapcar (lambda (c) (plist-get c :label))
+                           (append (plist-get reply :candidates) nil))))
+      (should (equal labels '("pre-a" "pre-b" "pre-longest-zz")))
+      (dotimes (i 3)
+        (should (equal (plist-get
+                        (ebp-client--handle-candidate-doc
+                         client (list :document "doc:r0-live.el"
+                                      :editor_id "body" :session "S"
+                                      :seq 0 :index i))
+                        :doc)
+                       (format "doc-of:%s" (nth i labels))))))))
+
+(ert-deftest ebp-complete-doc-provider-resets-across-arms ()
+  "The cross-arm leak (R5 review F3/F13): a live capf offering only the
+typed token ships nothing (the sole-candidate delete), the SHADOW
+answers — and the provider must be NIL, never the live arm's leftovers
+serving docs against the shadow's candidate list.  Word-fallback and
+no-capf runs RESET the variable rather than leaving it alone."
+  (ebp-complete-test--with-live-buffer "zzz zzz-other"
+    (setq-local completion-at-point-functions
+                (list (lambda ()
+                        (list (- (point) 3) (point) '("zzz")
+                              :company-doc-buffer
+                              (lambda (_cand)
+                                (with-current-buffer
+                                    (get-buffer-create " *r5 leak*")
+                                  (erase-buffer)
+                                  (insert "live-doc")
+                                  (current-buffer)))))))
+    (puthash "doc:r0-live.el" #'ebp-complete-edit-complete
+             (ebp-client-edit-complete-overrides client))
+    (let ((reply (ebp-client--handle-edit-complete
+                  client '(:document "doc:r0-live.el" :editor_id "body"
+                           :session "S" :seq 0 :cursor 3))))
+      ;; The stubbed shadow answered.
+      (should (equal (plist-get reply :prefix) "sh"))
+      (should shadow-ran))
+    (should (equal (ebp-client--handle-candidate-doc
+                    client '(:document "doc:r0-live.el" :editor_id "body"
+                             :session "S" :seq 0 :index 0))
+                   '(:doc "")))
+    ;; The reset is the harvester's own contract, independent of the
+    ;; handler's let-binding: a poisoned provider entering a run that
+    ;; ships no capf list does not survive it.
+    (let ((ebp-edit-complete-doc-provider (lambda (_i) "poison")))
+      (ebp-complete-edit-complete "doc:r0-live.el" "body"
+                                  "zzz zzz-other" 3)
+      (should-not ebp-edit-complete-doc-provider))))
+
+(ert-deftest ebp-complete-doc-provider-degrades ()
+  "A doc-fn slower than `ebp-complete-doc-timeout', a fetch arriving
+while the latch is up (the nested-dispatch window), and a doc-fn error
+all answer \"\" on the wire — and the same retained provider answers
+normally once nothing degrades."
+  (ebp-complete-test--with-live-buffer "pre"
+    (let ((mode 'ok))
+      (setq-local completion-at-point-functions
+                  (list (lambda ()
+                          (list (- (point) 3) (point) '("pre-needle")
+                                :company-doc-buffer
+                                (lambda (_cand)
+                                  (pcase mode
+                                    ('slow
+                                     (let ((deadline (+ (float-time) 5)))
+                                       (while (< (float-time) deadline)
+                                         (accept-process-output nil 0.02)))
+                                     nil)
+                                    ('boom (error "boom"))
+                                    ('ok
+                                     (with-current-buffer
+                                         (get-buffer-create " *r5 deg*")
+                                       (erase-buffer)
+                                       (insert "fine")
+                                       (current-buffer)))))))))
+      (puthash "doc:r0-live.el" #'ebp-complete-edit-complete
+               (ebp-client-edit-complete-overrides client))
+      (ebp-client--handle-edit-complete
+       client '(:document "doc:r0-live.el" :editor_id "body"
+                :session "S" :seq 0 :cursor 3))
+      (let ((fetch (lambda ()
+                     (plist-get
+                      (ebp-client--handle-candidate-doc
+                       client '(:document "doc:r0-live.el" :editor_id "body"
+                                :session "S" :seq 0 :index 0))
+                      :doc))))
+        (setq mode 'slow)
+        (let ((ebp-complete-doc-timeout 0.05))
+          (should (equal (funcall fetch) "")))
+        (setq mode 'boom)
+        (should (equal (funcall fetch) ""))
+        (setq mode 'ok)
+        (let ((ebp-complete--live-harvest-active t))
+          (should (equal (funcall fetch) "")))
+        (should (equal (funcall fetch) "fine"))))))
+
 (ert-deftest ebp-complete-override-beats-the-client-wide-default ()
   "ebp.el consults `ebp-client-edit-complete-overrides' before the
 config's client-wide function, and only for the registered document —

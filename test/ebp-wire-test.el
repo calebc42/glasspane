@@ -1874,5 +1874,342 @@ still ignored, over the live path with the sentinel in place."
                       (error :signalled))))
         (ignore replies)))))
 
+;;;; Amendment #172 (R5): edit.candidate.doc against the RETAINED reply
+
+(defun ebp-test--candidate-client (&optional fn)
+  "A connectionless client mirroring \"doc:cd\"/\"body\" at seq 4.
+FN, when given, is the client-wide completion function."
+  (let ((client (apply #'ebp-client-create
+                       :receipt-file (make-temp-file "ebp-test-receipts")
+                       (when fn (list :edit-complete-function fn)))))
+    (puthash (cons "doc:cd" "body")
+             (list :session (make-string 32 ?a) :seq 4 :text "ab" :cursor 2)
+             (ebp-client-editors client))
+    client))
+
+(defun ebp-test--candidate-doc (client seq index &optional session)
+  "Drive `ebp-client--handle-candidate-doc' for the fixture editor."
+  (ebp-client--handle-candidate-doc
+   client (list :document "doc:cd" :editor_id "body"
+                :session (or session (make-string 32 ?a))
+                :seq seq :index index)))
+
+(defun ebp-test--candidate-doc-code (client seq index &optional session)
+  "The `jsonrpc-error' code the fixture request signals."
+  (let ((err (should-error (ebp-test--candidate-doc client seq index session)
+                           :type 'jsonrpc-error)))
+    (alist-get 'jsonrpc-error-code (cdr err))))
+
+(ert-deftest ebp-test-candidate-doc-comparand-is-the-retained-reply ()
+  "Amendment #172: the comparand is the RETAINED `edit.complete' reply,
+never the live mirror.  After a qualifying delta advances the mirror —
+the #171-extension window the method exists for — the retained seq
+answers and the LIVE seq is refused; a live-mirror comparand would
+flip both.  The session half stands alone: a matching seq under a
+different session is stale (after a resync, seq restarts at 0 and can
+re-reach the retained value, so seq alone cannot carry the epoch)."
+  (let* ((session (make-string 32 ?a))
+         (client (ebp-test--candidate-client
+                  (lambda (_doc _eid _text _cursor)
+                    (setq ebp-edit-complete-doc-provider
+                          (lambda (i) (format "doc-%d" i)))
+                    (cons "a" (list (list :label "alpha")
+                                    (list :label "beta")))))))
+    (ebp-client--handle-edit-complete
+     client (list :document "doc:cd" :editor_id "body"
+                  :session session :seq 4 :cursor 2))
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:cd" :editor_id "body" :session session
+                  :seq 5 :start 2 :del 0 :text "c" :len 3))
+    (should (equal (ebp-test--candidate-doc client 4 0) '(:doc "doc-0")))
+    (should (equal (ebp-test--candidate-doc-code client 5 0) 1201))
+    (should (equal (ebp-test--candidate-doc-code
+                    client 4 0 (make-string 32 ?b))
+                   1201))))
+
+(ert-deftest ebp-test-candidate-doc-minted-on-every-arm-and-superseded ()
+  "The cell is minted on EVERY answer including the no-fn empty arm
+\(count 0, provider nil — any index is out of range, a bare 1201
+distinct from stale), and the next answer for the same key supersedes
+it in place."
+  (let* ((client (ebp-test--candidate-client))
+         (params (list :document "doc:cd" :editor_id "body"
+                       :session (make-string 32 ?a) :seq 4 :cursor 2)))
+    ;; No fn at all: the empty arm still mints.
+    (ebp-client--handle-edit-complete client params)
+    (should (equal (ebp-test--candidate-doc-code client 4 0) 1201))
+    ;; An override supersedes the retained cell at the same seq.
+    (puthash "doc:cd"
+             (lambda (_doc _eid _text _cursor)
+               (setq ebp-edit-complete-doc-provider
+                     (lambda (i) (format "over-%d" i)))
+               (cons "o" (list (list :label "one"))))
+             (ebp-client-edit-complete-overrides client))
+    (ebp-client--handle-edit-complete client params)
+    (should (equal (ebp-test--candidate-doc client 4 0) '(:doc "over-0")))))
+
+(ert-deftest ebp-test-candidate-doc-out-of-order-supersession ()
+  "R5 review F9: retention is gated on the answer still being CURRENT.
+A nested `edit.complete' dispatched under a blocking harvest answers
+FIRST (at seq N+1); the outer, older answer (at seq N) returning
+afterwards must NOT overwrite the newer cell — otherwise the
+Companion's displayed offer points at a reply Emacs no longer retains
+and every doc request 1201s in exactly the slow-LSP-plus-typing
+window."
+  (let* ((session (make-string 32 ?a))
+         (outer-ran nil)
+         client)
+    (setq client
+          (ebp-test--candidate-client
+           (lambda (_doc _eid _text _cursor)
+             (if outer-ran
+                 (progn
+                   (setq ebp-edit-complete-doc-provider
+                         (lambda (i) (format "inner-%d" i)))
+                   (cons "i" (list (list :label "inner"))))
+               (setq outer-ran t)
+               ;; What the process filter does under a blocking wait:
+               ;; a delta advances the mirror, a nested edit.complete
+               ;; answers at the new seq.
+               (ebp-client--handle-edit-delta
+                client (list :document "doc:cd" :editor_id "body"
+                             :session session :seq 5 :start 2 :del 0
+                             :text "c" :len 3))
+               (ebp-client--handle-edit-complete
+                client (list :document "doc:cd" :editor_id "body"
+                             :session session :seq 5 :cursor 3))
+               (setq ebp-edit-complete-doc-provider
+                     (lambda (i) (format "outer-%d" i)))
+               (cons "o" (list (list :label "outer-a")
+                               (list :label "outer-b")))))))
+    (ebp-client--handle-edit-complete
+     client (list :document "doc:cd" :editor_id "body"
+                  :session session :seq 4 :cursor 2))
+    (should (equal (ebp-test--candidate-doc client 5 0) '(:doc "inner-0")))
+    (should (equal (ebp-test--candidate-doc-code client 4 0) 1201))))
+
+(ert-deftest ebp-test-candidate-doc-index-arms ()
+  "Index -1 and count are 1201; count-1 answers.  The integral-float
+twin: 1.0 and 4.0 are the integers they equal (`integralLongOrNull'
+reads by VALUE on the Kotlin side, and a plain `integerp' here would
+diverge on the same frame); 5.5 and a string seq are one -32602 arm —
+never a `wrong-type-argument' escaping as -32603."
+  (let ((client (ebp-test--candidate-client
+                 (lambda (_doc _eid _text _cursor)
+                   (setq ebp-edit-complete-doc-provider
+                         (lambda (i) (format "d-%d" i)))
+                   (cons "p" (list (list :label "one")
+                                   (list :label "two")))))))
+    (ebp-client--handle-edit-complete
+     client (list :document "doc:cd" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 4 :cursor 2))
+    (should (equal (ebp-test--candidate-doc-code client 4 -1) 1201))
+    (should (equal (ebp-test--candidate-doc-code client 4 2) 1201))
+    (should (equal (ebp-test--candidate-doc client 4 1.0) '(:doc "d-1")))
+    (should (equal (ebp-test--candidate-doc client 4.0 0) '(:doc "d-0")))
+    (should (equal (ebp-test--candidate-doc-code client 4 5.5) -32602))
+    (should (equal (ebp-test--candidate-doc-code client "4" 0) -32602))
+    (let ((err (should-error
+                (ebp-client--handle-candidate-doc
+                 client '(:document "doc:cd" :editor_id "body"
+                          :session "x" :seq 4))
+                :type 'jsonrpc-error)))
+      (should (equal (alist-get 'jsonrpc-error-code (cdr err)) -32602)))))
+
+(ert-deftest ebp-test-candidate-doc-outlives-the-accept ()
+  "The applied goldens' lifetime pin (frames.golden 46-48): the accept
+delta at seq 5 claims the completion OFFER, not the retained cell — a
+doc request at the retained seq 4 still answers afterwards.  Clearing
+is the #151 memory bound at session events, not an accept side
+effect."
+  (let* ((session (make-string 32 ?a))
+         (client (ebp-test--candidate-client
+                  (lambda (_doc _eid _text _cursor)
+                    (setq ebp-edit-complete-doc-provider
+                          (lambda (i) (format "d-%d" i)))
+                    (cons "p" (list (list :label "print")))))))
+    (ebp-client--handle-edit-complete
+     client (list :document "doc:cd" :editor_id "body"
+                  :session session :seq 4 :cursor 2))
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:cd" :editor_id "body" :session session
+                  :seq 5 :start 0 :del 2 :text "print()" :len 7
+                  :accept t))
+    (should (equal (ebp-test--candidate-doc client 4 0) '(:doc "d-0")))))
+
+(ert-deftest ebp-test-candidate-doc-session-event-clears ()
+  "The four ebp.el session events reclaim the cell: edit.close,
+edit.open's reseed, the edit.resync callback's replace, and
+forget-pairing's clrhash."
+  (let* ((session (make-string 32 ?a))
+         (fn (lambda (_doc _eid _text _cursor)
+               (setq ebp-edit-complete-doc-provider (lambda (_i) "d"))
+               (cons "p" (list (list :label "one")))))
+         (client (ebp-test--candidate-client fn))
+         (arm (lambda (seq)
+                (ebp-client--handle-edit-complete
+                 client (list :document "doc:cd" :editor_id "body"
+                              :session session :seq seq :cursor 2)))))
+    ;; close
+    (funcall arm 4)
+    (ebp-client--handle-edit-close
+     client '(:document "doc:cd" :editor_id "body"))
+    (should (equal (ebp-test--candidate-doc-code client 4 0) 1201))
+    ;; reseed (edit.open over a live cell)
+    (ebp-client--handle-edit-open
+     client (list :document "doc:cd" :editor_id "body"
+                  :session session :seq 4 :text "ab" :cursor 2))
+    (funcall arm 4)
+    (ebp-client--handle-edit-open
+     client (list :document "doc:cd" :editor_id "body"
+                  :session (make-string 32 ?b) :seq 0 :text "ab" :cursor 2))
+    (should (equal (ebp-test--candidate-doc-code client 4 0) 1201))
+    ;; resync: the callback replacing the mirror drops the cell — the
+    ;; fresh session restarts seq at 0, which can re-reach a retained
+    ;; value, so the cell must not survive on the seq comparand alone.
+    (let (captured)
+      (cl-letf (((symbol-function 'ebp-client--request)
+                 (lambda (_c _method _params cb &optional _t)
+                   (setq captured cb))))
+        (puthash (cons "doc:cd" "body")
+                 (list :session session :seq 4 :text "ab" :cursor 2)
+                 (ebp-client-editors client))
+        (funcall arm 4)
+        (ebp-client-edit-resync client "doc:cd" "body")
+        (funcall captured
+                 (list :session (make-string 32 ?c) :seq 0
+                       :text "ab" :cursor 2)
+                 nil))
+      (should (equal (ebp-test--candidate-doc-code client 4 0) 1201)))
+    ;; forget-pairing
+    (puthash (cons "doc:cd" "body")
+             (list :session session :seq 4 :text "ab" :cursor 2)
+             (ebp-client-editors client))
+    (funcall arm 4)
+    (should (= (hash-table-count (ebp-client-candidate-replies client)) 1))
+    (ebp-client-forget-pairing client)
+    (should (= (hash-table-count (ebp-client-candidate-replies client)) 0))))
+
+(ert-deftest ebp-test-candidate-doc-cap-boundaries ()
+  "The SHOULD-cap truncates at a Unicode-scalar boundary at or below
+16384 UTF-8 octets.  Three pins the single \"<= 16384\" assertion
+cannot give (R5 review F20): a doc of exactly the cap ships
+UNTRUNCATED; a 2-byte-char doc lands EXACTLY on the cap; a 3-byte-char
+doc lands one octet BELOW it (16383), because the scalar boundary sits
+there — a converge-one-short binary search fails the second, an
+off-by-one the first or third."
+  (let* ((exact (make-string 16384 ?x))
+         (two-byte (make-string 9000 ?é))
+         (three-byte (make-string 6000 ?€))
+         (client (ebp-test--candidate-client
+                  (lambda (_doc _eid _text _cursor)
+                    (setq ebp-edit-complete-doc-provider
+                          (lambda (i)
+                            (nth i (list exact two-byte three-byte))))
+                    (cons "p" (list (list :label "a") (list :label "b")
+                                    (list :label "c")))))))
+    (ebp-client--handle-edit-complete
+     client (list :document "doc:cd" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 4 :cursor 2))
+    (should (equal (plist-get (ebp-test--candidate-doc client 4 0) :doc)
+                   exact))
+    (let ((d (plist-get (ebp-test--candidate-doc client 4 1) :doc)))
+      (should (= (string-bytes d) 16384))
+      (should (equal d (substring two-byte 0 8192))))
+    (let ((d (plist-get (ebp-test--candidate-doc client 4 2) :doc)))
+      (should (= (string-bytes d) 16383))
+      (should (equal d (substring three-byte 0 5461))))))
+
+(ert-deftest ebp-test-candidate-doc-degrades-to-empty ()
+  "Every provider failure is \"\" on the wire, never -32603: a
+provider that signals, answers a non-string, answers a raw-byte string
+or a lone surrogate (both refused by json.c AFTER a handler returns —
+the pre-flight serialize gate is the last link), and a reply whose fn
+set no provider at all."
+  (let ((client (ebp-test--candidate-client
+                 (lambda (_doc _eid _text _cursor)
+                   (setq ebp-edit-complete-doc-provider
+                         (lambda (i)
+                           (pcase i
+                             (0 (error "boom"))
+                             (1 42)
+                             (2 (concat "x" (string 4194176)))
+                             (3 (string #xD800))
+                             (4 "fine"))))
+                   (cons "p" (list (list :label "a") (list :label "b")
+                                   (list :label "c") (list :label "d")
+                                   (list :label "e")))))))
+    (ebp-client--handle-edit-complete
+     client (list :document "doc:cd" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 4 :cursor 2))
+    (dotimes (i 4)
+      (should (equal (ebp-test--candidate-doc client 4 i) '(:doc ""))))
+    (should (equal (ebp-test--candidate-doc client 4 4) '(:doc "fine"))))
+  ;; A fn that returns candidates but arms nothing: the MAY-be-empty arm.
+  (let ((client (ebp-test--candidate-client
+                 (lambda (_doc _eid _text _cursor)
+                   (cons "p" (list (list :label "a")))))))
+    (ebp-client--handle-edit-complete
+     client (list :document "doc:cd" :editor_id "body"
+                  :session (make-string 32 ?a) :seq 4 :cursor 2))
+    (should (equal (ebp-test--candidate-doc client 4 0) '(:doc "")))))
+
+(ert-deftest ebp-test-candidate-doc-error-extras-on-the-wire ()
+  "R5 review F17: `ebp-client--error' stashes data extras on the
+CONNECTION, so only a real round trip can pin them — the connectionless
+fixtures above see bare 1201s on both arms.  The stale arm carries
+data.reason \"editor-stale\"; the range arm carries data.kind with NO
+reason member (the ratified text names a reason for the stale arm
+only)."
+  (let ((session (make-string 32 ?e)))
+    (ebp-test--with-companion
+        (server client
+                (ebp-test--kat-script
+                 :after-ready
+                 (lambda (send)
+                   (funcall send
+                            `(:jsonrpc "2.0" :method "edit.open"
+                              :params (:document "doc:cd" :editor_id "body"
+                                       :session ,session :seq 0
+                                       :text "ab" :cursor 2)))
+                   (funcall send
+                            `(:jsonrpc "2.0" :id "cpk" :method "edit.complete"
+                              :params (:document "doc:cd" :editor_id "body"
+                                       :session ,session :seq 0 :cursor 2)))
+                   (funcall send
+                            `(:jsonrpc "2.0" :id "cd-stale"
+                              :method "edit.candidate.doc"
+                              :params (:document "doc:cd" :editor_id "body"
+                                       :session ,session :seq 7 :index 0)))
+                   (funcall send
+                            `(:jsonrpc "2.0" :id "cd-range"
+                              :method "edit.candidate.doc"
+                              :params (:document "doc:cd" :editor_id "body"
+                                       :session ,session :seq 0
+                                       :index 0))))))
+      (ignore client)
+      (should (ebp-test--wait
+               (lambda ()
+                 (cl-find-if (lambda (m) (equal (alist-get 'id m) "cd-range"))
+                             (funcall (plist-get server :received))))))
+      (let* ((msgs (funcall (plist-get server :received)))
+             (stale (cl-find-if (lambda (m)
+                                  (equal (alist-get 'id m) "cd-stale"))
+                                msgs))
+             (range (cl-find-if (lambda (m)
+                                  (equal (alist-get 'id m) "cd-range"))
+                                msgs))
+             (stale-err (alist-get 'error stale))
+             (range-err (alist-get 'error range)))
+        (should (equal (alist-get 'code stale-err) 1201))
+        (should (equal (alist-get 'kind (alist-get 'data stale-err))
+                       "content-invalid"))
+        (should (equal (alist-get 'reason (alist-get 'data stale-err))
+                       "editor-stale"))
+        (should (equal (alist-get 'code range-err) 1201))
+        (should (equal (alist-get 'kind (alist-get 'data range-err))
+                       "content-invalid"))
+        (should-not (assq 'reason (alist-get 'data range-err)))))))
+
 (provide 'ebp-wire-test)
 ;;; ebp-wire-test.el ends here

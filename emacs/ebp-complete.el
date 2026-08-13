@@ -83,6 +83,12 @@
 ;; stays `cl-lib' (the delineation the commentary promises).
 (declare-function ebp-sync-attached-buffer "ebp-sync" (document editor-id))
 
+;; The other half of the same discipline: ebp.el's amendment-#172 doc
+;; seam is a dynamic variable this module SETQs during a harvest run
+;; (the handler let-binds it around the funcall and snapshots it after).
+;; A value-less `defvar' marks it special here without requiring ebp.
+(defvar ebp-edit-complete-doc-provider)
+
 (defgroup ebp-complete nil
   "Emacs completion served to Companion editors."
   :group 'ebp)
@@ -107,6 +113,17 @@ and `edit.complete' is answered inside a jsonrpc request handler, so a
 thinking server must cost a degraded answer, never a stuck session.
 The bound is best-effort (`with-timeout'): a backend waiting on process
 output is interrupted; one spinning in C without yielding is not."
+  :type 'number)
+
+(defcustom ebp-complete-doc-timeout 1.0
+  "Seconds a candidate-documentation fetch may block before answering nil.
+eglot's `:company-doc-buffer' performs a SYNCHRONOUS
+completionItem/resolve against its server (10s default jsonrpc
+timeout, waiting in sit-for), and `edit.candidate.doc' is answered
+inside the jsonrpc dispatch — a thinking server must cost a missing
+doc, never a stuck session.  Same best-effort limit as
+`ebp-complete-live-timeout': a backend spinning in C without yielding
+is not interrupted."
   :type 'number)
 
 (defcustom ebp-complete-debug nil
@@ -251,6 +268,10 @@ likeliest next keystroke saver), capped at
          (table (nth 2 data))
          (props (nthcdr 3 data))
          (ann-fn (plist-get props :annotation-function))
+         ;; Amendment #172 (R5): the capf's documentation entry point,
+         ;; read here and nowhere else.  eglot and every core elisp capf
+         ;; carry it (emacs-30.1 elisp-mode.el:727,744,760,811,818).
+         (doc-fn (plist-get props :company-doc-buffer))
          ;; Amendment #169: the candidate's category, from the ecosystem
          ;; convention capf backends already speak.  Gated by the
          ;; author-time registration (the sender-omit rule), and only
@@ -290,58 +311,93 @@ likeliest next keystroke saver), capped at
           (and cands
                (list :exit-fn (plist-get props :exit-function)
                      :raw cands)))
+    ;; R5: every collect RESETS the doc provider; only the finalization
+    ;; below re-arms it, for exactly the list that ships.  Leave-alone
+    ;; would be wrong for the arms that ship no capf list — a live arm
+    ;; can arm, ship nothing (the sole-candidate delete), fall through
+    ;; to the shadow, and a stale provider would then serve the LIVE
+    ;; arm's docs against the SHADOW's candidate list.
+    (setq ebp-edit-complete-doc-provider nil)
     ;; Empty capf result -> generic word fallback (org prose, unknown modes).
     (unless cands
       (when-let* ((fb (ebp-complete--word-fallback)))
         (setq prefix (car fb) cands (cdr fb)
-              ann-fn nil insert-fn nil kind-fn nil)))
+              ann-fn nil insert-fn nil kind-fn nil doc-fn nil)))
     (when cands
-      (setq cands (sort (delete-dups
-                         (mapcar #'substring-no-properties cands))
-                        (lambda (a b) (or (< (length a) (length b))
-                                          (and (= (length a) (length b))
-                                               (string< a b))))))
-      ;; Sole candidate == what's already typed: nothing to offer.
-      (setq cands (delete prefix cands))
-      (when cands
-        (cons prefix
-              (mapcar (lambda (c)
-                        (let ((node (list :label c)))
-                          (when-let* ((a (ebp-complete--annotate ann-fn c)))
-                            (setq node (append node (list :annotation a))))
-                          ;; Amendment #169: `kind', from the RAW twin
-                          ;; when one exists — eglot's kind rides text
-                          ;; properties the wire strip removed — and
-                          ;; FILTERED against the registered vocabulary:
-                          ;; Emacs MUST NOT send any other value, and a
-                          ;; backend's spelling is not a promise.
-                          (when kind-fn
-                            (let* ((raw (plist-get
-                                         ebp-complete--collect-extras :raw))
-                                   (orig (and raw
-                                              (cl-find-if
-                                               (lambda (r)
-                                                 (equal
-                                                  (substring-no-properties r)
-                                                  c))
-                                               raw)))
-                                   (k (condition-case nil
-                                          (funcall kind-fn (or orig c))
-                                        (error nil))))
-                              (when (and (symbolp k) k
-                                         (member (symbol-name k)
-                                                 ebp-complete-kind-vocabulary))
+      (let ((raw-map (make-hash-table :test #'equal :size (length cands))))
+        ;; The strip pass doubles as the pairing pass (R5 review F2):
+        ;; each stripped twin remembers its FIRST propertized original —
+        ;; the string whose text properties `:company-kind' (R3) and
+        ;; `:company-doc-buffer' (R5) read — for one gethash per
+        ;; candidate, where per-candidate probing would cost
+        ;; |shipped| x |raw| compares against an obarray-scale elisp
+        ;; harvest on the per-keystroke path.  `delete-dups' keeps the
+        ;; first duplicate, so first-wins is the choice it already makes.
+        (setq cands (sort (delete-dups
+                           (mapcar (lambda (r)
+                                     (let ((s (substring-no-properties r)))
+                                       (unless (gethash s raw-map)
+                                         (puthash s r raw-map))
+                                       s))
+                                   cands))
+                          (lambda (a b) (or (< (length a) (length b))
+                                            (and (= (length a) (length b))
+                                                 (string< a b))))))
+        ;; Sole candidate == what's already typed: nothing to offer.
+        (setq cands (delete prefix cands))
+        (when cands
+          (let ((shipped (seq-take cands ebp-complete-max-candidates)))
+            (when ebp-complete--collect-extras
+              (setq ebp-complete--collect-extras
+                    (plist-put ebp-complete--collect-extras
+                               :raw-map raw-map)))
+            ;; Arm the doc provider at THIS finalization (R5 review
+            ;; F3/F13): the originals vector is index-aligned with the
+            ;; wire list because nothing below drops or reorders.
+            (setq ebp-edit-complete-doc-provider
+                  (and doc-fn
+                       (ebp-complete--doc-provider
+                        doc-fn
+                        (vconcat (mapcar (lambda (c) (gethash c raw-map))
+                                         shipped))
+                        (current-buffer))))
+            (cons prefix
+                  (mapcar (lambda (c)
+                            (let ((node (list :label c)))
+                              (when-let* ((a (ebp-complete--annotate
+                                              ann-fn c)))
                                 (setq node (append node
-                                                   (list :kind
-                                                         (symbol-name k)))))))
-                          (let ((ins (and insert-fn
-                                          (condition-case nil
-                                              (funcall insert-fn c)
-                                            (error nil)))))
-                            (when (and (stringp ins) (not (equal ins c)))
-                              (setq node (append node (list :insert ins)))))
-                          node))
-                      (seq-take cands ebp-complete-max-candidates)))))))
+                                                   (list :annotation a))))
+                              ;; Amendment #169: `kind', from the RAW
+                              ;; twin when one exists — eglot's kind
+                              ;; rides text properties the wire strip
+                              ;; removed — and FILTERED against the
+                              ;; registered vocabulary: Emacs MUST NOT
+                              ;; send any other value, and a backend's
+                              ;; spelling is not a promise.
+                              (when kind-fn
+                                (let* ((orig (gethash c raw-map))
+                                       (k (condition-case nil
+                                              (funcall kind-fn (or orig c))
+                                            (error nil))))
+                                  (when (and (symbolp k) k
+                                             (member
+                                              (symbol-name k)
+                                              ebp-complete-kind-vocabulary))
+                                    (setq node
+                                          (append node
+                                                  (list :kind
+                                                        (symbol-name k)))))))
+                              (let ((ins (and insert-fn
+                                              (condition-case nil
+                                                  (funcall insert-fn c)
+                                                (error nil)))))
+                                (when (and (stringp ins)
+                                           (not (equal ins c)))
+                                  (setq node (append node
+                                                     (list :insert ins)))))
+                              node))
+                          shipped))))))))
 
 (defun ebp-complete-in-text (document text cursor)
   "Complete DOCUMENT's TEXT at CURSOR (0-based Unicode scalar offset).
@@ -371,6 +427,52 @@ leaving the outer wait unbounded.  The JETPACS layer:
 so a continuation that WAITS (a bridged prompt, hub.eval) is never on
 the timeout throw's unwind path.")
 
+(defun ebp-complete--doc-provider (doc-fn originals buf)
+  "The `edit.candidate.doc' provider closure (amendment #172, R5).
+DOC-FN is the winning capf's `:company-doc-buffer'; ORIGINALS the
+index-aligned vector of PROPERTIZED shipped candidates — eglot's
+doc-buffer reads the `eglot--lsp-item' text property and is useless on
+a stripped twin; BUF the harvest buffer.
+
+The closure re-enters BUF before funcalling DOC-FN: jsonrpc dispatches
+every inbound message inside a `with-temp-buffer' (emacs-30.1
+jsonrpc.el:807-809), and `eglot-current-server' resolves from
+buffer-local state behind an explicit fundamental-mode guard
+\(eglot.el:2108-2120, gh#1330) — without the re-entry every eglot doc
+fetch would signal, degrade to \"\", and stay green under every
+buffer-agnostic fixture (the R5 review's P1, found by three lenses).
+The `ebp-sync--run-exit-fn' blocking discipline applies verbatim: nil
+immediately when a bounded wait is already on the stack — stacked
+`with-timeout's share one macroexpansion-minted catch tag — else latch
+\(a nested `edit.complete' takes the shadow; `jetpacs-flow-continue'
+keeps waiting continuations off the throw's unwind path), bound by
+`ebp-complete-doc-timeout', and degrade every failure to nil.
+
+DOC-FN's convention (company's doc-buffer): a buffer, a buffer name,
+or (BUFFER-OR-NAME . POINT) — elisp-mode returns `help-buffer's NAME,
+eglot a buffer object.  The doc is the buffer's widened text,
+stripped: eglot's markup render returns fontified text."
+  (lambda (index)
+    (unless ebp-complete--live-harvest-active
+      (let ((ebp-complete--live-harvest-active t))
+        (condition-case nil
+            (with-timeout (ebp-complete-doc-timeout nil)
+              (when-let* ((orig (and (integerp index) (>= index 0)
+                                     (< index (length originals))
+                                     (aref originals index)))
+                          (target (and (buffer-live-p buf)
+                                       (with-current-buffer buf
+                                         (funcall doc-fn orig))))
+                          (doc-buf (get-buffer (if (consp target)
+                                                   (car target)
+                                                 target))))
+                (when (buffer-live-p doc-buf)
+                  (with-current-buffer doc-buf
+                    (save-restriction
+                      (widen)
+                      (substring-no-properties (buffer-string)))))))
+          (error nil))))))
+
 (defvar ebp-complete-live-offer nil
   "The most recent live-buffer completion offer carrying an exit function.
 A plist (:document D :editor-id E :buffer B :cursor C :prefix P
@@ -393,15 +495,12 @@ nothing to do."
         (when-let* ((result)
                     (extras ebp-complete--collect-extras)
                     (exit-fn (plist-get extras :exit-fn))
-                    (raw (plist-get extras :raw)))
+                    (raw-map (plist-get extras :raw-map)))
           (let (accepts)
             (dolist (cand (cdr result))
               (let* ((label (plist-get cand :label))
                      (ins (or (plist-get cand :insert) label))
-                     (orig (cl-find-if
-                            (lambda (r) (equal (substring-no-properties r)
-                                               label))
-                            raw)))
+                     (orig (gethash label raw-map)))
                 (when orig (push (cons ins orig) accepts))))
             (when accepts
               (list :document document :editor-id editor-id

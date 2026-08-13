@@ -104,6 +104,20 @@ data class CompletionOffer(
     val epoch: Long,
 )
 
+/**
+ * SPEC 19.3 (amendment #172, R5): one published candidate documentation.
+ * INDEX is the WIRE index into the offer's candidate list and EPOCH the
+ * offer it was fetched for — the renderer shows the text only while that
+ * offer is still the published one AND the row is still in its visible
+ * narrowed set (an offer survives a qualifying extension without a new
+ * epoch, so the epoch alone cannot carry row visibility).
+ */
+data class CandidateDoc(
+    val index: Int,
+    val text: String,
+    val epoch: Long,
+)
+
 class DeviceBridge(
     private val appContext: android.content.Context,
     /** SPEC 14.4: the shown surface's ID travels with its spec, so an
@@ -468,6 +482,7 @@ class DeviceBridge(
         _completionOffers.update { it - key }
         _offerViews.update { it - key }
         _editorAnnotations.update { it - key }
+        retireCandidateDoc(key)
     }
 
     // SPEC 19.3 (JC-4b): completion offers, keyed (document, editor_id).
@@ -514,6 +529,9 @@ class DeviceBridge(
                     it + ((document to editorId) to
                         CompletionOfferView(prefix, "", true))
                 }
+                // R5: a fresh offer is a new epoch — any published doc and
+                // any in-flight fetch belong to the one it replaced.
+                retireCandidateDoc(document to editorId)
             }
         }
     }
@@ -577,6 +595,7 @@ class DeviceBridge(
         if (view == null || !view.active) {
             _offerViews.update { it - key }
             _completionOffers.update { it - key }
+            retireCandidateDoc(key)
         } else _offerViews.update { it + (key to view) }
     }
 
@@ -590,6 +609,89 @@ class DeviceBridge(
     fun clearCompletions(document: String, editorId: String) {
         _completionOffers.update { it - (document to editorId) }
         _offerViews.update { it - (document to editorId) }
+        retireCandidateDoc(document to editorId)
+    }
+
+    // SPEC 19.3 (amendment #172, R5): lazy candidate documentation. The
+    // published doc is OBSERVED state like the offer views beside it;
+    // the composition never reads the engine. One outstanding request
+    // per editor (the SPEC's SHOULD) via CandidateDocSlot's latest-wins
+    // arm; the frozen (session, seq) comparand comes from the PUBLISHED
+    // offer — the engine tracker has no session field and its
+    // expectedSeq mutates per qualifying splice, so only the offer holds
+    // the retained reply's pair.
+    private val candidateDocSlots =
+        ConcurrentHashMap<Pair<String, String>, CandidateDocSlot>()
+    private val _candidateDocs =
+        MutableStateFlow<Map<Pair<String, String>, CandidateDoc>>(emptyMap())
+    val candidateDocs: StateFlow<Map<Pair<String, String>, CandidateDoc>>
+        get() = _candidateDocs
+
+    /** A row was long-pressed. EPOCH is the epoch of the offer the row
+     * was COMPOSED from, not whatever is published when the executor
+     * runs: offer publication happens on the reader thread under the
+     * engine monitor, so a fresh reply can land between the gesture and
+     * this task — pairing the NEW offer's frozen (session, seq) with the
+     * OLD index would pass every staleness gate on both endpoints and
+     * document a candidate the user never highlighted (R5 review F11). */
+    fun editorCandidateDoc(document: String, editorId: String,
+                           index: Int, epoch: Long) {
+        dispatchExecutor.execute {
+            val key = document to editorId
+            val offer = _completionOffers.value[key] ?: return@execute
+            if (offer.epoch != epoch) return@execute
+            val slot = candidateDocSlots.getOrPut(key) { CandidateDocSlot() }
+            // Latest wins: null means the desired pair was recorded
+            // behind the in-flight one and issues at its conclusion.
+            val flight = slot.request(epoch, index) ?: return@execute
+            issueCandidateDoc(key, offer, flight)
+        }
+    }
+
+    /** Issue one flight; its conclusion (reader thread) publishes into a
+     * LIVE offer only — re-checked at publish time, not just slot
+     * identity — then issues the desired pair, if any. */
+    private fun issueCandidateDoc(key: Pair<String, String>,
+                                  offer: CompletionOffer,
+                                  flight: CandidateDocSlot.Flight) {
+        val e = engine
+        val sent = e != null && e.requestCandidateDoc(
+            key.first, key.second, offer.session, offer.seq, flight.index) { doc ->
+            // EVERY conclusion lands here — a doc, an explicit "", or
+            // null for error/malformed/discarded (the engine split
+            // conclusion from publication so a single 1201 can never
+            // wedge this slot).
+            if (doc != null) {
+                val live = _completionOffers.value[key]
+                if (live != null && live.epoch == flight.epoch)
+                    _candidateDocs.update {
+                        it + (key to CandidateDoc(flight.index, doc,
+                            flight.epoch))
+                    }
+            }
+            val slot = candidateDocSlots[key]
+            val next = slot?.concluded(flight.ticket)
+            if (next != null) {
+                val live = _completionOffers.value[key]
+                if (live != null && live.epoch == next.epoch)
+                    issueCandidateDoc(key, live, next)
+                else
+                    // The desired pair named a dead offer: free the slot
+                    // rather than leave an outstanding flight nothing
+                    // will ever conclude.
+                    slot.retire()
+            }
+        }
+        // Gate refusal (no engine, editor not OPEN, session not READY):
+        // no conclusion will ever arrive for this flight — free the slot,
+        // desired pair included; it could not have been sent either.
+        if (!sent) candidateDocSlots[key]?.retire()
+    }
+
+    /** Docs and their slot retire wherever the offer dies. */
+    private fun retireCandidateDoc(key: Pair<String, String>) {
+        candidateDocSlots.remove(key)?.retire()
+        _candidateDocs.update { it - key }
     }
 
     /** SPEC 19.3: a synchronized editor's local edit -> shadow + edit.delta.
@@ -861,6 +963,16 @@ class DeviceBridge(
             // the map bounded — entries are per (document, editor_id)).
             _editorMirrors.value = emptyMap()
             _editorAnnotations.value = emptyMap()
+            // R5, a named pre-existing-gap fix: offers and their views
+            // were NOT cleared here, so a dropdown could ghost across a
+            // reconnect over state no session backs — its taps refused,
+            // its rows a lie. Docs and slots die with the offers they
+            // were fetched for.
+            _completionOffers.value = emptyMap()
+            _offerViews.value = emptyMap()
+            _candidateDocs.value = emptyMap()
+            candidateDocSlots.values.forEach { it.retire() }
+            candidateDocSlots.clear()
             lastCaret.clear()
             // Atomic compare-and-clear: only if a newer connection has not
             // already superseded this one in the slot (SPEC 5.2 newest-wins).

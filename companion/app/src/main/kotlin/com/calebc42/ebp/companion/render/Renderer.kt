@@ -8,7 +8,9 @@
 // builtins to dialog completion and text_input edits to dialog-local state.
 package com.calebc42.ebp.companion.render
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,6 +32,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -82,6 +87,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.calebc42.ebp.companion.CompletionCandidate
 import com.calebc42.ebp.companion.DeviceBridge
 import com.calebc42.ebp.wire.CompletionNarrowing
 import com.calebc42.ebp.wire.EditorSession
@@ -717,6 +723,10 @@ private fun keyboardTypeOf(name: String, password: Boolean): androidx.compose.ui
     }
 }
 
+// The @OptIn is combinedClickable's (the completion rows' long-press);
+// a long-press-ONLY affordance with no visual cue makes onLongClickLabel
+// its entire TalkBack surface, so the label is not optional decoration.
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val id = node.stringOr("id")
@@ -825,6 +835,10 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val offers by ctx.bridge.completionOffers.collectAsState()
     val offer = if (wantsCompletion) offers[document to id] else null
     val offerViewMap by ctx.bridge.offerViews.collectAsState()
+    // R5 (amendment #172): the lazily fetched candidate doc, observed
+    // like the offer views beside it.
+    val candidateDocs by ctx.bridge.candidateDocs.collectAsState()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     // SPEC 19.3: report the caret so the other endpoint can answer a POSITION.
     // Keyed on the selection, so it re-runs exactly when the selection moves
     // and a no-op re-composition reports nothing; the delay coalesces a drag
@@ -968,46 +982,131 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         // composition (the monitor is held across socket writes).
         val offerView = if (offer != null && document.isNotEmpty())
             offerViewMap[document to id] else null
-        val narrowed = when {
-            offer == null -> emptyList()
-            offerView == null || !offerView.active -> emptyList()
-            offerView.ext.isEmpty() -> offer.candidates
-            else -> offer.candidates.filter { c ->
-                val ep = offerView.extendedPrefix
-                when (ctx.bridge.completionNarrowing) {
-                    CompletionNarrowing.STRICT ->
-                        c.label.startsWith(ep) || c.insert.startsWith(ep)
-                    CompletionNarrowing.CONTAINS ->
-                        c.label.contains(ep) || c.insert.contains(ep)
+        if (offer != null && offerView != null) {
+            // R5: rows keep their WIRE index through filter + take —
+            // list position == wire position holds because the engine
+            // discards invalid replies whole — so a long-press names the
+            // candidate Emacs retained at that index, never the row's
+            // screen slot after narrowing shifted it.
+            val visible = narrowedWithWireIndex(
+                offer.candidates, offerView.active, offerView.extendedPrefix,
+                offerView.ext, ctx.bridge.completionNarrowing)
+                .take(MAX_VISIBLE_COMPLETIONS)
+            visible.forEach { (wireIndex, cand) ->
+                Row(
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(
+                            onClick = {
+                                ctx.bridge.editorSelectCompletion(
+                                    document, id, cand.label, cand.insert)
+                            },
+                            // R5 (amendment #172): docs for the row, on
+                            // demand — the method exists to be lazy. The
+                            // haptic is the EditorToolbar/LayoutNodes
+                            // precedent; the label is the affordance's
+                            // whole TalkBack surface. A drag cancels the
+                            // press, so scroll and long-press coexist.
+                            onLongClickLabel = "Show documentation",
+                            onLongClick = {
+                                haptic.performHapticFeedback(
+                                    androidx.compose.ui.hapticfeedback
+                                        .HapticFeedbackType.LongPress)
+                                ctx.bridge.editorCandidateDoc(
+                                    document, id, wireIndex, offer.epoch)
+                            })
+                        .padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    // Amendment #169: the kind icon, through an EXPLICIT map -
+                    // IconMap.get answers unknowns with a placeholder, and the
+                    // SPEC's degrade for an unrecognized kind is NO decoration.
+                    completionKindIcon(cand.kind)?.let { iconName ->
+                        Icon(IconMap.get(iconName), contentDescription = cand.kind,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(cand.label, style = MaterialTheme.typography.bodyMedium)
+                    cand.annotation?.let {
+                        Spacer(Modifier.width(8.dp))
+                        Text(it, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
+            }
+            // R5 (amendment #172): the doc panel — local chrome in the
+            // eldoc-row idiom, never a floating popup (the rows' own
+            // rationale above). THREE show conditions, all required: the
+            // published doc belongs to THIS offer (epoch — a stale fetch
+            // or a fresh offer must not pair), its row is still in the
+            // VISIBLE narrowed set (an offer survives a qualifying
+            // extension without a new epoch, so narrowing can drop the
+            // documented row while the doc stays published — showing it
+            // then is the lie of presentation the narrowing rationale
+            // forbids), and it is non-empty (the eldoc row's own takeIf
+            // guard: "" is the universal degradation arm — every picker
+            // candidate, timeout, and failure — not a rare case).
+            // Rendered verbatim per §16.4: raw markdown punctuation from
+            // a markdown-mode-less device Emacs displays as typed.
+            val doc = candidateDocs[document to id]
+            if (doc != null && candidateDocVisible(doc, offer.epoch,
+                    visible.map { it.index })) {
+                Text(doc.text,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily =
+                            androidx.compose.ui.text.font.FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // ~8 bodySmall lines (16sp line height), bounded:
+                        // a frame budget, not a reading pane — SPEC 19.3
+                        // caps the doc itself at 16384 octets.
+                        .heightIn(max = 128.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 4.dp))
             }
         }
-        narrowed.take(MAX_VISIBLE_COMPLETIONS).forEach { cand ->
-            Row(
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        ctx.bridge.editorSelectCompletion(
-                            document, id, cand.label, cand.insert)
-                    }
-                    .padding(horizontal = 12.dp, vertical = 8.dp)) {
-                // Amendment #169: the kind icon, through an EXPLICIT map -
-                // IconMap.get answers unknowns with a placeholder, and the
-                // SPEC's degrade for an unrecognized kind is NO decoration.
-                completionKindIcon(cand.kind)?.let { iconName ->
-                    Icon(IconMap.get(iconName), contentDescription = cand.kind,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(cand.label, style = MaterialTheme.typography.bodyMedium)
-                cand.annotation?.let {
-                    Spacer(Modifier.width(8.dp))
-                    Text(it, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+    }
+}
+
+/** Amendment #171 display narrowing with WIRE indices preserved (R5): a
+ * row that survives filter keeps its ORIGINAL index into the offer's
+ * candidate list, because `edit.candidate.doc` names candidates by wire
+ * position and narrowing must not renumber them under the user's
+ * finger. A pristine offer (empty ext) is the base path and displays
+ * unfiltered — the predicate never applies to it (the emit-time re-proof
+ * in the engine stays the normative gate either way). */
+/** R5's three-condition show gate for the doc panel, pure so each
+ * condition is a killable mutant (no Compose test rig exists here): the
+ * doc belongs to the CURRENT offer epoch, its row is still among the
+ * VISIBLE wire indices after narrowing, and it is non-empty — "" is the
+ * universal degradation arm (every picker candidate, word-fallback
+ * candidate, timeout, latch collision, and failure), so an empty doc
+ * shows NO panel, exactly the eldoc row's own takeIf guard. */
+internal fun candidateDocVisible(
+    doc: com.calebc42.ebp.companion.CandidateDoc?,
+    offerEpoch: Long,
+    visibleIndices: List<Int>,
+): Boolean = doc != null && doc.epoch == offerEpoch &&
+    doc.index in visibleIndices && doc.text.isNotEmpty()
+
+internal fun narrowedWithWireIndex(
+    candidates: List<CompletionCandidate>,
+    active: Boolean,
+    extendedPrefix: String,
+    ext: String,
+    narrowing: CompletionNarrowing,
+): List<IndexedValue<CompletionCandidate>> = when {
+    !active -> emptyList()
+    ext.isEmpty() -> candidates.withIndex().toList()
+    else -> candidates.withIndex().filter { (_, c) ->
+        when (narrowing) {
+            CompletionNarrowing.STRICT ->
+                c.label.startsWith(extendedPrefix) ||
+                    c.insert.startsWith(extendedPrefix)
+            CompletionNarrowing.CONTAINS ->
+                c.label.contains(extendedPrefix) ||
+                    c.insert.contains(extendedPrefix)
         }
     }
 }

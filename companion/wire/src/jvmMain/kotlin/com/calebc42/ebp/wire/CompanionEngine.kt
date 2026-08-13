@@ -2004,6 +2004,51 @@ class CompanionEngine(
             insert, accept = true)
     }
 
+    /** SPEC 19.3 (amendment #172): documentation for the INDEX-th candidate
+     * of a RETAINED edit.complete reply. SESSION and SEQ are the CALLER's
+     * frozen pair — the (session, seq) of the reply the displayed offer was
+     * built from — never live engine state: mid-#171-extension the live seq
+     * has legitimately advanced past the reply's, and those requests are
+     * exactly what the method exists for (the tracker has no session field
+     * and its expectedSeq mutates per qualifying splice, so nothing here
+     * could reconstruct the pair anyway).
+     *
+     * CALLBACK fires on EVERY reply conclusion, with the doc or null (an
+     * error, a malformed result, a discarded reply) — conclusion is split
+     * from publication, because requestCompletion's refuse-with-a-bare-
+     * return precedent would leave a one-outstanding display slot marked
+     * in-flight forever after a single 1201 or -32601 (a pre-R5 Emacs),
+     * killing docs for that editor for the process's life. The Boolean
+     * return says whether anything was SENT at all. A 1201 or -32601 is a
+     * silent no-op for the display; the request still concludes, so
+     * §22.2's transmitted-request duty is met without rpc.cancel.
+     * Non-durable, session-scoped. */
+    @Synchronized
+    fun requestCandidateDoc(document: String, editorId: String,
+                            session: String, seq: Long, index: Int,
+                            callback: (String?) -> Unit): Boolean {
+        val s = editors[document to editorId] ?: return false
+        if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return false
+        sendRequest("edit.candidate.doc", buildJsonObject {
+            put("document", document)
+            put("editor_id", editorId)
+            put("session", session)
+            put("seq", seq)
+            put("index", index)
+        }) { result, error ->
+            // Discard-whole mirrors requestCompletion: `doc` MUST be a
+            // string — an explicit "" is a valid empty doc (the MAY-be-
+            // empty arm) — and the result is a closed object {doc}.
+            var doc: String? = null
+            if (error == null && result != null) {
+                val d = result.stringOrNull("doc")
+                if (d != null && result.keys.all { it == "doc" }) doc = d
+            }
+            callback(doc)
+        }
+        return true
+    }
+
     /** Render-facing snapshot of the survive-typing offer (amendment
      * #171): the narrowing operand plus liveness, for display filtering.
      * Candidates ride the answer callback as before. */

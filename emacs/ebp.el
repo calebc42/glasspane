@@ -622,6 +622,14 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; borrowing the client-wide slot — every other document keeps its
   ;; completions for the life of the prompt.
   (edit-complete-overrides (make-hash-table :test #'equal))
+  ;; SPEC 19.3 (amendment #172): the retained `edit.complete' reply that
+  ;; `edit.candidate.doc' answers against, (DOCUMENT . EDITOR-ID) ->
+  ;; (:session S :seq Q :count N :provider FN-or-nil).  Superseded by
+  ;; the next answer for its key, cleared at the session events below
+  ;; (reseed, close, resync, forget-pairing) — the #151 memory bound;
+  ;; a splice never clears it, because deltas advancing seq are exactly
+  ;; the #171-extension window the retained comparand exists to survive.
+  (candidate-replies (make-hash-table :test #'equal))
   ready-functions ; abnormal hook: called with the client on READY
   ;; SPEC 15.3: the latest replay summary and the bounded-backoff timer
   ;; that retries while `remaining' is nonzero.
@@ -689,6 +697,8 @@ receipts default to `ebp-receipts' under `user-emacs-directory' —
                                  #'ebp-client--handle-edit-close)
     (ebp-client-register-handler client "edit.complete"
                                  #'ebp-client--handle-edit-complete)
+    (ebp-client-register-handler client "edit.candidate.doc"
+                                 #'ebp-client--handle-candidate-doc)
     (ebp-client--receipts-load client)
     client))
 
@@ -753,6 +763,7 @@ partition it before reusing this."
     (clrhash (ebp-client-reset-history client))
     (clrhash (ebp-client-revisions client))
     (clrhash (ebp-client-editors client))
+    (clrhash (ebp-client-candidate-replies client))
     (setf (ebp-client-surfaces client) nil
           (ebp-client-input-state client) nil)
     (let ((token (plist-get (ebp-client-config client) :token)))
@@ -1672,6 +1683,9 @@ surfaces a conflict."
                    :text (plist-get params :text)
                    :cursor (plist-get params :cursor))
              (ebp-client-editors client))
+    ;; Amendment #172: a reseed is a session event — the retained
+    ;; candidate reply named the OLD session and can never answer again.
+    (remhash (cons doc eid) (ebp-client-candidate-replies client))
     (dolist (fn (ebp-client-edit-open-functions client))
       (funcall fn client doc eid (plist-get params :text) prior-text))
     (ebp-client--editor-changed client doc eid)))
@@ -1731,7 +1745,20 @@ it had nowhere to read the answer from."
   (let ((doc (plist-get params :document))
         (eid (plist-get params :editor_id)))
     (remhash (cons doc eid) (ebp-client-editors client))
+    (remhash (cons doc eid) (ebp-client-candidate-replies client))
     (ebp-client--editor-changed client doc eid)))
+
+(defvar ebp-edit-complete-doc-provider nil
+  "The candidate-documentation seam of amendment #172.
+`ebp-client--handle-edit-complete' let-binds this nil around the
+completion-fn funcall; the source MAY setq it during its run to a
+closure `(lambda (INDEX) DOC-STRING-or-nil)' serving documentation for
+the INDEX-th candidate of the list it just returned.  After the
+funcall the handler snapshots it into the retained reply that
+`edit.candidate.doc' answers against.  A dynamic variable rather than
+a wider return contract so the (DOC EID TEXT CURSOR) completion-fn
+shape — the picker override, every fixture — stays untouched, and
+ebp.el stays ignorant of capf.")
 
 (defun ebp-client--handle-edit-complete (client params)
   "SPEC 19.3: answer a completion request from the application's
@@ -1739,7 +1766,16 @@ completion source: the document's `edit-complete-overrides' entry when
 one is registered, else the client-wide `:edit-complete-function'.
 Either way (doc editor-id text cursor) -> (PREFIX . CANDS), each
 candidate a plist (:label :annotation? :insert?).  Session/seq must
-match or the query is editor-stale."
+match or the query is editor-stale.
+
+Every answer is retained for `edit.candidate.doc' (amendment #172) —
+including the no-fn empty arm — GATED on the answer still being
+current: a nested `edit.complete' dispatched under a blocking live
+harvest answers first, and the outer (older) answer overwriting the
+newer cell would leave the Companion's displayed offer pointing at a
+reply no longer retained, so every doc request would 1201 in exactly
+the slow-LSP-plus-typing window the method exists for.  The reply
+still goes out either way; only retention is skipped."
   (let* ((doc (plist-get params :document))
          (eid (plist-get params :editor_id))
          (ed (gethash (cons doc eid) (ebp-client-editors client)))
@@ -1750,11 +1786,100 @@ match or the query is editor-stale."
                  (= (plist-get ed :seq) (plist-get params :seq)))
       (ebp-client--error client 1201 "Editor stale" "content-invalid"
                          :reason "editor-stale"))
-    (if fn
-        (let ((r (funcall fn doc eid (plist-get ed :text)
-                          (plist-get params :cursor))))
-          (list :prefix (or (car r) "") :candidates (vconcat (cdr r))))
-      (list :prefix "" :candidates []))))
+    (let* ((ebp-edit-complete-doc-provider nil)
+           (reply (if fn
+                      (let ((r (funcall fn doc eid (plist-get ed :text)
+                                        (plist-get params :cursor))))
+                        (list :prefix (or (car r) "")
+                              :candidates (vconcat (cdr r))))
+                    (list :prefix "" :candidates [])))
+           (live (gethash (cons doc eid) (ebp-client-editors client))))
+      (when (and live
+                 (equal (plist-get live :session) (plist-get params :session))
+                 (= (plist-get live :seq) (plist-get params :seq)))
+        (puthash (cons doc eid)
+                 (list :session (plist-get live :session)
+                       :seq (plist-get live :seq)
+                       :count (length (plist-get reply :candidates))
+                       :provider ebp-edit-complete-doc-provider)
+                 (ebp-client-candidate-replies client)))
+      reply)))
+
+(defconst ebp--candidate-doc-cap 16384
+  "Amendment #172's SHOULD-cap on a candidate `doc', in UTF-8 octets.")
+
+(defun ebp--integral-value (v)
+  "V as an integer when it is integral BY VALUE, else nil.  Never signals.
+Amendment #172's comparands are read the way the Kotlin side's
+`integralLongOrNull' reads them — 5 and 5.0 are the same integral, 5.5
+is refused — because a plain `integerp' here would be a
+cross-implementation divergence on the same frame."
+  (cond ((integerp v) v)
+        ((and (floatp v) (not (isnan v))
+              (/= v 1.0e+INF) (/= v -1.0e+INF)
+              (= v (truncate v)))
+         (truncate v))))
+
+(defun ebp--truncate-octets (s cap)
+  "S truncated at a Unicode-scalar boundary to at most CAP UTF-8 octets.
+Binary search over the char-prefix length: Emacs chars are scalars, so
+a char boundary can never split one, and `string-bytes' of a
+scalar-clean string is its UTF-8 length.  A string carrying raw bytes
+lies to `string-bytes', but such a string never ships — the caller's
+pre-flight serialize refuses it first."
+  (if (<= (string-bytes s) cap)
+      s
+    (let ((lo 0) (hi (length s)))
+      (while (< lo hi)
+        (let ((mid (/ (+ lo hi 1) 2)))
+          (if (<= (string-bytes (substring s 0 mid)) cap)
+              (setq lo mid)
+            (setq hi (1- mid)))))
+      (substring s 0 lo))))
+
+(defun ebp-client--handle-candidate-doc (client params)
+  "SPEC 19.3 (amendment #172): documentation for one retained candidate.
+The comparand is the RETAINED `edit.complete' reply, never the live
+mirror: mid-#171-extension the mirror's seq has legitimately advanced
+past the reply's, and those requests are exactly what the method
+exists for.  Envelope first — one -32602 arm for any structural
+failure, the `event.action' precedent, because a bare `=' on a string
+seq would signal `wrong-type-argument' and leave as -32603, breaking
+SPEC 7's structural-params MUST.  Then the cell's session/seq (`1201'
+with `data.reason' \"editor-stale\" — `edit.complete's error shape),
+then the index against [0, count) (bare `1201 content-invalid': the
+ratified text names a reason only for the stale arm).  Every provider
+failure — absent, erring, slow, or a doc json.c would refuse at reply
+time (raw bytes, lone surrogates, refused AFTER a handler returns) —
+degrades to \"\", the MAY-be-empty arm, never -32603."
+  (let* ((doc (plist-get params :document))
+         (eid (plist-get params :editor_id))
+         (session (plist-get params :session))
+         (seq (ebp--integral-value (plist-get params :seq)))
+         (index (ebp--integral-value (plist-get params :index))))
+    (unless (and (stringp doc) (stringp eid) (stringp session) seq index)
+      (ebp-client--error client -32602 "Invalid params" "invalid-params"))
+    (let ((cell (gethash (cons doc eid)
+                         (ebp-client-candidate-replies client))))
+      (unless (and cell
+                   (equal session (plist-get cell :session))
+                   (eql seq (plist-get cell :seq)))
+        (ebp-client--error client 1201 "Editor stale" "content-invalid"
+                           :reason "editor-stale"))
+      (unless (and (<= 0 index) (< index (plist-get cell :count)))
+        (ebp-client--error client 1201 "Index out of range"
+                           "content-invalid"))
+      (let* ((provider (plist-get cell :provider))
+             (text (and provider
+                        (condition-case nil (funcall provider index)
+                          (error nil))))
+             (text (if (stringp text)
+                       (ebp--truncate-octets text ebp--candidate-doc-cap)
+                     ""))
+             (text (condition-case nil
+                       (progn (ebp--json-serialize (list :doc text)) text)
+                     (error ""))))
+        (list :doc text)))))
 
 (cl-defun ebp-client-edit-apply (client document editor-id start del text
                                  &key callback)
@@ -1854,6 +1979,11 @@ state under a fresh session at seq 0."
                           :text (plist-get result :text)
                           :cursor (plist-get result :cursor))
                     (ebp-client-editors client))
+           ;; Amendment #172: the fresh session restarts seq at 0, which
+           ;; can re-reach a retained value — the session comparand alone
+           ;; would be the only guard, so drop the cell with the epoch.
+           (remhash (cons document editor-id)
+                    (ebp-client-candidate-replies client))
            (ebp-client--editor-changed client document editor-id)))))))
 
 ;;;; Surface push (SPEC 13.1-13.3), the client half

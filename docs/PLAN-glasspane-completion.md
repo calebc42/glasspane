@@ -1,5 +1,12 @@
 # Completion excellence ladder (Glasspane rebuild track)
 
+UPDATE 2026-08-13: amendments #169–#172 are RATIFIED AND APPLIED (ebp
+submodule 2cd7387, pin 41c7b46; the ratification/verification record
+is docs/DRAFT-amendments-169-172-completion.md). R3, R4, and R5 are
+now pure implementation rungs — their wire vocabulary exists, the
+validator rails bite, and the per-rung Companion/Emacs duties are
+named in the ledger rows (#169/#171/#172) and the draft doc.
+
 Status: R0 LANDED. Ratified 2026-08-12 alongside the Glasspane rebuild
 decision: v1-quality completion/eldoc/eglot support is the focus, and
 the architectural rulings are settled — EBP and LSP are different

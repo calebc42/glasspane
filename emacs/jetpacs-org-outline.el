@@ -74,11 +74,24 @@ Records come from ITEMS, else ITEMS-FN, else
 `jetpacs-org-outline-card-function', else the default card) builds
 each row; HEADER/FOOTER bracket the list; the empty state uses the
 EMPTY-* members.  The records' buffer gets one exposure supersession
-so a re-render retires stale positions."
-  (let* ((records (ebp-org-outline-cap
-                   (or items
-                       (and items-fn (funcall items-fn))
-                       (and file (ebp-org-file-toplevel-records file)))))
+so a re-render retires stale positions.  A capped list carries the
+house trailing note — the pre-2026-08-13 truncation was silent, the
+one capped list in the codebase without one."
+  (let* ((from-items (or items (and items-fn (funcall items-fn))))
+         (source (or from-items
+                     (and file (ebp-org-file-toplevel-records file))))
+         (records (ebp-org-outline-cap source))
+         (shown (length records))
+         ;; The note's denominator follows the branch that PRODUCED the
+         ;; records, not the parameters (an items-fn returning nil falls
+         ;; through to the file): handed-in lists arrive whole, so their
+         ;; length is the total; the file path stops collecting at the cap
+         ;; (the bounded scan), so a full count exists — and is paid for —
+         ;; only when the cap was hit.
+         (total (cond (from-items (length from-items))
+                      ((and file (= shown ebp-org-outline-max-headings))
+                       (ebp-org-file-toplevel-count file))
+                      (t shown)))
          (card-fn (or card-fn jetpacs-org-outline-card-function
                       #'jetpacs-org-outline--default-card)))
     (when-let* ((name (plist-get (car records) :buffer)))
@@ -89,6 +102,10 @@ so a re-render retires stale positions."
                              :caption empty-caption)
       (apply #'jetpacs-lazy-column
              (append (delq nil (cons header (mapcar card-fn records)))
+                     (when (> total shown)
+                       (list (jetpacs-text
+                              (format "Showing %d of %d headings." shown total)
+                              :style "caption")))
                      (delq nil (list footer))
                      (list :spacing 4))))))
 

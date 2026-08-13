@@ -60,15 +60,42 @@
                        (plist-get rec :pos)))))))
 
 (ert-deftest jetpacs-org-outline-body-cap-seam-and-empty ()
-  "The body lists only level-1 records, honors the cap, the card seam,
-and the empty state."
+  "The body lists only level-1 records, honors the cap (with the house
+trailing note — the pre-2026-08-13 truncation was silent), the card
+seam, and the empty state."
   (jetpacs-org-outline-test--with-file f jetpacs-org-outline-test--fixture
     (let ((body (jetpacs-org-outline-body f)))
       (should (equal (plist-get body :t) "lazy_column"))
+      ;; Uncapped: three cards, no note.
       (should (= 3 (length (append (plist-get body :children) nil)))))
     (let ((ebp-org-outline-max-headings 1))
-      (let ((body (jetpacs-org-outline-body f)))
-        (should (= 1 (length (append (plist-get body :children) nil))))))
+      (let* ((body (jetpacs-org-outline-body f))
+             (children (append (plist-get body :children) nil)))
+        ;; Capped: the one card plus the trailing note.
+        (should (= 2 (length children)))
+        (let ((note (car (last children))))
+          (should (equal (plist-get note :t) "text"))
+          (should (equal (plist-get note :text) "Showing 1 of 3 headings."))
+          (should (equal (plist-get note :style) "caption")))))
+    ;; ITEMS handed in whole: the render-edge cap notes against the
+    ;; handed-in length.
+    (let ((ebp-org-outline-max-headings 1))
+      (let* ((items (mapcar (lambda (title) (list :level 1 :title title))
+                            '("A" "B" "C" "D")))
+             (body (jetpacs-org-outline-body nil :items items))
+             (children (append (plist-get body :children) nil)))
+        (should (= 2 (length children)))
+        (should (equal (plist-get (car (last children)) :text)
+                       "Showing 1 of 4 headings."))))
+    ;; An items-fn returning nil falls through to the FILE path and must
+    ;; still note: the denominator follows the branch that produced the
+    ;; records, not the parameters.
+    (let ((ebp-org-outline-max-headings 1))
+      (let* ((body (jetpacs-org-outline-body f :items-fn (lambda () nil)))
+             (children (append (plist-get body :children) nil)))
+        (should (= 2 (length children)))
+        (should (equal (plist-get (car (last children)) :text)
+                       "Showing 1 of 3 headings."))))
     ;; The card seam.
     (let* ((jetpacs-org-outline-card-function
             (lambda (rec) (jetpacs-text (plist-get rec :title))))

@@ -1191,6 +1191,9 @@ internal fun RenderLazyGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         }
         LaunchedEffect(atStart) { signal.atStart = atStart }
     }
+    // Stable per-child keys, same as lazy_column: without them a structural
+    // re-push loses key-based scroll re-anchoring and item identity.
+    val keys = remember(children) { lazyChildKeys(children) }
     LazyVerticalGrid(
         columns = cells,
         state = gridState,
@@ -1199,9 +1202,9 @@ internal fun RenderLazyGrid(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         horizontalArrangement = Arrangement.spacedBy(spacing),
         contentPadding = PaddingValues(pad),
         modifier = m.fillMaxWidth()) {
-        items(children.size) { i ->
-            (children[i] as? JsonObject)?.let {
-                RenderNode(it, ctx.child(it, i))
+        items(count = children.size, key = { keys[it] }) { i ->
+            (children.getOrNull(i) as? JsonObject)?.let {
+                Box(Modifier.animateItem()) { RenderNode(it, ctx.child(it, i)) }
             }
         }
     }

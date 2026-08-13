@@ -224,12 +224,344 @@ published after each tracker mutation — no more per-keystroke
 across blocking socket writes), no pre-splice reconcile race, and a
 reply the arm gate refused is never handed to the display.
 
-## R5 — lazy candidate docs (SPEC amendment) + doc panel
+## R5 — lazy candidate docs (amendment #172 implementation) + doc panel
 
-New Companion→Emacs request `edit.candidate.doc` for the HIGHLIGHTED
-candidate only (mirroring `completionItem/resolve` laziness), plain
-text, frame-budget capped. Emacs answers from `:company-doc-buffer` /
-eglot resolve.
+Amendment #172 is fully applied: SPEC §19.3 normative text
+(SPEC.md:3328-3345), the §11 registry row, contract.json's method
+entry (params {document, editor_id, session, seq, index}, result
+{doc}, errors [1201]), frames.golden's request/reply pair (lines
+47-48), validate.py's generic `check_result` walk, and Kotlin
+MethodRegistry all landed with the amendment adoption. R5 owes ONLY
+the two implementations the amendment's artifacts column deferred:
+the Emacs retention cell + handler, and the Companion doc panel +
+highlight-driven request.
+
+### The comparand, stated once
+
+The request names the session and seq **of the retained edit.complete
+reply** — never the live mirror. Mid-#171-extension the mirror's seq
+has legitimately advanced past the reply's; validating against the
+mirror would refuse exactly the requests the method exists for
+(edit.complete's own handler at ebp.el:1749-1750 compares the LIVE
+mirror — correct there, a conformance bug if copied here). On the
+Companion the frozen pair lives ONLY in the app-side
+`CompletionOffer.session/.seq` (DeviceBridge.kt:101-102): the engine
+tracker has no session field and its `expectedSeq` mutates per
+qualifying splice, and the engine's issue-time pair dies with the
+requestCompletion closure. So the engine method takes session/seq as
+CALLER parameters and the bridge supplies them from the offer it is
+displaying.
+
+### Retention-cell lifetime (a ratification point)
+
+The cell is superseded by the next edit.complete answer for its
+(document, editor_id) and cleared at the four session events ebp.el
+already owns — edit.open's reseed puthash, edit.close's remhash, the
+edit.resync callback's replace, and forget-pairing's clrhash. It is
+NOT cleared by splices (deltas advancing seq are precisely the
+#171-extension window the retained comparand exists to survive) and
+NOT cleared when the accept claims the completion OFFER: the applied
+goldens pin this — frames.golden line 46 is the accept delta at seq
+5, and lines 47-48 are a doc request at the retained seq 4 answered
+with a doc. Reading of the amendment's "reclaimed by the same session
+events that claim the offer": the SESSION events among the offer's
+claim events (reseed, resync, close, detach-side effects), not every
+claim. The stale comparand makes a leftover cell unanswerable after
+any session change regardless — clearing is the #151 memory bound,
+not a correctness need.
+
+### Emacs side
+
+- **The seam:** a new defvar in ebp.el, `ebp-edit-complete-doc-provider`
+  (nil default). `ebp-client--handle-edit-complete` let-binds it nil
+  around the completion-fn funcall; a completion source MAY setq it
+  during its run to a closure `(lambda (index) DOC-STRING-or-nil)`.
+  After the funcall the handler snapshots it into the retention cell.
+  This keeps the (doc eid text cursor) fn contract intact (the picker
+  override and every test fixture keep working), keeps ebp.el ignorant
+  of capf, and gives any future completion source the same hook.
+- **The cell:** new ebp-client struct hash `candidate-replies`, keyed
+  (document . editor-id), value `(:session S :seq Q :count N
+  :provider FN-or-nil)` — minted on EVERY edit.complete answer
+  including the no-fn empty arm (count 0, provider nil). Cleared at
+  the four ebp.el session-event sites named above. **Retention is
+  gated on the answer still being current** (review F9): a nested
+  edit.complete dispatched under a blocking live harvest answers
+  FIRST, so the outer (older) answer would otherwise overwrite the
+  newer cell and leave the Companion's displayed offer pointing at a
+  reply Emacs no longer retains — every doc request then 1201s in
+  exactly the slow-LSP-plus-typing window R5 exists for. Mint only
+  when the live mirror's session/seq still equal the request's; the
+  reply still goes out either way, only retention is skipped.
+- **The handler:** `ebp-client--handle-candidate-doc`, registered in
+  `ebp-client-create` beside edit.complete (registration also exempts
+  the method from the unknown-method sentinel). **Type-check the whole
+  envelope up front** — stringp document/editor_id/session, integral
+  seq, integral index — into ONE `-32602` arm, the event.action
+  precedent at ebp.el:1550-1560 (review F5: mirroring
+  handle-edit-complete's bare `=` on seq lets a string seq signal
+  `wrong-type-argument`, which jsonrpc converts to -32603, breaking
+  both SPEC.md:693's structural-params MUST and this plan's own
+  never--32603 invariant; compare with `equal`/`eql` afterwards so no
+  comparison can signal). "Integral" is the `integralLongOrNull` twin
+  — an integer OR an integral float, `5.0` accepted and `5.5` refused
+  — because the Kotlin side deliberately reads numbers by VALUE
+  (JsonAccess.kt:83-90) and a plain `integerp` would be precisely the
+  cross-implementation divergence genre the R4 review already caught
+  once (review F19). Then: cell present + session/seq equal → else
+  `(ebp-client--error client 1201 "Editor stale" "content-invalid"
+  :reason "editor-stale")` (signals; non-local exit); index outside
+  [0, count) → bare `1201 content-invalid` with NO data.reason —
+  exactly what the ratified text specifies (reason is named only for
+  the stale arm; no reason registry exists anywhere to extend).
+  Result: `(:doc STRING)` — provider nil, index unanswerable, or any
+  provider failure all degrade to `""` (the MAY-be-empty arm). The
+  handler owns the SHOULD-cap: a binary-search scalar-boundary
+  truncation helper to ≤ 16384 UTF-8 octets. **Emacs chars are not
+  all scalars** (review F4): raw bytes live at #x3FFF80-#x3FFFFF and
+  json.c refuses them (plus lone surrogates) at serialize time — i.e.
+  AFTER the handler returns, inside `ebp-client--serializable`, which
+  answers -32603. So the last link in the degradation chain is a
+  pre-flight `(ebp--json-serialize doc)` under condition-case; a
+  string json.c will not take answers `""` like every other failure.
+  Pre-flight rather than a hand-rolled predicate: json.c's refusal set
+  is wider than `ebp-sync--scalar-clean-p`'s arithmetic, and ebp.el
+  cannot require ebp-sync anyway.
+- **The provider (ebp-complete) — THREE ingredients, not two.** The
+  P1 the review caught: **the closure must capture the HARVEST BUFFER
+  and funcall doc-fn inside it.** jsonrpc.el dispatches every inbound
+  message inside `(with-temp-buffer (jsonrpc-connection-receive ...))`
+  (emacs-30.1 jsonrpc.el:807-809), so the handler runs in a
+  fundamental-mode temp buffer; `eglot-current-server` resolves from
+  buffer-local state behind an explicit `(not (eq major-mode
+  'fundamental-mode))` guard (eglot.el:2108-2120, gh#1330), returns
+  nil there, and `eglot--current-server-or-lose` SIGNALS — which this
+  plan's condition-case would have degraded to `""` on every single
+  eglot fetch, leaving R5's headline deliverable silently dead and
+  every listed test green (a fixture doc-fn is buffer-agnostic). So:
+  capture `(current-buffer)` at `--collect` time (the attached buffer
+  on the live arm, the shadow buffer otherwise) and run under
+  `(when (buffer-live-p buf) (with-current-buffer buf ...))`, dead
+  buffer → `""`. This is R2's `ebp-sync--run-exit-fn` discipline
+  (ebp-sync.el:474) applied to the doc path.
+  The other two ingredients: the capf props' `:company-doc-buffer`
+  function (read at the props extraction — it is read NOWHERE today)
+  and an index-aligned originals vector. **Build the pairing in the
+  strip pass the collect already pays** (review F2), not with a
+  `cl-find-if` per wire candidate: the existing `mapcar
+  #'substring-no-properties` at ebp-complete.el:300 already computes
+  every stripped twin, so one O(n) stripped→first-raw map there costs
+  nothing, where per-candidate probing costs 30 × |raw| compares with
+  a fresh allocation each — and |raw| is obarray-scale for elisp,
+  whose capfs ALL carry `:company-doc-buffer` (elisp-mode.el:727,
+  744, 760, 811, 818), on the per-keystroke path whose latency is
+  R4's whole point. Retaining only the ≤30 matched originals also
+  keeps #172's ratified #151 bound ("bounded by the candidate cap").
+  The closure funcalls doc-fn on the PROPERTIZED original — eglot's
+  doc-buffer reads the `eglot--lsp-item` text property and is useless
+  on stripped text — accepts the convention's BUFFER or
+  (BUFFER . POINT) return, extracts `buffer-string`, strips properties
+  (eglot's markup render returns fontified text).
+- **Arming discipline — ONE program point** (review F3/F13). The
+  provider var is SET at the finalization of the run whose list
+  actually ships (inside the `when cands` block, after `seq-take`),
+  and set UNCONDITIONALLY there — nil unless this run minted a vector
+  — mirroring the extras snapshot's `(and cands ...)` shape at
+  ebp-complete.el:289-292. "Word-fallback and no-capf arms set no
+  provider" must NOT be read as "leave the var alone": the live arm
+  can arm and then return nil (the sole-candidate delete at
+  ebp-complete.el:305 empties the list), fall through to the shadow
+  (ebp-complete.el:494), and have the word fallback answer — a
+  don't-touch reading then serves the LIVE arm's docs against the
+  SHADOW's candidate list, i.e. wrong docs for a fully valid
+  (session, seq, index), with no exotic timing at all.
+- **Blocking discipline (the R0/R2 lessons verbatim):** the answer is
+  computed inside the jsonrpc dispatch extent (no deferred serving
+  exists). eglot's doc-buffer performs a SYNCHRONOUS
+  completionItem/resolve — 10s default jsonrpc timeout, waiting in
+  sit-for, during which the ebp filter dispatches nested frames; with
+  `:cancel-on-input t` any user input aborts it to nil. The provider
+  therefore: answers nil immediately when
+  `ebp-complete--live-harvest-active` is already up (no stacked
+  bounded waits — the with-timeout shared-tag trap), else binds the
+  latch (routing any nested edit.complete to the shadow arm and
+  keeping flow continuations off the unwind path, the run-exit-fn
+  precedent) and runs doc-fn under
+  `(with-timeout (ebp-complete-doc-timeout) nil)` — new defcustom,
+  default 1.0 — inside condition-case. Every failure mode is `""` on
+  the wire, never -32603 — an invariant that holds BECAUSE of the
+  handler's pre-flight serialize gate above, not despite it.
+
+### Companion side
+
+- **Engine:** `requestCandidateDoc(document, editorId, session, seq,
+  index, callback): Boolean` — @Synchronized, OPEN+READY gate, sends
+  the five params verbatim (session/seq are the caller's retained
+  pair). Reply validation mirrors requestCompletion's discard-whole
+  style — `stringOrNull("doc")` non-null (explicit `""` is a valid
+  empty doc), closed-key loop `{doc}` — but **conclusion is split
+  from publication** (review F8/F12): the callback fires on EVERY
+  reply conclusion with a nullable doc (null = error, malformed, or
+  discarded), and the Boolean return says whether anything was sent
+  at all, because requestCompletion's precedent refuses with a bare
+  `return` and no callback (CompanionEngine.kt:1892). Without both,
+  a single 1201 / -32601 / gate refusal leaves the bridge's slot
+  marked in-flight forever and docs die for that editor for the
+  process's life. A 1201 (editor-stale or out-of-range) or -32601
+  (pre-R5 Emacs) is a silent no-op for the DISPLAY; the request still
+  concludes, so §22.2's transmitted-request duty is met without ever
+  emitting rpc.cancel.
+- **Bridge:** `editorCandidateDoc(document, editorId, index, epoch)` —
+  **the epoch of the offer the row was composed from is a PARAMETER**
+  (review F11): offer publication happens on the reader thread under
+  the engine monitor, so between the long-press and the executor read
+  a fresh reply can land, and the bridge would then pair the NEW
+  offer's session/seq with the OLD index — every staleness gate on
+  both endpoints passes and the panel documents a candidate the user
+  never highlighted. The executor task drops the request when the
+  published offer's epoch no longer matches. The frozen pair itself
+  comes from that offer's `.session`/`.seq` (DeviceBridge.kt:101-102),
+  never from live engine state.
+  One-outstanding SHOULD via a latest-wins slot: at most one in flight
+  per editor; a new highlight while one is outstanding overwrites the
+  desired (epoch, index); on conclusion the slot publishes into a new
+  `_candidateDocs` StateFlow<Map<(doc,eid), CandidateDoc(index, text,
+  epoch)>> — **re-checking offer aliveness at publish time, not just
+  slot identity** — else issues the desired request. **The slot is
+  extracted as a pure class with its own unit tests** (review F18):
+  DeviceBridge is constructor-coupled to android.content.Context and
+  has no test today, so every slot-state mutant (stale publish,
+  reissue dropped, slot never freed) would otherwise be unkillable.
+  Docs AND the slot retire wherever the offer dies: publishOfferView's
+  dead branch, clearCompletions, forgetEditor, a fresh offer's
+  publish, and serve()'s transport-loss finally — **which today fails
+  to clear _completionOffers/_offerViews at all (a stale-dropdown
+  display ghost); R5 sweeps all three into that finally as a named
+  pre-existing-gap fix.**
+- **Renderer:** the narrowing pipeline moves to
+  `offer.candidates.withIndex()` so a row that survives filter +
+  take(12) keeps its ORIGINAL wire index (list position == wire
+  position holds because the engine discards invalid replies whole —
+  pinned with a comment). Rows become combinedClickable: tap accepts
+  as today; LONG-PRESS (haptic, the EditorToolbar/LayoutNodes
+  precedent) requests documentation for that row — with
+  `onLongClickLabel` set and the function-level
+  `@OptIn(ExperimentalFoundationApi::class)` Renderer.kt does not
+  carry yet (review F15: a long-press-ONLY affordance with no visual
+  cue makes that label its entire TalkBack surface; scroll and
+  long-press coexist because a drag cancels the press). The panel is
+  local chrome in the eldoc-row idiom (never a floating popup — the
+  dropdown's own dialog-host rationale): a bounded plain-text block
+  under the candidate rows (bodySmall, ~8-line max height, vertical
+  scroll within), rendered verbatim per §16.4 — raw markdown
+  punctuation from a markdown-mode-less device Emacs displays as
+  typed, never interpreted. **THREE show conditions**, all required:
+  the published doc's (epoch, index) matches; the offer is alive; and
+  the documented row is still IN the narrowed set (review F14 — an
+  offer survives a qualifying extension without bumping its epoch, so
+  without this the panel documents a row the narrowing just filtered
+  off screen, the same "lie of presentation" R4's narrowing rationale
+  forbids; the index-preserving helper already computes the set).
+  Whether an EMPTY doc shows anything is decision point 6 below.
+  No new §22.4 feature — the method rides editor.sync.
+
+### Tests + mutants (the gate)
+
+**Elisp.** Cell minted on all three arms. THE comparand pin, BOTH
+halves: (a) a qualifying delta advances the mirror — a request at the
+RETAINED seq answers, one at the LIVE seq is 1201 editor-stale; (b) a
+LIVE cell presented with a request whose SESSION differs while seq
+matches is 1201 (review F16 — every other session test asserts through
+a CLEARED cell, a state a seq-only comparand also produces, and after
+a resync seq restarts at 0 and can re-reach the retained value, so the
+session half is genuinely reachable and otherwise unpinned).
+Supersession; **out-of-order supersession** (nested shadow answer at
+seq N+1 then the outer live answer at seq N leaves the cell at N+1).
+Index arms: -1, count, fractional 5.5 → 1201 / 1201 / -32602, plus
+5.0 ANSWERS (the integral-float twin). Post-accept answer (the
+goldens' lifetime pin); session-event clears (close, reseed, resync).
+Doc-fn context: a fixture whose doc-fn asserts `(current-buffer)` is
+the harvest buffer — **and returns a value DERIVED from the candidate's
+text property as the doc, with the test asserting that exact content**
+(review F22: `ert-test-failed` derives from `error`, so a bare `should`
+inside the closure is swallowed by the provider's own condition-case
+and surfaces only as `""`; the assertion has to ride the wire result).
+Cross-arm leak: live capf answering only the typed token + shadow
+word-fallback answer → provider nil. Degrades: provider absent, doc-fn
+error, doc-fn slower than `ebp-complete-doc-timeout`, nested request
+while the latch is up, raw-byte/lone-surrogate doc → all `""`. Cap
+boundaries: a doc of exactly 16384 octets comes back UNTRUNCATED, and
+a multibyte doc truncates to exactly 16384 at a scalar boundary
+(review F20 — the single "≤ 16384" assertion cannot catch a
+converge-one-short binary search). **One real-connection round trip**
+through the wire-test server harness asserting the stale reply carries
+`data.reason "editor-stale"` and the range reply carries `data.kind`
+with NO reason (review F17: `ebp-client--error` stashes extras on the
+CONNECTION, so the connectionless fixture idiom every listed test uses
+drops them and both arms look like bare 1201s — decision point 2 is
+otherwise unpinnable).
+
+**Kotlin wire.** Request carries the caller's frozen session/seq
+mid-extension; explicit-empty doc accepted; unknown result member /
+wrong-typed doc discarded; error reply publishes nothing but DOES
+conclude (a later highlight still issues — the wedge test); the
+OPEN+READY gate: SYNCING and CLOSED-editor cases emit no frame
+(review F21 — contract states are ["READY"] and no existing wire test
+covers requestCompletion's identical gate either).
+
+**App.** Two pure extractions with unit tests: the index-preserving
+narrowing helper (wire indices survive filter+take) and the
+one-outstanding slot class (desired/outstanding/published transitions
+keyed by epoch+index).
+
+**Mutants, each killed by a named test:** live-mirror comparand swap;
+session comparand dropped; off-by-one index bound; cap boundary
+off-by-one; serialize gate dropped; stripped-original passed to
+doc-fn; `with-current-buffer` dropped from the provider; provider
+armed at the extras snapshot instead of finalization; withIndex
+dropped for filtered position; closed-key check dropped; engine gate
+dropped; callback-on-error dropped (wedged slot); epoch parameter
+dropped; empty-doc panel guard dropped; narrowed-set show condition
+dropped.
+
+### Decision points for ratification
+
+1. **Highlight gesture = long-press** (recommended: zero new chrome,
+   existing haptic precedent, tap-to-accept untouched) vs an info
+   icon per row (discoverable but permanent clutter at 12 rows).
+2. **Index-out-of-range 1201 carries NO data.reason** (the ratified
+   text's literal shape; recommended) vs minting an advisory reason
+   string (legal under SPEC 8 extras, normative home nowhere).
+3. **Cell outlives the offer claim** (goldens-backed reading above;
+   recommended) vs claim-with-offer (would need ebp.el↔ebp-sync
+   coupling AND contradicts the applied goldens).
+4. **The dynamic-var provider seam** (recommended: fn contract
+   untouched, ebp.el stays capf-ignorant) vs widening the completion
+   fn's return contract (every fixture and the picker override churn).
+5. Scope rider: the serve()-finally display-ghost fix rides R5
+   (recommended) vs a separate commit.
+6. **An empty doc shows NO panel** (recommended: the eldoc row this
+   idiom comes from already guards with `takeIf { it.isNotEmpty() }`,
+   Renderer.kt:910) vs a muted "No documentation" line. This matters
+   more than it looks (review F6): `""` is not the rare case but the
+   universal degradation arm — every picker candidate, every
+   word-fallback candidate, every timeout, every latch collision, and
+   every failure answers `""`, so under the "show nothing" choice a
+   real regression is indistinguishable from "no docs here" at every
+   layer including device smoke. The muted line makes long-press
+   feedback unambiguous at the cost of one string and a permanent
+   affordance ambiguity.
+
+### Review provenance
+
+Drafted, then reviewed by a 4-lens adversarial pass (SPEC conformance,
+Emacs runtime, Kotlin threading/display, test completeness): 22
+findings, 4 verified before the pass exhausted its budget, the other
+18 hand-verified against the sources. Everything above is folded in.
+The P1 was found independently by three of the four lenses: the
+provider had no buffer context, which would have made every eglot doc
+fetch answer `""` forever while the whole planned test list stayed
+green. No finding was refuted.
 
 ## R6 — edit.command revival (LANDED)
 

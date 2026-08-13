@@ -1679,7 +1679,9 @@ seam is JA-5's; the seam itself is engine machinery.)")
 
 (defcustom ebp-org-outline-max-headings 400
   "Cap on heading records returned by one collection pass.
-Bounds very large files; `ebp-org-outline-cap' applies it."
+Bounds very large files; `ebp-org-file-toplevel-records' bounds
+collection itself with it, and `ebp-org-outline-cap' applies it at
+the edge that renders records handed in whole."
   :type 'integer)
 
 (defcustom ebp-org-outline-show-deadline t
@@ -1734,24 +1736,60 @@ elements (checkboxes) inside it."
             :deadline deadline :clocked clocked
             :body body :body-start body-start))))
 
-(defun ebp-org-outline-collect (beg end include-first)
+(defun ebp-org--outline-level-at (pos)
+  "Star count of the real heading at POS — the record's :level, unbuilt.
+Nil when POS is a star-only line: those match `org-heading-regexp'
+but not `org-outline-regexp', so `org-heading-components' would
+answer for the PREVIOUS real heading and the filter would admit a
+ghost record.  The bounded collector filters on this before paying
+`ebp-org--outline-record' for a heading it would drop."
+  (save-excursion
+    (goto-char pos)
+    (skip-chars-forward "*")
+    (and (eq (char-after) ?\s)
+         (- (point) pos))))
+
+(defun ebp-org-outline-collect (beg end include-first &optional level max)
   "Collect heading records between BEG and END of the current org buffer.
 INCLUDE-FIRST non-nil includes a heading sitting exactly at BEG (the
-subtree case).  Uncapped — apply `ebp-org-outline-cap' at the edge
-that renders."
-  (let (positions records)
+subtree case).  LEVEL non-nil keeps only headings of exactly that
+star count; MAX non-nil stops after MAX kept records and stops the
+scan one heading past the last one kept (that heading terminates the
+last record's body).  Both nil: uncapped — `ebp-org-outline-cap'
+still applies at the edge that renders.  Bounding here, not after,
+is jetpacs-files' bounded-scan lesson: a cap applied to collected
+records already paid `ebp-org--outline-record' for every heading in
+the file."
+  (let (positions records stop (matched 0))
     (save-excursion
       (goto-char beg)
       (when (and include-first (org-at-heading-p))
         (push (line-beginning-position) positions)
+        (when (or (null level)
+                  (eql level (ebp-org--outline-level-at
+                              (line-beginning-position))))
+          (setq matched (1+ matched)))
         (end-of-line))                  ; don't re-match this heading below
-      (while (re-search-forward org-heading-regexp end t)
-        (push (line-beginning-position) positions)))
+      (while (and (not stop)
+                  (re-search-forward org-heading-regexp end t))
+        (push (line-beginning-position) positions)
+        (if (and max (>= matched max))
+            (setq stop t)               ; the MAXth record's terminator
+          (when (or (null level)
+                    (eql level (ebp-org--outline-level-at
+                                (line-beginning-position))))
+            (setq matched (1+ matched))))))
     (setq positions (nreverse positions))
-    (cl-loop for cell on positions
-             for pos = (car cell)
-             for next = (or (cadr cell) end)
-             do (push (ebp-org--outline-record pos next) records))
+    (let ((kept 0))
+      (cl-loop for cell on positions
+               for pos = (car cell)
+               for next = (or (cadr cell) end)
+               while (or (null max) (< kept max))
+               when (or (null level)
+                        (eql level (ebp-org--outline-level-at pos)))
+               do (progn
+                    (push (ebp-org--outline-record pos next) records)
+                    (setq kept (1+ kept)))))
     (nreverse records)))
 
 (defun ebp-org-outline-tree (records)
@@ -1780,19 +1818,38 @@ FILE goes through the root allowlist first — signals
 `ebp-org-refused' outside `ebp-org-roots', exactly like every
 other engine entry point (the poc read any path handed to it).  The
 extra :file/:buffer members let a consumer mint a heading ref or a tap
-target from a record."
+target from a record.  Collection itself is bounded (level 1,
+`ebp-org-outline-max-headings'): the pre-2026-08-13 shape collected
+a record for EVERY heading and filtered after, paying full record
+cost on files the cap then discarded."
   (let ((file (ebp-org--check-file file)))
     (with-current-buffer (find-file-noselect file t)
       (unless (derived-mode-p 'org-mode) (org-mode))
       (org-with-wide-buffer
-       (let* ((buf (buffer-name))
-              (all (ebp-org-outline-collect (point-min) (point-max) nil))
-              (tops (cl-remove-if-not
-                     (lambda (r) (= (plist-get r :level) 1)) all)))
+       (let ((buf (buffer-name))
+             (tops (ebp-org-outline-collect
+                    (point-min) (point-max) nil
+                    1 ebp-org-outline-max-headings)))
          (mapcar (lambda (r)
                    (setq r (plist-put (copy-sequence r) :file file))
                    (plist-put r :buffer buf))
-                 (ebp-org-outline-cap tops)))))))
+                 tops))))))
+
+(defun ebp-org-file-toplevel-count (file)
+  "Level-1 heading count of org FILE — a regex pass, no records built.
+Root-checked like every engine entry point.  The truncation note's
+denominator: `ebp-org-file-toplevel-records' stops collecting at its
+cap, so the total is no longer a by-product of collection."
+  (let ((file (ebp-org--check-file file)))
+    (with-current-buffer (find-file-noselect file t)
+      (unless (derived-mode-p 'org-mode) (org-mode))
+      (org-with-wide-buffer
+       (goto-char (point-min))
+       (let ((n 0))
+         (while (re-search-forward org-heading-regexp nil t)
+           (when (eql 1 (ebp-org--outline-level-at (line-beginning-position)))
+             (setq n (1+ n))))
+         n)))))
 
 ;;;; Reset — every table this file owns, dropped
 

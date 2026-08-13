@@ -1372,6 +1372,60 @@ nearest shallower ancestor rather than being dropped."
     (should (= 2 (length (ebp-org-outline-cap '(a b c d)))))
     (should (equal '(a) (ebp-org-outline-cap '(a))))))
 
+(ert-deftest ebp-org-outline-collect-bounded ()
+  "LEVEL/MAX bound record BUILDING, not just the returned list —
+the bounded-scan lesson: the pre-2026-08-13 shape paid
+`ebp-org--outline-record' for every heading and filtered after.  The
+last kept record's body is still terminated by the next heading of
+any level."
+  (ebp-org-test--with-fixture f ebp-org-test--outline-fixture
+    (with-current-buffer (find-file-noselect f)
+      (org-mode)
+      (org-with-wide-buffer
+       (let* ((calls 0)
+              (real (symbol-function 'ebp-org--outline-record)))
+         (cl-letf (((symbol-function 'ebp-org--outline-record)
+                    (lambda (pos next)
+                      (setq calls (1+ calls))
+                      (funcall real pos next))))
+           ;; MAX bites: one record kept, ONE record built (of 4 headings).
+           (let ((recs (ebp-org-outline-collect
+                        (point-min) (point-max) nil 1 1)))
+             (should (= 1 (length recs)))
+             (should (equal (plist-get (car recs) :title) "One"))
+             ;; Terminated by the level-2 child, not the subtree end.
+             (should (equal (plist-get (car recs) :body) "Body."))
+             (should (= 1 calls)))
+           ;; LEVEL bites alone: both roots kept, TWO records built.
+           (setq calls 0)
+           (let ((recs (ebp-org-outline-collect
+                        (point-min) (point-max) nil 1 5)))
+             (should (equal (mapcar (lambda (r) (plist-get r :title)) recs)
+                            '("One" "Two")))
+             (should (= 2 calls)))))))))
+
+(ert-deftest ebp-org-file-toplevel-count-counts ()
+  "The truncation note's denominator: level-1 count, root-checked,
+no records built."
+  (ebp-org-test--with-fixture f ebp-org-test--outline-fixture
+    (should (= 2 (ebp-org-file-toplevel-count f)))
+    (let ((ebp-org-roots (list (make-temp-file "ja5-other" t))))
+      (should-error (ebp-org-file-toplevel-count f)
+                    :type 'ebp-org-refused))))
+
+(ert-deftest ebp-org-outline-bare-star-lines-are-not-records ()
+  "A star-only line matches `org-heading-regexp' but is body text, not
+a heading: the bounded filter must not admit it — it would build a
+GHOST record (whose `org-heading-components' answer for the previous
+real heading) inside the level-1 list — and the count must not count
+it.  It still terminates the preceding record's body, as it always
+did."
+  (ebp-org-test--with-fixture f "* A\n** B\n*\n* C\n"
+    (let ((tops (ebp-org-file-toplevel-records f)))
+      (should (equal (mapcar (lambda (r) (plist-get r :title)) tops)
+                     '("A" "C"))))
+    (should (= 2 (ebp-org-file-toplevel-count f)))))
+
 (ert-deftest ebp-org-file-toplevel-records-root-checked ()
   "Top-level records come back tagged :file/:buffer and only level 1;
 a path outside `ebp-org-roots' is REFUSED, not read — the poc read

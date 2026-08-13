@@ -146,6 +146,9 @@ class DeviceBridge(
     private val onTheme: (JsonObject?) -> Unit = {},
     /** SPEC 18.3: (menu_id, spec) to present; (menu_id, null) to dismiss. */
     private val onPieMenuChanged: (String, JsonObject?) -> Unit = { _, _ -> },
+    /** SPEC 14.2 `companion.settings.open`: present the Companion's own
+     * settings (R4: the completion-narrowing row is its first tenant). */
+    private val onOpenSettings: () -> Unit = {},
 ) {
 
     // SPEC 13.1/15.1/18.6: the durable stores are process-wide singletons
@@ -561,9 +564,18 @@ class DeviceBridge(
             // Amendments #170/#171: the engine validates membership and the
             // emission-time re-proof against the ACTIVE predicate, then
             // emits the accept-stamped delta through the funnel.
-            if (!e.selectCompletion(document, editorId, label, insert,
-                    completionNarrowing))
-                e.withEditor(document, editorId) { publishMirror(it) }
+            e.selectCompletion(document, editorId, label, insert,
+                completionNarrowing)
+            // The mirror republishes on BOTH arms (R5 device gate finding,
+            // pre-existing since JC-4b): a successful accept's splice
+            // originates in the ENGINE, not the field — localEditorEdit
+            // fires no display listener for local edits — so without this
+            // the field keeps the PRE-TAP text until the next keystroke
+            // bounces off the amendment-#100 stale-base gate and snaps
+            // back, swallowing that keystroke. The engine caret already
+            // follows the insertion (EditorSession.splice, Emacs's
+            // SET_PT), so the adopted TextFieldValue lands complete.
+            e.withEditor(document, editorId) { publishMirror(it) }
             publishOfferViewFor(document, editorId)
         }
     }
@@ -918,8 +930,7 @@ class DeviceBridge(
                         android.content.Intent.createChooser(send, null)
                             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
-                "companion.settings.open" ->
-                    onToast("Companion settings arrive with the app shell")
+                "companion.settings.open" -> onOpenSettings()
             }
         }
         // SPEC 18.6: reconcile platform alarms with the accepted set (cancel

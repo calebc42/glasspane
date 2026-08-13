@@ -36,6 +36,11 @@ class EbpApplication : Application() {
     val theme: StateFlow<JsonObject?> get() = _theme
     private val _currentPieMenu = MutableStateFlow<Pair<String, JsonObject>?>(null)
     val currentPieMenu: StateFlow<Pair<String, JsonObject>?> get() = _currentPieMenu
+    // SPEC 14.2 companion.settings.open (R4): the Companion's OWN settings
+    // sheet — receiver-local presentation state, no wire member anywhere.
+    private val _settingsOpen = MutableStateFlow(false)
+    val settingsOpen: StateFlow<Boolean> get() = _settingsOpen
+    fun dismissSettings() { _settingsOpen.value = false }
 
     lateinit var bridge: DeviceBridge
         private set
@@ -91,7 +96,8 @@ class EbpApplication : Application() {
             onTheme = { payload -> _theme.value = payload },
             onPieMenuChanged = { id, spec ->
                 _currentPieMenu.value = if (spec != null) id to spec else null
-            })
+            },
+            onOpenSettings = { _settingsOpen.value = true })
         bridge.start()
     }
 }

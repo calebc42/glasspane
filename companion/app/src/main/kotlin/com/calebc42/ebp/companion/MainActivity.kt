@@ -21,6 +21,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.companion.render.EbpTheme
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
                     PieMenuHost(app.currentPieMenu, bridge)
                     DialogHost(app.currentDialog, bridge)
                     ConfirmHost(bridge)
+                    SettingsHost(app, bridge)
                     }
                 }
             }
@@ -133,6 +135,60 @@ private fun ConfirmHost(bridge: DeviceBridge) {
                 }
             })
     }
+}
+
+/**
+ * SPEC 14.2 `companion.settings.open` (R4): the Companion's own settings.
+ * Its own host for the house reason — opening it must not recompose the
+ * surface tree.  First tenant: the amendment-#171 completion-narrowing
+ * predicate, receiver-local presentation the user may set (strict is the
+ * reference default); the choice persists through DeviceBridge's
+ * prefs-backed property and emits nothing on the wire.
+ */
+@androidx.compose.runtime.Composable
+private fun SettingsHost(app: EbpApplication, bridge: DeviceBridge) {
+    val open by app.settingsOpen.collectAsState()
+    if (!open) return
+    var narrowing by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(bridge.completionNarrowing)
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { app.dismissSettings() },
+        title = { Text("Companion settings") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                Text("Completion narrowing",
+                    style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "How typing filters an open completion list.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                listOf(
+                    com.calebc42.ebp.wire.CompletionNarrowing.STRICT
+                        to "Strict — candidates start with what you typed",
+                    com.calebc42.ebp.wire.CompletionNarrowing.CONTAINS
+                        to "Contains — candidates match anywhere",
+                ).forEach { (mode, label) ->
+                    androidx.compose.foundation.layout.Row(
+                        verticalAlignment =
+                            androidx.compose.ui.Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 8.dp)) {
+                        androidx.compose.material3.RadioButton(
+                            selected = narrowing == mode,
+                            onClick = {
+                                bridge.completionNarrowing = mode
+                                narrowing = mode
+                            })
+                        Text(label,
+                            style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = { app.dismissSettings() }) { Text("Done") }
+        })
 }
 
 @androidx.compose.runtime.Composable

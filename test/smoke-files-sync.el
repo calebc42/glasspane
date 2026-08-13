@@ -83,8 +83,8 @@
  :wants '("editor.sync" "theme" "surfaces.dialog" "presentation.snackbar")
  :receipt-file (make-temp-file "smoke-files-sync-receipts"))
 
-(smoke-fs--drain 10 (lambda () (jetpacs-ready-p)))
-(smoke-fs--check "session READY" (jetpacs-ready-p))
+(smoke-fs--drain 10 (lambda () (jetpacs-connected-p)))
+(smoke-fs--check "session READY" (jetpacs-connected-p))
 (smoke-fs--check "editor.sync granted" (jetpacs-granted-p "editor.sync"))
 
 (jetpacs-shell-push jetpacs-files-owner)

@@ -406,6 +406,11 @@ nothing to do."
             (when accepts
               (list :document document :editor-id editor-id
                     :buffer buffer :cursor (truncate cursor)
+                    ;; R4 (#171): the tracked extension, in scalars —
+                    ;; grown by qualifying splices, read by the marked
+                    ;; arm's region arithmetic.  Present from mint so the
+                    ;; in-place `setf' never re-heads the plist.
+                    :ext 0
                     :prefix (car result) :exit-fn exit-fn
                     :accepts accepts))))))
 

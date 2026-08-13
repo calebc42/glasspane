@@ -158,14 +158,147 @@ class EditorLifecycleTest {
             })
         }))
         assertEquals("pri", got!!.first)
-        // Selecting the candidate replaces the prefix with insert as one edit.
-        assertTrue(engine.selectCompletion("doc:1", "body", s.sessionId, s.seq,
-            s.cursor, "pri", "print()"))
+        // Selecting the candidate replaces the prefix with insert as one
+        // edit whose delta carries the #170 provenance marker (THE FUNNEL:
+        // only this path can stamp).
+        assertTrue(engine.selectCompletion("doc:1", "body", "print", "print()",
+            CompletionNarrowing.STRICT))
         assertEquals("print()", s.shadow)
         assertEquals(1, s.seq) // one advancing edit.delta
-        // A stale selection (cursor moved) is discarded without changing text.
-        assertFalse(engine.selectCompletion("doc:1", "body", s.sessionId, 99,
-            0, "x", "y"))
+        val accepts = out.method("edit.delta")
+        assertEquals(1, accepts.size)
+        assertEquals(true,
+            (accepts[0]["params"] as JsonObject)["accept"]
+                ?.let { it == JsonPrimitive(true) })
+        // The accept consumed the offer: a second tap has nothing to
+        // validate against and is discarded without changing text.
+        assertFalse(engine.selectCompletion("doc:1", "body", "print",
+            "print()", CompletionNarrowing.STRICT))
+        // And a TYPED delta never carries the member - the other funnel pin.
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(7), 0, "x"))
+        val typed = out.method("edit.delta")[1]
+        assertFalse("accept" in (typed["params"] as JsonObject))
+    }
+
+    @Test
+    fun offerSurvivesTypingAndReprovesAtEmission() {
+        // Amendment #171 end to end: qualifying extensions keep the offer
+        // alive and narrow it; the tap replaces the EXTENDED region with
+        // accept:true; the emission-time re-proof discards a tap whose
+        // candidate the extension no longer matches (the stale-row race);
+        // any foreign advance kills the offer outright.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        engine.requestCompletion("doc:1", "body") { _, _, _, _, _ -> }
+        val req = out.method("edit.complete").single()
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", req["id"]!!)
+            put("result", buildJsonObject {
+                put("prefix", "pri")
+                put("candidates", buildJsonArray {
+                    addJsonObject { put("label", "printing") }
+                    addJsonObject { put("label", "primes") }
+                })
+            })
+        }))
+        // The user types "n": del 0 at the region's end - qualifying.
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(3), 0, "n"))
+        // Strict re-proof: "primes" no longer matches "prin" - discarded.
+        assertFalse(engine.selectCompletion("doc:1", "body", "primes",
+            "primes", CompletionNarrowing.STRICT))
+        // The failed re-proof cleared the offer (SPEC: MUST discard) - a
+        // fresh reply re-arms for the surviving candidate's tap.
+        engine.requestCompletion("doc:1", "body") { _, _, _, _, _ -> }
+        val req2 = out.method("edit.complete")[1]
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", req2["id"]!!)
+            put("result", buildJsonObject {
+                put("prefix", "prin")
+                put("candidates", buildJsonArray {
+                    addJsonObject { put("label", "printing") }
+                })
+            })
+        }))
+        // Another qualifying extension, then the tap against "print-".
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(4), 0, "t"))
+        assertTrue(engine.selectCompletion("doc:1", "body", "printing",
+            "printing", CompletionNarrowing.STRICT))
+        // The accept replaced the EXTENDED region: prefix "prin" + ext "t".
+        assertEquals("printing", s.shadow)
+        val accept = out.method("edit.delta").last()
+        val p = accept["params"] as JsonObject
+        assertEquals(JsonPrimitive(0), p["start"])
+        assertEquals(JsonPrimitive(5), p["del"])
+        assertEquals(JsonPrimitive(true), p["accept"])
+    }
+
+    @Test
+    fun foreignAdvanceAndNonQualifyingEditsKillTheOffer() {
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        fun arm(prefix: String) {
+            engine.requestCompletion("doc:1", "body") { _, _, _, _, _ -> }
+            val rq = out.method("edit.complete").last()
+            engine.feed(frame(buildJsonObject {
+                put("jsonrpc", "2.0")
+                put("id", rq["id"]!!)
+                put("result", buildJsonObject {
+                    put("prefix", prefix)
+                    put("candidates", buildJsonArray {
+                        addJsonObject { put("label", "printing") }
+                    })
+                })
+            }))
+        }
+        // A deletion is never qualifying.
+        arm("pri")
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(2), 1, ""))
+        assertFalse(engine.selectCompletion("doc:1", "body", "printing",
+            "printing", CompletionNarrowing.STRICT))
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(2), 0, "i"))
+        // An insertion NOT at the region's end is never qualifying.
+        arm("pri")
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(0), 0, "x"))
+        assertFalse(engine.selectCompletion("doc:1", "body", "printing",
+            "printing", CompletionNarrowing.STRICT))
+        // A remote apply is a foreign advance.
+        arm("xpri".let { _ -> "pri" })
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", JsonPrimitive("ap1"))
+            put("method", "edit.apply")
+            put("params", buildJsonObject {
+                put("document", "doc:1"); put("editor_id", "body")
+                put("session", s.sessionId); put("seq", s.seq + 1)
+                put("start", 0); put("del", 0); put("text", "z")
+                put("len", s.shadow.codePointCount(0, s.shadow.length) + 1)
+                put("cursor", 1)
+            })
+        }))
+        assertFalse(engine.selectCompletion("doc:1", "body", "printing",
+            "printing", CompletionNarrowing.STRICT))
+        // CONTAINS accepts what STRICT refused: re-arm, extend past the
+        // prefix with a substring-only match.
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", JsonPrimitive("rs1"))
+            put("method", "edit.resync")
+            put("params", buildJsonObject {
+                put("document", "doc:1"); put("editor_id", "body")
+                put("session", s.sessionId)
+            })
+        }))
+        val s2 = engine.withEditor("doc:1", "body") { it }!!
+        engine.localEditorEdit("doc:1", "body", ScalarPos(0),
+            s2.shadow.codePointCount(0, s2.shadow.length), "rin")
+        engine.withEditor("doc:1", "body") { it.cursor = 3 }
+        arm("rin")
+        assertFalse(engine.selectCompletion("doc:1", "body", "printing",
+            "printing", CompletionNarrowing.STRICT))
     }
 
     @Test

@@ -83,6 +83,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.companion.DeviceBridge
+import com.calebc42.ebp.wire.CompletionNarrowing
 import com.calebc42.ebp.wire.EditorSession
 import com.calebc42.ebp.wire.InputDisplay
 import kotlinx.coroutines.launch
@@ -803,10 +804,11 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
             } else {
                 ctx.state(id, JsonPrimitive(new.text)) // local editor: state.changed
             }
-            // SPEC 19.3 (JC-4b): the offer described the text as it WAS; drop
-            // it the moment the text moves, so no stale candidate is tappable
-            // even in the window before the next answer arrives.
-            if (document.isNotEmpty()) ctx.bridge.clearCompletions(document, id)
+            // SPEC 19.3 (amendment #171): the offer now SURVIVES a
+            // qualifying extension (the engine tracker is rule (a)), so
+            // the per-keystroke clear became a reconciliation - drop the
+            // offer exactly when the tracker says it died.
+            if (document.isNotEmpty()) ctx.bridge.reconcileCompletions(document, id)
         }
         value = new
     }
@@ -952,14 +954,33 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         // floating DropdownMenu: this must work inside a dialog whose host
         // container scrolls, and a popup anchored to a field inside a
         // scrolling column drifts away from it.
-        offer?.candidates?.take(MAX_VISIBLE_COMPLETIONS)?.forEach { cand ->
+        // Amendment #171: display narrowing SHOULD match the emission
+        // predicate - showing what cannot be accepted is a lie of
+        // presentation. The emit-time re-proof in the engine remains the
+        // normative gate either way (display diffing is asynchronous).
+        val offerView = if (offer != null && document.isNotEmpty())
+            ctx.bridge.completionOfferView(document, id) else null
+        val narrowed = when {
+            offer == null -> emptyList()
+            offerView == null || !offerView.active -> emptyList()
+            else -> offer.candidates.filter { c ->
+                val ep = offerView.extendedPrefix
+                when (ctx.bridge.completionNarrowing) {
+                    CompletionNarrowing.STRICT ->
+                        c.label.startsWith(ep) || c.insert.startsWith(ep)
+                    CompletionNarrowing.CONTAINS ->
+                        c.label.contains(ep) || c.insert.contains(ep)
+                }
+            }
+        }
+        narrowed.take(MAX_VISIBLE_COMPLETIONS).forEach { cand ->
             Row(
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
                         ctx.bridge.editorSelectCompletion(
-                            document, id, offer, cand.insert)
+                            document, id, cand.label, cand.insert)
                     }
                     .padding(horizontal = 12.dp, vertical = 8.dp)) {
                 // Amendment #169: the kind icon, through an EXPLICIT map -

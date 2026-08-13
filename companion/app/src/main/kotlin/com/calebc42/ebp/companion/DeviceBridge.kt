@@ -17,6 +17,8 @@ import com.calebc42.ebp.companion.render.parseDiagnostics
 import com.calebc42.ebp.companion.render.parseEldoc
 import com.calebc42.ebp.companion.render.parseFontify
 import com.calebc42.ebp.companion.render.stringOr
+import com.calebc42.ebp.wire.CompletionNarrowing
+import com.calebc42.ebp.wire.CompletionOfferView
 import com.calebc42.ebp.wire.CompanionEngine
 import com.calebc42.ebp.wire.CompanionConfig
 import com.calebc42.ebp.wire.EbpAuth
@@ -507,15 +509,46 @@ class DeviceBridge(
      * The engine refuses a selection whose session/seq/cursor have moved,
      * so a stale tap is a no-op rather than a wrong edit (SPEC 19.2). */
     fun editorSelectCompletion(document: String, editorId: String,
-                               offer: CompletionOffer, insert: String) {
+                               label: String, insert: String) {
         clearCompletions(document, editorId)
         dispatchExecutor.execute {
             val e = engine ?: return@execute
-            if (!e.selectCompletion(document, editorId, offer.session, offer.seq,
-                    offer.cursor, offer.prefix, insert))
+            // Amendments #170/#171: the engine validates membership and the
+            // emission-time re-proof against the ACTIVE predicate, then
+            // emits the accept-stamped delta through the funnel.
+            if (!e.selectCompletion(document, editorId, label, insert,
+                    completionNarrowing))
                 e.withEditor(document, editorId) { publishMirror(it) }
         }
     }
+
+    /** Amendment #171: the ACTIVE narrowing predicate - receiver-local
+     * presentation, user-settable, persisted; strict is the reference
+     * default. No wire member anywhere: Emacs cannot tell the policies
+     * apart, which is what made this a setting instead of a schism. */
+    var completionNarrowing: CompletionNarrowing =
+        if (appContext.getSharedPreferences("ebp", android.content.Context.MODE_PRIVATE)
+                .getString("completion_narrowing", "strict") == "contains")
+            CompletionNarrowing.CONTAINS else CompletionNarrowing.STRICT
+        set(value) {
+            field = value
+            appContext.getSharedPreferences("ebp", android.content.Context.MODE_PRIVATE)
+                .edit().putString("completion_narrowing",
+                    if (value == CompletionNarrowing.CONTAINS) "contains"
+                    else "strict").apply()
+        }
+
+    /** Amendment #171: keep-or-drop after a local edit - the offer now
+     * SURVIVES qualifying extensions, so the per-keystroke clear becomes a
+     * reconciliation against the engine tracker (which is rule (a)). */
+    fun reconcileCompletions(document: String, editorId: String) {
+        val view = engine?.completionOfferView(document, editorId)
+        if (view == null || !view.active) clearCompletions(document, editorId)
+    }
+
+    /** Amendment #171: the narrowing operand for display filtering. */
+    fun completionOfferView(document: String, editorId: String): CompletionOfferView? =
+        engine?.completionOfferView(document, editorId)
 
     /** Drop any offer for this editor: the caret moved, or one was taken. */
     fun clearCompletions(document: String, editorId: String) {

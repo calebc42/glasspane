@@ -306,22 +306,25 @@ nothing else."
              ebp-sync--table)
     nil))
 
-(defun ebp-sync--on-splice (client document editor-id start del text)
+(defun ebp-sync--on-splice (client document editor-id start del text
+                                   &optional accept)
   "Apply an accepted inbound `edit.delta' splice to the bound buffer.
 An unsent local edit racing this splice makes local positions a guess —
 drop them and resync instead (SPEC 19.3: never a wrong edit)."
   (let ((buf (ebp-sync--buffer client document editor-id)))
     (when buf
       (with-current-buffer buf
-        ;; The offer is claimed on EVERY splice for its document — the
-        ;; resync branch below included, where the divergence is exactly
-        ;; what invalidates the offer's coordinates.
-        (let ((offer (ebp-sync--claim-offer document editor-id)))
+        ;; R4 (#171): the offer is no longer claimed on every splice —
+        ;; the dispatcher below extends, finishes, or claims it.  The
+        ;; RESYNC branch still claims outright (pin 3): its divergence
+        ;; is exactly what invalidates the offer's coordinates.
+        (progn
           ;; Anything the tracker has seen but we have not flushed is a
           ;; local edit the Companion did not know about when it spliced.
           (ebp-sync--fetch-pending-into-queue)
           (if (or ebp-sync--queue ebp-sync--inflight)
-              (ebp-sync--resync buf)
+              (progn (ebp-sync--claim-offer document editor-id)
+                     (ebp-sync--resync buf))
             (condition-case nil
                 (progn
                   ;; START is a DOCUMENT offset, so `(1+ start)' is an
@@ -346,8 +349,8 @@ drop them and resync instead (SPEC 19.3: never a wrong edit)."
                   (save-restriction
                     (widen)
                     (track-changes-fetch ebp-sync--tracker #'ignore))
-                  (when offer
-                    (ebp-sync--maybe-finish-completion offer start del text))
+                  (ebp-sync--offer-dispatch document editor-id
+                                            start del text accept)
                   (ebp-sync--arm-annotations buf))
               ;; Write protection is honored, never overridden (SPEC
               ;; 19.3); the refusing side recovers through resync.
@@ -380,32 +383,55 @@ finding)."
       (setq ebp-complete-live-offer nil)
       offer)))
 
-(defun ebp-sync--maybe-finish-completion (offer start del text)
-  "Recognize OFFER's accept in an applied splice; schedule its finish.
-The wire deliberately does not mark a completion accept (SPEC 19.3: a
-tap is an ordinary local edit replacing the prefix), so Emacs infers
-it from shape — and the shape must be one ONLY a tap can produce.
-The tap path emits the UNTRIMMED prefix-replace, while typed commits
-arrive minimally diffed by the Companion: a splice whose deleted
-prefix and inserted text share their first or last scalar could never
-have survived that trim, so it is provably a tap.  Sharing neither end
-is ambiguous — paste, swipe-typing, and IME word commits produce
-exactly that shape — and ambiguity must not run an exit function over
-typed text; missing a rare genuine tap is the safe direction.  The
-empty-prefix shape (DEL 0) is inherently indistinguishable from an
-insertion and never fires.  (A wire provenance marker would make the
-inference exact; that is a SPEC amendment, parked with R3-R5.)
+(defun ebp-sync--offer-dispatch (document editor-id start del text accept)
+  "Route an applied splice against the standing completion offer (R4).
+Four arms, in order — the amendments #170/#171 corollary, five pins:
 
-Whatever the exit function edits (snippet-fallback text,
-`additionalTextEdits' auto-imports) flows back to the device through
-the ordinary track-changes -> `edit.apply' loop; no special wire
-traffic exists for any of it, which is why R2 needs no SPEC change."
-  (let* ((prefix (plist-get offer :prefix))
-         (cursor (plist-get offer :cursor))
-         (accept (assoc text (plist-get offer :accepts)))
-         (exit-fn (plist-get offer :exit-fn))
-         (buf (plist-get offer :buffer)))
-    (when (and accept
+MARKED (ACCEPT non-nil): the wire asserted a candidate selection
+\(#170), so validation is MEMBERSHIP and REGION only — the text is an
+offered insert, `del' spans the original prefix plus the tracked
+extension, `start' sits at the region's invariant left edge — with
+none of the shape guards: empty-prefix and empty-insert accepts, both
+invisible to the shape heuristic, validate here.  The offer is
+consumed either way.
+
+EXTEND (unmarked `del' 0 insertion at the region's end): the #171
+qualifying splice — the offer survives, its tracked extension grows,
+and nothing fires.
+
+PRISTINE HEURISTIC (unmarked, extension zero): R2's provenance-by-
+shape, exactly as landed — the deleted prefix and inserted text must
+share an end scalar, the shape the Companion's minimal diff can never
+emit.  It never fires once any extension is tracked; extension
+survival must not widen the unmarked inference surface.
+
+CLAIM (anything else): the offer's world moved on.
+
+The finish is DEFERRED (`ebp-sync--run-exit-fn'): the exit function
+may block, and this watch is inside the jsonrpc dispatch."
+  (when-let* ((offer (bound-and-true-p ebp-complete-live-offer)))
+    (when (and (equal document (plist-get offer :document))
+               (equal editor-id (plist-get offer :editor-id)))
+      (let* ((prefix (plist-get offer :prefix))
+             (cursor (plist-get offer :cursor))
+             (ext (or (plist-get offer :ext) 0))
+             (end (+ cursor ext))
+             (cand (assoc text (plist-get offer :accepts)))
+             (exit-fn (plist-get offer :exit-fn))
+             (buf (plist-get offer :buffer)))
+        (cond
+         (accept
+          (setq ebp-complete-live-offer nil)
+          (when (and cand
+                     (= del (+ (length prefix) ext))
+                     (= start (- end del))
+                     (eq buf (current-buffer)))
+            (run-at-time 0 nil #'ebp-sync--run-exit-fn
+                         buf start text (cdr cand) exit-fn 0)))
+         ((and (= del 0) (> (length text) 0) (= start end))
+          (setf (plist-get offer :ext) (+ ext (length text))))
+         ((and (= ext 0)
+               cand
                (> del 0)
                (= del (length prefix))
                (= start (- cursor del))
@@ -414,11 +440,10 @@ traffic exists for any of it, which is why R2 needs no SPEC change."
                (or (eq (aref text 0) (aref prefix 0))
                    (eq (aref text (1- (length text)))
                        (aref prefix (1- (length prefix))))))
-      ;; DEFERRED: the exit function may block (eglot resolves the item
-      ;; against its server), and this watch is inside the jsonrpc
-      ;; dispatch.
-      (run-at-time 0 nil #'ebp-sync--run-exit-fn
-                   buf start text (cdr accept) exit-fn 0))))
+          (setq ebp-complete-live-offer nil)
+          (run-at-time 0 nil #'ebp-sync--run-exit-fn
+                       buf start text (cdr cand) exit-fn 0))
+         (t (setq ebp-complete-live-offer nil)))))))
 
 (defun ebp-sync--run-exit-fn (buf start text raw exit-fn retries)
   "Run EXIT-FN for the accepted RAW candidate in BUF, safely.

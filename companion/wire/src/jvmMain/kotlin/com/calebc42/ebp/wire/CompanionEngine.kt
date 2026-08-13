@@ -1571,7 +1571,8 @@ class CompanionEngine(
     @Synchronized
     fun localEditorEdit(document: String, editorId: String,
                         start: ScalarPos, del: Int, text: String,
-                        base: String? = null): Boolean {
+                        base: String? = null,
+                        accept: Boolean = false): Boolean {
         val s = editors[document to editorId] ?: return false
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY)
             return false
@@ -1593,6 +1594,10 @@ class CompanionEngine(
         val len = s.scalarLength() - del + text.codePointCount(0, text.length)
         if (!s.splice(start, del, text, len)) return false
         s.seq += 1
+        // Amendments #170/#171: the accept splice consumes the offer; any
+        // other local splice either extends it (del 0 at the region end)
+        // or kills it — the tracker IS rule (a).
+        if (accept) s.offer.clear() else s.offer.onLocalSplice(start.v, del, text)
         emit(notification("edit.delta", buildJsonObject {
             put("document", document)
             put("editor_id", editorId)
@@ -1602,6 +1607,11 @@ class CompanionEngine(
             put("del", del)
             put("text", text)
             put("len", len)
+            // Amendment #170: presence IS the assertion — the tap path is
+            // the ONLY caller passing the flag (THE FUNNEL RULE: a future
+            // accept gesture calls selectCompletion, never re-implements
+            // the splice-and-stamp), so a typed delta can never carry it.
+            if (accept) put("accept", true)
         }))
         return true
     }
@@ -1824,6 +1834,9 @@ class CompanionEngine(
                 selStart?.let(::ScalarPos), selEnd?.let(::ScalarPos)))
             return respondResult(id, buildJsonObject { put("status", "stale"); put("seq", s.seq) })
         s.seq = seq
+        // Amendment #171: a remote apply is a non-qualifying advance -
+        // the offer's coordinates describe a document state now left.
+        s.offer.onForeignAdvance()
         editorListener?.invoke(s)
         respondResult(id, buildJsonObject { put("status", "applied"); put("seq", s.seq) })
     }
@@ -1910,32 +1923,78 @@ class CompanionEngine(
                             k != "kind")
                             return@sendRequest
                 }
+                // Amendment #171: arm the survive-typing tracker - but only
+                // when the session still sits at the issued state; an offer
+                // computed against text already left was never alive, and
+                // taps on it discard exactly as before this amendment.
+                val live = editors[document to editorId]
+                if (live != null && live.sessionId == atSession &&
+                    live.seq == atSeq && live.cursor == atCursor) {
+                    live.offer.setOffer(prefix, atCursor, atSeq, cands.mapNotNull { el ->
+                        (el as? JsonObject)?.let { c ->
+                            val label = c.stringOrNull("label") ?: return@let null
+                            OfferCandidate(
+                                label,
+                                c.stringOrNull("insert").takeUnless { it.isNullOrEmpty() }
+                                    ?: label,
+                                c.stringOrNull("kind"))
+                        }
+                    })
+                }
                 callback(prefix, cands, atSession, atSeq, atCursor)
             }
         }
     }
 
     /**
-     * SPEC 19.3: apply a chosen candidate. Only when the session, seq, and
-     * cursor still match and the prefix still precedes the cursor does the
-     * Companion replace that prefix with `insert` as one local edit (an
-     * edit.delta); otherwise it discards the result without changing text.
+     * SPEC 19.3 (amendments #170/#171): apply a chosen candidate. The tap
+     * is legal while the tracker survived - every advance since the reply
+     * a qualifying extension - AND, at this very emission, the candidate
+     * still satisfies the ACTIVE narrowing predicate over the EXTENDED
+     * PREFIX: the re-proof that closes the stale-row tap race (display
+     * narrowing is asynchronous; this point is not). The replacement spans
+     * the extension region and its delta carries `accept: true` - THE
+     * FUNNEL: every accept gesture, present and future, goes through here.
      */
     @Synchronized
-    fun selectCompletion(document: String, editorId: String, atSession: String,
-                         atSeq: Long, atCursor: Int, prefix: String, insert: String): Boolean {
+    fun selectCompletion(document: String, editorId: String,
+                         label: String, insert: String,
+                         narrowing: CompletionNarrowing): Boolean {
         val s = editors[document to editorId] ?: return false
         if (s.state != EditorSession.State.OPEN || state != SessionState.READY) return false
-        if (s.sessionId != atSession || s.seq != atSeq || s.cursor != atCursor) return false
-        val prefixLen = prefix.codePointCount(0, prefix.length)
-        val start = atCursor - prefixLen
-        if (start < 0) return false
-        // The prefix must still be the text immediately before the cursor.
+        val o = s.offer
+        if (!o.active) return false
+        // Rule (a), settled by construction: the tracker qualified every
+        // advance, so a live seq it did not count is a foreign advance.
+        if (s.seq != o.expectedSeq || s.cursor != o.regionEnd()) {
+            o.clear(); return false
+        }
+        // Membership: the tapped candidate must be of THAT reply.
+        val cand = o.candidates.firstOrNull {
+            it.label == label && it.insert == insert }
+            ?: run { o.clear(); return false }
+        // Amendment #171: the emission-time re-proof.
+        if (!o.matches(narrowing, cand)) { o.clear(); return false }
+        val ep = o.extendedPrefix()
+        val epLen = ep.codePointCount(0, ep.length)
+        val start = o.regionEnd() - epLen
+        if (start < 0) { o.clear(); return false }
+        // The extended prefix must still be the text before the cursor.
         val from = s.shadow.offsetByCodePoints(0, start)
-        val to = s.shadow.offsetByCodePoints(0, atCursor)
-        if (s.shadow.substring(from, to) != prefix) return false
-        return localEditorEdit(document, editorId, ScalarPos(start), prefixLen, insert)
+        val to = s.shadow.offsetByCodePoints(0, o.regionEnd())
+        if (s.shadow.substring(from, to) != ep) { o.clear(); return false }
+        return localEditorEdit(document, editorId, ScalarPos(start), epLen,
+            insert, accept = true)
     }
+
+    /** Render-facing snapshot of the survive-typing offer (amendment
+     * #171): the narrowing operand plus liveness, for display filtering.
+     * Candidates ride the answer callback as before. */
+    @Synchronized
+    fun completionOfferView(document: String, editorId: String): CompletionOfferView? =
+        editors[document to editorId]?.let {
+            CompletionOfferView(it.offer.extendedPrefix(), it.offer.active)
+        }
 
     /** T2/LD-5: run F over a live editor session under the engine monitor —
      * the host's one safe read path for shadow/caret state (the mirror it

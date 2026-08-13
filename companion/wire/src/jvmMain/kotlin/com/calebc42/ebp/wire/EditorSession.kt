@@ -52,6 +52,9 @@ class EditorSession(
     enum class State { OPEN, STALE, CLOSED }
     var state = State.OPEN
     var seq = 0L
+    /** Amendments #170/#171 (R4): the survive-typing offer; dies with the
+     * session by construction. */
+    val offer = CompletionOfferTracker()
     var shadow = ""
 
     // Session caret state, always in the scalar domain (SPEC 19.1). Plain

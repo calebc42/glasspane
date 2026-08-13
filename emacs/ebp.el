@@ -596,11 +596,14 @@ Events: `hello-sent', `nonce-received', `auth-sent', `welcome-verified',
   ;; scalar values, so splice positions are char positions directly.
   (editors (make-hash-table :test #'equal))
   edit-change-functions ; called with (client document editor-id text)
-  ;; SPEC 19.3: called with (client document editor-id start del text)
-  ;; for each ACCEPTED inbound delta, BEFORE edit-change-functions, with
-  ;; the splice in scalar (= char) positions.  A buffer bridge needs the
-  ;; splice itself — replaying full text per delta would discard point
-  ;; and marker adjustment.
+  ;; SPEC 19.3: called with (client document editor-id start del text
+  ;; accept) for each ACCEPTED inbound delta, BEFORE
+  ;; edit-change-functions, with the splice in scalar (= char)
+  ;; positions.  A buffer bridge needs the splice itself — replaying
+  ;; full text per delta would discard point and marker adjustment.
+  ;; ACCEPT is amendment #170's provenance marker: t exactly when the
+  ;; delta carried `accept: true' (a candidate selection), nil
+  ;; otherwise.
   edit-splice-functions
   ;; SPEC 19.3 (amendment #71): called with (client document editor-id
   ;; seed-text prior-text) when edit.open arrives, so the application can
@@ -1694,7 +1697,11 @@ view stale and resync once."
                     (setf (plist-get ed :text) new
                           (plist-get ed :seq) (plist-get params :seq))
                     (dolist (fn (ebp-client-edit-splice-functions client))
-                      (funcall fn client doc eid start del ins))
+                      ;; Amendment #170: the provenance marker rides the
+                      ;; hook — presence IS the assertion (absent on every
+                      ;; non-selection delta).
+                      (funcall fn client doc eid start del ins
+                               (eq (plist-get params :accept) t)))
                     (ebp-client--editor-changed client doc eid))
                 (ebp-client-edit-resync client doc eid)))
           (ebp-client-edit-resync client doc eid))))))

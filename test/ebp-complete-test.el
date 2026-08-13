@@ -479,24 +479,147 @@ distant edit it makes (auto-import) flushes back as ordinary
       (should (equal (plist-get (nth 1 apply-frame) :text) ";; import\n")))))
 
 (ert-deftest ebp-complete-accept-mismatch-clears-the-offer ()
-  "Any other splice for the offered document clears the offer: a typed
-character is not an accept, and a LATER accept-shaped splice must not
-fire a stale exit function."
+  "R4 semantics: a caret insertion EXTENDS the offer (the #171
+qualifying splice) instead of clearing it — and once any extension is
+tracked, the unmarked R2 shape heuristic is DEAD (pin 4): a later
+accept-shaped UNMARKED splice claims the offer without firing, because
+extension survival must not widen the unmarked inference surface.  A
+deletion still claims outright."
   (ebp-complete-test--with-accept-setup
     (ebp-complete-edit-complete "doc:r2.el" "body" "prefix-li" 9)
     (should ebp-complete-live-offer)
-    ;; The user types instead: plain insertion at the end.
+    ;; The user types at the caret: a QUALIFYING extension — survives.
     (ebp-client--handle-edit-delta
      client (list :document "doc:r2.el" :editor_id "body" :session "S"
                   :seq 1 :start 9 :del 0 :text "x" :len 10))
+    (should ebp-complete-live-offer)
+    (should (= (plist-get ebp-complete-live-offer :ext) 1))
+    ;; The exact R2 accept shape — del = ORIGINAL prefix length, start
+    ;; at its left edge, shared first scalar — UNMARKED, after an
+    ;; extension: pin 4 — the pristine heuristic never fires once
+    ;; ext > 0; claimed, no run.  (del 9, not 10: the R2 shape, which a
+    ;; pin-4 mutant would wrongly finish.)
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                  :seq 2 :start 0 :del 9 :text "prefix-live-needle"
+                  :len 19))
     (should-not ebp-complete-live-offer)
-    ;; The exact accept shape afterwards: no offer, no run.
+    (cl-loop repeat 10 do (accept-process-output nil 0.02))
+    (should-not exit-calls)
+    ;; And a deletion claims a fresh offer outright (never qualifying).
+    (puthash (cons "doc:r2.el" "body")
+             (list :session "S" :seq 2 :text (with-current-buffer buf
+                                               (buffer-string))
+                   :cursor 9)
+             (ebp-client-editors client))
+    (ebp-complete-edit-complete "doc:r2.el" "body"
+                                (with-current-buffer buf (buffer-string)) 9)
+    (when ebp-complete-live-offer
+      (ebp-client--handle-edit-delta
+       client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                    :seq 3 :start 8 :del 1 :text ""
+                    :len (1- (with-current-buffer buf
+                               (length (buffer-string))))))
+      (should-not ebp-complete-live-offer))))
+
+(ert-deftest ebp-complete-marked-accept-validates-by-membership ()
+  "The #170 marked arm: a delta carrying `accept: true' runs the exit
+function on MEMBERSHIP and REGION alone — this candidate shares
+NEITHER end scalar with the prefix (the flex shape the unmarked
+heuristic must refuse), and with the marker it finishes."
+  (let* ((client (ebp-client-create :receipt-file (make-temp-file "r4")))
+         (buf (generate-new-buffer " *r4 marked*"))
+         (exit-calls nil))
+    (unwind-protect
+        (with-current-buffer buf
+          (insert "li")
+          (puthash (cons "doc:r4.el" "body")
+                   (list :session "S" :seq 0 :text "li" :cursor 2)
+                   (ebp-client-editors client))
+          (ebp-sync-attach client "doc:r4.el" "body" buf)
+          (setq-local completion-at-point-functions
+                      (list (lambda ()
+                              (list (- (point) 2) (point)
+                                    (lambda (str pred action)
+                                      (if (eq action t) '("XyzQw")
+                                        (complete-with-action
+                                         action '("XyzQw") str pred)))
+                                    :exit-function
+                                    (lambda (&rest args)
+                                      (push args exit-calls))))))
+          (ebp-complete-edit-complete "doc:r4.el" "body" "li" 2)
+          (should ebp-complete-live-offer)
+          ;; Negative first: marked but NON-MEMBER text — claimed, no
+          ;; run (membership is the marked arm's whole validation).
+          (ebp-client--handle-edit-delta
+           client (list :document "doc:r4.el" :editor_id "body"
+                        :session "S" :seq 1 :start 0 :del 2 :text "Rogue"
+                        :len 5 :accept t))
+          (should-not ebp-complete-live-offer)
+          (cl-loop repeat 5 do (accept-process-output nil 0.02))
+          (should-not exit-calls)
+          ;; The delta APPLIED regardless (a real splice): buffer now
+          ;; "Rogue".  Negative second: member text but WRONG del (the
+          ;; region check).  Mint against the current state.
+          (ebp-complete-edit-complete "doc:r4.el" "body" "Rogue" 2)
+          (should ebp-complete-live-offer)
+          (ebp-client--handle-edit-delta
+           client (list :document "doc:r4.el" :editor_id "body"
+                        :session "S" :seq 2 :start 1 :del 1 :text "XyzQw"
+                        :len 9 :accept t))
+          (should-not ebp-complete-live-offer)
+          (cl-loop repeat 5 do (accept-process-output nil 0.02))
+          (should-not exit-calls)
+          ;; The positive: reset to "li" BY HAND (consume the tracker —
+          ;; a manual buffer edit otherwise poisons the queue and the
+          ;; next splice resyncs instead of dispatching), re-mint, then
+          ;; the flex-shape member marked — finishes.
+          (with-current-buffer buf
+            (delete-region (point-min) (point-max))
+            (insert "li")
+            (save-restriction
+              (widen)
+              (track-changes-fetch ebp-sync--tracker #'ignore)))
+          (puthash (cons "doc:r4.el" "body")
+                   (list :session "S" :seq 2 :text "li" :cursor 2)
+                   (ebp-client-editors client))
+          (ebp-complete-edit-complete "doc:r4.el" "body" "li" 2)
+          (should ebp-complete-live-offer)
+          (ebp-client--handle-edit-delta
+           client (list :document "doc:r4.el" :editor_id "body"
+                        :session "S" :seq 3 :start 0 :del 2 :text "XyzQw"
+                        :len 5 :accept t))
+          (should-not ebp-complete-live-offer)
+          (cl-loop repeat 30 until exit-calls
+                   do (accept-process-output nil 0.02))
+          (should exit-calls))
+      (setq ebp-complete-live-offer nil)
+      (with-current-buffer buf (ebp-sync-detach))
+      (kill-buffer buf))))
+
+(ert-deftest ebp-complete-marked-accept-spans-the-extension ()
+  "The full #171 loop: a qualifying extension grows the tracked region,
+and the marked accept replaces prefix-plus-extension — the region
+arithmetic of corollary pin 2."
+  (ebp-complete-test--with-accept-setup
+    (ebp-complete-edit-complete "doc:r2.el" "body" "prefix-li" 9)
+    ;; Type "v": qualifying (del 0 at region end 9).
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                  :seq 1 :start 9 :del 0 :text "v" :len 10))
+    (should (= (plist-get ebp-complete-live-offer :ext) 1))
+    ;; The marked accept spans prefix (9) + extension (1) = del 10 at 0.
     (ebp-client--handle-edit-delta
      client (list :document "doc:r2.el" :editor_id "body" :session "S"
                   :seq 2 :start 0 :del 10 :text "prefix-live-needle"
-                  :len 18))
-    (cl-loop repeat 10 do (accept-process-output nil 0.02))
-    (should-not exit-calls)))
+                  :len 18 :accept t))
+    (should-not ebp-complete-live-offer)
+    (cl-loop repeat 30 until exit-calls
+             do (accept-process-output nil 0.02))
+    (pcase-let ((`(,s ,item ,status ,_pt ,_g) (car exit-calls)))
+      (should (equal s "prefix-live-needle"))
+      (should (eq item 'yes))
+      (should (eq status 'finished)))))
 
 (ert-deftest ebp-complete-accept-ambiguous-shape-never-fires ()
   "Provenance by shape (R2 review): a splice whose deleted prefix and

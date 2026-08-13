@@ -1,7 +1,11 @@
 # RATIFIED amendments #169–#172 — the completion ladder's wire half
 
-Status: **RATIFIED 2026-08-13 (all four, Caleb)**; application to the
-ebp submodule pending. Verification record: a 36-agent pre-application
+Status: **RATIFIED AND APPLIED 2026-08-13** (ebp submodule 2cd7387:
+SPEC.md through #172, ledger rows written, contract + validate.py
+check_result + 5 golden fixtures landed, all four new rails verified
+to bite; Kotlin MethodRegistry pinned, 360 wire tests green; elisp
+gate 899 green). Remaining halves live on the R3/R4/R5 implementation
+rungs, named per ledger row. Verification record: a 36-agent pre-application
 pass (wf_0ae2abc8-6c6; 3 finders, 33 findings adversarially verified,
 30 confirmed, 3 refuted) ran against SPEC.md, SPEC-CHANGES.md,
 contract.json, validate.py, the goldens, and the landed R0–R2/R6 code;

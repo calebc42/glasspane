@@ -42,6 +42,7 @@ val METHOD_REGISTRY: Map<String, MethodSpec> = mapOf(
     "edit.caret" to MethodSpec(Sender.COMPANION, false, R),
     "edit.close" to MethodSpec(Sender.COMPANION, false, R),
     "edit.complete" to MethodSpec(Sender.COMPANION, true, R),
+    "edit.candidate.doc" to MethodSpec(Sender.COMPANION, true, R),
     "edit.resync" to MethodSpec(Sender.EMACS, true, R),
     "edit.apply" to MethodSpec(Sender.EMACS, true, R),
     "diagnostics.show" to MethodSpec(Sender.EMACS, false, R),

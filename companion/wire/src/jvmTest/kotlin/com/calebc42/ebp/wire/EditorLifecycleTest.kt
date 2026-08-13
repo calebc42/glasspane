@@ -281,24 +281,28 @@ class EditorLifecycleTest {
         }))
         assertFalse(engine.selectCompletion("doc:1", "body", "printing",
             "printing", CompletionNarrowing.STRICT))
-        // CONTAINS accepts what STRICT refused: re-arm, extend past the
-        // prefix with a substring-only match.
-        engine.feed(frame(buildJsonObject {
-            put("jsonrpc", "2.0")
-            put("id", JsonPrimitive("rs1"))
-            put("method", "edit.resync")
-            put("params", buildJsonObject {
-                put("document", "doc:1"); put("editor_id", "body")
-                put("session", s.sessionId)
-            })
-        }))
+        // STRICT vs CONTAINS bite only over an EXTENSION (a pristine tap
+        // is the base path's unconditional MUST — see
+        // pristineTapIsBasePathNotPredicate): extend "rin" with "t" so
+        // the extended prefix "rint" is a substring but not a prefix of
+        // "printing" — STRICT refuses the tap, CONTAINS accepts it.
         val s2 = engine.withEditor("doc:1", "body") { it }!!
         engine.localEditorEdit("doc:1", "body", ScalarPos(0),
             s2.shadow.codePointCount(0, s2.shadow.length), "rin")
         engine.withEditor("doc:1", "body") { it.cursor = 3 }
         arm("rin")
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(3), 0, "t"))
         assertFalse(engine.selectCompletion("doc:1", "body", "printing",
             "printing", CompletionNarrowing.STRICT))
+        // The refused tap cleared the offer (SPEC: MUST discard); reset
+        // the stage and the SAME extension passes the CONTAINS predicate.
+        engine.localEditorEdit("doc:1", "body", ScalarPos(0), 4, "rin")
+        engine.withEditor("doc:1", "body") { it.cursor = 3 }
+        arm("rin")
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(3), 0, "t"))
+        assertTrue(engine.selectCompletion("doc:1", "body", "printing",
+            "printing", CompletionNarrowing.CONTAINS))
+        assertEquals("printing", engine.withEditor("doc:1", "body") { it.shadow })
     }
 
     @Test
@@ -346,6 +350,177 @@ class EditorLifecycleTest {
             })
         }))
         assertNull(got2)
+    }
+
+    // ---------------------------------- R4 review: the five wire survivors
+
+    private fun armWith(engine: CompanionEngine, out: MutableList<JsonObject>,
+                        prefix: String, candidates: List<JsonObject>) {
+        engine.requestCompletion("doc:1", "body") { _, _, _, _, _ -> }
+        val rq = out.method("edit.complete").last()
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", rq["id"]!!)
+            put("result", buildJsonObject {
+                put("prefix", prefix)
+                put("candidates", JsonArray(candidates))
+            })
+        }))
+    }
+
+    @Test
+    fun explicitEmptyInsertDeletesThePrefix() {
+        // SPEC 19.3: `insert` "MAY be empty" - an explicit "" is distinct
+        // from absence and means the selection DELETES the prefix. The R4
+        // review found both parse sites conflating the two, so the tap
+        // emitted the label where the SPEC required nothing (§19.2's
+        // wrong-edit class).
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        armWith(engine, out, "pri", listOf(
+            buildJsonObject { put("label", "print"); put("insert", "") }))
+        assertTrue(engine.selectCompletion("doc:1", "body", "print", "",
+            CompletionNarrowing.STRICT))
+        assertEquals("", s.shadow)
+        val p = out.method("edit.delta").single()["params"] as JsonObject
+        assertEquals(JsonPrimitive(3), p["del"])
+        assertEquals(JsonPrimitive(""), p["text"])
+        assertEquals(JsonPrimitive(true), p["accept"])
+    }
+
+    @Test
+    fun caretWiggleDuringRequestFlightStillArms() {
+        // The R4 review: seq equality alone proves the text is unchanged
+        // since issue (a caret move never advances seq), and §19.3 makes
+        // the caret best-effort context, never the comparand - so a tap
+        // elsewhere and back during the reply's flight must not suppress
+        // the offer. The cursor IS still verified where the SPEC puts the
+        // check: at selection.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        engine.requestCompletion("doc:1", "body") { _, _, _, _, _ -> }
+        // The caret wanders while the request is in flight...
+        engine.localEditorCaret("doc:1", "body", Utf16Pos(1))
+        val rq = out.method("edit.complete").single()
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", rq["id"]!!)
+            put("result", buildJsonObject {
+                put("prefix", "pri")
+                put("candidates", buildJsonArray {
+                    addJsonObject { put("label", "print") }
+                })
+            })
+        }))
+        // ...and returns before the tap: the offer armed and the accept
+        // proceeds against the selection-time comparands.
+        engine.localEditorCaret("doc:1", "body", Utf16Pos(3))
+        assertTrue(engine.selectCompletion("doc:1", "body", "print", "print",
+            CompletionNarrowing.STRICT))
+        assertEquals("print", s.shadow)
+    }
+
+    @Test
+    fun pristineTapIsBasePathNotPredicate() {
+        // SPEC 19.3's base path: session, seq, cursor, and prefix match ->
+        // "MUST replace that prefix with `insert`" - unconditionally. The
+        // narrowing predicate is normative only inside the extension
+        // exception, and Emacs completion tables are not prefix engines: a
+        // case-insensitive table answers "foo" with "Foobar", which STRICT
+        // predicate-testing at ext="" wrongly discarded.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "foo", cursor = ScalarPos(3))
+        armWith(engine, out, "foo", listOf(
+            buildJsonObject { put("label", "Foobar") }))
+        assertTrue(engine.selectCompletion("doc:1", "body", "Foobar", "Foobar",
+            CompletionNarrowing.STRICT))
+        assertEquals("Foobar", s.shadow)
+        // Once an extension IS typed, the predicate bites - under both
+        // members of the closed family ("foox" is not a substring of
+        // "Foobar" either).
+        engine.localEditorEdit("doc:1", "body", ScalarPos(0),
+            s.shadow.codePointCount(0, s.shadow.length), "foo")
+        engine.withEditor("doc:1", "body") { it.cursor = 3 }
+        armWith(engine, out, "foo", listOf(
+            buildJsonObject { put("label", "Foobar") }))
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(3), 0, "x"))
+        assertFalse(engine.selectCompletion("doc:1", "body", "Foobar", "Foobar",
+            CompletionNarrowing.CONTAINS))
+    }
+
+    @Test
+    fun resyncKillsTheOffer() {
+        // The R4 review: edit.resync re-mints the session at seq 0, which a
+        // tracker armed at seq 0 (the first-completion-after-open case)
+        // cannot tell apart - without the resync path claiming the offer,
+        // an accept would be emitted into a session the offer never
+        // belonged to.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        val s = engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        armWith(engine, out, "pri", listOf(
+            buildJsonObject { put("label", "print") }))
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", JsonPrimitive("rs9"))
+            put("method", "edit.resync")
+            put("params", buildJsonObject {
+                put("document", "doc:1"); put("editor_id", "body")
+                put("session", s.sessionId)
+            })
+        }))
+        assertFalse(engine.completionOfferView("doc:1", "body")!!.active)
+        assertFalse(engine.selectCompletion("doc:1", "body", "print", "print",
+            CompletionNarrowing.STRICT))
+        assertEquals("pri", engine.withEditor("doc:1", "body") { it.shadow })
+        assertEquals(0, out.method("edit.delta").size)
+    }
+
+    @Test
+    fun refusedReplyIsNotPublishedToTheDisplay() {
+        // The R4 review: the arm gate and the display publish must agree -
+        // a reply the tracker refused (the user typed between issue and
+        // reply) handed to the callback anyway would render rows that
+        // emission validates against an OLDER candidate set.
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        var published = 0
+        engine.requestCompletion("doc:1", "body") { _, _, _, _, _ -> published++ }
+        // The user types before the reply lands: seq moves, gate refuses.
+        assertTrue(engine.localEditorEdit("doc:1", "body", ScalarPos(3), 0, "n"))
+        val rq = out.method("edit.complete").single()
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", rq["id"]!!)
+            put("result", buildJsonObject {
+                put("prefix", "pri")
+                put("candidates", buildJsonArray {
+                    addJsonObject { put("label", "print") }
+                })
+            })
+        }))
+        assertEquals(0, published)
+        assertFalse(engine.completionOfferView("doc:1", "body")!!.active)
+        // The next round (the debounced re-request the renderer always
+        // issues) arms and publishes as one event.
+        engine.requestCompletion("doc:1", "body") { _, _, _, _, _ -> published++ }
+        val rq2 = out.method("edit.complete")[1]
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", rq2["id"]!!)
+            put("result", buildJsonObject {
+                put("prefix", "prin")
+                put("candidates", buildJsonArray {
+                    addJsonObject { put("label", "print") }
+                })
+            })
+        }))
+        assertEquals(1, published)
+        assertTrue(engine.completionOfferView("doc:1", "body")!!.active)
     }
 
     // ------------------------------- audit §3: lifecycle conformance (P1 1-5)

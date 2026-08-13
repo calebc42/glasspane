@@ -597,6 +597,63 @@ heuristic must refuse), and with the marker it finishes."
       (with-current-buffer buf (ebp-sync-detach))
       (kill-buffer buf))))
 
+(ert-deftest ebp-complete-empty-splice-extends-by-zero ()
+  "The R4 review's rule-(a) alignment: SPEC 19.3's qualifying clause
+has no non-empty-text requirement, and the Companion tracker counts a
+del-0 EMPTY-text splice at the region end as qualifying.  The
+dispatcher must agree — claiming here would silently skip the exit
+function on the accept that follows."
+  (ebp-complete-test--with-accept-setup
+    (ebp-complete-edit-complete "doc:r2.el" "body" "prefix-li" 9)
+    (should ebp-complete-live-offer)
+    ;; The degenerate no-op splice: del 0, empty text, at the region end.
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                  :seq 1 :start 9 :del 0 :text "" :len 9))
+    (should ebp-complete-live-offer)
+    (should (= (plist-get ebp-complete-live-offer :ext) 0))
+    ;; The offer is still whole: the marked accept fires as if the
+    ;; no-op never happened.
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                  :seq 2 :start 0 :del 9 :text "prefix-live-needle"
+                  :len 18 :accept t))
+    (should-not ebp-complete-live-offer)
+    (cl-loop repeat 30 until exit-calls
+             do (accept-process-output nil 0.02))
+    (pcase-let ((`(,s ,_item ,status ,_pt ,_g) (car exit-calls)))
+      (should (equal s "prefix-live-needle"))
+      (should (eq status 'finished)))))
+
+(ert-deftest ebp-complete-marked-accept-empty-insert ()
+  "Pin 5's empty-insert leg: a marked accept whose TEXT is empty — the
+candidate's `insert' is explicitly \"\" (SPEC 19.3: it \"MAY be
+empty\"; the selection DELETES the prefix) — validates by membership
+and region like any other.  The R4 review found the reference
+Companion could never emit this shape (its parse conflated
+explicit-empty with absent, since fixed); this guards the Emacs arm
+that makes the capability real."
+  (ebp-complete-test--with-accept-setup
+    (ebp-complete-edit-complete "doc:r2.el" "body" "prefix-li" 9)
+    (should ebp-complete-live-offer)
+    ;; Graft an empty-insert candidate into the minted offer's accept
+    ;; set — the reference harvest never mints one, but the dispatcher
+    ;; must validate one when a conforming reply carried it.
+    (push (cons "" (propertize "prefix-live-needle" 'ebp-r2-item 'empty))
+          (plist-get ebp-complete-live-offer :accepts))
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:r2.el" :editor_id "body" :session "S"
+                  :seq 1 :start 0 :del 9 :text "" :len 0 :accept t))
+    (should (equal (buffer-string) ""))
+    (should-not ebp-complete-live-offer)
+    (cl-loop repeat 30 until exit-calls
+             do (accept-process-output nil 0.02))
+    (pcase-let ((`(,s ,item ,status ,pt ,_g) (car exit-calls)))
+      (should (equal s "prefix-live-needle"))
+      (should (eq item 'empty))
+      (should (eq status 'finished))
+      (should (= pt 1)))))
+
 (ert-deftest ebp-complete-marked-accept-spans-the-extension ()
   "The full #171 loop: a qualifying extension grows the tracked region,
 and the marked accept replaces prefix-plus-extension — the region

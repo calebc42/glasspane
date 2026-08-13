@@ -31,6 +31,7 @@ import com.calebc42.ebp.wire.utf16PosIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -463,9 +464,10 @@ class DeviceBridge(
      * the only event that ends a session short of transport loss. */
     private fun forgetEditor(document: String, editorId: String) {
         val key = document to editorId
-        _editorMirrors.value = _editorMirrors.value - key
-        _completionOffers.value = _completionOffers.value - key
-        _editorAnnotations.value = _editorAnnotations.value - key
+        _editorMirrors.update { it - key }
+        _completionOffers.update { it - key }
+        _offerViews.update { it - key }
+        _editorAnnotations.update { it - key }
     }
 
     // SPEC 19.3 (JC-4b): completion offers, keyed (document, editor_id).
@@ -491,16 +493,27 @@ class DeviceBridge(
                         CompletionCandidate(
                             c.stringOr("label"),
                             c.stringOr("annotation").takeIf { it.isNotEmpty() },
-                            // SPEC 19.3: `insert` defaults to `label`.
-                            c.stringOr("insert").takeIf { it.isNotEmpty() }
-                                ?: c.stringOr("label"),
+                            // SPEC 19.3: `insert` defaults to `label` on
+                            // ABSENCE only — an explicit "" is a selection
+                            // that DELETES the prefix, and rewriting it to
+                            // the label emitted a wrong edit on accept.
+                            if ("insert" in c) c.stringOr("insert")
+                            else c.stringOr("label"),
                             c.stringOr("kind").takeIf { it.isNotEmpty() })
                     }
                 }
-                _completionOffers.value = _completionOffers.value +
-                    ((document to editorId) to CompletionOffer(
+                // The engine invokes this only when the tracker armed, so
+                // candidates and view publish as ONE event: rows shown are
+                // rows the tracker will validate.
+                _completionOffers.update {
+                    it + ((document to editorId) to CompletionOffer(
                         prefix, list, session, seq, cursor,
                         offerEpoch.incrementAndGet()))
+                }
+                _offerViews.update {
+                    it + ((document to editorId) to
+                        CompletionOfferView(prefix, "", true))
+                }
             }
         }
     }
@@ -519,6 +532,7 @@ class DeviceBridge(
             if (!e.selectCompletion(document, editorId, label, insert,
                     completionNarrowing))
                 e.withEditor(document, editorId) { publishMirror(it) }
+            publishOfferViewFor(document, editorId)
         }
     }
 
@@ -538,21 +552,44 @@ class DeviceBridge(
                     else "strict").apply()
         }
 
-    /** Amendment #171: keep-or-drop after a local edit - the offer now
-     * SURVIVES qualifying extensions, so the per-keystroke clear becomes a
-     * reconciliation against the engine tracker (which is rule (a)). */
-    fun reconcileCompletions(document: String, editorId: String) {
-        val view = engine?.completionOfferView(document, editorId)
-        if (view == null || !view.active) clearCompletions(document, editorId)
+    // Amendment #171 (R4 review): the tracker's render-facing view as
+    // OBSERVED state, keyed like the offers beside it. The composition
+    // reads THIS — never the engine — for two structural reasons: the
+    // engine monitor is held across blocking socket writes, so a
+    // per-keystroke or per-recomposition @Synchronized read can stall the
+    // main thread behind the transport; and a synchronous read races the
+    // dispatch executor, showing pre-splice tracker state (a killed
+    // offer's dropdown ghosting until the next reply). Published at every
+    // tracker mutation: armed in the completion callback, refreshed after
+    // every local splice ON the executor (ordered after the splice), and
+    // by the editor listener for engine-internal advances (edit.apply,
+    // edit.resync).
+    private val _offerViews =
+        MutableStateFlow<Map<Pair<String, String>, CompletionOfferView>>(emptyMap())
+    val offerViews: StateFlow<Map<Pair<String, String>, CompletionOfferView>>
+        get() = _offerViews
+
+    /** Publish VIEW for KEY; a dead tracker retires the candidates with
+     * it — the reconciliation that used to run synchronously in the
+     * renderer, now ordered after the mutation it reflects. */
+    private fun publishOfferView(key: Pair<String, String>,
+                                 view: CompletionOfferView?) {
+        if (view == null || !view.active) {
+            _offerViews.update { it - key }
+            _completionOffers.update { it - key }
+        } else _offerViews.update { it + (key to view) }
     }
 
-    /** Amendment #171: the narrowing operand for display filtering. */
-    fun completionOfferView(document: String, editorId: String): CompletionOfferView? =
-        engine?.completionOfferView(document, editorId)
+    /** Read the live tracker (off the main thread) and publish it. */
+    private fun publishOfferViewFor(document: String, editorId: String) {
+        publishOfferView(document to editorId,
+            engine?.completionOfferView(document, editorId))
+    }
 
     /** Drop any offer for this editor: the caret moved, or one was taken. */
     fun clearCompletions(document: String, editorId: String) {
-        _completionOffers.value = _completionOffers.value - (document to editorId)
+        _completionOffers.update { it - (document to editorId) }
+        _offerViews.update { it - (document to editorId) }
     }
 
     /** SPEC 19.3: a synchronized editor's local edit -> shadow + edit.delta.
@@ -568,6 +605,10 @@ class DeviceBridge(
             val e = engine ?: return@execute
             if (!e.localEditorEdit(document, editorId, start, del, text, base))
                 e.withEditor(document, editorId) { publishMirror(it) }
+            // Amendment #171: the splice extended or killed the tracker;
+            // publish what it decided. On the SAME serial executor, so the
+            // read is ordered after the splice — never pre-splice state.
+            publishOfferViewFor(document, editorId)
         }
     }
 
@@ -759,8 +800,15 @@ class DeviceBridge(
         // SPEC 19.4 (T2/LD-5): every inbound edit.apply republishes the
         // shadow, so the on-screen text follows it — before this, s.shadow
         // moved and the display did not, and the next keystroke diffed
-        // against a stale base. Fires under the engine monitor.
-        engine.editorListener = { s -> publishMirror(s) }
+        // against a stale base. Fires under the engine monitor. The offer
+        // view rides along (amendment #171): apply and resync are foreign
+        // advances the executor never sees, and this is their one signal.
+        engine.editorListener = { s ->
+            publishMirror(s)
+            publishOfferView(s.document to s.editorId,
+                CompletionOfferView(s.offer.extendedPrefix(), s.offer.ext,
+                    s.offer.active))
+        }
         // SPEC 19.5: diagnostics/fontify/eldoc have been validated, accepted
         // and then dropped into a null listener for the life of this tree —
         // no error, no log, no user-visible signal. They land here now.

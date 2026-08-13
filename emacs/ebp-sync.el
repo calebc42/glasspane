@@ -397,7 +397,9 @@ consumed either way.
 
 EXTEND (unmarked `del' 0 insertion at the region's end): the #171
 qualifying splice — the offer survives, its tracked extension grows,
-and nothing fires.
+and nothing fires.  Empty text qualifies too (a degenerate no-op
+splice): the SPEC's clause has no non-empty requirement and the
+Companion tracker agrees.
 
 PRISTINE HEURISTIC (unmarked, extension zero): R2's provenance-by-
 shape, exactly as landed — the deleted prefix and inserted text must
@@ -428,7 +430,11 @@ may block, and this watch is inside the jsonrpc dispatch."
                      (eq buf (current-buffer)))
             (run-at-time 0 nil #'ebp-sync--run-exit-fn
                          buf start text (cdr cand) exit-fn 0)))
-         ((and (= del 0) (> (length text) 0) (= start end))
+         ;; No non-empty-text conjunct: SPEC 19.3's qualifying clause has
+         ;; none, and the Companion tracker counts the degenerate empty
+         ;; no-op splice as qualifying — claiming here would silently
+         ;; skip the exit function on the accept that follows it.
+         ((and (= del 0) (= start end))
           (setf (plist-get offer :ext) (+ ext (length text))))
          ((and (= ext 0)
                cand

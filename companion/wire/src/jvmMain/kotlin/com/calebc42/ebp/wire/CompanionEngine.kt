@@ -1857,6 +1857,14 @@ class CompanionEngine(
         s.sessionId = EbpAuth.generateNonce()
         s.seq = 0
         s.state = EditorSession.State.OPEN
+        // Amendment #171: a resync is a foreign advance the tracker cannot
+        // see for itself - the session the offer's reply named is dead, and
+        // seq restarting at 0 is indistinguishable from an offer armed at
+        // seq 0, so without this an accept could be emitted into a session
+        // the offer never belonged to. The listener retires the display's
+        // dropdown, exactly as the edit.apply path does.
+        s.offer.onForeignAdvance()
+        editorListener?.invoke(s)
         respondResult(id, buildJsonObject {
             put("document", doc)
             put("editor_id", eid)
@@ -1924,24 +1932,33 @@ class CompanionEngine(
                             return@sendRequest
                 }
                 // Amendment #171: arm the survive-typing tracker - but only
-                // when the session still sits at the issued state; an offer
-                // computed against text already left was never alive, and
-                // taps on it discard exactly as before this amendment.
+                // when the session still sits at the issued TEXT state: seq
+                // equality is the whole test, because every text mutation
+                // advances seq while a caret move does not - the caret is
+                // §19.3's best-effort context, never the comparand (a wiggle
+                // during the request's flight must not suppress the offer;
+                // selectCompletion still verifies the cursor at the tap).
+                // The CALLBACK rides inside the gate: a reply the tracker
+                // refused must never reach the display, or the rows shown
+                // would be validated against an older candidate set.
                 val live = editors[document to editorId]
                 if (live != null && live.sessionId == atSession &&
-                    live.seq == atSeq && live.cursor == atCursor) {
+                    live.seq == atSeq) {
                     live.offer.setOffer(prefix, atCursor, atSeq, cands.mapNotNull { el ->
                         (el as? JsonObject)?.let { c ->
                             val label = c.stringOrNull("label") ?: return@let null
+                            // Default on ABSENCE only: the validator above
+                            // admitted an explicit "" (SPEC: "MAY be empty"
+                            // - a selection that DELETES the prefix), so
+                            // null here means the member is absent.
                             OfferCandidate(
                                 label,
-                                c.stringOrNull("insert").takeUnless { it.isNullOrEmpty() }
-                                    ?: label,
+                                c.stringOrNull("insert") ?: label,
                                 c.stringOrNull("kind"))
                         }
                     })
+                    callback(prefix, cands, atSession, atSeq, atCursor)
                 }
-                callback(prefix, cands, atSession, atSeq, atCursor)
             }
         }
     }
@@ -1993,7 +2010,8 @@ class CompanionEngine(
     @Synchronized
     fun completionOfferView(document: String, editorId: String): CompletionOfferView? =
         editors[document to editorId]?.let {
-            CompletionOfferView(it.offer.extendedPrefix(), it.offer.active)
+            CompletionOfferView(it.offer.extendedPrefix(), it.offer.ext,
+                it.offer.active)
         }
 
     /** T2/LD-5: run F over a live editor session under the engine monitor —

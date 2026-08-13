@@ -805,10 +805,12 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                 ctx.state(id, JsonPrimitive(new.text)) // local editor: state.changed
             }
             // SPEC 19.3 (amendment #171): the offer now SURVIVES a
-            // qualifying extension (the engine tracker is rule (a)), so
-            // the per-keystroke clear became a reconciliation - drop the
-            // offer exactly when the tracker says it died.
-            if (document.isNotEmpty()) ctx.bridge.reconcileCompletions(document, id)
+            // qualifying extension (the engine tracker is rule (a)). The
+            // keep-or-drop is NOT read here: the bridge publishes the
+            // tracker's verdict into offerViews after the splice runs on
+            // its executor - a synchronous read from this thread would
+            // see pre-splice state and could stall on the engine monitor
+            // while it is held across a blocking socket write.
         }
         value = new
     }
@@ -822,6 +824,7 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
     val wantsCompletion = node.boolOr("complete", false)
     val offers by ctx.bridge.completionOffers.collectAsState()
     val offer = if (wantsCompletion) offers[document to id] else null
+    val offerViewMap by ctx.bridge.offerViews.collectAsState()
     // SPEC 19.3: report the caret so the other endpoint can answer a POSITION.
     // Keyed on the selection, so it re-runs exactly when the selection moves
     // and a no-op re-composition reports nothing; the delay coalesces a drag
@@ -956,13 +959,19 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
         // scrolling column drifts away from it.
         // Amendment #171: display narrowing SHOULD match the emission
         // predicate - showing what cannot be accepted is a lie of
-        // presentation. The emit-time re-proof in the engine remains the
-        // normative gate either way (display diffing is asynchronous).
+        // presentation, and so is hiding what CAN be: a pristine offer is
+        // the base path (no predicate at emission - Emacs tables are not
+        // prefix engines), so it displays unfiltered. The emit-time
+        // re-proof in the engine remains the normative gate either way.
+        // The view is OBSERVED state the bridge publishes after each
+        // tracker mutation - never a synchronous engine read from the
+        // composition (the monitor is held across socket writes).
         val offerView = if (offer != null && document.isNotEmpty())
-            ctx.bridge.completionOfferView(document, id) else null
+            offerViewMap[document to id] else null
         val narrowed = when {
             offer == null -> emptyList()
             offerView == null || !offerView.active -> emptyList()
+            offerView.ext.isEmpty() -> offer.candidates
             else -> offer.candidates.filter { c ->
                 val ep = offerView.extendedPrefix
                 when (ctx.bridge.completionNarrowing) {

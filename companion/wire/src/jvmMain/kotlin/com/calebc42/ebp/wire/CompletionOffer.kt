@@ -19,7 +19,10 @@ package com.calebc42.ebp.wire
 /** SPEC 19.3 (amendment #171): the closed two-predicate family. */
 enum class CompletionNarrowing { STRICT, CONTAINS }
 
-/** One reply candidate, insert already defaulted to label. */
+/** One reply candidate. `insert` is defaulted to `label` on ABSENCE
+ * only: SPEC 19.3 says it "MAY be empty", and an explicit "" is a
+ * selection that DELETES the prefix — conflating it with absence
+ * emitted the label where the SPEC required nothing. */
 data class OfferCandidate(val label: String, val insert: String,
                           val kind: String?)
 
@@ -66,8 +69,17 @@ class CompletionOfferTracker {
 
     /** The emission-time re-proof over the EXTENDED PREFIX. Well-formed
      * strings make code-unit prefix/substring checks scalar-correct: a
-     * scalar boundary in the operand is always a code-unit boundary. */
+     * scalar boundary in the operand is always a code-unit boundary.
+     *
+     * A PRISTINE offer bypasses the predicate: SPEC 19.3 makes the
+     * narrowing normative only inside the extension exception, and the
+     * base path — session, seq, cursor, and prefix verified by the
+     * caller — is an unconditional MUST. Emacs completion tables are
+     * not prefix engines (case-insensitive, flex, partial-completion):
+     * their candidates need not contain the returned prefix at all,
+     * and predicate-testing them here discarded every such tap. */
     fun matches(narrowing: CompletionNarrowing, c: OfferCandidate): Boolean {
+        if (ext.isEmpty()) return true
         val ep = extendedPrefix()
         return when (narrowing) {
             CompletionNarrowing.STRICT ->
@@ -78,7 +90,10 @@ class CompletionOfferTracker {
     }
 }
 
-/** A render-facing snapshot: what to narrow against, and whether the
- * offer is still alive at all. */
+/** A render-facing snapshot: what to narrow against, whether any
+ * extension has been typed (a pristine offer is the base path — the
+ * display, like the emitter, applies no predicate to it), and whether
+ * the offer is still alive at all. */
 data class CompletionOfferView(val extendedPrefix: String,
+                               val ext: String,
                                val active: Boolean)

@@ -191,7 +191,7 @@ Adversarial review (10 raw, 5 confirmed, all fixed same day):
 - A latched second accept RE-ARMS (20 × 0.05s, revalidation makes a
   stale run self-cancel) instead of silently dropping its auto-import.
 
-## R3 — candidate `kind` (SPEC amendment) + icon render
+## R3 — candidate `kind` (SPEC amendment) + icon render (LANDED)
 
 Optional `kind` string on the §19.3 candidate: the LSP
 CompletionItemKind 25-name vocabulary as lowercase strings (eglot emits
@@ -199,13 +199,30 @@ exactly these via `eglot--kind-names` / `:company-kind`), §22.4
 feature-gated because the candidate object is closed. Companion renders
 leading icons. Queues behind a device gate + push.
 
-## R4 — survive-typing offers (SPEC amendment) + local narrowing
+## R4 — survive-typing offers (SPEC amendment) + local narrowing (LANDED)
 
 Relax §19.3's selection MUST-discard: MAY-apply when the only
 divergence since the request is a typed prefix-extension matching the
 candidate (replaced range = extended prefix). Companion narrows the
 list locally instead of clearing on keystroke — v1's perceived-zero-
 latency ingredient. Wire shapes unchanged; Emacs sees an ordinary delta.
+
+The adversarial review returned nine confirmed findings (none
+refuted), all fixed in the follow-up commit: explicit-empty `insert`
+conflated with absent at both parse sites (a §19.2 wrong edit on
+accept); reply-time cursor equality in the arm gate (the SPEC's caret
+is never the comparand — seq alone proves text identity); the
+narrowing predicate applied to PRISTINE offers (the base path is an
+unconditional MUST, and Emacs tables are not prefix engines);
+edit.resync not claiming the Companion tracker (an accept could cross
+a session boundary — seq restarting at 0 is indistinguishable from an
+offer armed at seq 0); the Kotlin/elisp divergence on the degenerate
+del-0 empty-text splice (qualifies on both sides now); and the
+display plumbing rebuilt as OBSERVED state (`DeviceBridge.offerViews`)
+published after each tracker mutation — no more per-keystroke
+@Synchronized engine reads on the main thread (the monitor is held
+across blocking socket writes), no pre-splice reconcile race, and a
+reply the arm gate refused is never handed to the display.
 
 ## R5 — lazy candidate docs (SPEC amendment) + doc panel
 

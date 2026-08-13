@@ -154,8 +154,13 @@ receiver would REJECT. Two options:
 > candidate selection MUST carry `accept: true`; a delta for any other
 > local edit MUST NOT carry the member (omitted, never `false`). This
 > is provenance, not coordinate authority — the splice applies
-> identically with or without it, an Emacs that predates the member
-> ignores it, and Emacs MAY still shape-check as defense in depth.
+> identically with or without it, and Emacs MAY still shape-check as
+> defense in depth. Presence-only is ratified on its surviving legs
+> (2026-08-13): a required boolean would ride EVERY keystroke delta —
+> the wire's hottest frame — to encode a rare event, and a tri-state
+> mints two spellings of "not a tap" that validators must equate; that
+> an older Emacs also happens to ignore the member is a corollary, not
+> the goal (backward compatibility is not a PoC goal — recorded).
 > Growth class 2 (optional member on an existing notification's
 > params, which are not a closed object).
 
@@ -188,11 +193,19 @@ becomes:
 - Kotlin: `selectCompletion` is the SINGLE emitter (verified in the R2
   review: CompanionEngine.kt:1919-1932 vs the Renderer diff path) —
   it stamps the member; the typed path cannot, by construction.
+  **THE FUNNEL RULE (ratification condition, 2026-08-13):** every
+  accept emission MUST flow through this one funnel forever — a future
+  accept gesture (Enter-accepts-top, a pie accept) calls it, never
+  re-implements the splice-and-stamp. The one-call-site thesis is this
+  project's most-recurred defect (6×), and the funnel is the seam that
+  prevents its recurrence here. Wire tests PIN both directions: the
+  tap path carries the member; a typed-path delta never does — so a
+  second unstamped emitter fails a named test instead of shipping.
   Deferred to the implementation rung, named.
 - Emacs: `ebp-sync--maybe-finish-completion` prefers the marker when
-  present and KEEPS the shape check (belt and braces; also the
-  behavior for pre-amendment Companions). The landed shape-only path
-  remains the documented fallback.
+  present and KEEPS the shape check — the last seam: even a future
+  unstamped accept degrades to today's inference, never to silent
+  nothing.
 - Monotonic resources (#151): none.
 
 ---
@@ -353,6 +366,11 @@ the word if v1's contains-behavior should be kept instead.
 1. ~~**#169 option A vs B**~~ — **RATIFIED 2026-08-13: Option A**,
    with the vocabulary enumerated in-document (no version pointer) and
    the LSP reference informative. #169 is fully ratified.
+1b. **#170 RATIFIED 2026-08-13** with the funnel condition: presence-
+   only boolean on its surviving rationale (hot-path cost + no dead
+   states; compat demoted to corollary), all accept emissions through
+   the single `selectCompletion` funnel, pins in both directions,
+   Emacs shape check retained as the last seam.
 2. **#171 matching policy** — strict prefix (drafted) vs POC 1's
    contains-on-insert?
 3. **#172 doc cap** — 16384 octets is proposed; any preference?

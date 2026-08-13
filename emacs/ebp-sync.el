@@ -463,9 +463,18 @@ self-cancel if the buffer moved on.  Both R0 guards cover the blocking
 extent: `ebp-complete--live-harvest-active' routes a nested
 `edit.complete' to the shadow so no request handler parks on this
 stack, and (with `ebp-sync--exit-fn-running') `jetpacs-flow-continue'
-keeps waiting continuations off the timeout throw's unwind path."
+keeps waiting continuations off the timeout throw's unwind path.
+
+The postpone gate reads BOTH latches (R5 review): this timer can fire
+inside ANOTHER throw-armed bounded wait — the R5 doc provider's, whose
+doc-fn waits in `accept-process-output', which runs timers — and a
+blocking exit function nested in that extent would sit on the doc
+timer's unwind path, the exact R0 trap shape.  Postponing while the
+harvest latch is up keeps this run out of every such extent; the two
+waits then serialize instead of nesting."
   (when (buffer-live-p buf)
-    (if ebp-sync--exit-fn-running
+    (if (or ebp-sync--exit-fn-running
+            (bound-and-true-p ebp-complete--live-harvest-active))
         (when (< retries 20)
           (run-at-time 0.05 nil #'ebp-sync--run-exit-fn
                        buf start text raw exit-fn (1+ retries)))

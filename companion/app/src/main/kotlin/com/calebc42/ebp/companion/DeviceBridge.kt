@@ -118,6 +118,15 @@ data class CandidateDoc(
     val epoch: Long,
 )
 
+/** R5: the ONE offer-currency rule — is the published offer's epoch
+ * (null when none is published) exactly EPOCH?  Used at gesture
+ * admission, doc publication, and desired-pair reissue alike; pure so
+ * each site's drop-the-check mutant is killable (review F11 named the
+ * gesture arm, and no Compose/bridge test rig exists to kill it in
+ * place). */
+internal fun offerEpochCurrent(liveEpoch: Long?, epoch: Long): Boolean =
+    liveEpoch != null && liveEpoch == epoch
+
 class DeviceBridge(
     private val appContext: android.content.Context,
     /** SPEC 14.4: the shown surface's ID travels with its spec, so an
@@ -482,7 +491,12 @@ class DeviceBridge(
         _completionOffers.update { it - key }
         _offerViews.update { it - key }
         _editorAnnotations.update { it - key }
-        retireCandidateDoc(key)
+        // The editor is gone for good: REMOVE the slot instance (the
+        // in-place retire is for offer death under a live editor). A
+        // conclusion still in flight lands on its captured instance,
+        // now orphaned — harmless by construction.
+        candidateDocSlots.remove(key)?.retire()
+        _candidateDocs.update { it - key }
     }
 
     // SPEC 19.3 (JC-4b): completion offers, keyed (document, editor_id).
@@ -639,20 +653,25 @@ class DeviceBridge(
         dispatchExecutor.execute {
             val key = document to editorId
             val offer = _completionOffers.value[key] ?: return@execute
-            if (offer.epoch != epoch) return@execute
+            if (!offerEpochCurrent(offer.epoch, epoch)) return@execute
             val slot = candidateDocSlots.getOrPut(key) { CandidateDocSlot() }
             // Latest wins: null means the desired pair was recorded
             // behind the in-flight one and issues at its conclusion.
             val flight = slot.request(epoch, index) ?: return@execute
-            issueCandidateDoc(key, offer, flight)
+            issueCandidateDoc(key, offer, slot, flight)
         }
     }
 
-    /** Issue one flight; its conclusion (reader thread) publishes into a
-     * LIVE offer only — re-checked at publish time, not just slot
-     * identity — then issues the desired pair, if any. */
+    /** Issue one flight against SLOT — the INSTANCE the flight was
+     * minted from, threaded through rather than re-resolved by key at
+     * conclusion time (R5 review): per-instance tickets restart at 1,
+     * so a stale conclusion for a discarded instance would otherwise
+     * match a FRESH instance's first flight and disown it mid-air.
+     * The conclusion (reader thread) publishes into a LIVE offer only —
+     * re-checked at publish time, not just slot identity. */
     private fun issueCandidateDoc(key: Pair<String, String>,
                                   offer: CompletionOffer,
+                                  slot: CandidateDocSlot,
                                   flight: CandidateDocSlot.Flight) {
         val e = engine
         val sent = e != null && e.requestCandidateDoc(
@@ -663,34 +682,44 @@ class DeviceBridge(
             // wedge this slot).
             if (doc != null) {
                 val live = _completionOffers.value[key]
-                if (live != null && live.epoch == flight.epoch)
+                if (offerEpochCurrent(live?.epoch, flight.epoch))
                     _candidateDocs.update {
                         it + (key to CandidateDoc(flight.index, doc,
                             flight.epoch))
                     }
             }
-            val slot = candidateDocSlots[key]
-            val next = slot?.concluded(flight.ticket)
-            if (next != null) {
-                val live = _completionOffers.value[key]
-                if (live != null && live.epoch == next.epoch)
-                    issueCandidateDoc(key, live, next)
-                else
-                    // The desired pair named a dead offer: free the slot
-                    // rather than leave an outstanding flight nothing
-                    // will ever conclude.
-                    slot.retire()
-            }
+            concludeAndPump(key, slot, flight.ticket)
         }
         // Gate refusal (no engine, editor not OPEN, session not READY):
-        // no conclusion will ever arrive for this flight — free the slot,
-        // desired pair included; it could not have been sent either.
-        if (!sent) candidateDocSlots[key]?.retire()
+        // no conclusion will ever arrive for this flight — conclude it
+        // here so the slot frees and any desired pair drains.
+        if (!sent) concludeAndPump(key, slot, flight.ticket)
     }
 
-    /** Docs and their slot retire wherever the offer dies. */
+    /** Conclude TICKET on SLOT, then issue whatever desired pair still
+     * names the live offer — freeing dead ones as they surface, so no
+     * armed flight is ever left unowned. */
+    private fun concludeAndPump(key: Pair<String, String>,
+                                slot: CandidateDocSlot, ticket: Long) {
+        var next = slot.concluded(ticket)
+        while (next != null) {
+            val live = _completionOffers.value[key]
+            if (live != null && offerEpochCurrent(live.epoch, next.epoch)) {
+                issueCandidateDoc(key, live, slot, next)
+                return
+            }
+            next = slot.concluded(next.ticket)
+        }
+    }
+
+    /** Docs retire wherever the offer dies. The slot retires IN PLACE —
+     * the instance stays in the map so an in-flight request keeps
+     * occupying it and a long-press on the fresh offer QUEUES behind
+     * the old flight's conclusion instead of double-issuing (the
+     * one-outstanding SHOULD, R5 review); only [forgetEditor] and the
+     * serve() teardown remove instances. */
     private fun retireCandidateDoc(key: Pair<String, String>) {
-        candidateDocSlots.remove(key)?.retire()
+        candidateDocSlots[key]?.retire()
         _candidateDocs.update { it - key }
     }
 
@@ -958,25 +987,31 @@ class DeviceBridge(
             // best-effort — a throw here must not skip clearLiveSession and
             // socket.close(), which would leak the FD and park a dead engine.
             runCatching { engine.close("transport closed") }
-            // SPEC 19: transport loss closes every editor session, so no
-            // mirror outlives the connection that produced it (also keeps
-            // the map bounded — entries are per (document, editor_id)).
-            _editorMirrors.value = emptyMap()
-            _editorAnnotations.value = emptyMap()
-            // R5, a named pre-existing-gap fix: offers and their views
-            // were NOT cleared here, so a dropdown could ghost across a
-            // reconnect over state no session backs — its taps refused,
-            // its rows a lie. Docs and slots die with the offers they
-            // were fetched for.
-            _completionOffers.value = emptyMap()
-            _offerViews.value = emptyMap()
-            _candidateDocs.value = emptyMap()
-            candidateDocSlots.values.forEach { it.retire() }
-            candidateDocSlots.clear()
-            lastCaret.clear()
-            // Atomic compare-and-clear: only if a newer connection has not
-            // already superseded this one in the slot (SPEC 5.2 newest-wins).
-            CompanionStores.clearLiveSession(engine)
+            // Atomic compare-and-clear FIRST: only if a newer connection
+            // has not already superseded this one in the slot (SPEC 5.2
+            // newest-wins) — and the shared display maps are wiped ONLY
+            // on that same verdict (R5 review: they are process-wide,
+            // so a superseded connection's delayed teardown was erasing
+            // the successor session's mirrors, offers, and docs).
+            if (CompanionStores.clearLiveSession(engine)) {
+                // SPEC 19: transport loss closes every editor session, so
+                // no mirror outlives the connection that produced it (also
+                // keeps the maps bounded — entries are per (document,
+                // editor_id)).
+                _editorMirrors.value = emptyMap()
+                _editorAnnotations.value = emptyMap()
+                // R5, a named pre-existing-gap fix: offers and their views
+                // were NOT cleared here, so a dropdown could ghost across a
+                // reconnect over state no session backs — its taps refused,
+                // its rows a lie. Docs and slots die with the offers they
+                // were fetched for.
+                _completionOffers.value = emptyMap()
+                _offerViews.value = emptyMap()
+                _candidateDocs.value = emptyMap()
+                candidateDocSlots.values.forEach { it.retire() }
+                candidateDocSlots.clear()
+                lastCaret.clear()
+            }
             socket.runCatching { close() }
         }
     }

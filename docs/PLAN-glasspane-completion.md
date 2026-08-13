@@ -242,6 +242,40 @@ and the R3 kind lookup plus the R2 mint-offer pairing were repointed at
 it (the F2 fix subsumed both older cl-find-if probes). Everything else
 below shipped as written; the section is kept as the design record.
 
+POST-LAND ADVERSARIAL REVIEW (same day, 4 lenses → 14 raw findings →
+12 verified by 3 skeptics each, all 40 verifier agents live): 10
+CONFIRMED unanimously, 2 refuted, plus 2 uncapped test-pin gaps
+hand-verified. All fixed in the follow-up commit. The two P2s: (1)
+per-instance slot tickets restart at 1 and the conclusion lambda
+re-resolved the slot BY KEY, so after an offer death replaced the
+instance, a slow reply's stale conclusion matched the fresh instance's
+first flight and disowned it mid-air — fixed by concluding on the
+INSTANCE the flight was issued from, with retire now IN PLACE (drops
+only the desired pair; the outstanding flight keeps occupying, so a
+fresh offer's long-press queues instead of double-issuing — which also
+closed the transient one-outstanding violation); (2) the F11 epoch
+admission was untestable bridge glue — extracted as the pure
+`offerEpochCurrent`, used at gesture/publish/reissue alike. Notable
+overturn: the plan's closed-key loop on candidate.doc's RESULT was an
+over-reject MUST violation — SPEC 12 rule 1 defaults receivers to
+IGNORE unknown optional members and §19.3 declares closed objects only
+for edit.complete's result, so the engine now ignores them (the
+growth-model asymmetry, cited by the review). Also fixed: the retained
+cell stores the NORMALIZED seq (a float-seeded mirror would eql-refuse
+every fetch); the serialize gate runs BEFORE the cap (garbage past
+16384 octets must answer "", not ship an innocent-looking prefix);
+ebp-sync--run-exit-fn postpones on the HARVEST latch too (its timer
+can fire inside the doc provider's throw-armed wait — the R0 trap
+shape); serve()'s finally wipes the shared display maps only when its
+own connection was still the live one (clearLiveSession now returns
+the CAS verdict — the pre-existing mirrors/annotations wipes had the
+same supersession hole); and the doc panel's scroll state is keyed on
+the documented row. Test deltas: the empty-arm mint asserted directly
+against the hash (range-1201 vs stale-1201 are wire-indistinguishable),
+the out-of-order test pins that the outer reply still goes out, a
+float-seeded-mirror test, a garbage-past-the-cap degrade case, and the
+rearm test covers the harvest-latch postpone.
+
 Amendment #172 is fully applied: SPEC §19.3 normative text
 (SPEC.md:3328-3345), the §11 registry row, contract.json's method
 entry (params {document, editor_id, session, seq, index}, result

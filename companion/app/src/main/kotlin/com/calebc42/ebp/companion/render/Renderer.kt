@@ -1062,7 +1062,13 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                         // a frame budget, not a reading pane — SPEC 19.3
                         // caps the doc itself at 16384 octets.
                         .heightIn(max = 128.dp)
-                        .verticalScroll(rememberScrollState())
+                        // Keyed on the documented row (R5 review): a
+                        // plain rememberScrollState survives doc
+                        // replacement, rendering a fresh candidate's
+                        // doc pre-scrolled to the previous one's offset.
+                        .verticalScroll(remember(doc.index, doc.epoch) {
+                            androidx.compose.foundation.ScrollState(0)
+                        })
                         .padding(horizontal = 12.dp, vertical = 4.dp))
             }
         }

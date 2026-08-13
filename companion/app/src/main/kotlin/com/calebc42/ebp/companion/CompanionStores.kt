@@ -41,8 +41,11 @@ object CompanionStores {
     fun setLiveSession(s: LiveSession) { liveSessionRef.set(s) }
 
     /** Clear only if still this exact session — a superseded connection's
-     * teardown must not null out the newer session (the lost-update race). */
-    fun clearLiveSession(s: LiveSession) { liveSessionRef.compareAndSet(s, null) }
+     * teardown must not null out the newer session (the lost-update race).
+     * Returns whether THIS call cleared it: the same verdict gates the
+     * teardown's wipe of the shared display maps (R5 review). */
+    fun clearLiveSession(s: LiveSession): Boolean =
+        liveSessionRef.compareAndSet(s, null)
 
     const val MAX_EVENT_BYTES = 262_144L
     // SPEC 14.1: matches DeviceBridge's advertised max_field_bytes.

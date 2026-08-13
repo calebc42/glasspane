@@ -761,7 +761,18 @@ auto-import must not silently vanish — and the re-arm is capped."
             (should (equal (car (last (car scheduled))) 1))
             ;; Capped: a wedged exit function cannot re-arm forever.
             (ebp-sync--run-exit-fn buf 0 "x" "x" #'ignore 20)
-            (should (= (length scheduled) 1))))
+            (should (= (length scheduled) 1)))
+          ;; R5 review: the HARVEST latch postpones too — this timer can
+          ;; fire inside the doc provider's throw-armed wait (doc-fns
+          ;; sit in `accept-process-output', which runs timers), and a
+          ;; blocking exit function nested there would ride the doc
+          ;; timer's unwind path, the R0 trap shape.
+          (let ((ebp-complete--live-harvest-active t)
+                (ran nil))
+            (ebp-sync--run-exit-fn buf 0 "x" "x"
+                                   (lambda (&rest _) (setq ran t)) 0)
+            (should (= (length scheduled) 2))
+            (should-not ran)))
       (kill-buffer buf))))
 
 ;;;; The ebp seam

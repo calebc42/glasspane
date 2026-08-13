@@ -1797,9 +1797,13 @@ still goes out either way; only retention is skipped."
       (when (and live
                  (equal (plist-get live :session) (plist-get params :session))
                  (= (plist-get live :seq) (plist-get params :seq)))
+        ;; The stored seq is NORMALIZED (R5 review): a mirror seeded by a
+        ;; float-carrying peer holds 4.0, and the doc handler's `eql'
+        ;; against its own integral-normalized request seq would then
+        ;; refuse every fetch for a perfectly current cell.
         (puthash (cons doc eid)
                  (list :session (plist-get live :session)
-                       :seq (plist-get live :seq)
+                       :seq (ebp--integral-value (plist-get live :seq))
                        :count (length (plist-get reply :candidates))
                        :provider ebp-edit-complete-doc-provider)
                  (ebp-client-candidate-replies client)))
@@ -1873,12 +1877,16 @@ degrades to \"\", the MAY-be-empty arm, never -32603."
              (text (and provider
                         (condition-case nil (funcall provider index)
                           (error nil))))
-             (text (if (stringp text)
-                       (ebp--truncate-octets text ebp--candidate-doc-cap)
-                     ""))
+             (text (if (stringp text) text ""))
+             ;; Serialize gate BEFORE the cap (R5 review): a source that
+             ;; answers garbage anywhere in its doc is not trusted for
+             ;; its first 16k octets — raw bytes or a lone surrogate
+             ;; sitting PAST the cap would otherwise ship as innocent
+             ;; truncated text instead of the pinned "".
              (text (condition-case nil
                        (progn (ebp--json-serialize (list :doc text)) text)
-                     (error ""))))
+                     (error "")))
+             (text (ebp--truncate-octets text ebp--candidate-doc-cap)))
         (list :doc text)))))
 
 (cl-defun ebp-client-edit-apply (client document editor-id start del text

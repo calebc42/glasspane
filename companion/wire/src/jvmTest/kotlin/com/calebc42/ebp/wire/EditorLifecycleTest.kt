@@ -771,11 +771,15 @@ class EditorLifecycleTest {
     }
 
     @Test
-    fun candidateDocMalformedRepliesConcludeWithNull() {
-        // Discard-whole mirrors requestCompletion - an unknown result
-        // member or a wrong-typed doc publishes nothing - but the
-        // conclusion still fires (null), splitting conclusion from
-        // publication (R5 review F8/F12).
+    fun candidateDocUnknownMemberIgnoredWrongTypeDiscards() {
+        // SPEC 12 rule 1: unknown optional members are IGNORED unless a
+        // section requires whole-object rejection, and 19.3 declares
+        // that only for edit.complete's result - candidate.doc's never
+        // does. So an unknown member rides along and the doc still
+        // publishes (the R5 review overturned the plan's closed-key
+        // loop as an over-reject against additive growth), while a
+        // wrong-TYPED doc still discards - concluding with null, never
+        // silence (F8/F12).
         val out = mutableListOf<JsonObject>()
         val engine = engine(out)
         engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
@@ -788,7 +792,7 @@ class EditorLifecycleTest {
             d -> docs.add(d) })
         answerDoc(engine, out.method("edit.candidate.doc").last(),
             buildJsonObject { put("doc", 5) })
-        assertEquals(listOf<String?>(null, null), docs)
+        assertEquals(listOf<String?>("x", null), docs)
     }
 
     @Test

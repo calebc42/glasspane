@@ -10,9 +10,24 @@ package com.calebc42.ebp.companion
  * round trips conclude: a new (epoch, index) wanted while one is in
  * flight OVERWRITES the previously desired pair rather than queueing
  * behind it, and the desired request is issued at the in-flight one's
- * conclusion.  Tickets pair each conclusion with the exact flight it
- * ends: after a [retire] (the offer died) a stale conclusion must not
- * free — or re-arm — a slot a fresh offer's flight now owns.
+ * conclusion.
+ *
+ * [retire] (the offer died) drops only the DESIRED pair: the
+ * outstanding flight stays, because it is physically on the wire and
+ * its conclusion is guaranteed exactly once (the engine's sendRequest
+ * answers locally when it refuses) — keeping it in the slot is what
+ * makes a long-press on the FRESH offer queue behind it instead of
+ * double-issuing (the R5 review's one-outstanding hole).  A flight the
+ * engine refused to send never concludes on its own; the caller
+ * concludes it immediately.
+ *
+ * Tickets pair each conclusion with the exact flight it ends.  With
+ * the bridge concluding on the instance a flight was ISSUED from (an
+ * R5 review fix — tickets are per-instance, so re-resolving the slot
+ * by key let a discarded instance's stale conclusion disown a fresh
+ * instance's first flight), the check guards the remaining shapes: a
+ * double conclusion, and a conclusion outliving a [forgetEditor]
+ * removal onto an orphaned instance.
  *
  * Extracted as a pure class because DeviceBridge is constructor-coupled
  * to android.content.Context and has no unit test: every slot-state
@@ -45,8 +60,9 @@ class CandidateDocSlot {
 
     /** The flight holding TICKET concluded.  Returns the next [Flight]
      * to issue (the desired pair, now outstanding), or null when the
-     * slot is free.  A stale ticket — a conclusion outliving [retire] —
-     * is ignored entirely. */
+     * slot is free.  A ticket that is not the outstanding flight's — a
+     * double conclusion, or one landing on an orphaned instance — is
+     * ignored entirely. */
     @Synchronized
     fun concluded(ticket: Long): Flight? {
         if (outstanding?.ticket != ticket) return null
@@ -55,11 +71,12 @@ class CandidateDocSlot {
         return outstanding
     }
 
-    /** The offer died: nothing in flight matters any more.  A conclusion
-     * that still arrives presents a ticket no longer outstanding. */
+    /** The offer died: drop the desired pair.  The outstanding flight —
+     * if any — keeps occupying the slot until its guaranteed
+     * conclusion, so a fresh offer's highlight queues rather than
+     * double-issuing. */
     @Synchronized
     fun retire() {
-        outstanding = null
         desired = null
     }
 }

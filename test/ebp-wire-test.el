@@ -1935,8 +1935,15 @@ it in place."
   (let* ((client (ebp-test--candidate-client))
          (params (list :document "doc:cd" :editor_id "body"
                        :session (make-string 32 ?a) :seq 4 :cursor 2)))
-    ;; No fn at all: the empty arm still mints.
+    ;; No fn at all: the empty arm still mints.  The cell is asserted
+    ;; DIRECTLY (R5 review): through the wire alone, a missing cell and
+    ;; a count-0 cell both answer 1201, so the mint pin needs the hash.
     (ebp-client--handle-edit-complete client params)
+    (let ((cell (gethash (cons "doc:cd" "body")
+                         (ebp-client-candidate-replies client))))
+      (should cell)
+      (should (equal (plist-get cell :count) 0))
+      (should-not (plist-get cell :provider)))
     (should (equal (ebp-test--candidate-doc-code client 4 0) 1201))
     ;; An override supersedes the retained cell at the same seq.
     (puthash "doc:cd"
@@ -1982,11 +1989,40 @@ window."
                      (lambda (i) (format "outer-%d" i)))
                (cons "o" (list (list :label "outer-a")
                                (list :label "outer-b")))))))
-    (ebp-client--handle-edit-complete
-     client (list :document "doc:cd" :editor_id "body"
-                  :session session :seq 4 :cursor 2))
+    (let ((outer-reply (ebp-client--handle-edit-complete
+                        client (list :document "doc:cd" :editor_id "body"
+                                     :session session :seq 4 :cursor 2))))
+      ;; F9's second half: only RETENTION is skipped — the outer reply
+      ;; still goes out, well-formed.
+      (should (equal (plist-get outer-reply :prefix) "o"))
+      (should (= (length (plist-get outer-reply :candidates)) 2)))
     (should (equal (ebp-test--candidate-doc client 5 0) '(:doc "inner-0")))
     (should (equal (ebp-test--candidate-doc-code client 4 0) 1201))))
+
+(ert-deftest ebp-test-candidate-doc-float-seeded-mirror-still-answers ()
+  "R5 review: a peer may carry seq as an integral float (JSON does not
+distinguish), seeding the mirror with 4.0.  The retained cell stores
+the NORMALIZED integer, so a doc request at integer 4 — or 4.0 —
+answers; an un-normalized cell would `eql'-refuse every fetch for a
+perfectly current reply."
+  (let ((client (ebp-client-create
+                 :receipt-file (make-temp-file "ebp-test-receipts")
+                 :edit-complete-function
+                 (lambda (_doc _eid _text _cursor)
+                   (setq ebp-edit-complete-doc-provider
+                         (lambda (i) (format "f-%d" i)))
+                   (cons "p" (list (list :label "one"))))))
+        (session (make-string 32 ?f)))
+    (ebp-client--handle-edit-open
+     client (list :document "doc:cd" :editor_id "body"
+                  :session session :seq 4.0 :text "ab" :cursor 2))
+    (ebp-client--handle-edit-complete
+     client (list :document "doc:cd" :editor_id "body"
+                  :session session :seq 4.0 :cursor 2))
+    (should (equal (ebp-test--candidate-doc client 4 0 session)
+                   '(:doc "f-0")))
+    (should (equal (ebp-test--candidate-doc client 4.0 0 session)
+                   '(:doc "f-0")))))
 
 (ert-deftest ebp-test-candidate-doc-index-arms ()
   "Index -1 and count are 1201; count-1 answers.  The integral-float
@@ -2135,16 +2171,21 @@ set no provider at all."
                              (1 42)
                              (2 (concat "x" (string 4194176)))
                              (3 (string #xD800))
-                             (4 "fine"))))
+                             ;; The R5 review's order pin: garbage PAST
+                             ;; the cap.  Gate-after-truncate would ship
+                             ;; the innocent-looking 16384-octet prefix.
+                             (4 (concat (make-string 17000 ?x)
+                                        (string 4194176)))
+                             (5 "fine"))))
                    (cons "p" (list (list :label "a") (list :label "b")
                                    (list :label "c") (list :label "d")
-                                   (list :label "e")))))))
+                                   (list :label "e") (list :label "f")))))))
     (ebp-client--handle-edit-complete
      client (list :document "doc:cd" :editor_id "body"
                   :session (make-string 32 ?a) :seq 4 :cursor 2))
-    (dotimes (i 4)
+    (dotimes (i 5)
       (should (equal (ebp-test--candidate-doc client 4 i) '(:doc ""))))
-    (should (equal (ebp-test--candidate-doc client 4 4) '(:doc "fine"))))
+    (should (equal (ebp-test--candidate-doc client 4 5) '(:doc "fine"))))
   ;; A fn that returns candidates but arms nothing: the MAY-be-empty arm.
   (let ((client (ebp-test--candidate-client
                  (lambda (_doc _eid _text _cursor)

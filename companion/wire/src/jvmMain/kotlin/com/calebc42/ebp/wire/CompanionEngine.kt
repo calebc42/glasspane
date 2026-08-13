@@ -2036,14 +2036,17 @@ class CompanionEngine(
             put("seq", seq)
             put("index", index)
         }) { result, error ->
-            // Discard-whole mirrors requestCompletion: `doc` MUST be a
-            // string — an explicit "" is a valid empty doc (the MAY-be-
-            // empty arm) — and the result is a closed object {doc}.
+            // `doc` MUST be a string — an explicit "" is a valid empty
+            // doc (the MAY-be-empty arm); absent or mistyped discards.
+            // Unknown result members are IGNORED, not grounds to
+            // discard: SPEC 12 rule 1 makes ignore the receiver default
+            // and 19.3 declares closed objects only for edit.complete's
+            // result — candidate.doc's paragraph never does, so the
+            // requestCompletion-style closed-key loop here was an
+            // over-reject that would break additive 25-class growth
+            // (R5 review, DECISIONS-wire-growth-model asymmetry).
             var doc: String? = null
-            if (error == null && result != null) {
-                val d = result.stringOrNull("doc")
-                if (d != null && result.keys.all { it == "doc" }) doc = d
-            }
+            if (error == null && result != null) doc = result.stringOrNull("doc")
             callback(doc)
         }
         return true

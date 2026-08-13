@@ -15,6 +15,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -165,6 +166,53 @@ class EditorLifecycleTest {
         // A stale selection (cursor moved) is discarded without changing text.
         assertFalse(engine.selectCompletion("doc:1", "body", s.sessionId, 99,
             0, "x", "y"))
+    }
+
+    @Test
+    fun candidateKindAcceptedUnknownValueSurvivesUnknownMemberRejects() {
+        // Amendment #169: `kind` is a legal candidate member whose TYPE is
+        // checked at the loop; an unrecognized VALUE is presentation (the
+        // render map decorates or not), never a discard - while an unknown
+        // MEMBER still discards the reply whole (the candidate stays a
+        // closed object).
+        val out = mutableListOf<JsonObject>()
+        val engine = engine(out)
+        engine.openEditor("doc:1", "body", "pri", cursor = ScalarPos(3))
+        var got: JsonArray? = null
+        engine.requestCompletion("doc:1", "body") { _, cands, _, _, _ ->
+            got = cands }
+        val req = out.method("edit.complete").single()
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", req["id"]!!)
+            put("result", buildJsonObject {
+                put("prefix", "pri")
+                put("candidates", buildJsonArray {
+                    addJsonObject { put("label", "print"); put("kind", "function") }
+                    addJsonObject {
+                        put("label", "primes")
+                        put("kind", "kind-from-the-future")
+                    }
+                })
+            })
+        }))
+        assertEquals(2, got!!.size)
+        // The closed object still rejects an unknown MEMBER whole.
+        var got2: JsonArray? = null
+        engine.requestCompletion("doc:1", "body") { _, cands, _, _, _ ->
+            got2 = cands }
+        val req2 = out.method("edit.complete")[1]
+        engine.feed(frame(buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", req2["id"]!!)
+            put("result", buildJsonObject {
+                put("prefix", "pri")
+                put("candidates", buildJsonArray {
+                    addJsonObject { put("label", "print"); put("detail", "x") }
+                })
+            })
+        }))
+        assertNull(got2)
     }
 
     // ------------------------------- audit §3: lifecycle conformance (P1 1-5)

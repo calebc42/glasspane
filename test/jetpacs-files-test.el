@@ -20,6 +20,7 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
 (require 'jetpacs-buffer)
+(require 'ebp-complete)   ; R3: the kind-registration wiring pin
 (require 'jetpacs-chrome)
 (require 'jetpacs-navigate)
 (require 'jetpacs-files)
@@ -1213,7 +1214,7 @@ the session keys, and the document id keeps its extension."
   (jetpacs-files-test--with-tree root
     (jetpacs-files-test--attached (jetpacs-files-test--sync-client)
       (let ((f (concat root "lib.el"))
-            (screens '()) (attached '())
+            (screens '()) (attached '()) (kinds-reg '())
             (jetpacs-files--edit nil))
         (write-region "(defun f ())\n" nil f nil 'silent)
         (unwind-protect
@@ -1224,6 +1225,9 @@ the session keys, and the document id keeps its extension."
                          (push (list surface id builder) screens)
                          (should (plist-get jetpacs-files--edit :document))
                          1))
+                      ((symbol-function 'ebp-complete-set-editor-kinds)
+                       (lambda (doc eid allowed)
+                         (push (list doc eid allowed) kinds-reg)))
                       ((symbol-function 'ebp-sync-attach)
                        (lambda (_c doc eid buf) (push (list doc eid buf) attached)
                          buf)))
@@ -1247,7 +1251,14 @@ the session keys, and the document id keeps its extension."
                   (with-current-buffer buf
                     ;; Phone keystrokes must not litter #autosave# files.
                     (should-not buffer-auto-save-file-name))
-                  (should (eq buf (plist-get jetpacs-files--edit :buffer))))
+                  (should (eq buf (plist-get jetpacs-files--edit :buffer)))
+                  ;; Amendment #169 (R3): the attach registered the
+                  ;; author-time kind verdict for exactly this session —
+                  ;; the WIRING pin (doc/eid, not the verdict, which
+                  ;; follows the fixture's welcome), so the registration
+                  ;; cannot silently unwire.
+                  (should (equal (cl-subseq (car kinds-reg) 0 2)
+                                 (list doc eid))))
                 ;; And the builder emits a node under exactly that id.
                 (should (member (plist-get jetpacs-files--edit :editor-id)
                                 (jetpacs-files-test--collect

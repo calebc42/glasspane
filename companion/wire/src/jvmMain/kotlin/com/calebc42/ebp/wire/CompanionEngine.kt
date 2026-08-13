@@ -1900,8 +1900,14 @@ class CompanionEngine(
                     if ("annotation" in c && c.stringOrNull("annotation") == null)
                         return@sendRequest
                     if ("insert" in c && c.stringOrNull("insert") == null) return@sendRequest
+                    // Amendment #169: `kind` is a feature-gated optional string.
+                    // Only its TYPE is checked here - an unrecognized VALUE is a
+                    // presentation gap (no icon), never a reason to discard the
+                    // reply; the render layer's explicit map decides decoration.
+                    if ("kind" in c && c.stringOrNull("kind") == null) return@sendRequest
                     for (k in c.keys)
-                        if (k != "label" && k != "annotation" && k != "insert")
+                        if (k != "label" && k != "annotation" && k != "insert" &&
+                            k != "kind")
                             return@sendRequest
                 }
                 callback(prefix, cands, atSession, atSeq, atCursor)

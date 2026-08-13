@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -961,6 +962,15 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
                             document, id, offer, cand.insert)
                     }
                     .padding(horizontal = 12.dp, vertical = 8.dp)) {
+                // Amendment #169: the kind icon, through an EXPLICIT map -
+                // IconMap.get answers unknowns with a placeholder, and the
+                // SPEC's degrade for an unrecognized kind is NO decoration.
+                completionKindIcon(cand.kind)?.let { iconName ->
+                    Icon(IconMap.get(iconName), contentDescription = cand.kind,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(cand.label, style = MaterialTheme.typography.bodyMedium)
                 cand.annotation?.let {
                     Spacer(Modifier.width(8.dp))
@@ -975,6 +985,33 @@ private fun RenderEditor(node: JsonObject, ctx: RenderCtx, m: Modifier) {
 /** How many candidates one editor shows. Emacs decides what to send; this
  * bounds what a phone-sized surface renders from it. */
 private const val MAX_VISIBLE_COMPLETIONS = 12
+
+/** Amendment #169: candidate `kind` -> material icon NAME, or null for no
+ * decoration. Every name here must resolve in the material catalog (IconMap
+ * is reflective, so a typo would draw the HelpOutline placeholder - which is
+ * exactly the decoration the SPEC's unrecognized-value degrade forbids; the
+ * render test resolves each name and asserts non-placeholder). Kinds absent
+ * from the map - recognized or not - render without decoration, which is the
+ * conforming degrade in both cases. */
+internal fun completionKindIcon(kind: String?): String? = when (kind) {
+    "text" -> "abc"
+    "method", "function", "constructor" -> "functions"
+    "field", "variable", "property" -> "data_object"
+    "class", "interface", "struct" -> "category"
+    "module" -> "inventory_2"
+    "value", "enum", "enum-member" -> "tag"
+    "keyword" -> "key"
+    "snippet" -> "content_paste"
+    "color" -> "palette"
+    "file" -> "description"
+    "reference" -> "link"
+    "folder" -> "folder"
+    "constant" -> "bookmark"
+    "event" -> "event"
+    "operator" -> "calculate"
+    "type-parameter" -> "code"
+    else -> null
+}
 
 /** SPEC 17.7 `${date}`: local `YYYY-MM-DD Day`. */
 private fun localDateStamp(): String {

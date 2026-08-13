@@ -900,6 +900,18 @@ a bound buffer and the annotation riders arm on the reseed."
         (unless (or (string-search "\0" seed)
                     (not (jetpacs-files--wire-safe-p seed)))
           (ebp-sync-attach (jetpacs-client) doc eid buf)
+          ;; Amendment #169 (R3), the author-time half of the sender-omit
+          ;; rule: this editor presents in the files APP surface, so its
+          ;; completion replies may carry `kind' exactly when the app
+          ;; profile advertises the member-gating feature — evaluated
+          ;; against the LIVE welcome (the bare predicate fails open
+          ;; offline, which is the wrong direction for a sender MUST).
+          (when (fboundp 'ebp-complete-set-editor-kinds)
+            (ebp-complete-set-editor-kinds
+             doc eid
+             (and (jetpacs-client)
+                  (jetpacs-feature-advertised-p
+                   "editor.candidate_kind" :app))))
           (setq jetpacs-files--edit
                 (list :path true :seed seed
                       :mtime (plist-get jetpacs-files--edit :mtime)
@@ -1002,6 +1014,20 @@ snapshot from replacing live text."
         (jetpacs-chrome-screen
          "Edit" (jetpacs-empty-state :icon "info" :title "Nothing being edited")
          :back back)
+      ;; Amendment #169 (R3): re-register the kind verdict on EVERY
+      ;; build — the registry's own invariant.  The sync-attach
+      ;; registration alone goes stale on exactly this builder's
+      ;; reconnect-over-a-cached-snapshot path (a new session opens over
+      ;; the same doc/eid with no re-attach), and a stale `allowed'
+      ;; against a downgraded welcome is a sender MUST violation whose
+      ;; symptom is a silently dead dropdown.  A pure table write, so
+      ;; the builder's never-attach rule is untouched.
+      (when (and (fboundp 'ebp-complete-set-editor-kinds)
+                 (plist-get req :document) (plist-get req :editor-id))
+        (ebp-complete-set-editor-kinds
+         (plist-get req :document) (plist-get req :editor-id)
+         (and (jetpacs-client)
+              (jetpacs-feature-advertised-p "editor.candidate_kind" :app))))
       (let* ((path (plist-get req :path))
              (document (plist-get req :document))
              (body (or (run-hook-with-args-until-success

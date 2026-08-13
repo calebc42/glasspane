@@ -80,6 +80,10 @@ data class CompletionCandidate(
     val label: String,
     val annotation: String?,
     val insert: String,
+    /** Amendment #169: the feature-gated category, or null. An unrecognized
+     * value survives to here - degrading it to no icon is the RENDERER's
+     * job, so a future vocabulary name flows through untouched. */
+    val kind: String? = null,
 )
 
 /**
@@ -487,7 +491,8 @@ class DeviceBridge(
                             c.stringOr("annotation").takeIf { it.isNotEmpty() },
                             // SPEC 19.3: `insert` defaults to `label`.
                             c.stringOr("insert").takeIf { it.isNotEmpty() }
-                                ?: c.stringOr("label"))
+                                ?: c.stringOr("label"),
+                            c.stringOr("kind").takeIf { it.isNotEmpty() })
                     }
                 }
                 _completionOffers.value = _completionOffers.value +

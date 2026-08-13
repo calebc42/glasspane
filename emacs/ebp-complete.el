@@ -47,10 +47,13 @@
 ;; and nothing is ever opened by that name.
 ;;
 ;; Candidate shape (SPEC 19.3): each candidate is a CLOSED object
-;; {label, annotation?, insert?} with `insert' defaulting to `label'.
-;; Closed is why the poc's `kind' member is dropped rather than carried:
-;; a conformant Companion must REJECT an unknown member, so emitting it
-;; would poison every reply that carried one.
+;; {label, annotation?, insert?, kind?} with `insert' defaulting to
+;; `label'.  Closed is why the poc's `kind' member was DROPPED at the
+;; rewrite — a conformant Companion must REJECT an unknown member — and
+;; why amendment #169 brought it back FEATURE-GATED: `kind' is emitted
+;; only for an editor whose author registered that the presenting
+;; target advertises `editor.candidate_kind' (the sender-omit rule),
+;; and only values from `ebp-complete-kind-vocabulary' ever cross.
 ;;
 ;; R0 of the completion ladder (docs/PLAN-glasspane-completion.md): the
 ;; shadow is not the only arm any more.  When `ebp-sync' holds a live
@@ -113,6 +116,43 @@ live trace of the bridge working without a device on logcat.  The
 prefix is user content, which is why this is opt-in and nil by default
 (SPEC 23.3); the non-debug failure path logs error SYMBOLS only."
   :type 'boolean)
+
+;;;; Candidate `kind' (amendment #169, R3)
+
+(defconst ebp-complete-kind-vocabulary
+  '("text" "method" "function" "constructor" "field" "variable" "class"
+    "interface" "module" "property" "unit" "value" "enum" "keyword"
+    "snippet" "color" "file" "reference" "folder" "enum-member" "constant"
+    "struct" "event" "operator" "type-parameter")
+  "The closed SPEC 19.3 candidate `kind' vocabulary (amendment #169).
+Exactly the contract's `candidate_schema.kind_enum' — the suite pins
+the two against each other — and exactly what capf `:company-kind'
+emits (core eglot and core elisp-mode both speak it: LSP
+CompletionItemKind 1–25 in the ecosystem's spelling).  Emacs MUST NOT
+send any other value, so the harvest FILTERS against this list rather
+than trusting a backend.")
+
+(defvar ebp-complete--kind-editors (make-hash-table :test #'equal)
+  "(DOCUMENT . EDITOR-ID) -> non-nil when replies may carry `kind'.
+Amendment #169's sender-omit rule needs the PRESENTING TARGET's
+profile, and `edit.complete' carries no target — so the AUTHOR, who
+emitted the editor node into a known surface or dialog, registers the
+verdict here at author time (`jetpacs-feature-advertised-p' against
+the presenting namespace, evaluated while a client is live).  An
+absent entry means OMIT: the conforming default for every
+unregistered document.")
+
+(defvar ebp-complete--emit-kinds nil
+  "Bound non-nil around a harvest whose editor may carry `kind'.")
+
+(defun ebp-complete-set-editor-kinds (document editor-id allowed)
+  "Record whether DOCUMENT/EDITOR-ID's replies may carry `kind'.
+The author-time half of amendment #169's sender-omit rule; see
+`ebp-complete--kind-editors'.  Authors re-register on every push — the
+verdict follows the welcome, and a reconnect re-pushes."
+  (if allowed
+      (puthash (cons document editor-id) t ebp-complete--kind-editors)
+    (remhash (cons document editor-id) ebp-complete--kind-editors)))
 
 ;;;; Shadow buffers
 
@@ -211,6 +251,12 @@ likeliest next keystroke saver), capped at
          (table (nth 2 data))
          (props (nthcdr 3 data))
          (ann-fn (plist-get props :annotation-function))
+         ;; Amendment #169: the candidate's category, from the ecosystem
+         ;; convention capf backends already speak.  Gated by the
+         ;; author-time registration (the sender-omit rule), and only
+         ;; consulted at all when the editor may carry the member.
+         (kind-fn (and ebp-complete--emit-kinds
+                       (plist-get props :company-kind)))
          ;; Capf extension: what a candidate INSERTS when it differs
          ;; from its display label — a wikilink chip shows "[[Title" but
          ;; lands "[[id:…][Title]]" in the buffer.  Feeds SPEC 19.3's
@@ -248,7 +294,7 @@ likeliest next keystroke saver), capped at
     (unless cands
       (when-let* ((fb (ebp-complete--word-fallback)))
         (setq prefix (car fb) cands (cdr fb)
-              ann-fn nil insert-fn nil)))
+              ann-fn nil insert-fn nil kind-fn nil)))
     (when cands
       (setq cands (sort (delete-dups
                          (mapcar #'substring-no-properties cands))
@@ -263,6 +309,31 @@ likeliest next keystroke saver), capped at
                         (let ((node (list :label c)))
                           (when-let* ((a (ebp-complete--annotate ann-fn c)))
                             (setq node (append node (list :annotation a))))
+                          ;; Amendment #169: `kind', from the RAW twin
+                          ;; when one exists — eglot's kind rides text
+                          ;; properties the wire strip removed — and
+                          ;; FILTERED against the registered vocabulary:
+                          ;; Emacs MUST NOT send any other value, and a
+                          ;; backend's spelling is not a promise.
+                          (when kind-fn
+                            (let* ((raw (plist-get
+                                         ebp-complete--collect-extras :raw))
+                                   (orig (and raw
+                                              (cl-find-if
+                                               (lambda (r)
+                                                 (equal
+                                                  (substring-no-properties r)
+                                                  c))
+                                               raw)))
+                                   (k (condition-case nil
+                                          (funcall kind-fn (or orig c))
+                                        (error nil))))
+                              (when (and (symbolp k) k
+                                         (member (symbol-name k)
+                                                 ebp-complete-kind-vocabulary))
+                                (setq node (append node
+                                                   (list :kind
+                                                         (symbol-name k)))))))
                           (let ((ins (and insert-fn
                                           (condition-case nil
                                               (funcall insert-fn c)
@@ -411,7 +482,10 @@ Jetpacs's `jetpacs-connect' does exactly that by default."
     ;; dropdown it described is being replaced.  The live harvest mints
     ;; the new one (or none).
     (setq ebp-complete-live-offer nil)
-    (let ((result (condition-case err
+    (let* ((ebp-complete--emit-kinds
+            (gethash (cons document editor-id)
+                     ebp-complete--kind-editors))
+           (result (condition-case err
                       (or (ebp-complete--live-harvest
                            document editor-id text cursor)
                           (ebp-complete-in-text document text cursor))

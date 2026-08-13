@@ -110,8 +110,10 @@ token itself excluded; multibyte text harvests in scalar space."
 
 (ert-deftest ebp-complete-annotation-insert-and-no-kind ()
   "Candidates are SPEC 19.3 closed objects: :label, trimmed :annotation,
-:insert only when it differs from the label (the wire default), and the
-poc's `kind' member is GONE — a closed object rejects unknown members."
+:insert only when it differs from the label (the wire default) — and
+`kind' stays OMITTED on an ungated harvest even when the capf offers
+`:company-kind': since #169 the member exists but is feature-gated,
+and this collect ran with no registration (the sender-omit default)."
   (with-temp-buffer
     (setq-local completion-at-point-functions
                 (list (lambda ()
@@ -172,6 +174,84 @@ matching nothing gets `fundamental-mode'."
     (should (eq (buffer-local-value
                  'major-mode (ebp-complete--shadow-buffer "doc:jpick-77"))
                 'fundamental-mode))))
+
+;;;; Candidate `kind' (amendment #169, R3)
+
+(ert-deftest ebp-complete-kind-vocabulary-matches-the-contract ()
+  "The elisp vocabulary IS the contract's `candidate_schema.kind_enum'
+— the cross-implementation pin; drift on either side fails here."
+  (let* ((contract (json-parse-string
+                    (with-temp-buffer
+                      (insert-file-contents
+                       (expand-file-name "ebp/contract.json"))
+                      (buffer-string))
+                    :object-type 'alist :array-type 'list))
+         (enum (alist-get 'kind_enum
+                          (alist-get 'candidate_schema contract))))
+    (should enum)
+    (should (equal (sort (copy-sequence enum) #'string<)
+                   (sort (copy-sequence ebp-complete-kind-vocabulary)
+                         #'string<)))))
+
+(ert-deftest ebp-complete-kind-emitted-when-registered ()
+  "A registered editor's replies carry `kind' from capf
+`:company-kind', resolved against the RAW candidate (eglot's kind
+rides text properties the wire strip removes) and FILTERED to the
+registered vocabulary — a backend's unregistered spelling is omitted,
+never sent."
+  (unwind-protect
+      (with-temp-buffer
+        (setq-local completion-at-point-functions
+                    (list (lambda ()
+                            (list (- (point) 3) (point)
+                                  (list (propertize "printing"
+                                                    'ebp-r3-kind 'function)
+                                        (propertize "priority"
+                                                    'ebp-r3-kind 'bogus-kind))
+                                  :company-kind
+                                  (lambda (c)
+                                    (get-text-property 0 'ebp-r3-kind c))))))
+        (insert "pri")
+        (goto-char (point-max))
+        (ebp-complete-set-editor-kinds "doc:r3.el" "body" t)
+        (let* ((ebp-complete--emit-kinds
+                (gethash (cons "doc:r3.el" "body")
+                         ebp-complete--kind-editors))
+               (r (ebp-complete--collect))
+               (printing (cl-find "printing" (cdr r)
+                                  :key (lambda (c) (plist-get c :label))
+                                  :test #'equal))
+               (priority (cl-find "priority" (cdr r)
+                                  :key (lambda (c) (plist-get c :label))
+                                  :test #'equal)))
+          ;; The propertized twin carried the kind through the strip.
+          (should (equal (plist-get printing :kind) "function"))
+          ;; The unregistered spelling is filtered, not forwarded.
+          (should-not (plist-member priority :kind))))
+    (ebp-complete-set-editor-kinds "doc:r3.el" "body" nil)))
+
+(ert-deftest ebp-complete-kind-omitted-by-default ()
+  "THE sender-omit pin: an UNREGISTERED editor's replies never carry
+`kind', whatever the capf offers — absent registration is the
+conforming default, and the seam binds the gate from the registry."
+  (with-temp-buffer
+    (setq-local completion-at-point-functions
+                (list (lambda ()
+                        (list (- (point) 3) (point) '("printing")
+                              :company-kind (lambda (_) 'function)))))
+    (insert "pri")
+    (goto-char (point-max))
+    ;; Through the REAL seam, whose let binds the gate from the registry.
+    (cl-letf (((symbol-function 'ebp-complete--live-harvest)
+               (lambda (&rest _) nil))
+              ((symbol-function 'ebp-complete-in-text)
+               (let ((buf (current-buffer)))
+                 (lambda (&rest _)
+                   (with-current-buffer buf (ebp-complete--collect))))))
+      (let ((r (ebp-complete-edit-complete "doc:r3-unreg.el" "body"
+                                           "pri" 3)))
+        (should r)
+        (should-not (plist-member (car (cdr r)) :kind))))))
 
 ;;;; The live-buffer arm (R0)
 

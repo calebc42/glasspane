@@ -383,6 +383,12 @@ the action staging table survives — it is load-time state that
     (setq jetpacs--client nil)
     (when (fboundp 'jetpacs-async-reset)
       (jetpacs-async-reset))
+    ;; Amendment #169 (R3): kind verdicts follow a WELCOME, so no
+    ;; verdict may outlive its client — the next welcome may not
+    ;; advertise, and a stale `allowed' is a sender MUST violation.
+    ;; Authors re-register per push against the next welcome.
+    (when (boundp 'ebp-complete--kind-editors)
+      (clrhash ebp-complete--kind-editors))
     (clrhash jetpacs--state-handlers)))
 
 (defun jetpacs-connect (host port &rest config)

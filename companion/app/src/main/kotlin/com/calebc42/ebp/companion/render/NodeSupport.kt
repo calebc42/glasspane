@@ -78,8 +78,14 @@ object NodeSupport {
 
     /** SPEC 17.2 image forms / §17.7 registered toolbars land here with their
      * renderer support (image.https, image.data, toolbar.<id>). */
-    val APP_FEATURES: Set<String> = IMAGE_FEATURES
-    val DIALOG_FEATURES: Set<String> = IMAGE_FEATURES
+    /** Amendment #169: the member-gating feature for candidate `kind` -
+     * advertised in the SAME change that taught the engine's candidate loop
+     * to accept the member, so the sender-omit rule never meets a strict
+     * loop that would refuse what the advertisement invited. */
+    private val EDITOR_FEATURES: Set<String> = sortedSetOf("editor.candidate_kind")
+
+    val APP_FEATURES: Set<String> = IMAGE_FEATURES + EDITOR_FEATURES
+    val DIALOG_FEATURES: Set<String> = IMAGE_FEATURES + EDITOR_FEATURES
     val NOTIFICATION_FEATURES: Set<String> = sortedSetOf()
 
     // C6: the advertised ORDER is observable — these arrays ride the welcome's

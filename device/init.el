@@ -235,6 +235,16 @@ so the dock is two destinations: Home and Files."
                       :key (jetpacs-wire-id "ev" (format "%d" idx))))
 
 (defun jetpacs-hub--screen (_back)
+  ;; Amendment #169 (R3): the REPL editor below presents in the hub APP
+  ;; surface — register whether its completion replies may carry
+  ;; candidate `kind', per the live welcome (the author-time half of the
+  ;; sender-omit rule; re-evaluated every build, so it follows a
+  ;; reconnect's welcome).
+  (when (fboundp 'ebp-complete-set-editor-kinds)
+    (ebp-complete-set-editor-kinds
+     "scratch.el" "hub-eval"
+     (and (jetpacs-client)
+          (jetpacs-feature-advertised-p "editor.candidate_kind" :app))))
   (let ((i -1))
     (jetpacs-chrome-screen
      "Jetpacs"

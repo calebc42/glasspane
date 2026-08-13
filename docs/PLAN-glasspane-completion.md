@@ -276,6 +276,26 @@ the out-of-order test pins that the outer reply still goes out, a
 float-seeded-mirror test, a garbage-past-the-cap degrade case, and the
 rearm test covers the harvest-latch postpone.
 
+DEVICE BATCH (same day, Pixel Tablet, commit after the review fixes):
+smoke-r5-docs.el SMOKE PASS — three kind icons drawn (R3), long-press
+doc panel with §16.4-verbatim text, empty-doc no-panel, accept:true on
+the tap and absent on the keystroke; the R4 settings row was BUILT
+(companion.settings.open's toast stub replaced by an app-owned dialog)
+and verified through the prefs file both ways; smoke-files-sync.el
+re-ran green (B1-B7 — the P1 save fix train is finally
+device-verified); smoke-eglot-lsp.el (desktop, real
+typescript-language-server) proved headless eglot connect at attach,
+server members through the live harvest, kind + exit-function armed,
+real squiggles through the rider, and the server's JSDoc through
+edit.candidate.doc — the review-P1 scenario against real eglot. The
+batch also CAUGHT one pre-existing display defect (fixed same commit):
+a successful tap-accept never republished the mirror, so the field
+kept the pre-tap text until the next keystroke bounced off the #100
+gate and snapped back, swallowing that keystroke. Still owed: the
+on-device Android-Emacs + Termux server smoke (needs hands on the
+Emacs app; pylsp install is the prep) and P1's desync/concurrency
+smoke sub-clauses.
+
 Amendment #172 is fully applied: SPEC §19.3 normative text
 (SPEC.md:3328-3345), the §11 registry row, contract.json's method
 entry (params {document, editor_id, session, seq, index}, result

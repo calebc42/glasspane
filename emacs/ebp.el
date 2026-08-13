@@ -1806,6 +1806,31 @@ the wire shape."
                  (funcall callback (and result (plist-get result :status))
                           error))))))))))
 
+(cl-defun ebp-client-edit-move (client document editor-id cursor
+                                &key sel-start sel-end callback)
+  "SPEC 19.4 move-only form: change only caret/selection.
+The frame omits start/del/text/len and carries the CURRENT seq (seq is
+REQUIRED on every `edit.apply'); the Companion honors it only while it
+still sits at that seq — a stale answer means the user typed and the
+positions describe a document state already left, so the caller simply
+loses the move (never a wrong caret).  CURSOR and the optional
+SEL-START/SEL-END pair are 0-based scalar offsets.  CALLBACK, when
+given, receives (STATUS ERROR) like `ebp-client-edit-apply's."
+  (let ((ed (gethash (cons document editor-id) (ebp-client-editors client))))
+    (when ed
+      (ebp-client--request
+       client 'edit.apply
+       (append (list :document document :editor_id editor-id
+                     :session (plist-get ed :session)
+                     :seq (plist-get ed :seq)
+                     :cursor cursor)
+               (and sel-start sel-end
+                    (list :sel_start sel-start :sel_end sel-end)))
+       (lambda (result error)
+         (when callback
+           (funcall callback (and result (plist-get result :status))
+                    error)))))))
+
 (defun ebp-client-edit-resync (client document editor-id)
   "SPEC 19.4: recover a stale local view — the Companion returns full
 state under a fresh session at seq 0."

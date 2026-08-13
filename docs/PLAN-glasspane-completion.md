@@ -207,15 +207,49 @@ candidate only (mirroring `completionItem/resolve` laziness), plain
 text, frame-budget capped. Emacs answers from `:company-doc-buffer` /
 eglot resolve.
 
-## R6 — edit.command revival
+## R6 — edit.command revival (LANDED)
 
-§17.7's `command` op is fully specified and doubly allowlisted, but
-Emacs has no handler (jetpacs-files.el bans toolbar `:command` ops as a
-dead letter). Revive v1's DWIM engine (v1 jetpacs-sync.el:717-920):
-predicate-gated command execution at the phone's point/region, bridged
-`completing-read` M-x, one-splice diff-back via `edit.apply`. The
-carrier for LSP code actions, rename, and formatting — zero wire
-additions. Independent of R3-R5; can be pulled earlier.
+The reverse direction of the delta stream, ported from POC 1
+(jetpacs-sync.el:717-920). A toolbar `command` op (SPEC 17.7) arrives
+as the `edit.command` event.action carrying the device's exact point
+and selection; the command runs in the ATTACHED buffer with real
+point/mark, and its result rides the ordinary sync loop back — this is
+also the carrier for LSP code actions, rename, and formatting (Emacs
+computes, eglot executes, the loop ships), with zero wire additions.
+
+- `edit.command` handler in jetpacs-emacs-ui.el (a GLOBAL VERB — the
+  op rides whatever surface hosts the editor): the dispatch validates
+  shape + mirror freshness only (D2), the command runs from the flow
+  continuation. The registration IS SPEC 17.7's required outer
+  allowlist; `jetpacs-emacs-ui-command-predicate` (default `commandp`)
+  is the nested one for the command name — interned softly, gated,
+  never handed to an evaluator.
+- The command runs WIDENED (device coordinates are document offsets)
+  with the desktop restriction restored after; region placed from the
+  device's selection under a let-bound `transient-mark-mode`. A text
+  change flushes eagerly (`ebp-sync-flush`) so it contends for seq+1
+  ahead of the next keystroke; a move-only result reports the new
+  `ebp-client-edit-move` (SPEC 19.4 move-only form: no
+  start/del/text/len, unchanged seq — stale simply loses the move).
+- The flow re-gates on the mirror at fire time: a seq that moved
+  between dispatch and continuation drops the run quietly (the raced
+  caret's rule). Only the M-x arm (empty command) gates on the dialog
+  bridge — an explicit command asks nothing and runs on a grant-less
+  session.
+- `jetpacs-files.el`'s toolbar `:command` dead-letter ban is lifted.
+
+Equivalent-mutant deletion: POC 1's explicit `activate-mark` after
+`set-mark` was dead code (`set-mark` activates the mark itself at
+emacs-30.1 simple.el) — caught by a surviving mutant and removed, the
+JA-6 F4 precedent.
+
+Adversarial review (3 raw, 1 confirmed P3, 2 refuted): the default
+predicate was bare `commandp` while the docstring claimed "same
+posture as the M-x surface" — but the M-x button filters
+`jetpacs-command-visible-p` (drops `jetpacs-suppressed-commands` like
+`suspend-frame`, and `jetpacs-unsupported` commands). Fixed by making
+the default actually `jetpacs-command-visible-p`, so the code matches
+the claim and `edit.command` is no wider than the palette.
 
 ## R7 — deferred
 

@@ -180,11 +180,11 @@ buttons.")
   "Function of (PATH) returning the editor's `:toolbar', or nil.
 A registered toolbar id string or a list of `jetpacs-toolbar-item's;
 validation rides `jetpacs-editor'.  A `:command' op requires a
-synchronized `:document' — the SYNCHRONIZED rung now has one, so
-`jetpacs-editor' no longer refuses those items there.  Do NOT ship them
-yet: `edit.command' arrives as an event.action for which Emacs has no
-handler at all, so the op would reach a dead letter.  `:snippet' and
-`:line' never contact Emacs and work on both rungs.")
+synchronized `:document', which the SYNCHRONIZED rung has — and since
+R6 `edit.command' has a real handler (jetpacs-emacs-ui.el: the command
+runs at the device's point/region, gated by
+`jetpacs-emacs-ui-command-predicate'), so `:command' items ship.
+`:snippet' and `:line' never contact Emacs and work on both rungs.")
 
 (defvar jetpacs-files-editor-fab-function nil
   "Function of (PATH) returning the edit screen's FAB node, or nil.

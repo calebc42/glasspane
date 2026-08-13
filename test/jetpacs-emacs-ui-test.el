@@ -239,6 +239,169 @@ worst a loop."
     (should (equal (plist-get (plist-get btn :on_tap) :action)
                    "jetpacs.emacs.mx"))))
 
+;;;; edit.command (R6, PLAN-glasspane-completion.md)
+
+(require 'ebp-sync)
+
+(defmacro jetpacs-emacs-ui-test--with-edit-command (content &rest body)
+  "Attached buffer holding CONTENT as doc:r6.txt/body, client attached.
+Binds `client', `buf', `sent' (captured requests, newest first) and
+`notices' (captured snackbar texts).  Drains pending flow timers while
+the stubs are still up, so no run leaks into a later test."
+  (declare (indent 1))
+  `(let* ((client (ebp-client-create :receipt-file (make-temp-file "r6")))
+          (buf (generate-new-buffer " *r6*"))
+          (sent nil) (notices nil))
+     (ignore sent notices)
+     (unwind-protect
+         (progn
+           (jetpacs-attach client)
+           (with-current-buffer buf
+             (insert ,content)
+             (puthash (cons "doc:r6.txt" "body")
+                      (list :session "S" :seq 0 :text ,content :cursor 0)
+                      (ebp-client-editors client))
+             (ebp-sync-attach client "doc:r6.txt" "body" buf))
+           (cl-letf (((symbol-function 'ebp-client--request)
+                      (lambda (_c method params cb &optional _t)
+                        (push (list method params cb) sent)))
+                     ((symbol-function 'jetpacs-shell-notify)
+                      (lambda (text &rest _) (push text notices))))
+             ,@body
+             (cl-loop repeat 10 do (accept-process-output nil 0.02))))
+       (with-current-buffer buf (ebp-sync-detach))
+       (kill-buffer buf)
+       (jetpacs-detach) (jetpacs-test-reset-state))))
+
+(defun jetpacs-emacs-ui-test--edit-command (args)
+  (funcall (gethash "edit.command" jetpacs-action-handlers)
+           args '(:surface "app:demo")))
+
+(ert-deftest jetpacs-emacs-ui-edit-command-gates ()
+  "Shape violations reject, a moved seq is stale, fresh accepts — and
+nothing runs inside the dispatch (D2)."
+  (jetpacs-emacs-ui-test--with-edit-command "hello world"
+    (should (eq (jetpacs-emacs-ui-test--edit-command
+                 '(:document "doc:r6.txt" :editor_id "body"
+                   :session "S" :seq "NaN" :cursor 0))
+                'rejected))
+    (should (eq (jetpacs-emacs-ui-test--edit-command
+                 '(:document "doc:r6.txt" :editor_id "body"
+                   :session "S" :seq 7 :cursor 0 :command "ignore"))
+                'stale))
+    (should (eq (jetpacs-emacs-ui-test--edit-command
+                 '(:document "doc:r6.txt" :editor_id "body"
+                   :session "S" :seq 0 :cursor 0 :command "ignore"))
+                'accepted))
+    (should (equal (with-current-buffer buf (buffer-string))
+                   "hello world"))))
+
+(ert-deftest jetpacs-emacs-ui-edit-command-runs-at-device-region ()
+  "The command runs at the DEVICE's point and region — `upcase-region'
+over the device's selection upcases exactly that span — and the text
+change flushes back as ordinary `edit.apply' traffic."
+  (jetpacs-emacs-ui-test--with-edit-command "hello world"
+    (should (eq (jetpacs-emacs-ui-test--edit-command
+                 '(:document "doc:r6.txt" :editor_id "body"
+                   :session "S" :seq 0 :cursor 5 :sel_start 0 :sel_end 5
+                   :command "upcase-region"))
+                'accepted))
+    (cl-loop repeat 30
+             until (with-current-buffer buf
+                     (equal (buffer-string) "HELLO world"))
+             do (accept-process-output nil 0.02))
+    (should (equal (with-current-buffer buf (buffer-string))
+                   "HELLO world"))
+    (let ((apply-frame (cl-find 'edit.apply sent :key #'car)))
+      (should apply-frame)
+      (should (equal (plist-get (nth 1 apply-frame) :text) "HELLO"))
+      (should (= (plist-get (nth 1 apply-frame) :start) 0))
+      (should (= (plist-get (nth 1 apply-frame) :del) 5)))))
+
+(ert-deftest jetpacs-emacs-ui-edit-command-refuses-noncommands ()
+  "The nested SPEC 17.7 allowlist: an eval-shaped name is interned
+softly, gated, and refused with a snackbar — it never reaches any
+dispatcher — and `jetpacs-emacs-ui-command-predicate' refuses real
+commands too when told to."
+  (jetpacs-emacs-ui-test--with-edit-command "abc"
+    (jetpacs-emacs-ui-test--edit-command
+     '(:document "doc:r6.txt" :editor_id "body" :session "S" :seq 0
+       :cursor 0 :command "(shell-command \"boom\")"))
+    (cl-loop repeat 30 until notices do (accept-process-output nil 0.02))
+    (should (string-match-p "Not a command" (car notices)))
+    ;; The default IS the M-x surface's own gate, not bare commandp: a
+    ;; suppressed command (suspends the host) is refused though
+    ;; commandp accepts it.  Reverting the default to commandp fails
+    ;; here (R6 review).
+    (setq notices nil)
+    (should (commandp 'suspend-frame))
+    (jetpacs-emacs-ui-test--edit-command
+     '(:document "doc:r6.txt" :editor_id "body" :session "S" :seq 0
+       :cursor 0 :command "suspend-frame"))
+    (cl-loop repeat 30 until notices do (accept-process-output nil 0.02))
+    (should (string-match-p "Not a command" (car notices)))
+    (setq notices nil)
+    (let ((jetpacs-emacs-ui-command-predicate #'ignore))
+      (jetpacs-emacs-ui-test--edit-command
+       '(:document "doc:r6.txt" :editor_id "body" :session "S" :seq 0
+         :cursor 0 :command "upcase-region"))
+      (cl-loop repeat 30 until notices do (accept-process-output nil 0.02))
+      (should (string-match-p "Not a command" (car notices))))
+    (should (equal (with-current-buffer buf (buffer-string)) "abc"))
+    (should-not (cl-find 'edit.apply sent :key #'car))))
+
+(ert-deftest jetpacs-emacs-ui-edit-command-move-only-frame ()
+  "A command that only moves point reports the SPEC 19.4 move-only
+form: no start/del/text/len, the UNCHANGED seq, the new cursor."
+  (jetpacs-emacs-ui-test--with-edit-command "hello"
+    (jetpacs-emacs-ui-test--edit-command
+     '(:document "doc:r6.txt" :editor_id "body" :session "S" :seq 0
+       :cursor 1 :command "forward-char"))
+    (cl-loop repeat 30 until sent do (accept-process-output nil 0.02))
+    (let ((frame (cl-find 'edit.apply sent :key #'car)))
+      (should frame)
+      (let ((p (nth 1 frame)))
+        (should-not (plist-member p :start))
+        (should-not (plist-member p :text))
+        (should (= (plist-get p :seq) 0))
+        (should (= (plist-get p :cursor) 2))))))
+
+(ert-deftest jetpacs-emacs-ui-edit-command-stale-flow-drops ()
+  "A seq that moves between dispatch and flow drops the run QUIETLY —
+the coordinates describe a document state already left, the raced
+caret's rule."
+  (jetpacs-emacs-ui-test--with-edit-command "abc"
+    (should (eq (jetpacs-emacs-ui-test--edit-command
+                 '(:document "doc:r6.txt" :editor_id "body" :session "S"
+                   :seq 0 :cursor 0 :sel_start 0 :sel_end 3
+                   :command "upcase-region"))
+                'accepted))
+    (setf (plist-get (gethash (cons "doc:r6.txt" "body")
+                              (ebp-client-editors client))
+                     :seq)
+          1)
+    (cl-loop repeat 10 do (accept-process-output nil 0.02))
+    (should (equal (with-current-buffer buf (buffer-string)) "abc"))
+    (should-not sent)))
+
+(ert-deftest jetpacs-emacs-ui-edit-command-mx-bridge ()
+  "An op with no command bridges M-x, scoped by
+`jetpacs-command-visible-p' — the palette's posture."
+  (jetpacs-emacs-ui-test--with-edit-command "hello"
+    (let (predicate-seen)
+      (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                 (lambda () t))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &optional pred &rest _)
+                   (setq predicate-seen pred)
+                   "forward-char")))
+        (jetpacs-emacs-ui-test--edit-command
+         '(:document "doc:r6.txt" :editor_id "body" :session "S" :seq 0
+           :cursor 0))
+        (cl-loop repeat 30 until sent do (accept-process-output nil 0.02))
+        (should (eq predicate-seen #'jetpacs-command-visible-p))
+        (should (cl-find 'edit.apply sent :key #'car))))))
+
 (provide 'jetpacs-emacs-ui-test)
 ;;; jetpacs-emacs-ui-test.el ends here
 

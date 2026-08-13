@@ -579,6 +579,159 @@ push — the top-buffer check keys the watch to this app's own stack."
 (add-hook 'jetpacs-shell-after-push-hook
           #'jetpacs-emacs-ui--reconcile-live-watch)
 
+;; --- edit.command: a command at the device's point (R6, POC 1 port) ----------
+;;
+;; The reverse direction of the delta stream.  A toolbar `command' op
+;; (SPEC 17.7) arrives as the event.action `edit.command' carrying the
+;; device's exact point and selection; the command runs in the ATTACHED
+;; buffer with real point/mark.  A resulting text change rides the
+;; ordinary track-changes -> `edit.apply' loop (flushed eagerly so it
+;; contends for seq+1 ahead of the next keystroke); a command that only
+;; MOVED point reports a SPEC 19.4 move-only frame.  This is also the
+;; carrier for LSP code actions, rename, and formatting: Emacs computes,
+;; eglot executes, the sync loop ships — zero wire additions.
+
+(defcustom jetpacs-emacs-ui-command-predicate #'jetpacs-command-visible-p
+  "Predicate gating which commands `edit.command' may run.
+Called with the interned command symbol; nil refuses (the device gets
+a snackbar).  The default is exactly the device M-x surface's own
+visibility test (`jetpacs-command-visible-p'): any interactive command
+that is not `jetpacs-unsupported' and not in `jetpacs-suppressed-commands'
+\(so `suspend-frame' and friends, which would suspend the host out from
+under the session, are refused here as they are at the palette).  Point
+it at a tighter allowlist to harden a deployment, or at bare `commandp'
+to widen back to every command.  This predicate is the nested allowlist
+SPEC 17.7 requires: the name is interned and gated, never handed to an
+evaluator or an ambient dispatcher."
+  :type 'function :group 'jetpacs)
+
+(declare-function ebp-sync-attached-buffer "ebp-sync" (document editor-id))
+(declare-function ebp-sync-flush "ebp-sync" (&optional buffer))
+
+(defun jetpacs-emacs-ui--edit-command-fresh-p (doc eid session seq)
+  "Non-nil while DOC/EID's mirror still sits at SESSION and SEQ."
+  (when-let* ((client (jetpacs-client))
+              (ed (gethash (cons doc eid) (ebp-client-editors client))))
+    (and (equal session (plist-get ed :session))
+         (= seq (plist-get ed :seq)))))
+
+(defun jetpacs-emacs-ui--place-region (cursor sel-start sel-end)
+  "Set point and mark from device coordinates (0-based scalars).
+When SEL-START/SEL-END describe a non-collapsed selection the mark
+goes to whichever end the caret is not on and activates, so
+`use-region-p' answers yes; otherwise the mark deactivates."
+  (goto-char (min (1+ (max 0 (truncate cursor))) (point-max)))
+  (if (and (numberp sel-start) (numberp sel-end)
+           (/= (truncate sel-start) (truncate sel-end)))
+      ;; `set-mark' activates the mark itself (emacs-30.1 simple.el
+      ;; calls `activate-mark' inside it) — POC 1's explicit
+      ;; `activate-mark' after it was dead code, caught here by an
+      ;; equivalent mutant and deleted, the JA-6 F4 precedent.
+      (set-mark (min (1+ (max 0 (truncate
+                                 (if (= (truncate cursor)
+                                        (truncate sel-start))
+                                     sel-end sel-start))))
+                     (point-max)))
+    (deactivate-mark)))
+
+(defun jetpacs-emacs-ui--edit-command-flow (doc eid session seq
+                                                command cursor
+                                                sel-start sel-end)
+  "The deferred half of `edit.command'.
+Re-gates on the live mirror first — the flow deferred past the
+dispatch, and a keystroke in between makes every coordinate a guess,
+so a moved seq drops the run quietly, exactly like a raced caret
+report.  COMMAND nil or empty prompts with a bridged `completing-read'
+over `jetpacs-command-visible-p' — M-x scoped like the palette.  The
+whole run happens widened (device coordinates are document offsets)
+with the desktop's restriction restored after; a command whose purpose
+was to SET a restriction loses that effect — a recorded delta from
+POC 1, which had no narrowing to preserve."
+  (let ((client (jetpacs-client))
+        (buf (and (fboundp 'ebp-sync-attached-buffer)
+                  (ebp-sync-attached-buffer doc eid))))
+    (when (and client buf (buffer-live-p buf)
+               (jetpacs-emacs-ui--edit-command-fresh-p doc eid session seq))
+      (let* ((name (cond
+                    ;; An explicit command needs no prompting and must
+                    ;; work on a session with no dialog grant at all —
+                    ;; only the M-x arm asks anything, so only it gates
+                    ;; on the bridge (the JA-3 wedge lesson).
+                    ((and (stringp command)
+                          (not (string-empty-p command)))
+                     command)
+                    ((jetpacs-dialog-can-bridge-p)
+                     (completing-read "M-x " obarray
+                                      #'jetpacs-command-visible-p t))
+                    (t
+                     (jetpacs-shell-notify
+                      (if (bound-and-true-p jetpacs-dialog--pending)
+                          "Busy — finish the open dialog first"
+                        "Dialogs are not available in this session"))
+                     nil)))
+             (cmd (and name (intern-soft name))))
+        (if (null name)
+            nil
+        (if (not (and cmd (funcall jetpacs-emacs-ui-command-predicate cmd)))
+            (jetpacs-shell-notify
+             (format "Not a command: %s"
+                     (truncate-string-to-width name 64)))
+          (let (before result dest)
+            (with-current-buffer buf
+              (save-restriction
+                (widen)
+                (setq before (buffer-substring-no-properties
+                              (point-min) (point-max)))
+                ;; `transient-mark-mode' stays let-bound across the
+                ;; command so region-aware commands see an active region
+                ;; regardless of host config; `deactivate-mark'
+                ;; post-processing is ours — `call-interactively' has no
+                ;; command loop behind it here.
+                (let ((transient-mark-mode t)
+                      (deactivate-mark nil))
+                  (jetpacs-emacs-ui--place-region cursor sel-start sel-end)
+                  (setq dest (jetpacs-buffer-call-shimmed
+                              cmd
+                              (lambda (err)
+                                (jetpacs-shell-notify
+                                 (format "%s failed (%s)" name
+                                         (jetpacs-error-label err))))))
+                  (when deactivate-mark (deactivate-mark)))
+                (setq result
+                      (list (buffer-substring-no-properties
+                             (point-min) (point-max))
+                            (1- (point))
+                            (and mark-active (mark t)
+                                 (/= (mark t) (point))
+                                 (cons (1- (min (point) (mark t)))
+                                       (1- (max (point) (mark t)))))))))
+            (pcase-let ((`(,after ,new-point ,region) result))
+              (if (not (equal before after))
+                  ;; Text changed: the sync loop owns the splice; flush
+                  ;; NOW so it contends for seq+1 ahead of the user's
+                  ;; next keystroke.
+                  (ebp-sync-flush buf)
+                ;; Only point/region moved: a SPEC 19.4 move-only frame
+                ;; at the unchanged seq — stale simply loses the move.
+                (when (or (/= new-point (truncate cursor))
+                          (not (equal region
+                                      (and (numberp sel-start)
+                                           (numberp sel-end)
+                                           (/= (truncate sel-start)
+                                               (truncate sel-end))
+                                           (cons (min (truncate sel-start)
+                                                      (truncate sel-end))
+                                                 (max (truncate sel-start)
+                                                      (truncate sel-end)))))))
+                  (ebp-client-edit-move client doc eid new-point
+                                        :sel-start (car-safe region)
+                                        :sel-end (cdr-safe region)))))
+            (when (and (consp dest) (buffer-live-p (car dest))
+                       (not (eq (car dest) buf)))
+              (jetpacs-shell-notify
+               (format "%s → %s (on desktop)" name
+                       (buffer-name (car dest))))))))))))
+
 ;; --- Actions -----------------------------------------------------------------
 
 (with-jetpacs-owner jetpacs-emacs-ui-owner
@@ -635,6 +788,49 @@ offered (SPEC 23.1)")
        (lambda ()
          (jetpacs-emacs-ui--with-prompting #'jetpacs-emacs-ui--mx-flow)))
       'accepted)
+    :any-surface t)
+
+  (jetpacs-defaction "edit.command"
+    ;; SPEC 17.7: this registration IS the outer allowlist entry the
+    ;; SPEC demands ("Emacs MUST explicitly allowlist `edit.command'"),
+    ;; and `jetpacs-emacs-ui-command-predicate' in the flow is the
+    ;; nested one for `command'.  A GLOBAL VERB: the op rides whatever
+    ;; surface (or dialog) hosts the synchronized editor, so the
+    ;; event's surface is legitimately foreign.  D2: the dispatch only
+    ;; validates shape and freshness; the command — and any bridged
+    ;; M-x prompt — runs from the flow continuation.
+    (lambda (args params)
+      (let ((doc (plist-get args :document))
+            (eid (plist-get args :editor_id))
+            (session (plist-get args :session))
+            (seq (plist-get args :seq))
+            (cursor (plist-get args :cursor)))
+        (cond
+         ((not (and (stringp doc) (stringp eid) (stringp session)
+                    (numberp seq) (numberp cursor)))
+          'rejected)
+         ((not (jetpacs-emacs-ui--edit-command-fresh-p doc eid session seq))
+          'stale)
+         (t
+          (let ((command (plist-get args :command))
+                (sel-start (plist-get args :sel_start))
+                (sel-end (plist-get args :sel_end)))
+            (ignore params)
+            ;; Not `--with-prompting': an explicit command asks nothing
+            ;; and must run on a grant-less session; the flow's own M-x
+            ;; arm gates on the bridge.  The error half is the same
+            ;; discipline (SPEC 23.3: symbol only, never die unreported
+            ;; in a timer).
+            (jetpacs-flow-continue
+             (lambda ()
+               (condition-case err
+                   (jetpacs-emacs-ui--edit-command-flow
+                    doc eid session seq command cursor
+                    sel-start sel-end)
+                 (error
+                  (message "jetpacs-emacs-ui: edit.command failed: %s"
+                           (jetpacs-error-label err)))))))
+          'accepted))))
     :any-surface t)
 
   (jetpacs-defaction "jetpacs.emacs.imenu"

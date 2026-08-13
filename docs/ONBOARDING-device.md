@@ -3,6 +3,27 @@
 The elisp lives at `/sdcard/Documents/jetpacs/` (refreshed over adb);
 the device Emacs's app-private init needs exactly ONE line.
 
+**Re-provisioning a wiped tablet, or bringing up Termux + `pylsp` for
+the eglot/language-server work:** use `tools/onboard-tablet.sh` instead
+of the steps below. It is the single desktop command for that path —
+Termux + sshd, the elisp tree, the `device/py/` fixtures, and
+`device/emacs-init.el` all land over one `ssh`/`rsync` transport
+(`com.termux` and `org.gnu.emacs` share a uid on this device, so a
+Termux shell can write straight into `org.gnu.emacs`'s app-private
+storage — no `/sdcard`, no storage permission dialog). See
+`device/MANIFEST.md` for exactly what lands where and why.
+
+The two flows **share one file**: step 3 below writes a `load` line
+into `~/.emacs.d/init.el`, and that is the same `init.el` the onboard
+script has to wire its harness from. So the script never overwrites it.
+It installs the harness beside it as `~/.emacs.d/jetpacs-onboard-init.el`
+and *appends* one `(load ...)` line, leaving anything already there to
+run first; the harness then declines to dial the Companion when a
+client is already attached. Net effect: run either flow, or both, in
+either order — the daily driver keeps the session and the harness
+contributes only `exec-path`/`PATH`, the Termux `load-path`, and the
+`jetpacs-files-roots` entry.
+
 ## One-time setup
 
 1. From the workstation, with the tablet on adb:

@@ -214,30 +214,44 @@ becomes:
 
 ### Proposed ledger row
 
-> **The offer survives typing.** §19.3's selection gate — session,
-> sequence, cursor, and prefix "still match", else "MUST discard" —
-> means every keystroke clears the dropdown, because a keystroke
-> advances the sequence. POC 1's strongest UX ingredient was exactly
-> the opposite: the list stayed up and narrowed locally while the user
-> typed, and a tap landed against the extended prefix, hiding the
-> round-trip entirely. That behavior is nonconformant under the
-> current gate. The gate now admits one precisely-bounded divergence:
-> selection MAY proceed when every sequence step since the offer was a
-> LOCAL insertion at the caret extending the offered prefix (each
-> intervening splice: `del` 0, at the then-current cursor), the
-> extended prefix is a Unicode-scalar prefix of the candidate's
-> `label` or of its `insert`, and the selection then replaces the
-> EXTENDED prefix with `insert` — in one local edit, sequence
-> advanced, `accept: true` (#170). Any other divergence — a remote
-> splice, a deletion, an edit away from the caret — still discards.
-> This relaxes a receiver-side MUST within major 2 (the #89 genre:
-> pinning apply semantics both readings left divergent), and the
-> no-harm argument is exact: Emacs receives an ordinary marked delta
-> whose splice replaces a prefix that really is on its mirror —
-> indistinguishable from a fast tap under today's rules. Requires
-> #170; without the marker, widening the legal accept shapes would
-> widen Emacs's inference surface, which is the R2 review's finding in
-> reverse.
+> **The offer survives typing; the tap re-proves itself at emission.**
+> §19.3's selection gate — session, sequence, cursor, and prefix
+> "still match", else "MUST discard" — means every keystroke clears
+> the dropdown, because a keystroke advances the sequence. POC 1's
+> strongest UX ingredient was the opposite: the list stayed up and
+> narrowed while the user typed, and a tap landed against the extended
+> prefix, hiding the round trip. The gate now admits one
+> precisely-bounded divergence. Selection MAY proceed when: (a) every
+> sequence advance since the reply was a local splice with `del` 0
+> whose `start` equals the then-current END of the extension region —
+> the reply's cursor plus all scalars inserted by prior qualifying
+> splices; the caret report is best-effort context and MUST NOT be the
+> test — and (b) the tapped candidate is a member of THAT reply and,
+> AT THE MOMENT OF EMISSION, still satisfies the Companion's active
+> narrowing predicate evaluated under the current extension, where the
+> predicate MUST be one of exactly two: the extension is a
+> Unicode-scalar PREFIX of the candidate's `label` or `insert`
+> (strict), or a Unicode-scalar SUBSTRING of one of them (contains).
+> A tap whose candidate no longer qualifies MUST be discarded without
+> changing text. (c) The selection then replaces the extension region
+> — `del` = original prefix length + extension length — with `insert`
+> as one local edit, sequence advanced, `accept: true` (#170). Any
+> other divergence — a remote splice, a deletion, a local edit not at
+> the region's end — still discards. The emission-time re-proof is
+> what closes the stale-row tap race the design review surfaced:
+> display narrowing is asynchronous on real devices, so a tap can land
+> on a row whose candidate the current extension no longer matches —
+> the predicate re-evaluation at emission catches exactly that,
+> whichever predicate is active, and keeps §14.5's
+> what-the-user-saw-is-a-correctness-boundary posture intact. WHICH
+> predicate is active is receiver-local presentation — user-settable,
+> no wire member, no §22.4 feature — because Emacs validates a marked
+> accept against the FULL returned candidate set by membership and
+> region, never against the displayed subset: both predicates produce
+> byte-identical wire traffic. Relaxes a receiver-side MUST within
+> major 2 (the #89 genre); requires #170 — without the marker,
+> widening the legal accept shapes would widen Emacs's inference
+> surface, the R2 review's finding in reverse.
 
 ### Normative text (§19.3, replacing the discard sentence)
 
@@ -250,26 +264,54 @@ becomes:
 
 > If they do not, it MUST discard the result without changing text and
 > MAY issue a new completion request — with one exception. Selection
-> MAY proceed against a PREFIX EXTENSION: when every sequence advance
-> since the reply was a local insertion at the caret extending the
-> returned prefix, and the extended prefix is a Unicode-scalar prefix
-> of the candidate's `label` or of its `insert`, the Companion MAY
-> treat the selection as valid, replacing the extended prefix with
-> `insert` as one local edit, advancing the sequence, and sending the
-> corresponding `edit.delta` with `accept: true`. Every other
-> divergence — an applied remote splice, a deletion, any local edit
-> not at the caret — MUST still discard. A Companion narrowing its
-> presented candidates against the extension (dropping candidates the
-> extension no longer prefixes) is presentation and needs no rule.
+> MAY proceed against an EXTENSION: when every sequence advance since
+> the reply was a local splice with `del` 0 whose `start` equals the
+> then-current end of the extension region (the reply's cursor plus
+> all scalars inserted by prior qualifying splices — the caret report
+> is best-effort context and MUST NOT be the test), and the tapped
+> candidate belongs to that reply and, at the moment of emission,
+> satisfies the Companion's active narrowing predicate under the
+> current extension, the Companion MAY treat the selection as valid:
+> it replaces the extension region with `insert` as one local edit,
+> advances the sequence, and sends the corresponding `edit.delta` with
+> `accept: true`. The active narrowing predicate MUST be one of: the
+> extension is a Unicode-scalar prefix of the candidate's `label` or
+> `insert`; or the extension is a Unicode-scalar substring of the
+> candidate's `label` or `insert`. A tapped candidate that no longer
+> satisfies the active predicate MUST be discarded without changing
+> text. Every other divergence — an applied remote splice, a deletion,
+> any local edit not at the region's end — MUST still discard.
+>
+> (Informative.) Which of the two predicates is active is
+> receiver-local presentation state: it emits no wire member, appears
+> in no profile, and requires no Section 22.4 feature — Emacs's accept
+> check runs against the full returned candidate set by membership and
+> region, never against the displayed subset, so both predicates
+> produce byte-identical wire traffic on a tap. A Companion SHOULD
+> narrow its DISPLAYED candidates with the same predicate it enforces
+> at emission; showing what cannot be accepted is a lie of
+> presentation. One combination deserves care: a contains-narrowing
+> Companion feeding an Emacs-side typed-text resolver (the picker's
+> RET-picks-top) can display a candidate that typed-text resolution
+> would not select — an explicit confirm SHOULD resolve against the
+> displayed selection, not the typed text.
 
-### Open sub-decision for the owner
+### The strict-vs-contains resolution (2026-08-13)
 
-POC 1 narrowed by `startsWith` on the label but by `contains` on
-insert-carrying candidates. The draft proposes **strict prefix only**
-(label or insert): substring matching would let a tap rewrite text
-that no longer visibly relates to what the user typed, and a missed
-flex-narrowing tap costs one extra round trip, not correctness. Say
-the word if v1's contains-behavior should be kept instead.
+The original draft legislated strict-prefix; the owner wanted contains
+personally while expecting the community to want strict. The
+adversarial design review resolved the tension by relocating the line:
+the WIRE-testable duty is that the Companion enforces its active
+predicate at emission against the current extension (closing the
+stale-row tap race that pure membership-checking admits and that
+strict-only was silently guarding); WHICH of the two named predicates
+is active is configuration. The predicate family is CLOSED at two —
+the growth model's usual posture — and grows only by amendment; a
+Companion with no narrowing predicate at all ("off") has no legal
+extension-accepts. Residual recorded from the review: the typed path's
+minimal-diff behavior (which the retained unmarked-delta heuristic in
+Emacs relies on) is a reference-Companion habit, not a wire MUST — a
+candidate for a future minimality clause, not blocking here.
 
 ### Duties, enforcement, deferrals
 
@@ -277,15 +319,43 @@ the word if v1's contains-behavior should be kept instead.
   prose; the resulting delta is #170's shape). validate.py scope
   unchanged, stated per #150.
 - Kotlin: the Renderer keeps the offer across qualifying keystrokes
-  and narrows locally; `selectCompletion` validates the extension rule
-  before emitting. Deferred to the R4 implementation rung with its
-  device gate (latency feel is the point; only hardware shows it).
-- Emacs: no change required — #170's marker plus the existing splice
-  handling already accept the resulting delta. The R2 shape-check
-  fallback intentionally does NOT recognize extension-accepts from
-  pre-#170 Companions; that combination cannot occur (both land
-  together on the Companion).
-- Monotonic resources (#151): none.
+  and narrows with the active predicate; `selectCompletion`
+  RE-EVALUATES the tapped candidate against that predicate under the
+  current extension at emission and discards on failure (the
+  stale-row race guard — display diffing is asynchronous, the emit
+  point is not). The predicate setting is Companion configuration
+  (reference default: strict; contains offered). Deferred to the R4
+  implementation rung with its device gate (latency feel is the
+  point; only hardware shows it).
+- Emacs (the corollary duty — the design review overturned the
+  draft's original "no change required", five pins):
+  1. `ebp-client--handle-edit-delta` threads `accept` through
+     `edit-splice-functions` — the hook signature grows the member.
+  2. `ebp-sync--claim-offer`'s claim policy splits: an UNMARKED delta
+     with `del` 0 at the tracked region end EXTENDS the standing offer
+     (tracked cursor and extension advance) instead of claiming it;
+     any other unmarked splice claims. The arithmetic closes exactly —
+     the region's left edge, reply cursor − original prefix length, is
+     invariant under qualifying extensions, so the marked accept
+     validates as start = tracked cursor − `del` and `del` = original
+     prefix length + tracked extension.
+  3. Resync, reseed, detach, and the pending-local-queue race branch
+     ALL still claim/discard — extension survival is carved out solely
+     for the clean unmarked caret-insertion case, or the R2 offer-
+     lifetime finding regresses.
+  4. The retained R2 shape heuristic fires for UNMARKED deltas only
+     while the tracked extension is ZERO (the pristine offer); once
+     any extension is tracked, an unmarked delta extends or claims,
+     never finishes — otherwise extension survival would widen the
+     unmarked inference surface, #171's own no-widening argument in
+     reverse.
+  5. The marked branch is a SEPARATE arm carrying none of the landed
+     shape guards — with the marker, membership + region alone
+     validate, which is a capability gain: empty-prefix and
+     empty-insert accepts (both legal, both invisible to the landed
+     heuristic) become recognizable.
+- Monotonic resources (#151): none — the tracked extension is a
+  counter on the standing offer, whose lifetime pin 3 already bounds.
 
 ---
 
@@ -376,8 +446,12 @@ the word if v1's contains-behavior should be kept instead.
    states; compat demoted to corollary), all accept emissions through
    the single `selectCompletion` funnel, pins in both directions,
    Emacs shape check retained as the last seam.
-2. **#171 matching policy** — strict prefix (drafted) vs POC 1's
-   contains-on-insert?
+2. ~~**#171 matching policy**~~ — **RESOLVED 2026-08-13 by design
+   review**: the emission-time re-proof against the Companion's active
+   predicate is normative; the predicate family is closed at two
+   (strict prefix / contains), and which is active is user-settable
+   presentation. Awaiting the owner's ratification of the restructured
+   section.
 3. **#172 doc cap** — 16384 octets is proposed; any preference?
 4. **Numbering** — #169–#172 assumed; renumber freely.
 5. **Sequencing** — ratify #170 alone first if R2's forgery fix should

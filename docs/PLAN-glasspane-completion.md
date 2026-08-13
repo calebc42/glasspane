@@ -224,7 +224,23 @@ published after each tracker mutation — no more per-keystroke
 across blocking socket writes), no pre-splice reconcile race, and a
 reply the arm gate refused is never handed to the display.
 
-## R5 — lazy candidate docs (amendment #172 implementation) + doc panel
+## R5 — lazy candidate docs (amendment #172 implementation) + doc panel (LANDED)
+
+LANDED 2026-08-13. All six decision points executed on their recommended
+arms (Caleb's continue-and-execute ratification): long-press gesture,
+range-1201 with NO data.reason, cell outlives the offer claim, the
+dynamic-var provider seam, the serve()-finally ghost fix riding R5, and
+an empty doc showing NO panel. Two deltas from the plan text, both
+additive: the slot class carries a TICKET per flight (a conclusion must
+name the exact flight it ends — after a retire, a stale conclusion could
+otherwise free or re-arm a slot a fresh offer's flight now owns), and
+the renderer's three-condition show gate is extracted as a THIRD pure
+helper (`candidateDocVisible`) because no Compose test rig exists, which
+is what made the epoch/narrowed-set/empty-doc mutants killable. The
+elisp collect now builds ONE stripped→first-raw map in the strip pass
+and the R3 kind lookup plus the R2 mint-offer pairing were repointed at
+it (the F2 fix subsumed both older cl-find-if probes). Everything else
+below shipped as written; the section is kept as the design record.
 
 Amendment #172 is fully applied: SPEC §19.3 normative text
 (SPEC.md:3328-3345), the §11 registry row, contract.json's method
@@ -524,7 +540,7 @@ dropped; callback-on-error dropped (wedged slot); epoch parameter
 dropped; empty-doc panel guard dropped; narrowed-set show condition
 dropped.
 
-### Decision points for ratification
+### Decision points for ratification (ALL RESOLVED on the recommended arms, 2026-08-13)
 
 1. **Highlight gesture = long-press** (recommended: zero new chrome,
    existing haptic precedent, tap-to-accept untouched) vs an info

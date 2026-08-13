@@ -331,10 +331,15 @@ the word if v1's contains-behavior should be kept instead.
 > (`1201` with `data.reason: "editor-stale"` otherwise, exactly as
 > `edit.complete`) and MUST answer `1201 content-invalid` for an
 > `index` outside that result. Emacs SHOULD cap `doc` at 16384 UTF-8
-> octets. A Companion SHOULD keep at most one such request
-> outstanding per session and SHOULD request documentation only for a
-> candidate it is presently highlighting — the method exists to be
-> lazy.
+> octets; a cap MUST truncate at a Unicode-scalar boundary at or below
+> the limit — an octet cut mid-scalar is not a string. A Companion
+> SHOULD keep at most one such request outstanding per session and
+> SHOULD request documentation only for a candidate it is presently
+> highlighting — the method exists to be lazy. (Informative: volume
+> needs no pagination here. A longer rendering, if ever wanted, is an
+> additive `offset` param under §25 — or, better, a full document is
+> what `surface.update` and the buffer machinery already exist to
+> show; the peek method never becomes a transport for manuals.)
 
 ### Duties, enforcement, deferrals
 

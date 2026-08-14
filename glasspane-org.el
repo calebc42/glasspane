@@ -234,7 +234,10 @@ brought up."
 (defun glasspane-org--todo-items (&optional files)
   "Extract TODO items from FILES (or agenda files).
 Memoised; see `ebp-org-cache-invalidate'."
-  (ebp-org-with-cache 'glasspane (list 'todos files)
+  ;; The key names the ARM as well as the action: the same scope answers
+  ;; differently once the vault index exists.
+  (ebp-org-with-cache 'glasspane
+      (list 'todos files (and (glasspane-org--vulpea-p) (null files) t))
     (if (and (glasspane-org--vulpea-p) (null files))
         (mapcar #'glasspane-org--vulpea-note-to-item
                 (vulpea-db-query (lambda (note) (vulpea-note-todo note))))
@@ -414,7 +417,10 @@ to a request, so the TOTAL policy check applies (ebp-org.el:214)."
 Combines `org-tag-alist' (the configured vocabulary) with every tag
 actually used in the agenda files.  Memoised; see
 `ebp-org-cache-invalidate'."
-  (ebp-org-with-cache 'glasspane (list 'all-tags)
+  ;; The key names the ARM as well as the action: the same scope answers
+  ;; differently once the vault index exists.
+  (ebp-org-with-cache 'glasspane
+      (list 'all-tags (and (featurep 'vulpea) (fboundp 'vulpea-db-query-tags) t))
     (let ((tags nil))
       (dolist (entry org-tag-alist)
         (let ((tg (if (consp entry) (car entry) entry)))

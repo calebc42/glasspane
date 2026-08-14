@@ -180,6 +180,35 @@ cache discipline are the engine's (`ebp-org-resolve-ref',
          (jetpacs-toast "That heading action failed")
          'rejected)))))
 
+;;;; Token minting (S5 — the mint side of the funnel above)
+
+(defun glasspane-ui--tokenize-tap (items set)
+  "ITEMS with a `token' cell attached, minted as one bulk SET (S5).
+Refs whose file left the org roots would SIGNAL at mint time
+\(ebp-org.el's policy-at-mint rule), so they are filtered first — the
+item still renders, just untappable — as is any overflow past
+`ebp-org-token-set-max', the per-set cap.  Tap tokens only: cards
+built from these carry no swipe arms.  Minted even when ITEMS is
+empty, because the replace sweep on SET is what retires the previous
+render's tokens — which is also why one screen at a time may use a
+given SET."
+  (let* ((mintable (cl-remove-if-not
+                    (lambda (it)
+                      (let ((f (plist-get (alist-get 'ref it) :file)))
+                        (and (stringp f) (not (string-empty-p f))
+                             (ebp-org-file-allowed-p f))))
+                    items))
+         (mintable (seq-take mintable ebp-org-token-set-max))
+         (refs (mapcar (lambda (it) (alist-get 'ref it)) mintable))
+         (tokens (ebp-org-ref-tokens refs :set set :owner "glasspane"))
+         (table (make-hash-table :test #'eq)))
+    (cl-loop for it in mintable for tok in tokens
+             do (puthash it tok table))
+    (mapcar (lambda (it)
+              (let ((tok (gethash it table)))
+                (if tok (cons (cons 'token tok) it) it)))
+            items)))
+
 ;;;; TODO keyword helpers (pure)
 
 (defun glasspane-ui--bare-keyword (word)
@@ -403,16 +432,32 @@ action instead conclude through `glasspane-ui-settings-dialog-close'
 in that action's handler.  Nowhere else shows settings dialogs, so
 one live request slot is enough."
   (when-let* ((client (jetpacs-client)))
-    (let ((request-id
-           (ebp-client-dialog-show
-            client id spec
-            :callback
-            (lambda (status result _error)
-              ;; Dismissal and the abandon's 1301 both land here.
-              (setq glasspane-ui--settings-dialog nil)
-              (when (and on-submit (equal status "submitted"))
-                (funcall on-submit (plist-get result :fields)))))))
+    ;; The slot holds ONE request and this is its only writer, so a
+    ;; still-live prior dialog is abandoned here rather than orphaned
+    ;; (its device dialog would otherwise linger with no way back to
+    ;; it), and each callback clears only its own id: the first show's
+    ;; 1301 must not clear the second show's slot, or the Save handler
+    ;; finds no request to close and loses the origin params.  CELL
+    ;; carries the id into the callback, which cannot close over
+    ;; REQUEST-ID — the show that returns it is that binding's init.
+    (glasspane-ui-settings-dialog-close)
+    (let* ((cell (list nil))
+           (request-id
+            (ebp-client-dialog-show
+             client id spec
+             :callback
+             (lambda (status result _error)
+               ;; Dismissal and the abandon's 1301 both land here.
+               (when (equal (plist-get glasspane-ui--settings-dialog
+                                       :request-id)
+                            (car cell))
+                 (setq glasspane-ui--settings-dialog nil))
+               ;; Outside the identity guard: a submitted conclusion
+               ;; runs its handler whoever owns the slot by then.
+               (when (and on-submit (equal status "submitted"))
+                 (funcall on-submit (plist-get result :fields)))))))
       (when request-id
+        (setcar cell request-id)
         (setq glasspane-ui--settings-dialog
               (list :request-id request-id :params params))))))
 
@@ -807,18 +852,34 @@ files.toggle-refile with the reader surfacing (G4).")
 Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces handlers and
 registry entries in place, and the link is re-added exactly once."
+  ;; :any-surface — D1 GLOBAL verbs on the ef precedent
+  ;; (glasspane-ef.el:361-366): the satellite link and the Display
+  ;; section both draw on the Settings ROOT, and the screen they lead
+  ;; to is pushed onto whatever surface was tapped, so every verb whose
+  ;; only emission site is there arrives on a surface Glasspane does
+  ;; not own and the owned-surface gate would refuse it before the
+  ;; handler ran (jetpacs-surfaces.el:770-785).  The rest stay
+  ;; owner-scoped: the save verbs fire from dialog conclusions, which
+  ;; carry no `:surface' at all (SPEC 14.4), and the agenda/files verbs
+  ;; from screens on this owner's own surface.
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "glasspane.settings.open"
                        #'glasspane-ui--on-settings-open
+                       :any-surface t
                        :doc "Open Glasspane's settings management screen")
     (jetpacs-defaction "settings.line-numbers"
-                       #'glasspane-ui--on-line-numbers)
-    (jetpacs-defaction "settings.tags" #'glasspane-ui--on-tags)
-    (jetpacs-defaction "settings.todo.edit" #'glasspane-ui--on-todo-edit)
+                       #'glasspane-ui--on-line-numbers
+                       :any-surface t)
+    (jetpacs-defaction "settings.tags" #'glasspane-ui--on-tags
+                       :any-surface t)
+    (jetpacs-defaction "settings.todo.edit" #'glasspane-ui--on-todo-edit
+                       :any-surface t)
     (jetpacs-defaction "settings.agenda.edit"
-                       #'glasspane-ui--on-agenda-edit)
+                       #'glasspane-ui--on-agenda-edit
+                       :any-surface t)
     (jetpacs-defaction "settings.agenda.delete"
-                       #'glasspane-ui--on-agenda-delete)
+                       #'glasspane-ui--on-agenda-delete
+                       :any-surface t)
     (jetpacs-defaction "settings.agenda.save"
                        #'glasspane-ui--on-agenda-save)
     (jetpacs-defaction "agenda.save-custom"

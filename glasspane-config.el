@@ -130,8 +130,11 @@ not take the app's whole load down with it."
       (dolist (file (directory-files dir t "\\.el\\'"))
         (condition-case err
             (load file nil 'nomessage)
+          ;; SPEC 23.3: a config file's own text is user data, and an
+          ;; error datum from `load' quotes it; the FILE name is what
+          ;; identifies the failure, the datum may not be logged.
           (error (message "glasspane-config: error loading %s: %s"
-                          file (error-message-string err))))))))
+                          file (jetpacs-error-label err))))))))
 
 ;;;###autoload
 (defun glasspane-config-sync ()
@@ -210,7 +213,14 @@ must restore every verb without a re-require (the G0 gate contract)."
 ;; v1's entry called this after its requires; in v3 the require itself
 ;; is the bundle load, so the startup arm runs here — a bare desktop
 ;; `require' still only loads what already exists (see startup's doc).
-(glasspane-config-startup)
+;; Interactive-only: a batch load (byte-compile, the ERT suite, an
+;; offline replay) runs under the REAL `user-emacs-directory' and would
+;; EXECUTE whatever an earlier `glasspane-config-ensure' left in the
+;; managed subtree.  The on-device Emacs and the desktop daemon are
+;; both interactive, so the device path is unaffected; batch callers
+;; that want the defaults call `glasspane-config-startup' themselves.
+(unless noninteractive
+  (glasspane-config-startup))
 
 (defun glasspane-config-unload-function ()
   "Unload hygiene: drop the verb, wherever registration stands."

@@ -137,33 +137,6 @@ render each other's results (the core's own %S rule)."
        (let ((print-length nil) (print-level nil) (print-circle t))
          (format "%S" q))))))
 
-;;;; Token minting (S5 — one :set per rendered screen, replace semantics)
-
-(defun glasspane-views--tokenize (items)
-  "ITEMS with `token' cells attached; one bulk mint into set \"views\".
-Only one view screen renders at a time, so one set serves them all —
-and the replace sweep is what makes a sheet left open on view A answer
-`stale' after view B rendered.  Refs whose file left the org roots
-would SIGNAL at mint time (the policy-at-mint rule), so they are
-filtered first — the item still renders, just untappable — as is any
-overflow past the per-set cap."
-  (let* ((mintable (cl-remove-if-not
-                    (lambda (it)
-                      (let ((f (plist-get (alist-get 'ref it) :file)))
-                        (and (stringp f) (not (string-empty-p f))
-                             (ebp-org-file-allowed-p f))))
-                    items))
-         (mintable (seq-take mintable ebp-org-token-set-max))
-         (refs (mapcar (lambda (it) (alist-get 'ref it)) mintable))
-         (tokens (ebp-org-ref-tokens refs :set "views" :owner "glasspane"))
-         (table (make-hash-table :test #'eq)))
-    (cl-loop for it in mintable for tok in tokens
-             do (puthash it tok table))
-    (mapcar (lambda (it)
-              (let ((tok (gethash it table)))
-                (if tok (cons (cons 'token tok) it) it)))
-            items)))
-
 ;;;; Renderings
 
 (defun glasspane-views--tap (item)
@@ -561,13 +534,16 @@ page's drag-reorder body."
                   ;; governs labels/logs, not renders).
                   (user-error (list 'error (error-message-string err)))))
          (broken (eq (car-safe items) 'error))
-         ;; Minted even when broken/empty — the replace sweep is what
-         ;; retires the previous render's tokens (S5).
+         ;; Set "views", minted even when broken/empty: only one view
+         ;; screen renders at a time, so one set serves them all, and
+         ;; its replace sweep is what retires the previous render's
+         ;; tokens — what makes a sheet left open on view A answer
+         ;; `stale' once view B has drawn (S5).
          (items (if broken
                     (progn (ebp-org-ref-tokens nil :set "views"
                                                :owner "glasspane")
                            items)
-                  (glasspane-views--tokenize items)))
+                  (glasspane-ui--tokenize-tap items "views")))
          (file (and (not broken) (glasspane-views--single-file items))))
     (apply #'jetpacs-lazy-column
            (append

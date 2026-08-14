@@ -230,9 +230,23 @@ previous render's tokens."
         a
       (format-time-string "%Y-%m-%d"))))
 
+(defconst glasspane-agenda--custom-max 8
+  "How many saved searches the agenda offers as pages.
+A token budget, not a taste call: every page mints TWO sets — the tap
+set under \"glasspane\" and the archive set under
+`jetpacs-org-dialogs-owner' — while `ebp-org-token-sets-max' is 32 PER
+OWNER, shared with every other glasspane screen.  The mint SIGNALS on
+overflow, which kills the whole body build, so the page count is
+bounded here rather than by however many agendas the user saved.
+`glasspane-ui''s saved-search list still shows all of them; a selected
+mode past the cap coerces back to \"day\"
+(`glasspane-agenda--current-mode').")
+
 (defun glasspane-agenda--modes ()
   "The agenda's mode names in display order: the spans, then customs."
-  (append '("day" "week" "month") (mapcar #'car glasspane-org-custom-agendas)))
+  (append '("day" "week" "month")
+          (mapcar #'car (seq-take glasspane-org-custom-agendas
+                                  glasspane-agenda--custom-max))))
 
 (defun glasspane-agenda--current-mode ()
   "The active mode, coerced back to one that still exists.
@@ -471,8 +485,8 @@ anchor to navigate."
   "One agenda page: MODE's nav affordance above its tokenized body.
 One mint set per page — the tabs body builds every page each push, so
 a shared set would sweep its siblings' tokens mid-render.  Set names
-therefore track mode names: bounded by the three spans plus the
-user's saved searches, well under the engine's per-owner set cap."
+therefore track mode names, so the live set count per owner is
+bounded by the three spans plus `glasspane-agenda--custom-max'."
   (let ((items (glasspane-agenda--tokenize
                 (glasspane-agenda--items-for mode anchor)
                 (concat "agenda-" mode))))
@@ -622,8 +636,13 @@ the result must name a mode we actually offer."
   (let* ((modes (glasspane-agenda--modes))
          (idx (plist-get args :value))
          ;; A whole-valued integer can arrive as a float after the
-         ;; JSON round trip (org.json emits the trailing .0).
-         (idx (if (numberp idx) (truncate idx) idx))
+         ;; JSON round trip (org.json emits the trailing .0) — that
+         ;; float, and only that one, is coerced back.  A genuinely
+         ;; fractional index is a malformed event, not a rounding job:
+         ;; it stays a float and the `integerp' test below rejects it.
+         (idx (if (and (floatp idx) (= idx (truncate idx)))
+                  (truncate idx)
+                idx))
          (mode (or (plist-get args :mode)
                    (and (integerp idx) (nth idx modes)))))
     (if (not (member mode modes))
@@ -635,7 +654,13 @@ the result must name a mode we actually offer."
 (defun glasspane-agenda--on-nav (args params)
   "Shift the agenda anchor by `:dir' (±1) in units of the active span."
   (let* ((dir (plist-get args :dir))
-         (dir (if (numberp dir) (truncate dir) dir)))
+         ;; Same JSON round trip as `--on-set-mode': a whole-valued
+         ;; integer can arrive as a float, and only that float coerces
+         ;; back.  A fractional direction is a malformed event, not a
+         ;; rounding job — it stays a float for `integerp' to reject.
+         (dir (if (and (floatp dir) (= dir (truncate dir)))
+                  (truncate dir)
+                dir)))
     (if (not (integerp dir))
         'rejected
       (let* ((mode (glasspane-agenda--current-mode))

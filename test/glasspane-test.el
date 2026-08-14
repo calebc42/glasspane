@@ -168,7 +168,41 @@ and a different key over the same tree never serves its payload
           (let ((hits (glasspane-org--search "garden")))
             (should (= (length hits) 1))
             (should (equal (alist-get 'headline (car hits))
-                           "Water the garden"))))
+                           "Water the garden")))
+          ;; Cross-ARM probe: the memo key names the arm, so a vulpea
+          ;; that lights up mid-session cannot be served the payload the
+          ;; pre-vulpea sweep cached under the same scope.
+          (let ((swept (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                                  (lambda () nil)))
+                         (glasspane-org--todo-items))))
+            (should (= (length swept) 2))
+            (let ((indexed
+                   (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                              (lambda () t))
+                             ((symbol-function 'vulpea-db-query)
+                              (lambda (&optional _pred) (list 'note)))
+                             ((symbol-function 'glasspane-org--vulpea-note-to-item)
+                              (lambda (_note) '((headline . "From the index")))))
+                     (glasspane-org--todo-items))))
+              (should-not (equal indexed swept))
+              (should (equal (alist-get 'headline (car indexed))
+                             "From the index"))))
+          ;; The tag vocabulary rides the same rule: `--all-tags' keys
+          ;; on its arm too, so the index's answer is not served from
+          ;; the pre-vulpea sweep's entry under the same scope.
+          (let ((swept (glasspane-org--all-tags)))
+            (should (member "home" swept))
+            (let ((indexed
+                   ;; The arm's own probe is `featurep', which reads
+                   ;; the GLOBAL `features' — a lexical `let' would not
+                   ;; be seen from C.
+                   (cl-letf (((symbol-value 'features)
+                              (cons 'vulpea features))
+                             ((symbol-function 'vulpea-db-query-tags)
+                              (lambda () '("indexed"))))
+                     (glasspane-org--all-tags))))
+              (should-not (equal indexed swept))
+              (should (member "indexed" indexed)))))
       (ebp-org-cache-invalidate)
       (dolist (buf (buffer-list))
         (let ((f (buffer-file-name buf)))
@@ -312,6 +346,19 @@ never mutates the user's global org hooks."
           (should-not (member #'glasspane-org--on-teardown
                               jetpacs-teardown-functions)))
       (glasspane-org-remove-hooks)
+      ;; The docstring's LOAD clause, asserted: re-loading the file with
+      ;; the hooks swept must leave every global org hook exactly as
+      ;; `glasspane-org-remove-hooks' left it — a top-level `add-hook'
+      ;; would attach here, where no app enable has run.
+      (load "glasspane-org")
+      (should-not (member #'glasspane-org--before-save-timestamps
+                          before-save-hook))
+      (should-not (member #'glasspane-org--heading-created-property
+                          org-insert-heading-hook))
+      (should-not (member #'glasspane-org--heading-modified-property
+                          org-property-changed-functions))
+      (should-not (member #'glasspane-org--todo-modified-property
+                          org-after-todo-state-change-hook))
       (dolist (buf (buffer-list))
         (let ((f (buffer-file-name buf)))
           (when (and f (string-prefix-p (file-name-as-directory
@@ -455,9 +502,16 @@ success/signal to `accepted'/`rejected'."
   (should (eq (glasspane-clock--on-switch nil nil) 'rejected))
   ;; in-last: success -> accepted; a signal (empty history, or a
   ;; prompt dying under the no-prompt regime) -> rejected.
-  (cl-letf (((symbol-function 'org-clock-in-last) (lambda (&rest _) t)))
-    (let ((org-clock-marker (make-marker)))
-      (should (eq (glasspane-clock--on-in-last nil nil) 'accepted))))
+  ;; A live marker, as the out arm has: a bare `make-marker' points at
+  ;; no buffer, so the deferred save would never be reached at all.
+  (with-temp-buffer
+    (let ((m (point-marker)) (saved nil))
+      (cl-letf (((symbol-function 'org-clock-in-last) (lambda (&rest _) t))
+                ((symbol-function 'ebp-org-defer-save)
+                 (lambda () (push (current-buffer) saved))))
+        (let ((org-clock-marker m))
+          (should (eq (glasspane-clock--on-in-last nil nil) 'accepted))
+          (should (equal saved (list (current-buffer))))))))
   (cl-letf (((symbol-function 'org-clock-in-last)
              (lambda (&rest _) (user-error "No last clock"))))
     (should (eq (glasspane-clock--on-in-last nil nil) 'rejected))))
@@ -529,6 +583,42 @@ asserted."
         (should (= roots 0))
         (should (= pushes 0))
         (should (= removes 0))))))
+
+(ert-deftest glasspane-test-clock-ready-tombstones-stopped ()
+  "READY with NO running clock tombstones the phone's cached
+chronometer: exactly one `jetpacs-shell-remove-root', no root, no
+push.  Asserted with the grant DENIED and `glasspane-clock--live' nil,
+because the removal is deliberately neither grant-gated nor
+live-gated — the cache survives an Emacs restart, where this session
+has asserted nothing and may hold no grant at all, and only Emacs
+knows the clock stopped.
+
+The live case is the `org-clock-cancel' shape: cancel runs
+`org-clock-cancel-hook', which this module does not hook, so the flag
+survives a clock this arm then tombstones.  The removal must clear it,
+or the next clock-in skips `jetpacs-shell-define-root' (the only
+tombstone-clearing call) and pushes into nothing forever."
+  (require 'glasspane-clock)
+  (let ((pushes 0) (roots 0) (removes 0))
+    (cl-letf (((symbol-function 'jetpacs-granted-p) (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-shell-push)
+               (lambda (&rest _) (cl-incf pushes)))
+              ((symbol-function 'jetpacs-shell-define-root)
+               (lambda (&rest _) (cl-incf roots)))
+              ((symbol-function 'jetpacs-shell-remove-root)
+               (lambda (&rest _) (cl-incf removes)))
+              ((symbol-function 'org-clock-is-active) (lambda () nil)))
+      (let ((glasspane-clock--live nil))
+        (glasspane-clock--on-ready nil)
+        (should (= removes 1))
+        (should (= roots 0))
+        (should (= pushes 0)))
+      (let ((glasspane-clock--live t))
+        (glasspane-clock--on-ready nil)
+        (should (= removes 2))
+        (should-not glasspane-clock--live)
+        (should (= roots 0))
+        (should (= pushes 0))))))
 
 ;;;; G2 — services: glasspane-config.el
 
@@ -630,17 +720,74 @@ when the continuation runs."
   "The closed set is exactly the four engines with glasspane-pack's
 folded floors, and a build without SQLite drops vulpea from the wanted
 list — no install can help it there — while search and review stay."
-  (should (equal glasspane-packages--set
-                 '((org-ql    . "0.7")
-                   (vulpea    . "2.0")
-                   (org-srs   . nil)
-                   (ef-themes . nil))))
+  ;; Derived properties, never a restatement of the constant: a
+  ;; verbatim copy of `glasspane-packages--set' would pass under any
+  ;; edit made in both places.  The floors are what the --outdated
+  ;; probe feeds to `version-to-list', which SIGNALS on junk.
+  (should (version-to-list (alist-get 'org-ql glasspane-packages--set)))
+  (should (stringp (alist-get 'vulpea glasspane-packages--set)))
+  (should (version-to-list (alist-get 'vulpea glasspane-packages--set)))
+  ;; One entry per package: `alist-get' would silently read the first.
+  (should (= (length (delete-dups (mapcar #'car glasspane-packages--set)))
+             (length glasspane-packages--set)))
   (cl-letf (((symbol-function 'sqlite-available-p) (lambda () nil)))
     (should-not (assq 'vulpea (glasspane-packages--wanted)))
     (should (equal (mapcar #'car (glasspane-packages--wanted))
                    '(org-ql org-srs ef-themes))))
   (cl-letf (((symbol-function 'sqlite-available-p) (lambda () t)))
-    (should (equal (glasspane-packages--wanted) glasspane-packages--set))))
+    (should (equal (glasspane-packages--wanted) glasspane-packages--set)))
+  ;; --outdated is the FLOOR probe over package.el's own installs, and
+  ;; it is DISJOINT from --missing, which only asks whether a package
+  ;; loads: an old-but-loadable engine is outdated and never missing.
+  (cl-letf (((symbol-function 'sqlite-available-p) (lambda () t))
+            ((symbol-function 'package-installed-p)
+             (lambda (pkg &optional min) (and (eq pkg 'vulpea) (null min)))))
+    (should (equal (glasspane-packages--outdated) '(vulpea)))
+    ;; The same stub cannot move --missing: it probes `require', and
+    ;; every engine is absent from this harness.
+    (should (equal (glasspane-packages--missing)
+                   (mapcar #'car glasspane-packages--set))))
+  ;; A floorless entry never appears, not even fully installed — there
+  ;; is no version for it to be below.
+  (cl-letf (((symbol-function 'sqlite-available-p) (lambda () t))
+            ((symbol-function 'package-installed-p)
+             (lambda (pkg &optional _min) (eq pkg 'org-srs))))
+    (should-not (glasspane-packages--outdated))))
+
+(ert-deftest glasspane-test-packages-ensure-floor-installs ()
+  "Both sets gate the install branch: with NOTHING missing but a
+below-floor engine outstanding, ensure must reach package.el instead of
+short-circuiting to the light-up — an old-but-loadable vulpea leaves
+`--missing' empty, so a missing-only gate could never raise the floor.
+The floor case installs the archive DESC, since `package-install' given
+a bare symbol no-ops for any installed version."
+  ;; package.el's own defvars must exist BEFORE the let below, or the
+  ;; bindings would be lexical ones the branch never sees.
+  (require 'package)
+  (let ((glasspane-packages--installing nil)
+        (refreshes 0) (installed nil) (lit 0)
+        ;; The real store is off limits in the harness: a live
+        ;; `package-initialize' would scan the user's elpa directory,
+        ;; and the archive list is global state.
+        (package--initialized t)
+        (package-archives nil)
+        (package-archive-contents '((vulpea vulpea-desc))))
+    (cl-letf (((symbol-function 'glasspane-packages--missing) (lambda () nil))
+              ((symbol-function 'glasspane-packages--outdated)
+               (lambda () '(vulpea)))
+              ((symbol-function 'package-refresh-contents)
+               (lambda (&rest _) (cl-incf refreshes)))
+              ((symbol-function 'package-install)
+               (lambda (pkg &rest _) (push pkg installed)))
+              ((symbol-function 'glasspane-packages--light-up)
+               (lambda () (cl-incf lit))))
+      (should (glasspane-packages-ensure))
+      (should (= refreshes 1))
+      (should (equal installed '(vulpea-desc)))
+      ;; The light-up still runs — at the END of the install branch,
+      ;; not as the short circuit that skipped it.
+      (should (= lit 1))
+      (should-not glasspane-packages--installing))))
 
 (ert-deftest glasspane-test-packages-batch-noop ()
   "In batch — `noninteractive' t, this suite's permanent condition —
@@ -817,113 +964,159 @@ Registration is idempotent (one settings link) and the section is in
 the registry."
   (require 'glasspane-ui)
   (glasspane-ui-register)
-  (should (alist-get "Glasspane" jetpacs-settings-registry
-                     nil nil #'equal))
-  (glasspane-ui-register)
-  (should (= 1 (cl-count #'glasspane-ui--settings-link
-                         jetpacs-settings-links :key #'cadr)))
-  (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")
-                                        ("Old" . "todo:TODO")))
-        (glasspane-ui-agenda-anchor "2020-01-01")
-        (glasspane-ui-agenda-selected-date "2020-01-02")
-        (glasspane-ui--files-filter "old")
-        (glasspane-ui--settings-dialog nil)
-        (jetpacs-line-numbers nil)
-        (org-tag-alist '(("home" . ?h)))
-        (org-todo-keywords '((sequence "TODO" "|" "DONE")))
-        (saved nil) (continuations nil))
-    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
-               (lambda (sym val) (push (cons sym val) saved) val))
-              ((symbol-function 'jetpacs-shell-notify)
-               (lambda (&rest _) nil))
-              ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
-              ((symbol-function 'jetpacs-flow-continue)
-               (lambda (fn) (push fn continuations) nil)))
-      (cl-flet ((run (name args &optional params)
-                  (let ((handler (gethash name jetpacs-action-handlers)))
-                    (should handler)
-                    (funcall handler args params))))
-        ;; The whole table answers statuses on bare nil/nil input.
-        (dolist (name glasspane-ui--verbs)
-          (should (memq (run name nil nil) '(accepted stale rejected))))
-        ;; settings.line-numbers: one option value or nil, persisted.
-        (should (eq (run "settings.line-numbers" '(:value "Relative"))
-                    'accepted))
-        (should (eq (cdr (assq 'jetpacs-line-numbers saved)) 'relative))
-        (should (eq (run "settings.line-numbers" '(:value 5)) 'rejected))
-        ;; settings.tags: vector rebuilds keeping fast-select conses;
-        ;; wrong shapes reject.
-        (should (eq (run "settings.tags" '(:value ["work" "home"]))
-                    'accepted))
-        (should (equal org-tag-alist '("work" ("home" . ?h))))
-        (should (assq 'org-tag-alist saved))
-        ;; Deselecting every chip is a well-formed no-op: accepted,
-        ;; nothing written, alist untouched (the chips re-seed from it).
-        (setq saved (assq-delete-all 'org-tag-alist saved))
-        (should (eq (run "settings.tags" '(:value [])) 'accepted))
-        (should-not (assq 'org-tag-alist saved))
-        (should (equal org-tag-alist '("work" ("home" . ?h))))
-        (should (eq (run "settings.tags" '(:value 42)) 'rejected))
-        (should (eq (run "settings.tags" '(:value ["x" 5])) 'rejected))
-        ;; settings.todo.edit: float index coerces; a vanished index is
-        ;; stale; a well-formed tap without a client cannot present.
-        (should (eq (run "settings.todo.edit" '(:index 99)) 'stale))
-        (should (eq (run "settings.todo.edit" '(:index "x")) 'rejected))
-        (should (eq (run "settings.todo.edit" '(:index 0)) 'rejected))
-        (should (eq (run "settings.todo.edit" '(:index -1.0)) 'rejected))
-        ;; settings.agenda.edit: dialog verb — same no-client refusal.
-        (should (eq (run "settings.agenda.edit" '(:name 42)) 'rejected))
-        (should (eq (run "settings.agenda.edit" '(:name "Errands"))
-                    'rejected))
-        ;; settings.agenda.delete: gone name is stale, present deletes.
-        (should (eq (run "settings.agenda.delete" '(:name "Ghost"))
-                    'stale))
-        (should (eq (run "settings.agenda.delete" '(:name "Errands"))
-                    'accepted))
-        (should-not (assoc "Errands" glasspane-org-custom-agendas))
-        ;; settings.agenda.save: captured fields ride params; a rename
-        ;; drops the old row; an empty name rejects.
-        (should (eq (run "settings.agenda.save" '(:old-name "Old")
-                         '(:fields (:agenda-name " New "
-                                    :agenda-query "todo:TODO")))
-                    'accepted))
-        (should (equal (assoc "New" glasspane-org-custom-agendas)
-                       '("New" . "todo:TODO")))
-        (should-not (assoc "Old" glasspane-org-custom-agendas))
-        (should (eq (run "settings.agenda.save" nil
-                         '(:fields (:agenda-name "  ")))
-                    'rejected))
-        ;; agenda.save-custom: no client, no dialog — never a hang.
-        (should (eq (run "agenda.save-custom" '(:query "todo:TODO"))
-                    'rejected))
-        (should (eq (run "agenda.save-custom" '(:query 5)) 'rejected))
-        ;; The S2 defvars: handlers are the single writer.
-        (should (eq (run "agenda.set-month" '(:value "2026-08"))
-                    'accepted))
-        (should (equal glasspane-ui-agenda-anchor "2026-08-01"))
-        (should (eq (run "agenda.set-month" '(:value "junk")) 'rejected))
-        (should (eq (run "agenda.select-date" '(:value "2026-08-13"))
-                    'accepted))
-        (should (equal glasspane-ui-agenda-selected-date "2026-08-13"))
-        (should (eq (run "agenda.select-date" '(:date "2026-08-14"))
-                    'accepted))
-        (should (equal glasspane-ui-agenda-selected-date "2026-08-14"))
-        (should (eq (run "agenda.select-date" '(:value "13-08-2026"))
-                    'rejected))
-        (should (eq (run "agenda.today" nil) 'accepted))
-        (should-not glasspane-ui-agenda-anchor)
-        (should-not glasspane-ui-agenda-selected-date)
-        (should (eq (run "files.filter" '(:value "tags:home"))
-                    'accepted))
-        (should (equal glasspane-ui--files-filter "tags:home"))
-        (should (eq (run "files.filter" nil) 'rejected))
-        ;; glasspane.settings.open: accepted on the strength of the
-        ;; deferred push — zero pushes inside the dispatch extent.
-        (let ((before (length continuations)))
-          (should (eq (run "glasspane.settings.open" nil
-                           '(:surface "app:jetpacs.settings"))
-                      'accepted))
-          (should (= (length continuations) (1+ before))))))))
+  (unwind-protect
+      (progn
+	(should (alist-get "Glasspane" jetpacs-settings-registry
+			   nil nil #'equal))
+	(glasspane-ui-register)
+	(should (= 1 (cl-count #'glasspane-ui--settings-link
+                               jetpacs-settings-links :key #'cadr)))
+	(let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")
+                                              ("Old" . "todo:TODO")))
+              (glasspane-ui-agenda-anchor "2020-01-01")
+              (glasspane-ui-agenda-selected-date "2020-01-02")
+              (glasspane-ui--files-filter "old")
+              (glasspane-ui--settings-dialog nil)
+              (jetpacs-line-numbers nil)
+              (org-tag-alist '(("home" . ?h)))
+              (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+              (saved nil) (continuations nil) (pushes 0))
+	  (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
+		     (lambda (sym val) (push (cons sym val) saved) val))
+		    ((symbol-function 'jetpacs-shell-notify)
+		     (lambda (&rest _) nil))
+		    ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
+		    ;; Counted, not merely absorbed: with no root defined a
+		    ;; direct push silently no-ops, so nothing else here
+		    ;; could tell a D2 violation from the deferred path.
+		    ((symbol-function 'jetpacs-shell-push)
+		     (lambda (&rest _) (cl-incf pushes) nil))
+		    ((symbol-function 'jetpacs-flow-continue)
+		     (lambda (fn) (push fn continuations) nil)))
+	    (cl-flet ((run (name args &optional params)
+			(let ((handler (gethash name jetpacs-action-handlers)))
+			  (should handler)
+			  (funcall handler args params))))
+              ;; The whole table answers statuses on bare nil/nil input.
+              (dolist (name glasspane-ui--verbs)
+		(should (memq (run name nil nil) '(accepted stale rejected))))
+              ;; settings.line-numbers: one option value or nil, persisted.
+              (should (eq (run "settings.line-numbers" '(:value "Relative"))
+			  'accepted))
+              (should (eq (cdr (assq 'jetpacs-line-numbers saved)) 'relative))
+              (should (eq (run "settings.line-numbers" '(:value 5)) 'rejected))
+              ;; settings.tags: vector rebuilds keeping fast-select conses;
+              ;; wrong shapes reject.
+              (should (eq (run "settings.tags" '(:value ["work" "home"]))
+			  'accepted))
+              (should (equal org-tag-alist '("work" ("home" . ?h))))
+              (should (assq 'org-tag-alist saved))
+              ;; Deselecting every chip is a well-formed no-op: accepted,
+              ;; nothing written, alist untouched (the chips re-seed from it).
+              (setq saved (assq-delete-all 'org-tag-alist saved))
+              (should (eq (run "settings.tags" '(:value [])) 'accepted))
+              (should-not (assq 'org-tag-alist saved))
+              (should (equal org-tag-alist '("work" ("home" . ?h))))
+              (should (eq (run "settings.tags" '(:value 42)) 'rejected))
+              (should (eq (run "settings.tags" '(:value ["x" 5])) 'rejected))
+              ;; settings.todo.edit: float index coerces; a vanished index is
+              ;; stale; a well-formed tap without a client cannot present.
+              (should (eq (run "settings.todo.edit" '(:index 99)) 'stale))
+              (should (eq (run "settings.todo.edit" '(:index "x")) 'rejected))
+              (should (eq (run "settings.todo.edit" '(:index 0)) 'rejected))
+              (should (eq (run "settings.todo.edit" '(:index -1.0)) 'rejected))
+              ;; settings.agenda.edit: dialog verb — same no-client refusal.
+              (should (eq (run "settings.agenda.edit" '(:name 42)) 'rejected))
+              (should (eq (run "settings.agenda.edit" '(:name "Errands"))
+			  'rejected))
+              ;; settings.agenda.delete: gone name is stale, present deletes.
+              (should (eq (run "settings.agenda.delete" '(:name "Ghost"))
+			  'stale))
+              (should (eq (run "settings.agenda.delete" '(:name "Errands"))
+			  'accepted))
+              (should-not (assoc "Errands" glasspane-org-custom-agendas))
+              ;; settings.agenda.save: captured fields ride params; a rename
+              ;; drops the old row; an empty name rejects.
+              (should (eq (run "settings.agenda.save" '(:old-name "Old")
+                               '(:fields (:agenda-name " New "
+						       :agenda-query "todo:TODO")))
+			  'accepted))
+              (should (equal (assoc "New" glasspane-org-custom-agendas)
+			     '("New" . "todo:TODO")))
+              (should-not (assoc "Old" glasspane-org-custom-agendas))
+              (should (eq (run "settings.agenda.save" nil
+                               '(:fields (:agenda-name "  ")))
+			  'rejected))
+              ;; agenda.save-custom: no client, no dialog — never a hang.
+              (should (eq (run "agenda.save-custom" '(:query "todo:TODO"))
+			  'rejected))
+              (should (eq (run "agenda.save-custom" '(:query 5)) 'rejected))
+              ;; The S2 defvars: handlers are the single writer.
+              (should (eq (run "agenda.set-month" '(:value "2026-08"))
+			  'accepted))
+              (should (equal glasspane-ui-agenda-anchor "2026-08-01"))
+              (should (eq (run "agenda.set-month" '(:value "junk")) 'rejected))
+              (should (eq (run "agenda.select-date" '(:value "2026-08-13"))
+			  'accepted))
+              (should (equal glasspane-ui-agenda-selected-date "2026-08-13"))
+              (should (eq (run "agenda.select-date" '(:date "2026-08-14"))
+			  'accepted))
+              (should (equal glasspane-ui-agenda-selected-date "2026-08-14"))
+              (should (eq (run "agenda.select-date" '(:value "13-08-2026"))
+			  'rejected))
+              (should (eq (run "agenda.today" nil) 'accepted))
+              (should-not glasspane-ui-agenda-anchor)
+              (should-not glasspane-ui-agenda-selected-date)
+              (should (eq (run "files.filter" '(:value "tags:home"))
+			  'accepted))
+              (should (equal glasspane-ui--files-filter "tags:home"))
+              (should (eq (run "files.filter" nil) 'rejected))
+              ;; glasspane.settings.open: accepted on the strength of the
+              ;; deferred push — zero pushes inside the dispatch extent.
+              (let ((before (length continuations)))
+		(should (eq (run "glasspane.settings.open" nil
+				 '(:surface "app:jetpacs.settings"))
+			    'accepted))
+		(should (= (length continuations) (1+ before))))
+              ;; D2 across the WHOLE table: every legitimate push in this
+              ;; file lives inside a continuation the stub never runs, so
+              ;; nothing above may have pushed inside a dispatch extent.
+              (should (zerop pushes))
+              ;; The dialog slot is single-writer: a second show abandons the
+              ;; first, and the first's late conclusion (the abandon's 1301)
+              ;; must not clear the LIVE slot.
+              (let ((ids '("req-1" "req-2")) (abandoned nil) (shown nil))
+		(cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
+			  ((symbol-function 'ebp-client-abandon)
+			   (lambda (_c id) (push id abandoned)))
+			  ((symbol-function 'ebp-client-dialog-show)
+			   (lambda (_c _id _spec &rest kw)
+			     (push (plist-get kw :callback) shown)
+			     (pop ids))))
+		  (glasspane-ui--show-dialog "d" nil :params '(:surface "s1"))
+		  (glasspane-ui--show-dialog "d" nil :params '(:surface "s2"))
+		  (let ((first-callback (cadr shown))) ; SHOWN is push-ordered
+		    (should (equal abandoned '("req-1")))
+		    (should (equal (plist-get glasspane-ui--settings-dialog
+                                              :request-id)
+				   "req-2"))
+		    (funcall first-callback "error" nil '(:code 1301))
+		    (should (equal (plist-get glasspane-ui--settings-dialog
+                                              :request-id)
+				   "req-2"))
+		    (should (equal (plist-get glasspane-ui--settings-dialog :params)
+				   '(:surface "s2")))
+		    (funcall (car shown) "dismissed" nil nil)
+		    (should-not glasspane-ui--settings-dialog))))))))
+    ;; The unregister sweep — its own gate, and the teardown this
+    ;; batch process would otherwise carry into every later test: the
+    ;; org-clock hooks, the teardown hook, and the Settings link.
+    (glasspane-ui-unregister)
+    (should-not (cl-find #'glasspane-ui--settings-link
+                         jetpacs-settings-links :key #'cadr))
+    ;; Re-registered so suite order never matters (the journal/srs
+    ;; precedent).
+    (glasspane-ui-register)))
 
 ;;;; G4 — reader: glasspane-org-reader.el
 
@@ -1413,7 +1606,6 @@ both modes, degrading to the go-back placeholder on a dead ref."
          (ebp-org-roots nil)
          (glasspane-ui--detail-read-mode t)
          (notified nil) (continuations nil) (pushes 0))
-    (ignore pushes)
     (unwind-protect
         (cl-letf (((symbol-function 'jetpacs-shell-notify)
                    (lambda (text &rest _) (push text notified)))
@@ -1543,6 +1735,26 @@ both modes, degrading to the go-back placeholder on a dead ref."
                            (insert (file-text))
                            (count-matches "^\\* Second$" (point-min)
                                           (point-max)))))
+            ;; heading.clock-in rides the same classifier: a live token
+            ;; clocks in and answers accepted, an absent one is stale.
+            ;; `org-clock-in' is stubbed — a real clock would outlive
+            ;; this test's vault.
+            (let ((clocked 0))
+              (cl-letf (((symbol-function 'org-clock-in)
+                         (lambda (&rest _) (cl-incf clocked))))
+                (should (eq (run "heading.clock-in"
+                                 (list :token (tok-for "Parent")))
+                            'accepted))
+                (should (= clocked 1))
+                (should (eq (run "heading.clock-in" '(:token "o0-swept"))
+                            'stale))
+                (should (eq (run "heading.clock-in" nil) 'stale))
+                (should (= clocked 1))))
+            ;; D2 over the direct arms: the only legitimate push sites
+            ;; in this file are inside continuations the stub never
+            ;; runs, so nothing above may have pushed inside a dispatch
+            ;; extent (a rootless push would no-op unnoticed).
+            (should (zerop pushes))
             ;; detail.save: durable rewrite + a re-anchoring re-push.
             (let ((before (length continuations)))
               (should (eq (run "detail.save"
@@ -1557,6 +1769,27 @@ both modes, degrading to the go-back placeholder on a dead ref."
             (should (eq (run "detail.save"
                              (list :value "* X\n" :token "junk"))
                         'stale))
+            ;; A value whose leading stars the user deleted is refused
+            ;; BEFORE the region is touched — and before the stale arm,
+            ;; so shape wins over a swept token.  This failure is
+            ;; destructive rather than merely a wrong answer: the
+            ;; delete+insert would leave an unsaved mutation in the
+            ;; buffer for the next unrelated save to flush.
+            (let* ((buf (find-file-noselect file))
+                   (before (file-text)))
+              (should (eq (run "detail.save"
+                               (list :value "no stars here"
+                                     :token (tok-for "Parent2")))
+                          'rejected))
+              (should-not (buffer-modified-p buf))
+              (should (equal (file-text) before))
+              (should (string-search "* Parent2" (file-text)))
+              ;; Shape first: a de-starred value with a SWEPT token
+              ;; answers rejected, never stale.
+              (should (eq (run "detail.save"
+                               '(:value "no stars here" :token "o0-swept"))
+                          'rejected))
+              (should (equal (file-text) before)))
             ;; Bridged flows: a continuation is scheduled, nothing
             ;; prompts inside the dispatch extent.
             (should (eq (run "heading.refile"
@@ -1830,6 +2063,14 @@ replaced the tab badge (FOUNDATION-GAPS #5)."
   (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand"))))
     (should (equal (glasspane-agenda--modes)
                    '("day" "week" "month" "Errands"))))
+  ;; The page count is a TOKEN budget: each page mints two sets against
+  ;; a per-owner cap, and the mint signals on overflow — so a user with
+  ;; twenty saved searches gets the first eight, never a dead body.
+  (let ((glasspane-org-custom-agendas
+         (cl-loop for i from 1 to 20
+                  collect (cons (format "S%d" i) "tags:x"))))
+    (should (= (length (glasspane-agenda--modes)) 11))
+    (should (equal (car (last (glasspane-agenda--modes))) "S8")))
   ;; The in-screen count reads the memoised day extraction and
   ;; swallows its errors.
   (cl-letf (((symbol-function 'glasspane-org--agenda-items)
@@ -1838,6 +2079,64 @@ replaced the tab badge (FOUNDATION-GAPS #5)."
   (cl-letf (((symbol-function 'glasspane-org--agenda-items)
              (lambda (&rest _) (error "boom"))))
     (should (= (glasspane-agenda--today-count) 0))))
+
+(ert-deftest glasspane-test-agenda-tokenize ()
+  "The agenda's bulk mint: an item whose file left the org roots is
+filtered BEFORE the mint (the mint would signal and kill the whole
+body build) and still renders — untappable, with neither cell — while
+an allowed item carries BOTH, the tap token in the app's own scope and
+the archive token in the disjoint \"glasspane-SET\" name the base
+`jetpacs.org.archive' resolves under."
+  (require 'glasspane-agenda)
+  (let* ((vault (make-temp-file "glasspane-agenda" t))
+         (file (expand-file-name "tasks.org" vault))
+         (outside (make-temp-file "glasspane-outside" nil ".org"))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "#+TITLE: T\n* TODO Inside\n"))
+          (with-temp-file outside (insert "#+TITLE: O\n* TODO Outside\n"))
+          (ebp-org-cache-invalidate)
+          (should (ebp-org-file-allowed-p file))
+          (should-not (ebp-org-file-allowed-p outside))
+          (let* ((items
+                  (list `((headline . "Inside")
+                          (ref . (:file ,file :pos 1 :headline "Inside")))
+                        `((headline . "Outside")
+                          (ref . (:file ,outside :pos 1
+                                  :headline "Outside")))))
+                 (out (glasspane-agenda--tokenize items "t-agenda")))
+            ;; The refused item is still on screen, just without arms.
+            (should (= (length out) 2))
+            (let ((refused (nth 1 out)))
+              (should (equal (alist-get 'headline refused) "Outside"))
+              (should-not (alist-get 'token refused))
+              (should-not (alist-get 'archive-token refused)))
+            (let* ((armed (nth 0 out))
+                   (tap (alist-get 'token armed))
+                   (arch (alist-get 'archive-token armed)))
+              (should (stringp tap))
+              (should (stringp arch))
+              (should (equal (plist-get (ebp-org-token-ref
+                                         tap :owner "glasspane")
+                                        :headline)
+                             "Inside"))
+              ;; The two scopes are disjoint: the archive token is the
+              ;; dialogs owner's, and neither resolves in the other's.
+              (should (ebp-org-token-ref
+                       arch :owner jetpacs-org-dialogs-owner))
+              (should-not (ebp-org-token-ref arch :owner "glasspane"))
+              (should-not (ebp-org-token-ref
+                           tap :owner jetpacs-org-dialogs-owner)))))
+      (ignore-errors
+        (ebp-org-ref-tokens nil :set "t-agenda" :owner "glasspane")
+        (ebp-org-ref-tokens nil :set "glasspane-t-agenda"
+                            :owner jetpacs-org-dialogs-owner))
+      (ebp-org-cache-invalidate)
+      (when (file-exists-p outside) (delete-file outside))
+      (delete-directory vault t))))
 
 (ert-deftest glasspane-test-agenda-handler-matrix ()
   "Every G5 agenda verb, funcalled from the handler table with plist
@@ -1876,6 +2175,9 @@ gate + suppress cache."
         (should (equal glasspane-agenda--mode "Errands"))
         (should (eq (run "agenda.set-mode" '(:mode "nope")) 'rejected))
         (should (eq (run "agenda.set-mode" '(:value 99)) 'rejected))
+        ;; Only the WHOLE float is org.json's trailing .0; a genuinely
+        ;; fractional index is a malformed event, not a rounding job.
+        (should (eq (run "agenda.set-mode" '(:value 0.7)) 'rejected))
         ;; agenda.nav: span-aware shifts off the shared anchor; month
         ;; steps re-anchor on the 1st; junk dir rejects.
         (setq glasspane-agenda--mode "day"
@@ -1890,6 +2192,8 @@ gate + suppress cache."
         (should (eq (run "agenda.nav" '(:dir 1)) 'accepted))
         (should (equal glasspane-ui-agenda-anchor "2026-02-01"))
         (should (eq (run "agenda.nav" '(:dir "x")) 'rejected))
+        (should (eq (run "agenda.nav" '(:dir 0.7)) 'rejected))
+        (should (equal glasspane-ui-agenda-anchor "2026-02-01"))
         ;; tasks.filter: the defvar is the single writer's cell.
         (should (eq (run "tasks.filter" '(:filter "DONE")) 'accepted))
         (should (equal glasspane-agenda--tasks-filter "DONE"))
@@ -2105,6 +2409,9 @@ sweep leaves no handler and no settings section behind."
             (should (eq (run "journal.nav" '(:delta -1.0)) 'accepted))
             (should (equal glasspane-journal--date "2026-08-10"))
             (should (eq (run "journal.nav" '(:delta "x")) 'rejected))
+            ;; Only the WHOLE float is org.json's trailing .0; half a
+            ;; day is a malformed event, not a rounding job.
+            (should (eq (run "journal.nav" '(:delta 0.5)) 'rejected))
             (should (eq (run "journal.nav" nil) 'rejected))
             (should (equal glasspane-journal--date "2026-08-10"))
             ;; journal.goto: the picker's :value must be a full day.
@@ -2132,6 +2439,24 @@ sweep leaves no handler and no settings section behind."
               (goto-char (point-min))
               (should (re-search-forward "^- Ship the port$" nil t))
               (should (string-search "2026-08-13" (buffer-string))))
+            ;; SPEC 23.2: wire text is neutralized before it becomes
+            ;; org structure.  The append lands at end-of-subtree, so
+            ;; an embedded newline would promote the payload out of the
+            ;; list item into a heading of its own.
+            (cl-flet ((headings ()
+                        (with-temp-buffer
+                          (insert-file-contents glasspane-journal-file)
+                          (count-matches "^\\*+ " (point-min) (point-max)))))
+              (let ((before (headings)))
+                (should (eq (run "journal.capture"
+                                 '(:value "hello\n* Evil"
+                                   :date "2026-08-13"))
+                            'accepted))
+                (should (= (headings) before))
+                (with-temp-buffer
+                  (insert-file-contents glasspane-journal-file)
+                  (goto-char (point-min))
+                  (should (re-search-forward "^- hello \\* Evil$" nil t)))))
             ;; journal.open: accepted on the strength of the deferred
             ;; push — zero pushes inside the dispatch extent (D2).
             (let ((before (length continuations)))
@@ -2787,8 +3112,8 @@ absolute path on the wire."
             (should (equal glasspane-search--query "todo:TODO"))
             ;; S5: the render mint attaches a tap token that resolves
             ;; back to its heading — offline, tokens are Emacs state.
-            (let* ((items (glasspane-search--tokenize
-                           glasspane-search--results))
+            (let* ((items (glasspane-ui--tokenize-tap
+                           glasspane-search--results "search-results"))
                    (tok (alist-get 'token (car items))))
               (should (stringp tok))
               (should (equal (plist-get
@@ -3172,7 +3497,25 @@ with the memo-busting after-set, the dialog-style row retired."
                                (error "evaluated after decline"))))
                     (setq notes nil)
                     (glasspane-table--babel-run buf src "app:glasspane")
-                    (should (equal (car notes) "Evaluation declined"))))
+                    (should (equal (car notes) "Evaluation declined")))
+                  ;; Policy refusal, not a user decline: a nil
+                  ;; `org-babel-check-confirm-evaluate' (a `:eval no' block)
+                  ;; makes `org-babel-confirm-evaluate' answer nil with no
+                  ;; prompt at all — the notification must say so.
+                  (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                             (lambda () t))
+                            ((symbol-function 'org-babel-check-confirm-evaluate)
+                             (lambda (&rest _) nil))
+                            ((symbol-function 'yes-or-no-p)
+                             (lambda (&rest _)
+                               (error "prompt raised for a disabled block")))
+                            ((symbol-function 'org-babel-execute:glasspanetest)
+                             (lambda (&rest _)
+                               (error "evaluated despite :eval no"))))
+                    (setq notes nil)
+                    (glasspane-table--babel-run buf src "app:glasspane")
+                    (should (equal (car notes)
+                                   "Evaluation disabled for this block"))))
                 ;; Timeout: a stub language that outsleeps the budget —
                 ;; the timer interrupts it and the failure is a notify,
                 ;; not a wedge (no confirm due: option nil).
@@ -3320,10 +3663,12 @@ at all (it is what makes Link-it replayable offline)."
 
 (ert-deftest glasspane-test-notes-guard-contract ()
   "With vulpea ABSENT — this harness's permanent condition — every
-notes entry point degrades to nil and both verbs answer rejected (the
-jetpacs-org-vulpea-test precedent); the register/unregister pair
-sweeps its verbs, its three hook claims, and the scan marks, and ends
-REGISTERED so suite order never matters."
+notes entry point degrades to nil and both verbs gate IN ORDER: a junk
+shape rejects first, an unminted or swept token answers stale even
+with the engine absent (it is a miss, not a refusal), and only a
+RESOLVABLE token reaches the availability gate's rejected.  The
+register/unregister pair sweeps its verbs, its three hook claims, and
+the scan marks, and ends REGISTERED so suite order never matters."
   (require 'glasspane-notes)
   (should-not (featurep 'vulpea))
   (should-not (glasspane-notes-available-p))
@@ -3352,15 +3697,42 @@ REGISTERED so suite order never matters."
                       glasspane-ui-detail-toolbar-functions))
         (should (memq #'glasspane-notes--setup-shadow
                       ebp-complete-shadow-setup-hook))
-        ;; Junk shape rejects BEFORE the availability gate; with
-        ;; vulpea absent everything else rejects too — never a signal,
-        ;; never a silent nil return.
+        ;; Junk shape rejects BEFORE the token lookup; an unminted
+        ;; token is a MISS and answers stale even with vulpea absent —
+        ;; borrowing the engine's rejected there would turn a swept
+        ;; sheet's replay into a permanent receipt deletion.  Never a
+        ;; signal, never a silent nil return.
         (should (eq (funcall mentions nil nil) 'rejected))
         (should (eq (funcall mentions '(:token 5) nil) 'rejected))
-        (should (eq (funcall mentions '(:token "tok") nil) 'rejected))
+        (should (eq (funcall mentions '(:token "tok") nil) 'stale))
         (should (eq (funcall materialize nil nil) 'rejected))
         (should (eq (funcall materialize '(:token 5) nil) 'rejected))
-        (should (eq (funcall materialize '(:token "tok") nil) 'rejected))
+        (should (eq (funcall materialize '(:token "tok") nil) 'stale))
+        ;; Only a RESOLVABLE token reaches the availability gate — the
+        ;; arm a fake token string can no longer see.
+        (let* ((vault (make-temp-file "glasspane-notes-guard" t))
+               (file (expand-file-name "note.org" vault))
+               (org-directory vault)
+               (org-agenda-files (list file))
+               (ebp-org-roots nil))
+          (unwind-protect
+              (progn
+                (with-temp-file file (insert "* Source note\n"))
+                (ebp-org-cache-invalidate)
+                (let ((tok (car (ebp-org-ref-tokens
+                                 (list (list :id "NOTE-G" :file file :pos 1
+                                             :headline "Source note"))
+                                 :set "notes-guard" :owner "glasspane"))))
+                  (should (stringp tok))
+                  (should-not (glasspane-notes-available-p))
+                  (should (eq (funcall mentions (list :token tok) nil)
+                              'rejected))
+                  (should (eq (funcall materialize (list :token tok) nil)
+                              'rejected))))
+            (ignore-errors (ebp-org-ref-tokens nil :set "notes-guard"
+                                               :owner "glasspane"))
+            (ebp-org-cache-invalidate)
+            (delete-directory vault t)))
         ;; Unregister sweeps verbs, hooks, and scan marks.
         (puthash "leftover" 1 glasspane-notes--mentions-scans)
         (glasspane-notes-unregister)
@@ -3449,6 +3821,21 @@ under the same stub and re-marks on re-tap."
                           (list (list :file "/definitely/not/here.org"))
                           "notes-test")
                          '(nil)))
+          ;; A MIXED batch degrades per ref, and the set's replace
+          ;; sweep still runs: the refused path costs its own token,
+          ;; never the batch's — and never the previous render's
+          ;; retirement, which an abort before the sweep would skip and
+          ;; leave the old sheet's tokens live.
+          (let* ((old (glasspane-notes--mint
+                       (list (list :file file :pos 1)) "notes-mixed"))
+                 (toks (glasspane-notes--mint
+                        (list (list :file file :pos 1)
+                              (list :file "/definitely/not/here.org" :pos 1))
+                        "notes-mixed")))
+            (should (= (length toks) 2))
+            (should (stringp (nth 0 toks)))
+            (should-not (nth 1 toks))
+            (should-not (ebp-org-token-ref (car old) :owner "glasspane")))
           ;; --mint-sparse keeps positions: nils stay nil, the one
           ;; real ref gets a token that resolves in the app scope.
           (let ((toks (glasspane-notes--mint-sparse
@@ -3481,6 +3868,94 @@ under the same stub and re-marks on re-tap."
                          2)))))
       (clrhash glasspane-notes--mentions-scans)
       (ignore-errors (ebp-org-ref-tokens nil :set "notes-test"
+                                         :owner "glasspane")
+                     (ebp-org-ref-tokens nil :set "notes-mixed"
+                                         :owner "glasspane"))
+      (ebp-org-cache-invalidate)
+      (dolist (buf (buffer-list))
+        (let ((f (buffer-file-name buf)))
+          (when (and f (string-prefix-p (file-name-as-directory
+                                         (file-truename vault))
+                                        (file-truename f)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf))))
+      (delete-directory vault t))))
+
+(defun glasspane-test--actions (node)
+  "Every ActionDescriptor in NODE's tree, depth first."
+  (when (jetpacs-node-p node)
+    (append (and (stringp (plist-get node :action)) (list node))
+            (cl-loop for (_k v) on node by #'cddr
+                     append (cond
+                             ((jetpacs-node-p v)
+                              (glasspane-test--actions v))
+                             ((or (vectorp v) (proper-list-p v))
+                              (cl-loop for x across (vconcat v)
+                                       append (glasspane-test--actions x))))))))
+
+(ert-deftest glasspane-test-notes-mention-card ()
+  "The mention card's TWO tokens, built locally with the availability
+probe stubbed open: the mint interleaves tap/edit-site refs pairwise,
+so the card must take them in that order — a swapped destructure hands
+`heading.tap' the edit-site ref and `link.materialize' a heading ref
+its own shape gate then refuses.  The tokens are told apart by what
+they RESOLVE to, and the Link-it action carries the ttl its queue
+policy requires."
+  (require 'glasspane-notes)
+  (let* ((vault (make-temp-file "glasspane-mention" t))
+         (file (expand-file-name "source.org" vault))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (mention (list :path file :line 2 :matched "Widget"
+                        :context "and then Widget again.")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* Source note\n"
+                    "Sees [[id:other][Widget]] and then Widget again.\n"))
+          (ebp-org-cache-invalidate)
+          (cl-letf (((symbol-function 'glasspane-notes-available-p)
+                     (lambda () t))
+                    ((symbol-function 'glasspane-notes--backlinks)
+                     (lambda (_id) nil))
+                    ((symbol-function 'glasspane-notes--forward-links)
+                     (lambda (_id) nil))
+                    ((symbol-function 'glasspane-notes--mentions-state)
+                     (lambda (_id) (cons 'ready (list mention)))))
+            (let* ((nodes (glasspane-notes-detail-nodes
+                           (list :id "NOTE-T9" :file file :pos 1)))
+                   (actions (cl-loop for n in nodes
+                                     append (glasspane-test--actions n)))
+                   (taps (cl-remove-if-not
+                          (lambda (a) (equal (plist-get a :action)
+                                             "heading.tap"))
+                          actions))
+                   (links (cl-remove-if-not
+                           (lambda (a) (equal (plist-get a :action)
+                                              "link.materialize"))
+                           actions)))
+              (should (= (length taps) 1))
+              (should (= (length links) 1))
+              ;; The tap token is the MENTIONING note's heading ref...
+              (let ((ref (ebp-org-token-ref
+                          (plist-get (plist-get (car taps) :args) :token)
+                          :owner "glasspane")))
+                (should (equal (plist-get ref :file) file))
+                (should (equal (plist-get ref :headline) "source.org"))
+                (should-not (plist-get ref :line)))
+              ;; ...and the Link-it token the EDIT SITE inside it.
+              (let ((ref (ebp-org-token-ref
+                          (plist-get (plist-get (car links) :args) :token)
+                          :owner "glasspane")))
+                (should (equal (plist-get ref :line) 2))
+                (should (equal (plist-get ref :matched) "Widget"))
+                (should (equal (plist-get ref :target-id) "NOTE-T9")))
+              ;; A queued tap must carry its ttl (SPEC 14.1 / plan T4).
+              (should (equal (plist-get (car links) :when_offline) "queue"))
+              (should (equal (plist-get (car links) :ttl_s)
+                             glasspane-notes--link-ttl-s)))))
+      (ignore-errors (ebp-org-ref-tokens nil :set "notes-detail"
                                          :owner "glasspane"))
       (ebp-org-cache-invalidate)
       (dolist (buf (buffer-list))
@@ -3796,13 +4271,22 @@ refuses headless without wedging."
               (setq glasspane-srs--available nil)
               (should-not (glasspane-srs-detail-toolbar ref))
               (setq glasspane-srs--available t))
-            ;; The sweep: unregister leaves no verb, chip, or section;
-            ;; re-register restores so suite order never matters.
+            ;; The sweep: unregister leaves no verb, chip, or section —
+            ;; and no LIVE SESSION either, which is why the session is
+            ;; re-armed first (srs.quit above cleared it).  A session
+            ;; surviving the sweep would keep answering taps the app no
+            ;; longer owns.
+            (should (eq (run "srs.review.start" nil) 'accepted))
+            (should glasspane-srs--active)
             (glasspane-srs-unregister)
             (dolist (name glasspane-srs--verbs)
               (should-not (gethash name jetpacs-action-handlers)))
             (should-not (memq #'glasspane-srs-detail-toolbar
                               glasspane-ui-detail-toolbar-functions))
+            (should-not glasspane-srs--active)
+            (should-not glasspane-srs--current)
+            (should-not glasspane-srs--revealed)
+            (should-not glasspane-srs--undo)
             (glasspane-srs-register)))
       (when-let* ((buf (find-buffer-visiting file)))
         (with-current-buffer buf (set-buffer-modified-p nil))
@@ -4042,7 +4526,96 @@ unknown theme, and a load that SIGNALS — never a swallowed
         (should (eq (glasspane-ef--on-random nil nil) 'rejected))
         (cl-letf (((symbol-function 'ef-themes-load-random)
                    (lambda (&optional _) nil)))
-          (should (eq (glasspane-ef--on-random nil nil) 'accepted)))))))
+          (should (eq (glasspane-ef--on-random nil nil) 'accepted))))))
+  ;; The satellite link: registered exactly once even after a
+  ;; live-reload re-register, and swept by unregister.
+  (should (= 1 (cl-count #'glasspane-ef--settings-link
+                         jetpacs-settings-links :key #'cadr)))
+  (glasspane-ef-register)
+  (should (= 1 (cl-count #'glasspane-ef--settings-link
+                         jetpacs-settings-links :key #'cadr)))
+  (unwind-protect
+      (progn
+        (glasspane-ef-unregister)
+        (should-not (cl-find #'glasspane-ef--settings-link
+                             jetpacs-settings-links :key #'cadr)))
+    ;; Suite order must never matter: leave ef registered.
+    (glasspane-ef-register)))
+
+(ert-deftest glasspane-test-settings-surface-scope ()
+  "The D1 GLOBAL verbs, asserted at DISPATCH level — the only level
+where SPEC 14.4's surface-scope gate exists.  Every verb here is
+emitted from the Settings ROOT, a surface Glasspane does not own, so
+without `:any-surface' the gate refuses the event before the handler
+runs and the tap is silently dead on a device.  `jetpacs--dispatch'
+resolves the owner from the action registry itself, so these are not
+vacuous.  The owner-scoped rest is the control: a verb that only ever
+fires from Glasspane's own surfaces must still be refused there."
+  (require 'glasspane-ef)
+  (glasspane-ef-register)
+  (glasspane-ui-register)
+  ;; `jetpacs--dispatch' takes (CLIENT PARAMS FN): the handler's args
+  ;; ride INSIDE params, exactly as they arrive off the wire.
+  (cl-flet ((dispatch (name args surface)
+              (let ((handler (gethash name jetpacs-action-handlers)))
+                (should handler)
+                (jetpacs--dispatch
+                 nil (list :action name :surface surface :args args)
+                 handler))))
+    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
+               (lambda (_s v) v))
+              ((symbol-function 'jetpacs-shell-notify) (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-flow-continue) (lambda (_fn) nil)))
+      (let ((jetpacs-line-numbers nil)
+            (org-tag-alist '(("home" . ?h))))
+        ;; The line-numbers arm is the biting one: it answers accepted
+        ;; now and rejected the moment `:any-surface' is dropped.
+        (should (eq (dispatch "settings.line-numbers" '(:value "Relative")
+                              "app:jetpacs.settings")
+                    'accepted))
+        (should (eq (dispatch "settings.tags" '(:value ["work"])
+                              "app:jetpacs.settings")
+                    'accepted))
+        (should (eq (dispatch "glasspane.settings.open" nil
+                              "app:jetpacs.settings")
+                    'accepted))
+        (should (eq (dispatch "ef.show" nil "app:jetpacs.settings")
+                    'accepted))
+        ;; The control: an owner-scoped verb dies at the gate on a
+        ;; foreign surface, which is what makes the four above bite.
+        (should (eq (dispatch "journal.open" nil "app:jetpacs.settings")
+                    'rejected)))))
+  ;; The registry side of the same rule, verb by verb.
+  (dolist (name '("glasspane.settings.open" "settings.tags"
+                  "settings.line-numbers" "settings.todo.edit"
+                  "settings.agenda.edit" "settings.agenda.delete"
+                  "ef.show"))
+    (should (gethash name jetpacs--any-surface-actions)))
+  ;; The dialog conclusions carry no surface at all, and the agenda and
+  ;; files verbs fire from this owner's own screens: owner-scoped.
+  (dolist (name '("settings.agenda.save" "agenda.save-custom"
+                  "agenda.today" "agenda.select-date"
+                  "agenda.set-month" "files.filter"))
+    (should-not (gethash name jetpacs--any-surface-actions)))
+  ;; The share intake is global for the same reason: a share is
+  ;; attributed by the COMPANION, so its wire surface may be a string
+  ;; this app does not own.  With no client the handler answers
+  ;; `rejected' either way — the tell is the STASH, which it writes
+  ;; before the client guard and could not reach past the gate.
+  (require 'glasspane-capture)
+  (glasspane-capture-register)
+  (dolist (name '("share.text" "org.capture.share"))
+    (should (gethash name jetpacs--any-surface-actions)))
+  (should-not (gethash "org.capture.show" jetpacs--any-surface-actions))
+  (let ((glasspane-capture--shared-text nil)
+        (glasspane-capture--shared-subject nil))
+    (jetpacs--dispatch nil
+                       '(:action "share.text"
+                         :surface "app:something-else"
+                         :args (:text "shared from elsewhere"))
+                       (gethash "share.text" jetpacs-action-handlers))
+    (should (equal glasspane-capture--shared-text "shared from elsewhere"))))
 
 (ert-deftest glasspane-test-ef-option-nodes ()
   "Style section shapes.  Options unbound (the default suite path)

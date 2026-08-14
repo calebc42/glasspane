@@ -78,7 +78,7 @@
 ;; is soft and the body degrades to plain org text (gap #6).
 (require 'glasspane-org-reader nil t)
 (declare-function glasspane-org-reader-subtree "glasspane-org-reader"
-                  (file pos &optional skip-props))
+                  (file pos &optional skip-props set))
 (defvar glasspane-org-reader-inline-props)
 
 ;; Later-rung siblings (G5's pure agenda formatters): declared, never
@@ -906,7 +906,11 @@ absent or declines (the gap #6 degrade)."
     (or (and (fboundp 'glasspane-org-reader-subtree)
              (condition-case nil
                  (let ((glasspane-org-reader-inline-props nil))
-                   (glasspane-org-reader-subtree file pos t))
+                   ;; Own token set, never the subtree default: that set's
+                   ;; replace sweep retires the tokens of any other live
+                   ;; subtree render (a reader screen still on the stack)
+                   ;; the moment a second caller exists.
+                   (glasspane-org-reader-subtree file pos t "detail-subtree"))
                (error nil)))
         (let ((body (with-current-buffer (plist-get info :buf)
                       (org-with-wide-buffer
@@ -1140,6 +1144,13 @@ closure would otherwise resolve yesterday's coordinates."
         (ref (glasspane-detail--token-ref args)))
     (cond
      ((not (stringp value)) 'rejected)
+     ;; Shape-gated BEFORE the region is touched, because this failure is
+     ;; destructive rather than merely a wrong answer: a value whose
+     ;; leading stars the user deleted signals inside
+     ;; `ebp-org-ref-at-point' only AFTER delete-region+insert, so the
+     ;; buffer keeps an unsaved mutation that the next unrelated save
+     ;; flushes to disk.
+     ((not (string-match-p "\\`\\*+\\(?:[ \t]\\|$\\)" value)) 'rejected)
      ((null ref) 'stale)
      (t
       (condition-case err

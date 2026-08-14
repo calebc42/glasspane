@@ -295,7 +295,11 @@ thing to catch here."
 Companion-local switches only (the device back arrow), which is the
 leave that matters: an Emacs push ON TOP (a heading drill) keeps the
 day, exactly the v1 tab feel."
-  (when (and (equal surface (jetpacs-shell-surface-for "glasspane"))
+  ;; ANY surface this owner holds, not just the D1 primary:
+  ;; `jetpacs-chrome-push-screen' accepts any surface, so the journal
+  ;; can live on a claimed secondary one and must still reset its day
+  ;; on leave.
+  (when (and (jetpacs-owned-surface-p surface "glasspane")
              (not (equal view glasspane-journal--screen-id)))
     (setq glasspane-journal--date nil)))
 
@@ -320,8 +324,12 @@ day, exactly the v1 tab feel."
   "Shift the viewed day by `:delta' days."
   (let ((delta (plist-get args :delta)))
     ;; A whole-valued integer can arrive as a float after the JSON
-    ;; round trip (org.json emits the trailing .0).
-    (when (numberp delta) (setq delta (truncate delta)))
+    ;; round trip (org.json emits the trailing .0) — that float, and
+    ;; only that one, is coerced back.  A genuinely fractional value is
+    ;; a malformed event, not a rounding job: it stays a float and the
+    ;; `integerp' check below rejects it.
+    (when (and (floatp delta) (= delta (truncate delta)))
+      (setq delta (truncate delta)))
     (if (not (integerp delta))
         'rejected
       (setq glasspane-journal--date
@@ -356,19 +364,27 @@ the SPEC 23.3 label, never the raw error."
         (date (plist-get args :date)))
     (if (or (not (stringp raw)) (string-empty-p (string-trim raw)))
         'rejected
-      (condition-case err
-          (progn
-            (glasspane-journal--append
-             (string-trim raw)
-             (and (stringp date) (not (string-empty-p date)) date))
-            (jetpacs-shell-notify "Added to journal")
-            (glasspane-ui--defer-refresh params)
-            'accepted)
-        (error
-         (message "glasspane: journal capture failed: %s"
-                  (jetpacs-error-label err))
-         (jetpacs-toast "Capture failed")
-         'rejected)))))
+      ;; SPEC 23.2 — neutralize wire text before it becomes org
+      ;; structure.  The append lands at end-of-subtree, so an embedded
+      ;; newline would promote the payload out of the list item into a
+      ;; heading, a keyword line or a local-variables block.  Collapsed
+      ;; HERE and not in `glasspane-journal--append': that path is
+      ;; M-x/internal, its text is not wire input.
+      (let ((text (string-trim
+                   (replace-regexp-in-string "[ \t\n\r]+" " " raw))))
+        (condition-case err
+            (progn
+              (glasspane-journal--append
+               text
+               (and (stringp date) (not (string-empty-p date)) date))
+              (jetpacs-shell-notify "Added to journal")
+              (glasspane-ui--defer-refresh params)
+              'accepted)
+          (error
+           (message "glasspane: journal capture failed: %s"
+                    (jetpacs-error-label err))
+           (jetpacs-toast "Capture failed")
+           'rejected))))))
 
 ;;;; Registration
 

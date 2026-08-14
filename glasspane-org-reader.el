@@ -683,6 +683,13 @@ input takes it back as `:value' each render."
                   (condition-case err
                       (glasspane-org-reader--reader-parts path query)
                     (user-error
+                     ;; Vetted exception to T2's user-facing-error rule
+                     ;; (SPEC 23.3): this arm catches only
+                     ;; `ebp-org-parse-query' user-errors, whose messages
+                     ;; are fixed strings plus the user's own query
+                     ;; keyword — no org payload can reach the caption,
+                     ;; and `jetpacs-error-label' would degrade it to the
+                     ;; useless "user-error".
                      (setq broken (error-message-string err))
                      nil))))
          (nodes (nth 0 parts))

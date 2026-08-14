@@ -56,6 +56,7 @@
 (defvar vulpea-db-sync-directories)
 (defvar org-srs-item-confirm)
 (defvar package-archives)
+(defvar package-archive-contents)
 
 (defcustom glasspane-packages-auto-install t
   "When non-nil, a store install with missing engines schedules one
@@ -101,6 +102,21 @@ can help, so vulpea is simply not wanted — search (org-ql) and review
   (cl-remove-if (lambda (pkg) (require pkg nil t))
                 (mapcar #'car (glasspane-packages--wanted))))
 
+(defun glasspane-packages--outdated ()
+  "The wanted packages package.el installed BELOW their folded floor.
+Disjoint from `glasspane-packages--missing', which asks only whether a
+package LOADS: an old vulpea 1.x loads fine and so is never missing,
+yet the app's features need the floor.  Restricted to package.el's own
+installs on purpose — a hand-placed checkout on `load-path' is the
+user's copy and is never force-upgraded over."
+  (cl-remove-if-not
+   (lambda (pkg)
+     (let ((min (alist-get pkg (glasspane-packages--wanted))))
+       (and min
+            (package-installed-p pkg)
+            (not (package-installed-p pkg (version-to-list min))))))
+   (mapcar #'car (glasspane-packages--wanted))))
+
 (defun glasspane-packages--app-dir ()
   "Glasspane's per-app data directory.
 The config sibling owns the seam (FOUNDATION-GAPS #4: app-local, this
@@ -144,7 +160,7 @@ live."
   (jetpacs-shell-refresh))
 
 (defun glasspane-packages-ensure ()
-  "Install any missing engine from MELPA, then light features up.
+  "Install any missing or below-floor engine from MELPA, then light up.
 Synchronous (package.el is), idempotent, and never signals: returns
 non-nil when everything wanted is loadable afterwards, else nil with
 the reason in *Messages*.  The retry story is calling this again —
@@ -156,7 +172,9 @@ defers here through `jetpacs-flow-continue' (D2)."
    (glasspane-packages--installing
     (message "glasspane-packages: install already in progress")
     nil)
-   ((null (glasspane-packages--missing))
+   ;; Both sets gate the install branch, or the floor could never
+   ;; bite: an old-but-loadable engine leaves `--missing' empty.
+   ((not (or (glasspane-packages--missing) (glasspane-packages--outdated)))
     (glasspane-packages--light-up)
     t)
    (t
@@ -170,15 +188,23 @@ defers here through `jetpacs-flow-continue' (D2)."
               (unless (bound-and-true-p package--initialized)
                 (package-initialize))
               (package-refresh-contents)
-              (dolist (pkg (glasspane-packages--missing))
-                ;; The floor gates the already-installed skip: a
-                ;; package below its folded min-version is not
-                ;; "installed" for this purpose.
-                (let ((min (alist-get pkg glasspane-packages--set)))
-                  (unless (package-installed-p
-                           pkg (and min (version-to-list min)))
-                    (message "glasspane-packages: installing %s…" pkg)
-                    (package-install pkg))))
+              ;; Two disjoint reasons to install: `--missing' is
+              ;; LOADABILITY, `--outdated' is the folded min-version
+              ;; floor among package.el's own installs.  A loadable
+              ;; checkout package.el never installed is in neither set
+              ;; and is deliberately left alone.  The floor case must
+              ;; install the ARCHIVE DESC — `package-install' given a
+              ;; SYMBOL computes an unversioned requirement and no-ops
+              ;; for any installed version (package.el:2247-2251) —
+              ;; and a desc install upgrades in place, unlike
+              ;; `package-upgrade', which deletes first.
+              (let ((outdated (glasspane-packages--outdated)))
+                (dolist (pkg (append (glasspane-packages--missing) outdated))
+                  (message "glasspane-packages: installing %s…" pkg)
+                  (package-install
+                   (if (memq pkg outdated)
+                       (cadr (assq pkg package-archive-contents))
+                     pkg))))
               (let ((still (glasspane-packages--missing)))
                 (if still
                     (progn
@@ -192,7 +218,7 @@ defers here through `jetpacs-flow-continue' (D2)."
                   t)))
           (error
            (message "glasspane-packages: install failed: %s"
-                    (error-message-string err))
+                    (jetpacs-error-label err))
            nil))
       (setq glasspane-packages--installing nil)))))
 

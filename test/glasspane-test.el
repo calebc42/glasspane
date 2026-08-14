@@ -3261,5 +3261,553 @@ the handler gate that will receive them."
               (should (= 4 (count-matches "^| "))))))
       (glasspane-test--table-cleanup vault))))
 
+;;;; G7 — knowledge arms, notes half: glasspane-notes.el
+
+(ert-deftest glasspane-test-notes-orgfree ()
+  "The org-free notes logic: `--find-unlinked' skips occurrences
+already inside an org link and matches case-insensitively within the
+mention line; `--age-caption' formats the three ranges off the real
+filesystem mtime; `--materialize-terms'' matched arm needs no vulpea
+at all (it is what makes Link-it replayable offline)."
+  (require 'glasspane-notes)
+  ;; --materialize-terms: the matched arm is pure; the fallback arm
+  ;; needs the note index and degrades to nil without it.
+  (should (equal (glasspane-notes--materialize-terms "some-id" "Widget")
+                 '("Widget")))
+  (should-not (glasspane-notes--materialize-terms "some-id" ""))
+  ;; --find-unlinked over a real org line: the linked occurrence is
+  ;; skipped, the bare one (case-insensitive) is the hit, and the
+  ;; match data lands on the text AS WRITTEN.
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Source\n"
+            "Already [[id:x][Widget]] linked, then a bare widget here.\n"
+            "Widget on the next line stays out of range.\n")
+    (goto-char (point-min))
+    (forward-line 1)
+    (let ((term (glasspane-notes--find-unlinked '("Widget")
+                                                (line-end-position))))
+      (should (equal term "Widget"))
+      (should (equal (match-string 0) "widget")))
+    ;; Term order is specificity: the first term with a hit wins.
+    (goto-char (point-min))
+    (forward-line 1)
+    (should (equal (glasspane-notes--find-unlinked '("zzz-never" "bare")
+                                                   (line-end-position))
+                   "bare"))
+    ;; A term the line does not carry at all is a miss — the
+    ;; file-changed arm's trigger.
+    (goto-char (point-min))
+    (forward-line 1)
+    (should-not (glasspane-notes--find-unlinked '("nope")
+                                                (line-end-position))))
+  ;; --age-caption: days, months, years off a mocked mtime.
+  (let ((file (make-temp-file "glasspane-age")))
+    (unwind-protect
+        (progn
+          (set-file-times file (time-subtract nil (days-to-time 10)))
+          (should (equal (glasspane-notes--age-caption file)
+                         "modified 10 days ago"))
+          (set-file-times file (time-subtract nil (days-to-time 100)))
+          (should (equal (glasspane-notes--age-caption file)
+                         "modified 3 months ago"))
+          (set-file-times file (time-subtract nil (days-to-time 800)))
+          (should (equal (glasspane-notes--age-caption file)
+                         "modified 2 years ago")))
+      (delete-file file))
+    (should-not (glasspane-notes--age-caption
+                 (concat file "-never-existed")))))
+
+(ert-deftest glasspane-test-notes-guard-contract ()
+  "With vulpea ABSENT — this harness's permanent condition — every
+notes entry point degrades to nil and both verbs answer rejected (the
+jetpacs-org-vulpea-test precedent); the register/unregister pair
+sweeps its verbs, its three hook claims, and the scan marks, and ends
+REGISTERED so suite order never matters."
+  (require 'glasspane-notes)
+  (should-not (featurep 'vulpea))
+  (should-not (glasspane-notes-available-p))
+  (should-not (glasspane-notes-stale-available-p))
+  (should-not (glasspane-notes--matches "any"))
+  (should-not (glasspane-notes--materialize-terms "id-sans-matched" nil))
+  (should-not (glasspane-notes--stale-notes))
+  (should-not (glasspane-notes-stale-section))
+  (should-not (glasspane-notes-detail-nodes '(:file "/tmp/x.org" :pos 1)))
+  (should-not (glasspane-notes-detail-toolbar '(:file "/tmp/x.org" :pos 1)))
+  ;; The capf declines inside its own guard even mid-"[[".
+  (with-temp-buffer
+    (org-mode)
+    (insert "[[Wid")
+    (should-not (glasspane-notes--wikilink-capf)))
+  (glasspane-notes-register)
+  (unwind-protect
+      (let ((mentions (gethash "notes.mentions" jetpacs-action-handlers))
+            (materialize (gethash "link.materialize"
+                                  jetpacs-action-handlers)))
+        (should mentions)
+        (should materialize)
+        (should (memq #'glasspane-notes-detail-nodes
+                      glasspane-ui-detail-nodes-functions))
+        (should (memq #'glasspane-notes-detail-toolbar
+                      glasspane-ui-detail-toolbar-functions))
+        (should (memq #'glasspane-notes--setup-shadow
+                      ebp-complete-shadow-setup-hook))
+        ;; Junk shape rejects BEFORE the availability gate; with
+        ;; vulpea absent everything else rejects too — never a signal,
+        ;; never a silent nil return.
+        (should (eq (funcall mentions nil nil) 'rejected))
+        (should (eq (funcall mentions '(:token 5) nil) 'rejected))
+        (should (eq (funcall mentions '(:token "tok") nil) 'rejected))
+        (should (eq (funcall materialize nil nil) 'rejected))
+        (should (eq (funcall materialize '(:token 5) nil) 'rejected))
+        (should (eq (funcall materialize '(:token "tok") nil) 'rejected))
+        ;; Unregister sweeps verbs, hooks, and scan marks.
+        (puthash "leftover" 1 glasspane-notes--mentions-scans)
+        (glasspane-notes-unregister)
+        (should-not (gethash "notes.mentions" jetpacs-action-handlers))
+        (should-not (gethash "link.materialize" jetpacs-action-handlers))
+        (should-not (memq #'glasspane-notes-detail-nodes
+                          glasspane-ui-detail-nodes-functions))
+        (should-not (memq #'glasspane-notes-detail-toolbar
+                          glasspane-ui-detail-toolbar-functions))
+        (should-not (memq #'glasspane-notes--setup-shadow
+                          ebp-complete-shadow-setup-hook))
+        (should (zerop (hash-table-count glasspane-notes--mentions-scans))))
+    (glasspane-notes-register)))
+
+(ert-deftest glasspane-test-notes-materialize-edges ()
+  "The link.materialize funnel over a real file with the availability
+probe stubbed open (the vulpea-live arm is device territory; the
+matched arm is org-free): a live edit-site token rewrites the first
+UN-linked occurrence and answers accepted, a mention the file no
+longer carries answers stale after its snackbar, a heading token
+replayed here rejects on shape, junk and swept tokens keep their
+classes, and a mint whose path fails the file policy degrades to nil
+tokens instead of signaling.  notes.mentions marks the scan wanted
+under the same stub and re-marks on re-tap."
+  (require 'glasspane-notes)
+  (glasspane-notes-register)
+  (let* ((vault (make-temp-file "glasspane-notes" t))
+         (file (expand-file-name "mentions.org" vault))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (notified nil)
+         (materialize (gethash "link.materialize" jetpacs-action-handlers))
+         (mentions (gethash "notes.mentions" jetpacs-action-handlers)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'glasspane-notes-available-p)
+                   (lambda () t))
+                  ((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _) (push text notified))))
+          (with-temp-file file
+            (insert "* Source note\n"
+                    "Sees [[id:other][Widget]] and then Widget again.\n"))
+          (ebp-org-cache-invalidate)
+          ;; Success arm: the linked occurrence is skipped, the bare
+          ;; one becomes a link, the save is synchronous.
+          (let ((tok (car (ebp-org-ref-tokens
+                           (list (list :file file :line 2
+                                       :matched "Widget"
+                                       :target-id "TARGET-1"))
+                           :set "notes-test" :owner "glasspane"))))
+            (should (eq (funcall materialize (list :token tok) nil)
+                        'accepted))
+            (should (cl-some (lambda (s) (string-search "Linked" s))
+                             notified))
+            (let ((text (with-temp-buffer
+                          (insert-file-contents file)
+                          (buffer-string))))
+              (should (string-search "[[id:TARGET-1][Widget]]" text))
+              (should (string-search "[[id:other][Widget]]" text))))
+          ;; File-changed arm: every occurrence is a link now -> stale.
+          (setq notified nil)
+          (let ((tok (car (ebp-org-ref-tokens
+                           (list (list :file file :line 2
+                                       :matched "Widget"
+                                       :target-id "TARGET-1"))
+                           :set "notes-test" :owner "glasspane"))))
+            (should (eq (funcall materialize (list :token tok) nil)
+                        'stale))
+            (should (cl-some (lambda (s) (string-search "file changed" s))
+                             notified)))
+          ;; A heading token replayed here: resolvable ref, wrong
+          ;; SHAPE (no :line/:target-id) -> rejected.
+          (let ((tok (car (ebp-org-ref-tokens
+                           (list (list :file file :pos 1
+                                       :headline "Source note"))
+                           :set "notes-test" :owner "glasspane"))))
+            (should (eq (funcall materialize (list :token tok) nil)
+                        'rejected)))
+          ;; Junk and swept keep their classes under the open probe.
+          (should (eq (funcall materialize '(:token 5) nil) 'rejected))
+          (should (eq (funcall materialize '(:token "never-minted") nil)
+                      'stale))
+          ;; A path outside the roots refuses at MINT time and the
+          ;; helper degrades to nil tokens (untappable, not a crash).
+          (should (equal (glasspane-notes--mint
+                          (list (list :file "/definitely/not/here.org"))
+                          "notes-test")
+                         '(nil)))
+          ;; --mint-sparse keeps positions: nils stay nil, the one
+          ;; real ref gets a token that resolves in the app scope.
+          (let ((toks (glasspane-notes--mint-sparse
+                       (list nil (list :file file :pos 1) nil)
+                       "notes-test")))
+            (should (= (length toks) 3))
+            (should-not (nth 0 toks))
+            (should-not (nth 2 toks))
+            (should (stringp (nth 1 toks)))
+            (should (equal (plist-get (ebp-org-token-ref
+                                       (nth 1 toks) :owner "glasspane")
+                                      :file)
+                           file)))
+          ;; notes.mentions under the stubbed probe: a live heading
+          ;; token carrying an :id marks the scan wanted (accepted),
+          ;; and a re-tap bumps the count (the fresh-key re-run).
+          (cl-letf (((symbol-function 'vulpea-note-unlinked-mentions-async)
+                     (lambda (&rest _) nil)))
+            (let ((tok (car (ebp-org-ref-tokens
+                             (list (list :id "NOTE-9" :file file :pos 1
+                                         :headline "Source note"))
+                             :set "notes-test" :owner "glasspane"))))
+              (should (eq (funcall mentions (list :token tok) nil)
+                          'accepted))
+              (should (= (gethash "NOTE-9" glasspane-notes--mentions-scans)
+                         1))
+              (should (eq (funcall mentions (list :token tok) nil)
+                          'accepted))
+              (should (= (gethash "NOTE-9" glasspane-notes--mentions-scans)
+                         2)))))
+      (clrhash glasspane-notes--mentions-scans)
+      (ignore-errors (ebp-org-ref-tokens nil :set "notes-test"
+                                         :owner "glasspane"))
+      (ebp-org-cache-invalidate)
+      (dolist (buf (buffer-list))
+        (let ((f (buffer-file-name buf)))
+          (when (and f (string-prefix-p (file-name-as-directory
+                                         (file-truename vault))
+                                        (file-truename f)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf))))
+      (delete-directory vault t))))
+
+;;;; G7 — knowledge arms: glasspane-srs.el
+
+(ert-deftest glasspane-test-srs-layout ()
+  "The pure card extraction/rendering stack over fixture buffers, org
+core only: child-body regions, the three card-part layouts, part-node
+rendering, drawer/link hiding in card content, and the cloze fill —
+org-srs absent throughout (`cloze-collect' stubbed), every node set
+round-tripping the canonical wire encoding."
+  (require 'glasspane-srs)
+  (cl-flet ((json-of (nodes)
+              (jetpacs-node->canonical-json (apply #'jetpacs-column nodes))))
+    ;; Explicit Front/Back children: both regions found, star-free.
+    (with-temp-buffer
+      (org-mode)
+      (insert "* Capital cards\n"
+              ":PROPERTIES:\n:ID: fixture-1\n:END:\n"
+              "** Front\nWhat is the capital of France?\n"
+              "** Back\nParis.\n")
+      (goto-char (point-min))
+      (let* ((child-re "^\\*\\{2\\}[ \t]")
+             (front (glasspane-srs--child-body 1 "Front" child-re))
+             (back (glasspane-srs--child-body 1 "Back" child-re)))
+        (should front)
+        (should (equal (buffer-substring-no-properties (car front)
+                                                       (cdr front))
+                       "What is the capital of France?\n"))
+        (should back)
+        (should (equal (buffer-substring-no-properties (car back)
+                                                       (cdr back))
+                       "Paris.\n"))
+        (should-not (glasspane-srs--child-body 1 "Hint" child-re)))
+      (let ((parts (glasspane-srs--card-parts 'back)))
+        (should (eq (car (car parts)) 'region))
+        (should (eq (car (cdr parts)) 'region))
+        ;; Reviewing the front swaps question and answer.
+        (should (equal (glasspane-srs--card-parts 'front)
+                       (cons (cdr parts) (car parts))))))
+    ;; Heading + body, no children: title question, body-region answer;
+    ;; the answer body and a divider arrive only with the reveal.
+    (with-temp-buffer
+      (org-mode)
+      (insert "* What is 2+2?\nFour.\n")
+      (goto-char (point-min))
+      (let* ((parts (glasspane-srs--card-parts 'back))
+             (q (car parts)) (a (cdr parts)))
+        (should (equal q (cons 'title "What is 2+2?")))
+        (should (eq (car a) 'region))
+        (let ((nodes (glasspane-srs--part-nodes q)))
+          (should (= (length nodes) 1))
+          (should (string-search "What is 2+2?" (json-of nodes))))
+        (should-not (glasspane-srs--part-nodes '(title . "")))
+        (should (glasspane-srs--part-nodes a))
+        (let ((hidden (json-of (glasspane-srs--card-content
+                                '(card back) nil)))
+              (shown (json-of (glasspane-srs--card-content
+                               '(card back) t))))
+          (should (string-search "What is 2+2?" hidden))
+          (should-not (string-search "Four." hidden))
+          (should (string-search "Four." shown))
+          (should (string-search "divider" shown)))))
+    ;; Children without Front/Back (the Logseq layout):
+    ;; title-and-region question, children answer.
+    (with-temp-buffer
+      (org-mode)
+      (insert "* Prompt\nlead-in\n** First child\nanswer body\n")
+      (goto-char (point-min))
+      (let ((parts (glasspane-srs--card-parts 'back)))
+        (should (eq (car (car parts)) 'title-and-region))
+        (should (eq (car (cdr parts)) 'region))
+        (let ((json (json-of (glasspane-srs--part-nodes (car parts)))))
+          (should (string-search "Prompt" json))
+          (should (string-search "lead-in" json)))))
+    ;; Drawer + link hygiene: the SRSITEMS log never renders; a
+    ;; descriptive link renders its description, never its target.
+    (with-temp-buffer
+      (org-mode)
+      (insert "* Q\nSee [[https://example.com][the site]] for more.\n"
+              ":SRSITEMS:\nsecret-log-row\n:END:\n")
+      (goto-char (point-min))
+      (let ((shown (json-of (glasspane-srs--card-content '(card back) t))))
+        ;; The description survives (possibly split across rich-text
+        ;; spans — segmentation is the renderer's), the target does not.
+        (should (string-search "See " shown))
+        (should (string-search "for more." shown))
+        (should-not (string-search "https" shown))
+        (should-not (string-search "example.com" shown))
+        (should-not (string-search "secret-log-row" shown))
+        (should-not (string-search "SRSITEMS" shown))))
+    ;; Cloze: the reviewed blank hides until revealed; other clozes are
+    ;; context; a hint shows bracketed.
+    (with-temp-buffer
+      (org-mode)
+      (insert "* Geography\nParis is the capital of France.\n")
+      (goto-char (point-min))
+      (let* ((beg (save-excursion (goto-char (point-min))
+                                  (search-forward "Paris")
+                                  (match-beginning 0)))
+             (end (+ beg 5)))
+        (cl-letf (((symbol-function 'org-srs-item-cloze-collect)
+                   (lambda (&rest _) (list (list 1 beg end "Paris" nil)))))
+          (let ((hidden (json-of (glasspane-srs--cloze-content
+                                  '(cloze 1) nil)))
+                (shown (json-of (glasspane-srs--cloze-content
+                                 '(cloze 1) t)))
+                (other (json-of (glasspane-srs--cloze-content
+                                 '(cloze 2) nil))))
+            (should-not (string-search "Paris" hidden))
+            (should (string-search "is the capital" hidden))
+            (should (string-search "Paris" shown))
+            (should (string-search "Paris" other))))
+        (cl-letf (((symbol-function 'org-srs-item-cloze-collect)
+                   (lambda (&rest _) (list (list 1 beg end "Paris" "city")))))
+          (should (string-search "[city]"
+                                 (json-of (glasspane-srs--cloze-content
+                                           '(cloze 1) nil)))))))
+    ;; An unresolvable item degrades to the couldn't-load caption —
+    ;; org-srs absent, the marker probe is the quietly path.
+    (should (string-search "load this card"
+                           (json-of (glasspane-srs--item-nodes
+                                     '((card back) "1" "nowhere") nil))))))
+
+(ert-deftest glasspane-test-srs-rating-row ()
+  "The rating rail over stubbed intervals: four buttons wired to
+srs.rate by wire name, weight-matched interval captions above them,
+and the caption row absent when the simulator has nothing to say."
+  (require 'glasspane-srs)
+  (let ((glasspane-srs--current '((card back) "1" "cards.org")))
+    (cl-letf (((symbol-function 'glasspane-srs--intervals)
+               (lambda () '(:again 60 :hard 36000 :good 259200
+                            :easy 864000)))
+              ((symbol-function 'org-srs-time-seconds-desc)
+               (lambda (secs)
+                 (if (>= secs 86400)
+                     (list (/ secs 86400) :day (/ (% secs 86400) 3600) :hour)
+                   (list (/ secs 3600) :hour)))))
+      (let* ((controls (glasspane-srs--rating-controls))
+             (json (jetpacs-node->canonical-json
+                    (apply #'jetpacs-column controls))))
+        (should (= (length controls) 2))
+        (dolist (needle '("Again" "Hard" "Good" "Easy" "srs.rate"
+                          "again" "hard" "good" "easy" "3d"))
+          (should (string-search needle json)))))
+    (cl-letf (((symbol-function 'glasspane-srs--intervals)
+               (lambda () nil)))
+      (should (= (length (glasspane-srs--rating-controls)) 1)))))
+
+(ert-deftest glasspane-test-srs-handler-statuses ()
+  "Every srs verb answers a SPEC 14.4 status over a stubbed engine:
+write ok → `accepted', no item → `stale', bad rating/malformed →
+`rejected' — and the G7 rework holds: an engine call that SIGNALS
+answers `rejected' (dropping its own undo snapshot), never
+`accepted'.  Registration is idempotent and sweeps clean; the detail
+chip mints a token only while org-srs is available; the create flow
+refuses headless without wedging."
+  (require 'glasspane-srs)
+  (glasspane-srs-register)
+  (let* ((vault (make-temp-file "glasspane-srs" t))
+         (file (expand-file-name "cards.org" vault))
+         (ebp-org-roots nil)
+         (org-directory vault)
+         (glasspane-srs--available t)
+         (glasspane-srs--active nil)
+         (glasspane-srs--current nil)
+         (glasspane-srs--revealed nil)
+         (glasspane-srs--undo nil)
+         (rated nil) (notified nil) (continuations nil)
+         (marker nil) (item nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _) (push text notified)))
+                  ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
+                  ((symbol-function 'jetpacs-shell-push)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (push fn continuations) nil))
+                  ((symbol-function 'org-srs-item-marker)
+                   (lambda (&rest _) marker))
+                  ((symbol-function 'org-srs-review-rate)
+                   (lambda (&rest args) (push args rated)))
+                  ((symbol-function 'org-srs-review-pending-items)
+                   (lambda (&rest _) (list item)))
+                  ((symbol-function 'org-srs-review-postpone)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'org-srs-log-beginning-of-drawer)
+                   #'ignore)
+                  ((symbol-function 'org-srs-log-end-of-drawer) #'ignore)
+                  ((symbol-function 'org-srs-log-hide-drawer) #'ignore))
+          (with-temp-file file (insert "* Card one\nBody.\n"))
+          (ebp-org-cache-invalidate)
+          (setq marker (with-current-buffer (find-file-noselect file)
+                         (org-with-wide-buffer (goto-char (point-min))
+                                               (point-marker))))
+          (setq item (list '(card back) "1"
+                           (buffer-name (marker-buffer marker))))
+          (cl-flet ((run (name args &optional params)
+                      (let ((handler (gethash name jetpacs-action-handlers)))
+                        (should handler)
+                        (funcall handler args
+                                 (or params '(:surface "app:glasspane"))))))
+            ;; Registration is complete and idempotent.
+            (dolist (name glasspane-srs--verbs)
+              (should (gethash name jetpacs-action-handlers)))
+            (glasspane-srs-register)
+            (should (gethash "srs.rate" jetpacs-action-handlers))
+            (should (memq #'glasspane-srs-detail-toolbar
+                          glasspane-ui-detail-toolbar-functions))
+            ;; Session gates before any session exists.
+            (should (eq (run "srs.answer.show" nil) 'stale))
+            (should (eq (run "srs.rate" '(:rating "good")) 'stale))
+            (should (eq (run "srs.postpone" nil) 'stale))
+            (should (eq (run "srs.suspend" nil) 'stale))
+            (should (eq (run "srs.undo" nil) 'stale))
+            (should (member "Nothing to undo" notified))
+            ;; review.open defers a chrome push; start refuses without
+            ;; the engine, arms the session with it.
+            (should (eq (run "review.open" nil) 'accepted))
+            (should (= (length continuations) 1))
+            (setq glasspane-srs--available nil)
+            (should (eq (run "srs.review.start" nil) 'rejected))
+            (setq glasspane-srs--available t)
+            (should (eq (run "srs.review.start" nil) 'accepted))
+            (should glasspane-srs--active)
+            (should (equal glasspane-srs--current item))
+            ;; Reveal, and the pager mirror (malformed page rejects; the
+            ;; mirror itself never re-pushes).
+            (should (eq (run "srs.answer.show" nil) 'accepted))
+            (should glasspane-srs--revealed)
+            (should (eq (run "srs.answer.page" '(:value "x")) 'rejected))
+            (should (eq (run "srs.answer.page" '(:value 0.0)) 'accepted))
+            (should-not glasspane-srs--revealed)
+            (should (eq (run "srs.answer.page" '(:value 1)) 'accepted))
+            (should glasspane-srs--revealed)
+            ;; rate: a bad name rejects untouched; a good one lands
+            ;; through the engine and snapshots for undo.
+            (should (eq (run "srs.rate" '(:rating "banana")) 'rejected))
+            (should-not rated)
+            (should (eq (run "srs.rate" '(:rating "good")) 'accepted))
+            (should (= (length rated) 1))
+            (should (eq (caar rated) :good))
+            (should (= (length glasspane-srs--undo) 1))
+            ;; The G7 rework: a signalling engine call answers
+            ;; `rejected' and drops its own snapshot.
+            (cl-letf (((symbol-function 'org-srs-review-rate)
+                       (lambda (&rest _) (error "boom"))))
+              (should (eq (run "srs.rate" '(:rating "good")) 'rejected)))
+            (should (= (length glasspane-srs--undo) 1))
+            (should (cl-some (lambda (s) (string-prefix-p "Review:" s))
+                             notified))
+            ;; undo restores from the snapshot and re-presents the card
+            ;; answer-shown.
+            (should (eq (run "srs.undo" nil) 'accepted))
+            (should glasspane-srs--revealed)
+            (should (equal glasspane-srs--current item))
+            (should-not glasspane-srs--undo)
+            ;; suspend comments the heading out — plain org, on disk.
+            (should (eq (run "srs.suspend" nil) 'accepted))
+            (should (string-search
+                     "COMMENT"
+                     (with-current-buffer (find-file-noselect file)
+                       (buffer-substring-no-properties (point-min)
+                                                       (point-max)))))
+            ;; postpone rides the stub; quit clears the session.
+            (should (eq (run "srs.postpone" nil) 'accepted))
+            (should (eq (run "srs.quit" nil) 'accepted))
+            (should-not glasspane-srs--active)
+            (should-not glasspane-srs--current)
+            ;; item.create: shape → token → availability gates, then
+            ;; the deferred bridged flow with the headless refusal (no
+            ;; wedge, no signal).
+            (should (eq (run "srs.item.create" '(:token 5)) 'rejected))
+            (should (eq (run "srs.item.create" '(:token "o0-junk"))
+                        'stale))
+            (let ((token (with-current-buffer (find-file-noselect file)
+                           (org-with-wide-buffer
+                            (goto-char (point-min))
+                            (car (ebp-org-ref-tokens
+                                  (list (ebp-org-ref-at-point))
+                                  :set "t-srs" :owner "glasspane"))))))
+              (setq glasspane-srs--available nil)
+              (should (eq (run "srs.item.create" (list :token token))
+                          'rejected))
+              (setq glasspane-srs--available t)
+              (setq continuations nil)
+              (should (eq (run "srs.item.create" (list :token token))
+                          'accepted))
+              (should (= (length continuations) 1))
+              (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                         (lambda () nil)))
+                (setq notified nil)
+                (funcall (car continuations))
+                (should notified)))
+            ;; The detail chip joins the mint discipline: a token while
+            ;; the engine is available, nothing without it.
+            (let ((ref (with-current-buffer (find-file-noselect file)
+                         (org-with-wide-buffer (goto-char (point-min))
+                                               (ebp-org-ref-at-point)))))
+              (let ((chips (glasspane-srs-detail-toolbar ref)))
+                (should (= (length chips) 1))
+                (should (string-search
+                         "srs.item.create"
+                         (jetpacs-node->canonical-json (car chips)))))
+              (setq glasspane-srs--available nil)
+              (should-not (glasspane-srs-detail-toolbar ref))
+              (setq glasspane-srs--available t))
+            ;; The sweep: unregister leaves no verb, chip, or section;
+            ;; re-register restores so suite order never matters.
+            (glasspane-srs-unregister)
+            (dolist (name glasspane-srs--verbs)
+              (should-not (gethash name jetpacs-action-handlers)))
+            (should-not (memq #'glasspane-srs-detail-toolbar
+                              glasspane-ui-detail-toolbar-functions))
+            (glasspane-srs-register)))
+      (when-let* ((buf (find-buffer-visiting file)))
+        (with-current-buffer buf (set-buffer-modified-p nil))
+        (kill-buffer buf))
+      (delete-directory vault t))))
+
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

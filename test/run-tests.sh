@@ -65,7 +65,7 @@ rm -f emacs/ebp.elc
 # subdirectory (the M3 catalog is 42 files) must not escape the guard by
 # living one level down.
 for f in emacs/*.el emacs/apps/*/*.el; do
-  emacs -Q --batch -L emacs -L emacs/apps/m3-catalog \
+  emacs -Q --batch -L emacs -L emacs/apps/m3-catalog -L emacs/apps/glasspane \
     --eval '(setq byte-compile-error-on-warn t)' \
     -f batch-byte-compile "$f"
   rm -f "${f%.el}.elc"
@@ -275,6 +275,12 @@ emacs -Q --batch -L emacs -l test/jetpacs-phase-a-test.el \
 # `jetpacs-m3-material-version', so the two move unanimously or go red.
 emacs -Q --batch -L emacs -L emacs/apps/m3-catalog \
   -l test/jetpacs-m3-catalog-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# Glasspane app ladder gates (docs/PLAN-glasspane-app.md): every rung's
+# NAMED local-gate assertions accumulate in one suite, the M3 pattern.
+emacs -Q --batch -L emacs -L emacs/apps/glasspane \
+  -l test/glasspane-test.el \
   -f ert-run-tests-batch-and-exit
 
 # Icon lint: SPEC 17.1's placeholder degrade means a misspelled icon

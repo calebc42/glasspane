@@ -1,0 +1,133 @@
+;;; glasspane.el --- Glasspane: org knowledge on Jetpacs -*- lexical-binding: t; -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Package-Requires: ((emacs "30.1"))
+
+;;; Commentary:
+
+;; The v3 rebuild of the v1 reference app — notes, agenda, capture,
+;; journal, SRS, the org reader — on the jetpacs foundation.  The
+;; ladder is docs/PLAN-glasspane-app.md; this file is G0: the thin
+;; entry in the M3 template (jetpacs-m3-catalog.el), owning exactly the
+;; app identity — the "glasspane" owner claim, the chrome root (a
+;; placeholder home until G3's glasspane-ui lands), the dock
+;; destination, and one owner verb.  The sibling `require' list below
+;; grows one rung at a time; nothing here reaches for org yet.
+;;
+;; Client hooks (clock notification, window class, save refresh) attach
+;; at READY starting with G2 — G0 registers surfaces and verbs only,
+;; which is connection-independent by design (`jetpacs-defaction' and
+;; `jetpacs-chrome-define-root' are registries, not pushes).
+
+;;; Code:
+
+;; The sibling modules live FLAT beside this file both in the repo
+;; (emacs/apps/glasspane/) and on the device (one directory), so the
+;; entry adds its own directory — the M3 shim's shape
+;; (jetpacs-m3-catalog.el:31-36), kept even while this file is alone so
+;; G1's first sibling require works the day it lands.
+(eval-and-compile
+  (let* ((here (or load-file-name buffer-file-name))
+         (dir (and here (file-name-directory here))))
+    (when (and dir (file-directory-p dir))
+      (add-to-list 'load-path dir))))
+
+(require 'jetpacs-surfaces)
+(require 'jetpacs-shell)
+(require 'jetpacs-chrome)
+(require 'jetpacs-widgets)
+(require 'jetpacs-apps)
+
+(defconst glasspane-owner "glasspane"
+  "The D1 owner whose surface hosts the app.
+Not under `jetpacs-reserved-owner-prefix': Glasspane is a Tier-1
+application, not base chrome — the M3 catalog's precedent, and the
+second real `jetpacs-defapp' caller there is.")
+
+(defconst glasspane-title "Glasspane"
+  "The home top-bar title and the dock label.")
+
+(defconst glasspane-icon "menu_book"
+  "The dock/launcher icon.  A knowledge base is a book you keep open.")
+
+;;;; The placeholder home (G3's glasspane-ui replaces this builder)
+
+(defun glasspane-home-screen (back)
+  "The G0 root screen: the identity, and the ladder's own state.
+Exists so registration, the dock, and `M-x glasspane' have a real
+screen behind them from the first rung — G3 swaps the builder for the
+ported glasspane-ui home without touching the registration."
+  (jetpacs-chrome-screen
+   glasspane-title
+   (jetpacs-column
+    (jetpacs-text "Glasspane" :style "headline")
+    (jetpacs-text "Org knowledge on Jetpacs — rebuild in progress."
+                  :style "body")
+    (jetpacs-text "Ladder: docs/PLAN-glasspane-app.md (G0 landed)."
+                  :style "label" :color "muted")
+    :spacing 8)
+   :back back))
+
+;;;; Verbs
+
+(defun glasspane--on-home (_args params)
+  "Return to the root screen (the dock row's second tap)."
+  (let ((surface (plist-get params :surface)))
+    (jetpacs-flow-continue
+     (lambda ()
+       (jetpacs-chrome-reset-screens (or surface glasspane-owner))))
+    'accepted))
+
+;;;; App identity
+
+(defun glasspane--dock-items (surface)
+  "The app's dock destination, in the chrome seam's item shape.
+A function so `:selected' tracks SURFACE (jetpacs-m3-core.el:1195's
+rationale); the tap rides the GLOBAL `jetpacs.launcher.open' because it
+arrives from whatever surface the user is looking at."
+  (let ((home (jetpacs-shell-surface-for glasspane-owner)))
+    (list (list :label glasspane-title
+                :icon glasspane-icon
+                :on-tap (jetpacs-action "jetpacs.launcher.open"
+                                        :args (list :surface home))
+                :selected (equal surface home)))))
+
+(defun glasspane-register ()
+  "Register the owner's verbs, the chrome root, and the app identity.
+Idempotent: re-evaluation replaces the handlers and RESETS the screen
+stack to home — the live-reload path; `jetpacs-defapp' replaces its
+registry entry in place."
+  (with-jetpacs-owner glasspane-owner
+    (jetpacs-defaction "glasspane.home" #'glasspane--on-home)
+    (jetpacs-chrome-define-root glasspane-owner "home"
+                                #'glasspane-home-screen))
+  ;; After the root exists: the app claims a surface that is really
+  ;; there, and its dock destination names one the launcher's
+  ;; membership guard recognizes (the M3 ordering).
+  (jetpacs-defapp glasspane-owner
+                  :label glasspane-title
+                  :icon glasspane-icon
+                  :surfaces (list glasspane-owner)
+                  :dock #'glasspane--dock-items))
+
+(defun glasspane-unregister ()
+  "Deregister the verbs, the chrome root, and the app identity."
+  (jetpacs-undefaction "glasspane.home")
+  (jetpacs-apps-unregister glasspane-owner)
+  (jetpacs-chrome-remove glasspane-owner))
+
+(glasspane-register)
+
+;;;###autoload
+(defun glasspane ()
+  "Open Glasspane on the device: reset its stack to the home screen."
+  (interactive)
+  (jetpacs-chrome-reset-screens glasspane-owner))
+
+(defun glasspane-unload-function ()
+  "Unload hygiene: drop the verbs, the chrome root, and the identity."
+  (glasspane-unregister)
+  nil)
+
+(provide 'glasspane)
+;;; glasspane.el ends here

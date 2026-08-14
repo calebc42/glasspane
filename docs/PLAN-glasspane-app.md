@@ -1,6 +1,6 @@
 # Glasspane app rebuild ladder (v1 → v3 port)
 
-Status: PLANNED — no rung landed. The completion ladder
+Status: G0 LANDED 2026-08-13 (skeleton/registration/harness; gate 4/4, full suite 927/41). Next: G1 (data layer). The completion ladder
 (PLAN-glasspane-completion.md, R0–R5) is closed on the foundation side;
 this plan is the app itself. Source: the 22-file v1 app at
 `llm-poc/jetpacs-v1-examples/glasspane/emacs/apps/glasspane/` (8,522

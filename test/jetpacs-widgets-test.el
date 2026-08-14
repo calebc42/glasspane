@@ -1016,5 +1016,40 @@ Undocumented until now, which is why callers reached for
   (should-error (jetpacs-wire-id (make-string 101 ?p) "n"))
   (should-error (jetpacs-wire-id "p" 42)))
 
+(ert-deftest jetpacs-widgets/capture-field-keyword-twin ()
+  "Building with :capture-fields makes the echoed `:fields' key findable.
+The G9 device defect: ebp decodes under a throwaway `obarray' and
+`ebp--remap-decoded' re-homes a keyword only when a global twin exists,
+so a runtime-minted field id (`jetpacs-wire-id') came back as a
+throwaway keyword `plist-get' could never match — the capture headline
+silently landed as \"\".  The builders' validation helper now interns
+the twin at build time.  This test replays the real conditions: parse
+the conclusion JSON under a throwaway obarray, re-home, extract."
+  (require 'ebp)
+  (let* ((id (jetpacs-wire-id "capf" "Twin Test Prompt"))
+         (name (concat ":" id)))
+    ;; Preclude a stale global twin faking the pass: the mint is
+    ;; deterministic, so unintern any twin a previous run left behind.
+    (unintern name obarray)
+    (cl-flet ((echoed-fields ()
+                ;; The Companion's conclusion, decoded as ebp-connect
+                ;; decodes it: json plist keys interned under a
+                ;; throwaway `obarray', then re-homed.
+                (let* ((json (format "{%S:\"Ship it\"}" id))
+                       (decoded (let ((obarray (obarray-make)))
+                                  (json-parse-string
+                                   json :object-type 'plist
+                                   :null-object nil
+                                   :false-object :json-false))))
+                  (ebp--remap-decoded decoded))))
+      ;; Without the build step the key stays throwaway: the defect.
+      (should-not (plist-get (echoed-fields) (intern name)))
+      (unintern name obarray)
+      ;; Building the submit action interns the twin; the same decode
+      ;; now re-homes onto it and extraction sees the value.
+      (jetpacs-dialog-submit :capture-fields (list id))
+      (should (equal "Ship it"
+                     (plist-get (echoed-fields) (intern name)))))))
+
 (provide 'jetpacs-widgets-test)
 ;;; jetpacs-widgets-test.el ends here

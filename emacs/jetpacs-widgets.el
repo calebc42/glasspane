@@ -219,10 +219,20 @@ Runs VAL-FN on each (KEY VALUE); WHAT names the field."
     (_ nil)))
 
 (defun jetpacs--check-capture-fields (fields)
-  "Signal an error unless FIELDS is a list of DISTINCT §4.4 identifiers (§14.1)."
+  "Signal an error unless FIELDS is a list of DISTINCT §4.4 identifiers (§14.1).
+Interns each id's keyword twin as a side effect: the conclusion echoes
+these ids back as `:fields' plist keys, and ebp's decode re-homes a
+keyword onto the global obarray ONLY when a global twin already exists
+\(`ebp--remap-decoded'; SPEC 23.5 keeps peer-invented names throwaway).
+An id minted at runtime (`jetpacs-wire-id') has no source-literal
+keyword, so without this the echoed key stays throwaway-interned and
+`plist-get' can never find it.  Growth is bounded by ids the app itself
+authors into specs — never by the peer."
   (unless (listp fields)
     (error "jetpacs: capture_fields must be a list of id strings (SPEC 14.1), got %S" fields))
-  (dolist (f fields) (jetpacs-check-identifier f "capture field"))
+  (dolist (f fields)
+    (jetpacs-check-identifier f "capture field")
+    (intern (concat ":" f)))
   (unless (= (length fields) (length (delete-dups (copy-sequence fields))))
     (error "jetpacs: capture_fields must be distinct (SPEC 14.1), got %S" fields)))
 

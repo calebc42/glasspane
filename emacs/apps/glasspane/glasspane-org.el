@@ -82,13 +82,23 @@ suppressed so the caller's explicit repush isn't doubled."
 ;; device can tap.
 
 (defun glasspane-org--agenda-scope ()
-  "The agenda file scope: anchored, local, existing — possibly empty.
+  "The agenda file scope: anchored, local, existing FILES — possibly empty.
 Never the `org-agenda-files' FUNCTION: it stats raw entries (one
 remote entry dials TRAMP inside the socket filter) and its
 missing-file path prompts — the foundation's P1-5/P1-7 rulings
-\(ebp-org.el:144-170,1220-1236).  Callers treat nil as \"no items\",
-never as \"current buffer\"."
-  (cl-remove-if-not #'file-exists-p (ebp-org-agenda-files)))
+\(ebp-org.el:144-170,1220-1236).  A DIRECTORY entry expands to the org
+files inside it, org's own semantics (emacs-30.1 org.el
+`org-agenda-files' maps `directory-files' over dir entries) — the
+managed config's default IS the whole `org-directory', and handing the
+raw dir to `org-map-entries' visits it as dired and answers nothing
+\(the G9 device catch: Agenda full, Tasks empty, same corpus).  Safe
+here because `ebp-org-agenda-files' already dropped remote entries.
+Callers treat nil as \"no items\", never as \"current buffer\"."
+  (cl-mapcan (lambda (entry)
+               (cond ((file-directory-p entry)
+                      (directory-files entry t org-agenda-file-regexp))
+                     ((file-exists-p entry) (list entry))))
+             (ebp-org-agenda-files)))
 
 (defun glasspane-org--agenda-items (&optional span start-day)
   "Extract agenda items for SPAN (\\='day, \\='week, or \\='month).

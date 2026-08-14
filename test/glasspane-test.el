@@ -71,13 +71,18 @@ so suite order never matters."
             ;; and unregister must agree on what "glasspane" owns.
             (should-not (jetpacs--owner-of "action" name)))
           (should-not (assoc glasspane-owner jetpacs-apps--registry))
-          (should-not (alist-get "Packages" jetpacs-settings-registry
-                                 nil nil #'equal)))
+          ;; §3 step 2: the app's ONE consolidated section sweeps with
+          ;; it — and the foundation's org sections must SURVIVE the
+          ;; app's unregister (they are not glasspane's to sweep).
+          (should-not (alist-get "Glasspane" jetpacs-settings-registry
+                                 nil nil #'equal))
+          (should (alist-get "Org Workflow" jetpacs-settings-registry
+                             nil nil #'equal)))
       (glasspane-register))
     (dolist (name verbs)
       (should (gethash name jetpacs-action-handlers))
       (should (equal (jetpacs--owner-of "action" name) glasspane-owner)))
-    (should (alist-get "Packages" jetpacs-settings-registry
+    (should (alist-get "Glasspane" jetpacs-settings-registry
                        nil nil #'equal))))
 
 ;;;; G1 — data layer: glasspane-org.el
@@ -874,10 +879,13 @@ install."
         (should (= ensures 1))))))
 
 (ert-deftest glasspane-test-packages-settings-registered ()
-  "`glasspane-register' (run at the entry's load) registered the
-Packages section: the auto-install row is present with a label, and
+  "The auto-install row lives in the CONSOLIDATED \"Glasspane\"
+section (§3 step 2): glasspane-packages registers no section of its
+own anymore, the row is present with a label under the app block, and
 the symbol's boolean custom-type is what derives its switch."
-  (let ((entries (alist-get "Packages" jetpacs-settings-registry
+  (should-not (alist-get "Packages" jetpacs-settings-registry
+                         nil nil #'equal))
+  (let ((entries (alist-get "Glasspane" jetpacs-settings-registry
                             nil nil #'equal)))
     (should entries)
     (let ((entry (assq 'glasspane-packages-auto-install entries)))
@@ -888,44 +896,14 @@ the symbol's boolean custom-type is what derives its switch."
 
 ;;;; G3 — keystone: glasspane-ui.el
 
-(ert-deftest glasspane-test-ui-todo-sequences ()
-  "The pure TODO-keyword helpers: the explicit-bar split, org's
-last-keyword-is-finished rule for bar-less sequences, and the
-fast-access-key strip in the flat global list."
-  (require 'glasspane-ui)
-  (should (equal (glasspane-ui--split-todo-sequence
-                  '(sequence "TODO(t!)" "NEXT" "|" "DONE(d)"))
-                 (cons '("TODO(t!)" "NEXT") '("DONE(d)"))))
-  ;; No bar: the last keyword is the finished state.
-  (should (equal (glasspane-ui--split-todo-sequence
-                  '(sequence "TODO" "DONE"))
-                 (cons '("TODO") '("DONE"))))
-  ;; A single bar-less keyword IS the finished state.
-  (should (equal (glasspane-ui--split-todo-sequence '(sequence "DONE"))
-                 (cons nil '("DONE"))))
-  ;; An explicit bar with nothing after it: nothing is finished.
-  (should (equal (glasspane-ui--split-todo-sequence
-                  '(sequence "TODO" "|"))
-                 (cons '("TODO") nil)))
-  ;; The flat global list strips fast keys, across sequence types.
-  (let ((org-todo-keywords '((sequence "TODO(t)" "|" "DONE(d!)")
-                             (type "BUG(b)" "FIXED"))))
-    (should (equal (glasspane-ui--global-todo-keywords)
-                   '("TODO" "DONE" "BUG" "FIXED")))))
-
 (ert-deftest glasspane-test-ui-settings-nodes ()
-  "Settings body shapes over stubbed org vars: tag options survive
-group markers and duplicates (the enum's build-time distinctness
-check), the enum site builds from enum-option nodes, and the body,
-the satellite link, and the pushed screen all round-trip the
-canonical wire encoding.  (The Display render block died with the §3
-relocation: `jetpacs-line-numbers' is a plain schema row in
-device/init.el's Appearance section now.)"
+  "Settings body shapes: the app screen is the saved searches ALONE
+after §3 step 2 (the TODO/tags editors are the foundation's Org
+workflow satellite now — jetpacs-org-settings-test.el owns them), and
+the body, the satellite link, and the pushed screen all round-trip
+the canonical wire encoding."
   (require 'glasspane-ui)
-  (let ((org-tag-alist '(("home" . ?h) (:startgroup) "work" "home"))
-        (glasspane-org-custom-agendas '(("Errands" . "tags:errand")))
-        (org-todo-keywords '((sequence "TODO(t)" "|" "DONE"))))
-    (should (equal (glasspane-ui--tag-options) '("home" "work")))
+  (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand"))))
     (let* ((body (glasspane-ui--settings-body))
            (json (jetpacs-node->canonical-json body)))
       (should (equal (plist-get body :t) "lazy_column"))
@@ -933,16 +911,14 @@ device/init.el's Appearance section now.)"
       (should (string-search "tags:errand" json))
       (should (string-search "settings.agenda.edit" json))
       (should (string-search "settings.agenda.delete" json))
-      ;; The sequence card shows bare keywords, active | finished.
-      (should (string-search "Sequence 1" json))
-      (should (string-search "TODO | DONE" json))
-      (should (string-search "settings.todo.edit" json))
-      ;; The tags enum: chips seeded all-selected, additions allowed.
-      (should (string-search "\"settings-tags\"" json))
-      (should (string-search "\"allow_add\":true" json)))
+      ;; The moved editors must NOT resurface here.
+      (should-not (string-search "Sequence 1" json))
+      (should-not (string-search "settings.todo" json))
+      (should-not (string-search "org-tags" json)))
     (let ((json (jetpacs-node->canonical-json
                  (glasspane-ui--settings-link))))
-      (should (string-search "glasspane.settings.open" json)))
+      (should (string-search "glasspane.settings.open" json))
+      (should (string-search "Saved searches" json)))
     (let ((screen (glasspane-ui--settings-screen nil)))
       (should (equal (plist-get screen :t) "scaffold"))
       (should (stringp (jetpacs-node->canonical-json screen))))))
@@ -1002,15 +978,18 @@ the registry."
   (glasspane-ui-register)
   (unwind-protect
       (progn
-	;; The app section survives the §3 relocation with exactly its
-	;; one app-opinion row: the babel timeout, plain (no after-set).
+	;; The app section is the §3 step-2 CONSOLIDATION: babel timeout,
+	;; journal landing, and packages auto-install in ONE "Glasspane"
+	;; block — one registration site (here), three sibling defcustoms,
+	;; all plain (none feeds a memoised extraction).
 	(let ((entries (alist-get "Glasspane" jetpacs-settings-registry
 				  nil nil #'equal)))
 	  (should entries)
-	  (should (assq 'glasspane-babel-timeout entries))
-	  (should-not (plist-get
-		       (cdr (assq 'glasspane-babel-timeout entries))
-		       :after-set)))
+	  (dolist (sym '(glasspane-babel-timeout
+			 glasspane-journal-landing
+			 glasspane-packages-auto-install))
+	    (should (assq sym entries))
+	    (should-not (plist-get (cdr (assq sym entries)) :after-set))))
 	(glasspane-ui-register)
 	(should (= 1 (cl-count #'glasspane-ui--settings-link
                                jetpacs-settings-links :key #'cadr)))
@@ -1019,7 +998,7 @@ the registry."
               (glasspane-ui-agenda-anchor "2020-01-01")
               (glasspane-ui-agenda-selected-date "2020-01-02")
               (glasspane-ui--files-filter "old")
-              (glasspane-ui--settings-dialog nil)
+              (jetpacs-settings--dialog nil)
               (org-tag-alist '(("home" . ?h)))
               (org-todo-keywords '((sequence "TODO" "|" "DONE")))
               (saved nil) (continuations nil) (pushes 0))
@@ -1042,27 +1021,10 @@ the registry."
               ;; The whole table answers statuses on bare nil/nil input.
               (dolist (name glasspane-ui--verbs)
 		(should (memq (run name nil nil) '(accepted stale rejected))))
-              ;; settings.tags: vector rebuilds keeping fast-select conses;
-              ;; wrong shapes reject.
-              (should (eq (run "settings.tags" '(:value ["work" "home"]))
-			  'accepted))
-              (should (equal org-tag-alist '("work" ("home" . ?h))))
-              (should (assq 'org-tag-alist saved))
-              ;; Deselecting every chip is a well-formed no-op: accepted,
-              ;; nothing written, alist untouched (the chips re-seed from it).
-              (setq saved (assq-delete-all 'org-tag-alist saved))
-              (should (eq (run "settings.tags" '(:value [])) 'accepted))
-              (should-not (assq 'org-tag-alist saved))
-              (should (equal org-tag-alist '("work" ("home" . ?h))))
-              (should (eq (run "settings.tags" '(:value 42)) 'rejected))
-              (should (eq (run "settings.tags" '(:value ["x" 5])) 'rejected))
-              ;; settings.todo.edit: float index coerces; a vanished index is
-              ;; stale; a well-formed tap without a client cannot present.
-              (should (eq (run "settings.todo.edit" '(:index 99)) 'stale))
-              (should (eq (run "settings.todo.edit" '(:index "x")) 'rejected))
-              (should (eq (run "settings.todo.edit" '(:index 0)) 'rejected))
-              (should (eq (run "settings.todo.edit" '(:index -1.0)) 'rejected))
-              ;; settings.agenda.edit: dialog verb — same no-client refusal.
+              ;; (The settings.tags / settings.todo.* arms left with §3
+              ;; step 2 — jetpacs-org-settings-test.el covers the
+              ;; foundation's jetpacs.org.* family now.)
+              ;; settings.agenda.edit: dialog verb — no-client refusal.
               (should (eq (run "settings.agenda.edit" '(:name 42)) 'rejected))
               (should (eq (run "settings.agenda.edit" '(:name "Errands"))
 			  'rejected))
@@ -1119,32 +1081,10 @@ the registry."
               ;; file lives inside a continuation the stub never runs, so
               ;; nothing above may have pushed inside a dispatch extent.
               (should (zerop pushes))
-              ;; The dialog slot is single-writer: a second show abandons the
-              ;; first, and the first's late conclusion (the abandon's 1301)
-              ;; must not clear the LIVE slot.
-              (let ((ids '("req-1" "req-2")) (abandoned nil) (shown nil))
-		(cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
-			  ((symbol-function 'ebp-client-abandon)
-			   (lambda (_c id) (push id abandoned)))
-			  ((symbol-function 'ebp-client-dialog-show)
-			   (lambda (_c _id _spec &rest kw)
-			     (push (plist-get kw :callback) shown)
-			     (pop ids))))
-		  (glasspane-ui--show-dialog "d" nil :params '(:surface "s1"))
-		  (glasspane-ui--show-dialog "d" nil :params '(:surface "s2"))
-		  (let ((first-callback (cadr shown))) ; SHOWN is push-ordered
-		    (should (equal abandoned '("req-1")))
-		    (should (equal (plist-get glasspane-ui--settings-dialog
-                                              :request-id)
-				   "req-2"))
-		    (funcall first-callback "error" nil '(:code 1301))
-		    (should (equal (plist-get glasspane-ui--settings-dialog
-                                              :request-id)
-				   "req-2"))
-		    (should (equal (plist-get glasspane-ui--settings-dialog :params)
-				   '(:surface "s2")))
-		    (funcall (car shown) "dismissed" nil nil)
-		    (should-not glasspane-ui--settings-dialog))))))))
+              ;; (The one-live-dialog slot is the foundation's now —
+              ;; jetpacs-settings-test.el owns its single-writer and
+              ;; identity-guard coverage.)
+              ))))
     ;; The unregister sweep — its own gate, and the teardown this
     ;; batch process would otherwise carry into every later test: the
     ;; org-clock hooks, the teardown hook, and the Settings link.
@@ -2178,16 +2118,16 @@ the archive token in the disjoint \"glasspane-SET\" name the base
 (ert-deftest glasspane-test-agenda-handler-matrix ()
   "Every G5 agenda verb, funcalled from the handler table with plist
 args and no client, answers a SPEC 14.4 status — then the sharp edges:
-the single-writer defvars, month-clamped nav, settings.todo.save's
-stale index, the empty-sequence reject, the last-sequence delete
-fallback, the deferred open pushes, and the reminder sync's grant
-gate + suppress cache."
+the single-writer defvars, month-clamped nav, the deferred open
+pushes, and the reminder sync's grant gate + suppress cache.  (The
+TODO-sequence writers left with §3 step 2 — the foundation suite owns
+their arms now.)"
   (glasspane-agenda-register)
   (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")))
         (glasspane-agenda--mode "day")
         (glasspane-agenda--tasks-filter "ALL")
         (glasspane-ui-agenda-anchor nil)
-        (glasspane-ui--settings-dialog nil)
+        (jetpacs-settings--dialog nil)
         (org-todo-keywords '((sequence "TODO" "|" "DONE")))
         (saved nil) (continuations nil))
     (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
@@ -2235,43 +2175,6 @@ gate + suppress cache."
         (should (eq (run "tasks.filter" '(:filter "DONE")) 'accepted))
         (should (equal glasspane-agenda--tasks-filter "DONE"))
         (should (eq (run "tasks.filter" '(:filter 5)) 'rejected))
-        ;; settings.todo.save: captured fields, no ui-state round trip.
-        (should (eq (run "settings.todo.save"
-                         '(:index 0 :type "sequence")
-                         '(:fields (:todo-active "TODO, DOING"
-                                    :todo-finished "DONE")))
-                    'accepted))
-        (should (equal (cdr (assq 'org-todo-keywords saved))
-                       '((sequence "TODO" "DOING" "|" "DONE"))))
-        ;; Stale index: the list changed while the dialog was up.
-        (should (eq (run "settings.todo.save"
-                         '(:index 99 :type "sequence")
-                         '(:fields (:todo-active "TODO")))
-                    'stale))
-        ;; A sequence needs at least one state; junk index rejects.
-        (should (eq (run "settings.todo.save"
-                         '(:index 0 :type "sequence")
-                         '(:fields (:todo-active " , " :todo-finished "")))
-                    'rejected))
-        (should (eq (run "settings.todo.save"
-                         '(:index "x" :type "sequence")
-                         '(:fields (:todo-active "TODO")))
-                    'rejected))
-        ;; Index -1 appends a new sequence.
-        (should (eq (run "settings.todo.save"
-                         '(:index -1 :type "type")
-                         '(:fields (:todo-active "BUG, FEATURE")))
-                    'accepted))
-        (should (= (length (default-value 'org-todo-keywords)) 2))
-        (should (equal (nth 1 (default-value 'org-todo-keywords))
-                       '(type "BUG" "FEATURE")))
-        ;; settings.todo.delete: out-of-range is stale; deleting the
-        ;; last sequence falls back to the stock one.
-        (should (eq (run "settings.todo.delete" '(:index 9)) 'stale))
-        (should (eq (run "settings.todo.delete" '(:index 1)) 'accepted))
-        (should (eq (run "settings.todo.delete" '(:index 0)) 'accepted))
-        (should (equal (default-value 'org-todo-keywords)
-                       '((sequence "TODO" "|" "DONE"))))
         ;; The open verbs park their pushes past the dispatch extent.
         (let ((before (length continuations)))
           (should (eq (run "agenda.open" nil '(:surface "glasspane"))
@@ -2416,7 +2319,9 @@ capture rejects empty input and answers `accepted' only once the
 append is ON DISK, open defers its push (D2) — and the unregister
 sweep leaves no handler and no settings section behind."
   (glasspane-journal-register)
-  (should (alist-get "Journal" jetpacs-settings-registry nil nil #'equal))
+  ;; §3 step 2 consolidation: journal registers NO section of its own;
+  ;; the landing row lives in glasspane-ui's "Glasspane" block.
+  (should-not (alist-get "Journal" jetpacs-settings-registry nil nil #'equal))
   (let* ((vault (glasspane-test--journal-vault))
          (org-directory vault)
          (org-agenda-files nil)
@@ -4593,9 +4498,11 @@ fires from Glasspane's own surfaces must still be refused there."
               ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
               ((symbol-function 'jetpacs-flow-continue) (lambda (_fn) nil)))
       (let ((org-tag-alist '(("home" . ?h))))
-        ;; The tags arm is the biting one: it answers accepted now and
-        ;; rejected the moment `:any-surface' is dropped.
-        (should (eq (dispatch "settings.tags" '(:value ["work"])
+        ;; The moved editors are OWNERLESS foundation verbs now (§3
+        ;; step 2): gate-exempt by construction, no `:any-surface'
+        ;; involved — the same dispatch proves they answer from a
+        ;; surface nobody owns them on.
+        (should (eq (dispatch "jetpacs.org.tags" '(:value ["work"])
                               "app:jetpacs.settings")
                     'accepted))
         (should (eq (dispatch "glasspane.settings.open" nil
@@ -4608,11 +4515,17 @@ fires from Glasspane's own surfaces must still be refused there."
         (should (eq (dispatch "journal.open" nil "app:jetpacs.settings")
                     'rejected)))))
   ;; The registry side of the same rule, verb by verb.
-  (dolist (name '("glasspane.settings.open" "settings.tags"
-                  "settings.todo.edit"
+  (dolist (name '("glasspane.settings.open"
                   "settings.agenda.edit" "settings.agenda.delete"
                   "ef.show"))
     (should (gethash name jetpacs--any-surface-actions)))
+  ;; The moved family must NOT be in the any-surface set: ownerless
+  ;; registration made the whole dance unnecessary (§3 step 2).
+  (dolist (name '("jetpacs.org.tags" "jetpacs.org.todo.edit"
+                  "jetpacs.org.todo.save" "jetpacs.org.todo.delete"
+                  "jetpacs.org.workflow.open"))
+    (should (gethash name jetpacs-action-handlers))
+    (should-not (gethash name jetpacs--any-surface-actions)))
   ;; The dialog conclusions carry no surface at all, and the agenda and
   ;; files verbs fire from this owner's own screens: owner-scoped.
   (dolist (name '("settings.agenda.save" "agenda.save-custom"
@@ -4937,8 +4850,7 @@ glasspane-gallery at orders 81 and 84, beside the app's own 80.")
     "org.table.cell-menu" "org.table.edit" "search.by-tag"
     "search.clear-filters" "search.update-filter"
     "settings.agenda.delete" "settings.agenda.edit"
-    "settings.agenda.save" "settings.tags"
-    "settings.todo.delete" "settings.todo.edit" "settings.todo.save"
+    "settings.agenda.save"
     "share.text" "srs.answer.page" "srs.answer.show" "srs.item.create"
     "srs.postpone" "srs.quit" "srs.rate" "srs.review.start"
     "srs.suspend" "srs.undo" "tasks.filter" "views.cal.select-date"

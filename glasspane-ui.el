@@ -356,68 +356,12 @@ given SET."
                 (if tok (cons (cons 'token tok) it) it)))
             items)))
 
-;;;; TODO keyword helpers (pure)
-
-(defun glasspane-ui--bare-keyword (word)
-  "WORD without its fast-access annotation: \"TODO(t!)\" -> \"TODO\"."
-  (if (string-match "^\\([a-zA-Z0-9_-]+\\)" word)
-      (match-string 1 word)
-    word))
-
-(defun glasspane-ui--global-todo-keywords ()
-  "Flat list of all global TODO keywords from `org-todo-keywords'."
-  (let ((kws nil))
-    (dolist (seq (default-value 'org-todo-keywords))
-      (dolist (w (cdr seq))
-        (unless (string-equal w "|")
-          (push (glasspane-ui--bare-keyword w) kws))))
-    (nreverse kws)))
-
-(defun glasspane-ui--split-todo-sequence (seq)
-  "Split `org-todo-keywords' entry SEQ into (ACTIVE . FINISHED) lists.
-Keywords keep their fast-access annotations (\"TODO(t!)\").  Mirrors
-org's rule for sequences without an explicit \"|\": the last keyword
-is the finished state."
-  (let ((words (cdr seq))
-        (active nil)
-        (finished nil)
-        (target 'active))
-    (dolist (w words)
-      (if (equal w "|")
-          (setq target 'finished)
-        (if (eq target 'active)
-            (push w active)
-          (push w finished))))
-    (setq active (nreverse active)
-          finished (nreverse finished))
-    (when (and (null finished) (not (member "|" words)))
-      (setq finished (last active)
-            active (butlast active)))
-    (cons active finished)))
-
 ;;;; Settings nodes
-
-(defun glasspane-ui--tag-options ()
-  "The global tag names from `org-tag-alist', strings only, distinct.
-Group markers (`:startgroup' and friends) are cons-free symbols the
-enum cannot carry; duplicates would fail the widget's SPEC 4.3
-distinctness check at build time."
-  (cl-remove-duplicates
-   (cl-remove-if-not #'stringp
-                     (mapcar (lambda (x) (if (consp x) (car x) x))
-                             org-tag-alist))
-   :test #'equal :from-end t))
-
-(defun glasspane-ui--tags-enum ()
-  "The editable global-tags chip list."
-  (let ((tags (glasspane-ui--tag-options)))
-    (jetpacs-enum-list "settings-tags"
-                       (mapcar (lambda (tg) (jetpacs-enum-option tg tg))
-                               tags)
-                       :value tags
-                       :multi-select t
-                       :allow-add t
-                       :on-change (jetpacs-action "settings.tags"))))
+;;
+;; The TODO-sequence and tag editors left with §3 step 2: they manage
+;; org's own state and live in jetpacs-org-settings.el now, behind the
+;; foundation's "Org workflow" satellite.  What remains here is the one
+;; managed UI that is genuinely app opinion — the saved searches.
 
 (defun glasspane-ui--agenda-card (name query)
   "One saved-search card with its edit/delete affordances."
@@ -442,56 +386,14 @@ distinctness check at build time."
                           :content-description "Delete search")
      :align "center"))))
 
-(defun glasspane-ui--sequence-cards ()
-  "One card per global TODO sequence, with edit/delete affordances.
-The error arm costs the section, never the screen — and shows the
-SPEC 23.3 label, not the raw error text."
-  (condition-case err
-      (cl-loop for seq in (or (default-value 'org-todo-keywords)
-                              '((sequence "TODO" "DONE")))
-               for i from 0
-               collect
-               (let* ((split (glasspane-ui--split-todo-sequence seq))
-                      (active (mapcar #'glasspane-ui--bare-keyword
-                                      (car split)))
-                      (finished (mapcar #'glasspane-ui--bare-keyword
-                                        (cdr split))))
-                 (jetpacs-card
-                  (list
-                   (jetpacs-row
-                    (jetpacs-with-attrs
-                     (jetpacs-column
-                      (jetpacs-text (format "Sequence %d" (1+ i))
-                                    :style "label")
-                      (jetpacs-text
-                       (concat (mapconcat #'identity active ", ")
-                               " | "
-                               (mapconcat #'identity finished ", "))
-                       :style "body")
-                      :spacing 2)
-                     :weight 1)
-                    (jetpacs-icon-button
-                     "edit"
-                     (jetpacs-action "settings.todo.edit"
-                                     :args (list :index i))
-                     :content-description "Edit sequence")
-                    (jetpacs-icon-button
-                     "delete"
-                     (jetpacs-action "settings.todo.delete"
-                                     :args (list :index i))
-                     :content-description "Delete sequence")
-                    :align "center")))))
-    (error (list (jetpacs-text (format "Error loading sequences: %s"
-                                       (jetpacs-error-label err))
-                               :style "caption")))))
-
 (defun glasspane-ui--settings-body ()
-  "The app settings screen body.
+  "The app settings screen body: the saved searches, nothing else.
 The org/calendar schema sections live on the Settings ROOT with the
-foundation that registers them (jetpacs-org-settings.el, the §3
-relocation) — this screen holds only what needs authored management
-UI.  lazy_column, not column: the scaffold body has no scroll
-container on the client."
+foundation that registers them, and the TODO-sequence/tags editors
+behind its \"Org workflow\" satellite (jetpacs-org-settings.el, §3
+steps 1-2) — this screen holds only the app's own managed UI.
+lazy_column, not column: the scaffold body has no scroll container on
+the client."
   (apply #'jetpacs-lazy-column
          (append
           (list (jetpacs-section-header "Saved Searches")
@@ -502,23 +404,7 @@ container on the client."
                   glasspane-org-custom-agendas)
           (list (jetpacs-button "New Saved Search"
                                 (jetpacs-action "settings.agenda.edit")
-                                :variant "outlined")
-                (jetpacs-divider)
-                (jetpacs-section-header "Global TODO Sequences")
-                (jetpacs-text
-                 "Manage your global TODO states and workflows."
-                 :style "caption"))
-          (glasspane-ui--sequence-cards)
-          (list (jetpacs-button "Add Sequence"
-                                (jetpacs-action "settings.todo.edit"
-                                                :args (list :index -1))
-                                :variant "outlined")
-                (jetpacs-divider)
-                (jetpacs-section-header "Global Org Tags")
-                (jetpacs-text
-                 "Manage the global tag list (org-tag-alist)."
-                 :style "caption")
-                (glasspane-ui--tags-enum)))))
+                                :variant "outlined")))))
 
 (defun glasspane-ui--settings-screen (back)
   "The pushed Glasspane settings screen."
@@ -528,127 +414,24 @@ container on the client."
 (defun glasspane-ui--settings-link ()
   "The Settings-root satellite row leading to the app settings screen."
   (jetpacs-chrome-row "Glasspane"
-                      :subtitle "Saved searches, TODO workflows, org tags"
+                      :subtitle "Saved searches"
                       :icon "menu_book"
                       :on-tap (jetpacs-action "glasspane.settings.open")
                       :key "glasspane-settings-link"))
 
 ;;;; Dialogs (S3 — one shape: ebp-client-dialog-show + captured fields)
-
-(defvar glasspane-ui--settings-dialog nil
-  "The live settings dialog, (:request-id ID :params PARAMS), or nil.
-PARAMS are the OPENING event's — a Save/Delete fired from inside the
-dialog arrives in dialog context with no `:surface' (SPEC 14.4), so
-its refresh needs the surface the dialog was opened from.")
-
-(defun glasspane-ui-settings-dialog-close ()
-  "Retire the live settings dialog (the S3 handler-side dismissal).
-`ebp-client-abandon' sends rpc.cancel; the Companion concludes the
-dialog with error 1301, which the show callback treats as a no-op."
-  (let ((sheet glasspane-ui--settings-dialog))
-    (setq glasspane-ui--settings-dialog nil)
-    (when-let* ((client (jetpacs-client))
-                (request-id (plist-get sheet :request-id)))
-      (ignore-errors (ebp-client-abandon client request-id)))))
-
-(cl-defun glasspane-ui--show-dialog (id spec &key params on-submit)
-  "Show SPEC as dialog ID; stash the request for handler-side abandon.
-ON-SUBMIT, when given, receives the conclusion's `:fields' plist —
-the `jetpacs-dialog-submit' route; dialogs whose Save is a remote
-action instead conclude through `glasspane-ui-settings-dialog-close'
-in that action's handler.  Nowhere else shows settings dialogs, so
-one live request slot is enough."
-  (when-let* ((client (jetpacs-client)))
-    ;; The slot holds ONE request and this is its only writer, so a
-    ;; still-live prior dialog is abandoned here rather than orphaned
-    ;; (its device dialog would otherwise linger with no way back to
-    ;; it), and each callback clears only its own id: the first show's
-    ;; 1301 must not clear the second show's slot, or the Save handler
-    ;; finds no request to close and loses the origin params.  CELL
-    ;; carries the id into the callback, which cannot close over
-    ;; REQUEST-ID — the show that returns it is that binding's init.
-    (glasspane-ui-settings-dialog-close)
-    (let* ((cell (list nil))
-           (request-id
-            (ebp-client-dialog-show
-             client id spec
-             :callback
-             (lambda (status result _error)
-               ;; Dismissal and the abandon's 1301 both land here.
-               (when (equal (plist-get glasspane-ui--settings-dialog
-                                       :request-id)
-                            (car cell))
-                 (setq glasspane-ui--settings-dialog nil))
-               ;; Outside the identity guard: a submitted conclusion
-               ;; runs its handler whoever owns the slot by then.
-               (when (and on-submit (equal status "submitted"))
-                 (funcall on-submit (plist-get result :fields)))))))
-      (when request-id
-        (setcar cell request-id)
-        (setq glasspane-ui--settings-dialog
-              (list :request-id request-id :params params))))))
-
-(defun glasspane-ui--show-todo-dialog (idx params)
-  "Show the TODO-sequence editor for sequence IDX (-1 = new).
-The sequence is re-read HERE, not in the dispatching handler: the
-show runs deferred, and the list may have changed in between."
-  (let* ((seqs (or (default-value 'org-todo-keywords)
-                   '((sequence "TODO" "DONE"))))
-         (seq (if (>= idx 0) (nth idx seqs) '(sequence "TODO" "|" "DONE"))))
-    (if (null seq)
-        (jetpacs-toast "That sequence no longer exists")
-      ;; Raw keyword strings, fast-access keys and all ("TODO(t!)"),
-      ;; so an untouched save round-trips losslessly.  Seeding is the
-      ;; field's `:value' (S2): no state round-trip — the Save action
-      ;; captures the fields and echoes them back in its event.
-      (let* ((type (car seq))
-             (split (glasspane-ui--split-todo-sequence seq))
-             (active (mapconcat #'identity (car split) ", "))
-             (finished (mapconcat #'identity (cdr split) ", ")))
-        (glasspane-ui--show-dialog
-         "glasspane-todo-edit"
-         (apply #'jetpacs-column
-                (append
-                 (list
-                  (jetpacs-text (if (>= idx 0) "Edit Sequence" "New Sequence")
-                                :style "title")
-                  (jetpacs-text
-                   "Comma-separated states; fast keys like TODO(t) are kept."
-                   :style "caption")
-                  (jetpacs-text-input "todo-active" :label "Active States"
-                                      :value active :single-line t)
-                  (jetpacs-text-input "todo-finished"
-                                      :label "Finished States"
-                                      :value finished :single-line t)
-                  (apply #'jetpacs-row
-                         (append
-                          (list (jetpacs-spacer :weight 1))
-                          (when (>= idx 0)
-                            (list (jetpacs-button
-                                   "Delete"
-                                   (jetpacs-action "settings.todo.delete"
-                                                   :args (list :index idx))
-                                   :variant "text")))
-                          (list (jetpacs-button "Cancel"
-                                                (jetpacs-dialog-dismiss)
-                                                :variant "text")
-                                (jetpacs-spacer :width 8)
-                                (jetpacs-button
-                                 "Save"
-                                 (jetpacs-action
-                                  "settings.todo.save"
-                                  :args (list :index idx
-                                              :type (symbol-name type))
-                                  :capture-fields '("todo-active"
-                                                    "todo-finished")))))))
-                 (list :spacing 8)))
-         :params params)))))
+;;
+;; The one-live-dialog slot is the FOUNDATION's now
+;; (jetpacs-settings-show-dialog, §3 step 2): the app's saved-search
+;; editors share it with the org-workflow editors that moved out, and
+;; the agenda writers stopped reaching across modules into a private
+;; slot for their origin params.
 
 (defun glasspane-ui--show-agenda-dialog (name params)
   "Show the saved-search editor for NAME (nil = new)."
   (let ((query (or (and name (cdr (assoc name glasspane-org-custom-agendas)))
                    "")))
-    (glasspane-ui--show-dialog
+    (jetpacs-settings-show-dialog
      "glasspane-agenda-edit"
      (jetpacs-column
       (jetpacs-text (if name "Edit Saved Search" "New Saved Search")
@@ -693,7 +476,7 @@ show runs deferred, and the list may have changed in between."
 The v1 handler read the name with an inline `read-string' (ui:454);
 the v3 no-prompt regime forbids that in the dispatch extent, so the
 name is a captured dialog field and the save runs in the conclusion."
-  (glasspane-ui--show-dialog
+  (jetpacs-settings-show-dialog
    "glasspane-agenda-name"
    (jetpacs-column
     (jetpacs-text "Save Search" :style "title")
@@ -737,50 +520,6 @@ name is a captured dialog field and the save runs in the conclusion."
                          (jetpacs-error-label err))))))
     'accepted))
 
-(defun glasspane-ui--on-tags (args params)
-  "Rebuild `org-tag-alist' from the multi-select `:value' (a vector).
-Existing alist entries keep their fast-select keys.  Deselecting every
-chip sends a well-formed empty vector and writes nothing (the v1
-contract — clearing every chip is not a bulk delete): that is
-`accepted', with the deferred refresh re-seeding the chips from the
-untouched alist; `rejected' is reserved for non-sequence junk and
-non-string members."
-  (let ((val (plist-get args :value)))
-    (if (not (or (vectorp val) (proper-list-p val)))
-        'rejected
-      (let ((tags (append val nil)))
-        (if (not (cl-every #'stringp tags))
-            'rejected
-          (when tags
-            (setq org-tag-alist
-                  (mapcar (lambda (tg) (or (assoc tg org-tag-alist) tg))
-                          tags))
-            (jetpacs-settings-save-variable 'org-tag-alist org-tag-alist)
-            (jetpacs-shell-notify "Settings saved"))
-          (glasspane-ui--defer-refresh params)
-          'accepted)))))
-
-(defun glasspane-ui--on-todo-edit (args params)
-  "Open the sequence editor dialog for `:index' (-1 = new)."
-  (let ((idx (plist-get args :index)))
-    ;; A whole-valued integer can arrive as a float after the JSON
-    ;; round trip (org.json emits the trailing .0).
-    (when (numberp idx) (setq idx (truncate idx)))
-    (cond
-     ((not (integerp idx)) 'rejected)
-     ((and (>= idx 0)
-           (null (nth idx (or (default-value 'org-todo-keywords)
-                              '((sequence "TODO" "DONE"))))))
-      ;; The card outlived the list it was rendered from.
-      (jetpacs-toast "That sequence no longer exists")
-      (glasspane-ui--defer-refresh params)
-      'stale)
-     ((null (jetpacs-client)) 'rejected)
-     (t
-      (jetpacs-flow-continue
-       (lambda () (glasspane-ui--show-todo-dialog idx params)))
-      'accepted))))
-
 (defun glasspane-ui--on-agenda-edit (args params)
   "Open the saved-search editor dialog for `:name' (absent = new)."
   (let ((name (plist-get args :name)))
@@ -807,9 +546,8 @@ non-string members."
                                       glasspane-org-custom-agendas)
       ;; From the dialog's Delete this event has no :surface — refresh
       ;; where the dialog was opened, then retire it.
-      (let ((origin (or (plist-get glasspane-ui--settings-dialog :params)
-                        params)))
-        (glasspane-ui-settings-dialog-close)
+      (let ((origin (or (jetpacs-settings-dialog-params) params)))
+        (jetpacs-settings-dialog-close)
         (jetpacs-shell-notify (format "Deleted saved search: %s" name))
         (glasspane-ui--defer-refresh origin))
       'accepted))))
@@ -830,9 +568,8 @@ non-string members."
         (setq glasspane-org-custom-agendas
               (assoc-delete-all old-name glasspane-org-custom-agendas)))
       (glasspane-ui--save-agenda new-name query)
-      (let ((origin (or (plist-get glasspane-ui--settings-dialog :params)
-                        params)))
-        (glasspane-ui-settings-dialog-close)
+      (let ((origin (or (jetpacs-settings-dialog-params) params)))
+        (jetpacs-settings-dialog-close)
         (jetpacs-shell-notify "Saved custom agenda")
         (glasspane-ui--defer-refresh origin))
       'accepted)))
@@ -933,8 +670,6 @@ the time any teardown runs, the entry has long finished loading."
 
 (defconst glasspane-ui--verbs
   '("glasspane.settings.open"
-    "settings.tags"
-    "settings.todo.edit"
     "settings.agenda.edit"
     "settings.agenda.delete"
     "settings.agenda.save"
@@ -944,8 +679,9 @@ the time any teardown runs, the entry has long finished loading."
     "agenda.set-month"
     "files.filter")
   "The verbs this rung owns, for the register/unregister sweep.
-settings.todo.save/.delete live with the sequence writers (G5),
-search.clear-filters with the filter state it clears (G6),
+The TODO-sequence/tags verbs left with §3 step 2 (they are the
+foundation's ownerless jetpacs.org.* family now);
+search.clear-filters lives with the filter state it clears (G6),
 files.toggle-refile with the reader surfacing (G4).")
 
 (defun glasspane-ui-register ()
@@ -968,10 +704,6 @@ registry entries in place, and the link is re-added exactly once."
                        #'glasspane-ui--on-settings-open
                        :any-surface t
                        :doc "Open Glasspane's settings management screen")
-    (jetpacs-defaction "settings.tags" #'glasspane-ui--on-tags
-                       :any-surface t)
-    (jetpacs-defaction "settings.todo.edit" #'glasspane-ui--on-todo-edit
-                       :any-surface t)
     (jetpacs-defaction "settings.agenda.edit"
                        #'glasspane-ui--on-agenda-edit
                        :any-surface t)
@@ -988,15 +720,23 @@ registry entries in place, and the link is re-added exactly once."
     (jetpacs-defaction "agenda.set-month"
                        #'glasspane-ui--on-agenda-set-month)
     (jetpacs-defaction "files.filter" #'glasspane-ui--on-files-filter)
-    ;; The app's own section: the one row that stayed app-side through
-    ;; the §3 relocation (the org/calendar schema is
-    ;; jetpacs-org-settings.el's now, and `jetpacs-line-numbers'
-    ;; became a plain row in device/init.el's Appearance section).
-    ;; Plain: the timeout feeds no memoised extraction.
+    ;; The app's own section — CONSOLIDATED (§3 step 2's recorded
+    ;; opportunity): the three single-entry app sections (babel
+    ;; timeout here, Journal landing, Packages auto-install) collapse
+    ;; into ONE "Glasspane" section so the Settings root carries one
+    ;; app block, not three orphan headers.  The sibling defcustoms
+    ;; stay where they live; this is the single registration site, so
+    ;; glasspane-journal/glasspane-packages no longer register
+    ;; sections of their own.  All plain: none feeds a memoised
+    ;; extraction.
     (jetpacs-settings-register-section
      "Glasspane"
      (list (list 'glasspane-babel-timeout
-                 :label "Babel run timeout (s)")))
+                 :label "Babel run timeout (s)")
+           (list 'glasspane-journal-landing
+                 :label "Open on the journal")
+           (list 'glasspane-packages-auto-install
+                 :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)")))
     (setq jetpacs-settings-links
           (cl-remove #'glasspane-ui--settings-link jetpacs-settings-links
                      :key #'cadr))
@@ -1017,7 +757,7 @@ registry entries in place, and the link is re-added exactly once."
   (setq jetpacs-settings-links
         (cl-remove #'glasspane-ui--settings-link jetpacs-settings-links
                    :key #'cadr))
-  (glasspane-ui-settings-dialog-close)
+  (jetpacs-settings-dialog-close)
   (glasspane-ui-remove-hooks))
 
 (provide 'glasspane-ui)

@@ -13,5 +13,6 @@ adb shell mkdir -p /sdcard/Documents/jetpacs
 for f in emacs/*.el emacs/apps/*/*.el device/init.el; do
   adb push "$f" /sdcard/Documents/jetpacs/ >/dev/null
 done
+adb push org /sdcard/Documents/jetpacs/ >/dev/null
 echo "pushed $(ls emacs/*.el emacs/apps/*/*.el | wc -l) modules + init.el \
-to /sdcard/Documents/jetpacs/"
+and Org Mode seed assets to /sdcard/Documents/jetpacs/"

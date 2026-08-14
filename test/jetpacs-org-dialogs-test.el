@@ -991,6 +991,22 @@ string; reading it as a boolean showed the [fn:...] wrapper instead."
              (should (equal (plist-get info :definition)
                             "the actual definition")))))))))
 
+(ert-deftest jetpacs-org-dialogs-labelled-footnote-records-definition-position ()
+  "The definition button carries an actual scroll target, not a line hint."
+  (jetpacs-org-dialogs-test--with-env
+    (jetpacs-org-dialogs-test--with-file f
+        "Body[fn:note].\n\n[fn:note] Definition.\n"
+      (let ((buf (jetpacs-org-dialogs-test--buffer f)))
+        (with-current-buffer buf
+          (org-with-wide-buffer
+           (goto-char (point-min))
+           (search-forward "[fn:note]")
+           (let ((info (jetpacs-org-dialogs--footnote-info
+                        buf (match-beginning 0))))
+             (should (integerp (plist-get info :def-pos)))
+             (goto-char (plist-get info :def-pos))
+             (should (org-footnote-at-definition-p)))))))))
+
 (ert-deftest jetpacs-org-dialogs-sheet-refuses-rotted-pos ()
   "P2 (14.5): a rotted pos must answer \"gone\", never resolve to
 whatever heading now encloses it — every sheet arm and the Archive
@@ -1043,7 +1059,8 @@ bare navigate from a timer resolves to the shell default."
     (jetpacs-org-dialogs-test--with-file f
         "A note[fn:1] here.\n\n[fn:1] Def.\n"
       (let* ((buf (jetpacs-org-dialogs-test--buffer f))
-             (navigated-to 'unset))
+             (navigated-to 'unset)
+             (navigated-pos nil))
         (with-current-buffer buf
           (org-with-wide-buffer
            (goto-char (point-min))
@@ -1053,11 +1070,13 @@ bare navigate from a timer resolves to the shell default."
         (cl-letf (((symbol-function 'run-at-time)
                    (lambda (_t _r fn &rest args) (apply fn args)))
                   ((symbol-function 'jetpacs-navigate-buffer)
-                   (lambda (_buf &optional surface _label)
-                     (setq navigated-to surface))))
+                   (lambda (_buf &optional surface _label mark-pos)
+                     (setq navigated-to surface
+                           navigated-pos mark-pos))))
           (jetpacs-org-dialogs-test--submit
            (jetpacs-org-dialogs-test--last) "edit"))
-        (should (equal navigated-to "app:ja5d"))))))
+        (should (equal navigated-to "app:ja5d"))
+        (should (integerp navigated-pos))))))
 
 (ert-deftest jetpacs-org-dialogs-pick-preserves-repeater-edits ()
   "P2 (14.1): the pick descriptors CAPTURE the repeater trio, and the

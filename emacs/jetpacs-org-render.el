@@ -13,9 +13,9 @@
 ;;                          column alignment kept; table.el tables and
 ;;                          #+TBLFM stay text)
 ;;   [[file:img.png]]     → an image node for paragraphs that are exactly
-;;                          one image link — local files ship as data:
-;;                          URIs through the root allowlist, https URLs
-;;                          pass through for the device to fetch
+;;   [[attachment:x.png]]   one image link — local files and Org attachments
+;;                          ship as data: URIs through the root allowlist;
+;;                          https URLs pass through for the device to fetch
 ;;   \begin{…}…\end{…}    → (JA-5c) the formula through org's own LaTeX
 ;;                          toolchain, compiled off the dispatch extent
 ;;   #+CAPTION: …         → a caption line under its upgraded element
@@ -26,8 +26,9 @@
 ;; outline-regexp detection cannot see (both reuse `jetpacs.buffer.fold'
 ;; — `org-cycle' at those lines toggles the drawer/block, verified
 ;; against emacs-30.1 org-cycle.el).  The footnote/heading/timestamp
-;; arms land with their dialog handlers (JA-5d/e).  Everything else —
-;; citations, inline math, list markers, src blocks (which org's native
+;; arms land with their dialog handlers (JA-5d/e), and links follow
+;; through Org itself before the destination drills into the originating
+;; surface.  Everything else — citations, inline math, list markers, src blocks (which org's native
 ;; fontification already highlights) — renders exactly as the user's
 ;; font-lock shows it.  If anything in the upgrade pass fails, the
 ;; buffer falls back to the pure Tier-0 render: this skin can subtract
@@ -64,12 +65,14 @@
 (require 'subr-x)
 (require 'org)
 (require 'org-element)
+(require 'org-attach)
 (require 'ebp-org)                      ; the engine, NOT jetpacs-org's shim:
                                         ; the skin reads and invalidates, and
                                         ; registers nothing with the floor
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-buffer)
+(require 'jetpacs-navigate)
 (require 'jetpacs-hypertext)
 (require 'jetpacs-async)
 ;; The dialog handlers must exist before any descriptor naming them can
@@ -188,9 +191,9 @@ element granularity has no table-cell objects."
 ;;;; Native upgrades: images
 
 (defconst jetpacs-org-render--image-link-line-re
-  (concat "[ \t]*\\[\\[\\(?:file:\\)?\\([^][]+\\."
-          "\\(?:png\\|jpe?g\\|gif\\|webp\\|svg\\|bmp\\)\\)\\]"
-          "\\(?:\\[\\([^][]*\\)\\]\\)?\\][ \t]*$")
+  (concat "[ \t]*\\[\\[\\(?1:\\(?:file\\|attachment\\):\\)?"
+          "\\(?2:[^][]+\\.\\(?:png\\|jpe?g\\|gif\\|webp\\|svg\\|bmp\\)\\)\\]"
+          "\\(?:\\[\\(?3:[^][]*\\)\\]\\)?\\][ \t]*$")
   "A line that is exactly one image link, description optional.")
 
 (defun jetpacs-org-render--data-uri (path)
@@ -224,8 +227,10 @@ per-image + frame-budget fit.  The encode passes NO-LINE-BREAK: RFC
 https URLs pass through when the Companion advertises `image.https'
 (it fetches them itself); http URLs never upgrade (the advertised form
 is https, and silently rewriting the user's URL is not this skin's
-call); local paths go through `jetpacs-org-render--data-uri'.  Any
-refusal returns nil and the paragraph stays Tier-0 text — with its
+call); `attachment:' paths are expanded at the containing Org entry by
+`org-attach-expand'; other local paths resolve relative to the Org
+file.  Local bytes always pass through `jetpacs-org-render--data-uri'.
+Any refusal returns nil and the paragraph stays Tier-0 text — with its
 link still tappable through `emacs.buffer.act'."
   (save-excursion
     (goto-char (org-element-property :post-affiliated el))
@@ -233,14 +238,19 @@ link still tappable through `emacs.buffer.act'."
                ;; The link line must BE the whole paragraph.
                (>= (line-beginning-position 2)
                    (jetpacs-org-render--visual-end el)))
-      (let* ((path (match-string-no-properties 1))
-             (desc (match-string-no-properties 2))
+      (let* ((kind (match-string-no-properties 1))
+             (path (match-string-no-properties 2))
+             (desc (match-string-no-properties 3))
              (url (cond
                    ((string-match-p "\\`https://" path)
                     (and (jetpacs-node-advertised-p "image")
                          (jetpacs-feature-advertised-p "image.https")
                          path))
                    ((string-match-p "\\`http://" path) nil)
+                   ((equal kind "attachment:")
+                    (when-let ((expanded
+                                (ignore-errors (org-attach-expand path))))
+                      (jetpacs-org-render--data-uri expanded)))
                    (t (jetpacs-org-render--data-uri path)))))
         (when url
           (jetpacs-image url
@@ -539,12 +549,23 @@ item's text — counts."
                 (and beg (>= pos beg) (< pos end)
                      (cons beg end)))))))
 
+(defun jetpacs-org-render--footnote-definition-at (pos)
+  "Footnote definition facts when POS is on its leading [fn:LABEL]."
+  (save-excursion
+    (goto-char pos)
+    (when-let* ((info (org-footnote-at-definition-p))
+                (label (car info))
+                (beg (nth 1 info)))
+      (when (and (<= beg pos)
+                 (< pos (+ beg 5 (length label))))
+        info))))
+
 (defun jetpacs-org-render--span-action (pos buffer-name)
   "Span tap routing for the org skin; nil keeps generic Tier-0 behavior.
 Each arm sits behind a one-or-two-char pre-filter, so ordinary runs pay
 comparisons, not org regexps (the poc ran the regexps per run).  Links
-deliberately fall through — they keep their Tier-0 `emacs.buffer.act'
-open behavior.  The drawer/block arms reuse the existing
+use Org's own follow behavior and the navigation host presents the
+resulting buffer and point.  The drawer/block arms reuse the existing
 `jetpacs.buffer.fold' verb: its handler puts point on the line and runs
 the buffer's TAB binding, and `org-cycle' there toggles the drawer or
 block — the collapse affordance Tier-0's outline-regexp fold detection
@@ -560,6 +581,13 @@ cannot see."
                (save-match-data (org-footnote-at-reference-p)))
           (jetpacs-action "jetpacs.org.footnote"
                           :args (list :buffer buffer-name :pos pos)))
+         ;; A definition label returns to its previous reference.  This
+         ;; is separate from the reference dialog so the round trip is
+         ;; one tap in both directions.
+         ((and (eq c ?\[)
+               (jetpacs-org-render--footnote-definition-at pos))
+          (jetpacs-action "jetpacs.org.footnote-return"
+                          :args (list :buffer buffer-name :pos pos)))
          ;; Item checkbox: [ ] / [-] / [X].
          ((and (eq c ?\[) (jetpacs-org-render--checkbox-at pos))
           (jetpacs-action "jetpacs.org.checkbox"
@@ -572,6 +600,13 @@ cannot see."
                (org-in-regexp org-ts-regexp-both)
                (= (match-beginning 0) pos))
           (jetpacs-action "jetpacs.org.timestamp"
+                          :args (list :buffer buffer-name :pos pos)))
+         ;; Links use Org's resolver so internal targets, footnotes,
+         ;; relative file links, custom link types and code references
+         ;; retain their built-in behavior.  Footnotes were claimed by
+         ;; the more-specific arm above.
+         ((org-in-regexp org-link-any-re)
+          (jetpacs-action "jetpacs.org.follow"
                           :args (list :buffer buffer-name :pos pos)))
          ;; Drawer header (or :END:) line: fold affordance.
          ((and (eq c ?:)
@@ -589,7 +624,7 @@ cannot see."
           (jetpacs-action "jetpacs.buffer.fold"
                           :args (list :buffer buffer-name :pos pos)))
          ;; Heading tap → the action sheet; a link inside the headline
-         ;; keeps its own Tier-0 open behavior.
+         ;; was already claimed by the Org follow arm.
          ((and (eq (char-after (line-beginning-position)) ?*)
                (org-at-heading-p)
                (not (org-in-regexp org-link-any-re)))
@@ -665,7 +700,8 @@ to the pure Tier-0 render."
               (when (>= beg pos)
                 (when (> beg pos)
                   (setq out (nconc out (jetpacs-buffer-render-region
-                                        name pos beg)))
+                                        name pos beg
+                                        jetpacs-buffer-scroll-position)))
                   ;; A spent budget already captioned itself in Tier-0.
                   (when (jetpacs-org-render--budget-spent-p)
                     (cl-return-from walk)))
@@ -676,7 +712,8 @@ to the pure Tier-0 render."
                 (setq pos end))))
           (when (< pos (point-max))
             (setq out (nconc out (jetpacs-buffer-render-region
-                                  name pos (point-max))))))
+                                  name pos (point-max)
+                                  jetpacs-buffer-scroll-position)))))
         (when dropped
           (setq out (nconc out (list (jetpacs-text
                                       "… output truncated (surface budget)"
@@ -738,11 +775,76 @@ to the pure Tier-0 render."
       (jetpacs-buffer-defer-refresh (plist-get params :surface))
       'accepted))))
 
+(defun jetpacs-org-render--follow (args params)
+  "Follow the exposed Org link and drill into its destination."
+  (let* ((name (plist-get args :buffer))
+         (pos (plist-get args :pos))
+         (buf (and (stringp name) (get-buffer name))))
+    (cond
+     ((not (and buf (integerp pos))) 'rejected)
+     ((jetpacs-event-stale-p params) 'stale)
+     ((not (jetpacs-buffer-exposed-p name pos "jetpacs.org.follow"))
+      'rejected)
+     ((not (with-current-buffer buf
+             (save-excursion
+               (goto-char (min (max (point-min) pos) (point-max)))
+               (org-in-regexp org-link-any-re))))
+      'stale)
+     (t
+      (jetpacs-navigate-thunk
+       (lambda ()
+         ;; Deliberately leave the destination buffer current: the
+         ;; navigator's shim captures both it and Org's destination point.
+         (set-buffer buf)
+         (goto-char pos)
+         (org-open-at-point))
+       (plist-get params :surface)
+       "Org link")
+      'accepted))))
+
+(defun jetpacs-org-render--footnote-return (args params)
+  "Jump from an exposed footnote definition to its previous reference."
+  (let* ((name (plist-get args :buffer))
+         (pos (plist-get args :pos))
+         (buf (and (stringp name) (get-buffer name)))
+         (info (and buf (integerp pos)
+                    (with-current-buffer buf
+                      (jetpacs-org-render--footnote-definition-at pos)))))
+    (cond
+     ((not (and buf (integerp pos))) 'rejected)
+     ((jetpacs-event-stale-p params) 'stale)
+     ((not (jetpacs-buffer-exposed-p
+            name pos "jetpacs.org.footnote-return"))
+      'rejected)
+     ((null info) 'stale)
+     (t
+      (jetpacs-navigate-thunk
+       (lambda ()
+         (set-buffer buf)
+         (goto-char pos)
+         (org-footnote-goto-previous-reference (car info)))
+       (plist-get params :surface)
+       "Footnote reference")
+      'accepted))))
+
 (jetpacs-defaction "jetpacs.org.checkbox" #'jetpacs-org-render--checkbox)
 (jetpacs-defaction "jetpacs.org.widen" #'jetpacs-org-render--widen)
+(jetpacs-defaction "jetpacs.org.follow" #'jetpacs-org-render--follow)
+(jetpacs-defaction "jetpacs.org.footnote-return"
+                   #'jetpacs-org-render--footnote-return)
 
 ;;;; The JA-6 files seams (rendered⇄plain, toolbar, FAB, after-save)
 ;;
+;; Deprecated by `jetpacs-reader', `jetpacs-reader-org',
+;; `jetpacs-editor', and `jetpacs-editor-org'.  The definitions remain
+;; for source compatibility with older app bundles, but their load-time
+;; installation is opt-in so a mode app has one composition path.
+
+(defcustom jetpacs-org-render-install-legacy-files-seams nil
+  "When non-nil, install the pre-mode-app Org/Files integration.
+New configurations should load `jetpacs-org-mode' instead."
+  :type 'boolean :group 'jetpacs-org)
+
 ;; JA-6's tap-to-open path builds the PLAIN editor screen and publishes
 ;; five seams; the org experience claims `.org' paths through them,
 ;; using only public names.  The per-path VIEW MODE decides which face
@@ -770,8 +872,10 @@ keys its body and actions seams off this exact question, and it did so
 through the double-hyphen private, so a rename of the mode-table
 internals would have snapped the reader with no tripwire.  App layers
 call THIS; the table stays private."
-  (and (jetpacs-org-render--org-path-p path)
-       (not (eq (gethash path jetpacs-org-render--files-mode) 'plain))))
+  (if (fboundp 'jetpacs-reader-active-p)
+      (jetpacs-reader-active-p path)
+    (and (jetpacs-org-render--org-path-p path)
+         (not (eq (gethash path jetpacs-org-render--files-mode) 'plain)))))
 
 (defalias 'jetpacs-org-render--files-rendered-p
   #'jetpacs-org-render-rendered-p
@@ -832,32 +936,34 @@ from their own state on the deferred re-push."
       (jetpacs-buffer-defer-refresh (plist-get params :surface))
       'accepted))))
 
-(jetpacs-defaction "jetpacs.org.view-mode" #'jetpacs-org-render--view-mode)
-
 ;; Compile-time declarations for the files seams (loaded lazily below).
 (defvar jetpacs-files-editor-toolbar-function)
 (defvar jetpacs-files-editor-fab-function)
 (declare-function jetpacs-org-toolbar "jetpacs-org-toolbar")
+(declare-function jetpacs-reader-active-p "jetpacs-reader" (path))
 
 (with-eval-after-load 'jetpacs-files
-  (require 'jetpacs-org-toolbar)
-  (add-hook 'jetpacs-files-editor-body-functions
-            #'jetpacs-org-render--files-body)
-  (add-hook 'jetpacs-files-editor-actions-functions
-            #'jetpacs-org-render--files-actions)
-  (add-hook 'jetpacs-files-after-save-hook
-            #'jetpacs-org-render--files-after-save)
-  ;; Single-function seams: claim politely, chaining any prior holder.
-  (let ((prev (bound-and-true-p jetpacs-files-editor-toolbar-function)))
-    (setq jetpacs-files-editor-toolbar-function
-          (lambda (path)
-            (or (jetpacs-org-render--files-toolbar path)
-                (and prev (funcall prev path))))))
-  (let ((prev (bound-and-true-p jetpacs-files-editor-fab-function)))
-    (setq jetpacs-files-editor-fab-function
-          (lambda (path)
-            (or (jetpacs-org-render--files-fab path)
-                (and prev (funcall prev path)))))))
+  (when jetpacs-org-render-install-legacy-files-seams
+    (require 'jetpacs-org-toolbar)
+    (jetpacs-defaction "jetpacs.org.view-mode"
+                       #'jetpacs-org-render--view-mode)
+    (add-hook 'jetpacs-files-editor-body-functions
+              #'jetpacs-org-render--files-body)
+    (add-hook 'jetpacs-files-editor-actions-functions
+              #'jetpacs-org-render--files-actions)
+    (add-hook 'jetpacs-files-after-save-hook
+              #'jetpacs-org-render--files-after-save)
+    ;; Single-function seams: claim politely, chaining any prior holder.
+    (let ((prev (bound-and-true-p jetpacs-files-editor-toolbar-function)))
+      (setq jetpacs-files-editor-toolbar-function
+            (lambda (path)
+              (or (jetpacs-org-render--files-toolbar path)
+                  (and prev (funcall prev path))))))
+    (let ((prev (bound-and-true-p jetpacs-files-editor-fab-function)))
+      (setq jetpacs-files-editor-fab-function
+            (lambda (path)
+              (or (jetpacs-org-render--files-fab path)
+                  (and prev (funcall prev path))))))))
 
 ;;;; Reset / unload
 
@@ -880,6 +986,8 @@ from their own state on the deferred re-push."
         (assq-delete-all 'org-mode jetpacs-render-buffer-functions))
   (jetpacs-undefaction "jetpacs.org.checkbox")
   (jetpacs-undefaction "jetpacs.org.widen")
+  (jetpacs-undefaction "jetpacs.org.follow")
+  (jetpacs-undefaction "jetpacs.org.footnote-return")
   (jetpacs-undefaction "jetpacs.org.view-mode")
   (when (boundp 'jetpacs-files-editor-body-functions)
     (remove-hook 'jetpacs-files-editor-body-functions

@@ -1,0 +1,32 @@
+#+TITLE: Jetpacs Org Starter
+#+STARTUP: overview hidestars
+#+TODO: TODO NEXT | DONE
+#+FILETAGS: :jetpacs:
+
+* Welcome to Org Mode in Jetpacs
+
+This is your starter inbox. Jetpacs created it because no =inbox.org= existed;
+future starts will leave this file exactly as you edit it.
+
+- [[file:org-mode-walkthrough/orgro-manual.org][Read the bundled Orgro manual]]
+- [ ] Tap this checkbox in reader mode
+- [ ] Switch to the editor and add a note
+
+* Inbox
+
+Capture quick notes and tasks here.
+
+** TODO Try a structured edit
+
+Tap the headline for its Org actions, or open the plain-text editor for the
+whole file.
+
+** NEXT Explore search
+
+Use plain text, regexp, or sparse-tree search from reader mode.
+
+* Notes
+
+Org remains the source of truth: document keywords, TODO sequences, links,
+tables, timestamps, citations, attachments, and encryption are interpreted by
+the Org bundled with Emacs.

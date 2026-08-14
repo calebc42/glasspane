@@ -1,0 +1,611 @@
+Welcome to Orgro
+
+Orgro is an [[https://orgmode.org/][Org Mode]] file viewer.
+
+Files open in “overview” visibility mode, with top sections folded.
+
+Tap a section header to expand it ↓
+
+* Supported Org Mode syntax
+
+Orgro can understand the following Org Mode syntax:
+
+** Sections
+
+TODO keywords, priority markers, and tags are highlighted and laid out nicely.
+
+You can perform these actions on a section:
+
+- Open and close by touching the section headline
+- Long tap the headline to [[#narrowing-section][narrow]] to that section
+- Slide a section from right to left to cycle the TODO keyword
+  - Statistics cookies are updated automatically
+
+** Blocks
+
+Blocks are laid out with horizontal scroll to keep code readable. They can also
+be opened and closed just like sections by touching the block header.
+
+   #+begin_src elisp
+     (+ 1 2)
+   #+end_src
+
+   #+RESULTS:
+   : 3
+
+The example above also illustrates affiliated keywords (the =#+RESULTS:= line)
+and fixed-width areas (the =: 3= line). Fixed width areas also have horizontal
+scroll to ensure proper display.
+
+Diminish meta lines like =#+RESULTS:= with [[*Reader Mode][Reader Mode]].
+
+Touch a code reference like [[(foo)]] to jump to the corresponding line.
+
+#+begin_src elisp
+  (calculate-the-thing) ;;(ref:foo)
+#+end_src
+
+** Code syntax highlighting
+
+Syntax highlighting is applied for [[https://github.com/git-touch/highlight/tree/master/highlight/lib/languages][many languages]] in =src= blocks.
+
+#+begin_src bash
+  #!/bin/bash
+
+  ###### CONFIG
+  ACCEPTED_HOSTS="/root/.hag_accepted.conf"
+  BE_VERBOSE=false
+
+  if [ "$UID" -ne 0 ]
+  then
+   echo "Superuser rights required"
+   exit 2
+  fi
+
+  genApacheConf(){
+   echo -e "# Host ${HOME_DIR}$1/$2 :"
+  }
+
+  echo '"quoted"' | tr -d \" > text.txt
+#+end_src
+
+#+begin_src python
+  @requires_authorization
+  def somefunc(param1='', param2=0):
+      r'''A docstring'''
+      if param1 > param2: # interesting
+          print 'Gre\'ater'
+      return (param2 - param1 + 1 + 0b10l) or None
+
+  class SomeClass:
+      pass
+
+  >>> message = '''interpreter
+  ... prompt'''
+#+end_src
+
+When the language is unknown or unspecified, ~code style~ is used:
+
+#+begin_src
+foo bar baz
+#+end_src
+
+Inline code blocks like src_bash[:var foo="​bar"]{echo $foo} {{{results(=​bar=)}}}
+are also supported.
+
+** Tables
+
+Tables are rendered as GUI tables (rather than as raw text) to ensure proper
+spacing.
+
+| Foo         |    Bar |  Baz |
+|-------------+--------+------|
+| Lorem ipsum | 30.000 |    1 |
+| 123         |        |      |
+| あいうえお  |  -1e24 | >3.5 |
+
+** LaTeX fragments
+
+Math in LaTeX markup is supported as both inline ($$ a^2 + b^2 $$) and block:
+
+\begin{equation*}
+\oint_{\partial \Sigma} \mathbf{B} \cdot \mathrm{d}\boldsymbol{l} = \mu_0 \left(\iint_{\Sigma} \mathbf{J} \cdot \mathrm{d}\mathbf{S} + \varepsilon_0 \frac{\mathrm{d}}{\mathrm{d}t} \iint_{\Sigma} \mathbf{E} \cdot \mathrm{d}\mathbf{S} \right)
+\end{equation*}
+
+** Prettified entities
+
+Special characters written with syntax like ~\﻿Omega~ or ~\﻿leftrightarrow~ are
+shown with their “pretty” replacement characters: \Omega \leftrightarrow
+
+Subscripts and superscripts are also prettified, and can contain entities and
+markup:
+ H_{2}O, A^*, e_(_\alpha^2_ + 1)
+
+** Lists
+
+When [[*Reader Mode][Reader Mode]] is enabled, list content is shown with content reflowed for
+easy reading on narrow screens.
+
+Tap on list items with checkboxes to toggle them. Statistics cookies are updated
+automatically.
+
+- foo (complete: [%] / [/])
+  - [ ] bar
+    - [ ] car
+    - [ ] dar
+  - [ ] baz
+    1. buzz
+    2. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vestibulum ipsum
+       sapien, molestie nec posuere at, porta sit amet neque. Duis vulputate
+       quis est et vestibulum. Quisque vehicula dolor vestibulum vestibulum
+       porta.
+  - bazinga
+    - thing :: this
+    - thang :: that
+
+** Drawers
+   :PROPERTIES:
+   :CUSTOM_ID: foobar
+   :END:
+
+Drawers are collapsed by default, but can be opened by touching the header.
+
+** Links
+
+External links open in your web browser:
+
+- Org-style bracketed links [[https://github.com/sponsors/amake][like this]]
+- Raw URLs like https://github.com/sponsors/amake
+
+Links to other sections in the same document open in a narrowed view. See
+[[*Narrowing][Narrowing]].
+
+Relative links to other Org Mode files are supported when Orgro has the required
+access permissions:
+
+file:./orgro-manual-linked.org
+
+The above link doesn't require special permission because it points to a file
+bundled with Orgro. But your files /will/ require permission; look for a banner
+at the top of a document prompting you to grant access.
+
+For more details, including supported apps and OS restrictions, see the [[https://orgro.org/faq/#how-can-i-use-relative-links-between-org-mode-files][FAQ]].
+
+Image links are also supported; see [[*Images][Images]].
+
+Code reference links are supported as well: see [[(foo)]].
+
+#+LINK: OrgroIssue https://github.com/amake/orgro/issues/
+
+Link abbreviations are supported if they are defined via ~#+LINK:~ lines:
+[[OrgroIssue:105]]
+
+If a link matches a <<link target>> or a ~#+NAME:~ line then Orgro will jump to
+it. Try it out:
+
+- [[bizzbazz]]
+- [[bazinga]]
+
+** Radio targets
+
+A <<<radio target>>> linkifies all occurrences of the word or phrase inside its
+brackets. Elsewhere in this document there is a radio target for abc123; tap to
+find it.
+
+** Emphasis
+
+The default emphasis markers are supported:
+
+- *bold*
+- /italic/
+- _underline_
+- +strikethrough+
+- ~code~
+- =verbatim=
+- _nested /styles/ like *this*!_
+
+Hide the emphasis markers with [[*Reader Mode][Reader Mode]].
+
+** Images
+
+Images referenced by relative paths can be displayed when Orgro has the required
+access permissions:
+
+[[./orgro-icon.png]]
+
+The above image doesn't require special permission because it is bundled with
+Orgro. But your images /will/ require permission; look for a banner at the top
+of a document prompting you to grant access.
+
+For more details, including supported apps and OS restrictions, see the [[https://orgro.org/faq/#how-can-i-use-relative-links-between-org-mode-files][FAQ]].
+
+Further, HTTP(S) links to images can be optionally loaded and displayed inline:
+
+[[https://orgro.org/assets/appicon.png]]
+
+Also =data:image/*= URLs:
+
+[[data:image/svg+xml,%3Csvg%20height%3D'326'%20viewBox%3D'0%200%20326%20326'%20width%3D'326'%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%3E%3Cg%20transform%3D'translate(-257.948%20-134.648)'%3E%3Cpath%20d%3D'm257.948%20134.648h326v326h-326z'%20fill%3D'%23006058'%2F%3E%3Cpath%20d%3D'm503.73917%20284.782s-15.15-57.931-82.8-50.128c0%200-13.881-15.037-29.486-14.923a28.676%2028.676%200%200%201%205.909%2021.949l-63.384-50.7%2038.315%2066.622-39.485%2067.778%2018.218%2018.222h22.725l2.67-2.5s-2.67-22.555%2022.062-28.577c5.606-1.364%2030.509-2.443%2033.975-26.74%200%200%2015.813%2023.179-12.708%2037.648%200%200%2026.078%203.124%2036.209%2013.938%200%200%2027.952-61.491-30.755-84.443%200%200%2052.249-9.583%2059.6%2049.465%201.97%2015.7-.89%2040.545-8.9%2055.468%200%200%2014.146%2020.283%2011.684%2046.455-.003.001%2034.429-61.377%2016.151-119.534zm-105.1-4.924s-7.007%2012.366-20.964%2013.029c0%200%2017.044-16.457%2022.062-28.236l-3.427%2013.275s-.345%202.276%202.325%201.932z'%20fill%3D'%23fff'%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E]]
+
+Long touch an image to open it in a view where you can zoom and pan.
+
+Image alignment via ~#+ATTR*~ keywords is supported:
+
+#+ATTR_ORG: :align center
+[[./orgro-icon.png]]
+
+Images are cached on your device. To clear the cache and reset your choice if
+you chose =Always= or =Never=, see the Settings screen.
+
+** Footnotes
+
+Jump to named foonotes by touching a footnote reference.[fn:1]
+
+** Citations
+
+#+bibliography: orgro.bib
+
+Orgro can follow citations when a BibTeX bibliography has been specified like
+above[cite:@OrgroManual]. Touch a citation for details.
+
+** Encryption
+
+Orgro recognizes encrypted content (OpenPGP/RFC 4880 messages starting with
+=-----BEGIN PGP MESSAGE-----=) and will offer to decrypt it. Only symmetrically
+(passphrase-only) encrypted messages can be decrypted.
+
+If edited, decrypted content will be reencrypted with the same password on save.
+To make this possible, Orgro retains the password in memory until the document
+is closed. The password is not permanently stored anywhere.
+
+[[file:orgro-manual-encrypted.org][Example]]
+
+** Horizontal rules
+
+If you like to have a nice horizontal line in your document, you can do that:
+
+-----
+
+Enjoy!
+
+** Timestamps
+
+- Active :: <2025-11-27 Thu>
+- Inactive :: [2025-11-27 Thu]
+- With time :: [2025-11-27 Thu 12:34]
+- Time range :: [2025-11-27 Thu 12:34-23:45]
+- Date range :: [2025-11-27 Thu]--[2025-11-28 Fri]
+
+Tap a timestamp to edit it. In the editor, long press the timestamp insertion
+button to insert an active timestamp instead of an inactive one.
+
+Active timestamps in sections indicate agenda items for which Orgro can send you
+notifications; see [[*Agenda][Agenda]].
+
+** Other
+
+Other syntaxes that are highlighted but not (yet) interpreted in any special
+way:
+
+- Anonymous footnotes :: guess what[fn:: this is an anonymous footnote]
+- Macro references :: {{{date}}}
+
+* Editing
+
+Some limited “structured” editing features are available:
+
+- Tap a list item with a checkbox to toggle the checkbox [/]
+  - [ ] Try me!
+  - [ ] And me!
+- Slide a section from right to left to cycle its TODO keyword
+- Tap a timestamp to edit with a date/time picker: [2024-11-07 Thu]
+
+Statistics cookies are updated automatically when toggling checkboxes or cycling
+TODOs.
+
+In addition, plain text editing is available from the floating edit button in
+the bottom right corner.
+
+If Orgro has the appropriate permissions, it will save changes back to the
+original file; see the [[https://orgro.org/faq/#can-i-edit-my-files-with-orgro][FAQ]] for details.
+
+If Orgro does /not/ have the permissions it needs, it will prompt you to share
+the content of your file when you close it.
+
+Edits can be undone and redone from the action menu.
+
+* Narrowing
+  :PROPERTIES:
+  :ID:       2F5F32A8-5DB9-4FE7-BAAE-8BD328A73228
+  :CUSTOM_ID: narrowing-section
+  :END:
+
+Orgro can “narrow” the view to a specific section in two ways:
+
+- Open a link to a section
+  - file:::#narrowing-section
+  - file:::*Narrowing
+  - id:2F5F32A8-5DB9-4FE7-BAAE-8BD328A73228
+  - Even in other files:
+    - file:orgro-manual-linked.org::#a-section
+    - file:orgro-manual-linked.org::*Section
+- Long touch a section headline
+
+Close the narrowed view by touching the Back button in the top app bar.
+
+* Agenda
+
+Orgro will offer to remind you of upcoming Org Agenda items (any section with an
+active timestamp like <2025-10-16 Thu>) by sending you a local notification.
+Look for a banner at the top of a document containing such sections.
+
+If you allow notifications, that file will be remembered as an “agenda file” and
+Orgro will update pending notifications across all agenda files at the following
+times:
+
+- At app launch
+- Periodically while open
+- When opening or editing an agenda file
+- Periodically in the background, subject to OS background task limitations
+
+In the Settings screen you can see a list of pending notifications. You can also
+clear all notifications; when doing so all agenda files are forgotten.
+
+If you denied notification permissions, look for “Enable notifications” in the
+Settings screen.
+
+* Attachments                                                        :ATTACH:
+  :PROPERTIES:
+  :ID:       C259CE94-D4C8-4C4F-9C9E-9ABE446E7DA3
+  :END:
+
+Orgro can show attached images and open links to attached Org Mode files like
+so:
+
+[[attachment:orgro-icon.png]]
+
+[[attachment:orgro-manual-attachment.org]]
+
+[[attachment:hello-world.pdf]]
+
+[[attachment:orgro-app-store-promotion.mp4]]
+
+Note that this depends on the ability to resolve relative links. See the [[*Links][Links]]
+section for details.
+
+* Transclusion
+
+Orgro supports transclusion of other files in the style of the [[https://nobiot.github.io/org-transclusion/][Org-transclusion]]
+package. Tap the =#+transclude:= keyword to expand or collapse the referenced
+content.
+
+#+transclude: [[file:orgro-manual-demo.org][demo file]]
+
+A subset of Org-transclusion features are supported:
+
+- =id:= links, relative =file:= links
+- =::*section-name=, =::#custom-id= targets
+- =:level= property
+- =:exclude-elements= and =:only-contents= properties
+- =:src= with optional =:lines= property
+
+* Capture
+
+Orgro supports =org-protocol://capture= URLs. When receiving such a URL, Orgro
+will ask you which file to capture to (if there are known files), or capture
+directly into a new, blank document.
+
+Because it is rare to encounter =org-protocol= URLs in the wild, Orgro includes
+“Capture” native share targets for both iOS and Android; look for them in the
+standard share interface for your system.
+
+* Reader Mode
+
+Enable Reader Mode to reflow text, hide emphasis markers, and make meta lines
+(lines starting with =#+=) less prominent. The Reader Mode toggle can be found
+in one of two places:
+
+- Narrow screens (phones) :: =Reader mode= in the action menu
+- Wide screens (tablets) :: icon button in the top app bar
+
+* Visibility Cycling
+
+Rotate sections between expanded and collapsed states just like Org Mode in
+Emacs. Tapping the button in the top app bar cycles between:
+
+1. Overview: Show only top-level headlines
+2. Contents: Show all headlines of all levels, but no body text
+
+Long press the button to show everything.
+
+Activate with the button in the top app bar.
+
+** Archived sections                                                :ARCHIVE:
+
+Archived sections always start out collapsed, and do not participate in
+visibility cycling. However you can open them by tapping the headline.
+
+* Search
+
+Touch the floating search button in the lower right of the screen. A search
+field will appear in the top app bar; enter your query here. Relevant sections
+will be expanded, while sections without hits will be collapsed. Hits are
+highlighted. Navigate hits with the up and down buttons in the lower right of
+the screen.
+
+Touch the =Aa= button to toggle to regular expressions search mode, or the =.*=
+button to toggle back to plain text mode. Regular expressions are not
+Emacs-style, but rather follow [[https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Cheatsheet][JavaScript syntax and semantics]].
+
+* Sparse trees
+
+Touch the floating search button in the lower right of the screen. An input bar
+will appear at the bottom of the screen above the keyboard with filter buttons:
+
+- Custom :: Write an arbitrary sparse tree filter in a subset of the query
+  language described in the [[https://orgmode.org/manual/Matching-tags-and-properties.html][Matching tags and properties]] section of the Org
+  manual. See the [[https://orgro.org/faq][FAQ]] for details on limitations.
+
+  Orgro will remember the last 10 custom filters. Long press the “Custom” button
+  to directly apply a past filter.
+- Keywords :: Filter by =TODO=, =DONE=, etc.
+- Priorities :: Filter by section priority, e.g. =A=, =B=, =C=
+- Tags :: Filter by section tags
+
+* Text Style
+
+Adjust the default text size and font on the Settings screen. Tap the preview
+text to customize it.
+
+You can also change the text size and font within a document. Orgro will
+remember your changes for just that document. The location of the controls
+depends on the size of your screen:
+
+- Narrow screens (phones) :: in the action menu
+- Wide screens (tablets) :: icon button in the top app bar
+
+* Full screen width
+
+On large screens, optionally let the document take up the entire screen width.
+
+* Questions and Feedback
+
+Feel free to raise an issue [[https://github.com/amake/orgro/issues][on GitHub]].
+
+* Keyboard shortcuts
+
+The following keyboard shortcuts are supported. Note that on iOS the Meta key is
+Command (⌘) while on Android it is Control (⌃).
+
+- Start screen
+  - Meta-O :: Open a file
+  - Meta-N :: Create a new file
+  - Meta-L :: Open a URL
+  - Meta-. :: Open Settings screen
+- Document screen
+  - Meta-W :: Close document
+  - Meta-E :: Edit document
+  - Meta-Z :: Undo
+  - Meta-Shift-Z :: Redo
+  - Home :: Scroll to top
+  - End :: Scroll to bottom
+  - Meta-F :: Search
+  - In search mode
+    - Meta-G :: Next search hit
+    - Meta-Shift-G :: Previous search hit
+- Editor screen
+  - Various [[https://api.flutter.dev/flutter/widgets/DefaultTextEditingShortcuts-class.html][platform defaults]]
+  - Meta-W :: Close and discard changes
+  - Meta-S :: Close and apply changes
+  - Meta-B :: Bold
+  - Meta-I :: Italic
+  - Meta-U :: Underline
+
+* Examples
+
+[fn:1] This is a footnote. Tap the reference here to jump back.
+
+<<bizzbazz>> is a link target. You can link to it.
+
+#+NAME: bazinga
+A ~#+NAME:~ line can also be linked to.
+
+<<<abc123>>> is a radio target. Instances of abc123 throughout the document are
+linked here.
+
+* STARTUP keywords
+
+Org Mode supports a variety of options for controlling the initial appearance of
+a document. These are specified with the ~#+STARTUP:~ keyword like so:
+
+#+STARTUP: overview nohideblocks showstars
+
+Options recognized by Orgro:
+
+- [no]hideblocks
+- [no]hidedrawers
+- hidestars / showstars
+- entitiespretty / entitiesplain
+- [no]inlineimages
+- [no]fold / overview / content / show[2..5]levels / showall / showeverything
+- [no]num
+
+* =TODO= keywords
+
+Org Mode allows customizing headline keywords (default: =TODO=, =DONE=). Orgro
+will interpret the ~#+TODO:~, ~#+SEQ_TODO:~, and ~#+TYP_TODO:~ keywords to inform:
+
+- What are valid keywords (invalid keywords are merely part of a section title)
+- What is the next state when [[*Editing][cycling the keyword]]
+
+* Right-to-left scripts and bidi texts
+
+Orgro supports right-to-left text layout:
+
+من النهر إلى البحر / فلسطين ستتحرر
+
+By default the direction for a paragraph is determined the same way as [[https://www.gnu.org/software/emacs/manual/html_node/emacs/Bidirectional-Editing.html][in Emacs]]:
+from the first strong directional character. To override this, you can set
+~bidi-paragraph-direction~ to =right-to-left= or =left-to-right= in a [[*Local Variables][local
+variables list]].
+
+* Local Variables
+
+Emacs allows defining a [[https://www.gnu.org/software/emacs/manual/html_node/emacs/Specifying-File-Variables.html][local variables list]] like below. Orgro can interpret the
+following settings from the local variables list:
+
+- ~org-entities-user~ :: Specify additional [[*Prettified entities][entities]] for prettification. Syntax
+  is the same as the “real” ~org-entities-user~, but only name and utf-8
+  replacement are used:
+
+  1. Name
+  2. LaTeX replacement
+  3. LaTeX mathp
+  4. HTML replacement
+  5. ASCII replacement
+  6. Latin1 replacement
+  7. utf-8 replacement
+
+  With the setting in this file, you can use e.g. ~\﻿avocado~ to display \avocado.
+
+- ~org-entities-local~ :: Same as ~org-entities-user~ but for use when you don’t
+  want to overwrite your global ~org-entities-user~ value or include the entire
+  value in your local variables. This is applied after the defaults and
+  ~org-entities-user~.
+
+- ~org-pretty-entities~ :: Whether to prettify entities. Pretty entities are
+  enabled by default; you can use this to disable them.
+
+- ~org-pretty-entities-include-sub-superscripts~ :: Whether to prettify
+  subscripts and superscripts. These are enabled by default; you can use this to
+  disable them. Note that turning off ~org-pretty-entities~ will also disable
+  subscripts and superscripts.
+
+- ~org-use-sub-superscripts~ :: When subscripts and superscripts are enabled,
+  setting this to the symbol ~{}~ requires brackets around subscripts and
+  superscripts. In other words foo_﻿bar will not render as a subscript but
+  foo_﻿{bar} will.
+
+- ~org-hide-emphasis-markers~ :: Whether to hide emphasis markers. Emphasis
+  markers are hidden in [[*Reader Mode][Reader Mode]], but this allows hiding them outside of
+  Reader Mode as well.
+
+- ~bidi-paragraph-direction~ :: Override per-paragraph detection of text
+  direction; see [[*Right-to-left scripts and bidi texts][Right-to-left scripts and bidi texts]].
+
+- ~org-attach-id-dir~ :: Specify the directory in which ~:ID:~-based attachments
+  are located. By default this is ~"data"~, but popular Emacs distros may
+  customize it.
+
+- ~org-hidden-keywords~ :: Document metadata keywords (~#+TITLE:~, ~#+AUTHOR:~,
+  etc.) to hide.
+
+To avoid having the local variables list show up in your exported docs, put it
+under a section with the =COMMENT= keyword or =noexport= tag.
+
+# Local Variables:
+# org-entities-user: (
+#   ("avocado" "[avocado]" nil "&#129361;" "[avocado]" "[avocado]" "🥑")
+#   ("snowman" "[snowman]" nil "&#9731;" "[snowman]" "[snowman]" "☃")
+# )
+# End:

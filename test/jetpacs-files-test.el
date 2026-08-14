@@ -1513,7 +1513,10 @@ orthogonal to sync and still answers `stale'."
     (jetpacs-files-test--attached (jetpacs-files-test--client)
       (let* ((handler (gethash "jetpacs.files.save" jetpacs-action-handlers))
              (f (concat root "f.el"))
-             (notes '()) (flushed '()) (reverted 0)
+             (notes '()) (flushed '()) (prewrites '()) (reverted 0)
+             (jetpacs-files-before-buffer-save-hook
+              (list (lambda (path buffer)
+                      (push (list path buffer) prewrites))))
              (jetpacs-files--edit nil))
         (write-region "old\n" nil f nil 'silent)
         (let* ((true (file-truename f))
@@ -1551,6 +1554,7 @@ orthogonal to sync and still answers `stale'."
                   (insert-file-contents true)
                   (should (equal (buffer-string) "from the buffer\n")))
                 (should (equal flushed (list buf)))
+                (should (equal prewrites (list (list true buf))))
                 (should (= reverted 0))
                 (with-current-buffer buf
                   (should-not (buffer-modified-p)))

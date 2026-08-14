@@ -42,8 +42,10 @@ contributes only `exec-path`/`PATH`, the Termux `load-path`, and the
    ./device/install.sh
    ```
 
-   This pushes every `emacs/*.el` module plus `device/init.el` to
-   `/sdcard/Documents/jetpacs/`.
+   This pushes every `emacs/*.el` module, `device/init.el`, and the
+   `org/` starter/manual bundle to `/sdcard/Documents/jetpacs/`. On
+   interactive startup the Org app copies missing seed files into
+   `org-directory`; it never overwrites an existing user file.
 
 2. On the DEVICE, make sure Emacs has storage permission
    (Android settings → Apps → Emacs → Permissions → Files, "allow all").

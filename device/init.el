@@ -44,14 +44,13 @@
 (require 'jetpacs-files)
 (require 'jetpacs-launcher)
 (require 'jetpacs-emacs-ui)   ; the Buffers app + the global M-x verb
-;; The org experience (JA-5).  jetpacs-org-render pulls the engine and
-;; the dialogs, registers the org-mode skin, and — because jetpacs-files
-;; is already loaded above — wires the editor seams, so a `.org' tapped
-;; in Files opens RENDERED with the pencil toggle, the toolbar on the
-;; plain editor, and the add-heading FAB.  Habits registers the
-;; `jetpacs.org' owner: reach it from the Apps button.
-(require 'jetpacs-org-render)
-(require 'jetpacs-org-habits)
+;; Org Mode is a real Jetpacs App.  Its composition root installs the
+;; reusable reader/editor hosts, their Org adapters, the existing Org
+;; renderer/dialogs/habits modules, and app identity.  A `.org' file in
+;; Files therefore opens in the reader with a text-editor toggle, while
+;; the Apps view also gains an Org Mode home.  This is the template a
+;; future `jetpacs-elisp-mode' app can reuse.
+(require 'jetpacs-org-mode)
 ;; The Material 3 Compose Catalog (owner `m3catalog'): 41 components
 ;; and 279 examples of the node vocabulary, on its own surface.  It is
 ;; also the tree's first `jetpacs-defapp' registration, so its "Catalog"

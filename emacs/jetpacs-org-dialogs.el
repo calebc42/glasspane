@@ -111,7 +111,7 @@ same way — AUDIT-ja5)."
 (defun jetpacs-org-dialogs--footnote-info (buf pos)
   "Footnote facts at POS in BUF, or nil when no reference is there.
 Plist: :label (nil for anonymous), :inline, :definition (string or
-nil), :def-line (definition's line number, labelled file-backed only)."
+nil), :def-pos and :def-line (the labelled file-backed definition)."
   (with-current-buffer buf
     (org-with-wide-buffer
      (goto-char (min (max (point-min) pos) (point-max)))
@@ -123,15 +123,16 @@ nil), :def-line (definition's line number, labelled file-backed only)."
        ;; the "definition" (AUDIT-ja5).
        (let* ((label (car ctx))
               (inline-def (nth 3 ctx))
+              (definition-record
+               (and label (not inline-def)
+                    (org-footnote-get-definition label)))
               (def (or inline-def
-                       (and label
-                            (nth 3 (org-footnote-get-definition label)))))
-              (def-line (and label (not inline-def)
-                             (when-let* ((d (org-footnote-get-definition
-                                             label)))
-                               (line-number-at-pos (nth 1 d))))))
+                       (nth 3 definition-record)))
+              (def-pos (nth 1 definition-record))
+              (def-line (and def-pos (line-number-at-pos def-pos))))
          (list :label label :inline (and inline-def t)
                :definition (and def (string-trim def))
+               :def-pos def-pos
                :def-line def-line))))))
 
 (defun jetpacs-org-dialogs--footnote-spec (info)
@@ -163,7 +164,7 @@ nil), :def-line (definition's line number, labelled file-backed only)."
                                      (jetpacs-truncate-text
                                       (jetpacs-scalar-text def) 4096))
                                     :variant "text"))
-                  (when (plist-get info :def-line)
+                  (when (plist-get info :def-pos)
                     (jetpacs-button "Go to definition"
                                     (jetpacs-dialog-submit :value "edit")
                                     :variant "text"))
@@ -188,24 +189,13 @@ nil), :def-line (definition's line number, labelled file-backed only)."
        (lambda (status result _error)
          (when (and (equal status "submitted")
                     (equal (plist-get result :value) "edit")
-                    (plist-get info :def-line))
-           ;; No cursor-seek exists: navigate to the buffer and put the
-           ;; definition's line number in the snackbar (the poc's own
-           ;; affordance, minus its private files dependency).
+                    (plist-get info :def-pos))
            (run-at-time 0 nil
                         (lambda ()
-                          ;; The TAPPED surface — a bare navigate from a
-                          ;; timer resolves to the shell default and the
-                          ;; drill lands where the user is not looking
-                          ;; (AUDIT-ja5).
                           (jetpacs-navigate-buffer
-                           buf (plist-get params :surface))
-                          (jetpacs-org-dialogs--notify
-                           (format "Definition of [fn:%s] is at line %d"
-                                   (jetpacs-scalar-text
-                                    (or (plist-get info :label) ""))
-                                   (plist-get info :def-line))
-                           params))))))))))
+                           buf (plist-get params :surface)
+                           "Footnote definition"
+                           (plist-get info :def-pos)))))))))))
 
 ;;;; The header action sheet (poc 1897-2029)
 

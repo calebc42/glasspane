@@ -84,8 +84,9 @@ sweeps it with the rest of the owner's state."
 
 (add-hook 'jetpacs-teardown-functions #'jetpacs-navigate--on-teardown)
 
-(defun jetpacs-navigate--screen-builder (name)
-  "A nullary builder closing over buffer NAME (never the object —
+(defun jetpacs-navigate--screen-builder (name &optional position)
+  "A nullary builder closing over buffer NAME and optional POSITION.
+It never closes over the buffer object —
 that would pin a dead buffer).  Re-resolves liveness at every build, so
 a deferred-refresh re-push re-renders the live buffer or degrades to a
 caption; it never auto-pops — back stays the stack's.  Renders through
@@ -93,7 +94,8 @@ the `jetpacs-render-buffer' dispatch seam, which also rewrites the SPEC
 23.1 exposure records that authorize taps inside the drill."
   (lambda ()
     (if-let* ((buf (get-buffer name)))
-        (jetpacs-render-buffer buf)
+        (let ((jetpacs-buffer-scroll-position position))
+          (jetpacs-render-buffer buf))
       (list (jetpacs-text (format "Buffer %s no longer exists" name)
                           :style "caption")))))
 
@@ -114,10 +116,12 @@ stand on."
       (and (not (or (jetpacs-in-action-p) (jetpacs-device-flow-p)))
            (jetpacs--default-surface))))
 
-(defun jetpacs-navigate-buffer (buffer-or-name &optional surface label)
+(defun jetpacs-navigate-buffer
+    (buffer-or-name &optional surface label mark-pos)
   "Present BUFFER-OR-NAME as a drill-in on SURFACE; the tablist seam.
 SURFACE defaults to the device-flow surface, else the owner default
-\(D1).  Returns the target surface when the drill was presented, nil
+\(D1).  MARK-POS, when non-nil, makes its rendered line the initial
+scroll target.  Returns the target surface when the drill was presented, nil
 otherwise — never signals: a broken host must not turn a handler's
 answer into rejected."
   (let ((buf (get-buffer buffer-or-name)))
@@ -141,7 +145,7 @@ handler of a surfaceless event); refusing to guess")
                          (funcall host
                                   target
                                   (jetpacs-navigate--screen-builder
-                                   (buffer-name buf))
+                                   (buffer-name buf) mark-pos)
                                   (or label (buffer-name buf)))
                        (error
                         (message "jetpacs-navigate: drill host failed: %s"
@@ -192,7 +196,8 @@ belongs in the handler (synchronous, or `jetpacs-retry-later')."
                (temp-origin-p
                 (jetpacs-shell-notify "Nothing to show" target)
                 nil)
-               (t (jetpacs-navigate-buffer (car dest) target label)))))))
+               (t (jetpacs-navigate-buffer
+                   (car dest) target label (cdr dest))))))))
     (cond
      ((null target)
       (jetpacs-shell-notify "No target surface")

@@ -12,9 +12,9 @@
 ;; ops — those require a synchronized `:document' the plain editor
 ;; never has, and `jetpacs-editor' rejects them at build time.
 ;;
-;; Host: JA-6's `jetpacs-files-editor-toolbar-function' seam, wired by
-;; jetpacs-org-render for `.org' paths.  The file is the specification
-;; of what the org toolbar contains.
+;; Host: `jetpacs-editor-org' contributes this data through the generic
+;; `jetpacs-editor' adapter registry for `.org' paths.  The file is the
+;; specification of what the baseline Org toolbar contains.
 
 ;;; Code:
 

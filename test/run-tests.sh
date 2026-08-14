@@ -220,6 +220,12 @@ emacs -Q --batch -L emacs -l test/jetpacs-org-vulpea-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-org-render-test.el \
   -f ert-run-tests-batch-and-exit
 
+# Mode-app architecture: the reusable reader/editor registries, the Org
+# adapters' built-in search/visibility/crypt behavior, synchronized-only
+# toolbar commands, and `jetpacs-org-mode' app identity.
+emacs -Q --batch -L emacs -l test/jetpacs-mode-app-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-5d exit gate: the org dialogs — profile-pinned specs, drop-only
 # remote descriptors, fresh ids, 23.2 re-validation, the engine-backed
 # sheet mutations, token+confirm Archive, and the can-bridge gate.

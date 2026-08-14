@@ -95,6 +95,11 @@ default `emacs.buffer.act' dispatch.  Tier-1 skins let-bind this around
 delegated region renders.  A signaling function counts as nil — a broken
 skin routing must not cost the render.")
 
+(defvar jetpacs-buffer-scroll-position nil
+  "Dynamically bound buffer position to mark as the scroll target.
+Tier-1 renderers and navigation hosts bind this while delegating to the
+generic renderer.  Nil preserves the ordinary top-of-document view.")
+
 (defvar jetpacs-buffer--default-fg-hex nil
   "Hex of the default face foreground, bound for the duration of a render.")
 
@@ -913,7 +918,8 @@ cut."
       (let* ((name (buffer-name buf))
              (total (count-lines (point-min) (point-max)))
              (nodes (jetpacs-buffer--render-region
-                     (point-min) (point-max) name)))
+                     (point-min) (point-max) name
+                     jetpacs-buffer-scroll-position)))
         (if (> total jetpacs-buffer-max-lines)
             (append nodes
                     (list (jetpacs-text

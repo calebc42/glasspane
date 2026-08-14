@@ -118,6 +118,17 @@ are multibyte content), so it is written and read back as raw bytes."
   "The members of NODES whose :t is TYPE."
   (seq-filter (lambda (n) (equal (plist-get n :t) type)) nodes))
 
+(defun jetpacs-org-render-test--exposed-position (buffer action)
+  "One exposed position in BUFFER for ACTION, or nil."
+  (let ((table (gethash (buffer-name buffer) jetpacs-buffer-exposed))
+        found)
+    (when table
+      (maphash (lambda (pos actions)
+                 (when (and (null found) (member action actions))
+                   (setq found pos)))
+               table))
+    found))
+
 ;;;; The golden and the degrade guarantee
 
 (ert-deftest jetpacs-org-render-golden ()
@@ -282,6 +293,28 @@ never upgrades."
       (should (= 1 (length imgs)))
       (should (equal (plist-get (car imgs) :url)
                      "https://example.org/pic.png")))))
+
+(ert-deftest jetpacs-org-render-attachment-image-uses-org-resolver ()
+  "An attachment image resolves in the containing entry through Org.
+The expanded file still passes through the same root allowlist and
+bounded data-URI path as an ordinary local image."
+  (jetpacs-org-render-test--with-file f
+      "* Entry\n[[attachment:img.png][Attached picture]]\n"
+    (let ((expanded nil)
+          (expected (expand-file-name "img.png" (file-name-directory f))))
+      (cl-letf (((symbol-function 'org-attach-expand)
+                 (lambda (path)
+                   (setq expanded path)
+                   expected)))
+        (let* ((nodes (jetpacs-org-render
+                       (jetpacs-org-render-test--buffer f)))
+               (imgs (jetpacs-org-render-test--nodes-of nodes "image")))
+          (should (equal expanded "img.png"))
+          (should (= 1 (length imgs)))
+          (should (equal (plist-get (car imgs) :content_description)
+                         "Attached picture"))
+          (should (string-prefix-p "data:image/png;base64,"
+                                   (plist-get (car imgs) :url))))))))
 
 (ert-deftest jetpacs-org-render-image-outside-roots-degrades ()
   "A link to an image OUTSIDE the org roots is never read: the
@@ -724,6 +757,63 @@ cleanup thunk — the drain never burns a tick on a view nobody shows."
         (jetpacs-async-reset)             ; sweep runs the cancel thunks
         (should (= 0 (length jetpacs-org-render--latex-queue)))
         (should (= 0 (car compiles)))))))
+
+(ert-deftest jetpacs-org-render-link-follows-and-scrolls-to-target ()
+  "An internal Org link drills to Org's destination point on-device."
+  (jetpacs-org-render-test--with-file f
+      "* Target\nDestination body.\n\n[[*Target][Jump]]\n"
+    (let* ((buf (jetpacs-org-render-test--buffer f))
+           (name (buffer-name buf))
+           (surface "app:org-link-test")
+           captured)
+      (jetpacs-org-render buf)
+      (let ((pos (jetpacs-org-render-test--exposed-position
+                  buf "jetpacs.org.follow"))
+            (jetpacs-navigate-drill-function
+             (lambda (target builder label)
+               (setq captured (list target builder label))
+               t)))
+        (should (integerp pos))
+        (should (eq 'accepted
+                    (jetpacs-org-render--follow
+                     (list :buffer name :pos pos)
+                     (list :surface surface))))
+        (should (equal (nth 0 captured) surface))
+        (should (equal (nth 2 captured) "Org link"))
+        (with-current-buffer buf
+          (should (looking-at-p "\\* Target")))
+        (let ((nodes (funcall (nth 1 captured))))
+          (should (seq-some (lambda (node)
+                              (plist-get node :scroll_here))
+                            nodes)))))))
+
+(ert-deftest jetpacs-org-render-footnote-definition-returns-to-reference ()
+  "A definition label jumps back and scrolls to its previous reference."
+  (jetpacs-org-render-test--with-file f
+      "Text before[fn:note] after.\n\n[fn:note] The definition.\n"
+    (let* ((buf (jetpacs-org-render-test--buffer f))
+           (name (buffer-name buf))
+           (surface "app:org-footnote-test")
+           captured)
+      (jetpacs-org-render buf)
+      (let ((pos (jetpacs-org-render-test--exposed-position
+                  buf "jetpacs.org.footnote-return"))
+            (jetpacs-navigate-drill-function
+             (lambda (target builder label)
+               (setq captured (list target builder label))
+               t)))
+        (should (integerp pos))
+        (should (eq 'accepted
+                    (jetpacs-org-render--footnote-return
+                     (list :buffer name :pos pos)
+                     (list :surface surface))))
+        (should (equal (nth 0 captured) surface))
+        (with-current-buffer buf
+          (should (org-footnote-at-reference-p)))
+        (let ((nodes (funcall (nth 1 captured))))
+          (should (seq-some (lambda (node)
+                              (plist-get node :scroll_here))
+                            nodes)))))))
 
 ;;;; The toolbar port (JA-5f)
 

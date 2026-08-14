@@ -50,6 +50,26 @@
         ;; The drill render armed 23.1 exposure for the button's tap.
         (should (jetpacs-buffer-exposed-p "*nav-host*" 1))))))
 
+(ert-deftest jetpacs-navigate-buffer-marks-captured-position ()
+  "A drill builder carries the destination point into its first paint."
+  (with-current-buffer (get-buffer-create "*nav-position*")
+    (erase-buffer)
+    (insert "first\nsecond\n")
+    (goto-char (point-min))
+    (forward-line 1))
+  (unwind-protect
+      (jetpacs-navigate-test--with-drill rec
+        (should (equal
+                 (jetpacs-navigate-buffer
+                  "*nav-position*" "app:demo" nil
+                  (with-current-buffer "*nav-position*" (point)))
+                 "app:demo"))
+        (let ((nodes (funcall (nth 1 (car rec)))))
+          (should (seq-some (lambda (node)
+                              (plist-get node :scroll_here))
+                            nodes))))
+    (kill-buffer "*nav-position*")))
+
 (ert-deftest jetpacs-navigate-thunk-switch-drills ()
   (with-current-buffer (get-buffer-create "*nav-golden*")
     (erase-buffer)

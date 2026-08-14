@@ -150,16 +150,32 @@ is the Companion's SPEC 13.6 draft: the user's typing.  Under sync the
 seed is a RECONNECT seed only (SPEC 19.3: `value' seeds a NEW session
 and a later snapshot MUST NOT replace live text).")
 
+(defvar jetpacs-files-editor-context nil
+  "Dynamic context visible while the file edit screen is being built.
+The value is the current edit request plist, including at least `:path',
+`:seed', and `:mtime'; synchronized editors also carry `:document',
+`:editor-id', and `:buffer'.  Mode-app extension functions may inspect
+this value to offer synchronized-only toolbar commands without reaching
+into `jetpacs-files--edit'.  It is nil outside the builder.")
+
 (defvar jetpacs-files-after-save-hook nil
   "Run with the saved truename after `jetpacs.files.save' lands on disk.
 The first JA-6 app seam: org affordances (cache invalidation, outline
 refresh) attach here rather than being wired into base.")
 
+(defvar jetpacs-files-before-buffer-save-hook nil
+  "Run with (TRUENAME BUFFER) immediately before a synced buffer write.
+Unlike `before-save-hook', this seam runs on Files' deliberate
+`write-region' persistence path.  A subscriber may normalize BUFFER;
+if it signals, the save aborts before disk mutation.  This hook is for
+correctness-critical mode behavior such as Org Crypt re-encryption,
+not post-save notification (use `jetpacs-files-after-save-hook' there).")
+
 ;;;; The editor app seams
 ;;
 ;; Base renders a PLAIN editor; everything file-type-shaped lives above
-;; it, attached through these four seams (the poc's names, kept so the
-;; org port recognizes its own extension points).  All four run inside
+;; it, attached through these seams (the poc's names, kept so the Org
+;; port recognizes its own extension points).  They run inside
 ;; the screen BUILDER: a seam function that signals costs that screen —
 ;; the chrome error card — and nothing else, which is the E1b
 ;; containment and needs no extra isolation here.
@@ -167,8 +183,8 @@ refresh) attach here rather than being wired into base.")
 (defvar jetpacs-files-editor-body-functions nil
   "Abnormal hook: functions of (PATH) that may REPLACE the editor body.
 Run until one returns a node, which becomes the edit screen's body in
-place of the plain editor — the seam the org render skin (JA-5) claims
-.org files through.  Returning nil passes.")
+place of the plain editor — the seam a mode app's reader or narrowed
+editor claims for its file type.  Returning nil passes.")
 
 (defvar jetpacs-files-editor-actions-functions nil
   "Abnormal hook: functions of (PATH) returning top-bar action nodes.
@@ -186,9 +202,54 @@ runs at the device's point/region, gated by
 `jetpacs-emacs-ui-command-predicate'), so `:command' items ship.
 `:snippet' and `:line' never contact Emacs and work on both rungs.")
 
+(defvar jetpacs-files-editor-toolbar-functions nil
+  "Abnormal hook of functions (PATH) returning an editor toolbar.
+Run until one returns a non-nil registered toolbar id or list of
+`jetpacs-toolbar-item' nodes.  This composable seam takes precedence
+over the legacy singleton `jetpacs-files-editor-toolbar-function'.")
+
 (defvar jetpacs-files-editor-fab-function nil
   "Function of (PATH) returning the edit screen's FAB node, or nil.
 The poc's org add-heading FAB attaches here.")
+
+(defvar jetpacs-files-editor-fab-functions nil
+  "Abnormal hook of functions (PATH) returning an editor FAB node.
+Run until success, before the legacy singleton
+`jetpacs-files-editor-fab-function'.")
+
+(defun jetpacs-files-current-edit-path ()
+  "Return the canonical path on the current edit screen, or nil.
+This public identity seam lets mode apps validate a device action
+against the document that was actually presented."
+  (plist-get jetpacs-files--edit :path))
+
+(defun jetpacs-files-downgrade-current-editor (&optional path)
+  "Downgrade the current PATH edit session from synchronized to plain.
+The current visiting buffer remains authoritative for the replacement
+seed, read widened.  This is the mode-adapter seam for a presentation
+whose coordinate space cannot honestly be the whole-document SPEC 19
+session (a narrowed Org subtree, for example).  Return non-nil when
+PATH is the current edit record."
+  (let ((current (jetpacs-files-current-edit-path)))
+    (when (and current
+               (or (null path)
+                   (equal (file-truename current) (file-truename path))))
+      (let* ((record (copy-sequence jetpacs-files--edit))
+             (buffer (or (plist-get record :buffer)
+                         (get-file-buffer current))))
+        (when (buffer-live-p buffer)
+          (ebp-sync-detach buffer)
+          (plist-put
+           record :seed
+           (with-current-buffer buffer
+             (save-restriction
+               (widen)
+               (buffer-substring-no-properties (point-min) (point-max))))))
+        (cl-remf record :document)
+        (cl-remf record :editor-id)
+        (cl-remf record :buffer)
+        (setq jetpacs-files--edit record)
+        t))))
 
 ;;;; The effective root set (config + the /sdcard probe)
 
@@ -997,7 +1058,7 @@ text — the synchronized rung seeds from the buffer, so it keeps them."
     reason))
 
 (defun jetpacs-files--edit-screen (back)
-  "Builder for the pushed editor screen, the four app seams applied.
+  "Builder for the pushed editor screen, with all app seams applied.
 Reads the edit record and NEVER attaches: the chrome rebuilds the whole
 stack on every push, so a binding made here would be remade — and its
 predecessor's unflushed edits discarded — on every re-push.
@@ -1030,6 +1091,12 @@ snapshot from replacing live text."
               (jetpacs-feature-advertised-p "editor.candidate_kind" :app))))
       (let* ((path (plist-get req :path))
              (document (plist-get req :document))
+             (jetpacs-files-editor-context req)
+             (toolbar
+              (or (run-hook-with-args-until-success
+                   'jetpacs-files-editor-toolbar-functions path)
+                  (and jetpacs-files-editor-toolbar-function
+                       (funcall jetpacs-files-editor-toolbar-function path))))
              (body (or (run-hook-with-args-until-success
                         'jetpacs-files-editor-body-functions path)
                        (jetpacs-editor
@@ -1049,17 +1116,17 @@ snapshot from replacing live text."
                                        t)
                         :syntax (jetpacs-files--syntax-for path)
                         :value (plist-get req :seed)
-                        :toolbar (and jetpacs-files-editor-toolbar-function
-                                      (funcall jetpacs-files-editor-toolbar-function
-                                               path))
+                        :toolbar toolbar
                         :on-save (jetpacs-action "jetpacs.files.save"
                                                  :args (list :path path
                                                              :mtime (plist-get req :mtime))))))
              (actions (apply #'append
                              (mapcar (lambda (f) (funcall f path))
                                      jetpacs-files-editor-actions-functions)))
-             (fab (and jetpacs-files-editor-fab-function
-                       (funcall jetpacs-files-editor-fab-function path))))
+             (fab (or (run-hook-with-args-until-success
+                       'jetpacs-files-editor-fab-functions path)
+                      (and jetpacs-files-editor-fab-function
+                           (funcall jetpacs-files-editor-fab-function path)))))
         (jetpacs-chrome-screen
          (jetpacs-scalar-text (file-name-nondirectory path))
          body
@@ -1526,7 +1593,16 @@ Runs inside a device flow."
                     ;; never at risk: `ebp-connect' pins the socket
                     ;; `:coding utf-8-unix' at creation, and that, not
                     ;; the ambient binding, is what encodes a frame.
-                    (when synced (ebp-sync-flush synced))
+                    (when synced
+                      ;; Files persists with `write-region', not
+                      ;; `save-buffer', so mode apps needing a
+                      ;; correctness-critical pre-write transform use
+                      ;; this explicit seam.  It is intentionally NOT
+                      ;; isolated: a failed encryption pass, for
+                      ;; example, must abort before cleartext lands.
+                      (run-hook-with-args
+                       'jetpacs-files-before-buffer-save-hook true synced)
+                      (ebp-sync-flush synced))
                     ;; THE WRITE COMES FIRST, and it is always
                     ;; `write-region' — never `save-buffer', whose
                     ;; recovery prompts signal `inhibited-interaction'

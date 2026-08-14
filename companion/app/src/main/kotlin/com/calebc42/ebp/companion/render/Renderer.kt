@@ -301,12 +301,23 @@ fun RenderNode(node: JsonObject, surface: String, bridge: DeviceBridge,
 
 /** Root of a dialog's node tree: owns the local field map (SPEC 18.1). */
 @Composable
-fun RenderDialogRoot(dialogId: String, spec: JsonObject, bridge: DeviceBridge) {
-    val fields = remember(dialogId) { mutableStateMapOf<String, JsonElement?>() }
+fun RenderDialogRoot(dialogId: String, spec: JsonObject, bridge: DeviceBridge,
+                     epoch: Long = 0L) {
+    // D-3(d): keyed on the show EPOCH, not the id alone — a same-id dialog
+    // shown while its predecessor is still composed (replace-in-place,
+    // SPEC 18.1) mints a FRESH engine-side dialog but inherited the old
+    // remember here: the predecessor's typed fields leaked into the
+    // successor and the stale defaults layer shadowed the new spec's
+    // authored values.  The epoch advances per show
+    // (EbpApplication.DialogShow), so identity here follows the engine's,
+    // not the id string's.
+    val fields = remember(dialogId, epoch) {
+        mutableStateMapOf<String, JsonElement?>()
+    }
     // T3/LD-3: the authored layer, computed by the engine while it validated
     // this spec — read once per presented dialog, so the two layers can never
     // disagree about which nodes are stateful.
-    val defaults = remember(dialogId) { bridge.dialogDefaults(dialogId) }
+    val defaults = remember(dialogId, epoch) { bridge.dialogDefaults(dialogId) }
     RenderNode(spec, RenderCtx("dialog:$dialogId", bridge,
         DialogContext(dialogId, fields, bridge, defaults)))
 }

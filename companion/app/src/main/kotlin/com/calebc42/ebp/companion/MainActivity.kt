@@ -202,11 +202,11 @@ private fun PieMenuHost(
 
 @androidx.compose.runtime.Composable
 private fun DialogHost(
-    flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
+    flow: kotlinx.coroutines.flow.StateFlow<EbpApplication.DialogShow?>,
     bridge: DeviceBridge,
 ) {
     val dialog by flow.collectAsState()
-    dialog?.let { (id, dspec) ->
+    dialog?.let { (id, dspec, epoch) ->
         androidx.compose.ui.window.Dialog(
             // SPEC 18.1: a platform dismissal is a dismiss.
             onDismissRequest = { bridge.dialogDismiss(id) }) {
@@ -231,7 +231,7 @@ private fun DialogHost(
                         .heightIn(max = maxDialogHeight)
                         .verticalScroll(rememberScrollState())
                         .padding(24.dp)) {
-                    RenderDialogRoot(id, dspec, bridge)
+                    RenderDialogRoot(id, dspec, bridge, epoch)
                 }
             }
         }

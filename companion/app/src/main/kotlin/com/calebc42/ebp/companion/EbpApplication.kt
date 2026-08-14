@@ -28,8 +28,16 @@ class EbpApplication : Application() {
     // callback may close over one (RF-0.5a's gate condition).
     private val _currentSpec = MutableStateFlow<Pair<String, JsonObject>?>(null)
     val currentSpec: StateFlow<Pair<String, JsonObject>?> get() = _currentSpec
-    private val _currentDialog = MutableStateFlow<Pair<String, JsonObject>?>(null)
-    val currentDialog: StateFlow<Pair<String, JsonObject>?> get() = _currentDialog
+    // D-3(d): `epoch` advances on EVERY show, so a same-id dialog is a
+    // DISTINCT value twice over — the renderer keys its per-dialog field
+    // state on it (a same-id successor must never inherit its
+    // predecessor's typed fields, SPEC 18.1), and the StateFlow's
+    // equality-conflation can never swallow a re-show whose id and spec
+    // are structurally identical to what is already on screen.
+    data class DialogShow(val id: String, val spec: JsonObject, val epoch: Long)
+    private var dialogEpoch = 0L
+    private val _currentDialog = MutableStateFlow<DialogShow?>(null)
+    val currentDialog: StateFlow<DialogShow?> get() = _currentDialog
     // SPEC 18.4: the accepted theme payload ({dark, colors, syntax}) to mirror,
     // or null for the native scheme (dark = follow-system, amendment #36).
     private val _theme = MutableStateFlow<JsonObject?>(null)
@@ -86,7 +94,9 @@ class EbpApplication : Application() {
             onDialogChanged = { id, spec ->
                 // SPEC 18.1: one outstanding dialog presented at a time here.
                 _currentDialog.value =
-                    if (spec != null && id != null) id to spec else null
+                    if (spec != null && id != null)
+                        DialogShow(id, spec, ++dialogEpoch)
+                    else null
             },
             onToast = { text ->
                 mainHandler.post {

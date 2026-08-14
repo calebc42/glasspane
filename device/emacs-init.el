@@ -334,7 +334,16 @@ yet) -- callers retry on that signal."
    :client-name "device-emacs" :client-version "30.1"
    :pairing-id "101112131415161718191a1b1c1d1e1f"
    :token (ebp-decode-pairing-token "AAECAwQFBgcICQoLDA0ODw")
-   :wants '("editor.sync" "surfaces.dialog" "theme")
+   ;; The FULL supported profile, not the R-series editor subset: the
+   ;; grant set is wants ∩ supported (CompanionEngine), and Glasspane's
+   ;; G9 arms need surfaces.notification (the clock chronometer),
+   ;; presentation.snackbar (the granted immediate-raise arm),
+   ;; reminders.owner (agenda reminders) — each degrades SILENTLY when
+   ;; unrequested, which is exactly how the chronometer vanished.
+   :wants '("editor.sync" "surfaces.dialog" "theme"
+            "presentation.toast" "presentation.snackbar"
+            "presentation.pie-menu" "reminders.owner"
+            "surfaces.notification" "capabilities" "triggers")
    :receipt-file (expand-file-name "jetpacs-receipts.sqlite"
                                    user-emacs-directory)
    :ready-function #'jetpacs-emacs-init--on-ready))

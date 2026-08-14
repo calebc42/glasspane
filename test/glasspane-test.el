@@ -699,5 +699,231 @@ the symbol's boolean custom-type is what derives its switch."
   (should (eq (get 'glasspane-packages-auto-install 'custom-type)
               'boolean)))
 
+;;;; G3 — keystone: glasspane-ui.el
+
+(ert-deftest glasspane-test-ui-todo-sequences ()
+  "The pure TODO-keyword helpers: the explicit-bar split, org's
+last-keyword-is-finished rule for bar-less sequences, and the
+fast-access-key strip in the flat global list."
+  (require 'glasspane-ui)
+  (should (equal (glasspane-ui--split-todo-sequence
+                  '(sequence "TODO(t!)" "NEXT" "|" "DONE(d)"))
+                 (cons '("TODO(t!)" "NEXT") '("DONE(d)"))))
+  ;; No bar: the last keyword is the finished state.
+  (should (equal (glasspane-ui--split-todo-sequence
+                  '(sequence "TODO" "DONE"))
+                 (cons '("TODO") '("DONE"))))
+  ;; A single bar-less keyword IS the finished state.
+  (should (equal (glasspane-ui--split-todo-sequence '(sequence "DONE"))
+                 (cons nil '("DONE"))))
+  ;; An explicit bar with nothing after it: nothing is finished.
+  (should (equal (glasspane-ui--split-todo-sequence
+                  '(sequence "TODO" "|"))
+                 (cons '("TODO") nil)))
+  ;; The flat global list strips fast keys, across sequence types.
+  (let ((org-todo-keywords '((sequence "TODO(t)" "|" "DONE(d!)")
+                             (type "BUG(b)" "FIXED"))))
+    (should (equal (glasspane-ui--global-todo-keywords)
+                   '("TODO" "DONE" "BUG" "FIXED")))))
+
+(ert-deftest glasspane-test-ui-settings-nodes ()
+  "Settings body shapes over stubbed org vars: tag options survive
+group markers and duplicates (the enum's build-time distinctness
+check), both enum sites build from enum-option nodes, and the body,
+the Display render block, the satellite link, and the pushed screen
+all round-trip the canonical wire encoding."
+  (require 'glasspane-ui)
+  (let ((org-tag-alist '(("home" . ?h) (:startgroup) "work" "home"))
+        (glasspane-org-custom-agendas '(("Errands" . "tags:errand")))
+        (org-todo-keywords '((sequence "TODO(t)" "|" "DONE")))
+        (jetpacs-line-numbers 'relative))
+    (should (equal (glasspane-ui--tag-options) '("home" "work")))
+    (let ((json (jetpacs-node->canonical-json
+                 (glasspane-ui--line-numbers-node))))
+      (should (string-search "\"enum_list\"" json))
+      (should (string-search "\"Relative\"" json))
+      (should (string-search "settings.line-numbers" json)))
+    (let* ((body (glasspane-ui--settings-body))
+           (json (jetpacs-node->canonical-json body)))
+      (should (equal (plist-get body :t) "lazy_column"))
+      (should (string-search "Errands" json))
+      (should (string-search "tags:errand" json))
+      (should (string-search "settings.agenda.edit" json))
+      (should (string-search "settings.agenda.delete" json))
+      ;; The sequence card shows bare keywords, active | finished.
+      (should (string-search "Sequence 1" json))
+      (should (string-search "TODO | DONE" json))
+      (should (string-search "settings.todo.edit" json))
+      ;; The tags enum: chips seeded all-selected, additions allowed.
+      (should (string-search "\"settings-tags\"" json))
+      (should (string-search "\"allow_add\":true" json)))
+    (let ((json (jetpacs-node->canonical-json
+                 (glasspane-ui--settings-link))))
+      (should (string-search "glasspane.settings.open" json)))
+    (let ((screen (glasspane-ui--settings-screen nil)))
+      (should (equal (plist-get screen :t) "scaffold"))
+      (should (stringp (jetpacs-node->canonical-json screen))))))
+
+(ert-deftest glasspane-test-ui-at-ref-classifier ()
+  "The S4/S5 funnel every later rung copies: no/unknown token ->
+\\='stale, `ebp-org-refused' -> \\='rejected, `ebp-org-unresolved' ->
+\\='stale, success -> \\='accepted with the memo busted (namespaced
+without save, the synchronous app funnel with), and a signal from the
+mutation body never answers \\='accepted."
+  (require 'glasspane-ui)
+  (should (eq (glasspane-ui--at-ref nil #'ignore) 'stale))
+  (should (eq (glasspane-ui--at-ref '(:token "o0-swept") #'ignore) 'stale))
+  (let ((ref '(:id nil :file "/vault/tasks.org" :pos 1 :headline "H")))
+    (cl-letf (((symbol-function 'ebp-org-token-ref)
+               (lambda (&rest _) ref)))
+      (cl-letf (((symbol-function 'ebp-org-resolve-ref)
+                 (lambda (_) (signal 'ebp-org-refused nil))))
+        (should (eq (glasspane-ui--at-ref '(:token "t") #'ignore)
+                    'rejected)))
+      (cl-letf (((symbol-function 'ebp-org-resolve-ref)
+                 (lambda (_) (signal 'ebp-org-unresolved nil))))
+        (should (eq (glasspane-ui--at-ref '(:token "t") #'ignore)
+                    'stale)))
+      (with-temp-buffer
+        (org-mode)
+        (insert "* Heading\n")
+        (let ((m (copy-marker (point-min)))
+              (at nil) (invalidated nil) (saved 0))
+          (cl-letf (((symbol-function 'ebp-org-resolve-ref)
+                     (lambda (_) (copy-marker m)))
+                    ((symbol-function 'ebp-org-cache-invalidate)
+                     (lambda (&optional ns) (push ns invalidated)))
+                    ((symbol-function 'glasspane-org--save-and-invalidate)
+                     (lambda (&optional _) (cl-incf saved))))
+            (should (eq (glasspane-ui--at-ref
+                         '(:token "t") (lambda () (setq at (point))))
+                        'accepted))
+            (should (equal at (point-min)))
+            (should (equal invalidated '(glasspane)))
+            (should (zerop saved))
+            (should (eq (glasspane-ui--at-ref '(:token "t") #'ignore t)
+                        'accepted))
+            (should (= saved 1))
+            (should (eq (glasspane-ui--at-ref
+                         '(:token "t") (lambda () (error "boom")))
+                        'rejected))))))))
+
+(ert-deftest glasspane-test-ui-handler-statuses ()
+  "Every G3 verb, funcalled straight from the handler table with plist
+args and no client, answers a SPEC 14.4 status symbol — then the sharp
+edges: persisted writes, the single-writer defvars, stale indices and
+names, malformed args, and dialog verbs refusing without a client.
+Registration is idempotent (one settings link) and the section is in
+the registry."
+  (require 'glasspane-ui)
+  (glasspane-ui-register)
+  (should (alist-get "Glasspane" jetpacs-settings-registry
+                     nil nil #'equal))
+  (glasspane-ui-register)
+  (should (= 1 (cl-count #'glasspane-ui--settings-link
+                         jetpacs-settings-links :key #'cadr)))
+  (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")
+                                        ("Old" . "todo:TODO")))
+        (glasspane-ui-agenda-anchor "2020-01-01")
+        (glasspane-ui-agenda-selected-date "2020-01-02")
+        (glasspane-ui--files-filter "old")
+        (glasspane-ui--settings-dialog nil)
+        (jetpacs-line-numbers nil)
+        (org-tag-alist '(("home" . ?h)))
+        (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+        (saved nil) (continuations nil))
+    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
+               (lambda (sym val) (push (cons sym val) saved) val))
+              ((symbol-function 'jetpacs-shell-notify)
+               (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (push fn continuations) nil)))
+      (cl-flet ((run (name args &optional params)
+                  (let ((handler (gethash name jetpacs-action-handlers)))
+                    (should handler)
+                    (funcall handler args params))))
+        ;; The whole table answers statuses on bare nil/nil input.
+        (dolist (name glasspane-ui--verbs)
+          (should (memq (run name nil nil) '(accepted stale rejected))))
+        ;; settings.line-numbers: one option value or nil, persisted.
+        (should (eq (run "settings.line-numbers" '(:value "Relative"))
+                    'accepted))
+        (should (eq (cdr (assq 'jetpacs-line-numbers saved)) 'relative))
+        (should (eq (run "settings.line-numbers" '(:value 5)) 'rejected))
+        ;; settings.tags: vector rebuilds keeping fast-select conses;
+        ;; wrong shapes reject.
+        (should (eq (run "settings.tags" '(:value ["work" "home"]))
+                    'accepted))
+        (should (equal org-tag-alist '("work" ("home" . ?h))))
+        (should (assq 'org-tag-alist saved))
+        ;; Deselecting every chip is a well-formed no-op: accepted,
+        ;; nothing written, alist untouched (the chips re-seed from it).
+        (setq saved (assq-delete-all 'org-tag-alist saved))
+        (should (eq (run "settings.tags" '(:value [])) 'accepted))
+        (should-not (assq 'org-tag-alist saved))
+        (should (equal org-tag-alist '("work" ("home" . ?h))))
+        (should (eq (run "settings.tags" '(:value 42)) 'rejected))
+        (should (eq (run "settings.tags" '(:value ["x" 5])) 'rejected))
+        ;; settings.todo.edit: float index coerces; a vanished index is
+        ;; stale; a well-formed tap without a client cannot present.
+        (should (eq (run "settings.todo.edit" '(:index 99)) 'stale))
+        (should (eq (run "settings.todo.edit" '(:index "x")) 'rejected))
+        (should (eq (run "settings.todo.edit" '(:index 0)) 'rejected))
+        (should (eq (run "settings.todo.edit" '(:index -1.0)) 'rejected))
+        ;; settings.agenda.edit: dialog verb — same no-client refusal.
+        (should (eq (run "settings.agenda.edit" '(:name 42)) 'rejected))
+        (should (eq (run "settings.agenda.edit" '(:name "Errands"))
+                    'rejected))
+        ;; settings.agenda.delete: gone name is stale, present deletes.
+        (should (eq (run "settings.agenda.delete" '(:name "Ghost"))
+                    'stale))
+        (should (eq (run "settings.agenda.delete" '(:name "Errands"))
+                    'accepted))
+        (should-not (assoc "Errands" glasspane-org-custom-agendas))
+        ;; settings.agenda.save: captured fields ride params; a rename
+        ;; drops the old row; an empty name rejects.
+        (should (eq (run "settings.agenda.save" '(:old-name "Old")
+                         '(:fields (:agenda-name " New "
+                                    :agenda-query "todo:TODO")))
+                    'accepted))
+        (should (equal (assoc "New" glasspane-org-custom-agendas)
+                       '("New" . "todo:TODO")))
+        (should-not (assoc "Old" glasspane-org-custom-agendas))
+        (should (eq (run "settings.agenda.save" nil
+                         '(:fields (:agenda-name "  ")))
+                    'rejected))
+        ;; agenda.save-custom: no client, no dialog — never a hang.
+        (should (eq (run "agenda.save-custom" '(:query "todo:TODO"))
+                    'rejected))
+        (should (eq (run "agenda.save-custom" '(:query 5)) 'rejected))
+        ;; The S2 defvars: handlers are the single writer.
+        (should (eq (run "agenda.set-month" '(:value "2026-08"))
+                    'accepted))
+        (should (equal glasspane-ui-agenda-anchor "2026-08-01"))
+        (should (eq (run "agenda.set-month" '(:value "junk")) 'rejected))
+        (should (eq (run "agenda.select-date" '(:value "2026-08-13"))
+                    'accepted))
+        (should (equal glasspane-ui-agenda-selected-date "2026-08-13"))
+        (should (eq (run "agenda.select-date" '(:date "2026-08-14"))
+                    'accepted))
+        (should (equal glasspane-ui-agenda-selected-date "2026-08-14"))
+        (should (eq (run "agenda.select-date" '(:value "13-08-2026"))
+                    'rejected))
+        (should (eq (run "agenda.today" nil) 'accepted))
+        (should-not glasspane-ui-agenda-anchor)
+        (should-not glasspane-ui-agenda-selected-date)
+        (should (eq (run "files.filter" '(:value "tags:home"))
+                    'accepted))
+        (should (equal glasspane-ui--files-filter "tags:home"))
+        (should (eq (run "files.filter" nil) 'rejected))
+        ;; glasspane.settings.open: accepted on the strength of the
+        ;; deferred push — zero pushes inside the dispatch extent.
+        (let ((before (length continuations)))
+          (should (eq (run "glasspane.settings.open" nil
+                           '(:surface "app:jetpacs.settings"))
+                      'accepted))
+          (should (= (length continuations) (1+ before))))))))
+
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

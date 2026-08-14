@@ -54,6 +54,10 @@
 ;; G3, the keystone: the settings surface, the shared view state, and
 ;; the at-ref funnel.  Requires glasspane-org, so it loads last.
 (require 'glasspane-ui)
+;; G4, the reader + detail: the reader claims the files body seam and
+;; owns the refile list; detail requires it softly, so it loads first.
+(require 'glasspane-org-reader)
+(require 'glasspane-detail)
 
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
@@ -140,7 +144,9 @@ registry entry in place."
   (glasspane-clock-install-hooks)
   (glasspane-config-register)
   (glasspane-packages-register)
-  (glasspane-ui-register))
+  (glasspane-ui-register)
+  (glasspane-org-reader-register)
+  (glasspane-detail-register))
 
 (defun glasspane-unregister ()
   "Deregister every verb, the chrome root, and the app identity.
@@ -157,7 +163,9 @@ glasspane.packages.install) sweep with the entry's own."
   (glasspane-clock-remove-hooks)
   (glasspane-config-unregister)
   (glasspane-packages-unregister)
-  (glasspane-ui-unregister))
+  (glasspane-ui-unregister)
+  (glasspane-org-reader-unregister)
+  (glasspane-detail-unregister))
 
 (glasspane-register)
 

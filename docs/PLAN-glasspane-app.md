@@ -14,8 +14,13 @@ arms delegated to the foundation dialogs; gate 31/31, full suite
 glasspane-journal.el + glasspane-capture.el + glasspane-dates.el —
 agenda/tasks/journal as pushed chrome screens, capture's one-dialog
 S3 sheet chain, the gap-#10 date helpers; gate 39/39, full suite
-962/41). Next: G6 (query surfaces: glasspane-views.el,
-glasspane-search.el, glasspane-table.el). The completion ladder
+962/41). G6 LANDED 2026-08-14 (query surfaces: glasspane-views.el +
+glasspane-search.el + glasspane-table.el — views as a real pushed
+stack with app-owned kanban board, search's S2 offline screen with
+the sexp query builder, table's app-authored mutable nodes over the
+--table-mutate funnel; gate 47/47, full suite 970/41). Next: G7
+(knowledge arms: glasspane-notes.el, glasspane-srs.el, vulpea/org-srs
+guarded). The completion ladder
 (PLAN-glasspane-completion.md, R0–R5) is closed on the foundation side;
 this plan is the app itself. Source: the 22-file v1 app at
 `llm-poc/jetpacs-v1-examples/glasspane/emacs/apps/glasspane/` (8,522

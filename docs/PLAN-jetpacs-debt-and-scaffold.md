@@ -170,6 +170,8 @@ The owner has ratified moving Glasspane's emacs-native settings surfaces to the 
 
 **New foundation module: `emacs/jetpacs-org-settings.el`** (jetpacs- prefix correct under the 2026-08-06 naming rule — it renders companion widgets and writes floor registries), required from device/init.el next to the existing curated block.
 
+> **STEPS 1 + 4 LANDED a0a9d3b (2026-08-14; step-4 ruling: YES).** `emacs/jetpacs-org-settings.el` carries the six sections (babel timeout stays app-side), the foundation whole-table after-set, the two previously unsurfaced rows, and the guarded interactive-only seeding; line-numbers folded into the host Appearance section, its node and verb deleted; org-defaults.el survives as a managed stub so config.sync overwrites stale device copies. Gate 44 suites green. Steps 2 (editors + dialog slot) and 3 (theme-picker) remain.
+
 ### Step 1 — schema-section moves (S, ~half a day incl. tests)
 
 Pure data relocation, no dependencies:

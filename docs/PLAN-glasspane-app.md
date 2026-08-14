@@ -10,8 +10,12 @@ funnel; gate 25/25, full suite 948/41). G4 LANDED 2026-08-13 (reader +
 detail: glasspane-org-reader.el + glasspane-detail.el — foldable
 reader claims the files body seam, detail is a pushed screen, prompt
 arms delegated to the foundation dialogs; gate 31/31, full suite
-954/41). Next: G5 (daily surfaces: glasspane-agenda.el,
-glasspane-journal.el, glasspane-capture.el). The completion ladder
+954/41). G5 LANDED 2026-08-14 (daily surfaces: glasspane-agenda.el +
+glasspane-journal.el + glasspane-capture.el + glasspane-dates.el —
+agenda/tasks/journal as pushed chrome screens, capture's one-dialog
+S3 sheet chain, the gap-#10 date helpers; gate 39/39, full suite
+962/41). Next: G6 (query surfaces: glasspane-views.el,
+glasspane-search.el, glasspane-table.el). The completion ladder
 (PLAN-glasspane-completion.md, R0–R5) is closed on the foundation side;
 this plan is the app itself. Source: the 22-file v1 app at
 `llm-poc/jetpacs-v1-examples/glasspane/emacs/apps/glasspane/` (8,522

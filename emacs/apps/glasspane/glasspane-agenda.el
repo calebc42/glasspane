@@ -1,0 +1,817 @@
+;;; glasspane-agenda.el --- Glasspane agenda + tasks surfaces -*- lexical-binding: t; -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Package-Requires: ((emacs "30.1"))
+
+;;; Commentary:
+
+;; The daily surfaces rung, agenda half (docs/PLAN-glasspane-app.md,
+;; G5): the day/week/month/custom agenda and the TODO task list as
+;; pushed chrome screens, the reminder sync riding the shell push, and
+;; the global-TODO-sequence writers the G3 settings dialog dispatches
+;; to.  Day/week/month stays an in-body `jetpacs-tabs' (the S1 ruling);
+;; every list renders through `glasspane-detail--agenda-card' over
+;; SPEC 23.1 tokens minted one set per page (S5); every handler
+;; answers a SPEC 14.4 status (S4).
+;;
+;; Retired against v1 (the plan's retirement list + G5 section):
+;;
+;; - The tab fabric (`jetpacs-shell-tab-view'/`-define-view', the tab
+;;   badge closure): S1 — the two views are chrome screens behind
+;;   agenda.open/tasks.open; the badge count surfaces IN-SCREEN until
+;;   the dock-item `:badge' thread-through lands (FOUNDATION-GAPS #5).
+;; - The clock tombstone view (v1 agenda:105-113): dies with the tab
+;;   fabric; the clock body renders inside Journal (its own rung).
+;; - The home-screen widget list + dividers (`--widget-items', v1
+;;   agenda:51-72): no widget node vocabulary (FOUNDATION-GAPS #1).
+;;   The pure meta/icon FORMATTERS stay — the cards and any future
+;;   widget rung read them.
+;; - `jetpacs-ui-state' writes for agenda-mode/anchor (S2): mode is an
+;;   app defvar here; anchor/selected-date are G3's shared defvars,
+;;   written only by the agenda.* handlers.
+;; - settings.todo.save's `jetpacs-ui-state' field reads and
+;;   `jetpacs-dismiss-dialog' (S2/S3): states arrive as the Save
+;;   action's `:capture-fields' echo; the live dialog retires through
+;;   `glasspane-ui-settings-dialog-close' (ebp-client-abandon).
+;; - `jetpacs-node-or' (T2): `jetpacs-node-advertised-p' conditionals.
+;; - The trimodal reader block (v1 agenda:552-602,
+;;   `glasspane-ui--org-editor-body'): PORTED IN G4 — the reader owns
+;;   the jetpacs-files seam surfacing now, not this file.
+;;
+;; `jetpacs-date-format'/`-shift'/`-month-abbrev' have no v3 home
+;; (FOUNDATION-GAPS #10): the app-local glasspane-dates module carries
+;; them.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'org)
+(require 'calendar)
+(require 'ebp-org)
+(require 'jetpacs-surfaces)
+(require 'jetpacs-widgets)
+(require 'jetpacs-shell)
+(require 'jetpacs-chrome)
+(require 'jetpacs-settings)
+(require 'jetpacs-device)
+(require 'jetpacs-org-dialogs)          ; the archive-token scope (S5)
+(require 'glasspane-dates)
+(require 'glasspane-org)
+(require 'glasspane-ui)                 ; shared anchor/selected defvars,
+                                        ; defer-refresh, dialog close (S2/S3)
+(require 'glasspane-detail)             ; the shared agenda card (G4)
+
+;;;; State (S2 — the handlers below are the only writers)
+
+(defvar glasspane-agenda--mode "day"
+  "The active agenda mode: a span name or a saved-search name.
+Replaces the v1 ui-state \"agenda-mode\"; the body re-seeds the tab
+strip's `:initial' from it each render.")
+
+(defvar glasspane-agenda--tasks-filter "ALL"
+  "Current TODO-keyword filter for the Tasks screen (\"ALL\" = all).")
+
+;;;; Reminders (piggybacked on each shell push)
+
+(defvar glasspane-agenda--last-reminders 'unset
+  "Reminder list from the previous sync, to suppress identical sends.")
+
+(defun glasspane-agenda--sync-reminders ()
+  "Send upcoming timed items to the device as owner-scoped alarms.
+Runs on `jetpacs-shell-after-push-hook': the extraction is memoised
+and identical sets are suppressed, so the piggyback costs nothing on
+a quiet vault.  `jetpacs-reminders-set' SIGNALS on a missing client
+or the ungranted \"reminders.owner\" capability, so both gate here —
+a hook member must never throw into the push path.  The cache adopts
+in the callback, only on the confirmed arm (the v1 rule: never
+pretend an unconfirmed set landed; the next push retries)."
+  (when (and (jetpacs-client) (jetpacs-granted-p "reminders.owner"))
+    (let ((rems (condition-case nil
+                    (glasspane-org--upcoming-reminders)
+                  (error nil))))
+      (unless (equal rems glasspane-agenda--last-reminders)
+        (condition-case err
+            (jetpacs-reminders-set
+             rems :owner "glasspane"
+             :callback (lambda (_count err)
+                         (unless err
+                           (setq glasspane-agenda--last-reminders rems))))
+          (error (message "glasspane: reminder sync failed: %s"
+                          (jetpacs-error-label err))))))))
+
+;;;; Pure formatters (the shared card's vocabulary; detail declares these)
+
+(defun glasspane-ui--widget-item-meta (it hm)
+  "Compose the compact metadata line for agenda item IT.
+Leads with the time HM or the agenda's own qualifier (\"Sched. 3x\",
+\"In 3 d.\", \"2 d. ago\"), then the file name — the Orgzly-style
+second row.  A bare \"Scheduled\"/\"Deadline\" qualifier restates what
+the row's type icon already says, so it is dropped."
+  (let* ((extra (alist-get 'extra it))
+         (extra (and (stringp extra)
+                     (replace-regexp-in-string
+                      "[ \t]+" " "
+                      (string-trim (replace-regexp-in-string
+                                    ":[ \t]*\\'" "" (string-trim extra))))))
+         (extra (and extra (not (member extra '("" "Scheduled" "Deadline")))
+                     extra))
+         (file (alist-get 'file it)))
+    (string-join (delq nil (list (or hm extra)
+                                 (and file (file-name-nondirectory file))))
+                 " · ")))
+
+(defun glasspane-ui--widget-agenda-icon (type)
+  "Map an org agenda TYPE to a compact metadata icon name."
+  (cond ((not (stringp type)) "event")
+        ((string-match-p "deadline" type) "deadline")
+        ((string-match-p "scheduled" type) "scheduled")
+        (t "event")))
+
+(defun glasspane-ui--agenda-type-icon (type)
+  "Return (ICON . COLOR) for an agenda item TYPE string (color may be nil)."
+  (cond
+   ((null type) nil)
+   ((string-match-p "past-scheduled" type) '("history" . "#E53935"))
+   ((string-match-p "deadline" type) '("flag" . nil))
+   ((string-match-p "scheduled" type) '("schedule" . nil))
+   (t nil)))
+
+(defun glasspane-ui--agenda-type-label (type)
+  "Short human label for an agenda item TYPE string, or nil to omit."
+  (pcase type
+    ("past-scheduled" "overdue")
+    ("upcoming-deadline" "deadline soon")
+    ("deadline" "deadline")
+    ("scheduled" "scheduled")
+    (_ nil)))
+
+(defun glasspane-ui--card-date-label (ts)
+  "Format org timestamp TS as a compact \"Mon D\" (or \"Mon D HH:MM\")."
+  (when (and (stringp ts)
+             (string-match "\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)" ts))
+    (let* ((month (string-to-number (match-string 2 ts)))
+           (day   (string-to-number (match-string 3 ts)))
+           (mon   (glasspane-dates-month-abbrev month))
+           (time  (ebp-org-ts-time ts)))
+      (if time (format "%s %d %s" mon day time)
+        (format "%s %d" mon day)))))
+
+(defun glasspane-ui--card-date-row (it)
+  "An inline scheduling indicator for card item IT.
+Compact icon + text labels for SCHEDULED and/or DEADLINE when present;
+nil when neither is set."
+  (let* ((scheduled (alist-get 'scheduled it))
+         (deadline  (alist-get 'deadline it))
+         (slabel (glasspane-ui--card-date-label scheduled))
+         (dlabel (glasspane-ui--card-date-label deadline))
+         (children
+          (delq nil
+                (list
+                 (when slabel
+                   (jetpacs-icon "schedule" :size 14 :color "#9E9E9E"))
+                 (when slabel (jetpacs-text (concat " " slabel)
+                                            :style "caption"))
+                 (when (and slabel dlabel) (jetpacs-spacer :width 16))
+                 (when dlabel (jetpacs-icon "flag" :size 14 :color "#EF5350"))
+                 (when dlabel (jetpacs-text (concat " " dlabel)
+                                            :style "caption"))))))
+    (when children
+      (apply #'jetpacs-row children))))
+
+;;;; Token minting (S5 — one :set per rendered list, replace semantics)
+
+(defun glasspane-agenda--tokenize (items set)
+  "ITEMS with `token'/`archive-token' cells attached; one bulk mint (S5).
+Refs whose file left the org roots would SIGNAL at mint time
+(ebp-org.el's policy-at-mint rule), so they are filtered first — the
+item still renders, just untappable — as is any overflow past the
+per-set cap.  Two sets because the base `jetpacs.org.archive' resolves
+only `jetpacs-org-dialogs-owner' tokens: the app rents the disjoint
+\"glasspane-SET\" name in that scope (the G4 reader's shape).  Minted
+even when ITEMS is empty — the replace sweep is what retires the
+previous render's tokens."
+  (let* ((mintable (cl-remove-if-not
+                    (lambda (it)
+                      (let ((f (plist-get (alist-get 'ref it) :file)))
+                        (and (stringp f) (not (string-empty-p f))
+                             (ebp-org-file-allowed-p f))))
+                    items))
+         (mintable (seq-take mintable ebp-org-token-set-max))
+         (refs (mapcar (lambda (it) (alist-get 'ref it)) mintable))
+         (taps (ebp-org-ref-tokens refs :set set :owner "glasspane"))
+         (archives (ebp-org-ref-tokens refs :set (concat "glasspane-" set)
+                                       :owner jetpacs-org-dialogs-owner))
+         (table (make-hash-table :test #'eq)))
+    (cl-loop for it in mintable for tap in taps for arch in archives
+             do (puthash it (cons tap arch) table))
+    (mapcar (lambda (it)
+              (let ((cell (gethash it table)))
+                (if cell
+                    (append (list (cons 'token (car cell))
+                                  (cons 'archive-token (cdr cell)))
+                            it)
+                  it)))
+            items)))
+
+;;;; Agenda navigation
+;;
+;; The agenda is anchored on a date (`glasspane-ui-agenda-anchor',
+;; nil = today).  The ‹ › buttons shift the anchor by one
+;; day/week/month according to the active span, and the anchor feeds
+;; `glasspane-org--agenda-items' as START-DAY — whose cache keys
+;; already include it, so each visited range memoises independently.
+
+(defun glasspane-agenda--anchor ()
+  "The agenda's anchor date as \"YYYY-MM-DD\"; today when unset."
+  (let ((a glasspane-ui-agenda-anchor))
+    (if (and (stringp a)
+             (string-match-p
+              "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" a))
+        a
+      (format-time-string "%Y-%m-%d"))))
+
+(defun glasspane-agenda--modes ()
+  "The agenda's mode names in display order: the spans, then customs."
+  (append '("day" "week" "month") (mapcar #'car glasspane-org-custom-agendas)))
+
+(defun glasspane-agenda--current-mode ()
+  "The active mode, coerced back to one that still exists.
+A saved search deleted while selected must not wedge the body."
+  (if (member glasspane-agenda--mode (glasspane-agenda--modes))
+      glasspane-agenda--mode
+    "day"))
+
+(defun glasspane-agenda--nav-row (mode anchor)
+  "The ‹ [range label] [today] › navigation row for the agenda header."
+  (let* ((today (format-time-string "%Y-%m-%d"))
+         (at-today (pcase mode
+                     ("month" (equal (substring anchor 0 7)
+                                     (substring today 0 7)))
+                     (_ (equal anchor today))))
+         (label (pcase mode
+                  ("month" (glasspane-dates-format anchor "%B %Y"))
+                  ("week" (concat "Week of "
+                                  (glasspane-dates-format anchor "%b %d")))
+                  (_ (if at-today
+                         (concat "Today · "
+                                 (glasspane-dates-format anchor "%a, %b %d"))
+                       (glasspane-dates-format anchor "%a, %b %d"))))))
+    (apply #'jetpacs-row
+           (delq nil
+                 (list
+                  (jetpacs-icon-button "chevron_left"
+                                       (jetpacs-action "agenda.nav"
+                                                       :args '(:dir -1))
+                                       :content-description "Previous")
+                  (jetpacs-with-attrs
+                   (jetpacs-box (list (jetpacs-text label :style "label"))
+                                :alignment "center")
+                   :weight 1)
+                  (unless at-today
+                    (jetpacs-icon-button "today"
+                                         (jetpacs-action "agenda.today")
+                                         :content-description
+                                         "Back to today"))
+                  (jetpacs-icon-button "chevron_right"
+                                       (jetpacs-action "agenda.nav"
+                                                       :args '(:dir 1))
+                                       :content-description "Next"))))))
+
+;;;; Mode bodies (items arrive already tokenized)
+
+(defun glasspane-agenda--day-view (items)
+  "The flat day list for tokenized ITEMS."
+  (let ((cards (mapcar #'glasspane-detail--agenda-card items)))
+    (if cards
+        (apply #'jetpacs-lazy-column cards)
+      (jetpacs-empty-state :icon "event_busy"
+                           :title "No agenda items"
+                           :caption "Nothing scheduled for this day."))))
+
+(defun glasspane-agenda--week-view (items)
+  "Tokenized ITEMS grouped under per-date section headers."
+  (let ((elements nil)
+        (current-date nil))
+    (dolist (it items)
+      (let ((date (alist-get 'date it)))
+        (unless (equal date current-date)
+          (setq current-date date)
+          (push (jetpacs-section-header (or date "Unknown Date")) elements))
+        (push (glasspane-detail--agenda-card it) elements)))
+    (if elements
+        (apply #'jetpacs-lazy-column (nreverse elements))
+      (jetpacs-empty-state :icon "event_busy"
+                           :title "No agenda items"
+                           :caption "Nothing scheduled for this week."))))
+
+(defun glasspane-agenda--month-view (items anchor)
+  "Month calendar for tokenized ITEMS, showing ANCHOR's month.
+The grid is the curated `month_grid' node when the device advertises
+it (month swipe, today/selection states, a11y grid semantics); an
+older device gets `glasspane-agenda--month-fallback' — the composed
+grid, the documented fallback recipe."
+  (let* ((today (format-time-string "%Y-%m-%d"))
+         (month-prefix (substring anchor 0 7))
+         (sel glasspane-ui-agenda-selected-date)
+         ;; A remembered selection only counts inside the shown month;
+         ;; otherwise select today (when visible) or the anchor day.
+         (selected-date (cond
+                         ((and (stringp sel)
+                               (string-prefix-p month-prefix sel))
+                          sel)
+                         ((string-prefix-p month-prefix today) today)
+                         (t anchor)))
+         (items-by-date (seq-group-by (lambda (it) (alist-get 'date it))
+                                      items))
+         (selected-items (cdr (assoc selected-date items-by-date))))
+    (jetpacs-column
+     (if (jetpacs-node-advertised-p "month_grid")
+         (jetpacs-month-grid
+          month-prefix
+          ;; One mark per date, dots = item count (capped at the
+          ;; node's 0..3 grammar).
+          :marks (delq nil
+                       (mapcar (lambda (g)
+                                 (and (stringp (car g))
+                                      (cons (car g)
+                                            (jetpacs-month-mark
+                                             (min 3 (length (cdr g)))))))
+                               items-by-date))
+          :selected selected-date
+          ;; Taps arrive with the ISO date as args :value.
+          :on-day-tap (jetpacs-action "agenda.select-date")
+          ;; Device-local swipe/chevrons report the shown month; the
+          ;; handler re-anchors and pushes fresh marks for it.
+          :on-month-change (jetpacs-action "agenda.set-month"))
+       (glasspane-agenda--month-fallback items-by-date anchor selected-date))
+     (jetpacs-divider)
+     (jetpacs-section-header (format "Events for %s" selected-date))
+     (if selected-items
+         (apply #'jetpacs-lazy-column
+                (mapcar #'glasspane-detail--agenda-card selected-items))
+       (jetpacs-text "No events" :style "caption")))))
+
+(defun glasspane-agenda--month-fallback (items-by-date anchor selected-date
+                                                       &optional select-action)
+  "The composed month grid for devices that predate `month_grid'.
+SELECT-ACTION (default \"agenda.select-date\") receives the tapped
+day as its `:date' arg — saved views pass their own handler."
+  (let* ((month (string-to-number (substring anchor 5 7)))
+         (year (string-to-number (substring anchor 0 4)))
+         (days-in-month (calendar-last-day-of-month month year))
+         (first-day-of-month (calendar-day-of-week (list month 1 year)))
+         (grid-rows nil)
+         (current-day 1)
+         (week-header
+          (apply #'jetpacs-row
+                 (mapcar (lambda (d)
+                           (jetpacs-with-attrs
+                            (jetpacs-box (list (jetpacs-text d
+                                                             :style "caption"))
+                                         :alignment "center")
+                            :weight 1))
+                         '("S" "M" "T" "W" "T" "F" "S")))))
+    (while (<= current-day days-in-month)
+      (let ((row-cells nil))
+        (dotimes (dow 7)
+          (if (or (and (= current-day 1) (< dow first-day-of-month))
+                  (> current-day days-in-month))
+              (push (jetpacs-with-attrs (jetpacs-box (list (jetpacs-spacer)))
+                                        :weight 1)
+                    row-cells)
+            (let* ((date-str (format "%04d-%02d-%02d" year month current-day))
+                   (day-items (cdr (assoc date-str items-by-date)))
+                   (is-selected (equal date-str selected-date))
+                   (text-color (if is-selected "#FFFFFF" nil))
+                   (bg-color (if is-selected "#1976D2" nil))
+                   (cell-content
+                    (list
+                     (jetpacs-with-attrs
+                      (jetpacs-surface
+                       (list
+                        (jetpacs-text (number-to-string current-day)
+                                      :style "body" :color text-color)
+                        (if day-items
+                            (jetpacs-with-attrs
+                             (jetpacs-icon "circle" :size 6
+                                           :color (if is-selected
+                                                      "#FFFFFF" "#1976D2"))
+                             :padding 2)
+                          (jetpacs-spacer :height 8)))
+                       :color bg-color :shape "rounded")
+                      :padding 4))))
+              (push (jetpacs-with-attrs
+                     (jetpacs-box cell-content
+                                  :alignment "center"
+                                  :on-tap (jetpacs-action
+                                           (or select-action
+                                               "agenda.select-date")
+                                           :args (list :date date-str)))
+                     :weight 1)
+                    row-cells)
+              (setq current-day (1+ current-day)))))
+        (push (apply #'jetpacs-row (nreverse row-cells)) grid-rows)))
+    (jetpacs-column
+     week-header
+     (jetpacs-spacer :height 8)
+     (apply #'jetpacs-column (nreverse grid-rows)))))
+
+;;;; Pages and the body
+
+(defun glasspane-agenda--items-for (mode anchor)
+  "Extract MODE's items anchored at ANCHOR (span extraction or search).
+Every branch is memoised, so building several mode pages per push (the
+tabs body) re-extracts nothing after each page's first build."
+  ;; The month span always starts on the 1st so the grid and the
+  ;; extraction agree on the visible range.
+  (let ((start-day (cond ((equal mode "month")
+                          (concat (substring anchor 0 7) "-01"))
+                         ((member mode '("day" "week")) anchor))))
+    (condition-case nil
+        (pcase mode
+          ("day" (glasspane-org--agenda-items 'day start-day))
+          ("week" (glasspane-org--agenda-items 'week start-day))
+          ("month" (glasspane-org--agenda-items 'month start-day))
+          (_ (glasspane-org--search
+              (cdr (assoc mode glasspane-org-custom-agendas)))))
+      (error nil))))
+
+(defun glasspane-agenda--nav-affordance (mode anchor)
+  "MODE's date-navigation row, or nil when the view navigates itself.
+The curated month grid carries its own header, chevrons, and swipe —
+only the jump-home chip remains ours there; custom agendas have no
+anchor to navigate."
+  (cond
+   ((equal mode "month")
+    (if (jetpacs-node-advertised-p "month_grid")
+        (unless (equal (substring anchor 0 7) (format-time-string "%Y-%m"))
+          (jetpacs-row
+           (jetpacs-spacer :weight 1)
+           (jetpacs-assist-chip "Today" :icon "today"
+                                :on-tap (jetpacs-action "agenda.today"))))
+      (glasspane-agenda--nav-row mode anchor)))
+   ((member mode '("day" "week"))
+    (glasspane-agenda--nav-row mode anchor))))
+
+(defun glasspane-agenda--mode-view (mode items anchor)
+  "MODE's item rendering, chrome-free; ITEMS arrive tokenized."
+  (pcase mode
+    ("day" (glasspane-agenda--day-view items))
+    ("week" (glasspane-agenda--week-view items))
+    ("month" (glasspane-agenda--month-view items anchor))
+    (_ (if items
+           (apply #'jetpacs-lazy-column
+                  (mapcar #'glasspane-detail--agenda-card items))
+         (jetpacs-empty-state :icon "event_busy"
+                              :title "No results"
+                              :caption
+                              "This custom agenda found no items.")))))
+
+(defun glasspane-agenda--page (mode anchor)
+  "One agenda page: MODE's nav affordance above its tokenized body.
+One mint set per page — the tabs body builds every page each push, so
+a shared set would sweep its siblings' tokens mid-render.  Set names
+therefore track mode names: bounded by the three spans plus the
+user's saved searches, well under the engine's per-owner set cap."
+  (let ((items (glasspane-agenda--tokenize
+                (glasspane-agenda--items-for mode anchor)
+                (concat "agenda-" mode))))
+    (apply #'jetpacs-column
+           (delq nil
+                 (list (glasspane-agenda--nav-affordance mode anchor)
+                       (jetpacs-spacer :height 4)
+                       (glasspane-agenda--mode-view mode items anchor))))))
+
+(defun glasspane-agenda--body-tabs (mode anchor)
+  "The agenda as native tabs: swipe between spans and custom agendas.
+Switching is device-local — every page ships in the push, which the
+memoised extractions keep cheap — and works offline; on_change keeps
+Emacs's mode state in step so the anchor and nav logic follow on the
+next push.  No :id — a background re-push must not yank the user's
+tab."
+  (let* ((modes (glasspane-agenda--modes))
+         (initial (or (seq-position modes mode) 0)))
+    (jetpacs-tabs
+     (mapcar (lambda (m)
+               (jetpacs-tab-item (pcase m
+                                   ("day" "Day") ("week" "Week")
+                                   ("month" "Month") (_ m))))
+             modes)
+     (mapcar (lambda (m) (glasspane-agenda--page m anchor)) modes)
+     :initial initial
+     :scrollable (jetpacs-bool (> (length modes) 3))
+     :on-change (jetpacs-action "agenda.set-mode"))))
+
+(defun glasspane-agenda--body-chips (mode anchor)
+  "The chip-row agenda for devices predating the `tabs' node."
+  (let ((chips
+         (mapcar (lambda (m)
+                   (jetpacs-chip (pcase m
+                                   ("day" "Day") ("week" "Week")
+                                   ("month" "Month") (_ m))
+                                 :selected (jetpacs-bool (equal mode m))
+                                 :on-tap (jetpacs-action
+                                          "agenda.set-mode"
+                                          :args (list :mode m))))
+                 (glasspane-agenda--modes))))
+    (jetpacs-column
+     (apply #'jetpacs-flow-row (append chips (list :spacing 4)))
+     (glasspane-agenda--page mode anchor))))
+
+(defun glasspane-agenda-body ()
+  "The whole agenda body: tabs when advertised, chips otherwise."
+  (let ((mode (glasspane-agenda--current-mode))
+        (anchor (glasspane-agenda--anchor)))
+    (if (jetpacs-node-advertised-p "tabs")
+        (glasspane-agenda--body-tabs mode anchor)
+      (glasspane-agenda--body-chips mode anchor))))
+
+;;;; Tasks
+
+(defun glasspane-agenda--tasks-body ()
+  "The TODO list under its keyword filter chips."
+  (let* ((items (condition-case nil
+                    (glasspane-org--todo-items)
+                  (error nil)))
+         (filtered (if (equal glasspane-agenda--tasks-filter "ALL") items
+                     (cl-remove-if-not
+                      (lambda (it)
+                        (equal (alist-get 'todo it)
+                               glasspane-agenda--tasks-filter))
+                      items)))
+         (filtered (glasspane-agenda--tokenize filtered "tasks"))
+         (cards (mapcar #'glasspane-detail--agenda-card filtered)))
+    (jetpacs-column
+     (apply #'jetpacs-flow-row
+            (append
+             (mapcar (lambda (kw)
+                       (jetpacs-chip
+                        kw
+                        :selected (jetpacs-bool
+                                   (equal glasspane-agenda--tasks-filter kw))
+                        :on-tap (jetpacs-action "tasks.filter"
+                                                :args (list :filter kw))))
+                     (cons "ALL" (or (glasspane-ui--global-todo-keywords)
+                                     '("TODO" "DONE"))))
+             (list :spacing 4)))
+     (if cards
+         (apply #'jetpacs-lazy-column cards)
+       (jetpacs-empty-state :icon "task_alt"
+                            :title "No tasks"
+                            :caption "Nothing matches this filter.")))))
+
+;;;; Screens
+
+(defun glasspane-agenda--today-count ()
+  "Today's agenda item count (overdue included).
+Reads the memoised day extraction, so a render recomputes nothing.
+The v1 tab badge's successor: the count surfaces IN-SCREEN until the
+dock-item badge thread-through lands (FOUNDATION-GAPS #5)."
+  (length (condition-case nil
+              (glasspane-org--agenda-items 'day)
+            (error nil))))
+
+(defun glasspane-agenda-screen (back)
+  "The pushed Agenda screen."
+  (let ((n (glasspane-agenda--today-count)))
+    (jetpacs-chrome-screen
+     "Agenda"
+     (apply #'jetpacs-column
+            (delq nil
+                  (list (when (> n 0)
+                          (jetpacs-text (format "%d scheduled today" n)
+                                        :style "caption"))
+                        (glasspane-agenda-body))))
+     :back back :fab (glasspane-ui--capture-fab))))
+
+(defun glasspane-agenda--tasks-screen (back)
+  "The pushed Tasks screen."
+  (jetpacs-chrome-screen "Tasks" (glasspane-agenda--tasks-body)
+                         :back back :fab (glasspane-ui--capture-fab)))
+
+;;;; Handlers (S4 — every one answers accepted/stale/rejected)
+
+(defun glasspane-agenda--push-screen (params id builder)
+  "Defer-push screen ID via BUILDER onto PARAMS' surface (D2); `accepted'.
+A deferred `jetpacs-chrome-push-screen' must catch its own re-signal
+or a refused gate dies in a timer."
+  (let ((surface (or (plist-get params :surface)
+                     (jetpacs-shell-surface-for "glasspane"))))
+    (jetpacs-flow-continue
+     (lambda ()
+       (condition-case err
+           (jetpacs-chrome-push-screen surface id builder)
+         (error (message "glasspane: %s push failed: %s"
+                         id (jetpacs-error-label err))))))
+    'accepted))
+
+(defun glasspane-agenda--on-open (_args params)
+  "Push the Agenda screen onto the tapped surface."
+  (glasspane-agenda--push-screen params "glasspane-agenda"
+                                 #'glasspane-agenda-screen))
+
+(defun glasspane-agenda--on-tasks-open (_args params)
+  "Push the Tasks screen onto the tapped surface."
+  (glasspane-agenda--push-screen params "glasspane-tasks"
+                                 #'glasspane-agenda--tasks-screen))
+
+(defun glasspane-agenda--on-set-mode (args params)
+  "Select an agenda mode.  `:mode' names come from the fallback chips;
+`:value' (a page index) from the tabs body's on_change.  Either way
+the result must name a mode we actually offer."
+  (let* ((modes (glasspane-agenda--modes))
+         (idx (plist-get args :value))
+         ;; A whole-valued integer can arrive as a float after the
+         ;; JSON round trip (org.json emits the trailing .0).
+         (idx (if (numberp idx) (truncate idx) idx))
+         (mode (or (plist-get args :mode)
+                   (and (integerp idx) (nth idx modes)))))
+    (if (not (member mode modes))
+        'rejected
+      (setq glasspane-agenda--mode mode)
+      (glasspane-ui--defer-refresh params)
+      'accepted)))
+
+(defun glasspane-agenda--on-nav (args params)
+  "Shift the agenda anchor by `:dir' (±1) in units of the active span."
+  (let* ((dir (plist-get args :dir))
+         (dir (if (numberp dir) (truncate dir) dir)))
+    (if (not (integerp dir))
+        'rejected
+      (let* ((mode (glasspane-agenda--current-mode))
+             (unit (pcase mode ("week" 'week) ("month" 'month) (_ 'day)))
+             (anchor (glasspane-agenda--anchor)))
+        ;; Month steps walk 1st → 1st so ±1 never skips a short month.
+        (when (eq unit 'month)
+          (setq anchor (concat (substring anchor 0 7) "-01")))
+        (setq glasspane-ui-agenda-anchor
+              (glasspane-dates-shift anchor dir unit))
+        (glasspane-ui--defer-refresh params)
+        'accepted))))
+
+(defun glasspane-agenda--on-tasks-filter (args params)
+  "Filter the tasks collection to a TODO keyword (or \"ALL\")."
+  (let ((filter (plist-get args :filter)))
+    (if (not (stringp filter))
+        'rejected
+      (setq glasspane-agenda--tasks-filter filter)
+      (glasspane-ui--defer-refresh params)
+      'accepted)))
+
+;;;; TODO sequence writers (the G3 settings dialog dispatches here)
+
+(defun glasspane-agenda--parse-keywords (s)
+  "Comma-separated keyword string S as a clean list; nil when empty."
+  (and (stringp s)
+       (delq nil (mapcar (lambda (x)
+                           (let ((x (string-trim x)))
+                             (unless (string-empty-p x) x)))
+                         (split-string s ",")))))
+
+(defun glasspane-agenda--todo-keywords-apply (seqs)
+  "Make SEQS the effective and persisted `org-todo-keywords'.
+Live org buffers cache the keywords buffer-locally at mode init
+(`org-todo-keywords-1', `org-todo-regexp', ...), so each one is
+restarted, and the org memo is dropped so task views re-render with
+the new states.  Returns non-nil when persisting succeeded."
+  (prog1 (jetpacs-settings-save-variable 'org-todo-keywords seqs)
+    (dolist (buf (buffer-list))
+      (with-current-buffer buf
+        (when (derived-mode-p 'org-mode)
+          (ignore-errors (org-mode-restart)))))
+    (ebp-org-cache-invalidate 'glasspane)))
+
+(defun glasspane-agenda--close-settings-dialog (params)
+  "Retire the live settings dialog and refresh where it was opened.
+A Save/Delete fired from inside the dialog arrives in dialog context
+with no `:surface' (SPEC 14.4), so the refresh needs the surface the
+dialog was opened from; fired from a settings card instead, the close
+is a harmless no-op and PARAMS carries the surface itself."
+  (let ((origin (or (plist-get glasspane-ui--settings-dialog :params)
+                    params)))
+    (glasspane-ui-settings-dialog-close)
+    (glasspane-ui--defer-refresh origin)))
+
+(defun glasspane-agenda--on-todo-save (args params)
+  "Write one global TODO sequence from the editor dialog's capture.
+`:index'/`:type' ride the Save action's args; the states arrive as
+captured fields (S2/S3) — no ui-state round trip."
+  (let* ((idx (plist-get args :index))
+         (idx (if (numberp idx) (truncate idx) idx))
+         (type (pcase (plist-get args :type)
+                 ("sequence" 'sequence)
+                 ("type" 'type)))
+         (fields (plist-get params :fields))
+         (active (glasspane-agenda--parse-keywords
+                  (plist-get fields :todo-active)))
+         (finished (glasspane-agenda--parse-keywords
+                    (plist-get fields :todo-finished)))
+         (seqs (copy-sequence (or (default-value 'org-todo-keywords)
+                                  '((sequence "TODO" "DONE"))))))
+    (cond
+     ((or (not (integerp idx)) (null type)) 'rejected)
+     ((and (null active) (null finished))
+      (jetpacs-shell-notify "A sequence needs at least one state")
+      'rejected)
+     ((>= idx (length seqs))
+      ;; Stale index: the list changed while the dialog was up.
+      (jetpacs-shell-notify "Sequences changed underneath; reopen the editor")
+      (glasspane-agenda--close-settings-dialog params)
+      'stale)
+     (t
+      (let ((new-seq (append (list type) active
+                             (when finished (cons "|" finished)))))
+        (if (>= idx 0)
+            (setcar (nthcdr idx seqs) new-seq)
+          (setq seqs (append seqs (list new-seq))))
+        (when (glasspane-agenda--todo-keywords-apply seqs)
+          (jetpacs-shell-notify "TODO sequence saved"))
+        (glasspane-agenda--close-settings-dialog params)
+        'accepted)))))
+
+(defun glasspane-agenda--on-todo-delete (args params)
+  "Delete the global TODO sequence at `:index'.
+Fired from a settings card or the edit dialog's Delete button."
+  (let* ((idx (plist-get args :index))
+         (idx (if (numberp idx) (truncate idx) idx))
+         (seqs (or (default-value 'org-todo-keywords)
+                   '((sequence "TODO" "DONE")))))
+    (cond
+     ((not (integerp idx)) 'rejected)
+     ((or (< idx 0) (>= idx (length seqs)))
+      ;; The card outlived the list it was rendered from.
+      (jetpacs-shell-notify "Sequences changed underneath")
+      (glasspane-agenda--close-settings-dialog params)
+      'stale)
+     (t
+      (let ((rest (or (append (cl-subseq seqs 0 idx)
+                              (cl-subseq seqs (1+ idx)))
+                      ;; Org misbehaves with no keywords at all;
+                      ;; deleting the last sequence falls back to the
+                      ;; stock one.
+                      '((sequence "TODO" "|" "DONE")))))
+        (when (glasspane-agenda--todo-keywords-apply rest)
+          (jetpacs-shell-notify "TODO sequence deleted"))
+        (glasspane-agenda--close-settings-dialog params)
+        'accepted)))))
+
+;;;; Registration
+
+(defconst glasspane-agenda--verbs
+  '("agenda.open"
+    "tasks.open"
+    "agenda.set-mode"
+    "agenda.nav"
+    "tasks.filter"
+    "settings.todo.save"
+    "settings.todo.delete")
+  "The verbs this file owns, for the register/unregister sweep.
+agenda.today/select-date/set-month live with the anchor defvars (G3);
+the sequence-editor DIALOG verbs (settings.todo.edit) do too — only
+the writers land here, beside `glasspane-agenda--todo-keywords-apply'.")
+
+(defun glasspane-agenda-remove-hooks ()
+  "Detach everything `glasspane-agenda-register' hooked."
+  (remove-hook 'jetpacs-shell-after-push-hook
+               #'glasspane-agenda--sync-reminders)
+  (remove-hook 'jetpacs-teardown-functions #'glasspane-agenda--on-teardown))
+
+(defun glasspane-agenda--on-teardown (owner)
+  "Drop the agenda hooks when OWNER is the Glasspane app.
+`glasspane-owner' is read late and defensively: the entry file defines
+it and `require's this one, so a back-`require' would cycle — and by
+the time any teardown runs, the entry has long finished loading."
+  (when (equal owner (bound-and-true-p glasspane-owner))
+    (glasspane-agenda-remove-hooks)))
+
+(defun glasspane-agenda-register ()
+  "Register the agenda/tasks verbs and the reminder-sync hook.
+Called from `glasspane-register', not at this file's load (the G0
+gate contract).  Idempotent: re-registration replaces handlers in
+place and the hooks are add-hook-deduplicated."
+  (with-jetpacs-owner "glasspane"
+    (jetpacs-defaction "agenda.open" #'glasspane-agenda--on-open
+                       :doc "Open the agenda screen")
+    (jetpacs-defaction "tasks.open" #'glasspane-agenda--on-tasks-open
+                       :doc "Open the TODO task list screen")
+    (jetpacs-defaction "agenda.set-mode" #'glasspane-agenda--on-set-mode)
+    (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav)
+    (jetpacs-defaction "tasks.filter" #'glasspane-agenda--on-tasks-filter)
+    (jetpacs-defaction "settings.todo.save" #'glasspane-agenda--on-todo-save)
+    (jetpacs-defaction "settings.todo.delete"
+                       #'glasspane-agenda--on-todo-delete))
+  (add-hook 'jetpacs-shell-after-push-hook
+            #'glasspane-agenda--sync-reminders)
+  (add-hook 'jetpacs-teardown-functions #'glasspane-agenda--on-teardown))
+
+(defun glasspane-agenda-unregister ()
+  "Drop the agenda/tasks verbs and hooks; forget the reminder cache.
+The forgotten cache makes the next register's first push re-arm the
+device set rather than trusting alarms a torn-down session sent."
+  (dolist (name glasspane-agenda--verbs)
+    (jetpacs-undefaction name))
+  (glasspane-agenda-remove-hooks)
+  (setq glasspane-agenda--last-reminders 'unset))
+
+(provide 'glasspane-agenda)
+;;; glasspane-agenda.el ends here

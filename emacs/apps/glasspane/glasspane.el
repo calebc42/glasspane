@@ -58,6 +58,13 @@
 ;; owns the refile list; detail requires it softly, so it loads first.
 (require 'glasspane-org-reader)
 (require 'glasspane-detail)
+;; G5, the daily surfaces: dates is the pure helper both halves lean
+;; on, agenda and journal build on detail's shared card and the reader
+;; (already above), capture is verbs + sheets only.
+(require 'glasspane-dates)
+(require 'glasspane-agenda)
+(require 'glasspane-journal)
+(require 'glasspane-capture)
 
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
@@ -146,7 +153,10 @@ registry entry in place."
   (glasspane-packages-register)
   (glasspane-ui-register)
   (glasspane-org-reader-register)
-  (glasspane-detail-register))
+  (glasspane-detail-register)
+  (glasspane-agenda-register)
+  (glasspane-journal-register)
+  (glasspane-capture-register))
 
 (defun glasspane-unregister ()
   "Deregister every verb, the chrome root, and the app identity.
@@ -165,7 +175,10 @@ glasspane.packages.install) sweep with the entry's own."
   (glasspane-packages-unregister)
   (glasspane-ui-unregister)
   (glasspane-org-reader-unregister)
-  (glasspane-detail-unregister))
+  (glasspane-detail-unregister)
+  (glasspane-agenda-unregister)
+  (glasspane-journal-unregister)
+  (glasspane-capture-unregister))
 
 (glasspane-register)
 

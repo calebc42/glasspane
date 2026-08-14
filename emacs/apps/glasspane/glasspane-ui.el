@@ -108,6 +108,19 @@ App layers contribute chip nodes after the built-in Refile/Archive
 pair; each returns a node list or nil.  An erroring function costs
 its own chips, never the toolbar.")
 
+;;;; The capture FAB (FOUNDATION-GAPS #2)
+
+(defun glasspane-ui--capture-fab ()
+  "The capture FAB every daily surface passes to its chrome `:fab' slot.
+v1's app-default FAB registry (`jetpacs-apps-set-default-fab') has no
+v3 successor, so each screen authors this node itself; the coupling to
+glasspane-capture.el is the verb string alone — the handler registers
+there, and a tap before that load lands answers `rejected' from the
+action shim, never a signal."
+  (jetpacs-icon-button "add" (jetpacs-action "org.capture.show")
+                       :content-description "Capture"
+                       :variant "filled" :size "large"))
+
 ;;;; Deferral
 
 (defun glasspane-ui--defer-refresh (params)

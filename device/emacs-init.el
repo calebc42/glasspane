@@ -267,8 +267,19 @@ default; has tools/onboard-tablet.sh run yet?"
 
 (condition-case err
     (if (require 'glasspane nil t)
-        (jetpacs-emacs-init--log "glasspane registered (vulpea=%s org-srs=%s)"
-                                 (featurep 'vulpea) (featurep 'org-srs))
+        (progn
+          (jetpacs-emacs-init--log "glasspane registered (vulpea=%s org-srs=%s)"
+                                   (featurep 'vulpea) (featurep 'org-srs))
+          ;; Dev/in-tree installs never appear in the app store, so the
+          ;; managed-config seeding is the HOST's explicit opt-in
+          ;; (glasspane-config.el's own contract: "dev first-boot
+          ;; seeding is manual").  This harness IS the dev host.
+          ;; ensure = write-once then load-only; user edits survive.
+          (glasspane-config-ensure)
+          (jetpacs-emacs-init--log
+           "glasspane config ensured: %d capture template(s), notes=%s"
+           (length (bound-and-true-p org-capture-templates))
+           (bound-and-true-p org-default-notes-file)))
       (jetpacs-emacs-init--log "glasspane not on load-path -- skipped"))
   (error (jetpacs-emacs-init--log "glasspane stage FAILED: %s"
                                   (error-message-string err))))

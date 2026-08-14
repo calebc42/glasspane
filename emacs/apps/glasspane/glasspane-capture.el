@@ -294,8 +294,17 @@ place."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "org.capture.show" #'glasspane-capture--on-show
                        :doc "Open the org capture template picker")
-    (jetpacs-defaction "share.text" #'glasspane-capture--on-share)
-    (jetpacs-defaction "org.capture.share" #'glasspane-capture--on-share)))
+    ;; The two share verbs are GLOBAL (the `jetpacs.launcher.open'
+    ;; precedent, jetpacs-launcher.el:148-162): a share is attributed
+    ;; by the COMPANION, not by one of this app's surfaces, so its wire
+    ;; surface may legitimately be a string glasspane does not own —
+    ;; under owner scope the D1 gate would then kill the intake
+    ;; silently.  `org.capture.show' stays owner-scoped: it is tapped
+    ;; from the app's own surfaces.
+    (jetpacs-defaction "share.text" #'glasspane-capture--on-share
+                       :any-surface t)
+    (jetpacs-defaction "org.capture.share" #'glasspane-capture--on-share
+                       :any-surface t)))
 
 (defun glasspane-capture-unregister ()
   "Drop the capture verbs, retire any live sheet, forget shared state."

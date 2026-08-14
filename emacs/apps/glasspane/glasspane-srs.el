@@ -907,7 +907,14 @@ register/unregister sweep."
      '((org-srs-review-new-items-per-day :label "New cards per day")
        (org-srs-review-max-reviews-per-day :label "Max reviews per day")))))
 
-(with-eval-after-load 'org-srs (glasspane-srs--settings-section-maybe))
+;; The form outlives the feature: M-x unload-feature voids the symbol
+;; while this closure is still on org-srs's after-load list, so a later
+;; (require 'org-srs) would signal void-function inside org-srs's OWN
+;; load.  It stays top-level — the docstring above names this
+;; late-install path, which `glasspane-srs-register' cannot reach.
+(with-eval-after-load 'org-srs
+  (when (fboundp 'glasspane-srs--settings-section-maybe)
+    (glasspane-srs--settings-section-maybe)))
 
 ;;;; Registration
 
@@ -956,12 +963,16 @@ place and the hooks add exactly once."
   (glasspane-srs--settings-section-maybe))
 
 (defun glasspane-srs-unregister ()
-  "Drop the review verbs, the chip, the hooks, and the settings block."
+  "Drop the review verbs, the chip, the hooks, and the settings block.
+The session dies with the registration: a re-register starts from no
+session rather than resuming the one whose verbs just went away."
   (dolist (name glasspane-srs--verbs)
     (jetpacs-undefaction name))
   (remove-hook 'glasspane-ui-detail-toolbar-functions
                #'glasspane-srs-detail-toolbar)
   (remove-hook 'jetpacs-shell-refresh-hook #'glasspane-srs--reprobe)
+  (setq glasspane-srs--active nil glasspane-srs--current nil
+        glasspane-srs--revealed nil glasspane-srs--undo nil)
   (jetpacs-settings-remove-section "Review"))
 
 (provide 'glasspane-srs)

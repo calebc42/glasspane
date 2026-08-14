@@ -859,7 +859,11 @@ Derived from the same defcustoms `ebp-org--roots' reads — an explicit
 anchoring rule), nil falls through to `org-directory' itself, which
 the nil-roots derivation always admits.  Seeding anywhere else would
 make every query, mutation, and mint over the corpus refuse (the
-ebp-org root allowlist), so the fallback path v1 hardcoded is gone."
+ebp-org root allowlist), so the fallback path v1 hardcoded is gone.
+The head is the ONLY seeded root: on a multi-root vault the remaining
+roots get no fixtures.  That is the intent — the corpus is one
+self-contained tour directory, and a copy per root would show up
+repeated in every whole-vault query."
   (let ((head (car ebp-org-roots)))
     (file-name-as-directory
      (expand-file-name

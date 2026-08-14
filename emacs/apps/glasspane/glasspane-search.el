@@ -157,34 +157,6 @@ paths or payload)."
                  (format "Search failed (%s)" (jetpacs-error-label err)))
            nil))))
 
-;;;; Token minting (S5 — one :set per render, replace semantics)
-
-(defun glasspane-search--tokenize (items)
-  "ITEMS with a `token' cell attached; one bulk mint (S5).
-Refs whose file left the org roots would SIGNAL at mint time
-\(ebp-org.el's policy-at-mint rule), so they are filtered first — the
-item still renders, just untappable — as is any overflow past the
-per-set cap.  Tap tokens only: the result card carries no swipe arms.
-Minted even when ITEMS is empty — the replace sweep is what retires
-the previous render's tokens."
-  (let* ((mintable (cl-remove-if-not
-                    (lambda (it)
-                      (let ((f (plist-get (alist-get 'ref it) :file)))
-                        (and (stringp f) (not (string-empty-p f))
-                             (ebp-org-file-allowed-p f))))
-                    items))
-         (mintable (seq-take mintable ebp-org-token-set-max))
-         (refs (mapcar (lambda (it) (alist-get 'ref it)) mintable))
-         (taps (ebp-org-ref-tokens refs :set "search-results"
-                                   :owner "glasspane"))
-         (table (make-hash-table :test #'eq)))
-    (cl-loop for it in mintable for tap in taps
-             do (puthash it tap table))
-    (mapcar (lambda (it)
-              (let ((tok (gethash it table)))
-                (if tok (cons (cons 'token tok) it) it)))
-            items)))
-
 ;;;; The query builder card
 
 (defun glasspane-search--section (key label summary widget)
@@ -304,7 +276,10 @@ results, to keep them above the fold."
 (defun glasspane-search--body ()
   "The Search screen body: builder card, search row, results."
   (let* ((q (or glasspane-search--query ""))
-         (items (glasspane-search--tokenize glasspane-search--results))
+         ;; Set "search-results": this screen's own, one render at a
+         ;; time — the replace sweep retires the last result list.
+         (items (glasspane-ui--tokenize-tap glasspane-search--results
+                                            "search-results"))
          (cards (mapcar #'glasspane-ui--result-card items))
          (input (jetpacs-text-input
                  "search-query"
@@ -428,7 +403,8 @@ in either text field — `:reset-input-ids' is the S2 door for that
         glasspane-search--filter-priority nil
         glasspane-search--filter-due nil)
   (glasspane-search--run "")
-  (let ((surface (plist-get params :surface)))
+  (let ((surface (or (plist-get params :surface)
+                     (jetpacs-shell-surface-for "glasspane"))))
     (jetpacs-flow-continue
      (lambda ()
        (ignore-errors

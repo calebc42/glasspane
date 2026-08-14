@@ -200,6 +200,8 @@ references (or mark them INVALID) on the way through.")
    "Table editing needs an attended session"))
 
 (define-error 'glasspane-table--timeout "Babel run timed out")
+(define-error 'glasspane-table--disabled
+              "Babel evaluation disabled for this block")
 
 (defconst glasspane-table--babel-refusal
   "Babel needs an attended session to confirm"
@@ -223,11 +225,16 @@ confirm that cannot reach the device refuses instead of wedging."
              (when (and (eq (org-babel-check-confirm-evaluate info) 'query)
                         (not (jetpacs-dialog-can-bridge-p)))
                (signal 'inhibited-interaction nil))
-             ;; `org-babel-confirm-evaluate' RETURNS nil on decline (it
+             ;; `org-babel-confirm-evaluate' RETURNS nil on refusal (it
              ;; does not signal) — gate on that, or a declined prompt
-             ;; would fall through and evaluate anyway.
+             ;; would fall through and evaluate anyway.  That nil covers
+             ;; BOTH an interactive "no" and a block whose `:eval'
+             ;; policy never reached a prompt, so the check function
+             ;; splits them: non-nil there means the user answered.
              (unless (org-babel-confirm-evaluate info)
-               (user-error "Evaluation declined"))
+               (if (org-babel-check-confirm-evaluate info)
+                   (user-error "Evaluation declined")
+                 (signal 'glasspane-table--disabled nil)))
              (let ((org-confirm-babel-evaluate nil))
                (with-timeout ((max 1 glasspane-babel-timeout)
                               (signal 'glasspane-table--timeout nil))
@@ -241,6 +248,8 @@ confirm that cannot reach the device refuses instead of wedging."
      (jetpacs-shell-notify (format "Run timed out after %ss"
                                    (max 1 glasspane-babel-timeout))
                            surface))
+    (glasspane-table--disabled
+     (jetpacs-shell-notify "Evaluation disabled for this block" surface))
     (user-error
      (jetpacs-shell-notify "Evaluation declined" surface))
     (error

@@ -162,10 +162,27 @@ roots."
   "SPEC 23.1 tokens for REFS in the app scope's SET, nils on refusal.
 One bulk replace-set mint per render; a nil REFS still sweeps the set
 (the views precedent).  A path that left the org roots refuses at
-MINT time — the section then degrades to untappable cards instead of
-taking the render down."
+MINT time — that CARD then degrades to untappable instead of taking
+the section, or the render, down."
+  ;; `ebp-org-ref-tokens' validates ATOMICALLY, so one mention outside
+  ;; the roots would nil the WHOLE section AND — the signal landing
+  ;; before the replace sweep — leave the PREVIOUS render's tokens
+  ;; live.  Hence the pre-filter: only the allowed refs enter the one
+  ;; atomic call (so the sweep still runs), and the rejects come back
+  ;; as nils in their parallel positions.  The condition-case stays as
+  ;; the last-resort net for everything the filter cannot foresee.
   (condition-case nil
-      (ebp-org-ref-tokens refs :set set :owner "glasspane")
+      (let* ((allowed (mapcar (lambda (ref)
+                                (let ((file (plist-get ref :file)))
+                                  (and (stringp file)
+                                       (ebp-org-file-allowed-p file))))
+                              refs))
+             (tokens (ebp-org-ref-tokens
+                      (cl-loop for ref in refs
+                               for ok in allowed
+                               when ok collect ref)
+                      :set set :owner "glasspane")))
+        (mapcar (lambda (ok) (and ok (pop tokens))) allowed))
     (error (make-list (length refs) nil))))
 
 (defun glasspane-notes--mint-sparse (refs set)
@@ -399,16 +416,21 @@ has nothing to search for."
 The re-render's builder starts the keyed ripgrep loader — start-on-
 first-ask is builder-side by design, so the dispatch extent never
 blocks (D2).  The wanted-mark is the durable effect."
+  ;; The S4 gate order every handler in this file follows, and the srs
+  ;; sibling with it: shape -> stale -> exposure -> grant.  The token
+  ;; lookup precedes the availability probe so a token the replace
+  ;; sweep already retired answers `stale' — what it IS — instead of
+  ;; borrowing the absent engine's `rejected'.
   (let ((token (plist-get args :token)))
-    (cond
-     ((not (stringp token)) 'rejected)
-     ((not (and (glasspane-notes-available-p)
-                (fboundp 'vulpea-note-unlinked-mentions-async)))
-      'rejected)
-     (t
+    (if (not (stringp token))
+        'rejected
       (let ((ref (ebp-org-token-ref token :owner "glasspane")))
-        (if (null ref)
-            'stale
+        (cond
+         ((null ref) 'stale)
+         ((not (and (glasspane-notes-available-p)
+                    (fboundp 'vulpea-note-unlinked-mentions-async)))
+          'rejected)
+         (t
           (let ((id (glasspane-notes--ref-id ref)))
             (if (null id)
                 'stale                  ; the :ID: left with an edit
@@ -504,18 +526,17 @@ a bug class, not an outcome (v1's rule, kept)."
 A heading token replayed here (no :line/:target-id in its ref) is a
 shape error, not a miss."
   (let ((token (plist-get args :token)))
-    (cond
-     ((not (stringp token)) 'rejected)
-     ((not (glasspane-notes-available-p)) 'rejected)
-     (t
+    (if (not (stringp token))
+        'rejected
       (let ((ref (ebp-org-token-ref token :owner "glasspane")))
         (cond
          ((null ref) 'stale)
+         ((not (glasspane-notes-available-p)) 'rejected)
          ((not (and (stringp (plist-get ref :file))
                     (integerp (plist-get ref :line))
                     (stringp (plist-get ref :target-id))))
           'rejected)
-         (t (glasspane-notes--materialize ref params))))))))
+         (t (glasspane-notes--materialize ref params)))))))
 
 ;;;; Stale files: the vulpea half of the Review screen
 ;;
@@ -628,7 +649,10 @@ gate contract).  Idempotent."
 (defun glasspane-notes-unregister ()
   "Drop the notes verbs and hook claims.
 The scan marks go too: a fresh registration owes no ripgrep to old
-taps (the async cache sweeps its own entries by owner)."
+taps.  Nothing here clears the async cache — `jetpacs-async-clear-owner'
+runs only from `jetpacs-teardown-owner', which this path never
+reaches; the mention entries die on their own when a push generation
+goes by without a build asking for them."
   (dolist (name glasspane-notes--verbs)
     (jetpacs-undefaction name))
   (remove-hook 'glasspane-ui-detail-nodes-functions

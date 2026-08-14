@@ -146,12 +146,26 @@ for the next barrier when offline."
      (lambda () (jetpacs-shell-remove-root glasspane-clock-surface)))))
 
 (defun glasspane-clock--on-ready (_client)
-  "Re-assert the running clock at READY (arity fixed at (CLIENT)).
-The phone's notification cache survives an Emacs restart; only Emacs
-knows whether the clock still runs.  Runs before the shell's drain at
-depth 90, so the re-registered root's push rides this very READY."
-  (when (org-clock-is-active)
-    (glasspane-clock--assert)))
+  "Settle BOTH directions of the phone's cache at READY (arity (CLIENT)).
+That cache survives an Emacs restart; only Emacs knows whether the
+clock still runs — so a running clock re-asserts, and a stopped one
+retires the ongoing chronometer that would otherwise tick in the shade
+forever.  The removal is deliberately NOT grant-gated (see
+`glasspane-clock--retire': the tombstone goes out even with the grant
+revoked) and NOT routed through `glasspane-clock--soon' — READY is not
+a dispatch extent.  It clears `glasspane-clock--live' with the removal
+for the same reason `glasspane-clock--retire' does: the flag names a
+REGISTERED root, and a clock cancelled through `org-clock-cancel-hook'
+\(which this module does not hook) leaves it set over a root this arm
+drops — a later `glasspane-clock--assert' would then skip
+`jetpacs-shell-define-root', the only thing that clears the tombstone,
+and push into nothing for the rest of the session.  Runs before the
+shell's drain at depth 90, so the re-registered root's push rides this
+very READY."
+  (if (org-clock-is-active)
+      (glasspane-clock--assert)
+    (setq glasspane-clock--live nil)
+    (jetpacs-shell-remove-root glasspane-clock-surface)))
 
 ;;;; SPEC 14 handlers
 

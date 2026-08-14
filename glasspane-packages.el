@@ -278,14 +278,14 @@ must restore them without a re-require (the G0 gate contract)."
     ;; and the foundation package-browser owns that name
     ;; (jetpacs-package-browser.el) — every glasspane verb is
     ;; app-prefixed (the M3 convention G0 adopted).
-    ;; :any-surface — the not-installed empty states that carry this
-    ;; tap (ef, srs) live on screens pushed onto whatever surface the
-    ;; satellite row was tapped from, usually the Settings root; the
-    ;; owned-surface gate would reject the tap there before the
-    ;; handler ran.
+    ;; No :any-surface: the not-installed empty states that carry this
+    ;; tap (ef, srs) live on screens this owner pushed itself, and a
+    ;; push onto a foreign surface registers the screen as a sanctioned
+    ;; GUEST (`jetpacs-chrome-push-screen', S4) — the D1 gate then
+    ;; admits the tap through `jetpacs-guest-delegation-function' for
+    ;; exactly as long as that screen is on the stack.
     (jetpacs-defaction "glasspane.packages.install"
                        #'glasspane-packages--on-install
-                       :any-surface t
                        :doc "Install Glasspane's closed optional-engine set from MELPA")))
 
 ;; The auto-install row registers with the app's CONSOLIDATED

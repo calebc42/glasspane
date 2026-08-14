@@ -4514,11 +4514,19 @@ fires from Glasspane's own surfaces must still be refused there."
         ;; foreign surface, which is what makes the four above bite.
         (should (eq (dispatch "journal.open" nil "app:jetpacs.settings")
                     'rejected)))))
-  ;; The registry side of the same rule, verb by verb.
-  (dolist (name '("glasspane.settings.open"
-                  "settings.agenda.edit" "settings.agenda.delete"
-                  "ef.show"))
+  ;; The registry side of the same rule, verb by verb.  Only the
+  ;; OPENERS stay global: their taps arrive before any guest screen
+  ;; exists.
+  (dolist (name '("glasspane.settings.open" "ef.show"))
     (should (gethash name jetpacs--any-surface-actions)))
+  ;; The verbs emitted FROM the pushed screens dropped the flag (S4):
+  ;; the opener's push registers a sanctioned guest, and the gate
+  ;; delegates to `jetpacs-guest-delegation-function' instead — scoped
+  ;; to the screen's lifetime, not granted forever.
+  (dolist (name '("settings.agenda.edit" "settings.agenda.delete"
+                  "glasspane.packages.install"))
+    (should (gethash name jetpacs-action-handlers))
+    (should-not (gethash name jetpacs--any-surface-actions)))
   ;; The moved family must NOT be in the any-surface set: ownerless
   ;; registration made the whole dance unnecessary (§3 step 2).
   (dolist (name '("jetpacs.org.tags" "jetpacs.org.todo.edit"

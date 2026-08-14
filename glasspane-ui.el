@@ -689,27 +689,28 @@ files.toggle-refile with the reader surfacing (G4).")
 Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces handlers and
 registry entries in place, and the link is re-added exactly once."
-  ;; :any-surface — D1 GLOBAL verbs on the ef precedent
-  ;; (glasspane-ef.el:361-366): the satellite link draws on the
-  ;; Settings ROOT, and the screen it leads to is pushed onto whatever
-  ;; surface was tapped, so every verb whose only emission site is
-  ;; there arrives on a surface Glasspane does not own and the
-  ;; owned-surface gate would refuse it before the handler ran
-  ;; (jetpacs-surfaces.el:770-785).  The rest stay owner-scoped: the
-  ;; save verbs fire from dialog conclusions, which carry no
-  ;; `:surface' at all (SPEC 14.4), and the agenda/files verbs from
-  ;; screens on this owner's own surface.
+  ;; :any-surface — ONLY the opener now.  The satellite link draws on
+  ;; the Settings ROOT, a surface Glasspane does not own, so the tap
+  ;; that OPENS the management screen arrives before any guest screen
+  ;; exists and still needs the global flag.  The verbs emitted FROM
+  ;; that screen (edit/delete) no longer do: the opener's push
+  ;; registers the screen as a sanctioned GUEST
+  ;; (`jetpacs-chrome-push-screen', S4), and the D1 gate admits an
+  ;; owner's verbs from any surface where one of its guest screens is
+  ;; live (`jetpacs-guest-delegation-function') — revoked the moment
+  ;; the screen leaves the stack, which a blanket :any-surface never
+  ;; was.  The rest stay owner-scoped: the save verbs fire from dialog
+  ;; conclusions, which carry no `:surface' at all (SPEC 14.4), and
+  ;; the agenda/files verbs from screens on this owner's own surface.
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "glasspane.settings.open"
                        #'glasspane-ui--on-settings-open
                        :any-surface t
                        :doc "Open Glasspane's settings management screen")
     (jetpacs-defaction "settings.agenda.edit"
-                       #'glasspane-ui--on-agenda-edit
-                       :any-surface t)
+                       #'glasspane-ui--on-agenda-edit)
     (jetpacs-defaction "settings.agenda.delete"
-                       #'glasspane-ui--on-agenda-delete
-                       :any-surface t)
+                       #'glasspane-ui--on-agenda-delete)
     (jetpacs-defaction "settings.agenda.save"
                        #'glasspane-ui--on-agenda-save)
     (jetpacs-defaction "agenda.save-custom"

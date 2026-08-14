@@ -41,7 +41,8 @@
          (progn (jetpacs-attach client) ,@body)
        (jetpacs-detach)
        (jetpacs-test-reset-state)
-       (clrhash jetpacs-chrome--stacks))))
+       (clrhash jetpacs-chrome--stacks)
+       (clrhash jetpacs-chrome--guests))))
 
 (defmacro jetpacs-chrome-test--recording (records &rest body)
   (declare (indent 1))
@@ -1240,6 +1241,180 @@ expanded window — only the data form can be re-authored into a rail."
             (should (gethash "root" views))
             (should-not (plist-get (gethash "root" views) :bottom_bar))))
       (jetpacs-chrome-remove "app:dockdemo2"))))
+
+;;;; S4 — sanctioned guests (CHROME-VOCABULARY v3, the two poles)
+
+(ert-deftest jetpacs-chrome-guest-push-registers-and-delegates ()
+  "A push by an owner onto a stack it does not own is a GUEST: the id
+is prefixed (two apps pushing \"settings\" onto the host must not
+truncate each other), the row is recorded, and the delegation checker
+answers from the LIVE stack — a Companion-local back revokes it with
+no bookkeeping, and re-pushing keeps exactly one row."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-chrome-test--define "hostapp" "hub")
+      (cl-flet ((push-guest ()
+                  (with-jetpacs-owner "guestapp"
+                    (jetpacs-chrome-push-screen
+                     "app:hostapp" "settings"
+                     (lambda (back)
+                       (jetpacs-chrome-screen "G" (jetpacs-text "g")
+                                              :back back))))))
+        (push-guest)
+        (should (equal (jetpacs-chrome-stack "hostapp")
+                       '("guest-guestapp-settings" "hub")))
+        (should (jetpacs-chrome--guest-delegate-p "guestapp" "app:hostapp"))
+        ;; Another owner gains nothing from this guest's screen.
+        (should-not (jetpacs-chrome--guest-delegate-p "otherapp"
+                                                      "app:hostapp"))
+        ;; Companion-local back to the hub: the row goes inert because
+        ;; the id left the stack, not because anything swept it.
+        (jetpacs-chrome--on-view-switched "app:hostapp" "hub")
+        (should-not (jetpacs-chrome--guest-delegate-p "guestapp"
+                                                      "app:hostapp"))
+        ;; Re-push: live again, and still exactly one recorded row.
+        (push-guest)
+        (should (jetpacs-chrome--guest-delegate-p "guestapp" "app:hostapp"))
+        (should (= 1 (length (gethash "app:hostapp"
+                                      jetpacs-chrome--guests))))
+        ;; The host's own pushes never prefix (owner nil here, as at
+        ;; the REPL, or the owner owning its surface in an app).
+        (jetpacs-chrome-push-screen
+         "hostapp" "own"
+         (lambda (back)
+           (jetpacs-chrome-screen "O" (jetpacs-text "o") :back back)))
+        (should (equal (car (jetpacs-chrome-stack "hostapp")) "own"))))))
+
+(ert-deftest jetpacs-chrome-guest-delegation-admits-owner-verbs ()
+  "The DISPATCH-level point of S4: an owner-scoped verb arriving from
+the host surface is refused until the owner has a live guest screen
+there, admitted while it lives, and refused again once swept — the
+scoped grant that retires blanket `:any-surface' on satellite verbs."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+     (jetpacs-chrome-test--clean-repush
+      (jetpacs-chrome-test--define "hostapp" "hub")
+      (let (hits)
+        (with-jetpacs-owner "guestapp"
+          (jetpacs-defaction "guestapp.poke"
+                             (lambda (_a _p) (push t hits) 'accepted)))
+        (unwind-protect
+            (cl-flet ((poke ()
+                        (jetpacs--dispatch
+                         nil (list :action "guestapp.poke"
+                                   :surface "app:hostapp" :args nil)
+                         (gethash "guestapp.poke"
+                                  jetpacs-action-handlers))))
+              ;; The control: no guest screen -> the D1 gate refuses
+              ;; BEFORE the handler.
+              (should (eq (poke) 'rejected))
+              (should-not hits)
+              (with-jetpacs-owner "guestapp"
+                (jetpacs-chrome-push-screen
+                 "app:hostapp" "gs"
+                 (lambda (back)
+                   (jetpacs-chrome-screen "G" (jetpacs-text "g")
+                                          :back back))))
+              (should (eq (poke) 'accepted))
+              (should (= 1 (length hits)))
+              ;; Swept -> revoked at the same gate.
+              (jetpacs-chrome-sweep-guests "guestapp")
+              (should (eq (poke) 'rejected))
+              (should (= 1 (length hits))))
+          ;; Reset never clears the action table wholesale.
+          (jetpacs-undefaction "guestapp.poke")))))))
+
+(ert-deftest jetpacs-chrome-guest-sweep-and-teardown ()
+  "The teardown half: the hook member sweeps the owner's guest rows AND
+stack entries off every foreign surface and schedules a repush there —
+a stranded guest must not survive its app's unload as an error card on
+the HOST's surface.  `jetpacs-chrome-remove' in owner form sweeps too
+(the live-unregister path)."
+  (should (memq #'jetpacs-chrome--on-guest-teardown
+                jetpacs-teardown-functions))
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (jetpacs-chrome-test--define "hostapp" "hub")
+      (cl-flet ((push-guest ()
+                  (with-jetpacs-owner "guestapp"
+                    (jetpacs-chrome-push-screen
+                     "app:hostapp" "gs"
+                     (lambda (back)
+                       (jetpacs-chrome-screen "G" (jetpacs-text "g")
+                                              :back back))))))
+        (push-guest)
+        (let (repushed)
+          (cl-letf (((symbol-function 'jetpacs-shell--schedule-repush)
+                     (lambda (s) (push s repushed))))
+            (jetpacs-chrome--on-guest-teardown "guestapp"))
+          (should (equal repushed '("app:hostapp")))
+          (should (equal (jetpacs-chrome-stack "hostapp") '("hub")))
+          (should-not (jetpacs-chrome--guest-delegate-p "guestapp"
+                                                        "app:hostapp"))
+          ;; A second sweep finds nothing and schedules nothing.
+          (setq repushed nil)
+          (cl-letf (((symbol-function 'jetpacs-shell--schedule-repush)
+                     (lambda (s) (push s repushed))))
+            (jetpacs-chrome-sweep-guests "guestapp"))
+          (should-not repushed))
+        ;; The live-unregister path: remove in OWNER form sweeps.
+        (push-guest)
+        (should (jetpacs-chrome--guest-delegate-p "guestapp" "app:hostapp"))
+        (cl-letf (((symbol-function 'jetpacs-shell--schedule-repush)
+                   #'ignore)
+                  ;; The removal RPC is not under test (fake client,
+                  ;; no connection) — the sweep riding it is.
+                  ((symbol-function 'jetpacs-shell-remove-root)
+                   #'ignore))
+          (jetpacs-chrome-remove "guestapp"))
+        (should-not (jetpacs-chrome--guest-delegate-p "guestapp"
+                                                      "app:hostapp"))
+        (should (equal (jetpacs-chrome-stack "hostapp") '("hub")))))))
+
+;;;; S6 — the snackbar injector (pinned; behavior landed 1ad6bde)
+
+(ert-deftest jetpacs-chrome-snackbar-injector-reaches-current-view ()
+  "`jetpacs-shell--inject-snackbar' pinned across its three arms: a bare
+scaffold root takes the slot; a multi_view spec takes it on the view
+this push lands on (VIEW arg, else `initial_view') IFF that view's root
+is a scaffold — copy-on-write, the caller's spec untouched; anything
+else answers nil so the caller degrades to a toast.  Every chrome
+screen is a scaffold wrapped as a VIEW, so the multi_view arm is the
+one every snackbar in the product rides."
+  ;; Arm 1: bare scaffold root.
+  (let* ((spec '(:t "scaffold" :body (:t "text" :text "b")))
+         (out (jetpacs-shell--inject-snackbar spec nil "Saved")))
+    (should (equal (plist-get out :snackbar) "Saved"))
+    (should-not (plist-get spec :snackbar)))
+  ;; Arm 2: multi_view — the CURRENT view, then the initial_view
+  ;; fallback, then the non-scaffold refusal; the original hash and
+  ;; spec never mutate.
+  (let* ((views (make-hash-table :test #'equal))
+         (scaffold '(:t "scaffold" :body (:t "text" :text "s")))
+         (plain '(:t "text" :text "p"))
+         (spec nil))
+    (puthash "hub" scaffold views)
+    (puthash "raw" plain views)
+    (setq spec (list :views views :initial_view "hub"))
+    ;; VIEW argument wins.
+    (let ((out (jetpacs-shell--inject-snackbar spec "hub" "Hi")))
+      (should out)
+      (should (equal (plist-get (gethash "hub" (plist-get out :views))
+                                :snackbar)
+                     "Hi"))
+      ;; Copy-on-write: the caller's structures are untouched.
+      (should-not (plist-get (gethash "hub" views) :snackbar))
+      (should (eq (plist-get spec :views) views)))
+    ;; nil VIEW falls back to initial_view.
+    (let ((out (jetpacs-shell--inject-snackbar spec nil "Hi")))
+      (should (equal (plist-get (gethash "hub" (plist-get out :views))
+                                :snackbar)
+                     "Hi")))
+    ;; The landing view's root is not a scaffold: nil, degrade.
+    (should-not (jetpacs-shell--inject-snackbar spec "raw" "Hi")))
+  ;; Arm 3: no scaffold anywhere.
+  (should-not (jetpacs-shell--inject-snackbar
+               '(:t "text" :text "x") nil "Hi")))
 
 (provide 'jetpacs-chrome-test)
 ;;; jetpacs-chrome-test.el ends here

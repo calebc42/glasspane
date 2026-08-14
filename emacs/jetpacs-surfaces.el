@@ -721,6 +721,7 @@ Returns the timer."
                      (funcall fn))))))
 
 (defvar jetpacs--any-surface-actions)   ; the global-verb table, defined below
+(defvar jetpacs-guest-delegation-function) ; the S4 seam, defined below
 
 (cl-defun jetpacs--dispatch (client params fn)
   "Run FN for one `event.action' and derive its SPEC 14.4 status.
@@ -773,7 +774,19 @@ logged: amendment #74 puts sensitive trigger data in `args'."
                  (not (gethash (plist-get params :action)
                                jetpacs--any-surface-actions))
                  (not (jetpacs-owned-surface-p event-surface
-                                               jetpacs-current-owner)))
+                                               jetpacs-current-owner))
+                 ;; S4 (CHROME-VOCABULARY v3, sanctioned GUESTS): an
+                 ;; owner with a live guest screen on the event's
+                 ;; surface receives its own events from there — the
+                 ;; scoped delegation that retires the app-era
+                 ;; `:any-surface' workaround for satellite screens.
+                 ;; The chrome kit installs the checker; validity is
+                 ;; derived from the LIVE stack, so a popped or swept
+                 ;; guest revokes itself.
+                 (not (and jetpacs-guest-delegation-function
+                           (funcall jetpacs-guest-delegation-function
+                                    jetpacs-current-owner
+                                    event-surface))))
         (display-warning
          'jetpacs
          (format "action %s (owner %S) refused for foreign surface %S \
@@ -834,6 +847,13 @@ Looks the handler up at dispatch time so live-coded redefinitions win."
       (if fn
           (jetpacs--dispatch client params fn)
         'rejected))))
+
+(defvar jetpacs-guest-delegation-function nil
+  "Function (OWNER SURFACE) -> non-nil when OWNER is a live GUEST there.
+The S4 seam: `jetpacs--dispatch''s D1 gate consults it after ownership
+and `:any-surface' both miss.  The chrome kit installs its checker
+\(a guest = a screen OWNER pushed onto a stack it does not own, still
+present on that stack); this module stays kit-agnostic.")
 
 (defvar jetpacs--any-surface-actions (make-hash-table :test #'equal)
   "Action names registered with :any-surface — D1 GLOBAL VERBS.

@@ -25,11 +25,11 @@
 ;; snapshot at the next natural push.  Offline back drift is BENIGN by
 ;; design — do not "fix" it by forcing current_view on reconnect.
 ;;
-;; Snackbar note (H10): `jetpacs-shell-push' injects a queued snackbar
-;; only into a scaffold ROOT; a multi-view spec has no :t, so
-;; `jetpacs-shell-notify' on a stack surface degrades to the gated
-;; toast.  Extending the shell to inject into the current view's
-;; scaffold is out of scope here.
+;; Snackbar note (H10, RESOLVED 2026-08-02 by 1ad6bde and stale here
+;; until the S6 sweep): `jetpacs-shell--inject-snackbar' reaches one
+;; level down into the CURRENT VIEW's scaffold, so `jetpacs-shell-notify'
+;; injects on multi-view chrome surfaces too — the toast degrade is
+;; only for surfaces with no scaffold anywhere.
 
 ;;; Code:
 
@@ -561,6 +561,59 @@ logged, and the requeued push renders the truncated stack."
               surface view (jetpacs-error-label err))
      nil)))
 
+(defvar jetpacs-chrome--guests (make-hash-table :test #'equal)
+  "SURFACE -> alist of (SCREEN-ID . OWNER): the sanctioned guests (S4).
+A row grants nothing by itself — `jetpacs-chrome--guest-delegate-p'
+requires the id to still be ON the surface's live stack, so a back
+truncation or pop revokes without bookkeeping here; stale rows are
+inert and swept when their owner tears down.")
+
+(defun jetpacs-chrome--guest-delegate-p (owner surface)
+  "Non-nil when OWNER has a guest screen live on SURFACE's stack.
+THE `jetpacs-guest-delegation-function': validity derives from the
+stack, never from the table alone."
+  (when-let* ((rows (gethash surface jetpacs-chrome--guests))
+              (stack (gethash surface jetpacs-chrome--stacks)))
+    (cl-some (lambda (row)
+               (and (equal (cdr row) owner)
+                    (cl-member (car row) stack :key #'car :test #'equal)
+                    t))
+             rows)))
+
+(defun jetpacs-chrome-sweep-guests (owner)
+  "Remove OWNER's guest screens from every foreign stack; repush touched.
+The S4 teardown half: without it a stranded guest survives its app's
+unload as a rebuilt error card on the HOST's surface.  Rides
+`jetpacs-teardown-functions' and `jetpacs-chrome-remove', so both the
+session-teardown and the live-unregister paths sweep."
+  (maphash
+   (lambda (surface rows)
+     (let ((mine (cl-remove-if-not (lambda (r) (equal (cdr r) owner))
+                                   rows)))
+       (when mine
+         (puthash surface
+                  (cl-set-difference rows mine) jetpacs-chrome--guests)
+         (when-let* ((stack (gethash surface jetpacs-chrome--stacks)))
+           (let ((kept (cl-remove-if
+                        (lambda (entry)
+                          (cl-member (car entry) mine
+                                     :key #'car :test #'equal))
+                        stack)))
+             (unless (equal kept stack)
+               (puthash surface kept jetpacs-chrome--stacks)
+               ;; Offline-safe: the queued repush renders the swept
+               ;; stack at the next opportunity, never inline here —
+               ;; teardown may run inside a dispatch extent.
+               (jetpacs-shell--schedule-repush surface)))))))
+   jetpacs-chrome--guests))
+
+(defun jetpacs-chrome--on-guest-teardown (owner)
+  "`jetpacs-teardown-functions' member: sweep OWNER's guests."
+  (jetpacs-chrome-sweep-guests owner))
+(add-hook 'jetpacs-teardown-functions #'jetpacs-chrome--on-guest-teardown)
+
+(setq jetpacs-guest-delegation-function #'jetpacs-chrome--guest-delegate-p)
+
 (defun jetpacs-chrome-push-screen (surface-or-owner id builder)
   "Push screen ID onto SURFACE's stack and navigate to it.
 ID is a SPEC 4.4 identifier, validated BEFORE any mutation — mint
@@ -583,8 +636,39 @@ sender ceiling does NOT yield nil here: `ebp-client--surface-request'
 claims and returns the revision before the ceiling can refuse; the
 refused frame is retried by the B8 repush.)"
   (let* ((surface (jetpacs-shell--resolve-surface surface-or-owner))
+         ;; S4: pushed by an owner onto a stack it does not own, the
+         ;; screen is a sanctioned GUEST — its id is prefixed (two
+         ;; apps pushing "settings" onto the host must not truncate
+         ;; each other's entries) and recorded, which is what admits
+         ;; this owner's events from the host surface while the
+         ;; screen lives (`jetpacs-chrome--guest-delegate-p').
+         (guest-owner (and jetpacs-current-owner
+                           (not (jetpacs-owned-surface-p
+                                 surface jetpacs-current-owner))
+                           jetpacs-current-owner))
+         (id (if guest-owner (concat "guest-" guest-owner "-" id) id))
          (undo (jetpacs-chrome--stack-insert surface id builder)))
-    (jetpacs-chrome--push-or-undo surface id undo)))
+    (when guest-owner
+      (let ((rows (gethash surface jetpacs-chrome--guests)))
+        (unless (equal (alist-get id rows nil nil #'equal) guest-owner)
+          (puthash surface (cons (cons id guest-owner)
+                                 ;; Re-noting replaces; rows whose id
+                                 ;; left the stack are inert either way.
+                                 (cl-remove id rows
+                                            :key #'car :test #'equal))
+                   jetpacs-chrome--guests))))
+    (if guest-owner
+        ;; The presenting push must not CLAIM the host's surface for
+        ;; the guest (`jetpacs-shell-push' claims under the bound
+        ;; owner): a stolen claim makes `jetpacs-owned-surface-p'
+        ;; answer t for the guest from then on — an UNSCOPED D1 grant
+        ;; where S4 promises a screen-lifetime one, unprefixed
+        ;; re-pushes, and the host's root swept by the guest's
+        ;; teardown.  Bind the owner of record (nil leaves an
+        ;; unclaimed surface unclaimed; `jetpacs--claim' no-ops).
+        (let ((jetpacs-current-owner (jetpacs--owner-of "surface" surface)))
+          (jetpacs-chrome--push-or-undo surface id undo))
+      (jetpacs-chrome--push-or-undo surface id undo))))
 
 (defun jetpacs-chrome-pop-screen (surface-or-owner)
   "Pop SURFACE's stack and navigate to the screen below (Emacs-side
@@ -613,9 +697,15 @@ doubles as a hub refresh."
                          jetpacs-chrome--stacks)))
 
 (defun jetpacs-chrome-remove (surface-or-owner)
-  "Drop SURFACE's stack and tombstone the surface."
+  "Drop SURFACE's stack and tombstone the surface.
+Also sweeps the owner's GUEST screens off foreign stacks (S4): the
+live-unregister path arrives here, not through session teardown."
   (let ((surface (jetpacs-shell--resolve-surface surface-or-owner)))
     (remhash surface jetpacs-chrome--stacks)
+    (remhash surface jetpacs-chrome--guests)
+    (when (stringp surface-or-owner)
+      (unless (string-search ":" surface-or-owner)
+        (jetpacs-chrome-sweep-guests surface-or-owner)))
     (jetpacs-shell-remove-root surface)))
 
 ;;;; Stack <-> device sync (the shell's view.switched, subscribed)

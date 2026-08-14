@@ -1,5 +1,15 @@
 # device/MANIFEST.md — the tablet re-provisioning bundle
 
+> **Field note (2026-08-13, first live run):** the tree transport is now
+> `tar` over the ssh exec channel, not rsync — Termux's rsync 3.5.0
+> receiver hit an unexplained EACCES on chdir into a directory the same
+> ssh login enters fine (no AVC, correct owner/modes). And pubkey auth
+> is not assumed: Termux's openssh 10.5p1 accepted the ed25519 in the
+> authorized_keys exchange yet denied the signed auth, so the kit keeps
+> a generated password in `tools/onboard-scratch/` and serves it via
+> `SSH_ASKPASS` whenever the key path fails.
+
+
 What lands on the tablet, at which path, by which transport, and why.
 This is the deploy contract `tools/onboard-tablet.sh` implements and
 `tools/onboard-provision-remote.sh` finishes on the device side.

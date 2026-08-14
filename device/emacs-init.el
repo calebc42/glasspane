@@ -189,6 +189,18 @@ yet? every jetpacs require below is skipped."
 ;; python-ts-mode are both in the default set), and Emacs 30.1 ships
 ;; eglot built in.  Stage 2 is the only thing this init owes it.
 
+;;;; Stage 3b: the DEVICE timing profile (measured on the Pixel
+;;;; Tablet, 2026-08-13).  A cold pylsp overruns the 1s desktop
+;;;; defaults -- the live harvest answered empty until the server
+;;;; warmed, and the doc fetch has a synchronous completionItem/resolve
+;;;; inside it.  5s keeps a thinking server a degraded answer rather
+;;;; than a dead feature; the with-timeout bound still protects the
+;;;; session either way.
+
+(with-eval-after-load 'ebp-complete
+  (setq ebp-complete-live-timeout 5.0)
+  (setq ebp-complete-doc-timeout 5.0))
+
 ;;;; Stage 4: jetpacs-files-roots gains the deployed bundle root.
 ;;;; EXTEND, not replace: the stock defaults (`user-emacs-directory',
 ;;;; `org-directory', "~/") all resolve inside org.gnu.emacs's own

@@ -184,8 +184,43 @@ SSH_OPTS=(-p "$SSH_PORT" -l "$SSH_USER"
           -o LogLevel=ERROR)
 RSYNC_RSH=""   # filled in once SSH_KEY is known
 
-ssh_ready() { ssh -i "$SSH_KEY" "${SSH_OPTS[@]}" 127.0.0.1 true 2>/dev/null; }
-ssh_run()   { ssh -i "$SSH_KEY" "${SSH_OPTS[@]}" 127.0.0.1 "$@"; }
+ssh_ready() {
+  if [ -f "$PASS_FILE" ]; then
+    ssh_auth_env ssh -o BatchMode=no -o PreferredAuthentications=password \
+        "${SSH_OPTS[@]}" 127.0.0.1 true 2>/dev/null
+  else
+    ssh -i "$SSH_KEY" "${SSH_OPTS[@]}" 127.0.0.1 true 2>/dev/null
+  fi
+}
+# Termux's openssh 10.5p1 ACCEPTED this desktop's ed25519 in the
+# authorized_keys exchange and then denied the signed auth anyway
+# (observed live 2026-08-13; byte-identical key file, correct modes,
+# nothing in logcat).  The fallback: a generated password stored in the
+# gitignored scratch dir, set once via the same typed-bootstrap channel
+# (`passwd` + two typed lines), served to ssh through SSH_ASKPASS.
+PASS_FILE="$SCRATCH_DIR/tablet-ssh-pass"
+ASKPASS_FILE="$SCRATCH_DIR/askpass.sh"
+ssh_auth_env() {
+  if [ -f "$PASS_FILE" ]; then
+    if [ ! -x "$ASKPASS_FILE" ]; then
+      printf '#!/bin/sh\ncat "%s"\n' "$PASS_FILE" > "$ASKPASS_FILE"
+      chmod 700 "$ASKPASS_FILE"
+    fi
+    SSH_ASKPASS="$ASKPASS_FILE" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" "$@"
+  else
+    "$@"
+  fi
+}
+# ssh takes the FIRST occurrence of an option, so the password arm's
+# overrides go BEFORE SSH_OPTS (whose BatchMode=yes must lose there).
+ssh_run() {
+  if [ -f "$PASS_FILE" ]; then
+    ssh_auth_env ssh -o BatchMode=no -o PreferredAuthentications=password \
+        "${SSH_OPTS[@]}" 127.0.0.1 "$@"
+  else
+    ssh -i "$SSH_KEY" "${SSH_OPTS[@]}" 127.0.0.1 "$@"
+  fi
+}
 
 wait_for_ssh_ready() {
   local budget="$1" delay=5 waited=0
@@ -344,13 +379,22 @@ phase_provision() {
   ssh_run "mkdir -p jetpacs/emacs jetpacs/py" \
     || die "could not mkdir ~/jetpacs/{emacs,py} on the device over ssh"
 
-  log "rsync emacs/ -> Termux ~/jetpacs/emacs/ (whole tree, apps/ and \
-spike/ included; --delete makes it a true mirror)"
-  rsync -rlptz --delete "${RSYNC_EXCLUDES[@]}" -e "$RSYNC_RSH" \
-        "$REPO_ROOT/emacs/" "127.0.0.1:jetpacs/emacs/" \
-    || die "rsync of emacs/ to the device failed -- is 'rsync' actually \
-on Termux's PATH? (verify: ssh -p $SSH_PORT -i $SSH_KEY $SSH_USER@127.0.0.1 \
-'command -v rsync')"
+  # tar over ssh, NOT rsync: on this tablet's Termux (rsync 3.5.0,
+  # openssh 10.5p1) the rsync RECEIVER gets EACCES on chdir into a
+  # directory the same login shell enters fine -- no AVC logged, owner
+  # and 0700 modes correct, `cd` over the identical ssh channel works.
+  # Observed live 2026-08-13; not understood, not worth fighting: tar
+  # rides the proven exec channel and the tree is small.  The --delete
+  # mirror semantic is approximated by extracting over the previous
+  # tree; stale .el files are swept by the remote provisioner's .elc
+  # sweep companion below only for .elc -- a RENAMED .el lingers until
+  # the next wipe, which the MANIFEST records as accepted.
+  log "tar emacs/ -> Termux ~/jetpacs/emacs/ (whole tree, apps/ and \
+spike/ included)"
+  tar -C "$REPO_ROOT/emacs" --exclude='*.elc' --exclude='.#*' \
+      --exclude='*~' --exclude='#*#' --exclude='__pycache__' -czf - . \
+    | ssh_run 'tar -C jetpacs/emacs -xzf -' \
+    || die "tar of emacs/ to the device failed"
 
   # NO --delete here, deliberately. ~/jetpacs/py is where
   # device/emacs-init.el points jetpacs-files-default-dir, i.e. it is a
@@ -359,17 +403,15 @@ on Termux's PATH? (verify: ssh -p $SSH_PORT -i $SSH_KEY $SSH_USER@127.0.0.1 \
   # files still win on name collision, so live.py stays authoritative.
   log "rsync device/py/ -> Termux ~/jetpacs/py/ (fixtures; no --delete, \
 this is a live editing dir)"
-  rsync -rlptz "${RSYNC_EXCLUDES[@]}" -e "$RSYNC_RSH" \
-        "$REPO_ROOT/device/py/" "127.0.0.1:jetpacs/py/" \
-    || die "rsync of device/py/ to the device failed"
+  tar -C "$REPO_ROOT/device/py" -czf - . \
+    | ssh_run 'tar -C jetpacs/py -xzf -' \
+    || die "tar of device/py/ to the device failed"
 
   log "staging device/emacs-init.el + the remote provisioner"
-  rsync -ptz -e "$RSYNC_RSH" \
-        "$REPO_ROOT/device/emacs-init.el" "127.0.0.1:jetpacs/emacs-init.el" \
+  ssh_run 'cat > jetpacs/emacs-init.el' < "$REPO_ROOT/device/emacs-init.el" \
     || die "transfer of device/emacs-init.el to the device failed"
-  rsync -ptz -e "$RSYNC_RSH" \
-        "$SCRIPT_DIR/onboard-provision-remote.sh" \
-        "127.0.0.1:.onboard-provision.sh" \
+  ssh_run 'cat > .onboard-provision.sh' \
+      < "$SCRIPT_DIR/onboard-provision-remote.sh" \
     || die "transfer of tools/onboard-provision-remote.sh failed"
 
   # The remote script's stderr streams straight through to ours as it

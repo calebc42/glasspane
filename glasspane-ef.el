@@ -8,7 +8,10 @@
 ;; A Glasspane screen for Prot's ef-themes — the "colorful" companion to
 ;; the austere modus themes.  Unlike modus, ef-themes ship as a
 ;; third-party package rather than inside Emacs, so this lives in the
-;; app tier (an opinion Glasspane offers).  It offers:
+;; app tier (an opinion Glasspane offers) even though the scaffold it
+;; instantiates is foundation now (jetpacs-theme-picker, the §3 step-3
+;; promotion) — ef-themes is in the APP's package set, and app-tier is
+;; where a package opinion belongs.  It offers:
 ;;
 ;;  - a light/dark grouped picker, each row previewing a theme's
 ;;    background and identity accent as swatches; the active theme is
@@ -66,7 +69,7 @@
 (require 'jetpacs-chrome)
 (require 'jetpacs-settings)
 (require 'jetpacs-theme)
-(require 'glasspane-theme-picker)
+(require 'jetpacs-theme-picker)
 (require 'glasspane-ui)
 
 ;; ef-themes is an optional runtime dependency loaded on demand; every
@@ -130,11 +133,11 @@ ef derivatives register a `:background-mode' theme property (the modus
 (defun glasspane-ef--display-name (theme)
   "A human-friendly label for THEME: drop the `ef-' prefix, then
 title-case, so `ef-melissa-dark' reads as \"Melissa Dark\"."
-  (glasspane-theme-picker-display-name "ef-" theme))
+  (jetpacs-theme-picker-display-name "ef-" theme))
 
 (defun glasspane-ef--current-card (current)
   "The header card: the active theme's name, polarity, palette, mirror status."
-  (glasspane-theme-picker-current-card current
+  (jetpacs-theme-picker-current-card current
                                        :display-fn #'symbol-name
                                        :dark-p-fn #'glasspane-ef--dark-p
                                        :color-fn #'glasspane-ef--color
@@ -153,7 +156,7 @@ title-case, so `ef-melissa-dark' reads as \"Melissa Dark\"."
 
 (defun glasspane-ef--themes-section (current)
   "The theme picker: cards grouped Light then Dark."
-  (glasspane-theme-picker-themes-section (glasspane-ef--themes) current
+  (jetpacs-theme-picker-themes-section (glasspane-ef--themes) current
                                          :dark-p-fn #'glasspane-ef--dark-p
                                          :display-fn #'glasspane-ef--display-name
                                          :color-fn #'glasspane-ef--color
@@ -200,7 +203,7 @@ variable every render (S2) and dispatches `ef.option' on change."
                         (glasspane-ef--actions-row))
                   (glasspane-ef--themes-section current)
                   (glasspane-ef--style-section)
-                  (list (glasspane-theme-picker-more-link "ef-themes")))))))
+                  (list (jetpacs-theme-picker-more-link "ef-themes")))))))
 
 (defun glasspane-ef--not-installed ()
   "The ef-themes-absent placeholder.

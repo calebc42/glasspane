@@ -79,10 +79,11 @@
 (require 'glasspane-srs)
 ;; G8, the satellites + fixtures: demo loads before gallery (gallery's
 ;; entry command leans on the demo seeder being in the image — the
-;; plan's DEMO-BEFORE-GALLERY order), and the theme-picker scaffold
-;; before ef, which instantiates it.
+;; plan's DEMO-BEFORE-GALLERY order).  The theme-picker scaffold ef
+;; instantiates is foundation now (jetpacs-theme-picker, the §3 step-3
+;; promotion), and ef requires it itself — no entry-point ordering to
+;; hold.
 (require 'glasspane-demo)
-(require 'glasspane-theme-picker)
 (require 'glasspane-ef)
 (require 'glasspane-gallery)
 

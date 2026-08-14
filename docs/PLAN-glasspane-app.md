@@ -745,7 +745,34 @@ in C locale, fixed-width stamps), `glasspane-test-demo-seed`
 derived from roots), `glasspane-test-demo-handlers` (write failure →
 'rejected after notify).
 
-### G9 — DEVICE GATE (exit)
+### G9 — DEVICE GATE (exit) — IN PROGRESS 2026-08-14
+
+First session (Pixel Tablet, via the onboarding channel): the engine
+set (vulpea/org-srs/ef-themes + deps) DESKTOP-STAGED and pushed into
+the device Emacs's elpa — the tablet never dials MELPA; the device
+init gained Stage 4b (package-initialize + guarded glasspane require)
+and file-logged breadcrumbs. VERIFIED ON HARDWARE: the app registers
+(elpa 8 dirs, session READY), the dock destination composes onto
+foreign surfaces and switches (after the launcher-allowlist catch
+below), the #26 hub renders whole (7 cards + drawer incl. the Apps
+section + capture FAB), the app Settings screen shows live managed
+config, and org.capture.show raises the Quick Capture dialog (S3 on
+hardware). TWO CATCHES, both fixed in tools/device: (1) a HOST init
+that never requires jetpacs-launcher leaves the global
+jetpacs.launcher.open verb off the SPEC 14 allowlist — every dock tap
+answers "action not allowlisted" with nothing on screen (the desktop
+never sees it: test images load the whole foundation); (2) the
+first-boot capture sheet is TEMPLATE-LESS — the managed-config
+seeding (v1: "first boot must yield a working capture sheet") does
+not run on a fresh device; the config-ensure flow needs wiring
+through the install-consent gap (#2 in FOUNDATION-GAPS) or an
+explicit first-boot call. REMAINING for the next session: capture
+templates seed then the capture flow end-to-end, agenda/journal with
+content, vulpea light-up (notes capf/backlinks/stale) and org-srs
+review/rate via Review, reminders adopt, notification chronometer,
+demo seeding, both snackbar arms, and the two residuals (#2
+mid-session vulpea light-up, #20 share surface string).
+
 
 Owed after G8, one device/vulpea session: install the closed engine
 set on hardware, then smoke — vulpea capf/backlinks/stale

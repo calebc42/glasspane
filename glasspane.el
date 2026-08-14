@@ -65,6 +65,12 @@
 (require 'glasspane-agenda)
 (require 'glasspane-journal)
 (require 'glasspane-capture)
+;; G6, the query surfaces: views leans on the reader's reorder table
+;; and the agenda's shared date row, so it loads after both; search and
+;; table depend only on landed G1/G3/G4 modules — the plan's order.
+(require 'glasspane-views)
+(require 'glasspane-search)
+(require 'glasspane-table)
 
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
@@ -156,7 +162,10 @@ registry entry in place."
   (glasspane-detail-register)
   (glasspane-agenda-register)
   (glasspane-journal-register)
-  (glasspane-capture-register))
+  (glasspane-capture-register)
+  (glasspane-views-register)
+  (glasspane-search-register)
+  (glasspane-table-register))
 
 (defun glasspane-unregister ()
   "Deregister every verb, the chrome root, and the app identity.
@@ -178,7 +187,10 @@ glasspane.packages.install) sweep with the entry's own."
   (glasspane-detail-unregister)
   (glasspane-agenda-unregister)
   (glasspane-journal-unregister)
-  (glasspane-capture-unregister))
+  (glasspane-capture-unregister)
+  (glasspane-views-unregister)
+  (glasspane-search-unregister)
+  (glasspane-table-unregister))
 
 (glasspane-register)
 

@@ -2320,5 +2320,946 @@ presentation."
         (should (= (length continuations) 2))
         (should (equal glasspane-capture--shared-text "hi"))))))
 
+;;;; G6 — query surfaces: glasspane-views.el
+
+(ert-deftest glasspane-test-views-board ()
+  "Board columns keep global keyword order, append file-local
+strangers in encounter order, and park no-state last; the single-file
+guard demands one file, integer positions, and headline levels; the
+done predicate and priority badge are the shared card vocabulary —
+all pure, over fixture alists."
+  (require 'glasspane-views)
+  ;; `org-todo-keywords-1' is defvar-local: bind the DEFAULT binding
+  ;; explicitly — `glasspane-views--board-columns' reads it, since the
+  ;; builder must see the global sequence whatever buffer it runs in.
+  (let ((old (default-value 'org-todo-keywords-1)))
+    (unwind-protect
+        (progn
+          (setq-default org-todo-keywords-1 '("TODO" "NEXT" "DONE"))
+          (should (equal (glasspane-views--board-columns
+                          '(((todo . "NEXT")) ((todo . "WIP"))
+                            ((todo . "TODO")) ((todo . "NEXT"))
+                            ((todo . nil))))
+                         '("TODO" "NEXT" "WIP" "")))
+          (should-not (glasspane-views--board-columns nil))
+          ;; Every present state gets a column even when none is global.
+          (should (equal (glasspane-views--board-columns
+                          '(((todo . "MAYBE"))))
+                         '("MAYBE"))))
+      (setq-default org-todo-keywords-1 old)))
+  ;; The single-file guard.
+  (let ((one '(((file . "/v/a.org") (pos . 10) (level . 1))
+               ((file . "/v/a.org") (pos . 40) (level . 2)))))
+    (should (equal (glasspane-views--single-file one) "/v/a.org"))
+    (should-not (glasspane-views--single-file nil))
+    (should-not (glasspane-views--single-file
+                 (cons '((file . "/v/b.org") (pos . 5) (level . 1)) one)))
+    ;; A file-level note (level 0) cannot reorder.
+    (should-not (glasspane-views--single-file
+                 '(((file . "/v/a.org") (pos . 1) (level . 0)))))
+    (should-not (glasspane-views--single-file
+                 '(((file . "/v/a.org") (pos . nil) (level . 1))))))
+  ;; Done predicate + priority badge.
+  (let ((old (default-value 'org-done-keywords)))
+    (unwind-protect
+        (progn
+          (setq-default org-done-keywords '("DONE" "KILLED"))
+          (should (glasspane-views--done-p '((todo . "KILLED"))))
+          (should-not (glasspane-views--done-p '((todo . "TODO"))))
+          (should-not (glasspane-views--done-p '((headline . "no state"))))
+          (should (equal (glasspane-views--done-keyword) "DONE")))
+      (setq-default org-done-keywords old)))
+  (should-not (glasspane-views--priority-span nil))
+  (let ((span (glasspane-views--priority-span "A")))
+    (should (equal (plist-get span :text) "[A] "))
+    (should (equal (plist-get span :font_weight) "bold"))
+    (should (equal (plist-get span :color) "#E53935")))
+  (should (equal (plist-get (glasspane-views--priority-span "Z") :color)
+                 "#9E9E9E"))
+  ;; Done headlines degrade to color — no strike span exists (gap #7).
+  (let ((old (default-value 'org-done-keywords)))
+    (unwind-protect
+        (progn
+          (setq-default org-done-keywords '("DONE"))
+          (let ((spans (glasspane-views--headline-spans
+                        '((headline . "Shipped") (todo . "DONE")
+                          (priority . "B")))))
+            (should (= (length spans) 2))
+            (should (equal (plist-get (cadr spans) :color)
+                           "on_surface_variant"))))
+      (setq-default org-done-keywords old))))
+
+(ert-deftest glasspane-test-views-rendering-roundtrip ()
+  "Setting a rendering rebuilds the saved entry without mutating the
+value Customize handed out, tolerates hand-authored entries missing
+the key, persists through the settings writer, and the read-side
+coercion never answers a rendering we don't offer."
+  (require 'glasspane-views)
+  (let* ((work '((name . "Work") (query . "tags:work") (rendering . "board")))
+         (glasspane-saved-views
+          (list '((name . "Inbox") (query . "todo:TODO")) work))
+         (saved nil))
+    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
+               (lambda (sym val) (push (cons sym val) saved) val)))
+      ;; A missing rendering key reads as the default.
+      (should (equal (glasspane-views--rendering
+                      (glasspane-views--get "Inbox"))
+                     "list"))
+      (glasspane-views--set-rendering "Inbox" "calendar")
+      (glasspane-views--persist)
+      (should (equal (alist-get 'rendering (glasspane-views--get "Inbox"))
+                     "calendar"))
+      ;; Exactly one rendering cell after the rebuild.
+      (should (= 1 (cl-count 'rendering (glasspane-views--get "Inbox")
+                             :key #'car-safe)))
+      ;; The untouched sibling is the SAME object Customize handed out.
+      (should (eq (glasspane-views--get "Work") work))
+      (should (equal (cdr (assq 'glasspane-saved-views saved))
+                     glasspane-saved-views))
+      ;; Junk in a hand-authored entry coerces at read, not in place.
+      (glasspane-views--set-rendering "Work" "sparkline")
+      (should (equal (glasspane-views--rendering
+                      (glasspane-views--get "Work"))
+                     "list")))))
+
+(ert-deftest glasspane-test-views-handler-statuses ()
+  "Every views verb answers a SPEC 14.4 status: unknown names are
+stale, malformed args rejected, opens/saves accepted on the strength
+of deferred work only.  The client-side pieces run stubbed (ui-state
+drafts, shell push, flow continuations); tokens mint through the real
+offline table.  Both screens build and round-trip the canonical wire
+encoding, in the tabs form and the chip fallback, drag list included."
+  (require 'glasspane-views)
+  (glasspane-views-register)
+  (glasspane-views-register)            ; idempotent re-registration
+  (let* ((vault (make-temp-file "glasspane-vault" t))
+         (file (expand-file-name "tasks.org" vault))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (today (format-time-string "%Y-%m-%d"))
+         (glasspane-saved-views
+          (list '((name . "Inbox") (query . "todo:TODO,DONE"))
+                '((name . "Sexp") (query . (todo "TODO")))
+                '((name . "Broken") (query . "(") (rendering . "board"))))
+         (glasspane-views--reorder nil)
+         (glasspane-views--cal-anchor nil)
+         (glasspane-views--cal-selected nil)
+         (saved nil) (continuations nil) (pushes nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "#+TITLE: Tasks\n\n"
+                    "* TODO Water the garden :home:\n"
+                    (format "SCHEDULED: <%s>\n" today)
+                    "* TODO [#A] Call the bank\n"
+                    "* DONE Done thing\n"))
+          (ebp-org-cache-invalidate)
+          (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
+                     (lambda (sym val) (push (cons sym val) saved) val))
+                    ((symbol-function 'jetpacs-shell-notify)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
+                    ((symbol-function 'jetpacs-shell-push)
+                     (lambda (&rest args) (push args pushes) nil))
+                    ((symbol-function 'jetpacs-flow-continue)
+                     (lambda (fn) (push fn continuations) nil)))
+            (cl-flet ((run (name args &optional params)
+                        (let ((handler (gethash name jetpacs-action-handlers)))
+                          (should handler)
+                          (funcall handler args params))))
+              ;; The whole table answers statuses on bare nil/nil input.
+              (dolist (name glasspane-views--verbs)
+                (should (memq (run name nil nil)
+                              '(accepted stale rejected))))
+              ;; views.open: malformed, gone, real (with state reset).
+              (should (eq (run "views.open" '(:name 42)) 'rejected))
+              (should (eq (run "views.open" '(:name "Ghost")) 'stale))
+              (setq glasspane-views--reorder t
+                    glasspane-views--cal-anchor "2020-01-01"
+                    glasspane-views--cal-selected "2020-01-02")
+              (let ((before (length continuations)))
+                (should (eq (run "views.open" '(:name "Inbox")) 'accepted))
+                (should (= (length continuations) (1+ before))))
+              (should-not glasspane-views--reorder)
+              (should-not glasspane-views--cal-anchor)
+              (should-not glasspane-views--cal-selected)
+              ;; views.hub: a deferred push, nothing else.
+              (let ((before (length continuations)))
+                (should (eq (run "views.hub" nil nil) 'accepted))
+                (should (= (length continuations) (1+ before))))
+              ;; The calendar defvars: handlers are the single writer.
+              (should (eq (run "views.cal.select-date"
+                               '(:value "2026-08-14"))
+                          'accepted))
+              (should (equal glasspane-views--cal-selected "2026-08-14"))
+              (should (eq (run "views.cal.select-date"
+                               '(:date "2026-08-15"))
+                          'accepted))
+              (should (equal glasspane-views--cal-selected "2026-08-15"))
+              (should (eq (run "views.cal.select-date" '(:value "junk"))
+                          'rejected))
+              (should (eq (run "views.cal.set-month" '(:value "2026-09"))
+                          'accepted))
+              (should (equal glasspane-views--cal-anchor "2026-09-01"))
+              (should (eq (run "views.cal.set-month" '(:value "2026-9"))
+                          'rejected))
+              ;; views.rendering: chips name it, the pager indexes it
+              ;; (float-coerced); gone view stale, junk rejected.
+              (should (eq (run "views.rendering"
+                               '(:name "Inbox" :rendering "board"))
+                          'accepted))
+              (should (equal (alist-get 'rendering
+                                        (glasspane-views--get "Inbox"))
+                             "board"))
+              (should (assq 'glasspane-saved-views saved))
+              (should (eq (run "views.rendering"
+                               '(:name "Inbox" :value 2.0))
+                          'accepted))
+              (should (equal (alist-get 'rendering
+                                        (glasspane-views--get "Inbox"))
+                             "calendar"))
+              (should (eq (run "views.rendering"
+                               '(:name "Ghost" :rendering "board"))
+                          'stale))
+              (should (eq (run "views.rendering"
+                               '(:name "Inbox" :rendering "sparkline"))
+                          'rejected))
+              (should (eq (run "views.rendering" '(:name "Inbox" :value 99))
+                          'rejected))
+              ;; views.reorder toggles.
+              (should (eq (run "views.reorder" nil nil) 'accepted))
+              (should glasspane-views--reorder)
+              (setq glasspane-views--reorder nil)
+              ;; views.save: no client refuses before any read.
+              (should (eq (run "views.save" nil nil) 'rejected))
+              (let ((drafts '(("views-new-name" . " Fresh ")
+                              ("views-new-query" . "tags:home")
+                              ("views-new-rendering" . "board"))))
+                (cl-letf (((symbol-function 'jetpacs-client)
+                           (lambda () t))
+                          ((symbol-function 'jetpacs-ui-state)
+                           (lambda (id &optional _surface)
+                             (cdr (assoc id drafts)))))
+                  (should (eq (run "views.save" nil
+                                   '(:surface "app:glasspane"))
+                              'accepted))
+                  (let ((view (glasspane-views--get "Fresh")))
+                    (should view)
+                    (should (equal (alist-get 'query view) "tags:home"))
+                    (should (equal (alist-get 'rendering view) "board")))
+                  ;; The deferred repush clears the device drafts.
+                  (funcall (car continuations))
+                  (should (equal (plist-get (cdar pushes) :reset-input-ids)
+                                 glasspane-views--form-ids))
+                  ;; Same name replaces, junk rendering coerces.
+                  (setcdr (assoc "views-new-rendering" drafts) "sparkline")
+                  (should (eq (run "views.save" nil nil) 'accepted))
+                  (should (= 1 (cl-count "Fresh" glasspane-saved-views
+                                         :key (lambda (v)
+                                                (alist-get 'name v))
+                                         :test #'equal)))
+                  (should (equal (alist-get
+                                  'rendering
+                                  (glasspane-views--get "Fresh"))
+                                 "list"))
+                  ;; Blank fields and a broken query refuse.
+                  (setcdr (assoc "views-new-name" drafts) "  ")
+                  (should (eq (run "views.save" nil nil) 'rejected))
+                  (setcdr (assoc "views-new-name" drafts) "X")
+                  (setcdr (assoc "views-new-query" drafts) " ")
+                  (should (eq (run "views.save" nil nil) 'rejected))
+                  (setcdr (assoc "views-new-query" drafts) "(")
+                  (should (eq (run "views.save" nil nil) 'rejected))
+                  (should-not (glasspane-views--get "X"))))
+              ;; views.delete: malformed, gone, real.
+              (should (eq (run "views.delete" '(:name 42)) 'rejected))
+              (should (eq (run "views.delete" '(:name "Ghost")) 'stale))
+              (should (eq (run "views.delete" '(:name "Fresh")) 'accepted))
+              (should-not (glasspane-views--get "Fresh")))
+            ;; The screens build offline and round-trip the canonical
+            ;; encoding.  No client: the advertised probe assumes the
+            ;; richer form — tabs pager, curated month grid.
+            (let ((json (jetpacs-node->canonical-json
+                         (glasspane-views--screen "Inbox" nil))))
+              (should (string-search "Inbox" json))
+              (should (string-search "Water the garden" json))
+              (should (string-search "month_grid" json)))
+            ;; The chip-switcher fallback, one rendering per push.
+            (cl-letf (((symbol-function 'jetpacs-node-advertised-p)
+                       (lambda (&rest _) nil)))
+              (dolist (r '("list" "board" "calendar"))
+                (glasspane-views--set-rendering "Inbox" r)
+                (should (stringp (jetpacs-node->canonical-json
+                                  (glasspane-views--screen "Inbox" nil))))))
+            ;; The drag list registers its resolution in the reader's
+            ;; table (D-4) — and unregister sweeps exactly that.
+            (let ((glasspane-views--reorder t)
+                  (list-id (jetpacs-wire-id "views-reorder"
+                                            (file-truename file))))
+              (glasspane-views--set-rendering "Inbox" "list")
+              (let ((json (jetpacs-node->canonical-json
+                           (glasspane-views--screen "Inbox" nil))))
+                (should (string-search "reorderable_list" json)))
+              (let ((record (glasspane-org-reader-refile-lookup list-id)))
+                (should record)
+                (should (equal (plist-get record :file)
+                               (file-truename file)))
+                (should (= (length (plist-get record :keys)) 3)))
+              (glasspane-views-unregister)
+              (should-not (glasspane-org-reader-refile-lookup list-id))
+              (should-not (gethash "views.open" jetpacs-action-handlers))
+              (glasspane-views-register))
+            ;; A broken query renders its feedback, a deleted view its
+            ;; tombstone — both still whole screens ('accepted renders).
+            (should (stringp (jetpacs-node->canonical-json
+                              (glasspane-views--screen "Broken" nil))))
+            (should (string-search "View deleted"
+                                   (jetpacs-node->canonical-json
+                                    (glasspane-views--screen "Ghost" nil))))
+            ;; The sexp-valued Customize entry prints before parsing.
+            (should (= (length (glasspane-views--items
+                                (glasspane-views--get "Sexp")))
+                       2))
+            ;; The hub carries the cards and the literal form ids.
+            (let ((json (jetpacs-node->canonical-json
+                         (glasspane-views--hub-screen nil))))
+              (dolist (id glasspane-views--form-ids)
+                (should (string-search id json)))
+              (should (string-search "Inbox" json)))))
+      (ebp-org-cache-invalidate)
+      (ebp-org-ref-tokens nil :set "views" :owner "glasspane")
+      (dolist (buf (buffer-list))
+        (let ((f (buffer-file-name buf)))
+          (when (and f (string-prefix-p (file-name-as-directory
+                                         (file-truename vault))
+                                        (file-truename f)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf))))
+      (delete-directory vault t))))
+
+;;;; G6 — search: glasspane-search.el
+
+(ert-deftest glasspane-test-search-sexp-matrix ()
+  "The builder's sexp output across every filter combination: each
+non-empty build round-trips `ebp-org-parse-query' (the SPEC 23.2
+vetter — the reason the text filter emits `heading', never the
+allowlist-dropped `regexp'), and the three deadline range forms are
+asserted against the interpreter itself through its documented
+closure-accessor seam."
+  (require 'glasspane-search)
+  (cl-flet ((build (&rest overrides)
+              (let ((glasspane-search--filter-todo
+                     (plist-get overrides :todo))
+                    (glasspane-search--filter-tags
+                     (plist-get overrides :tags))
+                    (glasspane-search--filter-text
+                     (or (plist-get overrides :text) ""))
+                    (glasspane-search--filter-priority
+                     (plist-get overrides :priority))
+                    (glasspane-search--filter-due
+                     (plist-get overrides :due)))
+                (glasspane-search--filter-query))))
+    ;; Resting state builds the empty query — "Any" and nil alike.
+    (should (equal (build) ""))
+    (should (equal (build :todo "Any" :priority "Any" :due "Any") ""))
+    ;; Each filter alone.
+    (should (equal (build :todo "NEXT") "(todo \"NEXT\")"))
+    (should (equal (build :todo "Done (any)") "(done)"))
+    (should (equal (build :tags '("work")) "(tags \"work\")"))
+    (should (equal (build :tags '("work" "home"))
+                   "(and (tags \"work\") (tags \"home\"))"))
+    (should (equal (build :priority "A") "(priority \"A\")"))
+    ;; The three deadline range forms, spelled exactly as the
+    ;; interpreter takes them (the G6 gate-entry check).
+    (should (equal (build :due "Overdue") "(deadline :to -1)"))
+    (should (equal (build :due "Today") "(deadline :on today)"))
+    (should (equal (build :due "This week")
+                   "(deadline :from today :to 7)"))
+    ;; Text emits a trimmed heading clause — a title match — because
+    ;; `regexp' is off the wire allowlist (ebp-org.el:828-836).
+    (should (equal (build :text "  meeting notes ")
+                   "(heading \"meeting notes\")"))
+    ;; The full combination, in builder clause order.
+    (should (equal (build :todo "TODO" :tags '("work" "deep")
+                          :priority "B" :due "Today" :text "plan")
+                   (concat "(and (todo \"TODO\") (tags \"work\")"
+                           " (tags \"deep\") (priority \"B\")"
+                           " (deadline :on today) (heading \"plan\"))")))
+    ;; Every non-empty build survives the wire vetter; the regexp
+    ;; spelling the v1 builder used would refuse.
+    (dolist (q (list (build :todo "NEXT")
+                     (build :todo "Done (any)")
+                     (build :tags '("work" "home"))
+                     (build :priority "A")
+                     (build :due "Overdue")
+                     (build :due "Today")
+                     (build :due "This week")
+                     (build :text "meeting notes")
+                     (build :todo "TODO" :tags '("work")
+                            :priority "B" :due "This week" :text "plan")))
+      (should (consp (ebp-org-parse-query q))))
+    (should-error (ebp-org-parse-query "(regexp \"meeting\")")
+                  :type 'user-error)
+    ;; The range forms against the interpreter: a closure accessor
+    ;; serving only the planning question, over yesterday / today /
+    ;; +5d / +30d deadline stamps.
+    (cl-flet ((entry (deadline)
+                (lambda (what &rest args)
+                  (when (and (eq what 'planning)
+                             (equal (car args) "DEADLINE"))
+                    deadline))))
+      (let* ((now (current-time))
+             (yesterday (format-time-string
+                         "<%Y-%m-%d>" (time-subtract now 86400)))
+             (today (format-time-string "<%Y-%m-%d>" now))
+             (soon (format-time-string
+                    "<%Y-%m-%d>" (time-add now (* 5 86400))))
+             (far (format-time-string
+                   "<%Y-%m-%d>" (time-add now (* 30 86400))))
+             (overdue (ebp-org-parse-query "(deadline :to -1)"))
+             (due-today (ebp-org-parse-query "(deadline :on today)"))
+             (week (ebp-org-parse-query
+                    "(deadline :from today :to 7)")))
+        (should (ebp-org-matches-p overdue (entry yesterday)))
+        (should-not (ebp-org-matches-p overdue (entry today)))
+        (should (ebp-org-matches-p due-today (entry today)))
+        (should-not (ebp-org-matches-p due-today (entry yesterday)))
+        (should (ebp-org-matches-p week (entry today)))
+        (should (ebp-org-matches-p week (entry soon)))
+        (should-not (ebp-org-matches-p week (entry yesterday)))
+        (should-not (ebp-org-matches-p week (entry far)))
+        ;; No stamp at all never matches a range form.
+        (should-not (ebp-org-matches-p week (entry nil)))))))
+
+(ert-deftest glasspane-test-search-screen-offline ()
+  "The whole search flow with NO client: every handler answers a
+SPEC 14.4 status straight from the table, the S2 defvars take their
+single-writer updates, the S5 mint attaches resolvable tokens at
+render, and the full screen builds + canonically serializes in every
+arm — results, error card, and resting empty state — with no
+absolute path on the wire."
+  (require 'glasspane-search)
+  (glasspane-search-register)
+  (let* ((vault (make-temp-file "glasspane-search" t))
+         (file (expand-file-name "notes.org" vault))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (org-tag-alist nil)
+         (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+         (glasspane-search--query "")
+         (glasspane-search--results nil)
+         (glasspane-search--error nil)
+         (glasspane-search--filter-todo nil)
+         (glasspane-search--filter-tags nil)
+         (glasspane-search--filter-text "")
+         (glasspane-search--filter-priority nil)
+         (glasspane-search--filter-due nil)
+         (continuations nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (push fn continuations) nil)))
+          (with-temp-file file
+            (insert "#+TITLE: Notes\n\n"
+                    "* TODO Plan the meeting :work:\n"
+                    "* DONE Old errand :errand:\n"
+                    "* Reference\n"))
+          (ebp-org-cache-invalidate)
+          (cl-flet ((run (name args &optional params)
+                      (let ((handler (gethash name jetpacs-action-handlers)))
+                        (should handler)
+                        (funcall handler args params))))
+            ;; The whole table answers statuses on bare nil/nil input.
+            (dolist (name glasspane-search--verbs)
+              (should (memq (run name nil nil)
+                            '(accepted stale rejected))))
+            ;; org.search.run: results cached, the push deferred (D2).
+            (let ((before (length continuations)))
+              (should (eq (run "org.search.run" '(:value "todo:TODO"))
+                          'accepted))
+              (should (> (length continuations) before)))
+            (should (equal glasspane-search--query "todo:TODO"))
+            (should-not glasspane-search--error)
+            (should (= (length glasspane-search--results) 1))
+            ;; :value junk rejects without touching the cache.
+            (should (eq (run "org.search.run" '(:value 42)) 'rejected))
+            (should (equal glasspane-search--query "todo:TODO"))
+            ;; S5: the render mint attaches a tap token that resolves
+            ;; back to its heading — offline, tokens are Emacs state.
+            (let* ((items (glasspane-search--tokenize
+                           glasspane-search--results))
+                   (tok (alist-get 'token (car items))))
+              (should (stringp tok))
+              (should (equal (plist-get
+                              (ebp-org-token-ref tok :owner "glasspane")
+                              :headline)
+                             "Plan the meeting")))
+            ;; The results arm serializes; refs never cross the wire.
+            (let ((json (jetpacs-node->canonical-json
+                         (glasspane-search-screen nil))))
+              (should (string-search "Query builder" json))
+              (should (string-search "Plan the meeting" json))
+              (should (string-search "heading.tap" json))
+              (should-not (string-search (file-truename vault) json)))
+            ;; update-filter: the S2 single-writer path — state lands
+            ;; in the defvar and the equivalent query in the box.
+            (should (eq (run "search.update-filter"
+                             '(:field "todo" :value "TODO")
+                             '(:surface "app:glasspane"))
+                        'accepted))
+            (should (equal glasspane-search--filter-todo "TODO"))
+            (should (equal glasspane-search--query "(todo \"TODO\")"))
+            (should (= (length glasspane-search--results) 1))
+            ;; Tags dedupe on write (the multi-select distinct rule).
+            (should (eq (run "search.update-filter"
+                             '(:field "tags" :value ["work" "work"]))
+                        'accepted))
+            (should (equal glasspane-search--filter-tags '("work")))
+            (should (= (length glasspane-search--results) 1))
+            ;; Malformed filter traffic rejects, never signals.
+            (should (eq (run "search.update-filter"
+                             '(:field "bogus" :value "x"))
+                        'rejected))
+            (should (eq (run "search.update-filter"
+                             '(:field "tags" :value 42))
+                        'rejected))
+            (should (eq (run "search.update-filter"
+                             '(:field "text" :value ["no"]))
+                        'rejected))
+            ;; by-tag: the builder resets to exactly that tag and the
+            ;; box shows the query the builder generated.
+            (should (eq (run "search.by-tag" '(:tag "errand"))
+                        'accepted))
+            (should (equal glasspane-search--filter-tags '("errand")))
+            (should-not glasspane-search--filter-todo)
+            (should (equal glasspane-search--query "(tags \"errand\")"))
+            (should (eq (run "search.by-tag" '(:tag "")) 'rejected))
+            (should (eq (run "search.by-tag" nil) 'rejected))
+            ;; A grammar refusal is an ERROR RENDER, not a rejection:
+            ;; the card is the effect (S4), it never echoes the query,
+            ;; and the screen still builds around it.
+            (should (eq (run "org.search.run"
+                             '(:value "(regexp \"x\")"))
+                        'accepted))
+            (should glasspane-search--error)
+            (should-not glasspane-search--results)
+            (should-not (string-search "(regexp"
+                                       glasspane-search--error))
+            (should (string-search "Query error"
+                                   (jetpacs-node->canonical-json
+                                    (glasspane-search-screen nil))))
+            ;; clear-filters: back to resting; the deferred push rides
+            ;; the draft-evicting :reset-input-ids.
+            (should (eq (run "search.clear-filters" nil
+                             '(:surface "app:glasspane"))
+                        'accepted))
+            (should (equal glasspane-search--query ""))
+            (should-not glasspane-search--error)
+            (should-not glasspane-search--filter-tags)
+            (should (equal glasspane-search--filter-text ""))
+            ;; The resting arm (empty state) serializes too.
+            (should (string-search
+                     "Search your notes"
+                     (jetpacs-node->canonical-json
+                      (glasspane-search-screen nil))))))
+      (ebp-org-cache-invalidate)
+      (dolist (buf (buffer-list))
+        (let ((f (buffer-file-name buf)))
+          (when (and f (string-prefix-p (file-name-as-directory
+                                         (file-truename vault))
+                                        (file-truename f)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf))))
+      (delete-directory vault t))))
+
+;;;; G6 — table: glasspane-table.el
+
+(defun glasspane-test--table-vault ()
+  "A throwaway vault with the table/babel fixture; (VAULT . FILE)."
+  (let* ((vault (make-temp-file "glasspane-table" t))
+         (file (expand-file-name "table.org" vault)))
+    (with-temp-file file
+      (insert "* Data\n"
+              "| a | b | sum |\n"
+              "|---+---+-----|\n"
+              "| 1 | 2 |   3 |\n"
+              "#+TBLFM: $3=$1+$2\n"
+              "\n"
+              "* Lone\n"
+              "| only |\n"
+              "\n"
+              "* Code\n"
+              "#+begin_src glasspanetest\n"
+              "ignored\n"
+              "#+end_src\n"))
+    (cons vault file)))
+
+(defun glasspane-test--table-cleanup (vault)
+  "Kill the vault's buffers, sweep the exposure records, drop the vault."
+  (ebp-org-cache-invalidate)
+  (jetpacs-buffer-forget-exposed)
+  (dolist (buf (buffer-list))
+    (let ((f (buffer-file-name buf)))
+      (when (and f (string-prefix-p (file-name-as-directory
+                                     (file-truename vault))
+                                    (file-truename f)))
+        (with-current-buffer buf (set-buffer-modified-p nil))
+        (kill-buffer buf))))
+  (delete-directory vault t))
+
+(defun glasspane-test--table-pos (buf needle)
+  "Position of NEEDLE's first char in BUF."
+  (with-current-buffer buf
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (search-forward needle)
+        (match-beginning 0)))))
+
+(defun glasspane-test--table-disk (file)
+  "FILE's current on-disk content."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (buffer-string)))
+
+(ert-deftest glasspane-test-table-mutate-edges ()
+  "The mutation funnel over a real temp table: align+recalc through a
+#+TBLFM line with `accepted'-grade durability (on disk, buffer clean),
+formula-vs-value routing decided by `ebp-org-table-field-formula' (the
+computed cell edits its formula, a plain cell its value — sanitized),
+a killed row realigning from the table's start, the only row's kill
+consuming the table without erroring, and the no-table refusal."
+  (require 'glasspane-table)
+  (let* ((fixture (glasspane-test--table-vault))
+         (vault (car fixture))
+         (file (cdr fixture)))
+    (unwind-protect
+        (let ((buf (find-file-noselect file)))
+          (with-current-buffer buf
+            (unless (derived-mode-p 'org-mode) (org-mode)))
+          ;; Routing: the #+TBLFM-computed column names its entry, the
+          ;; plain cell does not (the edit worker's fork).
+          (with-current-buffer buf
+            (org-with-wide-buffer
+             (goto-char (glasspane-test--table-pos buf "3"))
+             (should (equal (car (ebp-org-table-field-formula)) "$3"))
+             (goto-char (+ 2 (glasspane-test--table-pos buf "| 1")))
+             (should-not (ebp-org-table-field-formula))))
+          ;; Value mutation: durable, realigned, recalculated (1+2
+          ;; becomes 4+2 and the sum column follows).
+          (glasspane-table--mutate
+           buf (+ 2 (glasspane-test--table-pos buf "| 1"))
+           (lambda () (org-table-get-field nil "4")))
+          (should-not (buffer-modified-p buf))
+          (should (string-match-p "| 4 | 2 | +6 |"
+                                  (glasspane-test--table-disk file)))
+          ;; The bridged edit worker, formula path: prefilled with the
+          ;; stored RHS, stores the replacement, recalculates.  The
+          ;; prefill is asserted OUTSIDE the stub — a `should' failing
+          ;; inside the worker would be caught by its own error arm.
+          (let (seen-initial)
+            (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                       (lambda () t))
+                      ((symbol-function 'read-string)
+                       (lambda (_prompt &optional initial &rest _)
+                         (setq seen-initial initial)
+                         "$1*$2"))
+                      ((symbol-function 'jetpacs-shell-push)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'jetpacs-shell-notify)
+                       (lambda (&rest _) nil)))
+              (glasspane-table--edit-run
+               buf (glasspane-test--table-pos buf "6") "app:glasspane"))
+            (should (equal seen-initial "$1+$2")))
+          (let ((disk (glasspane-test--table-disk file)))
+            (should (string-search "$3=$1*$2" disk))
+            (should (string-match-p "| 4 | 2 | +8 |" disk)))
+          ;; The value path sanitizes: one line between pipes, always.
+          (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                     (lambda () t))
+                    ((symbol-function 'read-string)
+                     (lambda (&rest _) "x|y\nz"))
+                    ((symbol-function 'jetpacs-shell-push)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'jetpacs-shell-notify)
+                     (lambda (&rest _) nil)))
+            (glasspane-table--edit-run
+             buf (+ 2 (glasspane-test--table-pos buf "| a ")) "app:glasspane"))
+          (should (string-search "x\\vert{}y z"
+                                 (glasspane-test--table-disk file)))
+          ;; The menu worker: deleting the data row leaves a smaller,
+          ;; still-aligned table (realign from the table's start).
+          ;; The header edit above widened column 1, so the needle is
+          ;; the digit itself, not its old padding.
+          (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                     (lambda () t))
+                    ((symbol-function 'completing-read)
+                     (lambda (&rest _) "Delete row"))
+                    ((symbol-function 'jetpacs-shell-push)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'jetpacs-shell-notify)
+                     (lambda (&rest _) nil)))
+            (glasspane-table--cell-menu-run
+             buf (glasspane-test--table-pos buf "4 | 2") "app:glasspane"))
+          (let ((disk (glasspane-test--table-disk file)))
+            ;; The computed 8 lived only on the deleted row.
+            (should-not (string-search "8" disk))
+            (should (string-search "x\\vert{}y z" disk)))
+          ;; Killing the ONLY row consumes the table: the funnel skips
+          ;; the realign instead of erroring.
+          (glasspane-table--mutate
+           buf (+ 2 (glasspane-test--table-pos buf "| only"))
+           #'org-table-kill-row)
+          (should-not (string-search "| only |"
+                                     (glasspane-test--table-disk file)))
+          ;; No table at the heading: the funnel signals, mutating
+          ;; nothing.
+          (should-error (glasspane-table--mutate buf 1 #'ignore)))
+      (glasspane-test--table-cleanup vault))))
+
+(ert-deftest glasspane-test-table-headless-refusal ()
+  "The D2 rewrite's sharp edges: every verb answers a status on junk,
+unexposed addressing rejects (SPEC 23.1), the prompting verbs reject at
+dispatch without a bridgeable session and their WORKERS notify instead
+of raising a minibuffer prompt nobody attends (can-bridge nil -> notify
++ status, no wedge), the no-prompt add verbs are durable inside the
+dispatch, babel times out and honors a declined confirm with a stub
+language — plus the rung's settings sweep: org sections registered
+with the memo-busting after-set, the dialog-style row retired."
+  (require 'glasspane-table)
+  (glasspane-table-register)
+  ;; Sections registered; org/calendar entries carry the memo-buster,
+  ;; identity rows stay bare; the v1 Appearance row ports to NOTHING.
+  (let ((workflow (alist-get "Org Workflow" jetpacs-settings-registry
+                             nil nil #'equal))
+        (users (alist-get "User Defaults" jetpacs-settings-registry
+                          nil nil #'equal)))
+    (should workflow)
+    (should (eq (plist-get (cdr (assq 'org-directory workflow)) :after-set)
+                #'glasspane-ui-org-after-set))
+    (should (assq 'user-full-name users))
+    (should-not (plist-get (cdr (assq 'user-full-name users)) :after-set)))
+  (should-not (cl-some (lambda (sec) (assq 'jetpacs-dialog-style (cdr sec)))
+                       jetpacs-settings-registry))
+  (let* ((fixture (glasspane-test--table-vault))
+         (vault (car fixture))
+         (file (cdr fixture))
+         (glasspane-babel-timeout 1)
+         (notes nil)
+         (continuations nil))
+    (unwind-protect
+        (let* ((buf (find-file-noselect file))
+               (name (buffer-name buf)))
+          (with-current-buffer buf
+            (unless (derived-mode-p 'org-mode) (org-mode)))
+          (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                     (lambda (text &rest _) (push text notes) nil))
+                    ((symbol-function 'jetpacs-flow-continue)
+                     (lambda (fn) (push fn continuations) nil)))
+            (cl-flet ((run (verb args &optional params)
+                        (let ((handler (gethash verb jetpacs-action-handlers)))
+                          (should handler)
+                          (funcall handler args params))))
+              ;; The whole table answers statuses on bare nil/nil input.
+              (dolist (verb glasspane-table--verbs)
+                (should (memq (run verb nil nil)
+                              '(accepted stale rejected))))
+              ;; Well-formed but UNEXPOSED addressing rejects.
+              (let ((anchor (glasspane-test--table-pos buf "| a ")))
+                (should (eq (run "org.table.add-row"
+                                 (list :buffer name :pos anchor))
+                            'rejected))
+                ;; Exposed: durable inside the dispatch — the new row is
+                ;; on disk before `accepted' is answered; the repush is
+                ;; a queued continuation, never inline.
+                (jetpacs-buffer-expose name anchor "org.table.add-row")
+                (jetpacs-buffer-expose name anchor "org.table.add-col")
+                (let ((before (length continuations)))
+                  (should (eq (run "org.table.add-row"
+                                   (list :buffer name :pos anchor))
+                              'accepted))
+                  (should (= (length continuations) (1+ before))))
+                ;; Four "|"-rows now: the Data table's three plus the
+                ;; Lone table's one.
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (goto-char (point-min))
+                  (should (= 4 (count-matches "^| "))))
+                ;; add-col appends at the right edge: the header line
+                ;; gains a pipe.
+                (should (eq (run "org.table.add-col"
+                                 (list :buffer name :pos anchor))
+                            'accepted))
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (goto-char (point-min))
+                  (search-forward "sum")
+                  (should (= 5 (cl-count ?| (buffer-substring-no-properties
+                                             (line-beginning-position)
+                                             (line-end-position)))))))
+              ;; The prompting verbs: exposure alone is not enough — no
+              ;; connected+granted session, no flow, `rejected'.
+              (let ((pos (+ 2 (glasspane-test--table-pos buf "| 1"))))
+                (jetpacs-buffer-expose name pos "org.table.edit")
+                (jetpacs-buffer-expose name pos "org.table.cell-menu")
+                (should (eq (run "org.table.edit"
+                                 (list :buffer name :pos pos))
+                            'rejected))
+                (should (eq (run "org.table.cell-menu"
+                                 (list :buffer name :pos pos))
+                            'rejected))
+                ;; With a stubbed session the flow queues and the
+                ;; handler answers on its strength; a JSON-float pos
+                ;; coerces on the way through.
+                (let ((flows nil))
+                  (cl-letf (((symbol-function 'jetpacs-connected-p)
+                             (lambda () t))
+                            ((symbol-function 'jetpacs-granted-p)
+                             (lambda (&rest _) t))
+                            ((symbol-function 'jetpacs-flow-begin)
+                             (lambda (surface fn)
+                               (push (cons surface fn) flows) nil)))
+                    (should (eq (run "org.table.edit"
+                                     (list :buffer name :pos (float pos)))
+                                'accepted))
+                    (should (= (length flows) 1))))
+                ;; The workers' headless refusal: notify, never a
+                ;; minibuffer prompt (the stubs would signal).
+                (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                           (lambda () nil))
+                          ((symbol-function 'read-string)
+                           (lambda (&rest _)
+                             (error "prompt raised headless")))
+                          ((symbol-function 'completing-read)
+                           (lambda (&rest _)
+                             (error "prompt raised headless"))))
+                  (setq notes nil)
+                  (glasspane-table--edit-run buf pos "app:glasspane")
+                  (should (string-search "attended session" (car notes)))
+                  (glasspane-table--cell-menu-run buf pos "app:glasspane")
+                  (should (string-search "attended session" (car notes)))))
+              ;; Babel. Dispatch half: global confirm on, no dialog
+              ;; grant — reject with the refusal notified.
+              (let ((src (glasspane-test--table-pos buf "#+begin_src")))
+                (jetpacs-buffer-expose name src "org.babel.execute")
+                (let ((org-confirm-babel-evaluate t))
+                  (setq notes nil)
+                  (should (eq (run "org.babel.execute"
+                                   (list :buffer name :pos src))
+                              'rejected))
+                  (should (string-search "attended session" (car notes)))
+                  ;; Worker half: confirm due, bridge gone between
+                  ;; dispatch and flow — notify, never prompt.
+                  (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                             (lambda () nil))
+                            ((symbol-function 'yes-or-no-p)
+                             (lambda (&rest _)
+                               (error "prompt raised headless"))))
+                    (setq notes nil)
+                    (glasspane-table--babel-run buf src "app:glasspane")
+                    (should (string-search "attended session" (car notes))))
+                  ;; Declined confirm: `org-babel-confirm-evaluate'
+                  ;; returns nil (it does not signal) — the run must
+                  ;; stop on that, not evaluate anyway.
+                  (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                             (lambda () t))
+                            ((symbol-function 'yes-or-no-p)
+                             (lambda (&rest _) nil))
+                            ((symbol-function 'org-babel-execute:glasspanetest)
+                             (lambda (&rest _)
+                               (error "evaluated after decline"))))
+                    (setq notes nil)
+                    (glasspane-table--babel-run buf src "app:glasspane")
+                    (should (equal (car notes) "Evaluation declined"))))
+                ;; Timeout: a stub language that outsleeps the budget —
+                ;; the timer interrupts it and the failure is a notify,
+                ;; not a wedge (no confirm due: option nil).
+                (let ((org-confirm-babel-evaluate nil)
+                      (ran nil))
+                  (cl-letf (((symbol-function 'org-babel-execute:glasspanetest)
+                             (lambda (&rest _)
+                               (sleep-for 3)
+                               (setq ran t)
+                               "done")))
+                    (setq notes nil)
+                    (glasspane-table--babel-run buf src "app:glasspane")
+                    (should-not ran)
+                    (should (string-search "timed out" (car notes))))))
+              ;; The unregister sweep, then restore for suite order.
+              (glasspane-table-unregister)
+              (dolist (verb glasspane-table--verbs)
+                (should-not (gethash verb jetpacs-action-handlers)))
+              (should-not (alist-get "Org Workflow" jetpacs-settings-registry
+                                     nil nil #'equal))
+              (glasspane-table-register)
+              (dolist (verb glasspane-table--verbs)
+                (should (gethash verb jetpacs-action-handlers))))))
+      (glasspane-test--table-cleanup vault))))
+
+(ert-deftest glasspane-test-table-node-descriptors ()
+  "The app-authored table node (gap #11): header/rule/data rows in
+org's own convention, cell descriptors on the exposure route with no
+path on the wire, and the loop closed — a descriptor's own args pass
+the handler gate that will receive them."
+  (require 'glasspane-table)
+  (glasspane-table-register)
+  (let* ((fixture (glasspane-test--table-vault))
+         (vault (car fixture)))
+    (unwind-protect
+        (let* ((buf (find-file-noselect (cdr fixture)))
+               (name (buffer-name buf))
+               node)
+          (with-current-buffer buf
+            (unless (derived-mode-p 'org-mode) (org-mode))
+            (jetpacs-buffer-forget-exposed name)
+            (org-with-wide-buffer
+             (goto-char (glasspane-test--table-pos buf "| a "))
+             (setq node (glasspane-table-node (org-element-at-point)))))
+          (should node)
+          (should (equal (plist-get node :t) "table"))
+          (let ((json (jetpacs-node->canonical-json node)))
+            (should (string-search "org.table.edit" json))
+            (should (string-search "org.table.cell-menu" json))
+            (should (string-search "org.table.add-row" json))
+            (should (string-search "org.table.add-col" json))
+            ;; Exposure descriptors, never a baked path (S5/23.1).
+            (should (string-search "\"buffer\"" json))
+            (should-not (string-search "\"file\"" json))
+            (should-not (string-search vault json)))
+          (let ((rows (append (plist-get node :rows) nil)))
+            (should (equal (mapcar (lambda (r) (plist-get r :kind)) rows)
+                           '("header" "rule" "data")))
+            ;; A data cell's own descriptor: exposed, and its args pass
+            ;; the gate (the bridge half rejects without a session).
+            (let* ((cells (append (plist-get (nth 2 rows) :cells) nil))
+                   (args (plist-get (plist-get (car cells) :on_tap) :args)))
+              (should (jetpacs-buffer-exposed-p
+                       name (plist-get args :pos) "org.table.edit"))
+              (should (eq (funcall (gethash "org.table.edit"
+                                            jetpacs-action-handlers)
+                                   args nil)
+                          'rejected))))
+          ;; The add affordances: exposed anchor, and the handler
+          ;; mutates through it end to end.
+          (let ((args (plist-get (plist-get node :on_add_row) :args))
+                (continuations nil))
+            (should (jetpacs-buffer-exposed-p
+                     name (plist-get args :pos) "org.table.add-row"))
+            (cl-letf (((symbol-function 'jetpacs-flow-continue)
+                       (lambda (fn) (push fn continuations) nil)))
+              (should (eq (funcall (gethash "org.table.add-row"
+                                            jetpacs-action-handlers)
+                                   args nil)
+                          'accepted)))
+            ;; Four "|"-rows: Data's two plus the appended one, plus
+            ;; the Lone table's single row.
+            (with-temp-buffer
+              (insert-file-contents (cdr fixture))
+              (goto-char (point-min))
+              (should (= 4 (count-matches "^| "))))))
+      (glasspane-test--table-cleanup vault))))
+
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

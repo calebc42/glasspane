@@ -127,6 +127,16 @@ arrives from whatever surface the user is looking at."
                                         :args (list :surface home))
                 :selected (equal surface home)))))
 
+(defun glasspane--destinations ()
+  "The app's S1 route registry: the PLACES of `glasspane-ui-destinations'.
+One source of truth minus one row — capture opens a DIALOG, and the
+chrome contract types destinations as places, never actions
+\(docs/CHROME-VOCABULARY.md); routing it would also flip the current
+app under the host with no visible switch.  The host's capture
+affordance is the FAB story, not a drawer row."
+  (cl-remove "capture" glasspane-ui-destinations
+             :key (lambda (d) (plist-get d :key)) :test #'equal))
+
 (defun glasspane-register ()
   "Register the owner's verbs, the chrome root, and the app identity.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
@@ -146,7 +156,12 @@ registry entry in place."
                   :label glasspane-title
                   :icon glasspane-icon
                   :surfaces (list glasspane-owner)
-                  :dock #'glasspane--dock-items)
+                  :dock #'glasspane--dock-items
+                  ;; S1: the same destination table the hub renders,
+                  ;; CONTRIBUTED to the host — its rows open through
+                  ;; the global app.open `:route', so the verbs stay
+                  ;; owner-scoped (no :any-surface).
+                  :destinations #'glasspane--destinations)
   ;; The CREATED/MODIFIED stampers are GLOBAL org hooks, so they attach
   ;; at app enable — never at glasspane-org's load (a bare `require'
   ;; must not mutate the user's `before-save-hook').  Teardown of this

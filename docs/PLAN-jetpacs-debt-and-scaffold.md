@@ -75,6 +75,8 @@ Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ `3bc080c` (slop-
 **Consequence:** a base-repo rename of the rendered-p internals silently breaks the Glasspane reader with no compile-time or test tripwire. If the rework touches reader seams, this coupling snaps first.
 **Fix shape:** file the advisory now — public `jetpacs-org-render-rendered-p` accessor + test seam, verified against Glasspane per the cross-repo procedure. **Effort S.**
 
+> **LANDED 348feb8 (2026-08-14):** the in-tree ruling collapses the advisory into the fix — the accessor is public, the reader migrated, the old private spelling is an alias pinned to the public fn by the mode suite.
+
 ### D-5 — SurfaceStore.persist amplification + the paging §7 governance debris (one sub-claim struck)
 
 **Evidence:** PLAN-paging3-decision-2026-08-13.md:291-311 (§7). Verified current: (1) Nav 3 1.1.2 / material3 1.5.0-alpha16 / coroutines 1.11.0 wired (libs.versions.toml:7-8,21; app/build.gradle.kts:27,33-34) with **no LIBRARY-LEDGER rows**; (2) ledger Rung column speaks superseded RF names vs ARCHITECTURE-POC3's canonical Phases 0–9; (3) Room 3 seam column stale vs the live `RoomEbpDurableStore`; (4) "capability-adjacent" vs "capability" naming drift; (5) **the real per-push cost:** `SurfaceStore.persist()` (SurfaceStore.kt:155-158, persistRecords :138-144) rewrites *every* surface's full spec via whole-file atomic rewrite (SurfaceBacking.kt:118-132) on every accepted update (:305) and remove (:327). **STRUCK:** the §7 restatement of "hub lazy_column outside byte accounting" — fixed 2026-07-27 in eec7787 (`jetpacs-emacs-ui--charge-rows`, jetpacs-emacs-ui.el:127-156, budget-bound in jetpacs-chrome--build); §7 restating it on 2026-08-13 is itself doc-drift. A residual sliver survives as envelope-vs-2048-octet-headroom asymmetry (jetpacs-buffer.el:82). Replacing it as the sixth sub-item, and verified current: lazy_grid + 7 siblings exist contract-only with zero SPEC prose (→ D-22).
@@ -101,10 +103,14 @@ Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ `3bc080c` (slop-
 **Evidence:** docs/PLAN-glasspane-app.md:907-913 ("a one-key :badge thread-through in jetpacs-chrome--dock-tab/rail is the right base change, scheduled any time before G5"); `git log --all -S':badge' -- emacs/jetpacs-chrome.el` empty — never landed on any branch; dock-item plist still `:label/:icon/:on-tap/[:selected]` (jetpacs-chrome.el:77-89, --dock-tab :177). Both consumers shipped the in-screen fallback *and cite the gap by name in-tree* (glasspane-agenda.el:20-22,582-583; glasspane-srs.el:30,570). `jetpacs-icon` already supports a badge (jetpacs-widgets.el:679, passed at :689 — the plan's :669 is stale drift).
 **Fix shape:** one-key plist thread-through + the two consumers drop their fallbacks. **Effort S — take it before/during the rework; it ruled "right base change" and then silently never happened.**
 
+> **LANDED 26e3963 (2026-08-14):** :badge rides the bar tab's icon and the rail item (both arms test-pinned incl. the bare-dot form); Glasspane's dock item wears today's memoised agenda count, nil-when-zero. The SRS due count stays in-screen deliberately — two numbers on one icon is mud; recorded at the old gap citations.
+
 ### D-10 — EditorSession.diff materializes two `codePoints().toArray()` int[] per keystroke
 
 **Evidence:** PLAN-emacs-informed-execution-2026-07-25.md:691 (Tier-3 table: two-ended char scan, "~15 lines, same asymptotics, zero allocation. (Measured: diff is 22 ms of the 29 ms per-keystroke cost at the 4 MiB ceiling)"); current at EditorSession.kt:184-186 (the plan row's ":57-67" pointer is stale after the jvmMain move); on the keystroke path via Renderer.kt:809. No commit applied the rewrite (80728cd/2ece3b2/7f6bfde only moved the file / swapped JSON libs).
 **Fix shape:** the ~15-line two-ended scan, the one actionable Tier-3 row (the rest — typed IR, content-hash reuse, jit-lock chunking, TextFieldState — stay behind their named thresholds). **Effort S.**
+
+> **LANDED 8a0576c (2026-08-14):** char indices walk the UTF-16 forms, scalar counts ride alongside, only the deleted middle re-counts; EditorGoldenReplayTest pins the arithmetic unchanged.
 
 ### D-11 — strike span amendment PARKED (gap #7, open question 3)
 

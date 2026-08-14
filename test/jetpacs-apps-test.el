@@ -275,5 +275,74 @@ the canonical encoding."
         ;; The rows must NOT dispatch the owner-scoped verbs directly.
         (should-not (string-search "routed.one" json))))))
 
+;;;; The S2/S5 integration poles (CHROME-VOCABULARY v3)
+
+(ert-deftest jetpacs-apps-chrome-pole-validates-and-composes ()
+  "The `:chrome' pole: junk refuses at build; STANDALONE withdraws the
+core dock and the app's items stay off foreign surfaces; PRIMARY
+collapses core to one Home and turns the destinations into tabs
+through `app.open' `:route', Apps folding into the drawer."
+  (jetpacs-apps-test--env
+    (should-error (jetpacs-defapp "bad" :surfaces '("bad.main")
+                                  :chrome 'sideways))
+    ;; STANDALONE.
+    (jetpacs-defapp "solo" :label "Solo" :surfaces '("solo.main")
+                    :chrome 'standalone
+                    :dock (list (list :label "Own" :icon "home"
+                                      :on-tap '(:action "solo.show"))))
+    (jetpacs-defapp "other" :label "Other" :surfaces '("other.main"))
+    (setq jetpacs-apps--current "solo")
+    (cl-letf (((symbol-function 'jetpacs-shell-surface-for)
+               (lambda (owner) (concat "app:" owner))))
+      ;; Its own surface: ONLY its authored items — no core, no Apps.
+      (should (equal (jetpacs-apps-test--labels
+                      (jetpacs-apps-dock-items "app:solo.main"))
+                     '("Own")))
+      ;; A foreign surface: core + Apps, and the standalone app's
+      ;; items stay off it.
+      (let ((labels (jetpacs-apps-test--labels
+                     (jetpacs-apps-dock-items "app:hub"))))
+        (should (equal labels '("Home" "Apps")))
+        (should-not (member "Own" labels)))
+      ;; The S3 wrapper: globals withdraw on the standalone surface
+      ;; and survive on foreign ones.
+      (let ((jetpacs-apps-core-global-actions (lambda (_s) '(seed))))
+        (should-not (jetpacs-apps-global-actions "app:solo.main"))
+        (should (equal (jetpacs-apps-global-actions "app:hub")
+                       '(seed))))
+      ;; PRIMARY: one Home + destination tabs, Apps folded away.
+      (jetpacs-defapp "prime" :label "Prime" :surfaces '("prime.main")
+                      :chrome 'primary
+                      :destinations
+                      '((:key "one" :label "One" :icon "event"
+                         :verb "prime.one")
+                        (:key "two" :label "Two" :verb "prime.two")
+                        (:key "three" :label "Three" :verb "prime.three")
+                        (:key "four" :label "Four" :verb "prime.four")
+                        (:key "five" :label "Five" :verb "prime.five")))
+      (setq jetpacs-apps--current "prime"
+            jetpacs-apps--current-route "two")
+      (let* ((items (jetpacs-apps-dock-items "app:hub"))
+             (labels (jetpacs-apps-test--labels items)))
+        ;; Core collapsed to its FIRST item; four tabs max (the M3
+        ;; 3-5 budget with Home); no trailing Apps.
+        (should (equal labels '("Home" "One" "Two" "Three" "Four")))
+        (should-not (member "Five" labels))
+        (should-not (member "Apps" labels))
+        ;; The tab rides the S1 deep link and the routed one is
+        ;; selected.
+        (let ((two (cl-find "Two" items
+                            :key (lambda (i) (plist-get i :label))
+                            :test #'equal)))
+          (should (plist-get two :selected))
+          (should (string-search "\"route\":\"two\""
+                                 (jetpacs-node->canonical-json
+                                  (plist-get two :on-tap)))))
+        (should-not (plist-get
+                     (cl-find "One" items
+                              :key (lambda (i) (plist-get i :label))
+                              :test #'equal)
+                     :selected))))))
+
 (provide 'jetpacs-apps-test)
 ;;; jetpacs-apps-test.el ends here

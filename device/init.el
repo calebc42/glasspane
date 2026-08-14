@@ -65,6 +65,13 @@
 (require 'ebp-sync)
 (require 'ebp-complete)
 
+;; The S3 host seed: M-x rides EVERY screen's top bar through the
+;; global-actions seam (standalone apps excepted, the ratified
+;; withdrawal).  Screens that author their own M-x keep it — the seam
+;; de-dups by action name.
+(setq jetpacs-apps-core-global-actions
+      (lambda (_surface) (list (jetpacs-emacs-ui-mx-button))))
+
 ;; Mirror the device Emacs theme onto the chrome; `system'/`dark'/`off'
 ;; are the other choices (see `jetpacs-theme-mode').
 (setq jetpacs-theme-mode 'mirror)

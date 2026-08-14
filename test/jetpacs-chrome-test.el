@@ -1093,6 +1093,83 @@ compact on neither axis."
                            "row"))))
       (jetpacs-chrome-remove "app:phonedemo"))))
 
+(ert-deftest jetpacs-chrome-authored-bar-suppresses-rail-injection ()
+  "The RATIFIED S5 injection rule (CHROME-VOCABULARY v3): a screen
+authoring ANY dock slot opts out on EVERY slot.  On a medium window —
+where the data dock would inject a :rail — an authored :bottom-bar
+must suppress it; the old guard tested only the chosen slot and
+leaked the rail over the authored bar."
+  (let ((jetpacs-chrome-dock-items-function
+         (lambda (_s)
+           (list (list :label "A" :icon "home"
+                       :on-tap (jetpacs-action "jetpacs.noop"))))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-window-class)
+                   (lambda (_axis) "medium")))
+          (with-jetpacs-owner "authored"
+            (jetpacs-chrome-define-root
+             "authored" "root"
+             (lambda (_back)
+               (jetpacs-chrome-screen
+                "R" (jetpacs-text "r")
+                :bottom-bar (jetpacs-row
+                             (jetpacs-button "Own" (jetpacs-action
+                                                    "jetpacs.noop")))))))
+          (let* ((mv (jetpacs-chrome--build "app:authored"))
+                 (view (gethash "root" (plist-get mv :views))))
+            (should-not (plist-member view :rail))
+            ;; The authored bar itself survives untouched.
+            (should (string-match-p "Own" (format "%S"
+                                                  (plist-get view
+                                                              :bottom_bar))))))
+      (jetpacs-chrome-remove "app:authored"))))
+
+(ert-deftest jetpacs-chrome-global-actions-join-and-dedup ()
+  "The S3 seam: global action nodes append to every screen's top bar,
+de-duped by action name — a screen authoring its own copy keeps
+exactly one — and a nil seam changes nothing."
+  (let ((jetpacs-chrome-global-actions-function
+         (lambda (_s)
+           (list (jetpacs-icon-button
+                  "keyboard_command_key"
+                  (jetpacs-action "jetpacs.emacs.mx")
+                  :content-description "M-x")))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "gadem"
+            (jetpacs-chrome-define-root
+             "gadem" "root"
+             (lambda (_back) (jetpacs-chrome-screen "R" (jetpacs-text "r"))))
+            (jetpacs-chrome-define-root
+             "gadem2" "root"
+             (lambda (_back)
+               (jetpacs-chrome-screen
+                "R" (jetpacs-text "r")
+                :actions (list (jetpacs-icon-button
+                                "keyboard_command_key"
+                                (jetpacs-action "jetpacs.emacs.mx")
+                                :content-description "M-x"))))))
+          ;; Bare screen: the global joins.
+          (let* ((mv (jetpacs-chrome--build "app:gadem"))
+                 (bar (plist-get (gethash "root" (plist-get mv :views))
+                                 :top_bar)))
+            (should (= 1 (cl-count-if
+                          (lambda (k)
+                            (string-search "jetpacs.emacs.mx"
+                                           (format "%S" k)))
+                          (append (plist-get bar :children) nil)))))
+          ;; Authoring screen: exactly ONE M-x survives.
+          (let* ((mv (jetpacs-chrome--build "app:gadem2"))
+                 (bar (plist-get (gethash "root" (plist-get mv :views))
+                                 :top_bar)))
+            (should (= 1 (cl-count-if
+                          (lambda (k)
+                            (string-search "jetpacs.emacs.mx"
+                                           (format "%S" k)))
+                          (append (plist-get bar :children) nil))))))
+      (jetpacs-chrome-remove "app:gadem")
+      (jetpacs-chrome-remove "app:gadem2"))))
+
 (ert-deftest jetpacs-chrome-items-dock-wears-rail-on-medium-and-up ()
   "The data dock on a window compact on neither axis: the SAME
 destinations ride the scaffold rail slot as a navigation_rail, and no

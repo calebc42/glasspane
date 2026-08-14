@@ -207,6 +207,56 @@ everywhere else.  Equal weights are the bars\' EqualWeight default."
       :on-tap (plist-get item :on-tap))
      :weight 1)))
 
+(defvar jetpacs-chrome-global-actions-function nil
+  "Function (SURFACE) -> shell-global top-bar action nodes, or nil.
+The S3 seam, symmetric to the dock: what it returns is appended to
+EVERY stacked scaffold screen's top bar on that surface — the shell
+globals (M-x) persisting into apps, CHROME-VOCABULARY v3's
+build-within promise.  De-dup by action name: a screen that already
+authors a button dispatching the same action keeps its own, so the
+three existing M-x authors are not doubled.  The standalone pole opts
+out in the FUNCTION (jetpacs-apps wraps the host seed with the
+`:chrome' check), keeping this module app-agnostic.  Degrades like the
+dock: a signal or non-list costs the globals, never the surface.")
+
+(defun jetpacs-chrome--global-actions (surface)
+  "SURFACE's shell-global action nodes, isolated; nil without the seam."
+  (when jetpacs-chrome-global-actions-function
+    (condition-case err
+        (let ((nodes (funcall jetpacs-chrome-global-actions-function
+                              surface)))
+          (and (listp nodes) (cl-every #'jetpacs-node-p nodes) nodes))
+      (error (message "jetpacs-chrome: global actions failed: %s"
+                      (jetpacs-error-label err))
+             nil))))
+
+(defun jetpacs-chrome--join-global-actions (n globals)
+  "Append GLOBALS to scaffold N's top-bar row, de-duped by action name.
+Nodes whose `:on_tap' action already appears anywhere in the authored
+top bar are skipped — the author's own copy wins.  Non-scaffold nodes
+and bar-less scaffolds pass through untouched; `append'/`vconcat'
+copy, so the builder's node is never mutated."
+  (if-let* ((globals)
+            ((jetpacs-root-node-p n))
+            ((equal (plist-get n :t) "scaffold"))
+            (bar (plist-get n :top_bar))
+            (kids (plist-get bar :children)))
+      (let* ((authored (format "%S" bar))
+             (missing (cl-remove-if
+                       (lambda (g)
+                         (when-let* ((action (plist-get
+                                              (plist-get g :on_tap)
+                                              :action)))
+                           (string-search action authored)))
+                       globals)))
+        (if (null missing)
+            n
+          (let ((bar* (plist-put (copy-sequence bar)
+                                 :children
+                                 (vconcat kids missing))))
+            (plist-put (copy-sequence n) :top_bar bar*))))
+    n))
+
 (defun jetpacs-chrome--dock-slot (surface)
   "SURFACE\'s dock as (SLOT . NODE), or nil.
 SLOT is `:bottom_bar\' — or `:rail\' when the destinations come from
@@ -366,6 +416,7 @@ together, on every rebuild."
     (jetpacs-buffer-with-budget
      (let ((seen (make-hash-table :test #'equal))
            (dock (jetpacs-chrome--dock-slot surface))
+           (globals (jetpacs-chrome--global-actions surface))
            views prev-id)
       (dolist (entry (reverse stack))
         (let* ((id (car entry))
@@ -386,11 +437,23 @@ together, on every rebuild."
                              ;; The dock joins BEFORE the gates so what is
                              ;; checked is what ships; `append' copies, so
                              ;; the builder's own node is never mutated.
+                             ;; The RATIFIED injection rule
+                             ;; (CHROME-VOCABULARY v3, the standalone
+                             ;; pole): authoring ANY dock slot opts out
+                             ;; on EVERY slot — the old guard tested
+                             ;; only the slot the dock chose, leaking
+                             ;; an injected :rail over an authored
+                             ;; :bottom_bar on medium and expanded
+                             ;; windows (the S5 defect named against
+                             ;; that sentence).
                              (when (and dock (jetpacs-root-node-p n)
                                         (equal (plist-get n :t) "scaffold")
-                                        (not (plist-member n (car dock))))
+                                        (not (plist-member n :bottom_bar))
+                                        (not (plist-member n :rail)))
                                (setq n (append n (list (car dock)
                                                        (cdr dock)))))
+                             (setq n (jetpacs-chrome--join-global-actions
+                                      n globals))
                              (jetpacs-chrome--gate-view surface n)
                              (jetpacs-chrome--claim-screen-ids n seen)
                              n))

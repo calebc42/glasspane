@@ -44,12 +44,19 @@ POC 1's \"views not claimed by any app show everywhere\".")
 
 (defvar jetpacs-apps--registry nil
   "Ordered alist of APP-ID -> plist
-\(:label :icon :surfaces :dock :destinations :order).
+\(:label :icon :surfaces :dock :destinations :chrome :order).
 :dock is a list of dock item plists or a function (SURFACE) -> items;
-:destinations is the S1 route registry — see `jetpacs-defapp'.")
+:destinations is the S1 route registry and :chrome the integration
+pole — see `jetpacs-defapp'.")
 
 (defvar jetpacs-apps--current nil
   "The current app's id, or nil before any `app.open'.")
+
+(defvar jetpacs-apps--current-route nil
+  "The current app's last-opened destination key, or nil.
+Written only by `app.open' — set by a routed open, cleared by a plain
+one — so the app-primary tabs can indicate the selected place (the
+M3 navigation-bar contract).")
 
 ;;;; Registry
 
@@ -95,7 +102,7 @@ build-time-validation house rule."
     (jetpacs-apps--check-destination-list dests)))
 
 (cl-defun jetpacs-defapp (id &key label icon surfaces dock destinations
-                             (order 100))
+                             chrome (order 100))
   "Register (or replace) app ID.
 LABEL and ICON draw its Apps-grid card; SURFACES is the list of surface
 names it claims (the first is its home); DOCK is its destinations —
@@ -108,14 +115,26 @@ of no arguments returning one — naming the screens the app offers the
 HOST.  Each is opened via the global `app.open' with `:route KEY',
 which re-dispatches the destination's VERB on the app's own home
 surface — so the verb stays owner-scoped and no `:any-surface'
-declaration is ever needed for a host-side row.  Returns ID."
+declaration is ever needed for a host-side row.
+
+CHROME is the app's integration pole (CHROME-VOCABULARY v3):
+nil (default) composes into the shell as today; `primary' makes the
+dock APP-PRIMARY while this app is current — core collapses to its
+first item, the app's DESTINATIONS become the tabs (through the same
+`app.open' `:route' deep link), the Apps entry folds into the drawer;
+`standalone' withdraws the core dock items and the global-actions
+injection for the app's OWN surfaces and keeps the app's items off
+foreign ones — the app authors its chrome whole.  Returns ID."
   (unless (and (stringp id) (not (string-empty-p id)))
     (error "jetpacs-defapp: id must be a non-empty string"))
+  (unless (memq chrome '(nil standalone primary))
+    (error "jetpacs-defapp: :chrome must be nil, standalone, or primary, got %S"
+           chrome))
   (when destinations (jetpacs-apps--check-destinations destinations))
   (setf (alist-get id jetpacs-apps--registry nil nil #'equal)
         (list :label (or label id) :icon (or icon "apps")
               :surfaces surfaces :dock dock
-              :destinations destinations :order order))
+              :destinations destinations :chrome chrome :order order))
   (setq jetpacs-apps--registry
         (sort jetpacs-apps--registry
               (lambda (a b) (< (plist-get (cdr a) :order)
@@ -141,7 +160,8 @@ caller."
   "Remove app ID; the current app falls back to none."
   (setf (alist-get id jetpacs-apps--registry nil 'remove #'equal) nil)
   (when (equal jetpacs-apps--current id)
-    (setq jetpacs-apps--current nil)))
+    (setq jetpacs-apps--current nil
+          jetpacs-apps--current-route nil)))
 
 (defun jetpacs-apps--multi-p ()
   (> (length jetpacs-apps--registry) 1))
@@ -157,6 +177,23 @@ Defaults to the sole registered app when only one exists."
 (defun jetpacs-apps--home-surface (entry)
   (car (plist-get (cdr entry) :surfaces)))
 
+(defun jetpacs-apps--entry-owns-surface-p (entry surface)
+  "Non-nil when SURFACE (a full id) is one of ENTRY's claimed surfaces.
+Colon-aware on both sides, mirroring the flow resolver."
+  (cl-some (lambda (owner)
+             (equal surface
+                    (if (string-search ":" owner) owner
+                      (jetpacs-shell-surface-for owner))))
+           (plist-get (cdr entry) :surfaces)))
+
+(defun jetpacs-apps--surface-chrome (surface)
+  "The integration pole of the app owning SURFACE, or nil.
+nil for host surfaces and for build-within apps alike — only a
+declared pole changes composition."
+  (cl-loop for entry in jetpacs-apps--registry
+           when (jetpacs-apps--entry-owns-surface-p entry surface)
+           return (plist-get (cdr entry) :chrome)))
+
 ;;;; The composed dock
 
 (defun jetpacs-apps--app-items (entry surface)
@@ -171,22 +208,90 @@ malformed result costs this app's items only."
              items))
     (error nil)))
 
+(defun jetpacs-apps--destination-tabs (entry)
+  "ENTRY's destinations as dock tabs — the S2 app-primary form.
+Each tab deep-links through the global `app.open' `:route' (the S1
+mechanism powering S2), capped at four so one Home + tabs stays
+inside the M3 3-5 budget; `:selected' follows the route this verb
+last opened."
+  (pcase-let ((`(,id . ,_plist) entry))
+    (mapcar (lambda (d)
+              (list :label (plist-get d :label)
+                    :icon (or (plist-get d :icon) "circle")
+                    :on-tap (jetpacs-action
+                             "app.open"
+                             :args (list :app id
+                                         :route (plist-get d :key))
+                             :when-offline "drop")
+                    :selected (and (equal id jetpacs-apps--current)
+                                   (equal (plist-get d :key)
+                                          jetpacs-apps--current-route))))
+            (seq-take (jetpacs-apps-destinations id) 4))))
+
 (defun jetpacs-apps-dock-items (surface)
-  "THE `jetpacs-chrome-dock-items-function': core + current app + Apps.
-With fewer than two registered apps this composes to the core items
-(plus the sole app's, when one exists) and nothing more — the
-single-app contract."
-  (append
-   (when jetpacs-apps-core-dock-items
-     (condition-case nil
-         (funcall jetpacs-apps-core-dock-items surface)
-       (error nil)))
-   (when-let* ((entry (jetpacs-apps-current)))
-     (jetpacs-apps--app-items entry surface))
-   (when (jetpacs-apps--multi-p)
-     (list (list :label "Apps" :icon "apps"
-                 :on-tap (jetpacs-action "app.grid" :when-offline "drop")
-                 :selected (equal surface "app:jetpacs.app-store"))))))
+  "THE `jetpacs-chrome-dock-items-function', by integration pole.
+Default (build-within, no declared pole): core + current app + Apps —
+with fewer than two registered apps this composes to the core items
+\(plus the sole app's, when one exists) and nothing more, the
+single-app contract.  STANDALONE: on the app's own surfaces only its
+authored `:dock' items ship (none authored: no dock at all — the app's
+chrome is its own); on foreign surfaces a standalone current app
+contributes NOTHING.  PRIMARY while current: core collapses to its
+first item, the app's destinations become the tabs, and the Apps
+entry folds into the drawer (`jetpacs-apps-drawer-row' already lives
+there)."
+  (let ((surface-pole (jetpacs-apps--surface-chrome surface))
+        (entry (jetpacs-apps-current)))
+    (cond
+     ;; A standalone app's OWN surface: the app authors its chrome
+     ;; whole (CHROME-VOCABULARY v3, the ratified withdrawal).
+     ((eq surface-pole 'standalone)
+      (and entry (jetpacs-apps--app-items entry surface)))
+     ;; The current app is PRIMARY: one Home + its destination tabs.
+     ((and entry (eq (plist-get (cdr entry) :chrome) 'primary))
+      (append
+       (seq-take (when jetpacs-apps-core-dock-items
+                   (condition-case nil
+                       (funcall jetpacs-apps-core-dock-items surface)
+                     (error nil)))
+                 1)
+       (jetpacs-apps--destination-tabs entry)))
+     ;; Build-within default.
+     (t
+      (append
+       (when jetpacs-apps-core-dock-items
+         (condition-case nil
+             (funcall jetpacs-apps-core-dock-items surface)
+           (error nil)))
+       ;; A standalone CURRENT app keeps its items off foreign
+       ;; surfaces — they are its own chrome, not a contribution.
+       (when (and entry
+                  (not (eq (plist-get (cdr entry) :chrome) 'standalone)))
+         (jetpacs-apps--app-items entry surface))
+       (when (jetpacs-apps--multi-p)
+         (list (list :label "Apps" :icon "apps"
+                     :on-tap (jetpacs-action "app.grid"
+                                             :when-offline "drop")
+                     :selected (equal surface
+                                      "app:jetpacs.app-store")))))))))
+
+;;;; The global-actions wrapper (S3, standalone-aware)
+
+(defvar jetpacs-apps-core-global-actions nil
+  "The host's shell-global top-bar actions: a function (SURFACE) -> nodes.
+Seeded by the device init (M-x, canonically); rendered into every
+screen through `jetpacs-chrome-global-actions-function' — except on a
+standalone app's surfaces, where the ratified withdrawal applies.")
+
+(defun jetpacs-apps-global-actions (surface)
+  "THE `jetpacs-chrome-global-actions-function': the host seed, minus
+standalone surfaces (CHROME-VOCABULARY v3: `:chrome' `standalone'
+withdraws the global-actions injection for the app's own surfaces)."
+  (unless (eq (jetpacs-apps--surface-chrome surface) 'standalone)
+    (when jetpacs-apps-core-global-actions
+      (condition-case nil
+          (funcall jetpacs-apps-core-global-actions surface)
+        (error nil)))))
 
 ;;;; The Apps grid
 
@@ -311,7 +416,8 @@ when it refused — the app still opens."
              (home (jetpacs-apps--home-surface entry)))
         (if (and route (null dest))
             'stale
-          (setq jetpacs-apps--current id)
+          (setq jetpacs-apps--current id
+                jetpacs-apps--current-route (and dest route))
           (jetpacs-flow-continue
            (lambda ()
              (if-let* ((verb (and dest (plist-get dest :verb)))
@@ -374,6 +480,15 @@ when it refused — the app still opens."
            (null jetpacs-apps-core-dock-items))
   (setq jetpacs-apps-core-dock-items jetpacs-chrome-dock-items-function))
 (setq jetpacs-chrome-dock-items-function #'jetpacs-apps-dock-items)
+;; The S3 seam installs the same way: adopt any pre-existing raw
+;; function as the core seed, then wrap it standalone-aware.
+(when (and jetpacs-chrome-global-actions-function
+           (not (eq jetpacs-chrome-global-actions-function
+                    #'jetpacs-apps-global-actions))
+           (null jetpacs-apps-core-global-actions))
+  (setq jetpacs-apps-core-global-actions
+        jetpacs-chrome-global-actions-function))
+(setq jetpacs-chrome-global-actions-function #'jetpacs-apps-global-actions)
 
 (provide 'jetpacs-apps)
 ;;; jetpacs-apps.el ends here

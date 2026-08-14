@@ -51,16 +51,31 @@ selection against the app's own surface."
                            :selected))))
 
 (ert-deftest glasspane-test-unload-clean ()
-  "Unregistration leaves no verb, no registry entry — and is undone by
+  "Unregistration leaves no verb, no claim, no registry entry — the
+sibling modules' verbs included, since they register through
+`glasspane-register' rather than at their own load — and is undone by
 `glasspane-register' (the live-reload path), which this test restores
 so suite order never matters."
-  (unwind-protect
-      (progn
-        (glasspane-unregister)
-        (should-not (gethash "glasspane.home" jetpacs-action-handlers))
-        (should-not (assoc glasspane-owner jetpacs-apps--registry)))
-    (glasspane-register))
-  (should (gethash "glasspane.home" jetpacs-action-handlers)))
+  (let ((verbs '("glasspane.home"
+                 "org.clock.out" "org.clock.switch" "org.clock.in-last"
+                 "config.sync" "glasspane.packages.install")))
+    (unwind-protect
+        (progn
+          (glasspane-unregister)
+          (dolist (name verbs)
+            (should-not (gethash name jetpacs-action-handlers))
+            ;; The claim record goes with the handler: teardown-owner
+            ;; and unregister must agree on what "glasspane" owns.
+            (should-not (jetpacs--owner-of "action" name)))
+          (should-not (assoc glasspane-owner jetpacs-apps--registry))
+          (should-not (alist-get "Packages" jetpacs-settings-registry
+                                 nil nil #'equal)))
+      (glasspane-register))
+    (dolist (name verbs)
+      (should (gethash name jetpacs-action-handlers))
+      (should (equal (jetpacs--owner-of "action" name) glasspane-owner)))
+    (should (alist-get "Packages" jetpacs-settings-registry
+                       nil nil #'equal))))
 
 ;;;; G1 — data layer: glasspane-org.el
 
@@ -363,6 +378,326 @@ Loading the worker-lib beforehand must itself have had no side effects
     (should (equal (with-current-buffer (messages-buffer) (buffer-string))
                    log-before)))
   (should-not glasspane-vulpea--registered))
+
+;;;; G2 — services: glasspane-clock.el
+
+(ert-deftest glasspane-test-clock-notification-shape ()
+  "The chronometer SurfaceSpec is SPEC 18.5-shaped: the elapsed timer
+is meta `:chronometer' `:base_ms' (epoch millis, an integer), the
+buttons live in meta `:actions' (a vector — the notification node set
+has no button), every action carries a non-drop offline policy WITH
+its mandatory ttl, and the whole spec round-trips the canonical wire
+encoding."
+  (require 'glasspane-clock)
+  (cl-letf (((symbol-function 'org-clock-is-active) (lambda () t)))
+    (let* ((org-clock-current-task "Water the garden")
+           (org-clock-start-time (time-subtract nil 90))
+           (spec (glasspane-clock-notification-spec))
+           (meta (plist-get spec :meta))
+           (chrono (plist-get meta :chronometer))
+           (actions (plist-get meta :actions)))
+      ;; The body is inside the notification profile's node set.
+      (should (equal (plist-get (plist-get spec :body) :t) "text"))
+      (should (eq (plist-get meta :ongoing) t))
+      (should (equal (plist-get meta :category) "stopwatch"))
+      (should (integerp (plist-get chrono :base_ms)))
+      (should (= (plist-get chrono :base_ms)
+                 (truncate (* 1000 (float-time org-clock-start-time)))))
+      (should (vectorp actions))
+      (should (= (length actions) 2))
+      ;; Most important first: the platform may show fewer (SPEC 18.5).
+      (should (equal (mapcar (lambda (a) (plist-get a :label))
+                             (append actions nil))
+                     '("Clock out" "Switch task")))
+      (seq-doseq (entry actions)
+        (let ((tap (plist-get entry :on_tap)))
+          (should (member (plist-get tap :action)
+                          '("org.clock.out" "org.clock.switch")))
+          ;; No client in this harness, so `offline.wake' is ungranted:
+          ;; the descriptor degrades wake -> queue (amendment #85 would
+          ;; void the surface at the push gate) and still carries the
+          ;; ttl every non-drop policy requires (SPEC 14.1 / plan T4).
+          (should (equal (plist-get tap :when_offline) "queue"))
+          (should (integerp (plist-get tap :ttl_s)))
+          (should (<= 1 (plist-get tap :ttl_s) 604800))))
+      (let ((json (jetpacs-node->canonical-json spec)))
+        (should (stringp json))
+        (should (string-search "\"base_ms\"" json))
+        (should (string-search "\"actions\"" json))
+        (should (string-search "Water the garden" json))))))
+
+(ert-deftest glasspane-test-clock-handler-matrix ()
+  "Every clock verb answers a SPEC 14.4 status over faked org-clock
+state: out with no clock is `stale' (the notification outlived
+reality), out with a running clock is `accepted' with the clock
+buffer's save deferred through the ebp-org funnel, switch is a
+definitive `rejected' until a real picker exists, and in-last maps
+success/signal to `accepted'/`rejected'."
+  (require 'glasspane-clock)
+  ;; out, no clock -> stale.
+  (cl-letf (((symbol-function 'org-clock-is-active) (lambda () nil)))
+    (should (eq (glasspane-clock--on-out nil nil) 'stale)))
+  ;; out, running -> accepted; `org-clock-out' ran; the save was
+  ;; deferred IN the clock buffer (captured before out cleared markers).
+  (with-temp-buffer
+    (let ((m (point-marker)) (saved nil) (outed nil))
+      (cl-letf (((symbol-function 'org-clock-is-active) (lambda () m))
+                ((symbol-function 'org-clock-out)
+                 (lambda (&rest _) (setq outed t)))
+                ((symbol-function 'ebp-org-defer-save)
+                 (lambda () (push (current-buffer) saved))))
+        (let ((org-clock-marker m))
+          (should (eq (glasspane-clock--on-out nil nil) 'accepted))
+          (should outed)
+          (should (equal saved (list (current-buffer))))))))
+  ;; switch -> rejected: v1's `org-clock-goto' jump is a desktop
+  ;; effect the phone cannot observe (plan G2).
+  (should (eq (glasspane-clock--on-switch nil nil) 'rejected))
+  ;; in-last: success -> accepted; a signal (empty history, or a
+  ;; prompt dying under the no-prompt regime) -> rejected.
+  (cl-letf (((symbol-function 'org-clock-in-last) (lambda (&rest _) t)))
+    (let ((org-clock-marker (make-marker)))
+      (should (eq (glasspane-clock--on-in-last nil nil) 'accepted))))
+  (cl-letf (((symbol-function 'org-clock-in-last)
+             (lambda (&rest _) (user-error "No last clock"))))
+    (should (eq (glasspane-clock--on-in-last nil nil) 'rejected))))
+
+(ert-deftest glasspane-test-clock-replayed-tap-dispatch ()
+  "A durable clock tap replayed during SYNCING — after an Emacs restart,
+SPEC 10.3 step 4, BEFORE the READY hook (step 5) re-claims the
+notification root — reaches the handler's matrix instead of dying at
+the D1 owned-surface gate: `rejected' there is PERMANENT (SPEC 14.4),
+deleting the receipt while the clock keeps running.  The org.clock.*
+verbs are global (:any-surface), so the full dispatch with the wire
+surface and NO prior `glasspane-clock--assert' answers the matrix's
+`stale'/`accepted'."
+  (require 'glasspane-clock)
+  ;; The replay premise: this session holds no live claim on the
+  ;; notification surface, exactly like a fresh restart.
+  (should-not (jetpacs-owned-surface-p glasspane-clock-surface "glasspane"))
+  (dolist (name '("org.clock.out" "org.clock.switch" "org.clock.in-last"))
+    (should (plist-get (jetpacs-action-schema name) :any-surface)))
+  (let ((handler (gethash "org.clock.out" jetpacs-action-handlers)))
+    (should handler)
+    ;; No clock survives the restart -> the matrix's honest `stale'.
+    (cl-letf (((symbol-function 'org-clock-is-active) (lambda () nil)))
+      (should (eq (jetpacs--dispatch
+                   nil (list :action "org.clock.out"
+                             :surface glasspane-clock-surface
+                             :args nil)
+                   handler)
+                  'stale)))
+    ;; A clock still running -> the replayed clock-out lands `accepted'.
+    (with-temp-buffer
+      (let ((m (point-marker)) (outed nil))
+        (cl-letf (((symbol-function 'org-clock-is-active) (lambda () m))
+                  ((symbol-function 'org-clock-out)
+                   (lambda (&rest _) (setq outed t)))
+                  ((symbol-function 'ebp-org-defer-save) (lambda () t)))
+          (let ((org-clock-marker m))
+            (should (eq (jetpacs--dispatch
+                         nil (list :action "org.clock.out"
+                                   :surface glasspane-clock-surface
+                                   :args nil)
+                         handler)
+                        'accepted))
+            (should outed)))))))
+
+(ert-deftest glasspane-test-clock-grant-degrade ()
+  "With `surfaces.notification' ungranted — or no client at all,
+`jetpacs-granted-p' fails closed — the mirror degrades WHOLE and
+SILENT: no root registered, no push, no signal (the push gate would
+error); and retire never tombstones a surface this session never
+asserted."
+  (require 'glasspane-clock)
+  (let ((pushes 0) (roots 0) (removes 0))
+    (cl-letf (((symbol-function 'jetpacs-granted-p) (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-shell-push)
+               (lambda (&rest _) (cl-incf pushes)))
+              ((symbol-function 'jetpacs-shell-define-root)
+               (lambda (&rest _) (cl-incf roots)))
+              ((symbol-function 'jetpacs-shell-remove-root)
+               (lambda (&rest _) (cl-incf removes)))
+              ((symbol-function 'org-clock-is-active) (lambda () t)))
+      (let ((glasspane-clock--live nil)
+            (org-clock-current-task "Task")
+            (org-clock-start-time (current-time)))
+        (glasspane-clock--assert)
+        (glasspane-clock--on-ready nil)
+        (should-not glasspane-clock--live)
+        (glasspane-clock--retire)
+        (should (= roots 0))
+        (should (= pushes 0))
+        (should (= removes 0))))))
+
+;;;; G2 — services: glasspane-config.el
+
+(ert-deftest glasspane-test-config-sync-ensure-load ()
+  "Over a throwaway `user-emacs-directory': a missing subtree loads as
+a silent no-op; ensure CREATES it once (the full managed set) and
+thereafter only loads — a user's edit to a seeded file survives;
+loads run in name order with user extras sorted in; sync is the
+explicit reset that clobbers the edit.  `load' is stubbed to a
+recorder so the managed org payloads never execute in the harness."
+  (let* ((tmp (make-temp-file "glasspane-ued" t))
+         (user-emacs-directory (file-name-as-directory tmp))
+         (dir (glasspane-config-dir))
+         (managed (expand-file-name "capture-templates.el" dir))
+         (loads nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'load)
+                   (lambda (file &rest _) (push file loads) t)))
+          ;; The subtree key is the plan's pinned app-local path.
+          (should (equal dir (file-name-as-directory
+                              (expand-file-name "jetpacs/apps/glasspane"
+                                                user-emacs-directory))))
+          ;; Missing subtree: load is a no-op, nothing signals.
+          (glasspane-config-load)
+          (should-not loads)
+          ;; Ensure's create arm: the managed set is written and loaded.
+          (glasspane-config-ensure)
+          (should (equal (directory-files dir nil "\\.el\\'")
+                         '("capture-templates.el" "org-defaults.el")))
+          (should (equal (mapcar #'file-name-nondirectory (reverse loads))
+                         '("capture-templates.el" "org-defaults.el")))
+          ;; Create-ONCE: an existing subtree is loaded, never rewritten.
+          (write-region ";; user edit" nil managed nil 'silent)
+          (setq loads nil)
+          (glasspane-config-ensure)
+          (should (equal (mapcar #'file-name-nondirectory (reverse loads))
+                         '("capture-templates.el" "org-defaults.el")))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents managed)
+                           (buffer-string))
+                         ";; user edit"))
+          ;; Name order holds with a user extra in the subtree.
+          (write-region ";; extra" nil (expand-file-name "zz-extra.el" dir)
+                        nil 'silent)
+          (setq loads nil)
+          (glasspane-config-load)
+          (should (equal (mapcar #'file-name-nondirectory (reverse loads))
+                         '("capture-templates.el" "org-defaults.el"
+                           "zz-extra.el")))
+          ;; Sync is the explicit reset: managed content comes back.
+          (should (equal (glasspane-config-sync) dir))
+          (should (string-prefix-p ";;; capture-templates.el"
+                                   (with-temp-buffer
+                                     (insert-file-contents managed)
+                                     (buffer-string)))))
+      (delete-directory tmp t))))
+
+(ert-deftest glasspane-test-config-sync-accepted ()
+  "The registered config.sync verb writes SYNCHRONOUSLY — both managed
+files are on disk before the handler answers \\='accepted — notifies
+inline (queue/raise, never blocking), and pushes only in the deferred
+continuation: zero pushes inside the dispatch extent (D2), exactly one
+when the continuation runs."
+  (let* ((tmp (make-temp-file "glasspane-ued" t))
+         (user-emacs-directory (file-name-as-directory tmp))
+         (handler (gethash "config.sync" jetpacs-action-handlers))
+         (notified nil)
+         (pushes 0)
+         (continuations nil))
+    (should handler)
+    (unwind-protect
+        (cl-letf (((symbol-function 'load) (lambda (&rest _) t))
+                  ((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _) (push text notified)))
+                  ((symbol-function 'jetpacs-shell-push)
+                   (lambda (&rest _) (cl-incf pushes) nil))
+                  ((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (push fn continuations) nil)))
+          (should (eq (funcall handler nil (list :surface "app:glasspane"))
+                      'accepted))
+          (let ((dir (glasspane-config-dir)))
+            (should (file-exists-p
+                     (expand-file-name "capture-templates.el" dir)))
+            (should (file-exists-p
+                     (expand-file-name "org-defaults.el" dir))))
+          (should (= (length notified) 1))
+          (should (string-match-p "App defaults refreshed" (car notified)))
+          (should (= pushes 0))
+          (should (= (length continuations) 1))
+          (funcall (car continuations))
+          (should (= pushes 1)))
+      (delete-directory tmp t))))
+
+;;;; G2 — services: glasspane-packages.el
+
+(require 'glasspane-packages)
+
+(ert-deftest glasspane-test-packages-wanted-drops-vulpea ()
+  "The closed set is exactly the four engines with glasspane-pack's
+folded floors, and a build without SQLite drops vulpea from the wanted
+list — no install can help it there — while search and review stay."
+  (should (equal glasspane-packages--set
+                 '((org-ql    . "0.7")
+                   (vulpea    . "2.0")
+                   (org-srs   . nil)
+                   (ef-themes . nil))))
+  (cl-letf (((symbol-function 'sqlite-available-p) (lambda () nil)))
+    (should-not (assq 'vulpea (glasspane-packages--wanted)))
+    (should (equal (mapcar #'car (glasspane-packages--wanted))
+                   '(org-ql org-srs ef-themes))))
+  (cl-letf (((symbol-function 'sqlite-available-p) (lambda () t)))
+    (should (equal (glasspane-packages--wanted) glasspane-packages--set))))
+
+(ert-deftest glasspane-test-packages-batch-noop ()
+  "In batch — `noninteractive' t, this suite's permanent condition —
+the auto-install gate schedules nothing and never marks the session
+attempted, even with every other condition forced open: CI must never
+reach for MELPA."
+  (should noninteractive)
+  (let ((glasspane-packages-auto-install t)
+        (glasspane-packages--attempted nil)
+        (timers 0))
+    (cl-letf (((symbol-function 'glasspane-packages--missing)
+               (lambda () '(org-ql)))
+              ((symbol-function 'run-with-idle-timer)
+               (lambda (&rest _) (cl-incf timers) nil)))
+      (should-not (glasspane-packages-maybe-auto-install))
+      (should-not glasspane-packages--attempted)
+      (should (zerop timers)))))
+
+(ert-deftest glasspane-test-packages-install-defers ()
+  "The D2 showcase: dispatch answers `accepted' with ZERO synchronous
+ensure calls — the install runs only when the deferred continuation
+fires, and the outcome toast rides it.  Mid-install (the re-entrancy
+flag up) a second tap still answers without scheduling a second
+install."
+  (let ((handler (gethash "glasspane.packages.install"
+                          jetpacs-action-handlers))
+        (ensures 0) (continuations nil) (toasts nil))
+    (should handler)
+    (cl-letf (((symbol-function 'glasspane-packages-ensure)
+               (lambda () (cl-incf ensures) t))
+              ((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (push fn continuations)))
+              ((symbol-function 'jetpacs-toast)
+               (lambda (text &rest _) (push text toasts) nil)))
+      (should (eq (funcall handler nil nil) 'accepted))
+      (should (zerop ensures))
+      (should (= (length continuations) 1))
+      (funcall (car continuations))
+      (should (= ensures 1))
+      (should (cl-some (lambda (s) (string-search "ready" s)) toasts))
+      (let ((glasspane-packages--installing t))
+        (should (eq (funcall handler nil nil) 'accepted))
+        (should (= (length continuations) 1))
+        (should (= ensures 1))))))
+
+(ert-deftest glasspane-test-packages-settings-registered ()
+  "`glasspane-register' (run at the entry's load) registered the
+Packages section: the auto-install row is present with a label, and
+the symbol's boolean custom-type is what derives its switch."
+  (let ((entries (alist-get "Packages" jetpacs-settings-registry
+                            nil nil #'equal)))
+    (should entries)
+    (let ((entry (assq 'glasspane-packages-auto-install entries)))
+      (should entry)
+      (should (stringp (plist-get (cdr entry) :label)))))
+  (should (eq (get 'glasspane-packages-auto-install 'custom-type)
+              'boolean)))
 
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

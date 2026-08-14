@@ -762,9 +762,20 @@ to the pure Tier-0 render."
   (and (stringp path)
        (string-suffix-p ".org" path t)))
 
-(defun jetpacs-org-render--files-rendered-p (path)
+(defun jetpacs-org-render-rendered-p (path)
+  "Non-nil when PATH presents as the RENDERED org view, not plain text.
+PUBLIC — the D-4 advisory landed as the accessor itself (the in-tree
+ruling makes the base repo's review THIS repo's): Glasspane's reader
+keys its body and actions seams off this exact question, and it did so
+through the double-hyphen private, so a rename of the mode-table
+internals would have snapped the reader with no tripwire.  App layers
+call THIS; the table stays private."
   (and (jetpacs-org-render--org-path-p path)
        (not (eq (gethash path jetpacs-org-render--files-mode) 'plain))))
+
+(defalias 'jetpacs-org-render--files-rendered-p
+  #'jetpacs-org-render-rendered-p
+  "The pre-D-4 private spelling; internal callers migrate at leisure.")
 
 (defun jetpacs-org-render--files-body (path)
   "The body seam: the rendered org view, or nil to pass to the editor."

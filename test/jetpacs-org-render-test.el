@@ -784,11 +784,18 @@ rejects non-org paths."
           (should (eq 'accepted
                       (jetpacs-org-render--view-mode
                        (list :path f) '(:surface "app:jetpacs.files"))))
-          (should-not (jetpacs-org-render--files-rendered-p f))
+          (should-not (jetpacs-org-render-rendered-p f))
           (should (eq 'accepted
                       (jetpacs-org-render--view-mode
                        (list :path f) '(:surface "app:jetpacs.files"))))
-          (should (jetpacs-org-render--files-rendered-p f))
+          (should (jetpacs-org-render-rendered-p f))
+          ;; D-4: the public accessor IS the seam app layers key off;
+          ;; the old private spelling survives as an alias until the
+          ;; internal callers migrate — pin both facts.
+          (should (eq (indirect-function
+                       'jetpacs-org-render--files-rendered-p)
+                      (indirect-function
+                       'jetpacs-org-render-rendered-p)))
           (should (eq 'rejected
                       (jetpacs-org-render--view-mode
                        '(:path "/etc/passwd.txt")

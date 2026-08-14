@@ -10,6 +10,14 @@
 ;; `glasspane-ui--at-ref' — the token→resolve→classify funnel every
 ;; heading mutation in G4+ rides.
 ;;
+;; It also holds the HUB (`glasspane-ui-home-screen', the hub-wiring
+;; rung that punch-list #26 escalated): the chrome root's real home
+;; screen, whose body rows, drawer and FAB are the only things on any
+;; surface that emit the daily verbs the later rungs registered.  It
+;; lives beside the shared state rather than in the entry so the entry
+;; keeps its single job — identity — and so the destination table sits
+;; with the FAB and the deferral seam every one of those screens uses.
+;;
 ;; Retired against v1 (the plan's retirement list + G3 section):
 ;;
 ;; - The whole rendered⇄plain files block — mode vars, the editor
@@ -120,6 +128,143 @@ action shim, never a signal."
   (jetpacs-icon-button "add" (jetpacs-action "org.capture.show")
                        :content-description "Capture"
                        :variant "filled" :size "large"))
+
+;;;; The hub (the home screen every ported surface hangs off)
+;;
+;; Punch-list #26: through G8 the app registered a dozen screen-opening
+;; verbs and nothing emitted one — the G0 placeholder home was still the
+;; root, so agenda/journal/search/views/review were code no finger could
+;; reach.  The hub is the fix, and it lives HERE rather than in the entry
+;; because this file already owns the shared view state and the FAB the
+;; daily screens hang off; the entry keeps its one job, identity.
+
+;; The entry's identity constants, declared for the compiler: this file
+;; is `require'd BY glasspane.el, so a back-require would cycle.  Read
+;; late (a screen builds long after the entry finished loading) — the
+;; `glasspane-ui--on-teardown' rule, applied to a string.
+(defvar glasspane-title)
+
+(defconst glasspane-ui-destinations
+  '((:key "agenda" :label "Agenda" :icon "event"
+     :subtitle "Today's schedule, deadlines, and the month grid"
+     :verb "agenda.open")
+    (:key "tasks" :label "Tasks" :icon "task_alt"
+     :subtitle "Every TODO, under its keyword filter"
+     :verb "tasks.open")
+    (:key "journal" :label "Journal" :icon "calendar_today"
+     :subtitle "The datetree day, with what carried over"
+     :verb "journal.open")
+    (:key "capture" :label "Capture" :icon "add_circle"
+     :subtitle "File a note through an org capture template"
+     :verb "org.capture.show")
+    (:key "search" :label "Search" :icon "search"
+     :subtitle "Query the vault offline, with the filter builder"
+     :verb "search.open")
+    (:key "views" :label "Saved views" :icon "manage_search"
+     :subtitle "Named queries as lists, boards, and calendars"
+     :verb "views.hub")
+    (:key "review" :label "Review" :icon "school"
+     :subtitle "Flashcards due today, and notes gone stale"
+     :verb "review.open"))
+  "The app's user-facing destinations, in hub order.
+ONE table: the home body and the drawer both render it, so a
+destination can never appear in one and be missing from the other —
+which is exactly how #26 happened, with the new verbs appearing in
+neither.  Each `:verb' is registered by the sibling module that owns
+the screen and the coupling is the wire string alone (the
+`glasspane-ui--capture-fab' rule): a tap that beats that module's
+registration answers `rejected' from the action shim, never a signal.
+
+Subtitles are STATIC on purpose.  Chrome rebuilds every screen on the
+stack for every push, so a live count here would re-extract org on
+every frame the user is anywhere in the app; the Agenda and Review
+screens carry their own in-screen counts instead (FOUNDATION-GAPS #5).
+
+No Notes row: glasspane-notes owns no screen of its own — its surfaces
+are the detail view's backlinks/mentions sections and the Review
+screen's stale-files half, both reached from rows that ARE here.")
+
+(defun glasspane-ui--destination-row (dest prefix)
+  "One `jetpacs-chrome-row' for DEST, keyed under PREFIX.
+The body and the drawer ship in the SAME document, so the two copies
+of a destination need distinct SPEC 16.5 keys — the key is the
+reconciler's identity for the row, not a label."
+  (jetpacs-chrome-row (plist-get dest :label)
+                      :subtitle (plist-get dest :subtitle)
+                      :icon (plist-get dest :icon)
+                      :on-tap (jetpacs-action (plist-get dest :verb))
+                      :key (concat prefix (plist-get dest :key))))
+
+(defun glasspane-ui--home-body ()
+  "The hub body: one tappable row per destination."
+  (apply #'jetpacs-lazy-column
+         (append (mapcar (lambda (dest)
+                           (glasspane-ui--destination-row dest "hub-"))
+                         glasspane-ui-destinations)
+                 (list :spacing 8 :content-padding 12))))
+
+(declare-function jetpacs-launcher-rows "jetpacs-launcher" (&optional exclude))
+
+(defun glasspane-ui--drawer-app-rows ()
+  "The OTHER apps' destinations for the drawer's foot, or nil.
+`jetpacs-launcher-rows' is the base's own drawer convention
+\(jetpacs-launcher.el) and it is how the org reader is reachable at
+all: the reader claims the files editor body seam and registers no
+opening verb, so a `.org' tapped in Files IS its entry point.
+Resolved at render time (the `glasspane-srs--stale-section' idiom), so
+the hub still builds in an image without the launcher — the batch
+suite's, and any device profile that drops it.  Excludes this app's
+own surface: a row to where you already are is not a destination."
+  (when (fboundp 'jetpacs-launcher-rows)
+    (condition-case nil
+        (when-let* ((rows (jetpacs-launcher-rows
+                           (jetpacs-shell-surface-for "glasspane"))))
+          (append (list (jetpacs-divider) (jetpacs-section-header "Apps"))
+                  rows))
+      (error nil))))
+
+(defun glasspane-ui--home-drawer ()
+  "The navigation drawer: the app's canonical destination list.
+Home first (the root the stack resets to), then the body's own
+destinations, then the app's settings screen, then the other apps.
+Destinations only, never a document mutation, and every row is
+reachable elsewhere — M-x for the commands, the Settings root for the
+satellites (docs/CHROME-VOCABULARY.md).  Authored on the ROOT screen
+alone: chrome renders the stack as one multi_view, and a drawer
+repeated on every pushed screen would duplicate its rows in the same
+document."
+  (apply #'jetpacs-column
+         (append
+          (list (jetpacs-chrome-row "Home"
+                                    :subtitle "The hub"
+                                    :icon "home"
+                                    :on-tap (jetpacs-action "glasspane.home")
+                                    :key "drawer-home"))
+          (mapcar (lambda (dest)
+                    (glasspane-ui--destination-row dest "drawer-"))
+                  glasspane-ui-destinations)
+          (list (jetpacs-chrome-row
+                 "Settings"
+                 :subtitle "Saved searches, TODO workflows, org tags"
+                 :icon "settings"
+                 :on-tap (jetpacs-action "glasspane.settings.open")
+                 :key "drawer-settings"))
+          (glasspane-ui--drawer-app-rows)
+          (list :spacing 4 :scroll t))))
+
+(defun glasspane-ui-home-screen (back)
+  "The app's home screen: the hub `glasspane-register' defines as root.
+BACK is the chrome builder contract's argument — nil at the stack
+bottom, which is where this screen lives.  The capture FAB is the
+screen's one primary creation act (the vocabulary's FAB rule), and it
+names the same verb the Capture row does: the drawer, the body and the
+FAB are three projections of one command set, never three behaviors."
+  (jetpacs-chrome-screen
+   glasspane-title
+   (glasspane-ui--home-body)
+   :back back
+   :fab (glasspane-ui--capture-fab)
+   :drawer (glasspane-ui--home-drawer)))
 
 ;;;; Deferral
 

@@ -5,9 +5,12 @@ Status: G0–G8 ALL LANDED 2026-08-13/14 (G1 c36be82, G2 479dc06, G3
 final gate 984 tests / 41 suites, 0 unexpected, independently re-run).
 Pre-G9 punch list SWEPT 2026-08-14: all 40 advisories dispositioned
 (24 fixed, 11 test strengthenings, 4 wontfix, 1 deferred), gate 989
-tests / 41 suites, 0 unexpected. Remaining: G9 (device gate), preceded
-by the hub-wiring rung that punch-list #26 escalates to the ladder;
-two device-only residuals (#2, #20) ride the G9 checklist.
+tests / 41 suites, 0 unexpected. HUB RUNG LANDED 2026-08-14 (#26): the
+chrome root is now glasspane-ui's real hub — body rows, drawer and FAB
+make every ported surface reachable, and the gate pins the whole
+99-verb inventory so a future screen cannot ship dead; gate 993 tests
+/ 41 suites, 0 unexpected. Remaining: G9 (device gate) alone; two
+device-only residuals (#2, #20) ride its checklist.
 G1 LANDED 2026-08-13 (data layer: glasspane-org.el + glasspane-vulpea.el;
 gate 11/11, full suite 934/41). G2 LANDED 2026-08-13 (services:
 glasspane-clock.el + glasspane-config.el + glasspane-packages.el;
@@ -980,7 +983,7 @@ advisory text, the triage reasoning, and the diffs live in git (see
 
 - #25 [G5] **[FIXED]** The float coercion in agenda.set-mode/nav and journal.nav accepts non-whole floats (0.7 -> 0) as valid, looser than the "whole-valued integer arrives as float" rationale in the comments. Landed: all three sites coerce only whole-valued floats, so a fractional wire value now falls through to the integerp check and answers 'rejected — a malformed event, not a rounding job.
 
-- #26 [G6] **[DEFER-G9: the cure is a rung, not a bounded punch-list edit]** Reachability: nothing on any surface emits the new verbs — no drawer row, hub card, dock item, or FAB points at views.hub/search.open, and glasspane-table-node has no caller. Confirmed still true (glasspane.el:88-120 is the G0 placeholder home). Escalated to the ladder: the hub-wiring rung must land BEFORE the G9 device session, because only that session can prove the new surfaces are reachable on hardware rather than dead code.
+- #26 [G6] **[LANDED — hub rung]** Reachability: nothing on any surface emits the new verbs — no drawer row, hub card, dock item, or FAB points at views.hub/search.open, and glasspane-table-node has no caller. Landed: `glasspane-ui-home-screen` replaces the G0 placeholder as the chrome root (the entry still NAMES the root; the keystone builds it), rendering ONE destination table twice — as the home body's rows and as the drawer's, so a surface can never appear in one and be missing from the other — over agenda/tasks/journal/capture/search/saved views/review, with the drawer adding Home, the app's Settings screen and `jetpacs-launcher-rows` (the org reader's only entry point, since it claims the files body seam and registers no verb of its own), plus the capture FAB; the two satellites keep their Settings-root links (ef 81, gallery 84 — not double-registered). The standing gate is `glasspane-test-hub-reaches-every-opener` (walks the built screen and its drawer) plus `glasspane-test-hub-verb-inventory`, which classifies all 99 owner-registered verbs as hub opener / satellite opener / no-opener, so a future verb nobody wires fails the suite until it is wired or classified. NOT closed here: `glasspane-table-node` has no render host until the app reader gets a rich body (FOUNDATION-GAPS #6 / open question 2) — it stays parked with that gap rather than pretending a hub row could reach it.
 
 - #27 [G6] **[FIXED]** glasspane-search.el:431 — glasspane-search--on-clear-filters uses (plist-get params :surface) with no jetpacs-shell-surface-for fallback, unlike every sibling handler. Landed: the sibling fallback added; the ignore-errors stays.
 
@@ -1016,4 +1019,4 @@ Banked on the G9 device checklist (residuals of fixed items — observable only 
 
 - #2 residual — with vulpea actually installed (absent locally by house rule), load it after a first Agenda render and confirm the next render switches to the vault-index arm without a mutation.
 
-- #26 — the hub-wiring rung must land before the session; see the DEFER-G9 entry above.
+- #26 — LANDED as the hub rung, so the device session finally has something to walk: tap every hub row, every drawer row, and the FAB, and confirm each pushes its screen on hardware (the batch gate proves the descriptors exist, only the device proves they arrive).

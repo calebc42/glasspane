@@ -1,6 +1,9 @@
 # Glasspane app rebuild ladder (v1 → v3 port)
 
-Status: G0 LANDED 2026-08-13 (skeleton/registration/harness; gate 4/4).
+Status: G0–G8 ALL LANDED 2026-08-13/14 (G1 c36be82, G2 479dc06, G3
+4719ca8, G4 78612e7, G5 68ad844, G6 369d75f, G7 2add74e, G8 f2c6e2b;
+final gate 984 tests / 41 suites, 0 unexpected, independently re-run).
+Remaining: the pre-G9 punch list below, then G9 (device gate).
 G1 LANDED 2026-08-13 (data layer: glasspane-org.el + glasspane-vulpea.el;
 gate 11/11, full suite 934/41). G2 LANDED 2026-08-13 (services:
 glasspane-clock.el + glasspane-config.el + glasspane-packages.el;
@@ -913,3 +916,91 @@ fixture bytes only.
    `strike` span amendment for the next amendment batch, or ratify
    the color degrade as the permanent convention? Recommendation:
    park the amendment (small, additive, three consumers already).
+
+## Pre-G9 punch list (ladder review advisories, untriaged)
+
+Forty advisories the per-rung adversarial reviews raised BELOW the
+must-fix bar — real but bounded: vacuous-test strengthenings, cache-key
+sharpenings, posture inconsistencies, and two genuine small defects
+(the G2 clock stale-notification-at-READY and the decorative package
+version floors). Triage before or during G9; none blocks the ladder.
+
+- [G1] Partially vacuous test: glasspane-test-org-timestamp-hooks (test/glasspane-test.el:234) claims 'a bare require never mutates the user's global org hooks' but never asserts it — a mutant restoring v1's top-level (add-hook 'before-save-hook ...) in glasspane-org.el passes the entire suite, because glasspane-register installs the hooks at suite load anyway. Strengthen: after glasspane-org-remove-hooks, (load "glasspane-org") and assert before-save-hook still lacks glasspane-org--before-save-timestamps.
+
+- [G1] P1-12-adjacent cache-key gap: glasspane-org--todo-items (glasspane-org.el:237, key (todos files)) and glasspane-org--all-tags (glasspane-org.el:417, key (all-tags)) memoise arm-dependent payloads (vulpea whole-vault index vs agenda-file sweep) under keys that don't encode which arm ran — vulpea lighting up mid-session serves the pre-vulpea payload until the next mutation invalidates the namespace. Bounded (every mutation path invalidates, and glasspane-org--query already keys its arms apart), but adding the arm to the key is one token.
+
+- [G1] Everything else verified clean: no defaction handlers in G1 (data layer only) so no push/blocking-read sites; zero jetpacs-ui-state references; ext: declare-function idiom throughout both files with no bare vulpea/org-ql requires; refs are ebp-org-ref-at-point plists never serialized (S5 groundwork correct — no token minting here, per plan); ebp-org-query carries the mandatory action-identifying KEY (glasspane-org.el:374); all three find-file-noselect sites ride ebp-org--check-file/ebp-org-file-allowed-p + ebp-org--with-clamped-io; org-ql fork/commentary retired; glasspane-vulpea.el is verbatim v1 modulo ext:; load-time hooks moved behind glasspane-org-install-hooks with jetpacs-teardown-functions hygiene and unregister symmetry (glasspane.el:119-134); no :when-offline sites (T4 vacuously satisfied). Gates run by me: byte-compile error-on-warn OK for glasspane.el/glasspane-org.el/glasspane-vulpea.el, ERT 11/11 passed. The remaining six gate tests bite: extraction (plist-ref shape + truename), query-routing (the P1-12 cross-key probe would catch a tree-only key), filter (signal-vs-empty split), roots-refusal (refused/unresolved split), vulpea-register-noop (an unguarded call would error with the function unbound).
+
+- [G2] glasspane-clock.el:146-152 — glasspane-clock--on-ready re-asserts only when a clock RUNS; after a restart with no running clock the phone's cached ongoing chronometer notification is never retired and sits in the shade forever (its actions also dead per must-fix 1). The file's own Commentary states the READY hook exists 'so the phone's cache matches reality after an Emacs restart' — consider sending jetpacs-shell-remove-root when inactive at READY (remove-root of an unregistered surface is a safe tombstone, jetpacs-shell.el:213-230).
+
+- [G2] glasspane-packages.el:99-102 + :173-181 — the folded min-version floors are decorative: --missing is loadability-based, so an installed-but-old vulpea 1.x loads fine, never appears in --missing, and never reaches the install loop; and even when the floor branch fires, (package-install SYMBOL) no-ops when ANY version is installed (package-compute-transaction with an unversioned requirement). The comment at :174-176 ('a package below its folded min-version is not installed for this purpose') overclaims. Plan G2 only demands folding the data in, so not a must-fix — but either enforce the floor in --missing (package-installed-p pkg floor, plus package-desc-based install) or soften the comment.
+
+- [G2] glasspane-config.el:133-134 and glasspane-packages.el:186,194-196 use (error-message-string err) in *Messages* logs while glasspane-clock.el:116,193 deliberately uses jetpacs-error-label citing SPEC 23.3; config-load errors can quote user file contents. T2's rule formally covers only user-facing notify, but the split posture within one rung is inconsistent — pick one.
+
+- [G2] test/glasspane-test.el:577-581 — glasspane-test-packages-wanted-drops-vulpea's first assertion restates the --set constant verbatim (a tautology that passes under any edit made in both places); the sqlite arms are the biting part. Minor: assert derived properties (e.g. the vulpea floor is a version string) instead of the literal.
+
+- [G2] glasspane-config.el:204 — glasspane-config-startup at the load tail executes any EXISTING managed subtree under the real user-emacs-directory during batch byte-compile/suite runs (emacs -Q keeps ~/.emacs.d as user-emacs-directory); on a machine where the user once ran glasspane-config-ensure, every test run executes their capture-templates/org-defaults. Hermeticity hazard for the harness — consider gating startup on (not noninteractive) or having the suite rebind user-emacs-directory at top level.
+
+- [G2] test/glasspane-test.el:443-445 — the in-last 'accepted' arm uses (make-marker) with no buffer, so the deferred-save path of glasspane-clock--on-in-last is never exercised in the accepted case (the on-out arm does cover the analogous code); cheap to extend.
+
+- [G3] Dialog slot clobber race — glasspane-ui.el:385-404: --show-dialog overwrites glasspane-ui--settings-dialog without abandoning a still-live prior dialog, and every show's callback unconditionally nils the slot, so a stale conclusion (e.g. two rapid edit taps producing two outstanding dialog.shows) can clear the NEW dialog's request-id — after which settings.agenda.save's close/abandon no-ops (device dialog lingers) and the stored origin params are lost. Guard the callback to clear only when the slot still holds its own request-id, and abandon any existing live request before showing.
+
+- [G3] Mid-ladder dead verbs — glasspane-ui.el:444/455 (--show-todo-dialog) and :306-313 (--sequence-cards) wire settings.todo.save / settings.todo.delete, which register only in G5 (matching v1's glasspane-agenda.el:479/510 and the plan's G5 gate at PLAN-glasspane-app.md:578). Until G5 lands, device taps on those buttons dispatch unregistered actions. Plan-sanctioned by rung order, but worth interim 'rejected stubs or a comment if a device session runs between rungs.
+
+- [G3] Mutant survivability — test/glasspane-test.el glasspane-test-ui-handler-statuses asserts a deferred continuation only for glasspane.settings.open; a mutant that makes glasspane-ui--defer-refresh push directly still passes (jetpacs-shell-push with no registered root silently no-ops under the stubs). Stub jetpacs-shell-push to signal/record and assert zero direct pushes across the whole handler matrix.
+
+- [G3] Test hygiene — glasspane-test-ui-handler-statuses calls glasspane-ui-register twice and leaves org-clock-in/out hooks and the teardown hook attached in the batch process; harmless today, but wrapping in unwind-protect + glasspane-ui-unregister keeps later suite additions isolated (and would also exercise the unregister sweep).
+
+- [G4] test/glasspane-test.el:1415-1422 — the `pushes` counter in glasspane-test-detail-handler-triples is stubbed, incremented, and then `(ignore pushes)`d, never asserted. A mutant that calls jetpacs-shell-push inline inside the at-ref handler family (todo-set/todo-cycle/priority/tags/prop-set/duplicate/schedule) would pass this gate — heading.tap and detail.save are covered by continuation-count asserts, but the rest are not. Add `(should (zerop pushes))` after the dispatch block (the only legitimate push sites are inside never-run continuations, so it must stay 0).
+
+- [G4] emacs/apps/glasspane/glasspane-org-reader.el:686 — `(error-message-string err)` is rendered into a device-facing caption; plan T2 maps user-facing error text to jetpacs-error-label (SPEC 23.3). No payload leak here in practice (ebp-org-parse-query raises fixed strings plus the user's own query keyword, and jetpacs-error-label would degrade the caption to the useless "user-error"), but either state that vetting in a comment or map the parse errors to fixed captions so the T2 grep stays clean for later rungs.
+
+- [G4] emacs/apps/glasspane/glasspane-detail.el:1146-1171 — detail.save with a :value that does not start with a heading (user deleted the stars in the editor): after delete-region+insert, `ebp-org-ref-at-point`'s `(org-heading-components)` signals when beg was the first heading, landing in the error arm — 'rejected is answered but the buffer keeps the unsaved mutation in memory, which the next unrelated save flushes to disk. Shape-gate the value (require it to match org-heading-regexp at start) or revert the region on failure before answering 'rejected.
+
+- [G4] emacs/apps/glasspane/glasspane-detail.el:80-81 — the declare-function for glasspane-org-reader-subtree omits the real function's 4th optional SET arg (glasspane-org-reader.el:365), and glasspane-detail--reader-nodes (line 909) relies on the default "reader-subtree" set despite the subtree docstring's own warning to stacking callers. Safe today only because the single glasspane-detail screen-id means at most one subtree render is live; passing an explicit "detail-subtree" set (and updating the declaration) removes the latent replace-sweep hazard if a second subtree caller ever appears.
+
+- [G4] emacs/apps/glasspane/glasspane-org-reader.el:723,744 — the body/actions seams key off jetpacs-org-render--files-rendered-p, a foundation double-hyphen private (jetpacs-org-render.el:765); the test also rebinds the private jetpacs-org-render--files-mode hash. Works and the plan sanctions the seam chain, but a public rendered-p accessor on the foundation side would keep the app off private surface area.
+
+- [G4] emacs/apps/glasspane/glasspane-detail.el:1602-1608 — heading.clock-in is registered and emitted from four surfaces (reader ops, sheet, clock recents, detail top bar) but never exercised by the gate suite; its status path is only inferred from the shared at-ref classifier tests. A one-line clock-in/clock-out round trip in detail-handler-triples would close the gap.
+
+- [G5] share.text/org.capture.share are registered under with-jetpacs-owner "glasspane" without :any-surface (emacs/apps/glasspane/glasspane-capture.el:294-298); the D1 gate (jetpacs-surfaces.el:770-785) rejects any event whose wire surface is a string not owned by glasspane. A surfaceless share event passes, but if the Companion attributes shares to the launcher/foreign surface the intake dies silently. jetpacs.launcher.open's :any-surface precedent (jetpacs-launcher.el:148-162) suggests declaring it; at minimum bank a G9 checklist item to verify the emitted surface shape.
+
+- [G5] journal.capture inserts wire text raw into the datetree (glasspane-journal.el:130 '- ' + text): the device input is single-line, but a crafted wire event can carry newlines, promoting payload to org structure at end-of-file (headings, keyword lines, a local-variables block) — SPEC 23.2 recommends neutralizing; collapsing newlines/whitespace in glasspane-journal--on-capture (glasspane-journal.el:356-362) costs one line.
+
+- [G5] Token-set growth is unenforced: each agenda page mints two sets (glasspane-agenda.el:201-203 — 'agenda-MODE' under glasspane plus 'glasspane-agenda-MODE' under jetpacs.org), so ~25+ saved custom agendas exhausts ebp-org-token-sets-max (32, ebp-org.el:548-549) and the mint SIGNALS, killing the whole body build; the comment at glasspane-agenda.el:474-475 asserts 'well under the cap' without bounding glasspane-org-custom-agendas.
+
+- [G5] glasspane-journal--on-view-change (glasspane-journal.el:292-299) matches only the owner's primary surface via jetpacs-shell-surface-for, so a journal screen pushed onto a different tapped surface (chrome-push-screen accepts any surface, jetpacs-chrome.el:496-503) never resets its day on leave.
+
+- [G5] Coverage: glasspane-agenda--tokenize's disallowed-file filter and the token/archive-token attachment onto agenda/tasks cards are untested (glasspane-test-journal-carried-query covers only the single-set journal mint); a mutant that drops the archive-token cell or skips the ebp-org-file-allowed-p filter passes the current suite.
+
+- [G5] The float coercion in agenda.set-mode/nav and journal.nav ((truncate idx), e.g. glasspane-agenda.el:625,637) accepts non-whole floats (0.7 -> 0) as valid, looser than the 'whole-valued integer arrives as float' rationale in the comments; an (integerp (truncate ...))-plus-equality check would reject genuinely fractional wire values.
+
+- [G6] Reachability: nothing on any surface emits the new verbs — no drawer row, hub card, dock item, or FAB points at views.hub/search.open, and glasspane-table-node has no caller (the reader still renders bodies without it). Consistent with the G0 placeholder-home note (emacs/apps/glasspane/glasspane.el:88) and views' own commentary (emacs/apps/glasspane/glasspane-views.el:20-22) deferring wiring to the entry, but the entry was touched this rung without adding it; make sure the hub-wiring rung lands before the G9 device gate or these surfaces are dead code on hardware.
+
+- [G6] emacs/apps/glasspane/glasspane-search.el:431 — glasspane-search--on-clear-filters uses (plist-get params :surface) with no jetpacs-shell-surface-for fallback (every sibling handler has one); on a replay without :surface the draft-evicting :reset-input-ids push is silently swallowed by ignore-errors and stale device drafts survive the clear.
+
+- [G6] emacs/apps/glasspane/glasspane-table.el:244-245 — the babel user-error arm notifies "Evaluation declined" for every user-error, including org-babel-confirm-evaluate's ':eval no' refusal ("evaluation ... is disabled"), mislabeling a block-level policy as a user decline. Cosmetic.
+
+- [G6] Duplication: glasspane-views--tokenize (emacs/apps/glasspane/glasspane-views.el:142) and glasspane-search--tokenize (emacs/apps/glasspane/glasspane-search.el:162) are the same ~20-line mint-filter-attach helper differing only in the :set name; a shared glasspane-ui helper taking SET would keep the S5 filter/cap policy in one place when it next changes.
+
+- [G7] Gate-order inconsistency across the two files: glasspane-notes.el:404-411 (notes.mentions) and :508-513 (link.materialize) check vulpea availability BEFORE the token lookup, so a swept token with vulpea absent answers 'rejected; glasspane-srs.el:862-869 (srs.item.create) checks the token first, so the same situation answers 'stale. The plan's S4 gate order (shape → stale → exposure → grant) favors the srs ordering; harmless either way, but pick one convention.
+
+- [G7] The mention-card render path (glasspane-notes.el:291-315 and the tap/edit token pairing at :330-341,375-377) is never constructed in any local test — a swapped (tap edit) destructure would route heading.tap taps onto link.materialize edit-site tokens, and a dropped :ttl-s on the Link-it action is a runtime build signal, and neither would surface before the device gate. A stubbed glasspane-notes-detail-nodes test with a fake ready mentions state would close both holes cheaply.
+
+- [G7] glasspane-notes--mint (glasspane-notes.el:161-169) is all-or-nothing: ebp-org-ref-tokens validates atomically, so ONE mention path outside the org roots nils the WHOLE batch (every card in the section untappable) and — because the atomic mint aborts before the replace sweep — leaves the PREVIOUS render's token set live. Pre-filtering refs with ebp-org-file-allowed-p before minting would degrade only the offending card and keep the replace-sweep stale semantics.
+
+- [G7] glasspane-srs.el:910 installs a top-level (with-eval-after-load 'org-srs ...) that survives M-x unload-feature: after glasspane unloads, a later (require 'org-srs) calls the now-void glasspane-srs--settings-section-maybe and signals inside org-srs's load. Guard the form with fboundp or move the after-load registration into glasspane-srs-register.
+
+- [G7] glasspane-notes-unregister's docstring (glasspane-notes.el:630-631) claims 'the async cache sweeps its own entries by owner' — jetpacs-async-clear-owner runs only from jetpacs-teardown-owner (jetpacs-shell.el:297), which glasspane-unregister never calls; the entries actually die via per-push generation eviction. Docstring drift only.
+
+- [G7] glasspane-srs-unregister (glasspane-srs.el:958-965) leaves the session defvars (--active/--current/--revealed/--undo) populated, unlike the notes sibling which clrhashes its scan marks; an unregister/re-register cycle resumes a phantom session. One setq line would match the sibling's hygiene.
+
+- [G8] Test blind spot that hid the must_fix: all G8 handler tests invoke handlers via (gethash NAME jetpacs-action-handlers) and never cross jetpacs--dispatch, so the SPEC 14.4/D1 surface-scope gate is untested. Add one dispatch-level assertion to test/glasspane-test.el (e.g. in glasspane-test-ef-absent-paths): (should (eq (jetpacs--dispatch nil (list :action "ef.show" :surface "app:jetpacs.settings") (gethash "ef.show" jetpacs-action-handlers)) 'accepted)) — it fails today and pins the fix. No test is vacuous otherwise: demo-handlers counts dispatch-extent pushes (catches the inline-push mutant), gallery-trees rejects the v1 silent-"line" fallback mutant, ef-absent-paths catches the swallowed-'accepted mutant on a signalling load.
+
+- [G8] Pre-existing, same family, OUT of this diff: glasspane-ui.el:811 registers "glasspane.settings.open" owner-scoped, and its only button is the order-80 Settings link (glasspane-ui.el:372-378) — the landed G3 rung has the identical dead-link defect and should be swept in the same :any-surface fix.
+
+- [G8] glasspane-test-ef-absent-paths never asserts the ef Settings link registers exactly once across re-register nor that glasspane-ef-unregister removes it — glasspane-test-gallery-trees does both for gallery (test/glasspane-test.el, gallery-trees tail); a two-line symmetry addition would close the gap.
+
+- [G8] glasspane-demo's demo.setup/demo.setup-org are owner-scoped with no on-wire button in the port (M-x / offline-replay entry points only, matching the commentary); if a device button ever lands on the Settings screen they will need the same :any-surface treatment.
+
+- [G8] glasspane-demo--org-target honors only (car ebp-org-roots) — correct against ebp-org--roots anchoring (ebp-org.el:173-188, verified), but a multi-root vault seeds only the first root; the docstring could say so explicitly.

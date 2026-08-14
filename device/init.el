@@ -175,12 +175,18 @@ rows: the push-loop report, and Inspect a screen."
   ;; package built ON jetpacs; org activates like a major mode (on file
   ;; open, never a destination); Files lives in the nav-bar dock only.
   ;; lazy_column: a plain column cannot scroll past the fold.
-  (jetpacs-lazy-column
-   (jetpacs-apps-drawer-row)
-   (jetpacs-hub--tools-entry)
-   (jetpacs-divider)
-   (jetpacs-settings-drawer-entry)
-   :spacing 8))
+  (apply #'jetpacs-lazy-column
+         (append
+          (list (jetpacs-apps-drawer-row))
+          ;; S1 (CHROME-VOCABULARY v3, build-within): the destinations
+          ;; apps CONTRIBUTE, composed by the host — one nest per app,
+          ;; each row deep-linking through the global `app.open'
+          ;; `:route'.  poc-1's claimed-views drawer, restored.
+          (jetpacs-apps-destination-rows)
+          (list (jetpacs-hub--tools-entry)
+                (jetpacs-divider)
+                (jetpacs-settings-drawer-entry)
+                :spacing 8))))
 
 (defun jetpacs-hub--dock-items (surface)
   "The persistent view switcher's destinations, as data.

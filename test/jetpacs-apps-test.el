@@ -124,5 +124,156 @@
       (should (equal (plist-get (plist-get tap :args) :surface)
                      "app:jetpacs.app-store")))))
 
+;;;; The S1 destination registry (CHROME-VOCABULARY v3, build-within)
+
+(ert-deftest jetpacs-apps-destinations-validate-at-build ()
+  "A LIST of destinations is checked at `jetpacs-defapp' time — the
+build-time-validation house rule; a FUNCTION is deferred trust,
+re-checked (and isolated) per read."
+  (jetpacs-apps-test--env
+    (should-error (jetpacs-defapp "bad" :surfaces '("bad.main")
+                                  :destinations '((:key "x"))))
+    (should-error (jetpacs-defapp "bad" :surfaces '("bad.main")
+                                  :destinations
+                                  '((:key "has space" :label "X"
+                                     :verb "x.open"))))
+    (should-error (jetpacs-defapp "bad" :surfaces '("bad.main")
+                                  :destinations
+                                  '((:key "a" :label "A" :verb "a.open")
+                                    (:key "a" :label "B" :verb "b.open"))))
+    ;; A dotless verb can never have a registered handler: refused at
+    ;; build (the jetpacs-action rule).
+    (should-error (jetpacs-defapp "bad" :surfaces '("bad.main")
+                                  :destinations
+                                  '((:key "a" :label "A" :verb "open"))))
+    ;; The function form registers unchecked and a BROKEN one costs
+    ;; only that app's reads — including the escape hatches: a function
+    ;; returning a FUNCTION, or an improper list, must not slip a
+    ;; functionp fast path into a caller's mapcar.
+    (jetpacs-defapp "fn" :surfaces '("fn.main")
+                    :destinations (lambda () (error "boom")))
+    (should-not (jetpacs-apps-destinations "fn"))
+    (jetpacs-defapp "fn2" :surfaces '("fn2.main")
+                    :destinations (lambda () '((:key "k"))))
+    (should-not (jetpacs-apps-destinations "fn2"))
+    (jetpacs-defapp "fn3" :surfaces '("fn3.main")
+                    :destinations (lambda () (lambda () nil)))
+    (should-not (jetpacs-apps-destinations "fn3"))
+    (jetpacs-defapp "fn4" :surfaces '("fn4.main")
+                    :destinations (lambda () (cons '(:key "a") 'improper)))
+    (should-not (jetpacs-apps-destinations "fn4"))
+    (jetpacs-defapp "ok" :surfaces '("ok.main")
+                    :destinations
+                    '((:key "one" :label "One" :verb "ok.one")))
+    (should (equal (plist-get (car (jetpacs-apps-destinations "ok"))
+                              :key)
+                   "one"))))
+
+(ert-deftest jetpacs-apps-open-route-redispatches-on-the-apps-surface ()
+  "The S1 deep link end to end, WITH the D1 gate live: the row's tap
+arrives from a HOST surface, `app.open' is ownerless so the gate lets
+it through, and the route's OWNER-SCOPED verb (no `:any-surface') is
+re-dispatched with the app's own home surface — where the same gate
+passes.  The control proves the mechanism is load-bearing: the same
+verb dispatched directly from the host surface refuses."
+  (jetpacs-apps-test--env
+    (let ((seen nil))
+      (unwind-protect
+          (progn
+            (with-jetpacs-owner "routed"
+              (jetpacs-defaction "routed.open"
+                                 (lambda (_args params)
+                                   ;; The re-dispatch must hand over the
+                                   ;; FLOW identity too, not just the
+                                   ;; dispatch params: flow-surface wins
+                                   ;; over params in every downstream
+                                   ;; navigate/flow pattern.
+                                   (push (list (plist-get params :surface)
+                                               (jetpacs-flow-surface)
+                                               (jetpacs-device-flow-p))
+                                         seen)
+                                   'accepted)))
+            ;; The owner must OWN its surface for the gate to pass.
+            (cl-letf (((symbol-function 'jetpacs-owned-surface-p)
+                       (lambda (surface owner)
+                         (and (equal owner "routed")
+                              (equal surface "app:routed.main")))))
+              (jetpacs-defapp "routed" :surfaces '("routed.main")
+                              :destinations
+                              '((:key "main" :label "Main"
+                                 :verb "routed.open")))
+              ;; CONTROL: the bare verb from the host surface refuses.
+              (should (eq (jetpacs--dispatch
+                           nil '(:action "routed.open"
+                                 :surface "app:hub")
+                           (gethash "routed.open" jetpacs-action-handlers))
+                          'rejected))
+              (should-not seen)
+              ;; The S1 path: app.open from the SAME host surface.
+              (should (eq (jetpacs--dispatch
+                           nil '(:action "app.open" :surface "app:hub"
+                                 :args (:app "routed" :route "main"))
+                           (gethash "app.open" jetpacs-action-handlers))
+                          'accepted))
+              (should (equal seen
+                             '(("app:routed.main" "app:routed.main" t))))
+              (should (equal jetpacs-apps--current "routed"))
+              ;; The route handler accepted, so NO redundant home push.
+              (should-not pushed)
+              ;; A vanished route is stale — the row outlived its
+              ;; registry.
+              (should (eq (jetpacs-apps--action-open
+                           '(:app "routed" :route "ghost") nil)
+                          'stale))
+              ;; A refusing route still opens the app: home fallback.
+              (with-jetpacs-owner "routed"
+                (jetpacs-defaction "routed.open"
+                                   (lambda (_a _p) 'rejected)))
+              (should (eq (jetpacs-apps--action-open
+                           '(:app "routed" :route "main") nil)
+                          'accepted))
+              (should (equal pushed '("routed.main")))
+              ;; A SIGNALING route (incl. the typed jsonrpc errors
+              ;; jetpacs--dispatch deliberately re-signals) must not
+              ;; die in the timer: it maps to the same fallback.
+              (with-jetpacs-owner "routed"
+                (jetpacs-defaction "routed.open"
+                                   (lambda (_a _p)
+                                     (signal 'jsonrpc-error
+                                             '("retry" (jsonrpc-error-code . 1500))))))
+              (setq pushed nil)
+              (should (eq (jetpacs-apps--action-open
+                           '(:app "routed" :route "main") nil)
+                          'accepted))
+              (should (equal pushed '("routed.main")))))
+        (jetpacs-undefaction "routed.open")))))
+
+(ert-deftest jetpacs-apps-destination-rows-compose-the-host-nests ()
+  "The host consumption seam: one collapsible nest per app WITH
+destinations, each row tapping the global `app.open' with its route;
+apps without destinations cost nothing, and every node round-trips
+the canonical encoding."
+  (jetpacs-apps-test--env
+    (jetpacs-defapp "plain" :surfaces '("plain.main"))
+    (jetpacs-defapp "routed" :label "Routed" :icon "event"
+                    :surfaces '("routed.main")
+                    :destinations
+                    '((:key "one" :label "One" :subtitle "First"
+                       :verb "routed.one")
+                      (:key "two" :label "Two" :verb "routed.two")))
+    (let ((nests (jetpacs-apps-destination-rows)))
+      (should (= 1 (length nests)))
+      (let ((json (jetpacs-node->canonical-json (car nests))))
+        (should (string-search "\"collapsible\"" json))
+        ;; Collapsed by default — explicit, because the node's own
+        ;; default is expanded.
+        (should (string-search "\"collapsed\":true" json))
+        (should (string-search "Routed" json))
+        (should (string-search "app.open" json))
+        (should (string-search "\"route\":\"one\"" json))
+        (should (string-search "\"route\":\"two\"" json))
+        ;; The rows must NOT dispatch the owner-scoped verbs directly.
+        (should-not (string-search "routed.one" json))))))
+
 (provide 'jetpacs-apps-test)
 ;;; jetpacs-apps-test.el ends here

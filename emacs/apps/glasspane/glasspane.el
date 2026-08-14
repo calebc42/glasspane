@@ -9,11 +9,11 @@
 ;; journal, SRS, the org reader — on the jetpacs foundation.  The
 ;; ladder is docs/PLAN-glasspane-app.md; this file is G0: the thin
 ;; entry in the M3 template (jetpacs-m3-catalog.el), owning exactly the
-;; app identity — the "glasspane" owner claim, the chrome root (a
-;; placeholder home until the later rungs' screens give a hub
-;; something to point at — v1's ui was tab fabric and had none), the
-;; dock destination, and one owner verb.  The sibling `require' list below
-;; grows one rung at a time; nothing here reaches for org yet.
+;; app identity — the "glasspane" owner claim, the chrome root (the
+;; hub, built by glasspane-ui and merely NAMED here), the dock
+;; destination, and one owner verb, `glasspane.home', which the hub's
+;; drawer taps to come back.  The sibling `require' list below grew one
+;; rung at a time and is now the whole app.
 ;;
 ;; Client hooks (clock notification, window class, save refresh) attach
 ;; at READY starting with G2 — G0 registers surfaces and verbs only,
@@ -98,26 +98,6 @@ second real `jetpacs-defapp' caller there is.")
 (defconst glasspane-icon "menu_book"
   "The dock/launcher icon.  A knowledge base is a book you keep open.")
 
-;;;; The placeholder home (a later rung's hub replaces this builder)
-
-(defun glasspane-home-screen (back)
-  "The G0 root screen: the identity, and the ladder's own state.
-Exists so registration, the dock, and `M-x glasspane' have a real
-screen behind them from the first rung.  v1 had no home to port — its
-ui was tab fabric (S1-retired) — so the placeholder stands until the
-later rungs' screens give a hub something to point at; swapping the
-builder then must not change the registration's shape."
-  (jetpacs-chrome-screen
-   glasspane-title
-   (jetpacs-column
-    (jetpacs-text "Glasspane" :style "headline")
-    (jetpacs-text "Org knowledge on Jetpacs — rebuild in progress."
-                  :style "body")
-    (jetpacs-text "Ladder: docs/PLAN-glasspane-app.md (G0 landed)."
-                  :style "label" :color "muted")
-    :spacing 8)
-   :back back))
-
 ;;;; Verbs
 
 (defun glasspane--on-home (_args params)
@@ -149,8 +129,11 @@ stack to home — the live-reload path; `jetpacs-defapp' replaces its
 registry entry in place."
   (with-jetpacs-owner glasspane-owner
     (jetpacs-defaction "glasspane.home" #'glasspane--on-home)
+    ;; The root is glasspane-ui's hub (the #26 rung): the entry names
+    ;; the screen, the keystone builds it — the same split the dock
+    ;; item keeps, identity here and content there.
     (jetpacs-chrome-define-root glasspane-owner "home"
-                                #'glasspane-home-screen))
+                                #'glasspane-ui-home-screen))
   ;; After the root exists: the app claims a surface that is really
   ;; there, and its dock destination names one the launcher's
   ;; membership guard recognizes (the M3 ordering).

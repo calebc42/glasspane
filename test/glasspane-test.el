@@ -25,10 +25,13 @@ lands somewhere that exists (the M3 suite's shape)."
     (should (equal (jetpacs-apps--home-surface entry) glasspane-owner))))
 
 (ert-deftest glasspane-test-home-serializes ()
-  "The placeholder home screen BUILDS and its body round-trips the
-canonical wire encoding — the same bar every later rung's screens must
-clear, established while the screen is one card tall."
-  (let ((screen (glasspane-home-screen nil)))
+  "The REGISTERED root screen builds and round-trips the canonical wire
+encoding — the same bar every later rung's screens must clear.  The
+builder is glasspane-ui's hub since the #26 rung; the G0 contract is
+unchanged, and deliberately names the same function
+`glasspane-register' does: whatever the chrome root points at must
+build offline and serialize."
+  (let ((screen (glasspane-ui-home-screen nil)))
     (should screen)
     ;; A chrome screen IS a scaffold node — serialize it whole.
     (let ((json (jetpacs-node->canonical-json screen)))
@@ -4900,6 +4903,205 @@ manually-offset label — pure, no client."
   (should (string-search "\"canvas\""
                          (jetpacs-node->canonical-json
                           (glasspane-gallery--gauge 0.25)))))
+
+;;;; #26 — hub wiring
+
+;; The rung punch-list #26 escalated: through G8 every ported surface
+;; had a screen and an opening verb, and NOTHING on any surface emitted
+;; one.  The gate below is the standing cure — it walks what the app
+;; actually ships to the device and refuses to pass while an opener is
+;; unreachable, so a future rung's new screen cannot land dead.
+
+(defun glasspane-test--action-names (value)
+  "Every `action' and `builtin' name reachable anywhere inside VALUE.
+A generic walk, not a node walk: a descriptor hides in whatever member
+its parent named (`:on_tap', a `:children' vector, a swipe object, a
+menu item), and reachability is exactly the question of what a finger
+can eventually dispatch — so the walk follows every cons it is given."
+  (let (acc)
+    (letrec ((walk (lambda (v)
+                     (cond
+                      ((vectorp v) (mapc walk v))
+                      ((consp v)
+                       (when (and (keywordp (car v)) (plistp v))
+                         (dolist (key '(:action :builtin))
+                           (let ((name (plist-get v key)))
+                             (when (stringp name) (push name acc)))))
+                       (funcall walk (car v))
+                       (funcall walk (cdr v)))))))
+      (funcall walk value))
+    (delete-dups acc)))
+
+(defun glasspane-test--settings-link-nodes ()
+  "The built nodes of every Settings-root link THIS app registered.
+`jetpacs-settings-links' entries are (ORDER BUILDER . OWNER)."
+  (mapcar (lambda (entry) (funcall (cadr entry)))
+          (cl-remove-if-not (lambda (entry)
+                              (equal (cddr entry) glasspane-owner))
+                            jetpacs-settings-links)))
+
+(defconst glasspane-test--hub-verbs
+  '("glasspane.home"
+    "agenda.open"
+    "tasks.open"
+    "journal.open"
+    "org.capture.show"
+    "search.open"
+    "views.hub"
+    "review.open"
+    "glasspane.settings.open")
+  "THE RULE: every screen-opening verb the app registers must be
+emitted by the home screen or its drawer.  These are the daily
+surfaces; the two satellites below are the documented exception, and
+`glasspane-test--non-opening-verbs' names everything that opens no
+screen at all.  A verb added to the app without landing in one of the
+three lists fails `glasspane-test-hub-verb-inventory', which is the
+point: a new screen cannot ship unreachable.")
+
+(defconst glasspane-test--satellite-verbs
+  '("ef.show" "demo.gallery")
+  "The satellite openers, whose entry point is a Settings-root link
+rather than the hub (docs/CHROME-VOCABULARY.md: satellite screens live
+in Settings links, not the drawer).  Registered by glasspane-ef and
+glasspane-gallery at orders 81 and 84, beside the app's own 80.")
+
+(defconst glasspane-test--non-opening-verbs
+  '("agenda.nav" "agenda.save-custom" "agenda.select-date"
+    "agenda.set-mode" "agenda.set-month" "agenda.today" "config.sync"
+    "demo.gallery.kind" "demo.gallery.level" "demo.gallery.point"
+    "demo.setup" "demo.setup-org" "detail.planning.edit" "detail.save"
+    "detail.toggle-read" "ef.load" "ef.mirror" "ef.option" "ef.random"
+    "ef.random-dark" "ef.random-light" "files.filter"
+    "files.properties.save" "files.properties.show"
+    "files.toggle-refile" "glasspane.packages.install"
+    "heading.add-note" "heading.clock-in" "heading.delete"
+    "heading.duplicate" "heading.menu" "heading.priority"
+    "heading.prop-add" "heading.prop-set" "heading.props.show"
+    "heading.refile" "heading.reorder" "heading.schedule"
+    "heading.tags" "heading.tap" "heading.todo-cycle"
+    "heading.todo-set" "journal.capture" "journal.goto" "journal.nav"
+    "journal.today" "link.materialize" "notes.mentions"
+    "org.babel.execute" "org.capture.share" "org.clock.in-last"
+    "org.clock.out" "org.clock.switch" "org.link.open"
+    "org.search.run" "org.table.add-col" "org.table.add-row"
+    "org.table.cell-menu" "org.table.edit" "search.by-tag"
+    "search.clear-filters" "search.update-filter"
+    "settings.agenda.delete" "settings.agenda.edit"
+    "settings.agenda.save" "settings.line-numbers" "settings.tags"
+    "settings.todo.delete" "settings.todo.edit" "settings.todo.save"
+    "share.text" "srs.answer.page" "srs.answer.show" "srs.item.create"
+    "srs.postpone" "srs.quit" "srs.rate" "srs.review.start"
+    "srs.suspend" "srs.undo" "tasks.filter" "views.cal.select-date"
+    "views.cal.set-month" "views.delete" "views.open"
+    "views.rendering" "views.reorder" "views.save")
+  "Every verb that opens NO screen of its own, and therefore needs no
+hub entry: the in-screen controls (filters, navigation, ratings, cell
+and heading mutations), the dialog-fired saves, the notification
+buttons, the wire-only intakes (share.text, org.capture.share), the
+M-x-only seeders (demo.setup*), and the drill-ins reached FROM a
+screen the hub opens (views.open from the views hub, heading.tap from
+every card).  Classification only — the list exists so the inventory
+below is total.")
+
+(ert-deftest glasspane-test-hub-reaches-every-opener ()
+  "The hub is REACHABILITY: build the home screen and walk it.
+Every verb in `glasspane-test--hub-verbs' must be dispatchable from
+the screen the chrome root registers — body row, drawer row or FAB —
+and must be a verb the app really registered (a typo in a descriptor
+is a dead row, which is the defect this rung exists to end).  The
+drawer is the canonical navigation, so it carries the whole set on its
+own; the body carries every destination in the table."
+  (let* ((screen (glasspane-ui-home-screen nil))
+         (reachable (glasspane-test--action-names screen))
+         (drawer (glasspane-test--action-names (plist-get screen :drawer)))
+         (body (glasspane-test--action-names (plist-get screen :body))))
+    (dolist (verb glasspane-test--hub-verbs)
+      (should (member verb reachable))
+      (should (gethash verb jetpacs-action-handlers))
+      (should (equal (jetpacs--owner-of "action" verb) glasspane-owner))
+      (should (member verb drawer)))
+    (dolist (dest glasspane-ui-destinations)
+      (should (member (plist-get dest :verb) body)))
+    ;; The FAB is the screen's one creation act, and it names the same
+    ;; verb the Capture row does — one command, three projections.
+    (should (equal (plist-get (plist-get (plist-get screen :fab) :on_tap)
+                              :action)
+                   "org.capture.show")))
+  ;; The satellites keep the vocabulary's route: a Settings-root link.
+  (let ((links (glasspane-test--action-names
+                (glasspane-test--settings-link-nodes))))
+    (dolist (verb glasspane-test--satellite-verbs)
+      (should (member verb links))
+      (should (gethash verb jetpacs-action-handlers)))))
+
+(ert-deftest glasspane-test-hub-drawer-carries-the-other-apps ()
+  "The org reader registers NO opening verb — it claims the files
+editor body seam, so a `.org' tapped in the base Files app IS its
+entry — which is why the drawer ends in `jetpacs-launcher-rows', the
+base's own drawer convention, excluding this app's own surface.  The
+launcher is absent from the batch image (present on device,
+device/init.el:44), so the guarded arm must also build to a drawer
+with no app rows at all."
+  (should-not (member "jetpacs.launcher.open"
+                      (glasspane-test--action-names
+                       (glasspane-ui--home-drawer))))
+  (let (excluded)
+    (cl-letf (((symbol-function 'jetpacs-launcher-rows)
+               (lambda (&optional exclude)
+                 (setq excluded exclude)
+                 (list (jetpacs-chrome-row
+                        "Files"
+                        :icon "folder"
+                        :on-tap (jetpacs-action
+                                 "jetpacs.launcher.open"
+                                 :args '(:surface "app:jetpacs.files"))
+                        :key "lr-files")))))
+      (let ((drawer (glasspane-ui--home-drawer)))
+        (should (member "jetpacs.launcher.open"
+                        (glasspane-test--action-names drawer)))
+        (should (stringp (jetpacs-node->canonical-json drawer)))))
+    (should (equal excluded (jetpacs-shell-surface-for glasspane-owner)))))
+
+(ert-deftest glasspane-test-hub-verb-inventory ()
+  "THE TRIPWIRE: every verb glasspane registers is classified as a hub
+opener, a satellite opener, or no opener at all.  A new verb that
+nobody wired shows up as an unclassified name and fails here — the
+mechanical half of the rule stated on `glasspane-test--hub-verbs' —
+and a retired verb left in a list fails the other way."
+  (let ((owned nil)
+        (pinned (append glasspane-test--hub-verbs
+                        glasspane-test--satellite-verbs
+                        glasspane-test--non-opening-verbs)))
+    (maphash (lambda (name _fn)
+               (when (equal (jetpacs--owner-of "action" name) glasspane-owner)
+                 (push name owned)))
+             jetpacs-action-handlers)
+    ;; Named both ways: the failure message says WHICH verb drifted.
+    (should-not (cl-set-difference owned pinned :test #'equal))
+    (should-not (cl-set-difference pinned owned :test #'equal))
+    (should (= (length pinned) (length (delete-dups (copy-sequence pinned)))))))
+
+(ert-deftest glasspane-test-hub-serializes ()
+  "The hub clears the wire bar the whole app clears: a scaffold with
+the three chrome slots filled, inside the SPEC 16.2 `app' profile,
+with SPEC 16.1-unique ids, round-tripping the canonical encoding.  The
+body and drawer copies of one destination keep DISTINCT SPEC 16.5
+keys — they ship in the same document, and a shared key would make the
+reconciler treat two rows as one."
+  (let* ((screen (glasspane-ui-home-screen nil))
+         (json (jetpacs-node->canonical-json screen))
+         (ids (jetpacs-collect-node-ids screen nil)))
+    (should (equal (plist-get screen :t) "scaffold"))
+    (should (plist-get screen :body))
+    (should (plist-get screen :drawer))
+    (should (plist-get screen :fab))
+    (should (jetpacs-check-profile screen 'app))
+    (should (equal ids (delete-dups (copy-sequence ids))))
+    (should (stringp json))
+    (should (string-search "\"agenda.open\"" json))
+    (should (string-search "Saved views" json))
+    (should (string-search "\"hub-agenda\"" json))
+    (should (string-search "\"drawer-agenda\"" json))))
 
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

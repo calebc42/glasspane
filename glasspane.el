@@ -45,6 +45,11 @@
 ;; packages light-up), never here.
 (require 'glasspane-org)
 (require 'glasspane-vulpea)
+;; G2, the services: clock has zero siblings; packages soft-requires
+;; config's dir seam, so config loads first and its helper wins.
+(require 'glasspane-clock)
+(require 'glasspane-config)
+(require 'glasspane-packages)
 
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
@@ -120,18 +125,31 @@ registry entry in place."
   ;; The CREATED/MODIFIED stampers are GLOBAL org hooks, so they attach
   ;; at app enable — never at glasspane-org's load (a bare `require'
   ;; must not mutate the user's `before-save-hook').  Teardown of this
-  ;; owner detaches them; install self-registers that removal.
-  (glasspane-org-install-hooks))
+  ;; owner detaches them; install self-registers that removal.  The
+  ;; clock mirror's org-clock/READY hooks follow the same rule — and
+  ;; every sibling VERB registers through here too, never at module
+  ;; load, so `glasspane-unregister' can sweep what only this pair
+  ;; creates and restore it without a re-require.
+  (glasspane-org-install-hooks)
+  (glasspane-clock-install-hooks)
+  (glasspane-config-register)
+  (glasspane-packages-register))
 
 (defun glasspane-unregister ()
-  "Deregister the verbs, the chrome root, and the app identity."
+  "Deregister every verb, the chrome root, and the app identity.
+The G0 gate contract: no glasspane handler and no claim survives this
+— the sibling modules' verbs (clock's org.clock.*, config.sync,
+glasspane.packages.install) sweep with the entry's own."
   (jetpacs-undefaction "glasspane.home")
   (jetpacs-apps-unregister glasspane-owner)
   (jetpacs-chrome-remove glasspane-owner)
   ;; The live-reload/unload path: teardown of the owner would detach
   ;; the org stampers too, but unregister must not leave them behind
   ;; when no teardown ever runs (M-x unload-feature).
-  (glasspane-org-remove-hooks))
+  (glasspane-org-remove-hooks)
+  (glasspane-clock-remove-hooks)
+  (glasspane-config-unregister)
+  (glasspane-packages-unregister))
 
 (glasspane-register)
 

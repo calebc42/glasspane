@@ -4,8 +4,13 @@
 
 ;; The §3 relocation's gate (docs/PLAN-jetpacs-debt-and-scaffold): the
 ;; org/calendar schema sections register at the module's LOAD (not
-;; behind an app gate) and the foundation after-set drops the WHOLE
-;; org memo.
+;; behind an app gate), the foundation after-set drops the WHOLE org
+;; memo, and the step-4 seeding is only-while-stock.  Batch-safe: the
+;; require above runs registration but NOT seeding (the module's
+;; noninteractive guard — asserted below, since a batch suite that
+;; mkdirs the runner's `org-directory' is exactly the accident the
+;; guard exists for); seeding tests drive the fn by hand over let-bound
+;; vars and a temp directory.
 
 (require 'ert)
 (require 'cl-lib)
@@ -76,6 +81,76 @@ every consumer's org-derived views, not just the writer's."
                (lambda (&optional ns) (push ns calls))))
       (funcall after-set 'org-directory "/tmp/anywhere"))
     (should (equal calls '(nil)))))
+
+(defmacro jetpacs-org-settings-test--seed-env (dir &rest body)
+  "Run BODY with the seeded org vars let-bound and babel stubbed.
+DIR names a fresh temp root; `org-directory' points at a NOT yet
+existing subdirectory of it so the mkdir arm is observable.  `babel'
+collects the language lists `org-babel-do-load-languages' was asked
+to load — stubbed, because really loading ob-shell/ob-python is the
+side effect a batch suite must not have."
+  (declare (indent 1))
+  `(let* ((tmp (make-temp-file "jetpacs-org-settings" t))
+          (,dir (expand-file-name "org" tmp))
+          (org-directory ,dir)
+          (org-default-notes-file (convert-standard-filename "~/.notes"))
+          (org-agenda-files nil)
+          (org-log-into-drawer nil)
+          (org-babel-load-languages '((emacs-lisp . t)))
+          (babel nil))
+     (cl-letf (((symbol-function 'org-babel-do-load-languages)
+                (lambda (_sym langs) (push langs babel))))
+       (ignore babel)
+       (unwind-protect (progn ,@body)
+         (delete-directory tmp t)))))
+
+(ert-deftest jetpacs-org-settings-seed-while-stock ()
+  "Stock values seed: the inbox capture target lands inside a created
+`org-directory', the agenda falls back to that whole directory, LOGBOOK
+logging turns on, and the babel languages load."
+  (jetpacs-org-settings-test--seed-env dir
+    (jetpacs-org-settings-seed)
+    (should (equal org-default-notes-file
+                   (expand-file-name "inbox.org" dir)))
+    (should (file-directory-p dir))
+    (should (equal org-agenda-files (list dir)))
+    (should (eq org-log-into-drawer t))
+    (should (equal (length babel) 1))
+    (dolist (lang '(emacs-lisp shell python))
+      (should (assq lang (car babel))))))
+
+(ert-deftest jetpacs-org-settings-seed-never-touches-configured-values ()
+  "The only-while-stock guards, arm by arm: values already moved off
+stock survive a re-seed untouched — which is also what makes the
+load-time call idempotent."
+  (jetpacs-org-settings-test--seed-env dir
+    (setq org-default-notes-file "/elsewhere/notes.org"
+          org-agenda-files '("/elsewhere")
+          org-log-into-drawer "NOTES"
+          org-babel-load-languages '((emacs-lisp . t) (shell . t)))
+    (jetpacs-org-settings-seed)
+    (should (equal org-default-notes-file "/elsewhere/notes.org"))
+    (should (equal org-agenda-files '("/elsewhere")))
+    (should (equal org-log-into-drawer "NOTES"))
+    (should-not babel)
+    ;; A second pass over just-seeded stock values is a no-op too: the
+    ;; seeded notes file is no longer stock, so it is never re-derived
+    ;; against a later `org-directory'.
+    (setq org-default-notes-file (convert-standard-filename "~/.notes")
+          org-agenda-files nil)
+    (jetpacs-org-settings-seed)
+    (let ((seeded org-default-notes-file))
+      (jetpacs-org-settings-seed)
+      (should (equal org-default-notes-file seeded)))))
+
+(ert-deftest jetpacs-org-settings-batch-load-does-not-seed ()
+  "The noninteractive guard held for THIS process: the require at the
+top of this batch suite registered sections but seeded nothing — the
+runner's real `org-default-notes-file' would otherwise have been
+rewritten under its HOME."
+  (should noninteractive)
+  (should (alist-get "Org Workflow" jetpacs-settings-registry
+                     nil nil #'equal)))
 
 (provide 'jetpacs-org-settings-test)
 ;;; jetpacs-org-settings-test.el ends here

@@ -73,8 +73,9 @@
 ;; The curated settings content (owner: POC 1's settings had the right
 ;; content in the wrong shape).  Registered at boot so a queued toggle
 ;; replays even before the screen first renders.  The org/calendar
-;; sections are the foundation module's (the ratified §3 relocation)
-;; — required here under the same boot rule.
+;; sections + the phone-generic org seeding are the foundation
+;; module's (the ratified §3 relocation) — required here under the
+;; same boot rule.
 (require 'jetpacs-org-settings)
 (jetpacs-settings-register-section
  "Appearance"

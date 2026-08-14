@@ -190,9 +190,9 @@ yet? every jetpacs require below is skipped."
   ;; dock/drawer row dispatches — without it a dock tap answers
   ;; "action not allowlisted" and app switching silently dies.
   ;; jetpacs-org-settings carries the relocated org/calendar settings
-  ;; sections (§3 step 1): required HERE, not via Glasspane — the
-  ;; sections are foundation content and must exist even when the
-  ;; Stage 4b app light-up is skipped.
+  ;; sections + the phone-generic org seeding (§3 step 1+4): required
+  ;; HERE, not via Glasspane — the sections are foundation content and
+  ;; must exist even when the Stage 4b app light-up is skipped.
   (dolist (feat '(ebp ebp-sync ebp-complete
                   jetpacs-widgets jetpacs-async jetpacs-surfaces
                   jetpacs-shell jetpacs-buffer jetpacs-navigate

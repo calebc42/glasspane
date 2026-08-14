@@ -247,7 +247,7 @@ document."
                   glasspane-ui-destinations)
           (list (jetpacs-chrome-row
                  "Settings"
-                 :subtitle "Saved searches, TODO workflows, org tags"
+                 :subtitle "Saved searches"
                  :icon "settings"
                  :on-tap (jetpacs-action "glasspane.settings.open")
                  :key "drawer-settings"))

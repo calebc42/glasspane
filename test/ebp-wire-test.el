@@ -1232,6 +1232,93 @@ locally with a synthetic 1201 editor-too-large; nothing reaches the wire."
       (should (equal (caar sent) 'edit.apply))
       (should (= (plist-get (cdar sent) :len) 7)))))
 
+(ert-deftest ebp-test-edit-apply-cursor-marker-arithmetic ()
+  "SPEC 19.4: `cursor' PLACES the device caret, so an Emacs apply must
+compute it from the device's last-known caret with marker arithmetic —
+before the splice it stands still, inside it clamps to the splice end,
+after it shifts by the length change — never end-of-our-own-splice,
+which yanked the user's caret once per live-sync splice (D-1)."
+  (let* ((sent nil)
+         (client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts")))
+         (seed (lambda (cursor)
+                 (puthash '("doc:1" . "body")
+                          (list :session (make-string 32 ?0) :seq 0
+                                :text "0123456789" :cursor cursor)
+                          (ebp-client-editors client))))
+         (sent-cursor (lambda () (plist-get (cdar sent) :cursor))))
+    (cl-letf (((symbol-function 'ebp-client--request)
+               (lambda (_c method params _cb &optional _t)
+                 (push (cons method params) sent))))
+      ;; Caret BEFORE the splice [4,6): stands still.
+      (funcall seed 2)
+      (ebp-client-edit-apply client "doc:1" "body" 4 2 "abc")
+      (should (= (funcall sent-cursor) 2))
+      ;; Caret AT the splice start: the boundary is "before".
+      (funcall seed 4)
+      (ebp-client-edit-apply client "doc:1" "body" 4 2 "abc")
+      (should (= (funcall sent-cursor) 4))
+      ;; Caret INSIDE the replaced span: clamps to the splice end.
+      (funcall seed 5)
+      (ebp-client-edit-apply client "doc:1" "body" 4 2 "abc")
+      (should (= (funcall sent-cursor) 7))
+      ;; Caret AFTER the span: shifts by (length text) - del = +1.
+      (funcall seed 9)
+      (ebp-client-edit-apply client "doc:1" "body" 4 2 "abc")
+      (should (= (funcall sent-cursor) 10))
+      ;; Pure deletion, caret after: shifts left.
+      (funcall seed 9)
+      (ebp-client-edit-apply client "doc:1" "body" 4 2 "")
+      (should (= (funcall sent-cursor) 7))
+      ;; No caret ever reported (nil) and a hostile non-integer both
+      ;; fall back to end-of-splice — arithmetic on a float would put a
+      ;; float on our wire.
+      (funcall seed nil)
+      (ebp-client-edit-apply client "doc:1" "body" 4 2 "abc")
+      (should (= (funcall sent-cursor) 7))
+      (funcall seed 5.5)
+      (ebp-client-edit-apply client "doc:1" "body" 4 2 "abc")
+      (should (= (funcall sent-cursor) 7)))))
+
+(ert-deftest ebp-test-edit-apply-cursor-chains-across-applies ()
+  "The applied cursor is adopted as the next apply's base: without it a
+burst of consecutive applies all compute against the pre-burst report
+and drift.  A device delta's splice also refreshes the estimate — its
+caret parks at its own splice end until the best-effort report lands."
+  (let* ((sent nil)
+         (client (ebp-client-create
+                  :receipt-file (make-temp-file "ebp-test-receipts")))
+         (session (make-string 32 ?0)))
+    (puthash '("doc:1" . "body")
+             (list :session session :seq 0 :text "0123456789" :cursor 9)
+             (ebp-client-editors client))
+    (cl-letf (((symbol-function 'ebp-client--request)
+               (lambda (_c method params cb &optional _t)
+                 (push (cons method params) sent)
+                 ;; The Companion applies, winning seq.
+                 (funcall cb (list :status "applied"
+                                   :seq (plist-get params :seq))
+                          nil))))
+      ;; Splice [0,0)+"ab": caret 9 is after, shifts to 11 — and the
+      ;; mirror adopts 11 as the new base.
+      (ebp-client-edit-apply client "doc:1" "body" 0 0 "ab")
+      (should (= (plist-get (cdar sent) :cursor) 11))
+      (let ((ed (gethash '("doc:1" . "body") (ebp-client-editors client))))
+        (should (= (plist-get ed :cursor) 11))
+        (should (= (plist-get ed :seq) 1)))
+      ;; Second apply in the burst computes against 11, not 9.
+      (ebp-client-edit-apply client "doc:1" "body" 0 0 "cd")
+      (should (= (plist-get (cdar sent) :cursor) 13)))
+    ;; A device delta at seq 3 (current 2) would resync; at seq 3 =
+    ;; current+1 it adopts — and parks the caret estimate at ITS splice
+    ;; end, not wherever the last report left it.
+    (ebp-client--handle-edit-delta
+     client (list :document "doc:1" :editor_id "body" :session session
+                  :seq 3 :start 0 :del 0 :text "!" :len 15))
+    (let ((ed (gethash '("doc:1" . "body") (ebp-client-editors client))))
+      (should (= (plist-get ed :seq) 3))
+      (should (= (plist-get ed :cursor) 1)))))
+
 (ert-deftest ebp-test-editor-golden-scalar-splices ()
   "SPEC 19.1/19.3: goldens/editor.golden replays through the delta mirror.
 Positions and lengths count Unicode scalar values — Emacs chars — never

@@ -1709,7 +1709,18 @@ view stale and resync once."
               (if (= (length new) len)
                   (progn
                     (setf (plist-get ed :text) new
-                          (plist-get ed :seq) (plist-get params :seq))
+                          (plist-get ed :seq) (plist-get params :seq)
+                          ;; A device splice parks the device caret at
+                          ;; its own splice end (typing and deleting
+                          ;; happen AT the caret), and the edit.caret
+                          ;; report confirming it is best-effort and
+                          ;; later — estimate now so an Emacs apply
+                          ;; landing between the two computes its
+                          ;; cursor against this splice, not against
+                          ;; the report before it.  An accepted report
+                          ;; still overwrites: it is gated on this new
+                          ;; seq and arrives behind us on the stream.
+                          (plist-get ed :cursor) (+ start (length ins)))
                     (dolist (fn (ebp-client-edit-splice-functions client))
                       ;; Amendment #170: the provenance marker rides the
                       ;; hook — presence IS the assertion (absent on every
@@ -1913,14 +1924,35 @@ the wire shape."
                          :message "resulting document exceeds max_editor_bytes"
                          :data (:kind "content-invalid"
                                 :reason "editor-too-large"))))
-          (let ((session (plist-get ed :session))
-                (seq-at-send (plist-get ed :seq)))
+          (let* ((session (plist-get ed :session))
+                 (seq-at-send (plist-get ed :seq))
+                 ;; SPEC 19.4 REQUIRES `cursor' on a text-changing apply,
+                 ;; and the Companion honors it unconditionally — so this
+                 ;; member is not a suggestion, it PLACES the device
+                 ;; caret.  End-of-our-own-splice (the old value) yanked
+                 ;; the user's caret to wherever Emacs last edited, once
+                 ;; per live-sync splice.  Instead: marker arithmetic
+                 ;; over the device's last-known caret (edit.open seed,
+                 ;; resync, accepted edit.caret reports, and the delta
+                 ;; estimate below) — before the splice it stands still,
+                 ;; inside it clamps to the splice end, after it shifts
+                 ;; by the length change.  The non-integer arm is the
+                 ;; no-report-yet fallback AND the hostile-wire guard: a
+                 ;; caret report's cursor is stored unvalidated, and
+                 ;; arithmetic on a float would put a float on our wire.
+                 (cursor (let ((known (plist-get ed :cursor)))
+                           (cond ((not (integerp known))
+                                  (+ start (length text)))
+                                 ((<= known start) known)
+                                 ((<= known (+ start del))
+                                  (+ start (length text)))
+                                 (t (+ known (- (length text) del)))))))
             (ebp-client--request
              client 'edit.apply
              (list :document document :editor_id editor-id
                    :session session
                    :seq (1+ seq-at-send) :start start :del del
-                   :text text :len (length new) :cursor (+ start (length text)))
+                   :text text :len (length new) :cursor cursor)
              (lambda (result error)
                (when (and (null error)
                           (equal (plist-get result :status) "applied"))
@@ -1937,8 +1969,17 @@ the wire shape."
                     ((and (eq live ed)
                           (equal (plist-get live :session) session)
                           (= (plist-get live :seq) seq-at-send))
+                     ;; The applied cursor IS the device caret now (the
+                     ;; Companion placed it), so adopt it as the base the
+                     ;; NEXT apply's marker arithmetic starts from —
+                     ;; without this, consecutive applies all compute
+                     ;; against the pre-burst report and drift.  A report
+                     ;; the Companion emits after applying us carries the
+                     ;; new seq and lands after this adoption (one TCP
+                     ;; stream), so fresher truth still wins.
                      (setf (plist-get ed :text) new
-                           (plist-get ed :seq) (plist-get result :seq))
+                           (plist-get ed :seq) (plist-get result :seq)
+                           (plist-get ed :cursor) cursor)
                      (ebp-client--editor-changed client document editor-id))
                     (live
                      (ebp-client-edit-resync client document editor-id)))))

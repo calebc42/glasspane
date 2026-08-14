@@ -1039,7 +1039,8 @@ untouched by the adaptive seam."
            (list (list :label "A" :icon "home"
                        :on-tap (jetpacs-action "jetpacs.noop") :selected t)
                  (list :label "B" :icon "code"
-                       :on-tap (jetpacs-action "jetpacs.noop"))))))
+                       :on-tap (jetpacs-action "jetpacs.noop")
+                       :badge 3)))))
     (unwind-protect
         (progn
           (with-jetpacs-owner "itemsdemo"
@@ -1060,7 +1061,12 @@ untouched by the adaptive seam."
             (should (string-match-p "secondary_container"
                                     (format "%S" (aref tabs 0))))
             (should-not (string-match-p "secondary_container"
-                                        (format "%S" (aref tabs 1))))))
+                                        (format "%S" (aref tabs 1))))
+            ;; Gap #5's thread-through: the item's :badge rides the
+            ;; bar tab's ICON node; an unbadged item carries none.
+            (should (string-match-p ":badge 3" (format "%S" (aref tabs 1))))
+            (should-not (string-match-p ":badge"
+                                        (format "%S" (aref tabs 0))))))
       (jetpacs-chrome-remove "app:itemsdemo"))))
 
 (ert-deftest jetpacs-chrome-items-dock-wears-bar-on-phone-landscape ()
@@ -1097,7 +1103,8 @@ bottom bar is injected — the NavigationSuiteScaffold swap
            (list (list :label "A" :icon "home"
                        :on-tap (jetpacs-action "jetpacs.noop") :selected t)
                  (list :label "B" :icon "code"
-                       :on-tap (jetpacs-action "jetpacs.noop"))))))
+                       :on-tap (jetpacs-action "jetpacs.noop")
+                       :badge "")))))
     (unwind-protect
         (cl-letf (((symbol-function 'jetpacs-window-class)
                    (lambda (axis)
@@ -1111,7 +1118,11 @@ bottom bar is injected — the NavigationSuiteScaffold swap
                  (view (gethash "root" (plist-get mv :views)))
                  (rail (plist-get view :rail)))
             (should-not (plist-member view :bottom_bar))
-            (should (equal (plist-get rail :t) "navigation_rail"))))
+            (should (equal (plist-get rail :t) "navigation_rail"))
+            ;; The empty-string badge (the bare attention dot) survives
+            ;; the rail re-authoring — gap #5's other arm.
+            (should (string-match-p ":badge \"\""
+                                    (format "%S" rail)))))
       (jetpacs-chrome-remove "app:raildemo"))))
 
 (ert-deftest jetpacs-chrome-node-dock-outranks-items-and-stays-bottom ()

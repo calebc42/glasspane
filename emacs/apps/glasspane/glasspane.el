@@ -119,6 +119,10 @@ arrives from whatever surface the user is looking at."
   (let ((home (jetpacs-shell-surface-for glasspane-owner)))
     (list (list :label glasspane-title
                 :icon glasspane-icon
+                ;; Gap #5 landed: today's agenda count rides the dock
+                ;; icon (v1's Agenda tab badge on the one destination
+                ;; v3 has).  Memoised — a table lookup per render.
+                :badge (glasspane-agenda-dock-badge)
                 :on-tap (jetpacs-action "jetpacs.launcher.open"
                                         :args (list :surface home))
                 :selected (equal surface home)))))

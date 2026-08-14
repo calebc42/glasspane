@@ -78,7 +78,10 @@ surfaces it appears on — it renders on every chrome surface.")
   "Function (SURFACE) -> the dock's destinations as DATA, or nil.
 The window-class-adaptive alternative to `jetpacs-chrome-dock-function\':
 each item is a plist (:label STR :icon STR :on-tap DESCRIPTOR
-\[:selected BOOL]), and chrome wears the SAME destinations as a real
+\[:selected BOOL] [:badge STR-OR-NUM]) — the badge rides the icon in
+the bar form and the rail item in the rail form (gap #5's one-key
+thread-through; an empty string is the bare attention dot) — and
+chrome wears the SAME destinations as a real
 M3 navigation bar on a compact window (either axis) and as a
 `jetpacs-navigation-rail\' in the scaffold\'s start-edge rail slot on
 medium and expanded ones (SPEC 20.1.1) — the
@@ -191,6 +194,7 @@ everywhere else.  Equal weights are the bars\' EqualWeight default."
                                    :color (if selected
                                               "on_secondary_container"
                                             "on_surface_variant")
+                                   :badge (plist-get item :badge)
                                    :content-description
                                    (plist-get item :label))
                      :alignment "center")
@@ -228,7 +232,8 @@ data form can swap, because only data can be re-authored into a rail."
                                   (plist-get item :label)
                                   (plist-get item :icon)
                                   (plist-get item :on-tap)
-                                  :selected (plist-get item :selected)))
+                                  :selected (plist-get item :selected)
+                                  :badge (plist-get item :badge)))
                                items)
                        :arrangement "center"))
               (cons :bottom_bar

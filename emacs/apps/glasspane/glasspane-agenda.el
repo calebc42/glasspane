@@ -18,8 +18,9 @@
 ;;
 ;; - The tab fabric (`jetpacs-shell-tab-view'/`-define-view', the tab
 ;;   badge closure): S1 — the two views are chrome screens behind
-;;   agenda.open/tasks.open; the badge count surfaces IN-SCREEN until
-;;   the dock-item `:badge' thread-through lands (FOUNDATION-GAPS #5).
+;;   agenda.open/tasks.open; the badge count surfaces IN-SCREEN and,
+;;   since the gap-#5 thread-through landed, on the app's dock item
+;;   (`glasspane-agenda-dock-badge').
 ;; - The clock tombstone view (v1 agenda:105-113): dies with the tab
 ;;   fabric; the clock body renders inside Journal (its own rung).
 ;; - The home-screen widget list + dividers (`--widget-items', v1
@@ -580,11 +581,21 @@ tab."
 (defun glasspane-agenda--today-count ()
   "Today's agenda item count (overdue included).
 Reads the memoised day extraction, so a render recomputes nothing.
-The v1 tab badge's successor: the count surfaces IN-SCREEN until the
-dock-item badge thread-through lands (FOUNDATION-GAPS #5)."
+The v1 tab badge's successor — surfaced IN-SCREEN here, and on the
+app's dock item through `glasspane-agenda-dock-badge' now that the
+gap-#5 thread-through landed."
   (length (condition-case nil
               (glasspane-org--agenda-items 'day)
             (error nil))))
+
+(defun glasspane-agenda-dock-badge ()
+  "Today's count as a dock-item `:badge', or nil when zero.
+The gap-#5 consumer (v1's Agenda tab badge, reborn on the app's single
+dock destination): nil keeps the icon bare — a zero-count badge is
+noise — and the memoised extraction keeps the per-render cost at a
+table lookup.  Public: the entry's dock-items builder calls it."
+  (let ((n (glasspane-agenda--today-count)))
+    (and (> n 0) n)))
 
 (defun glasspane-agenda-screen (back)
   "The pushed Agenda screen."

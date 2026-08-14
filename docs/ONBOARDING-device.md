@@ -22,6 +22,9 @@ Termux + sshd, the elisp tree, the `device/py/` fixtures, and
 Termux shell can write straight into `org.gnu.emacs`'s app-private
 storage — no `/sdcard`, no storage permission dialog). See
 `device/MANIFEST.md` for exactly what lands where and why.
+That flow also syncs `org/`, registers the Org Mode app from its private
+mirror, and seeds the starter inbox plus Orgro walkthrough without
+overwriting existing Org files.
 
 The two flows **share one file**: step 3 below writes a `load` line
 into `~/.emacs.d/init.el`, and that is the same `init.el` the onboard

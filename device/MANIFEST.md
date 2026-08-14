@@ -73,7 +73,8 @@ what decides where the init is read from.
 | Repo path | Device path | Transport | Purpose |
 |---|---|---|---|
 | `emacs/` (whole tree, incl. `apps/`, `spike/`, READMEs) | `$TERMUX_HOME/jetpacs/emacs/` | `rsync -rlptz --delete` over `ssh -p 8022`, minus the excludes below | The elisp the device Emacs loads. Mirrored, not cherry-picked. |
-| `device/py/` | `$TERMUX_HOME/jetpacs/py/` | `rsync -rlptz` (**no `--delete`**) | The eglot/pylsp fixture — and a live editing directory. |
+| `device/py/` | `$TERMUX_HOME/jetpacs/py/` | `tar` over SSH (**no delete**) | The eglot/pylsp fixture — and a live editing directory. |
+| `org/` | `$TERMUX_HOME/jetpacs/org/` | `tar` over SSH | Distribution-only starter inbox and complete Orgro walkthrough bundle; the Org app copies only missing files into `org-directory`. |
 | `device/emacs-init.el` | `$EMACS_DOTDIR/jetpacs-onboard-init.el` | staged to `$TERMUX_HOME/jetpacs/`, then `cp` by the on-device provisioner through the shared uid | The onboarding/eglot harness. |
 | (generated) | one `(load ".../jetpacs-onboard-init.el" nil t)` line **appended** to `$EMACS_DOTDIR/init.el` | written by the on-device provisioner | Wires the harness without owning the file. |
 | `tools/onboard-provision-remote.sh` | `$TERMUX_HOME/.onboard-provision.sh` | `rsync` | The device-side half; run over the same ssh session. |
@@ -82,6 +83,11 @@ what decides where the init is read from.
 daily driver, deployed by `device/install.sh`, and it hardcodes the
 `/sdcard/Documents/jetpacs` load-path. It is named here only because
 the two flows collide in one file — see the next section.
+
+The private onboarding harness does load `jetpacs-org-mode` from the
+synced `emacs/` tree.  Keeping `org/` beside `emacs/` satisfies the
+composition root's source-tree asset lookup while keeping the bundle
+separate from the user's live `org-directory`.
 
 ### The init.el collision (the thing most likely to bite)
 

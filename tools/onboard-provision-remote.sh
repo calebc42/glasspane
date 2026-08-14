@@ -24,6 +24,7 @@ JETPACS_DIR="$HOME/jetpacs"
 EMACS_INIT_STAGED="$JETPACS_DIR/emacs-init.el"
 ELISP_DIR="$JETPACS_DIR/emacs"
 PY_DIR="$JETPACS_DIR/py"
+ORG_DIR="$JETPACS_DIR/org"
 # Kept in sync BY HAND with device/MANIFEST.md's deploy table and
 # device/emacs-init.el's `jetpacs-emacs-init-termux-bin' -- there is
 # nowhere on-device to source one shared constant from.
@@ -59,6 +60,8 @@ transfer of device/emacs-init.el did not land before this ran"
 not land before this ran"
 [ -d "$PY_DIR" ] || die "missing $PY_DIR -- the rsync of device/py/ did \
 not land before this ran"
+[ -d "$ORG_DIR" ] || die "missing $ORG_DIR -- the transfer of org/ did \
+not land before this ran"
 
 # A directory is not a tree. device/emacs-init.el's whole stage 3 is
 # `(require 'jetpacs-files)' and friends off this root; an empty or
@@ -69,6 +72,11 @@ not land before this ran"
 jetpacs-files.el -- the tree transfer is incomplete"
 ELISP_FILES="$(find "$ELISP_DIR" -name '*.el' | wc -l | tr -d ' ')"
 log "elisp tree: $ELISP_FILES .el files under $ELISP_DIR"
+
+[ -f "$ORG_DIR/inbox.org" ] \
+  && [ -f "$ORG_DIR/org-mode-walkthrough/orgro-manual.org" ] \
+  || die "$ORG_DIR is missing inbox.org or the Orgro manual bundle"
+log "Org seed bundle: inbox + Orgro walkthrough under $ORG_DIR"
 
 # The desktop excludes *.elc from the sync because a stale .elc silently
 # shadows its .el. Catch one that reached the device some other way (an
@@ -218,6 +226,7 @@ echo "REPORT_JETPACS_DIR=$JETPACS_DIR"
 echo "REPORT_ELISP_DIR=$ELISP_DIR"
 echo "REPORT_ELISP_FILES=$ELISP_FILES"
 echo "REPORT_PY_DIR=$PY_DIR"
+echo "REPORT_ORG_DIR=$ORG_DIR"
 echo "REPORT_EMACS_HOME=$EMACS_HOME"
 echo "REPORT_INIT_HARNESS=$HARNESS"
 echo "REPORT_INIT_DEST=$INIT"

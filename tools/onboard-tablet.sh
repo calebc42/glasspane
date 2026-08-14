@@ -376,8 +376,8 @@ RSYNC_EXCLUDES=(--exclude='*.elc' --exclude='.#*' --exclude='*~'
                 --exclude='#*#' --exclude='.git' --exclude='__pycache__')
 
 phase_provision() {
-  ssh_run "mkdir -p jetpacs/emacs jetpacs/py" \
-    || die "could not mkdir ~/jetpacs/{emacs,py} on the device over ssh"
+  ssh_run "mkdir -p jetpacs/emacs jetpacs/py jetpacs/org" \
+    || die "could not mkdir ~/jetpacs/{emacs,py,org} on the device over ssh"
 
   # tar over ssh, NOT rsync: on this tablet's Termux (rsync 3.5.0,
   # openssh 10.5p1) the rsync RECEIVER gets EACCES on chdir into a
@@ -407,6 +407,14 @@ this is a live editing dir)"
     | ssh_run 'tar -C jetpacs/py -xzf -' \
     || die "tar of device/py/ to the device failed"
 
+  # Distribution assets, not the user's live org-directory.  The Org
+  # app copies only missing files from here into Emacs's private
+  # org-directory, so re-provisioning never overwrites user content.
+  log "tar org/ -> Termux ~/jetpacs/org/ (seed + Orgro walkthrough)"
+  tar -C "$REPO_ROOT/org" -czf - . \
+    | ssh_run 'tar -C jetpacs/org -xzf -' \
+    || die "tar of org/ seed assets to the device failed"
+
   log "staging device/emacs-init.el + the remote provisioner"
   ssh_run 'cat > jetpacs/emacs-init.el' < "$REPO_ROOT/device/emacs-init.el" \
     || die "transfer of device/emacs-init.el to the device failed"
@@ -432,12 +440,13 @@ report_field() {
 # ---------------------------------------------------------------------
 
 phase_verify() {
-  local elisp_dir py_dir elisp_files emacs_home harness init_dest \
+  local elisp_dir py_dir org_dir elisp_files emacs_home harness init_dest \
         init_state pylsp_bin pylsp_version live_py_tail tail_note
 
   elisp_dir="$(report_field ELISP_DIR)"
   elisp_files="$(report_field ELISP_FILES)"
   py_dir="$(report_field PY_DIR)"
+  org_dir="$(report_field ORG_DIR)"
   emacs_home="$(report_field EMACS_HOME)"
   harness="$(report_field INIT_HARNESS)"
   init_dest="$(report_field INIT_DEST)"
@@ -460,6 +469,7 @@ phase_verify() {
   printf '  Termux elisp tree      : %s  (%s .el files)\n' \
     "${elisp_dir:-?}" "${elisp_files:-?}" >&2
   printf '  Termux py fixtures     : %s\n' "${py_dir:-?}" >&2
+  printf '  Termux Org seed bundle : %s\n' "${org_dir:-?}" >&2
   printf '  live.py tail bytes     : 0x%s%s\n' "${live_py_tail:-?}" \
     "$tail_note" >&2
   printf '  Android Emacs HOME     : %s  [probed this run, not assumed]\n' \

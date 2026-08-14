@@ -19,7 +19,8 @@
 ;;   (b) load the elisp tree the bundle deployed under Termux's home,
 ;;   (c) dial the Companion and reach READY, and
 ;;   (d) serve the deployed Python fixtures through the Files app with
-;;       live editor sync -- which is what lights up eglot/pylsp.
+;;       live editor sync -- which is what lights up eglot/pylsp, and
+;;   (e) register the Org Mode app and seed its bundled Orgro walkthrough.
 ;;
 ;; Two Emacs-visible HOMEs, one shared uid:
 ;;   - Termux's HOME is /data/data/com.termux/files/home ("~" there).
@@ -97,6 +98,12 @@ The repo's emacs/ directory, apps/ subdirectories preserved.")
 `jetpacs-files-default-dir' lands here, so these are the files the
 device Files app opens first -- and, being python-mode, the ones that
 trigger the eglot/pylsp path.")
+
+(defvar jetpacs-emacs-init-org-dir
+  (concat jetpacs-emacs-init-root "/org")
+  "Where the onboard bundle deploys Org Mode's seed assets.
+This is deliberately beside emacs/, matching
+`jetpacs-org-mode--asset-directory''s source-tree lookup.")
 
 ;;;; Stage 1: environment probe.  The two-HOME split above is a claim,
 ;;;; not a certainty, until this line runs on the actual device.
@@ -197,11 +204,18 @@ yet? every jetpacs require below is skipped."
                   jetpacs-widgets jetpacs-async jetpacs-surfaces
                   jetpacs-shell jetpacs-buffer jetpacs-navigate
                   jetpacs-chrome jetpacs-launcher jetpacs-files
-                  jetpacs-org-settings))
+                  jetpacs-org-settings jetpacs-org-mode))
     (condition-case err
         (progn (require feat) (jetpacs-emacs-init--log "required %s" feat))
       (error (jetpacs-emacs-init--log "require %s FAILED: %s" feat
                                       (error-message-string err))))))
+
+(when (featurep 'jetpacs-org-mode)
+  (jetpacs-emacs-init--log
+   "Org Mode app registered; seed assets=%s"
+   (if (file-directory-p jetpacs-emacs-init-org-dir)
+       jetpacs-emacs-init-org-dir
+     "NOT FOUND")))
 
 ;; eglot itself is NOT required here on purpose: `ebp-sync--ensure-eglot'
 ;; pulls it in lazily with `(require 'eglot nil t)', only for an attached

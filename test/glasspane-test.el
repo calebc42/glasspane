@@ -3809,5 +3809,524 @@ refuses headless without wedging."
         (kill-buffer buf))
       (delete-directory vault t))))
 
+;;;; G8 — fixtures: glasspane-demo.el
+
+(require 'glasspane-demo)
+
+(ert-deftest glasspane-test-demo-shift ()
+  "The one-regexp timestamp shifter: zero days is the IDENTITY (the
+corpus string comes back untouched), a real shift moves every
+day-named date as one block with the day name recomputed in the C
+locale, whatever follows the date (times, repeater cookies) rides
+along unchanged, and the fixed-width stamp keeps table alignment
+intact."
+  (let ((content (cdr (assoc "trackers.org" glasspane-demo--org-files))))
+    (should (equal (glasspane-demo--shift-timestamps content 0) content)))
+  (let* ((sample (concat "DEADLINE: <2026-07-06 Mon>\n"
+                         "SCHEDULED: <2026-07-05 Sun +1w>\n"
+                         "CLOCK: [2026-07-03 Fri 08:20]--"
+                         "[2026-07-03 Fri 08:34] =>  0:14\n"
+                         "| [2026-06-29 Mon] |       40 |\n"))
+         (shifted (glasspane-demo--shift-timestamps sample 2)))
+    ;; Day names recomputed, not string-shifted: +2 from a Monday is a
+    ;; Wednesday, and the C-locale binding inside the shifter makes
+    ;; that spelling locale-proof.
+    (should (string-search "DEADLINE: <2026-07-08 Wed>" shifted))
+    ;; The repeater cookie rides untouched behind the moved date.
+    (should (string-search "SCHEDULED: <2026-07-07 Tue +1w>" shifted))
+    ;; Both halves of a clock range move; the times ride.
+    (should (string-search
+             "CLOCK: [2026-07-05 Sun 08:20]--[2026-07-05 Sun 08:34]"
+             shifted))
+    ;; Fixed width: a shifted table row still lines up.
+    (should (= (length shifted) (length sample)))
+    (should (string-search "| [2026-07-01 Wed] |       40 |" shifted))))
+
+(ert-deftest glasspane-test-demo-seed ()
+  "Corpus seeding over a throwaway vault: both write targets derive
+from the roots defcustoms (never hardcoded paths — the G8 rule),
+every written file re-reads as parseable org INSIDE the ebp-org
+allowlist, the corpus's IDs are unique across files (id: links must
+land on exactly one entry), and the anchor-dated stamp lands on the
+day the seed ran."
+  (let* ((vault (make-temp-file "glasspane-demo-vault" t))
+         (org-directory (file-name-as-directory vault))
+         (org-agenda-files nil)
+         (ebp-org-roots nil)
+         (ids nil))
+    (unwind-protect
+        (progn
+          ;; The org-target derivation, both arms: nil roots fall
+          ;; through to `org-directory'; an explicit head anchors to it.
+          (should (equal (glasspane-demo--org-target) org-directory))
+          (let ((ebp-org-roots '("vault")))
+            (should (equal (glasspane-demo--org-target)
+                           (file-name-as-directory
+                            (expand-file-name "vault" org-directory)))))
+          ;; The tour default derives from the Files landing dir, which
+          ;; itself must lie inside `jetpacs-files-roots'.
+          (should (equal glasspane-demo-directory
+                         (expand-file-name "glasspane-demo"
+                                           jetpacs-files-default-dir)))
+          (let ((dir (glasspane-demo-setup-org)))
+            (should (equal dir org-directory))
+            (dolist (spec glasspane-demo--org-files)
+              (let ((file (expand-file-name (car spec) dir)))
+                (should (file-exists-p file))
+                ;; Inside the allowlist: queries/mutations/mints admit it.
+                (should (ebp-org-file-allowed-p file))
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (let ((org-inhibit-startup t))
+                    (delay-mode-hooks (org-mode)))
+                  ;; A real parse: a corpus typo that breaks org
+                  ;; structure fails here, not on the device.
+                  (should (org-element-parse-buffer 'headline))
+                  (goto-char (point-min))
+                  (while (re-search-forward
+                          "^[ \t]*:ID: +\\(\\S-+\\)[ \t]*$" nil t)
+                    (push (match-string 1) ids)))))
+            ;; Unique-ID lint across the whole corpus.
+            (should (> (length ids) 0))
+            (should (= (length ids)
+                       (length (delete-dups (copy-sequence ids)))))
+            ;; The authoring anchor IS the corpus's "today", so its
+            ;; stamp must land on the seed day (C-locale day name).
+            (should (string-search
+                     (format "SCHEDULED: <%s>"
+                             (let ((system-time-locale "C"))
+                               (format-time-string "%Y-%m-%d %a")))
+                     (with-temp-buffer
+                       (insert-file-contents
+                        (expand-file-name "inbox.org" dir))
+                       (buffer-string))))))
+      (delete-directory vault t))))
+
+(ert-deftest glasspane-test-demo-handlers ()
+  "The two demo verbs under the SPEC 14.4 contract: success writes
+synchronously (durable before \\='accepted), notifies inline, and
+setup-org's re-push rides the deferred continuation ONLY — zero
+pushes inside the dispatch extent (D2); a REAL write failure (a file
+squatting where the target directory must go) notifies, then answers
+\\='rejected, scheduling nothing."
+  (glasspane-demo-register)
+  (let* ((tour (make-temp-file "glasspane-demo-tour" t))
+         (vault (make-temp-file "glasspane-demo-vault" t))
+         (blocker (make-temp-file "glasspane-demo-blocker"))
+         (setup (gethash "demo.setup" jetpacs-action-handlers))
+         (setup-org (gethash "demo.setup-org" jetpacs-action-handlers))
+         (params (list :surface "app:glasspane"))
+         (notified nil) (pushes 0) (continuations nil))
+    (should setup)
+    (should setup-org)
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _) (push text notified)))
+                  ((symbol-function 'jetpacs-shell-push)
+                   (lambda (&rest _) (cl-incf pushes) nil))
+                  ((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (push fn continuations) nil)))
+          ;; demo.setup, the success arm.
+          (let ((glasspane-demo-directory tour))
+            (should (eq (funcall setup nil params) 'accepted))
+            (dolist (spec glasspane-demo--files)
+              (should (file-exists-p
+                       (expand-file-name (car spec) tour)))))
+          (should (= (length notified) 1))
+          (should (string-search "Demo files" (car notified)))
+          ;; demo.setup-org, the success arm: notify inline, push
+          ;; deferred — exactly one continuation, zero dispatch pushes.
+          (let ((org-directory (file-name-as-directory vault))
+                (org-agenda-files nil)
+                (ebp-org-roots nil))
+            (should (eq (funcall setup-org nil params) 'accepted))
+            (should (file-exists-p
+                     (expand-file-name "health.org" vault))))
+          (should (= pushes 0))
+          (should (= (length continuations) 1))
+          (funcall (car continuations))
+          (should (= pushes 1))
+          ;; The failure arms: notify, then 'rejected, nothing scheduled.
+          (setq notified nil continuations nil)
+          (let ((glasspane-demo-directory
+                 (expand-file-name "sub" blocker)))
+            (should (eq (funcall setup nil params) 'rejected)))
+          (should (= (length notified) 1))
+          (should (string-search "failed" (car notified)))
+          (let ((org-directory (expand-file-name "sub" blocker))
+                (ebp-org-roots nil))
+            (should (eq (funcall setup-org nil params) 'rejected)))
+          (should (= (length notified) 2))
+          (should (string-search "failed" (car notified)))
+          (should-not continuations))
+      (delete-file blocker)
+      (delete-directory tour t)
+      (delete-directory vault t))))
+
+;;;; G8 — satellites: glasspane-ef.el (+ glasspane-theme-picker.el)
+
+(ert-deftest glasspane-test-ef-absent-paths ()
+  "The DEFAULT suite path — ef-themes absent — is the real guard
+coverage: `--available-p' reads only theme names, the not-installed
+body keys its install tap on the `glasspane.packages.install'
+handler-table entry (the srs install-body precedent), and ef.load
+answers `rejected' for a malformed shape, an absent package, an
+unknown theme, and a load that SIGNALS — never a swallowed
+`accepted'."
+  (require 'glasspane-ef)
+  (glasspane-ef-register)
+  (should (gethash "ef.load" jetpacs-action-handlers))
+  ;; Availability is a pure read over the theme registry.
+  (cl-letf (((symbol-function 'custom-available-themes)
+             (lambda () '(modus-operandi tango))))
+    (should-not (glasspane-ef--available-p)))
+  (cl-letf (((symbol-function 'custom-available-themes)
+             (lambda () (list 'modus-operandi (intern "ef-day")))))
+    (should (glasspane-ef--available-p)))
+  ;; The install tap tracks the packages rung's verb, both ways.  The
+  ;; handler entry is restored by direct puthash so the claim records
+  ;; are never touched.
+  (let ((install (gethash "glasspane.packages.install"
+                          jetpacs-action-handlers)))
+    (should install)
+    (let ((json (jetpacs-node->canonical-json (glasspane-ef--not-installed))))
+      (should (string-search "\"action_label\":\"Install\"" json))
+      (should (string-search "glasspane.packages.install" json)))
+    (unwind-protect
+        (progn
+          (remhash "glasspane.packages.install" jetpacs-action-handlers)
+          (let ((json (jetpacs-node->canonical-json
+                       (glasspane-ef--not-installed))))
+            (should-not (string-search "action_label" json))
+            (should (string-search "isn't installed" json))))
+      (puthash "glasspane.packages.install" install
+               jetpacs-action-handlers)))
+  ;; ef.load statuses.  Stubbing an unbound ef-themes function via
+  ;; cl-letf restores its unboundness on exit (the srs org-srs-*
+  ;; precedent).
+  (let ((notified nil) (continuations nil) (loaded nil)
+        (themes (list (intern "ef-day") (intern "ef-night"))))
+    (cl-letf (((symbol-function 'jetpacs-shell-notify)
+               (lambda (text &rest _) (push text notified)))
+              ((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (push fn continuations) nil)))
+      ;; Malformed shape: no :theme.
+      (should (eq (glasspane-ef--on-load '(:other "x") nil) 'rejected))
+      ;; Package absent.
+      (cl-letf (((symbol-function 'glasspane-ef--ensure) (lambda () nil)))
+        (should (eq (glasspane-ef--on-load '(:theme "ef-day") nil)
+                    'rejected))
+        (should (string-search "not installed" (car notified))))
+      (cl-letf (((symbol-function 'glasspane-ef--ensure) (lambda () t))
+                ((symbol-function 'glasspane-ef--themes)
+                 (lambda () themes)))
+        ;; Unknown theme -> rejected (the gate's named arm).
+        (should (eq (glasspane-ef--on-load '(:theme "ef-nope") nil)
+                    'rejected))
+        (should (string-search "Unknown ef theme: ef-nope" (car notified)))
+        ;; A load that lands -> accepted, refresh deferred.
+        (cl-letf (((symbol-function 'ef-themes-load-theme)
+                   (lambda (theme &optional _) (push theme loaded))))
+          (should (eq (glasspane-ef--on-load '(:theme "ef-day") nil)
+                      'accepted))
+          (should (equal loaded (list (intern "ef-day"))))
+          (should continuations))
+        ;; A load that SIGNALS -> rejected, error labeled not swallowed.
+        (cl-letf (((symbol-function 'ef-themes-load-theme)
+                   (lambda (&rest _) (error "boom"))))
+          (should (eq (glasspane-ef--on-load '(:theme "ef-day") nil)
+                      'rejected))
+          (should (string-search "Ef theme:" (car notified))))
+        ;; The surprise loaders share the contract: absent fn ->
+        ;; rejected; present -> accepted.
+        (should (eq (glasspane-ef--on-random nil nil) 'rejected))
+        (cl-letf (((symbol-function 'ef-themes-load-random)
+                   (lambda (&optional _) nil)))
+          (should (eq (glasspane-ef--on-random nil nil) 'accepted)))))))
+
+(ert-deftest glasspane-test-ef-option-nodes ()
+  "Style section shapes.  Options unbound (the default suite path)
+render caption cards; a bound option renders a switch whose `:checked'
+re-seeds from the live variable (S2) and whose `:on-change' dispatches
+`ef.option' (the watch-toggle rewrite) — and that handler honors the
+SPEC 14.4 contract over a stubbed apply."
+  (require 'glasspane-ef)
+  (let* ((section (glasspane-ef--style-section))
+         (json (jetpacs-node->canonical-json
+                (apply #'jetpacs-column section))))
+    (should (= (length section) 5))          ; header + 4 option cards
+    (should (string-search "\"title\":\"Style\"" json))
+    (should (string-search "not available" json))
+    (should-not (string-search "\"t\":\"switch\"" json)))
+  ;; One option bound: the switch card, checked mirroring the value.
+  (cl-progv '(ef-themes-bold-constructs) '(t)
+    (let ((json (jetpacs-node->canonical-json
+                 (apply #'jetpacs-column (glasspane-ef--style-section)))))
+      (should (string-search "\"t\":\"switch\"" json))
+      (should (string-search "\"id\":\"ef-opt/ef-themes-bold-constructs\""
+                             json))
+      (should (string-search "\"checked\":true" json))
+      (should (string-search "\"action\":\"ef.option\"" json))
+      (should (string-search "ef-themes-bold-constructs" json))))
+  (cl-progv '(ef-themes-bold-constructs) '(nil)
+    (should (string-search "\"checked\":false"
+                           (jetpacs-node->canonical-json
+                            (apply #'jetpacs-column
+                                   (glasspane-ef--style-section))))))
+  ;; The ef.option handler: shape gates first, then availability, then
+  ;; the apply verdict.  jetpacs-settings-apply is stubbed — the real
+  ;; one persists through customize-save-variable.
+  (let ((applied nil) (continuations nil) (notified nil))
+    (cl-letf (((symbol-function 'jetpacs-settings-apply)
+               (lambda (sym value _after) (push (cons sym value) applied) t))
+              ((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (push fn continuations) nil))
+              ((symbol-function 'jetpacs-shell-notify)
+               (lambda (text &rest _) (push text notified))))
+      (should (eq (glasspane-ef--on-option '(:name "no-such" :value t) nil)
+                  'rejected))
+      (should (eq (glasspane-ef--on-option
+                   '(:name "ef-themes-bold-constructs" :value "yes") nil)
+                  'rejected))
+      ;; Known option, unbound symbol: the package left between render
+      ;; and tap.
+      (should (eq (glasspane-ef--on-option
+                   '(:name "ef-themes-bold-constructs" :value t) nil)
+                  'rejected))
+      (should (string-search "not installed" (car notified)))
+      (cl-progv '(ef-themes-bold-constructs) '(nil)
+        (should (eq (glasspane-ef--on-option
+                     '(:name "ef-themes-bold-constructs" :value t) nil)
+                    'accepted))
+        (should (equal (car applied) '(ef-themes-bold-constructs . t)))
+        (should continuations)
+        ;; :json-false decodes to elisp nil at the apply.
+        (should (eq (glasspane-ef--on-option
+                     '(:name "ef-themes-bold-constructs" :value :json-false)
+                     nil)
+                    'accepted))
+        (should (equal (car applied) '(ef-themes-bold-constructs . nil))))
+      ;; The apply refusing (schema mismatch) surfaces as rejected.
+      (cl-letf (((symbol-function 'jetpacs-settings-apply)
+                 (lambda (&rest _) nil)))
+        (cl-progv '(ef-themes-bold-constructs) '(nil)
+          (should (eq (glasspane-ef--on-option
+                       '(:name "ef-themes-bold-constructs" :value t) nil)
+                      'rejected)))))))
+
+(ert-deftest glasspane-test-ef-theme-picker-scaffold ()
+  "The app-local theme-picker split (gap #8): display names, the
+swatch rebuild on `jetpacs-surface' + universal width/height, the
+preview's modus-5.0 gate, light/dark grouping with the active-theme
+marker, the mirror note both ways, and the customize cross-link —
+every node through the canonical wire encoding."
+  (require 'glasspane-theme-picker)
+  (should (equal (glasspane-theme-picker-display-name
+                  "ef-" (intern "ef-melissa-dark"))
+                 "Melissa Dark"))
+  ;; Swatch: nil-safe, circle surface, dp via universal attrs.
+  (should-not (glasspane-theme-picker--swatch nil))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-theme-picker--swatch "#aabbcc"))))
+    (should (string-search "\"shape\":\"circle\"" json))
+    (should (string-search "\"color\":\"#aabbcc\"" json))
+    (should (string-search "\"width\":22" json)))
+  (should (string-search "\"height\":18"
+                         (jetpacs-node->canonical-json
+                          (glasspane-theme-picker--swatch "#123456" 18))))
+  ;; Preview gates on the modus 5.0 palette machinery.
+  (let ((color-fn (lambda (&rest _) "#001122")))
+    (when (not (fboundp 'modus-themes-activate))
+      (should-not (glasspane-theme-picker-preview color-fn 'any)))
+    (cl-letf (((symbol-function 'modus-themes-activate) (lambda (&rest _))))
+      (should (= (length (glasspane-theme-picker-preview color-fn 'any)) 3))))
+  ;; Grouping, the active marker, and the load-action args plist.
+  (let* ((day (intern "ef-day")) (night (intern "ef-night"))
+         (section (glasspane-theme-picker-themes-section
+                   (list day night) day
+                   :dark-p-fn (lambda (theme) (eq theme night))
+                   :display-fn #'symbol-name
+                   :color-fn (lambda (&rest _) nil)
+                   :load-action "ef.load"))
+         (json (jetpacs-node->canonical-json
+                (apply #'jetpacs-column section))))
+    (should (= (length section) 4))          ; Light hdr, day, Dark hdr, night
+    (should (string-search "\"title\":\"Light\"" json))
+    (should (string-search "\"title\":\"Dark\"" json))
+    (should (string-search "check_circle" json))
+    (should (string-search "\"theme\":\"ef-night\"" json))
+    ;; The active theme's card is not re-loadable.
+    (should-not (string-search "\"theme\":\"ef-day\"" json)))
+  ;; Mirror note both ways; the mode variable is a hard require here.
+  (let ((jetpacs-theme-mode 'mirror))
+    (should (string-search "Mirroring"
+                           (jetpacs-node->canonical-json
+                            (glasspane-theme-picker-mirror-note "ef.mirror")))))
+  (let ((jetpacs-theme-mode 'system))
+    (let ((json (jetpacs-node->canonical-json
+                 (glasspane-theme-picker-mirror-note "ef.mirror"))))
+      (should (string-search "Mirror on phone" json))
+      (should (string-search "\"action\":\"ef.mirror\"" json))))
+  ;; Current-card none arm, and the customize cross-link.
+  (should (string-search "No ef theme active"
+                         (jetpacs-node->canonical-json
+                          (glasspane-theme-picker-current-card
+                           nil
+                           :display-fn #'symbol-name
+                           :dark-p-fn #'ignore
+                           :color-fn #'ignore
+                           :mirror-action "ef.mirror"
+                           :none-label "No ef theme active"))))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-theme-picker-more-link "ef-themes"))))
+    (should (string-search "\"action\":\"customize.show\"" json))
+    (should (string-search "\"group\":\"ef-themes\"" json))))
+
+;;;; G8 — satellites: glasspane-gallery.el
+
+(ert-deftest glasspane-test-gallery-trees ()
+  "The gallery with NO client: the screen builds and canonically
+serializes in every chart kind, the chart/canvas nodes carry the T3
+member forms (ChartPoint series under `:name', the §16.5 border as a
+wrapped universal attr), the Settings satellite link registers exactly
+once and builds, and every handler answers a SPEC 14.4 status on good
+and bad args — the kind enum rejecting junk, the level mirror clamping
+float noise, the point tap landing its snackbar."
+  (require 'glasspane-gallery)
+  (glasspane-gallery-register)
+  (let ((glasspane-gallery--kind "line")
+        (glasspane-gallery--level 0.5)
+        (continuations nil)
+        (snack nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (push fn continuations) nil))
+                  ((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _) (setq snack text) nil)))
+          ;; Every kind renders and serializes; the chart carries the
+          ;; selected kind, the series their T3 shapes, the gauge its
+          ;; canvas, the slider its mirror-seeded value.
+          (dolist (kind glasspane-gallery--chart-kinds)
+            (setq glasspane-gallery--kind kind)
+            (let ((json (jetpacs-node->canonical-json
+                         (glasspane-gallery-screen nil))))
+              (should (string-search "Widget Gallery" json))
+              (should (string-search (format "\"kind\":\"%s\"" kind) json))
+              (should (string-search "\"name\":\"alpha\"" json))
+              (should (string-search "\"points\":" json))
+              (should (string-search "\"canvas\"" json))
+              (should (string-search "\"id\":\"gallery.level\"" json))
+              (should (string-search "\"value\":0.5" json))
+              ;; §16.5: the border rides as the universal-attr object,
+              ;; never as an inline container option.
+              (should (string-search
+                       "\"border\":{\"color\":\"primary\",\"width\":2}"
+                       json))))
+          ;; The whole verb table answers statuses on bare nil/nil.
+          (cl-flet ((run (name args &optional params)
+                      (let ((handler (gethash name jetpacs-action-handlers)))
+                        (should handler)
+                        (funcall handler args params))))
+            (dolist (name glasspane-gallery--verbs)
+              (should (memq (run name nil nil) '(accepted stale rejected))))
+            ;; demo.gallery: the push defers (D2), the reply is
+            ;; accepted before the continuation ever runs.
+            (let ((before (length continuations)))
+              (should (eq (run "demo.gallery" nil '(:surface "app:x"))
+                          'accepted))
+              (should (> (length continuations) before)))
+            ;; kind: the chips author the enum — junk rejects without
+            ;; touching the mirror (no v1 silent "line" fallback).
+            (should (eq (run "demo.gallery.kind" '(:kind "bar")) 'accepted))
+            (should (equal glasspane-gallery--kind "bar"))
+            (should (eq (run "demo.gallery.kind" '(:kind "pie")) 'rejected))
+            (should (eq (run "demo.gallery.kind" '(:kind 7)) 'rejected))
+            (should (equal glasspane-gallery--kind "bar"))
+            ;; level: the mirror takes the commit and the re-render
+            ;; re-seeds the slider from it; out-of-range clamps,
+            ;; non-numbers reject.
+            (should (eq (run "demo.gallery.level" '(:value 0.25)) 'accepted))
+            (should (= glasspane-gallery--level 0.25))
+            (should (eq (run "demo.gallery.level" '(:value 7)) 'accepted))
+            (should (= glasspane-gallery--level 1.0))
+            (should (eq (run "demo.gallery.level" '(:value "big")) 'rejected))
+            (should (= glasspane-gallery--level 1.0))
+            ;; point: the SPEC 17.5 injection (authored point in
+            ;; :value, ordinal in :index) lands in the snackbar — the
+            ;; notify IS the effect; a valueless tap rejects.
+            (should (eq (run "demo.gallery.point"
+                             '(:value (:x 1 :y 7) :index 1))
+                        'accepted))
+            (should (equal snack "point 1 = 7"))
+            (should (eq (run "demo.gallery.point" '(:index 0)) 'rejected)))
+          ;; The satellite link: registered exactly once even after a
+          ;; live-reload re-register, and its row builds.
+          (should (= (cl-count #'glasspane-gallery--settings-link
+                               jetpacs-settings-links :key #'cadr)
+                     1))
+          (glasspane-gallery-register)
+          (should (= (cl-count #'glasspane-gallery--settings-link
+                               jetpacs-settings-links :key #'cadr)
+                     1))
+          (should (string-search "Widget Gallery"
+                                 (jetpacs-node->canonical-json
+                                  (glasspane-gallery--settings-link))))
+          ;; The unregister sweep: no verb, no link survives.
+          (glasspane-gallery-unregister)
+          (dolist (name glasspane-gallery--verbs)
+            (should-not (gethash name jetpacs-action-handlers)))
+          (should-not (cl-find #'glasspane-gallery--settings-link
+                               jetpacs-settings-links :key #'cadr)))
+      ;; Suite order must never matter: leave the gallery registered.
+      (glasspane-gallery-register))))
+
+(ert-deftest glasspane-test-gallery-gauge-math ()
+  "The app-local gauge (v1 core's jetpacs-gauge/-arc-points
+transliterated onto the §17.5 canvas ops, T2): arc geometry, the
+five-op stack, needle position at the poles, level clamping, and the
+manually-offset label — pure, no client."
+  (require 'glasspane-gallery)
+  ;; 180°→0° over 44 segments = 45 points; screen y grows downward,
+  ;; so both ends sit ON the baseline and the middle at cy - r.
+  (let ((pts (glasspane-gallery--arc-points 120 116 95 180 0 44)))
+    (should (= (length pts) 45))
+    (should (< (abs (- (nth 0 (nth 0 pts)) 25)) 1e-6))
+    (should (< (abs (- (nth 1 (nth 0 pts)) 116)) 1e-6))
+    (should (< (abs (- (nth 0 (nth 22 pts)) 120)) 1e-6))
+    (should (< (abs (- (nth 1 (nth 22 pts)) 21)) 1e-6))
+    (should (< (abs (- (nth 0 (car (last pts))) 215)) 1e-6))
+    (should (< (abs (- (nth 1 (car (last pts))) 116)) 1e-6)))
+  ;; Mid level: the canvas node and its op stack, v1's strokes intact.
+  (let* ((node (glasspane-gallery--gauge 0.5))
+         (ops (plist-get node :ops)))
+    (should (equal (plist-get node :t) "canvas"))
+    (should (equal (plist-get node :width) 240))
+    (should (equal (plist-get node :height) 132))
+    (should (equal (mapcar (lambda (op) (plist-get op :op))
+                           (append ops nil))
+                   '("path" "path" "line" "circle" "text")))
+    (should (equal (plist-get (aref ops 0) :stroke_width) 12))
+    (should (= (length (plist-get (aref ops 0) :points)) 45))
+    (should (equal (plist-get (aref ops 2) :width) 3))
+    (should (equal (plist-get (aref ops 4) :text) "50%"))
+    ;; The label is offset left of centre — the manual stand-in for
+    ;; the align member §17.5 canvas text does not have.
+    (should (< (plist-get (aref ops 4) :x) 120)))
+  ;; The poles clamp: level ≥ 1 aims the needle right (end angle 0°),
+  ;; level ≤ 0 left — never outside the arc.
+  (let* ((ops (plist-get (glasspane-gallery--gauge 2.0) :ops))
+         (needle (aref ops 2)))
+    (should (equal (plist-get (aref ops 4) :text) "100%"))
+    (should (< (abs (- (plist-get needle :x2) (+ 120 (* 95 0.9)))) 1e-6))
+    (should (< (abs (- (plist-get needle :y2) 116)) 1e-6)))
+  (let* ((ops (plist-get (glasspane-gallery--gauge -1) :ops))
+         (needle (aref ops 2)))
+    (should (equal (plist-get (aref ops 4) :text) "0%"))
+    (should (< (abs (- (plist-get needle :x2) (- 120 (* 95 0.9)))) 1e-6)))
+  ;; The gauge round-trips the canonical wire encoding on its own.
+  (should (string-search "\"canvas\""
+                         (jetpacs-node->canonical-json
+                          (glasspane-gallery--gauge 0.25)))))
+
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

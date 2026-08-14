@@ -24,9 +24,13 @@ wikilink capf on the ebp-complete shadow bridge, mentions dissolved
 into the jetpacs-async keyed loader, SRS review as a pushed chrome
 screen with the in-screen due count, engine wrapper reworked so a
 failed call never answers 'accepted; vulpea/org-srs guarded, live
-paths banked for G9; gate 53/53, full suite 976/41). Next: G8
-(satellites + fixtures: glasspane-ef.el + glasspane-theme-picker.el,
-glasspane-demo.el, glasspane-gallery.el). The completion ladder
+paths banked for G9; gate 53/53, full suite 976/41). G8 LANDED
+2026-08-14 (satellites + fixtures: glasspane-ef.el +
+glasspane-theme-picker.el + glasspane-demo.el + glasspane-gallery.el —
+ef-themes screen on the app-local picker scaffold (gap #8), demo
+seeder kept with roots-derived targets, gallery gauge rebuilt on
+canvas; gate 61/61, full suite 984/41). Next: G9 (DEVICE GATE — the
+one device/vulpea smoke session that closes the ladder). The completion ladder
 (PLAN-glasspane-completion.md, R0–R5) is closed on the foundation side;
 this plan is the app itself. Source: the 22-file v1 app at
 `llm-poc/jetpacs-v1-examples/glasspane/emacs/apps/glasspane/` (8,522

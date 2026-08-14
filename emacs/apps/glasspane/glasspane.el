@@ -77,6 +77,14 @@
 ;; unconditional, the runtime probes are theirs.
 (require 'glasspane-notes)
 (require 'glasspane-srs)
+;; G8, the satellites + fixtures: demo loads before gallery (gallery's
+;; entry command leans on the demo seeder being in the image — the
+;; plan's DEMO-BEFORE-GALLERY order), and the theme-picker scaffold
+;; before ef, which instantiates it.
+(require 'glasspane-demo)
+(require 'glasspane-theme-picker)
+(require 'glasspane-ef)
+(require 'glasspane-gallery)
 
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
@@ -173,7 +181,10 @@ registry entry in place."
   (glasspane-search-register)
   (glasspane-table-register)
   (glasspane-notes-register)
-  (glasspane-srs-register))
+  (glasspane-srs-register)
+  (glasspane-demo-register)
+  (glasspane-ef-register)
+  (glasspane-gallery-register))
 
 (defun glasspane-unregister ()
   "Deregister every verb, the chrome root, and the app identity.
@@ -200,7 +211,10 @@ glasspane.packages.install) sweep with the entry's own."
   (glasspane-search-unregister)
   (glasspane-table-unregister)
   (glasspane-notes-unregister)
-  (glasspane-srs-unregister))
+  (glasspane-srs-unregister)
+  (glasspane-demo-unregister)
+  (glasspane-ef-unregister)
+  (glasspane-gallery-unregister))
 
 (glasspane-register)
 

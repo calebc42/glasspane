@@ -252,8 +252,14 @@ must restore them without a re-require (the G0 gate contract)."
     ;; and the foundation package-browser owns that name
     ;; (jetpacs-package-browser.el) — every glasspane verb is
     ;; app-prefixed (the M3 convention G0 adopted).
+    ;; :any-surface — the not-installed empty states that carry this
+    ;; tap (ef, srs) live on screens pushed onto whatever surface the
+    ;; satellite row was tapped from, usually the Settings root; the
+    ;; owned-surface gate would reject the tap there before the
+    ;; handler ran.
     (jetpacs-defaction "glasspane.packages.install"
                        #'glasspane-packages--on-install
+                       :any-surface t
                        :doc "Install Glasspane's closed optional-engine set from MELPA")
 
     (jetpacs-settings-register-section

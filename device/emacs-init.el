@@ -189,10 +189,15 @@ yet? every jetpacs require below is skipped."
   ;; it self-registers the GLOBAL `jetpacs.launcher.open' verb every
   ;; dock/drawer row dispatches — without it a dock tap answers
   ;; "action not allowlisted" and app switching silently dies.
+  ;; jetpacs-org-settings carries the relocated org/calendar settings
+  ;; sections (§3 step 1): required HERE, not via Glasspane — the
+  ;; sections are foundation content and must exist even when the
+  ;; Stage 4b app light-up is skipped.
   (dolist (feat '(ebp ebp-sync ebp-complete
                   jetpacs-widgets jetpacs-async jetpacs-surfaces
                   jetpacs-shell jetpacs-buffer jetpacs-navigate
-                  jetpacs-chrome jetpacs-launcher jetpacs-files))
+                  jetpacs-chrome jetpacs-launcher jetpacs-files
+                  jetpacs-org-settings))
     (condition-case err
         (progn (require feat) (jetpacs-emacs-init--log "required %s" feat))
       (error (jetpacs-emacs-init--log "require %s FAILED: %s" feat

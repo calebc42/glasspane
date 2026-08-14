@@ -77,7 +77,9 @@
 Best-effort: the timer can't interrupt a synchronous subprocess
 mid-call, but it fires between process reads and stops a runaway
 block from wedging the bridge forever.  Consumed by the table/babel
-rung (G6); registered in its settings section."
+rung (G6); surfaced in the app's own settings section
+\(`glasspane-ui-register') — the one app-opinion row left after the
+§3 relocation moved the org/calendar schema to the foundation."
   :type 'integer :group 'jetpacs)
 
 ;;;; Shared view state (S2)
@@ -417,26 +419,6 @@ distinctness check at build time."
                        :allow-add t
                        :on-change (jetpacs-action "settings.tags"))))
 
-(defun glasspane-ui--line-numbers-node ()
-  "The Display block: the line-number mode as a single-select enum.
-The `:render' of the registry entry `glasspane-ui-register' installs —
-it draws on the Settings root, replacing the schema-derived control."
-  (let ((value (pcase jetpacs-line-numbers
-                 ('absolute "Absolute")
-                 ('relative "Relative")
-                 (_ "Off"))))
-    (jetpacs-column
-     (jetpacs-text "Line numbers" :style "label")
-     (jetpacs-text "Line numbers in the buffer view and editor."
-                   :style "caption")
-     (jetpacs-enum-list "settings-linenum"
-                        (mapcar (lambda (label)
-                                  (jetpacs-enum-option label label))
-                                '("Off" "Absolute" "Relative"))
-                        :value value
-                        :on-change (jetpacs-action "settings.line-numbers"))
-     :spacing 4)))
-
 (defun glasspane-ui--agenda-card (name query)
   "One saved-search card with its edit/delete affordances."
   (jetpacs-card
@@ -505,11 +487,11 @@ SPEC 23.3 label, not the raw error text."
 
 (defun glasspane-ui--settings-body ()
   "The app settings screen body.
-The Display block lives on the Settings ROOT via the registry entry
-\(`glasspane-ui--line-numbers-node'), and the schema-driven org
-sections are the Settings surface's own — this screen holds only what
-needs authored management UI.  lazy_column, not column: the scaffold
-body has no scroll container on the client."
+The org/calendar schema sections live on the Settings ROOT with the
+foundation that registers them (jetpacs-org-settings.el, the §3
+relocation) — this screen holds only what needs authored management
+UI.  lazy_column, not column: the scaffold body has no scroll
+container on the client."
   (apply #'jetpacs-lazy-column
          (append
           (list (jetpacs-section-header "Saved Searches")
@@ -755,21 +737,6 @@ name is a captured dialog field and the save runs in the conclusion."
                          (jetpacs-error-label err))))))
     'accepted))
 
-(defun glasspane-ui--on-line-numbers (args params)
-  "Set `jetpacs-line-numbers'.  Single-select enum: `:value' is ONE
-option value, or nil when the user deselected — which counts as Off."
-  (let ((choice (plist-get args :value)))
-    (if (and choice (not (stringp choice)))
-        'rejected
-      (jetpacs-settings-save-variable 'jetpacs-line-numbers
-                                      (pcase choice
-                                        ("Absolute" 'absolute)
-                                        ("Relative" 'relative)
-                                        (_ nil)))
-      (jetpacs-toast (format "Line numbers: %s" (or choice "Off")))
-      (glasspane-ui--defer-refresh params)
-      'accepted)))
-
 (defun glasspane-ui--on-tags (args params)
   "Rebuild `org-tag-alist' from the multi-select `:value' (a vector).
 Existing alist entries keep their fast-select keys.  Deselecting every
@@ -923,16 +890,6 @@ matching happens at render, in the G4 reader that seeds from the var."
           'accepted)
       'rejected)))
 
-;;;; The settings after-set seam (T2)
-
-(defun glasspane-ui-org-after-set (_sym _value)
-  "Registry `:after-set' for org/calendar-derived entries.
-The v1 `jetpacs-settings-after-set-hook' member's per-entry successor:
-org-derived views are memoised, so every settings write over org or
-calendar state must drop the memo or the phone keeps rendering stale
-data.  G6's schema sections attach this to each such entry."
-  (ebp-org-cache-invalidate 'glasspane))
-
 ;;;; Refresh hooks
 
 (defun glasspane-ui--refresh-invalidate ()
@@ -976,7 +933,6 @@ the time any teardown runs, the entry has long finished loading."
 
 (defconst glasspane-ui--verbs
   '("glasspane.settings.open"
-    "settings.line-numbers"
     "settings.tags"
     "settings.todo.edit"
     "settings.agenda.edit"
@@ -998,23 +954,20 @@ Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces handlers and
 registry entries in place, and the link is re-added exactly once."
   ;; :any-surface — D1 GLOBAL verbs on the ef precedent
-  ;; (glasspane-ef.el:361-366): the satellite link and the Display
-  ;; section both draw on the Settings ROOT, and the screen they lead
-  ;; to is pushed onto whatever surface was tapped, so every verb whose
-  ;; only emission site is there arrives on a surface Glasspane does
-  ;; not own and the owned-surface gate would refuse it before the
-  ;; handler ran (jetpacs-surfaces.el:770-785).  The rest stay
-  ;; owner-scoped: the save verbs fire from dialog conclusions, which
-  ;; carry no `:surface' at all (SPEC 14.4), and the agenda/files verbs
-  ;; from screens on this owner's own surface.
+  ;; (glasspane-ef.el:361-366): the satellite link draws on the
+  ;; Settings ROOT, and the screen it leads to is pushed onto whatever
+  ;; surface was tapped, so every verb whose only emission site is
+  ;; there arrives on a surface Glasspane does not own and the
+  ;; owned-surface gate would refuse it before the handler ran
+  ;; (jetpacs-surfaces.el:770-785).  The rest stay owner-scoped: the
+  ;; save verbs fire from dialog conclusions, which carry no
+  ;; `:surface' at all (SPEC 14.4), and the agenda/files verbs from
+  ;; screens on this owner's own surface.
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "glasspane.settings.open"
                        #'glasspane-ui--on-settings-open
                        :any-surface t
                        :doc "Open Glasspane's settings management screen")
-    (jetpacs-defaction "settings.line-numbers"
-                       #'glasspane-ui--on-line-numbers
-                       :any-surface t)
     (jetpacs-defaction "settings.tags" #'glasspane-ui--on-tags
                        :any-surface t)
     (jetpacs-defaction "settings.todo.edit" #'glasspane-ui--on-todo-edit
@@ -1035,11 +988,15 @@ registry entries in place, and the link is re-added exactly once."
     (jetpacs-defaction "agenda.set-month"
                        #'glasspane-ui--on-agenda-set-month)
     (jetpacs-defaction "files.filter" #'glasspane-ui--on-files-filter)
+    ;; The app's own section: the one row that stayed app-side through
+    ;; the §3 relocation (the org/calendar schema is
+    ;; jetpacs-org-settings.el's now, and `jetpacs-line-numbers'
+    ;; became a plain row in device/init.el's Appearance section).
+    ;; Plain: the timeout feeds no memoised extraction.
     (jetpacs-settings-register-section
      "Glasspane"
-     (list (list 'jetpacs-line-numbers
-                 :label "Line numbers"
-                 :render #'glasspane-ui--line-numbers-node)))
+     (list (list 'glasspane-babel-timeout
+                 :label "Babel run timeout (s)")))
     (setq jetpacs-settings-links
           (cl-remove #'glasspane-ui--settings-link jetpacs-settings-links
                      :key #'cadr))

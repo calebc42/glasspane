@@ -55,7 +55,6 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
 (require 'jetpacs-buffer)
-(require 'jetpacs-settings)
 (require 'jetpacs-files)
 (require 'jetpacs-org-render)           ; the rendered⇄plain mode bit the
                                         ; body seam must respect
@@ -775,11 +774,15 @@ lives HERE, beside the only table that can resolve it (D-4) — views'
 board re-emits the same verb in G6.")
 
 (defun glasspane-org-reader-register ()
-  "Register the reader verbs, the settings section, and the seam claims.
+  "Register the reader verbs and the seam claims.
 Called from `glasspane-register', not at this file's load (the G0
-contract).  Remove-then-add keeps the body claim at the FRONT of the
-seam on a live re-register — ahead of jetpacs-org-render's entry, which
-is what lets org files open in the app reader at all."
+contract).  The \"Reader\" settings section this rung used to register
+is foundation content now (jetpacs-org-settings.el, the §3
+relocation): both rows were `ebp-org-outline-show-*' foundation
+defcustoms all along.  Remove-then-add keeps the body claim at the
+FRONT of the seam on a live re-register — ahead of
+jetpacs-org-render's entry, which is what lets org files open in the
+app reader at all."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "heading.menu"
                        #'glasspane-org-reader--on-heading-menu
@@ -788,15 +791,7 @@ is what lets org files open in the app reader at all."
                        #'glasspane-org-reader--on-toggle-refile)
     (jetpacs-defaction "heading.reorder"
                        #'glasspane-org-reader--on-reorder
-                       :doc "Apply a drag in the refile list (D-4)")
-    (jetpacs-settings-register-section
-     "Reader"
-     (list (list 'ebp-org-outline-show-deadline
-                 :label "Deadline on headings"
-                 :after-set #'glasspane-ui-org-after-set)
-           (list 'ebp-org-outline-show-clocked
-                 :label "Clocked time on headings"
-                 :after-set #'glasspane-ui-org-after-set))))
+                       :doc "Apply a drag in the refile list (D-4)"))
   (remove-hook 'jetpacs-files-editor-body-functions
                #'glasspane-org-reader--files-body)
   (add-hook 'jetpacs-files-editor-body-functions
@@ -807,10 +802,9 @@ is what lets org files open in the app reader at all."
             #'glasspane-org-reader--files-actions))
 
 (defun glasspane-org-reader-unregister ()
-  "Drop the reader verbs, the settings section, and the seam claims."
+  "Drop the reader verbs and the seam claims."
   (dolist (name glasspane-org-reader--verbs)
     (jetpacs-undefaction name))
-  (jetpacs-settings-remove-section "Reader")
   (remove-hook 'jetpacs-files-editor-body-functions
                #'glasspane-org-reader--files-body)
   (remove-hook 'jetpacs-files-editor-actions-functions

@@ -54,8 +54,19 @@
 ;;;; Stage 0: breadcrumb helper
 
 (defun jetpacs-emacs-init--log (fmt &rest args)
-  "Write a `jetpacs-emacs-init:' breadcrumb to *Messages*."
-  (message "jetpacs-emacs-init: %s" (apply #'format fmt args)))
+  "Write a `jetpacs-emacs-init:' breadcrumb to *Messages* AND the log
+file under Termux home — the file half is what the desktop can read
+over ssh (the shared uid), which is how a headless session gets
+diagnosed at all (the G9 practice: *Messages* is unreachable from
+adb).  File IO failures are swallowed: logging must never break init."
+  (let ((line (apply #'format fmt args)))
+    (message "jetpacs-emacs-init: %s" line)
+    (ignore-errors
+      (with-temp-buffer
+        (insert (format-time-string "%F %T ") line "\n")
+        (append-to-file (point-min) (point-max)
+                        (concat jetpacs-emacs-init-termux-home
+                                "/jetpacs/init.log"))))))
 
 ;;;; Paths -- the deploy locations tools/onboard-tablet.sh populates.
 ;;;; If a stage below logs "NOT FOUND", the script's deploy target and
@@ -230,6 +241,32 @@ default; has tools/onboard-tablet.sh run yet?"
                                jetpacs-files-roots
                                jetpacs-files-default-dir)))
   (error (jetpacs-emacs-init--log "files-roots stage FAILED: %s"
+                                  (error-message-string err))))
+
+;;;; Stage 4b: the engine set + the Glasspane app (G9).  The elpa dirs
+;;;; are PUSHED by the onboarding channel (desktop-staged vulpea /
+;;;; org-srs / ef-themes + deps -- the tablet never dials MELPA);
+;;;; package-initialize just wires what is already on disk.  Glasspane
+;;;; registers at require (owner, chrome root, dock) and its packages
+;;;; module lights the vulpea features up when the probe finds the
+;;;; engines.  Both guarded: a tree without the app, or an elpa without
+;;;; the engines, degrades to exactly the pre-G9 init.
+
+(condition-case err
+    (progn
+      (require 'package)
+      (package-initialize)
+      (jetpacs-emacs-init--log "elpa initialized: %d package dir(s)"
+                               (length package-alist)))
+  (error (jetpacs-emacs-init--log "elpa stage FAILED: %s"
+                                  (error-message-string err))))
+
+(condition-case err
+    (if (require 'glasspane nil t)
+        (jetpacs-emacs-init--log "glasspane registered (vulpea=%s org-srs=%s)"
+                                 (featurep 'vulpea) (featurep 'org-srs))
+      (jetpacs-emacs-init--log "glasspane not on load-path -- skipped"))
+  (error (jetpacs-emacs-init--log "glasspane stage FAILED: %s"
                                   (error-message-string err))))
 
 ;;;; Stage 5: connect -- the KAT pairing every smoke in this tree uses,

@@ -182,15 +182,33 @@ class EditorSession(
          * session maintains), this splice applies cleanly.
          */
         fun diff(old: String, new: String): Splice {
-            val o = old.codePoints().toArray()
-            val n = new.codePoints().toArray()
-            var pre = 0
-            val min = minOf(o.size, n.size)
-            while (pre < min && o[pre] == n[pre]) pre++
-            var suf = 0
-            while (suf < min - pre && o[o.size - 1 - suf] == n[n.size - 1 - suf]) suf++
-            val del = o.size - pre - suf
-            return Splice(ScalarPos(pre), del, String(n, pre, n.size - pre - suf))
+            // D-10: the two-ended scan, allocation-free — the previous
+            // form materialized BOTH documents as code-point int[] per
+            // call, and diff was 22 ms of the 29 ms per-keystroke cost
+            // at the 4 MiB ceiling (the informed-execution Tier-3
+            // measurement).  Char indices walk the UTF-16 forms; the
+            // scalar count rides alongside so astral characters stay
+            // whole.  Only the deleted MIDDLE is re-counted in scalars
+            // — for a keystroke that is 0 or 1 code points, not the
+            // document.
+            var pc = 0        // chars consumed by the common prefix
+            var pre = 0       // the same prefix in scalars
+            while (pc < old.length && pc < new.length) {
+                val cp = old.codePointAt(pc)
+                if (cp != new.codePointAt(pc)) break
+                pc += Character.charCount(cp); pre++
+            }
+            var oi = old.length
+            var ni = new.length
+            while (oi > pc && ni > pc) {
+                val cp = old.codePointBefore(oi)
+                if (cp != new.codePointBefore(ni)) break
+                oi -= Character.charCount(cp); ni -= Character.charCount(cp)
+            }
+            var del = 0
+            var i = pc
+            while (i < oi) { i += Character.charCount(old.codePointAt(i)); del++ }
+            return Splice(ScalarPos(pre), del, new.substring(pc, ni))
         }
     }
 

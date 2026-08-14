@@ -131,6 +131,43 @@ UI layer mints tokens from these, so the shape is load-bearing."
             (kill-buffer buf))))
       (delete-directory vault t))))
 
+(ert-deftest glasspane-test-org-directory-agenda-scope ()
+  "A DIRECTORY entry in `org-agenda-files' expands to the org files inside.
+The managed config's default is `(list org-directory)`; org-agenda's
+own machinery expands directory entries but `org-map-entries' visits
+the raw dir as dired and answers nothing — on the G9 device the same
+corpus filled Agenda and left Tasks empty.  The scope must hand every
+consumer FILES."
+  (let* ((vault (make-temp-file "glasspane-vault" t))
+         (file (expand-file-name "tasks.org" vault))
+         (org-directory vault)
+         (org-agenda-files (list vault))
+         (ebp-org-roots nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* TODO From the directory scope\n"
+                    "* Not a task\n"))
+          (ebp-org-cache-invalidate)
+          (let ((scope (glasspane-org--agenda-scope)))
+            (should (equal scope (list file)))
+            (should-not (cl-find-if #'file-directory-p scope)))
+          (let ((items (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                                  (lambda () nil)))
+                         (glasspane-org--todo-items))))
+            (should (= (length items) 1))
+            (should (equal (alist-get 'headline (car items))
+                           "From the directory scope"))))
+      (ebp-org-cache-invalidate)
+      (dolist (buf (buffer-list))
+        (let ((f (buffer-file-name buf)))
+          (when (and f (string-prefix-p (file-name-as-directory
+                                         (file-truename vault))
+                                        (file-truename f)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf))))
+      (delete-directory vault t))))
+
 (ert-deftest glasspane-test-org-query-routing ()
   "With vulpea absent every query runs the built-in interpreter, and
 the memo is KEYED on the action: a repeat never re-runs the action,

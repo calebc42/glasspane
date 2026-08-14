@@ -766,12 +766,90 @@ first-boot capture sheet is TEMPLATE-LESS — the managed-config
 seeding (v1: "first boot must yield a working capture sheet") does
 not run on a fresh device; the config-ensure flow needs wiring
 through the install-consent gap (#2 in FOUNDATION-GAPS) or an
-explicit first-boot call. REMAINING for the next session: capture
-templates seed then the capture flow end-to-end, agenda/journal with
-content, vulpea light-up (notes capf/backlinks/stale) and org-srs
-review/rate via Review, reminders adopt, notification chronometer,
-demo seeding, both snackbar arms, and the two residuals (#2
-mid-session vulpea light-up, #20 share surface string).
+explicit first-boot call — RESOLVED: Stage 4b now calls
+glasspane-config-ensure after the guarded require, and the seeded
+templates show on hardware.
+
+THIRD CATCH (session 2, 2026-08-14): CAPTURE E2E filed EMPTY
+headlines on hardware while every desktop gate stayed green.  Root
+cause — the obarray-twin trap: ebp decodes inbound JSON under a
+throwaway `obarray` and `ebp--remap-decoded` re-homes a keyword only
+when a GLOBAL twin already exists (SPEC 23.5 keeps peer-invented
+names throwaway).  A field id minted at runtime (`jetpacs-wire-id`,
+e.g. capf-Headline-442250df) has no source-literal keyword, so the
+conclusion's `:fields' key came back throwaway-interned —
+byte-identical, never `eq' — and the app's `plist-get' fell through
+to "".  Desktop never sees it: ERT builds `:fields' with literal
+keywords, and the foundation's own dialogs use source-literal ids
+(:org-tags, :org-note) whose twins the reader interned.  FIX 9f3752b:
+`jetpacs--check-capture-fields' interns each id's keyword twin at
+build time — one seam covering `jetpacs-dialog-submit',
+`jetpacs-action', and any future builder; regression test replays the
+throwaway-obarray decode with a negative arm.  CAPTURE E2E GREEN on
+hardware (inbox.org carries the typed headline).
+
+### G9 — CLOSED 2026-08-14 (session 2 complete)
+
+Every checklist arm ran on the Pixel Tablet; FIVE catches, all fixed
+and re-verified on hardware, plus two device-truths banked:
+
+1. **Obarray-twin trap** (above; 9f3752b).
+2. **srs rate/postpone not durable** (7316347): a Good rating
+   advanced the queue while flashcards.org kept its seed mtime —
+   org-srs mutates the log drawer in the BUFFER only, and the
+   handlers invalidated the memo without saving.  Now saved through
+   `glasspane-org--save-and-invalidate` INSIDE the engine form
+   (failed write ⇒ `rejected`), the suspend/undo shape.  Verified:
+   the :good FSRS row + the +10m due row hit disk at the tap; undo's
+   restore reverts the file.
+3. **Directory agenda scope starves org-map-entries** (fb469f4): the
+   managed config defaults `org-agenda-files` to `(list
+   org-directory)`; org-agenda expands dir entries, `org-map-entries`
+   visits the raw dir as dired and answers NOTHING — Agenda full,
+   Tasks/tags/search sweeps empty, same corpus.
+   `glasspane-org--agenda-scope` now expands dir entries via
+   `directory-files` + `org-agenda-file-regexp` (safe: remotes
+   already dropped).
+4. **The harness :wants was the R-series editor subset** — the grant
+   set is wants ∩ supported, so surfaces.notification /
+   presentation.snackbar / reminders.owner were silently ungranted
+   and the chronometer never posted.  device/emacs-init.el now
+   requests the full supported profile.  (Bonus: the ungranted
+   session accidentally demonstrated the snackbar INJECTION arm; the
+   granted session shows the immediate raise — both arms on
+   hardware.)
+5. **Companion share intake is UNBUILT** (#20 resolved-as-absent):
+   no ACTION_SEND intent-filter in the manifest — share.text has no
+   emitter; the flow must not be claimed working (gap #3's caution
+   held).
+
+VERIFIED GREEN on hardware: hub/drawer/dock; capture e2e (durable);
+Agenda day view w/ corpus (12 today, priorities/chips/tags); Tasks
+ALL/TODO/DONE both arms (file-scan AND index); Journal quick-add +
+carryover rows w/ Today/Pick; Search (query-builder screen, field
+on-submit injection — NOTE: the Search BUTTON echoes the build-time
+mirror by design, the first query must go through the field's ENTER);
+Saved-views empty state; Review flashcards (4 due) with
+reveal/rate/undo durable and real FSRS intervals; org-srs lit by the
+seeder; vulpea MID-SESSION light-up (residual #2 GREEN: stale-files
+half appears on refresh, Tasks re-answers from the index, cross-arm
+memo holds); detail view (breadcrumb/state chips/scheduling/tags/
+logbook/properties/toolbar); Mentions: outgoing links + linked
+references (the flashcard backlink) from the vulpea links table;
+clock chronometer notification (ongoing, category=stopwatch, 2 meta
+actions) with clock-out FROM the notification retiring it and the
+closed CLOCK line saved; reminders owner-set adopt (timed item ⇒
+exact RTC_WAKEUP alarm at 13:55 on the ReminderAlarmReceiver;
+date-only items correctly arm nothing); demo corpus seeded inside
+the root.
+
+Device-truths for the next session: (a) EXTERNAL edits to org files
+the session has open in buffers are invisible (no auto-revert) — seed
+NEW files or edit through the app; (b) unlinked mentions degrade
+honestly to "ripgrep unavailable" — `pkg install ripgrep` in Termux
+would light the third mentions section; (c) vulpea's full scan is
+async (worker) — the notes count right after light-up reads 0, the
+index is live moments later.
 
 
 Owed after G8, one device/vulpea session: install the closed engine

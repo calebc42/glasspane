@@ -1726,5 +1726,599 @@ subtree between files with no vulpea in sight."
             (kill-buffer buf))))
       (delete-directory vault t))))
 
+;;;; G5 — daily surfaces: glasspane-dates.el, glasspane-agenda.el,
+;;;; glasspane-journal.el, glasspane-capture.el
+
+(ert-deftest glasspane-test-dates-helpers ()
+  "The app-local date module (FOUNDATION-GAPS #10): pure string-in
+string-out arithmetic — noon-anchored against DST flips, positional
+parsing, month shifts clamped into the target month, locale-proof
+English month abbreviations."
+  (let ((decoded (decode-time (glasspane-dates-encode "2026-08-13"))))
+    (should (= (decoded-time-hour decoded) 12))
+    (should (= (decoded-time-day decoded) 13))
+    (should (= (decoded-time-month decoded) 8))
+    (should (= (decoded-time-year decoded) 2026)))
+  ;; Day/week shifts cross month and year boundaries.
+  (should (equal (glasspane-dates-shift "2026-08-13" 1 'day) "2026-08-14"))
+  (should (equal (glasspane-dates-shift "2026-08-13" -1 'day) "2026-08-12"))
+  (should (equal (glasspane-dates-shift "2026-01-31" 1 'day) "2026-02-01"))
+  (should (equal (glasspane-dates-shift "2026-01-01" -1 'day) "2025-12-31"))
+  (should (equal (glasspane-dates-shift "2026-12-31" 1 'day) "2027-01-01"))
+  (should (equal (glasspane-dates-shift "2026-08-13" 1 'week) "2026-08-20"))
+  (should (equal (glasspane-dates-shift "2026-08-13" 2 'week) "2026-08-27"))
+  ;; Month arithmetic clamps into the target month and walks years;
+  ;; leap February keeps its 29th.
+  (should (equal (glasspane-dates-shift "2026-01-31" 1 'month) "2026-02-28"))
+  (should (equal (glasspane-dates-shift "2024-01-31" 1 'month) "2024-02-29"))
+  (should (equal (glasspane-dates-shift "2026-01-15" -1 'month) "2025-12-15"))
+  (should (equal (glasspane-dates-shift "2026-12-15" 1 'month) "2027-01-15"))
+  (should (equal (glasspane-dates-shift "2026-11-01" 3 'month) "2027-02-01"))
+  ;; Format rides format-time-string; the C locale pins the weekday.
+  (should (equal (glasspane-dates-format "2026-08-13" "%Y/%m/%d")
+                 "2026/08/13"))
+  (let ((system-time-locale "C"))
+    (should (equal (glasspane-dates-format "2000-01-01" "%a %Y") "Sat 2000")))
+  (should (equal (glasspane-dates-month-abbrev 1) "Jan"))
+  (should (equal (glasspane-dates-month-abbrev 12) "Dec"))
+  (should-not (glasspane-dates-month-abbrev 0))
+  (should-not (glasspane-dates-month-abbrev 13))
+  (should-not (glasspane-dates-month-abbrev "3")))
+
+(ert-deftest glasspane-test-agenda-formatters ()
+  "The pure agenda formatters over fixture alists: the compact meta
+line, the type icon/label maps, the card date label/row, the composed
+month fallback grid, the mode list, and the in-screen count that
+replaced the tab badge (FOUNDATION-GAPS #5)."
+  ;; widget-item-meta: qualifier cleanup, redundant-qualifier drop,
+  ;; time precedence, empty degrade.
+  (should (equal (glasspane-ui--widget-item-meta
+                  '((extra . "Sched. 3x: ") (file . "/v/tasks.org")) nil)
+                 "Sched. 3x · tasks.org"))
+  (should (equal (glasspane-ui--widget-item-meta
+                  '((extra . "Scheduled") (file . "/v/tasks.org")) nil)
+                 "tasks.org"))
+  (should (equal (glasspane-ui--widget-item-meta
+                  '((extra . "In 3 d.") (file . "/v/t.org")) "09:15")
+                 "09:15 · t.org"))
+  (should (equal (glasspane-ui--widget-item-meta '((extra . "Deadline")) nil)
+                 ""))
+  ;; The icon/label maps.
+  (should (equal (glasspane-ui--widget-agenda-icon "upcoming-deadline")
+                 "deadline"))
+  (should (equal (glasspane-ui--widget-agenda-icon "past-scheduled")
+                 "scheduled"))
+  (should (equal (glasspane-ui--widget-agenda-icon nil) "event"))
+  (should (equal (glasspane-ui--agenda-type-icon "past-scheduled")
+                 '("history" . "#E53935")))
+  (should (equal (car (glasspane-ui--agenda-type-icon "deadline")) "flag"))
+  (should-not (glasspane-ui--agenda-type-icon "timestamp"))
+  (should (equal (glasspane-ui--agenda-type-label "past-scheduled")
+                 "overdue"))
+  (should-not (glasspane-ui--agenda-type-label "block"))
+  ;; Card date label: month abbrev + optional ebp-org-ts-time time.
+  (should (equal (glasspane-ui--card-date-label "<2026-08-13 Thu 14:00>")
+                 "Aug 13 14:00"))
+  (should (equal (glasspane-ui--card-date-label "<2026-02-01 Sun>") "Feb 1"))
+  (should-not (glasspane-ui--card-date-label "junk"))
+  ;; Card date row: both stamps render; no stamps, no row.
+  (let ((row (glasspane-ui--card-date-row
+              '((scheduled . "<2026-08-13 Thu>")
+                (deadline . "<2026-08-20 Thu>")))))
+    (should row)
+    (let ((json (jetpacs-node->canonical-json row)))
+      (should (string-search "Aug 13" json))
+      (should (string-search "Aug 20" json))))
+  (should-not (glasspane-ui--card-date-row '((headline . "x"))))
+  ;; Month fallback: Feb 2026 stops at 28 cells, the selected day is
+  ;; tinted, taps carry the ISO date, the select verb is overridable.
+  (let* ((grid (glasspane-agenda--month-fallback
+                '(("2026-02-14" . (((headline . "x")))))
+                "2026-02-15" "2026-02-14"))
+         (json (jetpacs-node->canonical-json grid)))
+    (should (string-search "\"28\"" json))
+    (should-not (string-search "\"29\"" json))
+    (should (string-search "#1976D2" json))
+    (should (string-search "agenda.select-date" json))
+    (should (string-search "2026-02-01" json)))
+  (should (string-search
+           "views.select-date"
+           (jetpacs-node->canonical-json
+            (glasspane-agenda--month-fallback nil "2026-02-15" "2026-02-14"
+                                              "views.select-date"))))
+  ;; Modes: the spans, then the saved searches, display order.
+  (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand"))))
+    (should (equal (glasspane-agenda--modes)
+                   '("day" "week" "month" "Errands"))))
+  ;; The in-screen count reads the memoised day extraction and
+  ;; swallows its errors.
+  (cl-letf (((symbol-function 'glasspane-org--agenda-items)
+             (lambda (&rest _) '(a b))))
+    (should (= (glasspane-agenda--today-count) 2)))
+  (cl-letf (((symbol-function 'glasspane-org--agenda-items)
+             (lambda (&rest _) (error "boom"))))
+    (should (= (glasspane-agenda--today-count) 0))))
+
+(ert-deftest glasspane-test-agenda-handler-matrix ()
+  "Every G5 agenda verb, funcalled from the handler table with plist
+args and no client, answers a SPEC 14.4 status — then the sharp edges:
+the single-writer defvars, month-clamped nav, settings.todo.save's
+stale index, the empty-sequence reject, the last-sequence delete
+fallback, the deferred open pushes, and the reminder sync's grant
+gate + suppress cache."
+  (glasspane-agenda-register)
+  (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")))
+        (glasspane-agenda--mode "day")
+        (glasspane-agenda--tasks-filter "ALL")
+        (glasspane-ui-agenda-anchor nil)
+        (glasspane-ui--settings-dialog nil)
+        (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+        (saved nil) (continuations nil))
+    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
+               (lambda (sym val)
+                 (push (cons sym val) saved) (set sym val) val))
+              ((symbol-function 'jetpacs-shell-notify)
+               (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (push fn continuations) nil)))
+      (cl-flet ((run (name args &optional params)
+                  (let ((handler (gethash name jetpacs-action-handlers)))
+                    (should handler)
+                    (funcall handler args params))))
+        ;; The whole table answers statuses on bare nil/nil input.
+        (dolist (name glasspane-agenda--verbs)
+          (should (memq (run name nil nil) '(accepted stale rejected))))
+        ;; agenda.set-mode: chip name, tabs float index, junk.
+        (should (eq (run "agenda.set-mode" '(:mode "week")) 'accepted))
+        (should (equal glasspane-agenda--mode "week"))
+        (should (eq (run "agenda.set-mode" '(:value 3.0)) 'accepted))
+        (should (equal glasspane-agenda--mode "Errands"))
+        (should (eq (run "agenda.set-mode" '(:mode "nope")) 'rejected))
+        (should (eq (run "agenda.set-mode" '(:value 99)) 'rejected))
+        ;; agenda.nav: span-aware shifts off the shared anchor; month
+        ;; steps re-anchor on the 1st; junk dir rejects.
+        (setq glasspane-agenda--mode "day"
+              glasspane-ui-agenda-anchor "2026-08-13")
+        (should (eq (run "agenda.nav" '(:dir 1)) 'accepted))
+        (should (equal glasspane-ui-agenda-anchor "2026-08-14"))
+        (setq glasspane-agenda--mode "week")
+        (should (eq (run "agenda.nav" '(:dir -1)) 'accepted))
+        (should (equal glasspane-ui-agenda-anchor "2026-08-07"))
+        (setq glasspane-agenda--mode "month"
+              glasspane-ui-agenda-anchor "2026-01-31")
+        (should (eq (run "agenda.nav" '(:dir 1)) 'accepted))
+        (should (equal glasspane-ui-agenda-anchor "2026-02-01"))
+        (should (eq (run "agenda.nav" '(:dir "x")) 'rejected))
+        ;; tasks.filter: the defvar is the single writer's cell.
+        (should (eq (run "tasks.filter" '(:filter "DONE")) 'accepted))
+        (should (equal glasspane-agenda--tasks-filter "DONE"))
+        (should (eq (run "tasks.filter" '(:filter 5)) 'rejected))
+        ;; settings.todo.save: captured fields, no ui-state round trip.
+        (should (eq (run "settings.todo.save"
+                         '(:index 0 :type "sequence")
+                         '(:fields (:todo-active "TODO, DOING"
+                                    :todo-finished "DONE")))
+                    'accepted))
+        (should (equal (cdr (assq 'org-todo-keywords saved))
+                       '((sequence "TODO" "DOING" "|" "DONE"))))
+        ;; Stale index: the list changed while the dialog was up.
+        (should (eq (run "settings.todo.save"
+                         '(:index 99 :type "sequence")
+                         '(:fields (:todo-active "TODO")))
+                    'stale))
+        ;; A sequence needs at least one state; junk index rejects.
+        (should (eq (run "settings.todo.save"
+                         '(:index 0 :type "sequence")
+                         '(:fields (:todo-active " , " :todo-finished "")))
+                    'rejected))
+        (should (eq (run "settings.todo.save"
+                         '(:index "x" :type "sequence")
+                         '(:fields (:todo-active "TODO")))
+                    'rejected))
+        ;; Index -1 appends a new sequence.
+        (should (eq (run "settings.todo.save"
+                         '(:index -1 :type "type")
+                         '(:fields (:todo-active "BUG, FEATURE")))
+                    'accepted))
+        (should (= (length (default-value 'org-todo-keywords)) 2))
+        (should (equal (nth 1 (default-value 'org-todo-keywords))
+                       '(type "BUG" "FEATURE")))
+        ;; settings.todo.delete: out-of-range is stale; deleting the
+        ;; last sequence falls back to the stock one.
+        (should (eq (run "settings.todo.delete" '(:index 9)) 'stale))
+        (should (eq (run "settings.todo.delete" '(:index 1)) 'accepted))
+        (should (eq (run "settings.todo.delete" '(:index 0)) 'accepted))
+        (should (equal (default-value 'org-todo-keywords)
+                       '((sequence "TODO" "|" "DONE"))))
+        ;; The open verbs park their pushes past the dispatch extent.
+        (let ((before (length continuations)))
+          (should (eq (run "agenda.open" nil '(:surface "glasspane"))
+                      'accepted))
+          (should (eq (run "tasks.open" nil nil) 'accepted))
+          (should (= (length continuations) (+ 2 before))))
+        ;; Reminder sync, ungranted: the wire is never touched and the
+        ;; suppress cache stays unset.
+        (let ((calls 0)
+              (glasspane-agenda--last-reminders 'unset))
+          (cl-letf (((symbol-function 'jetpacs-client) (lambda () t))
+                    ((symbol-function 'jetpacs-granted-p)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'jetpacs-reminders-set)
+                     (lambda (&rest _) (cl-incf calls))))
+            (glasspane-agenda--sync-reminders)
+            (should (= calls 0))
+            (should (eq glasspane-agenda--last-reminders 'unset))))
+        ;; Granted: one set goes out, the cache adopts only in the
+        ;; confirmed callback, and the identical next sync suppresses.
+        (let ((sent nil)
+              (glasspane-agenda--last-reminders 'unset))
+          (cl-letf (((symbol-function 'jetpacs-client) (lambda () t))
+                    ((symbol-function 'jetpacs-granted-p)
+                     (lambda (&rest _) t))
+                    ((symbol-function 'glasspane-org--upcoming-reminders)
+                     (lambda (&rest _) '((:id "r1"))))
+                    ((symbol-function 'jetpacs-reminders-set)
+                     (cl-function
+                      (lambda (rems &key owner callback)
+                        (push (cons owner rems) sent)
+                        (funcall callback 1 nil)))))
+            (glasspane-agenda--sync-reminders)
+            (should (equal sent '(("glasspane" . ((:id "r1"))))))
+            (should (equal glasspane-agenda--last-reminders '((:id "r1"))))
+            (glasspane-agenda--sync-reminders)
+            (should (= (length sent) 1))))))))
+
+(defun glasspane-test--journal-vault ()
+  "A throwaway vault directory for journal fixtures."
+  (make-temp-file "glasspane-journal" t))
+
+(defun glasspane-test--journal-cleanup (vault)
+  "Drop the org memo, kill VAULT's visiting buffers, delete VAULT."
+  (ebp-org-cache-invalidate)
+  (dolist (buf (buffer-list))
+    (let ((f (buffer-file-name buf)))
+      (when (and f (string-prefix-p (file-name-as-directory
+                                     (file-truename vault))
+                                    (file-truename f)))
+        (with-current-buffer buf (set-buffer-modified-p nil))
+        (kill-buffer buf))))
+  (delete-directory vault t))
+
+(ert-deftest glasspane-test-journal-datetree ()
+  "--day-pos/--append against a real temp datetree: an absent file is
+nil (never an error), the first append creates the file and the
+levels, same-day appends share ONE day heading in order — and the
+whole journal screen builds and round-trips the canonical encoding."
+  (let* ((vault (glasspane-test--journal-vault))
+         (org-directory vault)
+         (org-agenda-files nil)
+         (ebp-org-roots nil)
+         (glasspane-journal-file nil)
+         (glasspane-journal--date nil)
+         (today (glasspane-journal--today)))
+    (unwind-protect
+        (progn
+          (should-not (glasspane-journal--day-pos today))
+          (glasspane-journal--append "First entry" today)
+          (should (integerp (glasspane-journal--day-pos today)))
+          (should-not (glasspane-journal--day-pos "1999-01-01"))
+          (glasspane-journal--append "Second entry" today)
+          (with-temp-buffer
+            (insert-file-contents (expand-file-name "journal.org" vault))
+            ;; Both items landed, in order, under ONE day heading.
+            (goto-char (point-min))
+            (should (re-search-forward "^- First entry$" nil t))
+            (should (re-search-forward "^- Second entry$" nil t))
+            (should (= 1 (count-matches
+                          (format "^\\*+[ \t]+%s\\(?:[ \t]\\|$\\)"
+                                  (regexp-quote today))
+                          (point-min) (point-max)))))
+          ;; The screen clears the same serialization bar as G0's home.
+          (let ((json (jetpacs-node->canonical-json
+                       (glasspane-journal-screen nil))))
+            (should (stringp json))
+            (should (string-search "journal-capture" json))
+            (should (string-search "First entry" json))
+            ;; The capture FAB (FOUNDATION-GAPS #2): every daily
+            ;; surface carries the org.capture.show entry point, or
+            ;; capture is unreachable from the rendered UI.
+            (should (string-search "org.capture.show" json))))
+      (glasspane-test--journal-cleanup vault))))
+
+(ert-deftest glasspane-test-journal-carried-query ()
+  "The carry-over tree passes the wire vet UNCHANGED, the query finds
+exactly the overdue TODO, and the section's bulk mint lands in the
+\(glasspane . journal-carried) replace-set (S5)."
+  (should (equal (ebp-org--vet-query '(and (todo) (scheduled :to -1)))
+                 '(and (todo) (scheduled :to -1))))
+  (let* ((vault (glasspane-test--journal-vault))
+         (file (expand-file-name "tasks.org" vault))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (overdue (glasspane-dates-shift (glasspane-journal--today) -2 'day))
+         (upcoming (glasspane-dates-shift (glasspane-journal--today) 2 'day)))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "#+TITLE: Tasks\n\n"
+                    "* TODO Overdue thing\n"
+                    (format "SCHEDULED: <%s>\n" overdue)
+                    "* TODO Future thing\n"
+                    (format "SCHEDULED: <%s>\n" upcoming)
+                    "* DONE Finished thing\n"
+                    (format "SCHEDULED: <%s>\n" overdue)))
+          (ebp-org-cache-invalidate)
+          (let ((items (glasspane-journal--carried-over)))
+            (should (= (length items) 1))
+            (should (equal (alist-get 'headline (car items))
+                           "Overdue thing")))
+          (let ((nodes (glasspane-journal--carried-section)))
+            (should nodes)
+            (should (string-search
+                     "Carried over (1)"
+                     (mapconcat #'jetpacs-node->canonical-json nodes "")))
+            (should (= 1 (length (gethash (cons "glasspane" "journal-carried")
+                                          ebp-org--token-sets))))
+            ;; The minted token resolves back to the overdue heading.
+            (let* ((tok (car (gethash (cons "glasspane" "journal-carried")
+                                      ebp-org--token-sets)))
+                   (ref (ebp-org-token-ref tok :owner "glasspane")))
+              (should (equal (plist-get ref :headline) "Overdue thing")))))
+      (glasspane-test--journal-cleanup vault))))
+
+(ert-deftest glasspane-test-journal-handlers ()
+  "Every journal verb answers a SPEC 14.4 status: nav non-integer
+rejects (whole floats coerce), goto validates the full day shape,
+capture rejects empty input and answers `accepted' only once the
+append is ON DISK, open defers its push (D2) — and the unregister
+sweep leaves no handler and no settings section behind."
+  (glasspane-journal-register)
+  (should (alist-get "Journal" jetpacs-settings-registry nil nil #'equal))
+  (let* ((vault (glasspane-test--journal-vault))
+         (org-directory vault)
+         (org-agenda-files nil)
+         (ebp-org-roots nil)
+         (glasspane-journal-file (expand-file-name "journal.org" vault))
+         (glasspane-journal--date nil)
+         (continuations nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (push fn continuations) nil))
+                  ((symbol-function 'jetpacs-shell-notify)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil)))
+          (cl-flet ((run (name args &optional params)
+                      (let ((handler (gethash name jetpacs-action-handlers)))
+                        (should handler)
+                        (funcall handler args params))))
+            ;; The whole table answers statuses on bare nil/nil input.
+            (dolist (name glasspane-journal--verbs)
+              (should (memq (run name nil nil)
+                            '(accepted stale rejected))))
+            ;; journal.nav: integers move the day, whole floats coerce
+            ;; (org.json's trailing .0), junk rejects without writing.
+            (setq glasspane-journal--date "2026-08-10")
+            (should (eq (run "journal.nav" '(:delta 1)) 'accepted))
+            (should (equal glasspane-journal--date "2026-08-11"))
+            (should (eq (run "journal.nav" '(:delta -1.0)) 'accepted))
+            (should (equal glasspane-journal--date "2026-08-10"))
+            (should (eq (run "journal.nav" '(:delta "x")) 'rejected))
+            (should (eq (run "journal.nav" nil) 'rejected))
+            (should (equal glasspane-journal--date "2026-08-10"))
+            ;; journal.goto: the picker's :value must be a full day.
+            (should (eq (run "journal.goto" '(:value "2026-01-02"))
+                        'accepted))
+            (should (equal glasspane-journal--date "2026-01-02"))
+            (should (eq (run "journal.goto" '(:value "2026-1-2"))
+                        'rejected))
+            (should (eq (run "journal.goto" '(:value 42)) 'rejected))
+            ;; journal.today: back to the nil-means-today rest state.
+            (should (eq (run "journal.today" nil) 'accepted))
+            (should-not glasspane-journal--date)
+            ;; journal.capture: whitespace-only and non-string reject
+            ;; with nothing written...
+            (should (eq (run "journal.capture" '(:value "   ")) 'rejected))
+            (should (eq (run "journal.capture" '(:value 42)) 'rejected))
+            (should-not (file-exists-p glasspane-journal-file))
+            ;; ...and a real entry is ON DISK when accepted returns.
+            (should (eq (run "journal.capture"
+                             '(:value "  Ship the port  "
+                               :date "2026-08-13"))
+                        'accepted))
+            (with-temp-buffer
+              (insert-file-contents glasspane-journal-file)
+              (goto-char (point-min))
+              (should (re-search-forward "^- Ship the port$" nil t))
+              (should (string-search "2026-08-13" (buffer-string))))
+            ;; journal.open: accepted on the strength of the deferred
+            ;; push — zero pushes inside the dispatch extent (D2).
+            (let ((before (length continuations)))
+              (should (eq (run "journal.open" nil
+                               '(:surface "app:glasspane"))
+                          'accepted))
+              (should (= (length continuations) (1+ before))))
+            ;; The sweep — then re-register, so suite order never
+            ;; matters.
+            (glasspane-journal-unregister)
+            (dolist (name glasspane-journal--verbs)
+              (should-not (gethash name jetpacs-action-handlers)))
+            (should-not (alist-get "Journal" jetpacs-settings-registry
+                                   nil nil #'equal))
+            (glasspane-journal-register)))
+      (glasspane-test--journal-cleanup vault))))
+
+(ert-deftest glasspane-test-capture-flow ()
+  "The G5 capture gate: templates/fill/run against a temp org file and
+an `org-capture-templates' fixture, plus golden node trees for the two
+sheet bodies — then the whole chain simulated through a stubbed
+`ebp-client-dialog-show': the picker conclusion carries the form, the
+form conclusion runs the capture, and the durable entry precedes the
+success report (the rung's rule).  The SPEC 23.2 revalidation arm and
+the dismissal arm close the loop."
+  (let* ((vault (make-temp-file "glasspane-capture" t))
+         (file (expand-file-name "inbox.org" vault))
+         (org-directory vault)
+         (ebp-org-roots nil)
+         (org-capture-templates
+          `(("t" "Task" entry (file ,file)
+             "* TODO %^{Headline}\n%^{Notes|none}\n%?")))
+         (glasspane-capture--shared-text "shared body text")
+         (glasspane-capture--shared-subject "Shared subject")
+         (glasspane-capture--dialog nil)
+         (notified nil) (shown nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
+                  ((symbol-function 'ebp-client-abandon)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _)
+                     ;; Durability rule: when the report fires, the
+                     ;; capture must already be on disk.
+                     (push (cons text
+                                 (and (file-exists-p file)
+                                      (with-temp-buffer
+                                        (insert-file-contents file)
+                                        (buffer-string))))
+                           notified)))
+                  ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
+                  ((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (funcall fn)))
+                  ((symbol-function 'ebp-client-dialog-show)
+                   (lambda (_client id spec &rest kw)
+                     (push (list :id id :spec spec
+                                 :style (plist-get kw :style)
+                                 :callback (plist-get kw :callback))
+                           shown)
+                     (gensym "req"))))
+          (with-temp-file file (insert "#+TITLE: Inbox\n"))
+          ;; Prompt extraction: %? folds into Headline (first, deduped);
+          ;; the |default is label-stripped but fill-honoured.
+          (let ((tmpl (glasspane-capture--template "t")))
+            (should tmpl)
+            (should (equal (append (plist-get tmpl :prompts) nil)
+                           '("Headline" "Notes")))
+            ;; Golden trees, canonical wire encoding.
+            (let ((json (jetpacs-node->canonical-json
+                         (glasspane-capture--picker-body
+                          (ebp-org-capture-templates)))))
+              (should (string-search "Quick Capture" json))
+              (should (string-search "\"builtin\":\"dialog.submit\"" json))
+              (should (string-search "\"value\":\"t\"" json))
+              (should (string-search "\"builtin\":\"dialog.dismiss\"" json))
+              ;; The shared-in preview card.
+              (should (string-search "shared body text" json)))
+            (let* ((pairs (glasspane-capture--field-pairs tmpl))
+                   (json (jetpacs-node->canonical-json
+                          (glasspane-capture--form-body tmpl))))
+              (should (= (length pairs) 2))
+              ;; Deterministic minting: the conclusion re-derives the
+              ;; same prompt->id mapping the builder used.
+              (should (equal pairs (glasspane-capture--field-pairs tmpl)))
+              (dolist (cell pairs)
+                (should (jetpacs-identifier-p (cdr cell)))
+                (should (string-search (cdr cell) json)))
+              (should (string-search "\"capture_fields\"" json))
+              ;; The shared subject seeds the Headline field's :value.
+              (should (string-search "Shared subject" json))))
+          ;; The chain: picker -> pick "t" -> form -> submit -> durable.
+          (glasspane-capture--show-picker '(:surface "glasspane"))
+          (should (= (length shown) 1))
+          (should (equal (plist-get (car shown) :style) "sheet"))
+          (funcall (plist-get (car shown) :callback)
+                   "submitted" '(:status "submitted" :value "t") nil)
+          (should (= (length shown) 2))
+          (let* ((form (car shown))
+                 (pairs (glasspane-capture--field-pairs
+                         (glasspane-capture--template "t")))
+                 (fields (list (intern (concat ":" (cdr (assoc "Headline"
+                                                               pairs))))
+                               "Water the ferns"
+                               (intern (concat ":" (cdr (assoc "Notes"
+                                                               pairs))))
+                               "")))
+            (funcall (plist-get form :callback)
+                     "submitted"
+                     (list :status "submitted" :fields fields) nil))
+          (let ((content (with-temp-buffer
+                           (insert-file-contents file) (buffer-string))))
+            (should (string-search "* TODO Water the ferns" content))
+            ;; An empty wire value falls back to the template's default.
+            (should (string-search "none" content))
+            ;; The shared text rides below as the extra body.
+            (should (string-search "shared body text" content)))
+          ;; The report fired once, and never before the write.
+          (should (equal (caar notified) "Captured ✓"))
+          (should (string-search "Water the ferns" (cdar notified)))
+          ;; Consumed: stash cleared, no live sheet.
+          (should-not glasspane-capture--shared-text)
+          (should-not glasspane-capture--shared-subject)
+          (should-not glasspane-capture--dialog)
+          ;; Revalidation arm (SPEC 23.2): a key whose template vanished
+          ;; drops the stash instead of showing a form.
+          (setq glasspane-capture--shared-text "leftover")
+          (glasspane-capture--show-picker nil)
+          (let ((n (length shown)))
+            (funcall (plist-get (car shown) :callback)
+                     "submitted" '(:status "submitted" :value "zzz") nil)
+            (should (= (length shown) n)))
+          (should-not glasspane-capture--shared-text)
+          ;; Dismissal arm: bailing out of the picker forgets the share.
+          (setq glasspane-capture--shared-text "bail")
+          (glasspane-capture--show-picker nil)
+          (funcall (plist-get (car shown) :callback) "dismissed" nil nil)
+          (should-not glasspane-capture--shared-text)
+          (should-not glasspane-capture--dialog))
+      (ebp-org-cache-invalidate)
+      (dolist (buf (buffer-list))
+        (let ((f (buffer-file-name buf)))
+          (when (and f (string-prefix-p (file-name-as-directory
+                                         (file-truename vault))
+                                        (file-truename f)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf))))
+      (delete-directory vault t))))
+
+(ert-deftest glasspane-test-capture-handler-statuses ()
+  "The capture verbs answer SPEC 14.4 statuses straight from the
+handler table: dialog verbs refuse without a client (never a hang),
+and with one the show rides a continuation — zero dialog work inside
+the dispatch extent.  The share intake normalizes its stash before
+the client guard: a share IS its payload, and it outlives a refused
+presentation."
+  (glasspane-capture-register)
+  (let ((glasspane-capture--shared-text nil)
+        (glasspane-capture--shared-subject nil)
+        (glasspane-capture--dialog nil)
+        (continuations nil))
+    (cl-flet ((run (name args &optional params)
+                (let ((handler (gethash name jetpacs-action-handlers)))
+                  (should handler)
+                  (funcall handler args params))))
+      ;; The whole table answers statuses on bare nil/nil input.
+      (dolist (name glasspane-capture--verbs)
+        (should (memq (run name nil nil) '(accepted stale rejected))))
+      (should (eq (run "org.capture.show" nil nil) 'rejected))
+      ;; Stash normalization: trimmed, blank -> nil, a subject-only
+      ;; share doubles as the body (the v1 contract).
+      (should (eq (run "share.text" '(:text "   " :subject " Sub "))
+                  'rejected))
+      (should (equal glasspane-capture--shared-text "Sub"))
+      (should (equal glasspane-capture--shared-subject "Sub"))
+      (should (eq (run "org.capture.share" '(:text " body "))
+                  'rejected))
+      (should (equal glasspane-capture--shared-text "body"))
+      (should-not glasspane-capture--shared-subject)
+      (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
+                ((symbol-function 'jetpacs-flow-continue)
+                 (lambda (fn) (push fn continuations) nil)))
+        (should (eq (run "org.capture.show" nil '(:surface "glasspane"))
+                    'accepted))
+        (should (= (length continuations) 1))
+        (should (eq (run "share.text" '(:text "hi")) 'accepted))
+        (should (= (length continuations) 2))
+        (should (equal glasspane-capture--shared-text "hi"))))))
+
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

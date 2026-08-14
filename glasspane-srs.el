@@ -29,7 +29,9 @@
 ;; Retired against v1 (the plan's retirement list + G7 section):
 ;; - The "glasspane.review" nav view, the drawer item, and its badge
 ;;   (S1): Review is a chrome screen behind `review.open'; the due
-;;   count surfaces IN-SCREEN (FOUNDATION-GAPS #5's accepted fallback).
+;;   count surfaces IN-SCREEN as the idle body's own content (the
+;;   gap-#5 thread-through landed, but the app's ONE dock item wears
+;;   the agenda count — a second number on the same icon is mud).
 ;; - `jetpacs-shell-push' handler tails and the `:switch-to' push: D2 —
 ;;   handlers answer a SPEC 14.4 status and refresh through
 ;;   `glasspane-ui--defer-refresh'.
@@ -567,8 +569,9 @@ the settled page into `glasspane-srs--revealed' without a re-push."
 
 (defun glasspane-srs--idle-body ()
   "The between-sessions block: due summary and the start button.
-The due count IS the retired drawer badge, surfaced in-screen
-\(FOUNDATION-GAPS #5)."
+The due count IS the retired drawer badge, surfaced in-screen — its
+permanent home: the dock badge (gap #5, landed) carries the agenda
+count, and two numbers on one icon is mud."
   (let ((due (glasspane-srs--due-count)))
     (cond
      ((null due)

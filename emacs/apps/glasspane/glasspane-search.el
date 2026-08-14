@@ -53,6 +53,7 @@
 (require 'glasspane-org)
 (require 'glasspane-ui)                 ; --global-todo-keywords, defer-refresh
 (require 'glasspane-detail)             ; the shared result card (G4)
+(require 'jetpacs-org-settings)      ; the global-TODO-keywords helper
 
 ;;;; State (S2 — the handlers below are the only writers)
 ;;
@@ -194,7 +195,7 @@ results, to keep them above the fold."
   ;; not among its options, so stale values re-seed as the resting one.
   (let* ((todo-opts (delete-dups
                      (append '("Any")
-                             (glasspane-ui--global-todo-keywords)
+                             (jetpacs-org-settings-global-todo-keywords)
                              '("Done (any)"))))
          (todo-val (if (member glasspane-search--filter-todo todo-opts)
                        glasspane-search--filter-todo

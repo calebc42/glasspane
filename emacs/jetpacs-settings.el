@@ -312,6 +312,71 @@ owner for the app-identity layer to filter once it exists."
    (lambda ()
      (ignore-errors (jetpacs-shell-push jetpacs-settings-surface)))))
 
+;;;; The one-live-settings-dialog slot (§3 step 2: foundation-owned)
+;;
+;; Settings management dialogs — the org-workflow editors
+;; (jetpacs-org-settings.el), Glasspane's saved-search editors app-side
+;; — share ONE live request slot: nowhere in settings shows two dialogs
+;; at once, and a single writer is what lets a Save fired from INSIDE a
+;; dialog find the params the dialog was opened from (a dialog-context
+;; event carries no `:surface', SPEC 14.4).  Moved from glasspane-ui so
+;; the app's writers stop reaching across modules into a private slot.
+
+(defvar jetpacs-settings--dialog nil
+  "The live settings dialog, (:request-id ID :params PARAMS), or nil.
+PARAMS are the OPENING event's — the refresh a dialog-context Save
+needs is the surface the dialog was opened from.")
+
+(defun jetpacs-settings-dialog-params ()
+  "The opening event's params of the live settings dialog, or nil."
+  (plist-get jetpacs-settings--dialog :params))
+
+(defun jetpacs-settings-dialog-close ()
+  "Retire the live settings dialog (the S3 handler-side dismissal).
+`ebp-client-abandon' sends rpc.cancel; the Companion concludes the
+dialog with error 1301, which the show callback treats as a no-op."
+  (let ((sheet jetpacs-settings--dialog))
+    (setq jetpacs-settings--dialog nil)
+    (when-let* ((client (jetpacs-client))
+                (request-id (plist-get sheet :request-id)))
+      (ignore-errors (ebp-client-abandon client request-id)))))
+
+(cl-defun jetpacs-settings-show-dialog (id spec &key params on-submit)
+  "Show SPEC as dialog ID; stash the request for handler-side abandon.
+ON-SUBMIT, when given, receives the conclusion's `:fields' plist —
+the `jetpacs-dialog-submit' route; dialogs whose Save is a remote
+action instead conclude through `jetpacs-settings-dialog-close' in
+that action's handler."
+  (when-let* ((client (jetpacs-client)))
+    ;; The slot holds ONE request and this is its only writer, so a
+    ;; still-live prior dialog is abandoned here rather than orphaned
+    ;; (its device dialog would otherwise linger with no way back to
+    ;; it), and each callback clears only its own id: the first show's
+    ;; 1301 must not clear the second show's slot, or the Save handler
+    ;; finds no request to close and loses the origin params.  CELL
+    ;; carries the id into the callback, which cannot close over
+    ;; REQUEST-ID — the show that returns it is that binding's init.
+    (jetpacs-settings-dialog-close)
+    (let* ((cell (list nil))
+           (request-id
+            (ebp-client-dialog-show
+             client id spec
+             :callback
+             (lambda (status result _error)
+               ;; Dismissal and the abandon's 1301 both land here.
+               (when (equal (plist-get jetpacs-settings--dialog
+                                       :request-id)
+                            (car cell))
+                 (setq jetpacs-settings--dialog nil))
+               ;; Outside the identity guard: a submitted conclusion
+               ;; runs its handler whoever owns the slot by then.
+               (when (and on-submit (equal status "submitted"))
+                 (funcall on-submit (plist-get result :fields)))))))
+      (when request-id
+        (setcar cell request-id)
+        (setq jetpacs-settings--dialog
+              (list :request-id request-id :params params))))))
+
 ;;;; Actions and state handlers
 
 (defun jetpacs-settings--action-set (args _params)

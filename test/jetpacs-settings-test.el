@@ -178,5 +178,47 @@
                  "jetpacs.theme.modus-toggle" "packages.show"))
       (should (member a actions)))))
 
+;;;; The one-live-dialog slot (§3 step 2)
+
+(ert-deftest jetpacs-settings-dialog-slot-single-writer ()
+  "The slot is single-writer: a second show abandons the first, the
+first's late conclusion (the abandon's 1301) must not clear the LIVE
+slot, a dismissal clears it, and a submitted conclusion routes its
+captured fields to ON-SUBMIT whoever owns the slot by then."
+  (let ((jetpacs-settings--dialog nil)
+        (ids '("req-1" "req-2")) (abandoned nil) (shown nil))
+    (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
+              ((symbol-function 'ebp-client-abandon)
+               (lambda (_c id) (push id abandoned)))
+              ((symbol-function 'ebp-client-dialog-show)
+               (lambda (_c _id _spec &rest kw)
+                 (push (plist-get kw :callback) shown)
+                 (pop ids))))
+      (jetpacs-settings-show-dialog "d" nil :params '(:surface "s1"))
+      (jetpacs-settings-show-dialog "d" nil :params '(:surface "s2"))
+      (let ((first-callback (cadr shown))) ; SHOWN is push-ordered
+        (should (equal abandoned '("req-1")))
+        (should (equal (plist-get jetpacs-settings--dialog :request-id)
+                       "req-2"))
+        (funcall first-callback "error" nil '(:code 1301))
+        (should (equal (plist-get jetpacs-settings--dialog :request-id)
+                       "req-2"))
+        (should (equal (jetpacs-settings-dialog-params)
+                       '(:surface "s2")))
+        (funcall (car shown) "dismissed" nil nil)
+        (should-not jetpacs-settings--dialog))))
+  ;; The on-submit route: fields flow out of the conclusion.
+  (let ((jetpacs-settings--dialog nil) (got nil) (cb nil))
+    (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
+              ((symbol-function 'ebp-client-abandon) #'ignore)
+              ((symbol-function 'ebp-client-dialog-show)
+               (lambda (_c _id _spec &rest kw)
+                 (setq cb (plist-get kw :callback))
+                 "req-3")))
+      (jetpacs-settings-show-dialog
+       "d" nil :on-submit (lambda (fields) (setq got fields)))
+      (funcall cb "submitted" '(:fields (:name "x")) nil)
+      (should (equal got '(:name "x"))))))
+
 (provide 'jetpacs-settings-test)
 ;;; jetpacs-settings-test.el ends here

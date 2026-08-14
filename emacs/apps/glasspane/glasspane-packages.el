@@ -286,17 +286,15 @@ must restore them without a re-require (the G0 gate contract)."
     (jetpacs-defaction "glasspane.packages.install"
                        #'glasspane-packages--on-install
                        :any-surface t
-                       :doc "Install Glasspane's closed optional-engine set from MELPA")
+                       :doc "Install Glasspane's closed optional-engine set from MELPA")))
 
-    (jetpacs-settings-register-section
-     "Packages"
-     '((glasspane-packages-auto-install
-        :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)")))))
+;; The auto-install row registers with the app's CONSOLIDATED
+;; "Glasspane" section (glasspane-ui-register, §3 step 2): one app
+;; block on the Settings root, not three orphan single-entry headers.
 
 (defun glasspane-packages-unregister ()
-  "Drop the install verb and the Packages settings section."
-  (jetpacs-undefaction "glasspane.packages.install")
-  (jetpacs-settings-remove-section "Packages"))
+  "Drop the install verb."
+  (jetpacs-undefaction "glasspane.packages.install"))
 
 ;; v1's bundle entry made this call at its own load; requiring this
 ;; file IS that load moment, and every guard (interactive session,

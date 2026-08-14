@@ -72,6 +72,7 @@
 (require 'jetpacs-org-dialogs)
 (require 'glasspane-org)
 (require 'glasspane-ui)
+(require 'jetpacs-org-settings)      ; the shared tag vocabulary
 
 ;; Same-rung sibling: the foldable reader.  This file must build (and
 ;; the detail body must render) with the reader absent, so the require
@@ -848,7 +849,7 @@ deadline edit delegate to the foundation timestamp dialog through
                                       :test #'equal :from-end t))
          (inherited (seq-difference tags local))
          (available (cl-remove-duplicates
-                     (append local (glasspane-ui--tag-options))
+                     (append local (jetpacs-org-settings-tag-options))
                      :test #'equal :from-end t)))
     (jetpacs-collapsible
      (jetpacs-wire-id "gp-detail-tags-fold" key)
@@ -1643,7 +1644,7 @@ its own event — no state round-trip (v1 read 9 `jetpacs-ui-state's)."
              (filetags (when filetags-str
                          (split-string filetags-str ":" t "[ \t\n\r]+")))
              (available (cl-remove-duplicates
-                         (append filetags (glasspane-ui--tag-options))
+                         (append filetags (jetpacs-org-settings-tag-options))
                          :test #'equal :from-end t))
              (todo-str (or (funcall get "TODO")
                            (funcall get "SEQ_TODO")

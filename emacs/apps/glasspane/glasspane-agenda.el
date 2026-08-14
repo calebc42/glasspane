@@ -29,10 +29,10 @@
 ;; - `jetpacs-ui-state' writes for agenda-mode/anchor (S2): mode is an
 ;;   app defvar here; anchor/selected-date are G3's shared defvars,
 ;;   written only by the agenda.* handlers.
-;; - settings.todo.save's `jetpacs-ui-state' field reads and
-;;   `jetpacs-dismiss-dialog' (S2/S3): states arrive as the Save
-;;   action's `:capture-fields' echo; the live dialog retires through
-;;   `glasspane-ui-settings-dialog-close' (ebp-client-abandon).
+;; - The TODO-sequence WRITERS left with §3 step 2: they manage org's
+;;   own state and are jetpacs-org-settings.el's ownerless
+;;   jetpacs.org.todo.* family now, closing through the foundation's
+;;   settings-dialog slot.
 ;; - `jetpacs-node-or' (T2): `jetpacs-node-advertised-p' conditionals.
 ;; - The trimodal reader block (v1 agenda:552-602,
 ;;   `glasspane-ui--org-editor-body'): PORTED IN G4 — the reader owns
@@ -54,6 +54,7 @@
 (require 'jetpacs-chrome)
 (require 'jetpacs-settings)
 (require 'jetpacs-device)
+(require 'jetpacs-org-settings)      ; the global-TODO-keywords helper
 (require 'jetpacs-org-dialogs)          ; the archive-token scope (S5)
 (require 'glasspane-dates)
 (require 'glasspane-org)
@@ -565,7 +566,7 @@ tab."
                                    (equal glasspane-agenda--tasks-filter kw))
                         :on-tap (jetpacs-action "tasks.filter"
                                                 :args (list :filter kw))))
-                     (cons "ALL" (or (glasspane-ui--global-todo-keywords)
+                     (cons "ALL" (or (jetpacs-org-settings-global-todo-keywords)
                                      '("TODO" "DONE"))))
              (list :spacing 4)))
      (if cards
@@ -683,117 +684,16 @@ the result must name a mode we actually offer."
       (glasspane-ui--defer-refresh params)
       'accepted)))
 
-;;;; TODO sequence writers (the G3 settings dialog dispatches here)
-
-(defun glasspane-agenda--parse-keywords (s)
-  "Comma-separated keyword string S as a clean list; nil when empty."
-  (and (stringp s)
-       (delq nil (mapcar (lambda (x)
-                           (let ((x (string-trim x)))
-                             (unless (string-empty-p x) x)))
-                         (split-string s ",")))))
-
-(defun glasspane-agenda--todo-keywords-apply (seqs)
-  "Make SEQS the effective and persisted `org-todo-keywords'.
-Live org buffers cache the keywords buffer-locally at mode init
-(`org-todo-keywords-1', `org-todo-regexp', ...), so each one is
-restarted, and the org memo is dropped so task views re-render with
-the new states.  Returns non-nil when persisting succeeded."
-  (prog1 (jetpacs-settings-save-variable 'org-todo-keywords seqs)
-    (dolist (buf (buffer-list))
-      (with-current-buffer buf
-        (when (derived-mode-p 'org-mode)
-          (ignore-errors (org-mode-restart)))))
-    (ebp-org-cache-invalidate 'glasspane)))
-
-(defun glasspane-agenda--close-settings-dialog (params)
-  "Retire the live settings dialog and refresh where it was opened.
-A Save/Delete fired from inside the dialog arrives in dialog context
-with no `:surface' (SPEC 14.4), so the refresh needs the surface the
-dialog was opened from; fired from a settings card instead, the close
-is a harmless no-op and PARAMS carries the surface itself."
-  (let ((origin (or (plist-get glasspane-ui--settings-dialog :params)
-                    params)))
-    (glasspane-ui-settings-dialog-close)
-    (glasspane-ui--defer-refresh origin)))
-
-(defun glasspane-agenda--on-todo-save (args params)
-  "Write one global TODO sequence from the editor dialog's capture.
-`:index'/`:type' ride the Save action's args; the states arrive as
-captured fields (S2/S3) — no ui-state round trip."
-  (let* ((idx (plist-get args :index))
-         (idx (if (numberp idx) (truncate idx) idx))
-         (type (pcase (plist-get args :type)
-                 ("sequence" 'sequence)
-                 ("type" 'type)))
-         (fields (plist-get params :fields))
-         (active (glasspane-agenda--parse-keywords
-                  (plist-get fields :todo-active)))
-         (finished (glasspane-agenda--parse-keywords
-                    (plist-get fields :todo-finished)))
-         (seqs (copy-sequence (or (default-value 'org-todo-keywords)
-                                  '((sequence "TODO" "DONE"))))))
-    (cond
-     ((or (not (integerp idx)) (null type)) 'rejected)
-     ((and (null active) (null finished))
-      (jetpacs-shell-notify "A sequence needs at least one state")
-      'rejected)
-     ((>= idx (length seqs))
-      ;; Stale index: the list changed while the dialog was up.
-      (jetpacs-shell-notify "Sequences changed underneath; reopen the editor")
-      (glasspane-agenda--close-settings-dialog params)
-      'stale)
-     (t
-      (let ((new-seq (append (list type) active
-                             (when finished (cons "|" finished)))))
-        (if (>= idx 0)
-            (setcar (nthcdr idx seqs) new-seq)
-          (setq seqs (append seqs (list new-seq))))
-        (when (glasspane-agenda--todo-keywords-apply seqs)
-          (jetpacs-shell-notify "TODO sequence saved"))
-        (glasspane-agenda--close-settings-dialog params)
-        'accepted)))))
-
-(defun glasspane-agenda--on-todo-delete (args params)
-  "Delete the global TODO sequence at `:index'.
-Fired from a settings card or the edit dialog's Delete button."
-  (let* ((idx (plist-get args :index))
-         (idx (if (numberp idx) (truncate idx) idx))
-         (seqs (or (default-value 'org-todo-keywords)
-                   '((sequence "TODO" "DONE")))))
-    (cond
-     ((not (integerp idx)) 'rejected)
-     ((or (< idx 0) (>= idx (length seqs)))
-      ;; The card outlived the list it was rendered from.
-      (jetpacs-shell-notify "Sequences changed underneath")
-      (glasspane-agenda--close-settings-dialog params)
-      'stale)
-     (t
-      (let ((rest (or (append (cl-subseq seqs 0 idx)
-                              (cl-subseq seqs (1+ idx)))
-                      ;; Org misbehaves with no keywords at all;
-                      ;; deleting the last sequence falls back to the
-                      ;; stock one.
-                      '((sequence "TODO" "|" "DONE")))))
-        (when (glasspane-agenda--todo-keywords-apply rest)
-          (jetpacs-shell-notify "TODO sequence deleted"))
-        (glasspane-agenda--close-settings-dialog params)
-        'accepted)))))
-
-;;;; Registration
-
 (defconst glasspane-agenda--verbs
   '("agenda.open"
     "tasks.open"
     "agenda.set-mode"
     "agenda.nav"
-    "tasks.filter"
-    "settings.todo.save"
-    "settings.todo.delete")
+    "tasks.filter")
   "The verbs this file owns, for the register/unregister sweep.
-agenda.today/select-date/set-month live with the anchor defvars (G3);
-the sequence-editor DIALOG verbs (settings.todo.edit) do too — only
-the writers land here, beside `glasspane-agenda--todo-keywords-apply'.")
+agenda.today/select-date/set-month live with the anchor defvars (G3).
+The sequence writers left with §3 step 2 — the foundation's ownerless
+jetpacs.org.todo.* family owns them now.")
 
 (defun glasspane-agenda-remove-hooks ()
   "Detach everything `glasspane-agenda-register' hooked."
@@ -821,10 +721,7 @@ place and the hooks are add-hook-deduplicated."
                        :doc "Open the TODO task list screen")
     (jetpacs-defaction "agenda.set-mode" #'glasspane-agenda--on-set-mode)
     (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav)
-    (jetpacs-defaction "tasks.filter" #'glasspane-agenda--on-tasks-filter)
-    (jetpacs-defaction "settings.todo.save" #'glasspane-agenda--on-todo-save)
-    (jetpacs-defaction "settings.todo.delete"
-                       #'glasspane-agenda--on-todo-delete))
+    (jetpacs-defaction "tasks.filter" #'glasspane-agenda--on-tasks-filter))
   (add-hook 'jetpacs-shell-after-push-hook
             #'glasspane-agenda--sync-reminders)
   (add-hook 'jetpacs-teardown-functions #'glasspane-agenda--on-teardown))

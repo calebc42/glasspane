@@ -427,11 +427,10 @@ the registry entry in place."
     (jetpacs-defaction "journal.capture" #'glasspane-journal--on-capture
                        :doc "Append text to the current journal day."
                        :args '((:name value :type "text" :required t)
-                               (:name date :type "date")))
-    (jetpacs-settings-register-section
-     "Journal"
-     (list (list 'glasspane-journal-landing
-                 :label "Open on the journal"))))
+                               (:name date :type "date"))))
+  ;; The landing row registers with the app's CONSOLIDATED "Glasspane"
+  ;; section (glasspane-ui-register, §3 step 2): one app block on the
+  ;; Settings root, not three orphan single-entry headers.
   (add-hook 'jetpacs-ready-functions #'glasspane-journal--apply-landing)
   (add-hook 'jetpacs-shell-view-change-functions
             #'glasspane-journal--on-view-change)
@@ -441,7 +440,6 @@ the registry entry in place."
   "Drop the journal verbs, the settings section, and the hooks."
   (dolist (name glasspane-journal--verbs)
     (jetpacs-undefaction name))
-  (jetpacs-settings-remove-section "Journal")
   (glasspane-journal-remove-hooks))
 
 (provide 'glasspane-journal)

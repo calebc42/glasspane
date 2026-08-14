@@ -71,6 +71,12 @@
 (require 'glasspane-views)
 (require 'glasspane-search)
 (require 'glasspane-table)
+;; G7, the knowledge arms: srs soft-requires notes (the Review screen's
+;; stale-files half calls its section builder), so notes loads first.
+;; Both degrade to absent without vulpea/org-srs — the requires are
+;; unconditional, the runtime probes are theirs.
+(require 'glasspane-notes)
+(require 'glasspane-srs)
 
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
@@ -165,7 +171,9 @@ registry entry in place."
   (glasspane-capture-register)
   (glasspane-views-register)
   (glasspane-search-register)
-  (glasspane-table-register))
+  (glasspane-table-register)
+  (glasspane-notes-register)
+  (glasspane-srs-register))
 
 (defun glasspane-unregister ()
   "Deregister every verb, the chrome root, and the app identity.
@@ -190,7 +198,9 @@ glasspane.packages.install) sweep with the entry's own."
   (glasspane-capture-unregister)
   (glasspane-views-unregister)
   (glasspane-search-unregister)
-  (glasspane-table-unregister))
+  (glasspane-table-unregister)
+  (glasspane-notes-unregister)
+  (glasspane-srs-unregister))
 
 (glasspane-register)
 

@@ -18,9 +18,15 @@ S3 sheet chain, the gap-#10 date helpers; gate 39/39, full suite
 glasspane-search.el + glasspane-table.el — views as a real pushed
 stack with app-owned kanban board, search's S2 offline screen with
 the sexp query builder, table's app-authored mutable nodes over the
---table-mutate funnel; gate 47/47, full suite 970/41). Next: G7
-(knowledge arms: glasspane-notes.el, glasspane-srs.el, vulpea/org-srs
-guarded). The completion ladder
+--table-mutate funnel; gate 47/47, full suite 970/41). G7 LANDED
+2026-08-14 (knowledge arms: glasspane-notes.el + glasspane-srs.el —
+wikilink capf on the ebp-complete shadow bridge, mentions dissolved
+into the jetpacs-async keyed loader, SRS review as a pushed chrome
+screen with the in-screen due count, engine wrapper reworked so a
+failed call never answers 'accepted; vulpea/org-srs guarded, live
+paths banked for G9; gate 53/53, full suite 976/41). Next: G8
+(satellites + fixtures: glasspane-ef.el + glasspane-theme-picker.el,
+glasspane-demo.el, glasspane-gallery.el). The completion ladder
 (PLAN-glasspane-completion.md, R0–R5) is closed on the foundation side;
 this plan is the app itself. Source: the 22-file v1 app at
 `llm-poc/jetpacs-v1-examples/glasspane/emacs/apps/glasspane/` (8,522

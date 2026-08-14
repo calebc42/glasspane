@@ -1,7 +1,14 @@
 # M3 Expressive Catalog — verification ledger (2026-07-28)
 
-The catalog is **authored and gated**; what is outstanding is the
-**verification pass**, which was cut short by usage. This file is the
+**CLOSED (stamped 2026-08-14, the D-17 ledger row): the sprint this
+file was resume state for finished at 265/279 recreated with 14 real
+`:unsupported` — counted from the REGISTRY, not grep (20 raw hits
+include 6 infrastructure markers in jetpacs-m3-core.el).  The resume
+commands below cd into the ARCHIVED llm-poc-2 checkout and must not be
+run; llm-poc-3 is the live line.  Everything below is HISTORY.**
+
+The catalog is **authored and gated**; what was outstanding was the
+**verification pass**, cut short by usage. This file WAS the
 resume state.
 
 ## What exists

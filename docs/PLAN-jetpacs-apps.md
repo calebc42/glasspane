@@ -706,6 +706,12 @@ restart Emacs, confirm the edit took.
 
 ### JA-7 — git from the tablet *(**DEFERRED post-1.0** — Caleb, 2026-07-28)*
 
+> **Resolution stamp (2026-08-14, the D-18 ledger row): part-landed,
+> part-retired — do not re-litigate.** `jetpacs-transient.el` LANDED
+> (af47d48) with the single-dialog conclusion shape below; the
+> with-editor half is RETIRED by owner ruling (PLAN-poc1-parity.md:
+> "with-editor NOT a goal").
+
 **Lands:** `jetpacs-transient.el` — layout reader (port) plus a **single**
 dialog whose infixes are stateful nodes and whose suffix buttons are
 `(jetpacs-dialog-submit :value SUFFIX :capture-fields …)`, concluding once;
@@ -727,6 +733,11 @@ touch-usable.
 to end from the tablet, including one prefix with an infix argument set.
 
 ### JA-8 — Project and hosts *(**DEFERRED post-1.0** — Caleb, 2026-07-28)*
+
+> **Resolution stamp (2026-08-14, the D-18 ledger row): part-landed,
+> part-retired.** `jetpacs-project.el` and `jetpacs-sql.el` LANDED
+> (bde3bec); the hosts half is NOT PORTED ON PURPOSE — superseded by
+> EBP pairing (PLAN-poc1-parity.md:71-76).
 
 **Lands:** the project dashboard on JA-2's buffer host — grep, compile, shell,
 buffers, magit, each landing on a substrate the rewrite already finished.

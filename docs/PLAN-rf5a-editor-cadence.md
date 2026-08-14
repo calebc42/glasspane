@@ -1,6 +1,16 @@
 # PLAN-rf5a-editor-cadence — RF-5a: track-changes.el and the editor cadence, both sides
 
-Status: **DRAFT — awaiting Caleb's review. Nothing below §0 has executed.**
+Status: **SUPERSEDED (stamped 2026-08-14, the D-16 ledger row) — do NOT
+execute as written.** The ebp-sync.el §19 route (df8910c) and the
+completion ladder (R0–R6, PLAN-glasspane-completion.md) delivered this
+plan's territory by another path, and its two S1 amendment numbers
+(#156/#157) were since REUSED by the m3-tier1 draft — running the
+checkpoints now would collide with ratified spec text.  Two live
+remainders survive it, pointed at the ledger rather than lost:
+deliverable 3's poll replacement (jetpacs-emacs-ui.el still runs the
+1 s chars-modified-tick `run-at-time` poll) and the Companion :app
+profile hardening — both belong to future editor-cadence work, not to
+this document.  Everything below is HISTORY.
 Branch (on execution): `rf-5a`, stacked on `rf-4a` @ `93bb798`. One commit per
 checkpoint; rollback = `git reset --hard` to the prior checkpoint SHA.
 

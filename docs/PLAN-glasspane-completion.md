@@ -291,10 +291,12 @@ edit.candidate.doc — the review-P1 scenario against real eglot. The
 batch also CAUGHT one pre-existing display defect (fixed same commit):
 a successful tap-accept never republished the mirror, so the field
 kept the pre-tap text until the next keystroke bounced off the #100
-gate and snapped back, swallowing that keystroke. Still owed: the
-on-device Android-Emacs + Termux server smoke (needs hands on the
-Emacs app; pylsp install is the prep) and P1's desync/concurrency
-smoke sub-clauses.
+gate and snapped back, swallowing that keystroke. Still owed: P1's
+desync/concurrency smoke sub-clauses (the D-2 ledger row).  (The
+on-device Android-Emacs + Termux pylsp smoke RAN 2026-08-13 — the
+measured cold-pylsp timings live in device/emacs-init.el Stage 3b and
+the harness at tools/onboard-tablet.sh + device/py/live.py; 6b7bbfd,
+02e4087, f131130.)
 
 Amendment #172 is fully applied: SPEC §19.3 normative text
 (SPEC.md:3328-3345), the §11 registry row, contract.json's method

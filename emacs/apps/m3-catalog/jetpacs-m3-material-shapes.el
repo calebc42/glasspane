@@ -58,7 +58,22 @@
     :shape (car pair) :color "primary")
    :align "center" :spacing 8))
 
+(defun jetpacs-m3-material-shapes--all-shapes ()
+  "Upstream ShapesSample, the `AllShapes' grid: the whole shape set.
+A four-column `lazy_grid' over the 35 named MaterialShapes, each cell a
+label above a 56dp swatch.  The swatch is a `surface' whose `shape'
+names the shape by wire name, which the Companion resolves through
+MaterialShapes.<Name>.toShape() -- so every corner is androidx polygon
+rounding, not a lookalike.  Upstream clips a Spacer and paints primary
+through the clip; same pixels, different owner."
+  (apply #'jetpacs-lazy-grid
+         (append
+          (mapcar #'jetpacs-m3-material-shapes--cell
+                  jetpacs-m3-material-shapes--names)
+          (list :columns 4 :spacing 4))))
+
 (jetpacs-m3-defcomponent "material-shapes"
+  :builders (list #'jetpacs-surface #'jetpacs-lazy-grid)
   :name "Material Shapes"
   :description
   "Material Shapes are used to define the shape of components."
@@ -73,13 +88,7 @@
     "Material shapes examples"
     :source jetpacs-m3-material-shapes--source
     :expressive t
-    :build
-    (lambda ()
-      (apply #'jetpacs-lazy-grid
-             (append
-              (mapcar #'jetpacs-m3-material-shapes--cell
-                      jetpacs-m3-material-shapes--names)
-              (list :columns 4 :spacing 4)))))
+    :build #'jetpacs-m3-material-shapes--all-shapes)
    ))
 
 (provide 'jetpacs-m3-material-shapes)

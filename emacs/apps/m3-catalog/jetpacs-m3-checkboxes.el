@@ -82,7 +82,37 @@ which is what the sample hoists its toggleable onto upstream."
                     :label "Option selection"
                     :on-change (jetpacs-m3-demo "Option selection")))
 
+(defun jetpacs-m3-checkboxes--rounded-strokes ()
+  "Upstream CheckboxRoundedStrokesSample: CheckboxSample, rounded.
+The one thing that differs from the bare sample is the stroke pair --
+Round cap and Round join, on the checkmark and on the outline both --
+which is what `:stroke' reaches.  The width is left out on purpose: the
+renderer's own default already IS CheckboxDefaults.StrokeWidth."
+  (jetpacs-checkbox "checkboxes-rounded"
+                    :checked t
+                    :stroke jetpacs-m3-checkboxes--rounded-stroke
+                    :on-change (jetpacs-m3-demo "Checkbox")))
+
+(defun jetpacs-m3-checkboxes--tri-state ()
+  "Upstream TriStateCheckboxSample: the parent box over Daily and Weekly.
+`:state' is the third value -- off/on/indeterminate, a schema of its own
+rather than a widened boolean -- and the \"Receive Emails\" parent is the
+box that wears it.  That third state is what rides; what does not is
+upstream's per-frame derivation of the parent from its two children,
+the seam stated in this module's Commentary."
+  (jetpacs-m3-checkboxes--tri-family "plain"))
+
+(defun jetpacs-m3-checkboxes--tri-state-rounded-strokes ()
+  "Upstream TriStateCheckboxRoundedStrokesSample: that family, rounded.
+Nothing changes but the stroke pair, and it dresses all three boxes,
+the tri-state parent included.  The ids carry a \"rounded\" suffix so
+this family's boxes stay distinct on the wire from the plain family's
+-- each box holds its own state on the device."
+  (jetpacs-m3-checkboxes--tri-family
+   "rounded" jetpacs-m3-checkboxes--rounded-stroke))
+
 (jetpacs-m3-defcomponent "checkboxes"
+  :builders (list #'jetpacs-checkbox)
   :name "Checkboxes"
   :description
   "Checkboxes allow the user to select one or more items from a set or turn an option on or off."
@@ -105,23 +135,17 @@ which is what the sample hoists its toggleable onto upstream."
     "CheckboxRoundedStrokesSample"
     "Checkboxes examples"
     :source jetpacs-m3-checkboxes--source
-    :build (lambda ()
-             (jetpacs-checkbox "checkboxes-rounded"
-                               :checked t
-                               :stroke jetpacs-m3-checkboxes--rounded-stroke
-                               :on-change (jetpacs-m3-demo "Checkbox"))))
+    :build #'jetpacs-m3-checkboxes--rounded-strokes)
    (jetpacs-m3-example
     "TriStateCheckboxSample"
     "Checkboxes examples"
     :source jetpacs-m3-checkboxes--source
-    :build (lambda () (jetpacs-m3-checkboxes--tri-family "plain")))
+    :build #'jetpacs-m3-checkboxes--tri-state)
    (jetpacs-m3-example
     "TriStateCheckboxRoundedStrokesSample"
     "Checkboxes examples"
     :source jetpacs-m3-checkboxes--source
-    :build (lambda ()
-             (jetpacs-m3-checkboxes--tri-family
-              "rounded" jetpacs-m3-checkboxes--rounded-stroke)))
+    :build #'jetpacs-m3-checkboxes--tri-state-rounded-strokes)
    ))
 
 (provide 'jetpacs-m3-checkboxes)

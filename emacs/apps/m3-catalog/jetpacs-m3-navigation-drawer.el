@@ -150,7 +150,19 @@ already carries the 18 items."
     :weight 1 :padding 16)
    :align "top" :fill t))
 
+(defun jetpacs-m3-navigation-drawer--dismissible-body ()
+  "Upstream DismissibleNavigationDrawerSample: the content beside the sheet.
+Upstream draws a Column that reads \">>> Swipe >>>\" and a \"Click to
+open\" Button, both of them handles on the `DrawerState' the wire has no
+member for.  What survives is the instruction, and it is enough: the
+line names the two gestures that DO open this drawer -- the edge swipe,
+and the hamburger the Companion synthesizes for the slot."
+  (jetpacs-column
+   (jetpacs-text "Swipe from the edge or tap the menu icon")
+   :align "center" :fill t))
+
 (jetpacs-m3-defcomponent "navigation-drawer"
+  :builders (list #'jetpacs-scaffold)
   :name "Navigation drawer"
   :description
   "Navigation drawers provide ergonomic access to destinations in an app."
@@ -177,10 +189,7 @@ already carries the 18 items."
     ;; around the SAME drawer node: it pushes the body aside and leaves
     ;; it live and scrimless, which is the whole delta from the modal
     ;; sample.  The hamburger the Companion synthesizes is the way in.
-    :build (lambda ()
-             (jetpacs-column
-              (jetpacs-text "Swipe from the edge or tap the menu icon")
-              :align "center" :fill t))
+    :build #'jetpacs-m3-navigation-drawer--dismissible-body
     :slots (list :drawer #'jetpacs-m3-navigation-drawer--dismissible-sheet)
     :scaffold (list :drawer-variant "dismissible"))
    ))

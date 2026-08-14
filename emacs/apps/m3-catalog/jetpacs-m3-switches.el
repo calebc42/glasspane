@@ -47,6 +47,7 @@ as the message the toggle reports."
                   :on-change (jetpacs-m3-demo "Demo with icon")))
 
 (jetpacs-m3-defcomponent "switches"
+  :builders (list #'jetpacs-switch)
   :name "Switches"
   :description
   "Switches toggle the state of a single setting on or off."

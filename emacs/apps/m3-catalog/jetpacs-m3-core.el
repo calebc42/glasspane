@@ -43,6 +43,9 @@
 ;; dock destination through the app-identity layer, not by reaching for
 ;; the chrome seam itself.
 (require 'jetpacs-apps)
+;; `jetpacs-emacs-ui-mx-button' — M-x in the top bar, the chrome-as-a-
+;; projection-of-commands rule this app was the one not keeping.
+(require 'jetpacs-emacs-ui)
 ;; `jetpacs-theme-mode' backs the ThemePicker's System/Light/Dark row.
 (require 'jetpacs-theme)
 
@@ -265,18 +268,42 @@ sample would need; the example then drills into \"Not supported\"."
         :unsupported unsupported))
 
 (cl-defun jetpacs-m3-defcomponent (id &key name description guidelines docs
-                                      source additional-info examples)
+                                      source additional-info examples
+                                      builders)
   "Register catalog component ID (a §4.4 identifier used in screen ids).
 NAME, DESCRIPTION, GUIDELINES, DOCS, SOURCE and ADDITIONAL-INFO are
 upstream's `Component' fields; EXAMPLES is a list of `jetpacs-m3-example'
 plists in upstream order.  Re-registering an id REPLACES it in place, so
-a module can be re-evaluated live without duplicating or reordering."
+a module can be re-evaluated live without duplicating or reordering.
+
+BUILDERS names the `jetpacs-' NODE BUILDERS this M3 component is made of
+— `jetpacs-button' for Buttons, `jetpacs-scaffold' for Bottom Sheet —
+and the Component screen shows each one's docstring under upstream's
+description.  It is authored, not derived, and it has to be: a count of
+which constructors a module's samples CALL is dominated by scenery
+(`jetpacs-column' appears everywhere and means nothing), and the answer
+for a third of the catalog is `jetpacs-scaffold', which the samples
+never call at all because the Example screen builds the scaffold around
+them.  Which component a sample IS is a judgement.
+
+The mapping is 1:1 with M3 only at the vocabulary layer, exactly as
+docs/CHROME-VOCABULARY.md says: `scaffold' bundles eight-odd composables
+and `jetpacs-text-input' serves two M3 text fields, so a component
+legitimately names several builders, and several components legitimately
+name one."
   (jetpacs-check-identifier id "component id")
   (jetpacs-require-string name "component name")
   (jetpacs-require-string description "component description")
+  ;; A builder that does not exist would show an empty block on a screen
+  ;; nobody looks at twice; signalling here fails the module's own gate
+  ;; instead, which is where a typo is cheap.
+  (dolist (builder builders)
+    (unless (and (symbolp builder) (fboundp builder))
+      (error "jetpacs-m3: component %s names an unbound builder %S" id builder)))
   (let ((component (list :id id :name name :description description
                          :guidelines guidelines :docs docs :source source
                          :additional-info additional-info
+                         :builders builders
                          :examples examples)))
     (if-let* ((prior (gethash id jetpacs-m3--by-id)))
         (setq jetpacs-m3-components
@@ -541,9 +568,18 @@ siblings are link-outs and carry none."
    :icon "more_vert"))
 
 (defun jetpacs-m3--actions (screen-id &optional guidelines docs source elisp)
-  "The top-bar trailing actions: pin, theme, more.
+  "The top-bar trailing actions: pin, theme, M-x, more.
 SCREEN-ID is what the pin pins (upstream pins a nav route); ELISP rides
-into the more-menu (see `jetpacs-m3--more-menu')."
+into the more-menu (see `jetpacs-m3--more-menu').
+
+M-x is HERE because docs/CHROME-VOCABULARY.md says chrome is a
+projection of commands and puts M-x top-right on a top app bar, and
+`jetpacs-emacs-ui-mx-button' exists precisely so \"any app may embed\"
+it.  The catalog is the app that did not, which meant the one screen in
+this tree devoted to a command vocabulary had no way to run a command.
+It sits inside the icon group and left of the overflow, because the
+kebab is conventionally outermost and upstream's seven menu rows are
+still what that menu is for."
   (list (let ((pinned (equal jetpacs-m3-favorite screen-id)))
           (jetpacs-icon-button
            "push_pin"
@@ -559,6 +595,7 @@ into the more-menu (see `jetpacs-m3--more-menu')."
         (jetpacs-icon-button
          "palette" (jetpacs-action "m3catalog.theme")
          :content-description "Change theme")
+        (jetpacs-emacs-ui-mx-button)
         (jetpacs-m3--more-menu guidelines docs source elisp)))
 
 (defun jetpacs-m3--expr-badge ()
@@ -663,8 +700,9 @@ sixty-character title there is exactly the flex trap
                     (jetpacs-icon jetpacs-m3-component-icon :size 108)
                     :align_self "center" :padding 24)
                    (jetpacs-text "Description" :style "title")
-                   (jetpacs-text (plist-get component :description))
-                   (jetpacs-with-attrs (jetpacs-spacer) :height 16)
+                   (jetpacs-text (plist-get component :description)))
+             (jetpacs-m3--builders-block component)
+             (list (jetpacs-with-attrs (jetpacs-spacer) :height 16)
                    (jetpacs-text "Examples" :style "title"))
              (if cells
                  (mapcar (lambda (cell)
@@ -733,6 +771,171 @@ catalog must stay navigable when one recreation is wrong."
      (slots (jetpacs-m3--slot-hint slots))
      (t (jetpacs-m3--slot-hint nil)))))
 
+;;;; The example's own doc string
+
+;; Every screen in this app describes its subject in UPSTREAM's words —
+;; `:description' is Google's product copy, and fidelity is why.  But the
+;; thing actually on the glass was drawn by an elisp builder that
+;; documents itself, and the authoring brief has required that docstring
+;; from the first module ("Put each sample in its own `defun
+;; jetpacs-m3-<slug>--<name>' … with a docstring naming the upstream
+;; sample").  Nearly every one of the catalog's builders carries one and
+;; none of them had ever reached the device.  So both descriptions ride
+;; the Example screen now: what M3 says this component is, and what the
+;; elisp says this sample does.
+
+(defun jetpacs-m3--example-builder (example)
+  "The function symbol whose docstring documents EXAMPLE, or nil.
+
+THE DOCSTRING DECIDES.  An example is built from up to three functions —
+`:build', `:top-bar', and its `:slots' — and which of them is THE SAMPLE
+cannot be read off the plist key, because it goes both ways:
+
+  a sample that IS chrome claims `:top-bar' or a slot, and its `:build'
+  is only a backdrop, usually one several examples share — a hundred
+  lines for the bar to collapse over.  Ask `:build' and a full-screen
+  search bar describes itself as \"the Scaffold content both scaffold
+  samples share\";
+
+  and the mirror image, which is just as real: two examples can share
+  ONE chrome builder and differ in their bodies, so
+  `PinnedTopAppBarWithReversedLazyGrid' has the shared `--pinned' bar
+  and a `--reversed-grid' body of its own.  Ask the chrome and that
+  screen names its SIBLING's upstream sample.
+
+Both wrong answers are plausible, which is what makes a positional rule
+a trap.  So ask the functions instead: the one whose docstring NAMES
+this example is the one written for it.  Every sample builder in this
+tree opens \"Upstream <Name>...\" — the authoring brief requires it — so
+the discriminator is the same convention the docstrings already keep.
+A longer name outranks a shorter one for free, because
+`PinnedTopAppBar' is a substring of its own longer sibling but not the
+reverse.
+
+Chrome-first survives only as the TIEBREAK, for the examples whose
+builders name nothing.
+
+Only a SYMBOL can answer: an inline lambda has no docstring to read, and
+`:snackbar' (a string) and `:on-refresh' (a descriptor) are not functions
+at all, so the `fboundp' test is load-bearing rather than defensive."
+  (let* ((name (plist-get example :name))
+         (candidates
+          (cl-remove-if-not
+           (lambda (fn) (and fn (symbolp fn) (fboundp fn)))
+           (append (list (plist-get example :top-bar))
+                   (cl-loop for (_key value)
+                            on (plist-get example :slots) by #'cddr
+                            collect value)
+                   (list (plist-get example :build))))))
+    (or (and (stringp name)
+             (cl-find-if (lambda (fn)
+                           (let ((doc (ignore-errors (documentation fn))))
+                             (and doc (string-search name doc))))
+                         candidates))
+        (car candidates))))
+
+(defun jetpacs-m3-example-doc (example)
+  "EXAMPLE's builder docstring as display text, or nil when it has none.
+Run through `substitute-command-keys', so the `\\=`quoted symbols\\='
+every docstring in this tree is written with arrive as the curly quotes
+Emacs would show in *Help* rather than as raw grave accents.
+
+Never signals.  `documentation' reads a doc file for a preloaded
+function and can fail on a stripped or moved one, and this is called
+while a screen is being built — a docstring nobody can read costs its
+block and nothing else."
+  (when-let* ((sym (jetpacs-m3--example-builder example))
+              (raw (ignore-errors (documentation sym)))
+              (text (ignore-errors (substitute-command-keys raw))))
+    (and (stringp text)
+         (not (string-blank-p text))
+         (string-trim text))))
+
+(defvar jetpacs-m3-example-extras-function nil
+  "Seam: what an Example screen carries BESIDES its sample, or nil.
+
+Called with (COMPONENT INDEX SHEET-FREE-P) and returning a plist:
+
+  :scaffold PLIST  appended to the screen's own scaffold members;
+  :body     NODES  appended to the body column, under the doc block;
+  :override NODE   shown INSTEAD of the sample.
+
+`jetpacs-m3-repl' is the caller — the Playground.  It is a seam rather
+than a `require' because the dependency runs the wrong way for one: the
+Playground is built out of the core's own screens and registries, and
+the core has no business knowing it exists.  A catalog with the module
+absent is the catalog exactly as it was.
+
+SHEET-FREE-P says whether the example has already claimed the scaffold's
+`sheet'.  It has to be told, because the failure is silent either way:
+`jetpacs-scaffold' is a `cl-defun' and a duplicate keyword keeps the
+FIRST, so appending loses the Playground on those examples and
+prepending clobbers the sample they exist to show, and no gate can see
+either.")
+
+(defun jetpacs-m3-builder-doc (builder)
+  "BUILDER's docstring as display text, or nil.  Never signals."
+  (when-let* ((raw (ignore-errors (documentation builder)))
+              (text (ignore-errors (substitute-command-keys raw))))
+    (and (stringp text) (not (string-blank-p text)) (string-trim text))))
+
+(defun jetpacs-m3--builders-block (component)
+  "COMPONENT's node builders, each with its docstring — a LIST of nodes.
+Empty when the component names none, so the `append' that splices this
+into the screen closes over nothing.
+
+This is the other half of what the Example screen does one level down.
+There, upstream's `:description' says what M3 calls the component and
+the sample's docstring says what that one example demonstrates.  Here,
+upstream's says what the component IS and these say what YOU WRITE to
+get one — which is the question a catalog of a node vocabulary exists to
+answer, and the one it could not answer until now."
+  (when-let* ((builders (plist-get component :builders)))
+    (append
+     (list (jetpacs-with-attrs (jetpacs-spacer) :height 16)
+           (jetpacs-text "Elisp" :style "title"))
+     (cl-loop
+      for builder in builders
+      for index from 0
+      append (list
+              (jetpacs-text (symbol-name builder)
+                            :style "label" :font-weight "bold")
+              (jetpacs-text (or (jetpacs-m3-builder-doc builder)
+                                "This builder has no docstring.")
+                            :style "caption" :selectable t)
+              ;; The full *Help* is one tap away rather than inlined:
+              ;; `describe-function' also carries the arglist, the
+              ;; source link and the customization notes, and
+              ;; `jetpacs-hypertext' already renders help-mode to the
+              ;; device.  Addressed by (component, index) like every
+              ;; other verb here — never by symbol name, which would let
+              ;; a tap describe anything in the image.
+              (jetpacs-chrome-row
+               (format "Describe %s" builder)
+               :subtitle "Opens the *Help* buffer, on the hub"
+               :icon "help"
+               :on-tap (jetpacs-action
+                        "m3catalog.describe"
+                        :args (list :component (plist-get component :id)
+                                    :index index))
+               :key (format "desc-%s-%d" (plist-get component :id) index)))))))
+
+(defun jetpacs-m3--doc-block (example)
+  "EXAMPLE's elisp docstring as a titled block, or nil when it has none."
+  (when-let* ((doc (jetpacs-m3-example-doc example)))
+    (jetpacs-with-attrs
+     (jetpacs-column
+      (jetpacs-text "Elisp" :style "title")
+      ;; Selectable for the same reason the \"View elisp\" screen's text
+      ;; is: reading it on the phone and then taking it somewhere are two
+      ;; different wants, and selection serves the second without a verb.
+      (jetpacs-text doc :style "caption" :selectable t)
+      :spacing 4)
+     ;; The sample is CENTERED in this column and prose is not — a ragged
+     ;; paragraph centred line by line is the kind of thing that looks
+     ;; deliberate and reads terribly — so the block claims the start edge.
+     :align_self "start")))
+
 (defun jetpacs-m3--example-slots (example)
   "EXAMPLE's scaffold slots as a `jetpacs-scaffold' keyword plist."
   (let ((label (plist-get example :name))
@@ -760,11 +963,15 @@ instead, because a Node tree cannot nest a scaffold."
                                        (plist-get component :guidelines)
                                        (plist-get component :docs)
                                        (plist-get example :source)
-                                       ;; Only an example with a `:build'
-                                       ;; has a defun to show; a slots-only
-                                       ;; or `:unsupported' one gets the
-                                       ;; upstream seven and no more.
-                                       (and (plist-get example :build)
+                                       ;; Whatever the DOC BLOCK is quoting
+                                       ;; is what "View elisp" must show —
+                                       ;; the two disagreed while this asked
+                                       ;; `:build' and the block asked
+                                       ;; `jetpacs-m3--example-builder'.  It
+                                       ;; also un-gates 26 slots-only
+                                       ;; examples, which have a defun to
+                                       ;; show and were offered no row.
+                                       (and (jetpacs-m3--example-builder example)
                                             (jetpacs-m3--open-source
                                              (plist-get component :id)
                                              index))))
@@ -774,10 +981,33 @@ instead, because a Node tree cannot nest a scaffold."
          (extra-scaffold (let ((s (plist-get example :scaffold)))
                            (if (functionp s) (funcall s) s)))
          (top-bar (plist-get example :top-bar))
+         ;; The sample, then what its builder says about itself.  `apply'
+         ;; because the doc block is absent for an inline lambda and for
+         ;; every `:unsupported' example, and an absent child must not
+         ;; become a nil one.
+         ;; The Playground seam.  SHEET-FREE-P is the merge rule made
+         ;; explicit: `jetpacs-scaffold' is a `cl-defun', so a duplicate
+         ;; keyword keeps the FIRST — the example's own `:sheet' would
+         ;; silently win and the Playground would vanish, or, prepended,
+         ;; silently clobber the sample.  Neither signals.  So the seam
+         ;; is TOLD whether the slot is free and answers accordingly.
+         (extras (and jetpacs-m3-example-extras-function
+                      (funcall jetpacs-m3-example-extras-function
+                               component index
+                               (not (plist-member extra-scaffold :sheet)))))
          (body (jetpacs-with-attrs
-                (jetpacs-column (jetpacs-m3--example-body example)
-                                :scroll t :align "center" :spacing 16 :fill t)
+                (apply #'jetpacs-column
+                       (append
+                        (list (or (plist-get extras :override)
+                                  (jetpacs-m3--example-body example)))
+                        (when-let* ((doc (jetpacs-m3--doc-block example)))
+                          (list doc))
+                        (plist-get extras :body)
+                        (list :scroll t :align "center" :spacing 16 :fill t)))
                 :padding 16))
+         ;; The example's own members stay FIRST, so `cl-defun''s
+         ;; first-wins is what enforces "the sample keeps its slot".
+         (extra-scaffold (append extra-scaffold (plist-get extras :scaffold)))
          (slots (jetpacs-m3--example-slots example)))
     (if top-bar
         (apply #'jetpacs-scaffold
@@ -808,7 +1038,11 @@ The copy affordance is a labelled button rather than a bar icon
 because the thing it copies is a sexp and the label is the only place
 to say so."
   (let* ((example (nth index (plist-get component :examples)))
-         (source (jetpacs-m3-example-source (plist-get example :build)))
+         ;; The SAME builder the doc block quotes.  Asking `:build' here
+         ;; showed the backdrop for every example whose sample is chrome —
+         ;; the screen said one thing and its source screen showed another.
+         (source (jetpacs-m3-example-source
+                  (jetpacs-m3--example-builder example)))
          (text (plist-get source :text)))
     (jetpacs-chrome-screen
      (plist-get example :name)
@@ -1002,6 +1236,44 @@ Home."
      ((null (jetpacs-m3-component id)) 'stale)
      (t (jetpacs-flow-continue
          (lambda () (jetpacs-m3-show-source id index surface)))
+        'accepted))))
+
+(defun jetpacs-m3--on-describe (args params)
+  "Describe one of a component's node builders in a real *Help* buffer.
+Addressed by (component, index) into that component's own `:builders',
+so the wire can only ever name a builder the catalog already claims —
+resolving a SYMBOL off the wire would let any tap describe anything in
+the image, which is the reasoning `jetpacs-m3--open-source' records.
+
+The *Help* buffer drills on the HUB, not here: `jetpacs-hypertext'
+registers the help-mode renderer and buffer drills belong to the buffer
+app.  So this LEAVES the catalog, the snackbar says where it went, and
+`M-x jetpacs-m3-catalog' is the way back — which the row's own subtitle
+states rather than letting the screen vanish unexplained."
+  (let* ((id (plist-get args :component))
+         (index (plist-get args :index))
+         (surface (plist-get params :surface))
+         (component (and (stringp id) (jetpacs-m3-component id)))
+         (builder (and component (integerp index)
+                       (nth index (plist-get component :builders)))))
+    (cond
+     ((not (and (stringp id) (integerp index))) 'rejected)
+     ((null component) 'stale)
+     ((not (and builder (fboundp builder))) 'stale)
+     (t (jetpacs-flow-continue
+         (lambda ()
+           (condition-case err
+               (progn
+                 (save-window-excursion (describe-function builder))
+                 (jetpacs-navigate-buffer "*Help*" "app:hub")
+                 (jetpacs-shell-notify
+                  (format "%s — on the hub; M-x jetpacs-m3-catalog to come back"
+                          builder)
+                  surface))
+             (error (message "jetpacs-m3: describe %s failed: %s"
+                             builder (jetpacs-error-label err))
+                    (jetpacs-shell-notify "That help buffer could not be shown"
+                                          surface)))))
         'accepted))))
 
 (defun jetpacs-m3--on-theme (_args params)
@@ -1209,8 +1481,70 @@ the screens of whatever surface sent it)."
                                         :args (list :surface home))
                 :selected (equal surface home)))))
 
+;;;###autoload
+(defun jetpacs-m3-open (name)
+  "Drill into the catalog component called NAME, by name.
+The M-x projection of tapping a Home tile.  Completing over the
+component NAMES rather than the slugs, because the name is what the grid
+shows and what upstream calls the thing; the slug is a wire id."
+  (interactive
+   (list (completing-read
+          "Component: "
+          (mapcar (lambda (c) (plist-get c :name)) jetpacs-m3-components)
+          nil t)))
+  (if-let* ((component (cl-find name jetpacs-m3-components
+                                :key (lambda (c) (plist-get c :name))
+                                :test #'equal)))
+      (jetpacs-m3-show-component (plist-get component :id))
+    (user-error "jetpacs-m3: no component named %s" name)))
+
+;;;###autoload
+(defun jetpacs-m3-pin (screen-id)
+  "Pin SCREEN-ID, or unpin it when it is already the favourite.
+The M-x projection of the top bar's pin.  Reads the ids the entry point
+can actually restore — `home', `theme', and the `c-'/`e-' screens — so a
+pin made here is one `jetpacs-m3-catalog' will honour."
+  (interactive
+   (list (completing-read
+          "Pin screen: "
+          (append (list "home" "theme")
+                  (cl-loop for c in jetpacs-m3-components
+                           collect (jetpacs-m3-component-screen-id
+                                    (plist-get c :id))))
+          nil t nil nil jetpacs-m3-favorite)))
+  (setq jetpacs-m3-favorite
+        (unless (equal jetpacs-m3-favorite screen-id) screen-id))
+  (when (jetpacs-connected-p)
+    (ignore-errors (jetpacs-shell-push jetpacs-m3-owner)))
+  (message "jetpacs-m3: %s" (if jetpacs-m3-favorite
+                                (format "pinned %s" jetpacs-m3-favorite)
+                              "unpinned")))
+
+(defconst jetpacs-m3-verbs
+  '(("m3catalog.open"    . jetpacs-m3--on-open)
+    ("m3catalog.example" . jetpacs-m3--on-example)
+    ("m3catalog.source"  . jetpacs-m3--on-source)
+    ("m3catalog.describe" . jetpacs-m3--on-describe)
+    ("m3catalog.theme"   . jetpacs-m3--on-theme)
+    ("m3catalog.pref"    . jetpacs-m3--on-pref)
+    ("m3catalog.pin"     . jetpacs-m3--on-pin)
+    ("m3catalog.demo"    . jetpacs-m3--on-demo)
+    ("m3catalog.flag"    . jetpacs-m3--on-flag)
+    ("m3catalog.fn"      . jetpacs-m3--on-fn)
+    ("m3catalog.dialog"  . jetpacs-m3--on-dialog)
+    ("m3catalog.home"    . jetpacs-m3--on-home))
+  "The catalog's verbs: NAME -> handler.
+ONE list, because there were two and they had already drifted —
+`jetpacs-m3-unregister' named ten of the eleven and left
+\"m3catalog.fn\" registered after a teardown that promised to remove it.
+A handler surviving its own module is the kind of leak that only shows
+up as a stale tap much later, and a second literal list was always going
+to grow this bug again.")
+
 (defun jetpacs-m3-register ()
   "Register the catalog's owner, verbs, root screen — and the APP.
+See `jetpacs-m3-verbs' for the verb list; registration and teardown read
+the same one.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
 stack to Home, which is the documented live-reload path;
 `jetpacs-defapp' replaces its registry entry in place.
@@ -1225,17 +1559,8 @@ package built ON jetpacs; this is the first one there is."
   (when (jetpacs-connected-p)
     (jetpacs-m3--on-ready (jetpacs-client)))
   (with-jetpacs-owner jetpacs-m3-owner
-    (jetpacs-defaction "m3catalog.open" #'jetpacs-m3--on-open)
-    (jetpacs-defaction "m3catalog.example" #'jetpacs-m3--on-example)
-    (jetpacs-defaction "m3catalog.source" #'jetpacs-m3--on-source)
-    (jetpacs-defaction "m3catalog.theme" #'jetpacs-m3--on-theme)
-    (jetpacs-defaction "m3catalog.pref" #'jetpacs-m3--on-pref)
-    (jetpacs-defaction "m3catalog.pin" #'jetpacs-m3--on-pin)
-    (jetpacs-defaction "m3catalog.demo" #'jetpacs-m3--on-demo)
-    (jetpacs-defaction "m3catalog.flag" #'jetpacs-m3--on-flag)
-    (jetpacs-defaction "m3catalog.fn" #'jetpacs-m3--on-fn)
-    (jetpacs-defaction "m3catalog.dialog" #'jetpacs-m3--on-dialog)
-    (jetpacs-defaction "m3catalog.home" #'jetpacs-m3--on-home)
+    (pcase-dolist (`(,verb . ,handler) jetpacs-m3-verbs)
+      (jetpacs-defaction verb handler))
     (jetpacs-chrome-define-root jetpacs-m3-owner "home"
                                 #'jetpacs-m3-home-screen))
   ;; After the root exists: the app claims a surface that is really
@@ -1249,10 +1574,7 @@ package built ON jetpacs; this is the first one there is."
 
 (defun jetpacs-m3-unregister ()
   "Deregister the catalog verbs, its chrome root, and its app identity."
-  (dolist (verb '("m3catalog.open" "m3catalog.example" "m3catalog.source"
-                  "m3catalog.theme"
-                  "m3catalog.pref" "m3catalog.pin" "m3catalog.demo"
-                  "m3catalog.flag" "m3catalog.dialog" "m3catalog.home"))
+  (dolist (verb (mapcar #'car jetpacs-m3-verbs))
     (jetpacs-undefaction verb))
   (jetpacs-apps-unregister jetpacs-m3-owner)
   (jetpacs-chrome-remove jetpacs-m3-owner))

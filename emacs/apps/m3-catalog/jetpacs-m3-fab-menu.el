@@ -69,6 +69,7 @@
           (list :spacing 8 :content-padding 8))))
 
 (jetpacs-m3-defcomponent "fab-menu"
+  :builders (list #'jetpacs-fab-menu #'jetpacs-fab-menu-item)
   :name "FAB Menu"
   :description
   "The FAB Menu displays additional key actions on click of a FAB."

@@ -67,6 +67,23 @@
   "https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material3/material3/samples/src/main/java/androidx/compose/material3/samples/ButtonGroupSamples.kt"
   "Upstream ButtonGroupsExampleSourceUrl.")
 
+(defun jetpacs-m3-button-groups--plain ()
+  "Upstream ButtonGroupSample: ten numbered clickableItems in a ButtonGroup.
+The one sample of the four whose subject the `button_group' node owns
+outright.  What a group adds over the buttons inside it is CONTAINER
+behaviour, and both halves of that live on the device: the press
+animation couples neighbours, and whatever does not fit folds into the
+overflowIndicator menu at MEASURE time -- a width Emacs never sees,
+which is why this is a node and not a list trimmed here.  The labels are
+upstream\='s numButtons = 10 counted out."
+  ;; Ten numbered clickableItems: the press animation couples
+  ;; neighbours and the overflow fold happens at measure time.
+  (jetpacs-button-group
+   (cl-loop for i from 0 below 10
+            collect (jetpacs-button-group-item
+                     (number-to-string i)
+                     (jetpacs-m3-demo (format "Button %d" i))))))
+
 (defconst jetpacs-m3-button-groups--options
   '(("Work" . "work") ("Restaurant" . "restaurant") ("Coffee" . "coffee")
     ("Search" . "search") ("Home" . "home"))
@@ -149,6 +166,7 @@ single-select row."
           (list :overlap 6))))
 
 (jetpacs-m3-defcomponent "button-groups"
+  :builders (list #'jetpacs-button-group #'jetpacs-button-group-item)
   :name "Button Groups"
   :description
   "button groups is a container for material components that adds an animation on press"
@@ -162,14 +180,7 @@ single-select row."
     "ButtonGroup examples"
     :source jetpacs-m3-button-groups--source
     :expressive t
-    :build (lambda ()
-             ;; Ten numbered clickableItems: the press animation couples
-             ;; neighbours and the overflow fold happens at measure time.
-             (jetpacs-button-group
-              (cl-loop for i from 0 below 10
-                       collect (jetpacs-button-group-item
-                                (number-to-string i)
-                                (jetpacs-m3-demo (format "Button %d" i)))))))
+    :build #'jetpacs-m3-button-groups--plain)
    (jetpacs-m3-example
     "SingleSelectConnectedButtonGroupWithFlowLayoutSample"
     "ButtonGroup examples"

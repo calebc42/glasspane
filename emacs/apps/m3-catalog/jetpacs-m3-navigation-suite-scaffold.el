@@ -136,7 +136,34 @@ compact/medium widths the collapsed rail — items centered down it."
         ((equal (jetpacs-m3-window-class :width) "expanded") "rail_expanded")
         (t "rail_centered")))
 
+(defun jetpacs-m3-nav-suite--auto-body ()
+  "Upstream NavigationSuiteScaffoldSample: the body, over the AUTO type.
+What upstream prints inside the scaffold -- the resolved
+NavigationSuiteType, the current visibility, and the button that
+toggles it -- read here off the type
+`NavigationSuiteScaffoldDefaults.navigationSuiteType' would have
+chosen, computed in Emacs from the SPEC 20.1.1 window class.  The
+matching bar or rail rides this example\\='s own `:scaffold', and the
+hide flag is per-sample because upstream remembers one state per
+sample."
+  (jetpacs-m3-nav-suite--body
+   (jetpacs-m3-nav-suite--auto-type)
+   "nav-suite-hidden-auto"))
+
+(defun jetpacs-m3-nav-suite--custom-body ()
+  "Upstream NavigationSuiteScaffoldCustomConfigSample: the body, custom type.
+The same body as the sibling sample, over the branching this
+sample writes by hand instead of asking the defaults for: a compact
+HEIGHT takes the bar, an expanded width the expanded rail, and
+compact/medium widths the collapsed rail with its items centered.  Its
+hide flag is its own -- hiding the navigation here must not hide it in
+the sibling."
+  (jetpacs-m3-nav-suite--body
+   (jetpacs-m3-nav-suite--custom-type)
+   "nav-suite-hidden-custom"))
+
 (jetpacs-m3-defcomponent "navigation-suite-scaffold"
+  :builders (list #'jetpacs-scaffold #'jetpacs-navigation-rail)
   :name "Navigation Suite Scaffold"
   :description
   "The Navigation Suite Scaffold wraps the provided content and places the adequate provided navigation component on the screen according to the current NavigationSuiteType. \n\nNote: this sample is better experienced in a resizable emulator or foldable device."
@@ -150,10 +177,7 @@ compact/medium widths the collapsed rail — items centered down it."
     "Navigation suite scaffold examples"
     :source jetpacs-m3-navigation-suite-scaffold--source
     :expressive t
-    :build (lambda ()
-             (jetpacs-m3-nav-suite--body
-              (jetpacs-m3-nav-suite--auto-type)
-              "nav-suite-hidden-auto"))
+    :build #'jetpacs-m3-nav-suite--auto-body
     :scaffold (lambda ()
                 (jetpacs-m3-nav-suite--scaffold
                  (jetpacs-m3-nav-suite--auto-type)
@@ -163,10 +187,7 @@ compact/medium widths the collapsed rail — items centered down it."
     "Navigation suite scaffold examples"
     :source jetpacs-m3-navigation-suite-scaffold--source
     :expressive t
-    :build (lambda ()
-             (jetpacs-m3-nav-suite--body
-              (jetpacs-m3-nav-suite--custom-type)
-              "nav-suite-hidden-custom"))
+    :build #'jetpacs-m3-nav-suite--custom-body
     :scaffold (lambda ()
                 (jetpacs-m3-nav-suite--scaffold
                  (jetpacs-m3-nav-suite--custom-type)

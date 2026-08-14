@@ -13,6 +13,7 @@
 
 (require 'ert)
 (require 'jetpacs-chrome)
+(require 'jetpacs-repl)
 (require 'jetpacs-emacs-ui)
 (require 'jetpacs-apps)
 (require 'jetpacs-settings)
@@ -36,7 +37,9 @@
           (while t
             (let ((form (read (current-buffer))))
               (when (and (consp form)
-                         (memq (car form) '(defun defvar))
+                         ;; `defconst' too: the hub's REPL session id is
+                         ;; one, and the screen builder is void without it.
+                         (memq (car form) '(defun defvar defconst))
                          (symbolp (cadr form))
                          (string-prefix-p "jetpacs-hub--"
                                           (symbol-name (cadr form))))
@@ -45,15 +48,21 @@
     (setq jetpacs-home-test--loaded t)))
 
 (ert-deftest jetpacs-home-screen-builds-in-every-state ()
-  "The home builder never signals: empty history, results, errors."
+  "The home builder never signals: empty history, results, errors.
+The history lives in `jetpacs-repl' now, keyed by session, so the
+fixture is recorded rather than let-bound — and cleared first, because a
+session outlives one test."
   (jetpacs-home-test--load-hub-defuns)
-  (let ((jetpacs-hub--eval-history nil))
-    (should (jetpacs-hub--screen nil)))
-  (let ((jetpacs-hub--eval-history
-         (list (list "(+ 1 2)" "3" nil)
-               (list "(broken" "End of file during parsing" t)
-               (list (make-string 300 ?x) (make-string 3000 ?y) nil))))
-    (should (jetpacs-hub--screen nil))))
+  (jetpacs-repl-clear jetpacs-hub--repl)
+  (should (jetpacs-hub--screen nil))
+  (dolist (entry '(("(+ 1 2)" "3" nil)
+                   ("(broken" "End of file during parsing" t)))
+    (apply #'jetpacs-repl-record jetpacs-hub--repl entry))
+  ;; The elision case: an input and an output past every display bound.
+  (jetpacs-repl-record jetpacs-hub--repl
+                       (make-string 300 ?x) (make-string 3000 ?y) nil)
+  (should (jetpacs-hub--screen nil))
+  (jetpacs-repl-clear jetpacs-hub--repl))
 
 (ert-deftest jetpacs-home-drawer-builds ()
   "The drawer composition never signals."

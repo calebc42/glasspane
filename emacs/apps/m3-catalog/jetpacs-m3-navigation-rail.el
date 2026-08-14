@@ -234,6 +234,7 @@ move does not happen here, exactly as the selection does not."
    :fill t))
 
 (jetpacs-m3-defcomponent "navigation-rail"
+  :builders (list #'jetpacs-navigation-rail #'jetpacs-rail-item)
   :name "Navigation rail"
   :description
   "Navigation rails provide access to primary destinations in apps when using tablet and desktop screens."

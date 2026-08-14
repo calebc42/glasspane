@@ -88,7 +88,26 @@ The same Column as the determinate sample, with the contained variant."
   (jetpacs-m3-loading-indicators--determinate
    "contained_loading" "loading-indicators-determinate-contained"))
 
+(defun jetpacs-m3-loading-indicators--pull-to-refresh ()
+  "Upstream LoadingIndicatorPullToRefreshSample: the list under the pull.
+Only the scrollable body is authored here.  The gesture is the scaffold
+`on_refresh' slot and the thing drawn while it runs is
+`refresh_indicator \"loading\"' -- PullToRefreshDefaults.LoadingIndicator,
+the canned form of the composable upstream hand-places over the list.
+Upstream grows the list by five per refresh; here the fifteen keyed
+items stand still, because no distanceFraction and no item count ever
+cross the wire."
+  (apply #'jetpacs-lazy-column
+         (append
+          (mapcar (lambda (n)
+                    (jetpacs-with-attrs
+                     (jetpacs-text (format "Item %d" n))
+                     :key (format "loading-ptr-item-%d" n)))
+                  (number-sequence 1 15))
+          (list :spacing 8 :content-padding 8))))
+
 (jetpacs-m3-defcomponent "loading-indicators"
+  :builders (list #'jetpacs-progress)
   :name "Loading indicators"
   :description
   "Loading indicators express an unspecified wait time or display the length of a loading process."
@@ -129,15 +148,7 @@ The same Column as the determinate sample, with the contained variant."
     :slots (list :on-refresh (jetpacs-m3-demo "Refreshed"))
     ;; PullToRefreshDefaults.LoadingIndicator in the indicator slot.
     :scaffold (list :refresh-indicator "loading")
-    :build (lambda ()
-             (apply #'jetpacs-lazy-column
-                    (append
-                     (mapcar (lambda (n)
-                               (jetpacs-with-attrs
-                                (jetpacs-text (format "Item %d" n))
-                                :key (format "loading-ptr-item-%d" n)))
-                             (number-sequence 1 15))
-                     (list :spacing 8 :content-padding 8)))))
+    :build #'jetpacs-m3-loading-indicators--pull-to-refresh)
    ))
 
 (provide 'jetpacs-m3-loading-indicators)

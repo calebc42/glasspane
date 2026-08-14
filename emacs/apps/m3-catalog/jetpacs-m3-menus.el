@@ -138,6 +138,28 @@ their icon."
                            :variant "filled")
       :spacing 8))))
 
+(defun jetpacs-m3-menus--exposed ()
+  "Upstream ExposedDropdownMenuSample: the popup anchored to a FIELD.
+A read-only field seeded with `options[0]' and labelled \"Label\", its
+five desserts hanging off the field itself rather than off an icon,
+which is the whole reason `dropdown' exists beside `menu'."
+  (jetpacs-dropdown "menus-exposed" jetpacs-m3-menus--desserts
+                    :value "android"
+                    :label "Label"
+                    :on-change (jetpacs-m3-demo "Picked")))
+
+(defun jetpacs-m3-menus--editable ()
+  "Upstream EditableExposedDropdownMenuSample: the TEXT is the value.
+The same field-anchored popup, now typed into: the options filter as
+you type.  Both stated seams live here -- the Companion filters by
+label CONTAINMENT where upstream subsequence-matches, and the matched
+letters are not underlined, option labels being plain strings and not
+spans."
+  (jetpacs-dropdown "menus-editable" jetpacs-m3-menus--desserts
+                    :editable t
+                    :label "Label"
+                    :on-change (jetpacs-m3-demo "Picked")))
+
 (defvar jetpacs-m3-menus--auto-authored ""
   "The :value Emacs authors for the completion field; changes on PICK only.
 Re-authoring it per keystroke would bump the value epoch and fight the
@@ -235,6 +257,8 @@ completing the last token, visible when completing a middle one."
                     :on-change (jetpacs-m3-fn-action "menus-auto-pick")))
 
 (jetpacs-m3-defcomponent "menus"
+  :builders (list #'jetpacs-menu #'jetpacs-menu-item
+              #'jetpacs-menu-group #'jetpacs-dropdown)
   :name "Menus"
   :description
   "Menus display a list of choices on temporary surfaces."
@@ -264,24 +288,12 @@ completing the last token, visible when completing a middle one."
     "Menus examples"
     :source jetpacs-m3-menus--source
     :expressive t
-    :build (lambda ()
-             ;; Read-only field seeded with options[0]; the popup hangs off
-             ;; the field, which is the node's whole reason to exist.
-             (jetpacs-dropdown "menus-exposed" jetpacs-m3-menus--desserts
-                               :value "android"
-                               :label "Label"
-                               :on-change (jetpacs-m3-demo "Picked"))))
+    :build #'jetpacs-m3-menus--exposed)
    (jetpacs-m3-example
     "EditableExposedDropdownMenuSample"
     "Menus examples"
     :source jetpacs-m3-menus--source
-    :build (lambda ()
-             ;; The TEXT is the value and the popup filters as you type —
-             ;; by containment, the Commentary's stated seam.
-             (jetpacs-dropdown "menus-editable" jetpacs-m3-menus--desserts
-                               :editable t
-                               :label "Label"
-                               :on-change (jetpacs-m3-demo "Picked"))))
+    :build #'jetpacs-m3-menus--editable)
    (jetpacs-m3-example
     "MultiAutocompleteExposedDropdownMenuSample"
     "Menus examples"

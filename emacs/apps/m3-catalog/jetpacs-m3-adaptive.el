@@ -165,6 +165,7 @@ sample (PaneExpansionDragHandleSample) and is not on the wire."
    :height jetpacs-m3-adaptive--height))
 
 (jetpacs-m3-defcomponent "adaptive"
+  :builders (list #'jetpacs-pane-scaffold)
   :name "Adaptive"
   :description
   "Adaptive scaffolds provides automatic layout adjustment on different window size classes and postures.\n\nNote: this sample is better experienced in a resizable emulator or foldable device."

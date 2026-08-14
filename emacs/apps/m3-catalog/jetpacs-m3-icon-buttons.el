@@ -70,6 +70,20 @@ the content_description member, which is what the tooltip supplies."
   (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
                        :content-description "Localized description"))
 
+(defun jetpacs-m3-icon-buttons--tinted ()
+  "Upstream TintedIconButtonSample: the standard IconButton, tinted red.
+Icon(tint = Color.Red) is the whole of what this adds to IconButtonSample,
+and only the :color member reaches it -- no universal attribute can,
+because `icon_button' draws its own Icon.  Color.Red is authored as the
+literal #FF0000, being no M3 role.  The a11y name upstream supplies
+through its TooltipBox is content_description, as everywhere in this
+module."
+  ;; Icon(tint = Color.Red) — the one thing this sample adds to
+  ;; IconButtonSample, now the :color member.
+  (jetpacs-icon-button "lock" (jetpacs-m3-demo "Localized description")
+                       :content-description "Localized description"
+                       :color "#FF0000"))
+
 (defun jetpacs-m3-icon-buttons--filled ()
   "Upstream FilledIconButtonSample: FilledIconButton showing Icons.Filled.Lock.
 The filled container is the variant member; the a11y name upstream
@@ -164,6 +178,7 @@ The container is the variant member; it does not itself change with
                                         "outlined"))
 
 (jetpacs-m3-defcomponent "icon-buttons"
+  :builders (list #'jetpacs-icon-button)
   :name "Icon buttons"
   :description
   "Icon buttons allow users to take actions and make choices with a single tap."
@@ -181,13 +196,7 @@ The container is the variant member; it does not itself change with
     "TintedIconButtonSample"
     "Icon button examples"
     :source jetpacs-m3-icon-buttons--source
-    :build (lambda ()
-             ;; Icon(tint = Color.Red) — the one thing this sample adds to
-             ;; IconButtonSample, now the :color member.
-             (jetpacs-icon-button "lock"
-                                  (jetpacs-m3-demo "Localized description")
-                                  :content-description "Localized description"
-                                  :color "#FF0000")))
+    :build #'jetpacs-m3-icon-buttons--tinted)
    (jetpacs-m3-example
     "IconToggleButtonSample"
     "Icon button examples"

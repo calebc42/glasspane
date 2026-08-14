@@ -130,6 +130,26 @@ that item's \"F11\" trailing shortcut text."
 The only sample with no leading icon, so the node carries no `:icon'."
   (jetpacs-m3-split-button--toggle "split-button-with-text" "My Button"))
 
+(defun jetpacs-m3-split-button--with-icon ()
+  "Upstream SplitButtonWithIconSample: a LeadingButton of Icons.Filled.Edit alone.
+This is the form the label went optional for -- a leading half may be a
+label, an icon, or both, never neither -- so the node passes nil where
+every sibling passes text and keeps only `:icon'.  It is spelled out
+rather than built with `jetpacs-m3-split-button--toggle' because that
+helper names its snackbar after the label there is none of; the trailing
+half is otherwise the same toggle, `:checked :json-false' flipped from
+`:on-change' and published on `:id'.  Label-less, the icon identifier is
+the accessible fallback name: upstream's tooltip naming the leading half
+\"Button\" cannot ride, since the icon slot takes an identifier, not a
+node."
+  (jetpacs-with-attrs
+   (jetpacs-split-button nil (jetpacs-m3-demo "Button")
+                         :icon "edit"
+                         :trailing-description "Toggle Button"
+                         :checked :json-false
+                         :on-change (jetpacs-m3-demo "Toggle Button"))
+   :id "split-button-with-icon"))
+
 (defun jetpacs-m3-split-button--xsmall ()
   "Upstream XSmallFilledSplitButtonSample: ExtraSmallContainerHeight.
 `:size' selects the SplitButtonDefaults scale for BOTH halves -- the
@@ -156,6 +176,7 @@ Button\"."
                                    :icon "edit" :size "xlarge"))
 
 (jetpacs-m3-defcomponent "split-button"
+  :builders (list #'jetpacs-split-button)
   :name "Split Button"
   :description
   "Split buttons let user perform additional actions besides the main action"
@@ -211,16 +232,7 @@ Button\"."
     "Split Button examples"
     :source jetpacs-m3-split-button--source
     :expressive t
-    :build (lambda ()
-             ;; The leading half is Icons.Filled.Edit alone — the form the
-             ;; label went optional for.
-             (jetpacs-with-attrs
-              (jetpacs-split-button nil (jetpacs-m3-demo "Button")
-                                    :icon "edit"
-                                    :trailing-description "Toggle Button"
-                                    :checked :json-false
-                                    :on-change (jetpacs-m3-demo "Toggle Button"))
-              :id "split-button-with-icon")))
+    :build #'jetpacs-m3-split-button--with-icon)
    (jetpacs-m3-example
     "XSmallFilledSplitButtonSample"
     "Split Button examples"

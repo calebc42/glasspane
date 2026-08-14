@@ -263,6 +263,14 @@ of the sample and composes exactly."
   (jetpacs-m3-lists--divided
    (mapcar #'jetpacs-m3-lists--clickable-child-item (number-sequence 1 3))))
 
+(defun jetpacs-m3-lists--single ()
+  "Upstream SingleSelectionListItemSample: three exclusive rows.
+The `selectableGroup' Column IS the `enum_list' here: the node owns the
+one choice, so checking a row clears its siblings -- which is exactly
+what no per-row `checked' member could do, and why this sample waited
+for `:variant \"radio\"' with `:children'."
+  (jetpacs-m3-lists--single-selection "lists-single-selection"))
+
 (defun jetpacs-m3-lists--multi-item (n)
   "Item N of MultiSelectionListItemSample, around a live `checkbox'.
 Upstream hoists the toggle onto the ListItem and leaves its leading
@@ -281,6 +289,14 @@ target is the checkbox itself rather than the whole row."
   "Upstream MultiSelectionListItemSample: three checkable rows."
   (jetpacs-m3-lists--divided
    (mapcar #'jetpacs-m3-lists--multi-item (number-sequence 1 3))))
+
+(defun jetpacs-m3-lists--segmented-single ()
+  "Upstream SingleSelectionSegmentedListItemSample: the group, exclusive.
+The same radio `enum_list' as the plain sample, with every child dressed
+in the group container color and its own `segmentedShapes' corners --
+the grouping rides the universal attributes of the children, while the
+exclusive choice stays where it belongs, on the node."
+  (jetpacs-m3-lists--single-selection "lists-single-segmented" t))
 
 (defun jetpacs-m3-lists--segmented-multi-item (index count)
   "Item INDEX of COUNT of MultiSelectionSegmentedListItemSample."
@@ -406,6 +422,7 @@ mutation runs in Emacs and the next snapshot re-authors all three rows."
    (mapcar #'jetpacs-m3-lists--mode-change-item (number-sequence 0 2))))
 
 (jetpacs-m3-defcomponent "lists"
+  :builders (list #'jetpacs-row #'jetpacs-surface)
   :name "Lists"
   :description
   "Lists are continuous, vertical indexes of text or images."
@@ -451,8 +468,7 @@ mutation runs in Emacs and the next snapshot re-authors all three rows."
     "List examples"
     :source jetpacs-m3-lists--source
     :expressive t
-    :build (lambda ()
-             (jetpacs-m3-lists--single-selection "lists-single-selection")))
+    :build #'jetpacs-m3-lists--single)
    (jetpacs-m3-example
     "MultiSelectionListItemSample"
     "List examples"
@@ -470,8 +486,7 @@ mutation runs in Emacs and the next snapshot re-authors all three rows."
     "List examples"
     :source jetpacs-m3-lists--source
     :expressive t
-    :build (lambda ()
-             (jetpacs-m3-lists--single-selection "lists-single-segmented" t)))
+    :build #'jetpacs-m3-lists--segmented-single)
    (jetpacs-m3-example
     "MultiSelectionSegmentedListItemSample"
     "List examples"

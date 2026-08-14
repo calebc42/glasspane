@@ -277,6 +277,21 @@ emacs -Q --batch -L emacs -L emacs/apps/m3-catalog \
   -l test/jetpacs-m3-catalog-test.el \
   -f ert-run-tests-batch-and-exit
 
+# The shared Elisp REPL loop (jetpacs-repl.el): the loop the device
+# home screen IS and the catalog Playground rides.  These two suites
+# landed WITH the Playground branch but were never wired here — a suite
+# that exists and never runs is the trap this runner's explicit list
+# invites, so their absence was itself a merge-review catch.
+emacs -Q --batch -L emacs -l test/jetpacs-repl-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# The Catalog Playground (jetpacs-m3-repl.el): the REPL-over-one-sample
+# whose print step is a rendering — the placement pin (a duplicate
+# :sheet fails silently) and the override blast radius.
+emacs -Q --batch -L emacs -L emacs/apps/m3-catalog \
+  -l test/jetpacs-m3-repl-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # Glasspane app ladder gates (docs/PLAN-glasspane-app.md): every rung's
 # NAMED local-gate assertions accumulate in one suite, the M3 pattern.
 emacs -Q --batch -L emacs -L emacs/apps/glasspane \

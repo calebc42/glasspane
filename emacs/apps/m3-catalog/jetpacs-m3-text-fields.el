@@ -127,6 +127,16 @@ thing this sample says beyond its outlined twin; the id is the sample's
                       :label "Label"
                       :single-line t))
 
+(defun jetpacs-m3-text-fields--filled-selection ()
+  "Upstream TextFieldWithInitialValueAndSelection: the filled half of the pair.
+`jetpacs-m3-text-fields--selection' is the shared body -- \"Initial
+text\" with `:selection (0 12)', rememberTextFieldState's TextRange(0,
+12), so the field opens with the whole value already selected.  This
+half asks for the filled container; its own id keeps the twins distinct
+on the wire."
+  (jetpacs-m3-text-fields--selection "text-fields-selection"
+                                     "filled"))
+
 (defun jetpacs-m3-text-fields--outlined ()
   "Upstream SimpleOutlinedTextFieldSample: OutlinedTextField, label \"Label\".
 Outlined is also the default variant, but this sample exists to be the
@@ -135,6 +145,15 @@ other half of the pair, so it names it."
                       :variant "outlined"
                       :label "Label"
                       :single-line t))
+
+(defun jetpacs-m3-text-fields--outlined-selection ()
+  "Upstream OutlinedTextFieldWithInitialValueAndSelection: the outlined half.
+The same seeded \"Initial text\" and TextRange(0, 12) as
+`jetpacs-m3-text-fields--filled-selection' -- the container is the only
+thing the two samples differ in, which is why one
+`jetpacs-m3-text-fields--selection' serves both."
+  (jetpacs-m3-text-fields--selection "text-fields-outlined-selection"
+                                     "outlined"))
 
 (defun jetpacs-m3-text-fields--icons ()
   "Upstream TextFieldWithIcons: Favorite leading, Clear trailing, label \"Label\".
@@ -239,6 +258,7 @@ carrying that size."
    :height 120))
 
 (jetpacs-m3-defcomponent "text-fields"
+  :builders (list #'jetpacs-text-input)
   :name "Text fields"
   :description
   "Text fields let users enter and edit text."
@@ -256,9 +276,7 @@ carrying that size."
     "TextFieldWithInitialValueAndSelection"
     "Text fields examples"
     :source jetpacs-m3-text-fields--source
-    :build (lambda ()
-             (jetpacs-m3-text-fields--selection "text-fields-selection"
-                                                "filled")))
+    :build #'jetpacs-m3-text-fields--filled-selection)
    (jetpacs-m3-example
     "SimpleOutlinedTextFieldSample"
     "Text fields examples"
@@ -268,9 +286,7 @@ carrying that size."
     "OutlinedTextFieldWithInitialValueAndSelection"
     "Text fields examples"
     :source jetpacs-m3-text-fields--source
-    :build (lambda ()
-             (jetpacs-m3-text-fields--selection "text-fields-outlined-selection"
-                                                "outlined")))
+    :build #'jetpacs-m3-text-fields--outlined-selection)
    (jetpacs-m3-example
     "TextFieldWithTransformations"
     "Text fields examples"

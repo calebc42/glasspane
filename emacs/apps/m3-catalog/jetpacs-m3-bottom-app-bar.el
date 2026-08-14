@@ -122,6 +122,56 @@ naming both would silently discard the spacing."
   "Upstream BottomAppBarWithFAB\\='s floatingActionButton slot: Add."
   (jetpacs-m3-bottom-app-bar--action "add" "Add"))
 
+(defun jetpacs-m3-bottom-app-bar--overflow ()
+  "Upstream BottomAppBarWithOverflow: six actions over one overflow.
+The `app_bar_row' node IS AppBarRow, so Back, Forward, Add, Check,
+Edit and Favorite render inline while they fit and the rest fold into
+the more_vert menu at MEASURE time — a width decision the device
+makes per layout pass, which Emacs never sees and never needs to."
+  (jetpacs-app-bar-row
+   (list (jetpacs-app-bar-item "Back" "arrow_back"
+                               (jetpacs-m3-demo "Back"))
+         (jetpacs-app-bar-item "Forward" "arrow_forward"
+                               (jetpacs-m3-demo "Forward"))
+         (jetpacs-app-bar-item "Add" "add"
+                               (jetpacs-m3-demo "Add"))
+         (jetpacs-app-bar-item "Check" "check"
+                               (jetpacs-m3-demo "Check"))
+         (jetpacs-app-bar-item "Edit" "edit"
+                               (jetpacs-m3-demo "Edit"))
+         (jetpacs-app-bar-item "Favorite" "favorite"
+                               (jetpacs-m3-demo "Favorite")))))
+
+(defun jetpacs-m3-bottom-app-bar--exit-always-body ()
+  "Upstream ExitAlwaysBottomAppBar\\='s content: a long list of rows.
+The bar hides going up and returns coming down, so the sample is not
+itself without a body tall enough to scroll — upstream\\='s LazyColumn
+of numbered rows, spacedBy 8dp inside 16dp of horizontal padding."
+  (apply #'jetpacs-column
+         (append
+          (cl-loop for i from 0 below 100
+                   collect (jetpacs-with-attrs
+                            (jetpacs-text (format "Item %d" i))
+                            :pad (list :horizontal 16)))
+          (list :spacing 8 :fill t))))
+
+(defun jetpacs-m3-bottom-app-bar--exit-always-actions ()
+  "Upstream ExitAlwaysBottomAppBar\\='s actions slot: Check and Edit.
+The two icon buttons the bar carries while `:bottom-bar-behavior'
+\"exit_always\" scrolls it out of view and back."
+  (jetpacs-row
+   (jetpacs-m3-bottom-app-bar--action "check" "Check")
+   (jetpacs-m3-bottom-app-bar--action "edit" "Edit")
+   :spacing 4))
+
+(defun jetpacs-m3-bottom-app-bar--exit-always-fab ()
+  "Upstream ExitAlwaysBottomAppBar\\='s floatingActionButton slot: Add.
+The example asks for `:fab-position' \"end_overlay\", which is
+FabPosition.EndOverlay — the FAB rides OVER the bar rather than
+beside it, and that pairing is what this sample exists for."
+  (jetpacs-button "Add" (jetpacs-m3-demo "Add")
+                  :icon "add" :variant "filled"))
+
 (defun jetpacs-m3-bottom-app-bar--spaced-around ()
   "Upstream ExitAlwaysBottomAppBarSpacedAround: Arrangement.SpaceAround."
   (jetpacs-m3-bottom-app-bar--flexible-row :arrange "space_around"))
@@ -148,6 +198,8 @@ sample sets as the bar\\='s containerColor."
                    :color "primary_container"))
 
 (jetpacs-m3-defcomponent "bottom-app-bar"
+  :builders (list #'jetpacs-scaffold #'jetpacs-app-bar-row
+              #'jetpacs-app-bar-item)
   :name "Bottom App Bar"
   :description
   "A bottom app bar displays navigation and key actions at the bottom of mobile screens."
@@ -174,21 +226,7 @@ sample sets as the bar\\='s containerColor."
     :expressive t
     ;; The app_bar_row node IS AppBarRow: inline while they fit, folded
     ;; into the more_vert menu at measure time.
-    :slots (list :bottom-bar
-                 (lambda ()
-                   (jetpacs-app-bar-row
-                    (list (jetpacs-app-bar-item "Back" "arrow_back"
-                                                (jetpacs-m3-demo "Back"))
-                          (jetpacs-app-bar-item "Forward" "arrow_forward"
-                                                (jetpacs-m3-demo "Forward"))
-                          (jetpacs-app-bar-item "Add" "add"
-                                                (jetpacs-m3-demo "Add"))
-                          (jetpacs-app-bar-item "Check" "check"
-                                                (jetpacs-m3-demo "Check"))
-                          (jetpacs-app-bar-item "Edit" "edit"
-                                                (jetpacs-m3-demo "Edit"))
-                          (jetpacs-app-bar-item "Favorite" "favorite"
-                                                (jetpacs-m3-demo "Favorite")))))))
+    :slots (list :bottom-bar #'jetpacs-m3-bottom-app-bar--overflow))
    (jetpacs-m3-example
     "ExitAlwaysBottomAppBar"
     "Bottom app bar examples"
@@ -198,24 +236,9 @@ sample sets as the bar\\='s containerColor."
     ;; the bar hides going up and returns coming down, riding a real M3
     ;; BottomAppBar — and :fab-position "end_overlay" rides the Add FAB
     ;; OVER it, the pairing this sample exists for.
-    :build (lambda ()
-             (apply #'jetpacs-column
-                    (append
-                     (cl-loop for i from 0 below 100
-                              collect (jetpacs-with-attrs
-                                       (jetpacs-text (format "Item %d" i))
-                                       :pad (list :horizontal 16)))
-                     (list :spacing 8 :fill t))))
-    :slots (list :bottom-bar
-                 (lambda ()
-                   (jetpacs-row
-                    (jetpacs-m3-bottom-app-bar--action "check" "Check")
-                    (jetpacs-m3-bottom-app-bar--action "edit" "Edit")
-                    :spacing 4))
-                 :fab
-                 (lambda ()
-                   (jetpacs-button "Add" (jetpacs-m3-demo "Add")
-                                   :icon "add" :variant "filled")))
+    :build #'jetpacs-m3-bottom-app-bar--exit-always-body
+    :slots (list :bottom-bar #'jetpacs-m3-bottom-app-bar--exit-always-actions
+                 :fab #'jetpacs-m3-bottom-app-bar--exit-always-fab)
     :scaffold (list :bottom-bar-behavior "exit_always"
                     :fab-position "end_overlay"))
    (jetpacs-m3-example

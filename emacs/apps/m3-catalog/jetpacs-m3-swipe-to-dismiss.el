@@ -54,6 +54,7 @@ the catalog's demo verb reporting the direction, as everywhere else."
                              :on-trigger (jetpacs-m3-demo "Dismissed Cupcake"))))
 
 (jetpacs-m3-defcomponent "swipe-to-dismiss"
+  :builders (list #'jetpacs-swipe)
   :name "Swipe to Dismiss"
   :description
   "Swipe to dismiss is a gesture used to dismiss items in a list."

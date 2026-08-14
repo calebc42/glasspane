@@ -70,6 +70,18 @@ already scrolls its own content."
         :sheet-state (if (jetpacs-m3-flag "modal-sheet") "partial" "hidden")
         :on-sheet-change (jetpacs-m3-flag-action "modal-sheet")))
 
+(defun jetpacs-m3-bottom-sheet--modal-body ()
+  "Upstream ModalBottomSheetSample's app content: the show button.
+The tap flips the \"modal-sheet\" flag, the verb re-pushes, and the
+function-valued `:scaffold' reads the flag back at build time — the
+Emacs-owns-the-model round trip upstream's `openBottomSheet' remember
+stands in for.  Every exit rides the same flag, so Emacs's model stays
+true however the sheet closes."
+  (jetpacs-with-attrs
+   (jetpacs-button "Show bottom sheet"
+                   (jetpacs-m3-flag-action "modal-sheet"))
+   :align_self "center"))
+
 (defun jetpacs-m3-bottom-sheet--persistent-sheet ()
   "Upstream's persistent sheet: the swipe hint over its content."
   (jetpacs-column
@@ -84,6 +96,13 @@ already scrolls its own content."
     :align_self "center")
    :spacing 12 :fill t))
 
+(defun jetpacs-m3-bottom-sheet--persistent-body ()
+  "Upstream SimpleBottomSheetScaffoldSample's body: \"Scaffold Content\".
+The centered Text behind the sheet, which is all upstream puts there —
+the 128dp peek is the sample, and the peek is what selects the
+persistent BottomSheetScaffold form."
+  (jetpacs-text "Scaffold Content"))
+
 (defun jetpacs-m3-bottom-sheet--nested-sheet ()
   "The nested-scroll sample's sheet: fifty rows the sheet drag hands off.
 A plain column inside the sheet's own scrollable — BottomSheetScaffold
@@ -96,7 +115,16 @@ owns the fling hand-off between content and sheet."
                             :pad (list :horizontal 16)))
           (list :spacing 8))))
 
+(defun jetpacs-m3-bottom-sheet--nested-body ()
+  "Upstream BottomSheetScaffoldNestedScrollSample's body: the content.
+Upstream scrolls a hundred colored boxes here so that the fling has
+somewhere to start; the hand-off between body and sheet is
+BottomSheetScaffold's own, so the body only has to be behind the
+sheet, and \"Scaffold Content\" is."
+  (jetpacs-text "Scaffold Content"))
+
 (jetpacs-m3-defcomponent "bottom-sheet"
+  :builders (list #'jetpacs-scaffold)
   :name "Bottom Sheet"
   :description
   "Bottom sheets are surfaces containing supplementary content, anchored to the bottom of the screen."
@@ -109,17 +137,13 @@ owns the fling hand-off between content and sheet."
     "ModalBottomSheetSample"
     "Bottom sheet examples"
     :source jetpacs-m3-bottom-sheet--source
-    :build (lambda ()
-             (jetpacs-with-attrs
-              (jetpacs-button "Show bottom sheet"
-                              (jetpacs-m3-flag-action "modal-sheet"))
-              :align_self "center"))
+    :build #'jetpacs-m3-bottom-sheet--modal-body
     :scaffold #'jetpacs-m3-bottom-sheet--modal-scaffold)
    (jetpacs-m3-example
     "SimpleBottomSheetScaffoldSample"
     "Bottom sheet examples"
     :source jetpacs-m3-bottom-sheet--source
-    :build (lambda () (jetpacs-text "Scaffold Content"))
+    :build #'jetpacs-m3-bottom-sheet--persistent-body
     ;; sheetPeekHeight = 128.dp, verbatim; the peek selects the
     ;; persistent BottomSheetScaffold form.
     :scaffold (list :sheet (jetpacs-m3-bottom-sheet--persistent-sheet)
@@ -129,7 +153,7 @@ owns the fling hand-off between content and sheet."
     "BottomSheetScaffoldNestedScrollSample"
     "Bottom sheet examples"
     :source jetpacs-m3-bottom-sheet--source
-    :build (lambda () (jetpacs-text "Scaffold Content"))
+    :build #'jetpacs-m3-bottom-sheet--nested-body
     :scaffold (list :sheet (jetpacs-m3-bottom-sheet--nested-sheet)
                     :sheet-peek-height 128
                     :on-sheet-change (jetpacs-m3-demo "Sheet moved")))

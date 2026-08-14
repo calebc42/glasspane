@@ -110,6 +110,7 @@ A bare CircularWavyProgressIndicator() centered in a Column: variant
    :align "center"))
 
 (jetpacs-m3-defcomponent "progress-indicators"
+  :builders (list #'jetpacs-progress)
   :name "Progress indicators"
   :description
   "Progress indicators express an unspecified wait time or display the length of a process."

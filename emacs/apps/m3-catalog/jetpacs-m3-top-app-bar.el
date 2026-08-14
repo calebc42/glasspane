@@ -280,6 +280,8 @@ is deliberate -- the collapsed node carries it, and folding the bar is
 one scroll away.")
 
 (jetpacs-m3-defcomponent "top-app-bar"
+  :builders (list #'jetpacs-scaffold #'jetpacs-app-bar-row
+              #'jetpacs-app-bar-item)
   :name "Top app bar"
   :description
   "Top app bars display information and actions at the top of a screen."

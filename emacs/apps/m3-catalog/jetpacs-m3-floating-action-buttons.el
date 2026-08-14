@@ -120,7 +120,25 @@ LargeIconSize, not FabLargeTokens.IconSize -- upstream overrides its own
 token there."
   (jetpacs-m3-floating-action-buttons--fab 96 28 36))
 
+(defun jetpacs-m3-floating-action-buttons--animated-content ()
+  "Upstream AnimatedFloatingActionButtonSample, the list its FAB rides.
+The sample is the medium container plus the one thing the other four do
+not have: Modifier.animateFloatingActionButton, the scroll-driven show
+and hide.  So the subject is really this body -- upstream's hundred
+LazyColumn items -- and the scroll it produces, which
+`:fab-hide-on-scroll' hands to the slot's occupant: the FAB scales away
+as the list leaves its start and returns with it, derived on the device
+exactly as upstream derives it."
+  (apply #'jetpacs-column
+         (append
+          (cl-loop for i from 0 below 100
+                   collect (jetpacs-with-attrs
+                            (jetpacs-text (format "Item %d" i))
+                            :pad (list :horizontal 16)))
+          (list :spacing 8 :fill t))))
+
 (jetpacs-m3-defcomponent "floating-action-buttons"
+  :builders (list #'jetpacs-scaffold #'jetpacs-button)
   :name "Floating action buttons"
   :description
   "The FAB represents the most important action on a screen. It puts key actions within reach."
@@ -148,14 +166,7 @@ token there."
     ;; slot's occupant, driven by the body's own scroll signal — the FAB
     ;; scales away as the list leaves its start and returns with it, the
     ;; derived form upstream also computes on the device.
-    :build (lambda ()
-             (apply #'jetpacs-column
-                    (append
-                     (cl-loop for i from 0 below 100
-                              collect (jetpacs-with-attrs
-                                       (jetpacs-text (format "Item %d" i))
-                                       :pad (list :horizontal 16)))
-                     (list :spacing 8 :fill t))))
+    :build #'jetpacs-m3-floating-action-buttons--animated-content
     :slots (list :fab #'jetpacs-m3-floating-action-buttons--medium)
     :scaffold (list :fab-hide-on-scroll t))
    (jetpacs-m3-example

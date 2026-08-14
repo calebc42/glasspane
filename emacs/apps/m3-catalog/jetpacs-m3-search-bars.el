@@ -96,7 +96,7 @@ the expansion goes; nil is the node's full_screen default."
 (defun jetpacs-m3-search-bars--simple ()
   "Upstream SimpleSearchBarSample: the bar alone, centered in the body.
 Its expansion is ExpandedFullScreenSearchBar, the node's default."
-  (jetpacs-m3-search-bars--bar "sb-simple"))
+  (jetpacs-m3-search-bars--bar "search-bars-simple"))
 
 (defun jetpacs-m3-search-bars--tipped (icon label)
   "ICON as an IconButton under LABEL's plain tooltip.
@@ -118,6 +118,23 @@ must carry itself."
    (jetpacs-m3-search-bars--tipped "account_circle" "Account")
    :align "center" :spacing 4 :fill t))
 
+(defun jetpacs-m3-search-bars--full-screen-app-bar (back)
+  "Upstream FullScreenSearchBarScaffoldSample: the bar in the app bar.
+The AppBarWithSearch claims this screen's `:top-bar', so BACK rides in
+it, and node \"sb-full\" takes the node's full_screen default --
+ExpandedFullScreenSearchBar, whose results cover the Menu and Account
+buttons rather than sliding them away as upstream's AnimatedVisibility
+does."
+  (jetpacs-m3-search-bars--app-bar "search-bars-full" "full_screen" back))
+
+(defun jetpacs-m3-search-bars--docked-app-bar (back)
+  "Upstream DockedSearchBarScaffoldSample: the same bar, results docked.
+The same AppBarWithSearch carrying BACK; what separates this sample from
+its full-screen twin is the variant on node \"sb-docked\" -- \"docked\"
+hangs the expanded results at the field's own measured width instead of
+giving them the screen."
+  (jetpacs-m3-search-bars--app-bar "search-bars-docked" "docked" back))
+
 (defun jetpacs-m3-search-bars--content ()
   "The Scaffold content both scaffold samples share: \"Text 0\"..\"Text 99\".
 A plain column: the Example screen body is already a scrolling column,
@@ -130,6 +147,7 @@ and a lazily-composed list has no bounded height inside one."
                  (list :spacing 8 :fill t))))
 
 (jetpacs-m3-defcomponent "search-bars"
+  :builders (list #'jetpacs-search-bar)
   :name "Search bars"
   :description
   "Search bars allow users to enter a keyword or phrase and get relevant information."
@@ -148,8 +166,7 @@ and a lazily-composed list has no bounded height inside one."
     "Search bar examples"
     :source jetpacs-m3-search-bars--source
     :expressive t
-    :top-bar (lambda (back)
-               (jetpacs-m3-search-bars--app-bar "sb-full" "full_screen" back))
+    :top-bar #'jetpacs-m3-search-bars--full-screen-app-bar
     :top-bar-style "small"
     :scroll-behavior "enter_always"
     :build #'jetpacs-m3-search-bars--content)
@@ -158,8 +175,7 @@ and a lazily-composed list has no bounded height inside one."
     "Search bar examples"
     :source jetpacs-m3-search-bars--source
     :expressive t
-    :top-bar (lambda (back)
-               (jetpacs-m3-search-bars--app-bar "sb-docked" "docked" back))
+    :top-bar #'jetpacs-m3-search-bars--docked-app-bar
     :top-bar-style "small"
     :scroll-behavior "enter_always"
     :build #'jetpacs-m3-search-bars--content)

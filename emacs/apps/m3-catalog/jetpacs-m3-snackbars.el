@@ -182,6 +182,7 @@ fillMaxSize/wrapContentSize modifier pair does upstream."
   (jetpacs-text "Body content"))
 
 (jetpacs-m3-defcomponent "snackbars"
+  :builders (list #'jetpacs-scaffold #'jetpacs-snackbar-action)
   :name "Snackbars"
   :description
   "Snackbars provide brief messages about app processes at the bottom of the screen."

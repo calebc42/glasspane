@@ -113,6 +113,7 @@
                   :icon "edit" :variant "filled" :size "xlarge"))
 
 (jetpacs-m3-defcomponent "buttons"
+  :builders (list #'jetpacs-button)
   :name "Buttons"
   :description
   "Buttons help people initiate actions, from sending an email, to sharing a document, to liking a post."

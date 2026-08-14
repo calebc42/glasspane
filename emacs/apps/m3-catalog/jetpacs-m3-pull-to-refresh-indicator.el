@@ -73,6 +73,7 @@ text ListItem would have held."
           (list :spacing 8 :content-padding 8))))
 
 (jetpacs-m3-defcomponent "pull-to-refresh-indicator"
+  :builders (list #'jetpacs-scaffold)
   :name "Pull-to-Refresh Indicator"
   :description
   "Pull to refresh is a swipe gesture available at the beginning of lists, grid lists, and card collections where the most recent content appears "

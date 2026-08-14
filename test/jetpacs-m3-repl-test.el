@@ -1,0 +1,232 @@
+;;; jetpacs-m3-repl-test.el --- the Catalog Playground -*- lexical-binding: t; -*-
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+
+;; The catalog's third non-upstream section: a REPL over one sample,
+;; whose print step is a rendering.  What matters here is the placement
+;; rule (a duplicate `:sheet' fails SILENTLY, so it needs a pin) and the
+;; blast radius of an override.
+
+;;; Code:
+
+(require 'ert)
+(require 'cl-lib)
+(require 'jetpacs-m3-catalog)
+(require 'jetpacs-m3-repl)
+
+(defun jetpacs-m3-repl-test--json (id index)
+  (jetpacs-node->canonical-json
+   (jetpacs-m3-example-screen (jetpacs-m3-component id) index nil)))
+
+(defmacro jetpacs-m3-repl-test--clean (&rest body)
+  (declare (indent 0))
+  `(unwind-protect (progn (clrhash jetpacs-m3-repl--overrides) ,@body)
+     (clrhash jetpacs-m3-repl--overrides)))
+
+(ert-deftest jetpacs-m3-repl-rides-the-sheet-when-the-slot-is-free ()
+  "Every ordinary Example screen carries the Playground on its sheet."
+  (let ((json (jetpacs-m3-repl-test--json "switches" 0)))
+    (should (string-match-p "\"sheet\":" json))
+    (should (string-match-p "\"sheet_peek_height\":96" json))
+    (should (string-match-p "Playground" json))
+    ;; The sheet form, not the fallback.
+    (should-not (string-match-p "collapsible" json))))
+
+(ert-deftest jetpacs-m3-repl-never-takes-a-sample-s-own-sheet ()
+  "THE placement rule, and it fails silently without a pin.
+`jetpacs-scaffold' is a `cl-defun', so a duplicate `:sheet' keeps the
+FIRST — appending loses the Playground on these three examples and
+prepending clobbers the sample they exist to demonstrate, and every gate
+still passes either way.  So: Bottom Sheet's samples keep their own
+sheet, and the Playground rides an in-body `collapsible' instead."
+  (dolist (index '(0 1 2))
+    (let* ((component (jetpacs-m3-component "bottom-sheet"))
+           (example (nth index (plist-get component :examples)))
+           (json (jetpacs-m3-repl-test--json "bottom-sheet" index)))
+      ;; The example really does claim the slot — if this stops being
+      ;; true the test is about nothing and should be rewritten.
+      (should (plist-member (let ((s (plist-get example :scaffold)))
+                              (if (functionp s) (funcall s) s))
+                            :sheet))
+      (should (string-match-p "Playground" json))
+      (should (string-match-p "collapsible" json))
+      (should-not (string-match-p "\"sheet_peek_height\":96" json)))))
+
+(ert-deftest jetpacs-m3-repl-every-dispatch-says-which-example ()
+  "THE bug the offline tests all missed and the device found in a tap.
+The send button dispatches with NO value — it reads the synchronized
+mirror — so the `:component'/`:index' pair is the only thing on that
+dispatch saying which example it is for.  Without it `--on-eval' gets a
+nil component, answers `rejected', and the button does NOTHING AT ALL:
+no card, no error, no snackbar.  Every offline test passed because they
+all called the verb directly with args the UI was never sending.
+
+So: assert it of the authored TREE, which is what the device gets."
+  (let* ((json (jetpacs-m3-repl-test--json "buttons" 10))
+         (dispatches (let (out (start 0))
+                       (while (string-match "\"action\":\"m3catalog\\.repl\"" json start)
+                         (push (match-beginning 0) out)
+                         (setq start (match-end 0)))
+                       out)))
+    (should dispatches)
+    ;; Every m3catalog.repl dispatch in the panel carries the pair.
+    (dolist (at dispatches)
+      (let ((window (substring json at (min (length json) (+ at 200)))))
+        (should (string-match-p "\"component\":\"buttons\"" window))
+        (should (string-match-p "\"index\":10" window))))))
+
+(ert-deftest jetpacs-m3-repl-a-node-becomes-the-sample ()
+  "The print step of this REPL is a rendering — that is the point."
+  (jetpacs-m3-repl-test--clean
+    (jetpacs-m3-repl--on-eval
+     '(:component "switches" :index 0 :value "(jetpacs-text \"ZZTOP\")") nil)
+    (sit-for 0.2)
+    (should (equal '(:t "text" :text "ZZTOP")
+                   (jetpacs-m3-repl-override "switches" 0)))
+    (should (string-match-p "ZZTOP" (jetpacs-m3-repl-test--json "switches" 0)))
+    ;; And Reset gives upstream's sample back.
+    (should (eq 'accepted (jetpacs-m3-repl--on-reset
+                           '(:component "switches" :index 0) nil)))
+    (should-not (jetpacs-m3-repl-override "switches" 0))
+    (should (string-match-p "\"t\":\"switch\""
+                            (jetpacs-m3-repl-test--json "switches" 0)))))
+
+(ert-deftest jetpacs-m3-repl-a-failed-experiment-costs-nothing ()
+  "A non-node value stays a card; an ERROR never touches the sample.
+The screen you were looking at is the one thing a bad form must not
+take from you."
+  (jetpacs-m3-repl-test--clean
+    (dolist (input '("(+ 1 2)" "(error \"boom\")" "\"just a string\""))
+      (jetpacs-m3-repl--on-eval
+       (list :component "switches" :index 0 :value input) nil)
+      (sit-for 0.2))
+    (should-not (jetpacs-m3-repl-override "switches" 0))
+    (should (string-match-p "\"t\":\"switch\""
+                            (jetpacs-m3-repl-test--json "switches" 0)))))
+
+(ert-deftest jetpacs-m3-repl-an-override-cannot-leak-sideways ()
+  "Keyed per example, so a sibling and a neighbouring component are
+untouched — and `jetpacs-m3-repl-reset-all' clears the lot."
+  (jetpacs-m3-repl-test--clean
+    (jetpacs-m3-repl--on-eval
+     '(:component "switches" :index 0 :value "(jetpacs-text \"ONLY-HERE\")") nil)
+    (sit-for 0.2)
+    (should (jetpacs-m3-repl-override "switches" 0))
+    (should-not (jetpacs-m3-repl-override "switches" 1))
+    (should-not (jetpacs-m3-repl-override "buttons" 0))
+    (should-not (string-match-p "ONLY-HERE" (jetpacs-m3-repl-test--json "switches" 1)))
+    (jetpacs-m3-repl-reset-all)
+    (should-not (jetpacs-m3-repl-override "switches" 0))))
+
+(ert-deftest jetpacs-m3-repl-verbs-refuse-what-they-cannot-address ()
+  (should (eq 'stale (jetpacs-m3-repl--on-eval
+                      '(:component "nope" :index 0 :value "1") nil)))
+  (should (eq 'stale (jetpacs-m3-repl--on-eval
+                      '(:component "switches" :index 99 :value "1") nil)))
+  (should (eq 'rejected (jetpacs-m3-repl--on-eval
+                         '(:component "switches" :index "0" :value "1") nil)))
+  ;; No value and no live client: nothing to evaluate.
+  (should (eq 'rejected (jetpacs-m3-repl--on-eval
+                         '(:component "switches" :index 0) nil)))
+  (should (eq 'stale (jetpacs-m3-repl--on-reset
+                      '(:component "nope" :index 0) nil))))
+
+(ert-deftest jetpacs-m3-repl-seeds-the-prompt-with-the-sample ()
+  "The field opens holding the thing it is about.
+An empty box over a vocabulary you do not know yet is not a REPL you can
+start using."
+  (let ((seed (jetpacs-m3-repl--seed (jetpacs-m3-component "switches") 0)))
+    (should (string-prefix-p "(defun jetpacs-m3-switches--" seed))
+    (should (string-match-p "Upstream SwitchSample" seed)))
+  ;; The document and editor ids are per example, so a half-typed form
+  ;; cannot follow you into the next one.
+  (should-not (equal (jetpacs-m3-repl-document "switches" 0)
+                     (jetpacs-m3-repl-document "switches" 1)))
+  (should (string-suffix-p ".el" (jetpacs-m3-repl-document "switches" 0))))
+
+;;;; Knobs
+
+(ert-deftest jetpacs-m3-repl-knobs-come-from-the-validators ()
+  "The schema is read off the builder, never written down here."
+  (let ((schema (jetpacs-m3-repl-knob-schema 'jetpacs-button)))
+    (should (equal '("filled" "tonal" "elevated" "outlined" "text")
+                   (nth 2 (assq :variant schema))))
+    (should (eq 'bool (nth 1 (assq :enabled schema))))
+    ;; The lisp keyword, not the wire spelling.  `jetpacs-button' checks
+    ;; ":animate_shape" for a parameter called `animate-shape', and a
+    ;; knob under the wire name is a keyword the constructor refuses.
+    (should (assq :animate-shape schema))
+    (should-not (assq :animate_shape schema))
+    ;; Every derived knob is a keyword the constructor really takes.
+    (let ((accepted (jetpacs-m3-repl--key-params
+                     (car (read-from-string
+                           (jetpacs-m3--defun-text 'jetpacs-button))))))
+      (dolist (knob schema) (should (memq (car knob) accepted))))))
+
+(ert-deftest jetpacs-m3-repl-every-offered-knob-actually-builds ()
+  "THE property: no knob is offered that this sample cannot take.
+The arglist says which keywords a constructor accepts and cannot say
+which COMBINATIONS it accepts — several members are conditional on
+another — so knobs are filtered by trial against each sample's own
+arguments.  This sweeps every offered knob at every value it offers,
+across the whole catalog, because an error card is what the user gets
+otherwise."
+  (let (failures (turns 0) (examples 0))
+    (dolist (component jetpacs-m3-components)
+      (cl-loop
+       for _example in (plist-get component :examples)
+       for index from 0
+       do (when-let* ((call (jetpacs-m3-repl--call component index)))
+            (cl-incf examples)
+            (dolist (knob (jetpacs-m3-repl-knobs-for call))
+              (dolist (value (pcase (nth 1 knob)
+                               ('enum (nth 2 knob))
+                               ('bool (list t :json-false))))
+                (cl-incf turns)
+                (unless (condition-case nil
+                            (jetpacs-root-node-p
+                             (eval (jetpacs-m3-repl--apply-knobs
+                                    call (list (car knob) value))
+                                   t))
+                          (error nil))
+                  (push (list (plist-get component :id) index
+                              (car knob) value)
+                        failures)))))))
+    (should (> examples 50))
+    (should (> turns 500))
+    (should-not failures)))
+
+(ert-deftest jetpacs-m3-repl-a-knob-re-renders-through-the-builder ()
+  "Turning a knob re-evaluates the sample's OWN call with the member on."
+  (jetpacs-m3-repl-test--clean
+    (clrhash jetpacs-m3-repl--knobs)
+    (should (eq 'accepted
+                (jetpacs-m3-repl--on-knob
+                 '(:component "buttons" :index 1 :key ":variant"
+                   :value "outlined") nil)))
+    (let ((node (jetpacs-m3-repl-override "buttons" 1)))
+      (should (equal "button" (plist-get node :t)))
+      (should (equal "outlined" (plist-get node :variant)))
+      ;; The sample's own other arguments survive untouched.
+      (should (equal "Button" (plist-get node :label))))
+    ;; Reset discards the knob as well as the override.
+    (jetpacs-m3-repl--on-reset '(:component "buttons" :index 1) nil)
+    (should-not (jetpacs-m3-repl-override "buttons" 1))
+    (should-not (gethash (jetpacs-m3-example-screen-id "buttons" 1)
+                         jetpacs-m3-repl--knobs))))
+
+(ert-deftest jetpacs-m3-repl-a-knob-refuses-a-value-off-the-wire ()
+  "The value is injected by the device and checked against the schema."
+  (should (eq 'rejected (jetpacs-m3-repl--on-knob
+                         '(:component "buttons" :index 1 :key ":variant"
+                           :value "nonsense") nil)))
+  (should (eq 'stale (jetpacs-m3-repl--on-knob
+                      '(:component "buttons" :index 1 :key ":no-such-knob"
+                        :value "x") nil)))
+  (should (eq 'rejected (jetpacs-m3-repl--on-knob
+                         '(:component "buttons" :index 1) nil))))
+
+(provide 'jetpacs-m3-repl-test)
+;;; jetpacs-m3-repl-test.el ends here

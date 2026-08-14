@@ -925,5 +925,806 @@ the registry."
                       'accepted))
           (should (= (length continuations) (1+ before))))))))
 
+;;;; G4 — reader: glasspane-org-reader.el
+
+(defun glasspane-test--reader-vault ()
+  "A throwaway vault with the reader fixture; (VAULT . FILE)."
+  (let* ((vault (make-temp-file "glasspane-vault" t))
+         (file (expand-file-name "reader.org" vault)))
+    (with-temp-file file
+      (insert "#+TITLE: Reader\n\n"
+              "* TODO Water the garden :home:\n"
+              "DEADLINE: <2020-01-02 Thu>\n"
+              ":PROPERTIES:\n:EFFORT: 0:30\n:END:\n"
+              "Remember the roses.\n"
+              "** DONE Buy a hose\n"
+              "Coiled, 20m.\n"
+              "* Reference notes\n"
+              "Plain body.\n"))
+    (cons vault file)))
+
+(defun glasspane-test--reader-cleanup (vault)
+  "Kill the vault's buffers, sweep the reader mints, drop the vault."
+  (ebp-org-cache-invalidate)
+  (dolist (set '("reader-file" "reader-subtree"))
+    (ebp-org-ref-tokens nil :set set :owner "glasspane")
+    (ebp-org-ref-tokens nil :set (concat "glasspane-" set)
+                        :owner jetpacs-org-dialogs-owner))
+  (dolist (buf (buffer-list))
+    (let ((f (buffer-file-name buf)))
+      (when (and f (string-prefix-p (file-name-as-directory
+                                     (file-truename vault))
+                                    (file-truename f)))
+        (with-current-buffer buf (set-buffer-modified-p nil))
+        (kill-buffer buf))))
+  (delete-directory vault t))
+
+(defun glasspane-test--reader-ids (node)
+  "Every :id in NODE's tree, depth first."
+  (when (jetpacs-node-p node)
+    (append (when (plist-get node :id) (list (plist-get node :id)))
+            (cl-loop for (_k v) on node by #'cddr
+                     append (cond
+                             ((jetpacs-node-p v)
+                              (glasspane-test--reader-ids v))
+                             ((or (vectorp v) (proper-list-p v))
+                              (cl-loop for x across (vconcat v)
+                                       append (glasspane-test--reader-ids x))))))))
+
+(ert-deftest glasspane-test-reader-trees ()
+  "File, subtree and refile trees over a temp fixture: canonical
+serialization, the §16.2 app profile, §16.1 id uniqueness (the m3 gate
+pattern) — plus the surfacing the plan hangs the trees on: the files
+body seam serves the foldable reader while the foundation mode is
+rendered, the refile drag list when toggled, the plain editor when the
+base toggle says so, and the sparse filter narrows without ever
+signalling out of the builder."
+  (require 'glasspane-org-reader)
+  (glasspane-org-reader-register)
+  (let* ((fixture (glasspane-test--reader-vault))
+         (vault (car fixture))
+         (file (cdr fixture))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil))
+    (unwind-protect
+        (progn
+          (ebp-org-cache-invalidate)
+          ;; The whole-file tree: two foldable top levels.
+          (let ((nodes (glasspane-org-reader-file file)))
+            (should (= (length nodes) 2))
+            (dolist (n nodes)
+              (should (equal (plist-get n :t) "collapsible"))
+              (should (progn (jetpacs-check-profile n 'app) t))
+              (should (stringp (jetpacs-node->canonical-json n))))
+            ;; §16.1: every id in the render is unique.
+            (let ((ids (apply #'append
+                              (mapcar #'glasspane-test--reader-ids nodes))))
+              (should ids)
+              (should (equal (length ids)
+                             (length (cl-remove-duplicates
+                                      ids :test #'equal)))))
+            (let ((json (jetpacs-node->canonical-json
+                         (apply #'jetpacs-column nodes))))
+              ;; Long-press drills in on a minted token, never a ref.
+              (should (string-search "heading.tap" json))
+              (should (string-search "\"token\"" json))
+              (should-not (string-search "\"file\":" json))
+              ;; Swipes: todo cycle one side, the BASE archive (with
+              ;; the descriptor-level confirm) the other.
+              (should (string-search "heading.todo-cycle" json))
+              (should (string-search "jetpacs.org.archive" json))
+              (should (string-search "Archive this subtree?" json))
+              ;; The menu delegates the retired editors to the base
+              ;; sheet via the exposure route.
+              (should (string-search "jetpacs.org.heading" json))
+              ;; Overdue deadline badge, collapsed PROPERTIES drawer.
+              (should (string-search "Deadline 2020-01-02" json))
+              (should (string-search "PROPERTIES" json))
+              (should (string-search "\"collapsed\":true" json))
+              ;; Bodies degrade to org-syntax text (gap #6).
+              (should (string-search "Remember the roses." json))
+              (should (string-search "\"syntax\":\"org\"" json))
+              ;; Done title: color degrade, never :strike (gap #7).
+              (should (string-search "on_surface_variant" json))
+              (should-not (string-search "strike" json))
+              ;; Tag chips ride search.by-tag.
+              (should (string-search "search.by-tag" json)))
+            ;; The exposure route recorded each rendered heading for
+            ;; the base sheet verb.
+            (with-current-buffer (find-file-noselect file)
+              (org-with-wide-buffer
+               (goto-char (point-min))
+               (re-search-forward "^\\* TODO Water")
+               (should (jetpacs-buffer-exposed-p
+                        (buffer-name) (line-beginning-position)
+                        "jetpacs.org.heading")))))
+          ;; The subtree: the drilled heading's body inline, the child
+          ;; foldable; skip-props suppresses the drawer.
+          (let ((pos (with-current-buffer (find-file-noselect file)
+                       (org-with-wide-buffer
+                        (goto-char (point-min))
+                        (re-search-forward "^\\* TODO Water")
+                        (line-beginning-position)))))
+            (let* ((nodes (glasspane-org-reader-subtree file pos))
+                   (json (jetpacs-node->canonical-json
+                          (apply #'jetpacs-column nodes))))
+              (should nodes)
+              (should (string-search "Remember the roses." json))
+              (should (string-search "Buy a hose" json))
+              (should (string-search ":EFFORT: 0:30" json)))
+            (let ((json (jetpacs-node->canonical-json
+                         (apply #'jetpacs-column
+                                (glasspane-org-reader-subtree file pos t)))))
+              (should-not (string-search ":EFFORT: 0:30" json))))
+          ;; The refile list: one reorderable node, every item keyed,
+          ;; and the reorder action carrying the LIST id — file and
+          ;; positions resolve Emacs-side (D-4).
+          (let ((node (glasspane-org-reader-refile-list file)))
+            (should (equal (plist-get node :t) "reorderable_list"))
+            (should (progn (jetpacs-check-profile node 'app) t))
+            (should (= (length (plist-get node :items)) 3))
+            (let ((keys (mapcar (lambda (it) (plist-get it :key))
+                                (append (plist-get node :items) nil))))
+              (should (cl-every #'jetpacs-identifier-p keys))
+              (should (equal (length keys)
+                             (length (cl-remove-duplicates
+                                      keys :test #'equal))))
+              (let* ((args (plist-get (plist-get node :on_reorder) :args))
+                     (record (glasspane-org-reader-refile-lookup
+                              (plist-get args :list))))
+                (should record)
+                (should-not (plist-get args :file))
+                (should (equal (plist-get record :file)
+                               (file-truename file)))
+                (should (equal (mapcar #'car (plist-get record :keys))
+                               keys))
+                (should (cl-every (lambda (kv) (integerp (cdr kv)))
+                                  (plist-get record :keys))))))
+          ;; Surfacing: reader body while rendered, refile body when
+          ;; toggled, pass-through on the base's plain mode, and the
+          ;; filter narrows — or reports a bad query — inside the body.
+          (let ((jetpacs-org-render--files-mode
+                 (make-hash-table :test #'equal))
+                (glasspane-org-reader--refile-mode nil)
+                (glasspane-ui--files-filter ""))
+            (let ((body (glasspane-org-reader--files-body file)))
+              (should (equal (plist-get body :t) "lazy_column"))
+              (let ((json (jetpacs-node->canonical-json body)))
+                (should (string-search "files-filter" json))
+                (should (string-search "Water the garden" json))))
+            (let* ((glasspane-ui--files-filter "todo:TODO")
+                   (json (jetpacs-node->canonical-json
+                          (glasspane-org-reader--files-body file))))
+              (should (string-search "1 of 2 headings" json))
+              (should (string-search "Water the garden" json))
+              (should-not (string-search "Reference notes" json)))
+            (let* ((glasspane-ui--files-filter "(todo")
+                   (body (glasspane-org-reader--files-body file)))
+              (should body)
+              (should-not (string-search
+                           "collapsible"
+                           (jetpacs-node->canonical-json body))))
+            (let ((glasspane-org-reader--refile-mode t))
+              (should (string-search
+                       "reorderable_list"
+                       (jetpacs-node->canonical-json
+                        (glasspane-org-reader--files-body file)))))
+            (puthash file 'plain jetpacs-org-render--files-mode)
+            (should-not (glasspane-org-reader--files-body file))
+            (should-not (glasspane-org-reader--files-actions file)))
+          ;; A non-org path is never claimed, and a policy refusal
+          ;; passes through to the base skin instead of signalling out
+          ;; of the seam.
+          (should-not (glasspane-org-reader--files-body "/tmp/x.txt"))
+          (let ((outside (make-temp-file "glasspane-outside" nil ".org")))
+            (unwind-protect
+                (progn
+                  (with-temp-file outside (insert "* TODO Elsewhere\n"))
+                  (let ((jetpacs-org-render--files-mode
+                         (make-hash-table :test #'equal)))
+                    (should-not
+                     (glasspane-org-reader--files-body outside))))
+              (delete-file outside)))
+          ;; files.toggle-refile: the S4 status and the single writer.
+          (let ((handler (gethash "files.toggle-refile"
+                                  jetpacs-action-handlers))
+                (glasspane-org-reader--refile-mode nil)
+                (refreshed nil))
+            (should handler)
+            (cl-letf (((symbol-function 'jetpacs-buffer-defer-refresh)
+                       (lambda (surface) (push surface refreshed))))
+              (should (eq (funcall handler nil '(:surface "s")) 'accepted))
+              (should glasspane-org-reader--refile-mode)
+              (should (equal refreshed '("s"))))))
+      (glasspane-test--reader-cleanup vault))))
+
+(ert-deftest glasspane-test-reader-token-mint ()
+  "The offline mint/resolve round trip (:owner \"glasspane\"): a
+rendered heading's token resolves back to its ref and marker, the
+archive token lives in the base dialogs' scope and nowhere else, a
+re-render sweeps the previous set (replace semantics — swept sheets
+answer stale for free), and the heading.menu verb classifies on the
+same table."
+  (require 'glasspane-org-reader)
+  (glasspane-org-reader-register)
+  (let* ((fixture (glasspane-test--reader-vault))
+         (vault (car fixture))
+         (file (cdr fixture))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil))
+    (unwind-protect
+        (progn
+          (ebp-org-cache-invalidate)
+          (let* ((nodes (glasspane-org-reader-file file))
+                 (node (car nodes))
+                 (token (plist-get
+                         (plist-get (plist-get node :on_long_tap) :args)
+                         :token))
+                 (archive (plist-get
+                           (plist-get
+                            (plist-get (plist-get node :swipe_end)
+                                       :on_trigger)
+                            :args)
+                           :token)))
+            (should (stringp token))
+            (should (stringp archive))
+            (should-not (equal token archive))
+            ;; The tap token: the app's own scope, and only that scope.
+            (let ((ref (ebp-org-token-ref token :owner "glasspane")))
+              (should ref)
+              (should (equal (plist-get ref :file) (file-truename file)))
+              (should (integerp (plist-get ref :pos)))
+              (should (equal (plist-get ref :headline) "Water the garden"))
+              (should-not (ebp-org-token-ref token :owner "someone-else"))
+              (let ((m (ebp-org-resolve-ref ref)))
+                (unwind-protect
+                    (with-current-buffer (marker-buffer m)
+                      (should (equal (file-truename buffer-file-name)
+                                     (file-truename file)))
+                      (org-with-wide-buffer
+                       (goto-char m)
+                       (should (org-at-heading-p))
+                       (should (equal (nth 4 (org-heading-components))
+                                      "Water the garden"))))
+                  (set-marker m nil))))
+            ;; The archive token: minted INTO the base dialogs' owner
+            ;; scope so `jetpacs.org.archive' can resolve it — and
+            ;; invisible to the app scope.
+            (should (ebp-org-token-ref archive
+                                       :owner jetpacs-org-dialogs-owner))
+            (should-not (ebp-org-token-ref archive :owner "glasspane"))
+            ;; Replace-set: a re-render retires the old generation.
+            (glasspane-org-reader-file file)
+            (should-not (ebp-org-token-ref token :owner "glasspane"))
+            (should-not (ebp-org-token-ref
+                         archive :owner jetpacs-org-dialogs-owner))
+            ;; heading.menu classifies on the same table: junk shape
+            ;; rejects, a swept token is stale, and a live token with
+            ;; no client (so no dialog grant) refuses.
+            (let ((handler (gethash "heading.menu" jetpacs-action-handlers)))
+              (should handler)
+              (should (eq (funcall handler nil nil) 'rejected))
+              (should (eq (funcall handler '(:token 5) nil) 'rejected))
+              (should (eq (funcall handler (list :token token) nil) 'stale))
+              (let* ((fresh (glasspane-org-reader-file file))
+                     (live (plist-get
+                            (plist-get (plist-get (car fresh) :on_long_tap)
+                                       :args)
+                            :token)))
+                (should (eq (funcall handler (list :token live) nil)
+                            'rejected))))))
+      (glasspane-test--reader-cleanup vault))))
+
+(ert-deftest glasspane-test-reader-reorder ()
+  "heading.reorder consumes the D-4 record (the integration seam both
+porters flagged): a device drop moves the whole subtree on disk before
+`accepted' and retires the spent per-list record, a junk shape
+rejects, and a swept or mismatched list answers `stale'."
+  (require 'glasspane-org-reader)
+  (glasspane-org-reader-register)
+  (let* ((fixture (glasspane-test--reader-vault))
+         (vault (car fixture))
+         (file (cdr fixture))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (refreshed nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-buffer-defer-refresh)
+                   (lambda (surface) (push surface refreshed))))
+          (ebp-org-cache-invalidate)
+          (let* ((node (glasspane-org-reader-refile-list file))
+                 (handler (gethash "heading.reorder" jetpacs-action-handlers))
+                 (args (plist-get (plist-get node :on_reorder) :args))
+                 (list-id (plist-get args :list))
+                 (keys (mapcar #'car (plist-get
+                                      (glasspane-org-reader-refile-lookup
+                                       list-id)
+                                      :keys))))
+            (should handler)
+            ;; Fixture rows: Water(1) > Buy a hose(2), Reference(1).
+            ;; Drag "Reference notes" (index 2) to the top (index 0).
+            (should (eq (funcall handler
+                                 (list :list list-id :from 2 :to 0
+                                       :order (vector (nth 2 keys)
+                                                      (nth 0 keys)
+                                                      (nth 1 keys)))
+                                 '(:surface "s"))
+                        'accepted))
+            (should (equal refreshed '("s")))
+            (with-temp-buffer
+              (insert-file-contents file)
+              (let ((s (buffer-string)))
+                (should (string-search "* Reference notes" s))
+                (should (string-search "* TODO Water" s))
+                (should (< (string-search "* Reference notes" s)
+                           (string-search "* TODO Water" s)))))
+            ;; The spent record retired with the move; the same list id
+            ;; now classifies stale, junk shape still rejects.
+            (should-not (glasspane-org-reader-refile-lookup list-id))
+            (should (eq (funcall handler nil nil) 'rejected))
+            (should (eq (funcall handler
+                                 (list :list list-id :from 2 :to 0
+                                       :order (vconcat keys))
+                                 nil)
+                        'stale))))
+      (glasspane-test--reader-cleanup vault))))
+
+;;;; G4 — reader + detail: glasspane-detail.el
+
+(ert-deftest glasspane-test-detail-builders ()
+  "Golden node trees from fixture plists: the logbook renderer's three
+arms, the property-row control matrix (including the link-beats-date
+cond order v1 got backwards), the chip rails' clear-on-active args,
+and the shared agenda/result cards — G5's pure formatters stubbed
+until the agenda rung lands them — all round-tripping the canonical
+wire encoding."
+  (require 'glasspane-detail)
+  ;; Logbook arms.
+  (let* ((clock (glasspane-ui--render-logbook-entry
+                 '(:type clock :active nil
+                   :start "2026-08-10 Mon 10:00" :end "2026-08-10 Mon 11:30"
+                   :duration "1:30")))
+         (json (jetpacs-node->canonical-json clock)))
+    (should (equal (plist-get clock :t) "row"))
+    (should (string-search "2026-08-10, 10:00 to 11:30" json))
+    (should (string-search "1:30" json)))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--render-logbook-entry
+                '(:type note :timestamp "[2026-08-10 Mon]"
+                  :content "call back")))))
+    (should (string-search "Note" json))
+    (should (string-search "call back" json)))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--render-logbook-entry
+                '(:type state :from "TODO" :to "DONE"
+                  :timestamp "[2026-08-10 Mon]" :content "")))))
+    ;; Canonical JSON is UTF-8-encoded (unibyte): encode the arrow.
+    (should (string-search (encode-coding-string "TODO → DONE" 'utf-8)
+                           json)))
+  ;; Property rows: ID read-only; boolean switch; allowed enum with the
+  ;; single-select ONE-value rule; small number slider; link button
+  ;; (must beat the bracketed-value date heuristic); free text input.
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--property-row "ID" "abc-123" "tok" 7))))
+    (should (string-search "abc-123" json))
+    (should-not (string-search "text_input" json)))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--property-row "DONE?" "t" "tok" 7))))
+    (should (string-search "\"switch\"" json))
+    (should (string-search "\"checked\":true" json))
+    (should (string-search "heading.prop-set" json)))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--property-row "STATUS" "open" "tok" 7
+                                           '("open" "closed")))))
+    (should (string-search "\"enum_list\"" json))
+    (should (string-search "\"value\":\"open\"" json)))
+  ;; A value the options no longer carry seeds NO selection rather
+  ;; than failing the whole row at build time.
+  (should (jetpacs-node->canonical-json
+           (glasspane-ui--property-row "STATUS" "gone" "tok" 7
+                                       '("open" "closed"))))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--property-row "EFFORT" "5" "tok" 7))))
+    (should (string-search "\"slider\"" json)))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--property-row "CREATED" "[2026-08-10 Mon]"
+                                           "tok" 7))))
+    (should (string-search "\"date_button\"" json))
+    (should (string-search "\"value\":\"2026-08-10\"" json)))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--property-row
+                "LINK" "[[https://x.example][X]]" "tok" 7))))
+    (should (string-search "org.link.open" json))
+    (should (string-search "https://x.example" json))
+    (should-not (string-search "date_button" json)))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--property-row "FOO" "bar" "tok" 7))))
+    (should (string-search "\"text_input\"" json))
+    (should (string-search "\"token\":\"tok\"" json))
+    (should (string-search "\"name\":\"FOO\"" json)))
+  ;; Chip rails: tapping the ACTIVE chip sends the clearing value.
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--todo-chips "TODO" '("TODO" "DONE") "tok"))))
+    (should (string-search "\"scroll\":true" json))
+    (should (string-search "\"state\":\"\"" json))
+    (should (string-search "\"state\":\"DONE\"" json))
+    (should (string-search "\"selected\":true" json)))
+  (let* ((org-priority-highest ?A)
+         (org-priority-lowest ?B)
+         (json (jetpacs-node->canonical-json
+                (glasspane-ui--priority-chips "A" "tok"))))
+    (should (string-search "\"value\":\"\"" json))
+    (should (string-search "\"value\":\"B\"" json)))
+  ;; The shared cards (G5 formatters stubbed until the agenda rung).
+  (cl-letf (((symbol-function 'glasspane-ui--agenda-type-icon)
+             (lambda (_type) '("schedule" . nil)))
+            ((symbol-function 'glasspane-ui--agenda-type-label)
+             (lambda (_type) "scheduled"))
+            ((symbol-function 'glasspane-ui--card-date-row)
+             (lambda (_it) nil)))
+    (let* ((card (glasspane-detail--agenda-card
+                  '((headline . "Water the garden") (todo . "DONE")
+                    (type . "scheduled") (file . "/v/tasks.org")
+                    (priority . "A") (tags . ["home"])
+                    (token . "tok-1") (archive-token . "tok-arch"))))
+           (json (jetpacs-node->canonical-json card)))
+      (should (equal (plist-get card :t) "card"))
+      (should (string-search "heading.tap" json))
+      (should (string-search "\"token\":\"tok-1\"" json))
+      (should (string-search "heading.menu" json))
+      (should (string-search "heading.todo-cycle" json))
+      (should (string-search "jetpacs.org.archive" json))
+      (should (string-search "\"token\":\"tok-arch\"" json))
+      (should (string-search "Archive this subtree?" json))
+      ;; The done title takes the color degrade (gap #7), never strike.
+      (should (string-search "on_surface_variant" json))
+      (should-not (string-search "strike" json))
+      (should (string-search "search.by-tag" json)))
+    ;; No tokens -> a static card: no tap, no long-tap, no swipes.
+    (let ((card (glasspane-detail--agenda-card '((headline . "Plain")))))
+      (should-not (plist-get card :on_tap))
+      (should-not (plist-get card :on_long_tap))
+      (should-not (plist-get card :swipe_start))
+      (should-not (plist-get card :swipe_end))))
+  (let ((json (jetpacs-node->canonical-json
+               (glasspane-ui--result-card
+                '((headline . "Hit") (todo . "TODO") (file . "/v/a.org")
+                  (tags . ["x"]) (token . "tok-2"))))))
+    (should (string-search "heading.tap" json))
+    (should (string-search "\"token\":\"tok-2\"" json))
+    (should (string-search "search.by-tag" json))))
+
+(ert-deftest glasspane-test-detail-handler-triples ()
+  "Every detail verb answers a SPEC 14.4 status over temp org files,
+org core only: the token gate (junk `stale', wrong shape `rejected'),
+durable direct-arm mutations on disk before `accepted', bridged flows
+scheduling continuations instead of prompting, dialog verbs refusing
+without a client — and the pushed screen builds and serializes in
+both modes, degrading to the go-back placeholder on a dead ref."
+  (require 'glasspane-detail)
+  (glasspane-detail-register)
+  (let* ((vault (make-temp-file "glasspane-vault" t))
+         (file (expand-file-name "tasks.org" vault))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (glasspane-ui--detail-read-mode t)
+         (notified nil) (continuations nil) (pushes 0))
+    (ignore pushes)
+    (unwind-protect
+        (cl-letf (((symbol-function 'jetpacs-shell-notify)
+                   (lambda (text &rest _) (push text notified)))
+                  ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
+                  ((symbol-function 'jetpacs-shell-push)
+                   (lambda (&rest _) (cl-incf pushes) nil))
+                  ((symbol-function 'jetpacs-flow-continue)
+                   (lambda (fn) (push fn continuations) nil)))
+          (with-temp-file file
+            (insert "#+TITLE: Tasks\n\n"
+                    "* TODO Parent\n"
+                    ":PROPERTIES:\n:FOO: bar\n:END:\n"
+                    "body\n"
+                    "** Child\n"
+                    "* Second\n"))
+          (ebp-org-cache-invalidate)
+          (cl-flet* ((run (name args &optional params)
+                       (let ((handler (gethash name jetpacs-action-handlers)))
+                         (should handler)
+                         (funcall handler args
+                                  (or params '(:surface "app:glasspane")))))
+                     (tok-for (headline)
+                       (with-current-buffer (find-file-noselect file)
+                         (org-with-wide-buffer
+                          (goto-char (point-min))
+                          (re-search-forward (regexp-quote headline))
+                          (car (ebp-org-ref-tokens
+                                (list (ebp-org-ref-at-point))
+                                :set "t-detail" :owner "glasspane")))))
+                     (file-text ()
+                       (with-current-buffer (find-file-noselect file)
+                         (buffer-substring-no-properties (point-min)
+                                                         (point-max)))))
+            ;; Registration is complete and idempotent.
+            (dolist (name glasspane-detail--verbs)
+              (should (gethash name jetpacs-action-handlers)))
+            (glasspane-detail-register)
+            (should (gethash "heading.tap" jetpacs-action-handlers))
+            ;; The token gate every handler shares.
+            (should (eq (run "heading.tap" '(:token 5)) 'rejected))
+            (should (eq (run "heading.tap" '(:token "o0-swept")) 'stale))
+            (should (eq (run "heading.tap" (list :token (tok-for "Parent")))
+                        'accepted))
+            (should (= (length continuations) 1))
+            ;; todo-set: direct arm durable, clear arm, malformed, swept.
+            (should (eq (run "heading.todo-set"
+                             (list :state "DONE" :token (tok-for "Parent")))
+                        'accepted))
+            (should (string-search "* DONE Parent" (file-text)))
+            (should (eq (run "heading.todo-set"
+                             (list :state "" :token (tok-for "Parent")))
+                        'accepted))
+            (should-not (string-search "* DONE Parent" (file-text)))
+            (should (eq (run "heading.todo-set" '(:state 5 :token "x"))
+                        'rejected))
+            (should (eq (run "heading.todo-set" '(:state "DONE")) 'stale))
+            ;; todo-cycle steps the sequence.
+            (should (eq (run "heading.todo-cycle"
+                             (list :token (tok-for "Parent")))
+                        'accepted))
+            (should (string-search "* TODO Parent" (file-text)))
+            ;; schedule: relative arm, clear arm, empty shape rejects.
+            (should (eq (run "heading.schedule"
+                             (list :when "+1d" :token (tok-for "Parent")))
+                        'accepted))
+            (should (string-search "SCHEDULED:" (file-text)))
+            (should (eq (run "heading.schedule"
+                             (list :clear t :token (tok-for "Parent")))
+                        'accepted))
+            (should-not (string-search "SCHEDULED:" (file-text)))
+            (should (eq (run "heading.schedule"
+                             (list :token (tok-for "Parent")))
+                        'rejected))
+            ;; priority: set, clear, malformed.
+            (should (eq (run "heading.priority"
+                             (list :value "A" :token (tok-for "Parent")))
+                        'accepted))
+            (should (string-search "[#A]" (file-text)))
+            (should (eq (run "heading.priority"
+                             (list :value "" :token (tok-for "Parent")))
+                        'accepted))
+            (should-not (string-search "[#A]" (file-text)))
+            (should (eq (run "heading.priority" '(:value nil :token "x"))
+                        'rejected))
+            ;; tags: vector sets; a 23.1 charset violation and a bare
+            ;; string both refuse.
+            (should (eq (run "heading.tags"
+                             (list :value ["home" "x1"]
+                                   :token (tok-for "Parent")))
+                        'accepted))
+            (should (string-match-p ":home:x1:" (file-text)))
+            (should (eq (run "heading.tags"
+                             (list :value ["bad tag"]
+                                   :token (tok-for "Parent")))
+                        'rejected))
+            (should (eq (run "heading.tags"
+                             (list :value "home" :token (tok-for "Parent")))
+                        'rejected))
+            ;; prop-set writes and removes through the funnel.
+            (should (eq (run "heading.prop-set"
+                             (list :name "FOO" :value "baz"
+                                   :token (tok-for "Parent")))
+                        'accepted))
+            ;; org aligns drawer values — match the key, not the pad.
+            (should (string-match-p ":FOO:[ \t]+baz" (file-text)))
+            (should (eq (run "heading.prop-set"
+                             (list :name "FOO" :value ""
+                                   :token (tok-for "Parent")))
+                        'accepted))
+            (should-not (string-search ":FOO:" (file-text)))
+            (should (eq (run "heading.prop-set"
+                             (list :name "" :value "x" :token "t"))
+                        'rejected))
+            ;; duplicate then delete: durable both ways, even among
+            ;; duplicate titles (pos+headline resolution).
+            (should (eq (run "heading.duplicate"
+                             (list :token (tok-for "Second")))
+                        'accepted))
+            (should (= 2 (with-temp-buffer
+                           (insert (file-text))
+                           (count-matches "^\\* Second$" (point-min)
+                                          (point-max)))))
+            (should (eq (run "heading.delete"
+                             (list :token (tok-for "Second")))
+                        'accepted))
+            (should (= 1 (with-temp-buffer
+                           (insert (file-text))
+                           (count-matches "^\\* Second$" (point-min)
+                                          (point-max)))))
+            ;; detail.save: durable rewrite + a re-anchoring re-push.
+            (let ((before (length continuations)))
+              (should (eq (run "detail.save"
+                               (list :value "* Parent2\nnew body\n"
+                                     :token (tok-for "Parent")))
+                          'accepted))
+              (should (string-search "new body" (file-text)))
+              (should (string-search "* Parent2" (file-text)))
+              (should (= (length continuations) (1+ before))))
+            (should (eq (run "detail.save" '(:value 5 :token "x"))
+                        'rejected))
+            (should (eq (run "detail.save"
+                             (list :value "* X\n" :token "junk"))
+                        'stale))
+            ;; Bridged flows: a continuation is scheduled, nothing
+            ;; prompts inside the dispatch extent.
+            (should (eq (run "heading.refile"
+                             (list :token (tok-for "Parent2")))
+                        'accepted))
+            (should (eq (run "heading.add-note"
+                             (list :token (tok-for "Parent2")))
+                        'accepted))
+            (should (eq (run "heading.prop-add"
+                             (list :token (tok-for "Parent2")))
+                        'accepted))
+            (should (eq (run "heading.refile" '(:token "junk")) 'stale))
+            ;; Dialog verbs refuse without a client; bad types reject.
+            (should (eq (run "heading.props.show"
+                             (list :token (tok-for "Parent2")))
+                        'rejected))
+            (should (eq (run "detail.planning.edit"
+                             (list :token (tok-for "Parent2")
+                                   :type "SCHEDULED"))
+                        'rejected))
+            (should (eq (run "detail.planning.edit"
+                             (list :token (tok-for "Parent2")
+                                   :type "JUNK"))
+                        'rejected))
+            (should (eq (run "files.properties.show" (list :file file))
+                        'rejected))
+            (should (eq (run "files.properties.show"
+                             '(:file "/nope/x.org"))
+                        'rejected))
+            ;; link.open: shape gate, then a deferred open.
+            (should (eq (run "org.link.open" '(:link "")) 'rejected))
+            (should (eq (run "org.link.open" '(:link 5)) 'rejected))
+            (should (eq (run "org.link.open"
+                             '(:link "https://example.com"))
+                        'accepted))
+            ;; toggle-read is the single writer of the mode flag.
+            (should (eq (run "detail.toggle-read" nil) 'accepted))
+            (should-not glasspane-ui--detail-read-mode)
+            (should (eq (run "detail.toggle-read" nil) 'accepted))
+            (should glasspane-ui--detail-read-mode)
+            ;; files.properties.save: captured fields land as keywords,
+            ;; durably, before `accepted'; no fields rejects.
+            (should (eq (run "files.properties.save" (list :file file)
+                             '(:fields (:file-prop-title "Renamed"
+                                        :file-prop-category "cat")))
+                        'accepted))
+            (should (string-search "#+TITLE: Renamed" (file-text)))
+            (should (string-search "#+CATEGORY: cat" (file-text)))
+            (should (eq (run "files.properties.save" (list :file file))
+                        'rejected))
+            ;; The pushed screen: reader mode, editor mode, dead ref.
+            (let ((ref (with-current-buffer (find-file-noselect file)
+                         (org-with-wide-buffer
+                          (goto-char (point-min))
+                          (re-search-forward "Parent2")
+                          (ebp-org-ref-at-point)))))
+              (let* ((glasspane-ui--detail-read-mode t)
+                     (screen (glasspane-detail--screen ref nil))
+                     (json (jetpacs-node->canonical-json screen)))
+                (should (equal (plist-get screen :t) "scaffold"))
+                (should (string-search "Parent2" json))
+                (should (string-search "heading.todo-set" json))
+                (should (string-search "jetpacs.org.archive" json))
+                (should (string-search "detail.planning.edit" json))
+                (should (string-search "files.properties.show" json)))
+              (let* ((glasspane-ui--detail-read-mode nil)
+                     (json (jetpacs-node->canonical-json
+                            (glasspane-detail--screen ref nil))))
+                (should (string-search "\"editor\"" json))
+                (should (string-search "detail.save" json))
+                (should (string-search "\"ttl_s\"" json))
+                (should (string-search "\"dedupe\"" json))))
+            (let ((json (jetpacs-node->canonical-json
+                         (glasspane-detail--screen
+                          '(:id nil :file "/gone/nope.org" :pos 1
+                            :headline "X")
+                          nil))))
+              (should (string-search "Heading moved or gone" json)))))
+      (ebp-org-cache-invalidate)
+      (ebp-org-teardown-owner "glasspane")
+      (ebp-org-teardown-owner jetpacs-org-dialogs-owner)
+      (dolist (buf (buffer-list))
+        (let ((f (buffer-file-name buf)))
+          (when (and f (string-prefix-p (file-name-as-directory
+                                         (file-truename vault))
+                                        (file-truename f)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf))))
+      (delete-directory vault t))))
+
+(ert-deftest glasspane-test-detail-vulpea-noop ()
+  "With vulpea ABSENT — this harness's permanent condition — the two
+index touchpoints refile and (via the rebound engine save seam)
+archive share are silent no-ops that still land durably on disk: the
+seam saves synchronously, and the bridged refile flow moves the
+subtree between files with no vulpea in sight."
+  (require 'glasspane-detail)
+  (should-not (featurep 'vulpea))
+  (should-not (fboundp 'vulpea-db-update-file))
+  (glasspane-detail-register)
+  (let* ((vault (make-temp-file "glasspane-vault" t))
+         (src (expand-file-name "src.org" vault))
+         (dst (expand-file-name "dst.org" vault))
+         (org-directory vault)
+         (org-agenda-files (list src dst))
+         (ebp-org-roots nil)
+         (org-refile-targets `(((,dst) :maxlevel . 1)))
+         (org-refile-use-outline-path nil)
+         (notified nil))
+    (unwind-protect
+        (progn
+          (with-temp-file src
+            (insert "#+TITLE: Src\n* TODO Move me\nbody\n"))
+          (with-temp-file dst (insert "#+TITLE: Dst\n* Inbox\n"))
+          (ebp-org-cache-invalidate)
+          ;; The engine save seam is rebound to the app funnel and
+          ;; saves synchronously with the index arm a no-op.
+          (should (eq ebp-org-file-save-function
+                      #'glasspane-detail--file-save))
+          (with-current-buffer (find-file-noselect src)
+            (org-with-wide-buffer
+             (goto-char (point-max))
+             (insert "extra line\n"))
+            (funcall ebp-org-file-save-function (current-buffer))
+            (should-not (buffer-modified-p)))
+          (should (string-search "extra line"
+                                 (with-temp-buffer
+                                   (insert-file-contents src)
+                                   (buffer-string))))
+          ;; The bridged refile flow, bridge stubbed open: the subtree
+          ;; moves between files, both save, nothing reaches vulpea.
+          (let ((ref (with-current-buffer (find-file-noselect src)
+                       (org-with-wide-buffer
+                        (goto-char (point-min))
+                        (re-search-forward "Move me")
+                        (ebp-org-ref-at-point)))))
+            (cl-letf (((symbol-function 'jetpacs-dialog-can-bridge-p)
+                       (lambda () t))
+                      ((symbol-function 'completing-read)
+                       (lambda (_prompt collection &rest _)
+                         (car collection)))
+                      ((symbol-function 'jetpacs-shell-notify)
+                       (lambda (text &rest _) (push text notified)))
+                      ((symbol-function 'jetpacs-shell-push)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'jetpacs-chrome-pop-screen)
+                       (lambda (&rest _) nil)))
+              (glasspane-detail--refile-flow
+               ref '(:surface "app:glasspane"))))
+          (should (cl-some (lambda (s) (string-search "Refiled" s))
+                           notified))
+          (should (string-search "Move me"
+                                 (with-temp-buffer
+                                   (insert-file-contents dst)
+                                   (buffer-string))))
+          (should-not (string-search "Move me"
+                                     (with-temp-buffer
+                                       (insert-file-contents src)
+                                       (buffer-string)))))
+      (ebp-org-cache-invalidate)
+      (dolist (buf (buffer-list))
+        (let ((f (buffer-file-name buf)))
+          (when (and f (string-prefix-p (file-name-as-directory
+                                         (file-truename vault))
+                                        (file-truename f)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf))))
+      (delete-directory vault t))))
+
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

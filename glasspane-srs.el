@@ -746,13 +746,20 @@ Best-effort: a snapshot failure must not block the rating."
                          (org-srs-review-item nil))
                      (with-current-buffer buf
                        (apply #'org-srs-review-rate kw
-                              glasspane-srs--current)))))
+                              glasspane-srs--current)
+                       ;; Rating mutates the log drawer in the BUFFER
+                       ;; only; without the save funnel the schedule
+                       ;; dies with the process (the G9 device catch —
+                       ;; the smoke loop's force-stop is any Android
+                       ;; day's app kill).  Inside the engine form so a
+                       ;; failed write answers `rejected', the
+                       ;; suspend/undo shape.
+                       (glasspane-org--save-and-invalidate)))))
             (progn
               ;; The rating never landed: its snapshot goes with it, or
               ;; the undo button would offer a no-op restore.
               (setq glasspane-srs--undo undo)
               'rejected)
-          (ebp-org-cache-invalidate 'glasspane)
           (glasspane-srs--advance)
           (glasspane-ui--defer-refresh params)
           'accepted))))))
@@ -769,11 +776,16 @@ Best-effort: a snapshot failure must not block the rating."
   (cond
    ((null glasspane-srs--current) 'stale)
    ((not (glasspane-srs--engine
-           (apply #'org-srs-review-postpone '(1 :day)
-                  glasspane-srs--current)))
+           (let ((marker (apply #'org-srs-item-marker
+                                glasspane-srs--current)))
+             (with-current-buffer (marker-buffer marker)
+               (apply #'org-srs-review-postpone '(1 :day)
+                      glasspane-srs--current)
+               ;; Same durability rule as rate: the pushed-out
+               ;; schedule exists only in the buffer until saved.
+               (glasspane-org--save-and-invalidate)))))
     'rejected)
    (t
-    (ebp-org-cache-invalidate 'glasspane)
     (glasspane-srs--advance)
     (glasspane-ui--defer-refresh params)
     'accepted)))

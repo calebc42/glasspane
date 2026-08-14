@@ -1,4 +1,4 @@
-;;; glasspane-theme-picker.el --- shared scaffold for theme control screens -*- lexical-binding: t; -*-
+;;; jetpacs-theme-picker.el --- shared scaffold for theme control screens -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Package-Requires: ((emacs "30.1"))
@@ -10,13 +10,21 @@
 ;; the companion-mirror note, the current-theme header card, the
 ;; light/dark grouped picker, and the customize cross-link.  A concrete
 ;; screen supplies its provider functions (theme list, current, dark-p,
-;; palette color) and its action names; glasspane-ef is the app's
-;; instantiation for Prot's ef-themes.
+;; palette color) and its action names; glasspane-ef is the first
+;; instantiation, for Prot's ef-themes — and it STAYS app-side, because
+;; ef-themes is in the app's package set, not the foundation's.
 ;;
-;; G8 port of v1 core jetpacs-theme-picker.el, APP-LOCAL by the plan's
-;; gap-#8 ruling (docs/PLAN-glasspane-app.md, G8) — the v3 foundation
-;; ships no theme-picker, so the scaffold moves into the app under its
-;; own prefix.  Rewrites against v1:
+;; Foundation module by the ratified §3 step-3 promotion
+;; (docs/PLAN-jetpacs-debt-and-scaffold.md), REVERSING the
+;; FOUNDATION-GAPS #8 ruling (docs/PLAN-glasspane-app.md) that had
+;; landed the G8 port app-local as glasspane-theme-picker.el pending a
+;; second consumer.  The reversal costs nothing because the closure was
+;; foundation-only from the day it landed — cl-lib, jetpacs-widgets,
+;; jetpacs-theme, zero glasspane symbols — so under the 2026-08-06
+;; naming rule (a prefix is a claim about the require closure) the old
+;; prefix overclaimed, and the rename IS the whole promotion.
+;;
+;; G8 port of v1 core jetpacs-theme-picker.el.  Rewrites against v1:
 ;;  - `jetpacs-swatch' has no v3 node helper: the chip is a shaped
 ;;    `jetpacs-surface' sized through `jetpacs-with-attrs' (width and
 ;;    height are universal attributes, not surface members).
@@ -37,34 +45,34 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-theme)
 
-(defconst glasspane-theme-picker-strip-keys
+(defconst jetpacs-theme-picker-strip-keys
   '(bg-main fg-main accent-0 accent-1 accent-2 accent-3 err info)
   "Palette roles shown in the current theme's swatch strip.")
 
-(defun glasspane-theme-picker--swatch (hex &optional size)
+(defun jetpacs-theme-picker--swatch (hex &optional size)
   "A round color chip of HEX at SIZE dp (default 22), or nil when HEX is nil."
   (when hex
     (jetpacs-with-attrs
      (jetpacs-surface :color hex :shape "circle")
      :width (or size 22) :height (or size 22))))
 
-(defun glasspane-theme-picker-display-name (prefix theme)
+(defun jetpacs-theme-picker-display-name (prefix theme)
   "A human-friendly label for THEME: drop PREFIX, then title-case,
 so `modus-operandi-tinted' reads as \"Operandi Tinted\"."
   (capitalize
    (replace-regexp-in-string
     "-" " " (string-remove-prefix prefix (symbol-name theme)))))
 
-(defun glasspane-theme-picker-strip (color-fn)
+(defun jetpacs-theme-picker-strip (color-fn)
   "The CURRENT theme's swatch strip: one chip per strip key.
 COLOR-FN takes (KEY &optional THEME) and returns a hex string or nil;
 called with no theme it reads the live palette, which resolves on every
 provider version."
   (delq nil (mapcar (lambda (key)
-                      (glasspane-theme-picker--swatch (funcall color-fn key)))
-                    glasspane-theme-picker-strip-keys)))
+                      (jetpacs-theme-picker--swatch (funcall color-fn key)))
+                    jetpacs-theme-picker-strip-keys)))
 
-(defun glasspane-theme-picker-preview (color-fn theme)
+(defun jetpacs-theme-picker-preview (color-fn theme)
   "Per-theme swatches (background / foreground / accent) for THEME's row.
 Only when the running palette machinery can resolve a NON-current
 theme's colors (`modus-themes-activate', modus 5.0+); otherwise nil, so
@@ -72,11 +80,11 @@ the list shows uniformly clean names instead of swatches for the active
 theme alone."
   (when (fboundp 'modus-themes-activate)
     (delq nil (mapcar (lambda (key)
-                        (glasspane-theme-picker--swatch
+                        (jetpacs-theme-picker--swatch
                          (funcall color-fn key theme) 18))
                       '(bg-main fg-main accent-0)))))
 
-(defun glasspane-theme-picker-mirror-note (mirror-action)
+(defun jetpacs-theme-picker-mirror-note (mirror-action)
   "Companion-mirror status: a live badge, or a one-tap switch to mirror mode.
 MIRROR-ACTION is the action that flips `jetpacs-theme-mode' to `mirror'."
   (if (eq jetpacs-theme-mode 'mirror)
@@ -86,7 +94,7 @@ MIRROR-ACTION is the action that flips `jetpacs-theme-mode' to `mirror'."
     (jetpacs-chip "Mirror on phone" :icon "smartphone"
                   :on-tap (jetpacs-action mirror-action))))
 
-(cl-defun glasspane-theme-picker-current-card (current &key display-fn
+(cl-defun jetpacs-theme-picker-current-card (current &key display-fn
                                                        dark-p-fn color-fn
                                                        mirror-action
                                                        none-label)
@@ -107,11 +115,11 @@ palette strip, and MIRROR-ACTION the mirror note."
                                       :style "caption"))
                       (when current
                         (apply #'jetpacs-row
-                               (glasspane-theme-picker-strip color-fn)))
+                               (jetpacs-theme-picker-strip color-fn)))
                       (when current
-                        (glasspane-theme-picker-mirror-note mirror-action)))))))
+                        (jetpacs-theme-picker-mirror-note mirror-action)))))))
 
-(cl-defun glasspane-theme-picker-theme-card (theme current &key display-fn
+(cl-defun jetpacs-theme-picker-theme-card (theme current &key display-fn
                                                    color-fn load-action)
   "A single-line row for THEME: name, preview swatches, and a marker; a tap
 dispatches LOAD-ACTION with the theme name.  CURRENT (the active theme)
@@ -127,7 +135,7 @@ Light/Dark headers."
                     (jetpacs-box (jetpacs-text (funcall display-fn theme)
                                                :style "label"))
                     :weight 1))
-             (glasspane-theme-picker-preview color-fn theme)
+             (jetpacs-theme-picker-preview color-fn theme)
              (list (if activep
                        (jetpacs-icon "check_circle" :color "primary")
                      (jetpacs-icon "chevron_right")))))
@@ -135,14 +143,14 @@ Light/Dark headers."
                (jetpacs-action load-action
                                :args (list :theme (symbol-name theme)))))))
 
-(cl-defun glasspane-theme-picker-themes-section (themes current &key dark-p-fn
+(cl-defun jetpacs-theme-picker-themes-section (themes current &key dark-p-fn
                                                         display-fn color-fn
                                                         load-action)
   "The theme picker: THEMES as cards grouped Light then Dark."
   (let* ((light (seq-remove dark-p-fn themes))
          (dark (seq-filter dark-p-fn themes))
          (card (lambda (theme)
-                 (glasspane-theme-picker-theme-card theme current
+                 (jetpacs-theme-picker-theme-card theme current
                                                     :display-fn display-fn
                                                     :color-fn color-fn
                                                     :load-action load-action))))
@@ -150,7 +158,7 @@ Light/Dark headers."
      (when light (cons (jetpacs-section-header "Light") (mapcar card light)))
      (when dark (cons (jetpacs-section-header "Dark") (mapcar card dark))))))
 
-(defun glasspane-theme-picker-more-link (group)
+(defun jetpacs-theme-picker-more-link (group)
   "A card cross-linking into the customize browser's GROUP."
   (jetpacs-card
    (jetpacs-row
@@ -161,5 +169,5 @@ Light/Dark headers."
     (jetpacs-icon "chevron_right"))
    :on-tap (jetpacs-action "customize.show" :args (list :group group))))
 
-(provide 'glasspane-theme-picker)
-;;; glasspane-theme-picker.el ends here
+(provide 'jetpacs-theme-picker)
+;;; jetpacs-theme-picker.el ends here

@@ -160,6 +160,13 @@ emacs -Q --batch -L emacs -l test/ebp-complete-test.el \
 emacs -Q --batch -L emacs -l test/jetpacs-theme-test.el \
   -f ert-run-tests-batch-and-exit
 
+# The promoted theme-picker scaffold (PLAN-jetpacs-debt-and-scaffold §3
+# step 3, reversing FOUNDATION-GAPS #8): scaffold-alone coverage, moved
+# from the glasspane suite with the module; the ef instantiation stays
+# there.
+emacs -Q --batch -L emacs -l test/jetpacs-theme-picker-test.el \
+  -f ert-run-tests-batch-and-exit
+
 # JA-1 reminders wrapper exit gate.
 emacs -Q --batch -L emacs -l test/jetpacs-device-test.el \
   -f ert-run-tests-batch-and-exit

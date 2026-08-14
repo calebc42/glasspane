@@ -4470,7 +4470,9 @@ squatting where the target directory must go) notifies, then answers
       (delete-directory tour t)
       (delete-directory vault t))))
 
-;;;; G8 — satellites: glasspane-ef.el (+ glasspane-theme-picker.el)
+;;;; G8 — satellites: glasspane-ef.el (the theme-picker scaffold it
+;;;; instantiates is foundation since the §3 step-3 promotion; the
+;;;; scaffold-alone coverage moved with it, test/jetpacs-theme-picker-test.el)
 
 (ert-deftest glasspane-test-ef-absent-paths ()
   "The DEFAULT suite path — ef-themes absent — is the real guard
@@ -4705,74 +4707,6 @@ SPEC 14.4 contract over a stubbed apply."
           (should (eq (glasspane-ef--on-option
                        '(:name "ef-themes-bold-constructs" :value t) nil)
                       'rejected)))))))
-
-(ert-deftest glasspane-test-ef-theme-picker-scaffold ()
-  "The app-local theme-picker split (gap #8): display names, the
-swatch rebuild on `jetpacs-surface' + universal width/height, the
-preview's modus-5.0 gate, light/dark grouping with the active-theme
-marker, the mirror note both ways, and the customize cross-link —
-every node through the canonical wire encoding."
-  (require 'glasspane-theme-picker)
-  (should (equal (glasspane-theme-picker-display-name
-                  "ef-" (intern "ef-melissa-dark"))
-                 "Melissa Dark"))
-  ;; Swatch: nil-safe, circle surface, dp via universal attrs.
-  (should-not (glasspane-theme-picker--swatch nil))
-  (let ((json (jetpacs-node->canonical-json
-               (glasspane-theme-picker--swatch "#aabbcc"))))
-    (should (string-search "\"shape\":\"circle\"" json))
-    (should (string-search "\"color\":\"#aabbcc\"" json))
-    (should (string-search "\"width\":22" json)))
-  (should (string-search "\"height\":18"
-                         (jetpacs-node->canonical-json
-                          (glasspane-theme-picker--swatch "#123456" 18))))
-  ;; Preview gates on the modus 5.0 palette machinery.
-  (let ((color-fn (lambda (&rest _) "#001122")))
-    (when (not (fboundp 'modus-themes-activate))
-      (should-not (glasspane-theme-picker-preview color-fn 'any)))
-    (cl-letf (((symbol-function 'modus-themes-activate) (lambda (&rest _))))
-      (should (= (length (glasspane-theme-picker-preview color-fn 'any)) 3))))
-  ;; Grouping, the active marker, and the load-action args plist.
-  (let* ((day (intern "ef-day")) (night (intern "ef-night"))
-         (section (glasspane-theme-picker-themes-section
-                   (list day night) day
-                   :dark-p-fn (lambda (theme) (eq theme night))
-                   :display-fn #'symbol-name
-                   :color-fn (lambda (&rest _) nil)
-                   :load-action "ef.load"))
-         (json (jetpacs-node->canonical-json
-                (apply #'jetpacs-column section))))
-    (should (= (length section) 4))          ; Light hdr, day, Dark hdr, night
-    (should (string-search "\"title\":\"Light\"" json))
-    (should (string-search "\"title\":\"Dark\"" json))
-    (should (string-search "check_circle" json))
-    (should (string-search "\"theme\":\"ef-night\"" json))
-    ;; The active theme's card is not re-loadable.
-    (should-not (string-search "\"theme\":\"ef-day\"" json)))
-  ;; Mirror note both ways; the mode variable is a hard require here.
-  (let ((jetpacs-theme-mode 'mirror))
-    (should (string-search "Mirroring"
-                           (jetpacs-node->canonical-json
-                            (glasspane-theme-picker-mirror-note "ef.mirror")))))
-  (let ((jetpacs-theme-mode 'system))
-    (let ((json (jetpacs-node->canonical-json
-                 (glasspane-theme-picker-mirror-note "ef.mirror"))))
-      (should (string-search "Mirror on phone" json))
-      (should (string-search "\"action\":\"ef.mirror\"" json))))
-  ;; Current-card none arm, and the customize cross-link.
-  (should (string-search "No ef theme active"
-                         (jetpacs-node->canonical-json
-                          (glasspane-theme-picker-current-card
-                           nil
-                           :display-fn #'symbol-name
-                           :dark-p-fn #'ignore
-                           :color-fn #'ignore
-                           :mirror-action "ef.mirror"
-                           :none-label "No ef theme active"))))
-  (let ((json (jetpacs-node->canonical-json
-               (glasspane-theme-picker-more-link "ef-themes"))))
-    (should (string-search "\"action\":\"customize.show\"" json))
-    (should (string-search "\"group\":\"ef-themes\"" json))))
 
 ;;;; G8 — satellites: glasspane-gallery.el
 

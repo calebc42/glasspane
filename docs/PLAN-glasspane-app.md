@@ -4,8 +4,11 @@ Status: G0 LANDED 2026-08-13 (skeleton/registration/harness; gate 4/4, full suit
 (PLAN-glasspane-completion.md, R0–R5) is closed on the foundation side;
 this plan is the app itself. Source: the 22-file v1 app at
 `llm-poc/jetpacs-v1-examples/glasspane/emacs/apps/glasspane/` (8,522
-lines). Destination: `llm-poc-3/emacs/apps/glasspane/` (in-tree now;
-repo split waits for a bundle producer). Measured baseline
+lines). Destination: `llm-poc-3/emacs/apps/glasspane/` — CANONICAL, ratified
+by Caleb 2026-08-13: Tier-1 apps live inside jetpacs, which they
+depend on; no repo split is planned (the bundle-producer gap therefore
+gates nothing here — it matters only for distributing apps OUTSIDE
+this tree). Measured baseline
 (2026-08-12 verification workflow): 11/18 v1 requires resolve in v3
 and all 7 missing are dead/retired/renamed; 30/45 most-used v1
 functions exist keyword-compatible; the four

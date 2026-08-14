@@ -185,10 +185,14 @@ yet? every jetpacs require below is skipped."
                                   (error-message-string err))))
 
 (when jetpacs-emacs-init--elisp-ready
+  ;; jetpacs-launcher is load-bearing for MULTI-APP hosts (G9 catch):
+  ;; it self-registers the GLOBAL `jetpacs.launcher.open' verb every
+  ;; dock/drawer row dispatches — without it a dock tap answers
+  ;; "action not allowlisted" and app switching silently dies.
   (dolist (feat '(ebp ebp-sync ebp-complete
                   jetpacs-widgets jetpacs-async jetpacs-surfaces
                   jetpacs-shell jetpacs-buffer jetpacs-navigate
-                  jetpacs-chrome jetpacs-files))
+                  jetpacs-chrome jetpacs-launcher jetpacs-files))
     (condition-case err
         (progn (require feat) (jetpacs-emacs-init--log "required %s" feat))
       (error (jetpacs-emacs-init--log "require %s FAILED: %s" feat

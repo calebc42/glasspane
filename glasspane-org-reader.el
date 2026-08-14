@@ -726,7 +726,7 @@ text editor, so the base rendered⇄plain toggle keeps working.  Policy
 refusals and errors pass too — the base skin has no roots policy and
 still renders the file; the reader just declines it."
   (when (and (glasspane-org-reader--org-path-p path)
-             (jetpacs-org-render--files-rendered-p path))
+             (jetpacs-org-render-rendered-p path))
     (condition-case err
         (if glasspane-org-reader--refile-mode
             (jetpacs-lazy-column
@@ -747,7 +747,7 @@ The seams APPEND across claimants, so the foundation's edit/preview
 icon (`jetpacs.org.view-mode') still appears; this contributes only the
 refile flip, files.toggle-read having died with the bimodal machinery."
   (when (and (glasspane-org-reader--org-path-p path)
-             (jetpacs-org-render--files-rendered-p path))
+             (jetpacs-org-render-rendered-p path))
     (list (jetpacs-icon-button
            (if glasspane-org-reader--refile-mode "visibility" "swap_vert")
            (jetpacs-action "files.toggle-refile")

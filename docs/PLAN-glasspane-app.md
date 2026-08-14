@@ -4,7 +4,10 @@ Status: G0 LANDED 2026-08-13 (skeleton/registration/harness; gate 4/4).
 G1 LANDED 2026-08-13 (data layer: glasspane-org.el + glasspane-vulpea.el;
 gate 11/11, full suite 934/41). G2 LANDED 2026-08-13 (services:
 glasspane-clock.el + glasspane-config.el + glasspane-packages.el;
-gate 21/21, full suite 944/41). Next: G3 (keystone: glasspane-ui.el). The completion ladder
+gate 21/21, full suite 944/41). G3 LANDED 2026-08-13 (keystone:
+glasspane-ui.el — settings surface, shared view defvars, at-ref
+funnel; gate 25/25, full suite 948/41). Next: G4 (reader + detail:
+glasspane-org-reader.el, glasspane-detail.el). The completion ladder
 (PLAN-glasspane-completion.md, R0–R5) is closed on the foundation side;
 this plan is the app itself. Source: the 22-file v1 app at
 `llm-poc/jetpacs-v1-examples/glasspane/emacs/apps/glasspane/` (8,522

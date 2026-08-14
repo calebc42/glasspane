@@ -10,8 +10,9 @@
 ;; ladder is docs/PLAN-glasspane-app.md; this file is G0: the thin
 ;; entry in the M3 template (jetpacs-m3-catalog.el), owning exactly the
 ;; app identity — the "glasspane" owner claim, the chrome root (a
-;; placeholder home until G3's glasspane-ui lands), the dock
-;; destination, and one owner verb.  The sibling `require' list below
+;; placeholder home until the later rungs' screens give a hub
+;; something to point at — v1's ui was tab fabric and had none), the
+;; dock destination, and one owner verb.  The sibling `require' list below
 ;; grows one rung at a time; nothing here reaches for org yet.
 ;;
 ;; Client hooks (clock notification, window class, save refresh) attach
@@ -50,6 +51,9 @@
 (require 'glasspane-clock)
 (require 'glasspane-config)
 (require 'glasspane-packages)
+;; G3, the keystone: the settings surface, the shared view state, and
+;; the at-ref funnel.  Requires glasspane-org, so it loads last.
+(require 'glasspane-ui)
 
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
@@ -63,13 +67,15 @@ second real `jetpacs-defapp' caller there is.")
 (defconst glasspane-icon "menu_book"
   "The dock/launcher icon.  A knowledge base is a book you keep open.")
 
-;;;; The placeholder home (G3's glasspane-ui replaces this builder)
+;;;; The placeholder home (a later rung's hub replaces this builder)
 
 (defun glasspane-home-screen (back)
   "The G0 root screen: the identity, and the ladder's own state.
 Exists so registration, the dock, and `M-x glasspane' have a real
-screen behind them from the first rung — G3 swaps the builder for the
-ported glasspane-ui home without touching the registration."
+screen behind them from the first rung.  v1 had no home to port — its
+ui was tab fabric (S1-retired) — so the placeholder stands until the
+later rungs' screens give a hub something to point at; swapping the
+builder then must not change the registration's shape."
   (jetpacs-chrome-screen
    glasspane-title
    (jetpacs-column
@@ -133,7 +139,8 @@ registry entry in place."
   (glasspane-org-install-hooks)
   (glasspane-clock-install-hooks)
   (glasspane-config-register)
-  (glasspane-packages-register))
+  (glasspane-packages-register)
+  (glasspane-ui-register))
 
 (defun glasspane-unregister ()
   "Deregister every verb, the chrome root, and the app identity.
@@ -149,7 +156,8 @@ glasspane.packages.install) sweep with the entry's own."
   (glasspane-org-remove-hooks)
   (glasspane-clock-remove-hooks)
   (glasspane-config-unregister)
-  (glasspane-packages-unregister))
+  (glasspane-packages-unregister)
+  (glasspane-ui-unregister))
 
 (glasspane-register)
 

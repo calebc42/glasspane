@@ -38,6 +38,14 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-apps)
 
+;; The rung ladder's sibling modules, in the plan's load order (G1: the
+;; data layer).  glasspane-vulpea is the extractor's worker-lib —
+;; definitions only, safe to load with vulpea absent; registration
+;; happens where vulpea is DETECTED (glasspane-org's load tail, G2's
+;; packages light-up), never here.
+(require 'glasspane-org)
+(require 'glasspane-vulpea)
+
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
 Not under `jetpacs-reserved-owner-prefix': Glasspane is a Tier-1
@@ -108,13 +116,22 @@ registry entry in place."
                   :label glasspane-title
                   :icon glasspane-icon
                   :surfaces (list glasspane-owner)
-                  :dock #'glasspane--dock-items))
+                  :dock #'glasspane--dock-items)
+  ;; The CREATED/MODIFIED stampers are GLOBAL org hooks, so they attach
+  ;; at app enable — never at glasspane-org's load (a bare `require'
+  ;; must not mutate the user's `before-save-hook').  Teardown of this
+  ;; owner detaches them; install self-registers that removal.
+  (glasspane-org-install-hooks))
 
 (defun glasspane-unregister ()
   "Deregister the verbs, the chrome root, and the app identity."
   (jetpacs-undefaction "glasspane.home")
   (jetpacs-apps-unregister glasspane-owner)
-  (jetpacs-chrome-remove glasspane-owner))
+  (jetpacs-chrome-remove glasspane-owner)
+  ;; The live-reload/unload path: teardown of the owner would detach
+  ;; the org stampers too, but unregister must not leave them behind
+  ;; when no teardown ever runs (M-x unload-feature).
+  (glasspane-org-remove-hooks))
 
 (glasspane-register)
 

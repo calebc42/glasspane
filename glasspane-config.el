@@ -5,10 +5,16 @@
 
 ;;; Commentary:
 
-;; Glasspane's opinionated defaults — capture templates, agenda wiring,
-;; babel languages — live as small elisp files in Glasspane's config
-;; subtree, written and refreshed by the app rather than hand-maintained
-;; in init.el.  The contract is v1's, unchanged:
+;; Glasspane's opinionated defaults — the capture templates — live as
+;; small elisp files in Glasspane's config subtree, written and
+;; refreshed by the app rather than hand-maintained in init.el.  (The
+;; org-defaults.el half — inbox seeding, agenda-files fallback,
+;; LOGBOOK drawer, babel languages — was phone-generic, not app
+;; opinion, and moved to the foundation under the §3 step-4 ruling:
+;; jetpacs-org-settings.el seeds it at load with the same
+;; only-while-stock guards.  Its managed file survives as a stub so a
+;; `config.sync' overwrites stale copies on already-provisioned
+;; devices.)  The contract is v1's, unchanged:
 ;;
 ;;   - `glasspane-config-sync' (or the allowlisted `config.sync' action)
 ;;     rewrites every managed file to the bundle's current defaults, so
@@ -72,35 +78,15 @@ name.")
           (append org-capture-templates (list tpl)))))
 ")
     ("org-defaults.el" . "\
-;;; org-defaults.el --- Glasspane-managed org wiring
+;;; org-defaults.el --- Glasspane-managed org wiring (relocated)
 ;; APP-MANAGED (glasspane-config v1): rewritten by `glasspane-config-sync'.
-;; Personal settings belong in init.el or Customize — they win because
-;; init.el runs after this file loads.
-
-(require 'org)
-
-;; Capture lands in the inbox inside `org-directory' (only seeded while
-;; still at org's stock ~/.notes default).
-(when (equal org-default-notes-file
-             (convert-standard-filename \"~/.notes\"))
-  (setq org-default-notes-file
-        (expand-file-name \"inbox.org\" org-directory)))
-(make-directory org-directory t)
-
-;; The phone's agenda tab needs agenda files; default to the whole
-;; org directory when nothing is configured yet.
-(unless org-agenda-files
-  (setq org-agenda-files (list org-directory)))
-
-;; State changes and clocks go into LOGBOOK drawers — the heading
-;; detail view shows them as a structured section.
-(setq org-log-into-drawer t)
-
-;; Languages the demo corpus executes from the phone; the run button
-;; only appears for languages loaded here.
-(org-babel-do-load-languages
- 'org-babel-load-languages
- '((emacs-lisp . t) (shell . t) (python . t)))
+;; Emptied on purpose: the phone-generic org seeding this file carried
+;; (inbox capture target, the org-directory mkdir, the agenda-files
+;; fallback, the LOGBOOK drawer, babel languages) is FOUNDATION-owned
+;; now -- emacs/jetpacs-org-settings.el seeds it at load with the same
+;; only-while-stock guards.  The file stays managed so a config.sync on
+;; an already-provisioned device OVERWRITES the old duplicate copy
+;; instead of leaving it to shadow the foundation's seeding.
 "))
   "Alist of (FILENAME . CONTENT) written by `glasspane-config-sync'.")
 
@@ -169,8 +155,8 @@ allowlisted `config.sync' action."
   "Load the managed defaults; on a store-adopted install, create them first.
 Adoption via the app store (\"glasspane.el\" listed in
 `jetpacs-app-store-installed') IS the install consent: a freshly
-installed Glasspane must come up with capture templates and agenda
-wiring or the phone shows an empty Agenda and an empty capture sheet.
+installed Glasspane must come up with capture templates or the phone
+shows an empty capture sheet.
 Everywhere else — in-tree/dev requires, batch loads — nothing is
 written until the user opts in explicitly via
 `glasspane-config-ensure' (the FOUNDATION-GAPS #4 corollary: dev

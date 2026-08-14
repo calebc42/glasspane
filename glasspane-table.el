@@ -1,4 +1,4 @@
-;;; glasspane-table.el --- Glasspane org-table/babel actions + org settings -*- lexical-binding: t; -*-
+;;; glasspane-table.el --- Glasspane org-table/babel actions -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Package-Requires: ((emacs "30.1"))
@@ -6,10 +6,9 @@
 ;;; Commentary:
 
 ;; The G6 table rung (docs/PLAN-glasspane-app.md): the org-table
-;; structure and cell editors, the babel play verb, and the
-;; schema-driven org settings sections.  The base render's
-;; native-table upgrade is read-only (FOUNDATION-GAPS #11), so this
-;; file also AUTHORS the app's tappable table node
+;; structure and cell editors, and the babel play verb.  The base
+;; render's native-table upgrade is read-only (FOUNDATION-GAPS #11),
+;; so this file also AUTHORS the app's tappable table node
 ;; (`glasspane-table-node'), whose cell descriptors ride the SPEC 23.1
 ;; exposure route — v1 baked real file paths and positions into the
 ;; wire args; no v3 descriptor may (S5).
@@ -20,6 +19,12 @@
 ;;   (jetpacs-org-dialogs.el) owns the tapped-marker surface.
 ;; - The Appearance section's `jetpacs-dialog-style' row (v1 table:54):
 ;;   no such defcustom exists — dialog style is per-dialog (S3).
+;; - The schema-driven org settings sections this rung used to register
+;;   are FOUNDATION content now (emacs/jetpacs-org-settings.el, the
+;;   ratified relocation of PLAN-jetpacs-debt-and-scaffold §3): every
+;;   symbol in them was a built-in or foundation defcustom.  The one
+;;   app-opinion row, `glasspane-babel-timeout', stays with the app —
+;;   registered in glasspane-ui's own section beside the defcustom.
 ;;
 ;; The prompting arms (cell edit, the row/column menu, babel's
 ;; confirm) are the rung's D2 rewrite: the v1 handlers blocked the
@@ -42,10 +47,8 @@
 (require 'jetpacs-shell)
 (require 'jetpacs-buffer)
 (require 'jetpacs-dialog)
-(require 'jetpacs-settings)
 (require 'glasspane-org)
 (require 'glasspane-ui)                 ; glasspane-babel-timeout, the
-                                        ; org after-set memo-buster, the
                                         ; deferred-refresh seam
 
 ;;;; The exposure gate (SPEC 23.1 — the jetpacs-org-dialogs tap order)
@@ -465,54 +468,6 @@ is reachable through the computed cells it feeds."
                                        :args (list :buffer buffer
                                                    :pos beg))))))))
 
-;;;; Settings sections (the wire-modifiable org schema)
-
-(defconst glasspane-table--section-titles
-  '("Org Workflow" "Org Agenda" "Org Editing & Display"
-    "User Defaults" "Calendar & Location")
-  "The section titles this rung owns, for the register/unregister sweep.")
-
-(defun glasspane-table--settings-sections ()
-  "The schema-driven org sections as (TITLE . ENTRIES).
-The registry is the security boundary: only symbols listed here can be
-modified from the wire.  Every org/calendar entry carries the T2
-after-set memo-buster — org-derived views are memoised, so a settings
-write over their inputs must drop the memo or the phone keeps
-rendering stale data; the user-identity rows and the babel timeout
-feed no memoised extraction and stay bare."
-  (cl-flet ((org-entry (sym label)
-              (list sym :label label
-                    :after-set #'glasspane-ui-org-after-set))
-            (plain (sym label) (list sym :label label)))
-    (list
-     (cons "Org Workflow"
-           (list (org-entry 'org-directory "Org directory")
-                 (org-entry 'org-log-done "Log task completion")
-                 (org-entry 'org-log-into-drawer "Log into drawer")
-                 (org-entry 'org-archive-location "Archive location")))
-     (cons "Org Agenda"
-           (list (org-entry 'org-agenda-span "Agenda span")
-                 (org-entry 'org-deadline-warning-days
-                            "Deadline warning days")
-                 (org-entry 'org-extend-today-until
-                            "Extend today until (hour)")))
-     (cons "Org Editing & Display"
-           (list (org-entry 'org-startup-folded "Initial folding")
-                 (org-entry 'org-startup-indented "Indent to outline level")
-                 (org-entry 'org-hide-emphasis-markers
-                            "Hide emphasis markers")
-                 (org-entry 'org-return-follows-link "Enter follows links")
-                 (plain 'glasspane-babel-timeout "Babel run timeout (s)")))
-     (cons "User Defaults"
-           (list (plain 'user-full-name "Author (Name)")
-                 (plain 'user-mail-address "Email")))
-     (cons "Calendar & Location"
-           (list (org-entry 'calendar-week-start-day
-                            "Week start day (0=Sun, 1=Mon)")
-                 (org-entry 'calendar-latitude "Latitude (e.g. 40.7)")
-                 (org-entry 'calendar-longitude
-                            "Longitude (e.g. -74.0)"))))))
-
 ;;;; Registration
 
 (defconst glasspane-table--verbs
@@ -524,9 +479,9 @@ feed no memoised extraction and stay bare."
   "The verbs this rung owns, for the register/unregister sweep.")
 
 (defun glasspane-table-register ()
-  "Register the table/babel verbs and the org settings sections.
+  "Register the table/babel verbs.
 Called from `glasspane-register', not at this file's load (the G0
-gate contract).  Idempotent: handlers and sections replace in place."
+gate contract).  Idempotent: handlers replace in place."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "org.table.edit" #'glasspane-table--on-edit
                        :doc "Edit the tapped table cell (or its formula)")
@@ -535,16 +490,12 @@ gate contract).  Idempotent: handlers and sections replace in place."
     (jetpacs-defaction "org.table.add-row" #'glasspane-table--on-add-row)
     (jetpacs-defaction "org.table.add-col" #'glasspane-table--on-add-col)
     (jetpacs-defaction "org.babel.execute" #'glasspane-table--on-babel
-                       :doc "Run the tapped source block")
-    (dolist (section (glasspane-table--settings-sections))
-      (jetpacs-settings-register-section (car section) (cdr section)))))
+                       :doc "Run the tapped source block")))
 
 (defun glasspane-table-unregister ()
-  "Drop the table/babel verbs and the org settings sections."
+  "Drop the table/babel verbs."
   (dolist (name glasspane-table--verbs)
-    (jetpacs-undefaction name))
-  (dolist (title glasspane-table--section-titles)
-    (jetpacs-settings-remove-section title)))
+    (jetpacs-undefaction name)))
 
 (provide 'glasspane-table)
 ;;; glasspane-table.el ends here

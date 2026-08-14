@@ -916,20 +916,16 @@ fast-access-key strip in the flat global list."
 (ert-deftest glasspane-test-ui-settings-nodes ()
   "Settings body shapes over stubbed org vars: tag options survive
 group markers and duplicates (the enum's build-time distinctness
-check), both enum sites build from enum-option nodes, and the body,
-the Display render block, the satellite link, and the pushed screen
-all round-trip the canonical wire encoding."
+check), the enum site builds from enum-option nodes, and the body,
+the satellite link, and the pushed screen all round-trip the
+canonical wire encoding.  (The Display render block died with the §3
+relocation: `jetpacs-line-numbers' is a plain schema row in
+device/init.el's Appearance section now.)"
   (require 'glasspane-ui)
   (let ((org-tag-alist '(("home" . ?h) (:startgroup) "work" "home"))
         (glasspane-org-custom-agendas '(("Errands" . "tags:errand")))
-        (org-todo-keywords '((sequence "TODO(t)" "|" "DONE")))
-        (jetpacs-line-numbers 'relative))
+        (org-todo-keywords '((sequence "TODO(t)" "|" "DONE"))))
     (should (equal (glasspane-ui--tag-options) '("home" "work")))
-    (let ((json (jetpacs-node->canonical-json
-                 (glasspane-ui--line-numbers-node))))
-      (should (string-search "\"enum_list\"" json))
-      (should (string-search "\"Relative\"" json))
-      (should (string-search "settings.line-numbers" json)))
     (let* ((body (glasspane-ui--settings-body))
            (json (jetpacs-node->canonical-json body)))
       (should (equal (plist-get body :t) "lazy_column"))
@@ -1006,8 +1002,15 @@ the registry."
   (glasspane-ui-register)
   (unwind-protect
       (progn
-	(should (alist-get "Glasspane" jetpacs-settings-registry
-			   nil nil #'equal))
+	;; The app section survives the §3 relocation with exactly its
+	;; one app-opinion row: the babel timeout, plain (no after-set).
+	(let ((entries (alist-get "Glasspane" jetpacs-settings-registry
+				  nil nil #'equal)))
+	  (should entries)
+	  (should (assq 'glasspane-babel-timeout entries))
+	  (should-not (plist-get
+		       (cdr (assq 'glasspane-babel-timeout entries))
+		       :after-set)))
 	(glasspane-ui-register)
 	(should (= 1 (cl-count #'glasspane-ui--settings-link
                                jetpacs-settings-links :key #'cadr)))
@@ -1017,7 +1020,6 @@ the registry."
               (glasspane-ui-agenda-selected-date "2020-01-02")
               (glasspane-ui--files-filter "old")
               (glasspane-ui--settings-dialog nil)
-              (jetpacs-line-numbers nil)
               (org-tag-alist '(("home" . ?h)))
               (org-todo-keywords '((sequence "TODO" "|" "DONE")))
               (saved nil) (continuations nil) (pushes 0))
@@ -1040,11 +1042,6 @@ the registry."
               ;; The whole table answers statuses on bare nil/nil input.
               (dolist (name glasspane-ui--verbs)
 		(should (memq (run name nil nil) '(accepted stale rejected))))
-              ;; settings.line-numbers: one option value or nil, persisted.
-              (should (eq (run "settings.line-numbers" '(:value "Relative"))
-			  'accepted))
-              (should (eq (cdr (assq 'jetpacs-line-numbers saved)) 'relative))
-              (should (eq (run "settings.line-numbers" '(:value 5)) 'rejected))
               ;; settings.tags: vector rebuilds keeping fast-select conses;
               ;; wrong shapes reject.
               (should (eq (run "settings.tags" '(:value ["work" "home"]))
@@ -3391,23 +3388,11 @@ dispatch without a bridgeable session and their WORKERS notify instead
 of raising a minibuffer prompt nobody attends (can-bridge nil -> notify
 + status, no wedge), the no-prompt add verbs are durable inside the
 dispatch, babel times out and honors a declined confirm with a stub
-language — plus the rung's settings sweep: org sections registered
-with the memo-busting after-set, the dialog-style row retired."
+language.  (The org sections this rung used to register moved to the
+foundation with the §3 relocation — their coverage lives in
+test/jetpacs-org-settings-test.el now.)"
   (require 'glasspane-table)
   (glasspane-table-register)
-  ;; Sections registered; org/calendar entries carry the memo-buster,
-  ;; identity rows stay bare; the v1 Appearance row ports to NOTHING.
-  (let ((workflow (alist-get "Org Workflow" jetpacs-settings-registry
-                             nil nil #'equal))
-        (users (alist-get "User Defaults" jetpacs-settings-registry
-                          nil nil #'equal)))
-    (should workflow)
-    (should (eq (plist-get (cdr (assq 'org-directory workflow)) :after-set)
-                #'glasspane-ui-org-after-set))
-    (should (assq 'user-full-name users))
-    (should-not (plist-get (cdr (assq 'user-full-name users)) :after-set)))
-  (should-not (cl-some (lambda (sec) (assq 'jetpacs-dialog-style (cdr sec)))
-                       jetpacs-settings-registry))
   (let* ((fixture (glasspane-test--table-vault))
          (vault (car fixture))
          (file (cdr fixture))
@@ -3574,8 +3559,6 @@ with the memo-busting after-set, the dialog-style row retired."
               (glasspane-table-unregister)
               (dolist (verb glasspane-table--verbs)
                 (should-not (gethash verb jetpacs-action-handlers)))
-              (should-not (alist-get "Org Workflow" jetpacs-settings-registry
-                                     nil nil #'equal))
               (glasspane-table-register)
               (dolist (verb glasspane-table--verbs)
                 (should (gethash verb jetpacs-action-handlers))))))
@@ -4607,13 +4590,9 @@ fires from Glasspane's own surfaces must still be refused there."
               ((symbol-function 'jetpacs-shell-notify) (lambda (&rest _) nil))
               ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
               ((symbol-function 'jetpacs-flow-continue) (lambda (_fn) nil)))
-      (let ((jetpacs-line-numbers nil)
-            (org-tag-alist '(("home" . ?h))))
-        ;; The line-numbers arm is the biting one: it answers accepted
-        ;; now and rejected the moment `:any-surface' is dropped.
-        (should (eq (dispatch "settings.line-numbers" '(:value "Relative")
-                              "app:jetpacs.settings")
-                    'accepted))
+      (let ((org-tag-alist '(("home" . ?h))))
+        ;; The tags arm is the biting one: it answers accepted now and
+        ;; rejected the moment `:any-surface' is dropped.
         (should (eq (dispatch "settings.tags" '(:value ["work"])
                               "app:jetpacs.settings")
                     'accepted))
@@ -4628,7 +4607,7 @@ fires from Glasspane's own surfaces must still be refused there."
                     'rejected)))))
   ;; The registry side of the same rule, verb by verb.
   (dolist (name '("glasspane.settings.open" "settings.tags"
-                  "settings.line-numbers" "settings.todo.edit"
+                  "settings.todo.edit"
                   "settings.agenda.edit" "settings.agenda.delete"
                   "ef.show"))
     (should (gethash name jetpacs--any-surface-actions)))
@@ -5024,7 +5003,7 @@ glasspane-gallery at orders 81 and 84, beside the app's own 80.")
     "org.table.cell-menu" "org.table.edit" "search.by-tag"
     "search.clear-filters" "search.update-filter"
     "settings.agenda.delete" "settings.agenda.edit"
-    "settings.agenda.save" "settings.line-numbers" "settings.tags"
+    "settings.agenda.save" "settings.tags"
     "settings.todo.delete" "settings.todo.edit" "settings.todo.save"
     "share.text" "srs.answer.page" "srs.answer.show" "srs.item.create"
     "srs.postpone" "srs.quit" "srs.rate" "srs.review.start"

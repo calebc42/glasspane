@@ -72,10 +72,17 @@
 
 ;; The curated settings content (owner: POC 1's settings had the right
 ;; content in the wrong shape).  Registered at boot so a queued toggle
-;; replays even before the screen first renders.
+;; replays even before the screen first renders.  The org/calendar
+;; sections + the phone-generic org seeding are the foundation
+;; module's (the ratified §3 relocation) — required here under the
+;; same boot rule.
+(require 'jetpacs-org-settings)
 (jetpacs-settings-register-section
  "Appearance"
- '((jetpacs-theme-mode :label "Companion theme")))
+ '((jetpacs-theme-mode :label "Companion theme")
+   ;; The §3 fold-in: the app's authored enum node retired — the
+   ;; choice-of-consts custom-type renders an equivalent enum.
+   (jetpacs-line-numbers :label "Line numbers")))
 (jetpacs-settings-register-section
  "Editor"
  '((ebp-sync-diagnostics :label "Push diagnostics")

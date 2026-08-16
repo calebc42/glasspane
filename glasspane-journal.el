@@ -50,12 +50,13 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-apps)
 (require 'jetpacs-settings)
 (require 'glasspane-dates)
 (require 'glasspane-org)
 (require 'glasspane-org-reader)
-(require 'glasspane-ui)
-;; `glasspane-ui--clock-body' moved into the detail module in G4.
+(require 'glasspane-ui)                 ; capture FAB
+;; `glasspane-detail-clock-body' moved into the detail module in G4.
 (require 'glasspane-detail)
 
 (defcustom glasspane-journal-file nil
@@ -114,7 +115,7 @@ a lock/revert prompt would wedge the bridge (D2)."
 (defun glasspane-journal--append (text &optional date)
   "Append TEXT as a plain list item under DATE's (default today) day.
 Creates the datetree levels (and the file) on first use.  Saves NOW
-through `glasspane-org--save-and-invalidate' — the capture handler's
+through `glasspane-org-save-and-invalidate' — the capture handler's
 `accepted' promises on-disk, never on-timer (S4)."
   (let ((date (or date (glasspane-journal--today)))
         (file (glasspane-journal--file)))
@@ -128,13 +129,13 @@ through `glasspane-org--save-and-invalidate' — the capture handler's
            (org-end-of-subtree t t)
            (unless (bolp) (insert "\n"))
            (insert "- " text "\n"))
-          (glasspane-org--save-and-invalidate))))))
+          (glasspane-org-save-and-invalidate))))))
 
 (defun glasspane-journal--carried-over ()
   "Unfinished TODOs scheduled before today — the carry-over list.
 The tree stays inside the wire grammar (`ebp-org--vet-query' passes
 it), so the same query could ride a saved view verbatim."
-  (glasspane-org--query '(and (todo) (scheduled :to -1))))
+  (glasspane-org-query '(and (todo) (scheduled :to -1))))
 
 ;;;; The view
 
@@ -265,12 +266,12 @@ a card from a previous render answer `stale' for free."
             (when today-p
               (list (jetpacs-divider)
                     (jetpacs-section-header "Clock")
-                    (glasspane-ui--clock-body)))))))
+                    (glasspane-detail-clock-body)))))))
 
 (defun glasspane-journal-screen (back)
   "The journal chrome screen; BACK is chrome's descriptor for the arrow."
   (jetpacs-chrome-screen "Journal" (glasspane-journal--body)
-                         :back back :fab (glasspane-ui--capture-fab)))
+                         :back back :fab (glasspane-ui-capture-fab)))
 
 ;;;; Landing & state resets
 
@@ -334,7 +335,7 @@ day, exactly the v1 tab feel."
         'rejected
       (setq glasspane-journal--date
             (glasspane-dates-shift (glasspane-journal--current) delta 'day))
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'accepted)))
 
 (defun glasspane-journal--on-goto (args params)
@@ -345,14 +346,14 @@ day, exactly the v1 tab feel."
               "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" date))
         (progn
           (setq glasspane-journal--date date)
-          (glasspane-ui--defer-refresh params)
+          (jetpacs-app-defer-refresh params)
           'accepted)
       'rejected)))
 
 (defun glasspane-journal--on-today (_args params)
   "Snap back to today."
   (setq glasspane-journal--date nil)
-  (glasspane-ui--defer-refresh params)
+  (jetpacs-app-defer-refresh params)
   'accepted)
 
 (defun glasspane-journal--on-capture (args params)
@@ -378,7 +379,7 @@ the SPEC 23.3 label, never the raw error."
                text
                (and (stringp date) (not (string-empty-p date)) date))
               (jetpacs-shell-notify "Added to journal")
-              (glasspane-ui--defer-refresh params)
+              (jetpacs-app-defer-refresh params)
               'accepted)
           (error
            (message "glasspane: journal capture failed: %s"

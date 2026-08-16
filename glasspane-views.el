@@ -48,9 +48,10 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-apps)
 (require 'jetpacs-settings)
 (require 'glasspane-org)
-(require 'glasspane-ui)                 ; defer-refresh (S4 plumbing)
+(require 'glasspane-ui)                 ; shared tokenization helper
 (require 'glasspane-org-reader)         ; the reorder resolution table (D-4)
 (require 'glasspane-agenda)             ; card date row + month fallback grid
 
@@ -132,7 +133,7 @@ mutates the value Customize handed out."
 entry is printed first — with truncation off, or two entries could
 render each other's results (the core's own %S rule)."
   (let ((q (alist-get 'query view)))
-    (glasspane-org--search
+    (glasspane-org-search
      (if (stringp q) q
        (let ((print-length nil) (print-level nil) (print-circle t))
          (format "%S" q))))))
@@ -229,7 +230,7 @@ carrying a ref on the wire (D-4)."
                          (glasspane-views--headline-spans item))
                         (when-let* ((caption (glasspane-views--caption item)))
                           (jetpacs-text caption :style "caption"))
-                        (glasspane-ui--card-date-row item)
+                        (glasspane-agenda-card-date-row item)
                         (glasspane-views--tag-chips item))))))
     (jetpacs-card
      (list (apply #'jetpacs-row
@@ -296,9 +297,8 @@ visible without a widget-side indent (the reader's rule)."
                       :style "body" :max-lines 2)
                      :key key)))
                 items)))
-    (setf (alist-get list-id glasspane-org-reader--refile-lists
-                     nil nil #'equal)
-          (list :file true :keys (nreverse keys)))
+    (glasspane-org-reader-refile-store
+     list-id (list :file true :keys (nreverse keys)))
     (cl-pushnew list-id glasspane-views--reorder-lists :test #'equal)
     (jetpacs-reorderable-list
      rows
@@ -461,7 +461,7 @@ below it the selected day's cards and the Unscheduled section."
                        ;; month; the handler re-anchors and pushes
                        ;; fresh marks for it.
                        :on-month-change (jetpacs-action "views.cal.set-month"))
-                    (glasspane-agenda--month-fallback
+                    (glasspane-agenda-month-fallback
                      items-by-date anchor selected-date
                      "views.cal.select-date"))
                   (jetpacs-divider)
@@ -543,7 +543,7 @@ page's drag-reorder body."
                     (progn (ebp-org-ref-tokens nil :set "views"
                                                :owner "glasspane")
                            items)
-                  (glasspane-ui--tokenize-tap items "views")))
+                  (glasspane-ui-tokenize-tap items "views")))
          (file (and (not broken) (glasspane-views--single-file items))))
     (apply #'jetpacs-lazy-column
            (append
@@ -688,7 +688,7 @@ or a refused gate dies in a timer."
      ((not (glasspane-views--get name))
       ;; The card outlived the list it was rendered from.
       (jetpacs-toast "That view no longer exists")
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'stale)
      (t
       (setq glasspane-views--reorder nil
@@ -701,7 +701,7 @@ or a refused gate dies in a timer."
 (defun glasspane-views--on-reorder (_args params)
   "Toggle the single-file list rendering's drag list."
   (setq glasspane-views--reorder (not glasspane-views--reorder))
-  (glasspane-ui--defer-refresh params)
+  (jetpacs-app-defer-refresh params)
   'accepted)
 
 (defun glasspane-views--on-cal-select-date (args params)
@@ -714,7 +714,7 @@ on_day_tap injects."
               "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" date))
         (progn
           (setq glasspane-views--cal-selected date)
-          (glasspane-ui--defer-refresh params)
+          (jetpacs-app-defer-refresh params)
           'accepted)
       'rejected)))
 
@@ -725,7 +725,7 @@ on_day_tap injects."
              (string-match-p "\\`[0-9]\\{4\\}-[0-9]\\{2\\}\\'" month))
         (progn
           (setq glasspane-views--cal-anchor (concat month "-01"))
-          (glasspane-ui--defer-refresh params)
+          (jetpacs-app-defer-refresh params)
           'accepted)
       'rejected)))
 
@@ -745,13 +745,13 @@ on_change.  Either way the result must name a rendering we offer."
      ((not (stringp name)) 'rejected)
      ((not (glasspane-views--get name))
       ;; The pager outlived the view it was rendered for.
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'stale)
      ((not (member rendering glasspane-views--renderings)) 'rejected)
      (t
       (glasspane-views--set-rendering name rendering)
       (glasspane-views--persist)
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'accepted))))
 
 (defun glasspane-views--field (id)
@@ -822,7 +822,7 @@ with the deferred repush clearing the device drafts."
     (cond
      ((not (stringp name)) 'rejected)
      ((not (glasspane-views--get name))
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'stale)
      (t
       (setq glasspane-saved-views
@@ -883,9 +883,7 @@ place."
   (dolist (name glasspane-views--verbs)
     (jetpacs-undefaction name))
   (dolist (id glasspane-views--reorder-lists)
-    (setf (alist-get id glasspane-org-reader--refile-lists
-                     nil t #'equal)
-          nil))
+    (glasspane-org-reader-refile-store id nil))
   (setq glasspane-views--reorder-lists nil))
 
 (provide 'glasspane-views)

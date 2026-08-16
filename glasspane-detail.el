@@ -12,7 +12,7 @@
 ;; closure IS the state.  Every list this file renders addresses
 ;; headings through SPEC 23.1 tokens minted per screen (S5, set
 ;; \"detail\"); every handler answers a SPEC 14.4 status through the
-;; G3 `glasspane-ui--at-ref' funnel (S4).
+;; G3 `glasspane-ui-at-ref' funnel (S4).
 ;;
 ;; Retired against v1 (the plan's retirement list + G4 section):
 ;;
@@ -64,6 +64,7 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-apps)
 (require 'jetpacs-buffer)
 (require 'jetpacs-dialog)
 (require 'jetpacs-editor)
@@ -82,11 +83,11 @@
 (defvar glasspane-org-reader-inline-props)
 
 ;; Later-rung siblings (G5's pure agenda formatters): declared, never
-;; required forward — `glasspane-detail--agenda-card' has no caller until
+;; required forward — `glasspane-detail-agenda-card' has no caller until
 ;; the agenda screens land beside these definitions.
-(declare-function glasspane-ui--agenda-type-icon "glasspane-agenda" (type))
-(declare-function glasspane-ui--agenda-type-label "glasspane-agenda" (type))
-(declare-function glasspane-ui--card-date-row "glasspane-agenda" (it))
+(declare-function glasspane-agenda-type-icon "glasspane-agenda" (type))
+(declare-function glasspane-agenda-type-label "glasspane-agenda" (type))
+(declare-function glasspane-agenda-card-date-row "glasspane-agenda" (it))
 
 ;;;; State (S2 — the handlers below are the only writers)
 
@@ -236,7 +237,7 @@ sequences pan sideways rather than wrapping into a stack."
 ;; `jetpacs.org.archive' verb can resolve it; without one the card just
 ;; has no archive swipe.
 
-(defun glasspane-detail--agenda-card (it)
+(defun glasspane-detail-agenda-card (it)
   "A detail-rich agenda card for item IT.
 Leading time (or a type icon), priority-prefixed headline (done titles
 degrade to on_surface_variant — no strike span, FOUNDATION-GAPS #7),
@@ -245,7 +246,7 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
          (todo (alist-get 'todo it))
          ;; Normalized "HH:MM" — the raw property is a time-grid string
          ;; like " 9:15......".
-         (time (glasspane-org--item-hm (alist-get 'time it)))
+         (time (glasspane-org-item-hm (alist-get 'time it)))
          (type (alist-get 'type it))
          (file (alist-get 'file it))
          (priority (alist-get 'priority it))
@@ -256,11 +257,11 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                     (member todo (or (default-value 'org-done-keywords)
                                      '("DONE" "CANCELLED")))
                     t))
-         (icon+color (glasspane-ui--agenda-type-icon type))
+         (icon+color (glasspane-agenda-type-icon type))
          (caption (string-join
                    (delq nil (list todo
                                    (and (stringp type)
-                                        (glasspane-ui--agenda-type-label type))
+                                        (glasspane-agenda-type-label type))
                                    (and file (file-name-nondirectory file))))
                    "  ·  "))
          (lead (cond ((and (stringp time) (not (string-empty-p time)))
@@ -284,7 +285,7 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                         headline-node
                         (unless (string-empty-p caption)
                           (jetpacs-text caption :style "caption"))
-                        (glasspane-ui--card-date-row it)
+                        (glasspane-agenda-card-date-row it)
                         (when tags
                           (apply #'jetpacs-flow-row
                                  (mapcar
@@ -317,7 +318,7 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                                      :args (list :token archive-token)
                                      :confirm "Archive this subtree?"))))))
 
-(defun glasspane-ui--result-card (it)
+(defun glasspane-detail-result-card (it)
   "Render a search/heading item IT to a tappable card with tag chips."
   (let* ((headline (or (alist-get 'headline it) "?"))
          (todo (alist-get 'todo it))
@@ -347,15 +348,15 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                                       "heading.tap"
                                       :args (list :token token))))))
 
-(defun glasspane-ui--clock-body ()
+(defun glasspane-detail-clock-body ()
   "The clock status body: current task card plus recent-task cards.
 Journal's today card embeds it.  Recent refs are filtered through the
 TOTAL root policy and the mint is best-effort: a history entry whose
 file left the roots (or the disk) costs the recent list, never the
 body."
-  (let* ((status (glasspane-org--clock-status))
+  (let* ((status (glasspane-org-clock-status))
          (recent (condition-case nil
-                     (glasspane-org--recent-clocks 5)
+                     (glasspane-org-recent-clocks 5)
                    (error nil)))
          (recent (cl-remove-if-not
                   (lambda (r)
@@ -442,7 +443,7 @@ Signals like `ebp-org-resolve-ref'; the screen builder classifies."
              (list :buf (current-buffer)
                    :file file
                    :pos pos
-                   :edit-mtime (glasspane-org--mtime-stamp file)
+                   :edit-mtime (glasspane-org-mtime-stamp file)
                    :edit-beg pos
                    :edit-end end
                    :edit-tick (buffer-chars-modified-tick)
@@ -1142,7 +1143,7 @@ moved (SPEC 14.5: re-present, never guess)."
 (defun glasspane-detail--on-toggle-read (_args params)
   "Flip the reader/editor mode; the builder re-reads the flag."
   (setq glasspane-ui--detail-read-mode (not glasspane-ui--detail-read-mode))
-  (glasspane-ui--defer-refresh params)
+  (jetpacs-app-defer-refresh params)
   'accepted)
 
 (defun glasspane-detail--on-save (args params)
@@ -1164,7 +1165,7 @@ over the heading's new coordinates."
      (t
       (condition-case err
           (let ((new-ref
-                 (glasspane-org--fresh-splice
+                 (glasspane-org-fresh-splice
                   ref value
                   (plist-get args :mtime)
                   (plist-get args :beg)
@@ -1194,19 +1195,19 @@ over the heading's new coordinates."
     (if (not (stringp state))
         'rejected
       (let* ((clear (string-empty-p state))
-             (status (glasspane-ui--at-ref
+             (status (glasspane-ui-at-ref
                       args (lambda () (org-todo (if clear 'none state))) t)))
         (when (eq status 'accepted)
           (jetpacs-shell-notify (if clear "State cleared"
                                   (format "State → %s" state))
                                 (plist-get params :surface))
-          (glasspane-ui--defer-refresh params))
+          (jetpacs-app-defer-refresh params))
         status))))
 
 (defun glasspane-detail--on-todo-cycle (args params)
   "Cycle the heading through the TODO keyword sequence."
   (let* ((state nil)
-         (status (glasspane-ui--at-ref
+         (status (glasspane-ui-at-ref
                   args
                   (lambda ()
                     (org-todo)
@@ -1217,7 +1218,7 @@ over the heading's new coordinates."
       (jetpacs-shell-notify (if state (format "State → %s" state)
                               "State cleared")
                             (plist-get params :surface))
-      (glasspane-ui--defer-refresh params))
+      (jetpacs-app-defer-refresh params))
     status))
 
 (defun glasspane-detail--on-schedule (args params)
@@ -1229,20 +1230,20 @@ bug, not a user path (the picker flows are the foundation dialog's)."
         (date (or (plist-get args :when) (plist-get args :value))))
     (cond
      (clearp
-      (let ((status (glasspane-ui--at-ref
+      (let ((status (glasspane-ui-at-ref
                      args (lambda () (org-schedule '(4))) t)))
         (when (eq status 'accepted)
           (jetpacs-shell-notify "Schedule cleared"
                                 (plist-get params :surface))
-          (glasspane-ui--defer-refresh params))
+          (jetpacs-app-defer-refresh params))
         status))
      ((and (stringp date) (not (string-empty-p date)))
-      (let ((status (glasspane-ui--at-ref
+      (let ((status (glasspane-ui-at-ref
                      args (lambda () (org-schedule nil date)) t)))
         (when (eq status 'accepted)
           (jetpacs-shell-notify (format "Scheduled %s" date)
                                 (plist-get params :surface))
-          (glasspane-ui--defer-refresh params))
+          (jetpacs-app-defer-refresh params))
         status))
      (t 'rejected))))
 
@@ -1252,7 +1253,7 @@ bug, not a user path (the picker flows are the foundation dialog's)."
     (if (not (stringp val))
         'rejected
       (let* ((remove (string-empty-p val))
-             (status (glasspane-ui--at-ref
+             (status (glasspane-ui-at-ref
                       args
                       (lambda ()
                         (if remove (org-priority 'remove)
@@ -1262,7 +1263,7 @@ bug, not a user path (the picker flows are the foundation dialog's)."
           (jetpacs-shell-notify (if remove "Priority cleared"
                                   (format "Priority %s" (upcase val)))
                                 (plist-get params :surface))
-          (glasspane-ui--defer-refresh params))
+          (jetpacs-app-defer-refresh params))
         status))))
 
 (defun glasspane-detail--on-tags (args params)
@@ -1279,14 +1280,14 @@ own tag charset or the whole write refuses."
                                                   tg)))
                            tags))
             'rejected
-          (let ((status (glasspane-ui--at-ref
+          (let ((status (glasspane-ui-at-ref
                          args (lambda () (org-set-tags tags)) t)))
             (when (eq status 'accepted)
               (jetpacs-shell-notify (if tags (format "Tags: %s"
                                                      (string-join tags " "))
                                       "Tags cleared")
                                     (plist-get params :surface))
-              (glasspane-ui--defer-refresh params))
+              (jetpacs-app-defer-refresh params))
             status))))))
 
 (defun glasspane-detail--refile-flow (ref params)
@@ -1318,7 +1319,7 @@ own tag charset or the whole write refuses."
                   ;; projection memo stale.
                   (dolist (buffer (org-buffer-list 'files t))
                     (when (buffer-modified-p buffer)
-                      (glasspane-org--save-and-invalidate buffer)))
+                      (glasspane-org-save-and-invalidate buffer)))
                   (jetpacs-shell-notify (format "Refiled to %s" choice)
                                         (plist-get params :surface))))))
          (set-marker marker nil)))
@@ -1360,7 +1361,7 @@ own tag charset or the whole write refuses."
             (if (string-empty-p note)
                 (jetpacs-shell-notify "Note cancelled"
                                       (plist-get params :surface))
-              (when (eq (glasspane-ui--at-ref
+              (when (eq (glasspane-ui-at-ref
                          args
                          (lambda ()
                            (glasspane-detail--insert-note
@@ -1378,7 +1379,7 @@ own tag charset or the whole write refuses."
   "Delete the subtree outright.  The 14.1 `:confirm' on the emitting
 descriptor already parked this behind a device AlertDialog — Archive
 is the recoverable path; this one is for genuine junk."
-  (let ((status (glasspane-ui--at-ref
+  (let ((status (glasspane-ui-at-ref
                  args
                  (lambda ()
                    (delete-region (point)
@@ -1392,7 +1393,7 @@ is the recoverable path; this one is for genuine junk."
 (defun glasspane-detail--on-duplicate (args params)
   "Copy the subtree and insert it right after itself — the
 recurring-meeting-notes idiom."
-  (let ((status (glasspane-ui--at-ref
+  (let ((status (glasspane-ui-at-ref
                  args
                  (lambda ()
                    (let ((subtree (buffer-substring-no-properties
@@ -1405,7 +1406,7 @@ recurring-meeting-notes idiom."
                  t)))
     (when (eq status 'accepted)
       (jetpacs-shell-notify "Duplicated" (plist-get params :surface))
-      (glasspane-ui--defer-refresh params))
+      (jetpacs-app-defer-refresh params))
     status))
 
 (defun glasspane-detail--on-prop-set (args params)
@@ -1424,7 +1425,7 @@ An empty value deletes the property."
                  (t (format "%s" raw)))))
     (if (not (and (stringp name) (not (string-empty-p name))))
         'rejected
-      (let ((status (glasspane-ui--at-ref
+      (let ((status (glasspane-ui-at-ref
                      args
                      (lambda ()
                        (if (string-empty-p value)
@@ -1436,7 +1437,7 @@ An empty value deletes the property."
                                     (format "Removed %s" name)
                                   (format "%s → %s" name value))
                                 (plist-get params :surface))
-          (glasspane-ui--defer-refresh params))
+          (jetpacs-app-defer-refresh params))
         status))))
 
 (defun glasspane-detail--on-prop-add (args params)
@@ -1460,7 +1461,7 @@ then appears as a row whose value column is ready to fill in."
               (jetpacs-shell-notify
                "Property names can't contain colons or spaces"
                (plist-get params :surface)))
-             ((eq (glasspane-ui--at-ref
+             ((eq (glasspane-ui-at-ref
                    args
                    (lambda () (org-set-property (upcase name) ""))
                    t)
@@ -1614,10 +1615,10 @@ else (http, images) reports back as a snackbar."
 
 (defun glasspane-detail--on-clock-in (args params)
   "Clock in at the tapped heading."
-  (let ((status (glasspane-ui--at-ref args #'org-clock-in)))
+  (let ((status (glasspane-ui-at-ref args #'org-clock-in)))
     (when (eq status 'accepted)
       (jetpacs-shell-notify "Clocked in" (plist-get params :surface))
-      (glasspane-ui--defer-refresh params))
+      (jetpacs-app-defer-refresh params))
     status))
 
 ;;;; The file-properties dialog pair
@@ -1813,7 +1814,7 @@ non-TITLE keyword lands after an existing #+TITLE line."
                (goto-char (point-min))
                (when (re-search-forward "^[ \t]*#\\+CATEGORY:" nil t)
                  (ignore-errors (org-element-at-point)))))
-            (glasspane-org--save-and-invalidate buf)
+            (glasspane-org-save-and-invalidate buf)
             ;; The Save event arrives in dialog context (no :surface) —
             ;; refresh where the dialog was opened, then retire it.
             (let ((origin (or (plist-get glasspane-detail--dialog :params)
@@ -1821,7 +1822,7 @@ non-TITLE keyword lands after an existing #+TITLE line."
               (glasspane-detail--dialog-close)
               (jetpacs-shell-notify "File properties saved"
                                     (plist-get origin :surface))
-              (glasspane-ui--defer-refresh origin))
+              (jetpacs-app-defer-refresh origin))
             'accepted)
         (error (message "glasspane: file properties save failed: %s"
                         (jetpacs-error-label err))
@@ -1924,7 +1925,7 @@ gate contract).  Idempotent."
    'glasspane-org
    :predicate #'glasspane-detail--org-file-p
    :actions #'glasspane-detail--editor-actions
-   :after-save #'glasspane-org--vulpea-refresh-file))
+   :after-save #'glasspane-org-vulpea-refresh-file))
 
 (defun glasspane-detail-unregister ()
   "Drop the detail verbs, editor adapter, and any live dialog."

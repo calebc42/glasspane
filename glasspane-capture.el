@@ -49,8 +49,8 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
+(require 'jetpacs-apps)
 (require 'jetpacs-org-capture)
-(require 'glasspane-ui)
 
 (defvar glasspane-capture-enabled nil
   "Non-nil to register the legacy capture engine during rollback only.
@@ -241,7 +241,7 @@ that still celebrates is the G7 defect class)."
           (glasspane-capture--clear-shared)
           (ebp-org-cache-invalidate 'glasspane)
           (jetpacs-shell-notify "Captured ✓")
-          (glasspane-ui--defer-refresh params)
+          (jetpacs-app-defer-refresh params)
           t)
       (error
        ;; The raw error stays in *Messages*; the wire carries the

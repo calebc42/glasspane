@@ -401,6 +401,16 @@ rides in `:args'.  Each render replaces its own list's entry.")
 The heading.reorder handler's resolution seam."
   (alist-get list-id glasspane-org-reader--refile-lists nil nil #'equal))
 
+(defun glasspane-org-reader-refile-store (list-id record)
+  "Store LIST-ID's refile RECORD, or remove it when RECORD is nil.
+This is the writer half of `glasspane-org-reader-refile-lookup'.
+Reorderable-list producers own their minted ids, while this module
+keeps the resolution table private and remains the only module that
+knows its representation.  Return RECORD."
+  (setf (alist-get list-id glasspane-org-reader--refile-lists
+                   nil (null record) #'equal)
+        record))
+
 (defun glasspane-org-reader-refile-list (file)
   "Render all headings in FILE as a flat reorderable item list.
 Returns a single `jetpacs-reorderable-list' node, or nil when the file
@@ -427,9 +437,8 @@ so the level stays visible without a widget-side indent."
                                      :style "body" :max-lines 2)
                        :key key)))
                   records)))
-           (setf (alist-get list-id glasspane-org-reader--refile-lists
-                            nil nil #'equal)
-                 (list :file true :keys (nreverse keys)))
+           (glasspane-org-reader-refile-store
+            list-id (list :file true :keys (nreverse keys)))
            (jetpacs-reorderable-list
             items
             :on-reorder (jetpacs-action "heading.reorder"
@@ -508,14 +517,12 @@ is a no-op, and the refresh snaps the list back (SPEC 14.5)."
                                        (goto-char (line-beginning-position))
                                      (goto-char (point-max))))
                                  (org-paste-subtree level)
-                                 (glasspane-org--save-and-invalidate
+                                 (glasspane-org-save-and-invalidate
                                   (current-buffer)))))
                          (when prev-marker (set-marker prev-marker nil))))))
                   ;; Every recorded position is spent now; the deferred
                   ;; re-render mints the replacement table.
-                  (setf (alist-get list-id glasspane-org-reader--refile-lists
-                                   nil t #'equal)
-                        nil)
+                  (glasspane-org-reader-refile-store list-id nil)
                   (jetpacs-buffer-defer-refresh (plist-get params :surface))
                   'accepted)
               (ebp-org-refused 'rejected)

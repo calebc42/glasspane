@@ -50,8 +50,9 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-apps)
 (require 'glasspane-org)
-(require 'glasspane-ui)                 ; --global-todo-keywords, defer-refresh
+(require 'glasspane-ui)                 ; shared tokenization helper
 (require 'glasspane-detail)             ; the shared result card (G4)
 (require 'jetpacs-org-settings)      ; the global-TODO-keywords helper
 
@@ -145,7 +146,7 @@ paths or payload)."
         glasspane-search--error nil
         glasspane-search--results
         (condition-case err
-            (glasspane-org--search q)
+            (glasspane-org-search q)
           (ebp-org-unavailable
            (setq glasspane-search--error
                  "No org files available to search")
@@ -229,7 +230,7 @@ results, to keep them above the fold."
          (when tags-list (string-join tags-list ", "))
          (jetpacs-enum-list "search-filter-tags"
                             (glasspane-search--enum-options
-                             (glasspane-org--all-tags))
+                             (glasspane-org-all-tags))
                             :value (vconcat tags-list)
                             :multi-select t
                             :allow-add t
@@ -279,9 +280,9 @@ results, to keep them above the fold."
   (let* ((q (or glasspane-search--query ""))
          ;; Set "search-results": this screen's own, one render at a
          ;; time — the replace sweep retires the last result list.
-         (items (glasspane-ui--tokenize-tap glasspane-search--results
+         (items (glasspane-ui-tokenize-tap glasspane-search--results
                                             "search-results"))
-         (cards (mapcar #'glasspane-ui--result-card items))
+         (cards (mapcar #'glasspane-detail-result-card items))
          (input (jetpacs-text-input
                  "search-query"
                  :value q
@@ -390,7 +391,7 @@ vector for tags, a string for text."
          (setq glasspane-search--filter-text value))
         (_ (cl-return 'rejected)))
       (glasspane-search--run (glasspane-search--filter-query))
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'accepted)))
 
 (defun glasspane-search--on-clear-filters (_args params)

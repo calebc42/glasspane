@@ -41,8 +41,8 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-apps)
 (require 'jetpacs-settings)
-(require 'glasspane-ui)                 ; --defer-refresh (the shared D2 funnel)
 
 ;;;; State (S2 — the handlers below are the only writers)
 
@@ -196,7 +196,7 @@ v1's silent \"line\" fallback would repaint a state nobody chose."
     (if (not (member kind glasspane-gallery--chart-kinds))
         'rejected
       (setq glasspane-gallery--kind kind)
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'accepted)))
 
 (defun glasspane-gallery--on-level (args params)
@@ -208,7 +208,7 @@ reject: the authored :min/:max make them float noise, not malice."
     (if (not (numberp v))
         'rejected
       (setq glasspane-gallery--level (max 0.0 (min 1.0 (float v))))
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'accepted)))
 
 (defun glasspane-gallery--on-point (args params)

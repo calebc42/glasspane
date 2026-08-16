@@ -11,6 +11,67 @@
 (require 'jetpacs-org-mode)
 (require 'glasspane)
 
+(defconst glasspane-test--source-directory
+  (expand-file-name "../emacs/apps/glasspane"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The Glasspane source directory inspected by architectural gates.")
+
+(ert-deftest glasspane-test-no-cross-module-private-reads ()
+  "A sibling may consume only another module's public Glasspane API.
+Double-hyphen implementations remain legal inside their defining
+file.  The source-aware scan includes comments and docstrings: a
+documented private dependency is still coupling and tends to become
+the next live call."
+  (let ((definitions (make-hash-table :test #'equal))
+        (files (directory-files glasspane-test--source-directory t
+                                "\\.el\\'"))
+        violations)
+    (dolist (file files)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (re-search-forward
+                (concat
+                 "^(\\(?:cl-\\)?def\\(?:un\\|macro\\|subst\\|"
+                 "var\\(?:-local\\)?\\|const\\|custom\\)"
+                 "[ \t\n]+\\(glasspane-[[:alnum:]-]+--[[:alnum:]-]+\\)"
+                 "\\|^(defalias[ \t\n]+'"
+                 "\\(glasspane-[[:alnum:]-]+--[[:alnum:]-]+\\)")
+                nil t)
+          (let ((symbol (or (match-string-no-properties 1)
+                            (match-string-no-properties 2))))
+            (puthash symbol file definitions)))))
+    (dolist (file files)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (re-search-forward
+                "\\_<glasspane-[[:alnum:]-]+--[[:alnum:]-]+\\_>" nil t)
+          (let* ((symbol (match-string-no-properties 0))
+                 (owner (gethash symbol definitions)))
+            (when (and owner (not (equal owner file)))
+              (push (format "%s:%d:%s (defined in %s)"
+                            (file-name-nondirectory file)
+                            (line-number-at-pos)
+                            symbol
+                            (file-name-nondirectory owner))
+                    violations))))))
+    (should-not (nreverse violations))))
+
+(ert-deftest glasspane-test-gr7a-source-severance ()
+  "The retired app helper and ef/gallery's UI dependency stay absent."
+  (dolist (file (directory-files glasspane-test--source-directory t
+                                 "\\.el\\'"))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (should-not (search-forward "glasspane-ui--defer-refresh" nil t))))
+  (dolist (name '("glasspane-ef.el" "glasspane-gallery.el"))
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name name glasspane-test--source-directory))
+      (should-not (re-search-forward
+                   "^(require[ \t]+'glasspane-ui)" nil t)))))
+
 ;;;; G0 — skeleton, registration, harness wiring
 
 (ert-deftest glasspane-test-registers ()
@@ -120,7 +181,7 @@ UI layer mints tokens from these, so the shape is load-bearing."
                     "* Reference notes\n"
                     "** Not level one\n"))
           (ebp-org-cache-invalidate)
-          (let* ((items (glasspane-org--agenda-items 'day))
+          (let* ((items (glasspane-org-agenda-items 'day))
                  (hit (cl-find-if
                        (lambda (it)
                          (equal (alist-get 'headline it) "Water the garden"))
@@ -131,7 +192,7 @@ UI layer mints tokens from these, so the shape is load-bearing."
               (should (equal (plist-get ref :headline) "Water the garden"))
               (should (equal (plist-get ref :file) (file-truename file)))
               (should (integerp (plist-get ref :pos)))))
-          (let ((items (glasspane-org--todo-items (list file))))
+          (let ((items (glasspane-org-todo-items (list file))))
             (should (= (length items) 2))
             (dolist (it items)
               (should (stringp (plist-get (alist-get 'ref it) :headline)))))
@@ -172,7 +233,7 @@ consumer FILES."
             (should-not (cl-find-if #'file-directory-p scope)))
           (let ((items (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
                                   (lambda () nil)))
-                         (glasspane-org--todo-items))))
+                         (glasspane-org-todo-items))))
             (should (= (length items) 1))
             (should (equal (alist-get 'headline (car items))
                            "From the directory scope"))))
@@ -190,7 +251,7 @@ consumer FILES."
   "With vulpea absent every query runs the built-in interpreter, and
 the memo is KEYED on the action: a repeat never re-runs the action,
 and a different key over the same tree never serves its payload
-(the P1-12 rule `glasspane-org--query' rides)."
+(the P1-12 rule `glasspane-org-query' rides)."
   (let* ((vault (make-temp-file "glasspane-vault" t))
          (file (expand-file-name "tasks.org" vault))
          (org-directory vault)
@@ -213,17 +274,17 @@ and a different key over the same tree never serves its payload
                 (real (symbol-function 'glasspane-org--heading-item-at)))
             (cl-letf (((symbol-function 'glasspane-org--heading-item-at)
                        (lambda () (cl-incf calls) (funcall real))))
-              (let ((first (glasspane-org--search "todo:TODO")))
+              (let ((first (glasspane-org-search "todo:TODO")))
                 (should (= (length first) 2))
                 (should (= calls 2))
-                (should (equal (glasspane-org--search "todo:TODO") first))
+                (should (equal (glasspane-org-search "todo:TODO") first))
                 (should (= calls 2))))
             (let ((tree (ebp-org-parse-query "todo:TODO")))
               (should (equal (ebp-org-query 'glasspane 'other-action tree
                                             (lambda () 'other))
                              '(other other)))
-              (should (= (length (glasspane-org--query tree)) 2))))
-          (let ((hits (glasspane-org--search "garden")))
+              (should (= (length (glasspane-org-query tree)) 2))))
+          (let ((hits (glasspane-org-search "garden")))
             (should (= (length hits) 1))
             (should (equal (alist-get 'headline (car hits))
                            "Water the garden")))
@@ -232,7 +293,7 @@ and a different key over the same tree never serves its payload
           ;; pre-vulpea sweep cached under the same scope.
           (let ((swept (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
                                   (lambda () nil)))
-                         (glasspane-org--todo-items))))
+                         (glasspane-org-todo-items))))
             (should (= (length swept) 2))
             (let ((indexed
                    (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
@@ -241,14 +302,14 @@ and a different key over the same tree never serves its payload
                               (lambda (&optional _pred) (list 'note)))
                              ((symbol-function 'glasspane-org--vulpea-note-to-item)
                               (lambda (_note) '((headline . "From the index")))))
-                     (glasspane-org--todo-items))))
+                     (glasspane-org-todo-items))))
               (should-not (equal indexed swept))
               (should (equal (alist-get 'headline (car indexed))
                              "From the index"))))
           ;; The tag vocabulary rides the same rule: `--all-tags' keys
           ;; on its arm too, so the index's answer is not served from
           ;; the pre-vulpea sweep's entry under the same scope.
-          (let ((swept (glasspane-org--all-tags)))
+          (let ((swept (glasspane-org-all-tags)))
             (should (member "home" swept))
             (let ((indexed
                    ;; The arm's own probe is `featurep', which reads
@@ -258,7 +319,7 @@ and a different key over the same tree never serves its payload
                               (cons 'vulpea features))
                              ((symbol-function 'vulpea-db-query-tags)
                               (lambda () '("indexed"))))
-                     (glasspane-org--all-tags))))
+                     (glasspane-org-all-tags))))
               (should-not (equal indexed swept))
               (should (member "indexed" indexed)))))
       (ebp-org-cache-invalidate)
@@ -287,7 +348,7 @@ queries SIGNAL — an empty result must mean \"nothing matched\"."
                     "* TODO Water the garden :home:\n"
                     "* TODO Call the bank\n"))
           (ebp-org-cache-invalidate)
-          (let ((items (glasspane-org--todo-items (list file))))
+          (let ((items (glasspane-org-todo-items (list file))))
             (should (= (length items) 2))
             (should (equal (glasspane-org--filter-items items "") items))
             (let ((kept (glasspane-org--filter-items items "tags:home")))
@@ -330,9 +391,9 @@ deterministic."
                    (type . "scheduled") (file . "/v/my tasks.org") (pos . 90))
                   ((headline . "Far") (time . ,hm72) (date . ,d72)
                    (type . "scheduled") (file . "/v/my tasks.org") (pos . 7)))))
-    (cl-letf (((symbol-function 'glasspane-org--agenda-items)
+    (cl-letf (((symbol-function 'glasspane-org-agenda-items)
                (lambda (&optional _span start-day) (unless start-day items))))
-      (let ((rs (glasspane-org--upcoming-reminders)))
+      (let ((rs (glasspane-org-upcoming-reminders)))
         (should (= (length rs) 1))
         (let ((r (car rs)))
           (should (equal (plist-get r :title) "Water the garden"))
@@ -343,11 +404,11 @@ deterministic."
                                             (org-time-string-to-time
                                              (concat d2 " " hm2))))))))
         ;; Distinct entries never share an id (file+pos+instant ride in).
-        (let ((far (car (last (glasspane-org--upcoming-reminders (* 4 24))))))
+        (let ((far (car (last (glasspane-org-upcoming-reminders (* 4 24))))))
           (should (jetpacs-identifier-p (plist-get far :id)))
           (should-not (equal (plist-get far :id)
                              (plist-get (car rs) :id)))))
-      (should (= (length (glasspane-org--upcoming-reminders (* 4 24))) 2)))))
+      (should (= (length (glasspane-org-upcoming-reminders (* 4 24))) 2)))))
 
 (ert-deftest glasspane-test-org-timestamp-hooks ()
   "The CREATED/MODIFIED stampers attach at app enable, do their work on
@@ -462,7 +523,7 @@ never mutates the user's global org hooks."
                        (concat "-----BEGIN PGP MESSAGE-----\n"
                                "new cipher\n"
                                "-----END PGP MESSAGE-----")))))))
-            (glasspane-org--save-and-invalidate buffer))
+            (glasspane-org-save-and-invalidate buffer))
           (should (equal (car seen) (file-truename file)))
           (should (eq (cadr seen) buffer))
           (with-temp-buffer
@@ -496,13 +557,13 @@ never mutates the user's global org hooks."
                            (org-end-of-subtree t t)
                            (point)))
                     (tick (buffer-chars-modified-tick))
-                    (stamp (glasspane-org--mtime-stamp file))
+                    (stamp (glasspane-org-mtime-stamp file))
                     (original (buffer-string))
                     (jetpacs-files-before-buffer-save-hook
                      (list (lambda (&rest _)
                              (error "encryption failed")))))
                (should-error
-                (glasspane-org--fresh-splice
+                (glasspane-org-fresh-splice
                  ref
                  (concat "* Changed\n:PROPERTIES:\n:ID: stable-id\n"
                          ":END:\nnew\n")
@@ -922,18 +983,18 @@ the canonical wire encoding."
 without save, the synchronous app funnel with), and a signal from the
 mutation body never answers \\='accepted."
   (require 'glasspane-ui)
-  (should (eq (glasspane-ui--at-ref nil #'ignore) 'stale))
-  (should (eq (glasspane-ui--at-ref '(:token "o0-swept") #'ignore) 'stale))
+  (should (eq (glasspane-ui-at-ref nil #'ignore) 'stale))
+  (should (eq (glasspane-ui-at-ref '(:token "o0-swept") #'ignore) 'stale))
   (let ((ref '(:id nil :file "/vault/tasks.org" :pos 1 :headline "H")))
     (cl-letf (((symbol-function 'ebp-org-token-ref)
                (lambda (&rest _) ref)))
       (cl-letf (((symbol-function 'ebp-org-resolve-ref)
                  (lambda (_) (signal 'ebp-org-refused nil))))
-        (should (eq (glasspane-ui--at-ref '(:token "t") #'ignore)
+        (should (eq (glasspane-ui-at-ref '(:token "t") #'ignore)
                     'rejected)))
       (cl-letf (((symbol-function 'ebp-org-resolve-ref)
                  (lambda (_) (signal 'ebp-org-unresolved nil))))
-        (should (eq (glasspane-ui--at-ref '(:token "t") #'ignore)
+        (should (eq (glasspane-ui-at-ref '(:token "t") #'ignore)
                     'stale)))
       (with-temp-buffer
         (org-mode)
@@ -944,18 +1005,18 @@ mutation body never answers \\='accepted."
                      (lambda (_) (copy-marker m)))
                     ((symbol-function 'ebp-org-cache-invalidate)
                      (lambda (&optional ns) (push ns invalidated)))
-                    ((symbol-function 'glasspane-org--save-and-invalidate)
+                    ((symbol-function 'glasspane-org-save-and-invalidate)
                      (lambda (&optional _) (cl-incf saved))))
-            (should (eq (glasspane-ui--at-ref
+            (should (eq (glasspane-ui-at-ref
                          '(:token "t") (lambda () (setq at (point))))
                         'accepted))
             (should (equal at (point-min)))
             (should (equal invalidated '(glasspane)))
             (should (zerop saved))
-            (should (eq (glasspane-ui--at-ref '(:token "t") #'ignore t)
+            (should (eq (glasspane-ui-at-ref '(:token "t") #'ignore t)
                         'accepted))
             (should (= saved 1))
-            (should (eq (glasspane-ui--at-ref
+            (should (eq (glasspane-ui-at-ref
                          '(:token "t") (lambda () (error "boom")))
                         'rejected))))))))
 
@@ -1530,6 +1591,16 @@ same table."
                             'rejected))))))
       (glasspane-test--reader-cleanup vault))))
 
+(ert-deftest glasspane-test-reader-refile-accessor-pair ()
+  "The public lookup/store pair owns the private refile table shape."
+  (let ((glasspane-org-reader--refile-lists nil)
+        (record '(:file "/tmp/example.org" :keys (("one" . 1)))))
+    (should (equal (glasspane-org-reader-refile-store "list" record)
+                   record))
+    (should (equal (glasspane-org-reader-refile-lookup "list") record))
+    (should-not (glasspane-org-reader-refile-store "list" nil))
+    (should-not (glasspane-org-reader-refile-lookup "list"))))
+
 (ert-deftest glasspane-test-reader-reorder ()
   "heading.reorder consumes the D-4 record (the integration seam both
 porters flagged): a device drop moves the whole subtree on disk before
@@ -1672,13 +1743,13 @@ wire encoding."
     (should (string-search "\"value\":\"\"" json))
     (should (string-search "\"value\":\"B\"" json)))
   ;; The shared cards (G5 formatters stubbed until the agenda rung).
-  (cl-letf (((symbol-function 'glasspane-ui--agenda-type-icon)
+  (cl-letf (((symbol-function 'glasspane-agenda-type-icon)
              (lambda (_type) '("schedule" . nil)))
-            ((symbol-function 'glasspane-ui--agenda-type-label)
+            ((symbol-function 'glasspane-agenda-type-label)
              (lambda (_type) "scheduled"))
-            ((symbol-function 'glasspane-ui--card-date-row)
+            ((symbol-function 'glasspane-agenda-card-date-row)
              (lambda (_it) nil)))
-    (let* ((card (glasspane-detail--agenda-card
+    (let* ((card (glasspane-detail-agenda-card
                   '((headline . "Water the garden") (todo . "DONE")
                     (type . "scheduled") (file . "/v/tasks.org")
                     (priority . "A") (tags . ["home"])
@@ -1697,13 +1768,13 @@ wire encoding."
       (should-not (string-search "strike" json))
       (should (string-search "search.by-tag" json)))
     ;; No tokens -> a static card: no tap, no long-tap, no swipes.
-    (let ((card (glasspane-detail--agenda-card '((headline . "Plain")))))
+    (let ((card (glasspane-detail-agenda-card '((headline . "Plain")))))
       (should-not (plist-get card :on_tap))
       (should-not (plist-get card :on_long_tap))
       (should-not (plist-get card :swipe_start))
       (should-not (plist-get card :swipe_end))))
   (let ((json (jetpacs-node->canonical-json
-               (glasspane-ui--result-card
+               (glasspane-detail-result-card
                 '((headline . "Hit") (todo . "TODO") (file . "/v/a.org")
                   (tags . ["x"]) (token . "tok-2"))))))
     (should (string-search "heading.tap" json))
@@ -1768,7 +1839,7 @@ both modes, degrading to the go-back placeholder on a dead ref."
                                           (list (ebp-org-ref-at-point))
                                           :set "t-detail-save"
                                           :owner "glasspane"))
-                             :mtime (glasspane-org--mtime-stamp file)
+                             :mtime (glasspane-org-mtime-stamp file)
                              :beg beg
                              :end (save-excursion
                                     (org-end-of-subtree t t)
@@ -2216,47 +2287,47 @@ month fallback grid, the mode list, and the in-screen count that
 replaced the tab badge (FOUNDATION-GAPS #5)."
   ;; widget-item-meta: qualifier cleanup, redundant-qualifier drop,
   ;; time precedence, empty degrade.
-  (should (equal (glasspane-ui--widget-item-meta
+  (should (equal (glasspane-agenda-widget-item-meta
                   '((extra . "Sched. 3x: ") (file . "/v/tasks.org")) nil)
                  "Sched. 3x · tasks.org"))
-  (should (equal (glasspane-ui--widget-item-meta
+  (should (equal (glasspane-agenda-widget-item-meta
                   '((extra . "Scheduled") (file . "/v/tasks.org")) nil)
                  "tasks.org"))
-  (should (equal (glasspane-ui--widget-item-meta
+  (should (equal (glasspane-agenda-widget-item-meta
                   '((extra . "In 3 d.") (file . "/v/t.org")) "09:15")
                  "09:15 · t.org"))
-  (should (equal (glasspane-ui--widget-item-meta '((extra . "Deadline")) nil)
+  (should (equal (glasspane-agenda-widget-item-meta '((extra . "Deadline")) nil)
                  ""))
   ;; The icon/label maps.
-  (should (equal (glasspane-ui--widget-agenda-icon "upcoming-deadline")
+  (should (equal (glasspane-agenda-widget-icon "upcoming-deadline")
                  "deadline"))
-  (should (equal (glasspane-ui--widget-agenda-icon "past-scheduled")
+  (should (equal (glasspane-agenda-widget-icon "past-scheduled")
                  "scheduled"))
-  (should (equal (glasspane-ui--widget-agenda-icon nil) "event"))
-  (should (equal (glasspane-ui--agenda-type-icon "past-scheduled")
+  (should (equal (glasspane-agenda-widget-icon nil) "event"))
+  (should (equal (glasspane-agenda-type-icon "past-scheduled")
                  '("history" . "#E53935")))
-  (should (equal (car (glasspane-ui--agenda-type-icon "deadline")) "flag"))
-  (should-not (glasspane-ui--agenda-type-icon "timestamp"))
-  (should (equal (glasspane-ui--agenda-type-label "past-scheduled")
+  (should (equal (car (glasspane-agenda-type-icon "deadline")) "flag"))
+  (should-not (glasspane-agenda-type-icon "timestamp"))
+  (should (equal (glasspane-agenda-type-label "past-scheduled")
                  "overdue"))
-  (should-not (glasspane-ui--agenda-type-label "block"))
+  (should-not (glasspane-agenda-type-label "block"))
   ;; Card date label: month abbrev + optional ebp-org-ts-time time.
-  (should (equal (glasspane-ui--card-date-label "<2026-08-13 Thu 14:00>")
+  (should (equal (glasspane-agenda-card-date-label "<2026-08-13 Thu 14:00>")
                  "Aug 13 14:00"))
-  (should (equal (glasspane-ui--card-date-label "<2026-02-01 Sun>") "Feb 1"))
-  (should-not (glasspane-ui--card-date-label "junk"))
+  (should (equal (glasspane-agenda-card-date-label "<2026-02-01 Sun>") "Feb 1"))
+  (should-not (glasspane-agenda-card-date-label "junk"))
   ;; Card date row: both stamps render; no stamps, no row.
-  (let ((row (glasspane-ui--card-date-row
+  (let ((row (glasspane-agenda-card-date-row
               '((scheduled . "<2026-08-13 Thu>")
                 (deadline . "<2026-08-20 Thu>")))))
     (should row)
     (let ((json (jetpacs-node->canonical-json row)))
       (should (string-search "Aug 13" json))
       (should (string-search "Aug 20" json))))
-  (should-not (glasspane-ui--card-date-row '((headline . "x"))))
+  (should-not (glasspane-agenda-card-date-row '((headline . "x"))))
   ;; Month fallback: Feb 2026 stops at 28 cells, the selected day is
   ;; tinted, taps carry the ISO date, the select verb is overridable.
-  (let* ((grid (glasspane-agenda--month-fallback
+  (let* ((grid (glasspane-agenda-month-fallback
                 '(("2026-02-14" . (((headline . "x")))))
                 "2026-02-15" "2026-02-14"))
          (json (jetpacs-node->canonical-json grid)))
@@ -2268,7 +2339,7 @@ replaced the tab badge (FOUNDATION-GAPS #5)."
   (should (string-search
            "views.select-date"
            (jetpacs-node->canonical-json
-            (glasspane-agenda--month-fallback nil "2026-02-15" "2026-02-14"
+            (glasspane-agenda-month-fallback nil "2026-02-15" "2026-02-14"
                                               "views.select-date"))))
   ;; Modes: the spans, then the saved searches, display order.
   (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand"))))
@@ -2284,10 +2355,10 @@ replaced the tab badge (FOUNDATION-GAPS #5)."
     (should (equal (car (last (glasspane-agenda--modes))) "S8")))
   ;; The in-screen count reads the memoised day extraction and
   ;; swallows its errors.
-  (cl-letf (((symbol-function 'glasspane-org--agenda-items)
+  (cl-letf (((symbol-function 'glasspane-org-agenda-items)
              (lambda (&rest _) '(a b))))
     (should (= (glasspane-agenda--today-count) 2)))
-  (cl-letf (((symbol-function 'glasspane-org--agenda-items)
+  (cl-letf (((symbol-function 'glasspane-org-agenda-items)
              (lambda (&rest _) (error "boom"))))
     (should (= (glasspane-agenda--today-count) 0))))
 
@@ -2434,7 +2505,7 @@ their arms now.)"
           (cl-letf (((symbol-function 'jetpacs-client) (lambda () t))
                     ((symbol-function 'jetpacs-granted-p)
                      (lambda (&rest _) t))
-                    ((symbol-function 'glasspane-org--upcoming-reminders)
+                    ((symbol-function 'glasspane-org-upcoming-reminders)
                      (lambda (&rest _) '((:id "r1"))))
                     ((symbol-function 'jetpacs-reminders-set)
                      (cl-function
@@ -3166,7 +3237,7 @@ absolute path on the wire."
             (should (equal glasspane-search--query "todo:TODO"))
             ;; S5: the render mint attaches a tap token that resolves
             ;; back to its heading — offline, tokens are Emacs state.
-            (let* ((items (glasspane-ui--tokenize-tap
+            (let* ((items (glasspane-ui-tokenize-tap
                            glasspane-search--results "search-results"))
                    (tok (alist-get 'token (car items))))
               (should (stringp tok))

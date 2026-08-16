@@ -7,7 +7,7 @@
 
 ;; The keystone rung (docs/PLAN-glasspane-app.md, G3): the app's
 ;; settings surface, the shared view state the later rungs read, and
-;; `glasspane-ui--at-ref' — the token→resolve→classify funnel every
+;; `glasspane-ui-at-ref' — the token→resolve→classify funnel every
 ;; heading mutation in G4+ rides.
 ;;
 ;; It also holds the HUB (`glasspane-ui-home-screen', the hub-wiring
@@ -56,6 +56,7 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-apps)
 (require 'jetpacs-settings)
 (require 'glasspane-org)
 
@@ -110,7 +111,7 @@ its own chips, never the toolbar.")
 
 ;;;; The capture FAB (FOUNDATION-GAPS #2)
 
-(defun glasspane-ui--capture-fab ()
+(defun glasspane-ui-capture-fab ()
   "The capture FAB every daily surface passes to its chrome `:fab' slot.
 v1's app-default FAB registry (`jetpacs-apps-set-default-fab') has no
 v3 successor, so each screen authors this node itself; the coupling to
@@ -164,7 +165,7 @@ destination can never appear in one and be missing from the other —
 which is exactly how #26 happened, with the new verbs appearing in
 neither.  Each `:verb' is registered by the sibling module that owns
 the screen and the coupling is the wire string alone (the
-`glasspane-ui--capture-fab' rule): a tap that beats that module's
+`glasspane-ui-capture-fab' rule): a tap that beats that module's
 registration answers `rejected' from the action shim, never a signal.
 
 Subtitles are STATIC on purpose.  Chrome rebuilds every screen on the
@@ -203,7 +204,7 @@ reconciler's identity for the row, not a label."
 \(jetpacs-launcher.el) and it is how the org reader is reachable at
 all: the reader claims the files editor body seam and registers no
 opening verb, so a `.org' tapped in Files IS its entry point.
-Resolved at render time (the `glasspane-srs--stale-section' idiom), so
+Resolved at render time (the `glasspane-srs-stale-section' idiom), so
 the hub still builds in an image without the launcher — the batch
 suite's, and any device profile that drops it.  Excludes this app's
 own surface: a row to where you already are is not a destination."
@@ -255,24 +256,12 @@ FAB are three projections of one command set, never three behaviors."
    glasspane-title
    (glasspane-ui--home-body)
    :back back
-   :fab (glasspane-ui--capture-fab)
+   :fab (glasspane-ui-capture-fab)
    :drawer (glasspane-ui--home-drawer)))
-
-;;;; Deferral
-
-(defun glasspane-ui--defer-refresh (params)
-  "Schedule a repush of PARAMS' surface once the dispatch returns (D2).
-A dialog-context event carries no `:surface' (SPEC 14.4); the nil
-falls through to `jetpacs-shell-push's zero-arg meaning — the flow
-owner's surface, which `jetpacs-flow-continue' keeps."
-  (let ((surface (plist-get params :surface)))
-    (jetpacs-flow-continue
-     (lambda ()
-       (ignore-errors (jetpacs-shell-push surface))))))
 
 ;;;; The at-ref funnel (S4/S5 — the classifier every later rung copies)
 
-(defun glasspane-ui--at-ref (args fn &optional save)
+(defun glasspane-ui-at-ref (args fn &optional save)
   "Resolve ARGS' `:token' to its heading and run FN with point there.
 Returns the SPEC 14.4 status the calling handler answers with:
 
@@ -283,11 +272,11 @@ Returns the SPEC 14.4 status the calling handler answers with:
   FN returned               -> `accepted' (effect durable, see below)
 
 With SAVE non-nil the buffer is saved through
-`glasspane-org--save-and-invalidate'.  Deliberately NOT
+`glasspane-org-save-and-invalidate'.  Deliberately NOT
 `ebp-org-with-mutation': the engine defers saves to an idle timer,
 which leaves the file not-yet-on-disk for flows that read it back
 immediately (capture finalize, offline-queue replay) and fires the
-after-save refresh outside `glasspane-org--inhibit-save-refresh's
+after-save refresh outside `glasspane-org-inhibit-save-refresh's
 extent.  Save timing is app policy and stays here; resolution and
 cache discipline are the engine's (`ebp-org-resolve-ref',
 `ebp-org-cache-invalidate')."
@@ -303,7 +292,7 @@ cache discipline are the engine's (`ebp-org-resolve-ref',
                    (goto-char marker)
                    (funcall fn))
                   (if save
-                      (glasspane-org--save-and-invalidate)
+                      (glasspane-org-save-and-invalidate)
                     (ebp-org-cache-invalidate 'glasspane)))
               (set-marker marker nil))
             'accepted)
@@ -319,7 +308,7 @@ cache discipline are the engine's (`ebp-org-resolve-ref',
 
 ;;;; Token minting (S5 — the mint side of the funnel above)
 
-(defun glasspane-ui--tokenize-tap (items set)
+(defun glasspane-ui-tokenize-tap (items set)
   "ITEMS with a `token' cell attached, minted as one bulk SET (S5).
 Refs whose file left the org roots would SIGNAL at mint time
 \(ebp-org.el's policy-at-mint rule), so they are filtered first — the
@@ -491,7 +480,7 @@ name is a captured dialog field and the save runs in the conclusion."
          (setq name (string-trim name))
          (glasspane-ui--save-agenda name query)
          (jetpacs-shell-notify (format "Saved custom agenda: %s" name))
-         (glasspane-ui--defer-refresh params))))))
+         (jetpacs-app-defer-refresh params))))))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 
@@ -521,25 +510,24 @@ name is a captured dialog field and the save runs in the conclusion."
        (lambda () (glasspane-ui--show-agenda-dialog name params)))
       'accepted))))
 
-(defun glasspane-ui--on-agenda-delete (args params)
+(defun glasspane-ui--on-agenda-delete (args _params)
   "Delete saved search `:name'; fired from a card or the edit dialog."
   (let ((name (plist-get args :name)))
     (cond
      ((not (stringp name)) 'rejected)
      ((not (assoc name glasspane-org-custom-agendas))
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-settings-refresh)
       'stale)
      (t
       (setq glasspane-org-custom-agendas
             (assoc-delete-all name glasspane-org-custom-agendas))
       (jetpacs-settings-save-variable 'glasspane-org-custom-agendas
                                       glasspane-org-custom-agendas)
-      ;; From the dialog's Delete this event has no :surface — refresh
-      ;; where the dialog was opened, then retire it.
-      (let ((origin (or (jetpacs-settings-dialog-params) params)))
-        (jetpacs-settings-dialog-close)
-        (jetpacs-shell-notify (format "Deleted saved search: %s" name))
-        (glasspane-ui--defer-refresh origin))
+      ;; A dialog event has no :surface; this editor is a Settings
+      ;; satellite, so use the foundation's canonical refresh target.
+      (jetpacs-settings-dialog-close)
+      (jetpacs-shell-notify (format "Deleted saved search: %s" name))
+      (jetpacs-settings-refresh)
       'accepted))))
 
 (defun glasspane-ui--on-agenda-save (args params)
@@ -558,10 +546,9 @@ name is a captured dialog field and the save runs in the conclusion."
         (setq glasspane-org-custom-agendas
               (assoc-delete-all old-name glasspane-org-custom-agendas)))
       (glasspane-ui--save-agenda new-name query)
-      (let ((origin (or (jetpacs-settings-dialog-params) params)))
-        (jetpacs-settings-dialog-close)
-        (jetpacs-shell-notify "Saved custom agenda")
-        (glasspane-ui--defer-refresh origin))
+      (jetpacs-settings-dialog-close)
+      (jetpacs-shell-notify "Saved custom agenda")
+      (jetpacs-settings-refresh)
       'accepted)))
 
 (defun glasspane-ui--on-agenda-save-custom (args params)
@@ -579,7 +566,7 @@ name is a captured dialog field and the save runs in the conclusion."
   "Reset the anchor and any month-grid selection back to today."
   (setq glasspane-ui-agenda-anchor nil
         glasspane-ui-agenda-selected-date nil)
-  (glasspane-ui--defer-refresh params)
+  (jetpacs-app-defer-refresh params)
   'accepted)
 
 (defun glasspane-ui--on-agenda-select-date (args params)
@@ -591,7 +578,7 @@ name is a captured dialog field and the save runs in the conclusion."
               "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" date))
         (progn
           (setq glasspane-ui-agenda-selected-date date)
-          (glasspane-ui--defer-refresh params)
+          (jetpacs-app-defer-refresh params)
           'accepted)
       'rejected)))
 
@@ -602,7 +589,7 @@ name is a captured dialog field and the save runs in the conclusion."
              (string-match-p "\\`[0-9]\\{4\\}-[0-9]\\{2\\}\\'" month))
         (progn
           (setq glasspane-ui-agenda-anchor (concat month "-01"))
-          (glasspane-ui--defer-refresh params)
+          (jetpacs-app-defer-refresh params)
           'accepted)
       'rejected)))
 
@@ -619,7 +606,7 @@ Safe on any hook: a no-op while disconnected.  Invalidates the
 extraction memo first — this runs on clock in/out, which mutate the
 org buffer without necessarily saving it.  The clock hooks also fire
 from `org-clock-out'/`org-clock-in-last' INSIDE the org.clock.*
-handlers, so the push takes the D2 seam (the glasspane-clock--soon
+handlers, so the push takes the D2 seam (the glasspane-clock-soon
 shape): deferred past the dispatch extent when inside one, immediate
 for a desktop M-x."
   (when (jetpacs-connected-p)

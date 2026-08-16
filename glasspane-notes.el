@@ -52,9 +52,10 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
+(require 'jetpacs-apps)
 (require 'jetpacs-async)
 (require 'glasspane-org)
-(require 'glasspane-ui)                 ; detail seam hooks, defer-refresh
+(require 'glasspane-ui)                 ; detail seam hooks
 
 ;; vulpea is never installed on the CI Emacs: `ext:' pseudo-files keep
 ;; `byte-compile-error-on-warn' honest with it absent (banked trap).
@@ -436,7 +437,7 @@ blocks (D2).  The wanted-mark is the durable effect."
                 'stale                  ; the :ID: left with an edit
               (puthash id (1+ (gethash id glasspane-notes--mentions-scans 0))
                        glasspane-notes--mentions-scans)
-              (glasspane-ui--defer-refresh params)
+              (jetpacs-app-defer-refresh params)
               'accepted))))))))
 
 (defun glasspane-notes--materialize-terms (id matched)
@@ -504,7 +505,7 @@ a bug class, not an outcome (v1's rule, kept)."
                     "Couldn't find the mention — file changed? Refresh and retry"))
                (replace-match (format "[[id:%s][%s]]" target (match-string 0))
                               t t)
-               (glasspane-org--save-and-invalidate)
+               (glasspane-org-save-and-invalidate)
                ;; The shown scan is out of date now; the section
                ;; returns to unscanned until the next chip tap (v1's
                ;; post-link behavior).
@@ -518,7 +519,7 @@ a bug class, not an outcome (v1's rule, kept)."
                   (jetpacs-error-label err))
          (jetpacs-shell-notify "Couldn't link — the edit failed")
          (setq status 'rejected)))))
-    (glasspane-ui--defer-refresh params)
+    (jetpacs-app-defer-refresh params)
     status))
 
 (defun glasspane-notes--on-materialize (args params)

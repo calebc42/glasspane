@@ -430,6 +430,28 @@ glasspane-clock.el moves near-verbatim under owner "org-mode" (pure org-clock, z
 2. **Refile-lists coupling:** `glasspane-org-reader--refile-lists` gets a public accessor pair; glasspane-views writes through the public name only.
 3. **Shared card/formatter builders** parked in glasspane-detail/glasspane-agenda that detail/agenda/views/journal consume: exported under public names so GR-8 can relocate screen code without breaking three siblings.
 
+> **GR-7a GATE COMPLETE 2026-08-16.**
+> `jetpacs-app-defer-refresh` is now the mode-neutral D2 app-surface seam:
+> an event surface wins, otherwise the captured flow surface is preserved,
+> and presentation failure cannot escape the continuation.  Settings-owned
+> agenda editors use `jetpacs-settings-refresh`; every remaining caller uses
+> the app seam.  The retired helper has zero source callers, and EF/Gallery
+> no longer require `glasspane-ui`.
+>
+> The reader's refile table remains private behind public lookup/store
+> accessors.  Shared agenda/detail builders and every Glasspane sibling API
+> actually consumed cross-file now have public names; uncached workers remain
+> private.  Executable source gates reject both a return of the retired helper
+> and any double-hyphen Glasspane symbol read outside its defining module.
+>
+> Verification: Glasspane **73/73**, app registry **16/16**, Org editor policy
+> **7/7**, reminders **6/6**, and Settings **10/10**; all 16 touched source
+> modules pass warning-as-error byte compilation.  Zero upstream `glasspane`
+> names, zero generated `.elc` residue, diff check, and the full elevated
+> `test/run-tests.sh` all pass; the full runner exited **0**.  This is a
+> dependency-severance rung with no rendered behavior change, so the plan's
+> no-device-arm ruling applies.
+
 ### GR-7b — foundation gaps (one commit)
 1. **`:badge` plumbing** — required or the agenda badge dies at the GR-8a pole flip (verified: `jetpacs-apps--destination-tabs` emits only `:label`/`:icon`/`:on-tap`/`:selected`, jetpacs-apps.el:218-229; the D-9 `:badge` rides the hand dock item GR-8a deletes): add a `:badge` member to the destination plist — validated in `jetpacs-apps--check-destination-list` (jetpacs-apps.el:63-93), value a nullary function (memoised count) or string, nil-when-zero — and thread it through `jetpacs-apps--destination-tabs`. The dock-item plist already supports `:badge`; this is registry→generator plumbing only.
 2. **App-default FAB registry** (matrix row 15b, FOUNDATION-GAPS #2): `jetpacs-defapp` gains `:fab` (descriptor or (SURFACE)→descriptor fn); `jetpacs-chrome--build` injects it when the screen authors no `:fab` — **keyed on the SCREEN's owner, not the surface's: an S4 guest screen (its id carries the `guest-` prefix / a recorded foreign owner, jetpacs-chrome.el:617-671) NEVER gets the host app's FAB injected onto it.** Single-slot authored-wins for `:fab`; the S5 any-slot rule at jetpacs-chrome.el:440-454 governs the dock join it sits beside (different granularity — do not conflate). Glasspane will declare the capture FAB once at GR-8a, deleting the per-screen hand-authored node (glasspane-ui.el:123-132).

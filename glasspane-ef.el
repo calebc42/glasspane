@@ -67,10 +67,10 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-apps)
 (require 'jetpacs-settings)
 (require 'jetpacs-theme)
 (require 'jetpacs-theme-picker)
-(require 'glasspane-ui)
 
 ;; ef-themes is an optional runtime dependency loaded on demand; every
 ;; use is guarded, and the `ext:' pseudo-file keeps the error-on-warn
@@ -275,7 +275,7 @@ when `jetpacs-theme-mode' is `mirror'.  Hook-safe arity: doubles as a
       (condition-case err
           (progn
             (ef-themes-load-theme sym)
-            (glasspane-ui--defer-refresh params)
+            (jetpacs-app-defer-refresh params)
             'accepted)
         (error
          (jetpacs-shell-notify (format "Ef theme: %s"
@@ -296,7 +296,7 @@ never a swallowed `accepted' (the G7 engine-wrapper lesson)."
     (condition-case err
         (progn
           (funcall loader)
-          (glasspane-ui--defer-refresh params)
+          (jetpacs-app-defer-refresh params)
           'accepted)
       (error
        (jetpacs-shell-notify (format "Ef theme: %s" (jetpacs-error-label err))
@@ -318,7 +318,7 @@ never a swallowed `accepted' (the G7 engine-wrapper lesson)."
 and persists; the mode's own `:set' pushes the current theme on a live
 connection."
   (if (jetpacs-settings-apply 'jetpacs-theme-mode 'mirror)
-      (progn (glasspane-ui--defer-refresh params)
+      (progn (jetpacs-app-defer-refresh params)
              'accepted)
     'rejected))
 
@@ -335,7 +335,7 @@ connection."
                             (plist-get params :surface))
       'rejected)
      ((jetpacs-settings-apply sym (eq value t) #'glasspane-ef--reload)
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'accepted)
      (t 'rejected))))
 

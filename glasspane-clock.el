@@ -104,7 +104,7 @@ up from the clock-in instant."
 
 ;;;; Assert / retire
 
-(defun glasspane-clock--soon (fn)
+(defun glasspane-clock-soon (fn)
   "Run FN now, or after the dispatch extent when inside one.
 The D2 seam: a clock hook fired by `org-clock-out' INSIDE a handler
 must not send from the dispatch extent; the same hook fired by a
@@ -140,7 +140,7 @@ client, fail closed); `glasspane-clock--on-ready' re-asserts them."
       (with-jetpacs-owner "glasspane"
         (jetpacs-shell-define-root glasspane-clock-surface
                                    #'glasspane-clock-notification-spec)))
-    (glasspane-clock--soon #'glasspane-clock--push)))
+    (glasspane-clock-soon #'glasspane-clock--push)))
 
 (defun glasspane-clock--retire ()
   "Take the chronometer down; a disconnected removal is REMEMBERED.
@@ -149,7 +149,7 @@ tombstone must still go out — `jetpacs-shell-remove-root' queues it
 for the next barrier when offline."
   (when glasspane-clock--live
     (setq glasspane-clock--live nil)
-    (glasspane-clock--soon
+    (glasspane-clock-soon
      (lambda () (jetpacs-shell-remove-root glasspane-clock-surface)))))
 
 (defun glasspane-clock--on-ready (_client)
@@ -159,7 +159,7 @@ clock still runs — so a running clock re-asserts, and a stopped one
 retires the ongoing chronometer that would otherwise tick in the shade
 forever.  The removal is deliberately NOT grant-gated (see
 `glasspane-clock--retire': the tombstone goes out even with the grant
-revoked) and NOT routed through `glasspane-clock--soon' — READY is not
+revoked) and NOT routed through `glasspane-clock-soon' — READY is not
 a dispatch extent.  It clears `glasspane-clock--live' with the removal
 for the same reason `glasspane-clock--retire' does: the flag names a
 REGISTERED root, and a clock cancelled through `org-clock-cancel-hook'

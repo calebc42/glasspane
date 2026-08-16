@@ -45,11 +45,11 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
+(require 'jetpacs-apps)
 (require 'jetpacs-buffer)
 (require 'jetpacs-dialog)
 (require 'glasspane-org)
-(require 'glasspane-ui)                 ; glasspane-babel-timeout, the
-                                        ; deferred-refresh seam
+(require 'glasspane-ui)                 ; glasspane-babel-timeout
 
 ;;;; The exposure gate (SPEC 23.1 — the jetpacs-org-dialogs tap order)
 
@@ -125,7 +125,7 @@ from their own flow."
                  (let ((case-fold-search t))
                    (looking-at-p "[ \t]*#\\+TBLFM:")))
            (org-table-recalculate t)))))
-    (glasspane-org--save-and-invalidate)))
+    (glasspane-org-save-and-invalidate)))
 
 (defun glasspane-table--clean-field (input)
   "INPUT flattened to one table field.
@@ -242,7 +242,7 @@ confirm that cannot reach the device refuses instead of wedging."
                (with-timeout ((max 1 glasspane-babel-timeout)
                               (signal 'glasspane-table--timeout nil))
                  (org-babel-execute-src-block nil info)))))
-          (glasspane-org--save-and-invalidate))
+          (glasspane-org-save-and-invalidate))
         (jetpacs-shell-notify "Block executed" surface)
         (ignore-errors (jetpacs-shell-push surface)))
     (inhibited-interaction
@@ -312,7 +312,7 @@ defers (D2)."
                                        (goto-char (org-table-end))
                                        (forward-line -1) ; last table line
                                        (org-table-insert-row t)))
-            (glasspane-ui--defer-refresh params)
+            (jetpacs-app-defer-refresh params)
             'accepted)
         (error
          (message "glasspane: add row failed: %s" (jetpacs-error-label err))
@@ -343,7 +343,7 @@ defers (D2)."
                                               (line-beginning-position)
                                               (line-end-position))))))
                  (org-table-goto-column (1+ (max 1 ncols)) nil 'force))))
-            (glasspane-ui--defer-refresh params)
+            (jetpacs-app-defer-refresh params)
             'accepted)
         (error
          (message "glasspane: add column failed: %s"

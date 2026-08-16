@@ -34,7 +34,7 @@
 ;;   the agenda count — a second number on the same icon is mud).
 ;; - `jetpacs-shell-push' handler tails and the `:switch-to' push: D2 —
 ;;   handlers answer a SPEC 14.4 status and refresh through
-;;   `glasspane-ui--defer-refresh'.
+;;   `jetpacs-app-defer-refresh'.
 ;; - The `jetpacs-nav-item' toolbar chip: app-local text-button
 ;;   composition (T2), on a minted token instead of a baked ref (S5).
 ;; - `glasspane-srs--engine's swallow-and-notify: REWORKED — the macro
@@ -56,6 +56,7 @@
 (require 'jetpacs-buffer)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
+(require 'jetpacs-apps)
 (require 'jetpacs-dialog)
 (require 'jetpacs-settings)
 (require 'glasspane-org)
@@ -622,7 +623,7 @@ labelled menu rather than cluttering the bar."
                               (jetpacs-action "srs.quit")
                               :content-description "End review"))))
 
-(defun glasspane-srs--stale-section ()
+(defun glasspane-srs-stale-section ()
   "The notes sibling's stale-files block, or nil.
 Same-rung sibling (G7), resolved at run time so this file stands
 alone; an erroring section costs itself, never the Review screen."
@@ -635,7 +636,7 @@ Stacked sections in one scroll — the flashcard half is small (a due
 count and the start button), so both halves show at once.  Each half
 degrades to its install prompt / to absent independently: org-srs
 missing must not blank the stale list, nor vice versa."
-  (let ((stale (glasspane-srs--stale-section)))
+  (let ((stale (glasspane-srs-stale-section)))
     (apply #'jetpacs-lazy-column
            (append
             (list (jetpacs-section-header "Flashcards")
@@ -682,7 +683,7 @@ missing must not blank the stale list, nor vice versa."
         'rejected)
     (setq glasspane-srs--active t glasspane-srs--undo nil)
     (glasspane-srs--advance)
-    (glasspane-ui--defer-refresh params)
+    (jetpacs-app-defer-refresh params)
     'accepted))
 
 (defun glasspane-srs--on-answer-show (_args params)
@@ -690,7 +691,7 @@ missing must not blank the stale list, nor vice versa."
   (if (null glasspane-srs--current)
       'stale
     (setq glasspane-srs--revealed t)
-    (glasspane-ui--defer-refresh params)
+    (jetpacs-app-defer-refresh params)
     'accepted))
 
 (defun glasspane-srs--on-answer-page (args _params)
@@ -757,21 +758,21 @@ Best-effort: a snapshot failure must not block the rating."
                        ;; day's app kill).  Inside the engine form so a
                        ;; failed write answers `rejected', the
                        ;; suspend/undo shape.
-                       (glasspane-org--save-and-invalidate)))))
+                       (glasspane-org-save-and-invalidate)))))
             (progn
               ;; The rating never landed: its snapshot goes with it, or
               ;; the undo button would offer a no-op restore.
               (setq glasspane-srs--undo undo)
               'rejected)
           (glasspane-srs--advance)
-          (glasspane-ui--defer-refresh params)
+          (jetpacs-app-defer-refresh params)
           'accepted))))))
 
 (defun glasspane-srs--on-quit (_args params)
   "End the session; the screen re-renders as the between-sessions body."
   (setq glasspane-srs--active nil glasspane-srs--current nil
         glasspane-srs--revealed nil glasspane-srs--undo nil)
-  (glasspane-ui--defer-refresh params)
+  (jetpacs-app-defer-refresh params)
   'accepted)
 
 (defun glasspane-srs--on-postpone (_args params)
@@ -786,11 +787,11 @@ Best-effort: a snapshot failure must not block the rating."
                       glasspane-srs--current)
                ;; Same durability rule as rate: the pushed-out
                ;; schedule exists only in the buffer until saved.
-               (glasspane-org--save-and-invalidate)))))
+               (glasspane-org-save-and-invalidate)))))
     'rejected)
    (t
     (glasspane-srs--advance)
-    (glasspane-ui--defer-refresh params)
+    (jetpacs-app-defer-refresh params)
     'accepted)))
 
 (defun glasspane-srs--on-suspend (_args params)
@@ -806,11 +807,11 @@ Best-effort: a snapshot failure must not block the rating."
                 (org-back-to-heading t)
                 (unless (org-in-commented-heading-p)
                   (org-toggle-comment))
-                (glasspane-org--save-and-invalidate))))))
+                (glasspane-org-save-and-invalidate))))))
     'rejected)
    (t
     (glasspane-srs--advance)
-    (glasspane-ui--defer-refresh params)
+    (jetpacs-app-defer-refresh params)
     'accepted)))
 
 (defun glasspane-srs--on-undo (_args params)
@@ -835,13 +836,13 @@ for the retry."
                    (progn (org-srs-log-end-of-drawer) (point)))
                   (insert (cdr snap))
                   (org-srs-log-hide-drawer)
-                  (glasspane-org--save-and-invalidate))))))
+                  (glasspane-org-save-and-invalidate))))))
       'rejected)
      (t
       (pop glasspane-srs--undo)
       (setq glasspane-srs--current (car snap)
             glasspane-srs--revealed t)
-      (glasspane-ui--defer-refresh params)
+      (jetpacs-app-defer-refresh params)
       'accepted))))
 
 ;;;; Authoring: Flashcard on the heading detail view
@@ -858,12 +859,12 @@ headless refusal is mandatory (the JA-6 P2 lesson)."
              "Busy — finish the open dialog first"
            "This needs the Companion dialog bridge")
          surface)
-      ;; `glasspane-ui--at-ref' owns resolve/classify/save; its error
+      ;; `glasspane-ui-at-ref' owns resolve/classify/save; its error
       ;; arm already toasts.  Only the bridged prompt's C-g needs a
       ;; home here — `quit' is not an `error' and would otherwise die
       ;; in the timer.
       (condition-case nil
-          (when (eq (glasspane-ui--at-ref
+          (when (eq (glasspane-ui-at-ref
                      args (lambda () (org-srs-item-create)) t)
                     'accepted)
             (jetpacs-shell-notify "Review item created" surface))

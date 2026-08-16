@@ -774,15 +774,18 @@ lives HERE, beside the only table that can resolve it (D-4) — views'
 board re-emits the same verb in G6.")
 
 (defun glasspane-org-reader-register ()
-  "Register the reader verbs and the seam claims.
+  "Register the Glasspane reader verbs.
 Called from `glasspane-register', not at this file's load (the G0
 contract).  The \"Reader\" settings section this rung used to register
 is foundation content now (jetpacs-org-settings.el, the §3
 relocation): both rows were `ebp-org-outline-show-*' foundation
-defcustoms all along.  Remove-then-add keeps the body claim at the
-FRONT of the seam on a live re-register — ahead of
-jetpacs-org-render's entry, which is what lets org files open in the
-app reader at all."
+defcustoms all along.
+
+Glasspane does not claim the global Files body/actions seams.  Its outline
+renderer is an app-local presentation used explicitly by Glasspane screens;
+installing the app must not replace vanilla Org Mode merely because a file is
+inside `org-directory'.  The old global claim made the bundled manual open as
+Glasspane while the same file outside that root opened in the vanilla reader."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "heading.menu"
                        #'glasspane-org-reader--on-heading-menu
@@ -792,14 +795,12 @@ app reader at all."
     (jetpacs-defaction "heading.reorder"
                        #'glasspane-org-reader--on-reorder
                        :doc "Apply a drag in the refile list (D-4)"))
+  ;; Clean up registrations made by an older/live-loaded version before this
+  ;; app-local boundary was established.
   (remove-hook 'jetpacs-files-editor-body-functions
                #'glasspane-org-reader--files-body)
-  (add-hook 'jetpacs-files-editor-body-functions
-            #'glasspane-org-reader--files-body)
   (remove-hook 'jetpacs-files-editor-actions-functions
-               #'glasspane-org-reader--files-actions)
-  (add-hook 'jetpacs-files-editor-actions-functions
-            #'glasspane-org-reader--files-actions))
+               #'glasspane-org-reader--files-actions))
 
 (defun glasspane-org-reader-unregister ()
   "Drop the reader verbs and the seam claims."

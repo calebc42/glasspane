@@ -78,6 +78,11 @@ strip's `:initial' from it each render.")
 (defvar glasspane-agenda--last-reminders 'unset
   "Reminder list from the previous sync, to suppress identical sends.")
 
+(defvar glasspane-agenda-reminders-enabled t
+  "Non-nil when Glasspane owns the reminder-sync hook.
+This device-verified pipeline remains the sole active owner until the
+reminder cutover explicitly flips the flag and clears its durable set.")
+
 (defun glasspane-agenda--sync-reminders ()
   "Send upcoming timed items to the device as owner-scoped alarms.
 Runs on `jetpacs-shell-after-push-hook': the extraction is memoised
@@ -733,8 +738,9 @@ place and the hooks are add-hook-deduplicated."
     (jetpacs-defaction "agenda.set-mode" #'glasspane-agenda--on-set-mode)
     (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav)
     (jetpacs-defaction "tasks.filter" #'glasspane-agenda--on-tasks-filter))
-  (add-hook 'jetpacs-shell-after-push-hook
-            #'glasspane-agenda--sync-reminders)
+  (when glasspane-agenda-reminders-enabled
+    (add-hook 'jetpacs-shell-after-push-hook
+              #'glasspane-agenda--sync-reminders))
   (add-hook 'jetpacs-teardown-functions #'glasspane-agenda--on-teardown))
 
 (defun glasspane-agenda-unregister ()

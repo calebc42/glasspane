@@ -442,8 +442,27 @@
                   jetpacs-files-editor-toolbar-functions))
     (should (gethash "org-mode.capture" jetpacs-action-handlers))
     (should (gethash "org-mode.open-seed" jetpacs-action-handlers))
-    (should (memq #'jetpacs-org-mode--sync-reminders
-                  jetpacs-shell-after-push-hook))))
+    ;; GR-0: the unverified inline pipeline defaults off.  A dedicated
+    ;; owner takes over only after the device cutover ceremony.
+    (should-not (memq #'jetpacs-org-mode--sync-reminders
+                      jetpacs-shell-after-push-hook))))
+
+(ert-deftest jetpacs-org-mode-reminder-hook-follows-mitigation-flag ()
+  "GR-0 installs the legacy reminder hook iff its flag is enabled."
+  (unwind-protect
+      (progn
+        (jetpacs-org-mode-unregister)
+        (let ((jetpacs-org-mode-reminders-enabled nil))
+          (jetpacs-org-mode-register)
+          (should-not (memq #'jetpacs-org-mode--sync-reminders
+                            jetpacs-shell-after-push-hook))
+          (jetpacs-org-mode-unregister))
+        (let ((jetpacs-org-mode-reminders-enabled t))
+          (jetpacs-org-mode-register)
+          (should (memq #'jetpacs-org-mode--sync-reminders
+                        jetpacs-shell-after-push-hook))))
+    (jetpacs-org-mode-unregister)
+    (jetpacs-org-mode-register)))
 
 (provide 'jetpacs-mode-app-test)
 ;;; jetpacs-mode-app-test.el ends here

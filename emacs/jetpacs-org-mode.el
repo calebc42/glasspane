@@ -54,6 +54,12 @@ A date-only scheduled item is not an alarm.  Repeating timestamps are
 expanded by Org Agenda before reminders are built."
   :type 'natnum :group 'jetpacs-org)
 
+(defvar jetpacs-org-mode-reminders-enabled nil
+  "Non-nil when the legacy inline Org Mode reminder hook is enabled.
+This pipeline has no device history and stays disabled while reminder
+ownership moves to the dedicated Org reminder module.  Keep the flag
+until that cutover's rollback window closes.")
+
 (defconst jetpacs-org-mode--agenda-buffer "*Jetpacs Org Mode Agenda*"
   "Private Org Agenda buffer used while deriving reminder data.")
 
@@ -547,8 +553,9 @@ NOW is an Emacs time value and defaults to `current-time'."
                          :any-surface t
                          :doc "Capture text shared from another app")
       (setq jetpacs-org-mode--owns-share-action t))
-    (add-hook 'jetpacs-shell-after-push-hook
-              #'jetpacs-org-mode--sync-reminders)
+    (when jetpacs-org-mode-reminders-enabled
+      (add-hook 'jetpacs-shell-after-push-hook
+                #'jetpacs-org-mode--sync-reminders))
     (jetpacs-defapp
      jetpacs-org-mode-owner
      :label jetpacs-org-mode-title

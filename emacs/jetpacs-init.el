@@ -446,8 +446,8 @@ Companion app, then M-x jetpacs-start")
    :pairing-id jetpacs-pairing-id
    :token (ebp-decode-pairing-token jetpacs-pairing-token)
    :wants '("theme" "presentation.toast" "presentation.snackbar"
-            "surfaces.dialog" "reminders.owner" "offline.wake"
-            "editor.sync")
+            "surfaces.dialog" "surfaces.notification"
+            "reminders.owner" "offline.wake" "editor.sync")
    :receipt-file (expand-file-name "receipts.sqlite"
                                    jetpacs-var-directory)
    :ready-function (lambda (_c) (jetpacs-hub))))

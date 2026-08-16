@@ -37,7 +37,15 @@ Full ERT gate everywhere below = `test/run-tests.sh` (46 suites at HEAD **plus e
 - **I-5 D1:** verbs emitted from surfaces the new owner does not own get exactly one of: S4 guest sanctioning, `:any-surface` with a written rationale, or a forwarding verb — else taps go permanently rejected. Every moved verb in §3 names its choice.
 - **I-6 Slot budget:** `jetpacs-chrome-max-screens` is 3; pinned root = 2 live slots; S4 guests contend for host slots. §7's three-tier model is the design answer; GR-8c audits every screen family's stale slot assumption.
 - **I-7 Device smoke:** S1–S5, S4 guest lifecycle, and jetpacs-org-mode are ERT-only today. The FIRST hardware exposure of each is a named arm in this plan, **before** anything is rebased onto it (GR-1). Tablet is in PORTRAIT (landscape tap maps stale); force-stop before every smoke; screenshot before every tap (row positions shift with lockfiles/annotation rows).
-- **I-8 wants∩supported:** harness inits want the FULL supported profile (the G9 lesson). Daily-driver device/init.el:340-343 omits `surfaces.notification` (the chronometer silently degrades there today); tablet device/emacs-init.el:362-365 omits `offline.wake`. Fixed at GR-0.
+- **I-8 wants∩supported:** the single current composition root wants the FULL
+  Companion-supported profile (the G9 lesson).  The former daily-driver/tablet
+  dual-init split cited by the original plan was retired by
+  `tools/onboard-tablet.sh`; `emacs/jetpacs-init.el` omitted the supported
+  `surfaces.notification` capability and fixes that at GR-0.  It already asks
+  for `offline.wake`, but the Companion does not implement or advertise that
+  capability, so wants∩supported correctly leaves it ungranted.  The FGS vs
+  `offline.wake` vs client-backoff decision remains owned by RF-0.5b; GR-0 must
+  not counterfeit support by adding an inert capability string.
 
 ## §2 Why machinery-first (the ordering argument)
 
@@ -85,13 +93,25 @@ Each lettered sub-rung is one commit-able unit; every rung ends with a gate (ERT
 
 **Goal:** stop the bleeding at HEAD without prejudging structure: one alarm set per timed item, no silent grant degrades, every later flip has its flag.
 
+**Status: GATE CLOSED 2026-08-16.**  The two hook flags, duplicate-era
+device-set clear, supported notification want, automated gates, and generated
+single-alarm reboot/fire arm are green on the Pixel Tablet.  The durable store
+was empty after cleanup.  The device reported `reminders.owner` and
+`surfaces.notification` granted and `offline.wake` ungranted, matching the
+supported-capability registry and the RF-0.5b ownership recorded in I-8.
+
 **Steps:**
 1. **Flag-gate both reminder hooks** (the flags are what make the §5.1 ceremony's clear→code-drop window structurally safe — a push between clear and land cannot re-arm the losing set): new `defvar jetpacs-org-mode-reminders-enabled` **default nil** guarding `jetpacs-org-mode--sync-reminders` (jetpacs-org-mode.el:393-414, hook at :550-551) — it is ERT-only code with zero hardware history; Glasspane's device-verified pipeline keeps running. Symmetric `defvar glasspane-agenda-reminders-enabled` **default t** guarding `glasspane-agenda--sync-reminders` (glasspane-agenda.el:736-737). **This old inline org-mode pipeline's flag stays nil FOREVER**: the pipeline that eventually wins ownership is GR-3's new `jetpacs-org-reminders.el` under its OWN flag — no ceremony ever flips this one, and GR-9 demolishes the inline pipeline still-nil (three pipelines briefly coexist in-tree; the hook-singleton gate arm spans all three).
 2. **Clear the duplicate-era set**, connected + `reminders.owner` granted, on the tablet: `(jetpacs-reminders-clear "org-mode" (lambda (count err) (message "CLEAR org-mode: %s %s" count err)))` — **wait for the message; timeout/error aborts (tripwire T-1)**. Without this, `rearmAllReminders` re-arms the org-mode duplicates from ebp-reminders.json every boot regardless of step 1 (I-2).
-3. **I-8 fixes:** device/init.el:340-343 adds `"surfaces.notification"` to `:wants`; device/emacs-init.el:362-365 adds `"offline.wake"`. Both inits now want the FULL supported profile.
+3. **I-8 fix:** `emacs/jetpacs-init.el` adds
+   `"surfaces.notification"` to `:wants`, completing the supported profile in
+   the one composition root deployed by current onboarding.  `offline.wake`
+   was already requested, but remains absent from Companion support by the
+   explicit RF-0.5b decision boundary; an ungranted result is expected until
+   that rung implements a real wake mechanism.
 4. `git tag rework-baseline` on the deployed tree+APK pair.
 
-**Gate:** full ERT + new arms in `test/jetpacs-mode-app-test.el` and `test/glasspane-test.el` pinning hook-iff-flag on both sides. **Device arm (tablet, PORTRAIT, force-stop first, screenshot before every tap):** seed one timed item today+2h (generated fixture bytes only) → after a push, exactly ONE alarm+notification set, owner "glasspane" (`dumpsys alarm | grep -i jetpacs`); reboot → no org-mode re-arm. **I-8 proof (directly observable — the daily driver has NO chronometer code until GR-5; glasspane-clock is the sole implementation and device/init.el never loads Glasspane):** after reconnect, daily driver `(jetpacs-granted-p "surfaces.notification")` ⇒ t; tablet `(jetpacs-granted-p "offline.wake")` ⇒ t. Chronometer-posts-on-the-daily-driver is a GR-5 arm.
+**Gate:** full ERT + new arms in `test/jetpacs-mode-app-test.el` and `test/glasspane-test.el` pinning hook-iff-flag on both sides. **Device arm (tablet, PORTRAIT, force-stop first, screenshot before every tap):** seed one timed item today+2h (generated fixture bytes only) → after a push, exactly ONE alarm+notification set, owner "glasspane" (`dumpsys alarm | grep -i jetpacs`); reboot → no org-mode re-arm. **I-8 proof (directly observable on the current single-root install):** after reconnect, `(jetpacs-granted-p "surfaces.notification")` ⇒ t and `(jetpacs-granted-p "offline.wake")` ⇒ nil; the latter must agree with the Companion's supported-capability registry until RF-0.5b builds and advertises a conforming wake mechanism. Chronometer-posts-on-the-daily-driver is a GR-5 arm.
 
 ## GR-1 — Hardware floor: the seams get their first device truth (MANDATORY before GR-2+)
 

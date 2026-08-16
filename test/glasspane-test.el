@@ -2224,6 +2224,23 @@ their arms now.)"
             (glasspane-agenda--sync-reminders)
             (should (= (length sent) 1))))))))
 
+(ert-deftest glasspane-test-agenda-reminder-hook-follows-mitigation-flag ()
+  "GR-0 installs Glasspane's reminder hook iff its flag is enabled."
+  (unwind-protect
+      (progn
+        (glasspane-agenda-unregister)
+        (let ((glasspane-agenda-reminders-enabled nil))
+          (glasspane-agenda-register)
+          (should-not (memq #'glasspane-agenda--sync-reminders
+                            jetpacs-shell-after-push-hook))
+          (glasspane-agenda-unregister))
+        (let ((glasspane-agenda-reminders-enabled t))
+          (glasspane-agenda-register)
+          (should (memq #'glasspane-agenda--sync-reminders
+                        jetpacs-shell-after-push-hook))))
+    (glasspane-agenda-unregister)
+    (glasspane-agenda-register)))
+
 (defun glasspane-test--journal-vault ()
   "A throwaway vault directory for journal fixtures."
   (make-temp-file "glasspane-journal" t))

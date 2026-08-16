@@ -6,17 +6,22 @@
 ;; are collected, and no real project/SQL command executes.
 
 (require 'ert)
+(require 'jetpacs-chrome)
 (require 'jetpacs-project)
 (require 'jetpacs-sql)
 
 (defmacro jetpacs-psql-test--env (&rest body)
+  "BODY with continuations inline, navigation/snackbars collected, and
+the two modules' chrome STACKS restored afterwards — the sub-screens
+are real pushed screens since S9, so an action mutates global stack
+state that must not leak between tests."
   (declare (indent 0))
   `(let ((jetpacs-project--current nil)
-         (jetpacs-project--screen 'dashboard)
          (jetpacs-project--find-filter "")
-         (jetpacs-sql--screen 'hub)
          (jetpacs-files-roots nil)
-         (navigated nil) (notified nil))
+         (navigated nil) (notified nil)
+         (psql--proj (gethash "app:jetpacs.project" jetpacs-chrome--stacks))
+         (psql--sql (gethash "app:jetpacs.sql" jetpacs-chrome--stacks)))
      (cl-letf (((symbol-function 'jetpacs-flow-continue)
                 (lambda (fn) (funcall fn)))
                ((symbol-function 'jetpacs-navigate-buffer)
@@ -26,7 +31,10 @@
                ((symbol-function 'jetpacs-shell-push)
                 (lambda (&rest _) nil)))
        (ignore navigated notified)
-       ,@body)))
+       (unwind-protect
+           (progn ,@body)
+         (puthash "app:jetpacs.project" psql--proj jetpacs-chrome--stacks)
+         (puthash "app:jetpacs.sql" psql--sql jetpacs-chrome--stacks)))))
 
 ;;;; Project
 
@@ -45,15 +53,45 @@
                            (file-name-as-directory dir)))
             (should (equal (car (assoc "Project" jetpacs-files-roots))
                            "Project"))
-            (should (eq jetpacs-project--screen 'dashboard)))
+            ;; The pick RESETS the stack to the dashboard (S9): the
+            ;; sub-screens are pushed screens now, not a state flip.
+            (should (equal (jetpacs-chrome-stack "jetpacs.project")
+                           '("home"))))
         (delete-directory dir t)))))
 
 (ert-deftest jetpacs-project-find-file-sets-filter-and-screen ()
+  "Find file is a REAL pushed screen since S9 — its back arrow is the
+stack's companion-local `view.switch'; a refilter re-pushes the same
+id (truncate-and-replace), never deepening the stack."
   (jetpacs-psql-test--env
     (should (eq (jetpacs-project--action-find-file '(:value "core") nil)
                 'accepted))
     (should (equal jetpacs-project--find-filter "core"))
-    (should (eq jetpacs-project--screen 'find))))
+    (should (equal (jetpacs-chrome-stack "jetpacs.project")
+                   '("find" "home")))
+    (should (eq (jetpacs-project--action-find-file '(:value "elisp") nil)
+                'accepted))
+    (should (equal jetpacs-project--find-filter "elisp"))
+    (should (equal (jetpacs-chrome-stack "jetpacs.project")
+                   '("find" "home")))))
+
+(ert-deftest jetpacs-sql-new-screen-pushes-the-picker ()
+  "The product picker is a REAL pushed screen since S9; `sql.show'
+survives as the stack RESET (M-x parity, the settings link); and
+picking a product RESETS before the drill, so back-from-REPL lands
+on the hub, never the spent picker."
+  (jetpacs-psql-test--env
+    (should (eq (jetpacs-sql--action-new-screen nil nil) 'accepted))
+    (should (equal (jetpacs-chrome-stack "jetpacs.sql") '("new" "home")))
+    (should (eq (jetpacs-sql--action-show nil nil) 'accepted))
+    (should (equal (jetpacs-chrome-stack "jetpacs.sql") '("home")))
+    (should (eq (jetpacs-sql--action-new-screen nil nil) 'accepted))
+    (cl-letf (((symbol-function 'sql-product-interactive) #'ignore)
+              ((symbol-function 'jetpacs-sql--sqli-buffer)
+               (lambda () (get-buffer-create "*SQL*"))))
+      (should (eq (jetpacs-sql--action-new '(:product "sqlite") nil)
+                  'accepted)))
+    (should (equal (jetpacs-chrome-stack "jetpacs.sql") '("home")))))
 
 (ert-deftest jetpacs-project-view-buffer-of-navigates-and-degrades ()
   "The runner navigates to the returned buffer; a signal costs only

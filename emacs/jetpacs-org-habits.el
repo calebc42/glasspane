@@ -50,7 +50,8 @@
 (require 'jetpacs-chrome)
 (require 'jetpacs-navigate)
 
-;; Soft-coupled (the files precedent): embedded only when loaded.
+;; Soft-coupled fallback (the files precedent): the button renders
+;; only when the launcher is loaded AND the S8 drawer seam is not.
 (declare-function jetpacs-launcher-button "jetpacs-launcher")
 
 (defconst jetpacs-org-habits-owner "jetpacs.org"
@@ -190,7 +191,12 @@ has none."
               (append (cl-mapcar #'jetpacs-org-habits--card items tokens)
                       (list :spacing 8))))
      :back back
-     :actions (when (featurep 'jetpacs-launcher)
+     ;; The launcher button YIELDS to the S8 drawer: seam installed →
+     ;; the composed host drawer carries the Apps row the button
+     ;; duplicated; apps-less session → the button is this screen's
+     ;; only path to the switcher.  Read at BUILD time.
+     :actions (when (and (featurep 'jetpacs-launcher)
+                         (null jetpacs-chrome-drawer-function))
                 (list (jetpacs-launcher-button))))))
 
 ;;;; The verbs (owner-scoped: the habits surface is theirs alone)

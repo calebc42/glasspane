@@ -16,7 +16,8 @@
 ;;                     buffer on the generic substrate.
 ;;
 ;; (Behavior reference: POC 1's jetpacs-sql.el; the multi-view shell
-;; becomes one owned root surface with a screen-state variable.)
+;; becomes one owned root surface whose product picker is a PUSHED
+;; chrome screen — back is the companion-local `view.switch'.)
 
 ;;; Code:
 
@@ -31,9 +32,6 @@
 
 (defconst jetpacs-sql-surface "jetpacs.sql"
   "The SQL hub's root surface (owner and surface name).")
-
-(defvar jetpacs-sql--screen 'hub
-  "Which screen the surface shows: `hub' or `new'.")
 
 (defun jetpacs-sql--sqli-buffer ()
   "The current live SQLi buffer object, or nil.
@@ -116,28 +114,30 @@
             (mapcar #'jetpacs-sql--product-card products)))))
 
 (defun jetpacs-sql--view ()
+  "The root screen: sessions, saved connections, and the Add entry.
+The product picker is a PUSHED screen now (the conformance sweep),
+so its back arrow is the stack's companion-local `view.switch' —
+the hand-rolled `sql.show' back verb died with the socket down,
+where every other back arrow in the app kept working."
   (jetpacs-chrome-screen
-   (if (eq jetpacs-sql--screen 'new) "New connection" "Databases")
+   "Databases"
    (apply #'jetpacs-lazy-column
-          (if (eq jetpacs-sql--screen 'new)
-              (jetpacs-sql--new-nodes)
-            (append
-             (jetpacs-sql--session-nodes)
-             (jetpacs-sql--connections-nodes)
-             (list (jetpacs-section-header "Add")
-                   (jetpacs-sql--entry "add" "New connection"
-                                       "Start a REPL for a database product"
-                                       (jetpacs-action
-                                        "sql.new-screen"
-                                        :when-offline "drop"))))))
-   ;; The picker rides the top bar's own back slot.
-   :back (when (eq jetpacs-sql--screen 'new)
-           (jetpacs-action "sql.show" :when-offline "drop"))))
+          (append
+           (jetpacs-sql--session-nodes)
+           (jetpacs-sql--connections-nodes)
+           (list (jetpacs-section-header "Add")
+                 (jetpacs-sql--entry "add" "New connection"
+                                     "Start a REPL for a database product"
+                                     (jetpacs-action
+                                      "sql.new-screen"
+                                      :when-offline "drop")))))))
 
-(defun jetpacs-sql--refresh ()
-  (jetpacs-flow-continue
-   (lambda ()
-     (ignore-errors (jetpacs-shell-push jetpacs-sql-surface)))))
+(defun jetpacs-sql--new-screen (back)
+  "Builder for the pushed product-picker screen."
+  (jetpacs-chrome-screen
+   "New connection"
+   (apply #'jetpacs-lazy-column (jetpacs-sql--new-nodes))
+   :back back))
 
 (defun jetpacs-sql--view-buffer-of (fn)
   "Run FN in a continuation and navigate to the buffer it returns.
@@ -157,13 +157,26 @@ or quit costs the navigation, never the session."
 ;;;; Actions
 
 (defun jetpacs-sql--action-show (_args _params)
-  (setq jetpacs-sql--screen 'hub)
-  (jetpacs-sql--refresh)
+  "Land on the Databases root from anywhere (settings link, M-x parity).
+A stack RESET, not a state flip — DEFERRED, because the reset's push
+rebuilds and sends the surface, and a handler never pushes inside the
+dispatch extent (D2; the hub.home reset is the model)."
+  (jetpacs-flow-continue
+   (lambda () (jetpacs-chrome-reset-screens jetpacs-sql-surface)))
   'accepted)
 
 (defun jetpacs-sql--action-new-screen (_args _params)
-  (setq jetpacs-sql--screen 'new)
-  (jetpacs-sql--refresh)
+  "Push the product picker as a REAL stacked screen: its back arrow is
+the companion-local `view.switch', which works with the socket down."
+  (jetpacs-flow-continue
+   (lambda ()
+     ;; push-screen is transactional and RE-SIGNALS; a deferred caller
+     ;; must catch or the signal dies in a timer (its docstring's rule).
+     (condition-case err
+         (jetpacs-chrome-push-screen jetpacs-sql-surface "new"
+                                     #'jetpacs-sql--new-screen)
+       (error (message "jetpacs-sql: picker push failed: %s"
+                       (jetpacs-error-label err))))))
   'accepted)
 
 (defun jetpacs-sql--action-connect (args _params)
@@ -171,7 +184,9 @@ or quit costs the navigation, never the session."
     (if (not (and (stringp name)
                   (assoc-string name sql-connection-alist)))
         'rejected
-      (setq jetpacs-sql--screen 'hub)
+      ;; No reset here: the connection cards render only on the ROOT
+      ;; screen, so the stack is already at the hub — a reset would be
+      ;; a redundant full rebuild and wire frame before every connect.
       (jetpacs-sql--view-buffer-of
        (lambda ()
          (sql-connect (intern name))
@@ -183,10 +198,16 @@ or quit costs the navigation, never the session."
          (sym (and (stringp name) (intern-soft name))))
     (if (not (and sym (assq sym (jetpacs-sql--products))))
         'rejected
-      (setq jetpacs-sql--screen 'hub)
       (jetpacs-sql--view-buffer-of
        (lambda ()
          (sql-product-interactive sym)
+         ;; The pick SUCCEEDED: land the drill on a RESET stack, so
+         ;; back-from-REPL returns to the Databases hub, never the
+         ;; spent picker (the project.switch rationale).  AFTER the
+         ;; interactive call, so a quit at a bridged prompt keeps the
+         ;; picker; inside the continuation, so the reset's push
+         ;; stays out of the dispatch extent (D2).
+         (jetpacs-chrome-reset-screens jetpacs-sql-surface)
          (jetpacs-sql--sqli-buffer)))
       'accepted)))
 

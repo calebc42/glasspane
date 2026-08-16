@@ -16,8 +16,10 @@
 ;;
 ;; Reaching the launcher has the same shape as the problem it solves,
 ;; so `jetpacs.launcher.show' is a GLOBAL VERB (`:any-surface', the
-;; theme-toggle precedent): any app may embed `jetpacs-launcher-button'
-;; in its top bar, and the files browser does.
+;; theme-toggle precedent): a drawer-less screen may embed
+;; `jetpacs-launcher-button' in its top bar.  Since the S8 drawer
+;; seam that set is small — standalone-pole surfaces and non-chrome
+;; roots; build-within roots reach here through the injected drawer.
 
 ;;; Code:
 
@@ -51,36 +53,51 @@ Modules may seed their surface's icon; unlisted surfaces get \"apps\".")
 Modules seed these where the namespace-stripped `capitalize' guess is
 wrong — initialisms, mostly: \"Sql\" must read \"SQL\".")
 
-(defun jetpacs-launcher--pretty (owner surface)
-  "A human title for a switch row: a seeded label, else the name sans
-namespace, capitalized.  \"jetpacs.settings\" reads as \"Settings\"; an
-unowned surface keeps its id (better an honest id than a wrongly
-prettified one)."
-  (or (cdr (assoc surface jetpacs-launcher-row-labels))
-      (if owner
-          (capitalize (string-remove-prefix "jetpacs." owner))
-        surface)))
+(declare-function jetpacs-apps-home-for-surface "jetpacs-apps" (surface))
+
+(defun jetpacs-launcher--identity (surface owner)
+  "SURFACE's (LABEL . ICON) for a switch row.
+THE SINGLE ENUMERATION: an app's HOME surface takes its identity
+from the `jetpacs-defapp' REGISTRY — the same source the dock and
+the drawer nests read — so the launcher can never disagree with
+them about what an app is called.  HOME only: an entry names the
+APP, not the surface, and a claimed SECONDARY (Org Mode claims the
+Files surface) keeps its own identity.  The seeded tables remain
+the vocabulary for platform surfaces (Settings, SQL, …), which are
+deliberately not apps; last comes the namespace-stripped
+`capitalize' guess, and an unowned surface keeps its id (better an
+honest id than a wrongly prettified one)."
+  (let ((entry (and (fboundp 'jetpacs-apps-home-for-surface)
+                    (jetpacs-apps-home-for-surface surface))))
+    (cons (or (and entry (plist-get (cdr entry) :label))
+              (cdr (assoc surface jetpacs-launcher-row-labels))
+              (if owner
+                  (capitalize (string-remove-prefix "jetpacs." owner))
+                surface))
+          (or (and entry (plist-get (cdr entry) :icon))
+              (cdr (assoc surface jetpacs-launcher-row-icons))
+              "apps"))))
 
 (defun jetpacs-launcher--row (surface owner)
   "One tappable row for SURFACE (registered by OWNER, maybe nil)."
-  (jetpacs-chrome-row (jetpacs-launcher--pretty owner surface)
-                      :icon (or (cdr (assoc surface
-                                            jetpacs-launcher-row-icons))
-                                "apps")
-                      :subtitle (and owner surface)
-                      :on-tap (jetpacs-action "jetpacs.launcher.open"
-                                              :args (list :surface surface))
-                      :key (jetpacs-wire-id "lr" surface)))
+  (pcase-let ((`(,label . ,icon)
+               (jetpacs-launcher--identity surface owner)))
+    (jetpacs-chrome-row label
+                        :icon icon
+                        :subtitle (and owner surface)
+                        :on-tap (jetpacs-action "jetpacs.launcher.open"
+                                                :args (list :surface surface))
+                        :key (jetpacs-wire-id "lr" surface))))
 
 (defun jetpacs-launcher--view ()
-  "The launcher root: a row per switchable app surface."
+  "The launcher body: a row per switchable app surface.
+The screen title rides the chrome top bar, not a heading node."
   (let ((entries (jetpacs-launcher--entries)))
     (if (null entries)
         (jetpacs-empty-state :icon "apps"
                              :title "Nothing to switch to"
                              :caption "No other app has registered a surface")
       (apply #'jetpacs-lazy-column
-             (jetpacs-text "Apps" :style "title")
              (mapcar (lambda (entry)
                        (jetpacs-launcher--row (car entry) (cdr entry)))
                      entries)))))
@@ -88,8 +105,11 @@ prettified one)."
 (defun jetpacs-launcher-button ()
   "The top-bar affordance any app may embed to reach the launcher.
 Under docs/CHROME-VOCABULARY.md the drawer is the canonical home for
-app destinations — prefer embedding `jetpacs-launcher-rows' there; this
-button remains for screens that have no drawer."
+app destinations, and since the S8 seam every build-within chrome
+root wears the composed host drawer — so this button remains only
+for screens that genuinely have none: standalone-pole surfaces and
+non-chrome roots.  The Files and Org Habits roots retired their
+embeds when the seam landed."
   (jetpacs-icon-button "apps"
                        (jetpacs-action "jetpacs.launcher.show")
                        :content-description "Apps"))
@@ -118,8 +138,14 @@ from any surface's drawer."
 
 (with-jetpacs-owner "jetpacs.launcher"
 
-  (jetpacs-shell-define-root jetpacs-launcher-owner
-                             #'jetpacs-launcher--view)
+  ;; A CHROME root since the conformance sweep: the switcher used to
+  ;; be a bare lazy_column outside every seam — no title, no dock, no
+  ;; M-x, snackbars degraded to toast (the one screen for changing
+  ;; apps had the least app chrome in the tree).
+  (jetpacs-chrome-define-root jetpacs-launcher-owner "home"
+                              (lambda (_back)
+                                (jetpacs-chrome-screen
+                                 "Apps" (jetpacs-launcher--view))))
 
   (jetpacs-defaction "jetpacs.launcher.open"
     ;; The tapped row must still NAME a registered root: rows travel in

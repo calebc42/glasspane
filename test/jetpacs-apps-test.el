@@ -85,6 +85,25 @@
                     (jetpacs-apps-dock-items "app:hub"))
                    '("Home" "Apps")))))
 
+(ert-deftest jetpacs-apps-for-surface-reads-claims ()
+  "The public identity read: a claimed surface answers its entry
+\(colon-aware) and an unclaimed one answers nil."
+  (jetpacs-apps-test--env
+    (jetpacs-defapp "notes" :label "Notes" :icon "note"
+                    :surfaces '("notes.main"))
+    (should (equal (car (jetpacs-apps-for-surface "app:notes.main"))
+                   "notes"))
+    (should-not (jetpacs-apps-for-surface "app:jetpacs.settings"))
+    ;; The HOME-only read: ownership answers for every claimed
+    ;; surface, identity only for the app's home.
+    (jetpacs-defapp "multi" :label "Multi" :surfaces '("multi.home"
+                                                       "multi.aux"))
+    (should (equal (car (jetpacs-apps-for-surface "app:multi.aux"))
+                   "multi"))
+    (should (equal (car (jetpacs-apps-home-for-surface "app:multi.home"))
+                   "multi"))
+    (should-not (jetpacs-apps-home-for-surface "app:multi.aux"))))
+
 (ert-deftest jetpacs-apps-drawer-composes-head-then-core ()
   "The composed drawer (S8): the Apps row first, one S1 nest per app
 declaring destinations, then the host's seeded tail rows — the hub's

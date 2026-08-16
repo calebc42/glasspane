@@ -18,8 +18,8 @@
 ;; entry is built-in `project-vc-dir' only — magit is not shipped with
 ;; Emacs, so it is not named here; magit users reach theirs through the
 ;; palette, landing on the same substrates.  POC 1's multi-view shell
-;; becomes one owned root surface with a screen-state variable, like
-;; the Customize browser.)
+;; becomes one owned root surface; Find file and Switch project are
+;; PUSHED chrome screens — back is the companion-local `view.switch'.)
 
 ;;; Code:
 
@@ -44,9 +44,6 @@ of paging."
 
 (defvar jetpacs-project--current nil
   "The selected project root (a directory string), or nil for none.")
-
-(defvar jetpacs-project--screen 'dashboard
-  "Which screen the surface shows: `dashboard', `find', or `switch'.")
 
 (defvar jetpacs-project--find-filter ""
   "Current substring filter for the Find file screen.")
@@ -78,11 +75,6 @@ stays as tight as the current project."
                 (assoc-delete-all "Project" jetpacs-files-roots)))))
 
 ;;;; Running project commands
-
-(defun jetpacs-project--refresh ()
-  (jetpacs-flow-continue
-   (lambda ()
-     (ignore-errors (jetpacs-shell-push jetpacs-project-surface)))))
 
 (defun jetpacs-project--view-buffer-of (fn)
   "Run FN at the project root in a continuation; navigate to its buffer.
@@ -238,36 +230,57 @@ around the interactive drives so no stale event hijacks a prompt."
               roots))))
 
 (defun jetpacs-project--view ()
-  ;; A scaffold so chrome docks the view switcher.
+  "The dashboard root.  Find file and Switch project are PUSHED
+screens now (the conformance sweep): their back arrows are the
+stack's companion-local `view.switch', where the hand-rolled
+`project.show' back verb died with the socket down."
   (jetpacs-chrome-screen
-   (pcase jetpacs-project--screen
-     ('find "Find file")
-     ('switch "Switch project")
-     (_ "Project"))
-   (apply #'jetpacs-lazy-column
-          (pcase jetpacs-project--screen
-            ('find (jetpacs-project--find-nodes))
-            ('switch (jetpacs-project--switch-nodes))
-            (_ (jetpacs-project--dashboard-nodes))))
-   ;; Sub-screens ride the top bar's own back slot.
-   :back (unless (eq jetpacs-project--screen 'dashboard)
-           (jetpacs-action "project.show" :when-offline "drop"))))
+   "Project"
+   (apply #'jetpacs-lazy-column (jetpacs-project--dashboard-nodes))))
+
+(defun jetpacs-project--find-screen (back)
+  "Builder for the pushed Find file screen; reads the filter state."
+  (jetpacs-chrome-screen
+   "Find file"
+   (apply #'jetpacs-lazy-column (jetpacs-project--find-nodes))
+   :back back))
+
+(defun jetpacs-project--switch-screen (back)
+  "Builder for the pushed Switch project screen."
+  (jetpacs-chrome-screen
+   "Switch project"
+   (apply #'jetpacs-lazy-column (jetpacs-project--switch-nodes))
+   :back back))
+
+(defun jetpacs-project--push (id builder)
+  "Push a sub-screen, deferred and caught (the push-screen rule)."
+  (jetpacs-flow-continue
+   (lambda ()
+     (condition-case err
+         (jetpacs-chrome-push-screen jetpacs-project-surface id builder)
+       (error (message "jetpacs-project: %s push failed: %s"
+                       id (jetpacs-error-label err)))))))
 
 ;;;; Actions
 
 (defun jetpacs-project--action-show (_args _params)
+  "Land on the dashboard from anywhere (settings link, M-x parity).
+A stack RESET, deferred: the reset's push rebuilds the dashboard
+\(project-current under the selected root — real work, possibly
+remote), and a handler never pushes inside the dispatch extent (D2)."
   (jetpacs-project--widen-roots (jetpacs-project--root))
-  (setq jetpacs-project--screen 'dashboard)
-  (jetpacs-project--refresh)
+  (jetpacs-flow-continue
+   (lambda () (jetpacs-chrome-reset-screens jetpacs-project-surface)))
   'accepted)
 
 (defun jetpacs-project--action-find-file (args _params)
-  "Open (or refilter) the Find file screen; a filter submit carries :value."
+  "Open (or refilter) the Find file screen; a filter submit carries :value.
+A re-submit pushes the SAME id — the stack's truncate-and-replace
+gives refilter-in-place for free."
   (jetpacs-project--widen-roots (jetpacs-project--root))
   (let ((value (plist-get args :value)))
     (setq jetpacs-project--find-filter (if (stringp value) value "")))
-  (setq jetpacs-project--screen 'find)
-  (jetpacs-project--refresh)
+  (jetpacs-project--push "find" #'jetpacs-project--find-screen)
   'accepted)
 
 (defun jetpacs-project--action-open-file (args _params)
@@ -321,19 +334,22 @@ open follows the same shape)."
   'accepted)
 
 (defun jetpacs-project--action-switch-screen (_args _params)
-  (setq jetpacs-project--screen 'switch)
-  (jetpacs-project--refresh)
+  (jetpacs-project--push "switch" #'jetpacs-project--switch-screen)
   'accepted)
 
 (defun jetpacs-project--action-switch (args _params)
+  "Adopt ROOT and land back on its dashboard — a stack reset, since
+the pick came from the pushed Switch screen and the drill is over."
   (let ((root (plist-get args :root)))
     (if (not (and (stringp root) (file-directory-p root)))
         'rejected
       (setq jetpacs-project--current (file-name-as-directory root)
-            jetpacs-project--find-filter ""
-            jetpacs-project--screen 'dashboard)
+            jetpacs-project--find-filter "")
       (jetpacs-project--widen-roots jetpacs-project--current)
-      (jetpacs-project--refresh)
+      ;; Deferred like project.show: the reset's push is real builder
+      ;; work and never runs inside the dispatch extent (D2).
+      (jetpacs-flow-continue
+       (lambda () (jetpacs-chrome-reset-screens jetpacs-project-surface)))
       'accepted)))
 
 (with-jetpacs-owner "jetpacs.project"

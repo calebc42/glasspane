@@ -67,6 +67,26 @@
         (should (< (cl-position "app:demoa" surfaces :test #'equal)
                    (cl-position "app:demob" surfaces :test #'equal)))))))
 
+(ert-deftest jetpacs-launcher-identity-reads-the-registry-first ()
+  "THE SINGLE ENUMERATION: a defapp-claimed surface's row takes label
+and icon from the registry — the same source the dock and the drawer
+nests read — outranking the seeded tables and the capitalize guess;
+an unclaimed surface keeps the platform vocabulary."
+  (require 'jetpacs-apps)
+  (jetpacs-launcher-test--with-demos
+    (let ((jetpacs-apps--registry nil)
+          (jetpacs-launcher-row-labels '(("app:demoa" . "Seeded")))
+          (jetpacs-launcher-row-icons '(("app:demoa" . "bug_report"))))
+      (jetpacs-defapp "demoa" :label "Demo Alpha" :icon "science"
+                      :surfaces '("demoa" "demob"))
+      (should (equal (jetpacs-launcher--identity "app:demoa" "demoa")
+                     '("Demo Alpha" . "science")))
+      ;; A claimed SECONDARY surface keeps its own identity: the entry
+      ;; names the APP, not the surface (the Org-Mode-claims-Files
+      ;; shape the review caught).
+      (should (equal (jetpacs-launcher--identity "app:demob" "demob")
+                     '("Demob" . "apps"))))))
+
 (ert-deftest jetpacs-launcher-view-rows-carry-the-switch ()
   (jetpacs-launcher-test--with-demos
     (let ((view (jetpacs-launcher--view)))

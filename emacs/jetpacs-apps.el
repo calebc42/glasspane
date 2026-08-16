@@ -186,13 +186,38 @@ Colon-aware on both sides, mirroring the flow resolver."
                       (jetpacs-shell-surface-for owner))))
            (plist-get (cdr entry) :surfaces)))
 
+(defun jetpacs-apps-for-surface (surface)
+  "The registry entry (ID . PLIST) of the app claiming SURFACE, or nil.
+THE public identity read: the launcher takes a claimed surface's
+label and icon from here — one enumeration, the registry — instead
+of keeping a second vocabulary for surfaces that already have an
+app.  Platform surfaces (not apps by owner decision) return nil and
+keep their module-seeded launcher identity."
+  (cl-loop for entry in jetpacs-apps--registry
+           when (jetpacs-apps--entry-owns-surface-p entry surface)
+           return entry))
+
+(defun jetpacs-apps-home-for-surface (surface)
+  "The registry entry (ID . PLIST) whose HOME surface is SURFACE, or nil.
+The launcher's identity read: an entry names the APP, not the
+surface, so only the app's home wears its label and icon — a claimed
+SECONDARY surface (Org Mode claims the Files surface) keeps its own
+platform identity.  Colon-aware like the ownership check."
+  (cl-loop for entry in jetpacs-apps--registry
+           for home = (jetpacs-apps--home-surface entry)
+           ;; A registry SCAN, not a filter of the first ownership hit:
+           ;; app A claiming SURFACE as a secondary must not shadow app
+           ;; B whose home it is (registry order is :order, not claims).
+           when (and home
+                     (equal surface (if (string-search ":" home) home
+                                      (jetpacs-shell-surface-for home))))
+           return entry))
+
 (defun jetpacs-apps--surface-chrome (surface)
   "The integration pole of the app owning SURFACE, or nil.
 nil for host surfaces and for build-within apps alike — only a
 declared pole changes composition."
-  (cl-loop for entry in jetpacs-apps--registry
-           when (jetpacs-apps--entry-owns-surface-p entry surface)
-           return (plist-get (cdr entry) :chrome)))
+  (plist-get (cdr (jetpacs-apps-for-surface surface)) :chrome))
 
 ;;;; The composed dock
 

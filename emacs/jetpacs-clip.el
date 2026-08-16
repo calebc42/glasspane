@@ -32,6 +32,7 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
+(require 'jetpacs-chrome)
 
 (defgroup jetpacs-clip nil
   "The kill ring mirrored to the Companion clipboard."
@@ -129,13 +130,16 @@ selection is the fallback."
              :content-description "Copy to device clipboard")))))))
 
 (defun jetpacs-clip--view ()
-  "The root builder: a scaffold over the newest kills.
+  "The root builder: a chrome screen over the newest kills.
 A PURE READ of `kill-ring' — never `current-kill', which can query the
-OS clipboard and PUSH onto the ring inside a builder (the write-ban)."
+OS clipboard and PUSH onto the ring inside a builder (the write-ban).
+`jetpacs-chrome-screen', not a raw scaffold, since the conformance
+sweep: the raw form had no top bar at all — no title, no injected
+M-x — on a stock platform surface."
   (let* ((kills (seq-take kill-ring jetpacs-clip-max-entries))
          (copy-ok (jetpacs-builtin-advertised-p "clipboard.copy")))
-    (jetpacs-scaffold
-     :body
+    (jetpacs-chrome-screen
+     "Clipboard"
      (if (null kills)
          (jetpacs-empty-state :icon "content_paste"
                               :title "Kill ring is empty"
@@ -184,7 +188,8 @@ kill-new).  Behaviorally invisible to a disconnected desktop Emacs."
 ;;;; Registration
 
 (with-jetpacs-owner "jetpacs.clip"
-  (jetpacs-shell-define-root jetpacs-clip-owner #'jetpacs-clip--view)
+  (jetpacs-chrome-define-root jetpacs-clip-owner "home"
+                              (lambda (_back) (jetpacs-clip--view)))
   (jetpacs-defaction "jetpacs.clip.refresh"
     (lambda (_args params)
       ;; D1: the ORIGINATING surface.  `jetpacs--dispatch' does bind
@@ -205,13 +210,27 @@ kill-new).  Behaviorally invisible to a disconnected desktop Emacs."
 
 (advice-add 'kill-new :after #'jetpacs-clip--after-kill)
 
+;; Launcher identity for a platform surface (not an app by owner
+;; decision — the registry is only for Tier 1 packages).
+(defvar jetpacs-launcher-row-icons)
+(defvar jetpacs-launcher-row-labels)
+(with-eval-after-load 'jetpacs-launcher
+  (setf (alist-get (concat "app:" jetpacs-clip-owner)
+                   jetpacs-launcher-row-icons nil nil #'equal)
+        "content_paste")
+  (setf (alist-get (concat "app:" jetpacs-clip-owner)
+                   jetpacs-launcher-row-labels nil nil #'equal)
+        "Clipboard"))
+
 (defun jetpacs-clip-unload-function ()
-  "Unload hygiene: drop the advice, the timer, and the surface."
+  "Unload hygiene: drop the advice, the timer, and the surface.
+`jetpacs-chrome-remove', not the bare shell form, since the chrome
+conversion — the stack must go with the root."
   (advice-remove 'kill-new #'jetpacs-clip--after-kill)
   (when (timerp jetpacs-clip--refresh-timer)
     (cancel-timer jetpacs-clip--refresh-timer)
     (setq jetpacs-clip--refresh-timer nil))
-  (ignore-errors (jetpacs-shell-remove-root jetpacs-clip-owner))
+  (ignore-errors (jetpacs-chrome-remove jetpacs-clip-owner))
   nil)
 
 (provide 'jetpacs-clip)

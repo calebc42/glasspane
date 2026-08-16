@@ -502,20 +502,26 @@ landing configuration never went through a handler."
                           :caption (format "error: %s" (jetpacs-error-label err))))))
 
 (declare-function jetpacs-launcher-button "jetpacs-launcher" ())
+(defvar jetpacs-chrome-drawer-function)
 
 (defun jetpacs-files--screen (_back)
-  "The chrome root screen builder."
+  "The chrome root screen builder.
+The launcher button YIELDS to the S8 drawer: with the seam installed
+this root wears the composed host drawer, and a top-bar Apps icon
+would duplicate the drawer's Apps row.  In an apps-less session the
+seam is nil and the button remains this screen's only path to the
+switcher — read at BUILD time, so load order cannot strand it."
   (jetpacs-chrome-screen "Files" (jetpacs-files--body)
-                         :actions (append
-                                   (list (jetpacs-icon-button
-                                          "add"
-                                          (jetpacs-action "jetpacs.files.new")
-                                          :content-description
-                                          "New file or folder"))
-                                   ;; Soft coupling: the switcher rides
-                                   ;; along when its module is loaded.
-                                   (when (featurep 'jetpacs-launcher)
-                                     (list (jetpacs-launcher-button))))
+                         :actions
+                         (append
+                          (list (jetpacs-icon-button
+                                 "add"
+                                 (jetpacs-action "jetpacs.files.new")
+                                 :content-description
+                                 "New file or folder"))
+                          (when (and (featurep 'jetpacs-launcher)
+                                     (null jetpacs-chrome-drawer-function))
+                            (list (jetpacs-launcher-button))))
                          :on-refresh (jetpacs-action "jetpacs.files.refresh")))
 
 ;;;; Content search (F2)

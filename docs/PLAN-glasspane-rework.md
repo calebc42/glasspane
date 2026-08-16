@@ -179,6 +179,37 @@ supported-capability registry and the RF-0.5b ownership recorded in I-8.
 
 **Gate:** ERT (test/glasspane-test.el + test/jetpacs-mode-app-test.el): with both apps loaded, `.org` opens Glasspane's tree via the ADAPTER (hook lists contain only `jetpacs-reader--files-body`); host top bar carries Glasspane's actions and the absorbed decrypt action, **no other stock org action icons**; `glasspane-unregister` → stock adapter renders with its full action set; render-signal fallback arm; toggle round-trip preserves fold state. **Device arm:** open a seeded .org — tree renders, filter works, decrypt affordance visible on a crypt file, toggle to plain and back, no dead icons; force-stop + relaunch resumes.
 
+> **GR-2 DEVICE GATE COMPLETE 2026-08-16 — Pixel Tablet, Android 17,
+> portrait, force-stop-first, screenshot-before-every-tap.** The seeded
+> three-heading Org file opened through the stable `org` adapter; the
+> `todo:TODO` query rendered **1 of 3 headings**, the visible PGP block
+> exposed **Decrypt Org Crypt entries**, and rendered → plain → rendered
+> returned to the tree. The reader bar carried Refile + conditional decrypt
+> beside the generic host controls, with none of the stock Org
+> reader-mode/visibility/search icons. Refile and its Reader return both
+> dispatched on hardware; decrypt presence and handler reachability are
+> pinned without attempting to decrypt the deliberately invalid fixture.
+>
+> The arm found and closed two integration defects. First, the adapter's
+> Glasspane-owned descriptors are emitted from the stable foreign Files
+> surface, so D1 rejected all four until `heading.menu`, `files.filter`,
+> `files.toggle-refile`, and `heading.reorder` became bounded global verbs;
+> their live-path/token/list guards and a real `jetpacs--dispatch` arm now
+> pin that boundary. Second, a `reorderable_list` nested in a lazy column
+> crashed Compose with infinite vertical constraints; refile mode now gives
+> the weighted list the finite remainder of a root column, pinned by a
+> structural ERT arm. Companion force-stop/relaunch followed by the
+> documented caller-owned `M-x jetpacs-start` reconnect resumed the exact
+> Org document from Files while the Emacs process retained its path-keyed
+> reader state.
+>
+> Registration/unregistration, stock-render fallback, stock-action restore,
+> stable-id toggle round-trip, `:gp-*` document isolation, and the refile
+> layout all ride the suite. Final gates: Glasspane **72/72**; full
+> `test/run-tests.sh` **exit 0**. The generated fixture/evidence was removed
+> from the tablet, Eval was left clean, and the rotation baseline was
+> restored (`free`, accelerometer `1`, user rotation `0`).
+
 ## GR-3 — Reminders ownership cutover (RATIFIED ruling 1, reminders half) — RISKY
 
 **Goal:** one pipeline, owner "org-mode", device-verified code surviving, device sets cut over without orphans. Ceremony §5.1 IS the device gate.

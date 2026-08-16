@@ -11,12 +11,11 @@
 ;; round trip.  Three entry points: `glasspane-org-reader-file' (whole
 ;; file), `glasspane-org-reader-subtree' (one heading, used by the
 ;; detail and journal rungs), `glasspane-org-reader-refile-list' (flat
-;; drag-to-reorder list).  The file also owns the reader's SURFACING:
-;; the trimodal block v1 kept in glasspane-ui claims the jetpacs-files
-;; body/actions seams here, AHEAD of jetpacs-org-render's own entry
-;; (hooks chain — the plan's sanctioned shape), so org files open in
-;; this reader while the foundation's rendered⇄plain toggle still
-;; reaches the plain editor.
+;; drag-to-reorder list).  The whole-file presentation replaces the
+;; foundation reader adapter's stable `org' registry slot while
+;; Glasspane is loaded.  The reusable host remains the sole Files seam
+;; claimant and owns rendered⇄plain transitions; unloading Glasspane
+;; reasserts the stock Org adapter in the same slot.
 ;;
 ;; Retired against v1 (the plan's retirement list + G4 section):
 ;;
@@ -38,9 +37,8 @@
 ;;   app-named set there — the only cross-owner mint in the app.
 ;; - The collapsible's legacy single-action `:on-swipe': no v3 member —
 ;;   the per-side `:swipe-start'/`:swipe-end' pair is the whole story.
-;; - files.toggle-read: the foundation's `jetpacs.org.view-mode' owns
-;;   rendered⇄plain; only files.toggle-refile ports (with the state it
-;;   flips), per the G3 commentary.
+;; - files.toggle-read: the reader host's `jetpacs.reader.toggle' owns
+;;   rendered⇄plain; files.toggle-refile remains the tree/list switch.
 ;; - v1's read-mode surfacing listed level-1 cards through
 ;;   jetpacs-org-outline-body with the AGENDA card — a G5 builder this
 ;;   rung may not require forward — so read mode surfaces this file's
@@ -56,11 +54,12 @@
 (require 'jetpacs-widgets)
 (require 'jetpacs-buffer)
 (require 'jetpacs-files)
-(require 'jetpacs-org-render)           ; the rendered⇄plain mode bit the
-                                        ; body seam must respect
+(require 'jetpacs-reader)
+(require 'jetpacs-reader-org)           ; stock fallback, decrypt action,
+                                        ; and narrowed-editor transition
 (require 'jetpacs-org-dialogs)          ; the base sheet/archive verbs the
                                         ; reader delegates to (S3)
-(require 'glasspane-ui)                 ; the files-filter defvar (S2)
+(require 'glasspane-org)                ; durable mutation/save funnel
 
 ;;;; File access (the G1 funnel: policy first, clamped IO always)
 
@@ -651,30 +650,29 @@ error."
        (lambda () (glasspane-org-reader--show-sheet token ref params)))
       'accepted))))
 
-;;;; Surfacing: the jetpacs-files seam claims (the trimodal replacement)
+;;;; Reader adapter (the trimodal replacement on the reusable host)
 
-(defvar glasspane-org-reader--refile-mode nil
-  "When non-nil, the org reader shows the flat drag-to-reorder list.
-Single writer: the files.toggle-refile handler.")
+(defun glasspane-org-reader--fold-mode (path)
+  "Return PATH's Glasspane tree presentation: `tree' or `refile'."
+  (jetpacs-reader-state-get path :gp-fold-mode 'tree))
 
-(defun glasspane-org-reader--org-path-p (path)
-  "Non-nil when PATH names an org file."
-  (and (stringp path) (string-suffix-p ".org" path t)))
+(defun glasspane-org-reader--filter-query (path)
+  "Return PATH's submitted ONE-grammar filter query."
+  (jetpacs-reader-state-get path :gp-filter-query ""))
 
-(defun glasspane-org-reader--filter-input ()
-  "The sparse-filter row, re-seeded from the shared defvar (S2).
-Persistence across re-renders IS the feature (the v1 lesson the
-defvar's home documents): the submitted query lives Emacs-side and the
-input takes it back as `:value' each render."
-  (jetpacs-text-input "files-filter"
-                      :value glasspane-ui--files-filter
-                      :hint "Filter: todo:TODO tags:work text…"
-                      :single-line t
-                      :on-submit (jetpacs-action "files.filter")))
+(defun glasspane-org-reader--filter-input (path)
+  "The sparse-filter row for PATH, re-seeded from host-owned state."
+  (jetpacs-text-input
+   (jetpacs-wire-id "files-filter" path)
+   :value (glasspane-org-reader--filter-query path)
+   :hint "Filter: todo:TODO tags:work text…"
+   :single-line t
+   :on-submit (jetpacs-action "files.filter" :args (list :path path))))
 
 (defun glasspane-org-reader--reader-body (path)
   "The read-mode body for org PATH: filter row + the foldable tree."
-  (let* ((query (string-trim glasspane-ui--files-filter))
+  (let* ((query (string-trim
+                 (glasspane-org-reader--filter-query path)))
          (active (not (string-empty-p query)))
          (broken nil)
          (parts (if (not active)
@@ -694,125 +692,193 @@ input takes it back as `:value' each render."
          (nodes (nth 0 parts))
          (kept (nth 1 parts))
          (total (nth 2 parts)))
+    ;; Counts belong to the document whose render produced them.  Keeping
+    ;; them beside the query prevents one Files tab from reporting another
+    ;; file's filter result after a route switch.
+    (jetpacs-reader-state-set path :gp-filter-kept
+                              (and (not broken) kept))
+    (jetpacs-reader-state-set path :gp-filter-total
+                              (and (not broken) total))
     (cond
      (broken
-      (jetpacs-lazy-column (glasspane-org-reader--filter-input)
+      (jetpacs-lazy-column (glasspane-org-reader--filter-input path)
                            (jetpacs-text broken :style "caption")))
      (t
       (apply #'jetpacs-lazy-column
              (append
-              (list (glasspane-org-reader--filter-input))
+              (list (glasspane-org-reader--filter-input path))
               (when active
                 (list (jetpacs-row
                        (jetpacs-with-attrs
-                        (jetpacs-text (format "%d of %d headings" kept total)
-                                      :style "caption")
+                        (jetpacs-text
+                         (format "%d of %d headings"
+                                 (jetpacs-reader-state-get
+                                  path :gp-filter-kept 0)
+                                 (jetpacs-reader-state-get
+                                  path :gp-filter-total 0))
+                         :style "caption")
                         :weight 1)
                        (jetpacs-assist-chip
                         "Clear"
                         :on-tap (jetpacs-action "files.filter"
-                                                :args (list :value "")))
+                                                :args (list :path path
+                                                            :value "")))
                        :align "center")))
               (or nodes
                   (list (jetpacs-text
                          (if active "No matches" "No headings found.")
                          :style "caption")))))))))
 
-(defun glasspane-org-reader--files-body (path)
-  "The body seam: the app reader for org PATH, or nil to pass along.
-Claims AHEAD of jetpacs-org-render's entry (the plan's chain), but
-respects the foundation's per-path mode: `plain' passes through to the
-text editor, so the base rendered⇄plain toggle keeps working.  Policy
-refusals and errors pass too — the base skin has no roots policy and
-still renders the file; the reader just declines it."
-  (when (and (glasspane-org-reader--org-path-p path)
-             (jetpacs-org-render-rendered-p path))
-    (condition-case err
-        (if glasspane-org-reader--refile-mode
-            (jetpacs-lazy-column
+(defun glasspane-org-reader--adapter-render (path)
+  "Render PATH's Glasspane tree, degrading to the stock Org adapter.
+The replacement of registry id `org' is intentionally a single point of
+selection.  Its failure mode is therefore guarded here: an app-side tree,
+policy, or refiling error gets the foundation reader rather than a blank or
+generic host error screen."
+  (condition-case err
+      (if (eq (glasspane-org-reader--fold-mode path) 'refile)
+          (let ((list (glasspane-org-reader-refile-list path)))
+            ;; `reorderable_list' owns a LazyColumn on the device.  It must
+            ;; receive the screen's finite remainder, never sit as an item in
+            ;; another lazy/scrolling container (Compose rejects that with an
+            ;; infinite-height measurement).  A weighted child of this root
+            ;; column is the bounded list viewport; the caption stays fixed.
+            (jetpacs-column
              (jetpacs-text "Drag to reorder headings" :style "caption")
-             (or (glasspane-org-reader-refile-list path)
-                 (jetpacs-text "No headings to show." :style "caption")))
-          (glasspane-org-reader--reader-body path))
-      (ebp-org-refused nil)
-      (ebp-org-unresolved nil)
-      (error
-       (message "glasspane: reader body failed: %s"
-                (jetpacs-error-label err))
-       nil))))
+             (if list
+                 (jetpacs-with-attrs list :weight 1)
+               (jetpacs-text "No headings to show." :style "caption"))
+             :fill t))
+        (glasspane-org-reader--reader-body path))
+    (error
+     (message "glasspane: reader adapter fell back: %s"
+              (jetpacs-error-label err))
+     (jetpacs-reader-org--render path))))
 
-(defun glasspane-org-reader--files-actions (path)
-  "The actions seam: the reader⇄refile toggle beside the base's own.
-The seams APPEND across claimants, so the foundation's edit/preview
-icon (`jetpacs.org.view-mode') still appears; this contributes only the
-refile flip, files.toggle-read having died with the bimodal machinery."
-  (when (and (glasspane-org-reader--org-path-p path)
-             (jetpacs-org-render-rendered-p path))
-    (list (jetpacs-icon-button
-           (if glasspane-org-reader--refile-mode "visibility" "swap_vert")
-           (jetpacs-action "files.toggle-refile")
-           :content-description
-           (if glasspane-org-reader--refile-mode "Reader" "Refile")))))
+(defun glasspane-org-reader--adapter-actions (path)
+  "Return Glasspane's reader actions for PATH plus Org Crypt decrypt.
+The stock typography, visibility, and org-occur icons deliberately do not
+ride this presentation: the in-body ONE-grammar filter owns tree search."
+  (when (jetpacs-reader-active-p path)
+    (delq
+     nil
+     (list
+      (jetpacs-icon-button
+       (if (eq (glasspane-org-reader--fold-mode path) 'refile)
+           "visibility" "swap_vert")
+       (jetpacs-action "files.toggle-refile" :args (list :path path))
+       :content-description
+       (if (eq (glasspane-org-reader--fold-mode path) 'refile)
+           "Reader" "Refile"))
+      (when (jetpacs-reader-org--encrypted-p path)
+        (jetpacs-icon-button
+         "lock_open"
+         (jetpacs-action "jetpacs.reader.org.decrypt"
+                         :args (list :path path))
+         :content-description "Decrypt Org Crypt entries"))))))
 
-(defun glasspane-org-reader--on-toggle-refile (_args params)
-  "Flip the refile drag-list mode (S4)."
-  (if (jetpacs-event-stale-p params)
-      'stale
-    (setq glasspane-org-reader--refile-mode
-          (not glasspane-org-reader--refile-mode))
-    (jetpacs-buffer-defer-refresh (plist-get params :surface))
-    'accepted))
+(defun glasspane-org-reader--adapter-transition (path presentation)
+  "Apply the stock Org transition discipline to PATH and PRESENTATION."
+  (jetpacs-reader-org--transition path presentation))
+
+(defun glasspane-org-reader--action-path (args params)
+  "Return a validated current Org path, or a status symbol."
+  (let ((path (plist-get args :path)))
+    (cond
+     ((not (jetpacs-reader-org-path-p path)) 'rejected)
+     ((jetpacs-event-stale-p params) 'stale)
+     ((not (jetpacs-reader-current-path-p path)) 'stale)
+     (t path))))
+
+(defun glasspane-org-reader--on-files-filter (args params)
+  "Store the current document's ONE-grammar filter; empty clears it."
+  (let ((path (glasspane-org-reader--action-path args params))
+        (value (plist-get args :value)))
+    (cond
+     ((symbolp path) path)
+     ((not (stringp value)) 'rejected)
+     (t
+      (jetpacs-reader-state-set path :gp-filter-query value)
+      (jetpacs-reader-state-set path :gp-filter-kept nil)
+      (jetpacs-reader-state-set path :gp-filter-total nil)
+      (jetpacs-reader-refresh params)
+      'accepted))))
+
+(defun glasspane-org-reader--on-toggle-refile (args params)
+  "Flip the current document between foldable tree and refile list."
+  (let ((path (glasspane-org-reader--action-path args params)))
+    (if (symbolp path) path
+      (jetpacs-reader-state-set
+       path :gp-fold-mode
+       (if (eq (glasspane-org-reader--fold-mode path) 'refile)
+           'tree 'refile))
+      (jetpacs-reader-refresh params)
+      'accepted)))
 
 ;;;; Registration
 
 (defconst glasspane-org-reader--verbs
-  '("heading.menu" "files.toggle-refile" "heading.reorder")
+  '("heading.menu" "files.filter" "files.toggle-refile" "heading.reorder")
   "The verbs this rung's reader owns, for the register/unregister sweep.
 heading.tap/props.show/duplicate/todo-cycle/clock-in are the detail
 sibling's; the menu names them by wire string only.  heading.reorder
 lives HERE, beside the only table that can resolve it (D-4) — views'
-board re-emits the same verb in G6.")
+board re-emits the same verb in G6.  files.filter lives beside its
+path-keyed reader state rather than in the app-wide UI module.")
 
 (defun glasspane-org-reader-register ()
-  "Register the Glasspane reader verbs.
+  "Register the Glasspane Org adapter and reader verbs.
 Called from `glasspane-register', not at this file's load (the G0
 contract).  The \"Reader\" settings section this rung used to register
 is foundation content now (jetpacs-org-settings.el, the §3
 relocation): both rows were `ebp-org-outline-show-*' foundation
-defcustoms all along.
-
-Glasspane does not claim the global Files body/actions seams.  Its outline
-renderer is an app-local presentation used explicitly by Glasspane screens;
-installing the app must not replace vanilla Org Mode merely because a file is
-inside `org-directory'.  The old global claim made the bundled manual open as
-Glasspane while the same file outside that root opened in the vanilla reader."
+defcustoms all along.  The generic reader host remains the only Files
+body/actions claimant; this app replaces the stock adapter in the stable
+`org' slot and restores it during unregister."
+  ;; Ensure the stock action family (especially Org Crypt decrypt) exists
+  ;; before replacing only its adapter slot.  The registrar is deliberately
+  ;; reassertive, so this also makes live reload deterministic.
+  (jetpacs-reader-org-register)
+  (jetpacs-reader-register
+   'org :predicate #'jetpacs-reader-org-path-p
+   :render #'glasspane-org-reader--adapter-render
+   :actions #'glasspane-org-reader--adapter-actions
+   :transition #'glasspane-org-reader--adapter-transition)
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "heading.menu"
                        #'glasspane-org-reader--on-heading-menu
+                       :any-surface t
                        :doc "Long-press sheet: the app's per-heading delta")
+    (jetpacs-defaction "files.filter"
+                       #'glasspane-org-reader--on-files-filter
+                       :any-surface t)
     (jetpacs-defaction "files.toggle-refile"
-                       #'glasspane-org-reader--on-toggle-refile)
+                       #'glasspane-org-reader--on-toggle-refile
+                       :any-surface t)
     (jetpacs-defaction "heading.reorder"
                        #'glasspane-org-reader--on-reorder
+                       :any-surface t
                        :doc "Apply a drag in the refile list (D-4)"))
-  ;; Clean up registrations made by an older/live-loaded version before this
-  ;; app-local boundary was established.
+  ;; Clean up claims made by an older/live-loaded pre-adapter version.
   (remove-hook 'jetpacs-files-editor-body-functions
-               #'glasspane-org-reader--files-body)
+               'glasspane-org-reader--files-body)
   (remove-hook 'jetpacs-files-editor-actions-functions
-               #'glasspane-org-reader--files-actions))
+               'glasspane-org-reader--files-actions))
 
 (defun glasspane-org-reader-unregister ()
-  "Drop the reader verbs and the seam claims."
+  "Drop Glasspane reader state and restore the stock Org adapter."
   (dolist (name glasspane-org-reader--verbs)
     (jetpacs-undefaction name))
+  ;; Sweep hooks left by any live-loaded pre-GR-2 implementation.  This
+  ;; version never adds them: `jetpacs-reader--files-*' are the only reader
+  ;; seam functions.
   (remove-hook 'jetpacs-files-editor-body-functions
-               #'glasspane-org-reader--files-body)
+               'glasspane-org-reader--files-body)
   (remove-hook 'jetpacs-files-editor-actions-functions
-               #'glasspane-org-reader--files-actions)
+               'glasspane-org-reader--files-actions)
   (glasspane-org-reader-sheet-close)
-  (setq glasspane-org-reader--refile-lists nil
-        glasspane-org-reader--refile-mode nil))
+  (setq glasspane-org-reader--refile-lists nil)
+  (jetpacs-reader-org-register))
 
 (provide 'glasspane-org-reader)
 ;;; glasspane-org-reader.el ends here

@@ -23,14 +23,11 @@
 ;; - The whole rendered⇄plain files block — mode vars, the editor
 ;;   body/actions seam hooks, org toolbar/FAB wiring, checkbox.toggle,
 ;;   the after-save invalidation, the files-open hook, and the
-;;   files.toggle-read verb.  Foundation-owned now
-;;   (jetpacs-org-render.el:740-851: the `jetpacs.org.view-mode' verb,
-;;   the seam claims, the after-save cache bust).  The v1 block was
-;;   trimodal: the app's own foldable reader and the refile drag list
-;;   have no foundation home and port in G4 with their own surfacing —
-;;   `glasspane-ui--files-filter', the reader filter's write target,
-;;   therefore survives HERE, and files.toggle-refile moves to G4 with
-;;   the state it flips.
+;;   files.toggle-read verb.  Foundation-owned now (the reusable
+;;   reader/editor hosts, Org adapters, and after-save cache bust).  The
+;;   v1 block was trimodal: the app's foldable reader and refile drag
+;;   list ported in G4.  GR-2 moves their query/count/view state onto the
+;;   reusable reader host's per-path store; no Files state remains here.
 ;; - file.view: T2 ruling "route through the jetpacs.files.open verb or
 ;;   drop" — it existed for v1's cached UIs, which no v3 device has.
 ;; - The widget/capture-tile push hooks and their memo (v1 ui:53-70):
@@ -96,13 +93,6 @@ it back each render.")
 (defvar glasspane-ui-agenda-selected-date nil
   "The month grid's selected day (\"YYYY-MM-DD\"), or nil.
 Written only by the agenda.* handlers.")
-
-(defvar glasspane-ui--files-filter ""
-  "Sparse-filter query for the org reader body; empty = everything.
-Persistence across re-renders IS the feature (the v1 lesson at
-glasspane-search.el:39-48): the reconciled input model would clear a
-device-side draft, so the submitted query lives here and the reader
-\(G4) re-seeds its input from it.")
 
 ;;;; Detail extension hooks (consumed by G4, contributed to by G7)
 
@@ -616,17 +606,6 @@ name is a captured dialog field and the save runs in the conclusion."
           'accepted)
       'rejected)))
 
-(defun glasspane-ui--on-files-filter (args params)
-  "Store the reader's sparse filter (\"\" clears).  State only —
-matching happens at render, in the G4 reader that seeds from the var."
-  (let ((value (plist-get args :value)))
-    (if (stringp value)
-        (progn
-          (setq glasspane-ui--files-filter value)
-          (glasspane-ui--defer-refresh params)
-          'accepted)
-      'rejected)))
-
 ;;;; Refresh hooks
 
 (defun glasspane-ui--refresh-invalidate ()
@@ -676,13 +655,12 @@ the time any teardown runs, the entry has long finished loading."
     "agenda.save-custom"
     "agenda.today"
     "agenda.select-date"
-    "agenda.set-month"
-    "files.filter")
+    "agenda.set-month")
   "The verbs this rung owns, for the register/unregister sweep.
 The TODO-sequence/tags verbs left with §3 step 2 (they are the
 foundation's ownerless jetpacs.org.* family now);
 search.clear-filters lives with the filter state it clears (G6),
-files.toggle-refile with the reader surfacing (G4).")
+files.filter and files.toggle-refile with the reader adapter (G4/GR-2).")
 
 (defun glasspane-ui-register ()
   "Register the UI verbs, the settings section/link, and the hooks.
@@ -720,7 +698,6 @@ registry entries in place, and the link is re-added exactly once."
                        #'glasspane-ui--on-agenda-select-date)
     (jetpacs-defaction "agenda.set-month"
                        #'glasspane-ui--on-agenda-set-month)
-    (jetpacs-defaction "files.filter" #'glasspane-ui--on-files-filter)
     ;; The app's own section — CONSOLIDATED (§3 step 2's recorded
     ;; opportunity): the three single-entry app sections (babel
     ;; timeout here, Journal landing, Packages auto-install) collapse

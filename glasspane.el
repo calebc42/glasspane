@@ -54,8 +54,9 @@
 ;; G3, the keystone: the settings surface, the shared view state, and
 ;; the at-ref funnel.  Requires glasspane-org, so it loads last.
 (require 'glasspane-ui)
-;; G4, the reader + detail: the reader claims the files body seam and
-;; owns the refile list; detail requires it softly, so it loads first.
+;; G4/GR-2, the reader + detail: the reader replaces the reusable host's
+;; Org adapter slot and owns the refile list; detail requires it softly,
+;; so it loads first.
 (require 'glasspane-org-reader)
 (require 'glasspane-detail)
 ;; G5, the daily surfaces: dates is the pure helper both halves lean

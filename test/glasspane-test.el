@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'jetpacs-org-mode)
 (require 'glasspane)
 
 ;;;; G0 — skeleton, registration, harness wiring
@@ -997,7 +998,6 @@ the registry."
                                               ("Old" . "todo:TODO")))
               (glasspane-ui-agenda-anchor "2020-01-01")
               (glasspane-ui-agenda-selected-date "2020-01-02")
-              (glasspane-ui--files-filter "old")
               (jetpacs-settings--dialog nil)
               (org-tag-alist '(("home" . ?h)))
               (org-todo-keywords '((sequence "TODO" "|" "DONE")))
@@ -1066,10 +1066,6 @@ the registry."
               (should (eq (run "agenda.today" nil) 'accepted))
               (should-not glasspane-ui-agenda-anchor)
               (should-not glasspane-ui-agenda-selected-date)
-              (should (eq (run "files.filter" '(:value "tags:home"))
-			  'accepted))
-              (should (equal glasspane-ui--files-filter "tags:home"))
-              (should (eq (run "files.filter" nil) 'rejected))
               ;; glasspane.settings.open: accepted on the strength of the
               ;; deferred push — zero pushes inside the dispatch extent.
               (let ((before (length continuations)))
@@ -1141,25 +1137,128 @@ the registry."
                               (cl-loop for x across (vconcat v)
                                        append (glasspane-test--reader-ids x))))))))
 
-(ert-deftest glasspane-test-reader-registration-stays-app-local ()
-  "Installing Glasspane must not replace the vanilla Files Org reader."
+(ert-deftest glasspane-test-reader-registration-replaces-and-restores-org ()
+  "Glasspane replaces only adapter `org'; unregister restores foundation."
   (require 'glasspane-org-reader)
-  (let ((jetpacs-files-editor-body-functions
-         (list #'glasspane-org-reader--files-body #'ignore))
-        (jetpacs-files-editor-actions-functions
-         (list #'glasspane-org-reader--files-actions #'ignore)))
-    (glasspane-org-reader-register)
-    (should-not (memq #'glasspane-org-reader--files-body
-                      jetpacs-files-editor-body-functions))
-    (should-not (memq #'glasspane-org-reader--files-actions
-                      jetpacs-files-editor-actions-functions))))
+  (glasspane-org-reader-register)
+  (let ((adapter (jetpacs-reader-adapter-for "/tmp/reader.org")))
+    (should (eq (jetpacs-reader-adapter-id adapter) 'org))
+    (should (eq (jetpacs-reader-adapter-render adapter)
+                #'glasspane-org-reader--adapter-render))
+    (should (eq (jetpacs-reader-adapter-actions adapter)
+                #'glasspane-org-reader--adapter-actions))
+    (should (eq (jetpacs-reader-adapter-transition adapter)
+                #'glasspane-org-reader--adapter-transition)))
+  ;; The reusable reader/editor hosts are the only Files claimants; no
+  ;; Glasspane body/actions function competes in the hook chain.
+  (should (= 1 (cl-count #'jetpacs-reader--files-body
+                         jetpacs-files-editor-body-functions)))
+  (should (= 1 (cl-count #'jetpacs-reader--files-actions
+                         jetpacs-files-editor-actions-functions)))
+  (should-not (memq 'glasspane-org-reader--files-body
+                    jetpacs-files-editor-body-functions))
+  (should-not (memq 'glasspane-org-reader--files-actions
+                    jetpacs-files-editor-actions-functions))
+  (unwind-protect
+      (progn
+        (glasspane-org-reader-unregister)
+        (let ((adapter (jetpacs-reader-adapter-for "/tmp/reader.org")))
+          (should (eq (jetpacs-reader-adapter-render adapter)
+                      #'jetpacs-reader-org--render))
+          (should (eq (jetpacs-reader-adapter-actions adapter)
+                      #'jetpacs-reader-org--actions))
+          (should (eq (jetpacs-reader-adapter-transition adapter)
+                      #'jetpacs-reader-org--transition)))
+        (should-not (gethash "files.filter" jetpacs-action-handlers)))
+    (glasspane-org-reader-register))
+  (should (gethash "files.filter" jetpacs-action-handlers)))
+
+(ert-deftest glasspane-test-reader-adapter-gate ()
+  "GR-2 actions, fallback and rendered/plain round trip are lossless."
+  (let* ((fixture (glasspane-test--reader-vault))
+         (vault (car fixture))
+         (file (cdr fixture))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (jetpacs-reader--state (make-hash-table :test #'equal))
+         (jetpacs-files--edit (list :path (file-truename file))))
+    (unwind-protect
+        (progn
+          (with-temp-buffer
+            (insert-file-contents file)
+            (goto-char (point-max))
+            (insert "* Secret :crypt:\n"
+                    "-----BEGIN PGP MESSAGE-----\n"
+                    "ciphertext\n"
+                    "-----END PGP MESSAGE-----\n")
+            (write-region (point-min) (point-max) file nil 'silent))
+          (glasspane-org-reader-register)
+          (jetpacs-reader-state-set file :gp-filter-query "todo:TODO")
+          (let* ((before (glasspane-org-reader--adapter-render file))
+                 (ids-before (glasspane-test--reader-ids before))
+                 (actions (jetpacs-reader--files-actions file))
+                 (json (jetpacs-node->canonical-json
+                        (apply #'jetpacs-row actions))))
+            ;; Host toggle + Glasspane refile + absorbed decrypt, and no
+            ;; other stock Org action icons in the tree presentation.
+            (should (string-search "jetpacs.reader.toggle" json))
+            (should (string-search "files.toggle-refile" json))
+            (should (string-search "jetpacs.reader.org.decrypt" json))
+            (should-not (string-search "jetpacs.reader.org.reader-mode" json))
+            (should-not (string-search "jetpacs.reader.org.visibility" json))
+            (should-not (string-search "jetpacs.reader.org.search-toggle" json))
+            ;; The generic host owns the transition.  Returning to reader
+            ;; yields the same node ids, which is the Companion's key for
+            ;; retaining device-local collapsible state.
+            (cl-letf (((symbol-function 'jetpacs-buffer-defer-refresh)
+                       #'ignore))
+              (should (eq (jetpacs-reader--toggle
+                           (list :path file) '(:surface "app:files"))
+                          'accepted))
+              (should (eq (jetpacs-reader-state-get file :presentation)
+                          'editor))
+              (should (eq (jetpacs-reader--toggle
+                           (list :path file) '(:surface "app:files"))
+                          'accepted))
+              (should (eq (jetpacs-reader-state-get file :presentation)
+                          'reader)))
+            (let ((ids-after
+                   (glasspane-test--reader-ids
+                    (glasspane-org-reader--adapter-render file))))
+              (should ids-before)
+              (should (equal ids-after ids-before))
+              (should (equal (glasspane-org-reader--filter-query file)
+                             "todo:TODO"))))
+          ;; A tree-builder signal degrades through the stock render callback,
+          ;; rather than escaping to the host's generic Reader failed card.
+          (jetpacs-reader-state-set file :gp-fold-mode 'tree)
+          (cl-letf (((symbol-function 'glasspane-org-reader--reader-body)
+                     (lambda (_path) (error "GR-2 injected render fault")))
+                    ((symbol-function 'jetpacs-reader-org--render)
+                     (lambda (_path) (jetpacs-text "Stock Org fallback"))))
+            (let ((json (jetpacs-node->canonical-json
+                         (glasspane-org-reader--adapter-render file))))
+              (should (string-search "Stock Org fallback" json))))
+          ;; Teardown restores the stock adapter's complete action set.
+          (glasspane-org-reader-unregister)
+          (let ((json (jetpacs-node->canonical-json
+                       (apply #'jetpacs-row
+                              (jetpacs-reader--files-actions file)))))
+            (should (string-search "jetpacs.reader.org.reader-mode" json))
+            (should (string-search "jetpacs.reader.org.visibility" json))
+            (should (string-search "jetpacs.reader.org.search-toggle" json))
+            (should (string-search "jetpacs.reader.org.decrypt" json))
+            (should-not (string-search "files.toggle-refile" json))))
+      (glasspane-org-reader-register)
+      (glasspane-test--reader-cleanup vault))))
 
 (ert-deftest glasspane-test-reader-trees ()
   "File, subtree and refile trees over a temp fixture: canonical
 serialization, the §16.2 app profile, §16.1 id uniqueness (the m3 gate
-pattern) — plus the app-local body functions: reader, refile drag list,
-plain-mode pass-through, and sparse filtering without signalling out of
-the builder."
+pattern) — plus the registered adapter: reader, refile drag list,
+host-owned per-path state, stock fallback, and sparse filtering without
+signalling out of the builder."
   (require 'glasspane-org-reader)
   (glasspane-org-reader-register)
   (let* ((fixture (glasspane-test--reader-vault))
@@ -1262,62 +1361,104 @@ the builder."
                                keys))
                 (should (cl-every (lambda (kv) (integerp (cdr kv)))
                                   (plist-get record :keys))))))
-          ;; Surfacing: reader body while rendered, refile body when
-          ;; toggled, pass-through on the base's plain mode, and the
-          ;; filter narrows — or reports a bad query — inside the body.
-          (let ((jetpacs-org-render--files-mode
-                 (make-hash-table :test #'equal))
-                (glasspane-org-reader--refile-mode nil)
-                (glasspane-ui--files-filter ""))
-            (let ((body (glasspane-org-reader--files-body file)))
+          ;; Adapter surfacing: all state is host-owned and path-keyed;
+          ;; filtering and refile mode cannot bleed into a sibling file.
+          (let ((jetpacs-reader--state (make-hash-table :test #'equal)))
+            (let ((body (jetpacs-reader--files-body file)))
               (should (equal (plist-get body :t) "lazy_column"))
               (let ((json (jetpacs-node->canonical-json body)))
                 (should (string-search "files-filter" json))
                 (should (string-search "Water the garden" json))))
-            (let* ((glasspane-ui--files-filter "todo:TODO")
-                   (json (jetpacs-node->canonical-json
-                          (glasspane-org-reader--files-body file))))
+            (jetpacs-reader-state-set file :gp-filter-query "todo:TODO")
+            (let ((sibling (expand-file-name "sibling.org" vault)))
+              (should (equal (glasspane-org-reader--filter-query sibling) ""))
+              (should (eq (glasspane-org-reader--fold-mode sibling) 'tree)))
+            (let ((json (jetpacs-node->canonical-json
+                         (jetpacs-reader--files-body file))))
               (should (string-search "1 of 2 headings" json))
               (should (string-search "Water the garden" json))
-              (should-not (string-search "Reference notes" json)))
-            (let* ((glasspane-ui--files-filter "(todo")
-                   (body (glasspane-org-reader--files-body file)))
+              (should-not (string-search "Reference notes" json))
+              (should (= (jetpacs-reader-state-get file :gp-filter-kept) 1))
+              (should (= (jetpacs-reader-state-get file :gp-filter-total) 2)))
+            (jetpacs-reader-state-set file :gp-filter-query "(todo")
+            (let ((body (jetpacs-reader--files-body file)))
               (should body)
               (should-not (string-search
                            "collapsible"
-                           (jetpacs-node->canonical-json body))))
-            (let ((glasspane-org-reader--refile-mode t))
-              (should (string-search
-                       "reorderable_list"
-                       (jetpacs-node->canonical-json
-                        (glasspane-org-reader--files-body file)))))
-            (puthash file 'plain jetpacs-org-render--files-mode)
-            (should-not (glasspane-org-reader--files-body file))
-            (should-not (glasspane-org-reader--files-actions file)))
-          ;; A non-org path is never claimed, and a policy refusal
-          ;; passes through to the base skin instead of signalling out
-          ;; of the seam.
-          (should-not (glasspane-org-reader--files-body "/tmp/x.txt"))
+                           (jetpacs-node->canonical-json body)))
+              (should-not
+               (jetpacs-reader-state-get file :gp-filter-kept 'missing)))
+            (jetpacs-reader-state-set file :gp-filter-query "")
+            (jetpacs-reader-state-set file :gp-fold-mode 'refile)
+            (let* ((body (jetpacs-reader--files-body file))
+                   (children (append (plist-get body :children) nil))
+                   (list-node (cadr children)))
+              ;; A reorderable list is itself vertically lazy.  Nesting it in
+              ;; a lazy_column crashes Compose with infinite constraints; the
+              ;; adapter must give it the finite remainder of a root column.
+              (should (equal (plist-get body :t) "column"))
+              (should (equal (plist-get list-node :t)
+                             "reorderable_list"))
+              (should (= (plist-get list-node :weight) 1)))
+            (jetpacs-reader-state-set file :presentation 'editor)
+            (should-not (jetpacs-reader--files-body file))
+            ;; In editor mode the host keeps only its generic preview toggle;
+            ;; adapter-specific refile/decrypt actions are reader-only.
+            (should (= (length (jetpacs-reader--files-actions file)) 1)))
+          ;; A non-org path is never claimed.  A Glasspane policy/render
+          ;; refusal is caught inside the adapter and gets the stock reader.
+          (should-not (jetpacs-reader-adapter-for "/tmp/x.txt"))
           (let ((outside (make-temp-file "glasspane-outside" nil ".org")))
             (unwind-protect
                 (progn
                   (with-temp-file outside (insert "* TODO Elsewhere\n"))
-                  (let ((jetpacs-org-render--files-mode
-                         (make-hash-table :test #'equal)))
-                    (should-not
-                     (glasspane-org-reader--files-body outside))))
+                  (let* ((body (glasspane-org-reader--adapter-render outside))
+                         (json (jetpacs-node->canonical-json body)))
+                    (should (string-search "Elsewhere" json))
+                    (should-not (string-search "collapsible" json))))
               (delete-file outside)))
-          ;; files.toggle-refile: the S4 status and the single writer.
-          (let ((handler (gethash "files.toggle-refile"
-                                  jetpacs-action-handlers))
-                (glasspane-org-reader--refile-mode nil)
-                (refreshed nil))
-            (should handler)
+          ;; Reader handlers validate the live document, then write only its
+          ;; :gp-* state cells.
+          (let ((filter (gethash "files.filter" jetpacs-action-handlers))
+                (toggle (gethash "files.toggle-refile"
+                                 jetpacs-action-handlers))
+                (jetpacs-reader--state (make-hash-table :test #'equal))
+                (jetpacs-files--edit (list :path (file-truename file)))
+                refreshed)
+            (should filter)
+            (should toggle)
+            ;; GR-2 renders these Glasspane-owned descriptors on the stable
+            ;; Files host.  Exercise the real D1 gate, not just the handler:
+            ;; owner scope here would make every device tap silently dead.
+            (dolist (name '("heading.menu" "files.filter"
+                            "files.toggle-refile" "heading.reorder"))
+              (should (gethash name jetpacs--any-surface-actions)))
             (cl-letf (((symbol-function 'jetpacs-buffer-defer-refresh)
                        (lambda (surface) (push surface refreshed))))
-              (should (eq (funcall handler nil '(:surface "s")) 'accepted))
-              (should glasspane-org-reader--refile-mode)
-              (should (equal refreshed '("s"))))))
+              (should (eq (jetpacs--dispatch
+                           nil
+                           (list :action "files.filter"
+                                 :surface "app:jetpacs.files"
+                                 :args (list :path file
+                                             :value "tags:home"))
+                           filter)
+                          'accepted))
+              (should (equal (glasspane-org-reader--filter-query file)
+                             "tags:home"))
+              (should (eq (jetpacs--dispatch
+                           nil
+                           (list :action "files.toggle-refile"
+                                 :surface "app:jetpacs.files"
+                                 :args (list :path file))
+                           toggle)
+                          'accepted))
+              (should (eq (glasspane-org-reader--fold-mode file) 'refile))
+              (should (eq (funcall toggle '(:path "/tmp/other.org")
+                                   '(:surface "s"))
+                          'stale))
+              (should (equal refreshed
+                             '("app:jetpacs.files"
+                               "app:jetpacs.files"))))))
       (glasspane-test--reader-cleanup vault))))
 
 (ert-deftest glasspane-test-reader-token-mint ()
@@ -4562,12 +4703,18 @@ fires from Glasspane's own surfaces must still be refused there."
                   "jetpacs.org.workflow.open"))
     (should (gethash name jetpacs-action-handlers))
     (should-not (gethash name jetpacs--any-surface-actions)))
-  ;; The dialog conclusions carry no surface at all, and the agenda and
-  ;; files verbs fire from this owner's own screens: owner-scoped.
+  ;; The dialog conclusions carry no surface at all, and the agenda verbs
+  ;; fire from this owner's own screens: owner-scoped.
   (dolist (name '("settings.agenda.save" "agenda.save-custom"
                   "agenda.today" "agenda.select-date"
-                  "agenda.set-month" "files.filter"))
+                  "agenda.set-month"))
     (should-not (gethash name jetpacs--any-surface-actions)))
+  ;; GR-2's adapter emits its descriptors from the stable Files host, not a
+  ;; Glasspane-owned surface.  The live-document/path guards in each handler
+  ;; bound the global grant; without it D1 rejects the tap before those guards.
+  (dolist (name '("heading.menu" "files.filter"
+                  "files.toggle-refile" "heading.reorder"))
+    (should (gethash name jetpacs--any-surface-actions)))
   ;; The share intake is global for the same reason: a share is
   ;; attributed by the COMPANION, so its wire surface may be a string
   ;; this app does not own.  With no client the handler answers

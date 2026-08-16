@@ -1,4 +1,4 @@
-# Chrome vocabulary and functional contracts — v3 (v1 ratified 2026-07-28; v2 ratified with the chrome-polish rescope; v3's two-pole section ratified 2026-08-14, the S7 seam)
+# Chrome vocabulary and functional contracts — v4 (v1 ratified 2026-07-28; v2 ratified with the chrome-polish rescope; v3's two-pole section ratified 2026-08-14, the S7 seam; v4's full-bar form + drawer-injection rule ratified 2026-08-15, the PARA plan)
 
 *v2 change: element names are now the **Material 3 component names**, 1:1
 (m3.material.io; `material3` 1.4.0 per
@@ -43,6 +43,11 @@ without it (M-x parity, JA-3).  Chrome is a projection of commands.
 **Navigation drawer** — app-level *destinations* (screens, roots, the
 launcher rows), never actions that mutate a document.  Everything in it is
 reachable elsewhere (M-x parity).  Fewer than three destinations: no drawer.
+The composed host drawer is injected into the stack-BOTTOM scaffold ONLY —
+the root wears the hamburger and a drilled screen wears the back arrow (the
+M3 top-level rule); a guest screen, never the bottom, can never wear the
+host's drawer; a screen that authors its own `drawer` slot wins
+(single-slot authored-wins).  The v4 ratification of the S8 rule.
 
 **Top app bar** — identity and globals: title, back affordance or drawer
 button on the left, at most two or three screen-scope action icons on the
@@ -96,7 +101,10 @@ grows into: the app CONTRIBUTES destinations to the host hub through
 the defapp registry (S1 — the poc-1 `:views` mechanism restored;
 llm-poc/emacs/core/jetpacs-apps.el:88 is the reference); the dock can
 go APP-PRIMARY — core collapses to one Home, the app's own
-destinations become the tabs, within the M3 3–5 budget (S2); shell
+destinations become the tabs, within the M3 3–5 budget — or, when the
+app declares the full-bar form, to none: the app's destinations fill
+the M3 3–5 budget whole, and every core destination remains reachable
+in the navigation drawer (M-x parity is the floor, not the bar) (S2); shell
 globals (M-x) persist into the app's top bar (S3); and a screen pushed
 onto a FOREIGN stack is a sanctioned GUEST — scoped event delegation,
 prefixed ids, foreign-stack teardown — never an `:any-surface` workaround

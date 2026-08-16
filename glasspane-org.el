@@ -7,9 +7,9 @@
 
 ;; The app's data layer: memoised extraction, query routing, reminder
 ;; specs, clock status, the save funnel, CREATED/MODIFIED stamping.
-;; Pure Elisp over the ebp-org core — no bridge dependencies; the
-;; floor's teardown hook is named by symbol only, so this file loads
-;; and compiles without it.
+;; Pure Elisp downstream of Jetpacs and the ebp-org core — Glasspane
+;; adds no Kotlin layer.  The floor's teardown hook is named by symbol
+;; only, so this file loads and compiles without the live bridge.
 ;;
 ;; Retired against v1 (docs/PLAN-glasspane-app.md, retirement list +
 ;; G1): the org-ql routing commentary and its fork — `ebp-org-query'
@@ -29,6 +29,7 @@
 (require 'org-clock)
 (require 'ebp-org)
 (require 'jetpacs-files)
+(require 'jetpacs-editor-org)           ; native save policy
 (require 'jetpacs-org-reminders)         ; canonical agenda extraction
 (require 'jetpacs-org-vulpea)           ; note-index arm of the ONE grammar
 
@@ -66,34 +67,28 @@ never parsed or exposed as a path-bearing identity."
          (plist-get context :editor-id)
          (buffer-live-p (plist-get context :buffer)))))
 
-(defun glasspane-org--vulpea-refresh-file (&optional buffer)
-  "Synchronously re-index BUFFER's file in vulpea's db, when vulpea is up.
+(defun glasspane-org--vulpea-refresh-file (&optional buffer-or-path)
+  "Synchronously re-index BUFFER-OR-PATH in vulpea's db, when it is up.
+BUFFER-OR-PATH may be a visiting buffer or the durable path supplied by
+an editor adapter's after-save callback; nil means the current buffer.
 Vulpea's autosync applies saves on a short batch/idle timer, so a
 mutation that immediately re-renders (todo swipe → push) would read
 the stale row back out of the index.  No-op without vulpea."
   (when (fboundp 'vulpea-db-update-file)
-    (when-let* ((f (buffer-file-name (or buffer (current-buffer)))))
+    (when-let* ((f (cond
+                    ((bufferp buffer-or-path)
+                     (buffer-file-name buffer-or-path))
+                    ((stringp buffer-or-path) buffer-or-path)
+                    (t (buffer-file-name (current-buffer))))))
       (ignore-errors (vulpea-db-update-file f)))))
 
 (defun glasspane-org--save-and-invalidate (&optional buffer)
-  "Synchronously save BUFFER (default: current buffer); drop the org memo.
-The shared tail of every mutation outside the UI layer's at-ref
-funnel — keep-the-funnel: the save happens NOW, never on an idle
-timer (`ebp-org-defer-save'), with the after-save dashboard refresh
-suppressed so the caller's explicit repush isn't doubled.  Files'
-correctness-critical pre-write chain runs deliberately unisolated: an
-Org Crypt failure aborts before `save-buffer' can persist cleartext."
-  (with-current-buffer (or buffer (current-buffer))
-    (let* ((glasspane-org--inhibit-save-refresh t)
-           (save-silently t)
-           (true (file-truename
-                  (or buffer-file-name
-                      (user-error "Buffer is not visiting a file")))))
-      (run-hook-with-args 'jetpacs-files-before-buffer-save-hook
-                          true (current-buffer))
-      (save-buffer))
-    (glasspane-org--vulpea-refresh-file))
-  (ebp-org-cache-invalidate 'glasspane))
+  "Delegate BUFFER's synchronous save to Jetpacs' native Org policy.
+The app keeps only its refresh-suppression opinion; encryption,
+durability, optional indexing, and whole-cache invalidation belong to
+`jetpacs-editor-org-save-policy'."
+  (let ((glasspane-org--inhibit-save-refresh t))
+    (jetpacs-editor-org-save-policy (or buffer (current-buffer)))))
 
 (defun glasspane-org--fresh-splice (ref value stamp beg end tick)
   "Replace REF's subtree with VALUE after validating open-time facts.

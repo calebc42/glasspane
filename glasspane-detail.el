@@ -48,11 +48,9 @@
 ;;   `:confirm' (SPEC 14.1) parks the dispatch behind a device
 ;;   AlertDialog instead — no bridge round-trip at all.
 ;;
-;; The v1 `jetpacs-org-file-save-function' rebind (v1 detail:1448-1452
-;; commentary) ports here: registration points the engine's
-;; `ebp-org-file-save-function' seam at the app's synchronous
-;; save+reindex funnel, so base mutations (archive, add-heading)
-;; keep the vulpea index and the org memo coherent.
+;; The v1 app-owned save-function rebind retired at GR-6: native Org
+;; durability is Jetpacs policy now.  This module contributes only the
+;; opinionated file-properties action through a second editor adapter.
 
 ;;; Code:
 
@@ -68,6 +66,7 @@
 (require 'jetpacs-chrome)
 (require 'jetpacs-buffer)
 (require 'jetpacs-dialog)
+(require 'jetpacs-editor)
 (require 'jetpacs-org-toolbar)
 (require 'jetpacs-org-dialogs)
 (require 'glasspane-org)
@@ -99,9 +98,6 @@
 PARAMS are the OPENING event's — a Save fired from inside the dialog
 arrives in dialog context with no `:surface' (SPEC 14.4), so its
 refresh needs the surface the dialog was opened from.")
-
-(defvar glasspane-detail--prev-save-fn nil
-  "The `ebp-org-file-save-function' this app's rebind displaced.")
 
 (defconst glasspane-detail--screen-id "glasspane-detail"
   "The one detail screen id: re-tapping a heading replaces the top
@@ -1316,11 +1312,13 @@ own tag charset or the whole write refuses."
                     (jetpacs-shell-notify "Refile cancelled"
                                           (plist-get params :surface))
                   (org-refile nil nil target)
-                  (let ((glasspane-org--inhibit-save-refresh t)
-                        (save-silently t))
-                    (org-save-all-org-buffers))
-                  (glasspane-org--vulpea-refresh-file)
-                  (ebp-org-cache-invalidate 'glasspane)
+                  ;; Refile may dirty both source and target.  Put every
+                  ;; affected Org buffer through the native policy so neither
+                  ;; side can bypass Org Crypt or leave another namespace's
+                  ;; projection memo stale.
+                  (dolist (buffer (org-buffer-list 'files t))
+                    (when (buffer-modified-p buffer)
+                      (glasspane-org--save-and-invalidate buffer)))
                   (jetpacs-shell-notify (format "Refiled to %s" choice)
                                         (plist-get params :surface))))))
          (set-marker marker nil)))
@@ -1829,8 +1827,8 @@ non-TITLE keyword lands after an existing #+TITLE line."
                         (jetpacs-error-label err))
                'rejected))))))
 
-;;;; The files editor seam (the Properties top-bar action; the read/
-;;;; refile toggles are the reader's contribution on the same hook)
+;;;; The files editor adapter (the Properties top-bar action; the read/
+;;;; refile toggles are the reader adapter's contribution)
 
 (defun glasspane-detail--editor-actions (path)
   "The file-properties top-bar action for org PATH (files editor seam)."
@@ -1839,14 +1837,6 @@ non-TITLE keyword lands after an existing #+TITLE line."
                                (jetpacs-action "files.properties.show"
                                                :args (list :file path))
                                :content-description "File properties"))))
-
-;;;; The engine save seam
-
-(defun glasspane-detail--file-save (buffer)
-  "The app tail on `ebp-org-file-save-function': synchronous save +
-vulpea re-index + memo drop, so base mutations (archive, add-heading)
-leave disk and index coherent before their handler answers."
-  (glasspane-org--save-and-invalidate buffer))
 
 ;;;; Registration
 
@@ -1877,7 +1867,7 @@ heading.reorder with the reorderable-list builders; search.by-tag
 with the search state (G6).")
 
 (defun glasspane-detail-register ()
-  "Register the detail verbs, the editor-actions seam, the save seam.
+  "Register the detail verbs and downstream Org editor adapter.
 Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent."
   (with-jetpacs-owner "glasspane"
@@ -1928,24 +1918,19 @@ gate contract).  Idempotent."
     (jetpacs-defaction "files.properties.save"
                        #'glasspane-detail--on-file-props-save
                        :doc "Write the captured file keywords"))
-  ;; Depth 90: after jetpacs-org-render's rendered⇄plain toggle on the
-  ;; same seam, so the Properties action trails the mode toggle.
-  (add-hook 'jetpacs-files-editor-actions-functions
-            #'glasspane-detail--editor-actions 90)
-  (unless (eq ebp-org-file-save-function #'glasspane-detail--file-save)
-    (setq glasspane-detail--prev-save-fn ebp-org-file-save-function
-          ebp-org-file-save-function #'glasspane-detail--file-save)))
+  ;; A distinct id composes with the stock Org adapter: action lists append,
+  ;; while omitted single-value slots leave its body/toolbar/FAB untouched.
+  (jetpacs-editor-register
+   'glasspane-org
+   :predicate #'glasspane-detail--org-file-p
+   :actions #'glasspane-detail--editor-actions
+   :after-save #'glasspane-org--vulpea-refresh-file))
 
 (defun glasspane-detail-unregister ()
-  "Drop the detail verbs, the seam claims, and any live dialog."
+  "Drop the detail verbs, editor adapter, and any live dialog."
   (dolist (name glasspane-detail--verbs)
     (jetpacs-undefaction name))
-  (remove-hook 'jetpacs-files-editor-actions-functions
-               #'glasspane-detail--editor-actions)
-  (when (and glasspane-detail--prev-save-fn
-             (eq ebp-org-file-save-function #'glasspane-detail--file-save))
-    (setq ebp-org-file-save-function glasspane-detail--prev-save-fn
-          glasspane-detail--prev-save-fn nil))
+  (jetpacs-editor-unregister 'glasspane-org)
   (glasspane-detail--dialog-close))
 
 (provide 'glasspane-detail)

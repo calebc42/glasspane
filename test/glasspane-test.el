@@ -2091,10 +2091,10 @@ both modes, degrading to the go-back placeholder on a dead ref."
 
 (ert-deftest glasspane-test-detail-vulpea-noop ()
   "With vulpea ABSENT — this harness's permanent condition — the two
-index touchpoints refile and (via the rebound engine save seam)
-archive share are silent no-ops that still land durably on disk: the
-seam saves synchronously, and the bridged refile flow moves the
-subtree between files with no vulpea in sight."
+index touchpoints refile and the native engine save policy are silent
+no-ops that still land durably on disk.  The downstream editor adapter
+survives without Vulpea, and the bridged refile flow moves the subtree
+between files through the same policy."
   (require 'glasspane-detail)
   (should-not (featurep 'vulpea))
   (should-not (fboundp 'vulpea-db-update-file))
@@ -2114,10 +2114,12 @@ subtree between files with no vulpea in sight."
             (insert "#+TITLE: Src\n* TODO Move me\nbody\n"))
           (with-temp-file dst (insert "#+TITLE: Dst\n* Inbox\n"))
           (ebp-org-cache-invalidate)
-          ;; The engine save seam is rebound to the app funnel and
-          ;; saves synchronously with the index arm a no-op.
+          ;; Native Org owns the engine save seam; Glasspane only adds
+          ;; its composable action/index adapter.
           (should (eq ebp-org-file-save-function
-                      #'glasspane-detail--file-save))
+                      #'jetpacs-editor-org-save-policy))
+          (should (cl-find 'glasspane-org jetpacs-editor--adapters
+                           :key #'jetpacs-editor-adapter-id))
           (with-current-buffer (find-file-noselect src)
             (org-with-wide-buffer
              (goto-char (point-max))

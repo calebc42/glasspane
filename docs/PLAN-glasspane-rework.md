@@ -400,6 +400,29 @@ glasspane-clock.el moves near-verbatim under owner "org-mode" (pure org-clock, z
 
 **GR-6b gate:** full ERT — before-save abort arm (encrypt signal → no bytes on disk, buffer restored), save-policy arms (vulpea-present and vulpea-absent), **stale-memo arm (mutate via the funnel → the `'org-mode` extraction memo misses, fresh walk on next read)**, srs engine-form durability arm, editor-adapter actions arm — these land in **NEW `test/jetpacs-editor-org-test.el`, wired into `test/run-tests.sh`'s explicit list in the same commit** (the K1a rule; no editor-org suite exists today).
 
+> **GR-6b GATE COMPLETE 2026-08-16.**
+> `jetpacs-editor-org-save-policy` now owns the mandatory pre-write chain,
+> synchronous save, optional Vulpea refresh, and whole-cache invalidation;
+> a signaling encryption transform restores the buffer before re-signaling.
+> The Org adapter owns and lifecycle-restores `ebp-org-file-save-function`.
+> Glasspane's save funnel is a thin call into that public policy, while its
+> separate `glasspane-org` editor adapter contributes only the file-properties
+> action and downstream after-save index refresh — no body, toolbar, FAB, or
+> before-save slot.  Refile now sends every modified source/target Org buffer
+> through the same policy instead of bypassing it with
+> `org-save-all-org-buffers`.
+>
+> The new explicit `test/jetpacs-editor-org-test.el` gate is **7/7**:
+> encryption-abort rollback, Vulpea present/absent, `'org-mode` memo eviction,
+> EBP holder restoration, additive adapter composition, and rate/postpone/
+> suspend/undo durability inside the SRS engine form.  Affected legacy gates:
+> Glasspane **70/70**, Org mode/editor **17/17**, Org dialogs **37/37**, and
+> Files **61/61**.  Warning-as-error compilation, zero upstream `glasspane`
+> names, diff check, and full elevated `test/run-tests.sh` all pass; the full
+> runner exited **0**.  GR-6b adds no device behavior and requires no new
+> hardware arm; GR-6a's completed ciphertext/conflict device gate remains the
+> rung's hardware evidence.
+
 ## GR-7 — Coupling severance + foundation gap funding (unblocks GR-8)
 
 ### GR-7a — severance (one commit)

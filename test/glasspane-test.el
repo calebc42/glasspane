@@ -2585,176 +2585,37 @@ sweep leaves no handler and no settings section behind."
             (glasspane-journal-register)))
       (glasspane-test--journal-cleanup vault))))
 
-(ert-deftest glasspane-test-capture-flow ()
-  "The G5 capture gate: templates/fill/run against a temp org file and
-an `org-capture-templates' fixture, plus golden node trees for the two
-sheet bodies — then the whole chain simulated through a stubbed
-`ebp-client-dialog-show': the picker conclusion carries the form, the
-form conclusion runs the capture, and the durable entry precedes the
-success report (the rung's rule).  The SPEC 23.2 revalidation arm and
-the dismissal arm close the loop."
-  (let* ((vault (make-temp-file "glasspane-capture" t))
-         (file (expand-file-name "inbox.org" vault))
-         (org-directory vault)
-         (ebp-org-roots nil)
-         (org-capture-templates
-          `(("t" "Task" entry (file ,file)
-             "* TODO %^{Headline}\n%^{Notes|none}\n%?")))
-         (glasspane-capture--shared-text "shared body text")
-         (glasspane-capture--shared-subject "Shared subject")
-         (glasspane-capture--dialog nil)
-         (notified nil) (shown nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
-                  ((symbol-function 'ebp-client-abandon)
-                   (lambda (&rest _) nil))
-                  ((symbol-function 'jetpacs-shell-notify)
-                   (lambda (text &rest _)
-                     ;; Durability rule: when the report fires, the
-                     ;; capture must already be on disk.
-                     (push (cons text
-                                 (and (file-exists-p file)
-                                      (with-temp-buffer
-                                        (insert-file-contents file)
-                                        (buffer-string))))
-                           notified)))
-                  ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
-                  ((symbol-function 'jetpacs-flow-continue)
-                   (lambda (fn) (funcall fn)))
-                  ((symbol-function 'ebp-client-dialog-show)
-                   (lambda (_client id spec &rest kw)
-                     (push (list :id id :spec spec
-                                 :style (plist-get kw :style)
-                                 :callback (plist-get kw :callback))
-                           shown)
-                     (gensym "req"))))
-          (with-temp-file file (insert "#+TITLE: Inbox\n"))
-          ;; Prompt extraction: %? folds into Headline (first, deduped);
-          ;; the |default is label-stripped but fill-honoured.
-          (let ((tmpl (glasspane-capture--template "t")))
-            (should tmpl)
-            (should (equal (append (plist-get tmpl :prompts) nil)
-                           '("Headline" "Notes")))
-            ;; Golden trees, canonical wire encoding.
-            (let ((json (jetpacs-node->canonical-json
-                         (glasspane-capture--picker-body
-                          (ebp-org-capture-templates)))))
-              (should (string-search "Quick Capture" json))
-              (should (string-search "\"builtin\":\"dialog.submit\"" json))
-              (should (string-search "\"value\":\"t\"" json))
-              (should (string-search "\"builtin\":\"dialog.dismiss\"" json))
-              ;; The shared-in preview card.
-              (should (string-search "shared body text" json)))
-            (let* ((pairs (glasspane-capture--field-pairs tmpl))
-                   (json (jetpacs-node->canonical-json
-                          (glasspane-capture--form-body tmpl))))
-              (should (= (length pairs) 2))
-              ;; Deterministic minting: the conclusion re-derives the
-              ;; same prompt->id mapping the builder used.
-              (should (equal pairs (glasspane-capture--field-pairs tmpl)))
-              (dolist (cell pairs)
-                (should (jetpacs-identifier-p (cdr cell)))
-                (should (string-search (cdr cell) json)))
-              (should (string-search "\"capture_fields\"" json))
-              ;; The shared subject seeds the Headline field's :value.
-              (should (string-search "Shared subject" json))))
-          ;; The chain: picker -> pick "t" -> form -> submit -> durable.
-          (glasspane-capture--show-picker '(:surface "glasspane"))
-          (should (= (length shown) 1))
-          (should (equal (plist-get (car shown) :style) "sheet"))
-          (funcall (plist-get (car shown) :callback)
-                   "submitted" '(:status "submitted" :value "t") nil)
-          (should (= (length shown) 2))
-          (let* ((form (car shown))
-                 (pairs (glasspane-capture--field-pairs
-                         (glasspane-capture--template "t")))
-                 (fields (list (intern (concat ":" (cdr (assoc "Headline"
-                                                               pairs))))
-                               "Water the ferns"
-                               (intern (concat ":" (cdr (assoc "Notes"
-                                                               pairs))))
-                               "")))
-            (funcall (plist-get form :callback)
-                     "submitted"
-                     (list :status "submitted" :fields fields) nil))
-          (let ((content (with-temp-buffer
-                           (insert-file-contents file) (buffer-string))))
-            (should (string-search "* TODO Water the ferns" content))
-            ;; An empty wire value falls back to the template's default.
-            (should (string-search "none" content))
-            ;; The shared text rides below as the extra body.
-            (should (string-search "shared body text" content)))
-          ;; The report fired once, and never before the write.
-          (should (equal (caar notified) "Captured ✓"))
-          (should (string-search "Water the ferns" (cdar notified)))
-          ;; Consumed: stash cleared, no live sheet.
-          (should-not glasspane-capture--shared-text)
-          (should-not glasspane-capture--shared-subject)
-          (should-not glasspane-capture--dialog)
-          ;; Revalidation arm (SPEC 23.2): a key whose template vanished
-          ;; drops the stash instead of showing a form.
-          (setq glasspane-capture--shared-text "leftover")
-          (glasspane-capture--show-picker nil)
-          (let ((n (length shown)))
-            (funcall (plist-get (car shown) :callback)
-                     "submitted" '(:status "submitted" :value "zzz") nil)
-            (should (= (length shown) n)))
-          (should-not glasspane-capture--shared-text)
-          ;; Dismissal arm: bailing out of the picker forgets the share.
-          (setq glasspane-capture--shared-text "bail")
-          (glasspane-capture--show-picker nil)
-          (funcall (plist-get (car shown) :callback) "dismissed" nil nil)
-          (should-not glasspane-capture--shared-text)
-          (should-not glasspane-capture--dialog))
-      (ebp-org-cache-invalidate)
-      (dolist (buf (buffer-list))
-        (let ((f (buffer-file-name buf)))
-          (when (and f (string-prefix-p (file-name-as-directory
-                                         (file-truename vault))
-                                        (file-truename f)))
-            (with-current-buffer buf (set-buffer-modified-p nil))
-            (kill-buffer buf))))
-      (delete-directory vault t))))
-
-(ert-deftest glasspane-test-capture-handler-statuses ()
-  "The capture verbs answer SPEC 14.4 statuses straight from the
-handler table: dialog verbs refuse without a client (never a hang),
-and with one the show rides a continuation — zero dialog work inside
-the dispatch extent.  The share intake normalizes its stash before
-the client guard: a share IS its payload, and it outlives a refused
-presentation."
-  (glasspane-capture-register)
-  (let ((glasspane-capture--shared-text nil)
-        (glasspane-capture--shared-subject nil)
-        (glasspane-capture--dialog nil)
-        (continuations nil))
-    (cl-flet ((run (name args &optional params)
-                (let ((handler (gethash name jetpacs-action-handlers)))
-                  (should handler)
-                  (funcall handler args params))))
-      ;; The whole table answers statuses on bare nil/nil input.
-      (dolist (name glasspane-capture--verbs)
-        (should (memq (run name nil nil) '(accepted stale rejected))))
-      (should (eq (run "org.capture.show" nil nil) 'rejected))
-      ;; Stash normalization: trimmed, blank -> nil, a subject-only
-      ;; share doubles as the body (the v1 contract).
-      (should (eq (run "share.text" '(:text "   " :subject " Sub "))
-                  'rejected))
-      (should (equal glasspane-capture--shared-text "Sub"))
-      (should (equal glasspane-capture--shared-subject "Sub"))
-      (should (eq (run "org.capture.share" '(:text " body "))
-                  'rejected))
-      (should (equal glasspane-capture--shared-text "body"))
-      (should-not glasspane-capture--shared-subject)
-      (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
-                ((symbol-function 'jetpacs-flow-continue)
-                 (lambda (fn) (push fn continuations) nil)))
-        (should (eq (run "org.capture.show" nil '(:surface "glasspane"))
-                    'accepted))
-        (should (= (length continuations) 1))
-        (should (eq (run "share.text" '(:text "hi")) 'accepted))
-        (should (= (length continuations) 2))
-        (should (equal glasspane-capture--shared-text "hi"))))))
+(ert-deftest glasspane-test-capture-is-downstream-rollback-adapter ()
+  "The default app cannot displace native capture; the two flags reverse it."
+  (should-not (default-value 'glasspane-capture-enabled))
+  (unwind-protect
+      (progn
+        ;; Normal post-cutover composition: the disabled adapter neither
+        ;; overwrites nor unregisters the upstream owner.
+        (let ((jetpacs-org-capture-enabled t)
+              (glasspane-capture-enabled nil))
+          (jetpacs-org-capture-register)
+          (glasspane-capture-register))
+        (should (eq (gethash "org.capture.show" jetpacs-action-handlers)
+                    #'jetpacs-org-capture--on-show))
+        (should (equal (jetpacs--owner-of "action" "org.capture.show")
+                       "org-mode"))
+        (glasspane-capture-unregister)
+        (should (eq (gethash "org.capture.show" jetpacs-action-handlers)
+                    #'jetpacs-org-capture--on-show))
+        ;; Scripted reverse: upstream off first, then the downstream adapter on.
+        (let ((jetpacs-org-capture-enabled nil)
+              (glasspane-capture-enabled t))
+          (jetpacs-org-capture-register)
+          (glasspane-capture-register))
+        (should (eq (gethash "org.capture.show" jetpacs-action-handlers)
+                    #'glasspane-capture--on-show))
+        (should (equal (jetpacs--owner-of "action" "org.capture.show")
+                       "glasspane")))
+    (let ((glasspane-capture-enabled nil))
+      (glasspane-capture-register))
+    (let ((jetpacs-org-capture-enabled t))
+      (jetpacs-org-capture-register))))
 
 ;;;; G6 — query surfaces: glasspane-views.el
 
@@ -4715,24 +4576,23 @@ fires from Glasspane's own surfaces must still be refused there."
   (dolist (name '("heading.menu" "files.filter"
                   "files.toggle-refile" "heading.reorder"))
     (should (gethash name jetpacs--any-surface-actions)))
-  ;; The share intake is global for the same reason: a share is
-  ;; attributed by the COMPANION, so its wire surface may be a string
-  ;; this app does not own.  With no client the handler answers
-  ;; `rejected' either way — the tell is the STASH, which it writes
-  ;; before the client guard and could not reach past the gate.
-  (require 'glasspane-capture)
-  (glasspane-capture-register)
-  (dolist (name '("share.text" "org.capture.share"))
+  ;; GR-4: native capture is global intake.  Shares are attributed by the
+  ;; Companion, and the capture FAB is an app opinion emitted from this
+  ;; downstream surface, so all three names must pass D1 here.
+  (require 'jetpacs-org-capture)
+  (let ((jetpacs-org-capture-enabled t))
+    (jetpacs-org-capture-register))
+  (dolist (name '("org.capture.show" "share.text" "org.capture.share"))
     (should (gethash name jetpacs--any-surface-actions)))
-  (should-not (gethash "org.capture.show" jetpacs--any-surface-actions))
-  (let ((glasspane-capture--shared-text nil)
-        (glasspane-capture--shared-subject nil))
+  (let ((jetpacs-org-capture--shared-text nil)
+        (jetpacs-org-capture--shared-subject nil))
     (jetpacs--dispatch nil
                        '(:action "share.text"
                          :surface "app:something-else"
                          :args (:text "shared from elsewhere"))
                        (gethash "share.text" jetpacs-action-handlers))
-    (should (equal glasspane-capture--shared-text "shared from elsewhere"))))
+    (should (equal jetpacs-org-capture--shared-text
+                   "shared from elsewhere"))))
 
 (ert-deftest glasspane-test-ef-option-nodes ()
   "Style section shapes.  Options unbound (the default suite path)
@@ -4991,12 +4851,11 @@ can eventually dispatch — so the walk follows every cons it is given."
     "agenda.open"
     "tasks.open"
     "journal.open"
-    "org.capture.show"
     "search.open"
     "views.hub"
     "review.open"
     "glasspane.settings.open")
-  "THE RULE: every screen-opening verb the app registers must be
+  "THE RULE: every screen-opening verb the app owns must be
 emitted by the home screen or its drawer.  These are the daily
 surfaces; the two satellites below are the documented exception, and
 `glasspane-test--non-opening-verbs' names everything that opens no
@@ -5027,14 +4886,14 @@ glasspane-gallery at orders 81 and 84, beside the app's own 80.")
     "heading.tags" "heading.tap" "heading.todo-cycle"
     "heading.todo-set" "journal.capture" "journal.goto" "journal.nav"
     "journal.today" "link.materialize" "notes.mentions"
-    "org.babel.execute" "org.capture.share" "org.clock.in-last"
+    "org.babel.execute" "org.clock.in-last"
     "org.clock.out" "org.clock.switch" "org.link.open"
     "org.search.run" "org.table.add-col" "org.table.add-row"
     "org.table.cell-menu" "org.table.edit" "search.by-tag"
     "search.clear-filters" "search.update-filter"
     "settings.agenda.delete" "settings.agenda.edit"
     "settings.agenda.save"
-    "share.text" "srs.answer.page" "srs.answer.show" "srs.item.create"
+    "srs.answer.page" "srs.answer.show" "srs.item.create"
     "srs.postpone" "srs.quit" "srs.rate" "srs.review.start"
     "srs.suspend" "srs.undo" "tasks.filter" "views.cal.select-date"
     "views.cal.set-month" "views.delete" "views.open"
@@ -5042,8 +4901,7 @@ glasspane-gallery at orders 81 and 84, beside the app's own 80.")
   "Every verb that opens NO screen of its own, and therefore needs no
 hub entry: the in-screen controls (filters, navigation, ratings, cell
 and heading mutations), the dialog-fired saves, the notification
-buttons, the wire-only intakes (share.text, org.capture.share), the
-M-x-only seeders (demo.setup*), and the drill-ins reached FROM a
+buttons, the M-x-only seeders (demo.setup*), and the drill-ins reached FROM a
 screen the hub opens (views.open from the views hub, heading.tap from
 every card).  Classification only — the list exists so the inventory
 below is total.")
@@ -5065,6 +4923,14 @@ own; the body carries every destination in the table."
       (should (gethash verb jetpacs-action-handlers))
       (should (equal (jetpacs--owner-of "action" verb) glasspane-owner))
       (should (member verb drawer)))
+    ;; Capture is deliberately the exception to app ownership: this app
+    ;; chooses three placements, while the native Org engine owns the one
+    ;; global command they all emit.
+    (should (member "org.capture.show" reachable))
+    (should (member "org.capture.show" drawer))
+    (should (equal (jetpacs--owner-of "action" "org.capture.show")
+                   "org-mode"))
+    (should (gethash "org.capture.show" jetpacs--any-surface-actions))
     (dolist (dest glasspane-ui-destinations)
       (should (member (plist-get dest :verb) body)))
     ;; The FAB is the screen's one creation act, and it names the same

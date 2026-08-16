@@ -222,6 +222,12 @@ glasspane.packages.install) sweep with the entry's own."
 
 (glasspane-register)
 
+;; App-private managed configuration is downstream policy, so the app loads it
+;; itself instead of relying on the Jetpacs composition root to know this app
+;; exists.  Batch loads stay side-effect-free for byte compilation and ERT.
+(unless noninteractive
+  (glasspane-config-ensure))
+
 ;;;###autoload
 (defun glasspane ()
   "Open Glasspane on the device: reset its stack to the home screen."

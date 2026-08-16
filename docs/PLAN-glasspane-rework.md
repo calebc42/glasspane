@@ -19,10 +19,11 @@ Full ERT gate everywhere below = `test/run-tests.sh` (46 suites at HEAD **plus e
 
 1. **OWNERSHIP:** jetpacs-org-mode owns BOTH capture and agenda reminders. They migrate to jetpacs-org-mode as org-generic machinery; Glasspane consumes/extends them like any build-within app. The device-verified Glasspane implementations are the ones with hardware coverage — their code/UX moves under the new owner in preference to keeping the ERT-only org-mode versions, absorbing each side's exclusive extras (org-protocol + prefix-template filtering from org-mode; sheet-chain UX + share stash + `org.capture.share` replay alias from Glasspane).
 2. **SCOPE:** the rework = rebase onto the reader/editor primitives + full seam adoption AND an IA/UX restructure — hub, navigation, and screen inventory get rethought, not just machinery.
+3. **LAYERING (Caleb, 2026-08-16):** dependency direction is strictly **EBP → Jetpacs → Glasspane**. Jetpacs has no knowledge of Glasspane; the app is eventually extracted to its own repository. Native Emacs mechanisms belong to Jetpacs, while product opinions and placement belong to Glasspane. Glasspane consumes Jetpacs and EBP's Kotlin implementation and remains **entirely Elisp** — no Glasspane Kotlin layer. The executable guard is `test/run-tests.sh`'s zero-`glasspane` scan over top-level `emacs/*.el`.
+4. **OR-1 RATIFIED (Caleb, 2026-08-16):** the org-clock chronometer and clocking machinery move to Jetpacs at GR-5. Glasspane retains only its opinionated affordance placement (for example, the detail-screen clock-in icon).
 
 **PROPOSED, NOT RATIFIED — open rulings for Caleb (flagged at every rung they touch; executing a flagged rung requires the ruling first):**
 
-- **OR-1** org-clock chronometer notification → jetpacs-org-mode (org-generic, zero sibling deps — glasspane-clock.el:11-14 says so itself; verb names MUST survive either way). Rung GR-5.
 - **OR-2** ef + gallery leave the org story (both org-free); GR-8d proposes their new homes — the IA restructure decides.
 - **OR-3** the demo org corpus follows the capture/agenda owner; the IDE-tour half is foundation demo material. Rung GR-10.
 - **OR-4** D-20/OQ2 rich-bodies degrade — must be ratified before GR-10's table/babel upstream move (recommended-accept already on record).
@@ -46,6 +47,7 @@ Full ERT gate everywhere below = `test/run-tests.sh` (46 suites at HEAD **plus e
   capability, so wants∩supported correctly leaves it ungranted.  The FGS vs
   `offline.wake` vs client-backoff decision remains owned by RF-0.5b; GR-0 must
   not counterfeit support by adding an inert capability string.
+- **I-9 dependency direction:** EBP and Jetpacs source may not name, require, declare, or call Glasspane. The app may depend downward on both layers, never the reverse. Native Org capture/reminder/clock machinery lives under Jetpacs; Glasspane owns only its all-Elisp workflow opinions and their presentation sites. A top-level source-name scan makes the boundary executable, and the device's downstream user config explicitly loads Glasspane after Jetpacs.
 
 ## §2 Why machinery-first (the ordering argument)
 
@@ -78,7 +80,7 @@ Each lettered sub-rung is one commit-able unit; every rung ends with a gate (ERT
 | GR-2 | Reader seam: front-claim → adapter | GR-1 | M | YES | yes (UX) |
 | GR-3 | Reminders ownership cutover (ceremony §5.1) | GR-1 | M | YES, mandatory | YES |
 | GR-4 | Capture ownership cutover (ceremony §5.2) | GR-1, GR-3 | L | YES, mandatory | YES |
-| GR-5 | Chronometer → jetpacs-org-clock.el (**OR-1, flagged**) | GR-4 + ruling | S | YES | YES |
+| GR-5 | Chronometer → jetpacs-org-clock.el (**OR-1 ratified**) | GR-4 | S | YES | YES |
 | GR-6 | Editor discipline (a: crypt closure + freshness + refusal, app-side · b: save-policy seam + second adapter, foundation-side) | GR-2 | M | YES | no (additive) |
 | GR-7 | a: coupling severance · b: foundation gap funding (:badge, FAB registry, remove-link, dates) | GR-3, GR-4, GR-6 | M | no | no |
 | GR-8 | IA/UX restructure (a: pole+triage, b: hub/drawer, c: navigation+slots, d: periphery) | GR-7 | L | YES — the big batch + soak day | YES |
@@ -268,6 +270,7 @@ supported-capability registry and the RF-0.5b ownership recorded in I-8.
 **Goal:** one capture implementation, org-mode-owned, carrying the device-verified UX; durable names byte-identical. Ceremony §5.2.
 
 **Steps:**
+0. **Enforce the newly ratified layer boundary before moving capture:** remove the reminder module's direct legacy-hook reference and the Jetpacs composition root's optional Glasspane `require`; Glasspane now loads its own managed config, and downstream device `user.el` explicitly `(require 'glasspane)` after Jetpacs. Add the zero-name foundation guard. This keeps the rollback implementation downstream without making Jetpacs aware it exists.
 1. **New file `emacs/jetpacs-org-capture.el`** (owner "org-mode", registered from the composition root): glasspane-capture.el's sheet chain moves wholesale — picker→form dialogs, deterministic capf field ids (`jetpacs-wire-id`; the G9 obarray-twin rule: `jetpacs--check-capture-fields` interns keyword twins, so field-id generation must stay deterministic across the move), share stash written before the client guard, one-live-sheet/1301 semantics, durable-then-celebrate submit tail.
 2. **Absorb org-mode's exclusives:** org-protocol URL decoding (modern + legacy forms, jetpacs-org-mode.el:170-228) as an intake path feeding the same sheet chain (headless `ebp-org-capture-run` when the URL fully specifies); the non-selectable prefix-template filter (:139-145) applied to the picker's enumeration. Behavior change recorded for release notes: users with prefix templates now see the filter.
 3. **Registrations under owner "org-mode", names byte-identical (§3):** `org.capture.show` gains **`:any-surface t`** with this written rationale, recorded in the defaction `:doc`/comment: *"Global intake affordance — capture taps originate on any app's screens (Glasspane FAB and hub card today, future apps tomorrow) and on durable descriptors; the sheet chain that follows is dialog-scoped (SPEC 14.4: dialog conclusions carry no surface), so surface scoping protects nothing and D1 would permanently reject every Glasspane FAB tap. Alternatives rejected: S4 guest sanctioning — capture is a dialog, no guest SCREEN exists at tap time to delegate through; a forwarding verb — two live names for one action is worse than one honest `:any-surface`."* `share.text` + `org.capture.share` keep their `:any-surface` Companion-attribution rationale verbatim, now registered unconditionally — org-mode owns the intake; the deferential dance (`--owns-share-action`, eq-guarded teardown) is deleted and recorded in CHROME-VOCABULARY as the convention for a FUTURE app that wants to displace it. `org-mode.capture` becomes a thin deprecation alias onto the same handler.
@@ -279,9 +282,41 @@ supported-capability registry and the RF-0.5b ownership recorded in I-8.
 **Gate:** full ERT — sheet-chain conclusion mapping; stash semantics (share-over-open-picker abandon; async-1301 must not clobber a successor's stash); obarray-twin field arm; prefix-template filter; org-protocol both URL forms; whole-cache-invalidate arm; **D1 arm proving a glasspane-surface tap on `org.capture.show` is accepted.** **Device gate = ceremony §5.2:** FAB capture e2e from the Agenda screen under the new owner (picker → form → "Captured ✓" → entry lands); share replay (`org.capture.share` queued offline via injection — Companion ACTION_SEND intake is UNBUILT, D-12; injection is the honest arm) reconnects and is accepted; airplane-mode capture submit → reconnect → accepted receipt (I-1 proof); same-day daily-driver capture.
 **Rollback:** §5.2 reverse. **Tripwire T-3 armed:** any D1 `rejected` from a capture-path tap post-cutover → abort rung, re-inventory emission sites against §3.
 
-## GR-5 — Chronometer → `emacs/jetpacs-org-clock.el` (**OR-1: PROPOSED-NOT-RATIFIED — do not execute without Caleb's ruling**) — RISKY
+> **GR-4 DEVICE GATE COMPLETE 2026-08-16 — Pixel Tablet, Android 17,
+> portrait-locked, force-stop-first, screenshot-before-every-tap.** The private
+> queue was empty before the owner swap (`records=0`, `next_seq=1`). The
+> deployed downstream `user.el` explicitly required Glasspane while the
+> Jetpacs entry path loaded no Glasspane feature; all canonical capture verbs
+> resolved to owner `org-mode` with flags `(t nil)`.
+>
+> The Agenda FAB opened the moved picker and Note form, then durably wrote the
+> unique forward marker exactly once to `/sdcard/org/inbox.org` and closed the
+> sheet. A valid injected `org.capture.share` record
+> (`a4c42026081613560000000000000001`) replayed after reconnect with summary
+> `(delivered 1 rejected 0 expired 0 remaining 0 blocked_by nil)`; its receipt
+> survived a clean Emacs restart and the Companion queue returned to empty.
+> While Android airplane mode was visibly on, another Agenda capture advanced
+> the receipt store **599 → 600** under owner `org-mode`, wrote its marker once,
+> and closed the form; the next clean reconnect loaded all 600 receipts.
+>
+> The scripted reverse persisted flags `(nil t)`, restarted Emacs, transferred
+> the three rollback-era durable/live names to owner `glasspane`, and reran the
+> same Agenda picker/form smoke: receipt store **603 → 604**, marker exactly
+> once, sheet closed. Final restoration persisted `(t nil)`, restarted again,
+> and resolved `org.capture.show`, `share.text`, `org.capture.share`, and the
+> `org-mode.capture` deprecation alias to `org-mode`. Cleanup removed only the
+> three audited generated Org subtrees and the injection/ADB transport files;
+> final queue state is `records=0`, `next_seq=2`, airplane mode `0`, Wi-Fi `1`,
+> and rotation at its recorded baseline (accelerometer `1`, user rotation `0`).
+> The same-day deployed-tablet capture supplies this rung's live-use arm; the
+> full-day soak remains the GR-9 demolition prerequisite. Evidence is the
+> `tmp/gr4-*` set from this run. Automated gates: capture **8/8**, Org mode
+> **17/17**, reminders **6/6**, Glasspane **71/71**, entry **1/1**,
+> warning-as-error byte compilation, and full `test/run-tests.sh` **exit 0**.
 
-glasspane-clock.el moves near-verbatim under owner "org-mode" (pure org-clock, zero glasspane sibling deps, uses only foundation `ebp-org-defer-save`). **Verb strings and the `notification:org-clock` root name do not change** (§3/I-1); the `:any-surface` durable-replay rationale carries verbatim; grant-gated assert vs never-gated retire, both-directions READY settlement at depth 90, D2 `--soon` deferral, hooks-at-enable all move untouched — **except the GR-6a clock crypt guard, which the move carries (or lands here first if GR-5 runs before GR-6)**. `heading.clock-in` stays Glasspane (detail-screen affordance). If NOT ratified: glasspane-clock.el survives in place and §8's fate table row flips.
+## GR-5 — Chronometer → `emacs/jetpacs-org-clock.el` (**OR-1 RATIFIED 2026-08-16**) — RISKY
+
+glasspane-clock.el moves near-verbatim under owner "org-mode" (pure org-clock, zero glasspane sibling deps, uses only foundation `ebp-org-defer-save`). **Verb strings and the `notification:org-clock` root name do not change** (§3/I-1); the `:any-surface` durable-replay rationale carries verbatim; grant-gated assert vs never-gated retire, both-directions READY settlement at depth 90, D2 `--soon` deferral, hooks-at-enable all move untouched — **except the GR-6a clock crypt guard, which the move carries (or lands here first if GR-5 runs before GR-6)**. Clocking and chronometer behavior are native Emacs machinery and therefore Jetpacs-owned; `heading.clock-in` stays Glasspane as the opinionated detail-screen affordance.
 
 **Ceremony §5.3 gates the deploy.** Suite moves to new `test/jetpacs-org-clock-test.el`, **wired into test/run-tests.sh in the same commit.**
 **Gate:** ERT lifecycle suite green under the new name. **Device arms:** on the TABLET (the only device with a Glasspane detail screen): clock-in from detail → ongoing chronometer with 2 meta actions; clock-out FROM the notification retires it and the CLOCK line closes on disk; offline-queued clock-out replays during SYNCING, accepted. On the DAILY DRIVER (first chronometer code there — jetpacs-org-mode now carries it; GR-0's I-8 fix made the surface eligible): M-x org-clock-in → chronometer posts.
@@ -397,12 +432,12 @@ Precondition: GR-3 code merged and DEPLOYED; `jetpacs-org-reminders-enabled` nil
 ### §5.2 Capture: glasspane → org-mode (rides GR-4)
 
 1. Merge GR-4's tree (both registrations flag-selectable).
-2. **Offline-queue drain check:** on the tablet, confirm the queue is empty — or replay it to empty — BEFORE deploying the owner swap, so no durable receipt straddles the owner change (a receipt queued under the old registration replaying across the swap is exactly the durable-state bug I-1 exists for).
+2. **Offline-queue drain check:** on the tablet, confirm the queue is empty — or replay it to empty — BEFORE deploying the owner swap, so no durable receipt straddles the owner change (a receipt queued under the old registration replaying across the swap is exactly the durable-state bug I-1 exists to prevent). Ensure downstream `user.el` explicitly requires Glasspane; Jetpacs no longer discovers or loads it by name.
 3. Deploy; force-stop; run GR-4's device arms.
 
 **Reverse:** `glasspane-capture-enabled` t / org-mode capture registration off; re-run the capture smoke.
 
-### §5.3 Chronometer (rides GR-5, only if OR-1 is ratified)
+### §5.3 Chronometer (rides GR-5; OR-1 ratified 2026-08-16)
 
 1. Precondition: GR-0's I-8 fix landed and soaked (daily driver wants `surfaces.notification`).
 2. **Clock-out gate:** verify no active clock and no live `notification:org-clock` posted (`org-clock-out` if needed) before the deploy — the ttl-3600 PendingIntents keep resolving by I-1, but the notification root's owner claim must not straddle the swap.
@@ -447,12 +482,12 @@ Host drawer = canonical navigation (S1 registry). Hub = memoised-cards-only dash
 
 | File | Fate | Where / notes |
 |---|---|---|
-| glasspane.el | survives | loses hand dock item + the `glasspane.home` DRAWER emission (GR-8; the verb survives as the M-x/programmatic reset, §3), clock hook install (GR-5 if ratified); gains `:chrome 'primary` + `:fab` |
+| glasspane.el | survives | loses hand dock item + the `glasspane.home` DRAWER emission (GR-8; the verb survives as the M-x/programmatic reset, §3) and clock hook install (GR-5); gains `:chrome 'primary` + `:fab` |
 | glasspane-ui.el | survives, heavily rewritten | hub/drawer S1-native (GR-8b); `--defer-refresh` retired (GR-7a); FAB via registry; remove-link via foundation |
-| glasspane-config.el | survives | capture-template seeding stays (recorded non-move); startup guard unchanged |
+| glasspane-config.el | survives | capture-template seeding stays (recorded non-move); the downstream app entry owns its ensure call, with no Jetpacs bootstrap knowledge |
 | glasspane-packages.el | survives | unchanged; `glasspane.packages.install` stays under S4 delegation |
 | glasspane-capture.el | **dies (moves)** | → `emacs/jetpacs-org-capture.el` owner "org-mode" (GR-4), absorbing org-protocol + template filtering; names byte-identical |
-| glasspane-clock.el | **moves — OR-1 flagged** | → `emacs/jetpacs-org-clock.el` (GR-5); survives in place if not ratified |
+| glasspane-clock.el | **dies (moves)** | → `emacs/jetpacs-org-clock.el` (GR-5, OR-1 ratified); Glasspane keeps only opinionated clock-affordance placement |
 | glasspane-org.el | survives, slimmer | reminder helpers die (GR-3/9); extraction delegates to the consolidated org-mode walk; save funnel wraps the foundation save-policy seam + before-save discipline (GR-6); query/search/stamps stay |
 | glasspane-org-reader.el | survives as reader adapter | front-claim → `jetpacs-reader-register 'org` replace-in-place with fallback guard (GR-2); dead JA-6 assumptions deleted; subtree entry exported; heading affordances = GR-10 candidate |
 | glasspane-detail.el | survives | detail.save gains merged freshness core + before-save + synced-doc refusal (GR-6); builders exported (GR-7a); "Open in file" action (GR-8c); mutation verb family = GR-10 candidate |
@@ -469,7 +504,7 @@ Host drawer = canonical navigation (S1 registry). Hub = memoised-cards-only dash
 | glasspane-demo.el | splits (gated on OR-3) | IDE-tour half → foundation fixture infra; org corpus follows the capture owner — GR-10 |
 | glasspane-vulpea.el | survives | `glasspane_mobile` extractor stays; NO rename (`:worker-lib` resolution) |
 
-**jetpacs-org-mode delta:** GAINS `emacs/jetpacs-org-capture.el`, `emacs/jetpacs-org-reminders.el` (+ `emacs/jetpacs-org-clock.el` if OR-1), required+registered from the composition root; the consolidated rich agenda extractor (GR-3). LOSES the bridged-prompt capture path + share fallback + `--owns-share-action` deference (GR-4), the inline reminder pipeline (GR-3/9); `org-mode.capture` becomes a deprecation alias. CONTRIBUTES no `:destinations` (decided, GR-8b); dock item code-unchanged but **suppressed whenever Glasspane is the current app** (the primary branch has no surface check — GR-8b records the acceptance; on the daily driver, which never loads Glasspane, it renders everywhere as today). Capture success keeps the whole-cache invalidate (the GR-4 step 4 ruling).
+**jetpacs-org-mode delta:** GAINS `emacs/jetpacs-org-capture.el`, `emacs/jetpacs-org-reminders.el`, and `emacs/jetpacs-org-clock.el` (OR-1 ratified), required+registered from the composition root; the consolidated rich agenda extractor (GR-3). LOSES the bridged-prompt capture path + share fallback + `--owns-share-action` deference (GR-4), the inline reminder pipeline (GR-3/9); `org-mode.capture` becomes a deprecation alias. CONTRIBUTES no `:destinations` (decided, GR-8b); dock item code-unchanged but **suppressed whenever Glasspane is the current app** (the primary branch has no surface check — GR-8b records the acceptance; on the daily driver, which never loads Glasspane, it renders everywhere as today). Capture success keeps the whole-cache invalidate (the GR-4 step 4 ruling).
 
 ## §9 Tripwire table (named observations, named abort actions)
 
@@ -505,4 +540,4 @@ Host drawer = canonical navigation (S1 registry). Hub = memoised-cards-only dash
 
 **Risks (14 → mitigations):** #1 duplicate alarms→GR-0 · #2 durable reminder sets→§5.1/I-2 · #3 durable verb names→§3/I-1 · #4 cleartext+no-mtime→GR-6 · #5 seam-collision UX→GR-2 · #6 cache cross-talk→GR-4 step 4 ruling + GR-6b whole-cache save-policy + GR-3 extractor consolidation · #7 slot pressure→§7.2+GR-8c audit · #8 zero hardware coverage→GR-1 floor + per-rung arms + GR-8 batch · #9 wants∩supported→GR-0 · #10 D1 cross-owner rejection→GR-4 `:any-surface` rationale + T-3 · #11 token budget→GR-8c + T-4 · #12 private coupling→GR-7a · #13 SPEC-19 overlap→GR-6 step 3 · #14 armed tripwires→§9.
 
-**Upstream candidates (12 → disposition):** table.el→GR-10(OR-4) · save-policy seam→GR-6 · freshness merge→GR-6 · per-heading affordances→GR-10 · mutation verb family→GR-10 · cross-file search→GR-10 · dates util→GR-7b · settings-remove-link→GR-7b · FAB registry→GR-7b · clock→GR-5(OR-1) · ef/gallery→GR-8d(OR-2) · demo seeder→GR-10(OR-3).
+**Upstream candidates (12 → disposition):** table.el→GR-10(OR-4) · save-policy seam→GR-6 · freshness merge→GR-6 · per-heading affordances→GR-10 · mutation verb family→GR-10 · cross-file search→GR-10 · dates util→GR-7b · settings-remove-link→GR-7b · FAB registry→GR-7b · clock→GR-5(OR-1 ratified) · ef/gallery→GR-8d(OR-2) · demo seeder→GR-10(OR-3).

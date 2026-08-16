@@ -5,9 +5,11 @@
 
 ;;; Commentary:
 
-;; The capture surface (docs/PLAN-glasspane-app.md, G5): the template
+;; The legacy capture surface retained only for GR-4 rollback: the template
 ;; picker and field-form sheets, and the share-sheet intake that feeds
-;; them.  The v1 select→form→submit VERB chain collapsed into the S3
+;; them.  Native capture now lives in `jetpacs-org-capture'; this copy stays
+;; entirely downstream and is inert unless `glasspane-capture-enabled'.
+;; The v1 select→form→submit VERB chain collapsed into the S3
 ;; dialog shape: a picker button concludes its sheet with the template
 ;; key, the conclusion callback carries the form sheet, the form's
 ;; Capture gathers its fields (`jetpacs-dialog-submit'
@@ -47,7 +49,14 @@
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
+(require 'jetpacs-org-capture)
 (require 'glasspane-ui)
+
+(defvar glasspane-capture-enabled nil
+  "Non-nil to register the legacy capture engine during rollback only.
+The native Org capture module is the default owner after GR-4.  This flag and
+file remain through the soak window so the cutover can be reversed without a
+code rollback.")
 
 ;;;; Shared-in content (the share sheet's pending payload)
 
@@ -286,30 +295,45 @@ subject still captures (it doubles as the body — the v1 contract)."
 `org.capture.share' is the pre-rename id, kept so shares queued by an
 older Companion still replay — both route to the same handler.")
 
+(defun glasspane-capture--undef-if-handler (name handler)
+  "Undefine NAME only when HANDLER is still the legacy implementation."
+  (when (eq (gethash name jetpacs-action-handlers) handler)
+    (jetpacs-undefaction name)))
+
 (defun glasspane-capture-register ()
-  "Register the capture verbs.
+  "Register the legacy capture verbs when their rollback flag is enabled.
 Called from `glasspane-register', never at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces the handlers in
 place."
-  (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction "org.capture.show" #'glasspane-capture--on-show
-                       :doc "Open the org capture template picker")
-    ;; The two share verbs are GLOBAL (the `jetpacs.launcher.open'
-    ;; precedent, jetpacs-launcher.el:148-162): a share is attributed
-    ;; by the COMPANION, not by one of this app's surfaces, so its wire
-    ;; surface may legitimately be a string glasspane does not own —
-    ;; under owner scope the D1 gate would then kill the intake
-    ;; silently.  `org.capture.show' stays owner-scoped: it is tapped
-    ;; from the app's own surfaces.
-    (jetpacs-defaction "share.text" #'glasspane-capture--on-share
-                       :any-surface t)
-    (jetpacs-defaction "org.capture.share" #'glasspane-capture--on-share
-                       :any-surface t)))
+  (if glasspane-capture-enabled
+      (with-jetpacs-owner "glasspane"
+        (jetpacs-defaction "org.capture.show" #'glasspane-capture--on-show
+                           :doc "Open the org capture template picker")
+        ;; The two share verbs are GLOBAL (the `jetpacs.launcher.open'
+        ;; precedent, jetpacs-launcher.el:148-162): a share is attributed
+        ;; by the COMPANION, not by one of this app's surfaces, so its wire
+        ;; surface may legitimately be a string glasspane does not own.
+        (jetpacs-defaction "share.text" #'glasspane-capture--on-share
+                           :any-surface t)
+        (jetpacs-defaction "org.capture.share" #'glasspane-capture--on-share
+                           :any-surface t))
+    ;; A live flag flip retires legacy handlers and volatile state.  The
+    ;; canonical upstream handlers already occupying these names are untouched
+    ;; because each removal is guarded by handler identity.
+    (glasspane-capture--undef-if-handler
+     "org.capture.show" #'glasspane-capture--on-show)
+    (dolist (name '("share.text" "org.capture.share"))
+      (glasspane-capture--undef-if-handler
+       name #'glasspane-capture--on-share))
+    (glasspane-capture-dialog-close)
+    (glasspane-capture--clear-shared)))
 
 (defun glasspane-capture-unregister ()
   "Drop the capture verbs, retire any live sheet, forget shared state."
-  (dolist (name glasspane-capture--verbs)
-    (jetpacs-undefaction name))
+  (glasspane-capture--undef-if-handler
+   "org.capture.show" #'glasspane-capture--on-show)
+  (dolist (name '("share.text" "org.capture.share"))
+    (glasspane-capture--undef-if-handler name #'glasspane-capture--on-share))
   (glasspane-capture-dialog-close)
   (glasspane-capture--clear-shared))
 

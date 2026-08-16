@@ -34,9 +34,10 @@
 ;; is app-local below, promoted to the store only if a second app wants
 ;; it.  The install-consent register `jetpacs-installed-bundles' is now
 ;; `jetpacs-app-store-installed', and dev/in-tree loads NEVER appear
-;; there — dev first-boot seeding is manual (`M-x
-;; glasspane-config-ensure'); store-adopted installs keep the automatic
-;; path.  The handler's `fboundp' guards on shell notify/push are
+;; there.  Loading this helper alone remains load-only; the full Glasspane
+;; entry owns first-boot `glasspane-config-ensure', while store-adopted
+;; installs keep the automatic helper-level path.  The handler's `fboundp'
+;; guards on shell notify/push are
 ;; dropped (hard deps, T5) and its trailing inline push moved into the
 ;; deferred continuation (D2).
 
@@ -157,12 +158,10 @@ Adoption via the app store (\"glasspane.el\" listed in
 `jetpacs-app-store-installed') IS the install consent: a freshly
 installed Glasspane must come up with capture templates or the phone
 shows an empty capture sheet.
-Everywhere else — in-tree/dev requires, batch loads — nothing is
-written until the user opts in explicitly via
-`glasspane-config-ensure' (the FOUNDATION-GAPS #4 corollary: dev
-first-boot seeding is manual).  `bound-and-true-p' rather than a
-require: with the store not loaded there was no adoption, and the
-conservative load-only arm is the right answer."
+Everywhere else this helper stays load-only; the full app entry invokes
+`glasspane-config-ensure' after registration.  Batch loads remain inert.
+`bound-and-true-p' rather than a require: with the store not loaded there
+was no adoption, and the conservative helper-level arm is the right answer."
   (if (member "glasspane.el" (bound-and-true-p jetpacs-app-store-installed))
       (glasspane-config-ensure)
     (glasspane-config-load)))

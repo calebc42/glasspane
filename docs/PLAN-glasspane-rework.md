@@ -462,6 +462,13 @@ glasspane-clock.el moves near-verbatim under owner "org-mode" (pure org-clock, z
 
 ## GR-8 — IA/UX restructure (RATIFIED ruling 2) — RISKY; §7 is the design it implements
 
+> **NON-EXECUTABLE FORWARD POINTER (2026-08-16):** this GR-8 was already
+> superseded by `PLAN-glasspane-para.md`; Caleb has now also corrected PARA's
+> placement rule.  Glasspane's five PARA destinations are peer NavBar/
+> BottomAppBar entries beside Eval and Files, not tabs, and Apps is
+> NavDrawer-only.  The authoritative stop/replan note is at the top of the
+> PARA plan.  Do not implement the historical tab/core-suppression text below.
+
 Old hub/dock/front-claim-era code stays in-tree behind `defvar glasspane-ui-legacy-ia` through the soak; deletions land at GR-9 citing it.
 
 ### GR-8a — pole + destination triage (one commit)

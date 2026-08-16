@@ -1,4 +1,4 @@
-# PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, five-tab, PARA-shaped)
+# PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, shared-bar, PARA-shaped)
 
 Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **8965e40** (slop-fork/main; = S9 31c3f1c + S11 ee34b40 + S10 8965e40 — both seams committed while this plan was in review, so the "in-flight" caveat resolved before it landed). Written **2026-08-15**. Line cites were verified against exactly this tree state. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
 
@@ -7,6 +7,27 @@ Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **8965e40** (slo
 **Companion docs:** `docs/PLAN-glasspane-rework.md` — **this plan supersedes its §7 + GR-8 and re-scopes GR-9/GR-10**; that doc is NOT edited here; §10 carries the stamp for its next edit. `docs/PLAN-jetpacs-debt-and-scaffold.md` — §10 carries its stamp. `docs/CHROME-VOCABULARY.md` — **v4 ratified 2026-08-15 alongside this plan** (the full-bar clause + the S8 root-only drawer-injection sentence; edited in its own commit, not in passing).
 
 **Ladder prefix is PA- (PARA)** — fresh per the D-6 label-collision rule (GR-, G0–G9, R2/R4/R6 taken; grep `\b(PA|GP)-[0-9]` at this tree = zero prior hits). A session resuming "PA-2c" from this doc alone cannot land on another ledger.
+
+> **AUTHORITATIVE NAVIGATION CORRECTION — Caleb, 2026-08-16.**
+> This overrides the five-tab/full-bar/core-suppression placement described
+> below.  **Agenda, Projects, Areas, Resources, and Review are not tabs.**
+> They are peer entries on Jetpacs' persistent navigation surface — the
+> compact NavBar/BottomAppBar and its responsive rail form — immediately
+> alongside the existing **Eval** and **Files** entries.  Eval and Files stay
+> in that bar.  **Apps leaves the bar and is NavDrawer-only.**
+>
+> The resulting seven peer destinations must all remain reachable from the
+> navigation surface; the old 3–5 cap, `seq-take`, or silently relocating
+> entries into the drawer is not an acceptable implementation.  In-body
+> `jetpacs-tabs` pagers (for example Agenda's day/week/month pages) are a
+> separate widget and are unaffected.
+>
+> GR-0..GR-7 and the PARA data/screen/verb decisions remain valid.  The PA-1
+> and PA-3 navigation-placement mechanics, every `:dock-core nil` instruction,
+> and later uses of “tab” for these destinations are **non-executable until
+> rewritten after GR-7b**.  That rewrite must fund the seven-item responsive
+> bar, preserve route selection/badges, and make Apps drawer-only before any
+> IA implementation begins.
 
 Full ERT gate everywhere below = `test/run-tests.sh` — **the runner is an EXPLICIT list; a suite not named there never runs (the K1a merge lesson). This whole ladder adds ONE suite, `test/glasspane-para-test.el`, wired into the list in the same commit as PA-1; every later rung only adds arms to it.**
 

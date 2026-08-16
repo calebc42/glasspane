@@ -118,7 +118,7 @@ supported-capability registry and the RF-0.5b ownership recorded in I-8.
 **Goal:** never rebase onto ERT-only floor. The cutover ceremonies (GR-3/4) lean on live sync and S4 guest mechanics; the IA rung (GR-8) leans on S1/S2. Discovering a seam defect at the final gate would re-litigate five landed rungs.
 
 **Arms (each names what it proves; one device day):**
-- **S1:** host drawer renders Glasspane's `:destinations` nest (glasspane.el:130-138 registry); nested-row tap → `app.open :app "glasspane" :route KEY` lands on the right screen (the path GR-8b rebuilds the hub onto). Stale-route arm: dead route → fallback home, no error card. Routeless `app.open` returns home.
+- **S1:** host drawer renders Glasspane's `:destinations` nest (glasspane.el:130-138 registry); nested-row tap → `app.open :app "glasspane" :route KEY` lands on the right screen (the path GR-8b rebuilds the hub onto). Stale-route arm: dead route → fallback home, no error card. Routeless `app.open` resumes the app stack top, with home one system-back away — the later GR-8b return-to-app ruling supersedes this arm's original reset wording.
 - **S2:** temporarily flip a scratch app to `:chrome 'primary` on the tablet; verify ≤4 tab generation + `:selected` route tracking (jetpacs-apps.el:211-229 — the pole GR-8a adopts).
 - **S3:** M-x injected and executing on a Glasspane screen.
 - **S4:** push a guest screen (settings satellite from a Glasspane surface); verify `guest-OWNER-ID` prefixing, Companion-local back revokes with no bookkeeping, owner teardown sweeps the guest and repushes the host (the mechanism GR-4's sheet taps and GR-8's satellites ride). Slot-contention arm: guest push at 2-deep stack → record the observed eviction (feeds GR-8c's audit).
@@ -126,6 +126,43 @@ supported-capability registry and the RF-0.5b ownership recorded in I-8.
 - **D-2 (owed):** concurrent-edit + forced-desync steps added to the files-sync smoke and run — one `edit.resync`, no wrong edit; verifies the D-1 caret fix on hardware. Every reader/editor-host surface leans on live sync.
 
 **Gate:** all arms green, screenshots recorded in the rung notes; full ERT unchanged-green. **Tripwire T-2 armed from here on** (reverse-order `event.action` replies under batch traffic → halt, fund informed-execution R4 per D-6).
+
+> **GR-1 DEVICE GATE COMPLETE 2026-08-16 — Pixel Tablet, Android 17,
+> portrait, force-stop-first, screenshot-before-every-tap.** S1's canonical
+> host drawer deep-linked to the real Journal screen; a vanished route now
+> returned `stale` **and opened Glasspane home** (the gate found and fixed the
+> stale-host-screen defect in `jetpacs-apps--action-open`); routeless open
+> resumed the stack top and one system back reached home. S2's temporary
+> `primary` flip rendered Eval + Files + three Glasspane destinations (five
+> total, within the cap), with Journal selected, then restored the registry.
+> S3 executed the injected M-x on Glasspane. S4 used the real Glasspane
+> Settings satellite: wire id `guest-glasspane-glasspane-settings`, local back
+> left only an inert bookkeeping row with delegation false, owner teardown
+> swept the guest and repushed Settings home, and re-registration rebuilt a
+> healthy Glasspane root. At the three-view cap, Settings revision 30 retained
+> `home`, host B, and the guest while evicting oldest non-root host A; cleanup
+> revision 31 contained `home` only. S5/S6 revision 56 targeted the injected
+> snackbar at current view `glasspane-tasks` on the two-view surface while
+> `home.snackbar` remained null; it was visibly rendered on Tasks. Runner
+> screenshots are the `tmp/gr1-s1-*`, `gr1-s2-*`, `gr1-s4-*`, `gr1-s5-*`,
+> and `gr1-d2-*` sets from this device day.
+>
+> **D-2 CLOSED IN THE SAME RUN.** `test/smoke-files-sync.el` is now B1–B10:
+> D-1 left the reported device caret `61 -> 61` across an Emacs append; the
+> deterministic pending-local/device-delta race emitted exactly one
+> `edit.resync`, retained the one device keystroke, dropped the losing local
+> sentinel, and converged buffer+mirror; a deliberately stale local seq then
+> emitted exactly one more resync, minted a fresh seq-0 session, dropped the
+> refused sentinel from both copies, and converged again. The arm found a
+> second real defect: an accepted resync replaced only ebp.el's mirror and
+> never delivered its full-state seed to the attached buffer. The resync
+> callback now runs the same edit-open reconciliation hooks, pinned by
+> `ebp-sync-resync-result-reseeds-the-attached-buffer`. Final fresh hardware
+> run: `smoke-files-sync: 0 failure(s)`; targeted bridge gate: 45/45; full
+> `test/run-tests.sh` gate: exit 0. The final 123-file Elisp tree was then
+> deployed, Emacs + Companion relaunched to the clean Glasspane home root, and
+> the original rotation baseline restored (`free`, accelerometer `1`, user
+> rotation `0`).
 
 ## GR-2 — Reader seam: front-claim becomes adapter registration
 

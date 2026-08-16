@@ -28,6 +28,7 @@
 (require 'org-agenda)
 (require 'org-clock)
 (require 'ebp-org)
+(require 'jetpacs-org-reminders)         ; canonical agenda extraction
 (require 'jetpacs-org-vulpea)           ; note-index arm of the ONE grammar
 
 ;;;; Refresh coordination
@@ -81,111 +82,17 @@ suppressed so the caller's explicit repush isn't doubled."
 ;; wire (D-4): the UI layer mints SPEC 23.1 tokens for anything the
 ;; device can tap.
 
-(defun glasspane-org--agenda-scope ()
-  "The agenda file scope: anchored, local, existing FILES — possibly empty.
-Never the `org-agenda-files' FUNCTION: it stats raw entries (one
-remote entry dials TRAMP inside the socket filter) and its
-missing-file path prompts — the foundation's P1-5/P1-7 rulings
-\(ebp-org.el:144-170,1220-1236).  A DIRECTORY entry expands to the org
-files inside it, org's own semantics (emacs-30.1 org.el
-`org-agenda-files' maps `directory-files' over dir entries) — the
-managed config's default IS the whole `org-directory', and handing the
-raw dir to `org-map-entries' visits it as dired and answers nothing
-\(the G9 device catch: Agenda full, Tasks empty, same corpus).  Safe
-here because `ebp-org-agenda-files' already dropped remote entries.
-Callers treat nil as \"no items\", never as \"current buffer\"."
-  (cl-mapcan (lambda (entry)
-               (cond ((file-directory-p entry)
-                      (directory-files entry t org-agenda-file-regexp))
-                     ((file-exists-p entry) (list entry))))
-             (ebp-org-agenda-files)))
+(defalias 'glasspane-org--agenda-scope
+  #'jetpacs-org-mode--agenda-scope
+  "Delegate to Org Mode's canonical local agenda scope.")
 
-(defun glasspane-org--agenda-items (&optional span start-day)
-  "Extract agenda items for SPAN (\\='day, \\='week, or \\='month).
-START-DAY is an optional string (e.g. \"2026-11-01\") to start the agenda on.
-Returns a list of alists representing agenda items.  Memoised; see
-`ebp-org-cache-invalidate'."
-  (ebp-org-with-cache 'glasspane (list 'agenda (or span 'day) start-day)
-    (glasspane-org--agenda-items-1 span start-day)))
+(defalias 'glasspane-org--agenda-items
+  #'jetpacs-org-mode--agenda-items
+  "Delegate to Org Mode's rich, memoised agenda extraction.")
 
-(defconst glasspane-org--agenda-buffer "*Jetpacs Agenda*"
-  "Private buffer the agenda extraction builds into (and kills after).")
-
-(defun glasspane-org--agenda-items-1 (span start-day)
-  "Uncached worker for `glasspane-org--agenda-items'."
-  (let ((files (glasspane-org--agenda-scope)))
-    (when files
-      (let ((org-agenda-span (or span 'day))
-            (org-agenda-start-day start-day)
-            (org-agenda-files files)
-            ;; Build into a private buffer so a user's open *Org Agenda* on the
-            ;; desktop is never clobbered (and never killed) by an extraction.
-            ;; `org-agenda-buffer-tmp-name' is the supported redirect: `org-agenda'
-            ;; REBINDS `org-agenda-buffer-name' in its own let* and recomputes it,
-            ;; so binding that variable directly gets shadowed — the build then
-            ;; lands in *Org Agenda* while we look for (and fail to find, and fail
-            ;; to kill) our own name.
-            (org-agenda-buffer-tmp-name glasspane-org--agenda-buffer)
-            (org-agenda-sticky nil)
-            (inhibit-redisplay t)
-            items)
-        (unwind-protect
-            (save-window-excursion
-              (let ((org-agenda-window-setup 'current-window))
-                ;; The build visits every agenda file: clamped, so a
-                ;; drifted or oversized file becomes a STATUS signal,
-                ;; never a prompt in the dispatch extent (D2).
-                (ebp-org--with-clamped-io
-                  (org-agenda nil "a"))
-                (with-current-buffer glasspane-org--agenda-buffer
-                  (goto-char (point-min))
-                  (while (not (eobp))
-                    (let* ((marker (get-text-property (point) 'org-marker))
-                           (tags (get-text-property (point) 'tags))
-                           (time (get-text-property (point) 'time))
-                           (type (get-text-property (point) 'type))
-                           ;; The agenda's own qualifier ("Sched. 3x: ", "In 3 d.: ")
-                           ;; and the item's own date as an absolute day number —
-                           ;; ts-date < (org-today) is the overdue test.
-                           (extra (get-text-property (point) 'extra))
-                           (ts-date (get-text-property (point) 'ts-date))
-                           (date-abs (get-text-property (point) 'date))
-                           ;; org ≥9.6 stores the gregorian (MONTH DAY YEAR) list
-                           ;; directly; older code stored the absolute day number.
-                           ;; Feeding the list to calendar-gregorian-from-absolute
-                           ;; signals, which emptied the whole agenda.
-                           (date-list (cond ((consp date-abs) date-abs)
-                                            ((numberp date-abs)
-                                             (calendar-gregorian-from-absolute date-abs))))
-                           (date-str (when date-list
-                                       (format "%04d-%02d-%02d" (nth 2 date-list)
-                                               (nth 0 date-list) (nth 1 date-list)))))
-                      (when marker
-                        (with-current-buffer (marker-buffer marker)
-                          (save-excursion
-                            (goto-char marker)
-                            (let* ((components (org-heading-components))
-                                   (todo (nth 2 components))
-                                   (priority (nth 3 components))
-                                   (headline (nth 4 components)))
-                              (push `((headline . ,headline)
-                                      (todo . ,todo)
-                                      (priority . ,(if priority (char-to-string priority) nil))
-                                      (tags . ,(vconcat tags))
-                                      (file . ,(buffer-file-name))
-                                      (pos . ,(marker-position marker))
-                                      (time . ,time)
-                                      (date . ,date-str)
-                                      (type . ,(when type (format "%s" type)))
-                                      (extra . ,extra)
-                                      (ts-date . ,ts-date)
-                                      (ref . ,(ebp-org-ref-at-point)))
-                                    items))))))
-                    (forward-line 1)))))
-          ;; Kill by buffer object, not name, and even when extraction errored.
-          (when-let* ((buf (get-buffer glasspane-org--agenda-buffer)))
-            (kill-buffer buf)))
-        (nreverse items)))))
+(defalias 'glasspane-org--agenda-items-1
+  #'jetpacs-org-mode--agenda-items-1
+  "Delegate to Org Mode's uncached agenda extraction worker.")
 
 (defun glasspane-org--priority-string (p)
   "Normalize priority P to its display letter, or nil.

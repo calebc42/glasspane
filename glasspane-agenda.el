@@ -92,7 +92,10 @@ or the ungranted \"reminders.owner\" capability, so both gate here —
 a hook member must never throw into the push path.  The cache adopts
 in the callback, only on the confirmed arm (the v1 rule: never
 pretend an unconfirmed set landed; the next push retries)."
-  (when (and (jetpacs-client) (jetpacs-granted-p "reminders.owner"))
+  (when (and glasspane-agenda-reminders-enabled
+             (not jetpacs-org-reminders-enabled)
+             (jetpacs-client)
+             (jetpacs-granted-p "reminders.owner"))
     (let ((rems (condition-case nil
                     (glasspane-org--upcoming-reminders)
                   (error nil))))
@@ -738,7 +741,10 @@ place and the hooks are add-hook-deduplicated."
     (jetpacs-defaction "agenda.set-mode" #'glasspane-agenda--on-set-mode)
     (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav)
     (jetpacs-defaction "tasks.filter" #'glasspane-agenda--on-tasks-filter))
-  (when glasspane-agenda-reminders-enabled
+  (remove-hook 'jetpacs-shell-after-push-hook
+               #'glasspane-agenda--sync-reminders)
+  (when (and glasspane-agenda-reminders-enabled
+             (not jetpacs-org-reminders-enabled))
     (add-hook 'jetpacs-shell-after-push-hook
               #'glasspane-agenda--sync-reminders))
   (add-hook 'jetpacs-teardown-functions #'glasspane-agenda--on-teardown))

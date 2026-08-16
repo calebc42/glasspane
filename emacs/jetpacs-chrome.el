@@ -91,6 +91,25 @@ bar) WINS when both are set — it is the raw-node override.  Degrades
 like the node dock: a signal or malformed items cost the dock, never
 the surface.")
 
+(defvar jetpacs-chrome-drawer-function nil
+  "Function (SURFACE) -> Node or nil: SURFACE's navigation drawer.
+The S8 seam, the dock's missing sibling: the drawer was the one
+chrome element with no persistence seam — authored by hand on a root
+it existed nowhere else, and only two roots in the tree ever authored
+one.  When this is non-nil, `jetpacs-chrome--build' calls it once per
+build and injects the returned node as the `drawer' of the
+stack-BOTTOM scaffold ONLY: the root wears the hamburger and a
+drilled screen wears the back arrow (the M3 top-level-destination
+rule); a GUEST screen — never the bottom — can never wear the host's
+drawer; and the drawer's literal row ids stay in ONE view of the
+document (SPEC 16.1 scopes id uniqueness to the whole update — the
+constraint that forced every hand author root-only).  Single-slot
+authored-wins: a screen's own `:drawer' is never clobbered.
+Returning nil hangs no drawer on that surface; a signal or a
+non-node degrades the same way and never fails the build.  Every
+descriptor the drawer ships must be a GLOBAL VERB or scoped to the
+surfaces it appears on — it renders on every chrome surface's root.")
+
 ;;;; Composition
 
 (cl-defun jetpacs-chrome-screen (title body &key back actions fab drawer
@@ -174,6 +193,19 @@ must cost the dock, never every chrome surface in the process."
         (let ((n (funcall jetpacs-chrome-dock-function surface)))
           (and (jetpacs-root-node-p n) n))
       (error (message "jetpacs-chrome: dock builder failed: %s"
+                      (jetpacs-error-label err))
+             nil))))
+
+(defun jetpacs-chrome--drawer (surface)
+  "SURFACE's drawer node from `jetpacs-chrome-drawer-function', or nil.
+A signal or a non-node return degrades to nil — a broken drawer
+builder must cost the drawer, never every chrome surface in the
+process."
+  (when jetpacs-chrome-drawer-function
+    (condition-case err
+        (let ((n (funcall jetpacs-chrome-drawer-function surface)))
+          (and (jetpacs-root-node-p n) n))
+      (error (message "jetpacs-chrome: drawer builder failed: %s"
                       (jetpacs-error-label err))
              nil))))
 
@@ -416,6 +448,7 @@ together, on every rebuild."
     (jetpacs-buffer-with-budget
      (let ((seen (make-hash-table :test #'equal))
            (dock (jetpacs-chrome--dock-slot surface))
+           (drawer (jetpacs-chrome--drawer surface))
            (globals (jetpacs-chrome--global-actions surface))
            views prev-id)
       (dolist (entry (reverse stack))
@@ -434,6 +467,19 @@ together, on every rebuild."
                                         (list :surface surface :screen id)
                                         e))))
                            (let ((n (funcall (cdr entry) back)))
+                             ;; The DRAWER (S8) joins only at the stack
+                             ;; BOTTOM — `back' is nil exactly there: the
+                             ;; root wears the hamburger, a drill wears
+                             ;; the back arrow, a guest (never the
+                             ;; bottom) never wears the host's drawer,
+                             ;; and the drawer's literal row ids stay in
+                             ;; ONE view of the document (SPEC 16.1).
+                             ;; Single-slot authored-wins.
+                             (when (and drawer (null back)
+                                        (jetpacs-root-node-p n)
+                                        (equal (plist-get n :t) "scaffold")
+                                        (not (plist-member n :drawer)))
+                               (setq n (append n (list :drawer drawer))))
                              ;; The dock joins BEFORE the gates so what is
                              ;; checked is what ships; `append' copies, so
                              ;; the builder's own node is never mutated.

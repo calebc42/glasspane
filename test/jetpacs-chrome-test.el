@@ -1249,6 +1249,64 @@ expanded window — only the data form can be re-authored into a rail."
             (should-not (plist-get (gethash "root" views) :bottom_bar))))
       (jetpacs-chrome-remove "app:dockdemo2"))))
 
+(ert-deftest jetpacs-chrome-drawer-rides-the-root-and-only-the-root ()
+  "The S8 seam: `jetpacs-chrome-drawer-function''s node becomes the
+`drawer' of the stack-BOTTOM scaffold only — the root wears the
+hamburger, a drilled screen wears the back arrow, and the drawer's
+literal row ids stay in one view of the document (SPEC 16.1).  A
+root authoring its own drawer wins, single-slot."
+  (let ((jetpacs-chrome-drawer-function (lambda (_s) (jetpacs-text "dr"))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "drdemo"
+            (jetpacs-chrome-define-root "drdemo" "root"
+                                        (lambda (back)
+                                          (jetpacs-chrome-screen
+                                           "R" (jetpacs-text "r") :back back)))
+            (jetpacs-chrome-define-root
+             "drdemo2" "root"
+             (lambda (_back)
+               (jetpacs-chrome-screen "R" (jetpacs-text "r")
+                                      :drawer (jetpacs-text "own")))))
+          (jetpacs-chrome--stack-insert
+           "app:drdemo" "leaf"
+           (lambda (back)
+             (jetpacs-chrome-screen "L" (jetpacs-text "l") :back back)))
+          (let* ((mv (jetpacs-chrome--build "app:drdemo"))
+                 (views (plist-get mv :views)))
+            (should (equal (plist-get (plist-get (gethash "root" views)
+                                                 :drawer)
+                                      :text)
+                           "dr"))
+            (should-not (plist-member (gethash "leaf" views) :drawer)))
+          (let* ((mv (jetpacs-chrome--build "app:drdemo2"))
+                 (views (plist-get mv :views)))
+            (should (equal (plist-get (plist-get (gethash "root" views)
+                                                 :drawer)
+                                      :text)
+                           "own"))))
+      (jetpacs-chrome-remove "app:drdemo")
+      (jetpacs-chrome-remove "app:drdemo2"))))
+
+(ert-deftest jetpacs-chrome-drawer-failure-degrades-to-no-drawer ()
+  "A signalling drawer builder costs the drawer, never the surface;
+a non-node return degrades the same way."
+  (dolist (broken (list (lambda (_s) (error "boom"))
+                        (lambda (_s) "not a node")))
+    (let ((jetpacs-chrome-drawer-function broken))
+      (unwind-protect
+          (progn
+            (with-jetpacs-owner "drdemo3"
+              (jetpacs-chrome-define-root "drdemo3" "root"
+                                          (lambda (_back)
+                                            (jetpacs-chrome-screen
+                                             "R" (jetpacs-text "r")))))
+            (let* ((mv (jetpacs-chrome--build "app:drdemo3"))
+                   (views (plist-get mv :views)))
+              (should (gethash "root" views))
+              (should-not (plist-member (gethash "root" views) :drawer))))
+        (jetpacs-chrome-remove "app:drdemo3")))))
+
 ;;;; S4 — sanctioned guests (CHROME-VOCABULARY v3, the two poles)
 
 (ert-deftest jetpacs-chrome-guest-push-registers-and-delegates ()

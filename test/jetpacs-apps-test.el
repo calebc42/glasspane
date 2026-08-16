@@ -19,6 +19,7 @@
          (jetpacs-apps--current nil)
          (jetpacs-apps-core-dock-items
           (lambda (_surface) jetpacs-apps-test--core))
+         (jetpacs-apps-core-drawer-rows nil)
          (pushed nil))
      (cl-letf (((symbol-function 'jetpacs-flow-continue)
                 (lambda (fn) (funcall fn)))
@@ -83,6 +84,47 @@
     (should (equal (jetpacs-apps-test--labels
                     (jetpacs-apps-dock-items "app:hub"))
                    '("Home" "Apps")))))
+
+(ert-deftest jetpacs-apps-drawer-composes-head-then-core ()
+  "The composed drawer (S8): the Apps row first, one S1 nest per app
+declaring destinations, then the host's seeded tail rows — the hub's
+pass-4 IA, now surface-independent."
+  (jetpacs-apps-test--env
+    (setq jetpacs-apps-core-drawer-rows
+          (lambda (_surface) (list (jetpacs-text "core-tail"))))
+    (jetpacs-defapp "notes" :label "Notes" :surfaces '("notes.main")
+                    :destinations
+                    (list (list :key "inbox" :label "Inbox"
+                                :verb "notes.inbox")))
+    (let* ((drawer (jetpacs-apps-drawer "app:hub"))
+           (printed (format "%S" drawer))
+           (kids (append (plist-get drawer :children) nil)))
+      (should (equal (plist-get drawer :t) "lazy_column"))
+      ;; Head: the Apps entry leads.
+      (should (string-search "drawer-apps" (format "%S" (car kids))))
+      ;; The S1 nest and its deep link render.
+      (should (string-search "Inbox" printed))
+      (should (string-search "app.open" printed))
+      ;; Tail: the seeded core rows close the list.
+      (should (string-search "core-tail" (format "%S" (car (last kids)))))
+      ;; Order: head strictly before tail.
+      (should (< (string-search "drawer-apps" printed)
+                 (string-search "core-tail" printed))))))
+
+(ert-deftest jetpacs-apps-drawer-standalone-withdraws-and-core-isolates ()
+  "A standalone app's own surface gets NO composed drawer (the
+CHROME-VOCABULARY withdrawal); foreign surfaces keep it.  A
+signalling core seed costs the tail rows, never the drawer."
+  (jetpacs-apps-test--env
+    (jetpacs-defapp "solo" :label "Solo" :surfaces '("solo.main")
+                    :chrome 'standalone)
+    (should-not (jetpacs-apps-drawer
+                 (jetpacs-shell-surface-for "solo.main")))
+    (should (jetpacs-apps-drawer "app:hub"))
+    (setq jetpacs-apps-core-drawer-rows (lambda (_s) (error "boom")))
+    (let ((drawer (jetpacs-apps-drawer "app:hub")))
+      (should (equal (plist-get drawer :t) "lazy_column"))
+      (should (string-search "drawer-apps" (format "%S" drawer))))))
 
 (ert-deftest jetpacs-apps-open-switches-and-lands-home ()
   "app.open validates the id, sets current, and pushes the app's home."

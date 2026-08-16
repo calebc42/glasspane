@@ -104,6 +104,7 @@ remain in the private Emacs/Termux home on Android.")
 (defvar jetpacs-apps-core-global-actions
   (lambda (_surface) (list (jetpacs-emacs-ui-mx-button))))
 (defvar jetpacs-apps-core-dock-items #'jetpacs-hub--dock-items)
+(defvar jetpacs-apps-core-drawer-rows #'jetpacs-hub--drawer-rows)
 (defvar jetpacs-theme-mode 'mirror)
 (defvar jetpacs-clip-auto-refresh nil)
 
@@ -268,25 +269,20 @@ rows: the push-loop report, and Inspect a screen."
     :key "drawer-tools-inspect")
    :collapsed t))
 
-(defun jetpacs-hub--drawer ()
-  ;; The drawer IA (owner decisions 2026-08-06, pass 4): Apps first,
-  ;; then the Tools nest, then — below the divider, settings-last like
-  ;; every Android app — the Settings nest.  An App = a Tier 1 elisp
-  ;; package built ON jetpacs; org activates like a major mode (on file
-  ;; open, never a destination); Files lives in the nav-bar dock only.
-  ;; lazy_column: a plain column cannot scroll past the fold.
-  (apply #'jetpacs-lazy-column
-         (append
-          (list (jetpacs-apps-drawer-row))
-          ;; S1 (CHROME-VOCABULARY v3, build-within): the destinations
-          ;; apps CONTRIBUTE, composed by the host — one nest per app,
-          ;; each row deep-linking through the global `app.open'
-          ;; `:route'.  poc-1's claimed-views drawer, restored.
-          (jetpacs-apps-destination-rows)
-          (list (jetpacs-hub--tools-entry)
-                (jetpacs-divider)
-                (jetpacs-settings-drawer-entry)
-                :spacing 8))))
+(defun jetpacs-hub--drawer-rows (_surface)
+  ;; The host's drawer TAIL (owner decisions 2026-08-06, pass 4): the
+  ;; Tools nest, then — below the divider, settings-last like every
+  ;; Android app — the Settings nest.  The HEAD (the Apps row and the
+  ;; S1 destination nests) is `jetpacs-apps-drawer''s own; this seed
+  ;; composes below it through `jetpacs-apps-core-drawer-rows', and
+  ;; the S8 seam hangs the finished drawer on every build-within
+  ;; root — the hub stopped authoring it by hand.  An App = a Tier 1
+  ;; elisp package built ON jetpacs; org activates like a major mode
+  ;; (on file open, never a destination); Files lives in the nav-bar
+  ;; dock only.
+  (list (jetpacs-hub--tools-entry)
+        (jetpacs-divider)
+        (jetpacs-settings-drawer-entry)))
 
 (defun jetpacs-hub--dock-items (surface)
   "The persistent view switcher's destinations, as data.
@@ -342,8 +338,11 @@ and Files."
     ;; dropdown keeps answering while a prompt is up.)
     (jetpacs-repl-input-row :editor-id "hub-eval" :document "scratch.el"
                             :verb "hub.eval"))
-   :actions (list (jetpacs-emacs-ui-mx-button))
-   :drawer (jetpacs-hub--drawer)))
+   ;; No :drawer here since S8: the seam hangs the composed host
+   ;; drawer on this root — and on every other build-within root —
+   ;; from `jetpacs-apps-drawer'; authoring it here too would merely
+   ;; shadow the same node.
+   :actions (list (jetpacs-emacs-ui-mx-button))))
 
 (with-jetpacs-owner "hub"
   (jetpacs-chrome-define-root "hub" "home" #'jetpacs-hub--screen

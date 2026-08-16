@@ -65,10 +65,14 @@ session outlives one test."
   (jetpacs-repl-clear jetpacs-hub--repl))
 
 (ert-deftest jetpacs-home-drawer-builds ()
-  "The drawer composition never signals."
+  "The drawer composition never signals: the tail rows the host seeds
+(S8 — the hub stopped authoring its drawer; the seam composes it),
+and the full composed drawer over them."
   (jetpacs-home-test--load-hub-defuns)
-  (should (jetpacs-hub--drawer))
-  (should (jetpacs-hub--tools-entry)))
+  (should (jetpacs-hub--drawer-rows "app:hub"))
+  (should (jetpacs-hub--tools-entry))
+  (let ((jetpacs-apps-core-drawer-rows #'jetpacs-hub--drawer-rows))
+    (should (jetpacs-apps-drawer "app:hub"))))
 
 (ert-deftest jetpacs-home-dock-exposes-eval-and-files-globally ()
   "The host core names both persistent destinations honestly."

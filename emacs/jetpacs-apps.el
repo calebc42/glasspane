@@ -298,6 +298,40 @@ withdraws the global-actions injection for the app's own surfaces)."
           (funcall jetpacs-apps-core-global-actions surface)
         (error nil)))))
 
+;;;; The composed drawer (S8, standalone-aware)
+
+(defvar jetpacs-apps-core-drawer-rows nil
+  "The host's own drawer rows: a function (SURFACE) -> a list of nodes.
+Seeded by the device init (the Tools nest, the divider, and the
+Settings nest, canonically — the pass-4 IA tail); composed BELOW the
+app-identity head — the Apps row and the destination nests — by
+`jetpacs-apps-drawer'.  Isolated: a signal or a non-list costs the
+host rows, never the drawer.")
+
+(defun jetpacs-apps-drawer (surface)
+  "THE `jetpacs-chrome-drawer-function': the composed host drawer.
+The head is the app-identity half — the Apps entry and one S1
+destination nest per registered app — and the tail is the host's own
+rows (`jetpacs-apps-core-drawer-rows').  On the hub this composes
+exactly the drawer its root used to author by hand; on every other
+build-within root it is the SAME drawer, which is the point — the
+canonical navigation list no longer depends on which screen the user
+is standing on.  STANDALONE withdraws whole: the app authors its
+chrome, drawer included (CHROME-VOCABULARY v3)."
+  (unless (eq (jetpacs-apps--surface-chrome surface) 'standalone)
+    (apply #'jetpacs-lazy-column
+           (append
+            (list (jetpacs-apps-drawer-row))
+            (jetpacs-apps-destination-rows)
+            (when jetpacs-apps-core-drawer-rows
+              (condition-case nil
+                  (let ((rows (funcall jetpacs-apps-core-drawer-rows
+                                       surface)))
+                    (and (listp rows) (cl-every #'jetpacs-node-p rows)
+                         rows))
+                (error nil)))
+            (list :spacing 8)))))
+
 ;;;; The Apps grid
 
 (defun jetpacs-apps--card (entry)
@@ -494,6 +528,11 @@ when it refused — the app still opens."
   (setq jetpacs-apps-core-global-actions
         jetpacs-chrome-global-actions-function))
 (setq jetpacs-chrome-global-actions-function #'jetpacs-apps-global-actions)
+;; The S8 seam installs plainly: it is born alongside this composition,
+;; so unlike the two above there is no pre-existing direct setter to
+;; adopt — the host seeds `jetpacs-apps-core-drawer-rows' instead
+;; (defvar-before-load, the core-global-actions pattern).
+(setq jetpacs-chrome-drawer-function #'jetpacs-apps-drawer)
 
 (provide 'jetpacs-apps)
 ;;; jetpacs-apps.el ends here

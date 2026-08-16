@@ -437,11 +437,19 @@ Signals like `ebp-org-resolve-ref'; the screen builder classifies."
           (org-with-wide-buffer
            (goto-char marker)
            (org-back-to-heading t)
-           (let ((pos (point))
-                 (comps (org-heading-components)))
+           (let* ((pos (point))
+                  (file (buffer-file-name))
+                  (end (save-excursion
+                         (org-end-of-subtree t t)
+                         (point)))
+                  (comps (org-heading-components)))
              (list :buf (current-buffer)
-                   :file (buffer-file-name)
+                   :file file
                    :pos pos
+                   :edit-mtime (glasspane-org--mtime-stamp file)
+                   :edit-beg pos
+                   :edit-end end
+                   :edit-tick (buffer-chars-modified-tick)
                    :ref (ebp-org-ref-at-point)
                    :headline (or (nth 4 comps) "")
                    :todo (nth 2 comps)
@@ -946,7 +954,12 @@ absent or declines (the gap #6 degrade)."
                            :line-numbers (jetpacs-bool jetpacs-line-numbers)
                            :on-save (jetpacs-action
                                      "detail.save"
-                                     :args (list :token main)
+                                     :args (list
+                                            :token main
+                                            :mtime (plist-get info :edit-mtime)
+                                            :beg (plist-get info :edit-beg)
+                                            :end (plist-get info :edit-end)
+                                            :tick (plist-get info :edit-tick))
                                      :when-offline "queue"
                                      :ttl-s glasspane-detail--save-ttl-s
                                      :dedupe (jetpacs-wire-id "gp-save" key)))))
@@ -1137,10 +1150,9 @@ moved (SPEC 14.5: re-present, never guess)."
   'accepted)
 
 (defun glasspane-detail--on-save (args params)
-  "Replace the subtree with the editor's `:value'; re-anchor the screen.
-The rewrite moves positions, so the fresh ref is read back at the
-insertion point and the screen re-pushed over it — the captured
-closure would otherwise resolve yesterday's coordinates."
+  "Freshness-check and replace the subtree with the editor's `:value'.
+The rewrite returns an ID-aware fresh ref so the screen can be re-pushed
+over the heading's new coordinates."
   (let ((value (plist-get args :value))
         (ref (glasspane-detail--token-ref args)))
     (cond
@@ -1155,25 +1167,13 @@ closure would otherwise resolve yesterday's coordinates."
      ((null ref) 'stale)
      (t
       (condition-case err
-          (let ((marker (ebp-org-resolve-ref ref))
-                new-ref)
-            (unwind-protect
-                (with-current-buffer (marker-buffer marker)
-                  (org-with-wide-buffer
-                   (goto-char marker)
-                   (org-back-to-heading t)
-                   (let ((beg (point)))
-                     (delete-region beg (progn (org-end-of-subtree t t)
-                                               (point)))
-                     (goto-char beg)
-                     (insert value)
-                     ;; A value missing its final newline would glue
-                     ;; the next heading onto this body.
-                     (unless (or (bolp) (eobp)) (insert "\n"))
-                     (goto-char beg)
-                     (setq new-ref (ebp-org-ref-at-point))))
-                  (glasspane-org--save-and-invalidate))
-              (set-marker marker nil))
+          (let ((new-ref
+                 (glasspane-org--fresh-splice
+                  ref value
+                  (plist-get args :mtime)
+                  (plist-get args :beg)
+                  (plist-get args :end)
+                  (plist-get args :tick))))
             (setq glasspane-ui--detail-read-mode t)
             (jetpacs-shell-notify "Saved heading"
                                   (plist-get params :surface))
@@ -1182,6 +1182,9 @@ closure would otherwise resolve yesterday's coordinates."
                  (jetpacs-shell-surface-for "glasspane"))
              new-ref)
             'accepted)
+        (glasspane-org-splice-refused
+         (jetpacs-shell-notify (cadr err) (plist-get params :surface))
+         'rejected)
         (ebp-org-refused 'rejected)
         (ebp-org-unresolved 'stale)
         (error (message "glasspane: detail save failed: %s"

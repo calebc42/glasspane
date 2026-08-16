@@ -426,6 +426,140 @@ never mutates the user's global org hooks."
             (kill-buffer buf))))
       (delete-directory vault t))))
 
+(ert-deftest glasspane-test-org-save-funnel-persists-ciphertext ()
+  "The Glasspane mutation funnel runs Files' crypt chain before disk I/O."
+  (let* ((vault (make-temp-file "glasspane-crypt" t))
+         (file (expand-file-name "secrets.org" vault))
+         (ebp-org-roots nil)
+         buffer seen)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* Secret :crypt:\n"
+                    "-----BEGIN PGP MESSAGE-----\nold cipher\n"
+                    "-----END PGP MESSAGE-----\n"))
+          (setq buffer (find-file-noselect file))
+          ;; Model the decrypted buffer state Org Crypt presents to a
+          ;; mutation while the durable file still contains ciphertext.
+          (with-current-buffer buffer
+            (goto-char (point-min))
+            (re-search-forward "-----BEGIN PGP MESSAGE-----")
+            (beginning-of-line)
+            (delete-region (point)
+                           (progn
+                             (re-search-forward "-----END PGP MESSAGE-----")
+                             (forward-line 1)
+                             (point)))
+            (insert "cleartext secret\n"))
+          (let ((jetpacs-files-before-buffer-save-hook
+                 (list
+                  (lambda (path buf)
+                    (setq seen (list path buf))
+                    (with-current-buffer buf
+                      (goto-char (point-min))
+                      (re-search-forward "cleartext secret")
+                      (replace-match
+                       (concat "-----BEGIN PGP MESSAGE-----\n"
+                               "new cipher\n"
+                               "-----END PGP MESSAGE-----")))))))
+            (glasspane-org--save-and-invalidate buffer))
+          (should (equal (car seen) (file-truename file)))
+          (should (eq (cadr seen) buffer))
+          (with-temp-buffer
+            (insert-file-contents-literally file)
+            (should (search-forward "-----BEGIN PGP MESSAGE-----" nil t))
+            (should-not (search-forward "cleartext secret" nil t))))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer (set-buffer-modified-p nil))
+        (kill-buffer buffer))
+      (delete-directory vault t))))
+
+(ert-deftest glasspane-test-fresh-splice-restores-before-durability ()
+  "A failed correctness hook leaves neither speculative bytes nor dirt."
+  (let* ((vault (make-temp-file "glasspane-splice" t))
+         (file (expand-file-name "tasks.org" vault))
+         (org-directory vault)
+         (ebp-org-roots nil)
+         buffer)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* Stable\n:PROPERTIES:\n:ID: stable-id\n:END:\nold\n"
+                    "* Neighbor\nkeep\n"))
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer
+            (org-with-wide-buffer
+             (goto-char (point-min))
+             (let* ((ref (ebp-org-ref-at-point))
+                    (beg (point))
+                    (end (save-excursion
+                           (org-end-of-subtree t t)
+                           (point)))
+                    (tick (buffer-chars-modified-tick))
+                    (stamp (glasspane-org--mtime-stamp file))
+                    (original (buffer-string))
+                    (jetpacs-files-before-buffer-save-hook
+                     (list (lambda (&rest _)
+                             (error "encryption failed")))))
+               (should-error
+                (glasspane-org--fresh-splice
+                 ref
+                 (concat "* Changed\n:PROPERTIES:\n:ID: stable-id\n"
+                         ":END:\nnew\n")
+                 stamp beg end tick))
+               (should (equal (buffer-string) original))
+               (should-not (buffer-modified-p)))))
+          (with-temp-buffer
+            (insert-file-contents-literally file)
+            (should (string-search "* Stable" (buffer-string)))
+            (should-not (string-search "* Changed" (buffer-string)))))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer (set-buffer-modified-p nil))
+        (kill-buffer buffer))
+      (delete-directory vault t))))
+
+(ert-deftest glasspane-test-clock-deferred-save-persists-ciphertext ()
+  "The native clock's deferred plain save carries its local crypt hook."
+  (let* ((vault (make-temp-file "glasspane-clock-crypt" t))
+         (file (expand-file-name "clock.org" vault))
+         buffer marker)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "* Clocked secret :crypt:\nclear clock secret\n"))
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer
+            (org-mode)
+            (setq marker (copy-marker (point-min)))
+            (set-buffer-modified-p t))
+          (cl-letf (((symbol-function 'org-clock-is-active)
+                     (lambda () marker))
+                    ((symbol-function 'org-clock-out) #'ignore)
+                    ((symbol-function 'org-encrypt-entries)
+                     (lambda ()
+                       (goto-char (point-min))
+                       (when (re-search-forward "clear clock secret" nil t)
+                         (replace-match
+                          (concat "-----BEGIN PGP MESSAGE-----\n"
+                                  "clock cipher\n"
+                                  "-----END PGP MESSAGE-----")))))
+                    ;; The real function schedules this exact save on its
+                    ;; idle timer; running it now makes the durability arm
+                    ;; deterministic while retaining before-save-hook.
+                    ((symbol-function 'ebp-org-defer-save)
+                     (lambda () (save-buffer))))
+            (let ((org-clock-marker marker))
+              (should (eq (jetpacs-org-clock--on-out nil nil) 'accepted))))
+          (with-temp-buffer
+            (insert-file-contents-literally file)
+            (should (search-forward "-----BEGIN PGP MESSAGE-----" nil t))
+            (should-not (search-forward "clear clock secret" nil t))))
+      (when (markerp marker) (set-marker marker nil))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer (set-buffer-modified-p nil))
+        (kill-buffer buffer))
+      (delete-directory vault t))))
+
 (ert-deftest glasspane-test-org-roots-refusal ()
   "File access rides the ebp-org root policy: outside the roots signals
 `ebp-org-refused' (the UI layer's \\='rejected), a vanished file
@@ -1603,7 +1737,7 @@ both modes, degrading to the go-back placeholder on a dead ref."
           (with-temp-file file
             (insert "#+TITLE: Tasks\n\n"
                     "* TODO Parent\n"
-                    ":PROPERTIES:\n:FOO: bar\n:END:\n"
+                    ":PROPERTIES:\n:ID: parent-id\n:FOO: bar\n:END:\n"
                     "body\n"
                     "** Child\n"
                     "* Second\n"))
@@ -1621,6 +1755,25 @@ both modes, degrading to the go-back placeholder on a dead ref."
                           (car (ebp-org-ref-tokens
                                 (list (ebp-org-ref-at-point))
                                 :set "t-detail" :owner "glasspane")))))
+                     (save-args (headline value)
+                       (with-current-buffer (find-file-noselect file)
+                         (org-with-wide-buffer
+                          (goto-char (point-min))
+                          (re-search-forward (regexp-quote headline))
+                          (org-back-to-heading t)
+                          (let ((beg (point)))
+                            (list
+                             :value value
+                             :token (car (ebp-org-ref-tokens
+                                          (list (ebp-org-ref-at-point))
+                                          :set "t-detail-save"
+                                          :owner "glasspane"))
+                             :mtime (glasspane-org--mtime-stamp file)
+                             :beg beg
+                             :end (save-excursion
+                                    (org-end-of-subtree t t)
+                                    (point))
+                             :tick (buffer-chars-modified-tick))))))
                      (file-text ()
                        (with-current-buffer (find-file-noselect file)
                          (buffer-substring-no-properties (point-min)
@@ -1742,13 +1895,26 @@ both modes, degrading to the go-back placeholder on a dead ref."
             ;; extent (a rootless push would no-op unnoticed).
             (should (zerop pushes))
             ;; detail.save: durable rewrite + a re-anchoring re-push.
-            (let ((before (length continuations)))
-              (should (eq (run "detail.save"
-                               (list :value "* Parent2\nnew body\n"
-                                     :token (tok-for "Parent")))
-                          'accepted))
+            (let ((before (length continuations)) fresh-ref)
+              (cl-letf (((symbol-function 'glasspane-detail--push-screen)
+                         (lambda (_surface ref)
+                           (setq fresh-ref ref)
+                           (push #'ignore continuations))))
+                (should (eq (run "detail.save"
+                                 (save-args "Parent"
+                                            (concat
+                                             "* Parent2\n"
+                                             ":PROPERTIES:\n"
+                                             ":ID: parent-id\n"
+                                             ":END:\n"
+                                             "new body\n")))
+                            'accepted)))
               (should (string-search "new body" (file-text)))
               (should (string-search "* Parent2" (file-text)))
+              ;; Re-anchor from the newly written heading, retaining the
+              ;; stable Org ID even though its headline and extent moved.
+              (should (equal (plist-get fresh-ref :id) "parent-id"))
+              (should (equal (plist-get fresh-ref :headline) "Parent2"))
               (should (= (length continuations) (1+ before))))
             (should (eq (run "detail.save" '(:value 5 :token "x"))
                         'rejected))
@@ -1776,6 +1942,59 @@ both modes, degrading to the go-back placeholder on a dead ref."
                                '(:value "no stars here" :token "o0-swept"))
                           'rejected))
               (should (equal (file-text) before)))
+            ;; The descriptor snapshots disk and buffer freshness.  A
+            ;; concurrent external write wins; detail.save must neither
+            ;; overwrite it nor mutate the stale visiting buffer.
+            (let* ((args (save-args "Parent2"
+                                    "* Parent2\nfrom stale device\n"))
+                   (buf (find-file-noselect file))
+                   (before-buffer (with-current-buffer buf
+                                    (buffer-string))))
+              (with-temp-buffer
+                (insert-file-contents file)
+                (goto-char (point-max))
+                (insert "* External writer\n")
+                (write-region (point-min) (point-max) file nil 'silent))
+              ;; Make the conflict deterministic even on a filesystem
+              ;; whose timestamp resolution is coarser than this test.
+              (set-file-times file (time-add (current-time) 10))
+              (setq notified nil)
+              (should (eq (run "detail.save" args) 'rejected))
+              (should (member "File changed on disk — not saved" notified))
+              (should (equal (with-current-buffer buf (buffer-string))
+                             before-buffer))
+              (with-current-buffer buf
+                (revert-buffer :ignore-auto :noconfirm)))
+            ;; An unsaved Emacs mutation likewise invalidates the captured
+            ;; bounds/tick and survives the refusal untouched.
+            (let* ((args (save-args "Parent2"
+                                    "* Parent2\nfrom stale device\n"))
+                   (buf (find-file-noselect file)))
+              (with-current-buffer buf
+                (goto-char (point-max))
+                (insert "desktop draft\n"))
+              (setq notified nil)
+              (should (eq (run "detail.save" args) 'rejected))
+              (should (member "Heading changed in Emacs — not saved"
+                              notified))
+              (should (with-current-buffer buf (buffer-modified-p)))
+              (with-current-buffer buf
+                (revert-buffer :ignore-auto :noconfirm)))
+            ;; A live SPEC-19 Files editor owns the document coordinate
+            ;; space; the detail editor refuses rather than splicing under
+            ;; it, while a plain Files editor would not trip this arm.
+            (let* ((args (save-args "Parent2"
+                                    "* Parent2\nunder sync\n"))
+                   (buf (find-file-noselect file))
+                   (jetpacs-files--edit
+                    (list :path (file-truename file)
+                          :document "doc:test.org" :editor-id "body"
+                          :buffer buf)))
+              (setq notified nil)
+              (should (eq (run "detail.save" args) 'rejected))
+              (should (member "file is open in the synced editor"
+                              notified))
+              (should-not (string-search "under sync" (file-text))))
             ;; Bridged flows: a continuation is scheduled, nothing
             ;; prompts inside the dispatch extent.
             (should (eq (run "heading.refile"
@@ -1846,6 +2065,10 @@ both modes, degrading to the go-back placeholder on a dead ref."
                             (glasspane-detail--screen ref nil))))
                 (should (string-search "\"editor\"" json))
                 (should (string-search "detail.save" json))
+                (should (string-search "\"mtime\"" json))
+                (should (string-search "\"beg\"" json))
+                (should (string-search "\"end\"" json))
+                (should (string-search "\"tick\"" json))
                 (should (string-search "\"ttl_s\"" json))
                 (should (string-search "\"dedupe\"" json))))
             (let ((json (jetpacs-node->canonical-json

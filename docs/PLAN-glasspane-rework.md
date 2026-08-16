@@ -372,6 +372,28 @@ glasspane-clock.el moves near-verbatim under owner "org-mode" (pure org-clock, z
 
 **GR-6a gate:** full ERT, arms in `test/glasspane-test.el`: ciphertext regression (decrypted `:crypt:` entry + funnel save → on-disk bytes remain ciphertext); **clock ciphertext arm** (clock-out on a heading inside a decrypted `:crypt:` entry → idle save fires → on-disk bytes remain ciphertext); mtime-conflict arm (external touch → `detail.save` `'rejected` + snackbar); tick-conflict arm; shape-gate and ID re-anchor arms preserved; synced-document refusal arm. **Device arm:** edit a subtree containing a decrypted org-crypt entry via detail.save → ssh the file off, verify ciphertext; concurrent external edit (Termux `touch`+append) → save rejected on device.
 
+> **GR-6a DEVICE GATE COMPLETE 2026-08-16 — Pixel Tablet, Android 17.**
+> A real `org-crypt` fixture was encrypted by GnuPG, decrypted in the live
+> Emacs buffer, opened in Glasspane Detail, edited on-device, and saved
+> through `detail.save`.  The pulled file retained its complete PGP armor
+> and contained neither the original cleartext marker nor the device edit
+> marker (`tmp/gr6-crypt-after-detail-save.org`).
+>
+> A fresh Detail snapshot was then raced with a Termux append+touch.  The
+> physical Save tap returned **File changed on disk — not saved**; the
+> second pulled file retained both external append headings and its PGP
+> block while excluding the rejected device edit
+> (`tmp/gr6-crypt-after-conflict.org`, screenshot
+> `tmp/gr6-20-conflict-rejected.png`).  Cleanup removed only the disposable
+> fixture and scripts from the device, stopped the test GPG agent, and left
+> the Companion queue empty with airplane mode `0`, Wi-Fi `1`, and baseline
+> rotation `(accelerometer,user)=(1,0)`.
+>
+> Automated gates: Glasspane **70/70**, Files **61/61**, Org mode/editor
+> **17/17**, clock **7/7**, warning-as-error byte compilation, diff check,
+> and full elevated `test/run-tests.sh` **exit 0** (including live socket
+> integration).
+
 ### GR-6b — foundation save-policy seam + second adapter (one commit; cross-repo-verified)
 5. **Save-policy seam upstream (matrix rows 11-superset/12):** jetpacs-editor-org's bare after-save (`ebp-org-cache-invalidate` only, jetpacs-editor-org.el:286-288) adopts the full policy as a foundation function `jetpacs-editor-org-save-policy` — synchronous save + `vulpea-db-update-file` (guarded on vulpea presence; cross-repo rule: verify against Glasspane locally where vulpea is absent) + cache invalidation. **Invalidation scope RULING (mirrors GR-4 step 4's logic — a mutation writes a file ANY app's memos may cover):** the policy runs the **whole-cache** `(ebp-org-cache-invalidate)`, not a namespaced one — a namespaced `'glasspane` invalidate would leave the GR-3-consolidated `'org-mode` extraction memo (agenda cards, dashboard, reminder pipeline) stale after every todo swipe/detail.save until TTL, recreating risk #6 by plan. `glasspane-org--save-and-invalidate` becomes a thin wrapper over the policy. The `ebp-org-file-save-function` registration-time rebind (previous-holder restore) moves alongside. srs rate/postpone/suspend/undo durability (the G9 catch) pinned by a test asserting the policy runs INSIDE the engine form.
 6. **Second editor adapter (matrix row 13 / seam adoption):** `(jetpacs-editor-register 'glasspane-org …)` matching `.org` with ONLY `:actions` (append semantics — all matching adapters participate, verified jetpacs-editor.el:117-122) carrying the file-properties action, and `:after-save`; body/toolbar/fab stay nil (first-wins slots remain the stock adapter's).

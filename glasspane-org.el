@@ -28,6 +28,7 @@
 (require 'org-agenda)
 (require 'org-clock)
 (require 'ebp-org)
+(require 'jetpacs-files)
 (require 'jetpacs-org-reminders)         ; canonical agenda extraction
 (require 'jetpacs-org-vulpea)           ; note-index arm of the ONE grammar
 
@@ -39,6 +40,31 @@ Bound around our own programmatic saves (heading edits, file saves) so an
 explicit dashboard push isn't doubled by the save-hook firing on top.")
 
 (declare-function vulpea-db-update-file "ext:vulpea-db-extract" (file))
+
+(define-error 'glasspane-org-splice-refused
+  "Glasspane refused a stale or unsafe subtree splice" 'user-error)
+
+(defun glasspane-org--mtime-stamp (path)
+  "Return PATH's opaque microsecond modification stamp, or nil.
+The value is compared only with another value from this function; it is
+never parsed or exposed as a path-bearing identity."
+  (when-let* ((mtime (file-attribute-modification-time
+                      (file-attributes path))))
+    (format-time-string "%s.%6N" mtime)))
+
+(defun glasspane-org--splice-refuse (message)
+  "Refuse a subtree splice with user-facing MESSAGE."
+  (signal 'glasspane-org-splice-refused (list message)))
+
+(defun glasspane-org--synced-edit-p (path)
+  "Whether PATH is the live document in Files' synchronized editor."
+  (let ((current (jetpacs-files-current-edit-path))
+        (context (jetpacs-files-current-edit-context)))
+    (and current
+         (equal (file-truename current) (file-truename path))
+         (plist-get context :document)
+         (plist-get context :editor-id)
+         (buffer-live-p (plist-get context :buffer)))))
 
 (defun glasspane-org--vulpea-refresh-file (&optional buffer)
   "Synchronously re-index BUFFER's file in vulpea's db, when vulpea is up.
@@ -54,13 +80,98 @@ the stale row back out of the index.  No-op without vulpea."
 The shared tail of every mutation outside the UI layer's at-ref
 funnel — keep-the-funnel: the save happens NOW, never on an idle
 timer (`ebp-org-defer-save'), with the after-save dashboard refresh
-suppressed so the caller's explicit repush isn't doubled."
+suppressed so the caller's explicit repush isn't doubled.  Files'
+correctness-critical pre-write chain runs deliberately unisolated: an
+Org Crypt failure aborts before `save-buffer' can persist cleartext."
   (with-current-buffer (or buffer (current-buffer))
-    (let ((glasspane-org--inhibit-save-refresh t)
-          (save-silently t))
+    (let* ((glasspane-org--inhibit-save-refresh t)
+           (save-silently t)
+           (true (file-truename
+                  (or buffer-file-name
+                      (user-error "Buffer is not visiting a file")))))
+      (run-hook-with-args 'jetpacs-files-before-buffer-save-hook
+                          true (current-buffer))
       (save-buffer))
     (glasspane-org--vulpea-refresh-file))
   (ebp-org-cache-invalidate 'glasspane))
+
+(defun glasspane-org--fresh-splice (ref value stamp beg end tick)
+  "Replace REF's subtree with VALUE after validating open-time facts.
+STAMP, BEG, END, and TICK are the scalar snapshot minted with the detail
+editor.  The target is re-resolved from REF, including its Org ID, but the
+write proceeds only when disk mtime, subtree bounds, and buffer tick still
+match that snapshot.  Any failure before durability restores the visiting
+buffer's full text and modified state.  Return a freshly anchored ref."
+  (unless (and (stringp value)
+               (string-match-p "\\`\\*+\\(?:[ \t]\\|$\\)" value))
+    (glasspane-org--splice-refuse "Heading must start with Org stars"))
+  (when (> (string-bytes value) jetpacs-files-max-bytes)
+    (glasspane-org--splice-refuse "Heading is too large to save"))
+  ;; Check disk identity before resolving the ref.  Resolution may visit or
+  ;; consult the already-visiting buffer; doing it first would let Emacs ask
+  ;; whether to edit a buffer whose file changed externally, violating D2.
+  (let ((true (ebp-org--check-file (plist-get ref :file))))
+    (when (glasspane-org--synced-edit-p true)
+      (glasspane-org--splice-refuse "file is open in the synced editor"))
+    (unless (equal stamp (glasspane-org--mtime-stamp true))
+      (glasspane-org--splice-refuse "File changed on disk — not saved"))
+    (unless (file-writable-p true)
+      (glasspane-org--splice-refuse "File is not writable"))
+    (let ((marker (ebp-org-resolve-ref ref)))
+      (unwind-protect
+          (with-current-buffer (marker-buffer marker)
+            (org-with-wide-buffer
+             (goto-char marker)
+             (org-back-to-heading t)
+             (let ((current-beg (point))
+                   (current-end (save-excursion
+                                  (org-end-of-subtree t t)
+                                  (point))))
+               (unless (and (integerp beg) (integerp end) (integerp tick)
+                            (= current-beg beg) (= current-end end)
+                            (= (buffer-chars-modified-tick) tick))
+                 (glasspane-org--splice-refuse
+                  "Heading changed in Emacs — not saved"))
+               (let* ((original-beg (point-min))
+                      (original-end (point-max))
+                      (original-point (point))
+                      (original-modified (buffer-modified-p))
+                      (original-full
+                       (buffer-substring-no-properties
+                        (point-min) (point-max)))
+                      (changed nil)
+                      (durable nil)
+                      new-ref)
+                 (unwind-protect
+                     (progn
+                       (setq changed t)
+                       (delete-region current-beg current-end)
+                       (goto-char current-beg)
+                       (insert value)
+                       ;; Do not glue the following heading to a value
+                       ;; whose final newline was omitted by the client.
+                       (unless (or (bolp) (eobp)) (insert "\n"))
+                       (goto-char current-beg)
+                       (setq new-ref (ebp-org-ref-at-point))
+                       (when (> (string-bytes
+                                 (buffer-substring-no-properties
+                                  (point-min) (point-max)))
+                                jetpacs-files-max-bytes)
+                         (glasspane-org--splice-refuse
+                          "Edited file exceeds the save limit"))
+                       (glasspane-org--save-and-invalidate (current-buffer))
+                       (setq durable t)
+                       new-ref)
+                   (when (and changed (not durable))
+                     (let ((inhibit-read-only t))
+                       (widen)
+                       (delete-region (point-min) (point-max))
+                       (insert original-full)
+                       (narrow-to-region original-beg original-end)
+                       (goto-char
+                        (min (max original-point (point-min)) (point-max)))
+                       (set-buffer-modified-p original-modified))))))))
+        (set-marker marker nil)))))
 
 ;; The dashboard pushes every view on every action (so navigation stays
 ;; instant and offline-capable), which means the expensive extractions

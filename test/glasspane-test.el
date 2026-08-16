@@ -55,14 +55,23 @@ selection against the app's own surface."
                            :selected))))
 
 (ert-deftest glasspane-test-unload-clean ()
-  "Unregistration leaves no verb, no claim, no registry entry — the
-sibling modules' verbs included, since they register through
-`glasspane-register' rather than at their own load — and is undone by
-`glasspane-register' (the live-reload path), which this test restores
-so suite order never matters."
+  "Unregistration leaves no downstream verb, claim, or registry entry.
+Sibling modules register through `glasspane-register', while the native Org
+clock owner must survive.  Re-registration restores the app so suite order
+never matters."
   (let ((verbs '("glasspane.home"
-                 "org.clock.out" "org.clock.switch" "org.clock.in-last"
-                 "config.sync" "glasspane.packages.install")))
+                 "config.sync" "glasspane.packages.install"))
+        (native-clock-verbs
+         '("org.clock.out" "org.clock.switch" "org.clock.in-last")))
+    ;; GR-5: the clock machinery is upstream and must survive a downstream
+    ;; app unregister just as the foundation's Org settings do.
+    (dolist (name native-clock-verbs)
+      (should (eq (gethash name jetpacs-action-handlers)
+                  (pcase name
+                    ("org.clock.out" #'jetpacs-org-clock--on-out)
+                    ("org.clock.switch" #'jetpacs-org-clock--on-switch)
+                    (_ #'jetpacs-org-clock--on-in-last))))
+      (should (equal (jetpacs--owner-of "action" name) "org-mode")))
     (unwind-protect
         (progn
           (glasspane-unregister)
@@ -72,6 +81,9 @@ so suite order never matters."
             ;; and unregister must agree on what "glasspane" owns.
             (should-not (jetpacs--owner-of "action" name)))
           (should-not (assoc glasspane-owner jetpacs-apps--registry))
+          (dolist (name native-clock-verbs)
+            (should (gethash name jetpacs-action-handlers))
+            (should (equal (jetpacs--owner-of "action" name) "org-mode")))
           ;; §3 step 2: the app's ONE consolidated section sweeps with
           ;; it — and the foundation's org sections must SURVIVE the
           ;; app's unregister (they are not glasspane's to sweep).
@@ -472,199 +484,44 @@ Loading the worker-lib beforehand must itself have had no side effects
                    log-before)))
   (should-not glasspane-vulpea--registered))
 
-;;;; G2 — services: glasspane-clock.el
+;;;; G2 / GR-5 — downstream clock rollback adapter
 
-(ert-deftest glasspane-test-clock-notification-shape ()
-  "The chronometer SurfaceSpec is SPEC 18.5-shaped: the elapsed timer
-is meta `:chronometer' `:base_ms' (epoch millis, an integer), the
-buttons live in meta `:actions' (a vector — the notification node set
-has no button), every action carries a non-drop offline policy WITH
-its mandatory ttl, and the whole spec round-trips the canonical wire
-encoding."
-  (require 'glasspane-clock)
-  (cl-letf (((symbol-function 'org-clock-is-active) (lambda () t)))
-    (let* ((org-clock-current-task "Water the garden")
-           (org-clock-start-time (time-subtract nil 90))
-           (spec (glasspane-clock-notification-spec))
-           (meta (plist-get spec :meta))
-           (chrono (plist-get meta :chronometer))
-           (actions (plist-get meta :actions)))
-      ;; The body is inside the notification profile's node set.
-      (should (equal (plist-get (plist-get spec :body) :t) "text"))
-      (should (eq (plist-get meta :ongoing) t))
-      (should (equal (plist-get meta :category) "stopwatch"))
-      (should (integerp (plist-get chrono :base_ms)))
-      (should (= (plist-get chrono :base_ms)
-                 (truncate (* 1000 (float-time org-clock-start-time)))))
-      (should (vectorp actions))
-      (should (= (length actions) 2))
-      ;; Most important first: the platform may show fewer (SPEC 18.5).
-      (should (equal (mapcar (lambda (a) (plist-get a :label))
-                             (append actions nil))
-                     '("Clock out" "Switch task")))
-      (seq-doseq (entry actions)
-        (let ((tap (plist-get entry :on_tap)))
-          (should (member (plist-get tap :action)
-                          '("org.clock.out" "org.clock.switch")))
-          ;; No client in this harness, so `offline.wake' is ungranted:
-          ;; the descriptor degrades wake -> queue (amendment #85 would
-          ;; void the surface at the push gate) and still carries the
-          ;; ttl every non-drop policy requires (SPEC 14.1 / plan T4).
-          (should (equal (plist-get tap :when_offline) "queue"))
-          (should (integerp (plist-get tap :ttl_s)))
-          (should (<= 1 (plist-get tap :ttl_s) 604800))))
-      (let ((json (jetpacs-node->canonical-json spec)))
-        (should (stringp json))
-        (should (string-search "\"base_ms\"" json))
-        (should (string-search "\"actions\"" json))
-        (should (string-search "Water the garden" json))))))
+(ert-deftest glasspane-test-clock-rollback-adapter-is-inert-by-default ()
+  "The downstream owner is opt-in and never removes native handlers by accident."
+  (should-not (default-value 'glasspane-clock-enabled))
+  (unwind-protect
+      (progn
+        (let ((jetpacs-org-clock-enabled t))
+          (jetpacs-org-clock-register))
+        ;; Normal forward state: registering the disabled downstream adapter
+        ;; leaves the upstream owner and hooks byte-for-byte intact.
+        (let ((glasspane-clock-enabled nil))
+          (glasspane-clock-install-hooks))
+        (should (eq (gethash "org.clock.out" jetpacs-action-handlers)
+                    #'jetpacs-org-clock--on-out))
+        (should (equal (jetpacs--owner-of "action" "org.clock.out")
+                       "org-mode"))
+        (should-not (memq #'glasspane-clock--assert org-clock-in-hook))
 
-(ert-deftest glasspane-test-clock-handler-matrix ()
-  "Every clock verb answers a SPEC 14.4 status over faked org-clock
-state: out with no clock is `stale' (the notification outlived
-reality), out with a running clock is `accepted' with the clock
-buffer's save deferred through the ebp-org funnel, switch is a
-definitive `rejected' until a real picker exists, and in-last maps
-success/signal to `accepted'/`rejected'."
-  (require 'glasspane-clock)
-  ;; out, no clock -> stale.
-  (cl-letf (((symbol-function 'org-clock-is-active) (lambda () nil)))
-    (should (eq (glasspane-clock--on-out nil nil) 'stale)))
-  ;; out, running -> accepted; `org-clock-out' ran; the save was
-  ;; deferred IN the clock buffer (captured before out cleared markers).
-  (with-temp-buffer
-    (let ((m (point-marker)) (saved nil) (outed nil))
-      (cl-letf (((symbol-function 'org-clock-is-active) (lambda () m))
-                ((symbol-function 'org-clock-out)
-                 (lambda (&rest _) (setq outed t)))
-                ((symbol-function 'ebp-org-defer-save)
-                 (lambda () (push (current-buffer) saved))))
-        (let ((org-clock-marker m))
-          (should (eq (glasspane-clock--on-out nil nil) 'accepted))
-          (should outed)
-          (should (equal saved (list (current-buffer))))))))
-  ;; switch -> rejected: v1's `org-clock-goto' jump is a desktop
-  ;; effect the phone cannot observe (plan G2).
-  (should (eq (glasspane-clock--on-switch nil nil) 'rejected))
-  ;; in-last: success -> accepted; a signal (empty history, or a
-  ;; prompt dying under the no-prompt regime) -> rejected.
-  ;; A live marker, as the out arm has: a bare `make-marker' points at
-  ;; no buffer, so the deferred save would never be reached at all.
-  (with-temp-buffer
-    (let ((m (point-marker)) (saved nil))
-      (cl-letf (((symbol-function 'org-clock-in-last) (lambda (&rest _) t))
-                ((symbol-function 'ebp-org-defer-save)
-                 (lambda () (push (current-buffer) saved))))
-        (let ((org-clock-marker m))
-          (should (eq (glasspane-clock--on-in-last nil nil) 'accepted))
-          (should (equal saved (list (current-buffer))))))))
-  (cl-letf (((symbol-function 'org-clock-in-last)
-             (lambda (&rest _) (user-error "No last clock"))))
-    (should (eq (glasspane-clock--on-in-last nil nil) 'rejected))))
-
-(ert-deftest glasspane-test-clock-replayed-tap-dispatch ()
-  "A durable clock tap replayed during SYNCING — after an Emacs restart,
-SPEC 10.3 step 4, BEFORE the READY hook (step 5) re-claims the
-notification root — reaches the handler's matrix instead of dying at
-the D1 owned-surface gate: `rejected' there is PERMANENT (SPEC 14.4),
-deleting the receipt while the clock keeps running.  The org.clock.*
-verbs are global (:any-surface), so the full dispatch with the wire
-surface and NO prior `glasspane-clock--assert' answers the matrix's
-`stale'/`accepted'."
-  (require 'glasspane-clock)
-  ;; The replay premise: this session holds no live claim on the
-  ;; notification surface, exactly like a fresh restart.
-  (should-not (jetpacs-owned-surface-p glasspane-clock-surface "glasspane"))
-  (dolist (name '("org.clock.out" "org.clock.switch" "org.clock.in-last"))
-    (should (plist-get (jetpacs-action-schema name) :any-surface)))
-  (let ((handler (gethash "org.clock.out" jetpacs-action-handlers)))
-    (should handler)
-    ;; No clock survives the restart -> the matrix's honest `stale'.
-    (cl-letf (((symbol-function 'org-clock-is-active) (lambda () nil)))
-      (should (eq (jetpacs--dispatch
-                   nil (list :action "org.clock.out"
-                             :surface glasspane-clock-surface
-                             :args nil)
-                   handler)
-                  'stale)))
-    ;; A clock still running -> the replayed clock-out lands `accepted'.
-    (with-temp-buffer
-      (let ((m (point-marker)) (outed nil))
-        (cl-letf (((symbol-function 'org-clock-is-active) (lambda () m))
-                  ((symbol-function 'org-clock-out)
-                   (lambda (&rest _) (setq outed t)))
-                  ((symbol-function 'ebp-org-defer-save) (lambda () t)))
-          (let ((org-clock-marker m))
-            (should (eq (jetpacs--dispatch
-                         nil (list :action "org.clock.out"
-                                   :surface glasspane-clock-surface
-                                   :args nil)
-                         handler)
-                        'accepted))
-            (should outed)))))))
-
-(ert-deftest glasspane-test-clock-grant-degrade ()
-  "With `surfaces.notification' ungranted — or no client at all,
-`jetpacs-granted-p' fails closed — the mirror degrades WHOLE and
-SILENT: no root registered, no push, no signal (the push gate would
-error); and retire never tombstones a surface this session never
-asserted."
-  (require 'glasspane-clock)
-  (let ((pushes 0) (roots 0) (removes 0))
-    (cl-letf (((symbol-function 'jetpacs-granted-p) (lambda (&rest _) nil))
-              ((symbol-function 'jetpacs-shell-push)
-               (lambda (&rest _) (cl-incf pushes)))
-              ((symbol-function 'jetpacs-shell-define-root)
-               (lambda (&rest _) (cl-incf roots)))
-              ((symbol-function 'jetpacs-shell-remove-root)
-               (lambda (&rest _) (cl-incf removes)))
-              ((symbol-function 'org-clock-is-active) (lambda () t)))
-      (let ((glasspane-clock--live nil)
-            (org-clock-current-task "Task")
-            (org-clock-start-time (current-time)))
-        (glasspane-clock--assert)
-        (glasspane-clock--on-ready nil)
-        (should-not glasspane-clock--live)
-        (glasspane-clock--retire)
-        (should (= roots 0))
-        (should (= pushes 0))
-        (should (= removes 0))))))
-
-(ert-deftest glasspane-test-clock-ready-tombstones-stopped ()
-  "READY with NO running clock tombstones the phone's cached
-chronometer: exactly one `jetpacs-shell-remove-root', no root, no
-push.  Asserted with the grant DENIED and `glasspane-clock--live' nil,
-because the removal is deliberately neither grant-gated nor
-live-gated — the cache survives an Emacs restart, where this session
-has asserted nothing and may hold no grant at all, and only Emacs
-knows the clock stopped.
-
-The live case is the `org-clock-cancel' shape: cancel runs
-`org-clock-cancel-hook', which this module does not hook, so the flag
-survives a clock this arm then tombstones.  The removal must clear it,
-or the next clock-in skips `jetpacs-shell-define-root' (the only
-tombstone-clearing call) and pushes into nothing forever."
-  (require 'glasspane-clock)
-  (let ((pushes 0) (roots 0) (removes 0))
-    (cl-letf (((symbol-function 'jetpacs-granted-p) (lambda (&rest _) nil))
-              ((symbol-function 'jetpacs-shell-push)
-               (lambda (&rest _) (cl-incf pushes)))
-              ((symbol-function 'jetpacs-shell-define-root)
-               (lambda (&rest _) (cl-incf roots)))
-              ((symbol-function 'jetpacs-shell-remove-root)
-               (lambda (&rest _) (cl-incf removes)))
-              ((symbol-function 'org-clock-is-active) (lambda () nil)))
-      (let ((glasspane-clock--live nil))
-        (glasspane-clock--on-ready nil)
-        (should (= removes 1))
-        (should (= roots 0))
-        (should (= pushes 0)))
-      (let ((glasspane-clock--live t))
-        (glasspane-clock--on-ready nil)
-        (should (= removes 2))
-        (should-not glasspane-clock--live)
-        (should (= roots 0))
-        (should (= pushes 0))))))
+        ;; Rollback state: the downstream adapter first retires the upstream
+        ;; integration, then owns the unchanged durable names itself.
+        (let ((jetpacs-org-clock-enabled nil))
+          (jetpacs-org-clock-register))
+        (let ((glasspane-clock-enabled t))
+          (glasspane-clock-install-hooks))
+        (dolist (name '("org.clock.out" "org.clock.switch"
+                        "org.clock.in-last"))
+          (should (gethash name jetpacs--any-surface-actions))
+          (should (equal (jetpacs--owner-of "action" name) "glasspane")))
+        (should (eq (gethash "org.clock.out" jetpacs-action-handlers)
+                    #'glasspane-clock--on-out))
+        (should (memq #'glasspane-clock--assert org-clock-in-hook))
+        (should-not (memq #'jetpacs-org-clock--assert org-clock-in-hook)))
+    ;; Every exit restores the canonical owner for the remainder of the suite.
+    (let ((glasspane-clock-enabled nil))
+      (glasspane-clock-install-hooks))
+    (let ((jetpacs-org-clock-enabled t))
+      (jetpacs-org-clock-register))))
 
 ;;;; G2 — services: glasspane-config.el
 
@@ -4886,8 +4743,7 @@ glasspane-gallery at orders 81 and 84, beside the app's own 80.")
     "heading.tags" "heading.tap" "heading.todo-cycle"
     "heading.todo-set" "journal.capture" "journal.goto" "journal.nav"
     "journal.today" "link.materialize" "notes.mentions"
-    "org.babel.execute" "org.clock.in-last"
-    "org.clock.out" "org.clock.switch" "org.link.open"
+    "org.babel.execute" "org.link.open"
     "org.search.run" "org.table.add-col" "org.table.add-row"
     "org.table.cell-menu" "org.table.edit" "search.by-tag"
     "search.clear-filters" "search.update-filter"
@@ -4900,11 +4756,10 @@ glasspane-gallery at orders 81 and 84, beside the app's own 80.")
     "views.rendering" "views.reorder" "views.save")
   "Every verb that opens NO screen of its own, and therefore needs no
 hub entry: the in-screen controls (filters, navigation, ratings, cell
-and heading mutations), the dialog-fired saves, the notification
-buttons, the M-x-only seeders (demo.setup*), and the drill-ins reached FROM a
-screen the hub opens (views.open from the views hub, heading.tap from
-every card).  Classification only — the list exists so the inventory
-below is total.")
+and heading mutations), the dialog-fired saves, the M-x-only seeders
+(demo.setup*), and the drill-ins reached FROM a screen the hub opens
+(views.open from the views hub, heading.tap from every card).
+Classification only — the list exists so the inventory below is total.")
 
 (ert-deftest glasspane-test-hub-reaches-every-opener ()
   "The hub is REACHABILITY: build the home screen and walk it.

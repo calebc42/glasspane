@@ -5,12 +5,11 @@
 
 ;;; Commentary:
 
-;; Mirrors the running org clock to the Companion as an ongoing
-;; chronometer notification with Clock out / Switch task actions, and
-;; re-asserts it at READY so the phone's cache matches reality after an
-;; Emacs restart.  Zero glasspane siblings by design
-;; (docs/PLAN-glasspane-app.md, G2 — the pattern-proving port): pure
-;; org-clock over the foundation's surface/shell/widget layers.
+;; The legacy clock owner retained only for the GR-5 rollback window.
+;; Native clock state, persistence, and chronometer delivery now live in
+;; `jetpacs-org-clock'; this downstream copy stays inert unless
+;; `glasspane-clock-enabled'.  Glasspane's opinionated clock-in placement
+;; remains in its detail and reader screens, independent of this adapter.
 ;;
 ;; Retired against v1 (docs/PLAN-glasspane-app.md, retirement list +
 ;; G2): the whole `widget:custom1' home-screen clock widget block
@@ -28,10 +27,18 @@
 ;;; Code:
 
 (require 'org-clock)
+(require 'org-crypt)
 (require 'ebp-org)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
+(require 'jetpacs-org-clock)
+
+(defvar glasspane-clock-enabled nil
+  "Non-nil to register the legacy clock engine during rollback only.
+Native Org clock integration is the default owner after GR-5.  This flag and
+file remain through the soak window so the cutover can be reversed without a
+code rollback.")
 
 (defconst glasspane-clock-surface "notification:org-clock"
   "The chronometer's surface id (SPEC 13.1; the v1 name, kept).")
@@ -159,9 +166,8 @@ REGISTERED root, and a clock cancelled through `org-clock-cancel-hook'
 \(which this module does not hook) leaves it set over a root this arm
 drops — a later `glasspane-clock--assert' would then skip
 `jetpacs-shell-define-root', the only thing that clears the tombstone,
-and push into nothing for the rest of the session.  Runs before the
-shell's drain at depth 90, so the re-registered root's push rides this
-very READY."
+and push into nothing for the rest of the session.  Runs in the late
+depth-90 READY phase, after durable replay has settled."
   (if (org-clock-is-active)
       (glasspane-clock--assert)
     (setq glasspane-clock--live nil)
@@ -182,7 +188,9 @@ outside this extent."
                     (marker-buffer org-clock-marker))))
       (org-clock-out)
       (when (buffer-live-p buf)
-        (with-current-buffer buf (ebp-org-defer-save)))
+        (with-current-buffer buf
+          (add-hook 'before-save-hook #'org-encrypt-entries nil t)
+          (ebp-org-defer-save)))
       'accepted)))
 
 (defun glasspane-clock--on-switch (_args _params)
@@ -202,7 +210,9 @@ notification asserts via `org-clock-in-hook' outside this extent."
         (let ((buf (and (markerp org-clock-marker)
                         (marker-buffer org-clock-marker))))
           (when (buffer-live-p buf)
-            (with-current-buffer buf (ebp-org-defer-save))))
+            (with-current-buffer buf
+              (add-hook 'before-save-hook #'org-encrypt-entries nil t)
+              (ebp-org-defer-save))))
         'accepted)
     (error
      ;; Label only: the datum may quote heading text (SPEC 23.3).
@@ -220,6 +230,11 @@ notification asserts via `org-clock-in-hook' outside this extent."
     (setq glasspane-clock--live nil)
     (glasspane-clock-remove-hooks)))
 
+(defun glasspane-clock--undef-if-handler (name handler)
+  "Undefine NAME only when HANDLER is still the legacy implementation."
+  (when (eq (gethash name jetpacs-action-handlers) handler)
+    (jetpacs-undefaction name)))
+
 (defun glasspane-clock-remove-hooks ()
   "Detach everything `glasspane-clock-install-hooks' attached.
 Retires a live chronometer first: disabling the app must not leave a
@@ -228,9 +243,12 @@ dead timer ticking in the phone's shade."
   ;; Idempotent against `jetpacs-teardown-owner', which sweeps the
   ;; owner's actions before the teardown hook lands here; the
   ;; unregister/unload path has no such sweep and needs these.
-  (jetpacs-undefaction "org.clock.out")
-  (jetpacs-undefaction "org.clock.switch")
-  (jetpacs-undefaction "org.clock.in-last")
+  (glasspane-clock--undef-if-handler
+   "org.clock.out" #'glasspane-clock--on-out)
+  (glasspane-clock--undef-if-handler
+   "org.clock.switch" #'glasspane-clock--on-switch)
+  (glasspane-clock--undef-if-handler
+   "org.clock.in-last" #'glasspane-clock--on-in-last)
   (remove-hook 'org-clock-in-hook #'glasspane-clock--assert)
   (remove-hook 'org-clock-out-hook #'glasspane-clock--retire)
   (remove-hook 'jetpacs-ready-functions #'glasspane-clock--on-ready)
@@ -244,31 +262,33 @@ rule); registering here rather than at load also lets the entry's
 unregister/re-register pair round-trip the verbs without a re-require.
 Teardown of the app's owner detaches everything
 \(`jetpacs-teardown-functions', arity (OWNER))."
-  ;; :any-surface — D1 GLOBAL verbs, deliberately: a durable tap
-  ;; (ttl 3600, the dead-Emacs case this notification exists for)
-  ;; replays during SYNCING (SPEC 10.3 step 4), BEFORE the READY hook
-  ;; (step 5) re-claims the notification root, and the owned-surface
-  ;; gate reads live in-memory claims — surface-scoped, the replayed
-  ;; tap would answer a PERMANENT `rejected' (SPEC 14.4), deleting the
-  ;; receipt while the clock keeps running.  Same hole for a tap queued
-  ;; across retire's unclaim mid-session.  The handlers' own no-clock
-  ;; `stale' arm keeps the widened scope honest.
-  (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction "org.clock.out" #'glasspane-clock--on-out
-                       :any-surface t
-                       :doc "Stop the running org clock.")
-    (jetpacs-defaction "org.clock.switch" #'glasspane-clock--on-switch
-                       :any-surface t
-                       :doc "Switch the running clock (no picker yet).")
-    (jetpacs-defaction "org.clock.in-last" #'glasspane-clock--on-in-last
-                       :any-surface t
-                       :doc "Resume the last clocked task."))
-  (add-hook 'org-clock-in-hook #'glasspane-clock--assert)
-  (add-hook 'org-clock-out-hook #'glasspane-clock--retire)
-  (add-hook 'jetpacs-ready-functions #'glasspane-clock--on-ready)
-  (add-hook 'jetpacs-teardown-functions #'glasspane-clock--on-teardown)
-  ;; The app may be enabled mid-session with a clock already running.
-  (glasspane-clock--assert))
+  (if (not glasspane-clock-enabled)
+      ;; A live flag flip retires only legacy identities.  The canonical
+      ;; upstream owner may already occupy the durable names.
+      (glasspane-clock-remove-hooks)
+    ;; Downstream rollback is allowed to disable the upstream integration;
+    ;; the upstream module never reaches back into this application.
+    (jetpacs-org-clock-unregister)
+    ;; :any-surface — D1 GLOBAL verbs, deliberately: a durable tap
+    ;; (ttl 3600, the dead-Emacs case this notification exists for)
+    ;; replays during SYNCING, before READY re-claims the root.
+    (with-jetpacs-owner "glasspane"
+      (jetpacs-defaction "org.clock.out" #'glasspane-clock--on-out
+                         :any-surface t
+                         :doc "Stop the running org clock.")
+      (jetpacs-defaction "org.clock.switch" #'glasspane-clock--on-switch
+                         :any-surface t
+                         :doc "Switch the running clock (no picker yet).")
+      (jetpacs-defaction "org.clock.in-last" #'glasspane-clock--on-in-last
+                         :any-surface t
+                         :doc "Resume the last clocked task."))
+    (add-hook 'org-clock-in-hook #'glasspane-clock--assert)
+    (add-hook 'org-clock-out-hook #'glasspane-clock--retire)
+    (add-hook 'jetpacs-ready-functions #'glasspane-clock--on-ready 90)
+    (add-hook 'jetpacs-teardown-functions #'glasspane-clock--on-teardown)
+    ;; The app may be enabled mid-session with a clock already running.
+    (glasspane-clock--assert))
+  t)
 
 (provide 'glasspane-clock)
 ;;; glasspane-clock.el ends here

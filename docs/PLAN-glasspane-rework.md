@@ -321,6 +321,45 @@ glasspane-clock.el moves near-verbatim under owner "org-mode" (pure org-clock, z
 **Ceremony §5.3 gates the deploy.** Suite moves to new `test/jetpacs-org-clock-test.el`, **wired into test/run-tests.sh in the same commit.**
 **Gate:** ERT lifecycle suite green under the new name. **Device arms:** on the TABLET (the only device with a Glasspane detail screen): clock-in from detail → ongoing chronometer with 2 meta actions; clock-out FROM the notification retires it and the CLOCK line closes on disk; offline-queued clock-out replays during SYNCING, accepted. On the DAILY DRIVER (first chronometer code there — jetpacs-org-mode now carries it; GR-0's I-8 fix made the surface eligible): M-x org-clock-in → chronometer posts.
 
+> **GR-5 DEVICE GATE COMPLETE 2026-08-16 — Pixel Tablet, Android 17.**
+> The clock-out gate began stopped, with no live
+> `notification:org-clock`, an empty private queue, and the notification
+> grant present.  The deployed downstream `user.el` explicitly required
+> Glasspane while selecting flags `(jetpacs-org-clock-enabled
+> glasspane-clock-enabled) = (t nil)`; all three byte-stable durable verbs
+> and the notification root resolved to owner `org-mode`.
+>
+> A physical tap on Glasspane detail's unchanged **Clock in** affordance
+> started `GR5_CLOCK_FORWARD_20260816_1503`.  The Android shade showed one
+> ongoing elapsed chronometer with exactly **Clock out** and **Switch task**;
+> a physical **Clock out** notification tap retired it and left one closed
+> CLOCK line and no open line on disk.  For the cold durable arm, event
+> `a5c52026081615120000000000000002` was the sole queued record while the
+> Companion was stopped; Emacs restored the running generated clock before
+> reconnect, then the action replayed during SYNCING with summary
+> `(delivered 1 rejected 0 expired 0 remaining 0 blocked_by nil)`.  Its
+> durable receipt committed, the clock closed on disk, and the private queue
+> returned to `records=0` (`next_seq=5`).
+>
+> The reverse persisted flags `(nil t)`, restarted Emacs, and transferred
+> the unchanged verbs, hooks, root, and two-action chronometer to owner
+> `glasspane`; its registered clock-out handler answered `accepted` and
+> retired cleanly.  Final restoration persisted `(t nil)`, removed the
+> temporary clock-persistence harness, and left only the native Org hooks
+> and owner.  A native interactive `org-clock-in` call then posted the
+> elapsed chronometer under `org-mode`, supplying the same-day live-use arm
+> on the only connected device; the full-day daily-driver soak remains the
+> GR-9 demolition prerequisite.
+>
+> Cleanup removed only the four exact generated Org subtrees and audited
+> transport files.  Final state: no active clock/root/notification, queue
+> empty, airplane mode `0`, Wi-Fi `1`, and baseline rotation restored
+> (accelerometer `1`, user rotation `0`).  Evidence is the `tmp/gr5-*` set
+> from this run.  Automated gates: clock **7/7**, Org mode **17/17**,
+> Glasspane **67/67**, integration **14/14**, warning-as-error byte
+> compilation, zero upstream `glasspane` names, and full
+> `test/run-tests.sh` **exit 0**.
+
 ## GR-6 — Editor discipline: org-crypt closure + freshness merge + save-policy seam
 
 **Goal:** no Glasspane mutation can persist cleartext (I-4); the two complementary save-guard models become one shared core; app save policy becomes a foundation seam so srs durability survives GR-9's deletions. Two commit-able halves with separate blast radii: GR-6a is app-side hardening, GR-6b is a foundation refactor (its save-policy seam must be cross-repo-verified against vulpea-absent Glasspane).

@@ -167,10 +167,9 @@ registry entry in place."
   ;; at app enable — never at glasspane-org's load (a bare `require'
   ;; must not mutate the user's `before-save-hook').  Teardown of this
   ;; owner detaches them; install self-registers that removal.  The
-  ;; clock mirror's org-clock/READY hooks follow the same rule — and
-  ;; every sibling VERB registers through here too, never at module
-  ;; load, so `glasspane-unregister' can sweep what only this pair
-  ;; creates and restore it without a re-require.
+  ;; The disabled clock rollback adapter follows the same rule.  Native
+  ;; chronometer hooks live in the upstream Org Mode app; every downstream
+  ;; sibling verb registers through here, never at module load.
   (glasspane-org-install-hooks)
   (glasspane-clock-install-hooks)
   (glasspane-config-register)
@@ -191,10 +190,9 @@ registry entry in place."
   (glasspane-gallery-register))
 
 (defun glasspane-unregister ()
-  "Deregister every verb, the chrome root, and the app identity.
-The G0 gate contract: no glasspane handler and no claim survives this
-— the sibling modules' verbs (clock's org.clock.*, config.sync,
-glasspane.packages.install) sweep with the entry's own."
+  "Deregister every downstream verb, the chrome root, and app identity.
+The G0 gate contract: no Glasspane handler or claim survives this.  Native
+Org clock handlers are upstream and deliberately survive."
   (jetpacs-undefaction "glasspane.home")
   (jetpacs-apps-unregister glasspane-owner)
   (jetpacs-chrome-remove glasspane-owner)

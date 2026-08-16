@@ -1178,6 +1178,279 @@ exactly one — and a nil seam changes nothing."
       (jetpacs-chrome-remove "app:gadem")
       (jetpacs-chrome-remove "app:gadem2"))))
 
+;;;; S10 — global-actions placement
+
+(defconst jetpacs-chrome-test--mx-item
+  (list :icon "terminal" :label "M-x"
+        :on-tap (jetpacs-action "jetpacs.emacs.mx"))
+  "The device's own global item (jetpacs-init.el's S10 seed).")
+
+(defun jetpacs-chrome-test--mx-button ()
+  "The node the S3 node seam ships — `jetpacs-emacs-ui-mx-button''s body,
+inlined so this suite keeps loading no application layer."
+  (jetpacs-icon-button "terminal" (jetpacs-action "jetpacs.emacs.mx")
+                       :content-description "M-x"))
+
+(ert-deftest jetpacs-chrome-global-items-top-bar-supersedes-the-node-seam ()
+  "The S10 data seam at the default `top-bar' placement: an item authors
+the SAME button the node seam ships, joins and de-dups exactly as
+before, and SUPERSEDES the node seam when both are set — the device
+seeds both, and exactly one M-x must render."
+  (let ((jetpacs-chrome-global-actions-placement 'top-bar)
+        (jetpacs-chrome-global-actions-function
+         (lambda (_s) (list (jetpacs-chrome-test--mx-button))))
+        (jetpacs-chrome-global-items-function
+         (lambda (_s) (list jetpacs-chrome-test--mx-item))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "gidem"
+            (jetpacs-chrome-define-root
+             "gidem" "root"
+             (lambda (_back) (jetpacs-chrome-screen "R" (jetpacs-text "r"))))
+            (jetpacs-chrome-define-root
+             "gidem2" "root"
+             (lambda (_back)
+               (jetpacs-chrome-screen
+                "R" (jetpacs-text "r")
+                :actions (list (jetpacs-chrome-test--mx-button))))))
+          ;; Bare screen: ONE M-x, and it is byte-for-byte the node the
+          ;; node seam would have joined.
+          (let* ((mv (jetpacs-chrome--build "app:gidem"))
+                 (bar (plist-get (gethash "root" (plist-get mv :views))
+                                 :top_bar))
+                 (kids (append (plist-get bar :children) nil)))
+            (should (= 1 (cl-count-if
+                          (lambda (k)
+                            (string-search "jetpacs.emacs.mx"
+                                           (format "%S" k)))
+                          kids)))
+            (should (equal (car (last kids))
+                           (jetpacs-chrome-test--mx-button))))
+          ;; Authoring screen: still exactly its own.
+          (let* ((mv (jetpacs-chrome--build "app:gidem2"))
+                 (bar (plist-get (gethash "root" (plist-get mv :views))
+                                 :top_bar)))
+            (should (= 1 (cl-count-if
+                          (lambda (k)
+                            (string-search "jetpacs.emacs.mx"
+                                           (format "%S" k)))
+                          (append (plist-get bar :children) nil))))))
+      (jetpacs-chrome-remove "app:gidem")
+      (jetpacs-chrome-remove "app:gidem2"))))
+
+(ert-deftest jetpacs-chrome-global-items-fab-placement ()
+  "`fab' placement: one global item becomes the `fab' of EVERY stacked
+screen — the dock's reach, not the drawer's root-only one — the top bar
+keeps only what the screen authored, and a screen authoring its own fab
+keeps it, the globals falling back to its top bar (authored-wins costs
+the slot, never the reach)."
+  (let ((jetpacs-chrome-global-actions-placement 'fab)
+        (jetpacs-chrome-global-items-function
+         (lambda (_s) (list jetpacs-chrome-test--mx-item))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "fabdem"
+            (jetpacs-chrome-define-root
+             "fabdem" "root"
+             (lambda (back)
+               (jetpacs-chrome-screen "R" (jetpacs-text "r") :back back)))
+            (jetpacs-chrome-define-root
+             "fabdem2" "root"
+             (lambda (_back)
+               (jetpacs-chrome-screen
+                "R" (jetpacs-text "r")
+                :fab (jetpacs-icon-button "add"
+                                          (jetpacs-action "jetpacs.noop")
+                                          :content-description "own")))))
+          (jetpacs-chrome--stack-insert
+           "app:fabdem" "leaf"
+           (lambda (back)
+             (jetpacs-chrome-screen "L" (jetpacs-text "l") :back back)))
+          (let* ((mv (jetpacs-chrome--build "app:fabdem"))
+                 (views (plist-get mv :views)))
+            (dolist (id '("root" "leaf"))
+              (let ((fab (plist-get (gethash id views) :fab)))
+                (should (equal (plist-get fab :t) "icon_button"))
+                (should (equal (plist-get fab :icon) "terminal"))
+                (should (equal (plist-get fab :content_description) "M-x"))
+                (should (equal (plist-get (plist-get fab :on_tap) :action)
+                               "jetpacs.emacs.mx"))))
+            ;; Nothing leaked into the bar the placement moved it out of.
+            (should-not (string-search
+                         "jetpacs.emacs.mx"
+                         (format "%S" (plist-get (gethash "root" views)
+                                                 :top_bar)))))
+          (let* ((mv (jetpacs-chrome--build "app:fabdem2"))
+                 (view (gethash "root" (plist-get mv :views)))
+                 (fab (plist-get view :fab)))
+            (should (equal (plist-get fab :icon) "add"))
+            ;; Authored-wins costs the globals their SLOT, not their
+            ;; REACH: M-x falls back to this screen's top bar.
+            (should (string-search "jetpacs.emacs.mx"
+                                   (format "%S" (plist-get view
+                                                           :top_bar))))))
+      (jetpacs-chrome-remove "app:fabdem")
+      (jetpacs-chrome-remove "app:fabdem2"))))
+
+(ert-deftest jetpacs-chrome-global-dedup-is-token-delimited ()
+  "An authored action whose name merely CONTAINS the global's must not
+suppress it: ...mxyz is not ...mx.  Both the top-bar join and the fab
+arms search for the printed string, quotes included."
+  (let ((jetpacs-chrome-global-actions-placement 'top-bar)
+        (jetpacs-chrome-global-items-function
+         (lambda (_s) (list jetpacs-chrome-test--mx-item))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "dedupt"
+            (jetpacs-chrome-define-root
+             "dedupt" "root"
+             (lambda (_back)
+               (jetpacs-chrome-screen
+                "R" (jetpacs-text "r")
+                :actions (list (jetpacs-icon-button
+                                "bug_report"
+                                (jetpacs-action "jetpacs.emacs.mxyz")
+                                :content-description "not M-x"))))))
+          (let* ((bar (plist-get (gethash "root"
+                                          (plist-get (jetpacs-chrome--build
+                                                      "app:dedupt")
+                                                     :views))
+                                 :top_bar))
+                 (printed (format "%S" bar)))
+            ;; The real global joined despite the near-name...
+            (should (string-search "\"jetpacs.emacs.mx\"" printed))
+            ;; ...beside the author's own button.
+            (should (string-search "\"jetpacs.emacs.mxyz\"" printed))))
+      (jetpacs-chrome-remove "app:dedupt"))))
+
+(ert-deftest jetpacs-chrome-global-fab-yields-to-an-authored-action ()
+  "The de-dup holds ACROSS placements: a screen already authoring the
+global's action in its top bar gets no fab at all — the three existing
+M-x authors must never grow a second M-x in another slot."
+  (let ((jetpacs-chrome-global-actions-placement 'fab)
+        (jetpacs-chrome-global-items-function
+         (lambda (_s) (list jetpacs-chrome-test--mx-item))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "fabdedup"
+            (jetpacs-chrome-define-root
+             "fabdedup" "root"
+             (lambda (_back)
+               (jetpacs-chrome-screen
+                "R" (jetpacs-text "r")
+                :actions (list (jetpacs-chrome-test--mx-button))))))
+          (let ((view (gethash "root"
+                               (plist-get (jetpacs-chrome--build
+                                           "app:fabdedup")
+                                          :views))))
+            (should-not (plist-member view :fab))
+            (should (string-search "jetpacs.emacs.mx"
+                                   (format "%S" (plist-get view :top_bar))))))
+      (jetpacs-chrome-remove "app:fabdedup"))))
+
+(ert-deftest jetpacs-chrome-global-items-fab-menu-forms ()
+  "The slot holds ONE node, so several globals unfold as a `fab_menu'
+under `fab'; `fab-menu' is the menu even for a single global.  The
+toggle wears the vocabulary's menu anchor, not the builder's `add'."
+  (let ((jetpacs-chrome-global-items-function
+         (lambda (_s)
+           (list jetpacs-chrome-test--mx-item
+                 (list :icon "apps" :label "Apps"
+                       :on-tap (jetpacs-action "jetpacs.launcher.open"))))))
+    (unwind-protect
+        (progn
+          (with-jetpacs-owner "fabmenu"
+            (jetpacs-chrome-define-root
+             "fabmenu" "root"
+             (lambda (_back)
+               (jetpacs-chrome-screen "R" (jetpacs-text "r")))))
+          ;; Several items under `fab': the menu.
+          (let* ((jetpacs-chrome-global-actions-placement 'fab)
+                 (fab (plist-get (gethash "root"
+                                          (plist-get (jetpacs-chrome--build
+                                                      "app:fabmenu")
+                                                     :views))
+                                 :fab))
+                 (items (append (plist-get fab :items) nil)))
+            (should (equal (plist-get fab :t) "fab_menu"))
+            (should (equal (plist-get fab :icon) "more_vert"))
+            (should (equal (mapcar (lambda (i) (plist-get i :label)) items)
+                           '("M-x" "Apps")))
+            (should (equal (plist-get (plist-get (car items) :on_tap)
+                                      :action)
+                           "jetpacs.emacs.mx")))
+          ;; ONE item under `fab-menu': still the menu.
+          (let* ((jetpacs-chrome-global-actions-placement 'fab-menu)
+                 (jetpacs-chrome-global-items-function
+                  (lambda (_s) (list jetpacs-chrome-test--mx-item)))
+                 (fab (plist-get (gethash "root"
+                                          (plist-get (jetpacs-chrome--build
+                                                      "app:fabmenu")
+                                                     :views))
+                                 :fab)))
+            (should (equal (plist-get fab :t) "fab_menu"))
+            (should (= 1 (length (plist-get fab :items))))))
+      (jetpacs-chrome-remove "app:fabmenu"))))
+
+(ert-deftest jetpacs-chrome-global-fab-yields-to-the-live-profile ()
+  "`fab_menu' is outside the Core Node Set: a session whose profile does
+not carry it loses the GLOBALS, not every screen of every chrome
+surface.  The joined screen is gated and the join dropped on failure —
+without that retry a presentation preference would brick the shell for
+as long as it stayed set."
+  (jetpacs-chrome-test--with (jetpacs-chrome-test--client)
+    (jetpacs-chrome-test--recording recs
+      (let ((jetpacs-chrome-global-actions-placement 'fab-menu)
+            (jetpacs-chrome-global-items-function
+             (lambda (_s) (list jetpacs-chrome-test--mx-item))))
+        ;; The fixture profile carries icon_button but no fab_menu.
+        (should-not (seq-contains-p jetpacs-chrome-test--types "fab_menu"))
+        (with-jetpacs-owner "fabgate"
+          (jetpacs-chrome-define-root
+           "fabgate" "root"
+           (lambda (_back) (jetpacs-chrome-screen "R" (jetpacs-text "r")))))
+        (let ((view (gethash "root"
+                             (plist-get (jetpacs-chrome--build "app:fabgate")
+                                        :views))))
+          (should-not (plist-member view :fab))
+          ;; The screen itself is intact — not the error card.
+          (should (equal (plist-get (plist-get view :body) :text) "r")))
+        ;; The same profile takes the top-bar placement unchanged.
+        (let* ((jetpacs-chrome-global-actions-placement 'top-bar)
+               (view (gethash "root"
+                              (plist-get (jetpacs-chrome--build "app:fabgate")
+                                         :views))))
+          (should (string-search
+                   "jetpacs.emacs.mx"
+                   (format "%S" (plist-get view :top_bar)))))))))
+
+(ert-deftest jetpacs-chrome-global-items-failure-degrades-to-no-globals ()
+  "A signalling or malformed items function costs the globals, never the
+surface — at either placement, and with nothing left over in the slot."
+  (dolist (broken (list (lambda (_s) (error "boom"))
+                        (lambda (_s) "not a list")
+                        ;; An item no placement could author.
+                        (lambda (_s) (list (list :label "M-x")))))
+    (dolist (placement '(top-bar fab fab-menu))
+      (let ((jetpacs-chrome-global-actions-placement placement)
+            (jetpacs-chrome-global-items-function broken))
+        (unwind-protect
+            (progn
+              (with-jetpacs-owner "gidem3"
+                (jetpacs-chrome-define-root
+                 "gidem3" "root"
+                 (lambda (_back)
+                   (jetpacs-chrome-screen "R" (jetpacs-text "r")))))
+              (let ((view (gethash "root"
+                                   (plist-get (jetpacs-chrome--build
+                                               "app:gidem3")
+                                              :views))))
+                (should view)
+                (should-not (plist-member view :fab))
+                (should (= 1 (length (plist-get (plist-get view :top_bar)
+                                                :children))))))
+          (jetpacs-chrome-remove "app:gidem3"))))))
+
 (ert-deftest jetpacs-chrome-items-dock-wears-rail-on-medium-and-up ()
   "The data dock on a window compact on neither axis: the SAME
 destinations ride the scaffold rail slot as a navigation_rail, and no

@@ -323,6 +323,26 @@ withdraws the global-actions injection for the app's own surfaces)."
           (funcall jetpacs-apps-core-global-actions surface)
         (error nil)))))
 
+;;;; The global-items wrapper (S10, standalone-aware)
+
+(defvar jetpacs-apps-core-global-items nil
+  "The host's shell globals as DATA: a function (SURFACE) -> item plists.
+Seeded by the device init with the same M-x the node seam seeds, in
+the shape `jetpacs-chrome-global-items-function' can re-author per
+`jetpacs-chrome-global-actions-placement' — which is why the device
+carries both seeds and the data one wins.")
+
+(defun jetpacs-apps-global-items (surface)
+  "THE `jetpacs-chrome-global-items-function': the host seed, minus
+standalone surfaces.  The S3 withdrawal is about WHETHER a standalone
+app wears the shell's globals, and placement only moves WHERE they
+ride — so the ratified rule applies here unchanged."
+  (unless (eq (jetpacs-apps--surface-chrome surface) 'standalone)
+    (when jetpacs-apps-core-global-items
+      (condition-case nil
+          (funcall jetpacs-apps-core-global-items surface)
+        (error nil)))))
+
 ;;;; The composed drawer (S8, standalone-aware)
 
 (defvar jetpacs-apps-core-drawer-rows nil
@@ -553,6 +573,15 @@ when it refused — the app still opens."
   (setq jetpacs-apps-core-global-actions
         jetpacs-chrome-global-actions-function))
 (setq jetpacs-chrome-global-actions-function #'jetpacs-apps-global-actions)
+;; The S10 data seam installs identically — it is the placement-bearing
+;; half of the same globals, so it withdraws on the same surfaces.
+(when (and jetpacs-chrome-global-items-function
+           (not (eq jetpacs-chrome-global-items-function
+                    #'jetpacs-apps-global-items))
+           (null jetpacs-apps-core-global-items))
+  (setq jetpacs-apps-core-global-items
+        jetpacs-chrome-global-items-function))
+(setq jetpacs-chrome-global-items-function #'jetpacs-apps-global-items)
 ;; The S8 seam installs plainly: it is born alongside this composition,
 ;; so unlike the two above there is no pre-existing direct setter to
 ;; adopt — the host seeds `jetpacs-apps-core-drawer-rows' instead

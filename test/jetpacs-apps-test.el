@@ -376,6 +376,19 @@ through `app.open' `:route', Apps folding into the drawer."
         (should-not (jetpacs-apps-global-actions "app:solo.main"))
         (should (equal (jetpacs-apps-global-actions "app:hub")
                        '(seed))))
+      ;; The S10 wrapper: the DATA globals withdraw on exactly the same
+      ;; surfaces — placement moves where a global rides, never whether
+      ;; a standalone app must wear one — and a signalling seed costs
+      ;; the globals, not the caller.
+      (let ((jetpacs-apps-core-global-items
+             (lambda (_s) (list (list :icon "terminal" :label "M-x"
+                                      :on-tap '(:action "jetpacs.emacs.mx"))))))
+        (should-not (jetpacs-apps-global-items "app:solo.main"))
+        (should (equal (jetpacs-apps-test--labels
+                        (jetpacs-apps-global-items "app:hub"))
+                       '("M-x"))))
+      (let ((jetpacs-apps-core-global-items (lambda (_s) (error "boom"))))
+        (should-not (jetpacs-apps-global-items "app:hub")))
       ;; PRIMARY: the global core + destination tabs, Apps folded away.
       (jetpacs-defapp "prime" :label "Prime" :surfaces '("prime.main")
                       :chrome 'primary

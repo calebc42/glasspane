@@ -21,6 +21,9 @@
 (defun jetpacs-entry-test--dock (_surface)
   'custom-dock)
 
+(defun jetpacs-entry-test--items (_surface)
+  'custom-items)
+
 ;; This is the shape of an existing user's init immediately before its final
 ;; `(require 'jetpacs)'.  Package defaults must not replace any of it.
 (setq user-emacs-directory jetpacs-entry-test--user-emacs-directory
@@ -30,6 +33,7 @@
       jetpacs-theme-mode 'dark
       jetpacs-clip-auto-refresh t
       jetpacs-apps-core-global-actions #'jetpacs-entry-test--actions
+      jetpacs-apps-core-global-items #'jetpacs-entry-test--items
       jetpacs-apps-core-dock-items #'jetpacs-entry-test--dock)
 
 (make-directory (expand-file-name "jetpacs" user-emacs-directory) t)
@@ -64,6 +68,10 @@
         (should jetpacs-clip-auto-refresh)
         (should (eq jetpacs-apps-core-global-actions
                     #'jetpacs-entry-test--actions))
+        ;; The S10 data seed is a defvar for the same reason: a user's
+        ;; own globals survive the init's M-x default.
+        (should (eq jetpacs-apps-core-global-items
+                    #'jetpacs-entry-test--items))
         (should (eq jetpacs-apps-core-dock-items
                     #'jetpacs-entry-test--dock))
         (should (equal default-directory

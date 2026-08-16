@@ -103,6 +103,16 @@ remain in the private Emacs/Termux home on Android.")
 (declare-function jetpacs-emacs-ui-mx-button "jetpacs-emacs-ui" ())
 (defvar jetpacs-apps-core-global-actions
   (lambda (_surface) (list (jetpacs-emacs-ui-mx-button))))
+;; The same M-x as DATA (S10), which is what
+;; `jetpacs-chrome-global-actions-placement' can re-author into the fab
+;; slot; at the default `top-bar' placement it authors the node above
+;; byte for byte.  Both seeds ship: the data one supersedes, so exactly
+;; one M-x renders either way, and the node seam stays the working
+;; override for a host that seeds only it.
+(defvar jetpacs-apps-core-global-items
+  (lambda (_surface)
+    (list (list :icon "terminal" :label "M-x"
+                :on-tap (jetpacs-action "jetpacs.emacs.mx")))))
 (defvar jetpacs-apps-core-dock-items #'jetpacs-hub--dock-items)
 (defvar jetpacs-apps-core-drawer-rows #'jetpacs-hub--drawer-rows)
 (defvar jetpacs-theme-mode 'mirror)
@@ -188,7 +198,10 @@ then silently refuses.  A value set by the user's init remains authoritative.")
  '((jetpacs-theme-mode :label "Companion theme")
    ;; The §3 fold-in: the app's authored enum node retired — the
    ;; choice-of-consts custom-type renders an equivalent enum.
-   (jetpacs-line-numbers :label "Line numbers")))
+   (jetpacs-line-numbers :label "Line numbers")
+   ;; S10: where M-x rides — the whole point of the choice-of-consts
+   ;; type is that the phone can set it, so the phone must SHOW it.
+   (jetpacs-chrome-global-actions-placement :label "Global actions")))
 (jetpacs-settings-register-section
  "Editor"
  '((ebp-sync-diagnostics :label "Push diagnostics")

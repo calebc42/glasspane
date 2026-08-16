@@ -249,7 +249,13 @@ authors a button dispatching the same action keeps its own, so the
 three existing M-x authors are not doubled.  The standalone pole opts
 out in the FUNCTION (jetpacs-apps wraps the host seed with the
 `:chrome' check), keeping this module app-agnostic.  Degrades like the
-dock: a signal or non-list costs the globals, never the surface.")
+dock: a signal or non-list costs the globals, never the surface.
+
+Since S10 this is the TOP-BAR-ONLY arm: finished nodes cannot be
+re-authored into another slot, so `jetpacs-chrome-global-actions-placement'
+does not reach them, and `jetpacs-chrome-global-items-function' — the
+data form, which it does reach — supersedes this seam whenever it
+yields items.")
 
 (defun jetpacs-chrome--global-actions (surface)
   "SURFACE's shell-global action nodes, isolated; nil without the seam."
@@ -279,7 +285,10 @@ copy, so the builder's node is never mutated."
                          (when-let* ((action (plist-get
                                               (plist-get g :on_tap)
                                               :action)))
-                           (string-search action authored)))
+                           ;; Printed WITH its quotes so the token is
+                           ;; delimited: an authored ...mxyz must not
+                           ;; swallow the ...mx global.
+                           (string-search (format "%S" action) authored)))
                        globals)))
         (if (null missing)
             n
@@ -288,6 +297,215 @@ copy, so the builder's node is never mutated."
                                  (vconcat kids missing))))
             (plist-put (copy-sequence n) :top_bar bar*))))
     n))
+
+(defcustom jetpacs-chrome-global-actions-placement 'top-bar
+  "Where the shell globals ride on every chrome screen (S10).
+`top-bar' (the default) appends them to every stacked scaffold's top
+bar — docs/CHROME-VOCABULARY.md's placement for M-x, and what every
+screen has rendered since the S3 seam landed.  `fab' hands them the
+`fab' slot instead: ONE global IS the button, several unfold as a
+`fab_menu', because the slot holds exactly one node.  `fab-menu' is
+the menu unconditionally, a single global included.
+
+Only the DATA seam `jetpacs-chrome-global-items-function' obeys this.
+Placement is a RE-AUTHORING, and a raw node
+\(`jetpacs-chrome-global-actions-function') is by definition already
+authored — the same division the dock pair draws.
+
+This is the one seam member that is a defcustom, and the closed choice
+of consts is why: `customize.set' `read's a wire STRING for any type it
+cannot decode as a boolean, a number, or a choice of consts
+\(`jetpacs-settings--decode'), so a phone-settable FUNCTION value would
+hand every later chrome build whatever the wire typed.  Three symbols
+cannot carry a payload; a function value can, which is why the seams
+themselves stay defvars.  Setting this through Custom re-pushes every
+chrome surface, so the placement moves without a navigation.
+
+Two authored-wins consequences to expect on device: a screen that
+authors M-x in its own top bar keeps it THERE at every placement
+\(the de-dup — the hub, Buffers, and the m3 catalog do), and a screen
+whose `fab' slot holds its own button keeps that button, the globals
+falling back to its top bar."
+  :type '(choice (const :tag "Top app bar (M-x top-right)" top-bar)
+                 (const :tag "FAB (a fab menu once there are several)" fab)
+                 (const :tag "FAB menu (always)" fab-menu))
+  :set (lambda (sym val)
+         (set-default sym val)
+         ;; Unbound at definition time (`custom-initialize-reset' calls
+         ;; this with the standard value), which is exactly when there
+         ;; is nothing to re-push — the theme options' guard.
+         (when (featurep 'jetpacs-chrome)
+           (maphash (lambda (surface _stack)
+                      (jetpacs-shell--schedule-repush surface))
+                    jetpacs-chrome--stacks)))
+  :group 'jetpacs)
+
+(defvar jetpacs-chrome-global-items-function nil
+  "Function (SURFACE) -> the shell globals as DATA, or nil.
+Each item is a plist (:icon STR :label STR :on-tap DESCRIPTOR); the
+label is the accessible name in the top-bar form and the menu row's
+text in the fab-menu form, so all three members are required.  This is
+the placement-adaptive alternative to
+`jetpacs-chrome-global-actions-function', standing to it as
+`jetpacs-chrome-dock-items-function' stands to
+`jetpacs-chrome-dock-function': only data can be re-authored, so only
+data can obey `jetpacs-chrome-global-actions-placement' — a finished
+top-bar node dropped into the `fab' slot would be a presentation lie,
+not a placement.
+
+Where the dock pair gives the win to the raw node, this pair gives it
+to the DATA, and the asymmetry is deliberate: the device seeds BOTH
+globals seams, so raw-wins would leave the placement inert on the
+default install.  Items, whenever this seam yields any, supersede the
+node seam whole — at every placement, `top-bar' included, where the
+two would otherwise each contribute their own M-x.  The node seam
+remains the top-bar-only override for a host with no items to give.
+Degrades like the dock: a signal or malformed items cost the globals,
+never the surface.")
+
+(defun jetpacs-chrome--global-items (surface)
+  "SURFACE's shell-global ITEMS, validated and isolated; nil without the seam.
+The check is all-or-nothing like the dock's: an item missing what
+every placement needs cannot be re-authored at all, and a partially
+honored globals list is a worse answer than none."
+  (when jetpacs-chrome-global-items-function
+    (condition-case err
+        (let ((items (funcall jetpacs-chrome-global-items-function surface)))
+          (and (consp items)
+               (cl-every (lambda (item)
+                           (and (listp item)
+                                (stringp (plist-get item :icon))
+                                (stringp (plist-get item :label))
+                                (plist-get item :on-tap)))
+                         items)
+               items))
+      (error (message "jetpacs-chrome: global items failed: %s"
+                      (jetpacs-error-label err))
+             nil))))
+
+(defun jetpacs-chrome--global-slot (surface)
+  "SURFACE's shell globals as (SLOT . VALUE), or nil.
+`:top_bar' carries finished action NODES, authored once per build and
+appended to every screen's bar.  `:fab' carries the ITEM PLISTS still
+as data: the de-dup against a screen's authored top bar is a
+per-screen question and the slot holds exactly ONE node, so the answer
+differs per screen and the authoring has to happen there.
+The data seam supersedes the node one — see
+`jetpacs-chrome-global-items-function'."
+  (if-let* ((items (jetpacs-chrome--global-items surface)))
+      (if (memq jetpacs-chrome-global-actions-placement '(fab fab-menu))
+          (cons :fab items)
+        (condition-case err
+            (cons :top_bar (jetpacs-chrome--global-item-buttons items))
+          (error (message "jetpacs-chrome: global items failed: %s"
+                          (jetpacs-error-label err))
+                 nil)))
+    (when-let* ((nodes (jetpacs-chrome--global-actions surface)))
+      (cons :top_bar nodes))))
+
+(defun jetpacs-chrome--global-item-buttons (items)
+  "ITEMS authored as top-bar icon buttons — the `top-bar' arm's form.
+Shared with the fab arms' FALLBACK for a screen whose `:fab' slot is
+already taken: authored-wins costs the globals their slot there, never
+their reach."
+  (mapcar (lambda (item)
+            (jetpacs-icon-button
+             (plist-get item :icon)
+             (plist-get item :on-tap)
+             :content-description (plist-get item :label)))
+          items))
+
+(defun jetpacs-chrome--global-fab (items)
+  "ITEMS as the ONE node the `fab' slot wears at the current placement.
+A single item under `fab' is the plain FAB: the slot takes any node
+and an icon button is what the tree already puts there (the buffer
+screen's command-palette FAB).  Anything else is M3's
+FloatingActionButtonMenu, whose toggle wears the vocabulary's menu
+anchor rather than the builder's `add' default — these are the shell's
+globals, not a creation act."
+  (if (and (null (cdr items))
+           (eq jetpacs-chrome-global-actions-placement 'fab))
+      (jetpacs-icon-button (plist-get (car items) :icon)
+                           (plist-get (car items) :on-tap)
+                           :content-description (plist-get (car items) :label))
+    (jetpacs-fab-menu
+     (mapcar (lambda (item)
+               (jetpacs-fab-menu-item (plist-get item :label)
+                                      (plist-get item :icon)
+                                      (plist-get item :on-tap)))
+             items)
+     :icon "more_vert")))
+
+(defun jetpacs-chrome--join-global-fab (surface n items)
+  "Give SURFACE's scaffold N the shell globals as its `fab', de-duped.
+Authored-wins costs the globals their SLOT, never their REACH: a
+screen authoring its own `:fab' keeps it untouched and the globals
+fall back to the top-bar join instead — M-x must keep a home on
+every screen (the S3 build-within promise; glasspane's capture FAB,
+the buffer screen's palette FAB and the m3 demos all author fabs).
+Items whose `:on-tap' action already appears in the authored top bar
+are dropped first — the top-bar join's own token-delimited search —
+so a screen that authors M-x itself never grows a SECOND M-x in
+another slot; nothing left means no fab there.  The authoring runs
+per screen (the de-dup answer is per-screen), so it carries its own
+isolation: a malformed item costs the fab, never the screen.
+
+The injected fab subtree is run through the per-view gate and the
+join DROPPED if it fails: `fab_menu' is outside the Core Node Set,
+so a session whose profile lacks it would otherwise turn EVERY
+screen of every chrome surface into an error card for as long as the
+placement stayed set — a total loss for a presentation preference.
+The SUBTREE only: the caller gates the whole screen a line later, so
+gating the joined screen here would walk everything twice per build.
+The top-bar arm needs no such retry: its `icon_button' is what the
+authored bars beside it are already made of."
+  ;; GR-7b's per-app FAB registry lands in this slot too and must
+  ;; outrank the globals here for the same reason a screen does: the
+  ;; FAB's contract is the primary creation act, and a shell global is
+  ;; a guest in that slot, welcome only while it stands empty.
+  (cond
+   ((or (null items)
+        (not (jetpacs-root-node-p n))
+        (not (equal (plist-get n :t) "scaffold")))
+    n)
+   ((plist-member n :fab)
+    (jetpacs-chrome--join-global-actions
+     n (condition-case err
+           (jetpacs-chrome--global-item-buttons items)
+         (error (message "jetpacs-chrome: global fab fallback failed: %s"
+                         (jetpacs-error-label err))
+                nil))))
+   (t
+    (let* ((authored (format "%S" (plist-get n :top_bar)))
+           (missing (cl-remove-if
+                     (lambda (item)
+                       (when-let* ((action (plist-get
+                                            (plist-get item :on-tap)
+                                            :action)))
+                         ;; Printed WITH its quotes so the token is
+                         ;; delimited, as in the top-bar join.
+                         (string-search (format "%S" action) authored)))
+                     items))
+           (fab (and missing
+                     (condition-case err
+                         (jetpacs-chrome--global-fab missing)
+                       (error (message "jetpacs-chrome: global fab \
+failed: %s" (jetpacs-error-label err))
+                              nil)))))
+      (if (and fab
+               (ignore-errors (jetpacs-chrome--gate-view surface fab) t))
+          (append n (list :fab fab))
+        n)))))
+
+(defun jetpacs-chrome--join-globals (surface n globals)
+  "Join GLOBALS — `jetpacs-chrome--global-slot''s cons — into screen N.
+The placement fan-out: every arm is single-slot authored-wins and
+de-duped by action name, so no placement can double an affordance the
+screen already carries."
+  (pcase globals
+    (`(:top_bar . ,nodes) (jetpacs-chrome--join-global-actions n nodes))
+    (`(:fab . ,items) (jetpacs-chrome--join-global-fab surface n items))
+    (_ n)))
 
 (defun jetpacs-chrome--dock-slot (surface)
   "SURFACE\'s dock as (SLOT . NODE), or nil.
@@ -449,7 +667,7 @@ together, on every rebuild."
      (let ((seen (make-hash-table :test #'equal))
            (dock (jetpacs-chrome--dock-slot surface))
            (drawer (jetpacs-chrome--drawer surface))
-           (globals (jetpacs-chrome--global-actions surface))
+           (globals (jetpacs-chrome--global-slot surface))
            views prev-id)
       (dolist (entry (reverse stack))
         (let* ((id (car entry))
@@ -498,8 +716,19 @@ together, on every rebuild."
                                         (not (plist-member n :rail)))
                                (setq n (append n (list (car dock)
                                                        (cdr dock)))))
-                             (setq n (jetpacs-chrome--join-global-actions
-                                      n globals))
+                             ;; The shell globals join EVERY screen (the
+                             ;; dock's rule, not the drawer's root-only
+                             ;; one) in whichever slot
+                             ;; `jetpacs-chrome-global-actions-placement'
+                             ;; names; a taken fab slot falls back to
+                             ;; the top bar, so the placement moves the
+                             ;; affordance, not its reach.  The one
+                             ;; screen shape outside every arm's reach
+                             ;; is a BAR-LESS scaffold at `top-bar'
+                             ;; placement — the fab arms can dress it,
+                             ;; the bar arm has nothing to append to.
+                             (setq n (jetpacs-chrome--join-globals
+                                      surface n globals))
                              (jetpacs-chrome--gate-view surface n)
                              (jetpacs-chrome--claim-screen-ids n seen)
                              n))

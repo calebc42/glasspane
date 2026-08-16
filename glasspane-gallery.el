@@ -269,9 +269,7 @@ re-added exactly once."
     (jetpacs-defaction "demo.gallery.point" #'glasspane-gallery--on-point
                        :any-surface t
                        :doc "Report a tapped chart point")
-    (setq jetpacs-settings-links
-          (cl-remove #'glasspane-gallery--settings-link
-                     jetpacs-settings-links :key #'cadr))
+    (jetpacs-settings-remove-link #'glasspane-gallery--settings-link)
     ;; v1's drawer item sat at 65 among drawer orders that died with
     ;; the fabric; against v3's registered links the demo satellite
     ;; lands after the app's own settings card (glasspane-ui's 80).
@@ -283,9 +281,7 @@ The kind/level mirrors deliberately survive — the same S2 persistence
 rule as search's filters; the next register serves them as-is."
   (dolist (name glasspane-gallery--verbs)
     (jetpacs-undefaction name))
-  (setq jetpacs-settings-links
-        (cl-remove #'glasspane-gallery--settings-link
-                    jetpacs-settings-links :key #'cadr)))
+  (jetpacs-settings-remove-link #'glasspane-gallery--settings-link))
 
 ;;;###autoload
 (defun glasspane-demo-gallery ()

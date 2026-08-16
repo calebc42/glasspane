@@ -460,6 +460,32 @@ glasspane-clock.el moves near-verbatim under owner "org-mode" (pure org-clock, z
 
 **Gate (both):** full ERT — grep gates in the suite (zero `glasspane-ui--defer-refresh` callers, zero double-hyphen cross-module reads); badge validation + tab-generation arms; FAB injection FOUR arms (no-FAB screen gets app default / authored wins / foreign surface gets nothing / **guest screen on the app's own surface gets NO injected FAB**); remove-link pair; dates suite. No device arm (behavior-preserving + GR-8's batch covers the rendered results).
 
+> **GR-7b GATE COMPLETE 2026-08-16.**  Destination badges now validate at
+> registration and resolve per navigation-bar build; empty-dot, dynamic,
+> nil, malformed-result, and signalling arms are pinned.  `jetpacs-defapp'
+> owns the app-default FAB declaration, while chrome resolves it from each
+> screen's recorded owner: a native free slot inherits it, authored wins,
+> foreign surfaces remain empty, and an S4 guest on the host surface cannot
+> inherit either app's default.  The app join precedes S10 globals, so a
+> global requesting `fab' falls back to the top bar.
+>
+> `jetpacs-settings-remove-link' is the sole removal writer and every former
+> hand mutation (Glasspane UI, Ef, Gallery, and foundation Org settings) uses
+> it.  The pure date utility and its suite moved mechanically to
+> `jetpacs-dates'; executable source contains zero old-prefix references.
+>
+> Verification: app registry **19/19**, chrome **62/62**, Settings **11/11**,
+> dates **1/1**, Org settings **9/9**, and Glasspane **72/72**; all 11 touched
+> source modules pass warning-as-error byte compilation.  The foundation
+> layering grep, old-date-prefix grep, direct-settings-writer grep, diff
+> check, package-install gate, and full elevated `test/run-tests.sh` pass;
+> the full runner exited **0**.  Per the rung ruling there is no device arm.
+>
+> No GR-8 placement mechanics landed here.  The private legacy generator
+> name and its old four-entry cap remain implementation debt for the replan;
+> the authoritative target is still five Glasspane destinations as peer
+> NavBar/BottomAppBar entries beside Eval and Files, with Apps drawer-only.
+
 ## GR-8 — IA/UX restructure (RATIFIED ruling 2) — RISKY; §7 is the design it implements
 
 > **NON-EXECUTABLE FORWARD POINTER (2026-08-16):** this GR-8 was already

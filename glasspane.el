@@ -59,10 +59,10 @@
 ;; so it loads first.
 (require 'glasspane-org-reader)
 (require 'glasspane-detail)
-;; G5, the daily surfaces: dates is the pure helper both halves lean
-;; on, agenda and journal build on detail's shared card and the reader
-;; (already above), capture is verbs + sheets only.
-(require 'glasspane-dates)
+;; G5, the daily surfaces: the foundation date helper supports both
+;; halves; agenda and journal build on detail's shared card and the
+;; reader (already above), while capture is verbs + sheets only.
+(require 'jetpacs-dates)
 (require 'glasspane-agenda)
 (require 'glasspane-journal)
 (require 'glasspane-capture)

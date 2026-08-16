@@ -52,7 +52,7 @@
 (require 'jetpacs-chrome)
 (require 'jetpacs-apps)
 (require 'jetpacs-settings)
-(require 'glasspane-dates)
+(require 'jetpacs-dates)
 (require 'glasspane-org)
 (require 'glasspane-org-reader)
 (require 'glasspane-ui)                 ; capture FAB
@@ -153,7 +153,7 @@ it), so the same query could ride a saved view verbatim."
                 (jetpacs-with-attrs
                  (jetpacs-box
                   (jetpacs-date-button
-                   (glasspane-dates-format
+                   (jetpacs-dates-format
                     date (if today-p "Today · %a, %b %e" "%a, %b %e, %Y"))
                    (jetpacs-action "journal.goto")
                    :value date)
@@ -334,7 +334,7 @@ day, exactly the v1 tab feel."
     (if (not (integerp delta))
         'rejected
       (setq glasspane-journal--date
-            (glasspane-dates-shift (glasspane-journal--current) delta 'day))
+            (jetpacs-dates-shift (glasspane-journal--current) delta 'day))
       (jetpacs-app-defer-refresh params)
       'accepted)))
 

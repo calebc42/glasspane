@@ -389,9 +389,7 @@ place and the link is re-added exactly once."
     (jetpacs-defaction "ef.option" #'glasspane-ef--on-option
                        :any-surface t
                        :doc "Set an ef style option from its switch")
-    (setq jetpacs-settings-links
-          (cl-remove #'glasspane-ef--settings-link jetpacs-settings-links
-                     :key #'cadr))
+    (jetpacs-settings-remove-link #'glasspane-ef--settings-link)
     ;; Right after the app's own settings link (order 80): the two
     ;; Glasspane rows sit together, the v3 reading of v1's
     ;; next-to-Modus placement.
@@ -401,9 +399,7 @@ place and the link is re-added exactly once."
   "Drop the ef verbs and the Settings satellite link."
   (dolist (name glasspane-ef--verbs)
     (jetpacs-undefaction name))
-  (setq jetpacs-settings-links
-        (cl-remove #'glasspane-ef--settings-link jetpacs-settings-links
-                   :key #'cadr)))
+  (jetpacs-settings-remove-link #'glasspane-ef--settings-link))
 
 ;;;###autoload
 (defun glasspane-ef-open ()

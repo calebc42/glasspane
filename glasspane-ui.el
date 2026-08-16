@@ -702,9 +702,7 @@ registry entries in place, and the link is re-added exactly once."
                  :label "Open on the journal")
            (list 'glasspane-packages-auto-install
                  :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)")))
-    (setq jetpacs-settings-links
-          (cl-remove #'glasspane-ui--settings-link jetpacs-settings-links
-                     :key #'cadr))
+    (jetpacs-settings-remove-link #'glasspane-ui--settings-link)
     ;; v1's settings view sat at order 80 among the app's views.
     (jetpacs-settings-add-link 80 #'glasspane-ui--settings-link))
   (add-hook 'jetpacs-shell-refresh-hook #'glasspane-ui--refresh-invalidate)
@@ -719,9 +717,7 @@ registry entries in place, and the link is re-added exactly once."
   (dolist (name glasspane-ui--verbs)
     (jetpacs-undefaction name))
   (jetpacs-settings-remove-section "Glasspane")
-  (setq jetpacs-settings-links
-        (cl-remove #'glasspane-ui--settings-link jetpacs-settings-links
-                   :key #'cadr))
+  (jetpacs-settings-remove-link #'glasspane-ui--settings-link)
   (jetpacs-settings-dialog-close)
   (glasspane-ui-remove-hooks))
 

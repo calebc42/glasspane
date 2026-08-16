@@ -2241,44 +2241,8 @@ between files through the same policy."
             (kill-buffer buf))))
       (delete-directory vault t))))
 
-;;;; G5 — daily surfaces: glasspane-dates.el, glasspane-agenda.el,
-;;;; glasspane-journal.el, glasspane-capture.el
-
-(ert-deftest glasspane-test-dates-helpers ()
-  "The app-local date module (FOUNDATION-GAPS #10): pure string-in
-string-out arithmetic — noon-anchored against DST flips, positional
-parsing, month shifts clamped into the target month, locale-proof
-English month abbreviations."
-  (let ((decoded (decode-time (glasspane-dates-encode "2026-08-13"))))
-    (should (= (decoded-time-hour decoded) 12))
-    (should (= (decoded-time-day decoded) 13))
-    (should (= (decoded-time-month decoded) 8))
-    (should (= (decoded-time-year decoded) 2026)))
-  ;; Day/week shifts cross month and year boundaries.
-  (should (equal (glasspane-dates-shift "2026-08-13" 1 'day) "2026-08-14"))
-  (should (equal (glasspane-dates-shift "2026-08-13" -1 'day) "2026-08-12"))
-  (should (equal (glasspane-dates-shift "2026-01-31" 1 'day) "2026-02-01"))
-  (should (equal (glasspane-dates-shift "2026-01-01" -1 'day) "2025-12-31"))
-  (should (equal (glasspane-dates-shift "2026-12-31" 1 'day) "2027-01-01"))
-  (should (equal (glasspane-dates-shift "2026-08-13" 1 'week) "2026-08-20"))
-  (should (equal (glasspane-dates-shift "2026-08-13" 2 'week) "2026-08-27"))
-  ;; Month arithmetic clamps into the target month and walks years;
-  ;; leap February keeps its 29th.
-  (should (equal (glasspane-dates-shift "2026-01-31" 1 'month) "2026-02-28"))
-  (should (equal (glasspane-dates-shift "2024-01-31" 1 'month) "2024-02-29"))
-  (should (equal (glasspane-dates-shift "2026-01-15" -1 'month) "2025-12-15"))
-  (should (equal (glasspane-dates-shift "2026-12-15" 1 'month) "2027-01-15"))
-  (should (equal (glasspane-dates-shift "2026-11-01" 3 'month) "2027-02-01"))
-  ;; Format rides format-time-string; the C locale pins the weekday.
-  (should (equal (glasspane-dates-format "2026-08-13" "%Y/%m/%d")
-                 "2026/08/13"))
-  (let ((system-time-locale "C"))
-    (should (equal (glasspane-dates-format "2000-01-01" "%a %Y") "Sat 2000")))
-  (should (equal (glasspane-dates-month-abbrev 1) "Jan"))
-  (should (equal (glasspane-dates-month-abbrev 12) "Dec"))
-  (should-not (glasspane-dates-month-abbrev 0))
-  (should-not (glasspane-dates-month-abbrev 13))
-  (should-not (glasspane-dates-month-abbrev "3")))
+;;;; G5 — daily surfaces: glasspane-agenda.el, glasspane-journal.el,
+;;;; glasspane-capture.el (pure date helpers now have a Jetpacs suite)
 
 (ert-deftest glasspane-test-agenda-formatters ()
   "The pure agenda formatters over fixture alists: the compact meta
@@ -2603,8 +2567,8 @@ exactly the overdue TODO, and the section's bulk mint lands in the
          (org-directory vault)
          (org-agenda-files (list file))
          (ebp-org-roots nil)
-         (overdue (glasspane-dates-shift (glasspane-journal--today) -2 'day))
-         (upcoming (glasspane-dates-shift (glasspane-journal--today) 2 'day)))
+         (overdue (jetpacs-dates-shift (glasspane-journal--today) -2 'day))
+         (upcoming (jetpacs-dates-shift (glasspane-journal--today) 2 'day)))
     (unwind-protect
         (progn
           (with-temp-file file

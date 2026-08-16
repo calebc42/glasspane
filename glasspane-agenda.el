@@ -39,9 +39,8 @@
 ;;   `glasspane-ui--org-editor-body'): PORTED IN G4 — the reader owns
 ;;   the jetpacs-files seam surfacing now, not this file.
 ;;
-;; `jetpacs-date-format'/`-shift'/`-month-abbrev' have no v3 home
-;; (FOUNDATION-GAPS #10): the app-local glasspane-dates module carries
-;; them.
+;; The pure, locale-stable calendar arithmetic is foundation-owned in
+;; `jetpacs-dates'; this module supplies only Glasspane's agenda policy.
 
 ;;; Code:
 
@@ -58,7 +57,7 @@
 (require 'jetpacs-device)
 (require 'jetpacs-org-settings)      ; the global-TODO-keywords helper
 (require 'jetpacs-org-dialogs)          ; the archive-token scope (S5)
-(require 'glasspane-dates)
+(require 'jetpacs-dates)
 (require 'glasspane-org)
 (require 'glasspane-ui)                 ; shared anchor/selected defvars,
                                         ; capture FAB, dialog close (S2/S3)
@@ -162,7 +161,7 @@ the row's type icon already says, so it is dropped."
              (string-match "\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)" ts))
     (let* ((month (string-to-number (match-string 2 ts)))
            (day   (string-to-number (match-string 3 ts)))
-           (mon   (glasspane-dates-month-abbrev month))
+           (mon   (jetpacs-dates-month-abbrev month))
            (time  (ebp-org-ts-time ts)))
       (if time (format "%s %d %s" mon day time)
         (format "%s %d" mon day)))))
@@ -274,13 +273,13 @@ A saved search deleted while selected must not wedge the body."
                                      (substring today 0 7)))
                      (_ (equal anchor today))))
          (label (pcase mode
-                  ("month" (glasspane-dates-format anchor "%B %Y"))
+                  ("month" (jetpacs-dates-format anchor "%B %Y"))
                   ("week" (concat "Week of "
-                                  (glasspane-dates-format anchor "%b %d")))
+                                  (jetpacs-dates-format anchor "%b %d")))
                   (_ (if at-today
                          (concat "Today · "
-                                 (glasspane-dates-format anchor "%a, %b %d"))
-                       (glasspane-dates-format anchor "%a, %b %d"))))))
+                                 (jetpacs-dates-format anchor "%a, %b %d"))
+                       (jetpacs-dates-format anchor "%a, %b %d"))))))
     (apply #'jetpacs-row
            (delq nil
                  (list
@@ -691,7 +690,7 @@ the result must name a mode we actually offer."
         (when (eq unit 'month)
           (setq anchor (concat (substring anchor 0 7) "-01")))
         (setq glasspane-ui-agenda-anchor
-              (glasspane-dates-shift anchor dir unit))
+              (jetpacs-dates-shift anchor dir unit))
         (jetpacs-app-defer-refresh params)
         'accepted))))
 

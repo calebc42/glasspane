@@ -1,94 +1,254 @@
-# Onboarding: Jetpacs on the device
+# Onboarding Jetpacs on Android
 
-> **Field note (2026-08-13, first live run):** the tree transport is now
-> `tar` over the ssh exec channel, not rsync — Termux's rsync 3.5.0
-> receiver hit an unexplained EACCES on chdir into a directory the same
-> ssh login enters fine (no AVC, correct owner/modes). And pubkey auth
-> is not assumed: Termux's openssh 10.5p1 accepted the ed25519 in the
-> authorized_keys exchange yet denied the signed auth, so the kit keeps
-> a generated password in `tools/onboard-scratch/` and serves it via
-> `SSH_ASKPASS` whenever the key path fails.
+POC 3 begins with one decision: **Recommended** or **Advanced**.
 
+- **Recommended** is the fixed device-local preset: Local Emacs's private
+  `HOME` owns `.emacs.d/jetpacs`, and `/sdcard` is the user-content Vault.
+- **Advanced** chooses the Emacs host first—Local Emacs, Remote Emacs, or
+  Termux—then offers only the Vault locations appropriate to that host and
+  shows the exact startup snippets involved.
 
-The elisp lives at `/sdcard/Documents/jetpacs/` (refreshed over adb);
-the device Emacs's app-private init needs exactly ONE line.
+Run the interactive flow with:
 
-**Re-provisioning a wiped tablet, or bringing up Termux + `pylsp` for
-the eglot/language-server work:** use `tools/onboard-tablet.sh` instead
-of the steps below. It is the single desktop command for that path —
-Termux + sshd, the elisp tree, the `device/py/` fixtures, and
-`device/emacs-init.el` all land over one `ssh`/`rsync` transport
-(`com.termux` and `org.gnu.emacs` share a uid on this device, so a
-Termux shell can write straight into `org.gnu.emacs`'s app-private
-storage — no `/sdcard`, no storage permission dialog). See
-`device/MANIFEST.md` for exactly what lands where and why.
-That flow also syncs `org/`, registers the Org Mode app from its private
-mirror, and seeds the starter inbox plus Orgro walkthrough without
-overwriting existing Org files.
+```sh
+tools/onboard-tablet.sh
+```
 
-The two flows **share one file**: step 3 below writes a `load` line
-into `~/.emacs.d/init.el`, and that is the same `init.el` the onboard
-script has to wire its harness from. So the script never overwrites it.
-It installs the harness beside it as `~/.emacs.d/jetpacs-onboard-init.el`
-and *appends* one `(load ...)` line, leaving anything already there to
-run first; the harness then declines to dial the Companion when a
-client is already attached. Net effect: run either flow, or both, in
-either order — the daily driver keeps the session and the harness
-contributes only `exec-path`/`PATH`, the Termux `load-path`, and the
-`jetpacs-files-roots` entry.
+For automation, pass both dimensions explicitly:
 
-## One-time setup
+```sh
+tools/onboard-tablet.sh --vault shared --emacs-home emacs
+```
 
-1. From the workstation, with the tablet on adb:
+## Recommended
 
-   ```
-   ./device/install.sh
-   ```
+Recommended installs this pairing without asking two separate path questions:
 
-   This pushes every `emacs/*.el` module, `device/init.el`, and the
-   `org/` starter/manual bundle to `/sdcard/Documents/jetpacs/`. On
-   interactive startup the Org app copies missing seed files into
-   `org-directory`; it never overwrites an existing user file.
+| Concern | Selection |
+|---|---|
+| Unix `HOME` and `.emacs.d/jetpacs` | Local Emacs private home |
+| Vault | `/sdcard` |
 
-2. On the DEVICE, make sure Emacs has storage permission
-   (Android settings → Apps → Emacs → Permissions → Files, "allow all").
+This is the default for local Org Mode. User content survives uninstalling
+Emacs, although any app granted Android **All files** access can read it. Grant
+Android Emacs **All files** access so it can use the Vault.
 
-3. On the DEVICE, add one line to `~/.emacs.d/init.el` (create it if
-   absent — `C-x C-f ~/.emacs.d/init.el`):
+The Recommended screen has one **Prepare files and copy setup** button. Pressing
+it saves the APK's bundled payload temporarily under
+`/sdcard/Documents/jetpacs-installer/` and copies Jetpacs's exact marked package
+entry. The screen then tells the user to:
 
-   ```elisp
-   (load "/sdcard/Documents/jetpacs/init.el")
-   ```
+1. open `~/.emacs.d/init.el` in Android Emacs, creating it if necessary;
+2. paste the block at the bottom without replacing existing configuration; and
+3. save the file and return to the Companion.
 
-4. Restart Emacs (or `M-x load-file` that init).  Emacs auto-connects
-   to the Companion on localhost and the **hub** appears: Scratch,
-   Messages, and Shell rows (tap to drill in — Shell gets the comint
-   input field), a Theme toggle in the top bar.
+The Companion does not request access to or edit Emacs's private files. The
+existing init remains first and therefore runs before Jetpacs. On the next full
+Emacs start, the one-time bootstrap creates or repairs
+`~/.emacs.d/jetpacs/`, records `/sdcard` as the Vault, removes the temporary
+handoff, and finishes with `(require 'jetpacs)`. The Recommended flow downloads
+nothing and has no Termux, shell, or `early-init.el` step.
 
-## Daily commands (on the device)
+## Advanced: choose the Emacs HOME first
 
-- `M-x jetpacs-hub` — bring the hub back to the screen from anywhere.
-- `M-x jetpacs-clip-show` — the kill ring, one tap per entry to the
-  device clipboard.  (Auto-refresh is off: every kill would otherwise
-  claim the screen.)
-- `M-x jetpacs-start` / `M-x jetpacs-stop` — reconnect / disconnect.
-- `M-x jetpacs-theme-send` — one-shot palette push.
+| Choice | Unix `HOME` | Managed root | Startup material shown |
+|---|---|---|---|
+| Local Emacs | Android Emacs's probed private home | `EMACS_HOME/.emacs.d/jetpacs` | marked block for `EMACS_HOME/.emacs.d/init.el` |
+| Remote Emacs | remote user's existing home | remote `~/.emacs.d/jetpacs` state | one-time `package-vc-install`, pairing ID/token, `(require 'jetpacs)`, and adb port forward |
+| Termux | `/data/data/com.termux/files/home` | `TERMUX_HOME/.emacs.d/jetpacs` | Android Emacs `early-init.el` redirect plus Termux `init.el` block |
 
-## Updating
+Both Android-local HOME choices are private app storage. `.emacs.d` is never
+placed on `/sdcard`.
 
-Re-run `./device/install.sh` after any elisp change, then on the
-device: `M-x jetpacs-stop`, `M-x load-file /sdcard/Documents/jetpacs/init.el`,
-`M-x jetpacs-start`.  (Or just restart Emacs.)
+## Advanced: choose an eligible Vault
 
-## Two sharp edges
+| Choice | Vault path | Persistence and exposure |
+|---|---|---|
+| `/sdcard` | `/sdcard` | Survives uninstalling Emacs or Termux. Any app granted Android **All files** access can read it. |
+| Emacs home | Android Emacs's probed private home | Other ordinary apps cannot read it. It is deleted with Emacs app data. |
+| Termux home | `/data/data/com.termux/files/home` | Termux tools can work on the content directly. It is deleted with Termux app data. |
+| Remote Emacs home | remote `~/` | Remote content stays on the remote host. Android-local paths are not presented as ordinary remote filesystems. |
 
-- **One session.** The Companion binds ONE Emacs.  If the device Emacs
-  is running with this init, it grabs the session the moment the
-  Companion starts — a workstation Emacs dialing through
-  `adb forward` will be refused ("Server exited with status 256" is
-  what that looks like from the WSL side).  For workstation smokes,
-  quit the device Emacs first.
-- **Ghost sessions over adb.** A killed workstation Emacs can leave an
-  ESTABLISHED socket held by adbd; the Companion stays bound to the
-  ghost and refuses newcomers.  `adb forward --remove-all`, force-stop
-  the Companion, and start fresh.
+Local Emacs offers `/sdcard` and Local Emacs home. Termux offers all three
+Android-local Vaults. Remote Emacs uses its remote home. In particular, Termux
+home is not offered as a Vault for Local or Remote Emacs.
+
+The selected Vault supplies defaults for the Files landing directory and
+`org-directory` (`VAULT/org/`). Values already set by the user's init or Custom
+win, and Jetpacs never changes the user's `default-directory`. The Vault never
+becomes a second Jetpacs configuration tree.
+
+## Package boundary: install once, require from init
+
+Installation and loading are separate Emacs operations. `(require 'jetpacs)`
+loads the named feature only after Jetpacs is available on `load-path`; it does
+not contact MELPA or any other archive.
+
+Recommended and Advanced Android setup install the APK's bundled copy so a new
+user does not need a package archive, Git, or Termux. Existing desktop/remote
+Emacs users can install directly from the repository once:
+
+```elisp
+(package-vc-install
+ '(jetpacs :url "https://github.com/calebc42/jetpacs"
+            :lisp-dir "emacs"))
+```
+
+Their existing `init.el` then needs only its pairing values followed by:
+
+```elisp
+(require 'jetpacs)
+```
+
+Once Jetpacs is published in an Emacs package archive, `M-x package-install`
+or a user's existing `use-package :ensure` convention can replace the one-time
+installation command. The init-side `(require 'jetpacs)` contract does not
+change. Emacs Custom remains the persistence backend for settings changed in
+the Jetpacs Settings screen.
+
+## Startup chains
+
+Recommended uses an explicit clipboard handoff because the Companion cannot
+safely edit another app's private Emacs configuration:
+
+```text
+Companion bundled handoff
+  -> Companion stages /sdcard/Documents/jetpacs-installer
+  -> Companion copies the marked Jetpacs package entry
+  -> user pastes it at the bottom of ~/.emacs.d/init.el and saves
+  -> marked Jetpacs package entry
+  -> consumes /sdcard/Documents/jetpacs-installer once, when present
+  -> creates or repairs ~/.emacs.d/jetpacs
+  -> removes the temporary handoff
+  -> adds bundled package code to load-path
+  -> (require 'jetpacs)
+```
+
+Advanced local installation uses the lower-level startup chain below.
+
+Launch Android Emacs once so its original private home exists, then force-stop
+it before installing. The installer probes that bootstrap home as either
+`/data/data/org.gnu.emacs/files` or `/data/user/0/org.gnu.emacs/files`.
+
+```text
+ORIGINAL_EMACS_HOME/.emacs.d/early-init.el
+  -> keeps Local Emacs HOME or selects Termux HOME
+  -> Emacs naturally loads SELECTED_HOME/.emacs.d/init.el
+  -> one marked block adds bundled code to load-path
+  -> (require 'jetpacs)
+  -> install.conf independently supplies the Vault
+```
+
+`early-init.el` does not load `init.el` itself. The Advanced setup also ships
+the exact Termux executable-path forms exposed by the Companion's Copy button:
+
+```elisp
+(setenv "PATH" (format "%s:%s" "/data/data/com.termux/files/usr/bin"
+		       (getenv "PATH")))
+(push "/data/data/com.termux/files/usr/bin" exec-path)
+```
+
+The selected private tree is:
+
+```text
+SELECTED_HOME/.emacs.d/
+├── init.el                         user-owned; one marked Jetpacs block
+└── jetpacs/                        the removable Jetpacs boundary
+    ├── init.el                     compatibility loader for older seams
+    ├── install.conf                separate Vault and HOME selections
+    ├── emacs/
+    │   ├── jetpacs.el              public `(require 'jetpacs)` entry
+    │   ├── jetpacs-init.el         composition and startup
+    │   └── apps/                   bundled in-tree app modules
+    ├── org/                        distribution Org seed/manual assets
+    ├── examples/python/            optional development fixtures
+    ├── apps/                       user-installed apps and app configuration
+    ├── apps.el                     installed-app registry
+    ├── var/                        receipts and durable protocol state
+    ├── user.el                     optional overrides; never overwritten
+    └── migration/                  recovery copies from retired layouts
+```
+
+The Companion also has receiver-local preferences, protocol outbox data, and
+renderer caches under its own Android app data. Those are not an Emacs init or
+Elisp tree.
+
+## Reconnecting Android Emacs
+
+If an authenticated local Emacs session disconnects, the Companion posts an
+**Emacs disconnected** notification. Tapping it launches `org.gnu.emacs`
+directly, as POC 1 did, without routing through the Companion or its onboarding
+flow. The notification is cleared when the next Emacs session authenticates.
+Failed unauthenticated connection attempts and teardown of a session already
+superseded by a newer one do not post it.
+
+## Existing configurations and changing HOME
+
+Recommended never edits a user's init. The user deliberately pastes the marked
+block at the bottom, leaving existing configuration above it. On repair, the
+user should replace the existing marked Jetpacs block rather than adding a
+second copy. The Advanced installer applies its replace-only-its-own-block rule
+to `init.el` and `early-init.el` and creates a one-time preinstall backup.
+Personal overrides belong in
+`~/.emacs.d/jetpacs/user.el`, which loads last and survives updates.
+
+If the Unix-HOME choice changes later, the installer copies `apps/`, `apps.el`,
+`var/`, and `user.el` to the newly selected private home before changing
+startup. It archives the previous managed root under `migration/`, removes only
+the old marked init seam, and then retires the inactive managed root. User init
+forms are preserved. The Vault does not move.
+
+The retired POC 3 `jetpacs-onboard-init.el` harness and its durable state are
+handled by the same copy-before-startup migration.
+
+## Updating, auditing, and removing
+
+For a Recommended repair or update, reopen setup, press **Prepare files and copy
+setup**, replace the existing marked Jetpacs block in `init.el` with the fresh
+copy, save, and restart Emacs. Emacs then consumes the fresh handoff and
+refreshes only distribution-owned paths. `apps/`, `apps.el`, `var/`, `user.el`,
+the rest of `init.el`, and the Vault survive.
+
+The commands below are the Advanced/desktop maintenance interface.
+
+Rerun installation with the same pair to update distribution files:
+
+```sh
+tools/onboard-tablet.sh --vault shared --emacs-home emacs
+```
+
+Audit without changing anything:
+
+```sh
+tools/onboard-tablet.sh --audit --vault shared --emacs-home emacs
+```
+
+Remove Jetpacs while preserving the Vault and early-init HOME/PATH selection:
+
+```sh
+tools/onboard-tablet.sh --remove --vault shared --emacs-home emacs
+```
+
+This removes the marked normal-init seam and the validated
+`SELECTED_HOME/.emacs.d/jetpacs` tree. To separately remove the managed
+early-init block:
+
+```sh
+tools/onboard-tablet.sh --reset-home --vault shared --emacs-home emacs
+```
+
+Neither operation deletes the Vault.
+
+## Legacy directories
+
+The installer reports but does not automatically delete these obsolete POC 3
+locations because they may contain user edits:
+
+- `/sdcard/Documents/jetpacs`
+- `/data/data/com.termux/files/home/jetpacs`
+
+They are not on the new startup path. Inspect them before deleting them.
+
+After installation, force-stop and relaunch Android Emacs, then open the EBP
+Companion. Only one Emacs should own the Companion session at a time; stop the
+local Android Emacs before connecting Remote Emacs.

@@ -1141,14 +1141,25 @@ the registry."
                               (cl-loop for x across (vconcat v)
                                        append (glasspane-test--reader-ids x))))))))
 
+(ert-deftest glasspane-test-reader-registration-stays-app-local ()
+  "Installing Glasspane must not replace the vanilla Files Org reader."
+  (require 'glasspane-org-reader)
+  (let ((jetpacs-files-editor-body-functions
+         (list #'glasspane-org-reader--files-body #'ignore))
+        (jetpacs-files-editor-actions-functions
+         (list #'glasspane-org-reader--files-actions #'ignore)))
+    (glasspane-org-reader-register)
+    (should-not (memq #'glasspane-org-reader--files-body
+                      jetpacs-files-editor-body-functions))
+    (should-not (memq #'glasspane-org-reader--files-actions
+                      jetpacs-files-editor-actions-functions))))
+
 (ert-deftest glasspane-test-reader-trees ()
   "File, subtree and refile trees over a temp fixture: canonical
 serialization, the §16.2 app profile, §16.1 id uniqueness (the m3 gate
-pattern) — plus the surfacing the plan hangs the trees on: the files
-body seam serves the foldable reader while the foundation mode is
-rendered, the refile drag list when toggled, the plain editor when the
-base toggle says so, and the sparse filter narrows without ever
-signalling out of the builder."
+pattern) — plus the app-local body functions: reader, refile drag list,
+plain-mode pass-through, and sparse filtering without signalling out of
+the builder."
   (require 'glasspane-org-reader)
   (glasspane-org-reader-register)
   (let* ((fixture (glasspane-test--reader-vault))

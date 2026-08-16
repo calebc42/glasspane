@@ -165,8 +165,9 @@ Signals `user-error' for invalid or excessive input."
     (jetpacs-reader-org--ensure-initial-visibility path buffer)
     (jetpacs-reader-org--apply-reader-mode path buffer)
     (let ((jetpacs-org-render-proportional-prose
-           (jetpacs-reader-org--reader-mode-p path)))
-      (apply #'jetpacs-column
+           (jetpacs-reader-org--reader-mode-p path))
+          (jetpacs-org-render-reader-typography t))
+      (apply #'jetpacs-lazy-column
              (delq nil
                    (append
                     (list (jetpacs-reader-org--search-controls path))

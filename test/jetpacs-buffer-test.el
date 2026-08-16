@@ -432,6 +432,22 @@ Companion may re-present, not terminal `rejected'."
                  (make-hash-table :test #'eql)))
     (sort out (lambda (x y) (< (car x) (car y))))))
 
+(ert-deftest jetpacs-buffer-exposure-walks-transformed-line-controls ()
+  "A transformed line authorizes nested span and trailing-icon taps."
+  (let* ((name "*e4-transformed*")
+         (fold (jetpacs-action "jetpacs.buffer.fold"
+                               :args (list :buffer name :pos 1)))
+         (actions (jetpacs-action "jetpacs.org.heading"
+                                  :args (list :buffer name :pos 1)))
+         (node (jetpacs-row
+                (jetpacs-rich-text
+                 (list (jetpacs-span "Heading" :on-tap fold)))
+                (jetpacs-icon-button "more_vert" actions))))
+    (jetpacs-buffer-forget-exposed name)
+    (jetpacs-buffer--expose-node-taps node name)
+    (should (jetpacs-buffer-exposed-p name 1 "jetpacs.buffer.fold"))
+    (should (jetpacs-buffer-exposed-p name 1 "jetpacs.org.heading"))))
+
 (ert-deftest jetpacs-buffer-exposure-waits-for-the-byte-budget ()
   "SPEC 23.1/4.5: a node the byte budget discards must leave its bindings
 UNARMED.  Recording at span-build time authorized offsets that never

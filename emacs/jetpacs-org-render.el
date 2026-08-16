@@ -20,15 +20,17 @@
 ;;                          toolchain, compiled off the dispatch extent
 ;;   #+CAPTION: …         → a caption line under its upgraded element
 ;;
-;; Taps route through the Tier-0 span-action seam instead of upgrading
-;; in place: item checkboxes toggle (`jetpacs.org.checkbox'), and drawer
-;; and block header lines get the fold affordance Tier-0's
+;; Most taps route through the Tier-0 span-action seam: item checkboxes
+;; toggle (`jetpacs.org.checkbox'), and drawer and block header lines get
+;; the fold affordance Tier-0's
 ;; outline-regexp detection cannot see (both reuse `jetpacs.buffer.fold'
 ;; — `org-cycle' at those lines toggles the drawer/block, verified
-;; against emacs-30.1 org-cycle.el).  The footnote/heading/timestamp
-;; arms land with their dialog handlers (JA-5d/e), and links follow
-;; through Org itself before the destination drills into the originating
-;; surface.  Everything else — citations, inline math, list markers, src blocks (which org's native
+;; against emacs-30.1 org-cycle.el).  A heading line gets one structural
+;; upgrade: tapping its readable text folds/unfolds it, while a trailing
+;; more_vert icon opens the existing structured Org action sheet.  The
+;; footnote/timestamp arms land with their dialog handlers (JA-5d/e), and
+;; links follow through Org itself before the destination drills into the
+;; originating surface.  Everything else — citations, inline math, list markers, src blocks (which org's native
 ;; fontification already highlights) — renders exactly as the user's
 ;; font-lock shows it.  If anything in the upgrade pass fails, the
 ;; buffer falls back to the pure Tier-0 render: this skin can subtract
@@ -105,6 +107,15 @@ the device's proportional face."
 A host that owns its own back navigation and re-narrows the buffer on
 every build binds this — an in-body Widen button would be a confusing
 no-op there.")
+
+(defvar jetpacs-org-render-reader-typography nil
+  "When non-nil, give Org headings the compact Orgro reader rhythm.
+The reader host binds this for its document presentation.  Desktop Org
+aligns tags by inserting enough spaces to reach `org-tags-column'; those
+spaces are layout, not prose, and wrap destructively on a narrow device.
+The reader collapses that run and replaces the full blank line following
+a heading with a small spacer.  The ordinary Tier-1 renderer stays byte-
+faithful unless a reader explicitly asks for this mobile reflow.")
 
 ;;;; Native upgrades: table
 
@@ -623,8 +634,10 @@ cannot see."
                    (looking-at-p "[ \t]*#\\+begin_"))))
           (jetpacs-action "jetpacs.buffer.fold"
                           :args (list :buffer buffer-name :pos pos)))
-         ;; Heading tap → the action sheet; a link inside the headline
-         ;; was already claimed by the Org follow arm.
+         ;; Mark ordinary heading runs for the structural heading
+         ;; decorator below.  It moves this action to the trailing
+         ;; more_vert icon and rewrites the readable headline to fold;
+         ;; a link inside the headline was already claimed above.
          ((and (eq (char-after (line-beginning-position)) ?*)
                (org-at-heading-p)
                (not (org-in-regexp org-link-any-re)))
@@ -664,6 +677,145 @@ on device)."
           (setcar budget (- spans-left cells)))
         t))))
 
+(defun jetpacs-org-render--action-p (descriptor action)
+  "Whether DESCRIPTOR names ACTION."
+  (equal (plist-get descriptor :action) action))
+
+(defun jetpacs-org-render--heading-node-p (node)
+  "Whether NODE is a decorated or undecorated Org heading line."
+  (pcase (plist-get node :t)
+    ("rich_text"
+     (seq-some
+      (lambda (span)
+        (jetpacs-org-render--action-p (plist-get span :on_tap)
+                                      "jetpacs.org.heading"))
+      (append (plist-get node :spans) nil)))
+    ("row"
+     (seq-some
+      (lambda (child)
+        (and (equal (plist-get child :t) "icon_button")
+             (jetpacs-org-render--action-p (plist-get child :on_tap)
+                                           "jetpacs.org.heading")))
+      (append (plist-get node :children) nil)))))
+
+(defun jetpacs-org-render--blank-line-node-p (node)
+  "Whether NODE is Tier 0's faithful representation of one blank line."
+  (and (equal (plist-get node :t) "rich_text")
+       (let ((spans (append (plist-get node :spans) nil)))
+         (and spans
+              (seq-every-p
+               (lambda (span)
+                 (string-match-p "\\`[ \t]*\\'"
+                                 (or (plist-get span :text) "")))
+               spans)))))
+
+(defun jetpacs-org-render--compact-heading (node)
+  "Return NODE with stronger weight and compact tag-alignment spacing.
+The fold-arrow span is left alone because the heading decorator removes
+it.  Existing bold weights become numeric 800 and runs of desktop
+tag-alignment whitespace become one space."
+  (let ((copy (copy-sequence node)))
+    (plist-put
+     copy :spans
+     (vconcat
+      (mapcar
+       (lambda (span)
+         (if (and
+              (not
+               (jetpacs-org-render--action-p (plist-get span :on_tap)
+                                             "jetpacs.buffer.fold"))
+              (not (string-match-p "\\`[ \t]*[▸▾]\\'"
+                                   (or (plist-get span :text) ""))))
+             (let ((span-copy (copy-sequence span)))
+               (when (plist-member span-copy :font_weight)
+                 (plist-put span-copy :font_weight 800))
+               (when (string-match-p "[ \t]\\{2,\\}\\'"
+                                     (or (plist-get span-copy :text) ""))
+                 (plist-put span-copy :text
+                            (replace-regexp-in-string
+                             "[ \t]\\{2,\\}\\'" " "
+                             (plist-get span-copy :text))))
+               span-copy)
+           span))
+       (append (plist-get node :spans) nil))))
+    copy))
+
+(defun jetpacs-org-render--fold-arrow-span-p (span)
+  "Whether SPAN is Tier-0's trailing Org fold caret."
+  (and (jetpacs-org-render--action-p (plist-get span :on_tap)
+                                    "jetpacs.buffer.fold")
+       (string-match-p "\\`[ \t]*[▸▾]\\'"
+                       (or (plist-get span :text) ""))))
+
+(defun jetpacs-org-render--heading-controls (node bol _eol buffer-name)
+  "Give the Org heading line NODE at BOL its mobile controls.
+The readable headline folds on tap; special inline actions such as links
+and timestamps retain their own taps.  A trailing `more_vert' button
+opens the existing structured Org action sheet.  Tier-0's tiny fold
+caret is removed because the headline itself is now the affordance."
+  (if (not (and (equal (plist-get node :t) "rich_text")
+                (jetpacs-node-advertised-p "icon_button")
+                (save-excursion
+                  (goto-char bol)
+                  (org-at-heading-p))))
+      node
+    (let* ((headline (if jetpacs-org-render-reader-typography
+                         (jetpacs-org-render--compact-heading node)
+                       (copy-sequence node)))
+           (fold (jetpacs-action "jetpacs.buffer.fold"
+                                 :args (list :buffer buffer-name :pos bol)))
+           (actions (jetpacs-action "jetpacs.org.heading"
+                                    :args (list :buffer buffer-name :pos bol)))
+           (scroll-here (plist-get headline :scroll_here))
+           spans)
+      (dolist (span (append (plist-get headline :spans) nil))
+        (unless (jetpacs-org-render--fold-arrow-span-p span)
+          (let* ((copy (copy-sequence span))
+                 (tap (plist-get copy :on_tap))
+                 (action (plist-get tap :action)))
+            ;; Links, timestamps and the other more-specific Org span
+            ;; actions still win.  Ordinary headline runs all become the
+            ;; large fold target, including indentation and line numbers.
+            (when (or (null tap)
+                      (member action
+                              '("jetpacs.org.heading"
+                                "jetpacs.buffer.fold"
+                                "emacs.buffer.act")))
+              (plist-put copy :on_tap fold))
+            (push copy spans))))
+      (plist-put headline :spans (vconcat (nreverse spans)))
+      (when scroll-here (cl-remf headline :scroll_here))
+      (let ((row
+             (jetpacs-row
+              (jetpacs-with-attrs headline :weight 1)
+              (jetpacs-icon-button
+               "more_vert" actions
+               :content-description "Org actions for heading")
+              :align "center" :fill t)))
+        (if scroll-here
+            (jetpacs-with-attrs row :scroll_here scroll-here)
+          row)))))
+
+(defun jetpacs-org-render--apply-reader-typography (nodes)
+  "Return NODES with Orgro-shaped mobile heading spacing.
+Orgro gives a headline one 1.8-em row instead of rendering the source's
+separator as another full body line.  Tier 0 intentionally preserves that
+line for generic buffers; the reader replaces it with 8dp, which combines
+with the body line to approximate the same headline row without growing the
+wire vocabulary or changing prose paragraph spacing."
+  (let (out)
+    (while nodes
+      (let ((node (pop nodes)))
+        (if (jetpacs-org-render--heading-node-p node)
+            (progn
+              (push node out)
+              (when (and nodes
+                         (jetpacs-org-render--blank-line-node-p (car nodes)))
+                (pop nodes)
+                (push (jetpacs-spacer :height 8) out)))
+          (push node out))))
+    (nreverse out)))
+
 (defun jetpacs-org-render (buffer)
   "Tier-1 render skin for org BUFFER: the Tier-0 line render, upgraded.
 See the module commentary for exactly what upgrades; everything else is
@@ -673,6 +825,8 @@ to the pure Tier-0 render."
     (jetpacs-buffer-with-budget
       (let* ((jetpacs-buffer-span-action-function
               #'jetpacs-org-render--span-action)
+             (jetpacs-buffer-node-transform-function
+              #'jetpacs-org-render--heading-controls)
              (jetpacs-buffer-monospace
               (and (not jetpacs-org-render-proportional-prose)
                    jetpacs-buffer-monospace))
@@ -718,6 +872,8 @@ to the pure Tier-0 render."
           (setq out (nconc out (list (jetpacs-text
                                       "… output truncated (surface budget)"
                                       :style "caption")))))
+        (when jetpacs-org-render-reader-typography
+          (setq out (jetpacs-org-render--apply-reader-typography out)))
         ;; A narrowed buffer shows only its subtree; prepend a widen
         ;; affordance so the focus is reversible without leaving the view.
         (when (and (not jetpacs-org-render-hide-widen) (buffer-narrowed-p))

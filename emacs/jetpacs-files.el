@@ -286,6 +286,13 @@ Raw — `ebp-check-path' filters and truenames it."
   (append jetpacs-files-roots
           (and-let* ((shared (jetpacs-files-shared-dir))) (list shared))))
 
+(defun jetpacs-files-effective-roots ()
+  "Return the raw effective allowlist used by the Files app.
+This public policy seam lets mode adapters authorize structured actions for
+the same files the browser can open.  Consumers must still pass each target
+through their normal path guard before acting."
+  (jetpacs-files--roots))
+
 (cl-defun jetpacs-files--check (path &optional (require 'readable))
   "PATH through the shared path guard against the effective roots.
 REQUIRE as in `ebp-check-path'; the default applies only when the
@@ -1386,6 +1393,31 @@ Runs inside a device flow."
        (error (message "jetpacs-files: push failed: %s"
                        (jetpacs-error-label err)))))))
 
+(defun jetpacs-files-open-path (path surface)
+  "Validate and open PATH on SURFACE exactly as a Files row does.
+Directories become the current Files location.  Regular files enter the
+shared document host.  PATH is always revalidated against the effective
+Files roots, even when the caller obtained it from a trusted bundle."
+  (condition-case err
+      (let ((true (jetpacs-files--check path)))
+        (if (file-directory-p true)
+            ;; A directory path routes to cd semantics: the browse screen is
+            ;; the directory UI, and keeping dired buffers out of the drill
+            ;; host keeps one directory from holding the same literal node
+            ;; keys in two views of a surface.
+            (progn
+              (setq jetpacs-files--dir (file-name-as-directory true))
+              (jetpacs-files--repush surface))
+          ;; The whole effect lives in the flow continuation: eligibility
+          ;; stats and reads the file, the read fallback can PROMPT (changed
+          ;; on disk), and JC-4a bridges prompts to the device only there.
+          (jetpacs-flow-continue
+           (lambda () (jetpacs-files--edit-open true surface))))
+        'accepted)
+    (ebp-path-refused
+     (jetpacs-shell-notify (format "File refused: %s" (cadr err)) surface)
+     'rejected)))
+
 (with-jetpacs-owner "jetpacs.files"
 
   (jetpacs-chrome-define-root jetpacs-files-owner "browser"
@@ -1408,29 +1440,9 @@ Runs inside a device flow."
 
   (jetpacs-defaction "jetpacs.files.open"
     (lambda (args params)
-      (let ((surface (jetpacs-files--event-surface params)))
-        (condition-case err
-            (let ((true (jetpacs-files--check (plist-get args :path))))
-              (if (file-directory-p true)
-                  ;; A directory path routes to cd semantics: the browse
-                  ;; screen is the directory UI, and keeping dired
-                  ;; buffers out of the drill host keeps one directory
-                  ;; from holding the same literal node keys in two
-                  ;; views of a surface.
-                  (progn
-                    (setq jetpacs-files--dir (file-name-as-directory true))
-                    (jetpacs-files--repush surface))
-                ;; The whole effect lives in the flow continuation:
-                ;; eligibility stats and reads the file, the read
-                ;; fallback can PROMPT (changed on disk), and JC-4a
-                ;; bridges prompts to the device only from there.
-                (jetpacs-flow-continue
-                 (lambda () (jetpacs-files--edit-open true surface))))
-              'accepted)
-          (ebp-path-refused
-           (jetpacs-shell-notify (format "File refused: %s" (cadr err))
-                                 surface)
-           'rejected)))))
+      (jetpacs-files-open-path
+       (plist-get args :path)
+       (jetpacs-files--event-surface params))))
 
   (jetpacs-defaction "jetpacs.files.refresh"
     (lambda (_args params)

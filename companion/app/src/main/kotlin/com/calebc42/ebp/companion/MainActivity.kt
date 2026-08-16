@@ -58,6 +58,15 @@ class MainActivity : ComponentActivity() {
                 bridge.windowChanged(config.screenWidthDp, config.screenHeightDp)
             }
             EbpTheme(themePayload) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                var onboardingRequired by androidx.compose.runtime.remember {
+                    androidx.compose.runtime.mutableStateOf(
+                        !isCurrentOnboardingComplete(context),
+                    )
+                }
+                var onboardingOpen by androidx.compose.runtime.remember {
+                    androidx.compose.runtime.mutableStateOf(false)
+                }
                 // The Surface paints edge-to-edge (the theme reaches under
                 // the system bars) but CONTENT stays inside the safe-drawing
                 // insets: without this the first row of any surface — a nav
@@ -72,11 +81,36 @@ class MainActivity : ComponentActivity() {
                     // one recompose scope, and because every render composable
                     // takes an (unstable) JsonObject, a dialog opening
                     // re-executed the entire surface render.
-                    SurfaceHost(app.currentSpec, bridge)
+                    SurfaceHost(
+                        app.currentSpec,
+                        bridge,
+                        onRepair = { onboardingOpen = true },
+                    )
                     PieMenuHost(app.currentPieMenu, bridge)
                     DialogHost(app.currentDialog, bridge)
                     ConfirmHost(bridge)
-                    SettingsHost(app, bridge)
+                    SettingsHost(
+                        app,
+                        bridge,
+                        onOpenOnboarding = {
+                            app.dismissSettings()
+                            onboardingOpen = true
+                        },
+                    )
+                    if (onboardingRequired || onboardingOpen) {
+                        Surface(Modifier.fillMaxSize()) {
+                            OnboardingFlow(
+                                onDone = {
+                                    markCurrentOnboardingComplete(this@MainActivity)
+                                    onboardingRequired = false
+                                    onboardingOpen = false
+                                },
+                                onCancel = if (onboardingRequired) null else {
+                                    { onboardingOpen = false }
+                                },
+                            )
+                        }
+                    }
                     }
                 }
             }
@@ -88,12 +122,11 @@ class MainActivity : ComponentActivity() {
 private fun SurfaceHost(
     flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
     bridge: DeviceBridge,
+    onRepair: () -> Unit,
 ) {
     val shown by flow.collectAsState()
     when (val s = shown) {
-        null -> Text(
-            "EBP Companion — waiting for Emacs on 127.0.0.1:8765",
-            Modifier.padding(24.dp))
+        null -> WaitingForEmacs(onRepair)
         else -> RenderNode(s.second, s.first, bridge)
     }
 }
@@ -146,7 +179,11 @@ private fun ConfirmHost(bridge: DeviceBridge) {
  * prefs-backed property and emits nothing on the wire.
  */
 @androidx.compose.runtime.Composable
-private fun SettingsHost(app: EbpApplication, bridge: DeviceBridge) {
+private fun SettingsHost(
+    app: EbpApplication,
+    bridge: DeviceBridge,
+    onOpenOnboarding: () -> Unit,
+) {
     val open by app.settingsOpen.collectAsState()
     if (!open) return
     var narrowing by androidx.compose.runtime.remember {
@@ -182,6 +219,12 @@ private fun SettingsHost(app: EbpApplication, bridge: DeviceBridge) {
                         Text(label,
                             style = MaterialTheme.typography.bodyMedium)
                     }
+                }
+                androidx.compose.material3.HorizontalDivider(
+                    Modifier.padding(vertical = 12.dp))
+                Text("Installation", style = MaterialTheme.typography.titleSmall)
+                androidx.compose.material3.TextButton(onClick = onOpenOnboarding) {
+                    Text("Set up or repair Jetpacs")
                 }
             }
         },

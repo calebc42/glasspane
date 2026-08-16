@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
-# Push the Jetpacs elisp + the device init to /sdcard/Documents/jetpacs/.
-# Re-run after every elisp change; then restart the device Emacs (or
-# M-x jetpacs-stop, re-load, M-x jetpacs-start).
+# Compatibility entry point for the former /sdcard/Documents/jetpacs deploy.
+# There is no second "daily driver" anymore: use the same onboarding path and
+# its recommended /sdcard Vault. HOME, init.el, and the managed tree remain in
+# the private Emacs/Termux home and cannot drift apart.
 set -euo pipefail
-cd "$(dirname "$0")/.."
-adb shell mkdir -p /sdcard/Documents/jetpacs
-# emacs/apps/<app>/*.el is FLATTENED into the same directory: the device
-# load-path is one directory (device/init.el), and every module's file
-# name is already globally unique across the whole tree -- `jetpacs-' for
-# the application layer, `ebp-' for the wire-and-Emacs layer -- so the
-# subdirectory is a repo-side grouping only.
-for f in emacs/*.el emacs/apps/*/*.el device/init.el; do
-  adb push "$f" /sdcard/Documents/jetpacs/ >/dev/null
-done
-adb push org /sdcard/Documents/jetpacs/ >/dev/null
-echo "pushed $(ls emacs/*.el emacs/apps/*/*.el | wc -l) modules + init.el \
-and Org Mode seed assets to /sdcard/Documents/jetpacs/"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+exec "$SCRIPT_DIR/../tools/onboard-tablet.sh" \
+  --vault shared --emacs-home emacs "$@"

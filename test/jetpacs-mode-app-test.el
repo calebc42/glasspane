@@ -100,6 +100,47 @@
           (should org-hide-leading-stars))
         (should (eq (default-value 'org-hide-emphasis-markers) global-hide))))))
 
+(ert-deftest jetpacs-reader-org-render-scrolls-with-orgro-typography ()
+  "The reader scrolls and reflows headings without prescribing a font."
+  (jetpacs-mode-app-test--with-org-file
+      file (concat "Intro paragraph.\n\n"
+                   "* Attachments                                      :ATTACH:\n\n"
+                   "* Next\n")
+    (let* ((jetpacs-reader--state (make-hash-table :test #'equal))
+           (root (jetpacs-reader-org--render file))
+           (children (append (plist-get root :children) nil))
+           (heading-index
+            (seq-position
+             children "Attachments"
+             (lambda (node needle)
+               (string-match-p needle
+                               (jetpacs-node->canonical-json node)))))
+           (heading (and heading-index (nth heading-index children)))
+           (heading-children (append (plist-get heading :children) nil))
+           (headline (car heading-children))
+           (overflow (cadr heading-children))
+           (spans (append (plist-get headline :spans) nil))
+           (text (mapconcat (lambda (span) (plist-get span :text)) spans ""))
+           (body-span
+            (seq-find
+             (lambda (span)
+               (equal (plist-get (plist-get span :on_tap) :action)
+                      "jetpacs.buffer.fold"))
+             spans)))
+      (should (equal (plist-get root :t) "lazy_column"))
+      (should heading-index)
+      (should (equal (plist-get heading :t) "row"))
+      (should (equal (plist-get overflow :icon) "more_vert"))
+      (should (equal (plist-get (plist-get overflow :on_tap) :action)
+                     "jetpacs.org.heading"))
+      (should (= (plist-get body-span :font_weight) 800))
+      (should (string-match-p "Attachments :ATTACH:" text))
+      (should-not (string-match-p "Attachments  +:ATTACH:" text))
+      (should-not (string-match-p "[▸▾]" text))
+      (let ((gap (nth (1+ heading-index) children)))
+        (should (equal (plist-get gap :t) "spacer"))
+        (should (= (plist-get gap :height) 8))))))
+
 (ert-deftest jetpacs-editor-org-commands-require-sync-but-snippets-do-not ()
   "Plain editors get local helpers; synchronized editors also get Org commands."
   (let* ((jetpacs-files-editor-context '(:path "/tmp/a.org"))
@@ -356,23 +397,24 @@
                          "user manual note\n")))
       (delete-directory org-directory t))))
 
-(ert-deftest jetpacs-org-mode-open-seed-uses-known-path-and-surface ()
-  "Seed navigation accepts only known documents and retains the tap surface."
+(ert-deftest jetpacs-org-mode-open-seed-uses-validated-files-route-and-surface ()
+  "Seed navigation is exactly a validated Files open on the Files surface."
   (let ((file (make-temp-file "jetpacs-seed-open-" nil ".org" "* Manual\n"))
         captured)
     (unwind-protect
         (cl-letf (((symbol-function 'jetpacs-org-mode-seed)
                    (lambda () (list :manual file :inbox file)))
-                  ((symbol-function 'jetpacs-navigate-thunk)
-                   (lambda (thunk surface label)
-                     (setq captured (list thunk surface label)))))
+                  ((symbol-function 'jetpacs-org-mode--surface)
+                   (lambda (owner) (concat "app:" owner)))
+                  ((symbol-function 'jetpacs-files-open-path)
+                   (lambda (path surface)
+                     (setq captured (list path surface))
+                     'accepted)))
           (should (eq 'accepted
                       (jetpacs-org-mode--on-open-seed
                        '(:document "manual")
                        '(:surface "app:org-mode"))))
-          (should (equal (nth 1 captured) "app:org-mode"))
-          (should (equal (nth 2 captured) "Orgro manual"))
-          (should (bufferp (funcall (car captured))))
+          (should (equal captured (list file "app:jetpacs.files")))
           (should (eq 'rejected
                       (jetpacs-org-mode--on-open-seed
                        '(:document "forged")

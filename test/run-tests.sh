@@ -3,6 +3,12 @@
 set -e
 cd "$(dirname "$0")/.."
 
+# The startup-layout contract: one selected HOME, one marked early-init
+# redirect, one marked normal-init seam, and every managed artifact below
+# ~/.emacs.d/jetpacs. This is a hermetic fake-device run of the exact Termux
+# installer shipped by both desktop and in-app onboarding.
+bash test/onboarding-layout-test.sh
+
 # Delineation guard (REWRITE-PLAN "The ebp.el boundary", widened by the
 # ratified naming rule of 2026-08-06): EVERY ebp file loads alone, in a
 # process of its own, and defines nothing jetpacs-flavored.  The offender
@@ -148,6 +154,17 @@ emacs -Q --batch -L emacs -l test/jetpacs-app-store-test.el \
 
 emacs -Q --batch -L emacs -l test/jetpacs-home-test.el \
   -f ert-run-tests-batch-and-exit
+
+# Public installation boundary: package code may live anywhere on load-path,
+# `(require 'jetpacs)' composes it, existing init values win, and mutable state
+# remains below ~/.emacs.d/jetpacs rather than beside package code.
+emacs -Q --batch -L emacs -l test/jetpacs-entry-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# Exercise the real package-vc boundary from a clean local checkout.  This
+# catches package metadata, generated-autoload load-path setup, recursive
+# compilation, and accidental inclusion of experimental source as one contract.
+bash test/package-vc-install-test.sh
 
 # JC-5 completion harvester exit gate (the :edit-complete-function seam).
 # ebp-complete.el is wire-and-Emacs only, but this suite also pins

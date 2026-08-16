@@ -1,12 +1,12 @@
-;;; jetpacs-home-test.el --- The device init's home screen builds -*- lexical-binding: t; -*-
+;;; jetpacs-home-test.el --- The Jetpacs home screen builds -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; device/init.el is host config, not a module — but its screen
+;; jetpacs-init.el is package composition, but its screen
 ;; builders are code, and a builder that signals renders the chrome
 ;; error screen on the tablet ("Screen home failed to build").  This
-;; suite extracts the hub defuns from the init WITHOUT loading it (the
-;; init sets a device load-path and dials the Companion) and builds the
+;; suite extracts the hub defuns from the composition file WITHOUT loading it
+;; (the complete package dials the Companion) and builds the
 ;; home screen in every state.  Both bugs this harness caught on day
 ;; one (:pad vs :padding; :key passed as a card member) would have
 ;; shipped silently under the module-only suites.
@@ -27,11 +27,11 @@
 (defvar jetpacs-home-test--loaded nil)
 
 (defun jetpacs-home-test--load-hub-defuns ()
-  "Eval every jetpacs-hub-- defun/defvar from device/init.el, once."
+  "Eval every jetpacs-hub-- defun/defvar from jetpacs-init.el, once."
   (unless jetpacs-home-test--loaded
     (with-temp-buffer
       (insert-file-contents
-       (expand-file-name "device/init.el" jetpacs-home-test--root))
+       (expand-file-name "emacs/jetpacs-init.el" jetpacs-home-test--root))
       (goto-char (point-min))
       (condition-case nil
           (while t
@@ -69,6 +69,13 @@ session outlives one test."
   (jetpacs-home-test--load-hub-defuns)
   (should (jetpacs-hub--drawer))
   (should (jetpacs-hub--tools-entry)))
+
+(ert-deftest jetpacs-home-dock-exposes-eval-and-files-globally ()
+  "The host core names both persistent destinations honestly."
+  (jetpacs-home-test--load-hub-defuns)
+  (should (equal (mapcar (lambda (item) (plist-get item :label))
+                         (jetpacs-hub--dock-items "app:hub"))
+                 '("Eval" "Files"))))
 
 (provide 'jetpacs-home-test)
 ;;; jetpacs-home-test.el ends here

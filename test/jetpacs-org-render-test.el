@@ -77,7 +77,7 @@ byte-stable.  State is reset around BODY."
 
 (defconst jetpacs-org-render-test--rich-profile
   '(:app (:node_types ["text" "rich_text" "image" "divider" "table"
-                       "button" "row" "column"]
+                       "button" "icon_button" "row" "column"]
           :features ["image.data" "image.https"]))
   "A profile advertising everything the skin can emit.")
 
@@ -390,6 +390,47 @@ under a root would hang `insert-file-contents' forever (JA-6 P1-4)."
           (should-not read-attempted))))))
 
 ;;;; Span-action arms
+
+(ert-deftest jetpacs-org-render-heading-tap-folds-and-overflow-opens-actions ()
+  "Headline text owns folding; more_vert owns the structured action sheet."
+  (jetpacs-org-render-test--with-file f
+      "* [[https://example.com][Parent]]\nBody\n** Child\n"
+    (let* ((buf (jetpacs-org-render-test--buffer f))
+           (name (buffer-name buf))
+           (nodes (jetpacs-org-render buf))
+           (heading (car nodes))
+           (children (append (plist-get heading :children) nil))
+           (headline (car children))
+           (overflow (cadr children))
+           (spans (append (plist-get headline :spans) nil))
+           (text (mapconcat (lambda (span) (plist-get span :text)) spans "")))
+      (should (equal (plist-get heading :t) "row"))
+      (should (equal (plist-get headline :t) "rich_text"))
+      (should (equal (plist-get overflow :t) "icon_button"))
+      (should (equal (plist-get overflow :icon) "more_vert"))
+      (should (equal (plist-get (plist-get overflow :on_tap) :action)
+                     "jetpacs.org.heading"))
+      ;; The link keeps its more-specific action; ordinary headline runs
+      ;; become the larger fold target.
+      (should (seq-some
+               (lambda (span)
+                 (equal (plist-get (plist-get span :on_tap) :action)
+                        "jetpacs.org.follow"))
+               spans))
+      (should (seq-some
+               (lambda (span)
+                 (equal (plist-get (plist-get span :on_tap) :action)
+                        "jetpacs.buffer.fold"))
+               spans))
+      (should-not (string-match-p "[▸▾]" text))
+      ;; Recursive final-node exposure authorizes exactly both visible
+      ;; controls after the line has survived its budgets.
+      (should (jetpacs-buffer-exposed-p
+               name (with-current-buffer buf (point-min))
+               "jetpacs.buffer.fold"))
+      (should (jetpacs-buffer-exposed-p
+               name (with-current-buffer buf (point-min))
+               "jetpacs.org.heading")))))
 
 (ert-deftest jetpacs-org-render-fold-taps-on-drawer-and-block ()
   "Drawer and block header lines mint `jetpacs.buffer.fold' taps —

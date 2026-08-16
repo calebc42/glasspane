@@ -208,12 +208,12 @@ malformed result costs this app's items only."
              items))
     (error nil)))
 
-(defun jetpacs-apps--destination-tabs (entry)
+(defun jetpacs-apps--destination-tabs (entry &optional limit)
   "ENTRY's destinations as dock tabs — the S2 app-primary form.
 Each tab deep-links through the global `app.open' `:route' (the S1
-mechanism powering S2), capped at four so one Home + tabs stays
-inside the M3 3-5 budget; `:selected' follows the route this verb
-last opened."
+mechanism powering S2), capped at LIMIT (four by default) so the host
+core plus tabs stays inside the M3 five-item budget; `:selected'
+follows the route this verb last opened."
   (pcase-let ((`(,id . ,_plist) entry))
     (mapcar (lambda (d)
               (list :label (plist-get d :label)
@@ -226,7 +226,7 @@ last opened."
                     :selected (and (equal id jetpacs-apps--current)
                                    (equal (plist-get d :key)
                                           jetpacs-apps--current-route))))
-            (seq-take (jetpacs-apps-destinations id) 4))))
+            (seq-take (jetpacs-apps-destinations id) (or limit 4)))))
 
 (defun jetpacs-apps-dock-items (surface)
   "THE `jetpacs-chrome-dock-items-function', by integration pole.
@@ -247,15 +247,15 @@ there)."
      ;; whole (CHROME-VOCABULARY v3, the ratified withdrawal).
      ((eq surface-pole 'standalone)
       (and entry (jetpacs-apps--app-items entry surface)))
-     ;; The current app is PRIMARY: one Home + its destination tabs.
+     ;; The current app is PRIMARY: global host destinations remain global;
+     ;; its tabs fill the remaining slots in Material's five-item budget.
      ((and entry (eq (plist-get (cdr entry) :chrome) 'primary))
-      (append
-       (seq-take (when jetpacs-apps-core-dock-items
-                   (condition-case nil
-                       (funcall jetpacs-apps-core-dock-items surface)
-                     (error nil)))
-                 1)
-       (jetpacs-apps--destination-tabs entry)))
+      (let* ((core (when jetpacs-apps-core-dock-items
+                     (condition-case nil
+                         (funcall jetpacs-apps-core-dock-items surface)
+                       (error nil))))
+             (room (max 0 (- 5 (length core)))))
+        (append core (jetpacs-apps--destination-tabs entry room))))
      ;; Build-within default.
      (t
       (append
@@ -270,8 +270,13 @@ there)."
          (jetpacs-apps--app-items entry surface))
        (when (jetpacs-apps--multi-p)
          (list (list :label "Apps" :icon "apps"
-                     :on-tap (jetpacs-action "app.grid"
-                                             :when-offline "drop")
+                     ;; Use the same guarded global switch verb as the
+                     ;; drawer.  The retired app.grid wrapper swallowed push
+                     ;; failures and produced a visibly dead destination.
+                     :on-tap (jetpacs-action
+                              "jetpacs.launcher.open"
+                              :args '(:surface "app:jetpacs.app-store")
+                              :when-offline "drop")
                      :selected (equal surface
                                       "app:jetpacs.app-store")))))))))
 

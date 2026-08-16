@@ -11,6 +11,12 @@
     <!-- SPEC 20.3: the `vibrate` capability. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- The reconnection notification opens Android Emacs directly. Android
+         11+ hides installed packages unless they are declared here. -->
+    <queries>
+        <package android:name="org.gnu.emacs" />
+    </queries>
+
     <!-- SPEC 15/18.6/21.1: the Companion's durable state is an outbox and a
          cache, never a backup source. Restoring it onto another device would
          replay events this device already delivered, breaking the at-most-once

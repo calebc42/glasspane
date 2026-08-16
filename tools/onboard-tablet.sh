@@ -1,23 +1,18 @@
 #!/usr/bin/env bash
-# The ONE desktop command that re-provisions the tablet after any wipe.
+# The one desktop command that installs, audits, or removes Jetpacs on a
+# tablet. It establishes one private Emacs/Termux HOME before normal init
+# loading, then independently selects a Vault for user content. The old
+# /sdcard daily-driver + app-private harness dual install is retired.
 #
-#   tools/onboard-tablet.sh [SERIAL]
-#
-# SERIAL defaults to $ANDROID_SERIAL, then the tablet this tree has been
-# developed against. Every phase is idempotent: re-running after a
-# partial failure, or with nothing changed at all, is safe and cheap on
-# the parts that already succeeded.
-#
-# See device/MANIFEST.md for the deploy contract (which repo path lands
-# at which device path, by which transport) and device/emacs-init.el's
-# header for what runs once org.gnu.emacs boots against it.
+#   tools/onboard-tablet.sh [--vault shared|emacs|termux]
+#                            [--emacs-home emacs|termux|remote] [SERIAL]
 #
 #   PHASE ssh-bootstrap (skipped once ssh already answers): launches
 #     Termux, waits until Termux really is the FOCUSED app (checked with
 #     dumpsys, not by asking a human to promise), then types ONE chained
 #     command line into it:
 #
-#       pkg install -y openssh rsync && mkdir -p ~/.ssh && chmod 700 ...
+#       pkg install -y openssh && mkdir -p ~/.ssh && chmod 700 ...
 #         && echo "<pubkey>" > ~/.ssh/authorized_keys && chmod 600 ...
 #         && sshd
 #
@@ -30,27 +25,20 @@
 #     `pkg` ever starts, and each step only runs if the previous one
 #     succeeded. The desktop then just polls ssh until it answers.
 #
-#   PHASE provision (over ssh, batch/key auth only -- no interactive
-#     password ever): rsyncs the emacs/ elisp tree and the device/py/
-#     fixtures into Termux's home (com.termux and org.gnu.emacs share a
-#     uid on this device, so a Termux shell can read AND write
-#     org.gnu.emacs's app-private storage directly -- no /sdcard, no
-#     storage permission dialog anywhere in this flow), verifies pylsp
-#     is on Termux's PATH (installing python-lsp-server if not), and
-#     installs device/emacs-init.el as a HARNESS FILE next to
-#     org.gnu.emacs's init.el plus a one-line `load' appended to that
-#     init.el -- it never overwrites an init.el that already exists (see
-#     tools/onboard-provision-remote.sh for why: the /sdcard daily
-#     driver documented in docs/ONBOARDING-device.md lives in that exact
-#     file, and clobbering it would silently uninstall it).
+#   PHASE provision stages one payload through Termux, then the device-side
+#     installer puts it below the selected private HOME's .emacs.d/jetpacs.
+#     Local Emacs HOME keeps Android Emacs HOME; Termux-shared redirects it.
+#     Existing init content is preserved. The Vault never contains Jetpacs
+#     internals merely because it is /sdcard.
 #
 #   PHASE verify: prints what landed, where, and the on-device human
 #     steps this flow cannot remove (launch the Companion, launch Emacs).
 #
-# Transport note: rsync -- not scp -- moves every file, including the
-# two single ones. scp on OpenSSH 9+ speaks SFTP by default, which adds
-# a dependency on Termux's sftp-server being present and configured for
-# no benefit; rsync is already a hard requirement for the tree sync.
+# Shared Vault (/sdcard) is the recommended default for device-local Org Mode:
+# it survives uninstalling Emacs or Termux, at the cost of being readable by
+# any app granted Android's "All files" access. Advanced choices keep the
+# Vault in Local Emacs HOME or Termux HOME. A separate Advanced choice can use
+# Termux as Emacs's Unix HOME or hand the session to Remote Emacs.
 set -euo pipefail
 
 # ---------------------------------------------------------------------
@@ -62,7 +50,22 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
 
 usage() {
   cat >&2 <<EOF
-usage: tools/onboard-tablet.sh [-h] [SERIAL]
+usage: tools/onboard-tablet.sh [OPTIONS] [SERIAL]
+
+  --vault MODE      shared | emacs | termux
+                    shared: /sdcard (recommended for Org Mode workflows)
+                    emacs: user content in Local Emacs private home
+                    termux: user content in Termux private home
+  --emacs-home MODE emacs | termux | remote
+                    emacs: Local Emacs Unix HOME (default)
+                    termux: Termux-shared Unix HOME
+                    remote: do not configure Android Emacs
+  --home MODE       deprecated alias for --emacs-home
+  --remove          remove the init seam and ~/.emacs.d/jetpacs
+  --reset-home      remove only the managed early-init HOME/PATH block
+  --audit           report the selected layout without changing it
+  --skip-pylsp      do not install the optional Termux Python LSP tooling
+  -h, --help        show this help
 
   SERIAL   adb device serial (default: \$ANDROID_SERIAL, else
            192.168.1.181:42553 -- the tablet this tree targets)
@@ -74,17 +77,186 @@ Environment:
                      (default 420 -- a cold 'pkg install' on a slow link
                      genuinely takes minutes)
 
-Re-provisions the tablet from a clean wipe: Termux + sshd + this
-desktop's ssh key, the elisp tree, the pylsp fixtures, and the device
-Emacs's onboarding harness. Safe to re-run at any point.
+With no options, Recommended selects Local Emacs HOME plus an /sdcard Vault.
+Advanced chooses the Emacs host first and then an eligible Vault. Explicit
+flags retain the lower-level path controls for automation. Remove/reset-home
+require both choices when no terminal is available. .emacs.d is always in one
+of the two private homes, never /sdcard.
 EOF
 }
 
-case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
+log()  { printf '[onboard] %s\n' "$*" >&2; }
+die()  { printf '[onboard] ERROR: %s\n' "$*" >&2; exit 1; }
+step() { printf '\n[onboard] === %s ===\n' "$*" >&2; }
+
+VAULT_MODE=""
+EMACS_HOME_MODE=""
+ACTION=install
+ACTION_EXPLICIT=0
+INSTALL_PYLSP=1
+SERIAL_ARG=""
+set_action() {
+  local requested="$1"
+  if [ "$ACTION_EXPLICIT" -eq 1 ]; then
+    die "choose only one of --remove, --reset-home, or --audit"
+  fi
+  ACTION="$requested"
+  ACTION_EXPLICIT=1
+}
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --vault)
+      [ "$#" -ge 2 ] || die "$1 requires shared, emacs, or termux"
+      VAULT_MODE="$2"
+      shift 2
+      ;;
+    --vault=*) VAULT_MODE="${1#*=}"; shift ;;
+    --emacs-home|--home)
+      [ "$#" -ge 2 ] || die "$1 requires emacs, termux, or remote"
+      EMACS_HOME_MODE="$2"
+      shift 2
+      ;;
+    --emacs-home=*|--home=*) EMACS_HOME_MODE="${1#*=}"; shift ;;
+    --remove) set_action remove; shift ;;
+    --reset-home) set_action reset-home; shift ;;
+    --audit) set_action audit; INSTALL_PYLSP=0; shift ;;
+    --skip-pylsp) INSTALL_PYLSP=0; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --)
+      shift
+      while [ "$#" -gt 0 ]; do
+        [ -z "$SERIAL_ARG" ] || die "only one adb SERIAL may be supplied"
+        SERIAL_ARG="$1"
+        shift
+      done
+      ;;
+    -*) die "unknown option: $1" ;;
+    *)
+      [ -z "$SERIAL_ARG" ] || die "only one adb SERIAL may be supplied"
+      SERIAL_ARG="$1"
+      shift
+      ;;
+  esac
+done
+[ "$#" -eq 0 ] || die "unexpected arguments: $*"
+
+choose_emacs_home_mode() {
+  if [ -n "$EMACS_HOME_MODE" ]; then return; fi
+  if [ -t 0 ]; then
+    printf '\nWhere should your HOME directory be?\n\n' >&2
+    printf '  1. Local Emacs  (default)\n' >&2
+    printf '     .emacs.d/jetpacs uses Android Emacs private storage.\n\n' >&2
+    printf '  2. Remote Emacs\n' >&2
+    printf '     Leave Android Emacs and its HOME untouched.\n\n' >&2
+    printf '  3. Termux\n' >&2
+    printf '     .emacs.d/jetpacs uses Termux private storage.\n\n' >&2
+    printf 'Choice [1]: ' >&2
+    local choice
+    read -r choice
+    case "${choice:-1}" in
+      1|emacs|local) EMACS_HOME_MODE=emacs ;;
+      2|remote) EMACS_HOME_MODE=remote ;;
+      3|termux|advanced|private) EMACS_HOME_MODE=termux ;;
+      *) die "invalid Emacs HOME choice: $choice" ;;
+    esac
+  elif [ "$ACTION" = install ]; then
+    EMACS_HOME_MODE=emacs
+    log "no terminal and no --emacs-home; using Local Emacs HOME"
+  else
+    die "$ACTION requires --emacs-home emacs|termux in non-interactive use"
+  fi
+}
+
+choose_vault_mode() {
+  if [ -n "$VAULT_MODE" ]; then return; fi
+  if [ -t 0 ]; then
+    printf '\nWhere should your Vault be?\n\n' >&2
+    printf '  1. /sdcard\n' >&2
+    printf '     Persistent user content; apps with "All files" access can read it.\n\n' >&2
+    if [ "$EMACS_HOME_MODE" = emacs ]; then
+      printf '  2. Local Emacs home\n' >&2
+      printf '     Private user content deleted with Emacs app data.\n\n' >&2
+    else
+      printf '  2. Local Emacs home\n' >&2
+      printf '     Private user content deleted with Emacs app data.\n\n' >&2
+      printf '  3. Termux home\n' >&2
+      printf '     Private user content deleted with Termux app data.\n\n' >&2
+    fi
+    printf 'Choice [1]: ' >&2
+    local choice
+    read -r choice
+    case "${choice:-1}" in
+      1|shared) VAULT_MODE=shared ;;
+      2|emacs|local) VAULT_MODE=emacs ;;
+      3|termux)
+        [ "$EMACS_HOME_MODE" = termux ] \
+          || die "Termux Vault is offered only when Termux is the selected HOME"
+        VAULT_MODE=termux
+        ;;
+      *) die "invalid Vault choice: $choice" ;;
+    esac
+  elif [ "$ACTION" = install ]; then
+    VAULT_MODE=shared
+    log "no terminal and no --vault; using the /sdcard Vault default"
+  else
+    die "$ACTION requires --vault shared|emacs|termux in non-interactive use"
+  fi
+}
+
+case "$EMACS_HOME_MODE" in
+  local) EMACS_HOME_MODE=emacs ;;
+  private|advanced) EMACS_HOME_MODE=termux ;;
+  ''|emacs|termux|remote) ;;
+  *) die "--emacs-home must be emacs, termux, or remote" ;;
+esac
+case "$VAULT_MODE" in
+  local) VAULT_MODE=emacs ;;
+  ''|shared|emacs|termux) ;;
+  *) die "--vault must be shared, emacs, or termux" ;;
 esac
 
-SERIAL="${1:-${ANDROID_SERIAL:-192.168.1.181:42553}}"
+if [ "$ACTION" = install ] && [ -t 0 ] \
+     && [ -z "$EMACS_HOME_MODE" ] && [ -z "$VAULT_MODE" ]; then
+  printf '\nWhere should your HOME directory/Vault be?\n\n' >&2
+  printf '  1. Recommended\n' >&2
+  printf '     Local Emacs HOME + /sdcard Vault.\n\n' >&2
+  printf '  2. Advanced\n' >&2
+  printf '     Choose the Emacs host, then an eligible Vault.\n\n' >&2
+  printf 'Choice [1]: ' >&2
+  read -r setup_choice
+  case "${setup_choice:-1}" in
+    1|recommended)
+      EMACS_HOME_MODE=emacs
+      VAULT_MODE=shared
+      ;;
+    2|advanced) ;;
+    *) die "invalid setup choice: $setup_choice" ;;
+  esac
+fi
+
+choose_emacs_home_mode
+case "$EMACS_HOME_MODE" in
+  emacs|termux) ;;
+  remote)
+    [ "$ACTION" = install ] || die "--emacs-home remote is only valid for install"
+    echo "Jetpacs remote mode selected: Android Emacs HOME and Vault were not changed."
+    echo "Pairing ID: 101112131415161718191a1b1c1d1e1f"
+    echo "Pairing token: AAECAwQFBgcICQoLDA0ODw"
+    echo "Install this tree under ~/.emacs.d/jetpacs, add its emacs/ directory"
+    echo "to load-path, set jetpacs-pairing-id/token, then (require 'jetpacs)."
+    echo "Forward the listener with: adb forward tcp:8765 tcp:8765"
+    exit 0
+    ;;
+  *) die "--emacs-home must be emacs, termux, or remote" ;;
+esac
+
+choose_vault_mode
+case "$VAULT_MODE" in
+  shared|emacs|termux) ;;
+  *) die "--vault must be shared, emacs, or termux" ;;
+esac
+
+SERIAL="${SERIAL_ARG:-${ANDROID_SERIAL:-192.168.1.181:42553}}"
 SSH_PORT=8022
 SSH_USER="${ONBOARD_SSH_USER:-$(id -un)}"
 SSH_WAIT_SECONDS="${ONBOARD_SSH_WAIT:-420}"
@@ -93,17 +265,13 @@ SCRATCH_DIR="$REPO_ROOT/tools/onboard-scratch"
 DEFAULT_KEY="$HOME/.ssh/id_ed25519"
 DEDICATED_KEY="$SCRATCH_DIR/onboard_ed25519"
 
-log()  { printf '[onboard] %s\n' "$*" >&2; }
-die()  { printf '[onboard] ERROR: %s\n' "$*" >&2; exit 1; }
-step() { printf '\n[onboard] === %s ===\n' "$*" >&2; }
-
 adbs() { adb -s "$SERIAL" "$@"; }
 
 # ---------------------------------------------------------------------
 # Preflight: local tools, device visible, the tree's own invariants
 # ---------------------------------------------------------------------
 
-for cmd in adb ssh rsync ssh-keygen; do
+for cmd in adb ssh ssh-keygen tar; do
   command -v "$cmd" >/dev/null 2>&1 \
     || die "'$cmd' not found on this desktop -- install it first"
 done
@@ -182,8 +350,6 @@ SSH_OPTS=(-p "$SSH_PORT" -l "$SSH_USER"
           -o ServerAliveInterval=30 -o ServerAliveCountMax=20
           -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
           -o LogLevel=ERROR)
-RSYNC_RSH=""   # filled in once SSH_KEY is known
-
 ssh_ready() {
   if [ -f "$PASS_FILE" ]; then
     ssh_auth_env ssh -o BatchMode=no -o PreferredAuthentications=password \
@@ -346,7 +512,7 @@ Termux on the tablet and re-run"
   # ONE chained line. See the header for why this is not three lines
   # with sleeps between them.
   local bootstrap
-  bootstrap="pkg install -y openssh rsync"
+  bootstrap="pkg install -y openssh"
   bootstrap="$bootstrap && mkdir -p ~/.ssh && chmod 700 ~/.ssh"
   bootstrap="$bootstrap && echo \"$SSH_PUBKEY\" > ~/.ssh/authorized_keys"
   bootstrap="$bootstrap && chmod 600 ~/.ssh/authorized_keys && sshd"
@@ -365,70 +531,89 @@ ${TYPE_CHUNK}-char chunks)"
 
 PROVISION_OUTPUT=""
 
-# Excludes, in order of how badly each would hurt:
-#   *.elc  -- a stale .elc SILENTLY SHADOWS the .el it was built from.
-#             The repo gitignores them for exactly this reason; syncing
-#             one to the device would ship a build of some older source.
-#   .#*    -- Emacs lock files are DANGLING SYMLINKS (user@host:pid).
-#   *~ #*# -- backups/autosaves; noise, and *~ can shadow nothing but
-#             still confuses a directory listing on a tablet.
-RSYNC_EXCLUDES=(--exclude='*.elc' --exclude='.#*' --exclude='*~'
-                --exclude='#*#' --exclude='.git' --exclude='__pycache__')
-
 phase_provision() {
-  ssh_run "mkdir -p jetpacs/emacs jetpacs/py jetpacs/org" \
-    || die "could not mkdir ~/jetpacs/{emacs,py,org} on the device over ssh"
+  local stage='.cache/jetpacs-onboard' payload
+  payload="$stage/payload"
+
+  # Non-install actions need no payload and stream the installer through stdin.
+  # In particular, --audit leaves no temporary files behind on the tablet.
+  if [ "$ACTION" != install ]; then
+    log "running device-side action=$ACTION vault=$VAULT_MODE emacs-home=$EMACS_HOME_MODE"
+    PROVISION_OUTPUT="$(ssh_run bash -s -- \
+      "$ACTION" "$VAULT_MODE" "$EMACS_HOME_MODE" \
+      < "$SCRIPT_DIR/onboard-provision-remote.sh")" \
+      || die "the remote $ACTION action failed -- its output above names the step"
+    return
+  fi
+
+  ssh_run 'mkdir -p .cache/jetpacs-onboard' \
+    || die "could not create the temporary onboarding stage in Termux"
+  ssh_run 'cat > .cache/jetpacs-onboard/install-jetpacs.sh' \
+      < "$SCRIPT_DIR/onboard-provision-remote.sh" \
+    || die "transfer of the device-side installer failed"
+
+  if [ "$ACTION" = install ]; then
+    # The stage is transport only and is removed after provisioning.  The
+    # active tree is always SELECTED_HOME/.emacs.d/jetpacs.
+    ssh_run "rm -rf $payload && mkdir -p $payload/emacs $payload/org \
+$payload/examples/python $payload/bootstrap" \
+      || die "could not prepare the temporary payload directory"
 
   # tar over ssh, NOT rsync: on this tablet's Termux (rsync 3.5.0,
   # openssh 10.5p1) the rsync RECEIVER gets EACCES on chdir into a
   # directory the same login shell enters fine -- no AVC logged, owner
-  # and 0700 modes correct, `cd` over the identical ssh channel works.
-  # Observed live 2026-08-13; not understood, not worth fighting: tar
-  # rides the proven exec channel and the tree is small.  The --delete
-  # mirror semantic is approximated by extracting over the previous
-  # tree; stale .el files are swept by the remote provisioner's .elc
-  # sweep companion below only for .elc -- a RENAMED .el lingers until
-  # the next wipe, which the MANIFEST records as accepted.
-  log "tar emacs/ -> Termux ~/jetpacs/emacs/ (whole tree, apps/ and \
-spike/ included)"
-  tar -C "$REPO_ROOT/emacs" --exclude='*.elc' --exclude='.#*' \
+  # and 0700 modes correct. The stage is fresh, so renamed modules cannot
+  # linger; the device-side installer swaps the distribution subtrees.
+    log "staging emacs/ (whole tree, apps/ and spike/ included)"
+    tar -C "$REPO_ROOT/emacs" --exclude='*.elc' --exclude='.#*' \
       --exclude='*~' --exclude='#*#' --exclude='__pycache__' -czf - . \
-    | ssh_run 'tar -C jetpacs/emacs -xzf -' \
-    || die "tar of emacs/ to the device failed"
+      | ssh_run "tar -C $payload/emacs -xzf -" \
+      || die "tar of emacs/ to the device failed"
 
-  # NO --delete here, deliberately. ~/jetpacs/py is where
-  # device/emacs-init.el points jetpacs-files-default-dir, i.e. it is a
-  # directory the tablet's Files app can CREATE AND EDIT files in. A
-  # mirror would delete the user's on-device work on the next run. Repo
-  # files still win on name collision, so live.py stays authoritative.
-  log "rsync device/py/ -> Termux ~/jetpacs/py/ (fixtures; no --delete, \
-this is a live editing dir)"
-  tar -C "$REPO_ROOT/device/py" -czf - . \
-    | ssh_run 'tar -C jetpacs/py -xzf -' \
-    || die "tar of device/py/ to the device failed"
+    log "staging device/py/ as managed examples/python/"
+    tar -C "$REPO_ROOT/device/py" -czf - . \
+      | ssh_run "tar -C $payload/examples/python -xzf -" \
+      || die "tar of device/py/ to the device failed"
 
-  # Distribution assets, not the user's live org-directory.  The Org
-  # app copies only missing files from here into Emacs's private
-  # org-directory, so re-provisioning never overwrites user content.
-  log "tar org/ -> Termux ~/jetpacs/org/ (seed + Orgro walkthrough)"
-  tar -C "$REPO_ROOT/org" -czf - . \
-    | ssh_run 'tar -C jetpacs/org -xzf -' \
-    || die "tar of org/ seed assets to the device failed"
+    # Distribution assets, not the user's live org-directory. The Org app
+    # copies only missing files from here into ~/org.
+    log "staging org/ (seed + Orgro walkthrough)"
+    tar -C "$REPO_ROOT/org" -czf - . \
+      | ssh_run "tar -C $payload/org -xzf -" \
+      || die "tar of org/ seed assets to the device failed"
 
-  log "staging device/emacs-init.el + the remote provisioner"
-  ssh_run 'cat > jetpacs/emacs-init.el' < "$REPO_ROOT/device/emacs-init.el" \
-    || die "transfer of device/emacs-init.el to the device failed"
-  ssh_run 'cat > .onboard-provision.sh' \
-      < "$SCRIPT_DIR/onboard-provision-remote.sh" \
-    || die "transfer of tools/onboard-provision-remote.sh failed"
+    log "staging the path-independent composition root and startup seams"
+    ssh_run "cat > $payload/init.el" < "$REPO_ROOT/device/init.el" \
+      || die "transfer of device/init.el failed"
+    ssh_run "cat > $payload/bootstrap/early-init-local.el" \
+        < "$REPO_ROOT/device/early-init-local.el" \
+      || die "transfer of the Local Emacs early-init template failed"
+    ssh_run "cat > $payload/bootstrap/early-init-termux.el" \
+        < "$REPO_ROOT/device/early-init-termux.el" \
+      || die "transfer of the Termux-shared early-init template failed"
+    ssh_run "cat > $payload/bootstrap/init-seam.el" \
+        < "$REPO_ROOT/device/init-seam.el" \
+      || die "transfer of the init seam failed"
+
+    if [ "$INSTALL_PYLSP" -eq 1 ]; then
+      log "verifying optional Termux python/pylsp tooling"
+      ssh_run 'if ! command -v python3 >/dev/null 2>&1; then pkg install -y python; fi; if ! command -v pylsp >/dev/null 2>&1; then python3 -m pip install --no-input python-lsp-server; fi' \
+        || die "could not install the optional python-lsp-server tooling"
+    fi
+  fi
 
   # The remote script's stderr streams straight through to ours as it
   # runs (log/die breadcrumbs); only its REPORT_ lines are on stdout,
   # and those are what phase_verify parses.
-  log "running the remote provisioner (pip install can take minutes)"
-  PROVISION_OUTPUT="$(ssh_run bash .onboard-provision.sh)" \
+  log "running device-side action=$ACTION vault=$VAULT_MODE emacs-home=$EMACS_HOME_MODE"
+  PROVISION_OUTPUT="$(ssh_run bash "$stage/install-jetpacs.sh" \
+    "$ACTION" "$VAULT_MODE" "$EMACS_HOME_MODE" "$payload")" \
     || die "the remote provisioning script failed on the device -- its \
 output above names the exact step"
+
+  # This is explicitly a transport cache, not a third Jetpacs installation.
+  ssh_run "rm -rf $stage" \
+    || log "warning: could not remove temporary transport stage $stage"
 }
 
 report_field() {
@@ -440,56 +625,88 @@ report_field() {
 # ---------------------------------------------------------------------
 
 phase_verify() {
-  local elisp_dir py_dir org_dir elisp_files emacs_home harness init_dest \
-        init_state pylsp_bin pylsp_version live_py_tail tail_note
+  local vault vault_writable emacs_home_mode emacs_user_home emacs_user_dotdir \
+        jetpacs_root elisp_dir examples_dir \
+        org_dir elisp_files emacs_home early_init init_dest pylsp_bin legacy \
+        root_state home_seams init_seams legacy_harness_present
 
+  vault="$(report_field VAULT)"
+  vault_writable="$(report_field VAULT_WRITABLE)"
+  emacs_home_mode="$(report_field EMACS_HOME_MODE)"
+  emacs_user_home="$(report_field EMACS_USER_HOME)"
+  emacs_user_dotdir="$(report_field EMACS_USER_DOTDIR)"
+  jetpacs_root="$(report_field JETPACS_ROOT)"
+  root_state="$(report_field ROOT_STATE)"
   elisp_dir="$(report_field ELISP_DIR)"
   elisp_files="$(report_field ELISP_FILES)"
-  py_dir="$(report_field PY_DIR)"
+  examples_dir="$(report_field EXAMPLES_DIR)"
   org_dir="$(report_field ORG_DIR)"
   emacs_home="$(report_field EMACS_HOME)"
-  harness="$(report_field INIT_HARNESS)"
+  early_init="$(report_field BOOTSTRAP_EARLY_INIT)"
+  home_seams="$(report_field HOME_SEAM_COUNT)"
   init_dest="$(report_field INIT_DEST)"
-  init_state="$(report_field INIT_STATE)"
+  init_seams="$(report_field INIT_SEAM_COUNT)"
+  legacy_harness_present="$(report_field LEGACY_HARNESS_PRESENT)"
   pylsp_bin="$(report_field PYLSP_BIN)"
-  pylsp_version="$(report_field PYLSP_VERSION)"
-  live_py_tail="$(report_field LIVE_PY_TAIL)"
-
-  if [ "$live_py_tail" = "612e" ]; then
-    tail_note=' (ok: ends "a.", no trailing newline)'
-  else
-    tail_note=' (EXPECTED 612e -- see the provisioner WARNING above)'
-  fi
+  legacy="$(report_field LEGACY_PATHS)"
 
   echo >&2
-  echo "==================== onboard-tablet: landed ====================" >&2
+  echo "=================== Jetpacs onboarding report ==================" >&2
   printf '  device serial          : %s\n' "$SERIAL" >&2
+  printf '  action                 : %s\n' "$ACTION" >&2
+  printf '  Vault mode             : %s\n' "$VAULT_MODE" >&2
+  printf '  user-content Vault     : %s  [writable from Termux: %s]\n' \
+    "${vault:-?}" "${vault_writable:-?}" >&2
+  printf '  Emacs HOME mode        : %s\n' "${emacs_home_mode:-?}" >&2
+  printf '  private Unix HOME      : %s\n' "${emacs_user_home:-?}" >&2
+  printf '  private .emacs.d       : %s\n' "${emacs_user_dotdir:-?}" >&2
+  printf '  managed Jetpacs root   : %s  [%s]\n' \
+    "${jetpacs_root:-?}" "${root_state:-?}" >&2
   printf '  ssh                    : %s@127.0.0.1:%s (adb forward, key %s)\n' \
     "$SSH_USER" "$SSH_PORT" "$SSH_KEY" >&2
-  printf '  Termux elisp tree      : %s  (%s .el files)\n' \
+  printf '  managed elisp tree     : %s  (%s .el files)\n' \
     "${elisp_dir:-?}" "${elisp_files:-?}" >&2
-  printf '  Termux py fixtures     : %s\n' "${py_dir:-?}" >&2
-  printf '  Termux Org seed bundle : %s\n' "${org_dir:-?}" >&2
-  printf '  live.py tail bytes     : 0x%s%s\n' "${live_py_tail:-?}" \
-    "$tail_note" >&2
-  printf '  Android Emacs HOME     : %s  [probed this run, not assumed]\n' \
+  printf '  managed examples       : %s\n' "${examples_dir:-?}" >&2
+  printf '  managed Org seed       : %s\n' "${org_dir:-?}" >&2
+  printf '  original Emacs HOME    : %s  [bootstrap location only]\n' \
     "${emacs_home:-?}" >&2
-  printf '  onboarding harness     : %s\n' "${harness:-?}" >&2
-  printf '  device init.el         : %s  [%s]\n' \
-    "${init_dest:-?}" "${init_state:-?}" >&2
-  printf '  pylsp                  : %s\n' "${pylsp_bin:-?}" >&2
-  printf '  pylsp --version        : %s\n' "${pylsp_version:-?}" >&2
+  printf '  early-init seam        : %s  [%s managed block(s)]\n' \
+    "${early_init:-?}" "${home_seams:-?}" >&2
+  printf '  private init seam      : %s  [%s managed block(s)]\n' \
+    "${init_dest:-?}" "${init_seams:-?}" >&2
+  printf '  retired private harness: %s\n' "${legacy_harness_present:-?}" >&2
+  printf '  pylsp                  : %s\n' "${pylsp_bin:-not installed}" >&2
+  if [ -n "$legacy" ]; then
+    printf '  inactive legacy trees  : %s\n' "${legacy//|/, }" >&2
+  else
+    printf '  inactive legacy trees  : none detected\n' >&2
+  fi
   echo "===============================================================" >&2
   echo >&2
-  echo "REMAINING (on the tablet, by hand -- no adb path to either" >&2
-  echo "without a debuggable or rooted build):" >&2
-  echo "  1. Launch the EBP Companion app (binds 127.0.0.1:8765)." >&2
-  echo "  2. Launch, or force-stop and relaunch, org.gnu.emacs. It reads" >&2
-  echo "     the init.el above, gains Termux's usr/bin on exec-path and" >&2
-  echo "     PATH, loads the synced elisp, dials the Companion and pushes" >&2
-  echo "     Files. Watch *Messages* for 'jetpacs-emacs-init:'" >&2
-  echo "     breadcrumbs; M-x jetpacs-emacs-init-report dumps state, and" >&2
-  echo "     M-x jetpacs-emacs-init-connect re-dials by hand." >&2
+  case "$ACTION" in
+    install)
+      echo "REMAINING:" >&2
+      echo "  1. Grant Emacs 'All files' access if the Vault is /sdcard." >&2
+      echo "  2. Force-stop and relaunch org.gnu.emacs, then open the" >&2
+      echo "     EBP Companion. Emacs reads the private early-init redirect," >&2
+      echo "     then the private init and managed root above. User content" >&2
+      echo "     opens from the Vault; .emacs.d never lives there." >&2
+      if [ -n "$legacy" ]; then
+        echo "  3. The legacy trees listed above are no longer on the startup" >&2
+        echo "     path. Inspect them before deleting; they may contain edits." >&2
+      fi
+      ;;
+    remove)
+      echo "Jetpacs was removed; the Vault and selected Unix HOME were kept." >&2
+      echo "Use --reset-home --vault $VAULT_MODE --emacs-home $EMACS_HOME_MODE" >&2
+      echo "only if Android Emacs should" >&2
+      echo "return to its original app-private HOME." >&2
+      ;;
+    reset-home)
+      echo "The HOME/PATH block was removed. The Vault and private files remain." >&2
+      ;;
+    audit) : ;;
+  esac
   echo >&2
 }
 
@@ -498,9 +715,6 @@ phase_verify() {
 # ---------------------------------------------------------------------
 
 resolve_ssh_key
-RSYNC_RSH="ssh -i $SSH_KEY -p $SSH_PORT -l $SSH_USER -o BatchMode=yes \
--o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
--o ServerAliveInterval=30 -o LogLevel=ERROR"
 ensure_forward
 
 step "PHASE ssh-bootstrap"
@@ -513,10 +727,15 @@ else
 ${SSH_WAIT_SECONDS}s after the typed bootstrap. This script cannot read \
 Termux's terminal, so check the tablet directly -- the whole chain is on \
 one line there, so the FIRST failing step is the last thing printed: did \
-'pkg install -y openssh rsync' reach the network? did the echo land \
+'pkg install -y openssh' reach the network? did the echo land \
 (cat ~/.ssh/authorized_keys)? did 'sshd' print an error? Fix on-device, \
 then re-run -- this phase is skipped entirely once ssh answers."
   log "ssh reachable"
+fi
+
+if [ "$ACTION" != audit ]; then
+  log "force-stopping org.gnu.emacs before changing startup/state files"
+  adbs shell am force-stop org.gnu.emacs >/dev/null
 fi
 
 step "PHASE provision"

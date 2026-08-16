@@ -756,7 +756,11 @@ refused" surface)
                   ;; the SurfaceSpec and the stack puts N screens in one.
                   (jetpacs-chrome-screen
                    label
-                   (apply #'jetpacs-column (funcall builder))
+                   ;; A drill hosts an arbitrary Emacs buffer, whose rendered
+                   ;; height is not bounded by the viewport.  Scrolling is a
+                   ;; property of this generic host, not something every
+                   ;; Tier-0/Tier-1 renderer should have to remember.
+                   (apply #'jetpacs-lazy-column (funcall builder))
                    :back back)))))
     (run-at-time 0 nil
                  (lambda ()

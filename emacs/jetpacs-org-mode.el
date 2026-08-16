@@ -418,7 +418,7 @@ NOW is an Emacs time value and defaults to `current-time'."
   (jetpacs-shell-surface-for owner))
 
 (defun jetpacs-org-mode--on-open-seed (args params)
-  "Open a known seeded document selected by ARGS on the tapped surface."
+  "Open a known seeded document selected by ARGS through the Files app."
   (let ((document (plist-get args :document)))
     (cond
      ((not (member document '("manual" "inbox"))) 'rejected)
@@ -430,14 +430,14 @@ NOW is an Emacs time value and defaults to `current-time'."
                             (plist-get paths
                                        (if (equal document "manual")
                                            :manual :inbox)))))
-            (if (not (and path (file-readable-p path)))
+            (if (not (stringp path))
                 'rejected
-              (jetpacs-navigate-thunk
-               (lambda () (find-file-noselect path))
-               (plist-get params :surface)
-               (if (equal document "manual")
-                   "Orgro manual" "Starter inbox"))
-              'accepted))
+              ;; This is intentionally the exact public path used by a Files
+              ;; row—not a look-alike document view on the Org surface.  It
+              ;; performs the same root check, canonicalization, document-host
+              ;; selection, and navigation on the canonical Files surface.
+              (jetpacs-files-open-path
+               path (jetpacs-org-mode--surface jetpacs-files-owner))))
         (error
          (message "jetpacs-org-mode: opening seed failed: %s"
                   (jetpacs-error-label err))

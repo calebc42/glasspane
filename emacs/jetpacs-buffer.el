@@ -95,6 +95,14 @@ default `emacs.buffer.act' dispatch.  Tier-1 skins let-bind this around
 delegated region renders.  A signaling function counts as nil — a broken
 skin routing must not cost the render.")
 
+(defvar jetpacs-buffer-node-transform-function nil
+  "Optional function mapping (NODE BOL EOL BUFFER-NAME) to a line node.
+A mode skin binds this around Tier-0 when a complete line needs
+structural chrome rather than only specialized spans.  The transform
+runs before byte accounting and exposure recording, so the node that is
+budgeted and authorized is exactly the node shipped.  Returning a
+non-node or signalling leaves the original NODE intact.")
+
 (defvar jetpacs-buffer-scroll-position nil
   "Dynamically bound buffer position to mark as the scroll target.
 Tier-1 renderers and navigation hosts bind this while delegating to the
@@ -295,22 +303,39 @@ supersedes the previous set."
 
 (defun jetpacs-buffer--expose-node-taps (node buffer-name)
   "Record an exposure for every tap NODE actually ships (SPEC 23.1).
-Called once NODE has survived the span cap and the byte budget, so the
-record set is exactly what reached the wire.  Reads the shipped spans
-rather than replaying what the builder attempted: a span the SPEC 4.5
-cap replaced with the ellipsis took its `on_tap' with it, and must not
-stay authorized.  Nodes with no spans (`divider', the `text' fallback)
-carry no taps and record nothing."
-  (let ((spans (plist-get node :spans))
-        (jetpacs-buffer--defer-exposure nil))
-    (when (or (vectorp spans) (consp spans))
-      (mapc (lambda (span)
-              (when-let* ((desc (plist-get span :on_tap))
-                          (act (plist-get desc :action))
-                          (pos (plist-get (plist-get desc :args) :pos)))
-                (when (numberp pos)
-                  (jetpacs-buffer-expose buffer-name pos act))))
-            spans))))
+Called once NODE has survived the span cap and byte budget, so the
+record set is exactly what reached the wire.  Walk nested structural
+nodes as well as rich spans: a line transform may wrap its text in a
+row with a trailing icon action.  A span the SPEC 4.5 cap replaced with
+an ellipsis is absent from this final tree and stays unauthorized."
+  (let ((jetpacs-buffer--defer-exposure nil))
+    (cl-labels
+        ((expose (desc)
+           (when-let* ((act (and (listp desc)
+                                 (plist-get desc :action)))
+                       (pos (plist-get (plist-get desc :args) :pos)))
+             (when (numberp pos)
+               (jetpacs-buffer-expose buffer-name pos act))))
+         (walk (current)
+           (when (jetpacs-node-p current)
+             (expose (plist-get current :on_tap))
+             (mapc (lambda (span) (expose (plist-get span :on_tap)))
+                   (append (plist-get current :spans) nil))
+             (cl-loop for (_key value) on current by #'cddr
+                      do (cond
+                          ((jetpacs-node-p value) (walk value))
+                          ((vectorp value)
+                           (mapc (lambda (child)
+                                   (when (jetpacs-node-p child)
+                                     (walk child)))
+                                 (append value nil)))
+                          ((and (proper-list-p value)
+                                (seq-some #'jetpacs-node-p value))
+                           (mapc (lambda (child)
+                                   (when (jetpacs-node-p child)
+                                     (walk child)))
+                                 value)))))))
+      (walk node))))
 
 (defun jetpacs-buffer-exposed-p (buffer-name pos &optional action)
   "Non-nil when POS in BUFFER-NAME was emitted for ACTION by the last render.
@@ -876,6 +901,18 @@ containing that position as the scroll target (`:scroll_here')."
                               (jetpacs-with-attrs line :scroll_here t)
                             line)))))))
             (when node
+              ;; Tier-1 structural chrome must land before both gates:
+              ;; budgeting the old line and authorizing the new tree would
+              ;; make size accounting and SPEC 23.1 authority disagree with
+              ;; what the device actually received.
+              (when jetpacs-buffer-node-transform-function
+                (let ((transformed
+                       (condition-case nil
+                           (funcall jetpacs-buffer-node-transform-function
+                                    node bol eol buffer-name)
+                         (error nil))))
+                  (when (jetpacs-node-p transformed)
+                    (setq node transformed))))
               ;; The byte budget stops the walk BEFORE over-emitting.
               (when bytes-left
                 (let ((size (jetpacs-buffer-node-bytes node)))

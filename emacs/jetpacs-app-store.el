@@ -48,14 +48,15 @@
   "The Manage Apps screen's root surface (owner and surface name).")
 
 (defcustom jetpacs-app-store-staging-dirs
-  '("/sdcard/Download" "/sdcard/Documents/jetpacs/apps")
+  '("/sdcard/Download" "/sdcard/Documents/jetpacs-apps")
   "Directories scanned for app bundles, in priority order.
 Download is where self-distributed bundles land (possibly renamed
-\"name.el.txt\" by MediaStore); the apps subtree is the adb-push path."
+\"name.el.txt\" by MediaStore); Documents/jetpacs-apps is the explicit
+side-load staging folder.  Neither is an active Elisp load path."
   :type '(repeat directory) :group 'jetpacs)
 
 (defcustom jetpacs-app-store-file
-  (expand-file-name "jetpacs-apps.el" user-emacs-directory)
+  (expand-file-name "jetpacs/apps.el" user-emacs-directory)
   "The create-once file persisting the installed-bundle list."
   :type 'file :group 'jetpacs)
 
@@ -169,7 +170,7 @@ bundle, this resolves it against what is actually staged right now."
 ;;;; Persistence (the create-once list file)
 
 (defconst jetpacs-app-store--template
-  ";;; jetpacs-apps.el --- installed app bundles -*- lexical-binding: t; -*-
+  ";;; apps.el --- installed Jetpacs app bundles -*- lexical-binding: t; -*-
 ;; Yours to edit — but the phone's Manage Apps screen also writes it,
 ;; and each install/uninstall rewrites this whole file from the list
 ;; below (hand comments do not survive that).

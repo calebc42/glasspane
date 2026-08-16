@@ -246,6 +246,13 @@ snapshot still carries every view with initial_view at the stack top."
           ;; Stack mutated synchronously; the push deferred.
           (should (= (length (jetpacs-chrome-stack "app:filesapp")) 2))
           (should (null recs))
+          ;; Generic buffer drills own their viewport scrolling.  A plain
+          ;; column makes every line past the screen edge unreachable.
+          (let* ((entry (car (gethash "app:filesapp"
+                                      jetpacs-chrome--stacks)))
+                 (screen (funcall (cdr entry) nil)))
+            (should (equal (plist-get (plist-get screen :body) :t)
+                           "lazy_column")))
           (funcall (car deferred))
           (should (= (length recs) 1))
           ;; Repeat drill with the SAME label: replace-top, not stacking.

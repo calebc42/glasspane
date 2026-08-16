@@ -60,7 +60,12 @@
     (let ((labels (jetpacs-apps-test--labels
                    (jetpacs-apps-dock-items "app:hub"))))
       (should (equal labels '("Home" "Notes" "Apps")))
-      (should-not (member "Agenda" labels)))
+      (should-not (member "Agenda" labels))
+      (let* ((apps (car (last (jetpacs-apps-dock-items "app:hub"))))
+             (tap (plist-get apps :on-tap)))
+        (should (equal (plist-get tap :action) "jetpacs.launcher.open"))
+        (should (equal (plist-get (plist-get tap :args) :surface)
+                       "app:jetpacs.app-store"))))
     (setq jetpacs-apps--current "agenda")
     (should (equal (jetpacs-apps-test--labels
                     (jetpacs-apps-dock-items "app:hub"))
@@ -280,7 +285,7 @@ the canonical encoding."
 (ert-deftest jetpacs-apps-chrome-pole-validates-and-composes ()
   "The `:chrome' pole: junk refuses at build; STANDALONE withdraws the
 core dock and the app's items stay off foreign surfaces; PRIMARY
-collapses core to one Home and turns the destinations into tabs
+retains the global core and fills the remaining slots with destination tabs
 through `app.open' `:route', Apps folding into the drawer."
   (jetpacs-apps-test--env
     (should-error (jetpacs-defapp "bad" :surfaces '("bad.main")
@@ -310,7 +315,7 @@ through `app.open' `:route', Apps folding into the drawer."
         (should-not (jetpacs-apps-global-actions "app:solo.main"))
         (should (equal (jetpacs-apps-global-actions "app:hub")
                        '(seed))))
-      ;; PRIMARY: one Home + destination tabs, Apps folded away.
+      ;; PRIMARY: the global core + destination tabs, Apps folded away.
       (jetpacs-defapp "prime" :label "Prime" :surfaces '("prime.main")
                       :chrome 'primary
                       :destinations
@@ -324,8 +329,8 @@ through `app.open' `:route', Apps folding into the drawer."
             jetpacs-apps--current-route "two")
       (let* ((items (jetpacs-apps-dock-items "app:hub"))
              (labels (jetpacs-apps-test--labels items)))
-        ;; Core collapsed to its FIRST item; four tabs max (the M3
-        ;; 3-5 budget with Home); no trailing Apps.
+        ;; This fixture has one core item, leaving four tabs in the M3
+        ;; five-item budget; no trailing Apps.
         (should (equal labels '("Home" "One" "Two" "Three" "Four")))
         (should-not (member "Five" labels))
         (should-not (member "Apps" labels))

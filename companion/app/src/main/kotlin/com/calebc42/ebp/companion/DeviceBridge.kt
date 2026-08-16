@@ -41,6 +41,7 @@ import kotlinx.serialization.json.put
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -127,6 +128,10 @@ data class CandidateDoc(
 internal fun offerEpochCurrent(liveEpoch: Long?, epoch: Long): Boolean =
     liveEpoch != null && liveEpoch == epoch
 
+/** CHALLENGED is only a pairing claim; authentication begins at SYNCING. */
+internal fun isAuthenticatedConnectionState(state: SessionState): Boolean =
+    state == SessionState.SYNCING || state == SessionState.READY
+
 class DeviceBridge(
     private val appContext: android.content.Context,
     /** SPEC 14.4: the shown surface's ID travels with its spec, so an
@@ -168,13 +173,18 @@ class DeviceBridge(
     // directly (EbpApplication), independent of any connection.
     private val firing = CompanionStores.firing(appContext)
     @Volatile private var current: Socket? = null
+    // Unlike CompanionStores.liveSession (which preserves the existing
+    // accept-time routing behavior), this slot advances only after proof
+    // verification. It makes reconnect prompting immune to an unauthenticated
+    // probe displacing the live-session routing slot.
+    private val authenticatedSession = AtomicReference<CompanionEngine?>(null)
 
     private val config = CompanionConfig(
         serverName = "ebp-companion",
         serverVersion = "0.1.0-w4",
         pairings = mapOf(
-            "101112131415161718191a1b1c1d1e1f" to
-                EbpAuth.decodePairingToken("AAECAwQFBgcICQoLDA0ODw")),
+            JETPACS_PAIRING_ID to EbpAuth.decodePairingToken(JETPACS_PAIRING_TOKEN),
+        ),
         supportedCapabilities = setOf("theme", "surfaces.dialog", "presentation.toast",
             "presentation.snackbar",
             "presentation.pie-menu", "reminders.owner", "surfaces.notification",
@@ -975,6 +985,7 @@ class DeviceBridge(
             onTheme(payload)
         }
         engine.pieMenuListener = { id, spec -> onPieMenuChanged(id, spec) }
+        var authenticated = false
         try {
             // INSIDE the try: SPEC 5.2's newest-wins supersession closes this
             // socket from the accept loop the instant a newcomer arrives, and
@@ -989,6 +1000,11 @@ class DeviceBridge(
                 val n = input.read(buffer)
                 if (n < 0) break
                 engine.feed(buffer.copyOf(n))
+                if (!authenticated && isAuthenticatedConnectionState(engine.state)) {
+                    authenticated = true
+                    authenticatedSession.set(engine)
+                    Notifications.cancelReconnect(appContext)
+                }
             }
         } catch (_: Exception) {
             // transport loss: SPEC 10.1, any state may close
@@ -1004,7 +1020,8 @@ class DeviceBridge(
             // on that same verdict (R5 review: they are process-wide,
             // so a superseded connection's delayed teardown was erasing
             // the successor session's mirrors, offers, and docs).
-            if (CompanionStores.clearLiveSession(engine)) {
+            val wasCurrentSession = CompanionStores.clearLiveSession(engine)
+            if (wasCurrentSession) {
                 // SPEC 19: transport loss closes every editor session, so
                 // no mirror outlives the connection that produced it (also
                 // keeps the maps bounded — entries are per (document,
@@ -1022,6 +1039,14 @@ class DeviceBridge(
                 candidateDocSlots.values.forEach { it.retire() }
                 candidateDocSlots.clear()
                 lastCaret.clear()
+            }
+            val wasCurrentAuthenticatedSession = authenticated &&
+                authenticatedSession.compareAndSet(engine, null)
+            if (shouldPostReconnectNotification(
+                    authenticated,
+                    wasCurrentAuthenticatedSession,
+                )) {
+                Notifications.postReconnect(appContext)
             }
             socket.runCatching { close() }
         }

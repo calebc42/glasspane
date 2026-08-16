@@ -8,6 +8,7 @@ package com.calebc42.ebp.companion
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
@@ -25,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.calebc42.ebp.companion.render.EbpTheme
+import com.calebc42.ebp.companion.render.chromeBackDescriptor
 import com.calebc42.ebp.companion.render.RenderDialogRoot
 import com.calebc42.ebp.companion.render.RenderNode
 import com.calebc42.ebp.companion.render.RenderPieMenu
@@ -84,6 +86,12 @@ class MainActivity : ComponentActivity() {
                     SurfaceHost(
                         app.currentSpec,
                         bridge,
+                        // S11: every other overlay composes into its OWN
+                        // window (a ComponentDialog owns the back key while
+                        // it is up), but onboarding is drawn IN THIS ONE over
+                        // the surface — while it stands, back must not move
+                        // the screen stack under it.
+                        ownsBack = !(onboardingRequired || onboardingOpen),
                         onRepair = { onboardingOpen = true },
                     )
                     PieMenuHost(app.currentPieMenu, bridge)
@@ -122,12 +130,31 @@ class MainActivity : ComponentActivity() {
 private fun SurfaceHost(
     flow: kotlinx.coroutines.flow.StateFlow<Pair<String, JsonObject>?>,
     bridge: DeviceBridge,
+    ownsBack: Boolean,
     onRepair: () -> Unit,
 ) {
     val shown by flow.collectAsState()
     when (val s = shown) {
         null -> WaitingForEmacs(onRepair)
-        else -> RenderNode(s.second, s.first, bridge)
+        else -> {
+            // S11: system back runs the presented screen's OWN back arrow —
+            // bridge.action is the terminal call RenderCtx.action makes for a
+            // surface descriptor, so the companion-local view switch and its
+            // `view.switched` report are indistinguishable from a tap on the
+            // arrow (drop-mode offline, exactly like the tap). Enabled only
+            // while this screen authors one; otherwise the system default
+            // proceeds and the Activity finishes, as it always has.
+            //
+            // Registered BEFORE the tree composes, so every handler the tree
+            // installs — an open modal drawer's predictive back, an expanded
+            // search bar — is added later and outranks this one (the back
+            // dispatcher runs its callbacks newest-first).
+            val back = chromeBackDescriptor(s.second)
+            BackHandler(enabled = ownsBack && back != null) {
+                back?.let { bridge.action(s.first, it) }
+            }
+            RenderNode(s.second, s.first, bridge)
+        }
     }
 }
 

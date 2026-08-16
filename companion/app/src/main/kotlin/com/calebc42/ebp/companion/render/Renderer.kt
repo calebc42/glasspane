@@ -1726,12 +1726,18 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
         // Dismissible pushes the body aside and leaves it live; permanent
         // stands open (its hamburger is suppressed at the bar — it would
         // toggle nothing).
+        // The SHEETS take drawerState deliberately (S11): that overload is
+        // the one installing DrawerPredictiveBackHandler, so an OPEN drawer
+        // owns system back — it composes after, and therefore outranks, the
+        // chrome BackHandler in MainActivity. The stateless overload handles
+        // no back at all, and the view stack would move under the open sheet.
         when (node.stringOr("drawer_variant")) {
             "dismissible" ->
                 androidx.compose.material3.DismissibleNavigationDrawer(
                     drawerState = drawerState,
                     drawerContent = {
-                        androidx.compose.material3.DismissibleDrawerSheet {
+                        androidx.compose.material3.DismissibleDrawerSheet(
+                            drawerState = drawerState) {
                             RenderNode(drawer, ctx.child(drawer, 5))
                         }
                     }) { sheetWrap { railed() } }
@@ -1747,6 +1753,7 @@ fun RenderScaffold(node: JsonObject, ctx: RenderCtx) {
                     drawerState = drawerState,
                     drawerContent = {
                         androidx.compose.material3.ModalDrawerSheet(
+                            drawerState = drawerState,
                             modifier = Modifier.fillMaxWidth(0.75f)) {
                             RenderNode(drawer, ctx.child(drawer, 5))
                         }

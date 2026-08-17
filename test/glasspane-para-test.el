@@ -18,6 +18,11 @@
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The Areas source inspected by its architectural gate.")
 
+(defconst glasspane-para-test--resources-source
+  (expand-file-name "../emacs/apps/glasspane/glasspane-resources.el"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The Resources source inspected by its architectural gate.")
+
 (defmacro glasspane-para-test--with-vault (files &rest body)
   "Create FILES in a temporary local Org vault and evaluate BODY.
 FILES is a list of (RELATIVE-NAME CONTENT)."
@@ -248,6 +253,132 @@ one file may honestly participate in both its file Area and a nested Area."
     (should-not (search-forward "jetpacs-files--" nil t))
     (goto-char (point-min))
     (should-not (search-forward "vulpea-db-" nil t))))
+
+(ert-deftest glasspane-para-resources-delegates-every-path-to-files ()
+  "Vault, Org, and non-Org paths all take the one public Files route."
+  (let ((org-directory "/vault")
+        calls)
+    (cl-letf (((symbol-function 'jetpacs-files-open-path)
+               (lambda (path surface)
+                 (push (list path surface) calls)
+                 'accepted)))
+      (should (eq (glasspane-resources--on-open nil nil) 'accepted))
+      (should (eq (glasspane-resources--on-open-file
+                   '(:path "/vault/notes.org") nil)
+                  'accepted))
+      (should (eq (glasspane-resources--on-open-file
+                   '(:path "/vault/reference.pdf") nil)
+                  'accepted)))
+    (should (equal (nreverse calls)
+                   '(("/vault" "app:jetpacs.files")
+                     ("/vault/notes.org" "app:jetpacs.files")
+                     ("/vault/reference.pdf" "app:jetpacs.files"))))))
+
+(ert-deftest glasspane-para-resources-files-root-refusal-propagates ()
+  "The native Files guard rejects both landing and direct paths unchanged."
+  (let* ((root (make-temp-file "glasspane-resources-root" t))
+         (outside (make-temp-file "glasspane-resources-outside" t))
+         (outside-file (expand-file-name "outside.org" outside))
+         (org-directory outside)
+         (jetpacs-files-roots (list root))
+         (jetpacs-files-shared-storage nil)
+         notes)
+    (unwind-protect
+        (progn
+          (with-temp-file outside-file (insert "* Outside\n"))
+          (cl-letf (((symbol-function 'jetpacs-files-shared-dir) #'ignore)
+                    ((symbol-function 'jetpacs-shell-notify)
+                     (lambda (text &optional surface)
+                       (push (list text surface) notes))))
+            (should (eq (glasspane-resources--on-open nil nil) 'rejected))
+            (should (eq (glasspane-resources--on-open-file
+                         (list :path outside-file) nil)
+                        'rejected))
+            (should (= (length notes) 2))
+            (should (cl-every
+                     (lambda (note)
+                       (and (string-match-p "outside-roots" (car note))
+                            (equal (cadr note) "app:jetpacs.files")))
+                     notes))))
+      (delete-directory root t)
+      (delete-directory outside t))))
+
+(ert-deftest glasspane-para-resources-route-stays-selected-on-files ()
+  "A Resources deep link remains selected after the native surface handoff."
+  (let ((jetpacs-apps--registry nil)
+        (jetpacs-apps--current nil)
+        (jetpacs-apps--current-route nil)
+        (jetpacs-apps-core-dock-items nil)
+        (org-directory "/vault")
+        captured pushed)
+    (jetpacs-defapp
+     "glasspane" :label "Glasspane" :surfaces '("glasspane")
+     :chrome 'primary :dock-core nil
+     :destinations
+     '((:key "resources" :label "Resources" :icon "topic"
+        :verb "resources.open")))
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-owned-surface-p)
+               (lambda (surface owner)
+                 (and (equal surface "app:glasspane")
+                      (equal owner "glasspane"))))
+              ((symbol-function 'jetpacs-files-open-path)
+               (lambda (path surface)
+                 (setq captured (list path surface))
+                 'accepted))
+              ((symbol-function 'jetpacs-shell-push)
+               (lambda (surface &rest _)
+                 (push surface pushed))))
+      (should (eq (jetpacs-apps--action-open
+                   '(:app "glasspane" :route "resources") nil)
+                  'accepted)))
+    (should (equal captured '("/vault" "app:jetpacs.files")))
+    (should-not pushed)
+    (should (equal jetpacs-apps--current "glasspane"))
+    (should (equal jetpacs-apps--current-route "resources"))
+    (let ((item (car (jetpacs-apps-dock-items "app:jetpacs.files"))))
+      (should (equal (plist-get item :label) "Resources"))
+      (should (plist-get item :selected)))))
+
+(ert-deftest glasspane-para-resources-lifecycle-and-staging ()
+  "Glasspane owns both delegates while the legacy hub exposes neither."
+  (dolist (name '("resources.open" "resources.open-file"))
+    (should (gethash name jetpacs-action-handlers))
+    (should (equal (jetpacs--owner-of "action" name) "glasspane")))
+  (should (equal
+           (plist-get (jetpacs-action-schema "resources.open-file") :args)
+           '((:name path :type "text" :required t))))
+  (let ((home-actions
+         (glasspane-para-test--action-names (glasspane-ui-home-screen nil))))
+    (should-not (member "resources.open" home-actions))
+    (should-not (member "resources.open-file" home-actions)))
+  (unwind-protect
+      (progn
+        (glasspane-resources-unregister)
+        (dolist (name '("resources.open" "resources.open-file"))
+          (should-not (gethash name jetpacs-action-handlers))))
+    (glasspane-resources-register))
+  (dolist (name '("resources.open" "resources.open-file"))
+    (should (gethash name jetpacs-action-handlers))))
+
+(ert-deftest glasspane-para-resources-source-boundaries ()
+  "Resources is only a public delegate: no browser, walker, or screen."
+  (with-temp-buffer
+    (insert-file-contents glasspane-para-test--resources-source)
+    (should (search-forward "jetpacs-files-open-path" nil t))
+    (goto-char (point-min))
+    (should (search-forward "jetpacs-files-owner" nil t))
+    (goto-char (point-min))
+    (should-not (search-forward "jetpacs-files--" nil t))
+    (goto-char (point-min))
+    (should-not (re-search-forward
+                 "\\_<\\(directory-files\\(?:-recursively\\)?\\|file-expand-wildcards\\)\\_>"
+                 nil t))
+    (goto-char (point-min))
+    (should-not (re-search-forward
+                 "\\_<\\(jetpacs-chrome-screen\\|jetpacs-chrome-row\\|jetpacs-lazy-column\\)\\_>"
+                 nil t))))
 
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

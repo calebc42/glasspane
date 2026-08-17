@@ -4987,7 +4987,8 @@ rather than the hub (docs/CHROME-VOCABULARY.md: satellite screens live
 in Settings links, not the drawer).  Registered by glasspane-ef and
 glasspane-gallery at orders 81 and 84, beside the app's own 80.")
 
-(defconst glasspane-test--staged-opener-verbs '("areas.open")
+(defconst glasspane-test--staged-opener-verbs
+  '("areas.open" "resources.open")
   "PARA screen openers registered before PA-3 exposes the new navigation.
 The staging list is deliberately explicit: PA-3 must empty it while moving
 each opener into the authoritative destination table.")
@@ -5011,7 +5012,8 @@ each opener into the authoritative destination table.")
     "journal.today" "link.materialize" "notes.mentions"
     "org.babel.execute" "org.link.open"
     "org.search.run" "org.table.add-col" "org.table.add-row"
-    "org.table.cell-menu" "org.table.edit" "search.by-tag"
+    "org.table.cell-menu" "org.table.edit" "resources.open-file"
+    "search.by-tag"
     "search.clear-filters" "search.update-filter"
     "settings.agenda.delete" "settings.agenda.edit"
     "settings.agenda.save"

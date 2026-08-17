@@ -1,6 +1,6 @@
 # PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, shared-bar, PARA-shaped)
 
-Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **3ba0dd7** (PA-2a execution base on slop-fork/main; PA-1 complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2a mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
+Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **f68b808** (PA-2c execution base on slop-fork/main; PA-1/PA-2a complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2c executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2c mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
 
 **Authority:** the ratified PARA vision (Caleb, 2026-08-15 — §0 verbatim) + the surviving machinery half of `docs/PLAN-glasspane-rework.md` (GR-0..GR-7, unchanged). Produced by a full planning workflow (3 exploration + 3 design agents, 2026-08-15); every mechanism claim was re-verified in-tree while drafting.
 
@@ -184,6 +184,24 @@ App-side module (srs/notes shape, register/unregister from glasspane.el's sweep)
 6. **Leak audit (verified):** `_archive` files do NOT leak into agenda/Projects for directory-style config (`org-agenda-file-regexp` excludes them); the two remaining edges (an explicit agenda-files ENTRY naming an archive; a custom vulpea indexing archives) are covered by PA-2d's display filter.
 
 **Gate:** arms: Resources delegates `org-directory` to the canonical Files surface; direct-file delegation for Org and non-Org paths; no private `jetpacs-files--*` calls; no Resources walker/screen; Files root refusal propagates as a rejected result; Resources stays selected on the guest surface; Archive cap + refresh invalidation; `_archive` inclusion; shared predicate widening in both native paths; roots-policy pass for an archive file; no-unarchive grep pin.
+
+> **PA-2c GATE COMPLETE 2026-08-16 (Resources half; PA-2b Archive arms
+> remain open).** `glasspane-resources.el` is a downstream-only adapter:
+> `resources.open` hands `org-directory` to the public Files opener and
+> `resources.open-file` hands it the supplied path, both on the canonical
+> `jetpacs.files` surface. It creates no screen, walks no files, and calls no
+> private Files symbol. Native Files root refusal returns `rejected`
+> unchanged. The existing `app.open` route state keeps Resources selected
+> after the guest-surface handoff. Both verbs are lifecycle-owned by
+> Glasspane; the destination opener stays explicitly staged until PA-3.
+>
+> Evidence: five PA-2c arms extend the explicit PARA suite from **8/8** to
+> **13/13**, covering vault/Org/non-Org delegation, real Files-root refusal,
+> guest-surface selection, lifecycle/schema/staging, and source-boundary
+> pins. The legacy Glasspane suite remains **72/72**. Warning-as-error
+> compilation, package installation, EBP/Jetpacs/Glasspane layering, shell
+> and diff hygiene, and the full elevated `test/run-tests.sh` pass; the
+> runner exited **0**. PA-2c has no device arm.
 
 ### PA-2d — Projects (`emacs/apps/glasspane/glasspane-projects.el`, new, thin)
 

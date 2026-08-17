@@ -65,6 +65,7 @@
 (require 'jetpacs-dates)
 (require 'glasspane-agenda)
 (require 'glasspane-areas)
+(require 'glasspane-resources)
 (require 'glasspane-journal)
 (require 'glasspane-capture)
 ;; G6, the query surfaces: views leans on the reader's reorder table
@@ -180,6 +181,7 @@ registry entry in place."
   (glasspane-detail-register)
   (glasspane-agenda-register)
   (glasspane-areas-register)
+  (glasspane-resources-register)
   (glasspane-journal-register)
   (glasspane-capture-register)
   (glasspane-views-register)
@@ -210,6 +212,7 @@ Org clock handlers are upstream and deliberately survive."
   (glasspane-detail-unregister)
   (glasspane-agenda-unregister)
   (glasspane-areas-unregister)
+  (glasspane-resources-unregister)
   (glasspane-journal-unregister)
   (glasspane-capture-unregister)
   (glasspane-views-unregister)

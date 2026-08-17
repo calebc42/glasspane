@@ -10,13 +10,12 @@
 ;; `glasspane-ui-at-ref' — the token→resolve→classify funnel every
 ;; heading mutation in G4+ rides.
 ;;
-;; It also holds the HUB (`glasspane-ui-home-screen', the hub-wiring
-;; rung that punch-list #26 escalated): the chrome root's real home
-;; screen, whose body rows, drawer and FAB are the only things on any
-;; surface that emit the daily verbs the later rungs registered.  It
-;; lives beside the shared state rather than in the entry so the entry
-;; keeps its single job — identity — and so the destination table sits
-;; with the FAB and the deferral seam every one of those screens uses.
+;; It also holds the temporary HUB (`glasspane-ui-home-screen', the
+;; hub-wiring rung that punch-list #26 escalated), the authoritative PARA
+;; destination table, and the capture FAB descriptor PA-3a contributes to
+;; Jetpacs' app registry.  The hub remains the root only until PA-3b.  These
+;; live beside shared state rather than in the entry so the entry keeps its
+;; single job — identity and composition metadata.
 ;;
 ;; Retired against v1 (the plan's retirement list + G3 section):
 ;;
@@ -109,15 +108,22 @@ App layers contribute chip nodes after the built-in Refile/Archive
 pair; each returns a node list or nil.  An erroring function costs
 its own chips, never the toolbar.")
 
-;;;; The capture FAB (FOUNDATION-GAPS #2)
+;;;; PARA composition rollback and capture FAB
 
-(defun glasspane-ui-capture-fab ()
-  "The capture FAB every daily surface passes to its chrome `:fab' slot.
-v1's app-default FAB registry (`jetpacs-apps-set-default-fab') has no
-v3 successor, so each screen authors this node itself; the coupling to
-glasspane-capture.el is the verb string alone — the handler registers
-there, and a tap before that load lands answers `rejected' from the
-action shim, never a signal."
+(defvar glasspane-ui-legacy-ia nil
+  "Non-nil restores Glasspane's pre-PARA navigation composition.
+This is the PA-3/PA-4 soak rollback seam, not a user preference.  Change it
+before calling `glasspane-register': registration snapshots the selected
+integration pole while the screen builders read it at render time.")
+
+(defun glasspane-ui-capture-fab (&optional _surface)
+  "Return Glasspane's app-default capture FAB.
+SURFACE is accepted for the `jetpacs-defapp' FAB-builder contract and is
+otherwise unused.  In the PARA composition Jetpacs injects this node only
+onto Glasspane-owned screens; the legacy rollback arm still authors it on
+each historical daily screen.  The coupling to glasspane-capture.el is the
+verb string alone — an early tap is rejected by the action shim, never a
+signal."
   (jetpacs-icon-button "add" (jetpacs-action "org.capture.show")
                        :content-description "Capture"
                        :variant "filled" :size "large"))
@@ -137,7 +143,7 @@ action shim, never a signal."
 ;; `glasspane-ui--on-teardown' rule, applied to a string.
 (defvar glasspane-title)
 
-(defconst glasspane-ui-destinations
+(defconst glasspane-ui--legacy-destinations
   '((:key "agenda" :label "Agenda" :icon "event"
      :subtitle "Today's schedule, deadlines, and the month grid"
      :verb "agenda.open")
@@ -159,14 +165,34 @@ action shim, never a signal."
     (:key "review" :label "Review" :icon "school"
      :subtitle "Flashcards due today, and notes gone stale"
      :verb "review.open"))
-  "The app's user-facing destinations, in hub order.
-ONE table: the home body and the drawer both render it, so a
-destination can never appear in one and be missing from the other —
-which is exactly how #26 happened, with the new verbs appearing in
-neither.  Each `:verb' is registered by the sibling module that owns
-the screen and the coupling is the wire string alone (the
-`glasspane-ui-capture-fab' rule): a tap that beats that module's
-registration answers `rejected' from the action shim, never a signal.
+  "The pre-PARA hub rows retained only by `glasspane-ui-legacy-ia'.")
+
+(defconst glasspane-ui-destinations
+  '((:key "agenda" :label "Agenda" :icon "event"
+     :subtitle "Today's schedule, deadlines, and the month grid"
+     :verb "agenda.open" :badge glasspane-agenda-dock-badge :bar t)
+    (:key "projects" :label "Projects" :icon "task_alt"
+     :subtitle "Open work grouped by project file"
+     :verb "projects.open" :bar t)
+    (:key "areas" :label "Areas" :icon "category"
+     :subtitle "Responsibilities grouped by Org category"
+     :verb "areas.open" :bar t)
+    (:key "resources" :label "Resources" :icon "topic"
+     :subtitle "Browse the vault through native Files"
+     :verb "resources.open" :bar t)
+    (:key "review" :label "Review" :icon "school"
+     :subtitle "Flashcards due today, and notes gone stale"
+     :verb "review.open" :bar t)
+    (:key "archive" :label "Archive" :icon "archive"
+     :subtitle "Browse native Org archive files"
+     :verb "archive.open" :bar nil))
+  "Glasspane's authoritative PARA destinations, in navigation order.
+ONE table feeds the host destination registry, the five-item primary bar,
+the temporary hub body, and both drawer projections.  `:bar' nil makes
+Archive a deep-linkable drawer destination without spending a bar slot.
+Each `:verb' is registered by the sibling module that owns the screen; the
+coupling is the wire string alone, so an early tap is rejected by the action
+shim rather than signalling.
 
 Subtitles are STATIC on purpose.  Chrome rebuilds every screen on the
 stack for every push, so a live count here would re-extract org on
@@ -176,6 +202,23 @@ screens carry their own in-screen counts instead (FOUNDATION-GAPS #5).
 No Notes row: glasspane-notes owns no screen of its own — its surfaces
 are the detail view's backlinks/mentions sections and the Review
 screen's stale-files half, both reached from rows that ARE here.")
+
+(defun glasspane-ui-active-destinations ()
+  "Return the destination table selected by the PA-3 rollback seam."
+  (if glasspane-ui-legacy-ia
+      glasspane-ui--legacy-destinations
+    glasspane-ui-destinations))
+
+(defun glasspane-ui--home-destinations ()
+  "Return the destinations projected into the temporary hub body.
+The legacy hub shows every historical row.  The PARA hub mirrors the
+persistent bar, leaving drawer-only Archive in the drawer."
+  (if glasspane-ui-legacy-ia
+      (glasspane-ui-active-destinations)
+    (cl-remove-if (lambda (dest)
+                    (and (plist-member dest :bar)
+                         (null (plist-get dest :bar))))
+                  (glasspane-ui-active-destinations))))
 
 (defun glasspane-ui--destination-row (dest prefix)
   "One `jetpacs-chrome-row' for DEST, keyed under PREFIX.
@@ -193,7 +236,7 @@ reconciler's identity for the row, not a label."
   (apply #'jetpacs-lazy-column
          (append (mapcar (lambda (dest)
                            (glasspane-ui--destination-row dest "hub-"))
-                         glasspane-ui-destinations)
+                         (glasspane-ui--home-destinations))
                  (list :spacing 8 :content-padding 12))))
 
 (declare-function jetpacs-launcher-rows "jetpacs-launcher" (&optional exclude))
@@ -235,7 +278,7 @@ document."
                                     :key "drawer-home"))
           (mapcar (lambda (dest)
                     (glasspane-ui--destination-row dest "drawer-"))
-                  glasspane-ui-destinations)
+                  (glasspane-ui-active-destinations))
           (list (jetpacs-chrome-row
                  "Settings"
                  :subtitle "Saved searches"
@@ -248,15 +291,14 @@ document."
 (defun glasspane-ui-home-screen (back)
   "The app's home screen: the hub `glasspane-register' defines as root.
 BACK is the chrome builder contract's argument — nil at the stack
-bottom, which is where this screen lives.  The capture FAB is the
-screen's one primary creation act (the vocabulary's FAB rule), and it
-names the same verb the Capture row does: the drawer, the body and the
-FAB are three projections of one command set, never three behaviors."
+bottom, which is where this screen lives.  In the PARA composition the
+screen leaves its FAB slot absent for the app registry to inject Capture;
+the rollback arm authors the historical FAB directly."
   (jetpacs-chrome-screen
    glasspane-title
    (glasspane-ui--home-body)
    :back back
-   :fab (glasspane-ui-capture-fab)
+   :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab))
    :drawer (glasspane-ui--home-drawer)))
 
 ;;;; The at-ref funnel (S4/S5 — the classifier every later rung copies)

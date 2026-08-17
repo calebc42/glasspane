@@ -9,8 +9,8 @@
 ;; opinion that an Org category is a persistent responsibility.  Native Org
 ;; scope, references, and mutation machinery stay in Jetpacs/EBP; this module
 ;; only groups the canonical local scope, renders the two Areas screens, and
-;; owns their route verbs.  It remains staged until PA-3 puts Areas in the
-;; persistent navigation table.
+;; owns their route verbs.  PA-3a exposes `areas.open' through Glasspane's
+;; authoritative persistent-navigation table.
 
 ;;; Code:
 
@@ -223,14 +223,18 @@ sweeps the prior Areas token generation."
                 (list :spacing 8 :content-padding 12)))))))
 
 (defun glasspane-areas-screen (back)
-  "Build the staged Areas list screen with BACK navigation."
+  "Build the Areas list screen with BACK navigation."
   (jetpacs-chrome-screen "Areas" (glasspane-areas--list-body)
-                         :back back :fab (glasspane-ui-capture-fab)))
+                         :back back
+                         :fab (and glasspane-ui-legacy-ia
+                                   (glasspane-ui-capture-fab))))
 
 (defun glasspane-areas-drill-screen (category back)
-  "Build CATEGORY's staged Area drill screen with BACK navigation."
+  "Build CATEGORY's Area drill screen with BACK navigation."
   (jetpacs-chrome-screen category (glasspane-areas--drill-body category)
-                         :back back :fab (glasspane-ui-capture-fab)))
+                         :back back
+                         :fab (and glasspane-ui-legacy-ia
+                                   (glasspane-ui-capture-fab))))
 
 ;;;; Actions and lifecycle
 
@@ -247,7 +251,7 @@ sweeps the prior Areas token generation."
     'accepted))
 
 (defun glasspane-areas--on-open (_args params)
-  "Push the staged Areas list onto the tapped surface."
+  "Push the Areas list onto the tapped surface."
   (glasspane-areas--push-screen params "glasspane-areas"
                                 #'glasspane-areas-screen))
 
@@ -261,10 +265,10 @@ sweeps the prior Areas token generation."
        (lambda (back) (glasspane-areas-drill-screen category back))))))
 
 (defconst glasspane-areas--verbs '("areas.open" "areas.drill")
-  "The staged Areas verbs owned by this module.")
+  "The Areas verbs owned by this module.")
 
 (defun glasspane-areas-register ()
-  "Register the staged Areas verbs, idempotently."
+  "Register the Areas verbs, idempotently."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "areas.open" #'glasspane-areas--on-open
                        :doc "Open the PARA Areas screen")

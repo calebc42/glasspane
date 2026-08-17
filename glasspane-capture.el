@@ -27,10 +27,10 @@
 ;; - `jetpacs-dialog-style' (v1:55-59): no global style variable in
 ;;   v3; the bottom-sheet opinion is per-dialog (S3), carried by
 ;;   `glasspane-capture--show-dialog'.
-;; - `jetpacs-apps-set-default-fab' (v1:61-67): FOUNDATION-GAPS #2 —
-;;   the capture FAB is reimplemented per-screen via chrome `:fab' on
-;;   the screens that want it (G5's daily surfaces); this file owns
-;;   only the verbs and the sheets.
+;; - `jetpacs-apps-set-default-fab' (v1:61-67): replaced by Jetpacs'
+;;   typed per-app FAB registry.  PA-3a registers Glasspane's descriptor;
+;;   only the rollback arm still authors the node per screen.  This file
+;;   owns only the verbs and sheets.
 ;; - The `jetpacs-form' registry (v1:109-124 and every -reset/-seed/
 ;;   -field-id/-value site): S2/S3 — seeding is the field's `:value',
 ;;   values ride the dialog conclusion, and nothing persists

@@ -565,13 +565,12 @@ gap-#5 thread-through landed."
             (error nil))))
 
 (defun glasspane-agenda-dock-badge ()
-  "Today's count as a dock-item `:badge', or nil when zero.
-The gap-#5 consumer (v1's Agenda tab badge, reborn on the app's single
-dock destination): nil keeps the icon bare — a zero-count badge is
-noise — and the memoised extraction keeps the per-render cost at a
-table lookup.  Public: the entry's dock-items builder calls it."
+  "Today's count as a destination `:badge' string, or nil when zero.
+nil keeps the icon bare — a zero-count badge is noise — and the memoised
+extraction keeps the per-render cost at a table lookup.  Public: the PARA
+Agenda destination and the legacy dock builder both call it."
   (let ((n (glasspane-agenda--today-count)))
-    (and (> n 0) n)))
+    (and (> n 0) (number-to-string n))))
 
 (defun glasspane-agenda-screen (back)
   "The pushed Agenda screen."
@@ -584,7 +583,8 @@ table lookup.  Public: the entry's dock-items builder calls it."
                           (jetpacs-text (format "%d scheduled today" n)
                                         :style "caption"))
                         (glasspane-agenda-body))))
-     :back back :fab (glasspane-ui-capture-fab))))
+     :back back
+     :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab)))))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 

@@ -306,6 +306,32 @@ Deleted rows: tasks (→ projects + alias), journal (deleted), capture (FAB + M-
 
 **Gate:** arms: bar generation from the new table (five entries, order, badge, `:selected`); Archive absent from the bar, present in the drawer nest; Eval relocated exactly once; Files absent because Resources replaces it; registry-FAB injection (the GR-7b four arms re-run against the new table); deleted-row absence.
 
+> **PA-3a GATE COMPLETE 2026-08-16.** Glasspane now declares the
+> APP-PRIMARY pole with a full five-slot bar, suppresses native core bar
+> entries, selectively relocates only Eval, and contributes Capture through
+> Jetpacs' typed app-FAB registry. The per-screen FAB slots are absent in the
+> new composition; their historical authored nodes, the hand dock item, and
+> the old destination table remain reachable only through
+> `glasspane-ui-legacy-ia` plus re-registration for the PA-3 soak rollback.
+>
+> The authoritative table is exactly Agenda, Projects, Areas, Resources,
+> Review, then Archive. The first five are bar-eligible in that order;
+> Archive is drawer/deep-link-only. Agenda carries the live count as the
+> string-valued destination badge. Tasks, Journal, Capture, Search, and Saved
+> views are absent from the active table, while their still-required verbs
+> remain explicitly classified as compatibility contracts. The temporary
+> hub remains the root for PA-3b, and the authored-drawer handover remains
+> reserved for PA-3d.
+>
+> Evidence: the explicit PARA suite passes **30/30** and the legacy
+> Glasspane suite passes **72/72**. Exact table shape, bar ordering, badge,
+> selected route, Archive exclusion, Apps/Archive/Eval drawer presence,
+> Files absence, all four registry-FAB ownership/precedence arms, deleted
+> rows, and the rollback restoration are pinned. Warning-as-error
+> compilation, clean package installation, dependency layering, icon lint,
+> diff hygiene, and the full elevated `test/run-tests.sh` pass; the runner
+> exited **0**. PA-3a rides the batch gate and has no separate device arm.
+
 ### PA-3b — Root swap (hard dep: S11 committed + deployed)
 
 1. `glasspane.el:150`: `(jetpacs-chrome-define-root glasspane-owner "glasspane-agenda" #'glasspane-agenda-screen)` — the root id deliberately EQUALS the id `agenda.open` pushes, so tapping the Agenda bar entry resets to root for free via same-id truncate-and-replace (jetpacs-chrome.el's stack-insert). `glasspane-ui-home-screen` unreferenced (flag-gated corpse until PA-4). `glasspane.home` unchanged in name and shape; it now resets to the Agenda root.

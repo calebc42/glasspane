@@ -80,6 +80,21 @@ FILES is a list of (RELATIVE-NAME CONTENT)."
       (walk value))
     (delete-dups names)))
 
+(defun glasspane-para-test--node-texts (node)
+  "Return every text-node payload below NODE, in document order."
+  (let (texts)
+    (cl-labels
+        ((walk (value)
+           (cond
+            ((vectorp value) (mapc #'walk value))
+            ((consp value)
+             (when (and (keywordp (car-safe value))
+                        (equal (plist-get value :t) "text"))
+               (push (plist-get value :text) texts))
+             (mapc #'walk value)))))
+      (walk node))
+    (nreverse texts)))
+
 (ert-deftest glasspane-para-areas-bucket-layers-and-open-counts ()
   "Keyword, inherited-property, and basename categories form buckets.
 File-only categories survive, done headings do not inflate open counts, and
@@ -232,16 +247,16 @@ one file may honestly participate in both its file Area and a nested Area."
         (should (equal (plist-get body :title) "Area no longer exists"))
         (should (equal token-sets '(("areas"))))))))
 
-(ert-deftest glasspane-para-areas-lifecycle-and-staging ()
-  "Glasspane owns both verbs, while the legacy hub does not expose PA-3 early."
+(ert-deftest glasspane-para-areas-lifecycle-and-navigation ()
+  "Glasspane owns both verbs and PA-3 exposes the Areas destination."
   (should (eq (symbol-function 'glasspane-agenda-tokenize)
               'glasspane-agenda--tokenize))
   (dolist (name '("areas.open" "areas.drill"))
     (should (gethash name jetpacs-action-handlers))
     (should (equal (jetpacs--owner-of "action" name) "glasspane")))
-  (should-not (member "areas.open"
-                      (glasspane-para-test--action-names
-                       (glasspane-ui-home-screen nil))))
+  (should (member "areas.open"
+                  (glasspane-para-test--action-names
+                   (glasspane-ui-home-screen nil))))
   (unwind-protect
       (progn
         (glasspane-areas-unregister)
@@ -352,8 +367,8 @@ one file may honestly participate in both its file Area and a nested Area."
       (should (equal (plist-get item :label) "Resources"))
       (should (plist-get item :selected)))))
 
-(ert-deftest glasspane-para-resources-lifecycle-and-staging ()
-  "Glasspane owns both delegates while the legacy hub exposes neither."
+(ert-deftest glasspane-para-resources-lifecycle-and-navigation ()
+  "Glasspane owns both delegates while PA-3 exposes only the place opener."
   (dolist (name '("resources.open" "resources.open-file"))
     (should (gethash name jetpacs-action-handlers))
     (should (equal (jetpacs--owner-of "action" name) "glasspane")))
@@ -362,7 +377,7 @@ one file may honestly participate in both its file Area and a nested Area."
            '((:name path :type "text" :required t))))
   (let ((home-actions
          (glasspane-para-test--action-names (glasspane-ui-home-screen nil))))
-    (should-not (member "resources.open" home-actions))
+    (should (member "resources.open" home-actions))
     (should-not (member "resources.open-file" home-actions)))
   (unwind-protect
       (progn
@@ -459,7 +474,7 @@ one file may honestly participate in both its file Area and a nested Area."
       (ebp-org-cache-invalidate))))
 
 (ert-deftest glasspane-para-archive-screen-route-and-lifecycle ()
-  "Archive renders file handoffs and remains a staged drawer destination."
+  "Archive renders file handoffs and is exposed as a drawer destination."
   (let* ((mtime (encode-time 0 30 14 16 8 2026))
          (record (list :path "/vault/work.org_archive" :mtime mtime))
          (row (glasspane-resources--archive-row record))
@@ -494,9 +509,9 @@ one file may honestly participate in both its file Area and a nested Area."
     (should (eq (nth 2 pushed) #'glasspane-resources-archive-screen)))
   (should (gethash "archive.open" jetpacs-action-handlers))
   (should (equal (jetpacs--owner-of "action" "archive.open") "glasspane"))
-  (should-not (member "archive.open"
-                      (glasspane-para-test--action-names
-                       (glasspane-ui-home-screen nil))))
+  (should (member "archive.open"
+                  (glasspane-para-test--action-names
+                   (glasspane-ui-home-screen nil))))
   (unwind-protect
       (progn
         (glasspane-resources-unregister)
@@ -643,16 +658,16 @@ one file may honestly participate in both its file Area and a nested Area."
       (should (equal glasspane-projects--filter "DONE"))
       (should (= refreshes 1)))))
 
-(ert-deftest glasspane-para-projects-alias-route-lifecycle-and-staging ()
-  "The durable Tasks alias and new opener share one staged Projects route."
+(ert-deftest glasspane-para-projects-alias-route-lifecycle-and-navigation ()
+  "The durable Tasks alias and visible Projects opener share one route."
   (dolist (name '("projects.open" "tasks.open"))
     (should (eq (gethash name jetpacs-action-handlers)
                 #'glasspane-projects--on-open))
     (should (equal (jetpacs--owner-of "action" name) "glasspane")))
   (let ((home-actions
          (glasspane-para-test--action-names (glasspane-ui-home-screen nil))))
-    (should (member "tasks.open" home-actions))
-    (should-not (member "projects.open" home-actions)))
+    (should-not (member "tasks.open" home-actions))
+    (should (member "projects.open" home-actions)))
   (let (pushed)
     (cl-letf (((symbol-function 'jetpacs-flow-continue)
                (lambda (fn) (funcall fn)))
@@ -814,6 +829,181 @@ one file may honestly participate in both its file Area and a nested Area."
                      '((card back) "card-1" "cards.org")))
       (should glasspane-srs--revealed)
       (should (equal glasspane-srs--undo '((snapshot)))))))
+
+;;;; PA-3a — primary pole and authoritative PARA table
+
+(ert-deftest glasspane-para-pa3a-destination-table-flips-exactly ()
+  "The one table names exactly five bar places plus drawer-only Archive."
+  (should-not glasspane-ui-legacy-ia)
+  (should
+   (equal
+    (mapcar (lambda (dest)
+              (list (plist-get dest :key)
+                    (plist-get dest :label)
+                    (plist-get dest :icon)
+                    (plist-get dest :verb)
+                    (plist-get dest :badge)
+                    (plist-get dest :bar)))
+            glasspane-ui-destinations)
+    '(("agenda" "Agenda" "event" "agenda.open"
+       glasspane-agenda-dock-badge t)
+      ("projects" "Projects" "task_alt" "projects.open" nil t)
+      ("areas" "Areas" "category" "areas.open" nil t)
+      ("resources" "Resources" "topic" "resources.open" nil t)
+      ("review" "Review" "school" "review.open" nil t)
+      ("archive" "Archive" "archive" "archive.open" nil nil))))
+  (should (cl-every (lambda (dest) (plist-member dest :bar))
+                    glasspane-ui-destinations))
+  (should (plist-member (car glasspane-ui-destinations) :badge))
+  (should-not (cl-some (lambda (dest)
+                         (plist-member dest :badge))
+                       (cdr glasspane-ui-destinations)))
+  (should (equal (glasspane--destinations) glasspane-ui-destinations))
+  (let* ((screen (glasspane-ui-home-screen nil))
+         (body-actions
+          (glasspane-para-test--action-names (plist-get screen :body)))
+         (drawer-actions
+          (glasspane-para-test--action-names (plist-get screen :drawer))))
+    (should (equal (sort (copy-sequence body-actions) #'string<)
+                   '("agenda.open" "areas.open" "projects.open"
+                     "resources.open" "review.open")))
+    (should-not (member "archive.open" body-actions))
+    (dolist (verb '("agenda.open" "projects.open" "areas.open"
+                    "resources.open" "review.open" "archive.open"))
+      (should (member verb drawer-actions)))
+    (dolist (verb '("tasks.open" "journal.open" "org.capture.show"
+                    "search.open" "views.hub"))
+      (should-not (member verb
+                          (glasspane-para-test--action-names screen))))
+    ;; The registry owns capture now; an absent member, not an authored
+    ;; nil, is what lets the chrome join fill the slot.
+    (should-not (plist-member screen :fab))))
+
+(ert-deftest glasspane-para-pa3a-legacy-rollback-restores-old-ia ()
+  "The soak flag restores the old table, hand dock, and authored FAB."
+  (let ((original glasspane-ui-legacy-ia))
+    (unwind-protect
+        (progn
+          (setq glasspane-ui-legacy-ia t)
+          (glasspane-register)
+          (let* ((entry (assoc glasspane-owner jetpacs-apps--registry))
+                 (plist (cdr entry))
+                 (screen (glasspane-ui-home-screen nil)))
+            (should-not (plist-get plist :chrome))
+            (should (plist-get plist :dock-core))
+            (should (eq (plist-get plist :dock) #'glasspane--dock-items))
+            (should-not (plist-get plist :fab))
+            (should
+             (equal (mapcar (lambda (dest) (plist-get dest :key))
+                            (glasspane-ui-active-destinations))
+                    '("agenda" "tasks" "journal" "capture" "search"
+                      "views" "review")))
+            (should
+             (equal (mapcar (lambda (dest) (plist-get dest :key))
+                            (jetpacs-apps-destinations glasspane-owner))
+                    '("agenda" "tasks" "journal" "search" "views"
+                      "review")))
+            (should (plist-member screen :fab))
+            (should (member "org.capture.show"
+                            (glasspane-para-test--action-names screen)))))
+      (setq glasspane-ui-legacy-ia original)
+      (glasspane-register)))
+  (let ((plist (cdr (assoc glasspane-owner jetpacs-apps--registry))))
+    (should (eq (plist-get plist :chrome) 'primary))
+    (should-not (plist-get plist :dock-core))
+    (should-not (plist-get plist :dock))))
+
+(ert-deftest glasspane-para-pa3a-primary-bar-and-drawer-composition ()
+  "The real Glasspane metadata yields the exact bar and selective drawer."
+  (let* ((entry (assoc glasspane-owner jetpacs-apps--registry))
+         (plist (cdr entry)))
+    (should (eq (plist-get plist :chrome) 'primary))
+    (should-not (plist-get plist :dock-core))
+    (should (equal (plist-get plist :drawer-core) '("eval")))
+    (should-not (plist-get plist :dock))
+    (should (eq (plist-get plist :fab) #'glasspane-ui-capture-fab))
+    (let ((jetpacs-apps--registry (list entry))
+          (jetpacs-apps--current glasspane-owner)
+          (jetpacs-apps--current-route "areas")
+          (jetpacs-apps-core-drawer-rows nil)
+          (jetpacs-apps-core-dock-items
+           (lambda (_surface)
+             (list (list :key "eval" :label "Eval" :icon "code"
+                         :on-tap (jetpacs-action "eval.open"))
+                   (list :key "files" :label "Files" :icon "folder"
+                         :on-tap (jetpacs-action "files.open"))))))
+      (cl-letf (((symbol-function 'glasspane-agenda-dock-badge)
+                 (lambda () "7")))
+        (let* ((items (jetpacs-apps-dock-items "app:glasspane"))
+               (labels (mapcar (lambda (item) (plist-get item :label))
+                               items))
+               (drawer (jetpacs-apps-drawer "app:glasspane"))
+               (texts (glasspane-para-test--node-texts drawer)))
+          (should (equal labels
+                         '("Agenda" "Projects" "Areas" "Resources"
+                           "Review")))
+          (should (equal (mapcar (lambda (item) (plist-get item :badge))
+                                 items)
+                         '("7" nil nil nil nil)))
+          (should (equal (mapcar (lambda (item)
+                                  (plist-get item :selected))
+                                items)
+                         '(nil nil t nil nil)))
+          (should
+           (equal
+            (mapcar (lambda (item)
+                      (plist-get (plist-get (plist-get item :on-tap) :args)
+                                 :route))
+                    items)
+            '("agenda" "projects" "areas" "resources" "review")))
+          (dolist (label '("Agenda" "Projects" "Areas" "Resources"
+                           "Review" "Archive" "Apps" "Eval"))
+            (should (= 1 (cl-count label texts :test #'equal))))
+          (should (= 0 (cl-count "Files" texts :test #'equal)))
+          (dolist (label '("Archive" "Apps" "Eval" "Files"))
+            (should-not (member label labels))))))))
+
+(ert-deftest glasspane-para-pa3a-registry-fab-four-arms ()
+  "Glasspane re-runs the native, authored, foreign, and guest FAB arms."
+  (let* ((surface (jetpacs-shell-surface-for glasspane-owner))
+         (jetpacs-chrome-app-fab-function #'jetpacs-apps-default-fab)
+         (jetpacs-chrome--guests (make-hash-table :test #'equal))
+         (plain (jetpacs-chrome-screen "Plain" (jetpacs-text "plain")))
+         (authored-fab
+          (jetpacs-icon-button "edit" (jetpacs-action "jetpacs.noop")
+                               :content-description "Edit"))
+         (authored (jetpacs-chrome-screen
+                    "Authored" (jetpacs-text "authored")
+                    :fab authored-fab))
+         (default (jetpacs-apps-default-fab glasspane-owner surface)))
+    (should-not (plist-member (glasspane-ui-home-screen nil) :fab))
+    (should default)
+    (should (equal (glasspane-para-test--action-names default)
+                   '("org.capture.show")))
+    ;; Native Glasspane screen, free slot: registry default lands.
+    (should
+     (equal (plist-get (jetpacs-chrome--join-app-fab
+                        surface "home" plain)
+                       :fab)
+            default))
+    ;; Authored screen: authored action wins unchanged.
+    (should
+     (equal (plist-get (jetpacs-chrome--join-app-fab
+                        surface "authored" authored)
+                       :fab)
+            authored-fab))
+    ;; Glasspane metadata may not cross onto a foreign surface.
+    (should-not
+     (plist-member
+      (jetpacs-chrome--join-app-fab "app:foreign" "root" plain) :fab))
+    ;; A sanctioned foreign guest on Glasspane's surface keeps its owner
+    ;; identity and therefore cannot inherit the host's capture action.
+    (puthash surface '(("guest" . "foreign")) jetpacs-chrome--guests)
+    (should-not
+     (plist-member
+      (jetpacs-chrome--join-app-fab surface "guest" plain) :fab))
+    (should-not (jetpacs-apps-default-fab glasspane-owner "app:foreign"))
+    (should-not (jetpacs-apps-default-fab "foreign" surface))))
 
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

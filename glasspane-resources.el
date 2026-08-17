@@ -11,7 +11,8 @@
 ;; directly to the public Files opener on the canonical Files surface.
 ;; Archive is the app-side exception: an opinionated, bounded index of Org's
 ;; sibling archive files and one screen whose rows hand straight back to the
-;; same native Files route.  Both destinations stay staged until PA-3.
+;; same native Files route.  PA-3a exposes Resources in the persistent bar
+;; and Archive only in the drawer/deep-link registry.
 
 ;;; Code:
 
@@ -140,12 +141,14 @@ cache, so pull-to-refresh is their deliberate freshness boundary."
        :caption "No Org archive files were found in the vault."))))
 
 (defun glasspane-resources-archive-screen (back)
-  "Build the staged Archive screen with BACK navigation."
+  "Build the Archive screen with BACK navigation."
   (jetpacs-chrome-screen "Archive" (glasspane-resources--archive-body)
-                         :back back :fab (glasspane-ui-capture-fab)))
+                         :back back
+                         :fab (and glasspane-ui-legacy-ia
+                                   (glasspane-ui-capture-fab))))
 
 (defun glasspane-resources--on-archive-open (_args params)
-  "Push the staged Archive screen onto the tapped surface."
+  "Push the Archive screen onto the tapped surface."
   (let ((surface (or (plist-get params :surface)
                      (jetpacs-shell-surface-for "glasspane"))))
     (jetpacs-flow-continue
@@ -159,10 +162,10 @@ cache, so pull-to-refresh is their deliberate freshness boundary."
 
 (defconst glasspane-resources--verbs
   '("resources.open" "resources.open-file" "archive.open")
-  "The staged Resources and Archive verbs owned by this module.")
+  "The Resources and Archive verbs owned by this module.")
 
 (defun glasspane-resources-register ()
-  "Register the staged Resources delegation verbs, idempotently."
+  "Register the Resources delegation verbs, idempotently."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "resources.open" #'glasspane-resources--on-open
                        :doc "Open the Org vault in native Jetpacs Files")

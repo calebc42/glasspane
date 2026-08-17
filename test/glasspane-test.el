@@ -101,8 +101,10 @@ build offline and serialize."
       (should (string-search "Glasspane" json)))))
 
 (ert-deftest glasspane-test-dock-item-shape ()
-  "The dock destination carries the chrome item shape and tracks
-selection against the app's own surface."
+  "The new registry retires the hand dock while its rollback corpse is sound."
+  (let ((plist (cdr (assoc glasspane-owner jetpacs-apps--registry))))
+    (should (eq (plist-get plist :chrome) 'primary))
+    (should-not (plist-get plist :dock)))
   (let* ((home (jetpacs-shell-surface-for glasspane-owner))
          (items (glasspane--dock-items home)))
     (should (= (length items) 1))
@@ -2539,10 +2541,9 @@ whole journal screen builds and round-trips the canonical encoding."
             (should (stringp json))
             (should (string-search "journal-capture" json))
             (should (string-search "First entry" json))
-            ;; The capture FAB (FOUNDATION-GAPS #2): every daily
-            ;; surface carries the org.capture.show entry point, or
-            ;; capture is unreachable from the rendered UI.
-            (should (string-search "org.capture.show" json))))
+            ;; PA-3a retires the per-screen authored FAB.  The app registry
+            ;; injects capture only when chrome composes this screen.
+            (should-not (string-search "org.capture.show" json))))
       (glasspane-test--journal-cleanup vault))))
 
 (ert-deftest glasspane-test-journal-carried-query ()
@@ -4955,11 +4956,11 @@ can eventually dispatch — so the walk follows every cons it is given."
 (defconst glasspane-test--hub-verbs
   '("glasspane.home"
     "agenda.open"
-    "tasks.open"
-    "journal.open"
-    "search.open"
-    "views.hub"
+    "projects.open"
+    "areas.open"
+    "resources.open"
     "review.open"
+    "archive.open"
     "glasspane.settings.open")
   "THE RULE: every screen-opening verb the app owns must be
 emitted by the home screen or its drawer.  These are the daily
@@ -4976,11 +4977,14 @@ rather than the hub (docs/CHROME-VOCABULARY.md: satellite screens live
 in Settings links, not the drawer).  Registered by glasspane-ef and
 glasspane-gallery at orders 81 and 84, beside the app's own 80.")
 
-(defconst glasspane-test--staged-opener-verbs
-  '("areas.open" "archive.open" "projects.open" "resources.open")
-  "PARA screen openers registered before PA-3 exposes the new navigation.
-The staging list is deliberately explicit: PA-3 must empty it while moving
-each opener into the authoritative destination table.")
+(defconst glasspane-test--legacy-opener-verbs
+  '("tasks.open" "journal.open" "search.open" "views.hub")
+  "Still-live compatibility openers intentionally absent from the PARA IA.
+They remain classified until PA-3d gives the durable aliases their final
+targets and PA-4 removes the flag-gated legacy screens.")
+
+(defconst glasspane-test--staged-opener-verbs nil
+  "No PARA opener remains staged after the PA-3a table flip.")
 
 (defconst glasspane-test--non-opening-verbs
   '("agenda.nav" "agenda.save-custom" "agenda.select-date"
@@ -5036,21 +5040,27 @@ own; the body carries every destination in the table."
       (should (gethash verb jetpacs-action-handlers))
       (should (equal (jetpacs--owner-of "action" verb) glasspane-owner))
       (should (member verb drawer)))
-    ;; Capture is deliberately the exception to app ownership: this app
-    ;; chooses three placements, while the native Org engine owns the one
-    ;; global command they all emit.
-    (should (member "org.capture.show" reachable))
-    (should (member "org.capture.show" drawer))
+    (dolist (verb glasspane-test--legacy-opener-verbs)
+      (should (gethash verb jetpacs-action-handlers))
+      (should (equal (jetpacs--owner-of "action" verb) glasspane-owner))
+      (should-not (member verb reachable)))
+    ;; Capture is no longer a destination row.  Glasspane chooses its
+    ;; registry placement while the native Org engine owns the command.
+    (should-not (member "org.capture.show" reachable))
     (should (equal (jetpacs--owner-of "action" "org.capture.show")
                    "org-mode"))
     (should (gethash "org.capture.show" jetpacs--any-surface-actions))
+    (should (member "org.capture.show"
+                    (glasspane-test--action-names
+                     (jetpacs-apps-default-fab
+                      glasspane-owner
+                      (jetpacs-shell-surface-for glasspane-owner)))))
     (dolist (dest glasspane-ui-destinations)
-      (should (member (plist-get dest :verb) body)))
-    ;; The FAB is the screen's one creation act, and it names the same
-    ;; verb the Capture row does — one command, three projections.
-    (should (equal (plist-get (plist-get (plist-get screen :fab) :on_tap)
-                              :action)
-                   "org.capture.show")))
+      (should (member (plist-get dest :verb) drawer))
+      (if (plist-get dest :bar)
+          (should (member (plist-get dest :verb) body))
+        (should-not (member (plist-get dest :verb) body))))
+    (should-not (plist-member screen :fab)))
   ;; The satellites keep the vocabulary's route: a Settings-root link.
   (let ((links (glasspane-test--action-names
                 (glasspane-test--settings-link-nodes))))
@@ -5095,6 +5105,7 @@ and a retired verb left in a list fails the other way."
   (let ((owned nil)
         (pinned (append glasspane-test--hub-verbs
                         glasspane-test--satellite-verbs
+                        glasspane-test--legacy-opener-verbs
                         glasspane-test--staged-opener-verbs
                         glasspane-test--non-opening-verbs)))
     (maphash (lambda (name _fn)
@@ -5119,12 +5130,14 @@ reconciler treat two rows as one."
     (should (equal (plist-get screen :t) "scaffold"))
     (should (plist-get screen :body))
     (should (plist-get screen :drawer))
-    (should (plist-get screen :fab))
+    (should-not (plist-member screen :fab))
     (should (jetpacs-check-profile screen 'app))
     (should (equal ids (delete-dups (copy-sequence ids))))
     (should (stringp json))
     (should (string-search "\"agenda.open\"" json))
-    (should (string-search "Saved views" json))
+    (should (string-search "Projects" json))
+    (should (string-search "Archive" json))
+    (should-not (string-search "Saved views" json))
     (should (string-search "\"hub-agenda\"" json))
     (should (string-search "\"drawer-agenda\"" json))))
 

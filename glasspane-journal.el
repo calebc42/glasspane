@@ -271,7 +271,9 @@ a card from a previous render answer `stale' for free."
 (defun glasspane-journal-screen (back)
   "The journal chrome screen; BACK is chrome's descriptor for the arrow."
   (jetpacs-chrome-screen "Journal" (glasspane-journal--body)
-                         :back back :fab (glasspane-ui-capture-fab)))
+                         :back back
+                         :fab (and glasspane-ui-legacy-ia
+                                   (glasspane-ui-capture-fab))))
 
 ;;;; Landing & state resets
 

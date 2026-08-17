@@ -10,7 +10,8 @@
 ;; module promotes the former Tasks body without replacing its upstream data
 ;; source: `glasspane-org-todo-items' retains both its whole-vault Vulpea arm
 ;; and canonical agenda-scope fallback.  Projects only filters, groups by
-;; source file, and renders the shared cards.  It remains staged until PA-3.
+;; source file, and renders the shared cards.  PA-3a exposes `projects.open'
+;; while retaining `tasks.open' only as a compatibility alias.
 
 ;;; Code:
 
@@ -111,12 +112,14 @@ Item order within each file remains the extractor's order."
                     (glasspane-projects--grouped-cards tokenized))))
 
 (defun glasspane-projects-screen (back)
-  "Build the staged Projects screen with BACK navigation."
+  "Build the Projects screen with BACK navigation."
   (jetpacs-chrome-screen "Projects" (glasspane-projects--body)
-                         :back back :fab (glasspane-ui-capture-fab)))
+                         :back back
+                         :fab (and glasspane-ui-legacy-ia
+                                   (glasspane-ui-capture-fab))))
 
 (defun glasspane-projects--on-open (_args params)
-  "Push the staged Projects screen onto the tapped surface."
+  "Push the Projects screen onto the tapped surface."
   (let ((surface (or (plist-get params :surface)
                      (jetpacs-shell-surface-for "glasspane"))))
     (jetpacs-flow-continue
@@ -139,7 +142,7 @@ Item order within each file remains the extractor's order."
 
 (defconst glasspane-projects--verbs
   '("projects.open" "tasks.open" "tasks.filter")
-  "The staged Projects verb, legacy opener alias, and screen control.")
+  "The Projects verb, legacy opener alias, and screen control.")
 
 (defun glasspane-projects-register ()
   "Register Projects and its legacy Tasks contracts, idempotently."

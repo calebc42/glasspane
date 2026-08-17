@@ -10,10 +10,11 @@
 ;; ladder is docs/PLAN-glasspane-app.md; this file is G0: the thin
 ;; entry in the M3 template (jetpacs-m3-catalog.el), owning exactly the
 ;; app identity — the "glasspane" owner claim, the chrome root (the
-;; hub, built by glasspane-ui and merely NAMED here), the dock
-;; destination, and one owner verb, `glasspane.home', which the hub's
-;; drawer taps to come back.  The sibling `require' list below grew one
-;; rung at a time and is now the whole app.
+;; hub, built by glasspane-ui and merely NAMED here), the PA-3 primary
+;; composition metadata, and one owner verb, `glasspane.home', which the
+;; hub's drawer taps to come back.  The old hand dock remains solely behind
+;; `glasspane-ui-legacy-ia'.  The sibling `require' list below grew one rung
+;; at a time and is now the whole app.
 ;;
 ;; Client hooks (clock notification, window class, save refresh) attach
 ;; at READY starting with G2 — G0 registers surfaces and verbs only,
@@ -59,9 +60,9 @@
 ;; so it loads first.
 (require 'glasspane-org-reader)
 (require 'glasspane-detail)
-;; G5 plus the staged PARA screens: the foundation date helper supports both
-;; daily halves; agenda, Projects, and journal build on detail's shared card
-;; and the reader (already above), while capture is verbs + sheets only.
+;; G5 plus the PARA screens: the foundation date helper supports both daily
+;; halves; agenda, Projects, and journal build on detail's shared card and the
+;; reader (already above), while capture is verbs + sheets only.
 (require 'jetpacs-dates)
 (require 'glasspane-agenda)
 (require 'glasspane-projects)
@@ -116,7 +117,7 @@ second real `jetpacs-defapp' caller there is.")
 ;;;; App identity
 
 (defun glasspane--dock-items (surface)
-  "The app's dock destination, in the chrome seam's item shape.
+  "The legacy app dock destination retained by `glasspane-ui-legacy-ia'.
 A function so `:selected' tracks SURFACE (jetpacs-m3-core.el:1195's
 rationale); the tap rides the GLOBAL `jetpacs.launcher.open' because it
 arrives from whatever surface the user is looking at."
@@ -132,13 +133,13 @@ arrives from whatever surface the user is looking at."
                 :selected (equal surface home)))))
 
 (defun glasspane--destinations ()
-  "The app's S1 route registry: the PLACES of `glasspane-ui-destinations'.
-One source of truth minus one row — capture opens a DIALOG, and the
+  "The app's S1 route registry from `glasspane-ui-active-destinations'.
+The rollback table loses one row — capture opens a DIALOG, and the
 chrome contract types destinations as places, never actions
 \(docs/CHROME-VOCABULARY.md); routing it would also flip the current
 app under the host with no visible switch.  The host's capture
 affordance is the FAB story, not a drawer row."
-  (cl-remove "capture" glasspane-ui-destinations
+  (cl-remove "capture" (glasspane-ui-active-destinations)
              :key (lambda (d) (plist-get d :key)) :test #'equal))
 
 (defun glasspane-register ()
@@ -153,19 +154,31 @@ registry entry in place."
     ;; item keeps, identity here and content there.
     (jetpacs-chrome-define-root glasspane-owner "home"
                                 #'glasspane-ui-home-screen))
-  ;; After the root exists: the app claims a surface that is really
-  ;; there, and its dock destination names one the launcher's
-  ;; membership guard recognizes (the M3 ordering).
-  (jetpacs-defapp glasspane-owner
-                  :label glasspane-title
-                  :icon glasspane-icon
-                  :surfaces (list glasspane-owner)
-                  :dock #'glasspane--dock-items
-                  ;; S1: the same destination table the hub renders,
-                  ;; CONTRIBUTED to the host — its rows open through
-                  ;; the global app.open `:route', so the verbs stay
-                  ;; owner-scoped (no :any-surface).
-                  :destinations #'glasspane--destinations)
+  ;; After the root exists: the app claims a surface that is really there;
+  ;; the rollback dock, when selected, names one the launcher's membership
+  ;; guard recognizes (the M3 ordering).
+  (if glasspane-ui-legacy-ia
+      (jetpacs-defapp glasspane-owner
+                      :label glasspane-title
+                      :icon glasspane-icon
+                      :surfaces (list glasspane-owner)
+                      :dock #'glasspane--dock-items
+                      :destinations #'glasspane--destinations)
+    (jetpacs-defapp glasspane-owner
+                    :label glasspane-title
+                    :icon glasspane-icon
+                    :surfaces (list glasspane-owner)
+                    ;; PA-3a: Glasspane owns the full five-item bar.  Eval
+                    ;; is the one native core place it relocates; Files is
+                    ;; replaced by the downstream Resources destination.
+                    :chrome 'primary
+                    :dock-core nil
+                    :drawer-core '("eval")
+                    :fab #'glasspane-ui-capture-fab
+                    ;; The table is CONTRIBUTED to the host.  Rows open
+                    ;; through global app.open, so their verbs stay scoped
+                    ;; to Glasspane's own surface.
+                    :destinations #'glasspane--destinations))
   ;; The CREATED/MODIFIED stampers are GLOBAL org hooks, so they attach
   ;; at app enable — never at glasspane-org's load (a bare `require'
   ;; must not mutate the user's `before-save-hook').  Teardown of this

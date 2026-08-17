@@ -226,6 +226,7 @@ sweeps the prior Areas token generation."
   "Build the Areas list screen with BACK navigation."
   (jetpacs-chrome-screen "Areas" (glasspane-areas--list-body)
                          :back back
+                         :actions (glasspane-ui-top-actions)
                          :fab (and glasspane-ui-legacy-ia
                                    (glasspane-ui-capture-fab))))
 
@@ -233,6 +234,7 @@ sweeps the prior Areas token generation."
   "Build CATEGORY's Area drill screen with BACK navigation."
   (jetpacs-chrome-screen category (glasspane-areas--drill-body category)
                          :back back
+                         :actions (glasspane-ui-top-actions)
                          :fab (and glasspane-ui-legacy-ia
                                    (glasspane-ui-capture-fab))))
 

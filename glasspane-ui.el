@@ -129,6 +129,20 @@ signal."
                        :content-description "Capture"
                        :variant "filled" :size "large"))
 
+(defun glasspane-ui-top-actions ()
+  "Return Glasspane's destination-level top-bar actions.
+Search is an app navigation opinion, so Glasspane authors its placement while
+the shared chrome remains unaware of the downstream destination.  The rollback
+composition keeps its historical bars byte-for-byte until PA-4 removes it."
+  (unless glasspane-ui-legacy-ia
+    (list (jetpacs-icon-button "search" (jetpacs-action "search.open")
+                               :content-description "Search"))))
+
+;; The PA-3d plan recorded this spelling before the sibling-private boundary
+;; was enforced.  Keep it as a local compatibility name while screen modules
+;; consume the public function above.
+(defalias 'glasspane-ui--top-actions #'glasspane-ui-top-actions)
+
 ;;;; The hub (the home screen every ported surface hangs off)
 ;;
 ;; Punch-list #26: through G8 the app registered a dozen screen-opening
@@ -354,7 +368,7 @@ the rollback arm authors the historical FAB directly."
    (glasspane-ui--home-body)
    :back back
    :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab))
-   :drawer (glasspane-ui--home-drawer)))
+   :drawer (and glasspane-ui-legacy-ia (glasspane-ui--home-drawer))))
 
 ;;;; The at-ref funnel (S4/S5 — the classifier every later rung copies)
 

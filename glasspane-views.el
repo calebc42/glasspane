@@ -594,7 +594,8 @@ taking the whole push down."
        (jetpacs-empty-state :icon "manage_search"
                             :title "View deleted"
                             :caption "This saved view no longer exists."))
-     :back back)))
+     :back back
+     :actions (glasspane-ui-top-actions))))
 
 ;;;; The hub screen
 
@@ -864,8 +865,12 @@ Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces the handlers in
 place."
   (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction "views.hub" #'glasspane-views--on-hub
-                       :doc "Open the saved-views hub screen")
+    (jetpacs-defaction
+     "views.hub"
+     (if glasspane-ui-legacy-ia
+         #'glasspane-views--on-hub
+       #'glasspane-agenda-open-saved)
+     :doc "Deprecated alias opening Agenda's Saved page")
     (jetpacs-defaction "views.open" #'glasspane-views--on-open
                        :doc "Open a saved view by name")
     (jetpacs-defaction "views.reorder" #'glasspane-views--on-reorder)

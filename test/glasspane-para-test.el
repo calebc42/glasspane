@@ -524,9 +524,14 @@ one file may honestly participate in both its file Area and a nested Area."
     (should (eq (nth 2 pushed) #'glasspane-resources-archive-screen)))
   (should (gethash "archive.open" jetpacs-action-handlers))
   (should (equal (jetpacs--owner-of "action" "archive.open") "glasspane"))
-  (should (member "archive.open"
-                  (glasspane-para-test--action-names
-                   (glasspane-ui-home-screen nil))))
+  (let ((jetpacs-apps--current glasspane-owner))
+    (should
+     (cl-some
+      (lambda (action)
+        (and (equal (plist-get action :action) "app.open")
+             (equal (plist-get (plist-get action :args) :route) "archive")))
+      (glasspane-para-test--actions
+       (jetpacs-apps-drawer (jetpacs-shell-surface-for glasspane-owner))))))
   (unwind-protect
       (progn
         (glasspane-resources-unregister)
@@ -883,9 +888,8 @@ one file may honestly participate in both its file Area and a nested Area."
                    '("agenda.open" "areas.open" "projects.open"
                      "resources.open" "review.open")))
     (should-not (member "archive.open" body-actions))
-    (dolist (verb '("agenda.open" "projects.open" "areas.open"
-                    "resources.open" "review.open" "archive.open"))
-      (should (member verb drawer-actions)))
+    (should-not drawer-actions)
+    (should-not (plist-member screen :drawer))
     (dolist (verb '("tasks.open" "journal.open" "org.capture.show"
                     "search.open" "views.hub"))
       (should-not (member verb
@@ -1439,6 +1443,168 @@ one file may honestly participate in both its file Area and a nested Area."
              ebp-org--token-sets)
     (should (= count 24))
     (should (= (- ebp-org-token-sets-max count) 8))))
+
+;;;; PA-3d — host drawer, top-bar Search, and compatibility aliases
+
+(ert-deftest glasspane-para-pa3d-host-drawer-composes-on-agenda-root ()
+  "The active root authors no drawer; Jetpacs composes the complete host one."
+  (glasspane-register)
+  (let* ((surface (jetpacs-shell-surface-for glasspane-owner))
+         (glasspane-entry (assoc glasspane-owner jetpacs-apps--registry))
+         (other-entry
+          '("other" :label "Other" :icon "extension"
+            :surfaces ("other")
+            :destinations ((:key "elsewhere" :label "Elsewhere"
+                            :icon "explore" :verb "other.open"))))
+         (jetpacs-apps--registry (list glasspane-entry other-entry))
+         (jetpacs-apps--current glasspane-owner)
+         (jetpacs-apps--current-route "agenda")
+         (jetpacs-apps-core-dock-items
+          (lambda (_surface)
+            (list (list :key "eval" :label "Eval" :icon "code"
+                        :on-tap (jetpacs-action "eval.open"))
+                  (list :key "files" :label "Files" :icon "folder"
+                        :on-tap (jetpacs-action "files.open")))))
+         (jetpacs-apps-core-drawer-rows
+          (lambda (_surface)
+            (list (jetpacs-chrome-row "Tools" :icon "build"
+                                      :on-tap (jetpacs-action "tools.open")
+                                      :key "test-tools")
+                  (jetpacs-divider)
+                  (jetpacs-chrome-row "Settings" :icon "settings"
+                                      :on-tap (jetpacs-action "settings.open")
+                                      :key "test-settings"))))
+         (jetpacs-chrome-drawer-function #'jetpacs-apps-drawer))
+    (cl-letf (((symbol-function 'glasspane-agenda--today-count)
+               (lambda () 0))
+              ((symbol-function 'glasspane-agenda-body)
+               (lambda () (jetpacs-text "Agenda body"))))
+      (let* ((raw (glasspane-agenda-screen nil))
+             (built (jetpacs-chrome--build surface))
+             (root (gethash "glasspane-agenda" (plist-get built :views)))
+             (drawer (plist-get root :drawer))
+             (texts (glasspane-para-test--node-texts drawer)))
+        (should-not (plist-member raw :drawer))
+        (should (plist-member root :drawer))
+        (dolist (label '("Apps" "Glasspane" "Agenda" "Projects" "Areas"
+                         "Resources" "Review" "Archive" "Other"
+                         "Elsewhere" "Eval" "Tools" "Settings"))
+          (should (= 1 (cl-count label texts :test #'equal))))
+        (should (= 0 (cl-count "Files" texts :test #'equal)))))))
+
+(ert-deftest glasspane-para-pa3d-search-is-destination-action-only ()
+  "Search appears once on every authored destination, never on Search/detail."
+  (let ((glasspane-ui-legacy-ia nil)
+        (glasspane-srs--active nil))
+    (cl-letf (((symbol-function 'glasspane-agenda--today-count)
+               (lambda () 0))
+              ((symbol-function 'glasspane-agenda-body)
+               (lambda () (jetpacs-text "agenda")))
+              ((symbol-function 'glasspane-projects--body)
+               (lambda () (jetpacs-text "projects")))
+              ((symbol-function 'glasspane-areas--list-body)
+               (lambda () (jetpacs-text "areas")))
+              ((symbol-function 'glasspane-areas--drill-body)
+               (lambda (_category) (jetpacs-text "area")))
+              ((symbol-function 'glasspane-resources--archive-body)
+               (lambda () (jetpacs-text "archive")))
+              ((symbol-function 'glasspane-srs--review-body)
+               (lambda () (jetpacs-text "review")))
+              ((symbol-function 'glasspane-search--body)
+               (lambda () (jetpacs-text "search"))))
+      (dolist (screen
+               (list (glasspane-agenda-screen nil)
+                     (glasspane-projects-screen nil)
+                     (glasspane-areas-screen nil)
+                     (glasspane-areas-drill-screen "Work" nil)
+                     (glasspane-resources-archive-screen nil)
+                     (glasspane-srs-screen nil)
+                     (glasspane-views--screen "Vanished" nil)))
+        (should (= 1 (cl-count "search.open"
+                               (glasspane-para-test--action-names screen)
+                               :test #'equal)))
+        (should-not (plist-member screen :drawer)))
+      (should-not (member "search.open"
+                          (glasspane-para-test--action-names
+                           (glasspane-search-screen nil))))
+      (should-not (member "search.open"
+                          (glasspane-para-test--action-names
+                           (glasspane-detail--screen nil nil)))))))
+
+(ert-deftest glasspane-para-pa3d-aliases-land-on-current-destinations ()
+  "Tasks and Views remain accepted aliases; only capture remains of Journal."
+  (should (eq (gethash "tasks.open" jetpacs-action-handlers)
+              #'glasspane-projects--on-open))
+  (should (eq (gethash "views.hub" jetpacs-action-handlers)
+              #'glasspane-agenda-open-saved))
+  (should (eq (gethash "journal.capture" jetpacs-action-handlers)
+              #'glasspane-journal--on-capture))
+  (dolist (name '("journal.open" "journal.nav" "journal.goto"
+                  "journal.today"))
+    (should-not (gethash name jetpacs-action-handlers)))
+  (let ((glasspane-agenda--mode "day")
+        (jetpacs-apps--current glasspane-owner)
+        (jetpacs-apps--current-route "projects")
+        pushed)
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-chrome-push-screen)
+               (lambda (surface id builder &rest _)
+                 (setq pushed (list surface id builder)))))
+      (should (eq (funcall (gethash "views.hub" jetpacs-action-handlers)
+                           nil '(:surface "app:glasspane"))
+                  'accepted)))
+    (should (equal glasspane-agenda--mode "saved"))
+    (should (equal jetpacs-apps--current-route "agenda"))
+    (should (equal (seq-take pushed 2)
+                   '("app:glasspane" "glasspane-agenda")))
+    (should (eq (nth 2 pushed) #'glasspane-agenda-screen))))
+
+(ert-deftest glasspane-para-pa3d-queued-journal-alias-replays-to-datetree ()
+  "A queue-shaped event reaches the live alias and commits before acceptance."
+  (glasspane-para-test--with-vault nil
+    (let* ((glasspane-journal-file (expand-file-name "journal.org" vault))
+           (receipt-file (make-temp-file "glasspane-pa3d-receipts"))
+           (client (ebp-client-create :receipt-file receipt-file))
+           (event-id (make-string 32 ?a)))
+      (unwind-protect
+          (progn
+            (ebp-client-register-action
+             client "journal.capture" (jetpacs--action-shim "journal.capture"))
+            (cl-letf (((symbol-function 'jetpacs-shell-notify) #'ignore)
+                      ((symbol-function 'jetpacs-app-defer-refresh) #'ignore))
+              (should
+               (equal
+                (ebp-client--handle-event-action
+                 client
+                 (list :event_id event-id
+                       :action "journal.capture"
+                       :args '(:value "Queued field note"
+                               :date "2026-08-17")
+                       :surface "app:glasspane"
+                       :revision_seen 0
+                       :occurred_at_ms 1786946400000))
+                '(:status "accepted"))))
+            (with-temp-buffer
+              (insert-file-contents glasspane-journal-file)
+              (should (string-search "2026-08-17" (buffer-string)))
+              (should (re-search-forward "^- Queued field note$" nil t)))
+            ;; A replay retry with the same durable event id cannot append twice.
+            (should
+             (equal
+              (ebp-client--handle-event-action
+               client
+               (list :event_id event-id
+                     :action "journal.capture"
+                     :args '(:value "Queued field note"
+                             :date "2026-08-17")
+                     :surface "app:glasspane"
+                     :revision_seen 0
+                     :occurred_at_ms 1786946400000))
+              '(:status "duplicate"))))
+        (ebp-client-close client 'test-finished)
+        (when (file-exists-p receipt-file)
+          (delete-file receipt-file))))))
 
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

@@ -115,6 +115,7 @@ Item order within each file remains the extractor's order."
   "Build the Projects screen with BACK navigation."
   (jetpacs-chrome-screen "Projects" (glasspane-projects--body)
                          :back back
+                         :actions (glasspane-ui-top-actions)
                          :fab (and glasspane-ui-legacy-ia
                                    (glasspane-ui-capture-fab))))
 

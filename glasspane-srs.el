@@ -699,8 +699,10 @@ engine empty state.  The optional Habits row always remains independent."
        (glasspane-srs--session-body)
      (glasspane-srs--review-body))
    :back back
-   :actions (when (and glasspane-srs--active glasspane-srs--current)
-              (glasspane-srs--top-actions))))
+   :actions (append
+             (glasspane-ui-top-actions)
+             (when (and glasspane-srs--active glasspane-srs--current)
+               (glasspane-srs--top-actions)))))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 

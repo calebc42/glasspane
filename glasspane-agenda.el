@@ -653,12 +653,22 @@ Agenda destination and the legacy dock builder both call it."
                                         :style "caption"))
                         (glasspane-agenda-body))))
      :back back
+     :actions (glasspane-ui-top-actions)
      :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab)))))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 
 (defun glasspane-agenda--on-open (_args params)
   "Reset to the pinned Agenda root on the tapped surface."
+  (glasspane-ui-open-destination "agenda" "glasspane-agenda"
+                                 #'glasspane-agenda-screen params))
+
+(defun glasspane-agenda-open-saved (_args params)
+  "Open Agenda with its Saved page selected.
+This is the public compatibility landing used by the retired `views.hub'
+destination.  The durable wire name survives while its old peer screen stays
+available only through the PA rollback flag."
+  (setq glasspane-agenda--mode glasspane-agenda--saved-mode)
   (glasspane-ui-open-destination "agenda" "glasspane-agenda"
                                  #'glasspane-agenda-screen params))
 

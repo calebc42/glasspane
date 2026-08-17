@@ -414,23 +414,30 @@ the time any teardown runs, the entry has long finished loading."
   (remove-hook 'jetpacs-teardown-functions #'glasspane-journal--on-teardown))
 
 (defun glasspane-journal-register ()
-  "Register the journal verbs and rollback-only navigation hooks.
+  "Register the capture alias and rollback-only journal navigation.
 Called from `glasspane-register', never at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces handlers and
 the registry entry in place."
+  ;; Re-registering across the rollback pole must remove names which the
+  ;; active pole no longer owns; `jetpacs-defaction' only replaces names it is
+  ;; asked to define and therefore cannot perform this negative half itself.
+  (dolist (name '("journal.open" "journal.nav" "journal.goto"
+                  "journal.today"))
+    (jetpacs-undefaction name))
   (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction "journal.open" #'glasspane-journal--on-open
-                       :doc "Open the journal screen.")
-    (jetpacs-defaction "journal.nav" #'glasspane-journal--on-nav
-                       :doc "Shift the journal day by :delta days."
-                       :args '((:name delta :type "number" :required t)))
-    (jetpacs-defaction "journal.goto" #'glasspane-journal--on-goto
-                       :doc "Show a specific journal day."
-                       :args '((:name value :type "date" :required t)))
-    (jetpacs-defaction "journal.today" #'glasspane-journal--on-today
-                       :doc "Snap the journal back to today.")
+    (when glasspane-ui-legacy-ia
+      (jetpacs-defaction "journal.open" #'glasspane-journal--on-open
+                         :doc "Open the journal screen.")
+      (jetpacs-defaction "journal.nav" #'glasspane-journal--on-nav
+                         :doc "Shift the journal day by :delta days."
+                         :args '((:name delta :type "number" :required t)))
+      (jetpacs-defaction "journal.goto" #'glasspane-journal--on-goto
+                         :doc "Show a specific journal day."
+                         :args '((:name value :type "date" :required t)))
+      (jetpacs-defaction "journal.today" #'glasspane-journal--on-today
+                         :doc "Snap the journal back to today."))
     (jetpacs-defaction "journal.capture" #'glasspane-journal--on-capture
-                       :doc "Append text to the current journal day."
+                       :doc "Deprecated headless journal datetree append alias."
                        :args '((:name value :type "text" :required t)
                                (:name date :type "date"))))
   ;; PA-3b: Agenda is the real landing and the route-honesty subscriber owns

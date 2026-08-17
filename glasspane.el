@@ -81,15 +81,10 @@
 ;; unconditional, the runtime probes are theirs.
 (require 'glasspane-notes)
 (require 'glasspane-srs)
-;; G8, the satellites + fixtures: demo loads before gallery (gallery's
-;; entry command leans on the demo seeder being in the image — the
-;; plan's DEMO-BEFORE-GALLERY order).  The theme-picker scaffold ef
-;; instantiates is foundation now (jetpacs-theme-picker, the §3 step-3
-;; promotion), and ef requires it itself — no entry-point ordering to
-;; hold.
+;; G8's downstream demo fixtures remain.  The generic ef-themes satellite and
+;; widget gallery moved to Jetpacs composition at PA-3d; this app neither loads
+;; nor registers them.
 (require 'glasspane-demo)
-(require 'glasspane-ef)
-(require 'glasspane-gallery)
 
 (defconst glasspane-owner "glasspane"
   "The D1 owner whose surface hosts the app.
@@ -210,9 +205,7 @@ replaces its registry entry in place."
   (glasspane-table-register)
   (glasspane-notes-register)
   (glasspane-srs-register)
-  (glasspane-demo-register)
-  (glasspane-ef-register)
-  (glasspane-gallery-register))
+  (glasspane-demo-register))
 
 (defun glasspane-unregister ()
   "Deregister every downstream verb, the chrome root, and app identity.
@@ -242,9 +235,7 @@ Org clock handlers are upstream and deliberately survive."
   (glasspane-table-unregister)
   (glasspane-notes-unregister)
   (glasspane-srs-unregister)
-  (glasspane-demo-unregister)
-  (glasspane-ef-unregister)
-  (glasspane-gallery-unregister))
+  (glasspane-demo-unregister))
 
 (glasspane-register)
 

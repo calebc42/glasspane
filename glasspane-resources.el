@@ -151,6 +151,7 @@ cache, so pull-to-refresh is their deliberate freshness boundary."
   "Build the Archive screen with BACK navigation."
   (jetpacs-chrome-screen "Archive" (glasspane-resources--archive-body)
                          :back back
+                         :actions (glasspane-ui-top-actions)
                          :fab (and glasspane-ui-legacy-ia
                                    (glasspane-ui-capture-fab))))
 

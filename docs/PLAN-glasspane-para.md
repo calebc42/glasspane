@@ -1,6 +1,6 @@
 # PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, shared-bar, PARA-shaped)
 
-Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **ea6d4c5** (PA-2b execution base on slop-fork/main; PA-1/PA-2a/PA-2c complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2b mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
+Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **8358062** (PA-2d execution base on slop-fork/main; PA-1/PA-2a/PA-2b/PA-2c complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c/PA-2d executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2d mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
 
 **Authority:** the ratified PARA vision (Caleb, 2026-08-15 — §0 verbatim) + the surviving machinery half of `docs/PLAN-glasspane-rework.md` (GR-0..GR-7, unchanged). Produced by a full planning workflow (3 exploration + 3 design agents, 2026-08-15); every mechanism claim was re-verified in-tree while drafting.
 
@@ -227,9 +227,33 @@ App-side module (srs/notes shape, register/unregister from glasspane.el's sweep)
 
 ### PA-2d — Projects (`emacs/apps/glasspane/glasspane-projects.el`, new, thin)
 
-The tasks body promoted honestly: keyword chips + shared cards over `glasspane-org--todo-items` (both arms intact — vulpea whole-vault when the index is up, else the agenda-scope map), **grouped by file** (`seq-group-by` + basename section headers — a pure fold; items already carry `file` in both arms; ratified §0.3). `tasks.filter` moves with the body, name unchanged; `tasks.open` becomes the alias (§3). Token set: reuses `"tasks"` — net zero. **Archive display filter:** drop items whose `file` matches `_archive\'` (the leak-edge insurance). Recorded follow-ups, not v1: project-entity grouping (nest under level-1 headings — pure fold, items carry `level`+`pos`); group-by-category (reuse the Areas index).
+The tasks body promoted honestly: keyword chips + shared cards over `glasspane-org-todo-items` (both arms intact — vulpea whole-vault when the index is up, else the agenda-scope map), **grouped by file** (`seq-group-by` + basename section headers — a pure fold; items already carry `file` in both arms; ratified §0.3). `tasks.filter` moves with the body, name unchanged; `tasks.open` becomes the alias (§3). Token set: reuses `"tasks"` — net zero. **Archive display filter:** drop items whose `file` matches `_archive\'` (the leak-edge insurance). Recorded follow-ups, not v1: project-entity grouping (nest under level-1 headings — pure fold, items carry `level`+`pos`); group-by-category (reuse the Areas index).
 
 **Gate:** arms: alias; group-by-file fold over both arms' item shapes; archive display filter; chips-filter regression.
+
+> **PA-2d GATE COMPLETE 2026-08-16.** The Tasks body, filter state,
+> handlers, and lifecycle ownership now live whole in the new downstream
+> Projects module. Its extractor retains both public TODO-item arms: the
+> Vulpea whole-vault index when available and the agenda-scope fallback.
+> Items are grouped by their full file path, groups are ordered
+> deterministically by path, basename headers label each section, and the
+> existing shared Agenda cards preserve item order within a file.
+>
+> Explicit-scope and custom-index archive leaks are both stopped before
+> token minting by a case-insensitive `_archive` file filter. The native TODO
+> keyword chips and `tasks.filter` contract are unchanged, and the existing
+> `"tasks"` token set is reused for a net-zero token-set delta.
+> `projects.open` is staged for the PA-3 one-table flip; `tasks.open` is a
+> durable deprecated alias registered to the exact same handler. The legacy
+> hub therefore continues to reach Projects through `tasks.open` without
+> exposing the new destination early.
+>
+> Evidence: the explicit PARA suite passes **23/23** and the legacy
+> Glasspane suite passes **72/72**. Both extractor arms, pre-token archive
+> exclusion, grouping, chips, alias identity, lifecycle, staging, and source
+> boundaries are pinned. Warning-as-error compilation, package
+> installation, dependency layering, diff hygiene, and the full elevated
+> `test/run-tests.sh` pass; the runner exited **0**. PA-2d has no device arm.
 
 ### PA-2e — Review destination (edit `glasspane-srs.el`)
 

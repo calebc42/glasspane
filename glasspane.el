@@ -59,11 +59,12 @@
 ;; so it loads first.
 (require 'glasspane-org-reader)
 (require 'glasspane-detail)
-;; G5, the daily surfaces: the foundation date helper supports both
-;; halves; agenda and journal build on detail's shared card and the
-;; reader (already above), while capture is verbs + sheets only.
+;; G5 plus the staged PARA screens: the foundation date helper supports both
+;; daily halves; agenda, Projects, and journal build on detail's shared card
+;; and the reader (already above), while capture is verbs + sheets only.
 (require 'jetpacs-dates)
 (require 'glasspane-agenda)
+(require 'glasspane-projects)
 (require 'glasspane-areas)
 (require 'glasspane-resources)
 (require 'glasspane-journal)
@@ -180,6 +181,7 @@ registry entry in place."
   (glasspane-org-reader-register)
   (glasspane-detail-register)
   (glasspane-agenda-register)
+  (glasspane-projects-register)
   (glasspane-areas-register)
   (glasspane-resources-register)
   (glasspane-journal-register)
@@ -211,6 +213,7 @@ Org clock handlers are upstream and deliberately survive."
   (glasspane-org-reader-unregister)
   (glasspane-detail-unregister)
   (glasspane-agenda-unregister)
+  (glasspane-projects-unregister)
   (glasspane-areas-unregister)
   (glasspane-resources-unregister)
   (glasspane-journal-unregister)

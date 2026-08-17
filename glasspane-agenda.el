@@ -1,4 +1,4 @@
-;;; glasspane-agenda.el --- Glasspane agenda + tasks surfaces -*- lexical-binding: t; -*-
+;;; glasspane-agenda.el --- Glasspane agenda surfaces -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Package-Requires: ((emacs "30.1"))
@@ -6,10 +6,10 @@
 ;;; Commentary:
 
 ;; The daily surfaces rung, agenda half (docs/PLAN-glasspane-app.md,
-;; G5): the day/week/month/custom agenda and the TODO task list as
-;; pushed chrome screens, the reminder sync riding the shell push, and
-;; the global-TODO-sequence writers the G3 settings dialog dispatches
-;; to.  Day/week/month stays an in-body `jetpacs-tabs' (the S1 ruling);
+;; G5): the day/week/month/custom agenda as a pushed chrome screen, the
+;; reminder sync riding the shell push, and the global-TODO-sequence writers
+;; the G3 settings dialog dispatches to.  Day/week/month stays an in-body
+;; `jetpacs-tabs' (the S1 ruling);
 ;; every list renders through `glasspane-detail-agenda-card' over
 ;; SPEC 23.1 tokens minted one set per page (S5); every handler
 ;; answers a SPEC 14.4 status (S4).
@@ -17,8 +17,8 @@
 ;; Retired against v1 (the plan's retirement list + G5 section):
 ;;
 ;; - The tab fabric (`jetpacs-shell-tab-view'/`-define-view', the tab
-;;   badge closure): S1 — the two views are chrome screens behind
-;;   agenda.open/tasks.open; the badge count surfaces IN-SCREEN and,
+;;   badge closure): S1 — Agenda became a chrome screen behind
+;;   `agenda.open'; the badge count surfaces IN-SCREEN and,
 ;;   since the gap-#5 thread-through landed, on the app's dock item
 ;;   (`glasspane-agenda-dock-badge').
 ;; - The clock tombstone view (v1 agenda:105-113): dies with the tab
@@ -34,6 +34,9 @@
 ;;   own state and are jetpacs-org-settings.el's ownerless
 ;;   jetpacs.org.todo.* family now, closing through the foundation's
 ;;   settings-dialog slot.
+;; - PA-2d promotes the former Tasks body, state, and verbs into
+;;   `glasspane-projects'; this module retains only the public tokenization
+;;   seam its sibling consumes.
 ;; - `jetpacs-node-or' (T2): `jetpacs-node-advertised-p' conditionals.
 ;; - The trimodal reader block (v1 agenda:552-602,
 ;;   `glasspane-ui--org-editor-body'): PORTED IN G4 — the reader owns
@@ -53,9 +56,7 @@
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
 (require 'jetpacs-apps)
-(require 'jetpacs-settings)
 (require 'jetpacs-device)
-(require 'jetpacs-org-settings)      ; the global-TODO-keywords helper
 (require 'jetpacs-org-dialogs)          ; the archive-token scope (S5)
 (require 'jetpacs-dates)
 (require 'glasspane-org)
@@ -69,9 +70,6 @@
   "The active agenda mode: a span name or a saved-search name.
 Replaces the v1 ui-state \"agenda-mode\"; the body re-seeds the tab
 strip's `:initial' from it each render.")
-
-(defvar glasspane-agenda--tasks-filter "ALL"
-  "Current TODO-keyword filter for the Tasks screen (\"ALL\" = all).")
 
 ;;;; Reminders (piggybacked on each shell push)
 
@@ -554,40 +552,6 @@ tab."
         (glasspane-agenda--body-tabs mode anchor)
       (glasspane-agenda--body-chips mode anchor))))
 
-;;;; Tasks
-
-(defun glasspane-agenda--tasks-body ()
-  "The TODO list under its keyword filter chips."
-  (let* ((items (condition-case nil
-                    (glasspane-org-todo-items)
-                  (error nil)))
-         (filtered (if (equal glasspane-agenda--tasks-filter "ALL") items
-                     (cl-remove-if-not
-                      (lambda (it)
-                        (equal (alist-get 'todo it)
-                               glasspane-agenda--tasks-filter))
-                      items)))
-         (filtered (glasspane-agenda--tokenize filtered "tasks"))
-         (cards (mapcar #'glasspane-detail-agenda-card filtered)))
-    (jetpacs-column
-     (apply #'jetpacs-flow-row
-            (append
-             (mapcar (lambda (kw)
-                       (jetpacs-chip
-                        kw
-                        :selected (jetpacs-bool
-                                   (equal glasspane-agenda--tasks-filter kw))
-                        :on-tap (jetpacs-action "tasks.filter"
-                                                :args (list :filter kw))))
-                     (cons "ALL" (or (jetpacs-org-settings-global-todo-keywords)
-                                     '("TODO" "DONE"))))
-             (list :spacing 4)))
-     (if cards
-         (apply #'jetpacs-lazy-column cards)
-       (jetpacs-empty-state :icon "task_alt"
-                            :title "No tasks"
-                            :caption "Nothing matches this filter.")))))
-
 ;;;; Screens
 
 (defun glasspane-agenda--today-count ()
@@ -622,11 +586,6 @@ table lookup.  Public: the entry's dock-items builder calls it."
                         (glasspane-agenda-body))))
      :back back :fab (glasspane-ui-capture-fab))))
 
-(defun glasspane-agenda--tasks-screen (back)
-  "The pushed Tasks screen."
-  (jetpacs-chrome-screen "Tasks" (glasspane-agenda--tasks-body)
-                         :back back :fab (glasspane-ui-capture-fab)))
-
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 
 (defun glasspane-agenda--push-screen (params id builder)
@@ -647,11 +606,6 @@ or a refused gate dies in a timer."
   "Push the Agenda screen onto the tapped surface."
   (glasspane-agenda--push-screen params "glasspane-agenda"
                                  #'glasspane-agenda-screen))
-
-(defun glasspane-agenda--on-tasks-open (_args params)
-  "Push the Tasks screen onto the tapped surface."
-  (glasspane-agenda--push-screen params "glasspane-tasks"
-                                 #'glasspane-agenda--tasks-screen))
 
 (defun glasspane-agenda--on-set-mode (args params)
   "Select an agenda mode.  `:mode' names come from the fallback chips;
@@ -698,21 +652,10 @@ the result must name a mode we actually offer."
         (jetpacs-app-defer-refresh params)
         'accepted))))
 
-(defun glasspane-agenda--on-tasks-filter (args params)
-  "Filter the tasks collection to a TODO keyword (or \"ALL\")."
-  (let ((filter (plist-get args :filter)))
-    (if (not (stringp filter))
-        'rejected
-      (setq glasspane-agenda--tasks-filter filter)
-      (jetpacs-app-defer-refresh params)
-      'accepted)))
-
 (defconst glasspane-agenda--verbs
   '("agenda.open"
-    "tasks.open"
     "agenda.set-mode"
-    "agenda.nav"
-    "tasks.filter")
+    "agenda.nav")
   "The verbs this file owns, for the register/unregister sweep.
 agenda.today/select-date/set-month live with the anchor defvars (G3).
 The sequence writers left with §3 step 2 — the foundation's ownerless
@@ -733,18 +676,15 @@ the time any teardown runs, the entry has long finished loading."
     (glasspane-agenda-remove-hooks)))
 
 (defun glasspane-agenda-register ()
-  "Register the agenda/tasks verbs and the reminder-sync hook.
+  "Register the Agenda verbs and the reminder-sync hook.
 Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces handlers in
 place and the hooks are add-hook-deduplicated."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "agenda.open" #'glasspane-agenda--on-open
                        :doc "Open the agenda screen")
-    (jetpacs-defaction "tasks.open" #'glasspane-agenda--on-tasks-open
-                       :doc "Open the TODO task list screen")
     (jetpacs-defaction "agenda.set-mode" #'glasspane-agenda--on-set-mode)
-    (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav)
-    (jetpacs-defaction "tasks.filter" #'glasspane-agenda--on-tasks-filter))
+    (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav))
   (remove-hook 'jetpacs-shell-after-push-hook
                #'glasspane-agenda--sync-reminders)
   (when (and glasspane-agenda-reminders-enabled
@@ -754,7 +694,7 @@ place and the hooks are add-hook-deduplicated."
   (add-hook 'jetpacs-teardown-functions #'glasspane-agenda--on-teardown))
 
 (defun glasspane-agenda-unregister ()
-  "Drop the agenda/tasks verbs and hooks; forget the reminder cache.
+  "Drop the Agenda verbs and hooks; forget the reminder cache.
 The forgotten cache makes the next register's first push re-arm the
 device set rather than trusting alarms a torn-down session sent."
   (dolist (name glasspane-agenda--verbs)

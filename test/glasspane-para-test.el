@@ -24,6 +24,16 @@
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The Resources source inspected by its architectural gate.")
 
+(defconst glasspane-para-test--projects-source
+  (expand-file-name "../emacs/apps/glasspane/glasspane-projects.el"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The Projects source inspected by its architectural gate.")
+
+(defconst glasspane-para-test--agenda-source
+  (expand-file-name "../emacs/apps/glasspane/glasspane-agenda.el"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The Agenda source inspected after the Tasks promotion.")
+
 (defmacro glasspane-para-test--with-vault (files &rest body)
   "Create FILES in a temporary local Org vault and evaluate BODY.
 FILES is a list of (RELATIVE-NAME CONTENT)."
@@ -528,6 +538,166 @@ one file may honestly participate in both its file Area and a nested Area."
     (should (search-forward "resources.open-file" nil t))
     (goto-char (point-min))
     (should-not (search-forward "unarchive" nil t))))
+
+(ert-deftest glasspane-para-projects-groups-both-todo-extractor-arms ()
+  "File and Vulpea TODO item shapes receive the same by-file fold."
+  (glasspane-para-test--with-vault
+      '(("alpha.org" "* TODO Alpha one\n* TODO Alpha two\n")
+        ("beta.org" "* TODO Beta one\n"))
+    (let* ((file-items
+            (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                       (lambda () nil)))
+              (glasspane-org-todo-items)))
+           (file-groups (glasspane-projects--group-by-file file-items)))
+      (should (equal (mapcar (lambda (group)
+                               (file-name-nondirectory (car group)))
+                             file-groups)
+                     '("alpha.org" "beta.org")))
+      (should (equal (mapcar (lambda (item) (alist-get 'headline item))
+                             (cdar file-groups))
+                     '("Alpha one" "Alpha two"))))
+    (let* ((indexed-items
+            (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                       (lambda () t))
+                      ((symbol-function 'vulpea-db-query)
+                       (lambda (&optional _predicate) '(one two three)))
+                      ((symbol-function 'glasspane-org--vulpea-note-to-item)
+                       (lambda (note)
+                         `((headline . ,(symbol-name note))
+                           (todo . "TODO")
+                           (file . ,(expand-file-name
+                                     (if (eq note 'two)
+                                         "beta.org"
+                                       "alpha.org")
+                                     vault))))))
+              (glasspane-org-todo-items)))
+           (indexed-groups
+            (glasspane-projects--group-by-file indexed-items)))
+      (should (equal (mapcar (lambda (group)
+                               (file-name-nondirectory (car group)))
+                             indexed-groups)
+                     '("alpha.org" "beta.org")))
+      (should (equal (mapcar (lambda (item) (alist-get 'headline item))
+                             (cdar indexed-groups))
+                     '("one" "three"))))))
+
+(ert-deftest glasspane-para-projects-archive-filter-precedes-tokenization ()
+  "Both explicit-scope and indexed archive leaks die before token minting."
+  (let* ((live '((headline . "Live") (todo . "TODO")
+                 (file . "/vault/live.org")))
+         (explicit '((headline . "Explicit archive") (todo . "TODO")
+                     (file . "/vault/explicit.org_archive")))
+         (indexed '((headline . "Indexed archive") (todo . "TODO")
+                    (file . "/vault/indexed.ORG_ARCHIVE")))
+         (glasspane-projects--filter "ALL")
+         tokenized set)
+    (cl-letf (((symbol-function 'glasspane-org-todo-items)
+               (lambda () (list live explicit indexed)))
+              ((symbol-function 'glasspane-agenda-tokenize)
+               (lambda (items set-name)
+                 (setq tokenized items set set-name)
+                 items)))
+      (let ((json (jetpacs-node->canonical-json
+                   (glasspane-projects--body))))
+        (should (string-search "Live" json))
+        (should-not (string-search "Explicit archive" json))
+        (should-not (string-search "Indexed archive" json))))
+    (should (equal tokenized (list live)))
+    (should (equal set "tasks"))))
+
+(ert-deftest glasspane-para-projects-filter-chips-and-grouped-render ()
+  "The existing keyword chips filter shared cards inside file sections."
+  (let ((glasspane-projects--filter "TODO")
+        (refreshes 0)
+        (items '(((headline . "Alpha TODO") (todo . "TODO")
+                  (file . "/vault/alpha.org"))
+                 ((headline . "Alpha done") (todo . "DONE")
+                  (file . "/vault/alpha.org"))
+                 ((headline . "Beta TODO") (todo . "TODO")
+                  (file . "/vault/beta.org")))))
+    (cl-letf (((symbol-function 'glasspane-org-todo-items)
+               (lambda () items))
+              ((symbol-function 'glasspane-agenda-tokenize)
+               (lambda (visible _set) visible))
+              ((symbol-function 'jetpacs-org-settings-global-todo-keywords)
+               (lambda () '("TODO" "DONE")))
+              ((symbol-function 'jetpacs-app-defer-refresh)
+               (lambda (_params) (cl-incf refreshes))))
+      (let* ((body (glasspane-projects--body))
+             (json (jetpacs-node->canonical-json body))
+             (actions (glasspane-para-test--action-names body)))
+        (should (string-search "alpha.org" json))
+        (should (string-search "beta.org" json))
+        (should (string-search "Alpha TODO" json))
+        (should (string-search "Beta TODO" json))
+        (should-not (string-search "Alpha done" json))
+        (should (member "tasks.filter" actions)))
+      (should (eq (glasspane-projects--on-filter
+                   '(:filter "DONE") '(:surface "app:glasspane"))
+                  'accepted))
+      (should (equal glasspane-projects--filter "DONE"))
+      (should (= refreshes 1))
+      (should (eq (glasspane-projects--on-filter
+                   '(:filter 7) '(:surface "app:glasspane"))
+                  'rejected))
+      (should (equal glasspane-projects--filter "DONE"))
+      (should (= refreshes 1)))))
+
+(ert-deftest glasspane-para-projects-alias-route-lifecycle-and-staging ()
+  "The durable Tasks alias and new opener share one staged Projects route."
+  (dolist (name '("projects.open" "tasks.open"))
+    (should (eq (gethash name jetpacs-action-handlers)
+                #'glasspane-projects--on-open))
+    (should (equal (jetpacs--owner-of "action" name) "glasspane")))
+  (let ((home-actions
+         (glasspane-para-test--action-names (glasspane-ui-home-screen nil))))
+    (should (member "tasks.open" home-actions))
+    (should-not (member "projects.open" home-actions)))
+  (let (pushed)
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-chrome-push-screen)
+               (lambda (surface id builder &rest _)
+                 (push (list surface id builder) pushed))))
+      (dolist (name '("projects.open" "tasks.open"))
+        (should (eq (funcall (gethash name jetpacs-action-handlers)
+                             nil '(:surface "app:glasspane"))
+                    'accepted))))
+    (should (= (length pushed) 2))
+    (dolist (push pushed)
+      (should (equal (seq-take push 2)
+                     '("app:glasspane" "glasspane-projects")))
+      (should (eq (nth 2 push) #'glasspane-projects-screen))))
+  (should (jetpacs-check-profile (glasspane-projects-screen nil) 'app))
+  (unwind-protect
+      (progn
+        (glasspane-projects-unregister)
+        (dolist (name glasspane-projects--verbs)
+          (should-not (gethash name jetpacs-action-handlers)))
+        (should (gethash "agenda.open" jetpacs-action-handlers)))
+    (glasspane-projects-register))
+  (dolist (name glasspane-projects--verbs)
+    (should (gethash name jetpacs-action-handlers))))
+
+(ert-deftest glasspane-para-projects-source-boundaries ()
+  "Tasks moved whole while Projects consumes only public sibling seams."
+  (with-temp-buffer
+    (insert-file-contents glasspane-para-test--projects-source)
+    (dolist (needle '("seq-group-by" "glasspane-org-todo-items"
+                      "glasspane-agenda-tokenize"
+                      "glasspane-detail-agenda-card"))
+      (goto-char (point-min))
+      (should (search-forward needle nil t)))
+    (goto-char (point-min))
+    (should-not (re-search-forward
+                 "\\_<glasspane-\\(?:agenda\\|detail\\|org\\|ui\\)--"
+                 nil t)))
+  (with-temp-buffer
+    (insert-file-contents glasspane-para-test--agenda-source)
+    (dolist (needle '("glasspane-agenda--tasks" "\"tasks.open\""
+                      "\"tasks.filter\"" "\"projects.open\""))
+      (goto-char (point-min))
+      (should-not (search-forward needle nil t)))))
 
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

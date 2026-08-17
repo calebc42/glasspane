@@ -2394,15 +2394,9 @@ their arms now.)"
   (glasspane-agenda-register)
   (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")))
         (glasspane-agenda--mode "day")
-        (glasspane-agenda--tasks-filter "ALL")
         (glasspane-ui-agenda-anchor nil)
-        (jetpacs-settings--dialog nil)
-        (org-todo-keywords '((sequence "TODO" "|" "DONE")))
-        (saved nil) (continuations nil))
-    (cl-letf (((symbol-function 'jetpacs-settings-save-variable)
-               (lambda (sym val)
-                 (push (cons sym val) saved) (set sym val) val))
-              ((symbol-function 'jetpacs-shell-notify)
+        (continuations nil))
+    (cl-letf (((symbol-function 'jetpacs-shell-notify)
                (lambda (&rest _) nil))
               ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil))
               ((symbol-function 'jetpacs-flow-continue)
@@ -2440,16 +2434,11 @@ their arms now.)"
         (should (eq (run "agenda.nav" '(:dir "x")) 'rejected))
         (should (eq (run "agenda.nav" '(:dir 0.7)) 'rejected))
         (should (equal glasspane-ui-agenda-anchor "2026-02-01"))
-        ;; tasks.filter: the defvar is the single writer's cell.
-        (should (eq (run "tasks.filter" '(:filter "DONE")) 'accepted))
-        (should (equal glasspane-agenda--tasks-filter "DONE"))
-        (should (eq (run "tasks.filter" '(:filter 5)) 'rejected))
-        ;; The open verbs park their pushes past the dispatch extent.
+        ;; The open verb parks its push past the dispatch extent.
         (let ((before (length continuations)))
           (should (eq (run "agenda.open" nil '(:surface "glasspane"))
                       'accepted))
-          (should (eq (run "tasks.open" nil nil) 'accepted))
-          (should (= (length continuations) (+ 2 before))))
+          (should (= (length continuations) (1+ before))))
         ;; Reminder sync, ungranted: the wire is never touched and the
         ;; suppress cache stays unset.
         (let ((calls 0)
@@ -4988,7 +4977,7 @@ in Settings links, not the drawer).  Registered by glasspane-ef and
 glasspane-gallery at orders 81 and 84, beside the app's own 80.")
 
 (defconst glasspane-test--staged-opener-verbs
-  '("areas.open" "archive.open" "resources.open")
+  '("areas.open" "archive.open" "projects.open" "resources.open")
   "PARA screen openers registered before PA-3 exposes the new navigation.
 The staging list is deliberately explicit: PA-3 must empty it while moving
 each opener into the authoritative destination table.")

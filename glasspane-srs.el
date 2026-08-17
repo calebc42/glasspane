@@ -63,10 +63,16 @@
 (require 'glasspane-ui)
 
 ;; Same-rung sibling (G7): Review's stale-files half.  Soft — this
-;; file must build and render with notes absent; the section then
-;; simply isn't.
+;; file must build and render with notes absent; PA-2e then presents
+;; one combined engine empty state instead of two dead halves.
 (require 'glasspane-notes nil t)
 (declare-function glasspane-notes-stale-section "glasspane-notes" ())
+(declare-function glasspane-notes-stale-available-p "glasspane-notes" ())
+
+;; Jetpacs owns the native habits implementation and its surface.  Review
+;; consumes only this public entrypoint, and does not load the optional module
+;; merely to make its link appear.
+(declare-function jetpacs-org-habits "jetpacs-org-habits" ())
 
 ;; org-srs is NOT installed locally: the `ext:' pseudo-file idiom
 ;; keeps byte-compile-error-on-warn honest with it absent, and every
@@ -608,6 +614,17 @@ dispatches into the action shim's `rejected'."
      :on-tap (when installable
                (jetpacs-action "glasspane.packages.install")))))
 
+(defun glasspane-srs--engines-empty-body ()
+  "The combined empty state when neither Review engine is available."
+  (let ((installable (gethash "glasspane.packages.install"
+                              jetpacs-action-handlers)))
+    (jetpacs-empty-state
+     :icon "school" :title "Review needs engines"
+     :caption "org-srs for flashcards, vulpea for stale notes."
+     :action-label (when installable "Install engines")
+     :on-tap (when installable
+               (jetpacs-action "glasspane.packages.install")))))
+
 (defun glasspane-srs--top-actions ()
   "Session top-bar actions — kept to the two that read at a glance:
 undo (only after a rating) and close.  Postpone/suspend are niche and
@@ -630,21 +647,49 @@ alone; an erroring section costs itself, never the Review screen."
   (and (fboundp 'glasspane-notes-stale-section)
        (condition-case nil (glasspane-notes-stale-section) (error nil))))
 
+(defun glasspane-srs--stale-available-p ()
+  "Non-nil when the optional Vulpea stale-files engine is usable."
+  (and (fboundp 'glasspane-notes-stale-available-p)
+       (condition-case nil
+           (glasspane-notes-stale-available-p)
+         (error nil))))
+
+(defun glasspane-srs--habits-row ()
+  "Return the native Jetpacs Habits handoff row when that module is loaded."
+  (when (featurep 'jetpacs-org-habits)
+    (jetpacs-chrome-row
+     "Habits"
+     :subtitle "Consistency graphs from built-in org-habit"
+     :icon "event_repeat"
+     :trailing (jetpacs-icon "chevron_right")
+     :on-tap (jetpacs-action "review.habits.open")
+     :key "review-habits")))
+
 (defun glasspane-srs--review-body ()
   "The between-sessions Review body: flashcards, then vulpea stale files.
 Stacked sections in one scroll — the flashcard half is small (a due
-count and the start button), so both halves show at once.  Each half
-degrades to its install prompt / to absent independently: org-srs
-missing must not blank the stale list, nor vice versa."
-  (let ((stale (glasspane-srs-stale-section)))
+count and the start button), so both halves show at once.  One missing
+engine leaves the other half live; both missing collapse to one useful
+engine empty state.  The optional Habits row always remains independent."
+  (let* ((srs-available (glasspane-srs-available-p))
+         (stale-available (glasspane-srs--stale-available-p))
+         (stale (and stale-available (glasspane-srs-stale-section)))
+         (habits (glasspane-srs--habits-row))
+         (sections
+          (if (and (not srs-available) (not stale-available))
+              (list (glasspane-srs--engines-empty-body))
+            (append
+             (list (jetpacs-section-header "Flashcards")
+                   (if srs-available
+                       (glasspane-srs--idle-body)
+                     (glasspane-srs--install-body)))
+             (when stale
+               (cons (jetpacs-divider) stale))))))
     (apply #'jetpacs-lazy-column
            (append
-            (list (jetpacs-section-header "Flashcards")
-                  (if (glasspane-srs-available-p)
-                      (glasspane-srs--idle-body)
-                    (glasspane-srs--install-body)))
-            (when stale
-              (cons (jetpacs-divider) stale))))))
+            sections
+            (when habits
+              (list (jetpacs-divider) habits))))))
 
 (defun glasspane-srs-screen (back)
   "The pushed Review screen for the current session state."
@@ -673,6 +718,21 @@ missing must not blank the stale list, nor vice versa."
          (error (message "glasspane: review push failed: %s"
                          (jetpacs-error-label err))))))
     'accepted))
+
+(defun glasspane-srs--on-habits-open (_args params)
+  "Open native Jetpacs Habits, or reject when its public entry is absent."
+  (if (not (fboundp 'jetpacs-org-habits))
+      'rejected
+    (let ((surface (plist-get params :surface)))
+      (jetpacs-flow-continue
+       (lambda ()
+         (condition-case err
+             (jetpacs-org-habits)
+           (error
+            (message "glasspane: habits push failed: %s"
+                     (jetpacs-error-label err))
+            (jetpacs-shell-notify "Couldn't open Habits" surface)))))
+      'accepted)))
 
 (defun glasspane-srs--on-review-start (_args params)
   "Begin a session: reset the undo stack and load the first card."
@@ -936,6 +996,7 @@ register/unregister sweep."
 
 (defconst glasspane-srs--verbs
   '("review.open"
+    "review.habits.open"
     "srs.review.start"
     "srs.answer.show"
     "srs.answer.page"
@@ -955,6 +1016,8 @@ place and the hooks add exactly once."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "review.open" #'glasspane-srs--on-open
                        :doc "Push the Review screen")
+    (jetpacs-defaction "review.habits.open" #'glasspane-srs--on-habits-open
+                       :doc "Open native Jetpacs Habits")
     (jetpacs-defaction "srs.review.start" #'glasspane-srs--on-review-start
                        :doc "Begin a review session over the source")
     (jetpacs-defaction "srs.answer.show" #'glasspane-srs--on-answer-show

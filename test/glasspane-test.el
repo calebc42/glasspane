@@ -5002,6 +5002,7 @@ each opener into the authoritative destination table.")
     "org.babel.execute" "org.link.open"
     "org.search.run" "org.table.add-col" "org.table.add-row"
     "org.table.cell-menu" "org.table.edit" "resources.open-file"
+    "review.habits.open"
     "search.by-tag"
     "search.clear-filters" "search.update-filter"
     "settings.agenda.delete" "settings.agenda.edit"
@@ -5011,11 +5012,11 @@ each opener into the authoritative destination table.")
     "srs.suspend" "srs.undo" "tasks.filter" "views.cal.select-date"
     "views.cal.set-month" "views.delete" "views.open"
     "views.rendering" "views.reorder" "views.save")
-  "Every verb that opens NO screen of its own, and therefore needs no
-hub entry: the in-screen controls (filters, navigation, ratings, cell
-and heading mutations), the dialog-fired saves, the M-x-only seeders
-(demo.setup*), and the drill-ins reached FROM a screen the hub opens
-(views.open from the views hub, heading.tap from every card).
+  "Every verb that opens NO Glasspane peer screen of its own, and therefore
+needs no hub entry: the in-screen controls (filters, navigation, ratings,
+cell and heading mutations), the dialog-fired saves, the M-x-only seeders
+(demo.setup*), the drill-ins reached FROM a screen the hub opens, and the
+explicit handoffs into native Jetpacs surfaces (Resources files and Habits).
 Classification only — the list exists so the inventory below is total.")
 
 (ert-deftest glasspane-test-hub-reaches-every-opener ()

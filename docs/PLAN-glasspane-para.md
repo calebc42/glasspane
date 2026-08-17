@@ -1,6 +1,6 @@
 # PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, shared-bar, PARA-shaped)
 
-Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **8358062** (PA-2d execution base on slop-fork/main; PA-1/PA-2a/PA-2b/PA-2c complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c/PA-2d executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2d mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
+Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **29b0297** (PA-2e execution base on slop-fork/main; PA-1/PA-2a/PA-2b/PA-2c/PA-2d complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c/PA-2d/PA-2e executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2e mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
 
 **Authority:** the ratified PARA vision (Caleb, 2026-08-15 — §0 verbatim) + the surviving machinery half of `docs/PLAN-glasspane-rework.md` (GR-0..GR-7, unchanged). Produced by a full planning workflow (3 exploration + 3 design agents, 2026-08-15); every mechanism claim was re-verified in-tree while drafting.
 
@@ -262,6 +262,32 @@ The tasks body promoted honestly: keyword chips + shared cards over `glasspane-o
 3. Session-vs-destination state: unchanged (session defvars + the screen's session/idle body switch); one new arm pins navigation-away-and-back resumes.
 
 **Gate:** arms: both-absent combined empty state; habits-row gating; session-resume-across-destination-hop.
+
+> **PA-2e GATE COMPLETE 2026-08-16.** Review now stays useful across
+> every engine combination. With org-srs alone it keeps the due/session
+> half; with Vulpea alone it keeps the existing org-srs installer beside
+> stale files; with both it keeps both sections. When neither engine is
+> available, those dead halves collapse to one combined “Review needs
+> engines” empty state whose install action appears only while the package
+> verb is live.
+>
+> The Habits link is a downstream Glasspane placement opinion over the
+> public native `jetpacs-org-habits` entrypoint. Its row appears only when
+> that Jetpacs feature is loaded; `review.habits.open` guards the function,
+> defers the outgoing native-surface push, and is owned by the SRS module's
+> existing register/unregister sweep. Glasspane loads no Habits module and
+> duplicates none of its collection, graph, mutation, or surface logic.
+> Active session state remains separate from destination navigation: a
+> Review → Projects → Review hop resumes the same card, reveal flag, and
+> undo stack.
+>
+> Evidence: the explicit PARA suite passes **26/26** and the legacy
+> Glasspane suite passes **72/72**. Combined-empty capability gating,
+> Habits feature/function gating and public handoff, lifecycle inventory,
+> and session resumption are pinned. Warning-as-error compilation, clean
+> package installation, dependency layering, icon lint, diff hygiene, and
+> the full elevated `test/run-tests.sh` pass; the runner exited **0**.
+> PA-2e changes only downstream Glasspane Elisp and has no device arm.
 
 ### PA-3a — Pole + ONE-TABLE flip
 

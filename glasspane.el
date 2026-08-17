@@ -164,6 +164,7 @@ replaces its registry entry in place."
                       :icon glasspane-icon
                       :surfaces (list glasspane-owner)
                       :dock #'glasspane--dock-items
+                      :home-route "agenda"
                       :destinations #'glasspane--destinations)
     (jetpacs-defapp glasspane-owner
                     :label glasspane-title
@@ -176,6 +177,10 @@ replaces its registry entry in place."
                     :dock-core nil
                     :drawer-core '("eval")
                     :fab #'glasspane-ui-capture-fab
+                    ;; Glasspane alone decides that its root represents
+                    ;; Agenda.  Jetpacs only consumes this generic route
+                    ;; metadata when a deep link falls back to the root.
+                    :home-route "agenda"
                     ;; The table is CONTRIBUTED to the host.  Rows open
                     ;; through global app.open, so their verbs stay scoped
                     ;; to Glasspane's own surface.

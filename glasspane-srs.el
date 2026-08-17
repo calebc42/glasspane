@@ -150,12 +150,15 @@ Messages are suppressed so org-srs's and the user's `message's don't
 surface as toasts; a signal becomes a snackbar (SPEC 23.3 label, the
 raw text stays in *Messages*) and a nil return — the CALLER answers
 `rejected' on nil, never `accepted' (the G7 rework: `accepted' means
-durable, jetpacs-surfaces.el:918).  BODY's own value is discarded so a
-nil-returning engine call can't read as failure."
+durable, jetpacs-surfaces.el:918).  The EBP Org I/O clamp covers the
+whole opaque engine call: org-srs may visit every file in its source,
+and a risky file-local variable or drift question must become a status,
+never a Companion dialog raised from an action.  BODY's own value is
+discarded so a nil-returning engine call can't read as failure."
   (declare (indent 0) (debug t))
   `(condition-case err
        (let ((inhibit-message t) (message-log-max nil))
-         ,@body
+         (ebp-org--with-clamped-io ,@body)
          t)
      (error
       (message "glasspane: srs engine call failed: %s"
@@ -166,10 +169,13 @@ nil-returning engine call can't read as failure."
 (defmacro glasspane-srs--quietly (&rest body)
   "Run BODY with messages suppressed, returning its value or nil on error.
 The render-time counterpart of `glasspane-srs--engine': a failure while
-building a view must NOT raise a snackbar (only actions do that)."
+building a view must NOT raise a snackbar (only actions do that).  It
+uses the same Org I/O clamp because org-srs's pending-item scan opens
+source files while Review is rendering; navigation must never pause on
+an unsafe-local-variable prompt."
   (declare (indent 0) (debug t))
   `(let ((inhibit-message t) (message-log-max nil))
-     (ignore-errors ,@body)))
+     (ignore-errors (ebp-org--with-clamped-io ,@body))))
 
 (defun glasspane-srs--next-item ()
   "The first pending item over the source, or nil when none remain."

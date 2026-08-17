@@ -298,10 +298,11 @@ one file may honestly participate in both its file Area and a nested Area."
 (ert-deftest glasspane-para-resources-delegates-every-path-to-files ()
   "Vault, Org, and non-Org paths all take the one public Files route."
   (let ((org-directory "/vault")
+        (glasspane-ui-legacy-ia nil)
         calls)
     (cl-letf (((symbol-function 'jetpacs-files-open-path)
-               (lambda (path surface)
-                 (push (list path surface) calls)
+               (lambda (path surface &optional mark-pos browser-id browser-fab)
+                 (push (list path surface mark-pos browser-id browser-fab) calls)
                  'accepted)))
       (should (eq (glasspane-resources--on-open nil nil) 'accepted))
       (should (eq (glasspane-resources--on-open-file
@@ -310,10 +311,17 @@ one file may honestly participate in both its file Area and a nested Area."
       (should (eq (glasspane-resources--on-open-file
                    '(:path "/vault/reference.pdf") nil)
                   'accepted)))
-    (should (equal (nreverse calls)
-                   '(("/vault" "app:jetpacs.files")
-                     ("/vault/notes.org" "app:jetpacs.files")
-                     ("/vault/reference.pdf" "app:jetpacs.files"))))))
+    (setq calls (nreverse calls))
+    (should (equal (mapcar (lambda (call) (seq-take call 4)) calls)
+                   '(("/vault" "app:jetpacs.files" nil "files-resources")
+                     ("/vault/notes.org" "app:jetpacs.files"
+                      nil "files-return")
+                     ("/vault/reference.pdf" "app:jetpacs.files"
+                      nil "files-return"))))
+    (should (equal (glasspane-para-test--action-names (nth 4 (car calls)))
+                   '("org.capture.show")))
+    (should-not (nth 4 (cadr calls)))
+    (should-not (nth 4 (caddr calls)))))
 
 (ert-deftest glasspane-para-resources-files-root-refusal-propagates ()
   "The native Files guard rejects both landing and direct paths unchanged."
@@ -365,8 +373,9 @@ one file may honestly participate in both its file Area and a nested Area."
                  (and (equal surface "app:glasspane")
                       (equal owner "glasspane"))))
               ((symbol-function 'jetpacs-files-open-path)
-               (lambda (path surface)
-                 (setq captured (list path surface))
+               (lambda (path surface &optional mark-pos browser-id browser-fab)
+                 (setq captured
+                       (list path surface mark-pos browser-id browser-fab))
                  'accepted))
               ((symbol-function 'jetpacs-shell-push)
                (lambda (surface &rest _)
@@ -374,13 +383,57 @@ one file may honestly participate in both its file Area and a nested Area."
       (should (eq (jetpacs-apps--action-open
                    '(:app "glasspane" :route "resources") nil)
                   'accepted)))
-    (should (equal captured '("/vault" "app:jetpacs.files")))
+    (should (equal (seq-take captured 4)
+                   '("/vault" "app:jetpacs.files" nil "files-resources")))
+    (should (equal (glasspane-para-test--action-names (nth 4 captured))
+                   '("org.capture.show")))
     (should-not pushed)
     (should (equal jetpacs-apps--current "glasspane"))
     (should (equal jetpacs-apps--current-route "resources"))
     (let ((item (car (jetpacs-apps-dock-items "app:jetpacs.files"))))
       (should (equal (plist-get item :label) "Resources"))
       (should (plist-get item :selected)))))
+
+(ert-deftest glasspane-para-resources-local-back-handoffs-are-bounded ()
+  "Files returns direct rows to their exact origin and Resources to Agenda."
+  (let ((glasspane-ui-legacy-ia nil)
+        (jetpacs-apps--current "glasspane")
+        (jetpacs-apps--current-route "areas")
+        (files (glasspane-resources--files-surface))
+        opened pushed continued)
+    (cl-letf (((symbol-function 'glasspane-ui-open-destination)
+               (lambda (&rest args) (setq opened args) 'accepted))
+              ((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (setq continued t) (funcall fn)))
+              ((symbol-function 'jetpacs-shell-push)
+               (lambda (surface &rest _) (push surface pushed) 1)))
+      ;; Back from a direct Areas/Archive file reaches the caller-owned
+      ;; return screen, then re-presents the untouched Glasspane stack.
+      (glasspane-resources--on-view-change
+       files (jetpacs-chrome-guest-screen-id "glasspane" "files-return"))
+      (should continued)
+      (should (equal pushed '("app:glasspane")))
+      (should-not opened)
+      ;; The Resources browser's own Back reaches Files' root, then resets
+      ;; the cross-surface destination to Agenda exactly once.
+      (setq continued nil pushed nil
+            jetpacs-apps--current-route "resources")
+      (glasspane-resources--on-view-change files "browser")
+      (should (equal (seq-take opened 2)
+                     '("agenda" "glasspane-agenda")))
+      (should (eq (nth 2 opened) #'glasspane-agenda-screen))
+      (should (equal (nth 3 opened) '(:surface "app:glasspane")))
+      (should-not continued)
+      (should-not pushed)
+      ;; Foreign views and a non-Glasspane current app cannot hijack Back.
+      (setq opened nil jetpacs-apps--current "other")
+      (glasspane-resources--on-view-change files "browser")
+      (glasspane-resources--on-view-change
+       "app:other"
+       (jetpacs-chrome-guest-screen-id "glasspane" "files-return"))
+      (should-not opened)
+      (should-not continued)
+      (should-not pushed))))
 
 (ert-deftest glasspane-para-resources-lifecycle-and-navigation ()
   "Glasspane owns both delegates while PA-3 exposes only the place opener."
@@ -879,6 +932,12 @@ one file may honestly participate in both its file Area and a nested Area."
                          (plist-member dest :badge))
                        (cdr glasspane-ui-destinations)))
   (should (equal (glasspane--destinations) glasspane-ui-destinations))
+  ;; Jetpacs owns only the generic fallback seam.  This downstream app is
+  ;; where the root's PARA meaning is declared.
+  (should (equal (plist-get (cdr (assoc glasspane-owner
+                                         jetpacs-apps--registry))
+                            :home-route)
+                 "agenda"))
   (let* ((screen (glasspane-ui-home-screen nil))
          (body-actions
           (glasspane-para-test--action-names (plist-get screen :body)))
@@ -1292,13 +1351,17 @@ one file may honestly participate in both its file Area and a nested Area."
               ((symbol-function 'jetpacs-shell-push)
                (lambda (&rest _) t))
               ((symbol-function 'jetpacs-files-open-path)
-               (lambda (path target &optional mark-pos)
-                 (setq opened (list path target mark-pos))
+               (lambda (path target &optional mark-pos browser-id browser-fab)
+                 (setq opened
+                       (list path target mark-pos browser-id browser-fab))
                  'accepted)))
       (should (eq (jetpacs-apps--action-open
                    '(:app "glasspane" :route "resources") nil)
                   'accepted))
-      (should (equal opened (list "/vault" files-surface nil)))
+      (should (equal (seq-take opened 4)
+                     (list "/vault" files-surface nil "files-resources")))
+      (should (equal (glasspane-para-test--action-names (nth 4 opened))
+                     '("org.capture.show")))
       (should (equal jetpacs-apps--current-route "resources"))
       (let ((selected
              (cl-find-if (lambda (item) (plist-get item :selected))

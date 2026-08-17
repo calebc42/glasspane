@@ -245,7 +245,8 @@ consumer FILES."
     (unwind-protect
         (progn
           (with-temp-file file
-            (insert "* TODO From the directory scope\n"
+            (insert "#+filetags: :jetpacs:\n"
+                    "* TODO From the directory scope\n"
                     "* Not a task\n"))
           (ebp-org-cache-invalidate)
           (let ((scope (glasspane-org--agenda-scope)))
@@ -256,7 +257,24 @@ consumer FILES."
                          (glasspane-org-todo-items))))
             (should (= (length items) 1))
             (should (equal (alist-get 'headline (car items))
-                           "From the directory scope"))))
+                           "From the directory scope")))
+          ;; The shared query engine consumes the same normalized scope;
+          ;; handing the raw directory to `org-map-entries' used to signal
+          ;; `wrong-type-argument' on the production tablet.
+          (let ((items (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                                  (lambda () nil)))
+                         (glasspane-org-search "todo:TODO"))))
+            (should (= (length items) 1))
+            (should (equal (alist-get 'headline (car items))
+                           "From the directory scope")))
+          (let ((items (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                                  (lambda () nil)))
+                         (glasspane-org-search "tags:jetpacs"))))
+            (should (= (length items) 2))
+            (should (equal (mapcar (lambda (item)
+                                     (alist-get 'headline item))
+                                   items)
+                           '("From the directory scope" "Not a task")))))
       (ebp-org-cache-invalidate)
       (dolist (buf (buffer-list))
         (let ((f (buffer-file-name buf)))
@@ -4241,6 +4259,34 @@ and the caption row absent when the simulator has nothing to say."
     (cl-letf (((symbol-function 'glasspane-srs--intervals)
                (lambda () nil)))
       (should (= (length (glasspane-srs--rating-controls)) 1)))))
+
+(ert-deftest glasspane-test-srs-engine-io-is-clamped ()
+  "Review scans and engine calls cannot raise file-I/O questions.
+The hardware regression was an org-srs source scan visiting an encrypted
+Org document with a risky file-local variable: opening Review raised the
+Emacs approval question as a Companion dialog instead of painting the
+screen.  Both the render-time and mutating engine seams must run under
+the EBP Org clamp, where local variables are safe-only and an attempted
+question becomes a refused operation."
+  (require 'glasspane-srs)
+  (let ((glasspane-srs--available t)
+        quiet-local-vars engine-local-vars notified)
+    (ebp-org-cache-invalidate)
+    (cl-letf (((symbol-function 'org-srs-review-pending-items)
+               (lambda (&rest _)
+                 (setq quiet-local-vars enable-local-variables)
+                 (y-or-n-p "must not escape")
+                 nil)))
+      (should-not (glasspane-srs--due-count))
+      (should (eq quiet-local-vars :safe)))
+    (cl-letf (((symbol-function 'jetpacs-shell-notify)
+               (lambda (&rest args) (setq notified args))))
+      (should-not
+       (glasspane-srs--engine
+         (setq engine-local-vars enable-local-variables)
+         (yes-or-no-p "must not escape")))
+      (should (eq engine-local-vars :safe))
+      (should notified))))
 
 (ert-deftest glasspane-test-srs-handler-statuses ()
   "Every srs verb answers a SPEC 14.4 status over a stubbed engine:

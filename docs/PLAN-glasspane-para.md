@@ -452,6 +452,53 @@ Wire the PA-2 screens and Resources delegate to the flipped table; run the GR-8c
 
 Tablet, PORTRAIT, force-stop before every smoke, screenshot before every tap (I-7): boot-state arm (force-stop → relaunch → five entries on the Agenda root, Agenda selected, NO prior navigation — the seed, not the app-grid detour); five entries on BOTH form factors (bar compact / rail medium+); destination-hop across all five; Agenda opens its Day/Week/Month tabs; **system back from each destination → Agenda with Agenda re-selected after the repush; system back at the Agenda root → Activity finishes; relaunch resumes (the S11/I-14 arms)**; Agenda badge; drawer: Archive opens its filtered list, Eval reaches the REPL, Apps opens the switcher, and no Files duplicate appears; Eval and Files guest surfaces retain Glasspane's five-entry bar (the recorded §5.2 acceptance arm); Areas renders live categories from the real vault → drill → detail → back chain; Resources opens the native Files explorer rooted at `org-directory`, remains selected while browsing, exercises search/create plus Org and non-Org opens, and returns cleanly; Archive row → native Files reader + back; Review SRS + stale + Habits link tap; search icon → screen → `search.by-tag` chip round trip ending Search-visible with the origin destination still selected; FAB = capture on destinations, absent on the guest settings satellite; M-x on every destination; stale-route fallback lands on the Agenda root (re-verify `app.open`'s fallback-home under no-hub); journal-alias replay arm on hardware. **Then ONE full daily-driver soak day on the new IA before PA-4.**
 
+> **PA-3 DEVICE BATCH COMPLETE; DAILY-DRIVER SOAK ACTIVE (started
+> 2026-08-17 09:18 MDT).** The installed tablet passed the consolidated
+> traversal on the real `/sdcard` vault. Force-stop/relaunch seeded Agenda
+> directly; the five PARA destinations rendered as a selected rail on the
+> full tablet and as a selected five-label bottom bar under a temporary
+> compact-window override; Agenda's Day/Week/Month/Saved controls remained
+> content tabs. Projects, Areas, Resources, and Review each returned through
+> Android Back to Agenda with Agenda re-selected. Root Back/finish/relaunch,
+> drawer Archive/Eval/Apps with no Files duplicate, Eval and native-Files
+> guest chrome, live Areas drill/detail, Resources search/create plus Org and
+> text opens, Archive reader/back, Review SRS/stale/Habits, every-destination
+> M-x, destination capture and guest-Settings no-capture all passed. The zero
+> Agenda count correctly rendered no badge rather than a false zero badge.
+>
+> Search exposed two integration defects rather than accepting a seeded-only
+> pass: EBP now expands local directory entries in `org-agenda-files` only
+> after remote-path filtering, and its tag accessor includes inherited/file
+> tags just like the rendered cards. On the redeployed build `todo:TODO`
+> returned the real task and tapping an inherited `jetpacs` chip kept Search
+> visible, Projects selected, and returned five real-vault matches. A stale
+> `app.open` probe also exposed an unselected rail over the Agenda fallback;
+> Jetpacs now offers generic optional `:home-route` app metadata, while only
+> downstream Glasspane declares `"agenda"`. The repeated probe landed on the
+> Agenda root with its rail row selected.
+>
+> The same batch closed the guest seams it exercised: Files accepts a generic
+> caller-authored browser FAB (Glasspane supplies Capture only to the
+> Resources browser), async cache ownership is separate from the actual guest
+> push target and eviction generations are target-local, drawer state is
+> keyed to a drawer-bearing surface, and org-srs scans run under the EBP Org
+> I/O clamp so unsafe-local-variable prompts degrade to a bounded Review
+> failure instead of blocking the Companion. The hardware queue arm injected
+> a temporary `journal.capture` event and displayed `accepted`, then
+> `duplicate`; its datetree fixture existed and contained one append. After
+> recording the results, the exact four-file vault fixture and all 374
+> `/data/local/tmp/pa3-*` evidence files were removed and absence-checked.
+>
+> The display override was reset immediately: physical 1600×2560, density
+> 320, automatic rotation/user rotation exactly `1`/`0. Post-repair
+> `test/run-tests.sh` (including warning-as-error compilation and layering)
+> exited 0; Android `testDebugUnitTest assembleDebug` was successful; that
+> exact APK was installed and a final force-stop/relaunch again seeded
+> selected Agenda. The device batch is complete, but **PA-3 is not complete**
+> until one full daily-driver day has
+> elapsed and been used without a T-5/T-7 tripwire. Earliest soak close is
+> 2026-08-18 09:18 MDT; PA-4 must not start before that explicit close.
+
 ### PA-4 — Demolition + exit checklist (deletions cite their soaks)
 
 1. Delete the flag-gated corpses, each commit citing the soak: **`glasspane-journal.el`** (after the queue-drain check: confirm the offline queue empty — or replayed to empty — of `journal.capture` receipts before deleting the alias, the rework §5.2-step-2 pattern; the alias itself survives ≥ one release per §0.11 — its deletion may fall to a later ladder and this rung records that); the hub corpse (`glasspane-ui-home-screen`, `--home-body`, `--home-drawer`, `--drawer-app-rows`, `--capture-fab`); the views-hub screen; the `glasspane-tasks` registration remnants; the journal landing defcustom + Settings row; `glasspane-ui-legacy-ia` and now-constant flags.

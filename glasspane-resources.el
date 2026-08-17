@@ -29,19 +29,39 @@
 
 ;;;; Resources delegation
 
+(declare-function glasspane-agenda-screen "glasspane-agenda" (back))
+
+(defconst glasspane-resources--browser-screen "files-resources"
+  "Generic Files guest screen used by the Resources destination.")
+
+(defconst glasspane-resources--return-screen "files-return"
+  "Generic Files guest screen staged below a direct file handoff.")
+
+(defun glasspane-resources--guest-id (id)
+  "Return chrome's sanctioned-guest wire id for Glasspane screen ID."
+  (jetpacs-chrome-guest-screen-id "glasspane" id))
+
 (defun glasspane-resources--files-surface ()
   "Return the canonical Jetpacs Files surface."
   (jetpacs-shell-surface-for jetpacs-files-owner))
 
-(defun glasspane-resources--open-path (path)
+(defun glasspane-resources--open-path (path browser-id)
   "Open PATH through Jetpacs Files and return its action status.
 Files owns containment validation, browsing, document hosting, and every
-resulting operation; this downstream wrapper deliberately adds no policy."
-  (jetpacs-files-open-path path (glasspane-resources--files-surface)))
+resulting operation.  BROWSER-ID selects only the generic native Files guest
+screen that provides the cross-surface Back handoff; this downstream wrapper
+does not build or walk a browser."
+  (jetpacs-files-open-path path (glasspane-resources--files-surface)
+                           nil browser-id
+                           (and (not glasspane-ui-legacy-ia)
+                                (equal browser-id
+                                       glasspane-resources--browser-screen)
+                                (glasspane-ui-capture-fab))))
 
 (defun glasspane-resources--on-open (_args _params)
   "Open `org-directory' as the PARA Resources landing scope."
-  (let ((status (glasspane-resources--open-path org-directory)))
+  (let ((status (glasspane-resources--open-path
+                 org-directory glasspane-resources--browser-screen)))
     ;; `app.open' records this before redispatching the destination verb,
     ;; but direct/M-x entry reaches the owner verb without that wrapper.
     ;; The file-row delegate below deliberately does NOT rewrite the route:
@@ -52,7 +72,37 @@ resulting operation; this downstream wrapper deliberately adds no policy."
 
 (defun glasspane-resources--on-open-file (args _params)
   "Open ARGS' `:path' through the same native Files route."
-  (glasspane-resources--open-path (plist-get args :path)))
+  (glasspane-resources--open-path
+   (plist-get args :path) glasspane-resources--return-screen))
+
+(defun glasspane-resources--on-view-change (surface view)
+  "Complete a Companion-local Back handoff from native Files.
+The Files stack owns both transition points.  Returning from a direct file to
+the staged return screen re-presents Glasspane's untouched surface, preserving
+the exact Areas/Archive drill that launched it.  Back from the Resources
+browser reaches Files' native root; that destination-level Back resets to the
+Agenda root as the PA-3 navigation contract requires.
+
+The local view switch happens first and remains useful offline.  These remote
+pushes are merely the connected continuation and run through the action flow."
+  (when (and (not glasspane-ui-legacy-ia)
+             (equal jetpacs-apps--current "glasspane")
+             (equal surface (glasspane-resources--files-surface)))
+    (cond
+     ((and (equal view "browser")
+           (equal jetpacs-apps--current-route "resources"))
+      (glasspane-ui-open-destination
+       "agenda" "glasspane-agenda" #'glasspane-agenda-screen
+       (list :surface (jetpacs-shell-surface-for "glasspane"))))
+     ((equal view (glasspane-resources--guest-id
+                   glasspane-resources--return-screen))
+      (jetpacs-flow-continue
+       (lambda ()
+         (condition-case err
+             (jetpacs-shell-push (jetpacs-shell-surface-for "glasspane"))
+           (error
+            (message "glasspane: Files return push failed: %s"
+                     (jetpacs-error-label err))))))))))
 
 ;;;; Archive index and screen
 
@@ -177,14 +227,21 @@ cache, so pull-to-refresh is their deliberate freshness boundary."
     (jetpacs-defaction "archive.open" #'glasspane-resources--on-archive-open
                        :doc "Open the PARA Archive index"))
   (add-hook 'jetpacs-shell-refresh-hook
-            #'glasspane-resources--refresh-invalidate))
+            #'glasspane-resources--refresh-invalidate)
+  (remove-hook 'jetpacs-shell-view-change-functions
+               #'glasspane-resources--on-view-change)
+  (unless glasspane-ui-legacy-ia
+    (add-hook 'jetpacs-shell-view-change-functions
+              #'glasspane-resources--on-view-change)))
 
 (defun glasspane-resources-unregister ()
   "Drop every verb owned by the Resources module."
   (dolist (name glasspane-resources--verbs)
     (jetpacs-undefaction name))
   (remove-hook 'jetpacs-shell-refresh-hook
-               #'glasspane-resources--refresh-invalidate))
+               #'glasspane-resources--refresh-invalidate)
+  (remove-hook 'jetpacs-shell-view-change-functions
+               #'glasspane-resources--on-view-change))
 
 (provide 'glasspane-resources)
 ;;; glasspane-resources.el ends here

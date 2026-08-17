@@ -1233,5 +1233,212 @@ one file may honestly participate in both its file Area and a nested Area."
                (jetpacs-node->canonical-json
                 (glasspane-agenda--body-tabs "day" "2026-08-16")))))))
 
+(ert-deftest glasspane-para-pa3c-slot-eviction-and-detail-reentry ()
+  "Area peers replace; search evicts the peer; detail re-entry truncates."
+  (let ((surface (jetpacs-shell-surface-for glasspane-owner))
+        (glasspane-ui-legacy-ia nil)
+        (jetpacs-apps--current glasspane-owner)
+        (jetpacs-apps--current-route "agenda"))
+    (glasspane-register)
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-shell-push)
+               (lambda (&rest _) t)))
+      (should (eq (glasspane-areas--on-open nil (list :surface surface))
+                  'accepted))
+      (should (equal (jetpacs-chrome-stack surface)
+                     '("glasspane-areas" "glasspane-agenda")))
+      ;; The drill is a Tier-1 peer, not a second Areas tier.
+      (should (eq (glasspane-areas--on-drill
+                   '(:category "Home") (list :surface surface))
+                  'accepted))
+      (let ((area-id (jetpacs-wire-id "area" "Home")))
+        (should (equal (jetpacs-chrome-stack surface)
+                       (list area-id "glasspane-agenda"))))
+      ;; Detail consumes the third slot.  Search is a plain drill, so the
+      ;; max-three insertion retains search + detail + the pinned root and
+      ;; evicts the Area destination.
+      (glasspane-detail--push-screen surface '(:file "unused" :pos 1))
+      (should (equal (jetpacs-chrome-stack surface)
+                     (list "glasspane-detail"
+                           (jetpacs-wire-id "area" "Home")
+                           "glasspane-agenda")))
+      (should (eq (glasspane-search--on-open nil (list :surface surface))
+                  'accepted))
+      (should (equal (jetpacs-chrome-stack surface)
+                     '("glasspane-search" "glasspane-detail"
+                       "glasspane-agenda")))
+      ;; The constant detail id finds its existing entry, replaces it, and
+      ;; truncates Search instead of allocating a fourth conceptual tier.
+      (glasspane-detail--push-screen surface '(:file "unused-2" :pos 2))
+      (should (equal (jetpacs-chrome-stack surface)
+                     '("glasspane-detail" "glasspane-agenda")))
+      (should (equal jetpacs-apps--current-route "areas")))))
+
+(ert-deftest glasspane-para-pa3c-resources-handoff-and-return ()
+  "Resources owns selection; Files hosts it; a bar peer returns home-side."
+  (let ((surface (jetpacs-shell-surface-for glasspane-owner))
+        (files-surface (jetpacs-shell-surface-for jetpacs-files-owner))
+        (glasspane-ui-legacy-ia nil)
+        (org-directory "/vault")
+        opened)
+    (glasspane-register)
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-shell-push)
+               (lambda (&rest _) t))
+              ((symbol-function 'jetpacs-files-open-path)
+               (lambda (path target &optional mark-pos)
+                 (setq opened (list path target mark-pos))
+                 'accepted)))
+      (should (eq (jetpacs-apps--action-open
+                   '(:app "glasspane" :route "resources") nil)
+                  'accepted))
+      (should (equal opened (list "/vault" files-surface nil)))
+      (should (equal jetpacs-apps--current-route "resources"))
+      (let ((selected
+             (cl-find-if (lambda (item) (plist-get item :selected))
+                         (jetpacs-apps-dock-items files-surface))))
+        (should (equal (plist-get selected :label) "Resources")))
+      ;; This tap originates on the foreign Files surface, but app.open's
+      ;; sanctioned redispatch supplies Glasspane's own home surface.
+      (should (eq (jetpacs-apps--action-open
+                   '(:app "glasspane" :route "areas") nil)
+                  'accepted))
+      (should (equal (jetpacs-chrome-stack surface)
+                     '("glasspane-areas" "glasspane-agenda")))
+      (should (equal jetpacs-apps--current-route "areas"))
+      ;; Direct/M-x Resources entry records its route too; an Area/Archive
+      ;; row handoff intentionally preserves the origin route.
+      (should (eq (glasspane-resources--on-open nil nil) 'accepted))
+      (should (equal jetpacs-apps--current-route "resources"))
+      (setq jetpacs-apps--current-route "areas")
+      (should (eq (glasspane-resources--on-open-file
+                   '(:path "/vault/work.org") nil)
+                  'accepted))
+      (should (equal jetpacs-apps--current-route "areas")))))
+
+(ert-deftest glasspane-para-pa3c-delete-live-view-pops-only-its-top ()
+  "The surviving views.delete audit row leaves no dead view on top."
+  (let* ((surface (jetpacs-shell-surface-for glasspane-owner))
+         (glasspane-saved-views
+          '(((name . "Focus") (query . "todo:TODO")
+             (rendering . "list"))))
+         (id (jetpacs-wire-id "view" "Focus")))
+    (glasspane-register)
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-shell-push)
+               (lambda (&rest _) t))
+              ((symbol-function 'glasspane-views--persist) #'ignore)
+              ((symbol-function 'jetpacs-shell-notify) #'ignore))
+      (glasspane-ui-open-destination
+       "agenda" id
+       (lambda (back) (glasspane-views--screen "Focus" back))
+       (list :surface surface))
+      (should (equal (jetpacs-chrome-stack surface)
+                     (list id "glasspane-agenda")))
+      (should (eq (glasspane-views--on-delete
+                   '(:name "Focus") (list :surface surface))
+                  'accepted))
+      (should (equal (jetpacs-chrome-stack surface)
+                     '("glasspane-agenda")))
+      (should-not glasspane-saved-views))))
+
+(ert-deftest glasspane-para-pa3c-mark-position-navigation-family ()
+  "Agenda/notes source jumps and detail Files handoff preserve heading pos."
+  (glasspane-para-test--with-vault
+      '(("tasks.org" "* TODO First\n** NEXT Target\nBody\n"))
+    (let* ((file (expand-file-name "tasks.org" vault))
+           (buf (find-file-noselect file))
+           (ref (with-current-buffer buf
+                  (org-with-wide-buffer
+                   (goto-char (point-min))
+                   (re-search-forward "^\\*\\* NEXT Target")
+                   (goto-char (line-beginning-position))
+                   (ebp-org-ref-at-point))))
+           (pos (plist-get ref :pos))
+           (token (car (ebp-org-ref-tokens
+                        (list ref) :set "pa3c-jump" :owner "glasspane")))
+           (jetpacs-apps--current-route "projects")
+           navigated opened)
+      (unwind-protect
+          (cl-letf (((symbol-function 'jetpacs-flow-continue)
+                     (lambda (fn) (funcall fn)))
+                    ((symbol-function 'jetpacs-navigate-buffer)
+                     (lambda (buffer surface &optional label mark-pos)
+                       (setq navigated
+                             (list buffer surface label mark-pos))
+                       surface))
+                    ((symbol-function 'jetpacs-files-open-path)
+                     (lambda (path surface &optional mark-pos)
+                       (setq opened (list path surface mark-pos))
+                       'accepted)))
+            (should (eq (glasspane-detail--on-visit
+                         (list :token token) '(:surface "app:glasspane"))
+                        'accepted))
+            (should (eq (nth 0 navigated) buf))
+            (should (equal (nth 1 navigated) "app:glasspane"))
+            (should (equal (nth 2 navigated) "tasks.org"))
+            (should (= (nth 3 navigated) pos))
+            (jetpacs-reader-state-set file :presentation 'editor)
+            (jetpacs-reader-state-set file :gp-fold-mode 'refile)
+            (jetpacs-reader-state-set file :gp-filter-query "todo:DONE")
+            (should (eq (glasspane-detail--on-open-file
+                         (list :token token) nil)
+                        'accepted))
+            (should (equal opened
+                           (list (file-truename file)
+                                 "app:jetpacs.files" pos)))
+            (should (eq (jetpacs-reader-state-get file :presentation)
+                        'reader))
+            (should (eq (jetpacs-reader-state-get file :gp-fold-mode)
+                        'tree))
+            (should (equal (jetpacs-reader-state-get
+                            file :gp-filter-query)
+                           ""))
+            ;; A contextual Files handoff is not the Resources destination.
+            (should (equal jetpacs-apps--current-route "projects"))
+            (should (eq (glasspane-detail--on-visit
+                         '(:token 7) nil)
+                        'rejected))
+            (should (eq (glasspane-detail--on-open-file
+                         '(:token "gone") nil)
+                        'stale)))
+        (ebp-org-ref-tokens nil :set "pa3c-jump" :owner "glasspane")))))
+
+(ert-deftest glasspane-para-pa3c-glasspane-token-budget-is-24 ()
+  "Worst-case PARA composition retains eight free owner token-set slots."
+  (let* ((agenda-sets
+          (mapcar (lambda (mode) (concat "agenda-" mode))
+                  (append '("day" "week" "month")
+                          (mapcar (lambda (n) (format "custom-%d" n))
+                                  (number-sequence
+                                   1 glasspane-agenda--custom-max)))))
+         (sets
+          (append agenda-sets
+                  '("tasks" "areas" "search-results" "views"
+                    "detail" "detail-subtree" "detail-props"
+                    "clock-recent" "notes-detail" "notes-toolbar"
+                    "notes-stale" "srs-detail" "reader-file")))
+         (ebp-org--tokens (make-hash-table :test #'equal))
+         (ebp-org--token-sets (make-hash-table :test #'equal))
+         (ebp-org--token-counter 0)
+         (count 0))
+    (should (= (length sets) 24))
+    (should (= (length sets) (length (delete-dups (copy-sequence sets)))))
+    (should (>= (- ebp-org-token-sets-max (length sets)) 6))
+    (should-not (member "journal-carried" sets))
+    (should-not (member "journal-day" sets))
+    ;; Exercise the engine cap rather than checking arithmetic alone.
+    (dolist (set sets)
+      (ebp-org-ref-tokens nil :set set :owner "glasspane"))
+    (maphash (lambda (key _tokens)
+               (when (equal (car key) "glasspane")
+                 (cl-incf count)))
+             ebp-org--token-sets)
+    (should (= count 24))
+    (should (= (- ebp-org-token-sets-max count) 8))))
+
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

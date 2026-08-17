@@ -1,6 +1,6 @@
 # PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, shared-bar, PARA-shaped)
 
-Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **5b6592a** (PA-3b execution base on slop-fork/main; PA-1/PA-2a/PA-2b/PA-2c/PA-2d/PA-2e/PA-3a complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c/PA-2d/PA-2e/PA-3a/PA-3b executed **2026-08-16**. Original line cites were verified at 8965e40; PA-3b mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is committed and deployed; the installed APK is hash-identical to the local S11 build.
+Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **5c9ce99** (PA-3c execution base on slop-fork/main; PA-1/PA-2a/PA-2b/PA-2c/PA-2d/PA-2e/PA-3a/PA-3b complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c/PA-2d/PA-2e/PA-3a/PA-3b/PA-3c executed **2026-08-16**. Original line cites were verified at 8965e40; PA-3c mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is committed and deployed; the installed APK is hash-identical to the local S11 build.
 
 **Authority:** the ratified PARA vision (Caleb, 2026-08-15 — §0 verbatim) + the surviving machinery half of `docs/PLAN-glasspane-rework.md` (GR-0..GR-7, unchanged). Produced by a full planning workflow (3 exploration + 3 design agents, 2026-08-15); every mechanism claim was re-verified in-tree while drafting.
 
@@ -390,6 +390,52 @@ Deleted rows: tasks (→ projects + alias), journal (deleted), capture (FAB + M-
 Wire the PA-2 screens and Resources delegate to the flipped table; run the GR-8c-analog audit with the PARA rows: `area.open` peer-replace in the destination slot; the search-drill eviction chain (§5.6); detail constant-id re-entry; the Resources whole-surface Files handoff and return; journal keep-day row deleted from the audit (dies with Journal). **Token budget re-verified:** live `"glasspane"` sets ≈ 23-25 today; the delta is +1 ("areas" + twin) − 1 (`journal-carried` dies) — headroom vs `ebp-org-token-sets-max` 32/owner stays ≥ 6; T-4 stays armed. mark-pos adoption rows (agenda-item jumps, notes backlinks, detail "Open in file") carry over from GR-8c unchanged.
 
 **Gate:** the audit checklist recorded in the rung notes with per-family resolutions (the GR-8c artifact rule); token-count arm.
+
+> **PA-3c GATE COMPLETE 2026-08-16.** The destination/slot audit resolves
+> every surviving family explicitly:
+>
+> - Areas opens as the sole Tier-1 peer over the pinned Agenda root;
+>   `areas.drill` replaces that peer rather than allocating another Areas
+>   tier. Detail consumes the third slot. A following Search therefore
+>   retains Search + Detail + root and evicts the Area peer; re-entering the
+>   constant `glasspane-detail` id truncates Search and returns to Detail +
+>   root. Those transient screens preserve the selected `areas` route.
+> - Resources records `resources` whether reached through `app.open` or its
+>   direct/M-x verb, hands the whole surface to canonical native Files at
+>   `org-directory`, remains selected on that foreign surface, and can return
+>   through a Glasspane bar peer. A file-row handoff from Areas or Archive
+>   deliberately preserves that originating route instead of impersonating
+>   the Resources destination.
+> - Deleting a live saved-view screen removes only that top entry and exposes
+>   the Agenda root; no dead view remains presented. The obsolete Journal
+>   keep-day/carried rows are absent from both the stack audit and token
+>   census.
+>
+> The mark-position family now has an end-to-end generic seam:
+> `jetpacs-files-open-path` accepts an optional whole-buffer position, carries
+> it in the public editor context, and forwards it through the read-only
+> fallback. Jetpacs contains no Glasspane name or presentation policy.
+> Downstream Glasspane uses the seam for Agenda-shaped source jumps, Notes
+> backlinks/mentions, and Detail's **Open in file** action. The last action's
+> icon placement and fold/filter reset stay entirely in Glasspane; the reader
+> marks the direct LazyColumn child containing a nested target so the
+> Companion can honor `scroll_here`.
+>
+> The exact worst-case owner census is **24 live `glasspane` token sets**:
+> eleven Agenda pages (Day/Week/Month plus the eight-custom-page ceiling) and
+> thirteen destination/detail/clock/notes/SRS/reader sets. Against
+> `ebp-org-token-sets-max` 32 that leaves **8 slots of headroom**; both
+> `journal-carried` and `journal-day` are explicitly excluded. T-4 remains
+> armed.
+>
+> Evidence: the explicit PARA suite passes **39/39**, the legacy Glasspane
+> suite **73/73**, and the generic Files suite **62/62**. The changed Elisp
+> compiles warning-as-error clean; package-install, dependency-layering, icon,
+> and diff-hygiene gates pass; the full elevated `test/run-tests.sh` exited
+> **0**. The managed installer then refreshed **129 Elisp files** in the
+> tablet's selected Local-Emacs tree while preserving its downstream profile
+> and `/sdcard` vault boundary. PA-3c has no separate hardware arm; its live
+> traversal remains part of the consolidated PA-3 device batch.
 
 ### PA-3d — Drawer handover + top-bar Search + aliases
 

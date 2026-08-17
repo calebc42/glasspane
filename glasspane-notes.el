@@ -296,14 +296,14 @@ note's title/aliases otherwise."
             :target-id target-id))))
 
 (defun glasspane-notes--note-card (note token)
-  "A card for NOTE opening its heading in the detail view."
+  "A contextual NOTE card jumping to its source heading."
   (jetpacs-card
    (list (jetpacs-column
           (jetpacs-text (or (vulpea-note-title note) "") :style "body")
           (jetpacs-text (file-name-nondirectory
                          (or (vulpea-note-path note) ""))
                         :style "caption")))
-   :on-tap (and token (jetpacs-action "heading.tap"
+   :on-tap (and token (jetpacs-action "heading.visit"
                                       :args (list :token token)))))
 
 (defun glasspane-notes--mention-card (mention tap link)
@@ -329,7 +329,7 @@ refused mint costs the affordance, never the card."
                                              :when-offline "queue"
                                              :ttl-s glasspane-notes--link-ttl-s)
                              :variant "text" :icon "link")))))
-     :on-tap (and tap (jetpacs-action "heading.tap"
+     :on-tap (and tap (jetpacs-action "heading.visit"
                                       :args (list :token tap))))))
 
 (defun glasspane-notes-detail-nodes (ref)

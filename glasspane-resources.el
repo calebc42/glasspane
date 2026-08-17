@@ -41,7 +41,14 @@ resulting operation; this downstream wrapper deliberately adds no policy."
 
 (defun glasspane-resources--on-open (_args _params)
   "Open `org-directory' as the PARA Resources landing scope."
-  (glasspane-resources--open-path org-directory))
+  (let ((status (glasspane-resources--open-path org-directory)))
+    ;; `app.open' records this before redispatching the destination verb,
+    ;; but direct/M-x entry reaches the owner verb without that wrapper.
+    ;; The file-row delegate below deliberately does NOT rewrite the route:
+    ;; an Area/Archive handoff keeps its originating place selected.
+    (when (and (eq status 'accepted) (not glasspane-ui-legacy-ia))
+      (jetpacs-apps-note-route "glasspane" "resources"))
+    status))
 
 (defun glasspane-resources--on-open-file (args _params)
   "Open ARGS' `:path' through the same native Files route."

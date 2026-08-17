@@ -66,6 +66,8 @@
 (require 'jetpacs-chrome)
 (require 'jetpacs-apps)
 (require 'jetpacs-buffer)
+(require 'jetpacs-navigate)
+(require 'jetpacs-files)
 (require 'jetpacs-dialog)
 (require 'jetpacs-editor)
 (require 'jetpacs-org-toolbar)
@@ -80,6 +82,8 @@
 (require 'glasspane-org-reader nil t)
 (declare-function glasspane-org-reader-subtree "glasspane-org-reader"
                   (file pos &optional skip-props set))
+(declare-function glasspane-org-reader-prepare-landing
+                  "glasspane-org-reader" (path))
 (defvar glasspane-org-reader-inline-props)
 
 ;; Later-rung siblings (G5's pure agenda formatters): declared, never
@@ -301,7 +305,7 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                         (list lead
                               (jetpacs-with-attrs (jetpacs-box middle)
                                                   :weight 1)))))
-     :on-tap (and token (jetpacs-action "heading.tap"
+     :on-tap (and token (jetpacs-action "heading.visit"
                                         :args (list :token token)))
      :on-long-tap (and token (jetpacs-action "heading.menu"
                                              :args (list :token token)))
@@ -1004,10 +1008,16 @@ container would break Compose) and wrap otherwise."
      (t (apply #'jetpacs-column body extras)))))
 
 (defun glasspane-detail--top-actions (info tokens)
-  "The detail top-bar actions: clock toggle, read/edit, file properties."
+  "Detail top actions: source file, clock, read/edit, file properties."
   (let ((file (plist-get info :file)))
     (delq nil
           (list
+           (when (glasspane-detail--org-file-p file)
+             (jetpacs-icon-button
+              "open_in_new"
+              (jetpacs-action "detail.open-file"
+                              :args (list :token (plist-get tokens :main)))
+              :content-description "Open in file"))
            (if (plist-get info :clocked-in)
                (jetpacs-icon-button "timer_off"
                                     (jetpacs-action "org.clock.out")
@@ -1139,6 +1149,62 @@ moved (SPEC 14.5: re-present, never guess)."
                (jetpacs-shell-surface-for "glasspane"))
            ref)
           'accepted)))))
+
+(defun glasspane-detail--ref-location (ref)
+  "Resolve REF to (BUFFER FILE POSITION), releasing its marker."
+  (let ((marker (ebp-org-resolve-ref ref)))
+    (unwind-protect
+        (list (marker-buffer marker)
+              (buffer-file-name (marker-buffer marker))
+              (marker-position marker))
+      (set-marker marker nil))))
+
+(defun glasspane-detail--location-status (err)
+  "Map engine condition ERR to a handler result, including retry."
+  (pcase (ebp-org-refusal-disposition err)
+    ('retry (jetpacs-retry-later))
+    (status status)))
+
+(defun glasspane-detail--on-visit (args params)
+  "Open the token's Org buffer at its heading on the current surface."
+  (let ((token (plist-get args :token)))
+    (cond
+     ((not (stringp token)) 'rejected)
+     ((null (ebp-org-token-ref token :owner "glasspane")) 'stale)
+     (t
+      (condition-case err
+          (pcase-let* ((ref (ebp-org-token-ref token :owner "glasspane"))
+                       (`(,buffer ,file ,pos)
+                        (glasspane-detail--ref-location ref))
+                       (surface (or (plist-get params :surface)
+                                    (jetpacs-shell-surface-for "glasspane"))))
+            (jetpacs-flow-continue
+             (lambda ()
+               (jetpacs-navigate-buffer
+                buffer surface (file-name-nondirectory file) pos)))
+            'accepted)
+        ((ebp-org-refused ebp-org-unavailable ebp-org-unresolved)
+         (glasspane-detail--location-status err)))))))
+
+(defun glasspane-detail--on-open-file (args _params)
+  "Open the token's source heading through native Files at its position."
+  (let ((token (plist-get args :token)))
+    (cond
+     ((not (stringp token)) 'rejected)
+     ((null (ebp-org-token-ref token :owner "glasspane")) 'stale)
+     (t
+      (condition-case err
+          (pcase-let* ((ref (ebp-org-token-ref token :owner "glasspane"))
+                       (`(,_buffer ,file ,pos)
+                        (glasspane-detail--ref-location ref)))
+            ;; Product-specific reader mode/filter choices remain here in
+            ;; Glasspane; Files receives only a generic PATH + MARK-POS.
+            (when (fboundp 'glasspane-org-reader-prepare-landing)
+              (glasspane-org-reader-prepare-landing file))
+            (jetpacs-files-open-path
+             file (jetpacs-shell-surface-for jetpacs-files-owner) pos))
+        ((ebp-org-refused ebp-org-unavailable ebp-org-unresolved)
+         (glasspane-detail--location-status err)))))))
 
 (defun glasspane-detail--on-toggle-read (_args params)
   "Flip the reader/editor mode; the builder re-reads the flag."
@@ -1843,6 +1909,8 @@ non-TITLE keyword lands after an existing #+TITLE line."
 
 (defconst glasspane-detail--verbs
   '("heading.tap"
+    "heading.visit"
+    "detail.open-file"
     "detail.toggle-read"
     "detail.save"
     "detail.planning.edit"
@@ -1874,6 +1942,10 @@ gate contract).  Idempotent."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "heading.tap" #'glasspane-detail--on-tap
                        :doc "Open a heading in the pushed detail screen")
+    (jetpacs-defaction "heading.visit" #'glasspane-detail--on-visit
+                       :doc "Open an Org buffer at the selected heading")
+    (jetpacs-defaction "detail.open-file" #'glasspane-detail--on-open-file
+                       :doc "Open a detail heading in native Files")
     (jetpacs-defaction "detail.toggle-read"
                        #'glasspane-detail--on-toggle-read
                        :doc "Flip the detail reader/editor mode")

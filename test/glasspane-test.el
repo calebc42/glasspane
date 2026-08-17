@@ -1656,6 +1656,35 @@ rejects, and a swept or mismatched list answers `stale'."
                         'stale))))
       (glasspane-test--reader-cleanup vault))))
 
+(ert-deftest glasspane-test-reader-marks-containing-top-level-heading ()
+  "A nested Files landing marks the direct lazy child containing it."
+  (require 'glasspane-org-reader)
+  (let* ((fixture (glasspane-test--reader-vault))
+         (vault (car fixture))
+         (file (cdr fixture))
+         (true (file-truename file))
+         (org-directory vault)
+         (org-agenda-files (list file))
+         (ebp-org-roots nil)
+         (child-pos
+          (with-current-buffer (find-file-noselect file)
+            (org-with-wide-buffer
+             (goto-char (point-min))
+             (re-search-forward "^\\*\\* DONE Buy a hose")
+             (line-beginning-position)))))
+    (unwind-protect
+        (let* ((jetpacs-files-editor-context
+                (list :path true :mark-pos child-pos))
+               (nodes (glasspane-org-reader-file file)))
+          (should (= (length nodes) 2))
+          (should (plist-get (nth 0 nodes) :scroll_here))
+          (should-not (plist-get (nth 1 nodes) :scroll_here))
+          ;; The reader output remains valid after adding the universal attr.
+          (should (progn
+                    (jetpacs-check-profile (vconcat nodes) 'app)
+                    t)))
+      (glasspane-test--reader-cleanup vault))))
+
 ;;;; G4 — reader + detail: glasspane-detail.el
 
 (ert-deftest glasspane-test-detail-builders ()
@@ -1756,7 +1785,9 @@ wire encoding."
                     (token . "tok-1") (archive-token . "tok-arch"))))
            (json (jetpacs-node->canonical-json card)))
       (should (equal (plist-get card :t) "card"))
-      (should (string-search "heading.tap" json))
+      ;; Agenda-shaped cards use the contextual source jump; long-press
+      ;; retains the opinionated detail sheet.
+      (should (string-search "heading.visit" json))
       (should (string-search "\"token\":\"tok-1\"" json))
       (should (string-search "heading.menu" json))
       (should (string-search "heading.todo-cycle" json))
@@ -1773,6 +1804,16 @@ wire encoding."
       (should-not (plist-get card :on_long_tap))
       (should-not (plist-get card :swipe_start))
       (should-not (plist-get card :swipe_end))))
+  (let ((json
+         (jetpacs-node->canonical-json
+          (apply #'jetpacs-row
+                 (glasspane-detail--top-actions
+                  '(:file "/v/tasks.org" :clocked-in nil)
+                  '(:main "detail-token"))))))
+    (should (string-search "detail.open-file" json))
+    (should (string-search "open_in_new" json))
+    (should (string-search "Open in file" json))
+    (should (string-search "detail-token" json)))
   (let ((json (jetpacs-node->canonical-json
                (glasspane-detail-result-card
                 '((headline . "Hit") (todo . "TODO") (file . "/v/a.org")
@@ -3961,7 +4002,7 @@ under the same stub and re-marks on re-tap."
   "The mention card's TWO tokens, built locally with the availability
 probe stubbed open: the mint interleaves tap/edit-site refs pairwise,
 so the card must take them in that order — a swapped destructure hands
-`heading.tap' the edit-site ref and `link.materialize' a heading ref
+`heading.visit' the edit-site ref and `link.materialize' a heading ref
 its own shape gate then refuses.  The tokens are told apart by what
 they RESOLVE to, and the Link-it action carries the ttl its queue
 policy requires."
@@ -3993,7 +4034,7 @@ policy requires."
                                      append (glasspane-test--actions n)))
                    (taps (cl-remove-if-not
                           (lambda (a) (equal (plist-get a :action)
-                                             "heading.tap"))
+                                             "heading.visit"))
                           actions))
                    (links (cl-remove-if-not
                            (lambda (a) (equal (plist-get a :action)
@@ -4990,7 +5031,8 @@ targets and PA-4 removes the flag-gated legacy screens.")
     "agenda.set-mode" "agenda.set-month" "agenda.today" "config.sync"
     "areas.drill"
     "demo.gallery.kind" "demo.gallery.level" "demo.gallery.point"
-    "demo.setup" "demo.setup-org" "detail.planning.edit" "detail.save"
+    "demo.setup" "demo.setup-org" "detail.open-file"
+    "detail.planning.edit" "detail.save"
     "detail.toggle-read" "ef.load" "ef.mirror" "ef.option" "ef.random"
     "ef.random-dark" "ef.random-light" "files.filter"
     "files.properties.save" "files.properties.show"
@@ -4999,7 +5041,7 @@ targets and PA-4 removes the flag-gated legacy screens.")
     "heading.duplicate" "heading.menu" "heading.priority"
     "heading.prop-add" "heading.prop-set" "heading.props.show"
     "heading.refile" "heading.reorder" "heading.schedule"
-    "heading.tags" "heading.tap" "heading.todo-cycle"
+    "heading.tags" "heading.tap" "heading.visit" "heading.todo-cycle"
     "heading.todo-set" "journal.capture" "journal.goto" "journal.nav"
     "journal.today" "link.materialize" "notes.mentions"
     "org.babel.execute" "org.link.open"

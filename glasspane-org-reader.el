@@ -325,9 +325,25 @@ Runs in the file's buffer.  The exposure record is superseded once per
 render, then every heading accumulates into it (the document-scope
 contract of `jetpacs-buffer-forget-exposed')."
   (jetpacs-buffer-forget-exposed (buffer-name))
-  (let ((tokens (glasspane-org-reader--mint nodes set)))
-    (mapcar (lambda (n) (glasspane-org-reader--heading-node n true tokens))
-            nodes)))
+  (let* ((tokens (glasspane-org-reader--mint nodes set))
+         (context jetpacs-files-editor-context)
+         (mark-pos (and (equal (plist-get context :path) true)
+                        (plist-get context :mark-pos))))
+    (cl-labels ((contains-mark-p (node)
+                  (or (and (integerp mark-pos)
+                           (integerp (plist-get node :pos))
+                           (= (plist-get node :pos) mark-pos))
+                      (cl-some #'contains-mark-p
+                               (plist-get node :children)))))
+      ;; LazyColumn honors `scroll_here' only on one of its direct children,
+      ;; so a nested target marks the top-level fold that contains it.
+      (mapcar (lambda (n)
+                (let ((rendered
+                       (glasspane-org-reader--heading-node n true tokens)))
+                  (if (contains-mark-p n)
+                      (jetpacs-with-attrs rendered :scroll_here t)
+                    rendered)))
+              nodes))))
 
 ;;;; Entry points
 
@@ -787,6 +803,18 @@ ride this presentation: the in-body ONE-grammar filter owns tree search."
 (defun glasspane-org-reader--adapter-transition (path presentation)
   "Apply the stock Org transition discipline to PATH and PRESENTATION."
   (jetpacs-reader-org--transition path presentation))
+
+(defun glasspane-org-reader-prepare-landing (path)
+  "Prepare PATH for a contextual Files landing in the foldable reader.
+The detail screen's `Open in file' affordance is an app opinion over
+the generic Files mark-position seam.  Clear a prior sparse filter and
+refile presentation so the requested heading is actually present in the
+direct LazyColumn children, and select the rendered presentation."
+  (jetpacs-reader-state-set path :presentation 'reader)
+  (jetpacs-reader-state-set path :gp-fold-mode 'tree)
+  (jetpacs-reader-state-set path :gp-filter-query "")
+  (jetpacs-reader-state-set path :gp-filter-kept nil)
+  (jetpacs-reader-state-set path :gp-filter-total nil))
 
 (defun glasspane-org-reader--action-path (args params)
   "Return a validated current Org path, or a status symbol."

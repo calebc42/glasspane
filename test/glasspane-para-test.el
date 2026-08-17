@@ -11,6 +11,7 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'seq)
 (require 'glasspane)
 
 (defconst glasspane-para-test--areas-source
@@ -363,7 +364,7 @@ one file may honestly participate in both its file Area and a nested Area."
     (should (gethash name jetpacs-action-handlers))))
 
 (ert-deftest glasspane-para-resources-source-boundaries ()
-  "Resources is only a public delegate: no browser, walker, or screen."
+  "The Resources section stays a delegate despite Archive sharing its file."
   (with-temp-buffer
     (insert-file-contents glasspane-para-test--resources-source)
     (should (search-forward "jetpacs-files-open-path" nil t))
@@ -371,14 +372,162 @@ one file may honestly participate in both its file Area and a nested Area."
     (should (search-forward "jetpacs-files-owner" nil t))
     (goto-char (point-min))
     (should-not (search-forward "jetpacs-files--" nil t))
+    (let ((start (progn
+                   (goto-char (point-min))
+                   (search-forward ";;;; Resources delegation")
+                   (point)))
+          (end (progn
+                 (search-forward ";;;; Archive index and screen")
+                 (line-beginning-position))))
+      (save-restriction
+        (narrow-to-region start end)
+        (goto-char (point-min))
+        (should-not (re-search-forward
+                     "\\_<\\(directory-files\\(?:-recursively\\)?\\|file-expand-wildcards\\)\\_>"
+                     nil t))
+        (goto-char (point-min))
+        (should-not (re-search-forward
+                     "\\_<\\(jetpacs-chrome-screen\\|jetpacs-chrome-row\\|jetpacs-lazy-column\\)\\_>"
+                     nil t))))))
+
+(ert-deftest glasspane-para-archive-index-includes-metadata-and-stops-at-cap ()
+  "The bounded walk includes `_archive' files with one metadata read each."
+  (glasspane-para-test--with-vault
+      '(("a.org_archive" "* Archived A\n")
+        ("b.org_archive" "* Archived B\n")
+        ("c.org_archive" "* Archived C\n")
+        ("z.org" "* Live\n"))
+    (let ((real-attributes (symbol-function 'file-attributes))
+          (attribute-calls 0))
+      (cl-letf (((symbol-function 'file-attributes)
+                 (lambda (path &rest args)
+                   (when (string-suffix-p "_archive" path t)
+                     (cl-incf attribute-calls))
+                   (apply real-attributes path args))))
+        (let* ((glasspane-resources-archive-scan-cap 2)
+               (records (glasspane-resources--archive-files-1)))
+          (should (equal (mapcar (lambda (record)
+                                  (file-name-nondirectory
+                                   (plist-get record :path)))
+                                records)
+                         '("a.org_archive" "b.org_archive")))
+          (should (cl-every (lambda (record) (plist-get record :mtime))
+                            records))
+          (should (= attribute-calls 2)))
+        (setq attribute-calls 0)
+        (let* ((glasspane-resources-archive-scan-cap 20)
+               (records (glasspane-resources--archive-files-1)))
+          (should (equal (mapcar (lambda (record)
+                                  (file-name-nondirectory
+                                   (plist-get record :path)))
+                                records)
+                         '("a.org_archive" "b.org_archive" "c.org_archive")))
+          (should (= attribute-calls 3)))))))
+
+(ert-deftest glasspane-para-archive-cache-refreshes-outside-agenda-stamp ()
+  "Archive membership is memoized until its explicit refresh hook runs."
+  (let ((org-agenda-files nil)
+        (calls 0))
+    (unwind-protect
+        (progn
+          (ebp-org-cache-invalidate)
+          (should (memq #'glasspane-resources--refresh-invalidate
+                        jetpacs-shell-refresh-hook))
+          (cl-letf (((symbol-function 'glasspane-resources--archive-files-1)
+                     (lambda ()
+                       (cl-incf calls)
+                       (list (list :path (format "/archive-%d" calls)
+                                   :mtime (current-time))))))
+            (should (equal (glasspane-resources--archive-files)
+                           (glasspane-resources--archive-files)))
+            (should (= calls 1))
+            (let ((jetpacs-shell-refresh-hook
+                   '(glasspane-resources--refresh-invalidate)))
+              (run-hooks 'jetpacs-shell-refresh-hook))
+            (glasspane-resources--archive-files)
+            (should (= calls 2))))
+      (ebp-org-cache-invalidate))))
+
+(ert-deftest glasspane-para-archive-screen-route-and-lifecycle ()
+  "Archive renders file handoffs and remains a staged drawer destination."
+  (let* ((mtime (encode-time 0 30 14 16 8 2026))
+         (record (list :path "/vault/work.org_archive" :mtime mtime))
+         (row (glasspane-resources--archive-row record))
+         (tap (plist-get row :on_tap))
+         pushed)
+    (should (equal (plist-get tap :action) "resources.open-file"))
+    (should (equal (plist-get tap :args)
+                   '(:path "/vault/work.org_archive")))
+    (should (string-search "work.org"
+                           (jetpacs-node->canonical-json row)))
+    (should (string-search "Modified 2026-08-16 14:30"
+                           (jetpacs-node->canonical-json row)))
+    (cl-letf (((symbol-function 'glasspane-resources--archive-files)
+               (lambda () (list record))))
+      (let ((screen (glasspane-resources-archive-screen nil)))
+        (should (jetpacs-check-profile screen 'app))
+        (should (stringp (jetpacs-node->canonical-json screen)))))
+    (cl-letf (((symbol-function 'glasspane-resources--archive-files)
+               (lambda () nil)))
+      (should (equal (plist-get (glasspane-resources--archive-body) :t)
+                     "empty_state")))
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-chrome-push-screen)
+               (lambda (surface id builder &rest _)
+                 (setq pushed (list surface id builder)))))
+      (should (eq (glasspane-resources--on-archive-open
+                   nil '(:surface "app:glasspane"))
+                  'accepted)))
+    (should (equal (seq-take pushed 2)
+                   '("app:glasspane" "glasspane-archive")))
+    (should (eq (nth 2 pushed) #'glasspane-resources-archive-screen)))
+  (should (gethash "archive.open" jetpacs-action-handlers))
+  (should (equal (jetpacs--owner-of "action" "archive.open") "glasspane"))
+  (should-not (member "archive.open"
+                      (glasspane-para-test--action-names
+                       (glasspane-ui-home-screen nil))))
+  (unwind-protect
+      (progn
+        (glasspane-resources-unregister)
+        (dolist (name '("resources.open" "resources.open-file"
+                        "archive.open"))
+          (should-not (gethash name jetpacs-action-handlers)))
+        (should-not (memq #'glasspane-resources--refresh-invalidate
+                          jetpacs-shell-refresh-hook)))
+    (glasspane-resources-register))
+  (should (gethash "archive.open" jetpacs-action-handlers))
+  (should (memq #'glasspane-resources--refresh-invalidate
+                jetpacs-shell-refresh-hook)))
+
+(ert-deftest glasspane-para-archive-native-recognition-and-root-policy ()
+  "Org archives pass both native predicates and the real Files root guard."
+  (glasspane-para-test--with-vault
+      '(("project.org_archive" "* Archived project\n"))
+    (let* ((archive (expand-file-name "project.org_archive" vault))
+           (jetpacs-files-roots (list vault))
+           (jetpacs-files-shared-storage nil)
+           queued)
+      (should (ebp-org-file-allowed-p archive))
+      (should (jetpacs-reader-org-path-p archive))
+      (should (jetpacs-org-render--org-path-p archive))
+      (cl-letf (((symbol-function 'jetpacs-files-shared-dir) #'ignore)
+                ((symbol-function 'jetpacs-flow-continue)
+                 (lambda (fn) (push fn queued))))
+        (should (eq (glasspane-resources--on-open-file
+                     (list :path archive) nil)
+                    'accepted))
+        (should (= (length queued) 1))))))
+
+(ert-deftest glasspane-para-archive-source-has-no-unarchive-path ()
+  "Archive is a read/open index; no speculative reverse operation exists."
+  (with-temp-buffer
+    (insert-file-contents glasspane-para-test--resources-source)
+    (should (search-forward "_archive" nil t))
     (goto-char (point-min))
-    (should-not (re-search-forward
-                 "\\_<\\(directory-files\\(?:-recursively\\)?\\|file-expand-wildcards\\)\\_>"
-                 nil t))
+    (should (search-forward "resources.open-file" nil t))
     (goto-char (point-min))
-    (should-not (re-search-forward
-                 "\\_<\\(jetpacs-chrome-screen\\|jetpacs-chrome-row\\|jetpacs-lazy-column\\)\\_>"
-                 nil t))))
+    (should-not (search-forward "unarchive" nil t))))
 
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

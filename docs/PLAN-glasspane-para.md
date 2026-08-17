@@ -1,6 +1,6 @@
 # PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, shared-bar, PARA-shaped)
 
-Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **f68b808** (PA-2c execution base on slop-fork/main; PA-1/PA-2a complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2c executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2c mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
+Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **ea6d4c5** (PA-2b execution base on slop-fork/main; PA-1/PA-2a/PA-2c complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2b mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
 
 **Authority:** the ratified PARA vision (Caleb, 2026-08-15 — §0 verbatim) + the surviving machinery half of `docs/PLAN-glasspane-rework.md` (GR-0..GR-7, unchanged). Produced by a full planning workflow (3 exploration + 3 design agents, 2026-08-15); every mechanism claim was re-verified in-tree while drafting.
 
@@ -185,8 +185,8 @@ App-side module (srs/notes shape, register/unregister from glasspane.el's sweep)
 
 **Gate:** arms: Resources delegates `org-directory` to the canonical Files surface; direct-file delegation for Org and non-Org paths; no private `jetpacs-files--*` calls; no Resources walker/screen; Files root refusal propagates as a rejected result; Resources stays selected on the guest surface; Archive cap + refresh invalidation; `_archive` inclusion; shared predicate widening in both native paths; roots-policy pass for an archive file; no-unarchive grep pin.
 
-> **PA-2c GATE COMPLETE 2026-08-16 (Resources half; PA-2b Archive arms
-> remain open).** `glasspane-resources.el` is a downstream-only adapter:
+> **PA-2c GATE COMPLETE 2026-08-16 (Resources half; PA-2b completed
+> below).** `glasspane-resources.el` is a downstream-only adapter:
 > `resources.open` hands `org-directory` to the public Files opener and
 > `resources.open-file` hands it the supplied path, both on the canonical
 > `jetpacs.files` surface. It creates no screen, walks no files, and calls no
@@ -202,6 +202,28 @@ App-side module (srs/notes shape, register/unregister from glasspane.el's sweep)
 > compilation, package installation, EBP/Jetpacs/Glasspane layering, shell
 > and diff hygiene, and the full elevated `test/run-tests.sh` pass; the
 > runner exited **0**. PA-2c has no device arm.
+
+> **PA-2b GATE COMPLETE 2026-08-16 (Archive half; combined PA-2b/2c
+> rung complete).** The downstream Archive index performs a bounded local
+> walk of `org-directory`, does not follow symlinked directories, isolates an
+> unreadable directory, and records one explicit mtime read per matching
+> `_archive` file. Its result is memoised under the Glasspane EBP cache key;
+> the module-owned shell refresh hook invalidates membership independently of
+> the agenda stamp. The staged Archive screen shows source names and mtimes,
+> and every row delegates its path to `resources.open-file` on native Files.
+> `archive.open` is lifecycle-owned but remains absent from the legacy hub
+> until PA-3 installs it as a drawer-only destination.
+>
+> Jetpacs now recognizes `.org_archive` (case-insensitively) through both the
+> shared reader predicate and its legacy rendering compatibility predicate;
+> Glasspane adds no private file-type rule. Real EBP and Files root policies
+> accept a sibling archive under the vault, and a source pin confirms this
+> rung introduces no unarchive operation. Evidence: the explicit PARA suite
+> passes **18/18**, the native mode/app suite **18/18**, the native rendering
+> suite **39/39**, and the legacy Glasspane suite remains **72/72**.
+> Warning-as-error compilation, package installation, dependency layering,
+> diff hygiene, and the full elevated `test/run-tests.sh` pass; the runner
+> exited **0**. PA-2b has no device arm.
 
 ### PA-2d — Projects (`emacs/apps/glasspane/glasspane-projects.el`, new, thin)
 

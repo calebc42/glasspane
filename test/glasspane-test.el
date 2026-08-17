@@ -4988,7 +4988,7 @@ in Settings links, not the drawer).  Registered by glasspane-ef and
 glasspane-gallery at orders 81 and 84, beside the app's own 80.")
 
 (defconst glasspane-test--staged-opener-verbs
-  '("areas.open" "resources.open")
+  '("areas.open" "archive.open" "resources.open")
   "PARA screen openers registered before PA-3 exposes the new navigation.
 The staging list is deliberately explicit: PA-3 must empty it while moving
 each opener into the authoritative destination table.")

@@ -9,12 +9,11 @@
 ;; journal, SRS, the org reader — on the jetpacs foundation.  The
 ;; ladder is docs/PLAN-glasspane-app.md; this file is G0: the thin
 ;; entry in the M3 template (jetpacs-m3-catalog.el), owning exactly the
-;; app identity — the "glasspane" owner claim, the chrome root (the
-;; hub, built by glasspane-ui and merely NAMED here), the PA-3 primary
-;; composition metadata, and one owner verb, `glasspane.home', which the
-;; hub's drawer taps to come back.  The old hand dock remains solely behind
-;; `glasspane-ui-legacy-ia'.  The sibling `require' list below grew one rung
-;; at a time and is now the whole app.
+;; app identity — the "glasspane" owner claim, the Agenda chrome root, the
+;; PA-3 primary composition metadata, and one owner verb,
+;; `glasspane.home', which resets to that root.  The old hub and hand dock
+;; remain solely behind `glasspane-ui-legacy-ia'.  The sibling `require'
+;; list below grew one rung at a time and is now the whole app.
 ;;
 ;; Client hooks (clock notification, window class, save refresh) attach
 ;; at READY starting with G2 — G0 registers surfaces and verbs only,
@@ -109,6 +108,8 @@ second real `jetpacs-defapp' caller there is.")
 (defun glasspane--on-home (_args params)
   "Return to the root screen (the dock row's second tap)."
   (let ((surface (plist-get params :surface)))
+    (jetpacs-apps-note-route glasspane-owner
+                             (unless glasspane-ui-legacy-ia "agenda"))
     (jetpacs-flow-continue
      (lambda ()
        (jetpacs-chrome-reset-screens (or surface glasspane-owner))))
@@ -145,15 +146,20 @@ affordance is the FAB story, not a drawer row."
 (defun glasspane-register ()
   "Register the owner's verbs, the chrome root, and the app identity.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
-stack to home — the live-reload path; `jetpacs-defapp' replaces its
-registry entry in place."
+stack to the selected app root — the live-reload path; `jetpacs-defapp'
+replaces its registry entry in place."
   (with-jetpacs-owner glasspane-owner
     (jetpacs-defaction "glasspane.home" #'glasspane--on-home)
-    ;; The root is glasspane-ui's hub (the #26 rung): the entry names
-    ;; the screen, the keystone builds it — the same split the dock
-    ;; item keeps, identity here and content there.
-    (jetpacs-chrome-define-root glasspane-owner "home"
-                                #'glasspane-ui-home-screen))
+    ;; PA-3b pins Agenda as both app home and destination one.  Its root id
+    ;; deliberately equals agenda.open's pushed id, so a bar tap truncates
+    ;; straight to the root.  The old hub stays executable behind the one
+    ;; soak rollback flag until PA-4 removes it.
+    (if glasspane-ui-legacy-ia
+        (jetpacs-chrome-define-root glasspane-owner "home"
+                                    #'glasspane-ui-home-screen)
+      (jetpacs-chrome-define-root glasspane-owner "glasspane-agenda"
+                                  #'glasspane-agenda-screen
+                                  :required t)))
   ;; After the root exists: the app claims a surface that is really there;
   ;; the rollback dock, when selected, names one the launcher's membership
   ;; guard recognizes (the M3 ordering).
@@ -250,8 +256,10 @@ Org clock handlers are upstream and deliberately survive."
 
 ;;;###autoload
 (defun glasspane ()
-  "Open Glasspane on the device: reset its stack to the home screen."
+  "Open Glasspane on the device: reset its stack to the app root."
   (interactive)
+  (jetpacs-apps-note-route glasspane-owner
+                           (unless glasspane-ui-legacy-ia "agenda"))
   (jetpacs-chrome-reset-screens glasspane-owner))
 
 (defun glasspane-unload-function ()

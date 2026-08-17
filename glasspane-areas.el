@@ -238,31 +238,20 @@ sweeps the prior Areas token generation."
 
 ;;;; Actions and lifecycle
 
-(defun glasspane-areas--push-screen (params id builder)
-  "Defer-push screen ID via BUILDER onto PARAMS' surface."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane"))))
-    (jetpacs-flow-continue
-     (lambda ()
-       (condition-case err
-           (jetpacs-chrome-push-screen surface id builder)
-         (error (message "glasspane: %s push failed: %s"
-                         id (jetpacs-error-label err))))))
-    'accepted))
-
 (defun glasspane-areas--on-open (_args params)
-  "Push the Areas list onto the tapped surface."
-  (glasspane-areas--push-screen params "glasspane-areas"
-                                #'glasspane-areas-screen))
+  "Open the Areas list in the one Tier-1 destination slot."
+  (glasspane-ui-open-destination
+   "areas" "glasspane-areas" #'glasspane-areas-screen params))
 
 (defun glasspane-areas--on-drill (args params)
   "Open ARGS' plain-string `:category', even if it just vanished."
   (let ((category (plist-get args :category)))
     (if (not (and (stringp category) (not (string-empty-p category))))
         'rejected
-      (glasspane-areas--push-screen
-       params (jetpacs-wire-id "area" category)
-       (lambda (back) (glasspane-areas-drill-screen category back))))))
+      (glasspane-ui-open-destination
+       "areas" (jetpacs-wire-id "area" category)
+       (lambda (back) (glasspane-areas-drill-screen category back))
+       params))))
 
 (defconst glasspane-areas--verbs '("areas.open" "areas.drill")
   "The Areas verbs owned by this module.")

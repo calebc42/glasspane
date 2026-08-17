@@ -705,19 +705,9 @@ engine empty state.  The optional Habits row always remains independent."
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 
 (defun glasspane-srs--on-open (_args params)
-  "Push the Review screen onto the tapped surface."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane"))))
-    (jetpacs-flow-continue
-     (lambda ()
-       ;; A deferred `jetpacs-chrome-push-screen' must catch its own
-       ;; re-signal or a refused gate dies in a timer.
-       (condition-case err
-           (jetpacs-chrome-push-screen surface "glasspane-review"
-                                       #'glasspane-srs-screen)
-         (error (message "glasspane: review push failed: %s"
-                         (jetpacs-error-label err))))))
-    'accepted))
+  "Open Review in the one Tier-1 destination slot."
+  (glasspane-ui-open-destination
+   "review" "glasspane-review" #'glasspane-srs-screen params))
 
 (defun glasspane-srs--on-habits-open (_args params)
   "Open native Jetpacs Habits, or reject when its public entry is absent."

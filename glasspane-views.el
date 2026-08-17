@@ -14,12 +14,12 @@
 ;; Retired against v1 (the plan's retirement list + G6 section):
 ;;
 ;; - The two-screens-one-shell-view trick, `views.back', and the
-;;   drawer item (S1): the hub and each open view are REAL chrome
-;;   stack entries now — `views.open' pushes `jetpacs-wire-id "view"
-;;   NAME', back is the screen's own arrow, and chrome truncates the
-;;   stack on view.switched.  The hub's entry verb is `views.hub';
-;;   pointing the home hub or a drawer row at it is the entry file's
-;;   wiring, not this module's.
+;;   drawer item (S1): each open view is a real Tier-1 chrome peer now —
+;;   `views.open' pushes `jetpacs-wire-id "view" NAME', back is the
+;;   screen's own arrow, and chrome truncates the stack on view.switched.
+;;   Agenda's Saved page is the active entry; this module retains the
+;;   historical `views.hub' screen/verb only for rollback and PA-3d's alias
+;;   cutover.
 ;; - The `jetpacs-form' registry and its id-rotation reset (S2/S3):
 ;;   the new-view form is three literal stateful ids, `views.save'
 ;;   reads them back through `jetpacs-ui-state', and the device-side
@@ -694,9 +694,10 @@ or a refused gate dies in a timer."
       (setq glasspane-views--reorder nil
             glasspane-views--cal-anchor nil
             glasspane-views--cal-selected nil)
-      (glasspane-views--push-screen
-       params (jetpacs-wire-id "view" name)
-       (lambda (back) (glasspane-views--screen name back)))))))
+      (glasspane-ui-open-destination
+       "agenda" (jetpacs-wire-id "view" name)
+       (lambda (back) (glasspane-views--screen name back))
+       params)))))
 
 (defun glasspane-views--on-reorder (_args params)
   "Toggle the single-file list rendering's drag list."

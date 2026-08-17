@@ -119,17 +119,9 @@ Item order within each file remains the extractor's order."
                                    (glasspane-ui-capture-fab))))
 
 (defun glasspane-projects--on-open (_args params)
-  "Push the Projects screen onto the tapped surface."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane"))))
-    (jetpacs-flow-continue
-     (lambda ()
-       (condition-case err
-           (jetpacs-chrome-push-screen
-            surface "glasspane-projects" #'glasspane-projects-screen)
-         (error (message "glasspane: projects push failed: %s"
-                         (jetpacs-error-label err))))))
-    'accepted))
+  "Open Projects in the one Tier-1 destination slot."
+  (glasspane-ui-open-destination
+   "projects" "glasspane-projects" #'glasspane-projects-screen params))
 
 (defun glasspane-projects--on-filter (args params)
   "Select ARGS' TODO-stage filter and refresh the current screen."

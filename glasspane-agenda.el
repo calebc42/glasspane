@@ -71,6 +71,15 @@
 Replaces the v1 ui-state \"agenda-mode\"; the body re-seeds the tab
 strip's `:initial' from it each render.")
 
+;; `glasspane-views' loads after Agenda (and itself requires Agenda for the
+;; shared card/calendar seams).  Declaring its public registry here avoids a
+;; load cycle while the Saved page consumes the data directly.
+(defvar glasspane-saved-views nil
+  "Saved view definitions contributed by `glasspane-views'.")
+
+(defconst glasspane-agenda--saved-mode "saved"
+  "Internal mode key for Agenda's trailing Saved page.")
+
 ;;;; Reminders (piggybacked on each shell push)
 
 (defvar glasspane-agenda--last-reminders 'unset
@@ -244,21 +253,23 @@ previous render's tokens."
 
 (defconst glasspane-agenda--custom-max 8
   "How many saved searches the agenda offers as pages.
-A token budget, not a taste call: every page mints TWO sets — the tap
-set under \"glasspane\" and the archive set under
+A token budget, not a taste call: every Org-result page mints TWO sets —
+the tap set under \"glasspane\" and the archive set under
 `jetpacs-org-dialogs-owner' — while `ebp-org-token-sets-max' is 32 PER
 OWNER, shared with every other glasspane screen.  The mint SIGNALS on
 overflow, which kills the whole body build, so the page count is
 bounded here rather than by however many agendas the user saved.
 `glasspane-ui''s saved-search list still shows all of them; a selected
 mode past the cap coerces back to \"day\"
-(`glasspane-agenda--current-mode').")
+(`glasspane-agenda--current-mode').  The trailing Saved registry page
+mints no Org tokens and therefore does not consume this budget.")
 
 (defun glasspane-agenda--modes ()
-  "The agenda's mode names in display order: the spans, then customs."
+  "Agenda page keys in display order: spans, customs, then Saved."
   (append '("day" "week" "month")
           (mapcar #'car (seq-take glasspane-org-custom-agendas
-                                  glasspane-agenda--custom-max))))
+                                  glasspane-agenda--custom-max))
+          (list glasspane-agenda--saved-mode)))
 
 (defun glasspane-agenda--current-mode ()
   "The active mode, coerced back to one that still exists.
@@ -493,20 +504,76 @@ anchor to navigate."
                               :caption
                               "This custom agenda found no items.")))))
 
+(defun glasspane-agenda--saved-custom-row (entry)
+  "Render custom-agenda ENTRY as a jump to its existing Agenda page."
+  (let ((name (car entry))
+        (query (cdr entry)))
+    (jetpacs-chrome-row
+     name
+     :subtitle (format "%s" query)
+     :icon "event_note"
+     :trailing (jetpacs-icon "chevron_right")
+     :on-tap (jetpacs-action "agenda.set-mode" :args (list :mode name))
+     :key (jetpacs-wire-id "saved-agenda" name))))
+
+(defun glasspane-agenda--saved-view-row (view)
+  "Render saved VIEW as a Tier-1 peer-screen opener."
+  (let ((name (alist-get 'name view))
+        (query (alist-get 'query view))
+        (rendering (or (alist-get 'rendering view) "list")))
+    (jetpacs-chrome-row
+     name
+     :subtitle (format "%s · %s" rendering query)
+     :icon "manage_search"
+     :trailing (jetpacs-icon "chevron_right")
+     :on-tap (jetpacs-action "views.open" :args (list :name name))
+     :key (jetpacs-wire-id "saved-view" name))))
+
+(defun glasspane-agenda--saved-page ()
+  "List both saved-search registries without merging their semantics."
+  (let ((agendas
+         (cl-remove-if-not
+          (lambda (entry)
+            (and (consp entry) (stringp (car entry))
+                 (not (string-empty-p (car entry)))))
+          (seq-take glasspane-org-custom-agendas
+                    glasspane-agenda--custom-max)))
+        (views
+         (cl-remove-if-not
+          (lambda (view)
+            (let ((name (alist-get 'name view)))
+              (and (stringp name) (not (string-empty-p name)))))
+          glasspane-saved-views)))
+    (apply #'jetpacs-lazy-column
+           (append
+            (list (jetpacs-section-header "Custom agendas"))
+            (if agendas
+                (mapcar #'glasspane-agenda--saved-custom-row agendas)
+              (list (jetpacs-text "No custom agendas" :style "caption")))
+            (list (jetpacs-divider)
+                  (jetpacs-section-header "Saved views"))
+            (if views
+                (mapcar #'glasspane-agenda--saved-view-row views)
+              (list (jetpacs-text "No saved views" :style "caption")))
+            (list :spacing 8 :content-padding 12)))))
+
 (defun glasspane-agenda--page (mode anchor)
   "One agenda page: MODE's nav affordance above its tokenized body.
 One mint set per page — the tabs body builds every page each push, so
 a shared set would sweep its siblings' tokens mid-render.  Set names
 therefore track mode names, so the live set count per owner is
-bounded by the three spans plus `glasspane-agenda--custom-max'."
-  (let ((items (glasspane-agenda--tokenize
-                (glasspane-agenda--items-for mode anchor)
-                (concat "agenda-" mode))))
-    (apply #'jetpacs-column
-           (delq nil
-                 (list (glasspane-agenda--nav-affordance mode anchor)
-                       (jetpacs-spacer :height 4)
-                       (glasspane-agenda--mode-view mode items anchor))))))
+bounded by the three spans plus `glasspane-agenda--custom-max'.  Saved
+is registry navigation, not an Org result list, and therefore mints no set."
+  (if (equal mode glasspane-agenda--saved-mode)
+      (glasspane-agenda--saved-page)
+    (let ((items (glasspane-agenda--tokenize
+                  (glasspane-agenda--items-for mode anchor)
+                  (concat "agenda-" mode))))
+      (apply #'jetpacs-column
+             (delq nil
+                   (list (glasspane-agenda--nav-affordance mode anchor)
+                         (jetpacs-spacer :height 4)
+                         (glasspane-agenda--mode-view mode items anchor)))))))
 
 (defun glasspane-agenda--body-tabs (mode anchor)
   "The agenda as native tabs: swipe between spans and custom agendas.
@@ -521,7 +588,8 @@ tab."
      (mapcar (lambda (m)
                (jetpacs-tab-item (pcase m
                                    ("day" "Day") ("week" "Week")
-                                   ("month" "Month") (_ m))))
+                                   ("month" "Month")
+                                   ("saved" "Saved") (_ m))))
              modes)
      (mapcar (lambda (m) (glasspane-agenda--page m anchor)) modes)
      :initial initial
@@ -534,7 +602,8 @@ tab."
          (mapcar (lambda (m)
                    (jetpacs-chip (pcase m
                                    ("day" "Day") ("week" "Week")
-                                   ("month" "Month") (_ m))
+                                   ("month" "Month")
+                                   ("saved" "Saved") (_ m))
                                  :selected (jetpacs-bool (equal mode m))
                                  :on-tap (jetpacs-action
                                           "agenda.set-mode"
@@ -588,24 +657,10 @@ Agenda destination and the legacy dock builder both call it."
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 
-(defun glasspane-agenda--push-screen (params id builder)
-  "Defer-push screen ID via BUILDER onto PARAMS' surface (D2); `accepted'.
-A deferred `jetpacs-chrome-push-screen' must catch its own re-signal
-or a refused gate dies in a timer."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane"))))
-    (jetpacs-flow-continue
-     (lambda ()
-       (condition-case err
-           (jetpacs-chrome-push-screen surface id builder)
-         (error (message "glasspane: %s push failed: %s"
-                         id (jetpacs-error-label err))))))
-    'accepted))
-
 (defun glasspane-agenda--on-open (_args params)
-  "Push the Agenda screen onto the tapped surface."
-  (glasspane-agenda--push-screen params "glasspane-agenda"
-                                 #'glasspane-agenda-screen))
+  "Reset to the pinned Agenda root on the tapped surface."
+  (glasspane-ui-open-destination "agenda" "glasspane-agenda"
+                                 #'glasspane-agenda-screen params))
 
 (defun glasspane-agenda--on-set-mode (args params)
   "Select an agenda mode.  `:mode' names come from the fallback chips;

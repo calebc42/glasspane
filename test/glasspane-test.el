@@ -89,16 +89,16 @@ lands somewhere that exists (the M3 suite's shape)."
 (ert-deftest glasspane-test-home-serializes ()
   "The REGISTERED root screen builds and round-trips the canonical wire
 encoding — the same bar every later rung's screens must clear.  The
-builder is glasspane-ui's hub since the #26 rung; the G0 contract is
-unchanged, and deliberately names the same function
-`glasspane-register' does: whatever the chrome root points at must
-build offline and serialize."
-  (let ((screen (glasspane-ui-home-screen nil)))
+builder is PA-3b's pinned Agenda screen; the G0 contract is unchanged:
+whatever `glasspane-register' names as root must build offline and serialize."
+  (should (equal (jetpacs-chrome-stack glasspane-owner)
+                 '("glasspane-agenda")))
+  (let ((screen (glasspane-agenda-screen nil)))
     (should screen)
     ;; A chrome screen IS a scaffold node — serialize it whole.
     (let ((json (jetpacs-node->canonical-json screen)))
       (should (stringp json))
-      (should (string-search "Glasspane" json)))))
+      (should (string-search "Agenda" json)))))
 
 (ert-deftest glasspane-test-dock-item-shape ()
   "The new registry retires the hand dock while its rollback corpse is sound."
@@ -1033,18 +1033,16 @@ the registry."
   (glasspane-ui-register)
   (unwind-protect
       (progn
-	;; The app section is the §3 step-2 CONSOLIDATION: babel timeout,
-	;; journal landing, and packages auto-install in ONE "Glasspane"
-	;; block — one registration site (here), three sibling defcustoms,
-	;; all plain (none feeds a memoised extraction).
+	;; PA-3b removes Journal landing from the active app section.  The
+	;; defcustom survives only as rollback state until PA-4.
 	(let ((entries (alist-get "Glasspane" jetpacs-settings-registry
 				  nil nil #'equal)))
 	  (should entries)
 	  (dolist (sym '(glasspane-babel-timeout
-			 glasspane-journal-landing
 			 glasspane-packages-auto-install))
 	    (should (assq sym entries))
-	    (should-not (plist-get (cdr (assq sym entries)) :after-set))))
+	    (should-not (plist-get (cdr (assq sym entries)) :after-set)))
+	  (should-not (assq 'glasspane-journal-landing entries)))
 	(glasspane-ui-register)
 	(should (= 1 (cl-count #'glasspane-ui--settings-link
                                jetpacs-settings-links :key #'cadr)))
@@ -2307,18 +2305,19 @@ replaced the tab badge (FOUNDATION-GAPS #5)."
            (jetpacs-node->canonical-json
             (glasspane-agenda-month-fallback nil "2026-02-15" "2026-02-14"
                                               "views.select-date"))))
-  ;; Modes: the spans, then the saved searches, display order.
+  ;; Modes: spans, saved searches, then the registry-navigation page.
   (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand"))))
     (should (equal (glasspane-agenda--modes)
-                   '("day" "week" "month" "Errands"))))
+                   '("day" "week" "month" "Errands" "saved"))))
   ;; The page count is a TOKEN budget: each page mints two sets against
   ;; a per-owner cap, and the mint signals on overflow — so a user with
   ;; twenty saved searches gets the first eight, never a dead body.
   (let ((glasspane-org-custom-agendas
          (cl-loop for i from 1 to 20
                   collect (cons (format "S%d" i) "tags:x"))))
-    (should (= (length (glasspane-agenda--modes)) 11))
-    (should (equal (car (last (glasspane-agenda--modes))) "S8")))
+    (should (= (length (glasspane-agenda--modes)) 12))
+    (should (equal (nth 10 (glasspane-agenda--modes)) "S8"))
+    (should (equal (car (last (glasspane-agenda--modes))) "saved")))
   ;; The in-screen count reads the memoised day extraction and
   ;; swallows its errors.
   (cl-letf (((symbol-function 'glasspane-org-agenda-items)

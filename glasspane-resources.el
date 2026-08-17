@@ -148,17 +148,10 @@ cache, so pull-to-refresh is their deliberate freshness boundary."
                                    (glasspane-ui-capture-fab))))
 
 (defun glasspane-resources--on-archive-open (_args params)
-  "Push the Archive screen onto the tapped surface."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane"))))
-    (jetpacs-flow-continue
-     (lambda ()
-       (condition-case err
-           (jetpacs-chrome-push-screen
-            surface "glasspane-archive" #'glasspane-resources-archive-screen)
-         (error (message "glasspane: archive push failed: %s"
-                         (jetpacs-error-label err))))))
-    'accepted))
+  "Open Archive in the one Tier-1 destination slot."
+  (glasspane-ui-open-destination
+   "archive" "glasspane-archive"
+   #'glasspane-resources-archive-screen params))
 
 (defconst glasspane-resources--verbs
   '("resources.open" "resources.open-file" "archive.open")

@@ -10,10 +10,11 @@
 ;; `glasspane-ui-at-ref' — the token→resolve→classify funnel every
 ;; heading mutation in G4+ rides.
 ;;
-;; It also holds the temporary HUB (`glasspane-ui-home-screen', the
+;; It also holds the rollback-only HUB (`glasspane-ui-home-screen', the
 ;; hub-wiring rung that punch-list #26 escalated), the authoritative PARA
 ;; destination table, and the capture FAB descriptor PA-3a contributes to
-;; Jetpacs' app registry.  The hub remains the root only until PA-3b.  These
+;; Jetpacs' app registry.  PA-3b replaced that hub root with Agenda; the hub
+;; remains executable only behind `glasspane-ui-legacy-ia' until PA-4.  These
 ;; live beside shared state rather than in the entry so the entry keeps its
 ;; single job — identity and composition metadata.
 ;;
@@ -208,6 +209,60 @@ screen's stale-files half, both reached from rows that ARE here.")
   (if glasspane-ui-legacy-ia
       glasspane-ui--legacy-destinations
     glasspane-ui-destinations))
+
+(defun glasspane-ui-open-destination (route id builder &optional params)
+  "Open Glasspane destination ROUTE as peer screen ID via BUILDER.
+PARAMS is the originating action event.  In the PARA composition every
+Tier-1 destination first abandons the previous destination and its drills,
+then pushes its own screen.  Agenda is the pinned-root exception: its pushed
+ID equals the root ID, so chrome's same-ID truncation performs the reset in
+one operation.  The legacy rollback arm retains the historical plain-push
+stack shape.
+
+The selected route is recorded before the deferred push so the snapshot built
+for direct/M-x navigation has honest primary-bar selection.  The handler's
+effect remains outside the dispatch extent and presentation failures stay
+isolated there.  Return `accepted'."
+  (let ((surface (or (plist-get params :surface)
+                     (jetpacs-shell-surface-for "glasspane")))
+        (legacy glasspane-ui-legacy-ia))
+    (unless legacy
+      (jetpacs-apps-note-route "glasspane" route))
+    (jetpacs-flow-continue
+     (lambda ()
+       (condition-case err
+           (progn
+             (unless (or legacy (equal id "glasspane-agenda"))
+               (jetpacs-chrome-reset-screens surface))
+             (jetpacs-chrome-push-screen surface id builder))
+         (error (message "glasspane: %s destination push failed: %s"
+                         id (jetpacs-error-label err))))))
+    'accepted))
+
+(defun glasspane-ui--route-for-screen (view)
+  "Return the primary route represented by chrome screen id VIEW.
+Transient detail/search/drill screens deliberately return nil: their origin
+remains selected while they are on top."
+  (when (stringp view)
+    (cond
+     ((equal view "glasspane-agenda") "agenda")
+     ((equal view "glasspane-projects") "projects")
+     ((or (equal view "glasspane-areas")
+          (string-prefix-p "area-" view))
+      "areas")
+     ((equal view "glasspane-archive") "archive")
+     ((equal view "glasspane-review") "review")
+     ((string-prefix-p "view-" view) "agenda"))))
+
+(defun glasspane-ui--on-view-change (surface view)
+  "Keep Glasspane's primary route honest after a local switch to VIEW.
+Only a route-changing switch schedules a bounded repush; switching between a
+destination and one of its drills therefore costs no extra frame."
+  (when (and (not glasspane-ui-legacy-ia)
+             (jetpacs-owned-surface-p surface "glasspane"))
+    (when-let* ((route (glasspane-ui--route-for-screen view)))
+      (when (jetpacs-apps-note-route "glasspane" route)
+        (jetpacs-shell--schedule-repush surface)))))
 
 (defun glasspane-ui--home-destinations ()
   "Return the destinations projected into the temporary hub body.
@@ -662,6 +717,8 @@ for a desktop M-x."
   "Detach everything `glasspane-ui-register' hooked."
   (remove-hook 'jetpacs-shell-refresh-hook
                #'glasspane-ui--refresh-invalidate)
+  (remove-hook 'jetpacs-shell-view-change-functions
+               #'glasspane-ui--on-view-change)
   (remove-hook 'org-clock-in-hook #'glasspane-ui--refresh-if-connected)
   (remove-hook 'org-clock-out-hook #'glasspane-ui--refresh-if-connected)
   (remove-hook 'jetpacs-teardown-functions #'glasspane-ui--on-teardown))
@@ -728,26 +785,32 @@ registry entries in place, and the link is re-added exactly once."
     (jetpacs-defaction "agenda.set-month"
                        #'glasspane-ui--on-agenda-set-month)
     ;; The app's own section — CONSOLIDATED (§3 step 2's recorded
-    ;; opportunity): the three single-entry app sections (babel
-    ;; timeout here, Journal landing, Packages auto-install) collapse
-    ;; into ONE "Glasspane" section so the Settings root carries one
-    ;; app block, not three orphan headers.  The sibling defcustoms
-    ;; stay where they live; this is the single registration site, so
-    ;; glasspane-journal/glasspane-packages no longer register
-    ;; sections of their own.  All plain: none feeds a memoised
+    ;; opportunity): Babel timeout and Packages auto-install share ONE
+    ;; "Glasspane" section.  Journal landing rejoins them only in the
+    ;; legacy rollback arm; active PARA navigation always lands on Agenda.
+    ;; The sibling defcustoms stay where they live; this is the single
+    ;; registration site, so glasspane-journal/glasspane-packages no longer
+    ;; register sections of their own.  All plain: none feeds a memoised
     ;; extraction.
     (jetpacs-settings-register-section
      "Glasspane"
-     (list (list 'glasspane-babel-timeout
-                 :label "Babel run timeout (s)")
-           (list 'glasspane-journal-landing
-                 :label "Open on the journal")
-           (list 'glasspane-packages-auto-install
-                 :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)")))
+     (append
+      (list (list 'glasspane-babel-timeout
+                  :label "Babel run timeout (s)"))
+      (when glasspane-ui-legacy-ia
+        (list (list 'glasspane-journal-landing
+                    :label "Open on the journal")))
+      (list (list 'glasspane-packages-auto-install
+                  :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)"))))
     (jetpacs-settings-remove-link #'glasspane-ui--settings-link)
     ;; v1's settings view sat at order 80 among the app's views.
     (jetpacs-settings-add-link 80 #'glasspane-ui--settings-link))
   (add-hook 'jetpacs-shell-refresh-hook #'glasspane-ui--refresh-invalidate)
+  (remove-hook 'jetpacs-shell-view-change-functions
+               #'glasspane-ui--on-view-change)
+  (unless glasspane-ui-legacy-ia
+    (add-hook 'jetpacs-shell-view-change-functions
+              #'glasspane-ui--on-view-change))
   ;; Depth 90: after glasspane-clock's assert/retire on the same
   ;; hooks, so the repush renders the notification state they set.
   (add-hook 'org-clock-in-hook #'glasspane-ui--refresh-if-connected 90)

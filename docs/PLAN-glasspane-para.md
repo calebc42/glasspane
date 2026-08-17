@@ -1,6 +1,6 @@
 # PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, shared-bar, PARA-shaped)
 
-Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **29b0297** (PA-2e execution base on slop-fork/main; PA-1/PA-2a/PA-2b/PA-2c/PA-2d complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c/PA-2d/PA-2e executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2e mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
+Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **5b6592a** (PA-3b execution base on slop-fork/main; PA-1/PA-2a/PA-2b/PA-2c/PA-2d/PA-2e/PA-3a complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a/PA-2b/PA-2c/PA-2d/PA-2e/PA-3a/PA-3b executed **2026-08-16**. Original line cites were verified at 8965e40; PA-3b mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is committed and deployed; the installed APK is hash-identical to the local S11 build.
 
 **Authority:** the ratified PARA vision (Caleb, 2026-08-15 — §0 verbatim) + the surviving machinery half of `docs/PLAN-glasspane-rework.md` (GR-0..GR-7, unchanged). Produced by a full planning workflow (3 exploration + 3 design agents, 2026-08-15); every mechanism claim was re-verified in-tree while drafting.
 
@@ -334,13 +334,56 @@ Deleted rows: tasks (→ projects + alias), journal (deleted), capture (FAB + M-
 
 ### PA-3b — Root swap (hard dep: S11 committed + deployed)
 
-1. `glasspane.el:150`: `(jetpacs-chrome-define-root glasspane-owner "glasspane-agenda" #'glasspane-agenda-screen)` — the root id deliberately EQUALS the id `agenda.open` pushes, so tapping the Agenda bar entry resets to root for free via same-id truncate-and-replace (jetpacs-chrome.el's stack-insert). `glasspane-ui-home-screen` unreferenced (flag-gated corpse until PA-4). `glasspane.home` unchanged in name and shape; it now resets to the Agenda root.
+1. `glasspane.el:150`: `(jetpacs-chrome-define-root glasspane-owner "glasspane-agenda" #'glasspane-agenda-screen :required t)` — the root id deliberately EQUALS the id `agenda.open` pushes, so tapping the Agenda bar entry resets to root for free via same-id truncate-and-replace (jetpacs-chrome.el's stack-insert). Required is the reconnect contract that replaces a persisted pre-PARA snapshot before replay; the legacy rollback root remains non-required. `glasspane-ui-home-screen` is otherwise unreferenced (flag-gated corpse until PA-4). `glasspane.home` is unchanged in name and shape; it now resets to the Agenda root.
 2. **The Saved page** (§5.5) joins the agenda pages.
 3. **Boot seed** (PA-1's ROUTE form) lands in the tablet harness init.
 4. **Route hooks:** `glasspane-ui-open-destination` (GR-8c helper, survives verbatim: reset+push peer semantics) also calls `jetpacs-apps-note-route`; **the ratified back-repush hook** on `jetpacs-shell-view-change-functions` (the journal on-view-change precedent — that hook itself dies): map screen ids → route keys ("glasspane-agenda"→agenda, "glasspane-projects"→projects, areas/area-*→areas, archive→archive, "glasspane-review"→review, view-*→agenda; detail/search/drill-* → no change), note the route, `jetpacs-shell--schedule-repush` ONLY when the route changed (one bounded repush per route-changing back; T-5 watches). Resources has no Glasspane screen id: `app.open` selects that route before its deliberate handoff to the Files surface.
 5. Journal's landing hook + `glasspane-journal-landing` defcustom + its Settings row die behind the flag — the Agenda root IS the landing.
 
 **Gate:** arms: root-id-equals-agenda-push (bar tap truncates to root, never stacks); reset semantics (destination B removes destination A; drill preserved only within a destination); route honesty (verb-reached destination → its bar entry `:selected`; back → origin re-selected after the repush; boot-seed arm); `glasspane.home` resets to the Agenda root.
+
+> **PA-3b GATE COMPLETE 2026-08-16.** Agenda is now Glasspane's pinned
+> root in the active composition, with the former hub and Journal landing
+> machinery executable only through `glasspane-ui-legacy-ia`. The active
+> root is required so a clean reconnect replaces an older persisted
+> Glasspane snapshot before replay; the rollback hub remains non-required.
+> Agenda's opener uses the root's identical screen id for a one-push truncate;
+> Projects, Areas, Archive, Review, and saved-view opens share the
+> Glasspane-owned reset+push peer helper. Resources remains the intentional
+> native Files-surface handoff.
+>
+> Jetpacs gained one generic, policy-free seam:
+> `jetpacs-apps-note-route`. It validates an app/route pair and reports
+> whether that pair changed. Glasspane alone maps its screen ids to PARA
+> routes, records direct-verb navigation, and schedules one bounded repush
+> after a route-changing Companion-local Back. Transient details and search
+> drills leave their origin selected. The Agenda Saved page presents custom
+> agendas and saved views as separate registries and mints no Org token set.
+>
+> The downstream tablet profile now requires Glasspane and seeds
+> `(jetpacs-apps-seed-current "glasspane" "agenda")`; the generic tracked
+> `device/init.el` remains unaware of Glasspane. The managed installer
+> preserved that profile while deploying 129 Elisp files. Its numbered
+> `user.el.~1~` recovery copy remains on-device. The S11 Companion APK
+> prerequisite is deployed and byte-verified against the local BackHandler
+> build (SHA-256 `87077a52483932a193e3b14955801abc4700e2f142860d3a86fb2f03f010d96d`).
+> A privacy-preserving tablet spot arm then passed on the 800dp portrait
+> rail: force-stop/relaunch accepted `glasspane-agenda` as the initial view;
+> the Projects rail item opened `glasspane-projects`; Android Back returned
+> to `glasspane-agenda` without finishing the Activity and produced a fresh
+> surface state; Back at the Agenda root finished the Companion Activity;
+> relaunch resumed Agenda. The full cross-destination device batch and soak
+> remain at the PA-3 gate, as the rung table specifies.
+>
+> Evidence: the generic app suite passes **23/23**, the explicit PARA suite
+> passes **34/34**, and the legacy Glasspane suite passes **72/72**. Root
+> identity, active-required/legacy-non-required reconnect policy, same-id
+> truncation, peer-slot replacement, drill preservation,
+> route mapping/change bounds, both Saved registries, zero-token Saved
+> rendering, Journal rollback, and the profile seed are pinned. Warning-as-
+> error compilation, clean package installation, dependency layering, icon
+> lint, diff hygiene, and the full elevated `test/run-tests.sh` pass; the
+> runner exited **0**.
 
 ### PA-3c — Destination screens wired + slot/token audit
 

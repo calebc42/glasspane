@@ -66,7 +66,9 @@ nil means journal.org inside `org-directory'."
   :group 'jetpacs)
 
 (defcustom glasspane-journal-landing nil
-  "When non-nil the app opens on the Journal screen at session READY."
+  "Legacy-IA option to open Journal at session READY.
+The PARA composition always lands on its pinned Agenda root; this setting is
+surfaced and observed only while `glasspane-ui-legacy-ia' is non-nil."
   :type 'boolean :group 'jetpacs)
 
 (defconst glasspane-journal--screen-id "glasspane-journal"
@@ -412,7 +414,7 @@ the time any teardown runs, the entry has long finished loading."
   (remove-hook 'jetpacs-teardown-functions #'glasspane-journal--on-teardown))
 
 (defun glasspane-journal-register ()
-  "Register the journal verbs, the settings section, and the hooks.
+  "Register the journal verbs and rollback-only navigation hooks.
 Called from `glasspane-register', never at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces handlers and
 the registry entry in place."
@@ -431,12 +433,14 @@ the registry entry in place."
                        :doc "Append text to the current journal day."
                        :args '((:name value :type "text" :required t)
                                (:name date :type "date"))))
-  ;; The landing row registers with the app's CONSOLIDATED "Glasspane"
-  ;; section (glasspane-ui-register, §3 step 2): one app block on the
-  ;; Settings root, not three orphan single-entry headers.
-  (add-hook 'jetpacs-ready-functions #'glasspane-journal--apply-landing)
-  (add-hook 'jetpacs-shell-view-change-functions
-            #'glasspane-journal--on-view-change)
+  ;; PA-3b: Agenda is the real landing and the route-honesty subscriber owns
+  ;; view changes.  Keep both historical hooks solely in the reversible IA
+  ;; arm until the post-soak deletion rung.
+  (glasspane-journal-remove-hooks)
+  (when glasspane-ui-legacy-ia
+    (add-hook 'jetpacs-ready-functions #'glasspane-journal--apply-landing)
+    (add-hook 'jetpacs-shell-view-change-functions
+              #'glasspane-journal--on-view-change))
   (add-hook 'jetpacs-teardown-functions #'glasspane-journal--on-teardown))
 
 (defun glasspane-journal-unregister ()

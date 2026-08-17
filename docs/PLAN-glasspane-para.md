@@ -1,6 +1,6 @@
 # PLAN — Glasspane PARA: the fresh IA (Agenda-rooted, shared-bar, PARA-shaped)
 
-Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **73d0aa2** (PA-1 execution base on slop-fork/main; GR-7b complete). Written **2026-08-15**, navigation amended and PA-1 executed **2026-08-16**. Original line cites were verified at 8965e40; PA-1 mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
+Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **3ba0dd7** (PA-2a execution base on slop-fork/main; PA-1 complete). Written **2026-08-15**, navigation amended and PA-1/PA-2a executed **2026-08-16**. Original line cites were verified at 8965e40; PA-2a mechanisms and gates were re-verified at the execution base. PA-3b's S11 dependency is satisfied at the commit level; the APK deploy remains its device-side precondition.
 
 **Authority:** the ratified PARA vision (Caleb, 2026-08-15 — §0 verbatim) + the surviving machinery half of `docs/PLAN-glasspane-rework.md` (GR-0..GR-7, unchanged). Produced by a full planning workflow (3 exploration + 3 design agents, 2026-08-15); every mechanism claim was re-verified in-tree while drafting.
 
@@ -150,11 +150,29 @@ PARA assumptions; Glasspane consumes the seams at PA-3.
 
 App-side module (srs/notes shape, register/unregister from glasspane.el's sweep) — NOT glasspane-org.el (GR-3 moves generic extraction to org-mode; category-as-IA is a Glasspane opinion; recorded non-move keeps it out of GR-3's blast radius).
 
-1. **Extractor** `glasspane-areas--index`, memoised `(ebp-org-with-cache 'glasspane '(areas-index) …)`: over `(glasspane-org--agenda-scope)` (never the `org-agenda-files` FUNCTION — P1-7), per file under `ebp-org--with-clamped-io` with per-file `condition-case`-skip (the habits-walk discipline, jetpacs-org-habits.el:93-122): file-level `#+CATEGORY` via `org-collect-keywords` else basename-sans-extension; `org-map-entries "TODO<>\"\""` collecting the standard item alist + `(category . (org-get-category))` so inherited `:CATEGORY:` properties create their own buckets. **30.1 hazard:** stock `org-element.elc` mis-compiles the category cache-miss arm — apply the in-tree workaround (prime `org-element-at-point` at the keyword line, the glasspane-detail.el:1805-1814 recipe); the per-file skip is the backstop. Deliberately the file arm even when vulpea is up (the note index carries explicit drawer props only — an index arm would silently re-bucket the vault; documented at the arm).
-2. **Screens/verbs:** `areas.open` → list screen (name + open-TODO count + "N files", sorted); tap → `areas.drill :args (:category NAME)` — **plain string args, zero token sets for the list** (the `tasks.filter` precedent). `areas.drill` → Tier-1 peer screen (id `(jetpacs-wire-id "area" NAME)`; replacing the areas list in the destination slot is the views-open-replaces-views-hub precedent): section 1 = the category's TODO cards via the shared card builders + `glasspane-agenda--tokenize items "areas"` (mints the dialogs-owner twin too, keeping swipe-archive working); section 2 = the category's files, rows tapping `resources.open-file`, which delegates to the public Jetpacs Files host. Vanished category → empty state, never an error.
+1. **Extractor** `glasspane-areas--index`, memoised `(ebp-org-with-cache 'glasspane '(areas-index) …)`: over the public `glasspane-org-agenda-scope` alias to Jetpacs' canonical local scope (never a raw agenda-form call — P1-7), per file under `ebp-org--with-clamped-io` with per-file `condition-case`-skip (the habits-walk discipline, jetpacs-org-habits.el:93-122): file-level `#+CATEGORY` via `org-collect-keywords` else basename-sans-extension; `org-map-entries "TODO<>\"\""` collecting the standard item alist + `(category . (org-get-category))` so inherited `:CATEGORY:` properties create their own buckets. **30.1 hazard:** stock `org-element.elc` mis-compiles the category cache-miss arm — apply the in-tree workaround (prime `org-element-at-point` at the keyword line, the glasspane-detail.el:1805-1814 recipe); the per-file skip is the backstop. Deliberately the file arm even when vulpea is up (the note index carries explicit drawer props only — an index arm would silently re-bucket the vault; documented at the arm).
+2. **Screens/verbs:** `areas.open` → list screen (name + open-TODO count + "N files", sorted); tap → `areas.drill :args (:category NAME)` — **plain string args, zero token sets for the list** (the `tasks.filter` precedent). `areas.drill` → Tier-1 peer screen (id `(jetpacs-wire-id "area" NAME)`; replacing the areas list in the destination slot is the views-open-replaces-views-hub precedent): section 1 = the category's TODO cards via the shared card builders + public `glasspane-agenda-tokenize` over set `"areas"` (mints the dialogs-owner twin too, keeping swipe-archive working); section 2 = the category's files, rows tapping `resources.open-file`, which delegates to the public Jetpacs Files host. Vanished category → empty state, never an error.
 3. **Token budget:** +1 set ("areas") + its dialogs-owner twin — the ladder's whole net delta (§7).
 
 **Gate:** arms: bucket layering (keyword / inherited property / basename); rotten-file skip; string-arg drill round trip; empty-category degrade; grep-pin the module never calls `org-agenda-files` (the habits suite's pin pattern); 30.1 CATEGORY workaround arm.
+
+> **PA-2a GATE COMPLETE 2026-08-16.** The new app-side Areas module
+> indexes all three native Org category layers, preserves file-only areas,
+> counts only open TODO headings, skips malformed files locally, and memoises
+> the canonical local agenda scope. List routes use plain category strings;
+> drill cards use the public Agenda tokenizer, and file rows stage the public
+> `resources.open-file` contract for PA-2c. Public scope/tokenizer aliases keep
+> the implementation free of cross-module private calls. The staged
+> `areas.open` destination is deliberately absent from the legacy hub until
+> PA-3 performs the one-table navigation flip.
+>
+> Evidence: the explicit PARA suite is wired into the runner and passes
+> **8/8**; the legacy Glasspane suite passes **72/72**; the shared reminder /
+> scope suite passes **6/6**. The Emacs 30.1 category-cache arm, rotten-file
+> isolation, memoisation, serialization, vanished-category token sweep,
+> lifecycle, source-boundary, and layering pins all pass. Warning-as-error
+> compilation, package installation, diff hygiene, and the full elevated
+> `test/run-tests.sh` pass; the runner exited **0**. PA-2a has no device arm.
 
 ### PA-2b/2c — Resources + Archive (`emacs/apps/glasspane/glasspane-resources.el`, new; one wrapper action, one screen)
 

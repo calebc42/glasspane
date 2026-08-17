@@ -192,6 +192,10 @@ buffer's full text and modified state.  Return a freshly anchored ref."
   #'jetpacs-org-mode--agenda-scope
   "Delegate to Org Mode's canonical local agenda scope.")
 
+(defalias 'glasspane-org-agenda-scope
+  #'jetpacs-org-mode-agenda-scope
+  "Public downstream access to Jetpacs' canonical local agenda scope.")
+
 (defalias 'glasspane-org-agenda-items
   #'jetpacs-org-mode--agenda-items
   "Delegate to Org Mode's rich, memoised agenda extraction.")

@@ -223,6 +223,10 @@ previous render's tokens."
                   it)))
             items)))
 
+(defalias 'glasspane-agenda-tokenize
+  #'glasspane-agenda--tokenize
+  "Public shared-card tokenization for a Glasspane item list.")
+
 ;;;; Agenda navigation
 ;;
 ;; The agenda is anchored on a date (`glasspane-ui-agenda-anchor',

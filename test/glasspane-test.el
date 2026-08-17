@@ -4987,9 +4987,15 @@ rather than the hub (docs/CHROME-VOCABULARY.md: satellite screens live
 in Settings links, not the drawer).  Registered by glasspane-ef and
 glasspane-gallery at orders 81 and 84, beside the app's own 80.")
 
+(defconst glasspane-test--staged-opener-verbs '("areas.open")
+  "PARA screen openers registered before PA-3 exposes the new navigation.
+The staging list is deliberately explicit: PA-3 must empty it while moving
+each opener into the authoritative destination table.")
+
 (defconst glasspane-test--non-opening-verbs
   '("agenda.nav" "agenda.save-custom" "agenda.select-date"
     "agenda.set-mode" "agenda.set-month" "agenda.today" "config.sync"
+    "areas.drill"
     "demo.gallery.kind" "demo.gallery.level" "demo.gallery.point"
     "demo.setup" "demo.setup-org" "detail.planning.edit" "detail.save"
     "detail.toggle-read" "ef.load" "ef.mirror" "ef.option" "ef.random"
@@ -5097,6 +5103,7 @@ and a retired verb left in a list fails the other way."
   (let ((owned nil)
         (pinned (append glasspane-test--hub-verbs
                         glasspane-test--satellite-verbs
+                        glasspane-test--staged-opener-verbs
                         glasspane-test--non-opening-verbs)))
     (maphash (lambda (name _fn)
                (when (equal (jetpacs--owner-of "action" name) glasspane-owner)

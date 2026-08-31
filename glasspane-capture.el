@@ -314,9 +314,11 @@ place."
         ;; by the COMPANION, not by one of this app's surfaces, so its wire
         ;; surface may legitimately be a string glasspane does not own.
         (jetpacs-defaction "share.text" #'glasspane-capture--on-share
-                           :any-surface t)
+                           :any-surface t
+                           :doc "Capture text received from the Android share sheet")
         (jetpacs-defaction "org.capture.share" #'glasspane-capture--on-share
-                           :any-surface t))
+                           :any-surface t
+                           :doc "Replay the legacy share-text capture action"))
     ;; A live flag flip retires legacy handlers and volatile state.  The
     ;; canonical upstream handlers already occupying these names are untouched
     ;; because each removal is guarded by handler identity.

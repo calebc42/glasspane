@@ -484,7 +484,7 @@ anchor to navigate."
         (unless (equal (substring anchor 0 7) (format-time-string "%Y-%m"))
           (jetpacs-row
            (jetpacs-spacer :weight 1)
-           (jetpacs-assist-chip "Today" :icon "today"
+           (jetpacs-material3-assist-chip "Today" :icon "today"
                                 :on-tap (jetpacs-action "agenda.today"))))
       (glasspane-agenda--nav-row mode anchor)))
    ((member mode '("day" "week"))
@@ -748,8 +748,10 @@ place and the hooks are add-hook-deduplicated."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "agenda.open" #'glasspane-agenda--on-open
                        :doc "Open the agenda screen")
-    (jetpacs-defaction "agenda.set-mode" #'glasspane-agenda--on-set-mode)
-    (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav))
+    (jetpacs-defaction "agenda.set-mode" #'glasspane-agenda--on-set-mode
+                       :doc "Select the active agenda mode")
+    (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav
+                       :doc "Move the agenda anchor within its active span"))
   (remove-hook 'jetpacs-shell-after-push-hook
                #'glasspane-agenda--sync-reminders)
   (when (and glasspane-agenda-reminders-enabled

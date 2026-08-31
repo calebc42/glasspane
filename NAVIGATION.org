@@ -1,0 +1,106 @@
+#+title: Glasspane Navigation Contract
+
+* The rule
+
+Glasspane has one document presentation route. Features may discover a
+document in different ways, but they do not get to invent a destination UI.
+
+#+begin_example
+Project / Agenda / Note
+        |
+        | durable Glasspane heading token
+        v
+  heading.visit -- resolve immediately --> (path, position) --+
+                                                               |
+Resource / breadcrumb                                          |
+        | validated path                                       v
+        +--> glasspane.document.open -----------------> open-document
+                                                               |
+                                                               v
+                app:jetpacs.files / edit / Glasspane Org reader
+                staged files-return / glasspane.files.return
+#+end_example
+
+The convergence point is =glasspane-navigation-open-document= in
+=glasspane-navigation.el=. It fixes all presentation choices:
+
+- the owning surface is =app:jetpacs.files=;
+- regular files use Files' one shared =edit= document host;
+- Org files start in Glasspane's tree reader with stale filters cleared;
+- =files-return= is staged below the document; and
+- Back uses =glasspane.files.return= to restore Glasspane's untouched stack.
+
+That last property is important. Opening a Project TODO must not turn the
+current route into Resources, and opening a Resource must not manufacture a
+Project detail stack. Both temporarily use the same Files host, then return to
+the place from which the user left.
+
+* Why two opening actions remain
+
+The actions before the convergence point express authority, not presentation.
+
+| Entry point | Wire action | Authority | Stale behavior |
+|-------------+-------------+-----------+----------------|
+| Project, Agenda, Notes, heading source | =heading.visit= | app-scoped =ebp-org= token | token resolution returns =stale= after the rendered identity expires |
+| Resource row, file breadcrumb | =glasspane.document.open= | path | Files canonicalizes and revalidates the path against its effective roots |
+
+A heading card must not serialize a raw buffer position: edits can move the
+heading between render and tap. A file row must not mint an imaginary heading
+identity. Their handlers therefore remain small adapters and both call the
+same presenter after validation.
+
+=detail.open-file=, =resources.open-file=, and =resources.return= remain
+registered only so an already-rendered or cached specification from an older
+Glasspane version can finish safely. No current builder emits them. Their
+handlers delegate to the canonical implementations and may be removed only
+after the product's cached-spec compatibility window is explicitly retired.
+
+* Adding an entry point
+
+1. Decide what durable authority the row actually has.
+2. For a heading token, render
+   =glasspane-navigation-heading-action=. For a path, render
+   =glasspane-navigation-document-action=.
+3. If a new authority type is genuinely necessary, validate and resolve it in
+   a tiny handler, producing only =(path, optional-position)=, then call
+   =glasspane-navigation-open-document=.
+4. Do not call =jetpacs-files-open-path=, =jetpacs-navigate-buffer=, or
+   =jetpacs.files.open= from the feature.
+5. Add the builder and adapter to
+   =test/glasspane-navigation-test.el=.
+
+The test suite also scans the flat applet sources and fails if any file other
+than =glasspane-navigation.el= calls =jetpacs-files-open-path=. This is the
+mechanical guard against presentation policy spreading back into features.
+
+The historical
+=poc/v3-pre-split:test/glasspane-para-test.el::glasspane-para-pa3c-mark-position-navigation-family=
+still describes the retired Glasspane-local =jetpacs-navigate-buffer= drill.
+Glasspane is downstream now; that upstream POC test is migration evidence, not
+the applet's current contract. Do not restore its expectation. The owned suite
+in this directory supersedes it.
+
+* What the tooling can and cannot prove
+
+The static applet MCP inventories owners, actions, roots, dependencies,
+docstrings, and lifecycle symmetry without executing Glasspane. That catches
+many structural mistakes, but two individually valid handlers can still
+choose different screens. The focused ERT suite supplies that semantic proof:
+it evaluates the real builders, verifies both authority adapters converge, and
+pins the exact Files/reader/Back policy.
+
+The trusted runtime MCP then loads this explicitly trusted applet and checks
+that selected builders return the same canonical IR twice in the same bounded
+context. Deterministic rendering makes a difference inspectable; it does not
+replace the navigation contract or the device flow that proves native Back and
+chrome behavior.
+
+* Development and deployment
+
+This source checkout contains older neighboring =.elc= artifacts. They are not
+source authority and applet work must not overwrite them incidentally. A
+development load must bind =load-prefer-newer= to non-nil, as the focused ERT
+and trusted-runtime commands do. A packaged deployment must omit old bytecode
+or compile the current =.el= bundle afresh; otherwise ordinary =require= will
+load the stale entry file and the new navigation module will not exist in that
+session.

@@ -24,7 +24,7 @@
 ;;   checkboxes/tables/emphasis inside the reader (open question 2).
 ;; - `:strike' on done titles: RichSpan has no member (gap #7) — the
 ;;   keyword keeps its done green, the title degrades to
-;;   on_surface_variant.
+;;   the neutral on_surface role.
 ;; - The menu's Priority…/Schedule…/Deadline…/Tags… prompt rows: those
 ;;   arms are retired wholesale to the shipped foundation dialogs; one
 ;;   "Org actions…" row rides `jetpacs.org.heading' (the base sheet
@@ -231,8 +231,8 @@ overdue; the clocked total renders as h:mm."
   "The structured header for tree node N.
 Todo keyword and priority render as colored spans, tags become tappable
 chips, and deadline/clocked badges follow on their own line.  A done
-title takes on_surface_variant — the gap #7 degrade, RichSpan having no
-strike member.  Falls back to raw org markup when the heading didn't
+title takes the neutral on_surface role — the gap #7 degrade, RichSpan
+having no strike member.  Falls back to raw org markup when the heading didn't
 parse (no title)."
   (let ((todo (plist-get n :todo))
         (priority (plist-get n :priority))
@@ -256,13 +256,13 @@ parse (no title)."
                                            :color glasspane-org-reader--priority-color))
                            (if done
                                (jetpacs-span title
-                                             :color "on_surface_variant")
+                                             :color "on_surface")
                              (jetpacs-span title))))))
              (meta (glasspane-org-reader--meta-line n))
              (tag-row (when tags
                         (apply #'jetpacs-flow-row
                                (mapcar (lambda (tg)
-                                         (jetpacs-assist-chip
+                                         (jetpacs-material3-assist-chip
                                           tg :on-tap (jetpacs-action
                                                       "search.by-tag"
                                                       :args (list :tag tg))))
@@ -741,7 +741,7 @@ error."
                                   path :gp-filter-total 0))
                          :style "caption")
                         :weight 1)
-                       (jetpacs-assist-chip
+                       (jetpacs-material3-assist-chip
                         "Clear"
                         :on-tap (jetpacs-action "files.filter"
                                                 :args (list :path path
@@ -793,12 +793,7 @@ ride this presentation: the in-body ONE-grammar filter owns tree search."
        :content-description
        (if (eq (glasspane-org-reader--fold-mode path) 'refile)
            "Reader" "Refile"))
-      (when (jetpacs-reader-org--encrypted-p path)
-        (jetpacs-icon-button
-         "lock_open"
-         (jetpacs-action "jetpacs.reader.org.decrypt"
-                         :args (list :path path))
-         :content-description "Decrypt Org Crypt entries"))))))
+      nil))))
 
 (defun glasspane-org-reader--adapter-transition (path presentation)
   "Apply the stock Org transition discipline to PATH and PRESENTATION."
@@ -886,10 +881,12 @@ body/actions claimant; this app replaces the stock adapter in the stable
                        :doc "Long-press sheet: the app's per-heading delta")
     (jetpacs-defaction "files.filter"
                        #'glasspane-org-reader--on-files-filter
-                       :any-surface t)
+                       :any-surface t
+                       :doc "Filter the current Org document with one grammar")
     (jetpacs-defaction "files.toggle-refile"
                        #'glasspane-org-reader--on-toggle-refile
-                       :any-surface t)
+                       :any-surface t
+                       :doc "Toggle the current document's tree/refile presentation")
     (jetpacs-defaction "heading.reorder"
                        #'glasspane-org-reader--on-reorder
                        :any-surface t

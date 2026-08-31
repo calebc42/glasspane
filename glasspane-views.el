@@ -34,7 +34,7 @@
 ;;   view fabric.
 ;; - `jetpacs-node-or' (T2): `jetpacs-node-advertised-p' conditionals.
 ;; - `:strike'/`:tag' span members (T3, FOUNDATION-GAPS #7): done rows
-;;   degrade to on_surface_variant color; tag spans style with
+;;   degrade to the neutral on_surface color; tag spans style with
 ;;   `:color' + `:on-tap'.
 ;; - Explicit `:when-offline "drop"' (T4, the default); the four queue
 ;;   sites carry `:ttl-s' now — build-time errors replaced silent drops.
@@ -174,7 +174,7 @@ feeds both table cells and `jetpacs-rich-text' cards."
           (list (glasspane-views--priority-span (alist-get 'priority item))
                 (jetpacs-span headline
                               :color (and (glasspane-views--done-p item)
-                                          "on_surface_variant"))))))
+                                          "on_surface"))))))
 
 (defun glasspane-views--tag-action (tag)
   "The tap action shared by tag spans and chips: search by TAG."
@@ -196,7 +196,7 @@ feeds both table cells and `jetpacs-rich-text' cards."
   (when-let* ((tags (append (alist-get 'tags item) nil)))
     (apply #'jetpacs-flow-row
            (mapcar (lambda (tg)
-                     (jetpacs-assist-chip
+                     (jetpacs-material3-assist-chip
                       tg :on-tap (glasspane-views--tag-action tg)))
                    tags))))
 
@@ -327,7 +327,7 @@ visible without a widget-side indent (the reader's rule)."
           (jetpacs-table-cell
            (list (jetpacs-span (or (alist-get 'todo item) "")
                                :color (and (glasspane-views--done-p item)
-                                           "on_surface_variant"))))
+                                           "on_surface"))))
           (jetpacs-table-cell
            (list (jetpacs-span (or (ebp-org-ts-date
                                     (alist-get 'scheduled item))
@@ -873,14 +873,18 @@ place."
      :doc "Deprecated alias opening Agenda's Saved page")
     (jetpacs-defaction "views.open" #'glasspane-views--on-open
                        :doc "Open a saved view by name")
-    (jetpacs-defaction "views.reorder" #'glasspane-views--on-reorder)
+    (jetpacs-defaction "views.reorder" #'glasspane-views--on-reorder
+                       :doc "Toggle drag reordering for a saved list view")
     (jetpacs-defaction "views.cal.select-date"
-                       #'glasspane-views--on-cal-select-date)
+                       #'glasspane-views--on-cal-select-date
+                       :doc "Select a day in a saved calendar view")
     (jetpacs-defaction "views.cal.set-month"
-                       #'glasspane-views--on-cal-set-month)
+                       #'glasspane-views--on-cal-set-month
+                       :doc "Set a saved calendar view's displayed month")
     (jetpacs-defaction "views.rendering" #'glasspane-views--on-rendering
                        :doc "Switch a saved view's rendering (list/board/calendar)")
-    (jetpacs-defaction "views.save" #'glasspane-views--on-save)
+    (jetpacs-defaction "views.save" #'glasspane-views--on-save
+                       :doc "Create or replace a saved view from reconciled fields")
     (jetpacs-defaction "views.delete" #'glasspane-views--on-delete
                        :doc "Delete a saved view by name")))
 

@@ -12,7 +12,7 @@
 (require 'glasspane)
 
 (defconst glasspane-test--source-directory
-  (expand-file-name "../emacs/apps/glasspane"
+  (expand-file-name ".."
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The Glasspane source directory inspected by architectural gates.")
 
@@ -58,24 +58,30 @@ the next live call."
                     violations))))))
     (should-not (nreverse violations))))
 
-(ert-deftest glasspane-test-gr7a-source-severance ()
-  "The retired app helper stays absent and generic satellites stay upstream."
+(ert-deftest glasspane-test-ef-module-boundary ()
+  "EF is Glasspane-owned while Jetpacs exposes only a neutral provider seam."
   (dolist (file (directory-files glasspane-test--source-directory t
                                  "\\.el\\'"))
     (with-temp-buffer
       (insert-file-contents file)
       (should-not (search-forward "glasspane-ui--defer-refresh" nil t))))
-  (dolist (name '("glasspane-ef.el" "glasspane-gallery.el"))
-    (should-not (file-exists-p
-                 (expand-file-name name glasspane-test--source-directory))))
-  (dolist (file (list (expand-file-name
-                       "../ef-themes/jetpacs-ef-themes.el"
-                       glasspane-test--source-directory)
-                      (expand-file-name "../../jetpacs-gallery.el"
+  (let ((ef-file (expand-file-name "glasspane-ef.el"
+                                   glasspane-test--source-directory))
+        (modus-file (expand-file-name "../jetpacs/emacs/jetpacs-modus.el"
+                                      glasspane-test--source-directory))
+        (gallery-file (expand-file-name "../jetpacs/emacs/jetpacs-gallery.el"
                                         glasspane-test--source-directory)))
-    (should (file-readable-p file))
+    (dolist (file (list ef-file modus-file gallery-file))
+      (should (file-readable-p file)))
     (with-temp-buffer
-      (insert-file-contents file)
+      (insert-file-contents ef-file)
+      (should (search-forward "jetpacs-modus-register-theme-provider" nil t)))
+    (with-temp-buffer
+      (insert-file-contents modus-file)
+      (should-not (search-forward "ef.show" nil t))
+      (should-not (search-forward "ef-themes" nil t)))
+    (with-temp-buffer
+      (insert-file-contents gallery-file)
       (let ((case-fold-search t))
         (should-not (search-forward "glasspane" nil t))))))
 
@@ -129,16 +135,14 @@ whatever `glasspane-register' names as root must build offline and serialize."
 Sibling modules register through `glasspane-register', while the native Org
 clock owner must survive.  Re-registration restores the app so suite order
 never matters."
-  (require 'jetpacs-ef-themes)
   (require 'jetpacs-gallery)
-  (jetpacs-ef-themes-register)
   (jetpacs-gallery-register)
   (let ((verbs '("glasspane.home"
-                 "config.sync" "glasspane.packages.install"))
+                 "config.sync" "glasspane.packages.install"
+                 "ef.show" "ef.option"))
         (native-clock-verbs
          '("org.clock.out" "org.clock.switch" "org.clock.in-last"))
-        (upstream-verbs '("ef.show" "ef.option"
-                          "demo.gallery" "demo.gallery.level")))
+        (upstream-verbs '("demo.gallery" "demo.gallery.level")))
     ;; GR-5: the clock machinery is upstream and must survive a downstream
     ;; app unregister just as the foundation's Org settings do.
     (dolist (name native-clock-verbs)
@@ -165,6 +169,9 @@ never matters."
             (should (string-prefix-p
                      "jetpacs."
                      (jetpacs--owner-of "action" name))))
+          (should-not
+           (cl-find #'glasspane-ef--theme-provider-link
+                    jetpacs-modus-theme-provider-links :key #'cadr))
           ;; §3 step 2: the app's ONE consolidated section sweeps with
           ;; it — and the foundation's org sections must SURVIVE the
           ;; app's unregister (they are not glasspane's to sweep).
@@ -176,6 +183,8 @@ never matters."
     (dolist (name verbs)
       (should (gethash name jetpacs-action-handlers))
       (should (equal (jetpacs--owner-of "action" name) glasspane-owner)))
+    (should (= 1 (cl-count #'glasspane-ef--theme-provider-link
+                           jetpacs-modus-theme-provider-links :key #'cadr)))
     (should (alist-get "Glasspane" jetpacs-settings-registry
                        nil nil #'equal))))
 
@@ -988,28 +997,37 @@ the symbol's boolean custom-type is what derives its switch."
 ;;;; G3 — keystone: glasspane-ui.el
 
 (ert-deftest glasspane-test-ui-settings-nodes ()
-  "Settings body shapes: the app screen is the saved searches ALONE
-after §3 step 2 (the TODO/tags editors are the foundation's Org
-workflow satellite now — jetpacs-org-settings-test.el owns them), and
-the body, the satellite link, and the pushed screen all round-trip
-the canonical wire encoding."
+  "Settings body shapes: Area membership, confirmed demo generators, and
+saved searches stay app opinions; flat TODO/tag editors remain in Org workflow."
   (require 'glasspane-ui)
-  (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand"))))
+  (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")))
+        (org-tag-alist '((:startgrouptag) ("Area") (:grouptags)
+                         ("House") ("Auto") (:endgrouptag))))
     (let* ((body (glasspane-ui--settings-body))
            (json (jetpacs-node->canonical-json body)))
       (should (equal (plist-get body :t) "lazy_column"))
+      (should (string-search "Area Tags" json))
+      (should (string-search "House" json))
+      (should (string-search "Auto" json))
+      (should (string-search "settings.areas.save" json))
+      (should (string-search "Demo Content" json))
+      (should (string-search "demo.setup-org" json))
+      (should (string-search "demo.setup" json))
+      (should (string-search "Regenerate Org demo?" json))
+      (should (string-search "glasspane-demo-*" json))
       (should (string-search "Errands" json))
       (should (string-search "tags:errand" json))
       (should (string-search "settings.agenda.edit" json))
       (should (string-search "settings.agenda.delete" json))
-      ;; The moved editors must NOT resurface here.
+      ;; The generic moved editors must NOT resurface here.
       (should-not (string-search "Sequence 1" json))
       (should-not (string-search "settings.todo" json))
       (should-not (string-search "org-tags" json)))
     (let ((json (jetpacs-node->canonical-json
                  (glasspane-ui--settings-link))))
       (should (string-search "glasspane.settings.open" json))
-      (should (string-search "Saved searches" json)))
+      (should (string-search
+               "Area tags, demo content, and saved searches" json)))
     (let ((screen (glasspane-ui--settings-screen nil)))
       (should (equal (plist-get screen :t) "scaffold"))
       (should (stringp (jetpacs-node->canonical-json screen))))))
@@ -1112,6 +1130,21 @@ the registry."
               ;; (The settings.tags / settings.todo.* arms left with §3
               ;; step 2 — jetpacs-org-settings-test.el covers the
               ;; foundation's jetpacs.org.* family now.)
+              ;; The app-owned Area subset writes one native tag group.
+              (should (eq (run "settings.areas.save"
+                               '(:value ["House" "Auto"]))
+                          'accepted))
+              (should (equal
+                       (jetpacs-org-settings-tag-group-members "Area")
+                       '("House" "Auto")))
+              (should (assq 'org-tag-alist saved))
+              (should (eq (run "settings.areas.save"
+                               '(:value ["Bad Tag"]))
+                          'rejected))
+              (should (eq (run "settings.areas.save" '(:value []))
+                          'accepted))
+              (should-not
+               (jetpacs-org-settings-tag-group-members "Area"))
               ;; settings.agenda.edit: dialog verb — no-client refusal.
               (should (eq (run "settings.agenda.edit" '(:name 42)) 'rejected))
               (should (eq (run "settings.agenda.edit" '(:name "Errands"))
@@ -1394,7 +1427,7 @@ signalling out of the builder."
               (should (string-search "Remember the roses." json))
               (should (string-search "\"syntax\":\"org\"" json))
               ;; Done title: color degrade, never :strike (gap #7).
-              (should (string-search "on_surface_variant" json))
+              (should (string-search "on_surface" json))
               (should-not (string-search "strike" json))
               ;; Tag chips ride search.by-tag.
               (should (string-search "search.by-tag" json)))
@@ -1831,7 +1864,7 @@ wire encoding."
       (should (string-search "\"token\":\"tok-arch\"" json))
       (should (string-search "Archive this subtree?" json))
       ;; The done title takes the color degrade (gap #7), never strike.
-      (should (string-search "on_surface_variant" json))
+      (should (string-search "on_surface" json))
       (should-not (string-search "strike" json))
       (should (string-search "search.by-tag" json)))
     ;; No tokens -> a static card: no tap, no long-tap, no swipes.
@@ -1847,6 +1880,7 @@ wire encoding."
                   '(:file "/v/tasks.org" :clocked-in nil)
                   '(:main "detail-token"))))))
     (should (string-search "detail.open-file" json))
+    (should (string-search "\"open_surface\":\"app:jetpacs.files\"" json))
     (should (string-search "open_in_new" json))
     (should (string-search "Open in file" json))
     (should (string-search "detail-token" json)))
@@ -2869,7 +2903,7 @@ all pure, over fixture alists."
                           (priority . "B")))))
             (should (= (length spans) 2))
             (should (equal (plist-get (cadr spans) :color)
-                           "on_surface_variant"))))
+                           "on_surface"))))
       (setq-default org-done-keywords old))))
 
 (ert-deftest glasspane-test-views-rendering-roundtrip ()
@@ -4479,7 +4513,8 @@ day-named date as one block with the day name recomputed in the C
 locale, whatever follows the date (times, repeater cookies) rides
 along unchanged, and the fixed-width stamp keeps table alignment
 intact."
-  (let ((content (cdr (assoc "trackers.org" glasspane-demo--org-files))))
+  (let ((content (cdr (assoc "glasspane-demo-trackers.org"
+                             glasspane-demo--org-files))))
     (should (equal (glasspane-demo--shift-timestamps content 0) content)))
   (let* ((sample (concat "DEADLINE: <2026-07-06 Mon>\n"
                          "SCHEDULED: <2026-07-05 Sun +1w>\n"
@@ -4502,19 +4537,20 @@ intact."
     (should (string-search "| [2026-07-01 Wed] |       40 |" shifted))))
 
 (ert-deftest glasspane-test-demo-seed ()
-  "Corpus seeding over a throwaway vault: both write targets derive
-from the roots defcustoms (never hardcoded paths — the G8 rule),
-every written file re-reads as parseable org INSIDE the ebp-org
-allowlist, the corpus's IDs are unique across files (id: links must
-land on exactly one entry), and the anchor-dated stamp lands on the
-day the seed ran."
+  "The regenerated corpus is namespaced, parseable, and representative.
+It preserves an ordinary inbox, declares native Areas (including House+Bills
+and Auto+Bills intersections), exercises the TODO workflow and sibling
+archives, keeps IDs unique, and shifts its anchor stamp onto the setup day."
   (let* ((vault (make-temp-file "glasspane-demo-vault" t))
          (org-directory (file-name-as-directory vault))
          (org-agenda-files nil)
          (ebp-org-roots nil)
+         (sentinel (expand-file-name "inbox.org" vault))
          (ids nil))
     (unwind-protect
         (progn
+          (should (commandp 'glasspane-demo-setup))
+          (should (commandp 'glasspane-demo-setup-org))
           ;; The org-target derivation, both arms: nil roots fall
           ;; through to `org-directory'; an explicit head anchors to it.
           (should (equal (glasspane-demo--org-target) org-directory))
@@ -4527,8 +4563,19 @@ day the seed ran."
           (should (equal glasspane-demo-directory
                          (expand-file-name "glasspane-demo"
                                            jetpacs-files-default-dir)))
+          ;; The on-device buttons are easy to reach, so fixture names are a
+          ;; runtime safety boundary: never replace a plausible real file.
+          (write-region "#+TITLE: My real inbox\n" nil sentinel nil 'silent)
+          (dolist (spec glasspane-demo--org-files)
+            (should (glasspane-demo--safe-org-filename-p (car spec))))
+          (let ((glasspane-demo--org-files '(("inbox.org" . "unsafe"))))
+            (should-error (glasspane-demo-setup-org)))
           (let ((dir (glasspane-demo-setup-org)))
             (should (equal dir org-directory))
+            (should (equal (with-temp-buffer
+                             (insert-file-contents sentinel)
+                             (buffer-string))
+                           "#+TITLE: My real inbox\n"))
             (dolist (spec glasspane-demo--org-files)
               (let ((file (expand-file-name (car spec) dir)))
                 (should (file-exists-p file))
@@ -4545,6 +4592,61 @@ day the seed ran."
                   (while (re-search-forward
                           "^[ \t]*:ID: +\\(\\S-+\\)[ \t]*$" nil t)
                     (push (match-string 1) ids)))))
+            ;; Reset means reset even when one generated file is open and
+            ;; locally modified; the refreshed buffer must match durable disk.
+            (let* ((guide-file
+                    (expand-file-name "glasspane-demo-guide.org" dir))
+                   (guide-buffer (find-file-noselect guide-file)))
+              (with-current-buffer guide-buffer
+                (erase-buffer)
+                (insert "locally mangled demo")
+                (set-buffer-modified-p t))
+              (glasspane-demo-setup-org dir)
+              (with-current-buffer guide-buffer
+                (should-not (buffer-modified-p))
+                (should (string-prefix-p "#+TITLE: Exploring Glasspane"
+                                         (buffer-string)))))
+            ;; FILETAGS supplies file/heading inheritance for Health.
+            (let* ((health-file
+                    (expand-file-name "glasspane-demo-health.org" dir))
+                   (health (glasspane-areas--scan-file health-file)))
+              (should (member "Health" (plist-get health :areas)))
+              (should (equal (plist-get health :file-areas) '("Health"))))
+            ;; Heading-local members demonstrate both example intersections.
+            (let* ((tracker-file
+                    (expand-file-name "glasspane-demo-trackers.org" dir))
+                   (scan (glasspane-areas--scan-file tracker-file))
+                   (items (plist-get scan :items))
+                   (grocery
+                    (cl-find "Weekly grocery run" items
+                             :key (lambda (item) (alist-get 'headline item))
+                             :test #'equal))
+                   (insurance
+                    (cl-find "Call the insurance company about the claim"
+                             items
+                             :key (lambda (item) (alist-get 'headline item))
+                             :test #'equal)))
+              (should (equal (append (alist-get 'areas grocery) nil)
+                             '("House" "Bills")))
+              (should (equal (append (alist-get 'areas insurance) nil)
+                             '("Auto" "Bills"))))
+            ;; The Projects source advertises every primary workflow state,
+            ;; including the NEXT/WAITING chips missing from the old corpus.
+            (let ((keywords
+                   (glasspane-projects--file-todo-keywords
+                    (expand-file-name "glasspane-demo-projects.org" dir))))
+              (dolist (keyword '("TODO" "NEXT" "WAITING"
+                                 "DONE" "CANCELLED"))
+                (should (member keyword keywords))))
+            ;; A sibling _archive is discoverable from its source Resource.
+            (let ((archives
+                   (glasspane-resources-archives-for-files
+                    (list (expand-file-name
+                           "glasspane-demo-projects.org" dir)))))
+              (should (= (length archives) 1))
+              (should (string-suffix-p
+                       "glasspane-demo-projects.org_archive"
+                       (plist-get (car archives) :path))))
             ;; Unique-ID lint across the whole corpus.
             (should (> (length ids) 0))
             (should (= (length ids)
@@ -4557,8 +4659,13 @@ day the seed ran."
                                (format-time-string "%Y-%m-%d %a")))
                      (with-temp-buffer
                        (insert-file-contents
-                        (expand-file-name "inbox.org" dir))
+                        (expand-file-name "glasspane-demo-inbox.org" dir))
                        (buffer-string))))))
+      (dolist (buffer (buffer-list))
+        (when-let* ((file (buffer-file-name buffer))
+                    ((file-in-directory-p file vault)))
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer)))
       (delete-directory vault t))))
 
 (ert-deftest glasspane-test-demo-handlers ()
@@ -4600,7 +4707,7 @@ squatting where the target directory must go) notifies, then answers
                 (ebp-org-roots nil))
             (should (eq (funcall setup-org nil params) 'accepted))
             (should (file-exists-p
-                     (expand-file-name "health.org" vault))))
+                     (expand-file-name "glasspane-demo-health.org" vault))))
           (should (= pushes 0))
           (should (= (length continuations) 1))
           (funcall (car continuations))
@@ -4622,43 +4729,51 @@ squatting where the target directory must go) notifies, then answers
       (delete-directory tour t)
       (delete-directory vault t))))
 
-;;;; G8 — satellites: jetpacs-ef-themes.el (the theme-picker scaffold it
+;;;; G8 — satellites: glasspane-ef.el (the theme-picker scaffold it
 ;;;; instantiates is foundation since the §3 step-3 promotion; the
 ;;;; scaffold-alone coverage moved with it, test/jetpacs-theme-picker-test.el)
 
 (ert-deftest glasspane-test-ef-absent-paths ()
   "The DEFAULT suite path — ef-themes absent — is the real guard
 coverage: `--available-p' reads only theme names, the not-installed
-body delegates to the native package browser, and ef.load
+body delegates to Glasspane's package installer, and ef.load
 answers `rejected' for a malformed shape, an absent package, an
 unknown theme, and a load that SIGNALS — never a swallowed
 `accepted'."
-  (require 'jetpacs-ef-themes)
-  (jetpacs-ef-themes-register)
+  (require 'glasspane-ef)
+  (glasspane-ef-register)
   (should (gethash "ef.load" jetpacs-action-handlers))
+  (should (equal (mapcar (lambda (arg) (plist-get arg :name))
+                         (plist-get (jetpacs-action-schema "ef.load") :args))
+                 '(theme)))
+  (should (equal (mapcar (lambda (arg) (plist-get arg :name))
+                         (plist-get (jetpacs-action-schema "ef.option") :args))
+                 '(name value)))
   ;; Availability is a pure read over the theme registry.
   (cl-letf (((symbol-function 'custom-available-themes)
              (lambda () '(modus-operandi tango))))
-    (should-not (jetpacs-ef-themes--available-p)))
+    (should-not (glasspane-ef--available-p)))
   (cl-letf (((symbol-function 'custom-available-themes)
              (lambda () (list 'modus-operandi (intern "ef-day")))))
-    (should (jetpacs-ef-themes--available-p)))
-  ;; The handoff tracks the package browser's verb, both ways.  The
+    (should (glasspane-ef--available-p)))
+  ;; The handoff tracks Glasspane's package-install verb, both ways.  The
   ;; handler entry is restored by direct puthash so the claim records
   ;; are never touched.
-  (let ((show (gethash "packages.show" jetpacs-action-handlers)))
-    (should show)
-    (let ((json (jetpacs-node->canonical-json (jetpacs-ef-themes--not-installed))))
-      (should (string-search "\"action_label\":\"Open Packages\"" json))
-      (should (string-search "packages.show" json)))
+  (let ((install (gethash "glasspane.packages.install"
+                          jetpacs-action-handlers)))
+    (should install)
+    (let ((json (jetpacs-node->canonical-json (glasspane-ef--not-installed))))
+      (should (string-search "\"action_label\":\"Install\"" json))
+      (should (string-search "glasspane.packages.install" json)))
     (unwind-protect
         (progn
-          (remhash "packages.show" jetpacs-action-handlers)
+          (remhash "glasspane.packages.install" jetpacs-action-handlers)
           (let ((json (jetpacs-node->canonical-json
-                       (jetpacs-ef-themes--not-installed))))
+                       (glasspane-ef--not-installed))))
             (should-not (string-search "action_label" json))
             (should (string-search "isn't installed" json))))
-      (puthash "packages.show" show jetpacs-action-handlers)))
+      (puthash "glasspane.packages.install" install
+               jetpacs-action-handlers)))
   ;; ef.load statuses.  Stubbing an unbound ef-themes function via
   ;; cl-letf restores its unboundness on exit (the srs org-srs-*
   ;; precedent).
@@ -4669,58 +4784,62 @@ unknown theme, and a load that SIGNALS — never a swallowed
               ((symbol-function 'jetpacs-flow-continue)
                (lambda (fn) (push fn continuations) nil)))
       ;; Malformed shape: no :theme.
-      (should (eq (jetpacs-ef-themes--on-load '(:other "x") nil) 'rejected))
+      (should (eq (glasspane-ef--on-load '(:other "x") nil) 'rejected))
       ;; Package absent.
-      (cl-letf (((symbol-function 'jetpacs-ef-themes--ensure) (lambda () nil)))
-        (should (eq (jetpacs-ef-themes--on-load '(:theme "ef-day") nil)
+      (cl-letf (((symbol-function 'glasspane-ef--ensure) (lambda () nil)))
+        (should (eq (glasspane-ef--on-load '(:theme "ef-day") nil)
                     'rejected))
         (should (string-search "not installed" (car notified))))
-      (cl-letf (((symbol-function 'jetpacs-ef-themes--ensure) (lambda () t))
-                ((symbol-function 'jetpacs-ef-themes--themes)
+      (cl-letf (((symbol-function 'glasspane-ef--ensure) (lambda () t))
+                ((symbol-function 'glasspane-ef--themes)
                  (lambda () themes)))
         ;; Unknown theme -> rejected (the gate's named arm).
-        (should (eq (jetpacs-ef-themes--on-load '(:theme "ef-nope") nil)
+        (should (eq (glasspane-ef--on-load '(:theme "ef-nope") nil)
                     'rejected))
         (should (string-search "Unknown ef theme: ef-nope" (car notified)))
         ;; A load that lands -> accepted, refresh deferred.
         (cl-letf (((symbol-function 'ef-themes-load-theme)
                    (lambda (theme &optional _) (push theme loaded))))
-          (should (eq (jetpacs-ef-themes--on-load '(:theme "ef-day") nil)
+          (should (eq (glasspane-ef--on-load '(:theme "ef-day") nil)
                       'accepted))
           (should (equal loaded (list (intern "ef-day"))))
           (should continuations))
         ;; A load that SIGNALS -> rejected, error labeled not swallowed.
         (cl-letf (((symbol-function 'ef-themes-load-theme)
                    (lambda (&rest _) (error "boom"))))
-          (should (eq (jetpacs-ef-themes--on-load '(:theme "ef-day") nil)
+          (should (eq (glasspane-ef--on-load '(:theme "ef-day") nil)
                       'rejected))
           (should (string-search "Ef theme:" (car notified))))
         ;; The surprise loaders share the contract: absent fn ->
         ;; rejected; present -> accepted.
-        (should (eq (jetpacs-ef-themes--on-random nil nil) 'rejected))
+        (should (eq (glasspane-ef--on-random nil nil) 'rejected))
         (cl-letf (((symbol-function 'ef-themes-load-random)
                    (lambda (&optional _) nil)))
-          (should (eq (jetpacs-ef-themes--on-random nil nil) 'accepted))))))
-  ;; The satellite link: registered exactly once even after a
-  ;; live-reload re-register, and swept by unregister.
-  (should (= 1 (cl-count #'jetpacs-ef-themes--settings-link
-                         jetpacs-settings-links :key #'cadr)))
-  (jetpacs-ef-themes-register)
-  (should (= 1 (cl-count #'jetpacs-ef-themes--settings-link
-                         jetpacs-settings-links :key #'cadr)))
+          (should (eq (glasspane-ef--on-random nil nil) 'accepted))))))
+  ;; Glasspane contributes exactly one EF row to Jetpacs' Modus-family Theme
+  ;; Settings registry, even after live reload, and sweeps it on unregister.
+  (should (= 1 (cl-count #'glasspane-ef--theme-provider-link
+                         jetpacs-modus-theme-provider-links :key #'cadr)))
+  (should (string-search
+           "Ef Themes"
+           (jetpacs-node->canonical-json
+            (glasspane-ef--theme-provider-link))))
+  (glasspane-ef-register)
+  (should (= 1 (cl-count #'glasspane-ef--theme-provider-link
+                         jetpacs-modus-theme-provider-links :key #'cadr)))
   (unwind-protect
       (progn
-        (jetpacs-ef-themes-unregister)
-        (should-not (cl-find #'jetpacs-ef-themes--settings-link
-                             jetpacs-settings-links :key #'cadr)))
+        (glasspane-ef-unregister)
+        (should-not (cl-find #'glasspane-ef--theme-provider-link
+                             jetpacs-modus-theme-provider-links :key #'cadr)))
     ;; Suite order must never matter: leave ef registered.
-    (jetpacs-ef-themes-register)))
+    (glasspane-ef-register)))
 
 (ert-deftest glasspane-test-settings-surface-scope ()
   "Settings satellites grant only their cross-surface opening actions."
-  (require 'jetpacs-ef-themes)
+  (require 'glasspane-ef)
   (require 'jetpacs-gallery)
-  (jetpacs-ef-themes-register)
+  (glasspane-ef-register)
   (jetpacs-gallery-register)
   (glasspane-ui-register)
   ;; `jetpacs--dispatch' takes (CLIENT PARAMS FN): the handler's args
@@ -4764,13 +4883,14 @@ unknown theme, and a load that SIGNALS — never a swallowed
   ;; the opener's push registers a sanctioned guest, and the gate
   ;; delegates to `jetpacs-guest-delegation-function' instead — scoped
   ;; to the screen's lifetime, not granted forever.
-  (dolist (name '("settings.agenda.edit" "settings.agenda.delete"
+  (dolist (name '("settings.areas.save"
+                  "settings.agenda.edit" "settings.agenda.delete"
                   "glasspane.packages.install"))
     (should (gethash name jetpacs-action-handlers))
     (should-not (gethash name jetpacs--any-surface-actions)))
   (dolist (name '("ef.load" "ef.random" "ef.random-dark"
                   "ef.random-light" "ef.mirror" "ef.option"))
-    (should (equal (jetpacs--owner-of "action" name) "jetpacs.ef"))
+    (should (equal (jetpacs--owner-of "action" name) "glasspane"))
     (should-not (gethash name jetpacs--any-surface-actions)))
   (dolist (name '("demo.gallery.kind" "demo.gallery.level"
                   "demo.gallery.point"))
@@ -4819,8 +4939,8 @@ render caption cards; a bound option renders a switch whose `:checked'
 re-seeds from the live variable (S2) and whose `:on-change' dispatches
 `ef.option' (the watch-toggle rewrite) — and that handler honors the
 SPEC 14.4 contract over a stubbed apply."
-  (require 'jetpacs-ef-themes)
-  (let* ((section (jetpacs-ef-themes--style-section))
+  (require 'glasspane-ef)
+  (let* ((section (glasspane-ef--style-section))
          (json (jetpacs-node->canonical-json
                 (apply #'jetpacs-column section))))
     (should (= (length section) 5))          ; header + 4 option cards
@@ -4830,7 +4950,7 @@ SPEC 14.4 contract over a stubbed apply."
   ;; One option bound: the switch card, checked mirroring the value.
   (cl-progv '(ef-themes-bold-constructs) '(t)
     (let ((json (jetpacs-node->canonical-json
-                 (apply #'jetpacs-column (jetpacs-ef-themes--style-section)))))
+                 (apply #'jetpacs-column (glasspane-ef--style-section)))))
       (should (string-search "\"t\":\"switch\"" json))
       (should (string-search "\"id\":\"ef-opt/ef-themes-bold-constructs\""
                              json))
@@ -4841,7 +4961,7 @@ SPEC 14.4 contract over a stubbed apply."
     (should (string-search "\"checked\":false"
                            (jetpacs-node->canonical-json
                             (apply #'jetpacs-column
-                                   (jetpacs-ef-themes--style-section))))))
+                                   (glasspane-ef--style-section))))))
   ;; The ef.option handler: shape gates first, then availability, then
   ;; the apply verdict.  jetpacs-settings-apply is stubbed — the real
   ;; one persists through customize-save-variable.
@@ -4852,25 +4972,25 @@ SPEC 14.4 contract over a stubbed apply."
                (lambda (fn) (push fn continuations) nil))
               ((symbol-function 'jetpacs-shell-notify)
                (lambda (text &rest _) (push text notified))))
-      (should (eq (jetpacs-ef-themes--on-option '(:name "no-such" :value t) nil)
+      (should (eq (glasspane-ef--on-option '(:name "no-such" :value t) nil)
                   'rejected))
-      (should (eq (jetpacs-ef-themes--on-option
+      (should (eq (glasspane-ef--on-option
                    '(:name "ef-themes-bold-constructs" :value "yes") nil)
                   'rejected))
       ;; Known option, unbound symbol: the package left between render
       ;; and tap.
-      (should (eq (jetpacs-ef-themes--on-option
+      (should (eq (glasspane-ef--on-option
                    '(:name "ef-themes-bold-constructs" :value t) nil)
                   'rejected))
       (should (string-search "not installed" (car notified)))
       (cl-progv '(ef-themes-bold-constructs) '(nil)
-        (should (eq (jetpacs-ef-themes--on-option
+        (should (eq (glasspane-ef--on-option
                      '(:name "ef-themes-bold-constructs" :value t) nil)
                     'accepted))
         (should (equal (car applied) '(ef-themes-bold-constructs . t)))
         (should continuations)
         ;; :json-false decodes to elisp nil at the apply.
-        (should (eq (jetpacs-ef-themes--on-option
+        (should (eq (glasspane-ef--on-option
                      '(:name "ef-themes-bold-constructs" :value :json-false)
                      nil)
                     'accepted))
@@ -4879,7 +4999,7 @@ SPEC 14.4 contract over a stubbed apply."
       (cl-letf (((symbol-function 'jetpacs-settings-apply)
                  (lambda (&rest _) nil)))
         (cl-progv '(ef-themes-bold-constructs) '(nil)
-          (should (eq (jetpacs-ef-themes--on-option
+          (should (eq (glasspane-ef--on-option
                        '(:name "ef-themes-bold-constructs" :value t) nil)
                       'rejected)))))))
 
@@ -5082,7 +5202,11 @@ point: a new screen cannot ship unreachable.")
 
 (defconst glasspane-test--satellite-verbs
   '("glasspane.settings.open")
-  "The downstream Settings satellite.  Ef and the gallery are upstream.")
+  "The downstream general Settings satellite.")
+
+(defconst glasspane-test--theme-provider-verbs
+  '("ef.show")
+  "Glasspane openers contributed to the Modus-family Theme Settings screen.")
 
 (defconst glasspane-test--legacy-opener-verbs
   '("glasspane.home" "tasks.open" "search.open" "views.hub")
@@ -5094,7 +5218,7 @@ point: a new screen cannot ship unreachable.")
 (defconst glasspane-test--non-opening-verbs
   '("agenda.nav" "agenda.save-custom" "agenda.select-date"
     "agenda.set-mode" "agenda.set-month" "agenda.today" "config.sync"
-    "areas.drill"
+    "areas.drill" "areas.filter"
     "demo.setup" "demo.setup-org" "detail.open-file"
     "detail.planning.edit" "detail.save"
     "detail.toggle-read" "files.filter"
@@ -5106,14 +5230,17 @@ point: a new screen cannot ship unreachable.")
     "heading.refile" "heading.reorder" "heading.schedule"
     "heading.tags" "heading.tap" "heading.visit" "heading.todo-cycle"
     "heading.todo-set" "journal.capture" "link.materialize" "notes.mentions"
+    "ef.load" "ef.random" "ef.random-dark" "ef.random-light"
+    "ef.mirror" "ef.option"
     "org.babel.execute" "org.link.open"
     "org.search.run" "org.table.add-col" "org.table.add-row"
     "org.table.cell-menu" "org.table.edit" "resources.open-file"
+    "resources.return"
     "review.habits.open"
     "search.by-tag"
     "search.clear-filters" "search.update-filter"
     "settings.agenda.delete" "settings.agenda.edit"
-    "settings.agenda.save"
+    "settings.agenda.save" "settings.areas.save"
     "srs.answer.page" "srs.answer.show" "srs.item.create"
     "srs.postpone" "srs.quit" "srs.rate" "srs.review.start"
     "srs.suspend" "srs.undo" "tasks.filter" "views.cal.select-date"
@@ -5121,8 +5248,8 @@ point: a new screen cannot ship unreachable.")
     "views.rendering" "views.reorder" "views.save")
   "Every verb that opens NO Glasspane peer screen of its own, and therefore
 needs no hub entry: the in-screen controls (filters, navigation, ratings,
-cell and heading mutations), the dialog-fired saves, the M-x-only seeders
-(demo.setup*), the drill-ins reached FROM a screen the hub opens, and the
+cell and heading mutations), the dialog-fired saves, the confirmed Settings/M-x
+seeders (demo.setup*), the drill-ins reached FROM a screen the hub opens, and the
 explicit handoffs into native Jetpacs surfaces (Resources files and Habits).
 Classification only — the list exists so the inventory below is total.")
 
@@ -5167,6 +5294,13 @@ Classification only — the list exists so the inventory below is total.")
                 (glasspane-test--settings-link-nodes))))
     (dolist (verb glasspane-test--satellite-verbs)
       (should (member verb links))
+      (should (gethash verb jetpacs-action-handlers))))
+  ;; EF is not a general Settings satellite: Glasspane contributes it to the
+  ;; Modus-family Theme screen through the neutral Jetpacs registry.
+  (let ((links (glasspane-test--action-names
+                (jetpacs-modus--theme-provider-nodes))))
+    (dolist (verb glasspane-test--theme-provider-verbs)
+      (should (member verb links))
       (should (gethash verb jetpacs-action-handlers)))))
 
 (ert-deftest glasspane-test-hub-drawer-carries-the-other-apps ()
@@ -5209,6 +5343,7 @@ and a retired verb left in a list fails the other way."
   (let ((owned nil)
         (pinned (append glasspane-test--hub-verbs
                         glasspane-test--satellite-verbs
+                        glasspane-test--theme-provider-verbs
                         glasspane-test--legacy-opener-verbs
                         glasspane-test--staged-opener-verbs
                         glasspane-test--non-opening-verbs)))

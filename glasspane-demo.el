@@ -9,15 +9,18 @@
 ;; phone editor's IDE features can be demoed on demand: completion,
 ;; eldoc signatures, and flymake squiggles today; each file also marks
 ;; what upgrades once the eglot phase lands.  A companion org corpus
-;; (`glasspane-demo-setup-org') resets `org-directory' to a de-personalized
-;; set of files exercising tables, babel, LaTeX, drawers, and the agenda.
+;; (`glasspane-demo-setup-org') writes a de-personalized, namespaced set of
+;; files exercising the current Glasspane surfaces: agenda dates, TODO-stage
+;; chips, native Area tag groups and intersections, Resources/Archives,
+;; tables, Babel, LaTeX, drawers, backlinks, habits, and review cards.
 ;;
 ;; The files ship *inside the bundle* rather than as repo files because
 ;; Emacs's home on Android is app-private storage — adb can't push into
-;; it, but Emacs itself can write there.  Run `M-x glasspane-demo-setup' (or
-;; the `demo.setup' action from the phone) and the files appear under
-;; the Files tab.  Setup always overwrites, so a mangled demo resets to
-;; pristine by running it again.
+;; it, but Emacs itself can write there.  Run `M-x glasspane-demo-setup' for
+;; the editor tour or `M-x glasspane-demo-setup-org' for the Org corpus; the
+;; same commands are confirmed buttons in Glasspane Settings.  Setup always
+;; overwrites its own namespaced files, so a mangled demo resets to pristine
+;; without replacing ordinary names such as inbox.org or project.org.
 ;;
 ;; Ported against v1 with nothing on the retirement list landing here
 ;; (docs/PLAN-glasspane-app.md G8: the seeder KEEPS — it is the only
@@ -36,6 +39,7 @@
 ;;; Code:
 
 (require 'org)
+(require 'subr-x)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-shell)
 (require 'jetpacs-files)
@@ -218,11 +222,54 @@ completion or formatting or headline.
 ;; `glasspane-demo-setup-org' — same ship-inside-the-bundle rationale as
 ;; the tour files above.
 
+(defconst glasspane-demo--org-file-prefix "glasspane-demo-"
+  "Prefix shared by every resettable Org fixture file.
+This is a safety boundary, not merely presentation: the setup command refuses
+any corpus entry that could collide with an ordinary vault filename.")
+
 (defconst glasspane-demo--org-files
-  '(("health.org" . "\
+  '(("glasspane-demo-guide.org" . "\
+#+TITLE: Exploring Glasspane
+#+STARTUP: overview
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
+#+FILETAGS: :Learning:Digital:
+
+* Start here
+:PROPERTIES:
+:ID:       25f40bb1-b008-46bd-bf12-5ad72456bb68
+:END:
+This corpus is safe to reset: every generated vault file begins with
+=glasspane-demo-=.  Run =M-x glasspane-demo-setup-org= or use
+Settings → Glasspane → Demo Content whenever you want a fresh copy.
+
+* A short tour
+- *Agenda* shifts every timestamp together so today, overdue, upcoming,
+  repeating, and deadline items are always populated.
+- *Projects* discovers =TODO=, =NEXT=, =WAITING=, =IDEA=, =DONE=, and
+  =CANCELLED= from the files' native TODO workflows.
+- *Areas* uses the native non-exclusive =Area= tag group.  Try =House= with
+  =Bills=, then =Auto= with =Bills= to see intersection filtering.
+- *Resources* opens the generated Org files through the native Files app.
+- *Archives* includes sibling =_archive= files for Projects and Health.
+- *Review* gains live cards when org-srs is installed.
+
+* Native Area membership
+The declaration at the top of every generated Org file is ordinary Org:
+
+#+begin_example
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
+#+end_example
+
+Headings inherit Area tags normally.  This guide is both =Learning= and
+=Digital= through =#+FILETAGS=; other fixtures demonstrate heading-level
+and multi-Area membership.
+")
+    ("glasspane-demo-health.org" . "\
 #+TITLE: Health & Fitness
 #+STARTUP: overview
-#+TODO: TODO IN-PROGRESS | DONE CANCELLED
+#+TODO: TODO NEXT WAITING | DONE CANCELLED
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
+#+FILETAGS: :Health:
 
 * Training Log
 :PROPERTIES:
@@ -249,7 +296,7 @@ Tap a cell to edit it — the totals row recalculates in Emacs.
 :PROPERTIES:
 :ID:       6cb4432e-b24a-437d-9278-0421d01155eb
 :END:
-** IN-PROGRESS [#A] Hike a rim-to-rim canyon route             :fitness:goal:
+** NEXT [#A] Hike a rim-to-rim canyon route                    :fitness:goal:
 DEADLINE: <2026-08-15 Sat>
 :PROPERTIES:
 :Effort:   8h
@@ -260,7 +307,7 @@ CLOCK: [2026-07-01 Wed 06:30]--[2026-07-01 Wed 07:15] =>  0:45
 :END:
 Need to build up to *20+ mile* days.  Current max: /about 12 miles/.
 
-** IN-PROGRESS Run a sub-25 minute 5K                                 :goal:
+** NEXT Run a sub-25 minute 5K                                        :goal:
 SCHEDULED: <2026-07-06 Mon> DEADLINE: <2026-08-01 Sat>
 :PROPERTIES:
 :ID:       6c4b91a5-b4f6-43ea-8ad9-56d1ac8e8e03
@@ -298,12 +345,13 @@ Protein target: 140 g/day.  Hydration: 3 L minimum.
 :END:
 Resting heart rate trend: 58 \\rightarrow 54 bpm since March.
 ")
-    ("inbox.org" . "\
+    ("glasspane-demo-inbox.org" . "\
 #+TITLE: Inbox
 #+STARTUP: overview
-#+TODO: TODO IDEA | DONE
+#+TODO: TODO NEXT WAITING IDEA | DONE CANCELLED
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
 
-* TODO Read /Designing Data-Intensive Applications/, chapter 6     :reading:
+* NEXT Read /Designing Data-Intensive Applications/, chapter 6 :Learning:reading:
 SCHEDULED: <2026-07-06 Mon>
 :PROPERTIES:
 :Effort:   1h
@@ -318,26 +366,26 @@ The partitioning chapter pairs well with the replication notes[fn:1].
 - Rebalancing strategies: fixed partitions vs. dynamic splitting
 - Request routing belongs in a /separate/ layer
 
-* TODO Look into Nix flakes for a reproducible dev setup          :computer:
+* TODO Look into Nix flakes for a reproducible dev setup :Learning:Digital:computer:
 :PROPERTIES:
 :Effort:   1h
 :ID:       2bfc9a36-831f-4bcc-8431-d7373a47e151
 :END:
 
-* TODO Fix the leaky faucet in the guest bathroom                     :home:
+* NEXT Fix the leaky faucet in the guest bathroom       :House:Bills:home:
 SCHEDULED: <2026-07-07 Tue>
 :PROPERTIES:
 :ID:       eda8dcb1-311e-400a-b713-25b73941bcaf
 :END:
 
-* IDEA Kanban board backed by plain org files                      :project:
+* IDEA Kanban board backed by plain org files       :Work:Digital:project:
 :PROPERTIES:
 :ID:       a0a70496-49c8-475d-bbc6-b507e8c43d82
 :END:
 Columns map to TODO keywords; drag-and-drop rewrites the keyword.
 Could run on the [[id:86b18efc-f950-4c22-b006-5af19d0e1a74][home server]].
 
-* TODO [#B] Renew the domain registration                            :admin:
+* WAITING [#B] Renew the domain registration       :Work:Bills:Digital:admin:
 SCHEDULED: <2026-07-08 Wed> DEADLINE: <2026-07-31 Fri>
 :PROPERTIES:
 :Effort:   10min
@@ -345,13 +393,13 @@ SCHEDULED: <2026-07-08 Wed> DEADLINE: <2026-07-31 Fri>
 :END:
 Registrar dashboard: [[https://example.com/domains][example.com/domains]]
 
-* TODO Order a replacement HEPA filter                          :home:errand:
+* TODO Order a replacement HEPA filter           :House:Health:home:errand:
 SCHEDULED: <2026-07-05 Sun>
 :PROPERTIES:
 :ID:       2bf199b2-ab05-430d-a48c-81550252f6c3
 :END:
 
-* TODO [#A] Back up phone photos [0/3]                             :digital:
+* NEXT [#A] Back up phone photos [0/3]                :House:Digital:
 DEADLINE: <2026-07-09 Thu>
 :PROPERTIES:
 :Effort:   30min
@@ -365,12 +413,13 @@ DEADLINE: <2026-07-09 Thu>
 
 [fn:1] Chapter 5, replication — reread the section on quorums.
 ")
-    ("project.org" . "\
+    ("glasspane-demo-projects.org" . "\
 #+TITLE: Projects
 #+STARTUP: overview
-#+TODO: TODO IN-PROGRESS | DONE CANCELLED
+#+TODO: TODO NEXT WAITING | DONE CANCELLED
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
 
-* Mobile companion app                                            :software:
+* Mobile companion app                               :Work:Digital:software:
 :PROPERTIES:
 :ID:       f95e563c-62e9-4c8a-bff6-eef9194f9660
 :END:
@@ -396,7 +445,7 @@ CLOSED: [2026-06-12 Fri 17:02]
 :ID:       9142df4e-e85a-4cf1-9675-943e16da5e47
 :END:
 
-** IN-PROGRESS [#B] Phase 2 — Rich content
+** NEXT [#B] Phase 2 — Rich content
 SCHEDULED: <2026-07-01 Wed>
 :PROPERTIES:
 :ID:       933b2dfe-0b63-46ad-a4c4-6bfa8a847b2c
@@ -442,7 +491,7 @@ Babel playground over in the study notes.
 | v0.2 | 4.6 |
 | v0.3 | 5.2 |
 
-* Home server                                                     :selfhost:
+* Home server                              :House:Bills:Digital:selfhost:
 :PROPERTIES:
 :ID:       86b18efc-f950-4c22-b006-5af19d0e1a74
 :END:
@@ -478,7 +527,7 @@ Check the mount from the phone:
 df -h | head -3
 #+end_src
 
-* Side projects                                                        :fun:
+* Side projects                                :Learning:Digital:fun:
 :PROPERTIES:
 :ID:       4fa298a0-5c68-442a-ba4c-b3c71adc00cf
 :END:
@@ -501,9 +550,11 @@ CLOSED: [2026-06-20 Sat 12:00]
 :ID:       bbdf1a74-406f-4c12-866a-046462853f63
 :END:
 ")
-    ("notes.org" . "\
+    ("glasspane-demo-notes.org" . "\
 #+TITLE: Study Notes
 #+STARTUP: overview
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
+#+FILETAGS: :Learning:
 
 * Calculus — the Gaussian integral                                    :math:
 :PROPERTIES:
@@ -576,9 +627,11 @@ Remote images render inline when the device is online:
 
 [[https://picsum.photos/seed/orgdemo/600/300.jpg]]
 ")
-    ("quotes.org" . "\
+    ("glasspane-demo-quotes.org" . "\
 #+TITLE: Quotes
 #+STARTUP: overview
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
+#+FILETAGS: :Learning:
 
 * Marcus Aurelius
 :PROPERTIES:
@@ -629,12 +682,13 @@ Listen to the technology; find out what it's telling you.
 #+end_quote
 Captured: [2026-07-01 Wed 16:40]
 ")
-    ("trackers.org" . "\
+    ("glasspane-demo-trackers.org" . "\
 #+TITLE: Task Tracker
 #+STARTUP: overview
-#+TODO: TODO IN-PROGRESS | DONE CANCELLED
+#+TODO: TODO NEXT WAITING | DONE CANCELLED
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
 
-* IN-PROGRESS [#A] Prepare the quarterly demo                         :work:
+* NEXT [#A] Prepare the quarterly demo                    :Work:Digital:
 DEADLINE: <2026-07-06 Mon>
 :PROPERTIES:
 :Effort:   45min
@@ -646,7 +700,7 @@ CLOCK: [2026-07-02 Thu 09:00]--[2026-07-02 Thu 10:21] =>  1:21
 :END:
 Slides: [[https://example.com/slides][deck draft]]
 
-* TODO [#A] Finish the agenda screen                              :software:
+* NEXT [#A] Finish the agenda screen                 :Work:Digital:software:
 SCHEDULED: <2026-07-06 Mon>
 :PROPERTIES:
 :Effort:   2h
@@ -674,7 +728,7 @@ CLOSED: [2026-06-29 Mon 02:13]
 CLOCK: [2026-06-29 Mon 02:08]--[2026-06-29 Mon 02:13] =>  0:05
 :END:
 
-* TODO Weekly grocery run                                           :errand:
+* TODO Weekly grocery run                         :House:Bills:errand:
 SCHEDULED: <2026-07-07 Tue +1w>
 :PROPERTIES:
 :ID:       68fbf216-0000-41f1-b570-2b52ed092d13
@@ -684,13 +738,13 @@ SCHEDULED: <2026-07-07 Tue +1w>
 - State \"DONE\"       from \"TODO\"       [2026-06-30 Tue 18:37]
 :END:
 
-* IN-PROGRESS Call the insurance company about the claim      :phone:errand:
+* WAITING Call the insurance company about the claim :Auto:Bills:phone:errand:
 SCHEDULED: <2026-07-06 Mon>
 :PROPERTIES:
 :ID:       f95e563c-0000-4c8a-bff6-eef9194f9660
 :END:
 
-* IN-PROGRESS [#B] Write a blog post about server-driven UI        :writing:
+* NEXT [#B] Write a blog post about server-driven UI :Work:Learning:writing:
 SCHEDULED: <2026-07-08 Wed> DEADLINE: <2026-07-12 Sun>
 :PROPERTIES:
 :Effort:   2h
@@ -709,22 +763,24 @@ CLOSED: [2026-06-27 Sat 11:40]
 :ID:       61a44fea-0000-4b53-93a5-3e9147d4c2bf
 :END:
 
-* DONE Clean the kitchen                                              :home:
+* DONE Clean the kitchen                                      :House:home:
 CLOSED: [2026-07-03 Fri 21:30]
 :PROPERTIES:
 :ID:       0b6cfc7f-0000-438a-a25d-2d2d07c97677
 :END:
 
-* DONE Send the invoice to the client                         :work:finance:
+* DONE Send the invoice to the client                    :Work:Bills:finance:
 CLOSED: [2026-07-02 Thu 09:15]
 :PROPERTIES:
 :Effort:   15min
 :ID:       9142df4e-1111-4cf1-9675-943e16da5e47
 :END:
 ")
-    ("flashcards.org" . "\
+    ("glasspane-demo-flashcards.org" . "\
 #+TITLE: Flashcards
 #+STARTUP: overview
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
+#+FILETAGS: :Learning:
 
 Spaced repetition over the study notes (drawer → Review on the phone).
 Plain org until org-srs is installed — the demo setup registers these
@@ -750,6 +806,33 @@ E = mc² — derivation notes live in
 :END:
 The first actual case of bug being found: operators taped a moth into
 the Harvard Mark II logbook in 1947.
+")
+    ("glasspane-demo-projects.org_archive" . "\
+#+TITLE: Archived Glasspane Projects
+#+STARTUP: overview
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
+
+* DONE Prototype the first mobile project screen          :Work:Digital:
+CLOSED: [2026-06-18 Thu 17:30]
+:PROPERTIES:
+:ID:       43ed79ee-23af-4ab8-848d-ad9c8eca68c0
+:ARCHIVE_TIME: 2026-06-18 Thu 17:31
+:END:
+This sibling archive makes the Archives section tangible from both the
+=Work= and =Digital= Area drills.
+")
+    ("glasspane-demo-health.org_archive" . "\
+#+TITLE: Archived Health Projects
+#+STARTUP: overview
+#+TAGS: [ Area : House Auto Bills Work Health Learning Digital ]
+
+* CANCELLED Replace the garage treadmill                 :House:Health:
+CLOSED: [2026-06-24 Wed 09:00]
+:PROPERTIES:
+:ID:       4b65f186-0cff-4e9e-a878-1ad6fcf265de
+:ARCHIVE_TIME: 2026-06-24 Wed 09:01
+:END:
+The outdoor running plan won, but this remains available from Archives.
 "))
   "Alist of (FILENAME . CONTENT) written by `glasspane-demo-setup-org'.")
 
@@ -766,7 +849,7 @@ the Harvard Mark II logbook in 1947.
 (defconst glasspane-demo--srs-cards
   '("What does the Gaussian integral evaluate to?"
     "Mass–energy equivalence")
-  "flashcards.org headings the demo registers as `card' items.")
+  "Demo flashcard headings the setup registers as `card' items.")
 
 (defconst glasspane-demo--srs-clozes
   '(("The first computer bug" "a moth" "1947"))
@@ -781,7 +864,7 @@ Each TARGET is clozed in place, then the entry's items are created.")
   (beginning-of-line))
 
 (defun glasspane-demo--register-srs-items (dir)
-  "Register DIR's flashcards.org entries as org-srs review items.
+  "Register DIR's demo flashcard entries as org-srs review items.
 A no-op without org-srs — the file reads as plain org either way.
 Runs right after the corpus overwrote the files, so previously
 registered drawers are gone and every item is created fresh.  Errors
@@ -789,7 +872,8 @@ cost the registration, never the demo setup."
   (when (glasspane-srs-available-p)
     (condition-case err
         (with-current-buffer
-            (find-file-noselect (expand-file-name "flashcards.org" dir))
+            (find-file-noselect
+             (expand-file-name "glasspane-demo-flashcards.org" dir))
           ;; The buffer may predate the overwrite; the disk copy rules.
           (revert-buffer :ignore-auto :noconfirm)
           (org-with-wide-buffer
@@ -871,14 +955,32 @@ repeated in every whole-vault query."
         org-directory)
       org-directory))))
 
+(defun glasspane-demo--safe-org-filename-p (name)
+  "Return non-nil when corpus NAME is one namespaced basename.
+Reject directory components as well as unprefixed names so a future fixture
+edit cannot silently widen what the reset command overwrites."
+  (and (stringp name)
+       (string-prefix-p glasspane-demo--org-file-prefix name)
+       (equal name (file-name-nondirectory name))))
+
+(defun glasspane-demo--write-and-refresh (content file)
+  "Replace FILE with CONTENT and refresh any buffer already visiting it.
+Reset is explicit, so an open modified demo buffer is deliberately reverted;
+the device confirmation and the M-x command both promise pristine fixtures."
+  (write-region content nil file nil 'silent)
+  (when-let* ((buffer (find-buffer-visiting file)))
+    (with-current-buffer buffer
+      (revert-buffer :ignore-auto :noconfirm))))
+
 ;;;###autoload
 (defun glasspane-demo-setup-org (&optional dir)
   "Write the demo org corpus into DIR (default the first org root).
-Overwrites exactly the files named in `glasspane-demo--org-files' —
-other files in the directory are untouched.  Timestamps land relative
+Every filename is required to begin with `glasspane-demo--org-file-prefix';
+ordinary vault files are never candidates.  Existing demo copies are reset,
+and every other file in the directory is untouched.  Timestamps land relative
 to today: the authored dates shift as one block (see
-`glasspane-demo--org-anchor'), so the agenda always opens onto the
-same mix of overdue, due-today, and upcoming items.  Returns DIR."
+`glasspane-demo--org-anchor'), so the agenda always opens onto the same mix of
+overdue, due-today, and upcoming items.  Returns DIR."
   (interactive)
   (let ((dir (file-name-as-directory
               (expand-file-name (or dir (glasspane-demo--org-target)))))
@@ -886,13 +988,16 @@ same mix of overdue, due-today, and upcoming items.  Returns DIR."
         (coding-system-for-write 'utf-8))
     (make-directory dir t)
     (dolist (spec glasspane-demo--org-files)
-      (write-region (glasspane-demo--shift-timestamps (cdr spec) shift)
-                    nil (expand-file-name (car spec) dir)
-                    nil 'silent))
+      (unless (glasspane-demo--safe-org-filename-p (car spec))
+        (error "Unsafe demo filename: %S" (car spec)))
+      (glasspane-demo--write-and-refresh
+       (glasspane-demo--shift-timestamps (cdr spec) shift)
+       (expand-file-name (car spec) dir)))
     ;; The flashcards become live review items when org-srs is around.
     (glasspane-demo--register-srs-items dir)
-    ;; Agenda/search memos now describe files that no longer exist.
-    (ebp-org-cache-invalidate 'glasspane)
+    ;; Agenda, Projects, Areas, Search, and Review span several namespaces;
+    ;; the fixture set and its effective workflows just changed together.
+    (ebp-org-cache-invalidate)
     (when (called-interactively-p 'interactive)
       (message "Demo org corpus written to %s" dir))
     dir))
@@ -910,8 +1015,8 @@ Returns the directory the files were written to."
         (coding-system-for-write 'utf-8))
     (make-directory dir t)
     (dolist (spec glasspane-demo--files)
-      (write-region (cdr spec) nil (expand-file-name (car spec) dir)
-                    nil 'silent))
+      (glasspane-demo--write-and-refresh
+       (cdr spec) (expand-file-name (car spec) dir)))
     (when (called-interactively-p 'interactive)
       (message "Jetpacs demo files written to %s" dir))
     dir))
@@ -960,8 +1065,10 @@ Called from `glasspane-register', not at this file's load: the entry's
 unregister must leave no glasspane handler behind, and its re-register
 must restore every verb without a re-require (the G0 gate contract)."
   (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction "demo.setup" #'glasspane-demo--on-setup)
-    (jetpacs-defaction "demo.setup-org" #'glasspane-demo--on-setup-org)))
+    (jetpacs-defaction "demo.setup" #'glasspane-demo--on-setup
+                       :doc "Write the fixed Glasspane tour files")
+    (jetpacs-defaction "demo.setup-org" #'glasspane-demo--on-setup-org
+                       :doc "Reset the fixed Glasspane Org demonstration corpus")))
 
 (defun glasspane-demo-unregister ()
   "Drop the demo verbs."

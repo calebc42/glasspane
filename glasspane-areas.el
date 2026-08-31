@@ -1,273 +1,251 @@
-;;; glasspane-areas.el --- PARA Areas over Org categories -*- lexical-binding: t; -*-
+;;; glasspane-areas.el --- PARA Area notes on Glasspane -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Package-Requires: ((emacs "30.1"))
 
 ;;; Commentary:
 
-;; PA-2a of docs/PLAN-glasspane-para.md.  Areas is the downstream PARA
-;; opinion that an Org category is a persistent responsibility.  Native Org
-;; scope, references, and mutation machinery stay in Jetpacs/EBP; this module
-;; only groups the canonical local scope, renders the two Areas screens, and
-;; owns their route verbs.  PA-3a exposes `areas.open' through Glasspane's
-;; authoritative persistent-navigation table.
+;; An Area is one file-level Vulpea note carrying the configurable `area'
+;; tag.  Its title is the responsibility's name, and tagged Project headings
+;; in that same file belong to it.  This replaces the former interpretation
+;; of every member in an Org tag-group named "Area" as a separate Area.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'org)
 (require 'subr-x)
-(require 'ebp-org)
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
 (require 'jetpacs-apps)
-(require 'glasspane-org)
+(require 'jetpacs-settings)
+(require 'glasspane-para)
 (require 'glasspane-agenda)
 (require 'glasspane-detail)
+(require 'glasspane-resources)
 (require 'glasspane-ui)
 
-;;;; Extraction
+(declare-function vulpea-note-id "ext:vulpea-note" (note))
+(declare-function vulpea-note-path "ext:vulpea-note" (note))
+(declare-function vulpea-note-title "ext:vulpea-note" (note))
 
-(defun glasspane-areas--category-name (value fallback)
-  "Normalize category VALUE, using FALLBACK when it is empty."
-  (let ((name (and (stringp value) (string-trim value))))
-    (if (and name (not (string-empty-p name))) name fallback)))
+(defun glasspane-areas--area-by-title (title)
+  "Return the uniquely titled Area named TITLE, or nil."
+  (let ((matches (cl-remove-if-not
+                  (lambda (area)
+                    (equal (vulpea-note-title area) title))
+                  (glasspane-para-areas))))
+    (and (= 1 (length matches)) (car matches))))
 
-(defun glasspane-areas--file-category (file)
-  "Return FILE's keyword category, falling back to its basename.
-The current buffer is widened Org content for FILE."
-  (let* ((keywords (org-collect-keywords '("CATEGORY")))
-         (declared (cadr (assoc-string "CATEGORY" keywords t)))
-         (fallback (file-name-base file)))
-    (glasspane-areas--category-name declared fallback)))
-
-(defun glasspane-areas--prime-category-cache ()
-  "Prime a file keyword category into Org's element cache when present.
-Stock Emacs 30.1 can mis-compile the category cache-miss arm.  Touching the
-keyword element before the heading walk keeps subsequent `org-get-category'
-calls on the working cached path."
-  (save-excursion
-    (goto-char (point-min))
-    (when (re-search-forward "^[ \t]*#\\+CATEGORY:" nil t)
-      (ignore-errors (org-element-at-point)))))
-
-(defun glasspane-areas--heading-item (category)
-  "Build the standard Glasspane item at point, tagged with CATEGORY."
-  (let* ((components (org-heading-components))
-         (todo (nth 2 components))
-         (priority (nth 3 components))
-         (headline (nth 4 components))
-         (tags (org-get-tags))
-         (scheduled (org-entry-get (point) "SCHEDULED"))
-         (deadline (org-entry-get (point) "DEADLINE")))
-    `((headline . ,headline)
-      (todo . ,todo)
-      (priority . ,(and priority (char-to-string priority)))
-      (tags . ,(vconcat tags))
-      (scheduled . ,scheduled)
-      (deadline . ,deadline)
-      (level . ,(nth 0 components))
-      (category . ,category)
-      (file . ,(buffer-file-name))
-      (pos . ,(point))
-      (ref . ,(ebp-org-ref-at-point)))))
-
-(defun glasspane-areas--scan-file (file)
-  "Return FILE's base category and open TODO items.
-The result is `(:file PATH :base NAME :items ITEMS)'.  FILE is validated
-against the Org roots and all visiting runs under clamped I/O."
-  (let ((true (ebp-org--check-file file)))
-    (ebp-org--with-clamped-io
-      (with-current-buffer (find-file-noselect true t)
-        (unless (derived-mode-p 'org-mode) (org-mode))
-        (org-with-wide-buffer
-         (let ((base (glasspane-areas--file-category true))
-               items)
-           (glasspane-areas--prime-category-cache)
-           (org-map-entries
-            (lambda ()
-              (let ((todo (nth 2 (org-heading-components))))
-                (when (and todo (not (org-entry-is-done-p)))
-                  (let ((category
-                         (glasspane-areas--category-name
-                          (org-get-category) base)))
-                    (push (glasspane-areas--heading-item category) items)))))
-            "TODO<>\"\"" 'file)
-           (list :file true :base base :items (nreverse items))))))))
-
-(defun glasspane-areas--bucket (table category)
-  "Return CATEGORY's mutable bucket in TABLE, creating it when absent."
-  (or (gethash category table)
-      (let ((bucket (list :name category :files nil :items nil)))
-        (puthash category bucket table)
-        bucket)))
-
-(defun glasspane-areas--index-1 ()
-  "Build the uncached category index over the canonical local Org scope.
-One rotten file is skipped without costing every other Area."
-  (let ((table (make-hash-table :test #'equal))
-        areas)
-    ;; Deliberately no Vulpea arm: its note rows do not preserve inherited
-    ;; heading categories, so using it when available would silently change
-    ;; the PARA buckets for the same vault.
-    (dolist (file (delete-dups
-                   (copy-sequence (or (glasspane-org-agenda-scope) nil))))
-      (when-let* ((scan (condition-case nil
-                            (glasspane-areas--scan-file file)
-                          (error nil)))
-                  (true (plist-get scan :file))
-                  (base (plist-get scan :base)))
-        (let ((bucket (glasspane-areas--bucket table base)))
-          (cl-pushnew true (plist-get bucket :files) :test #'equal))
-        (dolist (item (plist-get scan :items))
-          (let* ((category (alist-get 'category item))
-                 (bucket (glasspane-areas--bucket table category)))
-            (cl-pushnew true (plist-get bucket :files) :test #'equal)
-            (push item (plist-get bucket :items))))))
-    (maphash
-     (lambda (_name bucket)
-       (setf (plist-get bucket :files)
-             (sort (plist-get bucket :files) #'string-lessp)
-             (plist-get bucket :items)
-             (nreverse (plist-get bucket :items)))
-       (push bucket areas))
-     table)
-    (sort areas
-          (lambda (a b)
-            (string-lessp (plist-get a :name) (plist-get b :name))))))
-
-(defun glasspane-areas--index ()
-  "Return the memoised Areas index."
-  (ebp-org-with-cache 'glasspane '(areas-index)
-    (glasspane-areas--index-1)))
-
-(defun glasspane-areas--find (category)
-  "Return CATEGORY's current area record, or nil when it vanished."
-  (cl-find category (glasspane-areas--index)
-           :key (lambda (area) (plist-get area :name))
-           :test #'equal))
-
-;;;; Rendering
+(defun glasspane-areas--resolve (id legacy-title)
+  "Resolve an Area by ID, with LEGACY-TITLE as compatibility fallback."
+  (or (and id (glasspane-para-note-by-id id #'glasspane-para-area-p))
+      (and legacy-title (glasspane-areas--area-by-title legacy-title))))
 
 (defun glasspane-areas--count-label (area)
-  "Return AREA's compact open-TODO and file counts."
-  (let ((todos (length (plist-get area :items)))
-        (files (length (plist-get area :files))))
-    (format "%d open TODO%s · %d file%s"
-            todos (if (= todos 1) "" "s")
-            files (if (= files 1) "" "s"))))
+  "Return AREA's compact Project count and facet reminder."
+  (let ((count (length (glasspane-para-projects-in-area area))))
+    (format "%d project%s · also a resource"
+            count (if (= count 1) "" "s"))))
 
 (defun glasspane-areas--area-row (area)
-  "Render AREA as a drill row with plain string arguments."
-  (let ((name (plist-get area :name)))
+  "Render AREA as a drill row."
+  (let ((id (vulpea-note-id area))
+        (title (or (vulpea-note-title area) "Untitled Area")))
     (jetpacs-chrome-row
-     name
+     title
      :subtitle (glasspane-areas--count-label area)
      :icon "category"
      :trailing (jetpacs-icon "chevron_right")
-     :on-tap (jetpacs-action "areas.drill" :args (list :category name))
-     :key (jetpacs-wire-id "area-row" name))))
+     :on-tap (jetpacs-action "areas.drill" :args (list :area id))
+     :key (jetpacs-wire-id "area-row" (or id title)))))
 
 (defun glasspane-areas--list-body ()
-  "Render the sorted Areas index or its empty state."
-  (let ((areas (condition-case nil (glasspane-areas--index) (error nil))))
-    (if areas
-        (apply #'jetpacs-lazy-column
-               (append (mapcar #'glasspane-areas--area-row areas)
-                       (list :spacing 8 :content-padding 12)))
-      (jetpacs-empty-state
-       :icon "category"
-       :title "No areas"
-       :caption "No Org categories were found in the local agenda scope."))))
+  "Render file-level Area notes."
+  (cond
+   ((not (glasspane-para-ready-p))
+    (jetpacs-empty-state
+     :icon "database"
+     :title "Vulpea is not ready"
+     :caption "Install Glasspane's optional packages to index PARA notes."))
+   ((glasspane-para-areas)
+    (apply #'jetpacs-lazy-column
+           (append (mapcar #'glasspane-areas--area-row
+                           (glasspane-para-areas))
+                   (list :spacing 8 :content-padding 12))))
+   (t
+    (jetpacs-empty-state
+     :icon "category"
+     :title "No areas"
+     :caption "Tag a file-level note with :area: or create one here."))))
 
-(defun glasspane-areas--file-row (file)
-  "Render FILE as a handoff to the forthcoming Resources wrapper."
-  (jetpacs-chrome-row
-   (file-name-nondirectory file)
-   :subtitle (abbreviate-file-name file)
-   :icon "description"
-   :trailing (jetpacs-icon "chevron_right")
-   :on-tap (jetpacs-action "resources.open-file" :args (list :path file))
-   :key (jetpacs-wire-id "area-file" file)))
+(defun glasspane-areas--project-items (area)
+  "Return AREA's Projects as shared card items."
+  (mapcar
+   (lambda (project)
+     (append
+      (list (cons 'para-project t)
+            (cons 'area-title (vulpea-note-title area))
+            (cons 'area-id (vulpea-note-id area)))
+      (glasspane-para-note-item project)))
+   (glasspane-para-projects-in-area area)))
 
-(defun glasspane-areas--drill-body (category)
-  "Render CATEGORY's open TODO cards and files.
-A category that vanished between row render and tap degrades in place and
-sweeps the prior Areas token generation."
-  (let ((area (condition-case nil (glasspane-areas--find category)
-                (error nil))))
-    (if (null area)
-        (progn
-          (glasspane-agenda-tokenize nil "areas")
-          (jetpacs-empty-state
-           :icon "category"
-           :title "Area no longer exists"
-           :caption "Refresh Areas to see the current Org categories."))
-      (let* ((items (glasspane-agenda-tokenize
-                     (plist-get area :items) "areas"))
-             (cards (mapcar #'glasspane-detail-agenda-card items))
-             (files (mapcar #'glasspane-areas--file-row
-                            (plist-get area :files))))
-        (apply #'jetpacs-lazy-column
-               (append
-                (list (jetpacs-section-header "Open TODOs"))
-                (or cards
-                    (list (jetpacs-text "No open TODOs in this area."
-                                        :style "caption")))
-                (list (jetpacs-divider)
-                      (jetpacs-section-header "Files"))
-                (or files
-                    (list (jetpacs-text "No files in this area."
-                                        :style "caption")))
-                (list :spacing 8 :content-padding 12)))))))
+(defun glasspane-areas--archive-cards (area)
+  "Return tappable archived Project cards from AREA."
+  (mapcar #'glasspane-detail-result-card
+          (glasspane-ui-tokenize-tap
+           (glasspane-para-archive-items (list (vulpea-note-path area)))
+           "area-archives")))
+
+(defun glasspane-areas--drill-body (area)
+  "Render AREA's overlapping Project, Resource, and Archive facets."
+  (let* ((projects
+          (mapcar #'glasspane-detail-agenda-card
+                  (glasspane-agenda-tokenize
+                   (glasspane-areas--project-items area) "area-projects")))
+         (resource (glasspane-resources-note-row area "area-resource"))
+         (archives (glasspane-areas--archive-cards area)))
+    (apply
+     #'jetpacs-lazy-column
+     (append
+      (list (jetpacs-section-header "Projects"))
+      (or projects
+          (list (jetpacs-text "No tagged Projects in this Area."
+                              :style "caption")))
+      (list (jetpacs-divider)
+            (jetpacs-section-header "Resources")
+            resource
+            (jetpacs-divider)
+            (jetpacs-section-header "Archive"))
+      (or archives
+          (list (jetpacs-text "No archived Projects in this Area."
+                              :style "caption")))
+      (list :spacing 8 :content-padding 12)))))
+
+(defun glasspane-areas--list-actions ()
+  "Return Areas destination top-bar actions."
+  (append
+   (glasspane-ui-top-actions)
+   (list
+    (jetpacs-icon-button
+     "add" (jetpacs-action "areas.capture")
+     :content-description "New area"))))
+
+(defun glasspane-areas--drill-actions (area)
+  "Return AREA drill top-bar actions."
+  (append
+   (glasspane-ui-top-actions)
+   (list
+    (jetpacs-icon-button
+     "add"
+     (jetpacs-action "projects.capture"
+                     :args (list :area (vulpea-note-id area)))
+     :content-description "New project"))))
 
 (defun glasspane-areas-screen (back)
   "Build the Areas list screen with BACK navigation."
-  (jetpacs-chrome-screen "Areas" (glasspane-areas--list-body)
-                         :back back
-                         :actions (glasspane-ui-top-actions)
-                         :fab (and glasspane-ui-legacy-ia
-                                   (glasspane-ui-capture-fab))))
+  (jetpacs-chrome-screen
+   "Areas" (glasspane-areas--list-body)
+   :back back :actions (glasspane-areas--list-actions)
+   :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab))))
 
-(defun glasspane-areas-drill-screen (category back)
-  "Build CATEGORY's Area drill screen with BACK navigation."
-  (jetpacs-chrome-screen category (glasspane-areas--drill-body category)
-                         :back back
-                         :actions (glasspane-ui-top-actions)
-                         :fab (and glasspane-ui-legacy-ia
-                                   (glasspane-ui-capture-fab))))
+(defun glasspane-areas-drill-screen (area back)
+  "Build AREA's drill screen with BACK navigation."
+  (jetpacs-chrome-screen
+   (or (vulpea-note-title area) "Area")
+   (glasspane-areas--drill-body area)
+   :back back :actions (glasspane-areas--drill-actions area)
+   :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab))))
+
+;;;; Area capture dialog
+
+(defun glasspane-areas--show-capture-dialog (params)
+  "Show a one-field new-Area dialog."
+  (jetpacs-settings-show-dialog
+   "glasspane-area-create"
+   (jetpacs-column
+    (jetpacs-text "New Area" :style "title")
+    (jetpacs-text
+     "An Area is a tagged note for an ongoing responsibility."
+     :style "caption")
+    (jetpacs-text-input "para-area-title" :label "Area"
+                        :single-line t :autofocus t)
+    (jetpacs-row
+     (jetpacs-spacer :weight 1)
+     (jetpacs-button "Cancel" (jetpacs-dialog-dismiss) :variant "text")
+     (jetpacs-spacer :width 8)
+     (jetpacs-button
+      "Create"
+      (jetpacs-dialog-submit :capture-fields '("para-area-title"))))
+    :spacing 8)
+   :params params
+   :on-submit
+   (lambda (fields)
+     (condition-case err
+         (progn
+           (glasspane-para-capture-area (plist-get fields :para-area-title))
+           (jetpacs-shell-notify "Area created" (plist-get params :surface))
+           (jetpacs-app-defer-refresh params))
+       (error
+        (message "glasspane-areas: capture failed: %s"
+                 (jetpacs-error-label err))
+        (jetpacs-toast "Area could not be created"))))))
 
 ;;;; Actions and lifecycle
 
 (defun glasspane-areas--on-open (_args params)
-  "Open the Areas list in the one Tier-1 destination slot."
+  "Open the Areas list in the Tier-1 destination slot."
   (glasspane-ui-open-destination
    "areas" "glasspane-areas" #'glasspane-areas-screen params))
 
 (defun glasspane-areas--on-drill (args params)
-  "Open ARGS' plain-string `:category', even if it just vanished."
-  (let ((category (plist-get args :category)))
-    (if (not (and (stringp category) (not (string-empty-p category))))
+  "Open the Area identified by ARGS."
+  (let ((id (plist-get args :area))
+        (legacy (plist-get args :category)))
+    (if (not (and (or (null id) (stringp id))
+                  (or (null legacy) (stringp legacy))))
         'rejected
-      (glasspane-ui-open-destination
-       "areas" (jetpacs-wire-id "area" category)
-       (lambda (back) (glasspane-areas-drill-screen category back))
-       params))))
+      (if-let* ((area (glasspane-areas--resolve id legacy)))
+          (progn
+            (glasspane-ui-open-destination
+             "areas"
+             (jetpacs-wire-id "area" (vulpea-note-id area))
+             (lambda (back) (glasspane-areas-drill-screen area back))
+             params)
+            'accepted)
+        'stale))))
 
-(defconst glasspane-areas--verbs '("areas.open" "areas.drill")
-  "The Areas verbs owned by this module.")
+(defun glasspane-areas--on-capture (_args params)
+  "Open the Area capture dialog."
+  (cond
+   ((not (glasspane-para-ready-p))
+    (jetpacs-toast "Vulpea is not ready")
+    'rejected)
+   ((null (jetpacs-client)) 'rejected)
+   (t
+    (jetpacs-flow-continue
+     (lambda () (glasspane-areas--show-capture-dialog params)))
+    'accepted)))
+
+(defconst glasspane-areas--verbs
+  '("areas.open" "areas.drill" "areas.capture")
+  "The Area destination, drill, and capture actions.")
 
 (defun glasspane-areas-register ()
-  "Register the Areas verbs, idempotently."
+  "Register Area actions idempotently."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "areas.open" #'glasspane-areas--on-open
-                       :doc "Open the PARA Areas screen")
-    (jetpacs-defaction "areas.drill" #'glasspane-areas--on-drill
-                       :doc "Open one PARA Area by Org category")))
+                       :doc "Open file-level PARA Areas")
+    (jetpacs-defaction
+     "areas.drill" #'glasspane-areas--on-drill
+     :doc "Open a PARA Area"
+     :args '((:name area :type "text")
+             (:name category :type "text")))
+    (jetpacs-defaction "areas.capture" #'glasspane-areas--on-capture
+                       :doc "Create a file-level PARA Area")))
 
 (defun glasspane-areas-unregister ()
-  "Drop every verb owned by the Areas module."
+  "Drop every action owned by the Areas module."
   (dolist (name glasspane-areas--verbs)
     (jetpacs-undefaction name)))
 

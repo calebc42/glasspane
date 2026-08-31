@@ -56,6 +56,7 @@
 (require 'jetpacs-async)
 (require 'glasspane-org)
 (require 'glasspane-ui)                 ; detail seam hooks
+(require 'glasspane-navigation)         ; canonical document handoffs
 
 ;; vulpea is never installed on the CI Emacs: `ext:' pseudo-files keep
 ;; `byte-compile-error-on-warn' honest with it absent (banked trap).
@@ -303,8 +304,7 @@ note's title/aliases otherwise."
           (jetpacs-text (file-name-nondirectory
                          (or (vulpea-note-path note) ""))
                         :style "caption")))
-   :on-tap (and token (jetpacs-action "heading.visit"
-                                      :args (list :token token)))))
+   :on-tap (glasspane-navigation-heading-action token)))
 
 (defun glasspane-notes--mention-card (mention tap link)
   "A card for MENTION: context, a Link-it button (LINK token), a tap
@@ -329,8 +329,7 @@ refused mint costs the affordance, never the card."
                                              :when-offline "queue"
                                              :ttl-s glasspane-notes--link-ttl-s)
                              :variant "text" :icon "link")))))
-     :on-tap (and tap (jetpacs-action "heading.visit"
-                                      :args (list :token tap))))))
+     :on-tap (glasspane-navigation-heading-action tap))))
 
 (defun glasspane-notes-detail-nodes (ref)
   "Backlink/outgoing/mentions section nodes for the detail REF, or nil.

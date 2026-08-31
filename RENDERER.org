@@ -1,0 +1,27 @@
+#+title: Glasspane Renderer Contract
+
+* Design choice
+
+Glasspane is a Material 3 application built on the Jetpacs Compose foundation.
+That choice belongs to Glasspane; it is not an implicit property of Jetpacs or
+of EBP.
+
+Both branches of =glasspane-register= declare
+=:requires-extensions '("glasspane.material3")=. On a live Companion, Jetpacs
+must observe that identifier in the app target's EBP 3 =extensions= profile
+before entering or building Glasspane. If it is absent, the Apps surface shows
+the missing requirement and leaves Glasspane state and builders untouched.
+
+Material-only wire nodes are also dual-gated by their namespaced node type and
+the same extension. Their schema lives in Glasspane's renderer manifest, not in
+EBP. Glasspane may use those nodes because it makes the app-level requirement
+explicit. Foundation modules must not infer the requirement from a node-name
+prefix or import Material on Glasspane's behalf.
+
+* Verification
+
+The focused Glasspane ERT suite asserts the registry declaration. The Jetpacs
+app and floor suites separately prove the unavailable-app flow and the
+node-plus-extension sender gate. Android renderer profiles are derived from
+installed renderer contributions rather than a second handwritten welcome
+list.

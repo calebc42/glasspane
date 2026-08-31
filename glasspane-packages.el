@@ -226,8 +226,8 @@ defers here through `jetpacs-flow-continue' (D2)."
   "Schedule this session's one automatic install when a device needs it.
 Fires on an idle timer so load cost is zero.  Only in an interactive
 session (batch/CI must never reach for MELPA), only when the app is
-store-installed (listed in `jetpacs-app-store-installed' — the same
-consent that seeds the managed config; in-tree/dev loads never are,
+enabled in Apps (listed in `jetpacs-app-store-installed' — the same
+consent that seeds the managed config; direct dev loads never are,
 so dev seeding stays `M-x glasspane-packages-ensure'), at most once a
 session, and only when something wanted is actually missing.  Restart =
 the natural retry."

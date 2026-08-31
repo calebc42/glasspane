@@ -37,6 +37,7 @@
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
 (require 'jetpacs-widgets)
+(require 'glasspane-material3)
 (require 'jetpacs-apps)
 
 ;; The rung ladder's sibling modules, in the plan's load order (G1: the
@@ -55,9 +56,11 @@
 ;; the at-ref funnel.  Requires glasspane-org, so it loads last.
 (require 'glasspane-ui)
 ;; G4/GR-2, the reader + detail: the reader replaces the reusable host's
-;; Org adapter slot and owns the refile list; detail requires it softly,
-;; so it loads first.
+;; Org adapter slot and owns the refile list.  Navigation then fixes the one
+;; canonical Files-backed document route that detail and every later entry
+;; point share; detail still degrades when the reader itself is absent.
 (require 'glasspane-org-reader)
+(require 'glasspane-navigation)
 (require 'glasspane-detail)
 ;; G5 plus the PARA screens: the foundation date helper supports both daily
 ;; halves; agenda, Projects, and journal build on detail's shared card and the
@@ -81,9 +84,9 @@
 ;; unconditional, the runtime probes are theirs.
 (require 'glasspane-notes)
 (require 'glasspane-srs)
-;; G8's downstream demo fixtures remain.  The generic ef-themes satellite and
-;; widget gallery moved to Jetpacs composition at PA-3d; this app neither loads
-;; nor registers them.
+;; EF is a Glasspane package opinion contributed to Jetpacs' Modus-family Theme
+;; Settings registry.  The generic widget gallery remains Jetpacs-owned.
+(require 'glasspane-ef)
 (require 'glasspane-demo)
 
 (defconst glasspane-owner "glasspane"
@@ -101,7 +104,7 @@ second real `jetpacs-defapp' caller there is.")
 ;;;; Verbs
 
 (defun glasspane--on-home (_args params)
-  "Return to the root screen (the dock row's second tap)."
+  "Return PARAMS' surface to the root screen on the dock row's second tap."
   (let ((surface (plist-get params :surface)))
     (jetpacs-apps-note-route glasspane-owner
                              (unless glasspane-ui-legacy-ia "agenda"))
@@ -115,8 +118,8 @@ second real `jetpacs-defapp' caller there is.")
 (defun glasspane--dock-items (surface)
   "The legacy app dock destination retained by `glasspane-ui-legacy-ia'.
 A function so `:selected' tracks SURFACE (jetpacs-m3-core.el:1195's
-rationale); the tap rides the GLOBAL `jetpacs.launcher.open' because it
-arrives from whatever surface the user is looking at."
+rationale); the tap uses receiver-local `surface.open' because it arrives
+from whatever surface the user is looking at."
   (let ((home (jetpacs-shell-surface-for glasspane-owner)))
     (list (list :label glasspane-title
                 :icon glasspane-icon
@@ -124,8 +127,7 @@ arrives from whatever surface the user is looking at."
                 ;; icon (v1's Agenda tab badge on the one destination
                 ;; v3 has).  Memoised — a table lookup per render.
                 :badge (glasspane-agenda-dock-badge)
-                :on-tap (jetpacs-action "jetpacs.launcher.open"
-                                        :args (list :surface home))
+                :on-tap (jetpacs-shell-open-surface-action home)
                 :selected (equal surface home)))))
 
 (defun glasspane--destinations ()
@@ -142,9 +144,11 @@ affordance is the FAB story, not a drawer row."
   "Register the owner's verbs, the chrome root, and the app identity.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
 stack to the selected app root — the live-reload path; `jetpacs-defapp'
-replaces its registry entry in place."
+replaces its registry entry in place.  Both layout branches declare
+`glasspane.material3' explicitly; see RENDERER.org."
   (with-jetpacs-owner glasspane-owner
-    (jetpacs-defaction "glasspane.home" #'glasspane--on-home)
+    (jetpacs-defaction "glasspane.home" #'glasspane--on-home
+                       :doc "Return Glasspane to its registered root screen")
     ;; PA-3b pins Agenda as both app home and destination one.  Its root id
     ;; deliberately equals agenda.open's pushed id, so a bar tap truncates
     ;; straight to the root.  The old hub stays executable behind the one
@@ -163,6 +167,7 @@ replaces its registry entry in place."
                       :label glasspane-title
                       :icon glasspane-icon
                       :surfaces (list glasspane-owner)
+                      :requires-extensions '("glasspane.material3")
                       :dock #'glasspane--dock-items
                       :home-route "agenda"
                       :destinations #'glasspane--destinations)
@@ -170,6 +175,7 @@ replaces its registry entry in place."
                     :label glasspane-title
                     :icon glasspane-icon
                     :surfaces (list glasspane-owner)
+                    :requires-extensions '("glasspane.material3")
                     ;; PA-3a: Glasspane owns the full five-item bar.  Eval
                     ;; is the one native core place it relocates; Files is
                     ;; replaced by the downstream Resources destination.
@@ -198,6 +204,7 @@ replaces its registry entry in place."
   (glasspane-packages-register)
   (glasspane-ui-register)
   (glasspane-org-reader-register)
+  (glasspane-navigation-register)
   (glasspane-detail-register)
   (glasspane-agenda-register)
   (glasspane-projects-register)
@@ -210,6 +217,7 @@ replaces its registry entry in place."
   (glasspane-table-register)
   (glasspane-notes-register)
   (glasspane-srs-register)
+  (glasspane-ef-register)
   (glasspane-demo-register))
 
 (defun glasspane-unregister ()
@@ -228,6 +236,7 @@ Org clock handlers are upstream and deliberately survive."
   (glasspane-packages-unregister)
   (glasspane-ui-unregister)
   (glasspane-org-reader-unregister)
+  (glasspane-navigation-unregister)
   (glasspane-detail-unregister)
   (glasspane-agenda-unregister)
   (glasspane-projects-unregister)
@@ -240,6 +249,7 @@ Org clock handlers are upstream and deliberately survive."
   (glasspane-table-unregister)
   (glasspane-notes-unregister)
   (glasspane-srs-unregister)
+  (glasspane-ef-unregister)
   (glasspane-demo-unregister))
 
 (glasspane-register)

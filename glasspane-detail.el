@@ -67,13 +67,13 @@
 (require 'jetpacs-apps)
 (require 'jetpacs-buffer)
 (require 'jetpacs-navigate)
-(require 'jetpacs-files)
 (require 'jetpacs-dialog)
 (require 'jetpacs-editor)
 (require 'jetpacs-org-toolbar)
 (require 'jetpacs-org-dialogs)
 (require 'glasspane-org)
 (require 'glasspane-ui)
+(require 'glasspane-navigation)
 (require 'jetpacs-org-settings)      ; the shared tag vocabulary
 
 ;; Same-rung sibling: the foldable reader.  This file must build (and
@@ -82,8 +82,6 @@
 (require 'glasspane-org-reader nil t)
 (declare-function glasspane-org-reader-subtree "glasspane-org-reader"
                   (file pos &optional skip-props set))
-(declare-function glasspane-org-reader-prepare-landing
-                  "glasspane-org-reader" (path))
 (defvar glasspane-org-reader-inline-props)
 
 ;; Later-rung siblings (G5's pure agenda formatters): declared, never
@@ -241,11 +239,13 @@ sequences pan sideways rather than wrapping into a stack."
 ;; `jetpacs.org.archive' verb can resolve it; without one the card just
 ;; has no archive swipe.
 
-(defun glasspane-detail-agenda-card (it)
-  "A detail-rich agenda card for item IT.
+(defun glasspane-detail-agenda-card (it &optional area-tags)
+  "A detail-rich agenda card for item IT, distinguishing AREA-TAGS.
 Leading time (or a type icon), priority-prefixed headline (done titles
-degrade to on_surface_variant — no strike span, FOUNDATION-GAPS #7),
-a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
+degrade to neutral on_surface — no strike span, FOUNDATION-GAPS #7),
+a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring.
+AREA-TAGS, when supplied by Projects, render first as elevated category chips
+and are removed from the ordinary flat-tag chip set."
   (let* ((headline (or (alist-get 'headline it) "Untitled"))
          (todo (alist-get 'todo it))
          ;; Normalized "HH:MM" — the raw property is a time-grid string
@@ -254,9 +254,15 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
          (type (alist-get 'type it))
          (file (alist-get 'file it))
          (priority (alist-get 'priority it))
-         (tags (append (alist-get 'tags it) nil))
+         (area-tags (delete-dups (copy-sequence area-tags)))
+         (tags (cl-remove-if (lambda (tag) (member tag area-tags))
+                             (append (alist-get 'tags it) nil)))
          (token (alist-get 'token it))
          (archive-token (alist-get 'archive-token it))
+         ;; PARA Projects archive into their Area's in-file Archive subtree,
+         ;; not Org's default sibling _archive file.  Other cards retain the
+         ;; foundation action unchanged.
+         (para-project (alist-get 'para-project it))
          (done (and todo
                     (member todo (or (default-value 'org-done-keywords)
                                      '("DONE" "CANCELLED")))
@@ -281,7 +287,7 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                     (jetpacs-span (format "[%s] " priority)
                                   :font-weight "bold" :color "#F57C00"))
                   (jetpacs-span headline
-                                :color (and done "on_surface_variant"))))))
+                                :color (and done "on_surface"))))))
          (middle
           (apply #'jetpacs-column
                  (delq nil
@@ -290,23 +296,33 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                         (unless (string-empty-p caption)
                           (jetpacs-text caption :style "caption"))
                         (glasspane-agenda-card-date-row it)
-                        (when tags
+                        (when (or area-tags tags)
                           (apply #'jetpacs-flow-row
-                                 (mapcar
-                                  (lambda (tg)
-                                    (jetpacs-assist-chip
-                                     tg :on-tap (jetpacs-action
-                                                 "search.by-tag"
-                                                 :args (list :tag tg))))
-                                  tags))))))))
+                                 (append
+                                  (mapcar
+                                   (lambda (area)
+                                     (jetpacs-material3-assist-chip
+                                      area
+                                      :icon "category"
+                                      :variant "elevated"
+                                      :on-tap (jetpacs-action
+                                               "search.by-tag"
+                                               :args (list :tag area))))
+                                   area-tags)
+                                  (mapcar
+                                   (lambda (tag)
+                                     (jetpacs-material3-assist-chip
+                                      tag :on-tap (jetpacs-action
+                                                   "search.by-tag"
+                                                   :args (list :tag tag))))
+                                   tags)))))))))
     (jetpacs-card
      (list (apply #'jetpacs-row
                   (delq nil
                         (list lead
                               (jetpacs-with-attrs (jetpacs-box middle)
                                                   :weight 1)))))
-     :on-tap (and token (jetpacs-action "heading.visit"
-                                        :args (list :token token)))
+     :on-tap (glasspane-navigation-heading-action token)
      :on-long-tap (and token (jetpacs-action "heading.menu"
                                              :args (list :token token)))
      :swipe-start (and token
@@ -314,13 +330,22 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                                       :on-trigger
                                       (jetpacs-action "heading.todo-cycle"
                                                       :args (list :token token))))
-     :swipe-end (and archive-token
-                     (jetpacs-swipe "Archive" :icon "archive" :color "#E53935"
-                                    :on-trigger
-                                    (jetpacs-action
-                                     "jetpacs.org.archive"
-                                     :args (list :token archive-token)
-                                     :confirm "Archive this subtree?"))))))
+     :swipe-end
+     (cond
+      ((and para-project token)
+       (jetpacs-swipe
+        "Archive" :icon "archive" :color "#E53935"
+        :on-trigger
+        (jetpacs-action
+         "projects.archive" :args (list :token token)
+         :confirm "Archive this Project inside its Area?")))
+      (archive-token
+       (jetpacs-swipe
+        "Archive" :icon "archive" :color "#E53935"
+        :on-trigger
+        (jetpacs-action
+         "jetpacs.org.archive" :args (list :token archive-token)
+         :confirm "Archive this subtree?")))))))
 
 (defun glasspane-detail-result-card (it)
   "Render a search/heading item IT to a tappable card with tag chips."
@@ -342,7 +367,7 @@ a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring."
                             (apply #'jetpacs-flow-row
                                    (mapcar
                                     (lambda (tg)
-                                      (jetpacs-assist-chip
+                                      (jetpacs-material3-assist-chip
                                        tg :on-tap (jetpacs-action
                                                    "search.by-tag"
                                                    :args (list :tag tg))))
@@ -878,7 +903,7 @@ deadline edit delegate to the foundation timestamp dialog through
               (jetpacs-column
                (jetpacs-text "Inherited" :style "caption")
                (apply #'jetpacs-flow-row
-                      (mapcar #'jetpacs-assist-chip inherited))
+                      (mapcar #'jetpacs-material3-assist-chip inherited))
                :spacing 4))))
      :collapsed (jetpacs-bool (null tags)))))
 
@@ -890,15 +915,14 @@ never detours through the file picker."
     (apply #'jetpacs-row
            (append
             (list (if file
-                      (jetpacs-assist-chip
+                      (jetpacs-material3-assist-chip
                        (file-name-nondirectory file)
                        :icon "description"
-                       :on-tap (jetpacs-action "jetpacs.files.open"
-                                               :args (list :path file)))
+                       :on-tap (glasspane-navigation-document-action file))
                     (jetpacs-text "?" :style "caption")))
             (cl-mapcan (lambda (anc tok)
                          (list (jetpacs-icon "chevron_right" :size 16)
-                               (jetpacs-assist-chip
+                               (jetpacs-material3-assist-chip
                                 (car anc)
                                 :on-tap (and tok
                                              (jetpacs-action
@@ -1015,8 +1039,8 @@ container would break Compose) and wrap otherwise."
            (when (glasspane-detail--org-file-p file)
              (jetpacs-icon-button
               "open_in_new"
-              (jetpacs-action "detail.open-file"
-                              :args (list :token (plist-get tokens :main)))
+              (glasspane-navigation-heading-action
+               (plist-get tokens :main))
               :content-description "Open in file"))
            (if (plist-get info :clocked-in)
                (jetpacs-icon-button "timer_off"
@@ -1165,46 +1189,26 @@ moved (SPEC 14.5: re-present, never guess)."
     ('retry (jetpacs-retry-later))
     (status status)))
 
-(defun glasspane-detail--on-visit (args params)
-  "Open the token's Org buffer at its heading on the current surface."
+(defun glasspane-detail--on-visit (args _params)
+  "Resolve ARGS' heading token and use the canonical document presenter."
   (let ((token (plist-get args :token)))
     (cond
      ((not (stringp token)) 'rejected)
-     ((null (ebp-org-token-ref token :owner "glasspane")) 'stale)
      (t
-      (condition-case err
-          (pcase-let* ((ref (ebp-org-token-ref token :owner "glasspane"))
-                       (`(,buffer ,file ,pos)
-                        (glasspane-detail--ref-location ref))
-                       (surface (or (plist-get params :surface)
-                                    (jetpacs-shell-surface-for "glasspane"))))
-            (jetpacs-flow-continue
-             (lambda ()
-               (jetpacs-navigate-buffer
-                buffer surface (file-name-nondirectory file) pos)))
-            'accepted)
-        ((ebp-org-refused ebp-org-unavailable ebp-org-unresolved)
-         (glasspane-detail--location-status err)))))))
+      (if-let* ((ref (ebp-org-token-ref token :owner "glasspane")))
+          (condition-case err
+              (pcase-let ((`(,_buffer ,file ,pos)
+                            (glasspane-detail--ref-location ref)))
+                (glasspane-navigation-open-document file pos))
+            ((ebp-org-refused ebp-org-unavailable ebp-org-unresolved)
+             (glasspane-detail--location-status err)))
+        'stale)))))
 
-(defun glasspane-detail--on-open-file (args _params)
-  "Open the token's source heading through native Files at its position."
-  (let ((token (plist-get args :token)))
-    (cond
-     ((not (stringp token)) 'rejected)
-     ((null (ebp-org-token-ref token :owner "glasspane")) 'stale)
-     (t
-      (condition-case err
-          (pcase-let* ((ref (ebp-org-token-ref token :owner "glasspane"))
-                       (`(,_buffer ,file ,pos)
-                        (glasspane-detail--ref-location ref)))
-            ;; Product-specific reader mode/filter choices remain here in
-            ;; Glasspane; Files receives only a generic PATH + MARK-POS.
-            (when (fboundp 'glasspane-org-reader-prepare-landing)
-              (glasspane-org-reader-prepare-landing file))
-            (jetpacs-files-open-path
-             file (jetpacs-shell-surface-for jetpacs-files-owner) pos))
-        ((ebp-org-refused ebp-org-unavailable ebp-org-unresolved)
-         (glasspane-detail--location-status err)))))))
+(defun glasspane-detail--on-open-file (args params)
+  "Compatibility adapter for cached `detail.open-file' events.
+New builders emit `heading.visit'; both token verbs deliberately call the
+same resolver and canonical presenter with ARGS and PARAMS."
+  (glasspane-detail--on-visit args params))
 
 (defun glasspane-detail--on-toggle-read (_args params)
   "Flip the reader/editor mode; the builder re-reads the flag."
@@ -1591,7 +1595,7 @@ then appears as a row whose value column is ready to fill in."
                            (jetpacs-spacer :weight 1)
                            (jetpacs-button "Close" (jetpacs-dialog-dismiss)
                                            :variant "text"))))
-                   (list :scroll t :spacing 8)))
+                   (list :spacing 8)))
            :params params)))
     (error (message "glasspane: properties dialog failed: %s"
                     (jetpacs-error-label err))
@@ -1779,7 +1783,7 @@ its own event — no state round-trip (v1 read 9 `jetpacs-ui-state's)."
                             :args (list :file file)
                             :capture-fields
                             glasspane-detail--file-prop-fields)))
-          :scroll t :spacing 8)
+          :spacing 8)
          :params params))
     (error (message "glasspane: file properties dialog failed: %s"
                     (jetpacs-error-label err))
@@ -1943,9 +1947,11 @@ gate contract).  Idempotent."
     (jetpacs-defaction "heading.tap" #'glasspane-detail--on-tap
                        :doc "Open a heading in the pushed detail screen")
     (jetpacs-defaction "heading.visit" #'glasspane-detail--on-visit
-                       :doc "Open an Org buffer at the selected heading")
+                       :doc "Resolve a heading and open its canonical document"
+                       :args '((:name token :type "text" :required t)))
     (jetpacs-defaction "detail.open-file" #'glasspane-detail--on-open-file
-                       :doc "Open a detail heading in native Files")
+                       :doc "Compatibility alias for cached heading file opens"
+                       :args '((:name token :type "text" :required t)))
     (jetpacs-defaction "detail.toggle-read"
                        #'glasspane-detail--on-toggle-read
                        :doc "Flip the detail reader/editor mode")

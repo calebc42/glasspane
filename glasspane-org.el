@@ -270,6 +270,74 @@ Memoised; see `ebp-org-cache-invalidate'."
                 (vulpea-db-query (lambda (note) (vulpea-note-todo note))))
       (glasspane-org--todo-items-1 files))))
 
+(defun glasspane-org--clean-tag-strings (tags)
+  "Return TAGS as distinct, non-empty strings without text properties."
+  (let ((values (cond
+                 ((vectorp tags) (append tags nil))
+                 ((listp tags) (copy-sequence tags))
+                 ((stringp tags) (list tags)))))
+    (delete-dups
+     (delq nil
+           (mapcar
+            (lambda (tag)
+              (when (stringp tag)
+                (let ((clean (string-trim
+                              (substring-no-properties tag))))
+                  (unless (string-empty-p clean) clean))))
+            values)))))
+
+(defun glasspane-org--file-tag-group-index (file group)
+  "Return FILE's effective tag GROUP members and heading memberships.
+The memoised result is a plist with `:members' in declaration order and
+`:positions' as an alist from heading point to the members inherited there."
+  (when (and (stringp file) (stringp group)
+             (not (string-empty-p group)))
+    (ebp-org-with-cache 'glasspane (list 'tag-group-index file group)
+      (condition-case nil
+          (let ((true (ebp-org--check-file file)))
+            (ebp-org--with-clamped-io
+              (with-current-buffer (find-file-noselect true t)
+                (unless (derived-mode-p 'org-mode) (org-mode))
+                (org-with-wide-buffer
+                 (let ((members
+                        (glasspane-org--clean-tag-strings
+                         (cdr (assoc-string group org-tag-groups-alist t))))
+                       positions)
+                   (org-map-entries
+                    (lambda ()
+                      (let ((tags (glasspane-org--clean-tag-strings
+                                   (org-get-tags))))
+                        (push
+                         (cons (point)
+                               (cl-remove-if-not
+                                (lambda (member) (member member tags))
+                                members))
+                         positions)))
+                    nil 'file)
+                   (list :members members
+                         :positions (nreverse positions)))))))
+        (error nil)))))
+
+(defun glasspane-org-item-tag-group-members (item group)
+  "Return ITEM's effective memberships in native Org tag GROUP.
+Membership is resolved at ITEM's source position so file tags and inherited
+heading tags are honored.  If a stale index item has no matching position,
+its own `tags' field is intersected with the source file's effective group.
+The result follows the group's declaration order."
+  (when-let* ((file (alist-get 'file item))
+              (index (glasspane-org--file-tag-group-index file group)))
+    (let* ((pos (alist-get 'pos item))
+           (at-pos (and (integerp pos)
+                        (assoc pos (plist-get index :positions))))
+           (tags (glasspane-org--clean-tag-strings
+                  (alist-get 'tags item))))
+      (copy-sequence
+       (if at-pos
+           (cdr at-pos)
+         (cl-remove-if-not
+          (lambda (member) (member member tags))
+          (plist-get index :members)))))))
+
 (defun glasspane-org--todo-items-1 (files)
   "Uncached worker for `glasspane-org-todo-items'."
   (let ((scope (or files (glasspane-org--agenda-scope)))

@@ -15,22 +15,22 @@
 (require 'glasspane)
 
 (defconst glasspane-para-test--areas-source
-  (expand-file-name "../emacs/apps/glasspane/glasspane-areas.el"
+  (expand-file-name "../glasspane-areas.el"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The Areas source inspected by its architectural gate.")
 
 (defconst glasspane-para-test--resources-source
-  (expand-file-name "../emacs/apps/glasspane/glasspane-resources.el"
+  (expand-file-name "../glasspane-resources.el"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The Resources source inspected by its architectural gate.")
 
 (defconst glasspane-para-test--projects-source
-  (expand-file-name "../emacs/apps/glasspane/glasspane-projects.el"
+  (expand-file-name "../glasspane-projects.el"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The Projects source inspected by its architectural gate.")
 
 (defconst glasspane-para-test--agenda-source
-  (expand-file-name "../emacs/apps/glasspane/glasspane-agenda.el"
+  (expand-file-name "../glasspane-agenda.el"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The Agenda source inspected after the Tasks promotion.")
 
@@ -110,34 +110,59 @@ FILES is a list of (RELATIVE-NAME CONTENT)."
       (walk node))
     (nreverse texts)))
 
-(ert-deftest glasspane-para-areas-bucket-layers-and-open-counts ()
-  "Keyword, inherited-property, and basename categories form buckets.
-File-only categories survive, done headings do not inflate open counts, and
-one file may honestly participate in both its file Area and a nested Area."
+(defun glasspane-para-test--nodes-of-type (node type)
+  "Return every node below NODE whose wire type is TYPE."
+  (let (nodes)
+    (cl-labels
+        ((walk (value)
+           (cond
+            ((vectorp value) (mapc #'walk value))
+            ((consp value)
+             (when (and (keywordp (car-safe value))
+                        (equal (plist-get value :t) type))
+               (push value nodes))
+             (mapc #'walk value)))))
+      (walk node))
+    (nreverse nodes)))
+
+(ert-deftest glasspane-para-areas-group-tags-inheritance-and-open-counts ()
+  "Area-group members use FILETAGS and inherited heading tags.
+Unused declared Areas remain visible, non-TODO headings classify Resources,
+done headings do not inflate project counts, and CATEGORY creates no Area."
   (glasspane-para-test--with-vault
       '(("work.org"
-         "#+CATEGORY: Work\n* TODO File task\n* DONE Finished\n* Parent\n:PROPERTIES:\n:CATEGORY: Home\n:END:\n** TODO Inherited task\n")
-        ("Reading.org" "* TODO Read a chapter\n")
-        ("empty.org" "#+CATEGORY: Empty\n* Reference material\n"))
+         "#+CATEGORY: LegacyWork\n#+TAGS: [ Area : Work Home Empty Unused ]\n#+FILETAGS: :Work:\n* TODO File task\n* DONE Finished\n* Parent :Home:\n** TODO Inherited task\n* Reference material :Empty:\n")
+        ("reading.org"
+         "#+TAGS: [ Area : Reading ]\n* TODO Read a chapter :Reading:\n")
+        ("category-only.org"
+         "#+CATEGORY: Inbox\n* TODO Not an Area\n"))
     (let* ((index (glasspane-areas--index))
            (names (mapcar (lambda (area) (plist-get area :name)) index))
            (work (glasspane-para-test--area "Work" index))
            (home (glasspane-para-test--area "Home" index))
            (reading (glasspane-para-test--area "Reading" index))
-           (empty (glasspane-para-test--area "Empty" index)))
-      (should (equal names '("Empty" "Home" "Reading" "Work")))
+           (empty (glasspane-para-test--area "Empty" index))
+           (unused (glasspane-para-test--area "Unused" index)))
+      (should (equal names '("Empty" "Home" "Reading" "Unused" "Work")))
       (should (equal (mapcar (lambda (item) (alist-get 'headline item))
                              (plist-get work :items))
-                     '("File task")))
+                     '("File task" "Inherited task")))
       (should (equal (mapcar (lambda (item) (alist-get 'headline item))
                              (plist-get home :items))
                      '("Inherited task")))
+      (should (equal (alist-get 'areas (car (plist-get home :items)))
+                     ["Work" "Home"]))
       (should (= (length (plist-get work :files)) 1))
       (should (= (length (plist-get home :files)) 1))
       (should (= (length (plist-get reading :items)) 1))
       (should-not (plist-get empty :items))
+      (should (= (length (plist-get empty :files)) 1))
+      (should-not (plist-get unused :items))
+      (should-not (plist-get unused :files))
+      (should-not (glasspane-para-test--area "LegacyWork" index))
+      (should-not (glasspane-para-test--area "Inbox" index))
       (should (equal (glasspane-areas--count-label work)
-                     "1 open TODO · 1 file")))))
+                     "2 open TODOs · 1 file")))))
 
 (ert-deftest glasspane-para-areas-index-is-memoised ()
   "The named Areas cache key computes its worker once per generation."
@@ -157,7 +182,8 @@ one file may honestly participate in both its file Area and a nested Area."
 (ert-deftest glasspane-para-areas-rotten-file-is-local ()
   "A vanished file is skipped while a healthy peer still contributes."
   (glasspane-para-test--with-vault
-      '(("good.org" "#+CATEGORY: Good\n* TODO Survives\n"))
+      '(("good.org"
+         "#+TAGS: [ Area : Good ]\n* TODO Survives :Good:\n"))
     (let ((good (expand-file-name "good.org" vault))
           (gone (expand-file-name "gone.org" vault)))
       (cl-letf (((symbol-function 'glasspane-org-agenda-scope)
@@ -169,32 +195,31 @@ one file may honestly participate in both its file Area and a nested Area."
                                     (car (plist-get (car index) :items)))
                          "Survives")))))))
 
-(ert-deftest glasspane-para-areas-primes-category-before-heading-read ()
-  "The Emacs 30.1 category workaround runs before `org-get-category'."
+(ert-deftest glasspane-para-areas-global-group-declares-unused-members ()
+  "The global Area group supplies rows; categories still supply none."
   (glasspane-para-test--with-vault
-      '(("prime.org" "#+CATEGORY: Primed\n* TODO Cache path\n"))
-    (let ((real-element (symbol-function 'org-element-at-point))
-          (real-category (symbol-function 'org-get-category))
-          primed early-category-read)
-      (cl-letf (((symbol-function 'org-element-at-point)
-                 (lambda (&rest args)
-                   (save-excursion
-                     (beginning-of-line)
-                     (when (looking-at-p "[ \t]*#\\+CATEGORY:")
-                       (setq primed t)))
-                   (apply real-element args)))
-                ((symbol-function 'org-get-category)
-                 (lambda (&rest args)
-                   (unless primed (setq early-category-read t))
-                   (apply real-category args))))
-        (let ((index (glasspane-areas--index-1)))
-          (should primed)
-          (should-not early-category-read)
-          (should (= (length (plist-get (car index) :items)) 1)))))))
+      '(("global.org"
+         "#+CATEGORY: Ignored\n* TODO Tagged :House:\n"))
+    (let ((org-tag-alist
+           '((:startgrouptag) ("Area") (:grouptags)
+             ("House") ("Auto") (:endgrouptag))))
+      (ebp-org-cache-invalidate)
+      (let* ((index (glasspane-areas--index))
+             (house (glasspane-para-test--area "House" index))
+             (auto (glasspane-para-test--area "Auto" index)))
+        (should (equal (mapcar (lambda (area) (plist-get area :name)) index)
+                       '("Auto" "House")))
+        (should (equal (mapcar (lambda (item) (alist-get 'headline item))
+                               (plist-get house :items))
+                       '("Tagged")))
+        (should-not (plist-get auto :items))
+        (should-not (plist-get auto :files))
+        (should-not (glasspane-para-test--area "Ignored" index))))))
 
 (ert-deftest glasspane-para-areas-plain-arg-and-drill-routing ()
   "The list mints no tokens; rows use strings and route by stable id."
-  (let* ((area '(:name "Home" :files ("/vault/home.org") :items nil))
+  (let* ((glasspane-areas--filter-state (make-hash-table :test #'equal))
+         (area '(:name "Home" :files ("/vault/home.org") :items nil))
          (row (glasspane-areas--area-row area))
          (tap (plist-get row :on_tap))
          pushed-id pushed-builder token-calls)
@@ -222,6 +247,8 @@ one file may honestly participate in both its file Area and a nested Area."
                   'accepted))
       (should (equal pushed-id (jetpacs-wire-id "area" "Home")))
       (should (functionp pushed-builder))
+      (should (equal (gethash "Home" glasspane-areas--filter-state)
+                     '("Home")))
       (should (eq (glasspane-areas--on-drill
                    '(:category 7) '(:surface "app:glasspane"))
                   'rejected))
@@ -230,23 +257,46 @@ one file may honestly participate in both its file Area and a nested Area."
                   'rejected)))))
 
 (ert-deftest glasspane-para-areas-drill-content-and-vanish-degrade ()
-  "The drill has shared cards + Files handoffs; a vanished Area is inert."
-  (let* ((item '((headline . "Keep house") (todo . "TODO")
-                 (tags . []) (file . "/vault/home.org")))
+  "Area sections use PARA names and scoped handoffs; vanished Areas are inert."
+  (let* ((glasspane-areas--filter-state (make-hash-table :test #'equal))
+         (item '((headline . "Keep house") (todo . "TODO")
+                 (tags . ["Home"]) (areas . ["Home"])
+                 (file . "/vault/home.org")))
          (area `(:name "Home" :files ("/vault/home.org") :items (,item)))
+         (archive (list :path "/vault/home.org_archive"
+                        :mtime (encode-time 0 30 9 2 1 2026)))
+         archive-files
          token-sets)
     (cl-letf (((symbol-function 'glasspane-areas--index)
                (lambda () (list area)))
+              ((symbol-function 'glasspane-resources-archives-for-files)
+               (lambda (files)
+                 (setq archive-files files)
+                 (list archive)))
               ((symbol-function 'glasspane-agenda-tokenize)
                (lambda (items set)
                  (push (cons set items) token-sets)
                  items)))
       (let* ((body (glasspane-areas--drill-body "Home"))
-             (json (jetpacs-node->canonical-json body)))
+             (json (jetpacs-node->canonical-json body))
+             (actions (glasspane-para-test--actions body)))
         (should (member "resources.open-file"
                         (glasspane-para-test--action-names body)))
-        (should (string-search "Open TODOs" json))
-        (should (string-search "Files" json))
+        (dolist (action actions)
+          (when (equal (plist-get action :action) "resources.open-file")
+            (should (equal (plist-get action :open_surface)
+                           "app:jetpacs.files"))))
+        (should (string-search "Projects" json))
+        (should (string-search "Resources" json))
+        (should (string-search "Archives" json))
+        (should (string-search "areas.filter" json))
+        (should-not (string-search "Open TODOs" json))
+        (should (equal archive-files '("/vault/home.org")))
+        (should (cl-some
+                 (lambda (action)
+                   (equal (plist-get (plist-get action :args) :path)
+                          "/vault/home.org_archive"))
+                 actions))
         (should (equal (caar token-sets) "areas"))
         (let ((screen (glasspane-areas-drill-screen "Home" nil)))
           (should (jetpacs-check-profile screen 'app))
@@ -262,11 +312,125 @@ one file may honestly participate in both its file Area and a nested Area."
         (should (equal (plist-get body :title) "Area no longer exists"))
         (should (equal token-sets '(("areas"))))))))
 
+(ert-deftest glasspane-para-areas-intersection-filters-all-sections ()
+  "Area chips apply AND membership to Projects, Resources, and Archives."
+  (let* ((glasspane-areas--filter-state (make-hash-table :test #'equal))
+         (inbox-only
+          '((headline . "Inbox only") (todo . "TODO") (tags . ["Inbox"])
+            (areas . ["Inbox"])
+            (file . "/vault/inbox.org")))
+         (inbox-house
+          '((headline . "Shared house project") (todo . "NEXT")
+            (tags . ["Inbox" "House"]) (areas . ["Inbox" "House"])
+            (file . "/vault/inbox.org")))
+         (house-only
+          '((headline . "House only") (todo . "TODO") (tags . ["House"])
+            (areas . ["House"])
+            (file . "/vault/house.org")))
+         (index `((:name "Bills" :files ("/vault/bills.org") :items nil)
+                  (:name "House"
+                   :files ("/vault/house.org" "/vault/inbox.org")
+                   :items (,house-only ,inbox-house))
+                  (:name "Inbox" :files ("/vault/inbox.org")
+                   :items (,inbox-only ,inbox-house))))
+         archive-files)
+    (cl-letf (((symbol-function 'glasspane-areas--index) (lambda () index))
+              ((symbol-function 'glasspane-agenda-tokenize)
+               (lambda (items _set) items))
+              ((symbol-function 'glasspane-resources-archives-for-files)
+               (lambda (files)
+                 (setq archive-files files)
+                 (mapcar (lambda (file)
+                           (list :path (concat file "_archive")
+                                 :mtime (encode-time 0 0 9 1 1 2026)))
+                         files))))
+      (let* ((body (glasspane-areas--drill-body "Inbox"))
+             (flow (aref (plist-get body :children) 0))
+             (chips (append (plist-get flow :children) nil))
+             (json (jetpacs-node->canonical-json body)))
+        (should (equal (mapcar (lambda (chip) (plist-get chip :label)) chips)
+                       '("Inbox" "Bills" "House")))
+        (should (equal (mapcar (lambda (chip) (plist-get chip :selected))
+                               chips)
+                       '(t :json-false :json-false)))
+        (should (equal
+                 (mapcar (lambda (chip)
+                           (plist-get (plist-get chip :on_tap) :args))
+                         chips)
+                 '((:category "Inbox" :area "Inbox")
+                   (:category "Inbox" :area "Bills")
+                   (:category "Inbox" :area "House"))))
+        (should (string-search "Inbox only" json))
+        (should (string-search "Shared house project" json))
+        (should-not (string-search "House only" json)))
+      (puthash "Inbox" '("Inbox" "House")
+               glasspane-areas--filter-state)
+      (let* ((body (glasspane-areas--drill-body "Inbox"))
+             (flow (aref (plist-get body :children) 0))
+             (chips (append (plist-get flow :children) nil))
+             (json (jetpacs-node->canonical-json body)))
+        (should (equal (mapcar (lambda (chip) (plist-get chip :selected))
+                               chips)
+                       '(t :json-false t)))
+        (should-not (string-search "Inbox only" json))
+        (should (string-search "Shared house project" json))
+        (should-not (string-search "House only" json))
+        (should (equal archive-files '("/vault/inbox.org")))
+        (should (string-search "/vault/inbox.org_archive" json))
+        (should-not (string-search "/vault/house.org" json))))))
+
+(ert-deftest glasspane-para-areas-filter-action-toggles-and-resets ()
+  "Secondary chips toggle; tapping the primary chip clears the intersection."
+  (let* ((glasspane-areas--filter-state (make-hash-table :test #'equal))
+         (index '((:name "House" :files nil :items nil)
+                  (:name "Inbox" :files nil :items nil)))
+         refreshes)
+    (cl-letf (((symbol-function 'glasspane-areas--index) (lambda () index))
+              ((symbol-function 'jetpacs-app-defer-refresh)
+               (lambda (params) (push params refreshes))))
+      (should (eq (glasspane-areas--on-filter
+                   '(:category "Inbox" :area "House") '(:surface "areas"))
+                  'accepted))
+      (should (equal (gethash "Inbox" glasspane-areas--filter-state)
+                     '("Inbox" "House")))
+      (should (eq (glasspane-areas--on-filter
+                   '(:category "Inbox" :area "House") '(:surface "areas"))
+                  'accepted))
+      (should (equal (gethash "Inbox" glasspane-areas--filter-state)
+                     '("Inbox")))
+      (glasspane-areas--on-filter
+       '(:category "Inbox" :area "House") '(:surface "areas"))
+      (should (eq (glasspane-areas--on-filter
+                   '(:category "Inbox" :area "Inbox") '(:surface "areas"))
+                  'accepted))
+      (should (equal (gethash "Inbox" glasspane-areas--filter-state)
+                     '("Inbox")))
+      (should (eq (glasspane-areas--on-filter
+                   '(:category "Inbox" :area "Gone") '(:surface "areas"))
+                  'rejected))
+      (should (eq (glasspane-areas--on-filter
+                   '(:category 7 :area "House") '(:surface "areas"))
+                  'rejected))
+      (should (= (length refreshes) 4)))))
+
+(ert-deftest glasspane-para-areas-archives-match-source-resources ()
+  "An Area receives only standard sibling archives for its source files."
+  (let ((records (list (list :path "/vault/home.org_archive" :mtime '(1 2))
+                       (list :path "/vault/work.org_archive" :mtime '(3 4))
+                       (list :path "/vault/nested/home.org_archive" :mtime '(5 6)))))
+    (cl-letf (((symbol-function 'glasspane-resources--archive-files)
+               (lambda () records)))
+      (should
+       (equal (mapcar (lambda (record) (plist-get record :path))
+                      (glasspane-resources-archives-for-files
+                       '("/vault/home.org" "/vault/absent.org")))
+              '("/vault/home.org_archive"))))))
+
 (ert-deftest glasspane-para-areas-lifecycle-and-navigation ()
-  "Glasspane owns both verbs and PA-3 exposes the Areas destination."
+  "Glasspane owns its opener, drill route, and intersection control."
   (should (eq (symbol-function 'glasspane-agenda-tokenize)
               'glasspane-agenda--tokenize))
-  (dolist (name '("areas.open" "areas.drill"))
+  (dolist (name '("areas.open" "areas.drill" "areas.filter"))
     (should (gethash name jetpacs-action-handlers))
     (should (equal (jetpacs--owner-of "action" name) "glasspane")))
   (should (member "areas.open"
@@ -275,19 +439,25 @@ one file may honestly participate in both its file Area and a nested Area."
   (unwind-protect
       (progn
         (glasspane-areas-unregister)
-        (dolist (name '("areas.open" "areas.drill"))
+        (dolist (name '("areas.open" "areas.drill" "areas.filter"))
           (should-not (gethash name jetpacs-action-handlers))))
     (glasspane-areas-register))
-  (dolist (name '("areas.open" "areas.drill"))
+  (dolist (name '("areas.open" "areas.drill" "areas.filter"))
     (should (gethash name jetpacs-action-handlers))))
 
 (ert-deftest glasspane-para-areas-source-boundaries ()
-  "Areas consumes public seams and contains no duplicate scope/browser path."
+  "Areas consumes tag groups/public seams and has no category fallback."
   (with-temp-buffer
     (insert-file-contents glasspane-para-test--areas-source)
     (should (search-forward "glasspane-org-agenda-scope" nil t))
     (goto-char (point-min))
     (should (search-forward "glasspane-agenda-tokenize" nil t))
+    (goto-char (point-min))
+    (should (search-forward "org-tag-groups-alist" nil t))
+    (goto-char (point-min))
+    (should (search-forward "org-get-tags" nil t))
+    (goto-char (point-min))
+    (should-not (search-forward "org-get-category" nil t))
     (goto-char (point-min))
     (should-not (re-search-forward "\\_<org-agenda-files\\_>" nil t))
     (goto-char (point-min))
@@ -301,8 +471,11 @@ one file may honestly participate in both its file Area and a nested Area."
         (glasspane-ui-legacy-ia nil)
         calls)
     (cl-letf (((symbol-function 'jetpacs-files-open-path)
-               (lambda (path surface &optional mark-pos browser-id browser-fab)
-                 (push (list path surface mark-pos browser-id browser-fab) calls)
+               (lambda (path surface &optional mark-pos browser-id browser-fab
+                             return-action)
+                 (push (list path surface mark-pos browser-id browser-fab
+                             return-action)
+                       calls)
                  'accepted)))
       (should (eq (glasspane-resources--on-open nil nil) 'accepted))
       (should (eq (glasspane-resources--on-open-file
@@ -321,7 +494,13 @@ one file may honestly participate in both its file Area and a nested Area."
     (should (equal (glasspane-para-test--action-names (nth 4 (car calls)))
                    '("org.capture.show")))
     (should-not (nth 4 (cadr calls)))
-    (should-not (nth 4 (caddr calls)))))
+    (should-not (nth 4 (caddr calls)))
+    (should (equal (plist-get (nth 5 (car calls)) :action) "agenda.open"))
+    (dolist (call (cdr calls))
+      (should (equal (plist-get (nth 5 call) :action) "resources.return")))
+    (dolist (call calls)
+      (should (equal (plist-get (nth 5 call) :open_surface)
+                     "app:glasspane")))))
 
 (ert-deftest glasspane-para-resources-files-root-refusal-propagates ()
   "The native Files guard rejects both landing and direct paths unchanged."
@@ -373,9 +552,11 @@ one file may honestly participate in both its file Area and a nested Area."
                  (and (equal surface "app:glasspane")
                       (equal owner "glasspane"))))
               ((symbol-function 'jetpacs-files-open-path)
-               (lambda (path surface &optional mark-pos browser-id browser-fab)
+               (lambda (path surface &optional mark-pos browser-id browser-fab
+                             return-action)
                  (setq captured
-                       (list path surface mark-pos browser-id browser-fab))
+                       (list path surface mark-pos browser-id browser-fab
+                             return-action))
                  'accepted))
               ((symbol-function 'jetpacs-shell-push)
                (lambda (surface &rest _)
@@ -387,6 +568,9 @@ one file may honestly participate in both its file Area and a nested Area."
                    '("/vault" "app:jetpacs.files" nil "files-resources")))
     (should (equal (glasspane-para-test--action-names (nth 4 captured))
                    '("org.capture.show")))
+    (should (equal (plist-get (nth 5 captured) :action) "agenda.open"))
+    (should (equal (plist-get (nth 5 captured) :open_surface)
+                   "app:glasspane"))
     (should-not pushed)
     (should (equal jetpacs-apps--current "glasspane"))
     (should (equal jetpacs-apps--current-route "resources"))
@@ -437,7 +621,7 @@ one file may honestly participate in both its file Area and a nested Area."
 
 (ert-deftest glasspane-para-resources-lifecycle-and-navigation ()
   "Glasspane owns both delegates while PA-3 exposes only the place opener."
-  (dolist (name '("resources.open" "resources.open-file"))
+  (dolist (name '("resources.open" "resources.open-file" "resources.return"))
     (should (gethash name jetpacs-action-handlers))
     (should (equal (jetpacs--owner-of "action" name) "glasspane")))
   (should (equal
@@ -450,10 +634,11 @@ one file may honestly participate in both its file Area and a nested Area."
   (unwind-protect
       (progn
         (glasspane-resources-unregister)
-        (dolist (name '("resources.open" "resources.open-file"))
+        (dolist (name '("resources.open" "resources.open-file"
+                        "resources.return"))
           (should-not (gethash name jetpacs-action-handlers))))
     (glasspane-resources-register))
-  (dolist (name '("resources.open" "resources.open-file"))
+  (dolist (name '("resources.open" "resources.open-file" "resources.return"))
     (should (gethash name jetpacs-action-handlers))))
 
 (ert-deftest glasspane-para-resources-source-boundaries ()
@@ -549,6 +734,7 @@ one file may honestly participate in both its file Area and a nested Area."
          (tap (plist-get row :on_tap))
          pushed)
     (should (equal (plist-get tap :action) "resources.open-file"))
+    (should (equal (plist-get tap :open_surface) "app:jetpacs.files"))
     (should (equal (plist-get tap :args)
                    '(:path "/vault/work.org_archive")))
     (should (string-search "work.org"
@@ -589,7 +775,7 @@ one file may honestly participate in both its file Area and a nested Area."
       (progn
         (glasspane-resources-unregister)
         (dolist (name '("resources.open" "resources.open-file"
-                        "archive.open"))
+                        "resources.return" "archive.open"))
           (should-not (gethash name jetpacs-action-handlers)))
         (should-not (memq #'glasspane-resources--refresh-invalidate
                           jetpacs-shell-refresh-hook)))
@@ -694,7 +880,7 @@ one file may honestly participate in both its file Area and a nested Area."
     (should (equal set "tasks"))))
 
 (ert-deftest glasspane-para-projects-filter-chips-and-grouped-render ()
-  "The existing keyword chips filter shared cards inside file sections."
+  "Keyword chips include observed file-local states and filter shared cards."
   (let ((glasspane-projects--filter "TODO")
         (refreshes 0)
         (items '(((headline . "Alpha TODO") (todo . "TODO")
@@ -702,6 +888,8 @@ one file may honestly participate in both its file Area and a nested Area."
                  ((headline . "Alpha done") (todo . "DONE")
                   (file . "/vault/alpha.org"))
                  ((headline . "Beta TODO") (todo . "TODO")
+                  (file . "/vault/beta.org"))
+                 ((headline . "Beta next") (todo . "NEXT")
                   (file . "/vault/beta.org")))))
     (cl-letf (((symbol-function 'glasspane-org-todo-items)
                (lambda () items))
@@ -711,14 +899,19 @@ one file may honestly participate in both its file Area and a nested Area."
                (lambda () '("TODO" "DONE")))
               ((symbol-function 'jetpacs-app-defer-refresh)
                (lambda (_params) (cl-incf refreshes))))
-      (let* ((body (glasspane-projects--body))
+      (let* ((filter-row (glasspane-projects--filter-row items))
+             (labels (mapcar (lambda (chip) (plist-get chip :label))
+                             (append (plist-get filter-row :children) nil)))
+             (body (glasspane-projects--body))
              (json (jetpacs-node->canonical-json body))
              (actions (glasspane-para-test--action-names body)))
+        (should (equal labels '("ALL" "TODO" "DONE" "NEXT")))
         (should (string-search "alpha.org" json))
         (should (string-search "beta.org" json))
         (should (string-search "Alpha TODO" json))
         (should (string-search "Beta TODO" json))
         (should-not (string-search "Alpha done" json))
+        (should-not (string-search "Beta next" json))
         (should (member "tasks.filter" actions)))
       (should (eq (glasspane-projects--on-filter
                    '(:filter "DONE") '(:surface "app:glasspane"))
@@ -730,6 +923,63 @@ one file may honestly participate in both its file Area and a nested Area."
                   'rejected))
       (should (equal glasspane-projects--filter "DONE"))
       (should (= refreshes 1)))))
+
+(ert-deftest glasspane-para-projects-file-local-todo-workflow-chips ()
+  "Every keyword in a file-local #+TODO workflow becomes a filter chip."
+  (glasspane-para-test--with-vault
+      '(("workflow.org"
+         "#+TODO: TODO NEXT WAIT | DONE CANCELED\n* TODO One\n* NEXT Two\n"))
+    (let ((items (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                            (lambda () nil)))
+                   (glasspane-org-todo-items))))
+      (should (equal (glasspane-projects--todo-keywords items)
+                     '("TODO" "NEXT" "WAIT" "DONE" "CANCELED"))))))
+
+(ert-deftest glasspane-para-projects-distinguishes-native-area-tags ()
+  "Project cards elevate Area-group tags without duplicating ordinary tags."
+  (glasspane-para-test--with-vault
+      '(("areas.org"
+         "#+TAGS: [ Area : House Auto Bills ]\n#+FILETAGS: :House:\n* Household :Auto:\n** TODO Pay repair invoice :Bills:urgent:\n"))
+    (let* ((items (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
+                             (lambda () nil)))
+                    (glasspane-org-todo-items)))
+           (item (car items))
+           (areas (glasspane-org-item-tag-group-members
+                   item glasspane-area-tag-group))
+           (card (glasspane-projects--card item))
+           (chips (glasspane-para-test--nodes-of-type card "material3.assist_chip")))
+      (should (equal areas '("House" "Auto" "Bills")))
+      (dolist (area areas)
+        (let ((chip (cl-find area chips :key (lambda (node)
+                                                (plist-get node :label))
+                             :test #'equal)))
+          (should chip)
+          (should (equal (plist-get chip :icon) "category"))
+          (should (equal (plist-get chip :variant) "elevated"))
+          (should (equal (plist-get (plist-get chip :on_tap) :action)
+                         "search.by-tag"))
+          (should (equal (plist-get
+                          (plist-get (plist-get chip :on_tap) :args) :tag)
+                         area))))
+      (let ((ordinary (cl-find "urgent" chips
+                               :key (lambda (node) (plist-get node :label))
+                               :test #'equal)))
+        (should ordinary)
+        (should-not (plist-get ordinary :icon))
+        (should-not (plist-get ordinary :variant)))
+      (should (= (length chips) 4))))
+  ;; A global group is effective even when the source file has no local
+  ;; declaration; a position-less indexed item falls back to its tag payload.
+  (let ((org-tag-alist
+         '((:startgrouptag) ("Area") (:grouptags)
+           ("Work") ("Digital") (:endgrouptag))))
+    (glasspane-para-test--with-vault
+        '(("global.org" "* TODO Ship release :Work:plain:\n"))
+      (let* ((file (expand-file-name "global.org" vault))
+             (item `((file . ,file) (tags . ["Work" "plain"]))))
+        (should (equal (glasspane-org-item-tag-group-members
+                        item glasspane-area-tag-group)
+                       '("Work")))))))
 
 (ert-deftest glasspane-para-projects-alias-route-lifecycle-and-navigation ()
   "The durable Tasks alias and visible Projects opener share one route."
@@ -915,16 +1165,18 @@ one file may honestly participate in both its file Area and a nested Area."
                     (plist-get dest :label)
                     (plist-get dest :icon)
                     (plist-get dest :verb)
+                    (plist-get dest :open-surface)
                     (plist-get dest :badge)
                     (plist-get dest :bar)))
             glasspane-ui-destinations)
-    '(("agenda" "Agenda" "event" "agenda.open"
+    '(("agenda" "Agenda" "event" "agenda.open" nil
        glasspane-agenda-dock-badge t)
-      ("projects" "Projects" "task_alt" "projects.open" nil t)
-      ("areas" "Areas" "category" "areas.open" nil t)
-      ("resources" "Resources" "topic" "resources.open" nil t)
-      ("review" "Review" "school" "review.open" nil t)
-      ("archive" "Archive" "archive" "archive.open" nil nil))))
+      ("projects" "Projects" "task_alt" "projects.open" nil nil t)
+      ("areas" "Areas" "category" "areas.open" nil nil t)
+      ("resources" "Resources" "topic" "resources.open"
+       "app:jetpacs.files" nil t)
+      ("review" "Review" "school" "review.open" nil nil t)
+      ("archive" "Archive" "archive" "archive.open" nil nil nil))))
   (should (cl-every (lambda (dest) (plist-member dest :bar))
                     glasspane-ui-destinations))
   (should (plist-member (car glasspane-ui-destinations) :badge))
@@ -956,6 +1208,23 @@ one file may honestly participate in both its file Area and a nested Area."
     ;; The registry owns capture now; an absent member, not an authored
     ;; nil, is what lets the chrome join fill the slot.
     (should-not (plist-member screen :fab))))
+
+(ert-deftest glasspane-para-resources-actions-select-native-files-locally ()
+  "Every Resources handoff carries the receiver-local Files destination."
+  (let* ((dest (cl-find "resources" glasspane-ui-destinations
+                        :key (lambda (item) (plist-get item :key))
+                        :test #'equal))
+         (home-tap (plist-get (glasspane-ui--destination-row dest "test-")
+                              :on_tap))
+         (host-tap (plist-get
+                    (jetpacs-apps--destination-row glasspane-owner dest)
+                    :on_tap)))
+    (should (equal (plist-get home-tap :action) "resources.open"))
+    (should (equal (plist-get home-tap :open_surface)
+                   "app:jetpacs.files"))
+    (should (equal (plist-get host-tap :action) "app.open"))
+    (should (equal (plist-get host-tap :open_surface)
+                   "app:jetpacs.files"))))
 
 (ert-deftest glasspane-para-pa3a-legacy-rollback-restores-old-ia ()
   "The soak flag restores the old table, hand dock, and authored FAB."
@@ -1351,9 +1620,11 @@ one file may honestly participate in both its file Area and a nested Area."
               ((symbol-function 'jetpacs-shell-push)
                (lambda (&rest _) t))
               ((symbol-function 'jetpacs-files-open-path)
-               (lambda (path target &optional mark-pos browser-id browser-fab)
+               (lambda (path target &optional mark-pos browser-id browser-fab
+                             return-action)
                  (setq opened
-                       (list path target mark-pos browser-id browser-fab))
+                       (list path target mark-pos browser-id browser-fab
+                             return-action))
                  'accepted)))
       (should (eq (jetpacs-apps--action-open
                    '(:app "glasspane" :route "resources") nil)
@@ -1362,6 +1633,7 @@ one file may honestly participate in both its file Area and a nested Area."
                      (list "/vault" files-surface nil "files-resources")))
       (should (equal (glasspane-para-test--action-names (nth 4 opened))
                      '("org.capture.show")))
+      (should (equal (plist-get (nth 5 opened) :action) "agenda.open"))
       (should (equal jetpacs-apps--current-route "resources"))
       (let ((selected
              (cl-find-if (lambda (item) (plist-get item :selected))

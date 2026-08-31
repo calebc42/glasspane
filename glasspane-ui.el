@@ -58,7 +58,9 @@
 (require 'jetpacs-chrome)
 (require 'jetpacs-apps)
 (require 'jetpacs-settings)
+(require 'jetpacs-org-settings)
 (require 'glasspane-org)
+(require 'glasspane-para)
 
 ;; v1 hard-required glasspane-magit (it lives outside the app
 ;; directory); its port is out of the plan's scope, so the require
@@ -69,6 +71,14 @@
   "Alist of saved searches (NAME . QUERY) in the ebp-org grammar."
   :type '(alist :key-type string :value-type string)
   :group 'jetpacs)
+
+(defcustom glasspane-area-tag-group "Area"
+  "Obsolete pre-vulpea-para Area tag-group name.
+Areas are now file-level notes carrying `glasspane-para-area-tag'."
+  :type 'string
+  :group 'jetpacs)
+(make-obsolete-variable 'glasspane-area-tag-group
+                        'glasspane-para-area-tag "2026-08-27")
 
 (defcustom glasspane-babel-timeout 30
   "Seconds before a phone-triggered babel execution is abandoned.
@@ -187,19 +197,19 @@ composition keeps its historical bars byte-for-byte until PA-4 removes it."
      :subtitle "Today's schedule, deadlines, and the month grid"
      :verb "agenda.open" :badge glasspane-agenda-dock-badge :bar t)
     (:key "projects" :label "Projects" :icon "task_alt"
-     :subtitle "Open work grouped by project file"
+     :subtitle "Tagged finish-line headings grouped by Area"
      :verb "projects.open" :bar t)
     (:key "areas" :label "Areas" :icon "category"
-     :subtitle "Responsibilities grouped by Org category"
+     :subtitle "Ongoing responsibilities tagged :area:"
      :verb "areas.open" :bar t)
     (:key "resources" :label "Resources" :icon "topic"
-     :subtitle "Browse the vault through native Files"
+     :subtitle "Every live file-level reference note"
      :verb "resources.open" :bar t)
     (:key "review" :label "Review" :icon "school"
      :subtitle "Flashcards due today, and notes gone stale"
      :verb "review.open" :bar t)
     (:key "archive" :label "Archive" :icon "archive"
-     :subtitle "Browse native Org archive files"
+     :subtitle "Projects archived inside their Areas"
      :verb "archive.open" :bar nil))
   "Glasspane's authoritative PARA destinations, in navigation order.
 ONE table feeds the host destination registry, the five-item primary bar,
@@ -264,6 +274,7 @@ remains selected while they are on top."
      ((or (equal view "glasspane-areas")
           (string-prefix-p "area-" view))
       "areas")
+     ((equal view "glasspane-resources") "resources")
      ((equal view "glasspane-archive") "archive")
      ((equal view "glasspane-review") "review")
      ((string-prefix-p "view-" view) "agenda"))))
@@ -297,7 +308,11 @@ reconciler's identity for the row, not a label."
   (jetpacs-chrome-row (plist-get dest :label)
                       :subtitle (plist-get dest :subtitle)
                       :icon (plist-get dest :icon)
-                      :on-tap (jetpacs-action (plist-get dest :verb))
+                      :on-tap
+                      (if-let* ((surface (plist-get dest :open-surface)))
+                          (jetpacs-shell-action-opening-surface
+                           (plist-get dest :verb) surface)
+                        (jetpacs-action (plist-get dest :verb)))
                       :key (concat prefix (plist-get dest :key))))
 
 (defun glasspane-ui--home-body ()
@@ -448,10 +463,22 @@ given SET."
 
 ;;;; Settings nodes
 ;;
-;; The TODO-sequence and tag editors left with §3 step 2: they manage
+;; The TODO-sequence and flat tag editors left with §3 step 2: they manage
 ;; org's own state and live in jetpacs-org-settings.el now, behind the
-;; foundation's "Org workflow" satellite.  What remains here is the one
-;; managed UI that is genuinely app opinion — the saved searches.
+;; foundation's "Org workflow" satellite.  Choosing which native tag group
+;; means PARA Areas remains Glasspane opinion, alongside saved searches.
+
+(defun glasspane-ui--area-tags-enum ()
+  "Build the editable global members of `glasspane-area-tag-group'."
+  (let ((areas (jetpacs-org-settings-tag-group-members
+                glasspane-area-tag-group)))
+    (jetpacs-enum-list
+     "glasspane-area-tags"
+     (mapcar (lambda (area) (jetpacs-enum-option area area)) areas)
+     :value areas
+     :multi-select t
+     :allow-add t
+     :on-change (jetpacs-action "settings.areas.save"))))
 
 (defun glasspane-ui--agenda-card (name query)
   "One saved-search card with its edit/delete affordances."
@@ -477,16 +504,53 @@ given SET."
      :align "center"))))
 
 (defun glasspane-ui--settings-body ()
-  "The app settings screen body: the saved searches, nothing else.
+  "The app settings screen body: Area tags, demo content, and saved searches.
 The org/calendar schema sections live on the Settings ROOT with the
 foundation that registers them, and the TODO-sequence/tags editors
 behind its \"Org workflow\" satellite (jetpacs-org-settings.el, §3
-steps 1-2) — this screen holds only the app's own managed UI.
+steps 1-2) — this screen holds only the app's own managed opinions.
 lazy_column, not column: the scaffold body has no scroll container on
 the client."
   (apply #'jetpacs-lazy-column
          (append
-          (list (jetpacs-section-header "Saved Searches")
+          (list (jetpacs-section-header "Area Tags")
+                (jetpacs-text
+                 "Members of the global non-exclusive Org tag group “Area”."
+                 :style "caption")
+                (glasspane-ui--area-tags-enum)
+                (jetpacs-divider)
+                (jetpacs-section-header "Demo Content")
+                (jetpacs-text
+                 "Generate a resettable sample vault or editor tour. Only Glasspane's namespaced demo files are replaced."
+                 :style "caption")
+                (jetpacs-button
+                 "Generate Org Demo Content"
+                 (jetpacs-action
+                  "demo.setup-org"
+                  :confirm
+                  (list
+                   :title "Regenerate Org demo?"
+                   :text "Replace the glasspane-demo-* files in the first Org root? Other vault files are untouched."
+                   :icon "science"
+                   :confirm-label "Generate"
+                   :dismiss-label "Cancel"))
+                 :icon "science"
+                 :variant "outlined")
+                (jetpacs-button
+                 "Generate Editor Tour Files"
+                 (jetpacs-action
+                  "demo.setup"
+                  :confirm
+                  (list
+                   :title "Regenerate editor tour?"
+                   :text "Replace Glasspane's isolated editor-tour files?"
+                   :icon "code"
+                   :confirm-label "Generate"
+                   :dismiss-label "Cancel"))
+                 :icon "code"
+                 :variant "outlined")
+                (jetpacs-divider)
+                (jetpacs-section-header "Saved Searches")
                 (jetpacs-text "Manage your saved search queries."
                               :style "caption"))
           (mapcar (lambda (cell)
@@ -501,13 +565,7 @@ the client."
   (jetpacs-chrome-screen "Glasspane" (glasspane-ui--settings-body)
                          :back back))
 
-(defun glasspane-ui--settings-link ()
-  "The Settings-root satellite row leading to the app settings screen."
-  (jetpacs-chrome-row "Glasspane"
-                      :subtitle "Saved searches"
-                      :icon "menu_book"
-                      :on-tap (jetpacs-action "glasspane.settings.open")
-                      :key "glasspane-settings-link"))
+
 
 ;;;; Dialogs (S3 — one shape: ebp-client-dialog-show + captured fields)
 ;;
@@ -609,6 +667,31 @@ name is a captured dialog field and the save runs in the conclusion."
          (error (message "glasspane: settings push failed: %s"
                          (jetpacs-error-label err))))))
     'accepted))
+
+(defun glasspane-ui--on-area-tags-save (args _params)
+  "Persist ARGS' `:value' as the global Area tag-group members."
+  (let ((value (plist-get args :value)))
+    (if (not (and (plist-member args :value)
+                  (or (vectorp value) (proper-list-p value))))
+        'rejected
+      (let ((raw (append value nil)))
+        (if (not
+             (cl-every
+              (lambda (area)
+                (and (stringp area)
+                     (let ((clean (string-trim area)))
+                       (and (not (string-empty-p clean))
+                            (string-match-p
+                             (concat "\\`" org-tag-re "\\'") clean)))))
+              raw))
+            'rejected
+          (let ((areas (delete-dups (mapcar #'string-trim raw))))
+            (jetpacs-org-settings-set-tag-group-members
+             glasspane-area-tag-group areas)
+            (jetpacs-shell-notify
+             (if areas "Area tags saved" "Area tag group cleared"))
+            (jetpacs-settings-refresh)
+            'accepted))))))
 
 (defun glasspane-ui--on-agenda-edit (args params)
   "Open the saved-search editor dialog for `:name' (absent = new)."
@@ -749,6 +832,7 @@ the time any teardown runs, the entry has long finished loading."
 
 (defconst glasspane-ui--verbs
   '("glasspane.settings.open"
+    "settings.areas.save"
     "settings.agenda.edit"
     "settings.agenda.delete"
     "settings.agenda.save"
@@ -785,19 +869,29 @@ registry entries in place, and the link is re-added exactly once."
                        #'glasspane-ui--on-settings-open
                        :any-surface t
                        :doc "Open Glasspane's settings management screen")
+    (jetpacs-defaction "settings.areas.save"
+                       #'glasspane-ui--on-area-tags-save
+                       :doc "Save the global Area tag-group members")
     (jetpacs-defaction "settings.agenda.edit"
-                       #'glasspane-ui--on-agenda-edit)
+                       #'glasspane-ui--on-agenda-edit
+                       :doc "Open the saved-agenda search editor")
     (jetpacs-defaction "settings.agenda.delete"
-                       #'glasspane-ui--on-agenda-delete)
+                       #'glasspane-ui--on-agenda-delete
+                       :doc "Delete a named saved-agenda search")
     (jetpacs-defaction "settings.agenda.save"
-                       #'glasspane-ui--on-agenda-save)
+                       #'glasspane-ui--on-agenda-save
+                       :doc "Persist fields from the saved-agenda editor")
     (jetpacs-defaction "agenda.save-custom"
-                       #'glasspane-ui--on-agenda-save-custom)
-    (jetpacs-defaction "agenda.today" #'glasspane-ui--on-agenda-today)
+                       #'glasspane-ui--on-agenda-save-custom
+                       :doc "Name and save the agenda's current custom query")
+    (jetpacs-defaction "agenda.today" #'glasspane-ui--on-agenda-today
+                       :doc "Reset the agenda calendar selection to today")
     (jetpacs-defaction "agenda.select-date"
-                       #'glasspane-ui--on-agenda-select-date)
+                       #'glasspane-ui--on-agenda-select-date
+                       :doc "Select a day in the agenda calendar")
     (jetpacs-defaction "agenda.set-month"
-                       #'glasspane-ui--on-agenda-set-month)
+                       #'glasspane-ui--on-agenda-set-month
+                       :doc "Set the agenda calendar's displayed month")
     ;; The app's own section — CONSOLIDATED (§3 step 2's recorded
     ;; opportunity): Babel timeout and Packages auto-install share ONE
     ;; "Glasspane" section.  Journal landing rejoins them only in the
@@ -816,9 +910,12 @@ registry entries in place, and the link is re-added exactly once."
                     :label "Open on the journal")))
       (list (list 'glasspane-packages-auto-install
                   :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)"))))
-    (jetpacs-settings-remove-link #'glasspane-ui--settings-link)
-    ;; v1's settings view sat at order 80 among the app's views.
-    (jetpacs-settings-add-link 80 #'glasspane-ui--settings-link))
+    (jetpacs-settings-remove-hub-entry "glasspane")
+    (jetpacs-settings-register-hub-entry
+     "glasspane" :order 40 :icon "menu_book"
+     :title "Glasspane"
+     :subtitle "Area tags, demo content, and saved searches"
+     :on-tap (jetpacs-action "glasspane.settings.open")))
   (add-hook 'jetpacs-shell-refresh-hook #'glasspane-ui--refresh-invalidate)
   (remove-hook 'jetpacs-shell-view-change-functions
                #'glasspane-ui--on-view-change)
@@ -836,7 +933,7 @@ registry entries in place, and the link is re-added exactly once."
   (dolist (name glasspane-ui--verbs)
     (jetpacs-undefaction name))
   (jetpacs-settings-remove-section "Glasspane")
-  (jetpacs-settings-remove-link #'glasspane-ui--settings-link)
+  (jetpacs-settings-remove-hub-entry "glasspane")
   (jetpacs-settings-dialog-close)
   (glasspane-ui-remove-hooks))
 

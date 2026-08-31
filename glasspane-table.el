@@ -487,8 +487,10 @@ gate contract).  Idempotent: handlers replace in place."
                        :doc "Edit the tapped table cell (or its formula)")
     (jetpacs-defaction "org.table.cell-menu" #'glasspane-table--on-cell-menu
                        :doc "Row/column structure edits for a table cell")
-    (jetpacs-defaction "org.table.add-row" #'glasspane-table--on-add-row)
-    (jetpacs-defaction "org.table.add-col" #'glasspane-table--on-add-col)
+    (jetpacs-defaction "org.table.add-row" #'glasspane-table--on-add-row
+                       :doc "Append an empty row to the current Org table")
+    (jetpacs-defaction "org.table.add-col" #'glasspane-table--on-add-col
+                       :doc "Append an empty column to the current Org table")
     (jetpacs-defaction "org.babel.execute" #'glasspane-table--on-babel
                        :doc "Run the tapped source block")))
 

@@ -1,231 +1,206 @@
-;;; glasspane-resources.el --- PARA Resources route into Files -*- lexical-binding: t; -*-
+;;; glasspane-resources.el --- PARA Resources and Archive views -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Package-Requires: ((emacs "30.1"))
 
 ;;; Commentary:
 
-;; PA-2b/2c of docs/PLAN-glasspane-para.md.  Resources is a Glasspane name
-;; and starting-scope opinion over Jetpacs' native Files app.  It owns no
-;; browser, screen, file walk, or path policy: both Resources verbs delegate
-;; directly to the public Files opener on the canonical Files surface.
-;; Archive is the app-side exception: an opinionated, bounded index of Org's
-;; sibling archive files and one screen whose rows hand straight back to the
-;; same native Files route.  PA-3a exposes Resources in the persistent bar
-;; and Archive only in the drawer/deep-link registry.
+;; Resources are the baseline PARA facet: every live file-level note,
+;; including Areas.  The destination lists those indexed notes and delegates
+;; actual browsing/editing to Jetpacs Files.  Archive lists Projects moved
+;; under an in-file `* Archive :ARCHIVE:' subtree; sibling `_archive' files
+;; are not a PARA bucket.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'org)
 (require 'subr-x)
-(require 'ebp-org)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
-(require 'jetpacs-files)
+(require 'glasspane-para)
+(require 'glasspane-detail)
 (require 'glasspane-ui)
+(require 'glasspane-navigation)
 
-;;;; Resources delegation
-
-(declare-function glasspane-agenda-screen "glasspane-agenda" (back))
+(declare-function vulpea-note-id "ext:vulpea-note" (note))
+(declare-function vulpea-note-path "ext:vulpea-note" (note))
+(declare-function vulpea-note-tags "ext:vulpea-note" (note))
+(declare-function vulpea-note-title "ext:vulpea-note" (note))
 
 (defconst glasspane-resources--browser-screen "files-resources"
-  "Generic Files guest screen used by the Resources destination.")
-
-(defconst glasspane-resources--return-screen "files-return"
-  "Generic Files guest screen staged below a direct file handoff.")
-
-(defun glasspane-resources--guest-id (id)
-  "Return chrome's sanctioned-guest wire id for Glasspane screen ID."
-  (jetpacs-chrome-guest-screen-id "glasspane" id))
+  "Files guest screen used below the full-vault browser.")
 
 (defun glasspane-resources--files-surface ()
   "Return the canonical Jetpacs Files surface."
-  (jetpacs-shell-surface-for jetpacs-files-owner))
+  (glasspane-navigation-files-surface))
 
-(defun glasspane-resources--open-path (path browser-id)
-  "Open PATH through Jetpacs Files and return its action status.
-Files owns containment validation, browsing, document hosting, and every
-resulting operation.  BROWSER-ID selects only the generic native Files guest
-screen that provides the cross-surface Back handoff; this downstream wrapper
-does not build or walk a browser."
-  (jetpacs-files-open-path path (glasspane-resources--files-surface)
-                           nil browser-id
-                           (and (not glasspane-ui-legacy-ia)
-                                (equal browser-id
-                                       glasspane-resources--browser-screen)
-                                (glasspane-ui-capture-fab))))
+(defun glasspane-resources--browse-vault (path)
+  "Open directory PATH in Files with Resources' browser adornments.
+Directory browsing is not a document entry point, but it still crosses the
+single low-level Files boundary owned by `glasspane-navigation'."
+  (glasspane-navigation-open-files-path
+   path
+   :browser-id glasspane-resources--browser-screen
+   :browser-fab (and (not glasspane-ui-legacy-ia)
+                     (glasspane-ui-capture-fab))
+   :return-action (glasspane-navigation-return-action)))
 
-(defun glasspane-resources--on-open (_args _params)
-  "Open `org-directory' as the PARA Resources landing scope."
-  (let ((status (glasspane-resources--open-path
-                 org-directory glasspane-resources--browser-screen)))
-    ;; `app.open' records this before redispatching the destination verb,
-    ;; but direct/M-x entry reaches the owner verb without that wrapper.
-    ;; The file-row delegate below deliberately does NOT rewrite the route:
-    ;; an Area/Archive handoff keeps its originating place selected.
-    (when (and (eq status 'accepted) (not glasspane-ui-legacy-ia))
-      (jetpacs-apps-note-route "glasspane" "resources"))
-    status))
+;;;; Resource list
 
-(defun glasspane-resources--on-open-file (args _params)
-  "Open ARGS' `:path' through the same native Files route."
-  (glasspane-resources--open-path
-   (plist-get args :path) glasspane-resources--return-screen))
-
-(defun glasspane-resources--on-view-change (surface view)
-  "Complete a Companion-local Back handoff from native Files.
-The Files stack owns both transition points.  Returning from a direct file to
-the staged return screen re-presents Glasspane's untouched surface, preserving
-the exact Areas/Archive drill that launched it.  Back from the Resources
-browser reaches Files' native root; that destination-level Back resets to the
-Agenda root as the PA-3 navigation contract requires.
-
-The local view switch happens first and remains useful offline.  These remote
-pushes are merely the connected continuation and run through the action flow."
-  (when (and (not glasspane-ui-legacy-ia)
-             (equal jetpacs-apps--current "glasspane")
-             (equal surface (glasspane-resources--files-surface)))
-    (cond
-     ((and (equal view "browser")
-           (equal jetpacs-apps--current-route "resources"))
-      (glasspane-ui-open-destination
-       "agenda" "glasspane-agenda" #'glasspane-agenda-screen
-       (list :surface (jetpacs-shell-surface-for "glasspane"))))
-     ((equal view (glasspane-resources--guest-id
-                   glasspane-resources--return-screen))
-      (jetpacs-flow-continue
-       (lambda ()
-         (condition-case err
-             (jetpacs-shell-push (jetpacs-shell-surface-for "glasspane"))
-           (error
-            (message "glasspane: Files return push failed: %s"
-                     (jetpacs-error-label err))))))))))
-
-;;;; Archive index and screen
-
-(defcustom glasspane-resources-archive-scan-cap 500
-  "Maximum directory entries one Archive index build examines.
-The walk stops at this ceiling instead of collecting the whole vault and
-truncating afterward.  Pull-to-refresh invalidates the memoized result."
-  :type 'integer :group 'jetpacs)
-
-(defun glasspane-resources--archive-root ()
-  "Return a local, existing `org-directory' root, or nil."
-  (when-let* ((configured (car (ebp-local-paths (list org-directory))))
-              (root (file-name-as-directory (expand-file-name configured)))
-              ((condition-case nil (file-directory-p root) (error nil))))
-    root))
-
-(defun glasspane-resources--archive-files-1 ()
-  "Build the uncached bounded Archive records below `org-directory'.
-Each record is `(:path PATH :mtime TIME)'.  Symlinked directories are not
-followed, one unreadable directory costs only itself, and each matching
-file incurs exactly one explicit `file-attributes' call."
-  (when-let* ((root (glasspane-resources--archive-root)))
-    (ebp-org--with-clamped-io
-      (let ((directories (list root))
-            (seen 0)
-            (cap (max 0 glasspane-resources-archive-scan-cap))
-            archives)
-        (while (and directories (< seen cap))
-          (let ((entries
-                 (condition-case nil
-                     (directory-files (pop directories) t
-                                      directory-files-no-dot-files-regexp)
-                   (file-error nil))))
-            (while (and entries (< seen cap))
-              (let ((entry (pop entries)))
-                (cl-incf seen)
-                (cond
-                 ((condition-case nil (file-directory-p entry) (error nil))
-                  (unless (file-symlink-p entry)
-                    (push (file-name-as-directory entry) directories)))
-                 ((string-suffix-p "_archive" entry t)
-                  (when-let* ((attrs (ignore-errors (file-attributes entry)))
-                              (mtime (file-attribute-modification-time attrs)))
-                    (push (list :path entry :mtime mtime) archives))))))))
-        (sort archives
-              (lambda (a b)
-                (string-lessp (plist-get a :path)
-                              (plist-get b :path))))))))
-
-(defun glasspane-resources--archive-files ()
-  "Return the memoized bounded Archive records."
-  (ebp-org-with-cache 'glasspane '(archive-files)
-    (glasspane-resources--archive-files-1)))
-
-(defun glasspane-resources--refresh-invalidate ()
-  "Invalidate Archive membership before an explicit refresh push.
-Archive files normally sit outside the agenda stamp carried by the shared
-cache, so pull-to-refresh is their deliberate freshness boundary."
-  (ebp-org-cache-invalidate 'glasspane))
-
-(defun glasspane-resources--archive-source-name (path)
-  "Return PATH's source filename, removing Org's `_archive' suffix."
-  (let ((name (file-name-nondirectory path)))
-    (if (string-suffix-p "_archive" name t)
-        (substring name 0 (- (length name) (length "_archive")))
-      name)))
-
-(defun glasspane-resources--archive-row (record)
-  "Render one Archive RECORD as a handoff to native Files."
-  (let ((path (plist-get record :path))
-        (mtime (plist-get record :mtime)))
+(defun glasspane-resources-note-row (note key-prefix)
+  "Render Resource NOTE as a native Files handoff using KEY-PREFIX."
+  (let* ((path (vulpea-note-path note))
+         (title (or (vulpea-note-title note)
+                    (and path (file-name-nondirectory path))
+                    "Untitled note"))
+         (area (glasspane-para-area-p note))
+         (tags (cl-remove glasspane-para-agenda-tag
+                          (copy-sequence (vulpea-note-tags note))
+                          :test #'equal))
+         (kind (if area "Area + Resource" "Resource"))
+         (subtitle (string-join
+                    (delq nil
+                          (list kind
+                                (and tags (string-join tags " · "))
+                                (and path (abbreviate-file-name path))))
+                    "  ·  ")))
     (jetpacs-chrome-row
-     (glasspane-resources--archive-source-name path)
-     :subtitle (format "Modified %s"
-                       (format-time-string "%Y-%m-%d %H:%M" mtime))
-     :icon "archive"
+     title :subtitle subtitle
+     :icon (if area "category" "description")
      :trailing (jetpacs-icon "chevron_right")
-     :on-tap (jetpacs-action "resources.open-file" :args (list :path path))
-     :key (jetpacs-wire-id "archive-file" path))))
+     :on-tap
+     (glasspane-navigation-document-action path)
+     :key (jetpacs-wire-id key-prefix
+                           (or (vulpea-note-id note) path title)))))
+
+(defun glasspane-resources--browse-row ()
+  "Return the explicit full-vault browser row."
+  (jetpacs-chrome-row
+   "Browse vault"
+   :subtitle "Open the complete folder tree in native Files"
+   :icon "folder_open" :trailing (jetpacs-icon "chevron_right")
+   :on-tap
+   (jetpacs-shell-action-opening-surface
+    "resources.browse" (glasspane-resources--files-surface))
+   :key "resource-browse-vault"))
+
+(defun glasspane-resources--body ()
+  "Render indexed Resource notes plus the native browser escape hatch."
+  (let ((notes (and (glasspane-para-ready-p)
+                    (glasspane-para-resources))))
+    (apply
+     #'jetpacs-lazy-column
+     (append
+      (list (glasspane-resources--browse-row)
+            (jetpacs-divider)
+            (jetpacs-section-header "Notes"))
+      (cond
+       (notes
+        (mapcar (lambda (note)
+                  (glasspane-resources-note-row note "resource-note"))
+                notes))
+       ((not (glasspane-para-ready-p))
+        (list
+         (jetpacs-text
+          "Vulpea is not ready; the native vault browser is still available."
+          :style "caption")))
+       (t
+        (list (jetpacs-text "No live file-level notes are indexed."
+                            :style "caption"))))
+      (list :spacing 8 :content-padding 12)))))
+
+(defun glasspane-resources-screen (back)
+  "Build the Resource note destination screen."
+  (jetpacs-chrome-screen
+   "Resources" (glasspane-resources--body)
+   :back back :actions (glasspane-ui-top-actions)
+   :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab))))
+
+;;;; Archive list
 
 (defun glasspane-resources--archive-body ()
-  "Render the bounded Archive index or its empty state."
-  (let ((records
-         (condition-case nil (glasspane-resources--archive-files)
-           (error nil))))
-    (if records
+  "Render Projects archived under their Area notes."
+  (let* ((items (glasspane-para-archive-items))
+         (tokenized (glasspane-ui-tokenize-tap items "para-archive")))
+    (if tokenized
         (apply #'jetpacs-lazy-column
-               (append (mapcar #'glasspane-resources--archive-row records)
+               (append (mapcar #'glasspane-detail-result-card tokenized)
                        (list :spacing 8 :content-padding 12)))
       (jetpacs-empty-state
        :icon "archive"
        :title "Archive is empty"
-       :caption "No Org archive files were found in the vault."))))
+       :caption "Archived Projects stay searchable inside their Area."))))
 
 (defun glasspane-resources-archive-screen (back)
-  "Build the Archive screen with BACK navigation."
-  (jetpacs-chrome-screen "Archive" (glasspane-resources--archive-body)
-                         :back back
-                         :actions (glasspane-ui-top-actions)
-                         :fab (and glasspane-ui-legacy-ia
-                                   (glasspane-ui-capture-fab))))
+  "Build the Archive destination screen."
+  (jetpacs-chrome-screen
+   "Archive" (glasspane-resources--archive-body)
+   :back back :actions (glasspane-ui-top-actions)
+   :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab))))
+
+;;;; Actions and cross-surface return
+
+(defun glasspane-resources--on-open (_args params)
+  "Open the indexed Resources destination on Glasspane's surface."
+  (glasspane-ui-open-destination
+   "resources" "glasspane-resources" #'glasspane-resources-screen params))
+
+(defun glasspane-resources--on-browse (_args _params)
+  "Open the whole Org vault through native Files."
+  (glasspane-resources--browse-vault org-directory))
+
+(defun glasspane-resources--on-open-file (args _params)
+  "Open the path in cached `resources.open-file' ARGS canonically."
+  (glasspane-navigation-open-document (plist-get args :path)))
+
+(defun glasspane-resources--on-return (args params)
+  "Delegate cached `resources.return' ARGS and PARAMS canonically."
+  (glasspane-navigation-return args params))
+
+(defun glasspane-resources--on-view-change (surface view)
+  "Complete the Resources browse handoff reported as SURFACE and VIEW."
+  (when (and (not glasspane-ui-legacy-ia)
+             (equal jetpacs-apps--current "glasspane")
+             (equal surface (glasspane-resources--files-surface)))
+    (when (and (equal view "browser")
+               (equal jetpacs-apps--current-route "resources"))
+      (glasspane-ui-open-destination
+       "resources" "glasspane-resources" #'glasspane-resources-screen
+       (list :surface (jetpacs-shell-surface-for "glasspane"))))))
 
 (defun glasspane-resources--on-archive-open (_args params)
-  "Open Archive in the one Tier-1 destination slot."
+  "Open Archive in its drawer-only destination slot."
   (glasspane-ui-open-destination
    "archive" "glasspane-archive"
    #'glasspane-resources-archive-screen params))
 
+(defun glasspane-resources--refresh-invalidate ()
+  "Invalidate Resource and Archive projections on explicit refresh."
+  (ebp-org-cache-invalidate 'glasspane))
+
 (defconst glasspane-resources--verbs
-  '("resources.open" "resources.open-file" "archive.open")
-  "The Resources and Archive verbs owned by this module.")
+  '("resources.open" "resources.browse" "resources.open-file"
+    "resources.return" "archive.open")
+  "The Resource and Archive actions owned by this module.")
 
 (defun glasspane-resources-register ()
-  "Register the Resources delegation verbs, idempotently."
+  "Register Resource and Archive actions idempotently."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "resources.open" #'glasspane-resources--on-open
-                       :doc "Open the Org vault in native Jetpacs Files")
+                       :doc "Open live PARA Resource notes")
+    (jetpacs-defaction "resources.browse" #'glasspane-resources--on-browse
+                       :doc "Browse the complete Org vault in Files")
     (jetpacs-defaction
      "resources.open-file" #'glasspane-resources--on-open-file
-     :doc "Open one path in native Jetpacs Files"
+     :doc "Compatibility alias for cached Resource document opens"
      :args '((:name path :type "text" :required t)))
-    (jetpacs-defaction "archive.open" #'glasspane-resources--on-archive-open
-                       :doc "Open the PARA Archive index"))
+    (jetpacs-defaction "resources.return" #'glasspane-resources--on-return
+                       :doc "Compatibility alias for cached Files returns")
+    (jetpacs-defaction "archive.open"
+                       #'glasspane-resources--on-archive-open
+                       :doc "Open Projects archived inside their Areas"))
   (add-hook 'jetpacs-shell-refresh-hook
             #'glasspane-resources--refresh-invalidate)
   (remove-hook 'jetpacs-shell-view-change-functions
@@ -235,7 +210,7 @@ cache, so pull-to-refresh is their deliberate freshness boundary."
               #'glasspane-resources--on-view-change)))
 
 (defun glasspane-resources-unregister ()
-  "Drop every verb owned by the Resources module."
+  "Drop every Resource/Archive action and hook."
   (dolist (name glasspane-resources--verbs)
     (jetpacs-undefaction name))
   (remove-hook 'jetpacs-shell-refresh-hook

@@ -35,8 +35,8 @@
 ;; it.  The install-consent register `jetpacs-installed-bundles' is now
 ;; `jetpacs-app-store-installed', and dev/in-tree loads NEVER appear
 ;; there.  Loading this helper alone remains load-only; the full Glasspane
-;; entry owns first-boot `glasspane-config-ensure', while store-adopted
-;; installs keep the automatic helper-level path.  The handler's `fboundp'
+;; entry owns first-boot `glasspane-config-ensure', while an explicit Apps
+;; enable keeps the automatic helper-level path.  The handler's `fboundp'
 ;; guards on shell notify/push are
 ;; dropped (hard deps, T5) and its trailing inline push moved into the
 ;; deferred continuation (D2).
@@ -153,10 +153,10 @@ allowlisted `config.sync' action."
     (glasspane-config-sync)))
 
 (defun glasspane-config-startup ()
-  "Load the managed defaults; on a store-adopted install, create them first.
-Adoption via the app store (\"glasspane.el\" listed in
+  "Load the managed defaults; after an Apps enable, create them first.
+The packaged app's explicit enable (\"glasspane.el\" listed in
 `jetpacs-app-store-installed') IS the install consent: a freshly
-installed Glasspane must come up with capture templates or the phone
+enabled Glasspane must come up with capture templates or the phone
 shows an empty capture sheet.
 Everywhere else this helper stays load-only; the full app entry invokes
 `glasspane-config-ensure' after registration.  Batch loads remain inert.
@@ -189,7 +189,8 @@ Called from `glasspane-register', not at this file's load: the entry's
 unregister must leave no glasspane handler behind, and its re-register
 must restore every verb without a re-require (the G0 gate contract)."
   (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction "config.sync" #'glasspane-config--on-sync)))
+    (jetpacs-defaction "config.sync" #'glasspane-config--on-sync
+                       :doc "Rewrite Glasspane's managed configuration defaults")))
 
 (defun glasspane-config-unregister ()
   "Drop the `config.sync' verb."

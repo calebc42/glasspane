@@ -216,10 +216,10 @@ feeds both table cells and `jetpacs-rich-text' cards."
 (defun glasspane-views--card (item &optional trailing)
   "The shared rich card for ITEM; TRAILING sits at the row's end.
 Priority-badged headline, todo · file caption, compact
-scheduled/deadline row, tappable tag chips.  Swipe from the start
-completes an open todo; swipe from the end schedules it today — both
-remain reachable by tap → detail.  Every wired affordance needs the
-minted token, so an unmintable item renders inert rather than
+scheduled/deadline row, tappable tag chips.  Swipe from the start reveals
+the open-todo completion action; swipe from the end reveals scheduling for
+today.  Both remain reachable by tap → detail.  Every wired affordance needs
+the minted token, so an unmintable item renders inert rather than
 carrying a ref on the wire (D-4)."
   (let* ((token (alist-get 'token item))
          (middle
@@ -241,21 +241,25 @@ carrying a ref on the wire (D-4)."
      :on-tap (glasspane-views--tap item)
      :swipe-start
      (when (and token (not (glasspane-views--done-p item)))
-       (jetpacs-swipe "Done" :icon "check" :color "#2E7D32"
-                      :on-trigger
-                      (jetpacs-action "heading.todo-set"
-                                      :args (list :token token
-                                                  :state (glasspane-views--done-keyword))
-                                      :when-offline "queue"
-                                      :ttl-s glasspane-views--ttl-s)))
+       (jetpacs-swipe
+        (list (jetpacs-swipe-action
+               "Done" :icon "check" :color "#2E7D32"
+               :on-trigger
+               (jetpacs-action "heading.todo-set"
+                               :args (list :token token
+                                           :state (glasspane-views--done-keyword))
+                               :when-offline "queue"
+                               :ttl-s glasspane-views--ttl-s)))))
      :swipe-end
      (when token
-       (jetpacs-swipe "Today" :icon "today"
-                      :on-trigger
-                      (jetpacs-action "heading.schedule"
-                                      :args (list :token token :when "+0d")
-                                      :when-offline "queue"
-                                      :ttl-s glasspane-views--ttl-s))))))
+       (jetpacs-swipe
+        (list (jetpacs-swipe-action
+               "Today" :icon "today"
+               :on-trigger
+               (jetpacs-action "heading.schedule"
+                               :args (list :token token :when "+0d")
+                               :when-offline "queue"
+                               :ttl-s glasspane-views--ttl-s))))))))
 
 ;;;; The drag-reorder list
 

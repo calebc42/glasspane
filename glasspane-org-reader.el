@@ -277,15 +277,19 @@ Rightward reveals the todo cycle (green); leftward the base archive
 (red) — `jetpacs.org.archive' with the descriptor-level confirm, so the
 Companion asks before the event exists (SPEC 14.1).  Shared with the
 agenda/tasks cards."
-  (cons (jetpacs-swipe "Cycle" :icon "check" :color "#4CAF50"
-                       :on-trigger (jetpacs-action "heading.todo-cycle"
-                                                   :args (list :token token)))
+  (cons (jetpacs-swipe
+         (list (jetpacs-swipe-action
+                "Cycle" :icon "check" :color "#4CAF50"
+                :on-trigger (jetpacs-action "heading.todo-cycle"
+                                            :args (list :token token)))))
         (and archive
-             (jetpacs-swipe "Archive" :icon "archive" :color "#E53935"
-                            :on-trigger (jetpacs-action
-                                         "jetpacs.org.archive"
-                                         :args (list :token archive)
-                                         :confirm "Archive this subtree?")))))
+             (jetpacs-swipe
+              (list (jetpacs-swipe-action
+                     "Archive" :icon "archive" :color "#E53935"
+                     :on-trigger (jetpacs-action
+                                  "jetpacs.org.archive"
+                                  :args (list :token archive)
+                                  :confirm "Archive this subtree?")))))))
 
 (defun glasspane-org-reader--heading-node (n file tokens)
   "Render tree node N (and its subtree) to a foldable `jetpacs-collapsible'.

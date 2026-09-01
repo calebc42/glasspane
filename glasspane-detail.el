@@ -326,26 +326,30 @@ and are removed from the ordinary flat-tag chip set."
      :on-long-tap (and token (jetpacs-action "heading.menu"
                                              :args (list :token token)))
      :swipe-start (and token
-                       (jetpacs-swipe "Cycle" :icon "check" :color "#4CAF50"
-                                      :on-trigger
-                                      (jetpacs-action "heading.todo-cycle"
-                                                      :args (list :token token))))
+                       (jetpacs-swipe
+                        (list (jetpacs-swipe-action
+                               "Cycle" :icon "check" :color "#4CAF50"
+                               :on-trigger
+                               (jetpacs-action "heading.todo-cycle"
+                                               :args (list :token token))))))
      :swipe-end
      (cond
       ((and para-project token)
        (jetpacs-swipe
-        "Archive" :icon "archive" :color "#E53935"
-        :on-trigger
-        (jetpacs-action
-         "projects.archive" :args (list :token token)
-         :confirm "Archive this Project inside its Area?")))
+        (list (jetpacs-swipe-action
+               "Archive" :icon "archive" :color "#E53935"
+               :on-trigger
+               (jetpacs-action
+                "projects.archive" :args (list :token token)
+                :confirm "Archive this Project inside its Area?")))))
       (archive-token
        (jetpacs-swipe
-        "Archive" :icon "archive" :color "#E53935"
-        :on-trigger
-        (jetpacs-action
-         "jetpacs.org.archive" :args (list :token archive-token)
-         :confirm "Archive this subtree?")))))))
+        (list (jetpacs-swipe-action
+               "Archive" :icon "archive" :color "#E53935"
+               :on-trigger
+               (jetpacs-action
+                "jetpacs.org.archive" :args (list :token archive-token)
+                :confirm "Archive this subtree?")))))))))
 
 (defun glasspane-detail-result-card (it)
   "Render a search/heading item IT to a tappable card with tag chips."

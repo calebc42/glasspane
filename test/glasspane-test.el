@@ -1607,12 +1607,17 @@ same table."
                          :token))
                  (archive (plist-get
                            (plist-get
-                            (plist-get (plist-get node :swipe_end)
-                                       :on_trigger)
+                            (plist-get
+                             (aref (plist-get (plist-get node :swipe_end)
+                                              :actions)
+                                   0)
+                             :on_trigger)
                             :args)
                            :token)))
             (should (stringp token))
             (should (stringp archive))
+            (should-not (plist-member (plist-get node :swipe_start) :commit))
+            (should-not (plist-member (plist-get node :swipe_end) :commit))
             (should-not (equal token archive))
             ;; The tap token: the app's own scope, and only that scope.
             (let ((ref (ebp-org-token-ref token :owner "glasspane")))
@@ -1669,6 +1674,31 @@ same table."
     (should (equal (glasspane-org-reader-refile-lookup "list") record))
     (should-not (glasspane-org-reader-refile-store "list" nil))
     (should-not (glasspane-org-reader-refile-lookup "list"))))
+
+(ert-deftest glasspane-test-org-swipes-reveal-before-actions ()
+  "Every Glasspane Org swipe requires a revealed-action tap to execute."
+  (require 'glasspane-detail)
+  (require 'glasspane-org-reader)
+  (require 'glasspane-views)
+  (let* ((reader (glasspane-org-reader-swipe-sides "tok" "archive"))
+         (detail (glasspane-detail-agenda-card
+                  '((headline . "Task") (token . "tok")
+                    (archive-token . "archive"))))
+         (project (glasspane-detail-agenda-card
+                   '((headline . "Project") (token . "tok")
+                     (para-project . t))))
+         (view (glasspane-views--card
+                '((headline . "Task") (todo . "TODO") (token . "tok"))))
+         (sides (list (car reader) (cdr reader)
+                      (plist-get detail :swipe_start)
+                      (plist-get detail :swipe_end)
+                      (plist-get project :swipe_end)
+                      (plist-get view :swipe_start)
+                      (plist-get view :swipe_end))))
+    (dolist (side sides)
+      (should (= (length (plist-get side :actions)) 1))
+      (should (plist-get (aref (plist-get side :actions) 0) :on_trigger))
+      (should-not (plist-member side :commit)))))
 
 (ert-deftest glasspane-test-reader-reorder ()
   "heading.reorder consumes the D-4 record (the integration seam both
@@ -1854,6 +1884,12 @@ wire encoding."
                     (token . "tok-1") (archive-token . "tok-arch"))))
            (json (jetpacs-node->canonical-json card)))
       (should (equal (plist-get card :t) "card"))
+      ;; Ordinary drags only reveal these actions.  Neither side opts into
+      ;; the deliberately deeper first-action commit gesture.
+      (dolist (side (list (plist-get card :swipe_start)
+                          (plist-get card :swipe_end)))
+        (should (= (length (plist-get side :actions)) 1))
+        (should-not (plist-member side :commit)))
       ;; Agenda-shaped cards use the contextual source jump; long-press
       ;; retains the opinionated detail sheet.
       (should (string-search "heading.visit" json))
@@ -2893,6 +2929,12 @@ all pure, over fixture alists."
     (should (equal (plist-get span :color) "#E53935")))
   (should (equal (plist-get (glasspane-views--priority-span "Z") :color)
                  "#9E9E9E"))
+  (let ((card (glasspane-views--card
+               '((headline . "Open") (todo . "TODO") (token . "tok")))))
+    (dolist (side (list (plist-get card :swipe_start)
+                        (plist-get card :swipe_end)))
+      (should (= (length (plist-get side :actions)) 1))
+      (should-not (plist-member side :commit))))
   ;; Done headlines degrade to color — no strike span exists (gap #7).
   (let ((old (default-value 'org-done-keywords)))
     (unwind-protect

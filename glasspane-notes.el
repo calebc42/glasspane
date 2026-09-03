@@ -297,13 +297,10 @@ note's title/aliases otherwise."
             :target-id target-id))))
 
 (defun glasspane-notes--note-card (note token)
-  "A contextual NOTE card jumping to its source heading."
-  (jetpacs-card
-   (list (jetpacs-column
-          (jetpacs-text (or (vulpea-note-title note) "") :style "body")
-          (jetpacs-text (file-name-nondirectory
-                         (or (vulpea-note-path note) ""))
-                        :style "caption")))
+  "A contextual NOTE row jumping to its source heading."
+  (jetpacs-chrome-row
+   (or (vulpea-note-title note) "Untitled note")
+   :subtitle (file-name-nondirectory (or (vulpea-note-path note) ""))
    :on-tap (glasspane-navigation-heading-action token)))
 
 (defun glasspane-notes--mention-card (mention tap link)
@@ -315,20 +312,17 @@ refused mint costs the affordance, never the card."
                    (and source (vulpea-note-path source))))
          (title (if source (vulpea-note-title source)
                   (file-name-nondirectory (or path "")))))
-    (jetpacs-card
-     (list
-      (jetpacs-column
-       (jetpacs-text (or title "") :style "body")
-       (jetpacs-text (or (plist-get mention :context) "") :style "caption")
-       (jetpacs-row
-        (jetpacs-spacer :weight 1)
-        (and link
-             (jetpacs-button "Link it"
-                             (jetpacs-action "link.materialize"
-                                             :args (list :token link)
-                                             :when-offline "queue"
-                                             :ttl-s glasspane-notes--link-ttl-s)
-                             :variant "text" :icon "link")))))
+    (jetpacs-chrome-row
+     (if (and title (not (string-empty-p title))) title "Untitled note")
+     :subtitle (let ((context (plist-get mention :context)))
+                 (and context (not (string-empty-p context)) context))
+     :trailing (and link
+                    (jetpacs-button "Link it"
+                                    (jetpacs-action "link.materialize"
+                                                    :args (list :token link)
+                                                    :when-offline "queue"
+                                                    :ttl-s glasspane-notes--link-ttl-s)
+                                    :variant "text" :icon "link"))
      :on-tap (glasspane-navigation-heading-action tap))))
 
 (defun glasspane-notes-detail-nodes (ref)
@@ -596,12 +590,10 @@ the file-level (level 0) note names the file best when present."
   "A card for stale NOTE: title, file, and how long untouched."
   (let* ((path (vulpea-note-path note))
          (age (glasspane-notes--age-caption path)))
-    (jetpacs-card
-     (list (jetpacs-column
-            (jetpacs-text (or (vulpea-note-title note) "") :style "body")
-            (jetpacs-text (concat (file-name-nondirectory (or path ""))
-                                  (when age (concat " · " age)))
-                          :style "caption")))
+    (jetpacs-chrome-row
+     (or (vulpea-note-title note) "Untitled note")
+     :subtitle (concat (file-name-nondirectory (or path ""))
+                       (when age (concat " · " age)))
      :on-tap (and token (jetpacs-action "heading.tap"
                                         :args (list :token token))))))
 

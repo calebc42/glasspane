@@ -150,13 +150,13 @@ A day: the token lives Emacs-side, so a replay after reconnect still
 names the heading the user meant, and anything older is better dropped
 than sprung on a file edited since.")
 
-(defconst glasspane-org-reader--todo-color "#EF5350"
+(defconst glasspane-org-reader--todo-color "error"
   "Span color for open TODO keywords in reader headers.")
-(defconst glasspane-org-reader--done-color "#66BB6A"
+(defconst glasspane-org-reader--done-color "success"
   "Span color for done keywords in reader headers.")
-(defconst glasspane-org-reader--priority-color "#F57C00"
+(defconst glasspane-org-reader--priority-color "warning"
   "Span color for priority cookies (matches the agenda cards).")
-(defconst glasspane-org-reader--overdue-color "#EF5350"
+(defconst glasspane-org-reader--overdue-color "error"
   "Span color for overdue deadline badges.")
 
 (defun glasspane-org-reader--heading-ops (token archive buffer pos clocked)
@@ -195,11 +195,14 @@ app-verbed here (FOUNDATION-GAPS #12)."
 
 (defun glasspane-org-reader-heading-menu (token archive buffer pos clocked)
   "The per-heading overflow (more_vert) dropdown of quick actions."
-  (jetpacs-menu
-   (mapcar (lambda (op)
-             (jetpacs-menu-item (nth 0 op) (nth 2 op) :icon (nth 1 op)))
-           (glasspane-org-reader--heading-ops token archive buffer pos
-                                              clocked))))
+  (jetpacs-with-semantics
+   (jetpacs-menu
+    (mapcar (lambda (op)
+              (jetpacs-menu-item (nth 0 op) (nth 2 op) :icon (nth 1 op)))
+            (glasspane-org-reader--heading-ops token archive buffer pos
+                                               clocked)))
+   ;; SPEC 16.4: without a name the trigger announces as its icon.
+   :name "Heading actions"))
 
 (defun glasspane-org-reader--meta-line (n)
   "The deadline/clocked badge line for tree node N, or nil.
@@ -279,13 +282,13 @@ Companion asks before the event exists (SPEC 14.1).  Shared with the
 agenda/tasks cards."
   (cons (jetpacs-swipe
          (list (jetpacs-swipe-action
-                "Cycle" :icon "check" :color "#4CAF50"
+                "Cycle" :icon "check" :color "success"
                 :on-trigger (jetpacs-action "heading.todo-cycle"
                                             :args (list :token token)))))
         (and archive
              (jetpacs-swipe
               (list (jetpacs-swipe-action
-                     "Archive" :icon "archive" :color "#E53935"
+                     "Archive" :icon "archive" :color "error"
                      :on-trigger (jetpacs-action
                                   "jetpacs.org.archive"
                                   :args (list :token archive)

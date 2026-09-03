@@ -153,8 +153,8 @@ render each other's results (the core's own %S rule)."
          t)))
 
 (defconst glasspane-views--priority-colors
-  '(("A" . "#E53935") ("B" . "#F57C00") ("C" . "#1976D2"))
-  "Badge color per priority; anything else renders neutral gray.")
+  '(("A" . "error") ("B" . "warning") ("C" . "primary"))
+  "Badge theme role per priority; anything else renders in `outline'.")
 
 (defun glasspane-views--priority-span (priority)
   "The bold colored [P] badge span, or nil without PRIORITY."
@@ -163,7 +163,7 @@ render each other's results (the core's own %S rule)."
                   :font-weight "bold"
                   :color (or (cdr (assoc priority
                                          glasspane-views--priority-colors))
-                             "#9E9E9E"))))
+                             "outline"))))
 
 (defun glasspane-views--headline-spans (item)
   "Priority badge + headline spans; done titles degrade to color
@@ -186,7 +186,7 @@ feeds both table cells and `jetpacs-rich-text' cards."
     (dolist (tg (append (alist-get 'tags item) nil))
       (when spans (push (jetpacs-span " ") spans))
       (push (jetpacs-span (concat "#" tg)
-                          :color "#1976D2"
+                          :color "primary"
                           :on-tap (glasspane-views--tag-action tg))
             spans))
     (nreverse spans)))
@@ -243,7 +243,7 @@ carrying a ref on the wire (D-4)."
      (when (and token (not (glasspane-views--done-p item)))
        (jetpacs-swipe
         (list (jetpacs-swipe-action
-               "Done" :icon "check" :color "#2E7D32"
+               "Done" :icon "check" :color "success"
                :on-trigger
                (jetpacs-action "heading.todo-set"
                                :args (list :token token
@@ -367,16 +367,19 @@ exists — so the move is a menu of the OTHER columns."
     (glasspane-views--card
      item
      (when token
-       (jetpacs-menu
-        (mapcar (lambda (target)
-                  (jetpacs-menu-item
-                   (if (string-empty-p target) "No state" target)
-                   (jetpacs-action "heading.todo-set"
-                                   :args (list :token token :state target)
-                                   :when-offline "queue"
-                                   :ttl-s glasspane-views--ttl-s)))
-                (remove state columns))
-        :icon "more_vert")))))
+       (jetpacs-with-semantics
+        (jetpacs-menu
+         (mapcar (lambda (target)
+                   (jetpacs-menu-item
+                    (if (string-empty-p target) "No state" target)
+                    (jetpacs-action "heading.todo-set"
+                                    :args (list :token token :state target)
+                                    :when-offline "queue"
+                                    :ttl-s glasspane-views--ttl-s)))
+                 (remove state columns))
+         :icon "more_vert")
+        ;; SPEC 16.4: without a name the trigger announces as its icon.
+        :name "Move to column")))))
 
 (defun glasspane-views--board-node (items)
   "The kanban rendering: one column per TODO state, panning sideways.
@@ -633,26 +636,22 @@ and the post-save repush resets them (S2)."
               (mapcar
                (lambda (view)
                  (let ((name (alist-get 'name view)))
-                   (jetpacs-card
-                    (list
-                     (jetpacs-row
-                      (jetpacs-with-attrs
-                       (jetpacs-column
-                        (jetpacs-text name :style "label")
-                        (jetpacs-text (format "%s · %s"
-                                              (glasspane-views--rendering view)
-                                              (alist-get 'query view))
-                                      :style "caption"))
-                       :weight 1)
-                      (jetpacs-icon-button
-                       "delete"
-                       (jetpacs-action "views.delete"
-                                       :args (list :name name)
-                                       :when-offline "queue"
-                                       :ttl-s glasspane-views--ttl-s)
-                       :content-description "Delete view")))
+                   (jetpacs-chrome-row
+                    name
+                    :subtitle (format "%s · %s"
+                                      (glasspane-views--rendering view)
+                                      (alist-get 'query view))
+                    :trailing (jetpacs-icon-button
+                               "delete"
+                               (jetpacs-action "views.delete"
+                                               :args (list :name name)
+                                               :when-offline "queue"
+                                               :ttl-s glasspane-views--ttl-s)
+                               :content-description
+                               (format "Delete view %s" name))
                     :on-tap (jetpacs-action "views.open"
-                                            :args (list :name name)))))
+                                            :args (list :name name))
+                    :key (jetpacs-wire-id "gv" name))))
                glasspane-saved-views)
             (list (jetpacs-empty-state
                    :icon "manage_search" :title "No saved views"

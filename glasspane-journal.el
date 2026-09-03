@@ -205,27 +205,23 @@ on top of this one must not sweep the day's still-visible taps."
 The buttons ride G4's `heading.schedule' DIRECT arms — computed args
 only; the picker flows belong to the foundation dialogs (the G4
 retirement split)."
-  (jetpacs-card
-   (list
-    (jetpacs-column
-     (jetpacs-text (or (alist-get 'headline item) "?") :style "body")
-     (jetpacs-text (format "%s · %s"
-                           (or (alist-get 'todo item) "TODO")
-                           (or (alist-get 'scheduled item) ""))
-                   :style "caption")
-     (jetpacs-row
-      (jetpacs-spacer :weight 1)
-      (jetpacs-button "Today"
-                      (jetpacs-action "heading.schedule"
-                                      :args (list :when "+0d" :token token)
-                                      :when-offline "queue"
-                                      :ttl-s glasspane-journal--ttl-s)
-                      :variant "text")
-      (jetpacs-date-button "Pick"
-                           (jetpacs-action "heading.schedule"
-                                           :args (list :token token)
-                                           :when-offline "queue"
-                                           :ttl-s glasspane-journal--ttl-s)))))))
+  (jetpacs-chrome-row
+   (or (alist-get 'headline item) "?")
+   :subtitle (format "%s · %s"
+                     (or (alist-get 'todo item) "TODO")
+                     (or (alist-get 'scheduled item) ""))
+   :trailing (list
+              (jetpacs-button "Today"
+                              (jetpacs-action "heading.schedule"
+                                              :args (list :when "+0d" :token token)
+                                              :when-offline "queue"
+                                              :ttl-s glasspane-journal--ttl-s)
+                              :variant "text")
+              (jetpacs-date-button "Pick"
+                                   (jetpacs-action "heading.schedule"
+                                                   :args (list :token token)
+                                                   :when-offline "queue"
+                                                   :ttl-s glasspane-journal--ttl-s)))))
 
 (defun glasspane-journal--carried-section ()
   "The carried-over nodes, or nil; tokens mint into set \"journal-carried\".

@@ -285,7 +285,7 @@ and are removed from the ordinary flat-tag chip set."
                  (list
                   (when priority
                     (jetpacs-span (format "[%s] " priority)
-                                  :font-weight "bold" :color "#F57C00"))
+                                  :font-weight "bold" :color "warning"))
                   (jetpacs-span headline
                                 :color (and done "on_surface"))))))
          (middle
@@ -328,7 +328,7 @@ and are removed from the ordinary flat-tag chip set."
      :swipe-start (and token
                        (jetpacs-swipe
                         (list (jetpacs-swipe-action
-                               "Cycle" :icon "check" :color "#4CAF50"
+                               "Cycle" :icon "check" :color "success"
                                :on-trigger
                                (jetpacs-action "heading.todo-cycle"
                                                :args (list :token token))))))
@@ -337,7 +337,7 @@ and are removed from the ordinary flat-tag chip set."
       ((and para-project token)
        (jetpacs-swipe
         (list (jetpacs-swipe-action
-               "Archive" :icon "archive" :color "#E53935"
+               "Archive" :icon "archive" :color "error"
                :on-trigger
                (jetpacs-action
                 "projects.archive" :args (list :token token)
@@ -345,7 +345,7 @@ and are removed from the ordinary flat-tag chip set."
       (archive-token
        (jetpacs-swipe
         (list (jetpacs-swipe-action
-               "Archive" :icon "archive" :color "#E53935"
+               "Archive" :icon "archive" :color "error"
                :on-trigger
                (jetpacs-action
                 "jetpacs.org.archive" :args (list :token archive-token)
@@ -425,10 +425,9 @@ body."
          (recent-cards
           (and tokens
                (cl-mapcar (lambda (r tok)
-                            (jetpacs-card
-                             (list (jetpacs-text
-                                    (or (alist-get 'headline r) "?")
-                                    :style "body"))
+                            (jetpacs-chrome-row
+                             (or (alist-get 'headline r) "?")
+                             :icon "history"
                              :on-tap (jetpacs-action
                                       "heading.clock-in"
                                       :args (list :token tok))))

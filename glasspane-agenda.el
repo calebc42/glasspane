@@ -148,7 +148,7 @@ the row's type icon already says, so it is dropped."
   "Return (ICON . COLOR) for an agenda item TYPE string (color may be nil)."
   (cond
    ((null type) nil)
-   ((string-match-p "past-scheduled" type) '("history" . "#E53935"))
+   ((string-match-p "past-scheduled" type) '("history" . "error"))
    ((string-match-p "deadline" type) '("flag" . nil))
    ((string-match-p "scheduled" type) '("schedule" . nil))
    (t nil)))
@@ -185,11 +185,11 @@ nil when neither is set."
           (delq nil
                 (list
                  (when slabel
-                   (jetpacs-icon "schedule" :size 14 :color "#9E9E9E"))
+                   (jetpacs-icon "schedule" :size 14 :color "outline"))
                  (when slabel (jetpacs-text (concat " " slabel)
                                             :style "caption"))
                  (when (and slabel dlabel) (jetpacs-spacer :width 16))
-                 (when dlabel (jetpacs-icon "flag" :size 14 :color "#EF5350"))
+                 (when dlabel (jetpacs-icon "flag" :size 14 :color "error"))
                  (when dlabel (jetpacs-text (concat " " dlabel)
                                             :style "caption"))))))
     (when children
@@ -419,8 +419,10 @@ day as its `:date' arg — saved views pass their own handler."
             (let* ((date-str (format "%04d-%02d-%02d" year month current-day))
                    (day-items (cdr (assoc date-str items-by-date)))
                    (is-selected (equal date-str selected-date))
-                   (text-color (if is-selected "#FFFFFF" nil))
-                   (bg-color (if is-selected "#1976D2" nil))
+                   ;; Theme roles, so the selected day follows the
+                   ;; profile and the Companion's own palette.
+                   (text-color (if is-selected "on_primary" nil))
+                   (bg-color (if is-selected "primary" nil))
                    (cell-content
                     (list
                      (jetpacs-with-attrs
@@ -432,7 +434,7 @@ day as its `:date' arg — saved views pass their own handler."
                             (jetpacs-with-attrs
                              (jetpacs-icon "circle" :size 6
                                            :color (if is-selected
-                                                      "#FFFFFF" "#1976D2"))
+                                                      "on_primary" "primary"))
                              :padding 2)
                           (jetpacs-spacer :height 8)))
                        :color bg-color :shape "rounded")

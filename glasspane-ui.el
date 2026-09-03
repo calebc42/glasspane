@@ -135,7 +135,9 @@ onto Glasspane-owned screens; the legacy rollback arm still authors it on
 each historical daily screen.  The coupling to glasspane-capture.el is the
 verb string alone — an early tap is rejected by the action shim, never a
 signal."
-  (jetpacs-icon-button "add" (jetpacs-action "org.capture.show")
+  ;; `note_add', not `add': the FAB rides Glasspane's Files guest too,
+  ;; where a plain plus beside Files' own "+" read as the same action.
+  (jetpacs-icon-button "note_add" (jetpacs-action "org.capture.show")
                        :content-description "Capture"
                        :variant "filled" :size "large"))
 
@@ -258,7 +260,15 @@ isolated there.  Return `accepted'."
            (progn
              (unless (or legacy (equal id "glasspane-agenda"))
                (jetpacs-chrome-reset-screens surface))
-             (jetpacs-chrome-push-screen surface id builder))
+             (jetpacs-chrome-push-screen
+              surface id
+              ;; A Tier-1 destination is a peer of the root, reached from
+              ;; the bar or rail beside it; a back arrow there is the
+              ;; rail's own job done twice.  Drills keep theirs.  The
+              ;; destination's screen id is "glasspane-<route>".
+              (if (and (not legacy) (equal id (concat "glasspane-" route)))
+                  (lambda (_back) (funcall builder nil))
+                builder)))
          (error (message "glasspane: %s destination push failed: %s"
                          id (jetpacs-error-label err))))))
     'accepted))
@@ -481,27 +491,22 @@ given SET."
      :on-change (jetpacs-action "settings.areas.save"))))
 
 (defun glasspane-ui--agenda-card (name query)
-  "One saved-search card with its edit/delete affordances."
-  (jetpacs-card
-   (list
-    (jetpacs-row
-     ;; The text column carries the flex weight itself: the client
-     ;; renders columns fillMaxWidth, so an unweighted one swallows
-     ;; the row and pushes the buttons off-screen.
-     (jetpacs-with-attrs
-      (jetpacs-column (jetpacs-text name :style "label")
-                      (jetpacs-text query :style "body")
-                      :spacing 2)
-      :weight 1)
-     (jetpacs-icon-button "edit"
-                          (jetpacs-action "settings.agenda.edit"
-                                          :args (list :name name))
-                          :content-description "Edit search")
-     (jetpacs-icon-button "delete"
-                          (jetpacs-action "settings.agenda.delete"
-                                          :args (list :name name))
-                          :content-description "Delete search")
-     :align "center"))))
+  "One saved-search row with its edit/delete affordances."
+  (jetpacs-chrome-row
+   name
+   :subtitle query
+   :trailing (list
+              (jetpacs-icon-button "edit"
+                                   (jetpacs-action "settings.agenda.edit"
+                                                   :args (list :name name))
+                                   :content-description
+                                   (format "Edit search %s" name))
+              (jetpacs-icon-button "delete"
+                                   (jetpacs-action "settings.agenda.delete"
+                                                   :args (list :name name))
+                                   :content-description
+                                   (format "Delete search %s" name)))
+   :key (jetpacs-wire-id "gs" name)))
 
 (defun glasspane-ui--settings-body ()
   "The app settings screen body: Area tags, demo content, and saved searches.

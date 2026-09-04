@@ -43,6 +43,8 @@ The actions before the convergence point express authority, not presentation.
 |-------------+-------------+-----------+----------------|
 | Project, Agenda, Notes, heading source | =heading.visit= | app-scoped =ebp-org= token | token resolution returns =stale= after the rendered identity expires |
 | Resource row, file breadcrumb | =glasspane.document.open= | path | Files canonicalizes and revalidates the path against its effective roots |
+| Area drill file row, Archive row (=glasspane-areas--file-row=, =glasspane-resources--archive-row=) | =glasspane.document.open= | path | as above; an archive path is the sibling =FILE.org_archive= |
+| Area declaring-note card (=glasspane-areas--declaring-card=) | =heading.visit= | app-scoped =ebp-org= token | as the heading row above |
 
 A heading card must not serialize a raw buffer position: edits can move the
 heading between render and tap. A file row must not mint an imaginary heading

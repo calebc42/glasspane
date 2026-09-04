@@ -36,6 +36,27 @@ Repo: `/home/calebc42/pkb/projects/jetpacs/jetpacs/llm-poc-3` @ **d856f1b** (PA-
 > category/filename fallback is retired.  Every historical category-based
 > Areas statement below is read through this amendment.
 
+> **AUTHORITATIVE PARA-MODEL AMENDMENT — Caleb, 2026-09-04.**
+> Glasspane keeps its own PARA implementation and never adopts vulpea-para
+> or any other software's PARA restrictions as a guide.  An Area is a member
+> of the non-exclusive Org tag group named by `glasspane-area-tag-group`
+> (default `Area`), never a file: anything carrying the tag locally, by
+> inheritance, or through `#+FILETAGS` is a member, and one note may belong
+> to many Areas.  An Area MAY additionally be a first-class note, declared by
+> an explicit `AREA` property (value = the Area tag) in a file-level or
+> heading drawer; the note is optional, opens as a document from the Area
+> drill, and is a member of itself when it carries its own tag.  A Project
+> is any heading with a TODO keyword — no project tag, no Area file — grouped
+> by file (§0.3) with group-by-Area as the second view; capture stays the
+> FAB, so the Area and Project capture dialogs die.  Resources remain the
+> Files delegation rooted at the vault.  Archive is plain Org semantics:
+> sibling `FILE.org_archive` files, filterable by Area; no in-file `* Archive
+> :ARCHIVE:` subtree is required.  The Area group is persisted in
+> `org-tag-persistent-alist` so per-file `#+TAGS` lines never shadow it.
+> The 2026-08-27 file-level Area / tagged-Project code is withdrawn; ladder
+> §4a (PM-) restores the model.  Every historical Areas, Projects,
+> Resources, and Archive statement below is read through this amendment.
+
 Full ERT gate everywhere below = `test/run-tests.sh` — **the runner is an EXPLICIT list; a suite not named there never runs (the K1a merge lesson). This whole ladder adds ONE suite, `test/glasspane-para-test.el`, wired into the list in the same commit as the first app-specific rung, PA-2a; every later rung only adds arms to it. PA-1's generic foundation arms live in the already-wired app/home suites.**
 
 ---
@@ -95,6 +116,9 @@ Full ERT gate everywhere below = `test/run-tests.sh` — **the runner is an EXPL
 | `glasspane.home` | survives, RETARGETED: the reset lands on the Agenda root | drawer/M-x/programmatic | rework §3 row amended per §2 |
 | `agenda.open` `review.open` `org.capture.show` | unchanged (`agenda.open` becomes the root's verb) | per rework §3 | — |
 | `tasks.filter` | moves with the body to glasspane-projects.el, name unchanged | live taps | screen-local |
+| `areas.capture` `projects.capture` `projects.archive` | DIE (PM-4/PM-5/PM-6): dialog and swipe verbs of the withdrawn 2026-08-27 model | live taps only (`when-offline` grep = 0 in both modules) | deleted with the dialogs, no alias |
+| `projects.group` `archive.filter` | NEW, owner-scoped (PM-6, PM-4) | — | screen-local view state, the `tasks.filter` pattern |
+| `resources.open-file` `resources.return` | compat-only (NAVIGATION.org): no builder emits them | cached specs | handlers delegate to `glasspane.document.open` / `glasspane.files.return` |
 
 ## §4 Rung ladder
 
@@ -518,6 +542,58 @@ Tablet, PORTRAIT, force-stop before every smoke, screenshot before every tap (I-
 
 = the rework's GR-10, re-hosted pointer, content unchanged (table/babel move, per-heading affordances, mutation verb family, cross-file search, demo seeder split, vulpea extractor non-rename). Executes after PA-4; each item decision-gated as written there.
 
+## §4a PM ladder — PARA model restoration (2026-09-04)
+
+Executes the 2026-09-04 amendment.  Baseline `db8b39f` (tag `pm-baseline`): `test/glasspane-para-test.el` already pins this model (it was committed in its tag-group / TODO-walk state while the modules were committed in the withdrawn file-level state) and runs **18/50**; `glasspane-navigation-test` **7/7**; `glasspane-test` **65/75** — its 10 failures ride Caleb's uncommitted `glasspane-demo.el` / `test/glasspane-test.el` edits and are out of this ladder's scope.  The suite is the executable spec except where it predates NAVIGATION.org (PM-3 reconciles those arms).  Pre-consolidation skeletons: `git show 1f76302:glasspane-areas.el` (CATEGORY walk, to be re-keyed to the tag group) and `git show 1f76302:glasspane-projects.el` (the TODO walk by file).
+
+| Rung | Name | Depends on | Size | Device arm? | RISKY |
+|---|---|---|---|---|---|
+| PM-0 | Governance: this section, the amendment, §3 rows, NAVIGATION.org rows, baseline tag | — | S | no | no |
+| PM-1 | Host: tag-group reader/writer support `org-tag-persistent-alist` (jetpacs-org-settings.el) | — | S | no | no |
+| PM-2 | Substrate in `glasspane-org.el`: `:file-tags`, forced inheritance, `AREA` declarations (file walk primary, vulpea property query as accelerator), `glasspane-org-open-todo-p` | — | S | no | no |
+| PM-3 | Spec reconciliation: stale para/navigation test arms → NAVIGATION.org contract; convergence test names the new builders | PM-0 | S | no | no |
+| PM-4 | Resources = Files delegation; Archive index/screen + Area filter; detail `projects.archive` swipe removed; destination table | PM-2, PM-3 | M | no | no |
+| PM-5 | Areas: tag-group index, list, drill with intersection chips + declaring-note card | PM-2, PM-3, PM-4 | M | desktop T-7 timing | yes (T-7) |
+| PM-6 | Projects: TODO walk by file, Area chips, group-by-Area; UI un-obsolete + persistent save; **delete `glasspane-para.el`**; suites green | PM-1, PM-5 | M | no | no |
+| PM-7 | `tools/para-migrate.el`; desktop vault migration; desktop config vulpea fix | PM-1, PM-6 | M | no | yes (vault writes) |
+| PM-8 | Managed updater → tablet migration → device batch + soak | PM-7 | S | **YES** | yes |
+
+PM-1/PM-2/PM-3 run in parallel after PM-0; PM-5 and PM-6 may be developed in parallel after PM-4.  Rollback = `git tag pm-baseline`; each rung stamps its gate below.
+
+### PM-0 — Governance (this commit)
+
+### PM-1 — Host persistent alist (`jetpacs/emacs/jetpacs-org-settings.el`)
+
+`jetpacs-org-settings-tag-group-members` reads `(append org-tag-persistent-alist org-tag-alist)`; `jetpacs-org-settings-set-tag-group-members (group members &optional variable)` may target `org-tag-persistent-alist`, stripping a same-named block from `org-tag-alist` so the group has one home.  **Gate:** host suite arms: persistent write; stale global block removed; a buffer with its own `#+TAGS:` line still sees the group; reader merge; existing round-trip unchanged.
+
+### PM-2 — Substrate (`glasspane-org.el`)
+
+`glasspane-org--file-tag-group-index` gains `:file-tags` and binds `org-use-tag-inheritance` to t; new `glasspane-org-open-todo-p`; new `glasspane-org-indexed-area-declarations` (`vulpea-db-query-by-property-key "AREA"`, the only vulpea read in the Areas model — `glasspane-areas.el` stays grep-pinned free of `vulpea-db-`).  **Gate:** arms: headingless `#+FILETAGS` file yields `:file-tags`; inheritance forced under `org-use-tag-inheritance` nil; declarations nil without vulpea and shaped with the query mocked.
+
+### PM-3 — Spec reconciliation (tests only)
+
+Stale arms re-pointed at the navigation contract: `glasspane.document.open` for path rows, `glasspane.files.return` for returns, 6-arg `jetpacs-files-open-path`, no `jetpacs-navigate-buffer`; `resources-source-boundaries` names the navigation seam; the convergence test builds `glasspane-areas--file-row`, `glasspane-areas--declaring-card`, `glasspane-resources--archive-row`.  **Gate:** both suites load; the reconciled-arm list is recorded here.
+
+### PM-4 — Resources + Archive (`glasspane-resources.el`, `glasspane-detail.el`, `glasspane-ui.el`)
+
+Resources delegation restored (`--on-open` browses the vault; note rows, list body, and screen deleted; compat handlers kept); Archive index (`--archive-files-1` bounded `_archive\'` walk under `glasspane-resources-archive-scan-cap`, memoised, invalidated by `--refresh-invalidate`), `glasspane-resources-archives-for-files`, `--archive-row` via `glasspane-navigation-document-action`, Area filter chips + `archive.filter`; detail's `para-project` swipe branch removed; resources destination gains `:open-surface`.  **Gate:** archive ×5, resources ×7, `pa3a-destination-table-flips-exactly`, `pa3c-resources-handoff-and-return`; new arms: Area filter, detail fallback.
+
+### PM-5 — Areas (`glasspane-areas.el`)
+
+`--scan-file` (tag group ∩ `org-get-tags` per heading, `org-file-tags`, `AREA` declarations), `--index-1` / `--index` (memoised `'(areas-index)`; every declared member is a bucket), `--count-label`, list rows minting zero tokens, drill = chips (`areas.filter`, AND-intersection, primary resets) + declaring header + **Projects / Resources / Archives** sections tokenized once under `"areas"`; verbs exactly `areas.open` / `areas.drill` / `areas.filter`.  T-7 timing arm on the real vault.  **Gate:** all 11 Areas arms + pa3b/pa3c/pa3d slot arms; new arms: declaring note (file and heading level), self-membership, `#+FILETAGS`-only file, indexed-declaration merge; convergence test green for the Areas builders.
+
+### PM-6 — Projects + UI + delete `glasspane-para.el`
+
+TODO walk by file with `"tasks"` tokens, `--card` passing `glasspane-org-item-tag-group-members`, group-by-Area second view (`projects.group`); `glasspane-area-tag-group` un-obsoleted and saved to `org-tag-persistent-alist`; `glasspane-para.el` removed (`git grep glasspane-para-` = suite file name + docs).  **Gate:** para suite fully green, navigation green, `glasspane-test` at its 65/75 baseline; static MCP PASS; Checkdoc; warning-as-error compile; determinism on Projects/Areas/Archive screens.
+
+### PM-7 — Migration (`tools/para-migrate.el`, `~/pkb`, `~/.emacs.d/config.el`)
+
+Dry-run-by-default, idempotent batch script: malformed tag lines; `:AREA:` collisions → `FIELD_OF_STUDY`; `:project:` → `:workspace:` filetags; seed `tech career meta sovereignty computing` into `org-tag-persistent-alist` through the host writer with per-Area counts; opt-in `areas.org` scaffold of declaring headings.  Desktop config: the dead vulpea checkout guard becomes an ELPA load.  **Gate:** dry-run twice identical; write then dry-run all `SKIP (already)`; real-vault `(glasspane-areas--index)` counts match the report.
+
+### PM-8 — Device
+
+Managed updater, tablet migration through the Eval REPL on `/sdcard/Jetpacs`, then the PA-3 device discipline (PORTRAIT, force-stop, screenshot before every tap) over Areas/Projects/Archive/Settings, one daily-driver soak day.  **Gate:** checklist with screenshots; no T-5/T-7 trip; tag `pm-closed`.
+
 ## §5 The IA target (first-class design; PA-3 implements it)
 
 ### §5.1 The full-bar primary pole
@@ -563,7 +639,7 @@ Token sets: net ≈ +1 −1 (add "areas"+twin; `journal-carried` dies) — headr
 
 ## §8 Tripwires (rework §9 carried whole; deltas)
 
-T-1..T-4, T-6 verbatim. **T-5 re-pointed:** push-cadence growth from the back-repush hook or the Agenda-root cards (watch Companion logs during the PA-3 batch) → D-5 graduates and is funded before PA-4. **T-7 (new):** the Areas whole-scope category walk shows hardware cost (slow first paint on the real vault) → halt, memoise/derive from the GR-3 consolidated walk before proceeding.
+T-1..T-4, T-6 verbatim. **T-5 re-pointed:** push-cadence growth from the back-repush hook or the Agenda-root cards (watch Companion logs during the PA-3 batch) → D-5 graduates and is funded before PA-4. **T-7 (new):** the Areas whole-scope category walk shows hardware cost (slow first paint on the real vault) → halt, memoise/derive from the GR-3 consolidated walk before proceeding.  **T-7 re-armed (2026-09-04, PM-5):** the same tripwire now guards the tag-group walk; threshold 1500 ms desktop first paint over the real vault → derive the fold from the memoised `glasspane-org--file-tag-group-index`.
 
 ## §9 What this plan deliberately does not do
 
@@ -572,6 +648,7 @@ T-1..T-4, T-6 verbatim. **T-5 re-pointed:** push-cadence growth from the back-re
 - Build unarchive, cross-archive search, or archive-side mutation verbs; honor `#+ARCHIVE` keywords or `::* heading` archive targets (v1 corpus = sibling `_archive` files only; all recorded).
 - Adopt `org-agenda-custom-commands` / org-ql / composite agendas.
 - Add the primary-branch surface check (§5.2's escape hatch — recorded follow-up if the foreign-surface trade sours).
+- Adopt vulpea-para or any other package's PARA restrictions (2026-09-04 amendment); create Areas from files, directories, `#+CATEGORY`, or a role tag; require an in-file `* Archive :ARCHIVE:` subtree; or add Area/Project capture dialogs (capture stays the FAB).
 - Everything in rework §10 except the overridden `journal.capture` row (§0.11).
 
 ## §10 Cross-reference stamps (apply on each doc's next edit; this plan does not modify them)
@@ -591,4 +668,5 @@ T-1..T-4, T-6 verbatim. **T-5 re-pointed:** push-cadence growth from the back-re
 **Ratified inputs → where honored:** §0.1→PA-1/PA-3a · §0.2→PA-3b/§5.3 · §0.3→PA-2d · §0.4→PA-2a · §0.5→PA-2c · §0.6→PA-2e/§9 · §0.7→PA-3d/§5.6 · §0.8→§2/§10 · §0.9→PA-0/PA-1 · §0.10→PA-3b/§5.4 · §0.11→§3/PA-4.
 **New surfaces → suite arms:** every PA-2 rung names its arms; the one new suite is wired at PA-2a (I-12).
 **Dying/moved verbs → I-13 rows:** all in §3; the only durable carrier (`journal.capture`) has its ceremony (PA-4).
+**2026-09-04 amendment → where honored:** no vulpea-para→PM-6 (file deleted) · Areas = tag group→PM-2/PM-5 · declaring `AREA` note→PM-2/PM-5/PM-7 · Projects = any TODO→PM-6 · Resources = Files→PM-4 · Archive = `_archive` siblings→PM-4 · persistent alist→PM-1/PM-6 · seed + `:workspace:`→PM-7 · new entry points→PM-3 (convergence test).
 **Invariants → enforcement:** I-9→PA-3a gate + the renamed inventory tests · I-10→PA-3a/PA-3 batch · I-11→PA-3d gate · I-12→PA-2a · I-13→§3 · I-14→PA-3 batch (S11 arms).

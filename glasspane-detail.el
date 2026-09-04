@@ -259,10 +259,6 @@ and are removed from the ordinary flat-tag chip set."
                              (append (alist-get 'tags it) nil)))
          (token (alist-get 'token it))
          (archive-token (alist-get 'archive-token it))
-         ;; PARA Projects archive into their Area's in-file Archive subtree,
-         ;; not Org's default sibling _archive file.  Other cards retain the
-         ;; foundation action unchanged.
-         (para-project (alist-get 'para-project it))
          (done (and todo
                     (member todo (or (default-value 'org-done-keywords)
                                      '("DONE" "CANCELLED")))
@@ -333,23 +329,14 @@ and are removed from the ordinary flat-tag chip set."
                                (jetpacs-action "heading.todo-cycle"
                                                :args (list :token token))))))
      :swipe-end
-     (cond
-      ((and para-project token)
-       (jetpacs-swipe
-        (list (jetpacs-swipe-action
-               "Archive" :icon "archive" :color "error"
-               :on-trigger
-               (jetpacs-action
-                "projects.archive" :args (list :token token)
-                :confirm "Archive this Project inside its Area?")))))
-      (archive-token
-       (jetpacs-swipe
-        (list (jetpacs-swipe-action
-               "Archive" :icon "archive" :color "error"
-               :on-trigger
-               (jetpacs-action
-                "jetpacs.org.archive" :args (list :token archive-token)
-                :confirm "Archive this subtree?")))))))))
+     (and archive-token
+          (jetpacs-swipe
+           (list (jetpacs-swipe-action
+                  "Archive" :icon "archive" :color "error"
+                  :on-trigger
+                  (jetpacs-action
+                   "jetpacs.org.archive" :args (list :token archive-token)
+                   :confirm "Archive this subtree?"))))))))
 
 (defun glasspane-detail-result-card (it)
   "Render a search/heading item IT to a tappable card with tag chips."

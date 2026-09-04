@@ -1137,7 +1137,7 @@ the registry."
               (should (equal
                        (jetpacs-org-settings-tag-group-members "Area")
                        '("House" "Auto")))
-              (should (assq 'org-tag-alist saved))
+              (should (assq 'org-tag-persistent-alist saved))
               (should (eq (run "settings.areas.save"
                                '(:value ["Bad Tag"]))
                           'rejected))
@@ -1684,15 +1684,11 @@ same table."
          (detail (glasspane-detail-agenda-card
                   '((headline . "Task") (token . "tok")
                     (archive-token . "archive"))))
-         (project (glasspane-detail-agenda-card
-                   '((headline . "Project") (token . "tok")
-                     (para-project . t))))
          (view (glasspane-views--card
                 '((headline . "Task") (todo . "TODO") (token . "tok"))))
          (sides (list (car reader) (cdr reader)
                       (plist-get detail :swipe_start)
                       (plist-get detail :swipe_end)
-                      (plist-get project :swipe_end)
                       (plist-get view :swipe_start)
                       (plist-get view :swipe_end))))
     (dolist (side sides)
@@ -5260,7 +5256,7 @@ point: a new screen cannot ship unreachable.")
 (defconst glasspane-test--non-opening-verbs
   '("agenda.nav" "agenda.save-custom" "agenda.select-date"
     "agenda.set-mode" "agenda.set-month" "agenda.today" "config.sync"
-    "areas.drill" "areas.filter"
+    "areas.drill" "areas.filter" "archive.filter" "projects.group"
     "demo.setup" "demo.setup-org" "detail.open-file"
     "detail.planning.edit" "detail.save"
     "detail.toggle-read" "files.filter"

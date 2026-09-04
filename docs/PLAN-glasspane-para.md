@@ -562,29 +562,43 @@ PM-1/PM-2/PM-3 run in parallel after PM-0; PM-5 and PM-6 may be developed in par
 
 ### PM-0 — Governance (this commit)
 
+> **PM-0 GATE COMPLETE 2026-09-04.**  Amendment, §3 rows, §4a ladder, §8/§9/§11 rows, NAVIGATION.org rows; tag `pm-baseline` = `db8b39f`.  Evidence: docs only; `git diff --check` clean.
+
 ### PM-1 — Host persistent alist (`jetpacs/emacs/jetpacs-org-settings.el`)
 
 `jetpacs-org-settings-tag-group-members` reads `(append org-tag-persistent-alist org-tag-alist)`; `jetpacs-org-settings-set-tag-group-members (group members &optional variable)` may target `org-tag-persistent-alist`, stripping a same-named block from `org-tag-alist` so the group has one home.  **Gate:** host suite arms: persistent write; stale global block removed; a buffer with its own `#+TAGS:` line still sees the group; reader merge; existing round-trip unchanged.
+
+> **PM-1 GATE COMPLETE 2026-09-04** (host commit `553a958`).  `jetpacs-org-settings-set-tag-group-members (group members &optional variable)`; persistent placement clears the same-named global block through the existing clear-a-group path so retired members survive as flat tags; the reader merges both alists.  Evidence: host suite **11/11** (was 10/10; the new arm pins the persistent block, the single-home rule, both saved symbols, the merged reader, and a `#+TAGS:`-bearing buffer still seeing the group); warning-as-error compile into the scratchpad; Checkdoc clean.
 
 ### PM-2 — Substrate (`glasspane-org.el`)
 
 `glasspane-org--file-tag-group-index` gains `:file-tags` and binds `org-use-tag-inheritance` to t; new `glasspane-org-open-todo-p`; new `glasspane-org-indexed-area-declarations` (`vulpea-db-query-by-property-key "AREA"`, the only vulpea read in the Areas model — `glasspane-areas.el` stays grep-pinned free of `vulpea-db-`).  **Gate:** arms: headingless `#+FILETAGS` file yields `:file-tags`; inheritance forced under `org-use-tag-inheritance` nil; declarations nil without vulpea and shaped with the query mocked.
 
+> **PM-2 GATE COMPLETE 2026-09-04** (`1d2230b`).  Evidence: four `pm2` arms **4/4**; `glasspane-org.el` warning-as-error compile exit 0.
+
 ### PM-3 — Spec reconciliation (tests only)
 
 Stale arms re-pointed at the navigation contract: `glasspane.document.open` for path rows, `glasspane.files.return` for returns, 6-arg `jetpacs-files-open-path`, no `jetpacs-navigate-buffer`; `resources-source-boundaries` names the navigation seam; the convergence test builds `glasspane-areas--file-row`, `glasspane-areas--declaring-card`, `glasspane-resources--archive-row`.  **Gate:** both suites load; the reconciled-arm list is recorded here.
+
+> **PM-3 GATE COMPLETE 2026-09-04** (`1d2230b`).  Reconciled: `areas-drill-content-and-vanish-degrade`, `archive-screen-route-and-lifecycle` (+ `archive.filter`), `resources-delegates-every-path-to-files`, `resources-route-stays-selected-on-files`, `pa3c-resources-handoff-and-return`, `pa3c-mark-position-navigation-family`, `resources-source-boundaries`, navigation `entry-builders-name-authority-only`; later in PM-4/5 the Tier-1 push assertions gained `glasspane-para-test--builder-routes-p` (the rail-aware back wraps a destination builder) and `resources-local-back-handoffs-are-bounded` now exercises `glasspane-navigation--on-view-change` for the files-return arm (navigation alone owns the return).  Evidence: para 19/54 and navigation 6/7 at the commit, every remaining red a not-yet-written builder.
 
 ### PM-4 — Resources + Archive (`glasspane-resources.el`, `glasspane-detail.el`, `glasspane-ui.el`)
 
 Resources delegation restored (`--on-open` browses the vault; note rows, list body, and screen deleted; compat handlers kept); Archive index (`--archive-files-1` bounded `_archive\'` walk under `glasspane-resources-archive-scan-cap`, memoised, invalidated by `--refresh-invalidate`), `glasspane-resources-archives-for-files`, `--archive-row` via `glasspane-navigation-document-action`, Area filter chips + `archive.filter`; detail's `para-project` swipe branch removed; resources destination gains `:open-surface`.  **Gate:** archive ×5, resources ×7, `pa3a-destination-table-flips-exactly`, `pa3c-resources-handoff-and-return`; new arms: Area filter, detail fallback.
 
+> **PM-4 GATE COMPLETE 2026-09-04.**  Resources is the Files delegation again (note rows, list body, and screen deleted; `--on-view-change` handles only browser→Agenda); Archive index over sibling `_archive` files with the Area filter and `archive.filter`; `glasspane-detail-agenda-card` lost the `para-project` swipe branch; the resources destination carries `:open-surface`.  Evidence: archive ×5, resources ×7, `pa3a-destination-table-flips-exactly`, `pa3c-resources-handoff-and-return` green; `glasspane-resources.el` / `glasspane-ui.el` compile warning-as-error clean and Checkdoc clean (`glasspane-detail.el` fails warning-as-error on the pre-existing unknown `jetpacs-material3-assist-chip` at HEAD, unchanged).
+
 ### PM-5 — Areas (`glasspane-areas.el`)
 
 `--scan-file` (tag group ∩ `org-get-tags` per heading, `org-file-tags`, `AREA` declarations), `--index-1` / `--index` (memoised `'(areas-index)`; every declared member is a bucket), `--count-label`, list rows minting zero tokens, drill = chips (`areas.filter`, AND-intersection, primary resets) + declaring header + **Projects / Resources / Archives** sections tokenized once under `"areas"`; verbs exactly `areas.open` / `areas.drill` / `areas.filter`.  T-7 timing arm on the real vault.  **Gate:** all 11 Areas arms + pa3b/pa3c/pa3d slot arms; new arms: declaring note (file and heading level), self-membership, `#+FILETAGS`-only file, indexed-declaration merge; convergence test green for the Areas builders.
 
+> **PM-5 GATE COMPLETE 2026-09-04.**  Tag-group index (global alists + every file's own group), declarations annotate members only (a stray `AREA` property never mints an Area — the real vault's two résumé drawers proved the point), drill = chips + declaring note + Projects / Resources / Archives.  Evidence: Areas **11/11** + three `pm5` arms (heading declaration is a member of itself and opens by token; file-level declaration opens by path; index-only declarations merge behind the scan); navigation **7/7**; warning-as-error compile and Checkdoc clean.  **T-7 arm on the real `~/pkb` scope (16 files): cold walk 1558 ms (first visit of every file — the same cost any first agenda paint pays), warm walk 91 ms, memoised thereafter; within tolerance, recorded.**
+
 ### PM-6 — Projects + UI + delete `glasspane-para.el`
 
 TODO walk by file with `"tasks"` tokens, `--card` passing `glasspane-org-item-tag-group-members`, group-by-Area second view (`projects.group`); `glasspane-area-tag-group` un-obsoleted and saved to `org-tag-persistent-alist`; `glasspane-para.el` removed (`git grep glasspane-para-` = suite file name + docs).  **Gate:** para suite fully green, navigation green, `glasspane-test` at its 65/75 baseline; static MCP PASS; Checkdoc; warning-as-error compile; determinism on Projects/Areas/Archive screens.
+
+> **PM-6 GATE COMPLETE 2026-09-04.**  Projects = the TODO walk, archive guard before tokenization under `"tasks"`, by-file / by-Area grouping (`projects.group`), Area chips through `glasspane-org-item-tag-group-members`; `glasspane-area-tag-group` un-obsoleted and saved to `org-tag-persistent-alist`; `glasspane-para.el` deleted (`git grep glasspane-para-` = the suite file name and docs).  Evidence: para **57/57** (50 + 4 pm2 + 3 pm5), navigation **7/7**, `glasspane-test` **65/75** = the pre-ladder baseline (its 10 reds ride Caleb's uncommitted demo/test edits; the three one-line edits this ladder needed there — the saved symbol, the two non-opening verbs, and dropping the withdrawn `para-project` swipe arm — added no failure); warning-as-error compile exit 0 for `glasspane-areas.el`, `glasspane-projects.el`, `glasspane-resources.el`, `glasspane-ui.el`, `glasspane-org.el`, `glasspane.el`; Checkdoc clean on the three rewritten modules; `git diff --check` clean.  Static `jetpacs-applet-tooling-validate-applet`: module code has zero unresolved literal action names — the five reported names (`eval.open`, `files.open`, `jetpacs.noop`, `settings.open`, `tools.open`) are test-fixture emissions and fail identically at `pm-baseline`.  Determinism: Areas list and Archive screens build byte-identical twice; the Areas drill and Projects screens differ only in freshly minted heading tokens, exactly as the unchanged Agenda screen does.  Demo prose in `glasspane-demo.el:258-263` still describes the withdrawn model and is updated after Caleb's in-flight demo edits land.
 
 ### PM-7 — Migration (`tools/para-migrate.el`, `~/pkb`, `~/.emacs.d/config.el`)
 

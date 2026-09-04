@@ -60,7 +60,6 @@
 (require 'jetpacs-settings)
 (require 'jetpacs-org-settings)
 (require 'glasspane-org)
-(require 'glasspane-para)
 
 ;; v1 hard-required glasspane-magit (it lives outside the app
 ;; directory); its port is out of the plan's scope, so the require
@@ -73,12 +72,13 @@
   :group 'jetpacs)
 
 (defcustom glasspane-area-tag-group "Area"
-  "Obsolete pre-vulpea-para Area tag-group name.
-Areas are now file-level notes carrying `glasspane-para-area-tag'."
+  "Name of the non-exclusive Org tag group whose members are PARA Areas.
+An Area is a tag, never a file: anything carrying a member tag locally,
+by inheritance, or through `#+FILETAGS' belongs to that Area.  The group
+is persisted in `org-tag-persistent-alist' by the Area Tags settings row
+so a file's own `#+TAGS' line never hides it."
   :type 'string
   :group 'jetpacs)
-(make-obsolete-variable 'glasspane-area-tag-group
-                        'glasspane-para-area-tag "2026-08-27")
 
 (defcustom glasspane-babel-timeout 30
   "Seconds before a phone-triggered babel execution is abandoned.
@@ -199,19 +199,19 @@ composition keeps its historical bars byte-for-byte until PA-4 removes it."
      :subtitle "Today's schedule, deadlines, and the month grid"
      :verb "agenda.open" :badge glasspane-agenda-dock-badge :bar t)
     (:key "projects" :label "Projects" :icon "task_alt"
-     :subtitle "Tagged finish-line headings grouped by Area"
+     :subtitle "Every TODO heading, grouped by file or Area"
      :verb "projects.open" :bar t)
     (:key "areas" :label "Areas" :icon "category"
-     :subtitle "Ongoing responsibilities tagged :area:"
+     :subtitle "Members of the Area tag group, with their open work"
      :verb "areas.open" :bar t)
     (:key "resources" :label "Resources" :icon "topic"
-     :subtitle "Every live file-level reference note"
-     :verb "resources.open" :bar t)
+     :subtitle "Every live file in the vault, in Files"
+     :verb "resources.open" :open-surface "app:jetpacs.files" :bar t)
     (:key "review" :label "Review" :icon "school"
      :subtitle "Flashcards due today, and notes gone stale"
      :verb "review.open" :bar t)
     (:key "archive" :label "Archive" :icon "archive"
-     :subtitle "Projects archived inside their Areas"
+     :subtitle "Sibling .org_archive files, filterable by Area"
      :verb "archive.open" :bar nil))
   "Glasspane's authoritative PARA destinations, in navigation order.
 ONE table feeds the host destination registry, the five-item primary bar,
@@ -520,7 +520,7 @@ the client."
          (append
           (list (jetpacs-section-header "Area Tags")
                 (jetpacs-text
-                 "Members of the global non-exclusive Org tag group “Area”."
+                 "Members of the non-exclusive Org tag group “Area”: each is a PARA Area.  Persisted in org-tag-persistent-alist so a file's own #+TAGS line never hides it."
                  :style "caption")
                 (glasspane-ui--area-tags-enum)
                 (jetpacs-divider)
@@ -692,7 +692,7 @@ name is a captured dialog field and the save runs in the conclusion."
             'rejected
           (let ((areas (delete-dups (mapcar #'string-trim raw))))
             (jetpacs-org-settings-set-tag-group-members
-             glasspane-area-tag-group areas)
+             glasspane-area-tag-group areas 'org-tag-persistent-alist)
             (jetpacs-shell-notify
              (if areas "Area tags saved" "Area tag group cleared"))
             (jetpacs-settings-refresh)

@@ -65,6 +65,19 @@ FILES is a list of (RELATIVE-NAME CONTENT)."
   (cl-find name index :key (lambda (area) (plist-get area :name))
            :test #'equal))
 
+(defun glasspane-para-test--builder-routes-p (builder screen)
+  "Return non-nil when BUILDER is SCREEN or a Tier-1 wrapper around it.
+`glasspane-ui-open-destination' hides the back arrow on a Tier-1 peer by
+wrapping the screen builder and calling it with a nil BACK; a drill keeps
+the builder itself."
+  (or (eq builder screen)
+      (and (functionp builder)
+           (let (called)
+             (cl-letf (((symbol-function screen)
+                        (lambda (back) (setq called (list 'called back)))))
+               (funcall builder 'probe))
+             (equal called '(called nil))))))
+
 (defun glasspane-para-test--action-names (value)
   "Return every action name nested anywhere inside VALUE."
   (let (names)
@@ -241,7 +254,8 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                    nil '(:surface "app:glasspane"))
                   'accepted))
       (should (equal pushed-id "glasspane-areas"))
-      (should (eq pushed-builder #'glasspane-areas-screen))
+      (should (glasspane-para-test--builder-routes-p
+               pushed-builder #'glasspane-areas-screen))
       (should (eq (glasspane-areas--on-drill
                    '(:category "Home") '(:surface "app:glasspane"))
                   'accepted))
@@ -599,6 +613,9 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                (lambda (surface &rest _) (push surface pushed) 1)))
       ;; Back from a direct Areas/Archive file reaches the caller-owned
       ;; return screen, then re-presents the untouched Glasspane stack.
+      ;; NAVIGATION.org: the navigation module alone owns that return.
+      (glasspane-navigation--on-view-change
+       files (jetpacs-chrome-guest-screen-id "glasspane" "files-return"))
       (glasspane-resources--on-view-change
        files (jetpacs-chrome-guest-screen-id "glasspane" "files-return"))
       (should continued)
@@ -770,7 +787,8 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                   'accepted)))
     (should (equal (seq-take pushed 2)
                    '("app:glasspane" "glasspane-archive")))
-    (should (eq (nth 2 pushed) #'glasspane-resources-archive-screen)))
+    (should (glasspane-para-test--builder-routes-p
+             (nth 2 pushed) #'glasspane-resources-archive-screen)))
   (should (gethash "archive.open" jetpacs-action-handlers))
   (should (equal (jetpacs--owner-of "action" "archive.open") "glasspane"))
   (let ((jetpacs-apps--current glasspane-owner))
@@ -1015,7 +1033,8 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
     (dolist (push pushed)
       (should (equal (seq-take push 2)
                      '("app:glasspane" "glasspane-projects")))
-      (should (eq (nth 2 push) #'glasspane-projects-screen))))
+      (should (glasspane-para-test--builder-routes-p
+               (nth 2 push) #'glasspane-projects-screen))))
   (should (jetpacs-check-profile (glasspane-projects-screen nil) 'app))
   (unwind-protect
       (progn
@@ -1920,7 +1939,8 @@ current route into Resources."
     (should (equal jetpacs-apps--current-route "agenda"))
     (should (equal (seq-take pushed 2)
                    '("app:glasspane" "glasspane-agenda")))
-    (should (eq (nth 2 pushed) #'glasspane-agenda-screen))))
+    (should (glasspane-para-test--builder-routes-p
+             (nth 2 pushed) #'glasspane-agenda-screen))))
 
 (ert-deftest glasspane-para-pa3d-queued-journal-alias-replays-to-datetree ()
   "A queue-shaped event reaches the live alias and commits before acceptance."
@@ -2023,6 +2043,109 @@ current route into Resources."
                        '((:name "tech" :file "/vault/areas.org" :pos 42
                                 :headline "Tech" :level 1))))
         (should (equal queried "AREA"))))))
+
+;;;; PM-5 — declaring notes and index merge
+
+(ert-deftest glasspane-para-pm5-heading-declaration-is-a-member-of-itself ()
+  "A heading declaring AREA opens as the Area's note and counts as a member."
+  (glasspane-para-test--with-vault
+      '(("areas.org"
+         "#+TAGS: [ Area : tech ]\n* Tech :tech:\n:PROPERTIES:\n:AREA: tech\n:END:\nStanding notes.\n** TODO Upgrade kernel\n")
+        ("notes.org"
+         "#+TAGS: [ Area : tech ]\n#+FILETAGS: :tech:\nProse only, no headings.\n"))
+    (let* ((glasspane-areas--filter-state (make-hash-table :test #'equal))
+           (index (glasspane-areas--index))
+           (tech (glasspane-para-test--area "tech" index))
+           (decl (car (plist-get tech :declares))))
+      (should (= (length (plist-get tech :files)) 2))
+      (should (equal (mapcar (lambda (item) (alist-get 'headline item))
+                             (plist-get tech :items))
+                     '("Upgrade kernel")))
+      (should (equal (plist-get decl :level) 1))
+      (should (equal (alist-get 'headline (plist-get decl :item)) "Tech"))
+      (should (string-search "2 files"
+                             (jetpacs-node->canonical-json
+                              (glasspane-areas--area-row tech))))
+      (should (string-search "note\""
+                             (jetpacs-node->canonical-json
+                              (glasspane-areas--area-row tech))))
+      (cl-letf (((symbol-function 'jetpacs-feature-advertised-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'glasspane-agenda-tokenize)
+                 (lambda (items _set)
+                   (mapcar (lambda (item) (cons '(token . "note-token") item))
+                           items)))
+                ((symbol-function 'glasspane-resources-archives-for-files)
+                 (lambda (_files) nil)))
+        (let* ((body (glasspane-areas--drill-body "tech"))
+               (actions (glasspane-para-test--actions body))
+               (visit (cl-find "heading.visit" actions
+                               :key (lambda (a) (plist-get a :action))
+                               :test #'equal)))
+          (should visit)
+          (should (equal (plist-get visit :args) '(:token "note-token")))
+          (should (string-search "Area note" (jetpacs-node->canonical-json body))))))))
+
+(ert-deftest glasspane-para-pm5-file-declaration-opens-as-document ()
+  "A file-level AREA drawer declares the Area; its row opens by path."
+  (glasspane-para-test--with-vault
+      '(("home.org"
+         ":PROPERTIES:\n:AREA: home\n:END:\n#+TAGS: [ Area : home ]\n#+FILETAGS: :home:\n* TODO Fix sink\n"))
+    (let* ((glasspane-areas--filter-state (make-hash-table :test #'equal))
+           (index (glasspane-areas--index))
+           (home (glasspane-para-test--area "home" index))
+           (decl (car (plist-get home :declares))))
+      (should (equal (plist-get decl :level) 0))
+      (should-not (plist-get decl :item))
+      (should (equal (glasspane-areas--count-label home) "1 open TODO · 1 file"))
+      (cl-letf (((symbol-function 'jetpacs-feature-advertised-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'glasspane-agenda-tokenize)
+                 (lambda (items _set) items))
+                ((symbol-function 'glasspane-resources-archives-for-files)
+                 (lambda (_files) nil)))
+        (let* ((body (glasspane-areas--drill-body "home"))
+               (json (jetpacs-node->canonical-json body))
+               (opens (cl-remove "glasspane.document.open"
+                                 (glasspane-para-test--actions body)
+                                 :key (lambda (a) (plist-get a :action))
+                                 :test-not #'equal)))
+          (should (string-search "Open home note" json))
+          (should (cl-some (lambda (a)
+                             (equal (plist-get (plist-get a :args) :path)
+                                    (plist-get decl :file)))
+                           opens)))))))
+
+(ert-deftest glasspane-para-pm5-indexed-declarations-merge-behind-the-scan ()
+  "Index-only declarations annotate members; the file walk wins on a name.
+A declaration for a name outside the group never invents an Area."
+  (glasspane-para-test--with-vault
+      '(("areas.org"
+         "#+TAGS: [ Area : tech ops ]\n* Tech :tech:\n:PROPERTIES:\n:AREA: tech\n:END:\n* Stray\n:PROPERTIES:\n:AREA: phantom\n:END:\n")
+        ("ops.org" "* Ops\n"))
+    (let ((ops (expand-file-name "ops.org" vault)))
+      (cl-letf (((symbol-function 'glasspane-org-indexed-area-declarations)
+                 (lambda ()
+                   (list (list :name "tech" :file ops :pos 1
+                               :headline "Stale" :level 1)
+                         (list :name "ops" :file ops :pos 1
+                               :headline "Ops" :level 1)
+                         (list :name "bad" :file "/nowhere/x.org" :pos 1
+                               :headline "Bad" :level 1)))))
+        (let* ((index (glasspane-areas--index-1))
+               (tech (glasspane-para-test--area "tech" index))
+               (ops-area (glasspane-para-test--area "ops" index)))
+          (should (equal (alist-get 'headline
+                                    (plist-get (car (plist-get tech :declares))
+                                               :item))
+                         "Tech"))
+          (should (= (length (plist-get tech :declares)) 1))
+          (should ops-area)
+          (should (equal (plist-get (car (plist-get ops-area :declares))
+                                    :headline)
+                         "Ops"))
+          (should-not (glasspane-para-test--area "bad" index))
+          (should-not (glasspane-para-test--area "phantom" index)))))))
 
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

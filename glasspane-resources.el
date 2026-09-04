@@ -106,9 +106,15 @@ truncating afterward.  Pull-to-refresh invalidates the memoized result."
   "The Area whose archives the Archive screen shows, or nil for all.")
 
 (defun glasspane-resources--archive-root ()
-  "Return a local, existing `org-directory' root, or nil."
+  "Return a local, existing `org-directory' root as a truename, or nil.
+The walk records truenames so a sibling matches the truenamed `file' an
+item carries even when `org-directory' is spelled through a symlink (the
+tablet's /sdcard is one)."
   (when-let* ((configured (and (stringp org-directory) org-directory))
-              (root (file-name-as-directory (expand-file-name configured)))
+              (root (file-name-as-directory
+                     (condition-case nil
+                         (file-truename (expand-file-name configured))
+                       (error (expand-file-name configured)))))
               ((condition-case nil (file-directory-p root) (error nil))))
     root))
 
@@ -172,7 +178,10 @@ cache, so pull-to-refresh is their deliberate freshness boundary."
 
 (defun glasspane-resources-archives-for-files (files)
   "Return the Archive records that are exact `_archive' siblings of FILES."
-  (let ((wanted (mapcar (lambda (file) (concat file "_archive"))
+  (let ((wanted (mapcar (lambda (file)
+                          (concat (condition-case nil (file-truename file)
+                                    (error file))
+                                  "_archive"))
                         (delq nil (cl-remove-if-not #'stringp files)))))
     (when wanted
       (cl-remove-if-not

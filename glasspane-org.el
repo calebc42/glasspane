@@ -225,6 +225,8 @@ org-map-entries paths already carry the letter."
 (declare-function vulpea-note-scheduled "ext:vulpea-note" (note))
 (declare-function vulpea-note-deadline "ext:vulpea-note" (note))
 (declare-function vulpea-note-level "ext:vulpea-note" (note))
+(declare-function vulpea-note-properties "ext:vulpea-note" (note))
+(declare-function vulpea-db-query-by-property-key "ext:vulpea-db-query" (key))
 (declare-function vulpea-db-query "ext:vulpea-db" (&optional pred))
 (declare-function vulpea-db-query-tags "ext:vulpea-db" ())
 
@@ -288,8 +290,13 @@ Memoised; see `ebp-org-cache-invalidate'."
 
 (defun glasspane-org--file-tag-group-index (file group)
   "Return FILE's effective tag GROUP members and heading memberships.
-The memoised result is a plist with `:members' in declaration order and
-`:positions' as an alist from heading point to the members inherited there."
+The memoised result is a plist with `:members' in declaration order,
+`:file-tags' as the members carried by the file's own `#+FILETAGS' (so a
+file with no headings still belongs), and `:positions' as an alist from
+heading point to the members inherited there.  Membership is local,
+inherited, and file-level tags together: the walk binds
+`org-use-tag-inheritance' to t so a user setting that narrows inheritance
+for agenda display cannot narrow the PARA model."
   (when (and (stringp file) (stringp group)
              (not (string-empty-p group)))
     (ebp-org-with-cache 'glasspane (list 'tag-group-index file group)
@@ -299,10 +306,13 @@ The memoised result is a plist with `:members' in declaration order and
               (with-current-buffer (find-file-noselect true t)
                 (unless (derived-mode-p 'org-mode) (org-mode))
                 (org-with-wide-buffer
-                 (let ((members
-                        (glasspane-org--clean-tag-strings
-                         (cdr (assoc-string group org-tag-groups-alist t))))
-                       positions)
+                 (let* ((org-use-tag-inheritance t)
+                        (members
+                         (glasspane-org--clean-tag-strings
+                          (cdr (assoc-string group org-tag-groups-alist t))))
+                        (file-tags (glasspane-org--clean-tag-strings
+                                    org-file-tags))
+                        positions)
                    (org-map-entries
                     (lambda ()
                       (let ((tags (glasspane-org--clean-tag-strings
@@ -315,7 +325,52 @@ The memoised result is a plist with `:members' in declaration order and
                          positions)))
                     nil 'file)
                    (list :members members
+                         :file-tags (cl-remove-if-not
+                                     (lambda (member)
+                                       (member member file-tags))
+                                     members)
                          :positions (nreverse positions)))))))
+        (error nil)))))
+
+(defun glasspane-org-open-todo-p (item)
+  "Return non-nil when ITEM carries a TODO keyword that is not done.
+Done-ness follows the current buffer's `org-done-keywords' when the caller
+is inside the source buffer (file-local `#+TODO' lines are honored), else
+the global default."
+  (let ((todo (alist-get 'todo item))
+        (done (or org-done-keywords
+                  (default-value 'org-done-keywords)
+                  '("DONE"))))
+    (and (stringp todo)
+         (not (string-empty-p todo))
+         (not (member todo done)))))
+
+(defun glasspane-org-indexed-area-declarations ()
+  "Return Area declarations known to the vault index, or nil without one.
+An Area note declares itself with an `AREA' property whose value is the
+Area tag.  Each result is a plist (:name VALUE :file PATH :pos POS
+:headline TITLE :level LEVEL).  This is the only place the Areas model
+reads the vulpea index; membership itself is always resolved from the
+files (see `glasspane-org--file-tag-group-index').  Memoised; see
+`ebp-org-cache-invalidate'."
+  (when (and (glasspane-org--vulpea-p)
+             (fboundp 'vulpea-db-query-by-property-key))
+    (ebp-org-with-cache 'glasspane (list 'area-declarations-indexed t)
+      (condition-case nil
+          (delq nil
+                (mapcar
+                 (lambda (note)
+                   (let ((value (cdr (assoc-string
+                                      "AREA" (vulpea-note-properties note)
+                                      t))))
+                     (when (and (stringp value)
+                                (not (string-empty-p (string-trim value))))
+                       (list :name (string-trim value)
+                             :file (vulpea-note-path note)
+                             :pos (or (vulpea-note-pos note) 1)
+                             :headline (or (vulpea-note-title note) "")
+                             :level (or (vulpea-note-level note) 0)))))
+                 (vulpea-db-query-by-property-key "AREA")))
         (error nil)))))
 
 (defun glasspane-org-item-tag-group-members (item group)

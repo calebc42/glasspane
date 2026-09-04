@@ -78,35 +78,45 @@
                 'rejected))))
 
 (ert-deftest glasspane-navigation-test-entry-builders-name-authority-only ()
-  "Project and Resource rows choose identity, never presentation policy."
-  (let* ((project (glasspane-detail-agenda-card
-                   '((headline . "Ship it") (token . "heading-token"))))
-         (project-action (plist-get project :on_tap))
-         resource-action)
-    (cl-letf (((symbol-function 'vulpea-note-path)
-               (lambda (_note) "/vault/work.org"))
-              ((symbol-function 'vulpea-note-title)
-               (lambda (_note) "Work"))
-              ((symbol-function 'vulpea-note-id)
-               (lambda (_note) "work-id"))
-              ((symbol-function 'vulpea-note-tags)
-               (lambda (_note) nil))
-              ((symbol-function 'glasspane-para-area-p)
-               (lambda (_note) nil)))
-      (setq resource-action
-            (plist-get (glasspane-resources-note-row 'note "resource")
-                       :on_tap)))
-    (should (equal (plist-get project-action :action) "heading.visit"))
-    (should (equal (plist-get project-action :args)
-                   '(:token "heading-token")))
-    (should (equal (plist-get resource-action :action)
-                   "glasspane.document.open"))
-    (should (equal (plist-get resource-action :args)
-                   '(:path "/vault/work.org")))
-    (should (equal (plist-get project-action :open_surface)
-                   "app:jetpacs.files"))
-    (should (equal (plist-get resource-action :open_surface)
-                   "app:jetpacs.files"))))
+  "Heading cards and file rows choose identity, never presentation policy.
+Every builder that opens a document is named here: the detail card and the
+Area declaring card carry a durable heading token (`heading.visit'); the
+Area file row and the Archive row carry a validated path
+\(`glasspane.document.open').  All of them present the one Files surface."
+  (cl-letf (((symbol-function 'jetpacs-feature-advertised-p)
+             (lambda (&rest _) t)))
+    (let* ((project (glasspane-detail-agenda-card
+                     '((headline . "Ship it") (token . "heading-token"))))
+           (project-action (plist-get project :on_tap))
+           (declaring (glasspane-areas--declaring-card
+                       '((headline . "Tech") (todo . nil) (tags . ["tech"])
+                         (areas . ["tech"]) (file . "/vault/areas.org")
+                         (pos . 1) (token . "decl-token"))))
+           (declaring-action (plist-get declaring :on_tap))
+           (file-row (glasspane-areas--file-row "/vault/work.org"))
+           (file-action (plist-get file-row :on_tap))
+           (archive-row (glasspane-resources--archive-row
+                         (list :path "/vault/work.org_archive"
+                               :mtime (encode-time 0 30 9 2 1 2026))))
+           (archive-action (plist-get archive-row :on_tap)))
+      (should (equal (plist-get project-action :action) "heading.visit"))
+      (should (equal (plist-get project-action :args)
+                     '(:token "heading-token")))
+      (should (equal (plist-get declaring-action :action) "heading.visit"))
+      (should (equal (plist-get declaring-action :args)
+                     '(:token "decl-token")))
+      (should (equal (plist-get file-action :action)
+                     "glasspane.document.open"))
+      (should (equal (plist-get file-action :args)
+                     '(:path "/vault/work.org")))
+      (should (equal (plist-get archive-action :action)
+                     "glasspane.document.open"))
+      (should (equal (plist-get archive-action :args)
+                     '(:path "/vault/work.org_archive")))
+      (dolist (action (list project-action declaring-action
+                            file-action archive-action))
+        (should (equal (plist-get action :open_surface)
+                       "app:jetpacs.files"))))))
 
 (ert-deftest glasspane-navigation-test-authority-adapters-converge ()
   "Token, path, and compatibility verbs call one document presenter."

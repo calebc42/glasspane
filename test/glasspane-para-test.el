@@ -280,10 +280,10 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
       (let* ((body (glasspane-areas--drill-body "Home"))
              (json (jetpacs-node->canonical-json body))
              (actions (glasspane-para-test--actions body)))
-        (should (member "resources.open-file"
+        (should (member "glasspane.document.open"
                         (glasspane-para-test--action-names body)))
         (dolist (action actions)
-          (when (equal (plist-get action :action) "resources.open-file")
+          (when (equal (plist-get action :action) "glasspane.document.open")
             (should (equal (plist-get action :open_surface)
                            "app:jetpacs.files"))))
         (should (string-search "Projects" json))
@@ -470,7 +470,9 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
   (let ((org-directory "/vault")
         (glasspane-ui-legacy-ia nil)
         calls)
-    (cl-letf (((symbol-function 'jetpacs-files-open-path)
+    (cl-letf (((symbol-function 'jetpacs-feature-advertised-p)
+               (lambda (&rest _) t))
+              ((symbol-function 'jetpacs-files-open-path)
                (lambda (path surface &optional mark-pos browser-id browser-fab
                              return-action)
                  (push (list path surface mark-pos browser-id browser-fab
@@ -495,10 +497,11 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                    '("org.capture.show")))
     (should-not (nth 4 (cadr calls)))
     (should-not (nth 4 (caddr calls)))
-    (should (equal (plist-get (nth 5 (car calls)) :action) "agenda.open"))
-    (dolist (call (cdr calls))
-      (should (equal (plist-get (nth 5 call) :action) "resources.return")))
+    ;; NAVIGATION.org: every Files trip returns to the untouched Glasspane
+    ;; stack through the one cross-surface return verb.
     (dolist (call calls)
+      (should (equal (plist-get (nth 5 call) :action)
+                     "glasspane.files.return"))
       (should (equal (plist-get (nth 5 call) :open_surface)
                      "app:glasspane")))))
 
@@ -547,6 +550,8 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
         :verb "resources.open")))
     (cl-letf (((symbol-function 'jetpacs-flow-continue)
                (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-feature-advertised-p)
+               (lambda (&rest _) t))
               ((symbol-function 'jetpacs-owned-surface-p)
                (lambda (surface owner)
                  (and (equal surface "app:glasspane")
@@ -568,7 +573,8 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                    '("/vault" "app:jetpacs.files" nil "files-resources")))
     (should (equal (glasspane-para-test--action-names (nth 4 captured))
                    '("org.capture.show")))
-    (should (equal (plist-get (nth 5 captured) :action) "agenda.open"))
+    (should (equal (plist-get (nth 5 captured) :action)
+                   "glasspane.files.return"))
     (should (equal (plist-get (nth 5 captured) :open_surface)
                    "app:glasspane"))
     (should-not pushed)
@@ -645,9 +651,13 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
   "The Resources section stays a delegate despite Archive sharing its file."
   (with-temp-buffer
     (insert-file-contents glasspane-para-test--resources-source)
-    (should (search-forward "jetpacs-files-open-path" nil t))
+    ;; NAVIGATION.org: the applet's only low-level Files boundary is
+    ;; glasspane-navigation; Resources never names Files' seam itself.
+    (should (search-forward "glasspane-navigation-open-files-path" nil t))
     (goto-char (point-min))
-    (should (search-forward "jetpacs-files-owner" nil t))
+    (should (search-forward "glasspane-navigation-files-surface" nil t))
+    (goto-char (point-min))
+    (should-not (search-forward "jetpacs-files-open-path" nil t))
     (goto-char (point-min))
     (should-not (search-forward "jetpacs-files--" nil t))
     (let ((start (progn
@@ -733,7 +743,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
          (row (glasspane-resources--archive-row record))
          (tap (plist-get row :on_tap))
          pushed)
-    (should (equal (plist-get tap :action) "resources.open-file"))
+    (should (equal (plist-get tap :action) "glasspane.document.open"))
     (should (equal (plist-get tap :open_surface) "app:jetpacs.files"))
     (should (equal (plist-get tap :args)
                    '(:path "/vault/work.org_archive")))
@@ -775,7 +785,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
       (progn
         (glasspane-resources-unregister)
         (dolist (name '("resources.open" "resources.open-file"
-                        "resources.return" "archive.open"))
+                        "resources.return" "archive.open" "archive.filter"))
           (should-not (gethash name jetpacs-action-handlers)))
         (should-not (memq #'glasspane-resources--refresh-invalidate
                           jetpacs-shell-refresh-hook)))
@@ -1617,6 +1627,8 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
     (glasspane-register)
     (cl-letf (((symbol-function 'jetpacs-flow-continue)
                (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-feature-advertised-p)
+               (lambda (&rest _) t))
               ((symbol-function 'jetpacs-shell-push)
                (lambda (&rest _) t))
               ((symbol-function 'jetpacs-files-open-path)
@@ -1633,7 +1645,10 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                      (list "/vault" files-surface nil "files-resources")))
       (should (equal (glasspane-para-test--action-names (nth 4 opened))
                      '("org.capture.show")))
-      (should (equal (plist-get (nth 5 opened) :action) "agenda.open"))
+      (should (equal (plist-get (nth 5 opened) :action)
+                     "glasspane.files.return"))
+      (should (equal (plist-get (nth 5 opened) :open_surface)
+                     "app:glasspane"))
       (should (equal jetpacs-apps--current-route "resources"))
       (let ((selected
              (cl-find-if (lambda (item) (plist-get item :selected))
@@ -1685,7 +1700,11 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
       (should-not glasspane-saved-views))))
 
 (ert-deftest glasspane-para-pa3c-mark-position-navigation-family ()
-  "Agenda/notes source jumps and detail Files handoff preserve heading pos."
+  "Heading tokens reach the one document presenter with their position.
+NAVIGATION.org: `heading.visit' resolves the token, then Files hosts the
+document at the heading's position with the reader landing prepared; the
+cached `detail.open-file' verb is the same route, and neither turns the
+current route into Resources."
   (glasspane-para-test--with-vault
       '(("tasks.org" "* TODO First\n** NEXT Target\nBody\n"))
     (let* ((file (expand-file-name "tasks.org" vault))
@@ -1700,35 +1719,32 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
            (token (car (ebp-org-ref-tokens
                         (list ref) :set "pa3c-jump" :owner "glasspane")))
            (jetpacs-apps--current-route "projects")
-           navigated opened)
+           (glasspane-ui-legacy-ia nil)
+           opened)
       (unwind-protect
           (cl-letf (((symbol-function 'jetpacs-flow-continue)
                      (lambda (fn) (funcall fn)))
-                    ((symbol-function 'jetpacs-navigate-buffer)
-                     (lambda (buffer surface &optional label mark-pos)
-                       (setq navigated
-                             (list buffer surface label mark-pos))
-                       surface))
+                    ((symbol-function 'jetpacs-feature-advertised-p)
+                     (lambda (&rest _) t))
                     ((symbol-function 'jetpacs-files-open-path)
-                     (lambda (path surface &optional mark-pos)
-                       (setq opened (list path surface mark-pos))
+                     (lambda (path surface &optional mark-pos browser-id
+                                   browser-fab return-action)
+                       (setq opened (list path surface mark-pos browser-id
+                                          browser-fab return-action))
                        'accepted)))
-            (should (eq (glasspane-detail--on-visit
-                         (list :token token) '(:surface "app:glasspane"))
-                        'accepted))
-            (should (eq (nth 0 navigated) buf))
-            (should (equal (nth 1 navigated) "app:glasspane"))
-            (should (equal (nth 2 navigated) "tasks.org"))
-            (should (= (nth 3 navigated) pos))
             (jetpacs-reader-state-set file :presentation 'editor)
             (jetpacs-reader-state-set file :gp-fold-mode 'refile)
             (jetpacs-reader-state-set file :gp-filter-query "todo:DONE")
-            (should (eq (glasspane-detail--on-open-file
-                         (list :token token) nil)
+            (should (eq (glasspane-detail--on-visit
+                         (list :token token) '(:surface "app:glasspane"))
                         'accepted))
-            (should (equal opened
-                           (list (file-truename file)
-                                 "app:jetpacs.files" pos)))
+            (should (equal (seq-take opened 5)
+                           (list (file-truename file) "app:jetpacs.files"
+                                 pos "files-return" nil)))
+            (should (equal (plist-get (nth 5 opened) :action)
+                           "glasspane.files.return"))
+            (should (equal (plist-get (nth 5 opened) :open_surface)
+                           "app:glasspane"))
             (should (eq (jetpacs-reader-state-get file :presentation)
                         'reader))
             (should (eq (jetpacs-reader-state-get file :gp-fold-mode)
@@ -1736,6 +1752,17 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
             (should (equal (jetpacs-reader-state-get
                             file :gp-filter-query)
                            ""))
+            ;; The cached compatibility verb is the very same route.
+            (setq opened nil)
+            (jetpacs-reader-state-set file :presentation 'editor)
+            (should (eq (glasspane-detail--on-open-file
+                         (list :token token) nil)
+                        'accepted))
+            (should (equal (seq-take opened 4)
+                           (list (file-truename file) "app:jetpacs.files"
+                                 pos "files-return")))
+            (should (eq (jetpacs-reader-state-get file :presentation)
+                        'reader))
             ;; A contextual Files handoff is not the Resources destination.
             (should (equal jetpacs-apps--current-route "projects"))
             (should (eq (glasspane-detail--on-visit
@@ -1940,6 +1967,62 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
         (ebp-client-close client 'test-finished)
         (when (file-exists-p receipt-file)
           (delete-file receipt-file))))))
+
+;;;; PM-2 — substrate arms (glasspane-org.el)
+
+(ert-deftest glasspane-para-pm2-file-tags-without-headings ()
+  "A file carrying an Area only in #+FILETAGS is a member with no headings."
+  (glasspane-para-test--with-vault
+      '(("notes.org"
+         "#+TAGS: [ Area : Work Home ]\n#+FILETAGS: :Work:\nJust prose.\n"))
+    (let ((index (glasspane-org--file-tag-group-index
+                  (expand-file-name "notes.org" vault) "Area")))
+      (should (equal (plist-get index :members) '("Work" "Home")))
+      (should (equal (plist-get index :file-tags) '("Work")))
+      (should-not (plist-get index :positions)))))
+
+(ert-deftest glasspane-para-pm2-inheritance-forced-for-membership ()
+  "Membership honors inherited tags even when inheritance is off globally."
+  (glasspane-para-test--with-vault
+      '(("work.org"
+         "#+TAGS: [ Area : Home ]\n* Parent :Home:\n** Child\n"))
+    (let* ((org-use-tag-inheritance nil)
+           (index (glasspane-org--file-tag-group-index
+                   (expand-file-name "work.org" vault) "Area"))
+           (memberships (mapcar #'cdr (plist-get index :positions))))
+      (should (equal memberships '(("Home") ("Home")))))))
+
+(ert-deftest glasspane-para-pm2-open-todo-predicate ()
+  "Only a not-done TODO keyword counts as open work."
+  (let ((org-done-keywords nil))
+    (should (glasspane-org-open-todo-p '((todo . "TODO"))))
+    (should (glasspane-org-open-todo-p '((todo . "IN-PROGRESS"))))
+    (should-not (glasspane-org-open-todo-p '((todo . "DONE"))))
+    (should-not (glasspane-org-open-todo-p '((todo . nil))))
+    (should-not (glasspane-org-open-todo-p '((headline . "Plain"))))))
+
+(ert-deftest glasspane-para-pm2-indexed-area-declarations ()
+  "Declarations are nil without vulpea and shaped from the property query."
+  (glasspane-para-test--with-vault '(("empty.org" "* Nothing\n"))
+    (cl-letf (((symbol-function 'glasspane-org--vulpea-p) (lambda () nil)))
+      (should-not (glasspane-org-indexed-area-declarations)))
+    (ebp-org-cache-invalidate)
+    (let (queried)
+      (cl-letf (((symbol-function 'glasspane-org--vulpea-p) (lambda () t))
+                ((symbol-function 'vulpea-db-query-by-property-key)
+                 (lambda (key) (setq queried key) '(tech blank)))
+                ((symbol-function 'vulpea-note-properties)
+                 (lambda (note)
+                   (if (eq note 'tech) '(("AREA" . " tech ")) '(("AREA" . "")))))
+                ((symbol-function 'vulpea-note-path)
+                 (lambda (_note) "/vault/areas.org"))
+                ((symbol-function 'vulpea-note-pos) (lambda (_note) 42))
+                ((symbol-function 'vulpea-note-title) (lambda (_note) "Tech"))
+                ((symbol-function 'vulpea-note-level) (lambda (_note) 1)))
+        (should (equal (glasspane-org-indexed-area-declarations)
+                       '((:name "tech" :file "/vault/areas.org" :pos 42
+                                :headline "Tech" :level 1))))
+        (should (equal queried "AREA"))))))
 
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

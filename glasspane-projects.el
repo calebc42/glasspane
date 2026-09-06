@@ -11,10 +11,10 @@
 ;; required.  The module keeps the shared data source whole:
 ;; `glasspane-org-todo-items' retains both its whole-vault index arm and
 ;; its agenda-scope fallback.  Projects only filters (archive files out,
-;; then the workflow keyword), groups — by source file, or by the Areas a
-;; heading carries through the native tag group — and renders the shared
-;; cards with Area chips elevated.  `projects.open' is the destination;
-;; `tasks.open' survives as its compatibility alias.
+;; then the workflow keyword and one optional Area facet), groups — by source
+;; file, or by the Areas a heading carries through the native tag group — and
+;; renders the shared cards with Area chips elevated.  `projects.open' is the
+;; destination; `tasks.open' survives as its compatibility alias.
 
 ;;; Code:
 
@@ -26,7 +26,6 @@
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
 (require 'jetpacs-apps)
-(require 'jetpacs-org-settings)
 (require 'glasspane-org)
 (require 'glasspane-agenda)
 (require 'glasspane-detail)
@@ -37,6 +36,9 @@
 
 (defvar glasspane-projects--group "file"
   "Current Projects grouping: \"file\" (source file) or \"area\".")
+
+(defvar glasspane-projects--area-filter nil
+  "Current Projects Area filter, or nil to include every Area.")
 
 (defconst glasspane-projects--no-area "No Area"
   "Group label for a Project carrying no Area tag.")
@@ -51,14 +53,22 @@
       (string-match-p "_archive\\'" file))))
 
 (defun glasspane-projects--filter-items (items)
-  "Apply the archive guard and then the active workflow filter to ITEMS."
-  (let ((visible (cl-remove-if #'glasspane-projects--archive-item-p items)))
-    (if (equal glasspane-projects--filter "ALL")
-        visible
+  "Apply archive, workflow, and Area filters to ITEMS, in that order."
+  (let* ((visible (cl-remove-if #'glasspane-projects--archive-item-p items))
+         (workflow
+          (if (equal glasspane-projects--filter "ALL")
+              visible
+            (cl-remove-if-not
+             (lambda (item)
+               (equal (alist-get 'todo item) glasspane-projects--filter))
+             visible))))
+    (if (null glasspane-projects--area-filter)
+        workflow
       (cl-remove-if-not
        (lambda (item)
-         (equal (alist-get 'todo item) glasspane-projects--filter))
-       visible))))
+         (member glasspane-projects--area-filter
+                 (glasspane-projects--item-areas item)))
+       workflow))))
 
 (defun glasspane-projects--group-by-file (items)
   "Group ITEMS by full source-file identity in deterministic path order.
@@ -102,43 +112,14 @@ buckets are not walls."
       (file-name-nondirectory file)
     "Unknown file"))
 
-;;;; Workflow keywords
-
-(defun glasspane-projects--file-todo-keywords (file)
-  "Return FILE's effective TODO keywords without trusting another buffer."
-  (when (stringp file)
-    (ebp-org-with-cache 'glasspane (list 'projects-todo-keywords file)
-      (condition-case nil
-          (let ((true (ebp-org--check-file file)))
-            (ebp-org--with-clamped-io
-              (with-current-buffer (find-file-noselect true t)
-                (unless (derived-mode-p 'org-mode) (org-mode))
-                (copy-sequence org-todo-keywords-1))))
-        (error nil)))))
-
-(defun glasspane-projects--todo-keywords (items)
-  "Return the stable workflow keywords represented by Project ITEMS.
-File-local `#+TODO' sequences come first, then the global keywords, then
-any keyword an item carries that neither declared."
-  (let ((files (sort (delete-dups
-                      (delq nil (mapcar
-                                 (lambda (item) (alist-get 'file item))
-                                 items)))
-                     #'string-lessp))
-        keywords)
-    (cl-labels ((add (keyword)
-                  (when (and (stringp keyword)
-                             (not (string-empty-p keyword))
-                             (not (member keyword keywords)))
-                    (setq keywords (append keywords (list keyword))))))
-      (dolist (file files)
-        (dolist (keyword (glasspane-projects--file-todo-keywords file))
-          (add keyword)))
-      (dolist (keyword (jetpacs-org-settings-global-todo-keywords))
-        (add keyword))
-      (dolist (item items)
-        (add (alist-get 'todo item))))
-    keywords))
+(defun glasspane-projects--area-names (items)
+  "Return the distinct Area memberships represented by ITEMS, sorted."
+  (let (names)
+    (dolist (item items)
+      (dolist (area (glasspane-projects--item-areas item))
+        (when (and (stringp area) (not (string-empty-p area)))
+          (cl-pushnew area names :test #'equal))))
+    (sort names #'string-lessp)))
 
 ;;;; Rendering
 
@@ -154,19 +135,64 @@ any keyword an item carries that neither declared."
         :selected (jetpacs-bool (equal glasspane-projects--filter keyword))
         :on-tap (jetpacs-action "tasks.filter"
                                 :args (list :filter keyword))))
-     (cons "ALL" (glasspane-projects--todo-keywords items)))
+     (cons "ALL" (glasspane-org-workflow-keywords items)))
     (list :spacing 4 :run-spacing 4))))
 
-(defun glasspane-projects--group-row ()
-  "Build the two grouping chips: by source file, or by Area."
+(defun glasspane-projects--group-chips ()
+  "Build the grouping-chip fallback for receivers without segmented buttons."
   (jetpacs-flow-row
-   (jetpacs-chip "By file"
+   (jetpacs-chip "By File"
                  :selected (jetpacs-bool (equal glasspane-projects--group "file"))
                  :on-tap (jetpacs-action "projects.group" :args '(:by "file")))
    (jetpacs-chip "By Area"
                  :selected (jetpacs-bool (equal glasspane-projects--group "area"))
                  :on-tap (jetpacs-action "projects.group" :args '(:by "area")))
    :spacing 4 :run-spacing 4))
+
+(defun glasspane-projects--group-control ()
+  "Build the visually connected File/Area grouping control.
+Use a stable stateful ID so the Companion can reconcile the selected segment;
+older receivers retain the equivalent chip actions."
+  (if (jetpacs-node-advertised-p "segmented_button")
+      (jetpacs-segmented-button
+       "projects-grouping"
+       (list (jetpacs-enum-option "By File" "file" :icon "folder")
+             (jetpacs-enum-option "By Area" "area" :icon "category"))
+       :value glasspane-projects--group
+       :on-change (jetpacs-action "projects.group"))
+    (glasspane-projects--group-chips)))
+
+(defun glasspane-projects--controls-row (items)
+  "Place ITEMS' workflow filters left and the grouping control right.
+The weighted flow row consumes remaining width and wraps its own chips without
+displacing the grouping control from the row's trailing edge."
+  (jetpacs-row
+   (jetpacs-with-attrs (glasspane-projects--filter-row items) :weight 1)
+   (glasspane-projects--group-control)
+   :spacing 12 :align "top" :fill t))
+
+(defun glasspane-projects--area-filter-row (items)
+  "Build the single-select Area filter row over Project ITEMS."
+  (apply
+   #'jetpacs-flow-row
+   (append
+    (list
+     (jetpacs-chip
+      "All Areas"
+      :icon "category"
+      :selected (jetpacs-bool (null glasspane-projects--area-filter))
+      :on-tap (jetpacs-action "projects.area-filter")))
+    (mapcar
+     (lambda (area)
+       (jetpacs-chip
+        area
+        :icon (glasspane-area-icon area)
+        :selected (jetpacs-bool
+                   (equal glasspane-projects--area-filter area))
+        :on-tap (jetpacs-action "projects.area-filter"
+                                :args (list :area area))))
+     (glasspane-projects--area-names items))
+    (list :spacing 4 :run-spacing 4))))
 
 (defun glasspane-projects--card (item)
   "Render tokenized ITEM as the shared card with its Area chips elevated."
@@ -199,9 +225,17 @@ any keyword an item carries that neither declared."
       (jetpacs-empty-state
        :icon "task_alt"
        :title "No projects"
-       :caption (if (equal glasspane-projects--filter "ALL")
-                    "Give any heading a TODO keyword and it lands here."
-                  "Nothing matches this workflow state.")))))
+       :caption
+       (cond
+        ((and (equal glasspane-projects--filter "ALL")
+              (null glasspane-projects--area-filter))
+         "Give any heading a TODO keyword and it lands here.")
+        ((and glasspane-projects--area-filter
+              (not (equal glasspane-projects--filter "ALL")))
+         "Nothing matches this workflow state and Area.")
+        (glasspane-projects--area-filter
+         "No Projects belong to this Area.")
+        (t "Nothing matches this workflow state."))))))
 
 (defun glasspane-projects--body ()
   "Build Projects from the shared TODO walk, filter, and card seams."
@@ -211,9 +245,10 @@ any keyword an item carries that neither declared."
          (filtered (glasspane-projects--filter-items items))
          ;; Keep the established set name: promotion adds no token set.
          (tokenized (glasspane-agenda-tokenize filtered "tasks")))
-    (jetpacs-column (glasspane-projects--filter-row items)
-                    (glasspane-projects--group-row)
-                    (glasspane-projects--grouped-cards tokenized))))
+    (jetpacs-column (glasspane-projects--controls-row items)
+                    (glasspane-projects--area-filter-row items)
+                    (glasspane-projects--grouped-cards tokenized)
+                    :spacing 8)))
 
 (defun glasspane-projects-screen (back)
   "Build the Projects screen with BACK navigation."
@@ -242,17 +277,32 @@ PARAMS carry the surface for the deferred refresh."
       'accepted)))
 
 (defun glasspane-projects--on-group (args params)
-  "Select ARGS' grouping (\"file\" or \"area\") and refresh.
-PARAMS carry the surface for the deferred refresh."
-  (let ((by (plist-get args :by)))
+  "Select ARGS' grouping and refresh the screen.
+`:value' is injected by the segmented control; `:by' preserves the chip
+fallback and actions already rendered by an older screen.  PARAMS carry the
+surface for the deferred refresh."
+  (let ((by (or (plist-get args :value) (plist-get args :by))))
     (if (not (member by '("file" "area")))
         'rejected
       (setq glasspane-projects--group by)
       (jetpacs-app-defer-refresh params)
       'accepted)))
 
+(defun glasspane-projects--on-area-filter (args params)
+  "Select ARGS' optional `:area' Project facet and refresh.
+An absent value means all Areas.  PARAMS carry the surface for the deferred
+refresh."
+  (let ((area (plist-get args :area)))
+    (if (not (or (null area)
+                 (and (stringp area) (not (string-empty-p area)))))
+        'rejected
+      (setq glasspane-projects--area-filter area)
+      (jetpacs-app-defer-refresh params)
+      'accepted)))
+
 (defconst glasspane-projects--verbs
-  '("projects.open" "tasks.open" "tasks.filter" "projects.group")
+  '("projects.open" "tasks.open" "tasks.filter" "projects.group"
+    "projects.area-filter")
   "The Projects verb, its legacy opener alias, and the screen controls.")
 
 (defun glasspane-projects-register ()
@@ -269,7 +319,12 @@ PARAMS carry the surface for the deferred refresh."
     (jetpacs-defaction
      "projects.group" #'glasspane-projects--on-group
      :doc "Group Projects by source file or by Area"
-     :args '((:name by :type "text" :required t)))))
+     :args '((:name value :type "text")
+             (:name by :type "text")))
+    (jetpacs-defaction
+     "projects.area-filter" #'glasspane-projects--on-area-filter
+     :doc "Filter Projects to one Area, or clear the Area filter"
+     :args '((:name area :type "text")))))
 
 (defun glasspane-projects-unregister ()
   "Drop every verb owned by the Projects module."

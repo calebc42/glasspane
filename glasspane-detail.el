@@ -76,6 +76,9 @@
 (require 'glasspane-navigation)
 (require 'jetpacs-org-settings)      ; the shared tag vocabulary
 
+(declare-function jetpacs-material3-assist-chip "glasspane-material3"
+                  (label &rest keys))
+
 ;; Same-rung sibling: the foldable reader.  This file must build (and
 ;; the detail body must render) with the reader absent, so the require
 ;; is soft and the body degrades to plain org text (gap #6).
@@ -239,13 +242,19 @@ sequences pan sideways rather than wrapping into a stack."
 ;; `jetpacs.org.archive' verb can resolve it; without one the card just
 ;; has no archive swipe.
 
+(defun glasspane-detail--agenda-tag-chips (tags &optional areas)
+  "Build wrapping TAGS using the shared chip presentation.
+With AREAS, elevate the chips, add Area icons, and align them right."
+  (glasspane-ui-tag-chips tags areas))
+
 (defun glasspane-detail-agenda-card (it &optional area-tags)
   "A detail-rich agenda card for item IT, distinguishing AREA-TAGS.
 Leading time (or a type icon), priority-prefixed headline (done titles
 degrade to neutral on_surface — no strike span, FOUNDATION-GAPS #7),
 a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring.
-AREA-TAGS, when supplied by Projects, render first as elevated category chips
-and are removed from the ordinary flat-tag chip set."
+AREA-TAGS, when supplied by Projects, align right beside the headline as
+elevated chips with their configured icons.  Ordinary tags use the full
+bottom row without duplicating Areas."
   (let* ((headline (or (alist-get 'headline it) "Untitled"))
          (todo (alist-get 'todo it))
          ;; Normalized "HH:MM" — the raw property is a time-grid string
@@ -288,30 +297,18 @@ and are removed from the ordinary flat-tag chip set."
           (apply #'jetpacs-column
                  (delq nil
                        (list
-                        headline-node
+                        (if area-tags
+                            (jetpacs-row
+                             (jetpacs-with-attrs headline-node :weight 1)
+                             (jetpacs-with-attrs
+                              (glasspane-detail--agenda-tag-chips area-tags t)
+                              :weight 1)
+                             :fill t :align "center" :spacing 8)
+                          headline-node)
                         (unless (string-empty-p caption)
                           (jetpacs-text caption :style "caption"))
                         (glasspane-agenda-card-date-row it)
-                        (when (or area-tags tags)
-                          (apply #'jetpacs-flow-row
-                                 (append
-                                  (mapcar
-                                   (lambda (area)
-                                     (jetpacs-material3-assist-chip
-                                      area
-                                      :icon "category"
-                                      :variant "elevated"
-                                      :on-tap (jetpacs-action
-                                               "search.by-tag"
-                                               :args (list :tag area))))
-                                   area-tags)
-                                  (mapcar
-                                   (lambda (tag)
-                                     (jetpacs-material3-assist-chip
-                                      tag :on-tap (jetpacs-action
-                                                   "search.by-tag"
-                                                   :args (list :tag tag))))
-                                   tags)))))))))
+                        (glasspane-detail--agenda-tag-chips tags))))))
     (jetpacs-card
      (list (apply #'jetpacs-row
                   (delq nil
@@ -600,18 +597,7 @@ companion-local (`clipboard.copy') and works offline."
 (defun glasspane-ui--render-logbook-entry (entry)
   "One logbook ENTRY (a plist from `ebp-org-logbook-entries') as a row."
   (pcase (plist-get entry :type)
-    ('clock
-     (jetpacs-row
-      (jetpacs-icon "timer" :color "primary")
-      (jetpacs-column
-       (jetpacs-text (if (plist-get entry :active)
-                         (format "Started %s" (plist-get entry :start))
-                       (ebp-org-format-clock-time (plist-get entry :start)
-                                                  (plist-get entry :end)))
-                     :style "body" :font-weight "bold")
-       (jetpacs-text (or (plist-get entry :duration) "") :style "caption")
-       :spacing 2)
-      :spacing 12))
+    ('clock (glasspane-ui-clock-entry entry))
     ('note
      (jetpacs-row
       (jetpacs-icon "chat" :color "primary")

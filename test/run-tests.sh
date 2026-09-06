@@ -7,7 +7,7 @@ ebp_el_dir=${EBP_EL_DIR:-"$(pwd)/../ebp-poc/ebp.el"}
 ebp_org_dir=${EBP_ORG_DIR:-"$(pwd)/../ebp-poc/ebp-org"}
 material_dir=${GLASSPANE_MATERIAL3_DIR:-"$(pwd)/../glasspane-material3"}
 
-for suite in glasspane-navigation-test glasspane-para-test glasspane-test; do
+for suite in glasspane-reader-layout-test glasspane-navigation-test glasspane-para-test glasspane-test; do
   emacs -Q --batch \
     -L "$ebp_el_dir/lisp" -L "$ebp_org_dir/lisp" \
     -L "$jetpacs_dir/emacs" \

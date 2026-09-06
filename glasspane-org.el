@@ -31,6 +31,7 @@
 (require 'jetpacs-files)
 (require 'jetpacs-editor-org)           ; native save policy
 (require 'jetpacs-org-reminders)         ; canonical agenda extraction
+(require 'jetpacs-org-settings)          ; public workflow vocabulary
 (require 'jetpacs-org-vulpea)           ; note-index arm of the ONE grammar
 
 ;;;; Refresh coordination
@@ -331,6 +332,43 @@ for agenda display cannot narrow the PARA model."
                                      members)
                          :positions (nreverse positions)))))))
         (error nil)))))
+
+(defun glasspane-org--file-todo-keywords (file)
+  "Return FILE's effective TODO keywords without trusting another buffer."
+  (when (stringp file)
+    (ebp-org-with-cache 'glasspane (list 'workflow-todo-keywords file)
+      (condition-case nil
+          (let ((true (ebp-org--check-file file)))
+            (ebp-org--with-clamped-io
+              (with-current-buffer (find-file-noselect true t)
+                (unless (derived-mode-p 'org-mode) (org-mode))
+                (copy-sequence org-todo-keywords-1))))
+        (error nil)))))
+
+(defun glasspane-org-workflow-keywords (items)
+  "Return the stable workflow keywords represented by Org ITEMS.
+File-local `#+TODO' sequences come first, then the global keywords, then any
+keyword an item carries that neither source declares.  ITEMS need only carry
+`file' and `todo' alist fields."
+  (let ((files (sort (delete-dups
+                      (cl-remove-if-not
+                       #'stringp
+                       (mapcar (lambda (item) (alist-get 'file item)) items)))
+                     #'string-lessp))
+        keywords)
+    (cl-labels ((add (keyword)
+                  (when (and (stringp keyword)
+                             (not (string-empty-p keyword))
+                             (not (member keyword keywords)))
+                    (setq keywords (append keywords (list keyword))))))
+      (dolist (file files)
+        (dolist (keyword (glasspane-org--file-todo-keywords file))
+          (add keyword)))
+      (dolist (keyword (jetpacs-org-settings-global-todo-keywords))
+        (add keyword))
+      (dolist (item items)
+        (add (alist-get 'todo item))))
+    keywords))
 
 (defun glasspane-org-open-todo-p (item)
   "Return non-nil when ITEM carries a TODO keyword that is not done.

@@ -233,6 +233,8 @@ index; a source that no longer exists has no Areas."
                          (equal glasspane-resources--archive-filter area))))
          (jetpacs-chip
           area
+          :icon (and (not (equal area "All"))
+                     (glasspane-area-icon area))
           :selected (jetpacs-bool selected)
           :on-tap (jetpacs-action "archive.filter"
                                   :args (list :area (if (equal area "All")

@@ -12,7 +12,8 @@
 ;; `#+FILETAGS' is a member, so one note may belong to many Areas.  The
 ;; Areas list is the set of declared members; a drill is an agenda-style
 ;; query over one member, intersected with any further members the user
-;; selects.  An Area MAY additionally be a first-class note: a heading or
+;; selects, with an independent TODO-state facet over its Projects.  An Area
+;; MAY additionally be a first-class note: a heading or
 ;; file whose property drawer declares `AREA' with the Area's tag.  That
 ;; note opens as a document from the drill and, when it carries its own
 ;; tag, is a member of itself.  Membership is always resolved from the
@@ -210,7 +211,7 @@ The list mints no tokens: a row names its Area by tag and nothing else."
      :subtitle (if (plist-get area :declares)
                    (concat subtitle " · note")
                  subtitle)
-     :icon "category"
+     :icon (glasspane-area-icon name)
      :trailing (jetpacs-icon "chevron_right")
      :on-tap (jetpacs-action "areas.drill" :args (list :category name))
      :key (jetpacs-wire-id "area-row" name))))
@@ -235,10 +236,17 @@ The list mints no tokens: a row names its Area by tag and nothing else."
   "Selected Area intersection per drill, keyed by the primary Area.
 Each value is the list of selected member names with the primary first.")
 
+(defvar glasspane-areas--todo-filter-state (make-hash-table :test #'equal)
+  "Selected Project TODO state per Area drill; absent entries mean ALL.")
+
 (defun glasspane-areas--selected (category)
   "Return CATEGORY's selected intersection, primary first."
   (or (gethash category glasspane-areas--filter-state)
       (list category)))
+
+(defun glasspane-areas--todo-filter (category)
+  "Return CATEGORY's selected Project TODO state, defaulting to ALL."
+  (or (gethash category glasspane-areas--todo-filter-state) "ALL"))
 
 (defun glasspane-areas--file-row (file &optional title subtitle)
   "Render FILE as a validated-path handoff to the one Files route.
@@ -297,6 +305,7 @@ declarations are path-authority rows."
              (lambda (name)
                (jetpacs-chip
                 name
+                :icon (glasspane-area-icon name)
                 :selected (jetpacs-bool (member name selected))
                 :on-tap (jetpacs-action
                          "areas.filter"
@@ -308,6 +317,48 @@ declarations are path-authority rows."
   "Return non-nil when ITEM's areas cover every name in SELECTED."
   (let ((areas (append (alist-get 'areas item) nil)))
     (cl-every (lambda (name) (member name areas)) selected)))
+
+(defun glasspane-areas--todo-keywords (items)
+  "Return ITEMS' represented TODO states in shared workflow order."
+  (let ((present (delete-dups
+                  (cl-remove-if-not
+                   (lambda (keyword)
+                     (and (stringp keyword) (not (string-empty-p keyword))))
+                   (mapcar (lambda (item) (alist-get 'todo item)) items)))))
+    (cl-remove-if-not (lambda (keyword) (member keyword present))
+                      (glasspane-org-workflow-keywords items))))
+
+(defun glasspane-areas--todo-chip-row (category items)
+  "Build CATEGORY's single-select Project TODO filter over ITEMS."
+  (let* ((filter (glasspane-areas--todo-filter category))
+         (keywords (glasspane-areas--todo-keywords items))
+         (options (cons "ALL"
+                        (if (or (equal filter "ALL")
+                                (member filter keywords))
+                            keywords
+                          (append keywords (list filter))))))
+    (apply
+     #'jetpacs-flow-row
+     (append
+      (mapcar
+       (lambda (keyword)
+         (jetpacs-chip
+          keyword
+          :selected (jetpacs-bool (equal filter keyword))
+          :on-tap (jetpacs-action
+                   "areas.todo-filter"
+                   :args (list :category category :filter keyword))))
+       options)
+      (list :spacing 4 :run-spacing 4)))))
+
+(defun glasspane-areas--filter-projects (category items)
+  "Return ITEMS matching CATEGORY's selected Project TODO state."
+  (let ((filter (glasspane-areas--todo-filter category)))
+    (if (equal filter "ALL")
+        items
+      (cl-remove-if-not
+       (lambda (item) (equal (alist-get 'todo item) filter))
+       items))))
 
 (defun glasspane-areas--files-in-all (selected)
   "Return the files every Area in SELECTED shares, path-sorted."
@@ -336,10 +387,13 @@ sweeps the prior Areas token generation."
              (decl-items (delq nil (mapcar (lambda (decl)
                                              (plist-get decl :item))
                                            (plist-get area :declares))))
-             (items (cl-remove-if-not
-                     (lambda (item)
-                       (glasspane-areas--item-in-all-p item selected))
-                     (plist-get area :items)))
+             (area-project-items
+              (cl-remove-if-not
+               (lambda (item)
+                 (glasspane-areas--item-in-all-p item selected))
+               (plist-get area :items)))
+             (items (glasspane-areas--filter-projects
+                     category area-project-items))
              (tokenized (glasspane-agenda-tokenize
                          (append decl-items items) "areas"))
              (decl-count (length decl-items))
@@ -360,10 +414,16 @@ sweeps the prior Areas token generation."
                (append
                 (list (glasspane-areas--chip-row category selected))
                 note-rows
-                (list (jetpacs-section-header "Projects"))
+                (list (jetpacs-section-header "Projects")
+                      (glasspane-areas--todo-chip-row
+                       category area-project-items))
                 (or cards
-                    (list (jetpacs-text "Nothing actionable here yet."
-                                        :style "caption")))
+                    (list
+                     (jetpacs-text
+                      (if (equal (glasspane-areas--todo-filter category) "ALL")
+                          "Nothing actionable here yet."
+                        "Nothing matches this workflow state.")
+                      :style "caption")))
                 (list (jetpacs-divider)
                       (jetpacs-section-header "Resources"))
                 (or file-rows
@@ -402,12 +462,13 @@ PARAMS is the originating action event."
 
 (defun glasspane-areas--on-drill (args params)
   "Open ARGS' plain-string `:category', even if it just vanished.
-The drill seeds its own intersection so a stale chip state never leaks
-between visits.  PARAMS is the originating action event."
+The drill seeds its Area intersection and TODO facet so stale chip state never
+leaks between visits.  PARAMS is the originating action event."
   (let ((category (plist-get args :category)))
     (if (not (and (stringp category) (not (string-empty-p category))))
         'rejected
       (puthash category (list category) glasspane-areas--filter-state)
+      (puthash category "ALL" glasspane-areas--todo-filter-state)
       (glasspane-ui-open-destination
        "areas" (jetpacs-wire-id "area" category)
        (lambda (back) (glasspane-areas-drill-screen category back))
@@ -436,7 +497,21 @@ PARAMS carry the surface for the deferred refresh."
         (jetpacs-app-defer-refresh params)
         'accepted)))))
 
-(defconst glasspane-areas--verbs '("areas.open" "areas.drill" "areas.filter")
+(defun glasspane-areas--on-todo-filter (args params)
+  "Select ARGS' Project TODO `:filter' for its Area `:category'.
+PARAMS carry the surface for the deferred refresh."
+  (let ((category (plist-get args :category))
+        (filter (plist-get args :filter)))
+    (if (not (and (stringp category) (not (string-empty-p category))
+                  (stringp filter) (not (string-empty-p filter))
+                  (glasspane-areas--find category)))
+        'rejected
+      (puthash category filter glasspane-areas--todo-filter-state)
+      (jetpacs-app-defer-refresh params)
+      'accepted)))
+
+(defconst glasspane-areas--verbs
+  '("areas.open" "areas.drill" "areas.filter" "areas.todo-filter")
   "The Areas verbs owned by this module.")
 
 (defun glasspane-areas-register ()
@@ -450,7 +525,12 @@ PARAMS carry the surface for the deferred refresh."
     (jetpacs-defaction "areas.filter" #'glasspane-areas--on-filter
                        :doc "Toggle an Area in a drill's intersection"
                        :args '((:name category :type "text")
-                               (:name area :type "text")))))
+                               (:name area :type "text")))
+    (jetpacs-defaction
+     "areas.todo-filter" #'glasspane-areas--on-todo-filter
+     :doc "Filter one Area drill's Projects by TODO state"
+     :args '((:name category :type "text" :required t)
+             (:name filter :type "text" :required t)))))
 
 (defun glasspane-areas-unregister ()
   "Drop every verb owned by the Areas module."

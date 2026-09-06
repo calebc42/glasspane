@@ -1001,6 +1001,7 @@ the symbol's boolean custom-type is what derives its switch."
 saved searches stay app opinions; flat TODO/tag editors remain in Org workflow."
   (require 'glasspane-ui)
   (let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")))
+        (glasspane-area-icons '(("House" . "home")))
         (org-tag-alist '((:startgrouptag) ("Area") (:grouptags)
                          ("House") ("Auto") (:endgrouptag))))
     (let* ((body (glasspane-ui--settings-body))
@@ -1010,6 +1011,9 @@ saved searches stay app opinions; flat TODO/tag editors remain in Org workflow."
       (should (string-search "House" json))
       (should (string-search "Auto" json))
       (should (string-search "settings.areas.save" json))
+      (should (string-search "Area Icons" json))
+      (should (string-search "settings.area-icon.edit" json))
+      (should (string-search "\"name\":\"home\"" json))
       (should (string-search "Demo Content" json))
       (should (string-search "demo.setup-org" json))
       (should (string-search "demo.setup" json))
@@ -1024,13 +1028,57 @@ saved searches stay app opinions; flat TODO/tag editors remain in Org workflow."
       (should-not (string-search "settings.todo" json))
       (should-not (string-search "org-tags" json)))
     (let ((json (jetpacs-node->canonical-json
-                 (glasspane-ui--settings-link))))
+                 (car (glasspane-test--settings-hub-nodes)))))
       (should (string-search "glasspane.settings.open" json))
       (should (string-search
-               "Area tags, demo content, and saved searches" json)))
+               "Area tags and icons, demo content, and saved searches" json)))
     (let ((screen (glasspane-ui--settings-screen nil)))
       (should (equal (plist-get screen :t) "scaffold"))
       (should (stringp (jetpacs-node->canonical-json screen))))))
+
+(ert-deftest glasspane-test-ui-area-icon-resolution-and-dialog ()
+  "Area icon preferences normalize safely and shape both rows and editors."
+  (let ((glasspane-area-icons
+         '(("House" . "Home")
+           ("Travel" . "Directions-Car")
+           ("Filled" . "Home Filled")
+           ("Unknown" . "not_a_catalog_icon")
+           ("Broken" . "bad/icon"))))
+    (should (equal (glasspane-area-icon "House") "home"))
+    (should (equal (glasspane-area-icon "Travel") "directions_car"))
+    (should (equal (glasspane-area-icon "Filled") "home_filled"))
+    (should (equal (glasspane-area-icon "Unknown")
+                   "not_a_catalog_icon"))
+    (should (equal (glasspane-area-icon "Broken") "category"))
+    (should (equal (glasspane-area-icon "Unset") "category"))
+    (should (equal (glasspane-area-icon nil) "category"))
+    (cl-letf (((symbol-function 'glasspane-areas--index)
+               (lambda () '((:name "House" :files nil :items nil)))))
+      (dolist (node
+               (list
+                (glasspane-areas--area-row
+                 '(:name "House" :files nil :items nil))
+                (glasspane-areas--chip-row "House" '("House"))
+                (glasspane-detail-agenda-card '((headline . "Fix roof"))
+                                                '("House"))
+                (glasspane-resources--archive-filter-row '("House"))))
+        (should (string-search "\"home\""
+                               (jetpacs-node->canonical-json node)))))
+    (let (dialog-id dialog-spec dialog-params)
+      (cl-letf (((symbol-function 'jetpacs-settings-show-dialog)
+                 (lambda (id spec &rest args)
+                   (setq dialog-id id
+                         dialog-spec spec
+                         dialog-params (plist-get args :params)))))
+        (glasspane-ui--show-area-icon-dialog
+         "House" '(:surface "app:jetpacs.settings")))
+      (should (equal dialog-id "glasspane-area-icon-edit"))
+      (should (equal dialog-params '(:surface "app:jetpacs.settings")))
+      (let ((json (jetpacs-node->canonical-json dialog-spec)))
+        (should (string-search "area-icon-name" json))
+        (should (string-search "settings.area-icon.save" json))
+        (should (string-search "health_and_safety" json))
+        (should (string-search "directions_car" json))))))
 
 (ert-deftest glasspane-test-ui-at-ref-classifier ()
   "The S4/S5 funnel every later rung copies: no/unknown token ->
@@ -1081,7 +1129,7 @@ mutation body never answers \\='accepted."
 args and no client, answers a SPEC 14.4 status symbol — then the sharp
 edges: persisted writes, the single-writer defvars, stale indices and
 names, malformed args, and dialog verbs refusing without a client.
-Registration is idempotent (one settings link) and the section is in
+Registration is idempotent (one keyed Settings hub entry) and the section is in
 the registry."
   (require 'glasspane-ui)
   (glasspane-ui-register)
@@ -1098,10 +1146,11 @@ the registry."
 	    (should-not (plist-get (cdr (assq sym entries)) :after-set)))
 	  (should-not (assq 'glasspane-journal-landing entries)))
 	(glasspane-ui-register)
-	(should (= 1 (cl-count #'glasspane-ui--settings-link
-                               jetpacs-settings-links :key #'cadr)))
+	(should (= 1 (cl-count "glasspane" jetpacs-settings-hub-entries
+                              :key #'car :test #'equal)))
 	(let ((glasspane-org-custom-agendas '(("Errands" . "tags:errand")
                                               ("Old" . "todo:TODO")))
+              (glasspane-area-icons nil)
               (glasspane-ui-agenda-anchor "2020-01-01")
               (glasspane-ui-agenda-selected-date "2020-01-02")
               (jetpacs-settings--dialog nil)
@@ -1138,6 +1187,53 @@ the registry."
                        (jetpacs-org-settings-tag-group-members "Area")
                        '("House" "Auto")))
               (should (assq 'org-tag-persistent-alist saved))
+              ;; Per-Area icons are presentation-only Custom data.  Curated
+              ;; values and captured text share one durable save path; the
+              ;; mapping is normalized and key-sorted, blank resets, malformed
+              ;; input rejects, and a removed Area makes an old dialog stale.
+              (should (eq (run "settings.area-icon.save"
+                               '(:area "House" :icon "Home"))
+                          'accepted))
+              (should (equal glasspane-area-icons '(("House" . "home"))))
+              (should (eq (run "settings.area-icon.save"
+                               '(:area "Auto")
+                               '(:fields
+                                 (:area-icon-name "Directions-Car")))
+                          'accepted))
+              (should (equal glasspane-area-icons
+                             '(("Auto" . "directions_car")
+                               ("House" . "home"))))
+              (should (assq 'glasspane-area-icons saved))
+              (should (eq (run "settings.area-icon.save"
+                               '(:area "Auto" :icon "bad/icon"))
+                          'rejected))
+              (should (equal (glasspane-area-icon "Auto") "directions_car"))
+              (should (eq (run "settings.area-icon.save"
+                               '(:area "Ghost" :icon "star"))
+                          'stale))
+              (should (eq (run "settings.area-icon.save"
+                               '(:area "House" :icon ""))
+                          'accepted))
+              (should (equal glasspane-area-icons
+                             '(("Auto" . "directions_car"))))
+              (should (eq (run "settings.area-icon.edit"
+                               '(:area "House"))
+                          'rejected))
+              (let (opened)
+                (cl-letf (((symbol-function 'jetpacs-client)
+                           (lambda () 'test-client))
+                          ((symbol-function
+                            'glasspane-ui--show-area-icon-dialog)
+                           (lambda (area params)
+                             (setq opened (list area params)))))
+                  (should (eq (run "settings.area-icon.edit"
+                                   '(:area "House")
+                                   '(:surface "app:jetpacs.settings"))
+                              'accepted))
+                  (funcall (car continuations))
+                  (should (equal opened
+                                 '("House"
+                                   (:surface "app:jetpacs.settings"))))))
               (should (eq (run "settings.areas.save"
                                '(:value ["Bad Tag"]))
                           'rejected))
@@ -1204,10 +1300,9 @@ the registry."
               ))))
     ;; The unregister sweep — its own gate, and the teardown this
     ;; batch process would otherwise carry into every later test: the
-    ;; org-clock hooks, the teardown hook, and the Settings link.
+    ;; org-clock hooks, teardown hook, and Settings hub entry.
     (glasspane-ui-unregister)
-    (should-not (cl-find #'glasspane-ui--settings-link
-                         jetpacs-settings-links :key #'cadr))
+    (should-not (assoc "glasspane" jetpacs-settings-hub-entries))
     ;; Re-registered so suite order never matters (the journal/srs
     ;; precedent).
     (glasspane-ui-register)))
@@ -1419,10 +1514,11 @@ signalling out of the builder."
               ;; The menu delegates the retired editors to the base
               ;; sheet via the exposure route.
               (should (string-search "jetpacs.org.heading" json))
-              ;; Overdue deadline badge, collapsed PROPERTIES drawer.
+              ;; Overdue deadline badge and native Properties visibility control.
               (should (string-search "Deadline 2020-01-02" json))
               (should (string-search "PROPERTIES" json))
-              (should (string-search "\"collapsed\":true" json))
+              (should (string-search "jetpacs.org.toggle-drawer" json))
+              (should (string-search "Toggle properties" json))
               ;; Bodies degrade to org-syntax text (gap #6).
               (should (string-search "Remember the roses." json))
               (should (string-search "\"syntax\":\"org\"" json))
@@ -4551,7 +4647,7 @@ day-named date as one block with the day name recomputed in the C
 locale, whatever follows the date (times, repeater cookies) rides
 along unchanged, and the fixed-width stamp keeps table alignment
 intact."
-  (let ((content (cdr (assoc "glasspane-demo-trackers.org"
+  (let ((content (cdr (assoc "glasspane-demo-life.org"
                              glasspane-demo--org-files))))
     (should (equal (glasspane-demo--shift-timestamps content 0) content)))
   (let* ((sample (concat "DEADLINE: <2026-07-06 Mon>\n"
@@ -4575,41 +4671,56 @@ intact."
     (should (string-search "| [2026-07-01 Wed] |       40 |" shifted))))
 
 (ert-deftest glasspane-test-demo-seed ()
-  "The regenerated corpus is namespaced, parseable, and representative.
-It preserves an ordinary inbox, declares native Areas (including House+Bills
-and Auto+Bills intersections), exercises the TODO workflow and sibling
-archives, keeps IDs unique, and shifts its anchor stamp onto the setup day."
+  "The reset writes five safe fixtures aligned with Glasspane's PARA model.
+It preserves ordinary files, removes only exact retired fixture names, treats
+every TODO heading as a Project without a role tag, declares native Area-group
+members and intersections, keeps 24 IDs unique, and shifts dates onto today."
   (let* ((vault (make-temp-file "glasspane-demo-vault" t))
          (org-directory (file-name-as-directory vault))
          (org-agenda-files nil)
          (ebp-org-roots nil)
+         (org-tag-alist nil)
+         (org-tag-persistent-alist nil)
+         (custom-file (expand-file-name "custom.el" vault))
          (sentinel (expand-file-name "inbox.org" vault))
-         (ids nil))
+         (retired (expand-file-name "glasspane-demo-guide.org" vault))
+         retired-buffer
+         ids)
     (unwind-protect
         (progn
           (should (commandp 'glasspane-demo-setup))
           (should (commandp 'glasspane-demo-setup-org))
-          ;; The org-target derivation, both arms: nil roots fall
-          ;; through to `org-directory'; an explicit head anchors to it.
           (should (equal (glasspane-demo--org-target) org-directory))
-          (let ((ebp-org-roots '("vault")))
-            (should (equal (glasspane-demo--org-target)
-                           (file-name-as-directory
-                            (expand-file-name "vault" org-directory)))))
-          ;; The tour default derives from the Files landing dir, which
-          ;; itself must lie inside `jetpacs-files-roots'.
           (should (equal glasspane-demo-directory
                          (expand-file-name "glasspane-demo"
                                            jetpacs-files-default-dir)))
-          ;; The on-device buttons are easy to reach, so fixture names are a
-          ;; runtime safety boundary: never replace a plausible real file.
+          ;; Validate every destructive target before setup changes the vault.
           (write-region "#+TITLE: My real inbox\n" nil sentinel nil 'silent)
+          (write-region "#+TITLE: Retired generated file\n"
+                        nil retired nil 'silent)
           (dolist (spec glasspane-demo--org-files)
             (should (glasspane-demo--safe-org-filename-p (car spec))))
+          (dolist (name glasspane-demo--retired-org-files)
+            (should (glasspane-demo--safe-org-filename-p name)))
           (let ((glasspane-demo--org-files '(("inbox.org" . "unsafe"))))
             (should-error (glasspane-demo-setup-org)))
+          (let ((glasspane-demo--retired-org-files '("../inbox.org")))
+            (should-error (glasspane-demo-setup-org)))
+          (should (file-exists-p retired))
+          ;; Reset semantics also discard an open, modified retired fixture.
+          (setq retired-buffer (find-file-noselect retired))
+          (with-current-buffer retired-buffer
+            (goto-char (point-max))
+            (insert "locally modified")
+            (set-buffer-modified-p t))
           (let ((dir (glasspane-demo-setup-org)))
             (should (equal dir org-directory))
+            (should-not (buffer-live-p retired-buffer))
+            (should-not (file-exists-p retired))
+            (should (= (length
+                        (directory-files
+                         dir nil "^glasspane-demo-" :nosort))
+                       5))
             (should (equal (with-temp-buffer
                              (insert-file-contents sentinel)
                              (buffer-string))
@@ -4617,94 +4728,274 @@ archives, keeps IDs unique, and shifts its anchor stamp onto the setup day."
             (dolist (spec glasspane-demo--org-files)
               (let ((file (expand-file-name (car spec) dir)))
                 (should (file-exists-p file))
-                ;; Inside the allowlist: queries/mutations/mints admit it.
                 (should (ebp-org-file-allowed-p file))
                 (with-temp-buffer
                   (insert-file-contents file)
                   (let ((org-inhibit-startup t))
                     (delay-mode-hooks (org-mode)))
-                  ;; A real parse: a corpus typo that breaks org
-                  ;; structure fails here, not on the device.
-                  (should (org-element-parse-buffer 'headline))
+                  (should (org-element-parse-buffer))
                   (goto-char (point-min))
                   (while (re-search-forward
                           "^[ \t]*:ID: +\\(\\S-+\\)[ \t]*$" nil t)
                     (push (match-string 1) ids)))))
-            ;; Reset means reset even when one generated file is open and
-            ;; locally modified; the refreshed buffer must match durable disk.
-            (let* ((guide-file
-                    (expand-file-name "glasspane-demo-guide.org" dir))
-                   (guide-buffer (find-file-noselect guide-file)))
-              (with-current-buffer guide-buffer
+            ;; No legacy role tags: TODO state and Area-group members classify.
+            (let ((content (mapconcat #'cdr glasspane-demo--org-files "\n")))
+              (let ((case-fold-search nil))
+                (should-not (string-match-p
+                             ":\\(?:area\\|project\\):" content))))
+            ;; An open current fixture resets in-place to durable disk.
+            (let* ((hub-file
+                    (expand-file-name "glasspane-demo-hub.org" dir))
+                   (hub-buffer (find-file-noselect hub-file)))
+              (with-current-buffer hub-buffer
                 (erase-buffer)
                 (insert "locally mangled demo")
                 (set-buffer-modified-p t))
               (glasspane-demo-setup-org dir)
-              (with-current-buffer guide-buffer
+              (with-current-buffer hub-buffer
                 (should-not (buffer-modified-p))
-                (should (string-prefix-p "#+TITLE: Exploring Glasspane"
-                                         (buffer-string)))))
-            ;; FILETAGS supplies file/heading inheritance for Health.
-            (let* ((health-file
-                    (expand-file-name "glasspane-demo-health.org" dir))
-                   (health (glasspane-areas--scan-file health-file)))
-              (should (member "Health" (plist-get health :areas)))
-              (should (equal (plist-get health :file-areas) '("Health"))))
-            ;; Heading-local members demonstrate both example intersections.
-            (let* ((tracker-file
-                    (expand-file-name "glasspane-demo-trackers.org" dir))
-                   (scan (glasspane-areas--scan-file tracker-file))
-                   (items (plist-get scan :items))
+                (should (string-search "#+TITLE: Glasspane Demo Hub"
+                                       (buffer-string)))))
+            ;; Heading tags supply genuine multi-Area intersections.
+            (let* ((life-file
+                    (expand-file-name "glasspane-demo-life.org" dir))
+                   (items (glasspane-org-todo-items (list life-file)))
                    (grocery
                     (cl-find "Weekly grocery run" items
                              :key (lambda (item) (alist-get 'headline item))
                              :test #'equal))
                    (insurance
-                    (cl-find "Call the insurance company about the claim"
-                             items
+                    (cl-find "Call the insurance company" items
                              :key (lambda (item) (alist-get 'headline item))
-                             :test #'equal)))
-              (should (equal (append (alist-get 'areas grocery) nil)
-                             '("House" "Bills")))
-              (should (equal (append (alist-get 'areas insurance) nil)
-                             '("Auto" "Bills"))))
-            ;; The Projects source advertises every primary workflow state,
-            ;; including the NEXT/WAITING chips missing from the old corpus.
-            (let ((keywords
-                   (glasspane-projects--file-todo-keywords
-                    (expand-file-name "glasspane-demo-projects.org" dir))))
-              (dolist (keyword '("TODO" "NEXT" "WAITING"
+                             :test #'string-prefix-p))
+                   (scan (glasspane-areas--scan-file life-file))
+                   (declared
+                    (mapcar (lambda (decl) (plist-get decl :name))
+                            (plist-get scan :declares))))
+              (should (equal
+                       (glasspane-org-item-tag-group-members grocery "Area")
+                       '("House" "Bills")))
+              (should (equal
+                       (glasspane-org-item-tag-group-members insurance "Area")
+                       '("Auto" "Bills")))
+              (dolist (name '("Health" "House" "Auto" "Bills"))
+                (should (member name declared))))
+            ;; Every configured Area has a first-class declaring note whose
+            ;; own native tag makes that note a member of itself.
+            (let (declared)
+              (dolist (name '("glasspane-demo-hub.org"
+                              "glasspane-demo-work.org"
+                              "glasspane-demo-life.org"
+                              "glasspane-demo-knowledge.org"))
+                (setq declared
+                      (nconc
+                       (mapcar
+                        (lambda (decl) (plist-get decl :name))
+                        (plist-get
+                         (glasspane-areas--scan-file
+                          (expand-file-name name dir))
+                         :declares))
+                       declared)))
+              (should
+               (equal (sort (delete-dups declared) #'string-lessp)
+                      '("Auto" "Bills" "Digital" "Health"
+                        "House" "Learning" "Work"))))
+            ;; Every configured workflow stage is a real heading in the live
+            ;; Work file, including CANCELLED; no project tag is involved.
+            (let* ((work-file
+                    (expand-file-name "glasspane-demo-work.org" dir))
+                   (content (with-temp-buffer
+                              (insert-file-contents work-file)
+                              (buffer-string)))
+                   (items (glasspane-org-todo-items (list work-file))))
+              (dolist (keyword '("TODO" "NEXT" "WAITING" "IDEA"
                                  "DONE" "CANCELLED"))
-                (should (member keyword keywords))))
-            ;; A sibling _archive is discoverable from its source Resource.
-            (let ((archives
-                   (glasspane-resources-archives-for-files
-                    (list (expand-file-name
-                           "glasspane-demo-projects.org" dir)))))
-              (should (= (length archives) 1))
-              (should (string-suffix-p
-                       "glasspane-demo-projects.org_archive"
-                       (plist-get (car archives) :path))))
-            ;; Unique-ID lint across the whole corpus.
-            (should (> (length ids) 0))
+                (should (string-match-p
+                         (format "^\\* %s " keyword) content)))
+              (should (>= (length items) 6))
+              (should-not
+               (seq-some
+                (lambda (item)
+                  (member "project" (append (alist-get 'tags item) nil)))
+                items))
+              ;; Archive follows the current implementation: a sibling file,
+              ;; discoverable from its live source and excluded from Projects.
+              (let ((archives
+                     (glasspane-resources-archives-for-files
+                      (list work-file))))
+                (should (= (length archives) 1))
+                (should (string-suffix-p
+                         "glasspane-demo-work.org_archive"
+                         (plist-get (car archives) :path)))))
+            ;; Setup places the tag group where file-local #+TAGS cannot hide it.
+            (should
+             (equal (jetpacs-org-settings-tag-group-members "Area")
+                    '("House" "Auto" "Bills" "Work" "Health"
+                      "Learning" "Digital")))
+            (should
+             (assoc-string
+              "Area"
+              (org-tag-alist-to-groups org-tag-persistent-alist) t))
+            (should-not
+             (assoc-string "Area" (org-tag-alist-to-groups org-tag-alist) t))
+            (should (= (length ids) 24))
             (should (= (length ids)
                        (length (delete-dups (copy-sequence ids)))))
-            ;; The authoring anchor IS the corpus's "today", so its
-            ;; stamp must land on the seed day (C-locale day name).
-            (should (string-search
-                     (format "SCHEDULED: <%s>"
-                             (let ((system-time-locale "C"))
-                               (format-time-string "%Y-%m-%d %a")))
-                     (with-temp-buffer
-                       (insert-file-contents
-                        (expand-file-name "glasspane-demo-inbox.org" dir))
-                       (buffer-string))))))
+            ;; The authoring anchor is represented by a scheduled item today.
+            (should
+             (string-search
+              (format "SCHEDULED: <%s>"
+                      (let ((system-time-locale "C"))
+                        (format-time-string "%Y-%m-%d %a")))
+              (with-temp-buffer
+                (insert-file-contents
+                 (expand-file-name "glasspane-demo-hub.org" dir))
+                (buffer-string))))))
       (dolist (buffer (buffer-list))
         (when-let* ((file (buffer-file-name buffer))
                     ((file-in-directory-p file vault)))
           (with-current-buffer buffer (set-buffer-modified-p nil))
           (kill-buffer buffer)))
       (delete-directory vault t))))
+
+(ert-deftest glasspane-test-demo-org-feature-coverage ()
+  "The compact corpus covers the complete core Org parser vocabulary."
+  (let (elements objects link-types list-types timestamp-types description)
+    (should (= (length glasspane-demo--org-files) 5))
+    (let ((knowledge
+           (cdr (assoc "glasspane-demo-knowledge.org"
+                       glasspane-demo--org-files))))
+      (should knowledge)
+      (dolist (heading glasspane-demo--srs-cards)
+        (should (string-search (concat "* " heading) knowledge)))
+      (pcase-dolist (`(,heading . ,targets) glasspane-demo--srs-clozes)
+        (should (string-search (concat "* " heading) knowledge))
+        (dolist (target targets)
+          (should (string-search target knowledge)))))
+    (should (< (apply #'+
+                      (mapcar (lambda (spec) (string-bytes (cdr spec)))
+                              glasspane-demo--org-files))
+               20000))
+    (dolist (spec glasspane-demo--org-files)
+      (with-temp-buffer
+        (insert (cdr spec))
+        (let ((org-inhibit-startup t))
+          (delay-mode-hooks (org-mode)))
+        (let ((tree (org-element-parse-buffer)))
+          (setq elements
+                (nconc (org-element-map
+                        tree org-element-all-elements #'org-element-type)
+                       elements))
+          (setq objects
+                (nconc (org-element-map
+                        tree org-element-all-objects #'org-element-type)
+                       objects))
+          (setq link-types
+                (nconc
+                 (org-element-map
+                  tree 'link
+                  (lambda (link) (org-element-property :type link)))
+                 link-types))
+          (setq list-types
+                (nconc
+                 (org-element-map
+                  tree 'plain-list
+                  (lambda (list) (org-element-property :type list)))
+                 list-types))
+          (setq timestamp-types
+                (nconc
+                 (org-element-map
+                  tree 'timestamp
+                  (lambda (stamp) (org-element-property :type stamp)))
+                 timestamp-types))
+          (when (org-element-map
+                    tree 'item
+                  (lambda (item) (org-element-property :tag item))
+                  nil t)
+            (setq description t)))))
+    (should-not
+     (cl-set-difference org-element-all-elements elements :test #'eq))
+    (should-not
+     (cl-set-difference org-element-all-objects objects :test #'eq))
+    (dolist (type '("attachment" "file" "fuzzy" "https" "id" "radio"))
+      (should (member type link-types)))
+    (should (memq 'ordered list-types))
+    (should (memq 'unordered list-types))
+    (should description)
+    (dolist (type '(active-range inactive-range inactive))
+      (should (memq type timestamp-types)))))
+
+(ert-deftest glasspane-test-demo-vulpea-graph-density ()
+  "Every demo note has four inbound and outbound links under Vulpea boundaries."
+  (let ((id-files (make-hash-table :test #'equal))
+        (edges (make-hash-table :test #'equal))
+        (outbound (make-hash-table :test #'equal))
+        (inbound (make-hash-table :test #'equal))
+        duplicates
+        (links 0)
+        (cross-file 0))
+    ;; Vulpea note identity is a file/heading ID.  Record every generated ID
+    ;; before resolving links so forward references are treated symmetrically.
+    (dolist (spec glasspane-demo--org-files)
+      (with-temp-buffer
+        (insert (cdr spec))
+        (let ((org-inhibit-startup t))
+          (delay-mode-hooks (org-mode)))
+        (org-element-map
+            (org-element-parse-buffer) 'node-property
+          (lambda (property)
+            (when (equal (org-element-property :key property) "ID")
+              (let ((id (org-element-property :value property)))
+                (when (gethash id id-files)
+                  (push id duplicates))
+                (puthash id (car spec) id-files)))))))
+    (should-not duplicates)
+    (should (= (hash-table-count id-files) 24))
+    (dolist (spec glasspane-demo--org-files)
+      (with-temp-buffer
+        (insert (cdr spec))
+        (let ((org-inhibit-startup t))
+          (delay-mode-hooks (org-mode)))
+        (let ((file-id (org-entry-get (point-min) "ID"))
+              (tree (org-element-parse-buffer)))
+          (org-element-map
+              tree 'link
+            (lambda (link)
+              (when (equal (org-element-property :type link) "id")
+                (let* ((target (org-element-property :path link))
+                       ;; This is Vulpea's extraction boundary: a link belongs
+                       ;; to its nearest enclosing ID heading, else the file ID.
+                       (source
+                        (save-excursion
+                          (goto-char (org-element-property :begin link))
+                          (if (org-before-first-heading-p)
+                              file-id
+                            (org-back-to-heading t)
+                            (catch 'note-id
+                              (while t
+                                (when-let* ((id (org-entry-get (point) "ID")))
+                                  (throw 'note-id id))
+                                (unless (org-up-heading-safe)
+                                  (throw 'note-id file-id)))))))
+                       (edge (cons source target)))
+                  (should source)
+                  (should (gethash target id-files))
+                  (cl-incf links)
+                  (should-not (gethash edge edges))
+                  (puthash edge t edges)
+                  (puthash source (1+ (gethash source outbound 0)) outbound)
+                  (puthash target (1+ (gethash target inbound 0)) inbound)
+                  (unless (equal (gethash source id-files)
+                                 (gethash target id-files))
+                    (cl-incf cross-file)))))))))
+    (should (= links 96))
+    (should (= (hash-table-count edges) 96))
+    (should (= cross-file 72))
+    (maphash
+     (lambda (id _file)
+       (should (= (gethash id outbound 0) 4))
+       (should (= (gethash id inbound 0) 4)))
+     id-files)))
 
 (ert-deftest glasspane-test-demo-handlers ()
   "The two demo verbs under the SPEC 14.4 contract: success writes
@@ -4742,10 +5033,13 @@ squatting where the target directory must go) notifies, then answers
           ;; deferred — exactly one continuation, zero dispatch pushes.
           (let ((org-directory (file-name-as-directory vault))
                 (org-agenda-files nil)
-                (ebp-org-roots nil))
+                (ebp-org-roots nil)
+                (org-tag-alist nil)
+                (org-tag-persistent-alist nil)
+                (custom-file (expand-file-name "custom.el" vault)))
             (should (eq (funcall setup-org nil params) 'accepted))
             (should (file-exists-p
-                     (expand-file-name "glasspane-demo-health.org" vault))))
+                     (expand-file-name "glasspane-demo-life.org" vault))))
           (should (= pushes 0))
           (should (= (length continuations) 1))
           (funcall (car continuations))
@@ -5215,13 +5509,12 @@ can eventually dispatch — so the walk follows every cons it is given."
       (funcall walk value))
     (delete-dups acc)))
 
-(defun glasspane-test--settings-link-nodes ()
-  "The built nodes of every Settings-root link THIS app registered.
-`jetpacs-settings-links' entries are (ORDER BUILDER . OWNER)."
-  (mapcar (lambda (entry) (funcall (cadr entry)))
-          (cl-remove-if-not (lambda (entry)
-                              (equal (cddr entry) glasspane-owner))
-                            jetpacs-settings-links)))
+(defun glasspane-test--settings-hub-nodes ()
+  "Build Glasspane's keyed Settings hub entry, if registered."
+  (let ((entry (assoc "glasspane" jetpacs-settings-hub-entries)))
+    (when entry
+      (let ((jetpacs-settings-hub-entries (list entry)))
+        (jetpacs-settings--hub-cards)))))
 
 (defconst glasspane-test--hub-verbs
   '("agenda.open"
@@ -5232,15 +5525,15 @@ can eventually dispatch — so the walk follows every cons it is given."
     "archive.open")
   "THE RULE: every screen-opening verb the app owns must be
 emitted by the home screen or its drawer.  These are the daily
-surfaces; the two satellites below are the documented exception, and
+surfaces; the two Settings integrations below are the documented exception, and
 `glasspane-test--non-opening-verbs' names everything that opens no
 screen at all.  A verb added to the app without landing in one of the
 three lists fails `glasspane-test-hub-verb-inventory', which is the
 point: a new screen cannot ship unreachable.")
 
-(defconst glasspane-test--satellite-verbs
+(defconst glasspane-test--settings-hub-verbs
   '("glasspane.settings.open")
-  "The downstream general Settings satellite.")
+  "The opener emitted by Glasspane's downstream Settings hub entry.")
 
 (defconst glasspane-test--theme-provider-verbs
   '("ef.show")
@@ -5256,7 +5549,9 @@ point: a new screen cannot ship unreachable.")
 (defconst glasspane-test--non-opening-verbs
   '("agenda.nav" "agenda.save-custom" "agenda.select-date"
     "agenda.set-mode" "agenda.set-month" "agenda.today" "config.sync"
-    "areas.drill" "areas.filter" "archive.filter" "projects.group"
+    "areas.drill" "areas.filter" "areas.todo-filter" "archive.filter"
+    "projects.area-filter"
+    "projects.group"
     "demo.setup" "demo.setup-org" "detail.open-file"
     "detail.planning.edit" "detail.save"
     "detail.toggle-read" "files.filter"
@@ -5275,9 +5570,10 @@ point: a new screen cannot ship unreachable.")
     "org.table.cell-menu" "org.table.edit" "resources.open-file"
     "resources.return"
     "review.habits.open"
-    "search.by-tag"
-    "search.clear-filters" "search.update-filter"
-    "settings.agenda.delete" "settings.agenda.edit"
+	    "search.by-tag"
+	    "search.clear-filters" "search.update-filter"
+	    "settings.area-icon.edit" "settings.area-icon.save"
+	    "settings.agenda.delete" "settings.agenda.edit"
     "settings.agenda.save" "settings.areas.save"
     "srs.answer.page" "srs.answer.show" "srs.item.create"
     "srs.postpone" "srs.quit" "srs.rate" "srs.review.start"
@@ -5327,10 +5623,10 @@ Classification only — the list exists so the inventory below is total.")
                     (glasspane-test--action-names
                      (glasspane-agenda-screen nil))))
     (should-not (plist-member (glasspane-ui-home-screen nil) :drawer)))
-  ;; The satellites keep the vocabulary's route: a Settings-root link.
+  ;; The app settings opener keeps the vocabulary's route through the hub.
   (let ((links (glasspane-test--action-names
-                (glasspane-test--settings-link-nodes))))
-    (dolist (verb glasspane-test--satellite-verbs)
+                (glasspane-test--settings-hub-nodes))))
+    (dolist (verb glasspane-test--settings-hub-verbs)
       (should (member verb links))
       (should (gethash verb jetpacs-action-handlers))))
   ;; EF is not a general Settings satellite: Glasspane contributes it to the
@@ -5374,13 +5670,13 @@ with no app rows at all."
 
 (ert-deftest glasspane-test-hub-verb-inventory ()
   "THE TRIPWIRE: every verb glasspane registers is classified as a hub
-opener, a satellite opener, or no opener at all.  A new verb that
+opener, a Settings integration opener, or no opener at all.  A new verb that
 nobody wired shows up as an unclassified name and fails here — the
 mechanical half of the rule stated on `glasspane-test--hub-verbs' —
 and a retired verb left in a list fails the other way."
   (let ((owned nil)
         (pinned (append glasspane-test--hub-verbs
-                        glasspane-test--satellite-verbs
+                        glasspane-test--settings-hub-verbs
                         glasspane-test--theme-provider-verbs
                         glasspane-test--legacy-opener-verbs
                         glasspane-test--staged-opener-verbs

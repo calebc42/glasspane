@@ -37,7 +37,7 @@
 ;;   automatic in v3 (jetpacs-apps.el).
 ;; - The v1 nav fabric (defapp/define-view/tab-view/top-action): S1 —
 ;;   app identity and the chrome root live in glasspane.el (G0); the
-;;   settings view is now a Settings satellite link plus a pushed
+;;   settings view is now a Settings hub entry plus a pushed
 ;;   chrome screen.  search.clear-filters registers in G6 beside the
 ;;   filter state it clears.
 ;; - The desktop-save auto-refresh block (v1 ui:603-620): the
@@ -79,6 +79,79 @@ is persisted in `org-tag-persistent-alist' by the Area Tags settings row
 so a file's own `#+TAGS' line never hides it."
   :type 'string
   :group 'jetpacs)
+
+(defcustom glasspane-area-icons nil
+  "Alist mapping PARA Area tag names to Material icon identifiers.
+Keys are the exact members of `glasspane-area-tag-group'.  Values use the
+bundled Material icon names in snake_case, such as \"directions_car\" or
+\"health_and_safety\"; a trailing \"_filled\" requests the filled variant.
+Missing, empty, or malformed values render the safe \"category\" default.
+An identifier absent from the Companion's bundled Material catalog renders
+its harmless help-outline placeholder.  This is presentation metadata only:
+it never changes Org tags, Area membership, or a vault file."
+  :type '(alist :key-type (string :tag "Area tag")
+                :value-type (string :tag "Material icon"))
+  :group 'jetpacs)
+
+(defconst glasspane-ui--default-area-icon "category"
+  "Material icon used when an Area has no valid explicit preference.")
+
+(defconst glasspane-ui--area-icon-suggestions
+  '(("Home" . "home")
+    ("Work" . "work")
+    ("Health" . "health_and_safety")
+    ("Learning" . "school")
+    ("Travel" . "flight")
+    ("Money" . "payments")
+    ("Car" . "directions_car")
+    ("Digital" . "devices"))
+  "Curated Material icon choices shown before the free-form editor.")
+
+(defun glasspane-ui--normalize-material-icon-name (value)
+  "Return VALUE in the Material renderer's canonical snake_case spelling.
+Leading/trailing whitespace is dropped, ASCII case is folded, and internal
+spaces or hyphens become underscores.  Non-string values return nil."
+  (when (stringp value)
+    (replace-regexp-in-string
+     "[-[:space:]]+" "_" (downcase (string-trim value)))))
+
+(defun glasspane-ui--material-icon-name-p (value)
+  "Return non-nil when VALUE is a safe Material icon identifier.
+This proves wire shape, not catalog membership; an unavailable but valid name
+is deliberately left for the Companion's harmless placeholder behavior."
+  (and (stringp value)
+       (<= (length value) 128)
+       (jetpacs-identifier-p value)
+       (string-match-p "\\`[a-z][a-z0-9_]*\\'" value)))
+
+(defun glasspane-ui--configured-area-icon (area)
+  "Return AREA's normalized, valid configured icon, or nil."
+  (let ((icon (glasspane-ui--normalize-material-icon-name
+               (alist-get area glasspane-area-icons nil nil #'equal))))
+    (and (glasspane-ui--material-icon-name-p icon) icon)))
+
+(defun glasspane-area-icon (area)
+  "Return AREA's configured Material icon or the safe category default.
+AREA is an exact native Org tag-group member.  Invalid direct Custom values
+degrade locally rather than making an Areas, Projects, or Archive builder fail."
+  (or (and (stringp area) (glasspane-ui--configured-area-icon area))
+      glasspane-ui--default-area-icon))
+
+(defun glasspane-ui-tag-chips (tags &optional areas)
+  "Build wrapping TAGS, or nil when there are none.
+With AREAS, elevate the chips, add Area icons, and align them right."
+  (when tags
+    (apply #'jetpacs-flow-row
+           (append
+            (mapcar
+             (lambda (tag)
+               (jetpacs-material3-assist-chip
+                tag :icon (and areas (glasspane-area-icon tag))
+                :variant (and areas "elevated")
+                :on-tap (jetpacs-action
+                         "search.by-tag" :args (list :tag tag))))
+             tags)
+            (when areas (list :arrange "end"))))))
 
 (defcustom glasspane-babel-timeout 30
   "Seconds before a phone-triggered babel execution is abandoned.
@@ -239,16 +312,17 @@ screen's stale-files half, both reached from rows that ARE here.")
 (defun glasspane-ui-open-destination (route id builder &optional params)
   "Open Glasspane destination ROUTE as peer screen ID via BUILDER.
 PARAMS is the originating action event.  In the PARA composition every
-Tier-1 destination first abandons the previous destination and its drills,
-then pushes its own screen.  Agenda is the pinned-root exception: its pushed
+Tier-1 destination first abandons the previous destination and its drills
+without presenting the root, then pushes its own screen in one update.
+Agenda is the pinned-root exception: its pushed
 ID equals the root ID, so chrome's same-ID truncation performs the reset in
 one operation.  The legacy rollback arm retains the historical plain-push
 stack shape.
 
 The selected route is recorded before the deferred push so the snapshot built
-for direct/M-x navigation has honest primary-bar selection.  The handler's
-effect remains outside the dispatch extent and presentation failures stay
-isolated there.  Return `accepted'."
+for direct or interactive navigation has honest primary-bar selection.  The
+handler's effect remains outside the dispatch extent and presentation failures
+stay isolated there.  Return `accepted'."
   (let ((surface (or (plist-get params :surface)
                      (jetpacs-shell-surface-for "glasspane")))
         (legacy glasspane-ui-legacy-ia))
@@ -259,7 +333,7 @@ isolated there.  Return `accepted'."
        (condition-case err
            (progn
              (unless (or legacy (equal id "glasspane-agenda"))
-               (jetpacs-chrome-reset-screens surface))
+               (jetpacs-chrome-reset-screens surface t))
              (jetpacs-chrome-push-screen
               surface id
               ;; A Tier-1 destination is a peer of the root, reached from
@@ -359,7 +433,7 @@ Home first (the root the stack resets to), then the body's own
 destinations, then the app's settings screen, then the other apps.
 Destinations only, never a document mutation, and every row is
 reachable elsewhere — M-x for the commands, the Settings root for the
-satellites (docs/CHROME-VOCABULARY.md).  Authored on the ROOT screen
+app's hub entry (docs/CHROME-VOCABULARY.md).  Authored on the ROOT screen
 alone: chrome renders the stack as one multi_view, and a drawer
 repeated on every pushed screen would duplicate its rows in the same
 document."
@@ -490,6 +564,41 @@ given SET."
      :allow-add t
      :on-change (jetpacs-action "settings.areas.save"))))
 
+(defun glasspane-ui--area-icon-row (area)
+  "Build AREA's Material icon preview and editor row."
+  (let* ((entry (assoc area glasspane-area-icons))
+         (configured (glasspane-ui--configured-area-icon area))
+         (icon (or configured glasspane-ui--default-area-icon))
+         (subtitle
+          (cond
+           (configured (format "Material icon · %s" configured))
+           ((and entry
+                 (or (not (stringp (cdr entry)))
+                     (not (string-empty-p (string-trim (cdr entry))))))
+            "Invalid icon setting · using category")
+           (t "Default · category"))))
+    (jetpacs-chrome-row
+     area
+     :subtitle subtitle
+     :icon icon
+     :trailing (jetpacs-icon "edit"
+                             :content-description
+                             (format "Edit %s Area icon" area))
+     :on-tap (jetpacs-action "settings.area-icon.edit"
+                             :args (list :area area))
+     :key (jetpacs-wire-id "area-icon" area))))
+
+(defun glasspane-ui--area-icons-list ()
+  "Build icon-editor rows for the globally declared Areas."
+  (let ((areas (jetpacs-org-settings-tag-group-members
+                glasspane-area-tag-group)))
+    (if areas
+        (apply #'jetpacs-column
+               (append (mapcar #'glasspane-ui--area-icon-row areas)
+                       (list :spacing 4)))
+      (jetpacs-text "Add an Area tag above before choosing its icon."
+                    :style "caption"))))
+
 (defun glasspane-ui--agenda-card (name query)
   "One saved-search row with its edit/delete affordances."
   (jetpacs-chrome-row
@@ -509,7 +618,7 @@ given SET."
    :key (jetpacs-wire-id "gs" name)))
 
 (defun glasspane-ui--settings-body ()
-  "The app settings screen body: Area tags, demo content, and saved searches.
+  "The app settings screen body: Area tags/icons, demos, and saved searches.
 The org/calendar schema sections live on the Settings ROOT with the
 foundation that registers them, and the TODO-sequence/tags editors
 behind its \"Org workflow\" satellite (jetpacs-org-settings.el, §3
@@ -523,6 +632,12 @@ the client."
                  "Members of the non-exclusive Org tag group “Area”: each is a PARA Area.  Persisted in org-tag-persistent-alist so a file's own #+TAGS line never hides it."
                  :style "caption")
                 (glasspane-ui--area-tags-enum)
+                (jetpacs-divider)
+                (jetpacs-section-header "Area Icons")
+                (jetpacs-text
+                 "Choose presentation-only Material icons for each Area. Area membership remains ordinary Org tag data."
+                 :style "caption")
+                (glasspane-ui--area-icons-list)
                 (jetpacs-divider)
                 (jetpacs-section-header "Demo Content")
                 (jetpacs-text
@@ -579,6 +694,99 @@ the client."
 ;; editors share it with the org-workflow editors that moved out, and
 ;; the agenda writers stopped reaching across modules into a private
 ;; slot for their origin params.
+
+(defun glasspane-ui--area-icon-suggestion-chip
+    (area label icon configured &optional save-icon)
+  "Build AREA's LABEL/ICON suggestion chip against CONFIGURED.
+SAVE-ICON overrides the value persisted when tapped; the Default chip uses an
+empty value to remove the mapping while still drawing the category glyph.
+Choosing a suggestion is itself the durable save conclusion; the free-form
+field below remains available for every other bundled Material icon."
+  (jetpacs-chip
+   label
+   :icon icon
+   :selected (jetpacs-bool (equal configured icon))
+   :on-tap (jetpacs-action "settings.area-icon.save"
+                           :args (list :area area
+                                       :icon (if (null save-icon)
+                                                 icon
+                                               save-icon)))))
+
+(defun glasspane-ui--show-area-icon-dialog (area params)
+  "Show AREA's curated and free-form Material icon editor.
+PARAMS are the opening event and preserve the Settings dialog context."
+  (let* ((configured (glasspane-ui--configured-area-icon area))
+         (effective (or configured glasspane-ui--default-area-icon))
+         (save-action
+          (jetpacs-action "settings.area-icon.save"
+                          :args (list :area area)
+                          :capture-fields '("area-icon-name"))))
+    (jetpacs-settings-show-dialog
+     "glasspane-area-icon-edit"
+     (jetpacs-column
+      (jetpacs-text (format "Icon for %s" area) :style "title")
+      (jetpacs-chrome-row
+       area
+       :subtitle (if configured
+                     (format "Current · %s" configured)
+                   "Default · category")
+       :icon effective)
+      (jetpacs-text
+       "Suggestions save immediately. Or enter any bundled Material icon name below."
+       :style "caption")
+      (apply
+       #'jetpacs-flow-row
+       (append
+        (list
+         (glasspane-ui--area-icon-suggestion-chip
+          area "Default" glasspane-ui--default-area-icon
+          effective ""))
+        (mapcar
+         (lambda (choice)
+           (glasspane-ui--area-icon-suggestion-chip
+            area (car choice) (cdr choice) configured))
+         glasspane-ui--area-icon-suggestions)
+        (list :spacing 4 :run-spacing 4)))
+      (jetpacs-text-input
+       "area-icon-name"
+       :label "Custom Material icon"
+       :value (or configured "")
+       :single-line t
+       :leading-icon effective
+       :max-length 128
+       :supporting-text
+       "Use snake_case, for example health_and_safety. Blank restores category; unavailable names show a help icon."
+       :on-submit save-action
+       :hide-keyboard-on-submit t)
+      (jetpacs-row
+       (jetpacs-spacer :weight 1)
+       (jetpacs-button "Cancel" (jetpacs-dialog-dismiss) :variant "text")
+       (jetpacs-spacer :width 8)
+       (jetpacs-button "Save" save-action))
+      :spacing 8)
+     :params params)))
+
+(defun glasspane-ui--persist-area-icon (area icon)
+  "Persist AREA's normalized ICON, or remove its mapping when ICON is nil.
+The alist is key-sorted before Customize writes it because its order has no
+semantics and must not depend on the sequence in which Areas were edited."
+  (let ((next (cl-remove area glasspane-area-icons
+                         :key #'car-safe :test #'equal)))
+    (when icon (push (cons area icon) next))
+    (setq next
+          (sort next
+                (lambda (a b)
+                  (string-lessp (format "%s" (car-safe a))
+                                (format "%s" (car-safe b))))))
+    (setq glasspane-area-icons next)
+    (jetpacs-settings-save-variable 'glasspane-area-icons next)))
+
+(defun glasspane-ui--area-member-p (area)
+  "Return non-nil when AREA is a current global Area-group member."
+  (and (stringp area)
+       (member area
+               (jetpacs-org-settings-tag-group-members
+                glasspane-area-tag-group))))
 
 (defun glasspane-ui--show-agenda-dialog (name params)
   "Show the saved-search editor for NAME (nil = new)."
@@ -673,6 +881,54 @@ name is a captured dialog field and the save runs in the conclusion."
                          (jetpacs-error-label err))))))
     'accepted))
 
+(defun glasspane-ui--on-area-icon-edit (args params)
+  "Open the Material icon editor for ARGS' current `:area'.
+PARAMS preserve the originating Settings surface for the deferred dialog."
+  (let ((area (plist-get args :area)))
+    (cond
+     ((not (and (stringp area) (not (string-empty-p area)))) 'rejected)
+     ((not (glasspane-ui--area-member-p area)) 'stale)
+     ((null (jetpacs-client)) 'rejected)
+     (t
+      (jetpacs-flow-continue
+       (lambda () (glasspane-ui--show-area-icon-dialog area params)))
+      'accepted))))
+
+(defun glasspane-ui--on-area-icon-save (args params)
+  "Persist ARGS' Area icon or the custom field captured in PARAMS.
+An explicit `:icon' comes from a curated chip; otherwise `:area-icon-name'
+comes from the free-form field.  Blank removes the preference."
+  (let* ((area (plist-get args :area))
+         (fields (plist-get params :fields))
+         (raw (if (plist-member args :icon)
+                  (plist-get args :icon)
+                (plist-get fields :area-icon-name))))
+    (cond
+     ((not (and (stringp area) (not (string-empty-p area)))) 'rejected)
+     ((not (glasspane-ui--area-member-p area))
+      (jetpacs-settings-dialog-close)
+      (jetpacs-settings-refresh)
+      'stale)
+     ((not (stringp raw)) 'rejected)
+     (t
+      (let ((icon (glasspane-ui--normalize-material-icon-name raw)))
+        (cond
+         ((string-empty-p icon)
+          (glasspane-ui--persist-area-icon area nil)
+          (jetpacs-settings-dialog-close)
+          (jetpacs-shell-notify (format "Reset Area icon: %s" area))
+          (jetpacs-settings-refresh)
+          'accepted)
+         ((not (glasspane-ui--material-icon-name-p icon))
+          (jetpacs-toast "Use a snake_case Material icon name")
+          'rejected)
+         (t
+          (glasspane-ui--persist-area-icon area icon)
+          (jetpacs-settings-dialog-close)
+          (jetpacs-shell-notify (format "Saved Area icon: %s" area))
+          (jetpacs-settings-refresh)
+          'accepted)))))))
+
 (defun glasspane-ui--on-area-tags-save (args _params)
   "Persist ARGS' `:value' as the global Area tag-group members."
   (let ((value (plist-get args :value)))
@@ -722,8 +978,8 @@ name is a captured dialog field and the save runs in the conclusion."
             (assoc-delete-all name glasspane-org-custom-agendas))
       (jetpacs-settings-save-variable 'glasspane-org-custom-agendas
                                       glasspane-org-custom-agendas)
-      ;; A dialog event has no :surface; this editor is a Settings
-      ;; satellite, so use the foundation's canonical refresh target.
+      ;; A dialog event has no :surface; this editor is reached from the
+      ;; Settings hub, so use the foundation's canonical refresh target.
       (jetpacs-settings-dialog-close)
       (jetpacs-shell-notify (format "Deleted saved search: %s" name))
       (jetpacs-settings-refresh)
@@ -837,6 +1093,8 @@ the time any teardown runs, the entry has long finished loading."
 
 (defconst glasspane-ui--verbs
   '("glasspane.settings.open"
+    "settings.area-icon.edit"
+    "settings.area-icon.save"
     "settings.areas.save"
     "settings.agenda.edit"
     "settings.agenda.delete"
@@ -852,11 +1110,11 @@ search.clear-filters lives with the filter state it clears (G6),
 files.filter and files.toggle-refile with the reader adapter (G4/GR-2).")
 
 (defun glasspane-ui-register ()
-  "Register the UI verbs, the settings section/link, and the hooks.
+  "Register the UI verbs, settings section/hub entry, and hooks.
 Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces handlers and
-registry entries in place, and the link is re-added exactly once."
-  ;; :any-surface — ONLY the opener now.  The satellite link draws on
+registry entries in place, and the keyed hub entry is replaced."
+  ;; :any-surface — ONLY the opener now.  The Settings hub entry draws on
   ;; the Settings ROOT, a surface Glasspane does not own, so the tap
   ;; that OPENS the management screen arrives before any guest screen
   ;; exists and still needs the global flag.  The verbs emitted FROM
@@ -874,6 +1132,15 @@ registry entries in place, and the link is re-added exactly once."
                        #'glasspane-ui--on-settings-open
                        :any-surface t
                        :doc "Open Glasspane's settings management screen")
+    (jetpacs-defaction
+     "settings.area-icon.edit" #'glasspane-ui--on-area-icon-edit
+     :doc "Open one Area's Material icon editor"
+     :args '((:name area :type "text" :required t)))
+    (jetpacs-defaction
+     "settings.area-icon.save" #'glasspane-ui--on-area-icon-save
+     :doc "Persist or reset one Area's Material icon preference"
+     :args '((:name area :type "text" :required t)
+             (:name icon :type "text")))
     (jetpacs-defaction "settings.areas.save"
                        #'glasspane-ui--on-area-tags-save
                        :doc "Save the global Area tag-group members")
@@ -919,7 +1186,7 @@ registry entries in place, and the link is re-added exactly once."
     (jetpacs-settings-register-hub-entry
      "glasspane" :order 40 :icon "menu_book"
      :title "Glasspane"
-     :subtitle "Area tags, demo content, and saved searches"
+     :subtitle "Area tags and icons, demo content, and saved searches"
      :on-tap (jetpacs-action "glasspane.settings.open")))
   (add-hook 'jetpacs-shell-refresh-hook #'glasspane-ui--refresh-invalidate)
   (remove-hook 'jetpacs-shell-view-change-functions
@@ -934,13 +1201,33 @@ registry entries in place, and the link is re-added exactly once."
   (add-hook 'jetpacs-teardown-functions #'glasspane-ui--on-teardown))
 
 (defun glasspane-ui-unregister ()
-  "Drop the UI verbs, the settings section/link, and the hooks."
+  "Drop the UI verbs, settings section/hub entry, and hooks."
   (dolist (name glasspane-ui--verbs)
     (jetpacs-undefaction name))
   (jetpacs-settings-remove-section "Glasspane")
   (jetpacs-settings-remove-hub-entry "glasspane")
   (jetpacs-settings-dialog-close)
   (glasspane-ui-remove-hooks))
+
+(defun glasspane-ui-clock-entry (entry)
+  "Render parsed Org clock ENTRY with a time range and duration or status.
+ENTRY comes from `ebp-org-parse-logbook'.  Running clocks use source state;
+rendering never reads wall time or updates the clock."
+  (jetpacs-row
+   (jetpacs-icon "timer" :size 18 :color "outline")
+   (jetpacs-column
+    (jetpacs-text
+     (if (plist-get entry :active)
+         (format "Started %s" (plist-get entry :start))
+       (ebp-org-format-clock-time (plist-get entry :start)
+                                 (plist-get entry :end)))
+     :style "body")
+    (jetpacs-text
+     (if (plist-get entry :active) "Running"
+       (format "Duration · %s" (or (plist-get entry :duration) "")))
+     :style "caption" :color "outline")
+    :spacing 2)
+   :spacing 8))
 
 (provide 'glasspane-ui)
 ;;; glasspane-ui.el ends here

@@ -76,7 +76,7 @@
 (require 'glasspane-navigation)
 (require 'jetpacs-org-settings)      ; the shared tag vocabulary
 
-(declare-function jetpacs-material3-assist-chip "glasspane-material3"
+(declare-function jetpacs-material3-assist-chip "jetpacs-material3"
                   (label &rest keys))
 
 ;; Same-rung sibling: the foldable reader.  This file must build (and

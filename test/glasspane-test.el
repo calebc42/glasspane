@@ -16,6 +16,28 @@
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The Glasspane source directory inspected by architectural gates.")
 
+(defun glasspane-test--jetpacs-root ()
+  "Return the canonical Jetpacs root used by path-based architectural gates.
+Honor `JETPACS_DIR' and `JETPACS_ROOT'; otherwise find a sibling root by its
+`emacs/jetpacs-widgets.el' source file."
+  (let ((explicit (or (getenv "JETPACS_DIR")
+                      (getenv "JETPACS_ROOT")))
+        (candidates
+         (list (expand-file-name "../jetpacs-poc" glasspane-test--source-directory)
+               (expand-file-name "../jetpacs" glasspane-test--source-directory)
+               (expand-file-name "../jetpacs/jetpacs-poc"
+                                 glasspane-test--source-directory))))
+    (or (and explicit
+             (file-readable-p (expand-file-name "emacs/jetpacs-widgets.el"
+                                                explicit))
+             explicit)
+        (cl-find-if
+         (lambda (candidate)
+           (file-readable-p (expand-file-name "emacs/jetpacs-widgets.el"
+                                              candidate)))
+         candidates)
+        (error "Unable to locate the Jetpacs root"))))
+
 (ert-deftest glasspane-test-no-cross-module-private-reads ()
   "A sibling may consume only another module's public Glasspane API.
 Double-hyphen implementations remain legal inside their defining
@@ -65,12 +87,13 @@ the next live call."
     (with-temp-buffer
       (insert-file-contents file)
       (should-not (search-forward "glasspane-ui--defer-refresh" nil t))))
-  (let ((ef-file (expand-file-name "glasspane-ef.el"
-                                   glasspane-test--source-directory))
-        (modus-file (expand-file-name "../jetpacs/emacs/jetpacs-modus.el"
-                                      glasspane-test--source-directory))
-        (gallery-file (expand-file-name "../jetpacs/emacs/jetpacs-gallery.el"
-                                        glasspane-test--source-directory)))
+  (let* ((jetpacs-root (glasspane-test--jetpacs-root))
+         (ef-file (expand-file-name "glasspane-ef.el"
+                                    glasspane-test--source-directory))
+         (modus-file (expand-file-name "emacs/jetpacs-modus.el"
+                                       jetpacs-root))
+         (gallery-file (expand-file-name "emacs/jetpacs-gallery.el"
+                                         jetpacs-root)))
     (dolist (file (list ef-file modus-file gallery-file))
       (should (file-readable-p file)))
     (with-temp-buffer

@@ -1,9 +1,9 @@
 # Glasspane applet implementation guide
 
 This directory is the downstream Glasspane applet. Follow the workspace
-[`../AGENTS.md`](../AGENTS.md), then the applet contract in
-[`../jetpacs-applet-mcp/APPLET-GUIDE.md`](../jetpacs-applet-mcp/APPLET-GUIDE.md)
-and [`../jetpacs-applet-mcp/DETERMINISM.md`](../jetpacs-applet-mcp/DETERMINISM.md).
+[`../AGENTS.md`](../jetpacs-poc/AGENTS.md), then the applet contract in
+[`../jetpacs-poc/jetpacs-applet-mcp/APPLET-GUIDE.md`](../jetpacs-poc/jetpacs-applet-mcp/APPLET-GUIDE.md)
+and [`../jetpacs-poc/jetpacs-applet-mcp/DETERMINISM.md`](../jetpacs-poc/jetpacs-applet-mcp/DETERMINISM.md).
 
 Glasspane deliberately targets the optional Material renderer. Read
 [`RENDERER.org`](RENDERER.org) before changing its app registration or using a

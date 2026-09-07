@@ -7,13 +7,13 @@ That choice belongs to Glasspane; it is not an implicit property of Jetpacs or
 of EBP.
 
 Both branches of =glasspane-register= declare
-=:requires-extensions '("glasspane.material3")=. On a live Companion, Jetpacs
+=:requires-extensions '("jetpacs.material3")=. On a live Companion, Jetpacs
 must observe that identifier in the app target's EBP 3 =extensions= profile
 before entering or building Glasspane. If it is absent, the Apps surface shows
 the missing requirement and leaves Glasspane state and builders untouched.
 
 Material-only wire nodes are also dual-gated by their namespaced node type and
-the same extension. Their schema lives in Glasspane's renderer manifest, not in
+the same extension. Their schema lives in Jetpacs' renderer manifest, not in
 EBP. Glasspane may use those nodes because it makes the app-level requirement
 explicit. Foundation modules must not infer the requirement from a node-name
 prefix or import Material on Glasspane's behalf.

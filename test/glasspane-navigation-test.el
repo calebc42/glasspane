@@ -27,7 +27,8 @@
   (let ((entry (assoc glasspane-owner jetpacs-apps--registry)))
     (should entry)
     (should (equal (plist-get (cdr entry) :requires-extensions)
-                   '("glasspane.material3")))))
+                   '("jetpacs.material3")))
+    (should (equal jetpacs-material3-extension "jetpacs.material3"))))
 
 (ert-deftest glasspane-navigation-test-canonical-document-policy ()
   "A document open fixes Files, reader, Back screen, and return policy."

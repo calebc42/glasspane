@@ -2,7 +2,7 @@
 
 Personal information applet for Jetpacs. Glasspane is entirely downstream: it
 consumes `ebp-org`, the Jetpacs public app/surface APIs, and the optional
-`glasspane-material3` renderer extension. It does not define EBP or Jetpacs
+`jetpacs-material3` renderer extension. It does not define EBP or Jetpacs
 foundation behavior.
 
 The `glasspane-ef.el` module owns the optional EF Themes integration and
@@ -140,7 +140,7 @@ The same presentation-only mapping can be configured from Elisp:
 ```
 
 Append `_filled` to request a filled icon variant, such as `home_filled`.
-The renderer's generated [Material icon reference](../glasspane-material3/docs/lookup-tables/M3-ICON-REFERENCE.org)
+The renderer's generated [Material icon reference](../jetpacs-poc/docs/material3/lookup-tables/M3-ICON-REFERENCE.org)
 lists the accepted `snake_case` catalog names.
 
 ## Demo Org corpus

@@ -37,7 +37,7 @@
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
 (require 'jetpacs-widgets)
-(require 'glasspane-material3)
+(require 'jetpacs-material3)
 (require 'jetpacs-apps)
 
 ;; The rung ladder's sibling modules, in the plan's load order (G1: the
@@ -145,7 +145,7 @@ affordance is the FAB story, not a drawer row."
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
 stack to the selected app root — the live-reload path; `jetpacs-defapp'
 replaces its registry entry in place.  Both layout branches declare
-`glasspane.material3' explicitly; see RENDERER.org."
+`jetpacs.material3' explicitly; see RENDERER.org."
   (with-jetpacs-owner glasspane-owner
     (jetpacs-defaction "glasspane.home" #'glasspane--on-home
                        :doc "Return Glasspane to its registered root screen")
@@ -167,7 +167,7 @@ replaces its registry entry in place.  Both layout branches declare
                       :label glasspane-title
                       :icon glasspane-icon
                       :surfaces (list glasspane-owner)
-                      :requires-extensions '("glasspane.material3")
+                      :requires-extensions '("jetpacs.material3")
                       :dock #'glasspane--dock-items
                       :home-route "agenda"
                       :destinations #'glasspane--destinations)
@@ -175,7 +175,7 @@ replaces its registry entry in place.  Both layout branches declare
                     :label glasspane-title
                     :icon glasspane-icon
                     :surfaces (list glasspane-owner)
-                    :requires-extensions '("glasspane.material3")
+                    :requires-extensions '("jetpacs.material3")
                     ;; PA-3a: Glasspane owns the full five-item bar.  Eval
                     ;; is the one native core place it relocates; Files is
                     ;; replaced by the downstream Resources destination.

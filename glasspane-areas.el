@@ -293,25 +293,23 @@ declarations are path-authority rows."
           (plist-get area :declares)))))
 
 (defun glasspane-areas--chip-row (category selected)
-  "Build the intersection chips for CATEGORY with SELECTED members first."
+  "Build the intersection chip rail for CATEGORY with SELECTED members first."
   (let ((names (cons category
                      (cl-remove category
                                 (mapcar (lambda (area) (plist-get area :name))
                                         (glasspane-areas--index))
                                 :test #'equal))))
-    (apply #'jetpacs-flow-row
-           (append
-            (mapcar
-             (lambda (name)
-               (jetpacs-chip
-                name
-                :icon (glasspane-area-icon name)
-                :selected (jetpacs-bool (member name selected))
-                :on-tap (jetpacs-action
-                         "areas.filter"
-                         :args (list :category category :area name))))
-             names)
-            (list :spacing 4 :run-spacing 4)))))
+    (glasspane-ui-chip-rail
+     (mapcar
+      (lambda (name)
+        (jetpacs-chip
+         name
+         :icon (glasspane-area-icon name)
+         :selected (jetpacs-bool (member name selected))
+         :on-tap (jetpacs-action
+                  "areas.filter"
+                  :args (list :category category :area name))))
+      names))))
 
 (defun glasspane-areas--item-in-all-p (item selected)
   "Return non-nil when ITEM's areas cover every name in SELECTED."
@@ -329,7 +327,7 @@ declarations are path-authority rows."
                       (glasspane-org-workflow-keywords items))))
 
 (defun glasspane-areas--todo-chip-row (category items)
-  "Build CATEGORY's single-select Project TODO filter over ITEMS."
+  "Build CATEGORY's single-select Project TODO filter rail over ITEMS."
   (let* ((filter (glasspane-areas--todo-filter category))
          (keywords (glasspane-areas--todo-keywords items))
          (options (cons "ALL"
@@ -337,19 +335,16 @@ declarations are path-authority rows."
                                 (member filter keywords))
                             keywords
                           (append keywords (list filter))))))
-    (apply
-     #'jetpacs-flow-row
-     (append
-      (mapcar
-       (lambda (keyword)
-         (jetpacs-chip
-          keyword
-          :selected (jetpacs-bool (equal filter keyword))
-          :on-tap (jetpacs-action
-                   "areas.todo-filter"
-                   :args (list :category category :filter keyword))))
-       options)
-      (list :spacing 4 :run-spacing 4)))))
+    (glasspane-ui-chip-rail
+     (mapcar
+      (lambda (keyword)
+        (jetpacs-chip
+         keyword
+         :selected (jetpacs-bool (equal filter keyword))
+         :on-tap (jetpacs-action
+                  "areas.todo-filter"
+                  :args (list :category category :filter keyword))))
+      options))))
 
 (defun glasspane-areas--filter-projects (category items)
   "Return ITEMS matching CATEGORY's selected Project TODO state."

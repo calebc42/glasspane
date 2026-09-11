@@ -1457,13 +1457,14 @@ than sprung on a file edited since.")
 (defconst glasspane-org-reader--overdue-color "error"
   "Span color for overdue deadline badges.")
 
-(defun glasspane-org-reader--heading-ops (token archive buffer pos clocked)
+(defun glasspane-org-reader--heading-ops (token buffer pos clocked)
   "Per-heading quick actions as (LABEL ICON DESCRIPTOR) triples.
-TOKEN/ARCHIVE are the render's minted pair; BUFFER/POS the exposure
-route the \"Org actions…\" bridge needs — the base sheet carries every
-editor this app no longer owns (set-todo, schedule, deadline, priority,
-tags, refile, archive), so only the delta the base cannot offer stays
-app-verbed here (FOUNDATION-GAPS #12)."
+TOKEN is the render's minted tap token; BUFFER/POS the exposure route
+the \"Org actions…\" bridge needs — the base sheet carries every editor
+this app no longer owns (set-todo, schedule, deadline, priority, tags,
+refile, archive), so only the delta the base cannot offer stays
+app-verbed here (FOUNDATION-GAPS #12).  Archive is not repeated here:
+the header's leftward swipe already carries it."
   (delq nil
         (list
          (list "Open" "open_in_new"
@@ -1484,21 +1485,17 @@ app-verbed here (FOUNDATION-GAPS #12)."
          (when buffer
            (list "Org actions…" "edit_note"
                  (jetpacs-action "jetpacs.org.heading"
-                                 :args (list :buffer buffer :pos pos))))
-         (when archive
-           (list "Archive" "archive"
-                 (jetpacs-action "jetpacs.org.archive"
-                                 :args (list :token archive)
-                                 :confirm "Archive this subtree?"))))))
+                                 :args (list :buffer buffer :pos pos)))))))
 
-(defun glasspane-org-reader-heading-menu (token archive buffer pos clocked)
-  "The per-heading overflow (more_vert) dropdown of quick actions."
+(defun glasspane-org-reader-heading-menu (token _archive buffer pos clocked)
+  "The per-heading overflow (more_vert) dropdown of quick actions.
+The archive token is accepted for signature stability but unused: the
+header swipe is Archive's one home."
   (jetpacs-with-semantics
    (jetpacs-menu
     (mapcar (lambda (op)
               (jetpacs-menu-item (nth 0 op) (nth 2 op) :icon (nth 1 op)))
-            (glasspane-org-reader--heading-ops token archive buffer pos
-                                               clocked)))
+            (glasspane-org-reader--heading-ops token buffer pos clocked)))
    ;; SPEC 16.4: without a name the trigger announces as its icon.
    :name "Heading actions"))
 
@@ -1541,9 +1538,12 @@ and color normalization follow the same rules as Emacs buffer presentation."
         (jetpacs-buffer-line-spans (point-min) (point-max) (buffer-name))))))
 
 (defun glasspane-org-reader--heading-header (n &optional areas)
-  "Build tree node N's inline TODO/title and right-aligned AREAS.
-AREAS are effective memberships resolved in the source document.  Ordinary
-tags stay below the title without duplicating the elevated Area chips."
+  "Build tree node N's inline TODO/title with its elevated AREAS chips.
+AREAS are effective memberships resolved in the source document.  They sit
+right-aligned beside the title on medium and expanded windows and stack
+beneath it on a compact one, through the presentation every card shares
+\(`glasspane-ui-headline-with-areas').  Ordinary tags stay below the title
+without duplicating the elevated Area chips."
   (let* ((title (plist-get n :title))
          (todo (plist-get n :todo))
          (title-start (when (and (integerp (plist-get n :pos)) (derived-mode-p 'org-mode))
@@ -1564,13 +1564,11 @@ tags stay below the title without duplicating the elevated Area chips."
                       (or (glasspane-org-reader--emphasis-spans title t "bold" "on_surface" title-start)
                           (list (jetpacs-span title :font-weight "bold"
                                               :color "on_surface")))))))
-        (jetpacs-column
-         (if areas
-             (jetpacs-row
-              (jetpacs-with-attrs headline :weight 1)
-              (jetpacs-with-attrs (glasspane-ui-tag-chips areas t) :weight 1)
-              :fill t :align "center" :spacing 8)
-           headline)
+        (apply
+         #'jetpacs-column
+         (append
+          (glasspane-ui-headline-with-areas headline areas)
+          (list
          (when priority
            (jetpacs-rich-text
             (list (jetpacs-span (format "Priority %s" priority)
@@ -1578,7 +1576,7 @@ tags stay below the title without duplicating the elevated Area chips."
             :style "caption"))
          (glasspane-org-reader--meta-line n)
          (glasspane-ui-tag-chips tags)
-         :spacing 4)))))
+         :spacing 4)))))))
 
 (defun glasspane-org-reader-swipe-sides (token archive)
   "The (START . END) per-side swipe pair for a heading's minted pair.
@@ -1603,8 +1601,9 @@ agenda/tasks cards."
 (defun glasspane-org-reader--heading-node (n file tokens)
   "Render tree node N from FILE to a foldable `jetpacs-collapsible'.
 TOKENS is the render's POS -> (TAP . ARCHIVE) table.  Long-press opens
-the detail view; the trailing overflow menu carries the quick actions;
-the header swipes right = todo cycle, left = archive.  The \"Org
+the detail view, as does the overflow menu's Open item — there is no
+separate open icon, keeping the header row to the drawer controls and
+the menu; the header swipes right = todo cycle, left = archive.  The \"Org
 actions…\" bridge is authorized here through the exposure route
 \(SPEC 23.1): the base `jetpacs.org.heading' refuses any position this
 render did not record."
@@ -1634,10 +1633,6 @@ render did not record."
              drawer-controls
              (when token
                (list
-                (jetpacs-icon-button
-                 "open_in_new"
-                 (jetpacs-action "heading.tap" :args (list :token token))
-                 :content-description "Open heading")
                 (glasspane-org-reader-heading-menu
                  token archive buffer pos (ebp-org-clocked-in-p pos))))
              (list :spacing 4 :align "center")))

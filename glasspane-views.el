@@ -191,14 +191,13 @@ feeds both table cells and `jetpacs-rich-text' cards."
             spans))
     (nreverse spans)))
 
-(defun glasspane-views--tag-chips (item)
-  "The tappable tag chip row for card renderings, or nil without tags."
-  (when-let* ((tags (append (alist-get 'tags item) nil)))
-    (apply #'jetpacs-flow-row
-           (mapcar (lambda (tg)
-                     (jetpacs-material3-assist-chip
-                      tg :on-tap (glasspane-views--tag-action tg)))
-                   tags))))
+(defun glasspane-views--tag-chips (item &optional areas)
+  "The tappable ordinary-tag chip row for card renderings, or nil.
+AREAS, ITEM's Area memberships, are left out here: the card elevates them
+beside the headline through the shared presentation."
+  (glasspane-ui-tag-chips
+   (cl-remove-if (lambda (tag) (member tag areas))
+                 (append (alist-get 'tags item) nil))))
 
 (defun glasspane-views--caption (item)
   "The todo · file caption line, or nil when neither is known."
@@ -213,25 +212,31 @@ feeds both table cells and `jetpacs-rich-text' cards."
   "The keyword a swipe-to-complete lands on."
   (or (car (default-value 'org-done-keywords)) "DONE"))
 
-(defun glasspane-views--card (item &optional trailing)
+(defun glasspane-views--card (item &optional trailing stack)
   "The shared rich card for ITEM; TRAILING sits at the row's end.
-Priority-badged headline, todo · file caption, compact
-scheduled/deadline row, tappable tag chips.  Swipe from the start reveals
+Priority-badged headline with its Area chips elevated (STACK forces them
+beneath the headline, for a narrow board column), todo · file caption,
+compact scheduled/deadline row, tappable tag chips.  Swipe from the
+start reveals
 the open-todo completion action; swipe from the end reveals scheduling for
 today.  Both remain reachable by tap → detail.  Every wired affordance needs
 the minted token, so an unmintable item renders inert rather than
 carrying a ref on the wire (D-4)."
   (let* ((token (alist-get 'token item))
+         (areas (glasspane-ui-item-areas item))
          (middle
           (apply #'jetpacs-column
                  (delq nil
-                       (list
-                        (jetpacs-rich-text
-                         (glasspane-views--headline-spans item))
-                        (when-let* ((caption (glasspane-views--caption item)))
-                          (jetpacs-text caption :style "caption"))
-                        (glasspane-agenda-card-date-row item)
-                        (glasspane-views--tag-chips item))))))
+                       (append
+                        (glasspane-ui-headline-with-areas
+                         (jetpacs-rich-text
+                          (glasspane-views--headline-spans item))
+                         areas stack)
+                        (list
+                         (when-let* ((caption (glasspane-views--caption item)))
+                           (jetpacs-text caption :style "caption"))
+                         (glasspane-agenda-card-date-row item)
+                         (glasspane-views--tag-chips item areas)))))))
     (jetpacs-card
      (list (apply #'jetpacs-row
                   (delq nil
@@ -379,7 +384,9 @@ exists — so the move is a menu of the OTHER columns."
                  (remove state columns))
          :icon "more_vert")
         ;; SPEC 16.4: without a name the trigger announces as its icon.
-        :name "Move to column")))))
+        :name "Move to column"))
+     ;; A 260dp column is narrow on every window: always stack.
+     t)))
 
 (defun glasspane-views--board-node (items)
   "The kanban rendering: one column per TODO state, panning sideways.
@@ -492,17 +499,17 @@ below it the selected day's cards and the Unscheduled section."
 
 (defun glasspane-views--rendering-chips (view)
   "The List | Board | Calendar switcher for devices predating `tabs'."
-  (apply #'jetpacs-row
-         (mapcar (lambda (r)
-                   (jetpacs-chip
-                    (capitalize r)
-                    :selected (jetpacs-bool
-                               (equal r (glasspane-views--rendering view)))
-                    :on-tap (jetpacs-action
-                             "views.rendering"
-                             :args (list :name (alist-get 'name view)
-                                         :rendering r))))
-                 glasspane-views--renderings)))
+  (glasspane-ui-chip-rail
+   (mapcar (lambda (r)
+             (jetpacs-chip
+              (capitalize r)
+              :selected (jetpacs-bool
+                         (equal r (glasspane-views--rendering view)))
+              :on-tap (jetpacs-action
+                       "views.rendering"
+                       :args (list :name (alist-get 'name view)
+                                   :rendering r))))
+           glasspane-views--renderings)))
 
 (defun glasspane-views--rendering-tabs (view items file)
   "The list | board | calendar pager for VIEW over ITEMS.

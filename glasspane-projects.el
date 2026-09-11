@@ -80,10 +80,8 @@ Item order within each file remains the extractor's order."
                           (if (stringp bfile) bfile ""))))))
 
 (defun glasspane-projects--item-areas (item)
-  "Return ITEM's Area-group memberships, resolved at its source position."
-  (condition-case nil
-      (glasspane-org-item-tag-group-members item glasspane-area-tag-group)
-    (error nil)))
+  "Return ITEM's Area-group memberships through the shared applet seam."
+  (glasspane-ui-item-areas item))
 
 (defun glasspane-projects--group-by-area (items)
   "Group ITEMS by every Area each carries; unassigned Projects come last.
@@ -124,19 +122,16 @@ buckets are not walls."
 ;;;; Rendering
 
 (defun glasspane-projects--filter-row (items)
-  "Build the workflow filter chips for ITEMS."
-  (apply
-   #'jetpacs-flow-row
-   (append
-    (mapcar
-     (lambda (keyword)
-       (jetpacs-chip
-        keyword
-        :selected (jetpacs-bool (equal glasspane-projects--filter keyword))
-        :on-tap (jetpacs-action "tasks.filter"
-                                :args (list :filter keyword))))
-     (cons "ALL" (glasspane-org-workflow-keywords items)))
-    (list :spacing 4 :run-spacing 4))))
+  "Build the workflow filter chips for ITEMS as one scrolling rail."
+  (glasspane-ui-chip-rail
+   (mapcar
+    (lambda (keyword)
+      (jetpacs-chip
+       keyword
+       :selected (jetpacs-bool (equal glasspane-projects--filter keyword))
+       :on-tap (jetpacs-action "tasks.filter"
+                               :args (list :filter keyword))))
+    (cons "ALL" (glasspane-org-workflow-keywords items)))))
 
 (defun glasspane-projects--group-chips ()
   "Build the grouping-chip fallback for receivers without segmented buttons."
@@ -164,35 +159,33 @@ older receivers retain the equivalent chip actions."
 
 (defun glasspane-projects--controls-row (items)
   "Place ITEMS' workflow filters left and the grouping control right.
-The weighted flow row consumes remaining width and wraps its own chips without
-displacing the grouping control from the row's trailing edge."
+This is the medium and expanded layout: the weighted rail consumes the
+remaining width and scrolls its own chips without displacing the grouping
+control from the row's trailing edge.  The control's end inset mirrors the
+rail's content padding so both align with the card list beneath."
   (jetpacs-row
    (jetpacs-with-attrs (glasspane-projects--filter-row items) :weight 1)
-   (glasspane-projects--group-control)
+   (jetpacs-with-attrs (glasspane-projects--group-control)
+                       :pad (list :end glasspane-ui-chip-rail-padding))
    :spacing 12 :align "top" :fill t))
 
+(defun glasspane-projects--group-action ()
+  "Build the compact-window grouping toggle for the top bar.
+On a phone the segmented control would take half the width the workflow
+rail needs, so grouping moves out of the body into one icon button.  The
+icon shows the current grouping; the description names what a tap does."
+  (let ((by-area (equal glasspane-projects--group "area")))
+    (jetpacs-icon-button
+     (if by-area "category" "folder")
+     (jetpacs-action "projects.group"
+                     :args (list :by (if by-area "file" "area")))
+     :content-description (if by-area "Group by File" "Group by Area"))))
+
 (defun glasspane-projects--area-filter-row (items)
-  "Build the single-select Area filter row over Project ITEMS."
-  (apply
-   #'jetpacs-flow-row
-   (append
-    (list
-     (jetpacs-chip
-      "All Areas"
-      :icon "category"
-      :selected (jetpacs-bool (null glasspane-projects--area-filter))
-      :on-tap (jetpacs-action "projects.area-filter")))
-    (mapcar
-     (lambda (area)
-       (jetpacs-chip
-        area
-        :icon (glasspane-area-icon area)
-        :selected (jetpacs-bool
-                   (equal glasspane-projects--area-filter area))
-        :on-tap (jetpacs-action "projects.area-filter"
-                                :args (list :area area))))
-     (glasspane-projects--area-names items))
-    (list :spacing 4 :run-spacing 4))))
+  "Build the single-select Area filter rail over Project ITEMS."
+  (glasspane-ui-area-filter-rail (glasspane-projects--area-names items)
+                                 glasspane-projects--area-filter
+                                 "projects.area-filter"))
 
 (defun glasspane-projects--card (item)
   "Render tokenized ITEM as the shared card with its Area chips elevated."
@@ -238,23 +231,34 @@ displacing the grouping control from the row's trailing edge."
         (t "Nothing matches this workflow state."))))))
 
 (defun glasspane-projects--body ()
-  "Build Projects from the shared TODO walk, filter, and card seams."
+  "Build Projects from the shared TODO walk, filter, and card seams.
+A compact window gets the two rails alone; the grouping control lives in
+the top bar there (`glasspane-projects--group-action').  Wider windows keep
+the grouping control trailing the workflow rail."
   (let* ((items (condition-case nil
                     (glasspane-org-todo-items)
                   (error nil)))
          (filtered (glasspane-projects--filter-items items))
          ;; Keep the established set name: promotion adds no token set.
          (tokenized (glasspane-agenda-tokenize filtered "tasks")))
-    (jetpacs-column (glasspane-projects--controls-row items)
+    (jetpacs-column (if (glasspane-ui-compact-width-p)
+                        (glasspane-projects--filter-row items)
+                      (glasspane-projects--controls-row items))
                     (glasspane-projects--area-filter-row items)
                     (glasspane-projects--grouped-cards tokenized)
                     :spacing 8)))
+
+(defun glasspane-projects--top-actions ()
+  "The screen's top-bar actions: the compact grouping toggle, then Search."
+  (append (and (glasspane-ui-compact-width-p)
+               (list (glasspane-projects--group-action)))
+          (glasspane-ui-top-actions)))
 
 (defun glasspane-projects-screen (back)
   "Build the Projects screen with BACK navigation."
   (jetpacs-chrome-screen "Projects" (glasspane-projects--body)
                          :back back
-                         :actions (glasspane-ui-top-actions)
+                         :actions (glasspane-projects--top-actions)
                          :fab (and glasspane-ui-legacy-ia
                                    (glasspane-ui-capture-fab))))
 

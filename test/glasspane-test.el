@@ -5570,7 +5570,7 @@ point: a new screen cannot ship unreachable.")
   "No PARA opener remains staged after the PA-3a table flip.")
 
 (defconst glasspane-test--non-opening-verbs
-  '("agenda.nav" "agenda.save-custom" "agenda.select-date"
+  '("agenda.area-filter" "agenda.nav" "agenda.save-custom" "agenda.select-date"
     "agenda.set-mode" "agenda.set-month" "agenda.today" "config.sync"
     "areas.drill" "areas.filter" "areas.todo-filter" "archive.filter"
     "projects.area-filter"

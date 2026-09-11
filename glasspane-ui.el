@@ -137,9 +137,12 @@ degrade locally rather than making an Areas, Projects, or Archive builder fail."
   (or (and (stringp area) (glasspane-ui--configured-area-icon area))
       glasspane-ui--default-area-icon))
 
-(defun glasspane-ui-tag-chips (tags &optional areas)
+(defun glasspane-ui-tag-chips (tags &optional areas arrange)
   "Build wrapping TAGS, or nil when there are none.
-With AREAS, elevate the chips, add Area icons, and align them right."
+With AREAS, elevate the chips and add Area icons.  ARRANGE is the flow
+row's arrangement; Area chips default to \"end\" so they hug the trailing
+edge beside a headline, and a caller stacking them under the headline
+passes \"start\"."
   (when tags
     (apply #'jetpacs-flow-row
            (append
@@ -151,7 +154,89 @@ With AREAS, elevate the chips, add Area icons, and align them right."
                 :on-tap (jetpacs-action
                          "search.by-tag" :args (list :tag tag))))
              tags)
-            (when areas (list :arrange "end"))))))
+            (when (or arrange areas)
+              (list :arrange (or arrange "end")))))))
+
+(defconst glasspane-ui-chip-rail-padding 12
+  "Inset, in dp, drawn inside a chip rail's scroll viewport.
+It matches the 12dp content padding of the card lists the rails sit above,
+so the first chip lines up with the first card while later chips scroll
+under the window edge.")
+
+(defun glasspane-ui-chip-rail (chips)
+  "Build CHIPS as one horizontally scrolling line, or nil when there are none.
+A rail never wraps.  On a compact window a wrapping flow row of workflow
+states or Areas stacks into several lines before any content appears; one
+scrolling line costs the same fixed height on every window size and keeps
+each chip at its intrinsic width."
+  (when chips
+    (apply #'jetpacs-row
+           (append chips
+                   (list :scroll t :spacing 4
+                         :content-padding glasspane-ui-chip-rail-padding)))))
+
+(defun glasspane-ui-compact-width-p ()
+  "Non-nil when the window's width class is compact (a phone, SPEC 20.1.1).
+Before any geometry report the class defaults to compact, so a first paint
+lands in the phone layout and chrome re-pushes on the real class."
+  (equal (jetpacs-window-class :width) "compact"))
+
+(defun glasspane-ui-item-areas (item)
+  "Return ITEM's Area-group memberships, resolved at its source position.
+Any resolution error degrades to no Areas rather than failing a screen."
+  (condition-case nil
+      (glasspane-org-item-tag-group-members item glasspane-area-tag-group)
+    (error nil)))
+
+(defun glasspane-ui-area-names (items)
+  "Return the distinct Area memberships represented by ITEMS, sorted."
+  (let (names)
+    (dolist (item items)
+      (dolist (area (glasspane-ui-item-areas item))
+        (when (and (stringp area) (not (string-empty-p area)))
+          (cl-pushnew area names :test #'equal))))
+    (sort names #'string-lessp)))
+
+(defun glasspane-ui-headline-with-areas (headline areas &optional stack)
+  "Arrange HEADLINE (a node) with its elevated AREAS chips, as a node list.
+On medium and expanded windows the chips share the headline's row and hug
+the trailing edge; on a compact window, or when STACK is non-nil (a
+narrow container such as a board column), they wrap start-aligned on the
+line beneath so the title keeps the full width.  Without AREAS the list
+is just HEADLINE.  Every card shares this so a heading's Areas read the
+same on Agenda, Projects, Views, and Search."
+  (cond
+   ((null areas) (list headline))
+   ((or stack (glasspane-ui-compact-width-p))
+    (list headline (glasspane-ui-tag-chips areas t "start")))
+   (t (list (jetpacs-row
+             (jetpacs-with-attrs headline :weight 1)
+             (jetpacs-with-attrs (glasspane-ui-tag-chips areas t) :weight 1)
+             :fill t :align "center" :spacing 8)))))
+
+(defun glasspane-ui-area-filter-rail (names selected action)
+  "Build the single-select Area rail over NAMES with SELECTED active.
+The leading **All Areas** chip dispatches ACTION without arguments; each
+Area chip dispatches ACTION with its name as `:area'.  A SELECTED name
+missing from NAMES is still offered, so the active filter stays visible.
+Projects and Agenda share this rail so Areas read the same everywhere."
+  (let ((names (if (and selected (not (member selected names)))
+                   (append names (list selected))
+                 names)))
+    (glasspane-ui-chip-rail
+     (cons
+      (jetpacs-chip "All Areas"
+                    :icon "category"
+                    :selected (jetpacs-bool (null selected))
+                    :on-tap (jetpacs-action action))
+      (mapcar
+       (lambda (area)
+         (jetpacs-chip
+          area
+          :icon (glasspane-area-icon area)
+          :selected (jetpacs-bool (equal selected area))
+          :on-tap (jetpacs-action action :args (list :area area))))
+       names)))))
 
 (defcustom glasspane-babel-timeout 30
   "Seconds before a phone-triggered babel execution is abandoned.

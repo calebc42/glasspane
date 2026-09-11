@@ -242,10 +242,11 @@ sequences pan sideways rather than wrapping into a stack."
 ;; `jetpacs.org.archive' verb can resolve it; without one the card just
 ;; has no archive swipe.
 
-(defun glasspane-detail--agenda-tag-chips (tags &optional areas)
+(defun glasspane-detail--agenda-tag-chips (tags &optional areas arrange)
   "Build wrapping TAGS using the shared chip presentation.
-With AREAS, elevate the chips, add Area icons, and align them right."
-  (glasspane-ui-tag-chips tags areas))
+With AREAS, elevate the chips, add Area icons, and align them right unless
+ARRANGE says otherwise (see `glasspane-ui-tag-chips')."
+  (glasspane-ui-tag-chips tags areas arrange))
 
 (defun glasspane-detail-agenda-card (it &optional area-tags)
   "A detail-rich agenda card for item IT, distinguishing AREA-TAGS.
@@ -253,8 +254,10 @@ Leading time (or a type icon), priority-prefixed headline (done titles
 degrade to neutral on_surface — no strike span, FOUNDATION-GAPS #7),
 a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring.
 AREA-TAGS, when supplied by Projects, align right beside the headline as
-elevated chips with their configured icons.  Ordinary tags use the full
-bottom row without duplicating Areas."
+elevated chips with their configured icons on medium and expanded windows;
+a compact window stacks them start-aligned beneath the headline so the
+title keeps the card's full width.  Ordinary tags use the full bottom row
+without duplicating Areas."
   (let* ((headline (or (alist-get 'headline it) "Untitled"))
          (todo (alist-get 'todo it))
          ;; Normalized "HH:MM" — the raw property is a time-grid string
@@ -296,19 +299,14 @@ bottom row without duplicating Areas."
          (middle
           (apply #'jetpacs-column
                  (delq nil
-                       (list
-                        (if area-tags
-                            (jetpacs-row
-                             (jetpacs-with-attrs headline-node :weight 1)
-                             (jetpacs-with-attrs
-                              (glasspane-detail--agenda-tag-chips area-tags t)
-                              :weight 1)
-                             :fill t :align "center" :spacing 8)
-                          headline-node)
+                       (append
+                        (glasspane-ui-headline-with-areas headline-node
+                                                          area-tags)
+                        (list
                         (unless (string-empty-p caption)
                           (jetpacs-text caption :style "caption"))
                         (glasspane-agenda-card-date-row it)
-                        (glasspane-detail--agenda-tag-chips tags))))))
+                        (glasspane-detail--agenda-tag-chips tags)))))))
     (jetpacs-card
      (list (apply #'jetpacs-row
                   (delq nil
@@ -336,30 +334,28 @@ bottom row without duplicating Areas."
                    :confirm "Archive this subtree?"))))))))
 
 (defun glasspane-detail-result-card (it)
-  "Render a search/heading item IT to a tappable card with tag chips."
+  "Render a search/heading item IT to a tappable card with tag chips.
+Areas elevate beside (or, on a phone, beneath) the headline exactly as the
+agenda card places them; ordinary tags keep the full bottom row."
   (let* ((headline (or (alist-get 'headline it) "?"))
          (todo (alist-get 'todo it))
          (file (alist-get 'file it))
-         (tags (append (alist-get 'tags it) nil))
+         (areas (glasspane-ui-item-areas it))
+         (tags (cl-remove-if (lambda (tag) (member tag areas))
+                             (append (alist-get 'tags it) nil)))
          (token (alist-get 'token it))
          (caption (string-join
                    (delq nil (list todo
                                    (when file (file-name-nondirectory file))))
                    "  ·  "))
          (children (delq nil
-                         (list
-                          (jetpacs-text headline :style "body")
-                          (unless (string-empty-p caption)
-                            (jetpacs-text caption :style "caption"))
-                          (when tags
-                            (apply #'jetpacs-flow-row
-                                   (mapcar
-                                    (lambda (tg)
-                                      (jetpacs-material3-assist-chip
-                                       tg :on-tap (jetpacs-action
-                                                   "search.by-tag"
-                                                   :args (list :tag tg))))
-                                    tags)))))))
+                         (append
+                          (glasspane-ui-headline-with-areas
+                           (jetpacs-text headline :style "body") areas)
+                          (list
+                           (unless (string-empty-p caption)
+                             (jetpacs-text caption :style "caption"))
+                           (glasspane-ui-tag-chips tags))))))
     (jetpacs-card (list (apply #'jetpacs-column children))
                   :on-tap (and token (jetpacs-action
                                       "heading.tap"
@@ -876,11 +872,22 @@ deadline edit delegate to the foundation timestamp dialog through
                                            "heading.tags"
                                            :args (list :token main)))
             (when inherited
-              (jetpacs-column
-               (jetpacs-text "Inherited" :style "caption")
-               (apply #'jetpacs-flow-row
-                      (mapcar #'jetpacs-material3-assist-chip inherited))
-               :spacing 4))))
+              (let* ((areas (glasspane-ui-item-areas
+                             (list (cons 'file (plist-get info :file))
+                                   (cons 'pos (plist-get info :pos))
+                                   (cons 'tags (vconcat inherited)))))
+                     (inherited-areas (cl-remove-if-not
+                                       (lambda (tag) (member tag areas))
+                                       inherited))
+                     (plain (cl-remove-if (lambda (tag) (member tag areas))
+                                          inherited)))
+                (apply #'jetpacs-column
+                       (delq nil
+                             (list
+                              (jetpacs-text "Inherited" :style "caption")
+                              (glasspane-ui-tag-chips inherited-areas t "start")
+                              (glasspane-ui-tag-chips plain)))
+                       (list :spacing 4))))))
      :collapsed (jetpacs-bool (null tags)))))
 
 (defun glasspane-detail--breadcrumbs (info tokens)

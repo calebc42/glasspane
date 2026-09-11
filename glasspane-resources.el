@@ -222,26 +222,9 @@ index; a source that no longer exists has no Areas."
      :key (jetpacs-wire-id "archive" path))))
 
 (defun glasspane-resources--archive-filter-row (areas)
-  "Build the Archive Area filter chips over AREAS."
-  (apply
-   #'jetpacs-flow-row
-   (append
-    (mapcar
-     (lambda (area)
-       (let ((selected (if (equal area "All")
-                           (null glasspane-resources--archive-filter)
-                         (equal glasspane-resources--archive-filter area))))
-         (jetpacs-chip
-          area
-          :icon (and (not (equal area "All"))
-                     (glasspane-area-icon area))
-          :selected (jetpacs-bool selected)
-          :on-tap (jetpacs-action "archive.filter"
-                                  :args (list :area (if (equal area "All")
-                                                        ""
-                                                      area))))))
-     (cons "All" areas))
-    (list :spacing 4 :run-spacing 4))))
+  "Build the Archive Area filter rail over AREAS, shared with Projects."
+  (glasspane-ui-area-filter-rail areas glasspane-resources--archive-filter
+                                 "archive.filter"))
 
 (defun glasspane-resources--archive-body ()
   "Render the bounded Archive index, filtered by Area, or its empty state."
@@ -290,12 +273,14 @@ index; a source that no longer exists has no Areas."
    #'glasspane-resources-archive-screen params))
 
 (defun glasspane-resources--on-archive-filter (args params)
-  "Select the Area named in ARGS for the Archive screen; \"\" shows all.
-PARAMS carry the dispatch context for the deferred refresh."
+  "Select the Area named in ARGS for the Archive screen.
+An absent or empty `:area' shows all (the shared rail sends none; older
+renders sent \"\").  PARAMS carry the dispatch context for the deferred
+refresh."
   (let ((area (plist-get args :area)))
     (cond
-     ((not (stringp area)) 'rejected)
-     ((string-empty-p area)
+     ((not (or (null area) (stringp area))) 'rejected)
+     ((or (null area) (string-empty-p area))
       (setq glasspane-resources--archive-filter nil)
       (jetpacs-app-defer-refresh params)
       'accepted)

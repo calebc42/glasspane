@@ -74,6 +74,11 @@ strip's `:initial' from it each render.")
 ;; `glasspane-views' loads after Agenda (and itself requires Agenda for the
 ;; shared card/calendar seams).  Declaring its public registry here avoids a
 ;; load cycle while the Saved page consumes the data directly.
+(defvar glasspane-agenda--area-filter nil
+  "The active Agenda Area filter, or nil to show every Area.
+One filter for every page: switching Day, Week, Month, or a custom agenda
+keeps the narrowing, as does date navigation.")
+
 (defvar glasspane-saved-views nil
   "Saved view definitions contributed by `glasspane-views'.")
 
@@ -314,11 +319,45 @@ A saved search deleted while selected must not wedge the body."
                                                        :args '(:dir 1))
                                        :content-description "Next"))))))
 
+;;;; Areas (the shared PARA facet, presented as Projects presents it)
+
+(defun glasspane-agenda--card (it)
+  "The shared card for tokenized IT with its Area chips elevated.
+Projects renders the same card the same way, so a heading's Areas read
+identically wherever it appears."
+  (glasspane-detail-agenda-card it (glasspane-ui-item-areas it)))
+
+(defun glasspane-agenda--filter-areas (items)
+  "ITEMS narrowed to the active Area filter, or all of them without one."
+  (if (null glasspane-agenda--area-filter)
+      items
+    (cl-remove-if-not
+     (lambda (it)
+       (member glasspane-agenda--area-filter (glasspane-ui-item-areas it)))
+     items)))
+
+(defun glasspane-agenda--area-names (anchor)
+  "Area names represented across every Org-backed page at ANCHOR.
+The union keeps the rail stable while the user swipes between pages;
+each extraction is memoised, so the pages themselves re-extract nothing."
+  (glasspane-ui-area-names
+   (apply #'append
+          (mapcar (lambda (mode)
+                    (unless (equal mode glasspane-agenda--saved-mode)
+                      (glasspane-agenda--items-for mode anchor)))
+                  (glasspane-agenda--modes)))))
+
+(defun glasspane-agenda--area-rail (anchor)
+  "The Area filter rail above the pages, anchored at ANCHOR."
+  (glasspane-ui-area-filter-rail (glasspane-agenda--area-names anchor)
+                                 glasspane-agenda--area-filter
+                                 "agenda.area-filter"))
+
 ;;;; Mode bodies (items arrive already tokenized)
 
 (defun glasspane-agenda--day-view (items)
   "The flat day list for tokenized ITEMS."
-  (let ((cards (mapcar #'glasspane-detail-agenda-card items)))
+  (let ((cards (mapcar #'glasspane-agenda--card items)))
     (if cards
         (apply #'jetpacs-lazy-column cards)
       (jetpacs-empty-state :icon "event_busy"
@@ -334,7 +373,7 @@ A saved search deleted while selected must not wedge the body."
         (unless (equal date current-date)
           (setq current-date date)
           (push (jetpacs-section-header (or date "Unknown Date")) elements))
-        (push (glasspane-detail-agenda-card it) elements)))
+        (push (glasspane-agenda--card it) elements)))
     (if elements
         (apply #'jetpacs-lazy-column (nreverse elements))
       (jetpacs-empty-state :icon "event_busy"
@@ -385,7 +424,7 @@ grid, the documented fallback recipe."
      (jetpacs-section-header (format "Events for %s" selected-date))
      (if selected-items
          (apply #'jetpacs-lazy-column
-                (mapcar #'glasspane-detail-agenda-card selected-items))
+                (mapcar #'glasspane-agenda--card selected-items))
        (jetpacs-text "No events" :style "caption")))))
 
 (defun glasspane-agenda-month-fallback (items-by-date anchor selected-date
@@ -500,7 +539,7 @@ anchor to navigate."
     ("month" (glasspane-agenda--month-view items anchor))
     (_ (if items
            (apply #'jetpacs-lazy-column
-                  (mapcar #'glasspane-detail-agenda-card items))
+                  (mapcar #'glasspane-agenda--card items))
          (jetpacs-empty-state :icon "event_busy"
                               :title "No results"
                               :caption
@@ -569,7 +608,8 @@ is registry navigation, not an Org result list, and therefore mints no set."
   (if (equal mode glasspane-agenda--saved-mode)
       (glasspane-agenda--saved-page)
     (let ((items (glasspane-agenda--tokenize
-                  (glasspane-agenda--items-for mode anchor)
+                  (glasspane-agenda--filter-areas
+                   (glasspane-agenda--items-for mode anchor))
                   (concat "agenda-" mode))))
       (apply #'jetpacs-column
              (delq nil
@@ -612,16 +652,20 @@ tab."
                                           :args (list :mode m))))
                  (glasspane-agenda--modes))))
     (jetpacs-column
-     (apply #'jetpacs-flow-row (append chips (list :spacing 4)))
+     (glasspane-ui-chip-rail chips)
      (glasspane-agenda--page mode anchor))))
 
 (defun glasspane-agenda-body ()
-  "The whole agenda body: tabs when advertised, chips otherwise."
+  "The whole agenda body: the Area rail, then tabs (or chips) beneath.
+The rail sits outside the pager so it stays put while pages swipe."
   (let ((mode (glasspane-agenda--current-mode))
         (anchor (glasspane-agenda--anchor)))
-    (if (jetpacs-node-advertised-p "tabs")
-        (glasspane-agenda--body-tabs mode anchor)
-      (glasspane-agenda--body-chips mode anchor))))
+    (jetpacs-column
+     (glasspane-agenda--area-rail anchor)
+     (if (jetpacs-node-advertised-p "tabs")
+         (glasspane-agenda--body-tabs mode anchor)
+       (glasspane-agenda--body-chips mode anchor))
+     :spacing 8)))
 
 ;;;; Screens
 
@@ -696,6 +740,18 @@ the result must name a mode we actually offer."
       (jetpacs-app-defer-refresh params)
       'accepted)))
 
+(defun glasspane-agenda--on-area-filter (args params)
+  "Select ARGS' optional `:area' facet for every Agenda page and refresh.
+An absent value means all Areas.  PARAMS carry the surface for the
+deferred refresh."
+  (let ((area (plist-get args :area)))
+    (if (not (or (null area)
+                 (and (stringp area) (not (string-empty-p area)))))
+        'rejected
+      (setq glasspane-agenda--area-filter area)
+      (jetpacs-app-defer-refresh params)
+      'accepted)))
+
 (defun glasspane-agenda--on-nav (args params)
   "Shift the agenda anchor by `:dir' (±1) in units of the active span."
   (let* ((dir (plist-get args :dir))
@@ -722,7 +778,8 @@ the result must name a mode we actually offer."
 (defconst glasspane-agenda--verbs
   '("agenda.open"
     "agenda.set-mode"
-    "agenda.nav")
+    "agenda.nav"
+    "agenda.area-filter")
   "The verbs this file owns, for the register/unregister sweep.
 agenda.today/select-date/set-month live with the anchor defvars (G3).
 The sequence writers left with §3 step 2 — the foundation's ownerless
@@ -753,7 +810,11 @@ place and the hooks are add-hook-deduplicated."
     (jetpacs-defaction "agenda.set-mode" #'glasspane-agenda--on-set-mode
                        :doc "Select the active agenda mode")
     (jetpacs-defaction "agenda.nav" #'glasspane-agenda--on-nav
-                       :doc "Move the agenda anchor within its active span"))
+                       :doc "Move the agenda anchor within its active span")
+    (jetpacs-defaction
+     "agenda.area-filter" #'glasspane-agenda--on-area-filter
+     :doc "Filter every Agenda page to one Area, or clear the Area filter"
+     :args '((:name area :type "text"))))
   (remove-hook 'jetpacs-shell-after-push-hook
                #'glasspane-agenda--sync-reminders)
   (when (and glasspane-agenda-reminders-enabled

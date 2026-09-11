@@ -17,11 +17,13 @@ stack; Agenda remains the Back destination beneath the new peer screen.
 The document reader keeps the TODO keyword inline with the bold heading title,
 using the source buffer's Org keyword face and custom Emacs colors. Area chips
 share the root Projects styling: elevated, with configured icons, right-aligned
-beside the heading. Membership includes inherited and file-level Areas; ordinary
+beside the heading on medium and expanded windows and stacked beneath it on a
+phone. Membership includes inherited and file-level Areas; ordinary
 tags stay below the heading without duplicating Area chips.
-Tap the disclosure header to expand content; the labeled **Open heading** icon
-opens the existing detail view. Tag search, swipe and overflow actions remain
-available. Properties and Logbook use Jetpacs's shared tonal visibility icons:
+Tap the disclosure header to expand content; a long press, or **Open** in the
+overflow menu, opens the existing detail view. The header carries no separate
+open icon. Archive lives only in the leftward swipe, not in the overflow menu.
+Tag search, swipe and the remaining overflow actions stay available. Properties and Logbook use Jetpacs's shared tonal visibility icons:
 filled tonal means shown, and tapping hides the drawer without editing the file.
 The icons directly open or close the rendered contents beneath the heading;
 only one drawer per heading is open at a time. Opening the other icon switches
@@ -101,21 +103,43 @@ the retained file and detail views, preserving the file view's fold identity.
 The outline filter accepts text and expressions such as `todo:TODO` and
 `tags:work`.
 
+## Agenda
+
+Agenda pages render the same card Projects uses, so a heading's Area chips
+appear elevated beside (or, on a phone, beneath) its title in both places. An
+Area rail above the Day / Week / Month tabs narrows every page to one Area or
+restores the full set with **All Areas**; the filter persists across pages and
+date navigation. The rail and the fallback mode chips scroll sideways on one
+line.
+
+Saved Views cards, Search results, and the Archive screen share the same
+Area presentation: Area chips elevate beside or beneath a headline, ordinary
+tags keep the bottom row, and the Archive filter is the same Area rail as
+Projects. On a compact window the Search row trades its labeled Search and
+Save buttons for icon buttons so the query field keeps its width.
+
 ## Projects
 
 The Projects screen treats every live heading with a TODO keyword as a
-Project. Its first chip row filters by workflow state, while the second filters
-to one native Area or restores the complete set with **All Areas**. A Project
-belonging to several Areas matches each of those Area filters. The trailing
-**By File** / **By Area** segmented control changes grouping independently of
-both filters, and filtering happens before navigation tokens are allocated.
-Opening an Area mirrors the workflow-state chips beneath that Area's
-**Projects** heading. This filter is independent per Area and offers the TODO
+Project. Its first chip rail filters by workflow state, while the second filters
+to one native Area or restores the complete set with **All Areas**. Both rails
+scroll sideways on one line rather than wrapping, so a phone shows its first
+cards without a stack of chips above them. A Project
+belonging to several Areas matches each of those Area filters. The
+**By File** / **By Area** grouping changes independently of both filters, and
+filtering happens before navigation tokens are allocated. On medium and
+expanded windows the grouping is a segmented control trailing the workflow
+rail; on a compact window it is a top-bar icon button showing the current
+grouping (folder or category) whose tap switches to the other.
+Opening an Area mirrors the workflow-state rail beneath that Area's
+**Projects** heading, and its intersection chips scroll the same way. This filter is independent per Area and offers the TODO
 states represented by its actionable Projects.
 
-Project cards place elevated Area chips to the right of the heading. Ordinary
-tags have the full bottom row. Both chip groups wrap when space is limited;
-Area icons and tag-search actions are retained.
+Project cards place elevated Area chips to the right of the heading on medium
+and expanded windows; a compact window stacks them beneath the heading so the
+title keeps the card's full width. Ordinary tags have the full bottom row. Both
+chip groups wrap when space is limited; Area icons and tag-search actions are
+retained.
 
 ## Area icons
 

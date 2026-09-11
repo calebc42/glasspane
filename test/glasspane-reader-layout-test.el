@@ -950,7 +950,9 @@
     (let* ((record '(:title "A long project heading" :todo "NEXT"
                             :priority "A" :tags ("plain" "Work")))
            (glasspane-area-icons '(("Work" . "work")))
-           (header (glasspane-org-reader--heading-header record '("Work")))
+           (wide (lambda (_axis) "expanded"))
+           (header (cl-letf (((symbol-function 'jetpacs-window-class) wide))
+                     (glasspane-org-reader--heading-header record '("Work"))))
            (row (aref (plist-get header :children) 0))
            (headline (aref (plist-get row :children) 0))
            (spans (plist-get headline :spans))
@@ -968,7 +970,20 @@
       (should (= (length (plist-get tags :children)) 1))
       (should (equal (jetpacs-node->canonical-json header)
                      (jetpacs-node->canonical-json
-                      (glasspane-org-reader--heading-header record '("Work"))))))))
+                      (cl-letf (((symbol-function 'jetpacs-window-class) wide))
+                        (glasspane-org-reader--heading-header record '("Work"))))))
+      ;; A compact window stacks the Area chips beneath the full-width title.
+      (let* ((compact (cl-letf (((symbol-function 'jetpacs-window-class)
+                                 (lambda (_axis) "compact")))
+                        (glasspane-org-reader--heading-header record '("Work"))))
+             (children (append (plist-get compact :children) nil)))
+        (should (equal (plist-get (car children) :t) "rich_text"))
+        (should (equal (plist-get (cadr children) :t) "flow_row"))
+        (should (equal (plist-get (cadr children) :arrange) "start"))
+        (should-not (plist-get (cadr children) :weight))
+        (should (equal (plist-get (aref (plist-get (cadr children) :children) 0)
+                                  :variant)
+                       "elevated"))))))
 
 (ert-deftest glasspane-reader-layout-native-drawers-hide-without-editing ()
   "Native drawer actions hide both kinds without changing Org source."
@@ -1070,8 +1085,11 @@
                    (item `((file . ,file) (pos . ,pos) (tags . ("plain"))))
                    (areas (glasspane-org-item-tag-group-members
                            item glasspane-area-tag-group))
-                   (header (plist-get (glasspane-org-reader--heading-node
-                                       node file (make-hash-table :test #'eql)) :header))
+                   (header (cl-letf (((symbol-function 'jetpacs-window-class)
+                                      (lambda (_axis) "expanded")))
+                             (plist-get (glasspane-org-reader--heading-node
+                                         node file (make-hash-table :test #'eql))
+                                        :header)))
                    (json (decode-coding-string
                           (jetpacs-node->canonical-json header) 'utf-8)))
               (should (equal areas '("Work" "Digital")))
@@ -1084,20 +1102,36 @@
       (delete-directory vault t))))
 
 (ert-deftest glasspane-reader-layout-open-uses-the-heading-token ()
-  "An explicit open control and long press use the same heading authority."
+  "Long press and the menu's Open item share one heading authority.
+The header carries no separate open icon, and Archive lives only in the
+swipe, not in the overflow menu."
   (let ((tokens (make-hash-table :test #'eql)))
-    (puthash 1 '("heading-token" . nil) tokens)
+    (puthash 1 '("heading-token" . "archive-token") tokens)
     (cl-letf (((symbol-function 'jetpacs-buffer-expose) #'ignore)
               ((symbol-function 'ebp-org-clocked-in-p) #'ignore))
       (let* ((node (glasspane-org-reader--heading-node
                     '(:pos 1 :title "Heading") "/tmp/reader.org" tokens))
              (header (plist-get node :header))
-             (open (aref (plist-get header :children) 1)))
-        (should (equal (plist-get open :content_description) "Open heading"))
+             (children (append (plist-get header :children) nil))
+             (menu (car (last children)))
+             (items (append (plist-get menu :items) nil))
+             (open (car items)))
+        (should (= (length children) 2))
+        (should-not (seq-some (lambda (child)
+                                (equal (plist-get child :t) "icon_button"))
+                              children))
+        (should (equal (plist-get menu :t) "menu"))
+        (should (equal (plist-get open :label) "Open"))
         (should (equal (plist-get open :on_tap)
                        (plist-get node :on_long_tap)))
         (should (equal (plist-get (plist-get open :on_tap) :args)
-                       '(:token "heading-token")))))))
+                       '(:token "heading-token")))
+        (should-not (seq-some (lambda (item)
+                                (equal (plist-get item :label) "Archive"))
+                              items))
+        (should (plist-get node :swipe_end))
+        (should (string-search "jetpacs.org.archive"
+                               (jetpacs-node->canonical-json node)))))))
 
 (provide 'glasspane-reader-layout-test)
 ;;; glasspane-reader-layout-test.el ends here

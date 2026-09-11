@@ -275,6 +275,25 @@ results, to keep them above the fold."
 
 ;;;; The screen
 
+(defun glasspane-search--query-row (input q)
+  "The query INPUT with its Search and Save affordances for query Q.
+Two labeled buttons beside the field leave a phone's field a few
+characters wide, so a compact window gets icon buttons instead; the
+verbs and arguments are identical on both."
+  (let ((run (jetpacs-action "org.search.run" :args (list :value q)))
+        (save (jetpacs-action "agenda.save-custom" :args (list :query q))))
+    (if (glasspane-ui-compact-width-p)
+        (jetpacs-row
+         (jetpacs-with-attrs (jetpacs-box input) :weight 1)
+         (jetpacs-icon-button "search" run :content-description "Search")
+         (jetpacs-icon-button "bookmark_add" save
+                              :content-description "Save search")
+         :align "center")
+      (jetpacs-row
+       (jetpacs-with-attrs (jetpacs-box input) :weight 1)
+       (jetpacs-button "Search" run)
+       (jetpacs-button "Save" save)))))
+
 (defun glasspane-search--body ()
   "The Search screen body: builder card, search row, results."
   (let* ((q (or glasspane-search--query ""))
@@ -297,12 +316,7 @@ results, to keep them above the fold."
      #'jetpacs-lazy-column
      (glasspane-search--builder)
      (jetpacs-spacer :height 8)
-     (jetpacs-row
-      (jetpacs-with-attrs (jetpacs-box input) :weight 1)
-      (jetpacs-button "Search" (jetpacs-action "org.search.run"
-                                               :args (list :value q)))
-      (jetpacs-button "Save" (jetpacs-action "agenda.save-custom"
-                                             :args (list :query q))))
+     (glasspane-search--query-row input q)
      (jetpacs-spacer :height 8)
      (cond
       (glasspane-search--error

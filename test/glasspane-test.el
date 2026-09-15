@@ -5586,6 +5586,7 @@ point: a new screen cannot ship unreachable.")
     "heading.refile" "heading.reorder" "heading.schedule"
     "heading.tags" "heading.tap" "heading.visit" "heading.todo-cycle"
     "heading.todo-set" "journal.capture" "link.materialize" "notes.mentions"
+    "glasspane.link.open"
     "ef.load" "ef.random" "ef.random-dark" "ef.random-light"
     "ef.mirror" "ef.option"
     "org.babel.execute" "org.link.open"

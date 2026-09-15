@@ -45,6 +45,14 @@ The actions before the convergence point express authority, not presentation.
 | Resource row, file breadcrumb | =glasspane.document.open= | path | Files canonicalizes and revalidates the path against its effective roots |
 | Area drill file row, Archive row (=glasspane-areas--file-row=, =glasspane-resources--archive-row=) | =glasspane.document.open= | path | as above; an archive path is the sibling =FILE.org_archive= |
 | Area declaring-note card (=glasspane-areas--declaring-card=) | =heading.visit= | app-scoped =ebp-org= token | as the heading row above |
+| Outline link span (=glasspane-org-reader--emphasis-spans=) | =glasspane.link.open= | exposed buffer position; Org itself resolves the destination | exposure, tick, or link-syntax mismatch returns =stale=; a file-backed destination then calls =glasspane-navigation-open-document=, an external target is acknowledged, and a refused path is reported rather than drilled |
+
+A rendered link carries a buffer position only because Org must parse the
+link at tap time; the exposure table and modification tick make that position
+a bounded snapshot, and Org's own resolver produces the destination.  The
+presenter installed by =glasspane-org-reader--on-link-open= then converges
+on the same document route, so a linked heading gets the same reader, staged
+Back screen, and return action as a Project row.
 
 A heading card must not serialize a raw buffer position: edits can move the
 heading between render and tap. A file row must not mint an imaginary heading

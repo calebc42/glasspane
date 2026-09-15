@@ -51,6 +51,20 @@ background and the theme’s secondary text color to stand apart from prose.
 Source blocks and literal punctuation stay unchanged. Strikethrough delimiters are hidden, but the current RichSpan
 vocabulary has no line-through decoration. The plain editor retains all
 original Org markup.
+Org links render as underlined spans without their bracket syntax: a
+described link shows its description with any nested emphasis, and a bare
+link shows a readable label instead of its target, so `[[id:…]]` names the
+linked heading (from the note database or Org's ID index), `file:` links show
+the file name and target heading, and web links drop their scheme. Links into
+Org content use the primary color; links that leave Emacs use the secondary
+color. Tapping lets Org follow the link, then a file-backed destination opens
+through Glasspane's one document route, while web and mail addresses are
+handed to the system and acknowledged with a snackbar. Links inside examples,
+source blocks and other literal contexts keep their source text. Beneath a
+heading, a small connections caption counts the links its title and body
+render and, when the note database is available and the heading has an ID,
+the notes that link to it; tapping that caption opens the detail view, whose
+Outgoing links and Linked references sections manage the connections.
 Footnote references are underlined links that open a dialog with the note's
 rendered text. Edit switches to a compact Org text field that fits above the
 keyboard. Save commits synchronously after

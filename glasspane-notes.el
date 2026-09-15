@@ -217,6 +217,13 @@ with an :ID: still gets its backlink section."
   "Notes that link TO ID (the linked-references set), or nil."
   (condition-case nil (vulpea-db-query-by-links-some (list id)) (error nil)))
 
+(defun glasspane-notes-backlink-count (id)
+  "How many notes link to ID, or nil while the note database is unavailable.
+The outline reader's connections caption consumes this public count; the
+detail screen's Linked references section lists the notes themselves."
+  (when (glasspane-notes-available-p)
+    (length (glasspane-notes--backlinks id))))
+
 (defun glasspane-notes--forward-links (id)
   "Notes that ID links out to via id-type links, resolved to note objects."
   (when-let* ((note (condition-case nil (vulpea-db-get-by-id id) (error nil)))

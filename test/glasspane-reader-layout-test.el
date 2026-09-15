@@ -450,6 +450,162 @@
            (should-not (string-search "Hidden too." json))))
        (should (equal before (buffer-string)))))))
 
+(defun glasspane-reader-layout--link-spans (nodes)
+  "Collect spans carrying the link follow action in NODES in presentation order."
+  (cl-loop for node in (glasspane-reader-layout--nodes-of-type nodes "rich_text")
+           append (cl-loop for span across (vconcat (plist-get node :spans))
+                           for tap = (plist-get span :on_tap)
+                           when (equal (plist-get tap :action) "glasspane.link.open")
+                           collect span)))
+
+(defun glasspane-reader-layout--sibling-file (file name text)
+  "Write TEXT to NAME beside FILE and return its truename."
+  (let ((path (expand-file-name name (file-name-directory file))))
+    (with-temp-file path (insert text))
+    (file-truename path)))
+
+(ert-deftest glasspane-reader-layout-links-render-as-tappable-spans ()
+  "Links hide their syntax, label bare targets, and expose one follow verb."
+  (glasspane-reader-layout--with-source-file
+   (lambda (file)
+     (let ((other (glasspane-reader-layout--sibling-file
+                   file "other.org"
+                   "* Target note\n:PROPERTIES:\n:ID: 0a1b2c3d-target\n:END:\nBody.\n"))
+           (org-id-locations (make-hash-table :test #'equal)))
+       (puthash "0a1b2c3d-target" other org-id-locations)
+       (erase-buffer)
+       (insert "* Lab\nSee [[https://example.com/docs/][the *docs*]] and [[https://example.com/api]] or https://plain.example now.\nRead [[id:0a1b2c3d-target]], [[file:other.org::*Target note]] and [[*Lab]].\n\n#+begin_example\n[[https://example.com/literal][Literal]]\n#+end_example\n")
+       (unwind-protect
+           (let* ((before (buffer-string))
+                  (nodes (glasspane-reader-layout--source-render))
+                  (spans (glasspane-reader-layout--link-spans nodes))
+                  (json (jetpacs-node->canonical-json (apply #'jetpacs-column nodes))))
+             (should (equal (mapcar (lambda (span) (plist-get span :text)) spans)
+                            '("the " "docs" "example.com/api" "plain.example"
+                              "Target note" "other.org › Target note" "Lab")))
+             (should (equal (mapcar (lambda (span) (plist-get span :color)) spans)
+                            '("secondary" "secondary" "secondary" "secondary"
+                              "primary" "primary" "primary")))
+             (should (cl-every (lambda (span) (eq (plist-get span :underline) t)) spans))
+             (should (equal (plist-get (nth 1 spans) :font_weight) "bold"))
+             ;; One description yields two spans sharing one exposed position.
+             (should (equal (plist-get (car spans) :on_tap) (plist-get (nth 1 spans) :on_tap)))
+             (dolist (span spans)
+               (let* ((args (plist-get (plist-get span :on_tap) :args))
+                      (pos (plist-get args :pos)))
+                 (should (equal (plist-get args :buffer) (buffer-name)))
+                 (should (= (plist-get args :tick) (buffer-chars-modified-tick)))
+                 (should (jetpacs-buffer-exposed-p (buffer-name) pos "glasspane.link.open"))
+                 (should (save-excursion
+                           (goto-char pos)
+                           (eq (org-element-type (org-element-context)) 'link)))))
+             (should (string-search "[[https://example.com/literal][Literal]]" json))
+             (should-not (string-search "[[https://example.com/docs/]" json))
+             (should-not (string-search "0a1b2c3d-target" json))
+             (should (string-search "See " json))
+             (should (string-search " now." json))
+             (should (equal nodes (glasspane-reader-layout--source-render)))
+             (should (equal before (buffer-string))))
+         (when-let* ((buffer (find-buffer-visiting other)))
+           (kill-buffer buffer)))))))
+
+(ert-deftest glasspane-reader-layout-link-open-follows-org-then-the-document-route ()
+  "Org resolves a tapped link; files converge on the document route, the web is acknowledged."
+  (glasspane-reader-layout--with-source-file
+   (lambda (file)
+     (let ((other (glasspane-reader-layout--sibling-file
+                   file "other.org" "* Intro\nText.\n* Elsewhere\nMore.\n")))
+       (erase-buffer)
+       (insert "* Lab\nGo [[file:other.org::*Elsewhere][there]] or [[https://example.com/x][web]].\n")
+       (unwind-protect
+           (let* ((source (current-buffer))
+                  (nodes (glasspane-reader-layout--source-render))
+                  (spans (glasspane-reader-layout--link-spans nodes))
+                  (file-args (plist-get (plist-get (car spans) :on_tap) :args))
+                  (web-args (plist-get (plist-get (cadr spans) :on_tap) :args))
+                  opened notices browsed thunks)
+             (should (= (length spans) 2))
+             (cl-letf (((symbol-function 'jetpacs-navigate-thunk)
+                        (lambda (thunk _surface _label presenter)
+                          (push (cons thunk presenter) thunks)
+                          "app:jetpacs.files"))
+                       ((symbol-function 'glasspane-navigation-open-document)
+                        (lambda (path &optional position)
+                          (push (list path position) opened)
+                          'accepted))
+                       ((symbol-function 'jetpacs-shell-notify)
+                        (lambda (text &rest _) (push text notices)))
+                       ((symbol-function 'browse-url)
+                        (lambda (url &rest _) (push url browsed))))
+               ;; A file link lands on the searched heading of the other file.
+               (should (eq (glasspane-org-reader--on-link-open file-args nil) 'accepted))
+               (let* ((entry (pop thunks))
+                      (dest (with-temp-buffer
+                              (jetpacs-buffer-funcall-shimmed (car entry)))))
+                 (should (equal (buffer-file-name (car dest)) other))
+                 (should (with-current-buffer (car dest)
+                           (save-excursion (goto-char (cdr dest))
+                                           (looking-at-p "\\* Elsewhere"))))
+                 (should (funcall (cdr entry) (car dest) (cdr dest) "app:jetpacs.files"))
+                 (should (equal opened (list (list other (cdr dest))))))
+               ;; A web link stays put: Org handed it to the browser.
+               (should (eq (glasspane-org-reader--on-link-open web-args nil) 'accepted))
+               (let* ((entry (pop thunks))
+                      (dest (with-temp-buffer
+                              (jetpacs-buffer-funcall-shimmed (car entry)))))
+                 (should (eq (car dest) source))
+                 (should (equal browsed '("https://example.com/x")))
+                 (should (funcall (cdr entry) (car dest) (cdr dest) "app:jetpacs.files"))
+                 (should (equal notices '("Opened link")))
+                 (should (= (length opened) 1)))
+               ;; Snapshot discipline: a changed source or an unexposed position.
+               (should (eq (glasspane-org-reader--on-link-open
+                            (plist-put (copy-sequence file-args) :tick
+                                       (1+ (plist-get file-args :tick)))
+                            nil)
+                           'stale))
+               (should (eq (glasspane-org-reader--on-link-open
+                            (list :buffer (buffer-name) :pos 1
+                                  :tick (plist-get file-args :tick))
+                            nil)
+                           'rejected))
+               (should (null thunks))))
+         (when-let* ((buffer (find-buffer-visiting other)))
+           (kill-buffer buffer)))))))
+
+(ert-deftest glasspane-reader-layout-connections-caption-counts-own-links ()
+  "Each heading counts the links it renders; the note graph adds references."
+  (glasspane-reader-layout--with-source-file
+   (lambda (file)
+     (erase-buffer)
+     (insert "* Lab [[https://lab.example][site]]\n:PROPERTIES:\n:ID: lab-id\n:END:\nSee [[https://a.example][A]] and [[https://b.example][B]].\n** Child\nOnly [[https://c.example][C]].\n* Quiet\nNothing here.\n")
+     (cl-labels ((captions (nodes)
+                   (cl-loop for node in (glasspane-reader-layout--nodes-of-type nodes "rich_text")
+                            when (equal (plist-get node :style) "caption")
+                            append (cl-loop for span across (vconcat (plist-get node :spans))
+                                            when (string-match-p "link" (plist-get span :text))
+                                            collect span))))
+       (cl-letf (((symbol-function 'glasspane-org-reader--mint)
+                  (lambda (&rest _)
+                    (let ((table (make-hash-table :test #'eql)))
+                      (puthash 1 '("lab-token" . "lab-archive") table)
+                      table))))
+         (let ((spans (captions (glasspane-org-reader-file file))))
+           (should (equal (mapcar (lambda (span) (plist-get span :text)) spans)
+                          '("3 links" "1 link")))
+           (should (cl-every (lambda (span) (equal (plist-get span :color) "outline")) spans))
+           (should (cl-notany (lambda (span) (plist-get span :on_tap)) spans)))
+         (cl-letf (((symbol-function 'glasspane-notes-available-p) (lambda () t))
+                   ((symbol-function 'glasspane-notes-backlink-count)
+                    (lambda (id) (if (equal id "lab-id") 2 0))))
+           (let ((spans (captions (glasspane-org-reader-file file))))
+             (should (equal (mapcar (lambda (span) (plist-get span :text)) spans)
+                            '("3 links · 2 linked references" "1 link")))
+             (should (equal (plist-get (car spans) :color) "primary"))
+             (should (equal (plist-get (car spans) :on_tap)
+                            (jetpacs-action "heading.tap" :args '(:token "lab-token"))))
+             (should-not (plist-get (cadr spans) :on_tap)))))))))
+
 (ert-deftest glasspane-reader-layout-footnote-dialog-saves-normal-and-inline ()
   "Dialog Save durably updates exactly one definition; Cancel leaves source alone."
   (dolist (source '("* Lab\nRead[fn:a].\n* Footnotes\n[fn:a] Old *note*\n\n[fn:b] Other.\n"
@@ -682,7 +838,7 @@
       (should-not (glasspane-reader-layout--nodes-of-type (glasspane-reader-layout--source-render) "box")))))
 
 (ert-deftest glasspane-reader-layout-images-coexist-with-tables ()
-  "The demo image and caption render without upgrading example/prose links."
+  "The demo image and caption render; prose links become links, examples stay literal."
   (with-temp-buffer
     (insert "* Lab\nBefore.\n\n#+CAPTION: Standalone remote image with alt text\n#+ATTR_ORG: :width 640\n[[https://picsum.photos/seed/glasspane-org/640/320.jpg]]\n\n| Feature | State |\n|---------+-------|\n| Images | ready |\n\n- [ ] Task\n\n[[https://example.org/second.png][Second picture]]\n\n[[https://example.org/prose.png]] followed by prose.\n\n#+begin_src text\n#+CAPTION: Example\n[[https://example.org/example.png]]\n#+end_src\nAfter.\n")
     (org-mode)
@@ -697,9 +853,12 @@
       (should (= (length (glasspane-reader-layout--nodes-of-type nodes "table")) 1))
       (should (= (length (glasspane-reader-layout--nodes-of-type nodes "checkbox")) 1))
       (dolist (text '("Before." "After." "Standalone remote image with alt text"
-                      "[[https://example.org/prose.png]] followed by prose."
+                      "example.org/prose.png" " followed by prose."
                       "[[https://example.org/example.png]]"))
         (should (string-search text json)))
+      ;; An image link inside prose is a tappable link, not an inline image.
+      (should-not (string-search "[[https://example.org/prose.png]]" json))
+      (should (= (length (glasspane-reader-layout--link-spans nodes)) 1))
       (should-not (string-search "#+ATTR_ORG" json))
       (should-not (string-search "#+CAPTION: Standalone" json))
       (should (equal json (jetpacs-node->canonical-json
@@ -710,7 +869,9 @@
                (plain (jetpacs-node->canonical-json (apply #'jetpacs-column fallback))))
           (should-not (glasspane-reader-layout--nodes-of-type fallback "image"))
           (should (string-search "#+CAPTION: Standalone" plain))
-          (should (string-search "[[https://picsum.photos" plain))))
+          ;; Without native images the standalone link is still a link.
+          (should (string-search "picsum.photos/seed/glasspane-org/640/320.jpg" plain))
+          (should-not (string-search "[[https://picsum.photos" plain))))
       (should (equal source (buffer-string))))))
 
 (ert-deftest glasspane-reader-layout-tables-preserve-surrounding-source ()

@@ -64,6 +64,17 @@
 (require 'glasspane-org)                ; durable mutation/save funnel
 (require 'glasspane-ui)                 ; shared Area and tag presentation
 (require 'jetpacs-org-render)            ; native drawer visibility controls
+(require 'org-id)                        ; ID index for bare id: link labels
+(require 'jetpacs-navigate)              ; Org follows links; Glasspane presents
+
+;; The document route lives in the sibling that soft-requires this reader;
+;; the note graph is an optional later rung.  Both are called by name only.
+(declare-function glasspane-navigation-open-document "glasspane-navigation"
+                  (path &optional position))
+(declare-function glasspane-notes-available-p "glasspane-notes" ())
+(declare-function glasspane-notes-backlink-count "glasspane-notes" (id))
+(declare-function vulpea-db-get-by-id "ext:vulpea-db-query" (id))
+(declare-function vulpea-note-title "ext:vulpea-note" (note))
 
 ;;;; File access (the G1 funnel: policy first, clamped IO always)
 
@@ -1039,6 +1050,205 @@ drafts, and failed writes roll back the buffer while leaving the dialog open."
                  'accepted)))))
         (error (jetpacs-shell-notify (jetpacs-error-label err) surface) 'rejected))))))
 
+;;;; Links: pretty inline references that follow through Org
+
+(defconst glasspane-org-reader--link-label-limit 60
+  "Longest readable label synthesized for a link without a description.")
+
+(defconst glasspane-org-reader--internal-link-types
+  '("id" "file" "attachment" "fuzzy" "custom-id" "coderef" "radio")
+  "Link types whose destination is Org content rather than an external app.")
+
+(defvar glasspane-org-reader--link-tally nil
+  "Tappable links rendered for the heading being built, or nil outside one.
+`glasspane-org-reader--heading-node' binds it around its own header and body
+so a nested heading's binding never leaks into its parent's count.")
+
+(defun glasspane-org-reader--link-color (object)
+  "The theme role for link OBJECT: primary inside Org, secondary outside.
+Both are roles every Companion resolves, so the distinction survives themes."
+  (if (member (org-element-property :type object)
+              glasspane-org-reader--internal-link-types)
+      "primary"
+    "secondary"))
+
+(defun glasspane-org-reader--id-title (id source-buffer)
+  "The heading title behind Org ID, or nil when it cannot be read cheaply.
+The note database answers first.  Otherwise Org's ID index names the file,
+falling back to SOURCE-BUFFER's own file, and the EBP resolver reads the
+heading inside the allowlisted roots.  Never signals and never edits."
+  (or (and (featurep 'vulpea) (fboundp 'vulpea-db-get-by-id)
+           (condition-case nil
+               (when-let* ((note (vulpea-db-get-by-id id))
+                           (title (vulpea-note-title note)))
+                 (and (stringp title) (not (string-empty-p title)) title))
+             (error nil)))
+      (condition-case nil
+          (when-let* ((file (with-current-buffer source-buffer
+                              (org-id-find-id-file id)))
+                      (marker (ebp-org-resolve-ref
+                               (list :id id :file (file-truename file)))))
+            (unwind-protect
+                (with-current-buffer (marker-buffer marker)
+                  (org-with-wide-buffer
+                   (goto-char marker)
+                   (let ((title (org-get-heading t t t t)))
+                     (and (stringp title) (not (string-empty-p title)) title))))
+              (set-marker marker nil)))
+        (error nil))))
+
+(defun glasspane-org-reader--link-label (object source-buffer)
+  "A readable label for link OBJECT that has no description.
+An id link shows the heading it names, a file link its file name and target
+heading, a web link its address without the scheme.  Other types keep their
+raw target.  SOURCE-BUFFER helps resolve ids declared in the same file."
+  (let* ((type (org-element-property :type object))
+         (path (or (org-element-property :path object) ""))
+         (raw (or (org-element-property :raw-link object) path))
+         (search (org-element-property :search-option object))
+         (label
+          (pcase type
+            ("id" (or (glasspane-org-reader--id-title path source-buffer)
+                      (concat "Heading " (jetpacs-truncate-text path 9))))
+            ((or "file" "attachment")
+             (concat (file-name-nondirectory (directory-file-name path))
+                     (when (and (stringp search) (not (string-empty-p search)))
+                       (concat " › " (string-trim-left search "[*#]+")))))
+            ((or "http" "https" "ftp")
+             (string-remove-suffix "/" (string-remove-prefix "//" path)))
+            ("fuzzy" (string-trim-left path "[*]+"))
+            ((or "mailto" "custom-id" "coderef" "radio") path)
+            (_ raw))))
+    (jetpacs-truncate-text (if (string-empty-p label) raw label)
+                           glasspane-org-reader--link-label-limit)))
+
+(defun glasspane-org-reader--link-properties (object action source-buffer)
+  "Mark link OBJECT in the current presentation copy as a tappable span.
+ACTION is its follow descriptor.  A described link keeps its description
+text, so emphasis nested inside stays styled; a bare link is replaced by a
+readable label.  Return non-nil when OBJECT lay inside the copy."
+  (let* ((beg (org-element-property :begin object))
+         (end (- (org-element-property :end object)
+                 (or (org-element-property :post-blank object) 0)))
+         (cb (org-element-property :contents-begin object))
+         (ce (org-element-property :contents-end object))
+         (attributes (list 'gp-action action
+                           'gp-color (glasspane-org-reader--link-color object)
+                           'gp-underline t)))
+    (when (<= (point-min) beg end (point-max))
+      (if (and cb ce (< cb ce))
+          (progn
+            (put-text-property beg cb 'gp-hide t)
+            (put-text-property ce end 'gp-hide t)
+            (add-text-properties cb ce attributes))
+        (set-text-properties beg end nil)
+        (add-text-properties
+         beg (1+ beg)
+         (append (list 'gp-replacement
+                       (glasspane-org-reader--link-label object source-buffer))
+                 attributes))
+        (put-text-property (1+ beg) end 'gp-hide t))
+      t)))
+
+(defun glasspane-org-reader--present-link-destination
+    (source pos destination position surface)
+  "Present Org's DESTINATION at POSITION for the link at POS in SOURCE.
+Org has already followed the link.  A file-backed destination takes
+Glasspane's one document route, so a linked heading lands in the same
+reader, Back screen, and return policy as every Project or Resource row.
+Staying on the link means Org handed an external target to the system (a
+browser or mail client), which only needs an acknowledgement on SURFACE.
+Return non-nil for every owned outcome, including a refused path, so the
+generic buffer drill never bypasses the document policy; nil leaves a
+non-file buffer to the foundation."
+  (let ((path (and (buffer-live-p destination)
+                   (buffer-local-value 'buffer-file-name destination))))
+    (cond
+     ((and (eq destination source) (integerp position)
+           (with-current-buffer source
+             (save-excursion
+               (goto-char pos)
+               (let ((link (org-element-context)))
+                 (and (eq (org-element-type link) 'link)
+                      (<= (org-element-property :begin link) position
+                          (org-element-property :end link)))))))
+      (jetpacs-shell-notify "Opened link" surface)
+      t)
+     (path
+      (let ((status
+             (condition-case err
+                 (glasspane-navigation-open-document
+                  path (and (integerp position) position))
+               (error
+                (message "glasspane: link destination failed: %s"
+                         (jetpacs-error-label err))
+                'rejected))))
+        (unless (eq status 'accepted)
+          (jetpacs-shell-notify "This link leads outside the document roots."
+                                surface))
+        t))
+     (t nil))))
+
+(defun glasspane-org-reader--on-link-open (args params)
+  "Follow ARGS' exposed Org link, then present where Org went for PARAMS.
+Reject positions this render never exposed; answer `stale' once the source
+changed or no longer holds a link there.  Org owns link syntax and
+resolution, including internal targets, custom types and the system
+handoff for web addresses.  Presentation is Glasspane's document route."
+  (let* ((name (plist-get args :buffer))
+         (pos (plist-get args :pos))
+         (tick (plist-get args :tick))
+         (buffer (and (stringp name) (get-buffer name))))
+    (cond
+     ((not (and buffer (integerp pos) (integerp tick)
+                (jetpacs-buffer-exposed-p name pos "glasspane.link.open")))
+      'rejected)
+     ((jetpacs-event-stale-p params) 'stale)
+     ((not (with-current-buffer buffer
+             (and (derived-mode-p 'org-mode)
+                  (= tick (buffer-chars-modified-tick))
+                  (org-with-wide-buffer
+                   (and (<= (point-min) pos (point-max))
+                        (save-excursion
+                          (goto-char pos)
+                          (eq (org-element-type (org-element-context)) 'link)))))))
+      'stale)
+     (t
+      (jetpacs-navigate-thunk
+       (lambda ()
+         ;; Leave the destination current: the navigator captures both it
+         ;; and Org's destination point.
+         (set-buffer buffer)
+         (goto-char pos)
+         (org-open-at-point))
+       (plist-get params :surface)
+       "Org link"
+       (lambda (destination position surface)
+         (glasspane-org-reader--present-link-destination
+          buffer pos destination position surface)))
+      'accepted))))
+
+(defun glasspane-org-reader--connections-line (links backlinks token)
+  "A caption summarizing LINKS out of a heading and BACKLINKS into it.
+BACKLINKS is nil when the note database is unavailable; then the line only
+counts links and is not tappable.  With the database, tapping opens the
+detail view for TOKEN, whose reference sections manage the connections.
+Return nil when there is nothing to report."
+  (let ((parts (delq nil
+                     (list (when (> links 0)
+                             (format "%d link%s" links (if (= links 1) "" "s")))
+                           (when (and (integerp backlinks) (> backlinks 0))
+                             (format "%d linked reference%s" backlinks
+                                     (if (= backlinks 1) "" "s")))))))
+    (when parts
+      (let ((tap (and (integerp backlinks) token
+                      (jetpacs-action "heading.tap" :args (list :token token)))))
+        (jetpacs-rich-text
+         (list (jetpacs-span (string-join parts " · ")
+                             :color (if tap "primary" "outline")
+                             :on-tap tap))
+         :style "caption")))))
+
 (defconst glasspane-org-reader--literal-background "#80808024"
   "Subtle translucent background shared by inline literals and examples.")
 
@@ -1047,12 +1257,14 @@ drafts, and failed writes roll back the buffer while leaving the dialog open."
 INLINE parses a heading or label; otherwise parse full Org elements so code,
 examples, keywords and fixed-width text remain literal.  WEIGHT and COLOR
 supply base styling.  SOURCE-START maps TEXT to the current Org buffer for
-footnote links.  Only the temporary presentation copy is modified.
+footnote and link taps.  Only the temporary presentation copy is modified.
 Return nil when there is no emphasis or the native budget cannot fit it.
 RichSpan has no strike decoration; strike-through loses only its markers."
   (when (and (jetpacs-node-advertised-p "rich_text")
              (or (string-match-p "[*_/+~=]" text)
-                 (and source-start (string-search "[fn:" text))))
+                 (and source-start
+                      (or (string-search "[fn:" text)
+                          (string-match-p org-link-any-re text)))))
     (let* ((source-buffer (current-buffer))
            (tree (if inline
                      (org-element-parse-secondary-string text (org-element-restriction 'paragraph))
@@ -1060,9 +1272,9 @@ RichSpan has no strike decoration; strike-through loses only its markers."
                      (insert text)
                      (let ((org-inhibit-startup t)) (delay-mode-hooks (org-mode)))
                      (org-element-parse-buffer))))
-           (objects (org-element-map tree '(bold italic underline strike-through code verbatim footnote-reference)
+           (objects (org-element-map tree '(bold italic underline strike-through code verbatim footnote-reference link)
                       #'identity))
-           spans exposed)
+           spans exposed links)
       (when objects
         (with-temp-buffer
           (insert text)
@@ -1079,12 +1291,24 @@ RichSpan has no strike decoration; strike-through loses only its markers."
                                  ((or 'code 'verbatim)
                                   (list 'gp-mono t 'gp-color "secondary"
                                         'gp-bg glasspane-org-reader--literal-background)))))
-              (when (and (not (eq type 'footnote-reference))
+              (when (and (not (memq type '(footnote-reference link)))
                          (<= (point-min) beg cb ce (1+ ce) (point-max)))
                 (put-text-property beg cb 'gp-hide t)
                 (put-text-property ce (1+ ce) 'gp-hide t)
                 (when attributes (add-text-properties cb ce attributes)))))
           (when source-start
+            ;; Links first: a reference's own pass below clears any link
+            ;; nested inside the note text it hides.
+            (dolist (object objects)
+              (when (and (eq (org-element-type object) 'link)
+                         (not (org-element-lineage object '(footnote-reference link))))
+                (let* ((pos (+ source-start (1- (org-element-property :begin object))))
+                       (action (with-current-buffer source-buffer
+                                 (jetpacs-action "glasspane.link.open"
+                                                 :args (list :buffer (buffer-name) :pos pos
+                                                             :tick (buffer-chars-modified-tick))))))
+                  (when (glasspane-org-reader--link-properties object action source-buffer)
+                    (push pos links)))))
             (dolist (object objects)
               (when (and (eq (org-element-type object) 'footnote-reference)
                          (not (org-element-lineage object '(footnote-reference))))
@@ -1131,7 +1355,11 @@ RichSpan has no strike decoration; strike-through loses only its markers."
             (when bytes-left (setcdr jetpacs-buffer-budget (- bytes-left bytes)))
             (with-current-buffer source-buffer
               (dolist (pos exposed)
-                (jetpacs-buffer-expose (buffer-name) pos "glasspane.footnote.open")))
+                (jetpacs-buffer-expose (buffer-name) pos "glasspane.footnote.open"))
+              (dolist (pos links)
+                (jetpacs-buffer-expose (buffer-name) pos "glasspane.link.open")))
+            (when glasspane-org-reader--link-tally
+              (cl-incf glasspane-org-reader--link-tally (length links)))
             spans))))))
 
 (defun glasspane-org-reader--prose-node (text &optional inline color source-start)
@@ -1598,6 +1826,17 @@ agenda/tasks cards."
                                   :args (list :token archive)
                                   :confirm "Archive this subtree?")))))))
 
+(defun glasspane-org-reader--backlink-count (pos)
+  "How many notes link to the heading at POS, or nil without a note database.
+Only a heading with an ID can be linked to by id, so the ID is read before
+the graph is consulted.  The caller is in the heading's source buffer."
+  (when (and (fboundp 'glasspane-notes-available-p)
+             (fboundp 'glasspane-notes-backlink-count)
+             (glasspane-notes-available-p)
+             (integerp pos))
+    (when-let* ((id (org-entry-get pos "ID")))
+      (glasspane-notes-backlink-count id))))
+
 (defun glasspane-org-reader--heading-node (n file tokens)
   "Render tree node N from FILE to a foldable `jetpacs-collapsible'.
 TOKENS is the render's POS -> (TAP . ARCHIVE) table.  Long-press opens
@@ -1616,10 +1855,20 @@ render did not record."
          (areas (glasspane-org-item-tag-group-members
                  `((file . ,file) (pos . ,pos) (tags . ,(plist-get n :tags)))
                  glasspane-area-tag-group))
-         (header (glasspane-org-reader--heading-header n areas))
          (drawer-controls
           (jetpacs-org-render-drawer-controls
-           (glasspane-org-reader--drawers n) buffer t)))
+           (glasspane-org-reader--drawers n) buffer t))
+         header content links)
+    ;; Count only this heading's own rendered links: the header's title and
+    ;; its body.  Each child heading rebinds the tally for itself.
+    (let ((glasspane-org-reader--link-tally 0))
+      (setq header (glasspane-org-reader--heading-header n areas))
+      (setq content (glasspane-org-reader--content-nodes n file tokens))
+      (setq links glasspane-org-reader--link-tally))
+    (when-let* ((connections
+                 (glasspane-org-reader--connections-line
+                  links (glasspane-org-reader--backlink-count pos) token)))
+      (setq header (jetpacs-column header connections :spacing 4)))
     (when token
       (jetpacs-buffer-expose buffer pos "jetpacs.org.heading"))
     (jetpacs-collapsible
@@ -1636,7 +1885,7 @@ render did not record."
                 (glasspane-org-reader-heading-menu
                  token archive buffer pos (ebp-org-clocked-in-p pos))))
              (list :spacing 4 :align "center")))
-     (glasspane-org-reader--content-nodes n file tokens)
+     content
      :on-long-tap (and token
                        (jetpacs-action "heading.tap"
                                        :args (list :token token)))
@@ -2205,7 +2454,8 @@ direct LazyColumn children, and select the rendered presentation."
   '("heading.menu" "files.filter" "files.toggle-refile" "heading.reorder"
     "glasspane.checkbox" "glasspane.source.edit" "glasspane.source.save" "glasspane.source.cancel" "glasspane.call.execute"
     "glasspane.call.edit" "glasspane.call.save" "glasspane.call.cancel"
-    "glasspane.footnote.open" "glasspane.footnote.edit" "glasspane.footnote.save")
+    "glasspane.footnote.open" "glasspane.footnote.edit" "glasspane.footnote.save"
+    "glasspane.link.open")
   "The verbs this rung's reader owns, for the register/unregister sweep.
 heading.tap/props.show/duplicate/todo-cycle/clock-in are the detail
 sibling's; the menu names them by wire string only.  heading.reorder
@@ -2238,6 +2488,8 @@ body/actions claimant; this app replaces the stock adapter in the stable
                        :any-surface t :doc "Switch this footnote dialog from reading to editing")
     (jetpacs-defaction "glasspane.footnote.save" #'glasspane-org-reader--on-footnote-save
                        :any-surface t :doc "Save this dialog's footnote text after checking source and disk freshness")
+    (jetpacs-defaction "glasspane.link.open" #'glasspane-org-reader--on-link-open
+                       :any-surface t :doc "Follow this exposed Org link through Org, then present it by Glasspane's document route")
     (jetpacs-defaction "glasspane.call.edit" #'glasspane-org-reader--on-call-edit
                        :any-surface t :doc "Open an inline argument draft for this Babel call")
     (jetpacs-defaction "glasspane.call.save" #'glasspane-org-reader--on-call-save

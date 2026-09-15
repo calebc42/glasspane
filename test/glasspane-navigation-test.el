@@ -148,6 +148,35 @@ Area file row and the Archive row carry a validated path
                      ("/vault/work.org" nil)
                      ("/vault/work.org" nil))))))
 
+(ert-deftest glasspane-navigation-test-link-destinations-converge ()
+  "An Org-resolved link destination takes the same presenter as tokens and paths.
+Staying on the link means Org handed an external target to the system, and a
+buffer without a file is left to the foundation drill."
+  (let (calls notices)
+    (cl-letf (((symbol-function 'glasspane-navigation-open-document)
+               (lambda (path &optional position)
+                 (push (list path position) calls)
+                 'accepted))
+              ((symbol-function 'jetpacs-shell-notify)
+               (lambda (text &rest _) (push text notices))))
+      (with-temp-buffer
+        (org-mode)
+        (insert "See [[https://example.com][web]] now.\n")
+        (let ((source (current-buffer)))
+          (with-temp-buffer
+            (setq buffer-file-name "/vault/other.org")
+            (unwind-protect
+                (should (glasspane-org-reader--present-link-destination
+                         source 5 (current-buffer) 42 "app:jetpacs.files"))
+              (setq buffer-file-name nil)))
+          (should (glasspane-org-reader--present-link-destination
+                   source 5 source 7 "app:jetpacs.files"))
+          (with-temp-buffer
+            (should-not (glasspane-org-reader--present-link-destination
+                         source 5 (current-buffer) 1 "app:jetpacs.files"))))))
+    (should (equal calls '(("/vault/other.org" 42))))
+    (should (equal notices '("Opened link")))))
+
 (ert-deftest glasspane-navigation-test-real-org-token-preserves-position ()
   "A real durable heading token resolves to canonical PATH and POSITION."
   (let* ((root (make-temp-file "glasspane-navigation" t))

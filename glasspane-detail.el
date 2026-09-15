@@ -32,7 +32,8 @@
 ;;   (jetpacs-org-dialogs.el:385-745,1165-1169).  The app keeps token-based
 ;;   delegation verbs for planning and tags.  `detail.planning.edit'
 ;;   seeds the foundation timestamp dialog for SCHEDULED/DEADLINE;
-;;   `detail.tags.edit' opens its grouped local-tag picker.  Archive rides
+;;   `detail.tags.edit' opens its grouped local-tag picker and
+;;   `detail.priority.edit' its priority dialog.  Archive rides
 ;;   the base `jetpacs.org.archive' verb on a token minted under the
 ;;   base owner's scope, with the SPEC 14.1 device-side confirm.
 ;; - The (ask . t)/empty-date PROMPT arms of todo-set/schedule/
@@ -79,6 +80,11 @@
 
 (declare-function jetpacs-material3-assist-chip "jetpacs-material3"
                   (label &rest keys))
+(declare-function jetpacs-material3-split-button "jetpacs-material3"
+                  (label on-tap &rest keys))
+;; The note graph is an optional later rung, consulted by name only.
+(declare-function glasspane-notes-available-p "glasspane-notes" ())
+(declare-function glasspane-notes-backlink-count "glasspane-notes" (id))
 
 ;; Same-rung sibling: the foldable reader.  This file must build (and
 ;; the detail body must render) with the reader absent, so the require
@@ -100,11 +106,6 @@
 (defvar glasspane-ui--detail-read-mode t
   "When non-nil the detail screen shows the foldable reader, else the editor.")
 
-(defvar glasspane-detail--todo-picker-key nil
-  "The heading key whose inline TODO chip list is open, or nil.
-Only actions write this presentation state.  Opening a heading or setting
-its TODO state closes the list; other headings never inherit it.")
-
 (defvar glasspane-detail--section nil
   "The metadata panel the detail's tonal icons currently show.
 Nil or a section symbol from `glasspane-detail--sections': only one panel
@@ -116,10 +117,13 @@ is the toggle writer; opening another heading resets it.")
     ("scheduled" scheduled "event" "Scheduled")
     ("deadline" deadline "flag" "Deadline")
     ("props" props "tune" "Properties")
-    ("logbook" logbook "history" "Logbook"))
-  "Detail panel records: (WIRE-NAME STATE ICON LABEL).
+    ("logbook" logbook "history" "Logbook")
+    ("links" links "link" "Connections"))
+  "Detail drawer records: (WIRE-NAME STATE ICON LABEL).
 STATE is a `glasspane-detail--section' value.  The same record supplies the
-`detail.section' argument, tonal control, and outlined panel heading.")
+`detail.section' argument, the tonal control, and the open drawer's header.
+Connections holds what the app layers contribute (backlinks, outgoing
+links, unlinked mentions) and is offered only when something did.")
 
 (defvar glasspane-detail--dialog nil
   "The live detail-owned dialog, (:request-id ID :params PARAMS), or nil.
@@ -214,106 +218,156 @@ repushes the surface.  Runs OUTSIDE the dispatch extent."
        (error (message "glasspane: detail push failed: %s"
                        (jetpacs-error-label err)))))))
 
-;;;; Shared chip rails (the detail metadata block; views reuse the verbs)
+;;;; The header: state control, status pills, and the resting tag line
 
-(defun glasspane-ui--todo-chips (current keywords token)
-  "A single-line chip rail for KEYWORDS with CURRENT selected.
-Tapping the active chip clears the state (`:state' \"\").  Long
-sequences pan sideways rather than wrapping into a stack."
-  (apply #'jetpacs-row
-         (append
-          (mapcar (lambda (kw)
-                    (jetpacs-chip kw
-                                  :selected (jetpacs-bool (equal kw current))
-                                  :on-tap (jetpacs-action
-                                           "heading.todo-set"
-                                           :args (list :state
-                                                       (if (equal kw current)
-                                                           "" kw)
-                                                       :token token))))
-                  keywords)
-          (list :scroll t :spacing 4))))
+(defun glasspane-detail--today (info)
+  "INFO's :today, the render's one calendar read, or today's ISO date."
+  (or (plist-get info :today) (format-time-string "%Y-%m-%d")))
 
-(defun glasspane-detail--todo-control (info main key)
-  "Build INFO's current TODO chip and its inline choices.
-MAIN is the heading token; KEY gives the control a stable identity.
-Tap or long-press opens the bounded vertical list.  Choosing the active
-stage clears it, as in `glasspane-ui--todo-chips'."
-  (let* ((current (plist-get info :todo))
-         (label (or current "No state"))
-         (picker-key (jetpacs-wire-id "gp-detail-todo" key))
-         (opened (equal glasspane-detail--todo-picker-key picker-key))
-         (toggle (jetpacs-action "detail.todo-picker"
-                                 :args (list :key picker-key)))
-         ;; A native chip installs its own click recognizer even without an
-         ;; action.  Keep this chip face passive so one box owns both gestures.
-         (trigger
-          (jetpacs-with-semantics
-           (jetpacs-with-attrs
-            (jetpacs-box
-             (jetpacs-with-attrs
-              (jetpacs-surface
-               (jetpacs-with-attrs
-                (jetpacs-row
-                 (jetpacs-text label :style "body" :font-weight 500
-                               :color (if current "primary" "on_surface"))
-                 (jetpacs-icon (if opened "expand_less" "expand_more")
-                               :size 16 :color "primary")
-                 :align "center" :spacing 4)
-                :pad '(:start 12 :end 12 :top 6 :bottom 6))
-               :shape "rounded")
-              :corner 8 :border '(:width 1 :color "outline"))
-             :alignment "center_start" :on-tap toggle :on-long-tap toggle)
-            :id picker-key :min_height 48)
-           :name "Choose TODO state" :state-description label
-           :description "Tap or long-press to show stage chips")))
-    (jetpacs-with-attrs
-     (apply #'jetpacs-column
-            (append
-             (list trigger)
-             (when opened
-               (list
-                (jetpacs-with-attrs
-                 (apply #'jetpacs-column
-                        (append
-                         (mapcar
-                          (lambda (state)
-                            (jetpacs-chip
-                             (or state "No state")
-                             :selected (jetpacs-bool (equal state current))
-                             :on-tap
-                             (jetpacs-action
-                              "heading.todo-set"
-                              :args (list :token main :state
-                                          (if (equal state current) ""
-                                            (or state ""))))))
-                          (append (plist-get info :keywords) (list nil)))
-                         (list :scroll t :spacing 4)))
-                 :id (jetpacs-wire-id "gp-detail-todo-options" key)
-                 :height 176)))
-             (list :spacing 0)))
-     :max_width 144)))
+(defun glasspane-detail--priority-levels ()
+  "The current buffer's priority letters, highest first, or nil."
+  (let ((hi (or (bound-and-true-p org-priority-highest) ?A))
+        (lo (or (bound-and-true-p org-priority-lowest) ?C)))
+    (and (integerp hi) (integerp lo) (<= hi lo)
+         (mapcar #'char-to-string (number-sequence hi lo)))))
 
-(defun glasspane-ui--priority-chips (current token)
-  "A row of priority chips with CURRENT selected; the active chip clears."
-  (let* ((hi (or (bound-and-true-p org-priority-highest) ?A))
-         (lo (or (bound-and-true-p org-priority-lowest) ?C))
-         (levels (and (integerp hi) (integerp lo) (<= hi lo)
-                      (mapcar #'char-to-string (number-sequence hi lo)))))
-    (when levels
+(defun glasspane-detail--priority-color (priority levels)
+  "The theme role carrying PRIORITY's urgency among LEVELS, highest first."
+  (pcase (cl-position priority levels :test #'equal)
+    (0 "error")
+    (1 "warning")
+    (_ "on_surface")))
+
+(defun glasspane-detail--backlink-count (pos)
+  "How many notes link to the heading at POS, or nil without a note graph.
+Only a heading with an ID can be linked to by id, and the notes layer is
+consulted by name only: it is an optional later rung."
+  (when (and (fboundp 'glasspane-notes-available-p)
+             (fboundp 'glasspane-notes-backlink-count)
+             (glasspane-notes-available-p))
+    (when-let* ((id (org-entry-get pos "ID")))
+      (ignore-errors (glasspane-notes-backlink-count id)))))
+
+(defun glasspane-detail--todo-control (info main)
+  "Build INFO's TODO state control for the heading token MAIN.
+A Material split button: the leading half shows the keyword and cycles
+the sequence on tap (Org's `C-c C-t' reflex); the trailing chevron opens
+every keyword plus No state as a dropdown, so the title row never grows.
+An open keyword is filled, a done one tonal, and a heading without a
+state shows an outlined empty ring.  Nil when no keywords are declared."
+  (let ((todo (plist-get info :todo))
+        (keywords (plist-get info :keywords)))
+    (when keywords
+      (jetpacs-with-semantics
+       (jetpacs-material3-split-button
+        todo
+        (jetpacs-action "heading.todo-cycle" :args (list :token main))
+        :icon (and (null todo) "radio_button_unchecked")
+        :variant (cond ((null todo) "outlined")
+                       ((plist-get info :done) "tonal")
+                       (t "filled"))
+        :size "xsmall"
+        :trailing-description "Choose TODO state"
+        :items (append
+                (mapcar (lambda (kw)
+                          (jetpacs-menu-item
+                           kw
+                           (jetpacs-action "heading.todo-set"
+                                           :args (list :token main :state kw))
+                           :enabled (and (equal kw todo) :json-false)))
+                        keywords)
+                (list (jetpacs-menu-item
+                       "No state"
+                       (jetpacs-action "heading.todo-set"
+                                       :args (list :token main :state ""))
+                       :enabled (and (null todo) :json-false)))))
+       :name "TODO state" :state-description (or todo "No state")
+       :description "Tap to advance; the arrow lists every state"))))
+
+(cl-defun glasspane-detail--pill (label &key icon color on-tap on-long-tap
+                                        name state)
+  "A tinted status pill reading LABEL beside ICON in theme role COLOR.
+The whole pill dispatches ON-TAP and ON-LONG-TAP; NAME and STATE name
+it for assistive technology."
+  (jetpacs-with-semantics
+   (jetpacs-with-attrs
+    (jetpacs-box (jetpacs-badge label :icon icon :color color)
+                 :alignment "center_start"
+                 :on-tap on-tap :on-long-tap on-long-tap)
+    :min_height 36)
+   :name (or name label) :state-description state))
+
+(defun glasspane-detail--status-pills (info main)
+  "INFO's planning, priority and clock facts as one wrapping pill row, or nil.
+Only facts that are set appear, so a plain note shows nothing here.  A
+date pill opens its drawer on tap and the foundation timestamp dialog on
+long-press; the priority pill opens the foundation priority dialog; the
+clock pill clocks out.  MAIN is the heading token the edits address."
+  (let* ((today (glasspane-detail--today info))
+         (done (plist-get info :done))
+         (warn (or (plist-get info :warn-days) 14))
+         (planning
+          (lambda (kind stamp icon label)
+            (when-let* ((h (glasspane-ui-human-date
+                            stamp today :done done :kind kind :warn-days warn)))
+              (let ((name (symbol-name kind))
+                    (type (if (eq kind 'deadline) "DEADLINE" "SCHEDULED")))
+                (glasspane-detail--pill
+                 (plist-get h :label) :icon icon :color (plist-get h :color)
+                 :on-tap (jetpacs-action "detail.section"
+                                         :args (list :section name))
+                 :on-long-tap (jetpacs-action "detail.planning.edit"
+                                              :args (list :token main :type type))
+                 :name label :state stamp)))))
+         (pills
+          (delq nil
+                (list
+                 (funcall planning 'scheduled (plist-get info :scheduled)
+                          "event" "Scheduled")
+                 (funcall planning 'deadline (plist-get info :deadline)
+                          "flag" "Deadline")
+                 (when-let* ((p (plist-get info :priority)))
+                   (glasspane-detail--pill
+                    (concat "Priority " p) :icon "priority_high"
+                    :color (glasspane-detail--priority-color
+                            p (plist-get info :priority-levels))
+                    :on-tap (jetpacs-action "detail.priority.edit"
+                                            :args (list :token main))
+                    :name "Priority" :state p))
+                 (when (plist-get info :clocked-in)
+                   (glasspane-detail--pill
+                    "Clocking" :icon "timer" :color "success"
+                    :on-tap (jetpacs-action "org.clock.out")
+                    :name "Clock" :state "running"))))))
+    (when pills
       (apply #'jetpacs-flow-row
-             (append
-              (mapcar (lambda (p)
-                        (jetpacs-chip p
-                                      :selected (jetpacs-bool (equal p current))
-                                      :on-tap (jetpacs-action
-                                               "heading.priority"
-                                               :args (list :value
-                                                           (if (equal p current)
-                                                               "" p)
-                                                           :token token))))
-                      levels)
-              (list :spacing 4))))))
+             (append pills (list :spacing 6 :run-spacing 4 :align "center"))))))
+
+(defun glasspane-detail--tag-line (info)
+  "INFO's Areas and local plain tags as one wrapping chip line, or nil.
+Areas keep their elevated icon chips; the other local tags are flat
+assist chips; inherited tags stay out of the resting view (the Tags
+drawer explains them).  A tap searches by tag."
+  (let* ((areas (plist-get info :areas))
+         (chip (lambda (tag area)
+                 (jetpacs-material3-assist-chip
+                  tag
+                  :icon (and area (glasspane-area-icon tag))
+                  :variant (and area "elevated")
+                  :on-tap (jetpacs-action "search.by-tag"
+                                          :args (list :tag tag)))))
+         (chips (append
+                 (mapcar (lambda (tag) (funcall chip tag t)) areas)
+                 (mapcar (lambda (tag) (funcall chip tag nil))
+                         (cl-remove-if (lambda (tag) (member tag areas))
+                                       (plist-get info :local-tags))))))
+    (when chips
+      (apply #'jetpacs-flow-row
+             (append chips (list :spacing 4 :run-spacing 4))))))
+
+(defun glasspane-detail--title (info)
+  "INFO's headline as reading text: link markup shows its description."
+  (org-link-display-format (or (plist-get info :headline) "")))
 
 ;;;; Shared cards (agenda G5 and search G6 render through these)
 ;;
@@ -559,6 +613,19 @@ Signals like `ebp-org-resolve-ref'; the screen builder classifies."
                    :scheduled (org-entry-get pos "SCHEDULED")
                    :deadline (org-entry-get pos "DEADLINE")
                    :keywords (or org-todo-keywords-1 '("TODO" "DONE"))
+                   :done (and (nth 2 comps)
+                              (member (nth 2 comps) org-done-keywords) t)
+                   ;; The render's one calendar read: every date word
+                   ;; below is a pure function of this day.
+                   :today (format-time-string "%Y-%m-%d")
+                   :warn-days org-deadline-warning-days
+                   :priority-levels (glasspane-detail--priority-levels)
+                   :file-title (or (ignore-errors
+                                     (cadr (assoc "TITLE"
+                                                  (org-collect-keywords
+                                                   '("TITLE")))))
+                                   (and file (file-name-base file)))
+                   :backlinks (glasspane-detail--backlink-count pos)
                    :clocked-in (and (ebp-org-clocked-in-p pos) t)
                    :props (ignore-errors
                             (org-entry-properties pos 'standard))
@@ -637,11 +704,12 @@ An erroring contributor costs its own chips, never the toolbar."
           (set-marker marker nil)))
     (error nil)))
 
-(defun glasspane-ui--detail-copy-link-item (ref)
-  "The Copy Link chip for REF, or nil when the ref can't resolve.
-An id link when the heading already has an :ID:, a file::*headline
+(defun glasspane-detail--share-items (ref)
+  "The Copy link, Copy text and Share menu items for REF, or nil.
+The link is an id link when the heading has an :ID:, a file::*headline
 link otherwise — built at render time so the copy itself is
-companion-local (`clipboard.copy') and works offline."
+companion-local (`clipboard.copy') and works offline.  The subtree text
+is read once for both the copy and the share sheet."
   (condition-case nil
       (let ((marker (ebp-org-resolve-ref ref)))
         (unwind-protect
@@ -653,32 +721,20 @@ companion-local (`clipboard.copy') and works offline."
                       (link (if id
                                 (format "[[id:%s][%s]]" id headline)
                               (format "[[file:%s::*%s][%s]]"
-                                      (buffer-file-name) headline headline))))
-                 (jetpacs-button "Copy link" (jetpacs-clipboard-copy link)
-                                 :icon "content_copy" :variant "text"))))
+                                      (buffer-file-name) headline headline)))
+                      (text (buffer-substring-no-properties
+                             (point)
+                             (progn (org-end-of-subtree t t) (point)))))
+                 (list
+                  (jetpacs-menu-item "Copy link" (jetpacs-clipboard-copy link)
+                                     :icon "content_copy")
+                  (jetpacs-menu-item "Copy text" (jetpacs-clipboard-copy text)
+                                     :icon "copy_all")
+                  (jetpacs-menu-item "Share…"
+                                     (jetpacs-share text :title headline)
+                                     :icon "share")))))
           (set-marker marker nil)))
     (error nil)))
-
-(defun glasspane-ui--detail-copy-text-item (ref)
-  "The Copy Text chip for REF: the whole subtree onto the clipboard."
-  (when-let* ((text (glasspane-ui--detail-subtree-text ref)))
-    (jetpacs-button "Copy text" (jetpacs-clipboard-copy text)
-                    :icon "copy_all" :variant "text")))
-
-(defun glasspane-ui--detail-share-item (ref)
-  "The Share chip for REF: the whole subtree through the share sheet."
-  (when-let* ((text (glasspane-ui--detail-subtree-text ref)))
-    (jetpacs-button "Share"
-                    (jetpacs-share text :title (plist-get ref :headline))
-                    :icon "share" :variant "text")))
-
-(defun glasspane-detail--date-stamp (ts)
-  "A date-stamp node for org timestamp string TS, or nil."
-  (when-let* ((date (ebp-org-ts-date ts)))
-    (jetpacs-date-stamp :day (string-to-number (substring date 8 10))
-                        :month-index (string-to-number (substring date 5 7))
-                        :year (string-to-number (substring date 0 4))
-                        :time (ebp-org-ts-time ts))))
 
 (defun glasspane-ui--render-logbook-entry (entry)
   "One logbook ENTRY (a plist from `ebp-org-logbook-entries') as a row."
@@ -829,55 +885,97 @@ empty value removes the property."
        (org-property-get-allowed-values pos key)))))
 
 (defun glasspane-ui--properties-panel (props token pos &optional buf)
-  "The Properties panel nodes: PROPS as key/value rows plus + Add.
+  "The Properties drawer nodes: PROPS as key/value rows.
 Rows edit the heading at POS through TOKEN, with BUF supplying allowed
-values.  Shown beneath the tonal `tune' icon, which is always offered
-\(even with no properties yet) so + Add is reachable."
-  (delq nil
-        (append
-         (mapcar (lambda (kv)
-                   (glasspane-ui--property-row
-                    (car kv) (or (cdr kv) "") token pos
-                    (and buf (glasspane-detail--allowed-values
-                              buf pos (car kv)))))
-                 props)
-         (list
-          (when props
-            (jetpacs-text "Submit an empty value to remove a property."
-                          :style "caption"))
-          (jetpacs-row
-           (jetpacs-spacer :weight 1)
-           (jetpacs-button "+ Add property"
-                           (jetpacs-action "heading.prop-add"
-                                           :args (list :token token))
-                           :variant "outlined"))))))
+values.  The drawer header carries the add action, so an empty drawer
+is only a hint."
+  (if (null props)
+      (list (jetpacs-text "No properties yet." :style "caption"
+                          :color "outline"))
+    (append
+     (mapcar (lambda (kv)
+               (glasspane-ui--property-row
+                (car kv) (or (cdr kv) "") token pos
+                (and buf (glasspane-detail--allowed-values buf pos (car kv)))))
+             props)
+     (list (jetpacs-text "Submit an empty value to remove a property."
+                         :style "caption" :color "outline")))))
 
-(defun glasspane-detail--section-controls (info)
-  "Build the tonal metadata controls for INFO's heading.
-The active icon uses the primary accent.  Tapping it hides its panel;
-tapping another replaces the panel.  Logbook appears only with entries.
-The remaining controls stay available so empty metadata can be edited."
+;;;; The drawers: tonal controls and the one open panel
+
+(defun glasspane-detail--section-badge (info section)
+  "The count badge for SECTION's control from INFO, or nil when empty."
+  (let ((n (pcase section
+             ('tags (length (plist-get info :tags)))
+             ('props (length (plist-get info :props)))
+             ('logbook (length (plist-get info :logbook)))
+             ('links (plist-get info :backlinks)))))
+    (and (integerp n) (> n 0) (number-to-string n))))
+
+(defun glasspane-detail--section-controls (info &optional extras)
+  "Build INFO's tonal drawer controls, start-aligned under the header.
+Each icon is tooltipped with its drawer's name and badged with a count
+when the drawer has content.  The selected icon is tonal in the primary
+accent; tapping it closes its drawer, tapping another switches.  The
+Connections drawer is offered only when an app layer contributed EXTRAS."
   (apply #'jetpacs-row
          (append
           (cl-loop for (name section icon label) in glasspane-detail--sections
-                   unless (and (eq section 'logbook)
-                               (null (plist-get info :logbook)))
+                   unless (and (eq section 'links) (null extras))
                    collect
                    (let ((shown (eq glasspane-detail--section section)))
-                     (jetpacs-icon-button
-                      icon
-                      (jetpacs-action "detail.section"
-                                      :args (list :section name))
-                      :variant (and shown "tonal")
-                      :color (and shown "primary")
-                      :content-description
-                      (concat "Toggle " (downcase label)))))
-          (list :fill t :arrange "end" :spacing 4))))
+                     (jetpacs-tooltip
+                      label
+                      (jetpacs-icon-button
+                       icon
+                       (jetpacs-action "detail.section"
+                                       :args (list :section name))
+                       :variant (and shown "tonal")
+                       :color (and shown "primary")
+                       :badge (glasspane-detail--section-badge info section)
+                       :content-description
+                       (concat "Toggle " (downcase label)))
+                      :position "below")))
+          (list :fill t :arrange "start" :spacing 0 :align "center"))))
 
-(defun glasspane-detail--section-panel (info main key)
-  "Build INFO's selected metadata panel, or nil when all are hidden.
-MAIN identifies the heading for edits and KEY supplies stable child IDs.
-An outlined card repeats the control's icon and label above the content."
+(defun glasspane-detail--section-action (main section)
+  "The trailing header action of SECTION's open drawer for token MAIN."
+  (let ((button (lambda (icon action label)
+                  (jetpacs-icon-button icon action
+                                       :variant "tonal" :size "small"
+                                       :content-description label))))
+    (pcase section
+      ('tags (funcall button "edit"
+                      (jetpacs-action "detail.tags.edit"
+                                      :args (list :token main))
+                      "Edit tags"))
+      ((or 'scheduled 'deadline)
+       (funcall button "edit_calendar"
+                (jetpacs-action "detail.planning.edit"
+                                :args (list :token main
+                                            :type (if (eq section 'scheduled)
+                                                      "SCHEDULED" "DEADLINE")))
+                "Edit timestamp"))
+      ('props (funcall button "add"
+                       (jetpacs-action "heading.prop-add"
+                                       :args (list :token main))
+                       "Add property"))
+      ('logbook (funcall button "edit_note"
+                         (jetpacs-action "heading.add-note"
+                                         :args (list :token main))
+                         "Log note")))))
+
+(defun glasspane-detail--strip-leading-dividers (nodes)
+  "NODES without any leading divider: the drawer supplies its own edges."
+  (seq-drop-while (lambda (node) (equal (plist-get node :t) "divider"))
+                  nodes))
+
+(defun glasspane-detail--section-panel (info main key &optional extras)
+  "Build INFO's open drawer as a filled card, or nil when all are closed.
+MAIN identifies the heading for edits, KEY supplies stable child ids and
+EXTRAS are the app layers' Connections nodes.  A section header names
+the drawer and carries its one editing action; the tonal icon above is
+the only other chrome."
   (let* ((record (cl-find glasspane-detail--section
                           glasspane-detail--sections :key #'cadr))
          (section (cadr record))
@@ -886,146 +984,210 @@ An outlined card repeats the control's icon and label above the content."
             ('props (glasspane-ui--properties-panel
                      (plist-get info :props) main (plist-get info :pos)
                      (plist-get info :buf)))
-            ('logbook (glasspane-detail--logbook-panel
-                       (plist-get info :logbook) key))
-            ('tags (list (glasspane-detail--tags-section info main key)))
+            ('logbook (or (glasspane-detail--logbook-panel
+                           (plist-get info :logbook) key)
+                          (list (jetpacs-text "Nothing logged yet."
+                                              :style "caption"
+                                              :color "outline"))))
+            ('tags (list (glasspane-detail--tags-panel info main key)))
             ((or 'scheduled 'deadline)
-             (list (glasspane-detail--planning-section info main section))))))
+             (glasspane-detail--planning-panel info main section))
+            ('links (glasspane-detail--strip-leading-dividers extras)))))
     (when children
-      (jetpacs-card
-       (jetpacs-with-attrs
-        (jetpacs-column
-         (jetpacs-row
-          (jetpacs-icon (nth 2 record) :size 16 :color "primary")
-          (jetpacs-text (nth 3 record) :style "caption" :color "primary")
-          :fill t :arrange "start" :spacing 4)
-         (apply #'jetpacs-column (append children (list :spacing 8)))
-         :spacing 6)
-        :padding 10)
-       :variant "outlined"))))
+      (jetpacs-with-attrs
+       (jetpacs-card
+        (apply #'jetpacs-column
+               (jetpacs-section-header
+                (nth 3 record)
+                :trailing (glasspane-detail--section-action main section))
+               (append children (list :spacing 8)))
+        :variant "filled")
+       :id (jetpacs-wire-id "gp-detail-panel" key)))))
 
-(defun glasspane-detail--planning-section (info main section)
-  "Build INFO's scheduled or deadline date controls for token MAIN.
-SECTION is `scheduled' or `deadline'.  Existing date actions retain their
-semantics: quick schedule changes use `heading.schedule'; full timestamp
-edits use the foundation dialog through `detail.planning.edit'."
+(defun glasspane-detail--relative-date (today when)
+  "The ISO date that WHEN (\"+0d\", \"+1d\", \"+1w\") names from ISO TODAY.
+Nil for any other spelling."
+  (when (and (stringp when)
+             (string-match "\\`\\+\\([0-9]+\\)\\([dw]\\)\\'" when))
+    (jetpacs-dates-shift today (string-to-number (match-string 1 when))
+                         (if (equal (match-string 2 when) "w") 'week 'day))))
+
+(defun glasspane-detail--planning-panel (info main section)
+  "Build INFO's SECTION (`scheduled' or `deadline') drawer for token MAIN.
+A summary row (tinted icon, the human date, the full sentence beneath)
+opens the foundation timestamp dialog, where time, repeater and delay
+cookies are edited; a scrolling row of quick chips moves the day
+without losing any of them, a native picker chooses a day, and Clear
+removes the stamp.  Deadline chips ride the same verb with `:type'."
   (let* ((scheduled (eq section 'scheduled))
-         (stamp (plist-get info (if scheduled :scheduled :deadline)))
-         (date (ebp-org-ts-date stamp))
          (type (if scheduled "SCHEDULED" "DEADLINE"))
-         (chip (lambda (label when)
-                 (jetpacs-button
-                  label
-                  (jetpacs-action "heading.schedule"
-                                  :args (list :when when :token main))
-                  :variant "text"))))
-    (jetpacs-row
-     (or (glasspane-detail--date-stamp stamp) (jetpacs-spacer :width 0))
-     (jetpacs-with-attrs
-      (apply #'jetpacs-column
-             (delq nil
-                   (list
-                    (unless date
-                      (jetpacs-text (if scheduled "Not scheduled" "No deadline")
-                                    :style "caption"))
-                    (when-let* ((rep (ebp-org-ts-repeater stamp)))
-                      (jetpacs-text (concat "Repeats " rep) :style "caption"))
-                    (apply
-                     #'jetpacs-flow-row
-                     (append
-                      (when scheduled
-                        (list
-                         (jetpacs-date-button
-                          "Set date"
-                          (jetpacs-action "heading.schedule"
-                                          :args (list :token main))
-                          :value date)
-                         (funcall chip "Today" "+0d")
-                         (funcall chip "+1d" "+1d")
-                         (funcall chip "+1w" "+1w")
-                         (jetpacs-button
-                          "Clear"
-                          (jetpacs-action "heading.schedule"
-                                          :args (list :clear t :token main))
-                          :variant "text")))
-                      (list
-                       (jetpacs-button
-                        (if scheduled "More…" "Edit…")
-                        (jetpacs-action "detail.planning.edit"
-                                        :args (list :token main :type type))
-                        :variant "text")))))))
-      :weight 1))))
+         (stamp (plist-get info (if scheduled :scheduled :deadline)))
+         (today (glasspane-detail--today info))
+         (h (glasspane-ui-human-date
+             stamp today :done (plist-get info :done) :kind section
+             :warn-days (or (plist-get info :warn-days) 14)))
+         (date (plist-get h :date))
+         (type-args (unless scheduled (list :type type)))
+         (color (if h (plist-get h :color) "outline"))
+         (quick (lambda (label when)
+                  (jetpacs-chip
+                   label
+                   :selected (jetpacs-bool
+                              (and date
+                                   (equal date (glasspane-detail--relative-date
+                                                today when))))
+                   :on-tap (jetpacs-action
+                            "heading.schedule"
+                            :args (append (list :when when :token main)
+                                          type-args))))))
+    (list
+     (jetpacs-with-semantics
+      (jetpacs-with-attrs
+       (jetpacs-box
+        (jetpacs-row
+         (jetpacs-icon (if scheduled "event" "flag") :size 22 :color color)
+         (jetpacs-with-attrs
+          (jetpacs-column
+           (jetpacs-text (if h (plist-get h :label)
+                           (if scheduled "Not scheduled" "No deadline"))
+                         :style "body" :font-weight 500 :color color)
+           (jetpacs-text (if h (plist-get h :long)
+                           "Tap to pick a date, time or repeater.")
+                         :style "caption" :color "outline")
+           :spacing 2)
+          :weight 1)
+         (jetpacs-icon "chevron_right" :size 20 :color "outline")
+         :fill t :align "center" :spacing 12)
+        :alignment "center_start"
+        :on-tap (jetpacs-action "detail.planning.edit"
+                                :args (list :token main :type type)))
+       :min_height 48)
+      :name (if scheduled "Scheduled" "Deadline")
+      :state-description (or stamp "not set"))
+     (apply #'jetpacs-row
+            (append
+             (list (funcall quick "Today" "+0d")
+                   (funcall quick "Tomorrow" "+1d")
+                   (funcall quick "Next week" "+1w")
+                   (jetpacs-date-button
+                    "Pick date…"
+                    (jetpacs-action "heading.schedule"
+                                    :args (append (list :token main) type-args))
+                    :value date))
+             (when stamp
+               (list (jetpacs-material3-assist-chip
+                      "Clear" :icon "close"
+                      :on-tap (jetpacs-action
+                               "heading.schedule"
+                               :args (append (list :clear t :token main)
+                                             type-args)))))
+             (list :scroll t :spacing 6 :align "center"))))))
 
-(defun glasspane-detail--tag-members (local inherited areas)
-  "Build read-only LOCAL and INHERITED chip nodes, styling AREAS specially."
-  (delq nil
-        (list (when local (jetpacs-text "Local" :style "caption"))
-              (glasspane-ui-tag-chips local areas "start")
-              (when inherited (jetpacs-text "Inherited" :style "caption"))
-              (glasspane-ui-tag-chips inherited areas "start"))))
+(defun glasspane-detail--toggled-local-tags (local group tag)
+  "LOCAL tags after toggling TAG within GROUP, a tag-groups plist or nil.
+A tag already local leaves; otherwise it joins, ousting its siblings
+first when GROUP is exclusive.  Pure."
+  (cond ((member tag local) (remove tag local))
+        ((plist-get group :exclusive)
+         (append (cl-remove-if (lambda (candidate)
+                                 (member candidate (plist-get group :tags)))
+                               local)
+                 (list tag)))
+        (t (append local (list tag)))))
 
-(defun glasspane-detail--tags-section (info main key)
-  "Build INFO's grouped tags and token MAIN's picker action.
-KEY supplies the stable content identity.  Visibility belongs to the shared
-metadata panel; the foundation picker edits only local tags."
+(defun glasspane-detail--area-group (info)
+  "INFO's Area tag group plist, or nil when the vocabulary lacks one."
+  (glasspane-org-tag-group (plist-get (plist-get info :tag-groups) :groups)
+                           glasspane-area-tag-group))
+
+(defun glasspane-detail--tag-toggle-chip (info main group tag)
+  "A chip toggling TAG's membership in GROUP for INFO's heading MAIN.
+Selected when the heading carries it; disabled when it is only
+inherited, because Org can drop a tag only where it was set."
+  (let* ((local (plist-get info :local-tags))
+         (set (member tag local))
+         (inherited (and (not set)
+                         (member tag (plist-get info :inherited-tags))))
+         (area (and group (eq group (glasspane-detail--area-group info)))))
+    (jetpacs-chip tag
+                  :selected (jetpacs-bool (or set inherited))
+                  :enabled (and inherited :json-false)
+                  :icon (cond (area (glasspane-area-icon tag))
+                              (set "check"))
+                  :on-tap (jetpacs-action
+                           "heading.tags"
+                           :args (list :token main
+                                       :value (vconcat
+                                               (glasspane-detail--toggled-local-tags
+                                                local group tag)))))))
+
+(defun glasspane-detail--tags-panel (info main key)
+  "Build INFO's Tags drawer for token MAIN with its content id from KEY.
+Every declared tag group shows its whole vocabulary as toggle chips, the
+Area group with its icons, so known tags are one tap away and an
+exclusive group swaps by construction; loose tags follow, with a chip
+that opens the foundation picker for anything free-form."
   (let* ((membership (plist-get info :tag-groups))
-         (groups (plist-get membership :groups))
-         (area-group (glasspane-org-tag-group groups glasspane-area-tag-group))
-         (loose (plist-get membership :loose))
-         (local (seq-intersection loose (plist-get membership :local)))
-         (inherited (seq-intersection loose
-                                      (plist-get membership :inherited))))
+         (groups (cl-remove-if-not (lambda (group) (plist-get group :tags))
+                                   (plist-get membership :groups)))
+         (loose (plist-get membership :loose)))
     (jetpacs-with-attrs
      (apply
       #'jetpacs-column
       (append
        (cl-loop for group in groups
-                when (plist-get group :members)
                 append
-                (cons
-                 (jetpacs-text
-                  (concat (or (plist-get group :name) "Choose one")
-                          (when (plist-get group :exclusive) " (one of)"))
-                  :style "label")
-                 (glasspane-detail--tag-members
-                  (plist-get group :local) (plist-get group :inherited)
-                  (eq group area-group))))
-       (when loose
-         (cons (jetpacs-text "Other tags" :style "label")
-               (glasspane-detail--tag-members local inherited nil)))
-       (unless (plist-get membership :tags)
-         (list (jetpacs-text "No tags" :style "caption")))
-       (list (jetpacs-button
-              "Set tags…"
-              (jetpacs-action "detail.tags.edit" :args (list :token main))
-              :icon "label" :variant "text")
-             :spacing 8)))
+                (list
+                 (jetpacs-text (concat (or (plist-get group :name) "Choose one")
+                                       (when (plist-get group :exclusive)
+                                         " · one of"))
+                               :style "label" :color "outline")
+                 (apply #'jetpacs-flow-row
+                        (append
+                         (mapcar (lambda (tag)
+                                   (glasspane-detail--tag-toggle-chip
+                                    info main group tag))
+                                 (plist-get group :tags))
+                         (list :spacing 4 :run-spacing 4)))))
+       (list
+        (jetpacs-text (if loose "Other tags" "Free tags")
+                      :style "label" :color "outline")
+        (apply #'jetpacs-flow-row
+               (append
+                (mapcar (lambda (tag)
+                          (glasspane-detail--tag-toggle-chip info main nil tag))
+                        loose)
+                (list (jetpacs-material3-assist-chip
+                       "Add tag…" :icon "add"
+                       :on-tap (jetpacs-action "detail.tags.edit"
+                                               :args (list :token main))))
+                (list :spacing 4 :run-spacing 4))))
+       (list :spacing 6)))
      :id (jetpacs-wire-id "gp-detail-tags" key))))
 
 (defun glasspane-detail--breadcrumbs (info tokens)
-  "The breadcrumb rail: the file, then each ancestor heading.
-Every chip taps up to that level, so climbing out of a deep subtree
-never detours through the file picker."
-  (let ((file (plist-get info :file)))
-    (apply #'jetpacs-row
-           (append
-            (list (if file
-                      (jetpacs-material3-assist-chip
-                       (file-name-nondirectory file)
-                       :icon "description"
-                       :on-tap (glasspane-navigation-document-action file))
-                    (jetpacs-text "?" :style "caption")))
-            (cl-mapcan (lambda (anc tok)
-                         (list (jetpacs-icon "chevron_right" :size 16)
-                               (jetpacs-material3-assist-chip
-                                (car anc)
-                                :on-tap (and tok
-                                             (jetpacs-action
-                                              "heading.tap"
-                                              :args (list :token tok))))))
-                       (plist-get info :ancestors)
-                       (plist-get tokens :ancestors))
-            (list :scroll t :align "center" :spacing 4)))))
+  "The ancestor trail as one tappable caption line, or nil at the top level.
+Each ancestor span opens that heading, so climbing out of a deep subtree
+never detours through the file picker; the file itself is the top bar's
+title and the overflow menu's Open in file.  TOKENS supplies the
+ancestors' minted tokens."
+  (let ((ancestors (plist-get info :ancestors))
+        (anc-tokens (plist-get tokens :ancestors)))
+    (when ancestors
+      (jetpacs-rich-text
+       (cl-loop for anc in ancestors
+                for tok in anc-tokens
+                for i from 0
+                append
+                (delq nil
+                      (list (when (> i 0)
+                              (jetpacs-span " › " :color "outline"))
+                            (jetpacs-span (car anc) :color "primary"
+                                          :on-tap (and tok
+                                                       (jetpacs-action
+                                                        "heading.tap"
+                                                        :args (list :token tok)))))))
+       :style "caption"))))
 
 (defun glasspane-detail--reader-nodes (info)
   "The child-subtree reader nodes; plain org text when the reader is
@@ -1053,8 +1215,9 @@ absent or declines (the gap #6 degrade)."
           (unless (string-blank-p body)
             (list (jetpacs-text body :syntax "org")))))))
 
-(defun glasspane-ui--detail-body (info tokens)
-  "The detail body: reader metadata + foldable children, or the editor."
+(defun glasspane-ui--detail-body (info tokens &optional extras)
+  "The detail body: the header, its drawers and the reader, or the editor.
+EXTRAS are the app layers' Connections nodes, shown in that drawer."
   (let* ((buf (plist-get info :buf))
          (file (plist-get info :file))
          (pos (plist-get info :pos))
@@ -1084,114 +1247,168 @@ absent or declines (the gap #6 degrade)."
                                      :when-offline "queue"
                                      :ttl-s glasspane-detail--save-ttl-s
                                      :dedupe (jetpacs-wire-id "gp-save" key)))))
-      (apply #'jetpacs-lazy-column
-             (append
-              (delq nil
-                    (list
-                     (glasspane-detail--breadcrumbs info tokens)
-                     (apply #'jetpacs-column
-                            (append
-                             (glasspane-ui-headline-with-areas
-                              (jetpacs-row
-                               (glasspane-detail--todo-control info main key)
-                               (jetpacs-with-attrs
-                                (jetpacs-text
-                                 (or (plist-get info :headline) "")
-                                 :style "title")
-                                :weight 1)
-                               :fill t :align "top" :spacing 8)
-                              (plist-get info :areas))
-                             (list :spacing 4)))
-                     (glasspane-ui--priority-chips (plist-get info :priority)
-                                                   main)
-                     (jetpacs-divider)
-                     (glasspane-detail--section-controls info)
-                     (glasspane-detail--section-panel info main key)
-                     (jetpacs-divider)))
-              ;; Reader: body and child headings.  Root metadata belongs
-              ;; to the tonal panels above (and for sub-headings the
-              ;; swipe reveal), so no inline drawers for the root here.
-              (glasspane-detail--reader-nodes info)
-              (list :spacing 8))))))
+      ;; Reader: the heading as a page.  Root metadata lives in the
+      ;; pills and drawers above the body (sub-headings keep the swipe
+      ;; reveal), so the reader renders no root drawers.
+      (let ((reader (glasspane-detail--reader-nodes info)))
+        (apply #'jetpacs-lazy-column
+               (append
+                (delq nil
+                      (list
+                       (glasspane-detail--breadcrumbs info tokens)
+                       (apply #'jetpacs-row
+                              (delq nil
+                                    (list
+                                     (glasspane-detail--todo-control info main)
+                                     (jetpacs-with-attrs
+                                      (jetpacs-text
+                                       (glasspane-detail--title info)
+                                       :style "headline" :font-weight 500
+                                       :color (if (plist-get info :done)
+                                                  "outline" "on_surface"))
+                                      :weight 1)
+                                     :fill t :align "top" :spacing 10)))
+                       (glasspane-detail--status-pills info main)
+                       (glasspane-detail--tag-line info)
+                       (glasspane-detail--section-controls info extras)
+                       (glasspane-detail--section-panel info main key extras)
+                       (and reader (jetpacs-divider))))
+                reader
+                (list :spacing 8 :content-padding 16)))))))
 
 (defun glasspane-ui--detail-body-with-notes (info tokens)
-  "The detail body plus every registered app layer's sections.
-The sections splice INTO the lazy_column body (nesting another scroll
-container would break Compose) and wrap otherwise."
-  (let ((body (glasspane-ui--detail-body info tokens))
-        (extras (cl-loop for fn in glasspane-ui-detail-nodes-functions
-                         append (condition-case nil
-                                    (funcall fn (plist-get info :ref))
-                                  (error nil)))))
-    (cond
-     ((null extras) body)
-     ((equal (plist-get body :t) "lazy_column")
-      (let ((copy (copy-sequence body)))
-        (plist-put copy :children
-                   (vconcat (plist-get body :children) extras))))
-     (t (apply #'jetpacs-column body extras)))))
+  "The detail body with every registered app layer's Connections nodes.
+The layers' nodes fill the Connections drawer instead of trailing the
+body, so backlinks and mentions are found where the other metadata is."
+  (glasspane-ui--detail-body
+   info tokens
+   (cl-loop for fn in glasspane-ui-detail-nodes-functions
+            append (condition-case nil
+                       (funcall fn (plist-get info :ref))
+                     (error nil)))))
+
+(defun glasspane-detail--overflow-menu (info tokens)
+  "The heading's overflow menu: everything that is not a resting affordance.
+Grouped so two taps reach any of it; Delete keeps its device-side
+confirm.  The Org actions… item exposes the heading to the foundation
+sheet at build time, the reader's own route (SPEC 23.1)."
+  (let* ((file (plist-get info :file))
+         (buf (plist-get info :buf))
+         (pos (plist-get info :pos))
+         (main (plist-get tokens :main))
+         (org-file (glasspane-detail--org-file-p file))
+         (bufname (and (bufferp buf) (buffer-live-p buf) (buffer-name buf))))
+    (when (and bufname (integerp pos))
+      (jetpacs-buffer-expose bufname pos "jetpacs.org.heading"))
+    (jetpacs-with-semantics
+     (jetpacs-menu
+      nil :icon "more_vert"
+      :groups
+      (delq nil
+            (list
+             (jetpacs-menu-group
+              "Heading"
+              (list
+               (if (plist-get info :clocked-in)
+                   (jetpacs-menu-item "Clock out" (jetpacs-action "org.clock.out")
+                                      :icon "timer_off")
+                 (jetpacs-menu-item "Clock in"
+                                    (jetpacs-action "heading.clock-in"
+                                                    :args (list :token main))
+                                    :icon "timer"))
+               (jetpacs-menu-item "Priority…"
+                                  (jetpacs-action "detail.priority.edit"
+                                                  :args (list :token main))
+                                  :icon "priority_high")
+               (jetpacs-menu-item "Log note…"
+                                  (jetpacs-action "heading.add-note"
+                                                  :args (list :token main))
+                                  :icon "edit_note")
+               (jetpacs-menu-item "Duplicate"
+                                  (jetpacs-action "heading.duplicate"
+                                                  :args (list :token main))
+                                  :icon "content_copy")
+               ;; Delete is unrecoverable — Archive is the kept path —
+               ;; so the device confirm gates it (SPEC 14.1).
+               (jetpacs-menu-item
+                "Delete"
+                (jetpacs-action "heading.delete"
+                                :args (list :token main)
+                                :confirm "Delete this heading and its subtree?")
+                :icon "delete")))
+             (when-let* ((items (glasspane-detail--share-items
+                                 (plist-get info :ref))))
+               (jetpacs-menu-group "Share" items))
+             (when (or org-file bufname)
+               (jetpacs-menu-group
+                "Org"
+                (delq nil
+                      (list
+                       (when org-file
+                         (jetpacs-menu-item
+                          "Open in file"
+                          (glasspane-navigation-heading-action main)
+                          :icon "open_in_new"))
+                       (when org-file
+                         (jetpacs-menu-item
+                          "File properties…"
+                          (jetpacs-action "files.properties.show"
+                                          :args (list :file file))
+                          :icon "tune"))
+                       (when (and bufname (integerp pos))
+                         (jetpacs-menu-item
+                          "Org actions…"
+                          (jetpacs-action "jetpacs.org.heading"
+                                          :args (list :buffer bufname :pos pos))
+                          :icon "more_horiz")))))))))
+     :name "Heading actions")))
 
 (defun glasspane-detail--top-actions (info tokens)
-  "Detail top actions: source file, clock, read/edit, file properties."
-  (let ((file (plist-get info :file)))
-    (delq nil
-          (list
-           (when (glasspane-detail--org-file-p file)
-             (jetpacs-icon-button
-              "open_in_new"
-              (glasspane-navigation-heading-action
-               (plist-get tokens :main))
-              :content-description "Open in file"))
-           (if (plist-get info :clocked-in)
-               (jetpacs-icon-button "timer_off"
-                                    (jetpacs-action "org.clock.out")
-                                    :content-description "Clock out")
-             (jetpacs-icon-button "timer"
-                                  (jetpacs-action
-                                   "heading.clock-in"
-                                   :args (list :token
-                                               (plist-get tokens :main)))
-                                  :content-description "Clock in"))
-           (jetpacs-icon-button
-            (if glasspane-ui--detail-read-mode "edit" "visibility")
-            (jetpacs-action "detail.toggle-read")
-            :content-description
-            (if glasspane-ui--detail-read-mode "Edit" "Read"))
-           (when (glasspane-detail--org-file-p file)
-             (jetpacs-icon-button "tune"
-                                  (jetpacs-action
-                                   "files.properties.show"
-                                   :args (list :file file))
-                                  :content-description "File properties"))))))
+  "Detail top actions: a clock-out light while clocked in, the read/edit
+toggle, and the overflow menu in read mode.  Three icons at most, so the
+bar title has room beside the shell's own globals.  TOKENS carries the
+heading token the menu addresses."
+  (delq nil
+        (list
+         (when (plist-get info :clocked-in)
+           (jetpacs-icon-button "timer_off" (jetpacs-action "org.clock.out")
+                                :variant "tonal" :color "primary"
+                                :content-description "Clock out"))
+         (jetpacs-icon-button
+          (if glasspane-ui--detail-read-mode "edit" "visibility")
+          (jetpacs-action "detail.toggle-read")
+          :content-description
+          (if glasspane-ui--detail-read-mode "Edit Org text" "Read"))
+         (when glasspane-ui--detail-read-mode
+           (glasspane-detail--overflow-menu info tokens)))))
 
 (defun glasspane-detail--bottom-bar (tokens)
-  "Prev/Log-note/Next.  Prev and Next flank the bar and appear only
-when a same-level sibling exists."
+  "Prev · Log note · Next, the note action centred whichever siblings exist.
+Prev and Next appear only when a same-level sibling exists."
   (let ((main (plist-get tokens :main))
         (prev (plist-get tokens :prev))
         (next (plist-get tokens :next)))
-    (apply #'jetpacs-row
-           (append
-            (delq nil
-                  (list
-                   (when prev
-                     (jetpacs-button "Prev"
-                                     (jetpacs-action "heading.tap"
-                                                     :args (list :token prev))
-                                     :icon "chevron_left" :variant "text"))
-                   (jetpacs-button "Log note"
-                                   (jetpacs-action "heading.add-note"
-                                                   :args (list :token main))
-                                   :icon "edit_note" :variant "text")
-                   (when next
-                     (jetpacs-button "Next"
-                                     (jetpacs-action "heading.tap"
-                                                     :args (list :token next))
-                                     :icon "chevron_right" :variant "text"))))
-            (list :arrange "space_between" :align "center")))))
+    (jetpacs-row
+     (if prev
+         (jetpacs-button "Prev"
+                         (jetpacs-action "heading.tap" :args (list :token prev))
+                         :icon "chevron_left" :variant "text")
+       (jetpacs-spacer :width 0))
+     (jetpacs-spacer :weight 1)
+     (jetpacs-button "Log note"
+                     (jetpacs-action "heading.add-note" :args (list :token main))
+                     :icon "edit_note" :variant "text")
+     (jetpacs-spacer :weight 1)
+     (if next
+         (jetpacs-button "Next"
+                         (jetpacs-action "heading.tap" :args (list :token next))
+                         :icon "chevron_right" :variant "text")
+       (jetpacs-spacer :width 0))
+     :fill t :align "center")))
 
 (defun glasspane-detail--floating-toolbar (info tokens)
-  "The curated heading actions rail, plus app-layer extras."
+  "The one-tap heading actions: Refile, Archive, and the app layers' extras.
+Everything rarer lives in the top bar's overflow menu."
   (let ((ref (plist-get info :ref))
         (main (plist-get tokens :main))
         (archive (plist-get tokens :archive)))
@@ -1209,31 +1426,22 @@ when a same-level sibling exists."
                       (jetpacs-action "jetpacs.org.archive"
                                       :args (list :token archive)
                                       :confirm "Archive this subtree?")
-                      :icon "archive" :variant "text"))
-                   (glasspane-ui--detail-copy-link-item ref)
-                   (glasspane-ui--detail-copy-text-item ref)
-                   (glasspane-ui--detail-share-item ref)
-                   ;; Delete is unrecoverable — Archive is the kept
-                   ;; path — so the device confirm gates it (14.1).
-                   (jetpacs-button
-                    "Delete"
-                    (jetpacs-action "heading.delete"
-                                    :args (list :token main)
-                                    :confirm "Delete this heading and its subtree?")
-                    :icon "delete" :variant "text")))
+                      :icon "archive" :variant "text"))))
             (glasspane-ui--detail-toolbar-extras ref)
             (list :scroll t)))))
 
 (defun glasspane-detail--screen (ref back)
   "The pushed detail screen for REF.
-A ref that stopped resolving degrades to a go-back placeholder — the
-builder runs on every stack rebuild, long after the heading may have
-moved (SPEC 14.5: re-present, never guess)."
+The bar names the document (its #+TITLE, else the file's base name);
+the heading is the page's own headline.  A ref that stopped resolving
+degrades to a go-back placeholder — the builder runs on every stack
+rebuild, long after the heading may have moved (SPEC 14.5: re-present,
+never guess)."
   (condition-case err
       (let* ((info (glasspane-ui--detail-meta ref))
              (tokens (glasspane-detail--tokens info)))
         (jetpacs-chrome-screen
-         "Detail"
+         (or (plist-get info :file-title) "Detail")
          (glasspane-ui--detail-body-with-notes info tokens)
          :back back
          :actions (glasspane-detail--top-actions info tokens)
@@ -1268,8 +1476,7 @@ moved (SPEC 14.5: re-present, never guess)."
         (if (null ref)
             'stale
           (setq glasspane-ui--detail-read-mode t
-                glasspane-detail--section nil
-                glasspane-detail--todo-picker-key nil)
+                glasspane-detail--section nil)
           (glasspane-detail--push-screen
            (or (plist-get params :surface)
                (jetpacs-shell-surface-for "glasspane"))
@@ -1317,17 +1524,6 @@ same resolver and canonical presenter with ARGS and PARAMS."
   (setq glasspane-ui--detail-read-mode (not glasspane-ui--detail-read-mode))
   (jetpacs-app-defer-refresh params)
   'accepted)
-
-(defun glasspane-detail--on-todo-picker (args params)
-  "Toggle the TODO chip list for ARGS' heading key and refresh PARAMS.
-This changes presentation state only; selecting a chip owns the mutation."
-  (let ((key (plist-get args :key)))
-    (if (not (and (stringp key) (not (string-empty-p key))))
-        'rejected
-      (setq glasspane-detail--todo-picker-key
-            (unless (equal glasspane-detail--todo-picker-key key) key))
-      (jetpacs-app-defer-refresh params)
-      'accepted)))
 
 (defun glasspane-detail--on-section (args params)
   "Show ARGS' `:section' panel, or hide it when it is already shown.
@@ -1395,7 +1591,6 @@ over the heading's new coordinates."
              (status (glasspane-ui-at-ref
                       args (lambda () (org-todo (if clear 'none state))) t)))
         (when (eq status 'accepted)
-          (setq glasspane-detail--todo-picker-key nil)
           (jetpacs-shell-notify (if clear "State cleared"
                                   (format "State → %s" state))
                                 (plist-get params :surface))
@@ -1420,27 +1615,55 @@ over the heading's new coordinates."
     status))
 
 (defun glasspane-detail--on-schedule (args params)
-  "Schedule the heading: `:when' relative, `:value' from the picker,
-or `:clear'.  No prompting arm — the empty-args tap is a build-time
-bug, not a user path (the picker flows are the foundation dialog's)."
-  (let ((clearp (let ((c (plist-get args :clear)))
-                  (and c (not (eq c :json-false)))))
-        (date (or (plist-get args :when) (plist-get args :value))))
+  "Move the heading's SCHEDULED stamp, or its DEADLINE with `:type'.
+`:when' is relative to today (\"+0d\", \"+1d\", \"+1w\"), `:value' an ISO
+date from the picker, and `:clear' removes the stamp.  A moved stamp
+keeps its time of day, repeater and delay cookie: only the day changes.
+No prompting arm — the empty-args tap is a build-time bug, not a user
+path (the picker flows are the foundation dialog's)."
+  (let* ((deadline (equal (plist-get args :type) "DEADLINE"))
+         (prop (if deadline "DEADLINE" "SCHEDULED"))
+         (setter (if deadline #'org-deadline #'org-schedule))
+         (clearp (let ((c (plist-get args :clear)))
+                   (and c (not (eq c :json-false)))))
+         (when (plist-get args :when))
+         (value (plist-get args :value))
+         (date (or (and (stringp when) (not (string-empty-p when))
+                        (or (glasspane-detail--relative-date
+                             (format-time-string "%Y-%m-%d") when)
+                            when))
+                   (and (stringp value) (not (string-empty-p value)) value)))
+         (surface (plist-get params :surface)))
     (cond
      (clearp
       (let ((status (glasspane-ui-at-ref
-                     args (lambda () (org-schedule '(4))) t)))
+                     args (lambda () (funcall setter '(4))) t)))
         (when (eq status 'accepted)
-          (jetpacs-shell-notify "Schedule cleared"
-                                (plist-get params :surface))
+          (jetpacs-shell-notify (if deadline "Deadline cleared"
+                                  "Schedule cleared")
+                                surface)
           (jetpacs-app-defer-refresh params))
         status))
-     ((and (stringp date) (not (string-empty-p date)))
-      (let ((status (glasspane-ui-at-ref
-                     args (lambda () (org-schedule nil date)) t)))
+     (date
+      (let ((status
+             (glasspane-ui-at-ref
+              args
+              (lambda ()
+                ;; Org rebuilds the stamp from the date it is given and
+                ;; re-attaches the old repeater and delay itself; the
+                ;; time of day survives only when handed back.
+                (let ((time (glasspane-ui-ts-time-range
+                             (org-entry-get nil prop))))
+                  (funcall setter nil
+                           (if (and time (ebp-org-ts-date date))
+                               (concat date " " time)
+                             date))))
+              t)))
         (when (eq status 'accepted)
-          (jetpacs-shell-notify (format "Scheduled %s" date)
-                                (plist-get params :surface))
+          (jetpacs-shell-notify (format "%s %s" (if deadline "Deadline"
+                                                  "Scheduled")
+                                        date)
+                                surface)
           (jetpacs-app-defer-refresh params))
         status))
      (t 'rejected))))
@@ -1742,12 +1965,13 @@ then appears as a row whose value column is ready to fill in."
        (lambda () (glasspane-detail--show-props-dialog ref params)))
       'accepted))))
 
-(defun glasspane-detail--on-tags-edit (args params)
-  "Open the foundation tag picker for ARGS' token using event PARAMS.
-Look up the app-owned token's ref before scheduling presentation.  Resolve
-that ref in the continuation before delegating to the registered heading
-action.  Only the resolved heading position crosses that boundary; the
-device cannot supply a raw position."
+(defun glasspane-detail--delegate-heading (args params value)
+  "Open the foundation heading editor VALUE for ARGS' token using PARAMS.
+VALUE names a `jetpacs.org.heading' sheet candidate (\"tags\",
+\"priority\", …).  Look up the app-owned token's ref before scheduling
+presentation.  Resolve that ref in the continuation before delegating to
+the registered heading action.  Only the resolved heading position
+crosses that boundary; the device cannot supply a raw position."
   (let ((token (plist-get args :token))
         (handler (gethash "jetpacs.org.heading" jetpacs-action-handlers)))
     (cond
@@ -1768,13 +1992,21 @@ device cannot supply a raw position."
                                              "jetpacs.org.heading")
                      (funcall handler
                               (list :buffer (buffer-name buf) :pos pos
-                                    :value "tags")
+                                    :value value)
                               params))
                  (error
                   (jetpacs-shell-notify
                    (jetpacs-error-label err) (plist-get params :surface))))))
             'accepted)
         'stale)))))
+
+(defun glasspane-detail--on-tags-edit (args params)
+  "Open the foundation grouped tag picker for ARGS' token using PARAMS."
+  (glasspane-detail--delegate-heading args params "tags"))
+
+(defun glasspane-detail--on-priority-edit (args params)
+  "Open the foundation priority dialog for ARGS' token using PARAMS."
+  (glasspane-detail--delegate-heading args params "priority"))
 
 (defun glasspane-detail--on-planning-edit (args params)
   "Open the foundation timestamp dialog on this heading's `:type' stamp.
@@ -2079,7 +2311,7 @@ non-TITLE keyword lands after an existing #+TITLE line."
     "detail.open-file"
     "detail.toggle-read"
     "detail.section"
-    "detail.todo-picker"
+    "detail.priority.edit"
     "detail.save"
     "detail.planning.edit"
     "detail.tags.edit"
@@ -2121,11 +2353,12 @@ gate contract).  Idempotent."
                        #'glasspane-detail--on-toggle-read
                        :doc "Flip the detail reader/editor mode")
     (jetpacs-defaction "detail.section" #'glasspane-detail--on-section
-                       :doc "Show or hide Tags, Scheduled, Deadline, Properties, or Logbook"
+                       :doc "Show or hide one of the heading's metadata drawers"
                        :args '((:name section :type "text" :required t)))
-    (jetpacs-defaction "detail.todo-picker" #'glasspane-detail--on-todo-picker
-                       :doc "Show or hide a heading's inline TODO stage chips"
-                       :args '((:name key :type "text" :required t)))
+    (jetpacs-defaction "detail.priority.edit"
+                       #'glasspane-detail--on-priority-edit
+                       :doc "Open the foundation priority dialog for a heading"
+                       :args '((:name token :type "text" :required t)))
     (jetpacs-defaction "detail.save" #'glasspane-detail--on-save
                        :doc "Replace the subtree with the editor value")
     (jetpacs-defaction "detail.planning.edit"
@@ -2184,7 +2417,6 @@ gate contract).  Idempotent."
   (dolist (name glasspane-detail--verbs)
     (jetpacs-undefaction name))
   (jetpacs-editor-unregister 'glasspane-org)
-  (setq glasspane-detail--todo-picker-key nil)
   (glasspane-detail--dialog-close))
 
 (provide 'glasspane-detail)

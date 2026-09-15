@@ -333,10 +333,11 @@ refused mint costs the affordance, never the card."
      :on-tap (glasspane-navigation-heading-action tap))))
 
 (defun glasspane-notes-detail-nodes (ref)
-  "Backlink/outgoing/mentions section nodes for the detail REF, or nil.
+  "Backlink/outgoing/mentions nodes for the detail REF's Connections drawer.
 Contributed to `glasspane-ui-detail-nodes-functions'; runs once per
 detail render, so ONE bulk mint replaces the notes-detail set each
-time — swept sheets answer stale for free (S5)."
+time — swept sheets answer stale for free (S5).  Until a scan has been
+asked for, the drawer ends in the Find-mentions button."
   (when-let* (((glasspane-notes-available-p))
               (id (glasspane-notes--ref-id ref)))
     (let* ((backlinks (glasspane-notes--backlinks id))
@@ -358,8 +359,7 @@ time — swept sheets answer stale for free (S5)."
            (mention-toks (nthcdr (+ (length fwd-refs) (length back-refs))
                                  tokens)))
       (append
-       (list (jetpacs-divider)
-             (jetpacs-collapsible
+       (list (jetpacs-collapsible
               (jetpacs-wire-id "gp-notes-fwd" id)
               (jetpacs-section-header
                (format "Outgoing links (%d)" (length forward)))
@@ -393,22 +393,26 @@ time — swept sheets answer stale for free (S5)."
                        (cl-loop for m in mentions
                                 for (tap edit) on mention-toks by #'cddr
                                 collect (glasspane-notes--mention-card
-                                         m tap edit))))))))))))
+                                         m tap edit))))))))
+       ;; Nothing scanned yet: the scan is one tap inside the drawer.
+       (unless state
+         (when-let* ((button (glasspane-notes-detail-scan-button ref)))
+           (list button)))))))
 
-(defun glasspane-notes-detail-toolbar (ref)
-  "The Mentions chip for the detail floating toolbar, or nil.
-The chip carries a token from its own per-render set — never the note
-id raw (S5; the chip joins the detail screen's mint discipline).
-Chip only when the heading actually has an org ID: a scan without one
-has nothing to search for."
+(defun glasspane-notes-detail-scan-button (ref)
+  "The Find-mentions button for REF's Connections drawer, or nil.
+The button carries a token from its own per-render set — never the note
+id raw (S5; it joins the detail screen's mint discipline).  Only when
+the heading actually has an org ID: a scan without one has nothing to
+search for."
   (when-let* (((glasspane-notes-available-p))
               ((glasspane-notes--ref-id ref))
               (token (car (glasspane-notes--mint (list ref)
                                                  "notes-toolbar"))))
-    (list (jetpacs-button "Mentions"
-                          (jetpacs-action "notes.mentions"
-                                          :args (list :token token))
-                          :icon "manage_search" :variant "text"))))
+    (jetpacs-button "Find unlinked mentions"
+                    (jetpacs-action "notes.mentions"
+                                    :args (list :token token))
+                    :icon "manage_search" :variant "text")))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 
@@ -640,8 +644,6 @@ gate contract).  Idempotent."
                        :doc "Replace a scanned mention with a real id link"))
   (add-hook 'glasspane-ui-detail-nodes-functions
             #'glasspane-notes-detail-nodes)
-  (add-hook 'glasspane-ui-detail-toolbar-functions
-            #'glasspane-notes-detail-toolbar)
   (add-hook 'ebp-complete-shadow-setup-hook
             #'glasspane-notes--setup-shadow))
 
@@ -656,8 +658,6 @@ goes by without a build asking for them."
     (jetpacs-undefaction name))
   (remove-hook 'glasspane-ui-detail-nodes-functions
                #'glasspane-notes-detail-nodes)
-  (remove-hook 'glasspane-ui-detail-toolbar-functions
-               #'glasspane-notes-detail-toolbar)
   (remove-hook 'ebp-complete-shadow-setup-hook
                #'glasspane-notes--setup-shadow)
   (clrhash glasspane-notes--mentions-scans))

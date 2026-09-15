@@ -59,6 +59,8 @@
 (require 'jetpacs-apps)
 (require 'jetpacs-settings)
 (require 'jetpacs-org-settings)
+(require 'jetpacs-dates)              ; locale-stable date arithmetic
+(require 'calendar)                   ; weekday of a date
 (require 'glasspane-org)
 
 ;; v1 hard-required glasspane-magit (it lives outside the app
@@ -237,6 +239,130 @@ Projects and Agenda share this rail so Areas read the same everywhere."
           :selected (jetpacs-bool (equal selected area))
           :on-tap (jetpacs-action action :args (list :area area))))
        names)))))
+
+;;;; Human planning text (the detail's pills and rows; cards may adopt it)
+
+(defconst glasspane-ui--day-names
+  ["Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday"]
+  "English weekday names, independent of the host locale.
+The same choice `jetpacs-dates--month-abbrevs' makes for months.")
+
+(defconst glasspane-ui--repeat-units
+  '((?h . "hour") (?d . "day") (?w . "week") (?m . "month") (?y . "year"))
+  "Org repeater unit letters and their singular English nouns.")
+
+(defun glasspane-ui-ts-time-range (ts)
+  "Return the HH:MM or HH:MM-HH:MM range inside org timestamp TS, or nil.
+Org's own hyphenated form, so the result can be handed back to
+`org-schedule' unchanged; `ebp-org-ts-time' returns the start alone."
+  (when (and (stringp ts)
+             (string-match (concat "\\([0-9]\\{1,2\\}:[0-9]\\{2\\}\\)"
+                                   "\\(?:-\\([0-9]\\{1,2\\}:[0-9]\\{2\\}\\)\\)?")
+                           ts))
+    (let ((start (match-string 1 ts))
+          (end (match-string 2 ts)))
+      (if end (concat start "-" end) start))))
+
+(defun glasspane-ui-repeat-words (cookie)
+  "English words for org repeater COOKIE, or nil without one.
+\"+1w\" reads \"weekly\" and \"+2w\" \"every 2 weeks\"; a \".+\" cookie
+appends \" from done\" and a \"++\" cookie \" catch-up\", the two
+restart rules Org distinguishes.  An unparsed cookie is shown as is."
+  (when (stringp cookie)
+    (if (string-match
+         "\\`\\(\\.\\+\\|\\+\\+\\|\\+\\)\\([0-9]+\\)\\([hdwmy]\\)\\'" cookie)
+        (let* ((kind (match-string 1 cookie))
+               (n (string-to-number (match-string 2 cookie)))
+               (unit (cdr (assq (aref (match-string 3 cookie) 0)
+                                glasspane-ui--repeat-units)))
+               (base (if (= n 1)
+                         (pcase unit
+                           ("hour" "hourly") ("day" "daily") ("week" "weekly")
+                           ("month" "monthly") (_ "yearly"))
+                       (format "every %d %ss" n unit))))
+          (concat base (pcase kind (".+" " from done") ("++" " catch-up")
+                              (_ ""))))
+      (concat "repeats " cookie))))
+
+(defun glasspane-ui--date-words (date today)
+  "Relative or short words for ISO DATE seen from ISO TODAY.
+Today, Tomorrow and Yesterday by name; the coming week by weekday; any
+other date as \"Mon, Sep 21\", with the year appended when it differs."
+  (let* ((delta (- (time-to-days (jetpacs-dates-encode date))
+                   (time-to-days (jetpacs-dates-encode today))))
+         (y (string-to-number (substring date 0 4)))
+         (m (string-to-number (substring date 5 7)))
+         (d (string-to-number (substring date 8 10)))
+         (weekday (aref glasspane-ui--day-names
+                        (calendar-day-of-week (list m d y)))))
+    (cond ((= delta 0) "Today")
+          ((= delta 1) "Tomorrow")
+          ((= delta -1) "Yesterday")
+          ((<= 2 delta 6) weekday)
+          ((equal (substring date 0 4) (substring today 0 4))
+           (format "%s, %s %d" (substring weekday 0 3)
+                   (jetpacs-dates-month-abbrev m) d))
+          (t (format "%s %d, %d" (jetpacs-dates-month-abbrev m) d y)))))
+
+(defun glasspane-ui--span-words (days unit-word)
+  "\"N days\" or \"N weeks\" for a DAYS count; UNIT-WORD trails it."
+  (if (< days 14)
+      (format "%d day%s %s" days (if (= days 1) "" "s") unit-word)
+    (let ((weeks (/ days 7)))
+      (format "%d week%s %s" weeks (if (= weeks 1) "" "s") unit-word))))
+
+(cl-defun glasspane-ui-human-date (ts today &key done (kind 'scheduled)
+                                      (warn-days 14))
+  "Describe org timestamp TS for a reader, seen from ISO TODAY.
+KIND is `scheduled' or `deadline'; DONE says the heading is closed, so
+nothing reads as overdue; WARN-DAYS is the deadline lead time that turns
+the warning color on.  Returns nil without a date, else a plist:
+:label the short pill text (\"Tomorrow · 09:00 · weekly\", \"Due Friday\",
+\"3 days overdue\"); :long the full sentence for a row subtitle;
+:color the theme role carrying urgency; :date, :time (Org's hyphen form),
+:repeat (the cookie) and :delta (days from today) for callers that
+lay out their own text.  Pure: TODAY is the only clock."
+  (when-let* ((date (ebp-org-ts-date ts)))
+    (let* ((time (glasspane-ui-ts-time-range ts))
+           (shown-time (and time (string-replace "-" "–" time)))
+           (cookie (ebp-org-ts-repeater ts))
+           (repeat (and cookie (glasspane-ui-repeat-words cookie)))
+           (delta (- (time-to-days (jetpacs-dates-encode date))
+                     (time-to-days (jetpacs-dates-encode today))))
+           (deadline (eq kind 'deadline))
+           (overdue (and (not done) (< delta 0)))
+           (words (glasspane-ui--date-words date today))
+           (day (cond ((and overdue deadline)
+                       (glasspane-ui--span-words (- delta) "overdue"))
+                      ((and overdue (< delta -1))
+                       (glasspane-ui--span-words (- delta) "ago"))
+                      ((and deadline (not done))
+                       (concat "Due " (if (member words '("Today" "Tomorrow"))
+                                          (downcase words)
+                                        words)))
+                      (t words)))
+           (color (cond (done "outline")
+                        (deadline (cond ((<= delta 0) "error")
+                                        ((<= delta warn-days) "warning")
+                                        (t "on_surface")))
+                        ((< delta 0) "warning")
+                        ((= delta 0) "primary")
+                        (t "on_surface")))
+           (y (string-to-number (substring date 0 4)))
+           (m (string-to-number (substring date 5 7)))
+           (d (string-to-number (substring date 8 10)))
+           (long (concat
+                  (aref glasspane-ui--day-names
+                        (calendar-day-of-week (list m d y)))
+                  (format ", %s %d, %d" (jetpacs-dates-month-abbrev m) d y)
+                  (when shown-time (concat " at " shown-time))
+                  (when repeat (concat " · repeats " repeat)))))
+      (list :label (concat day
+                           (when shown-time (concat " · " shown-time))
+                           (when repeat (concat " · " repeat)))
+            :long long
+            :color color
+            :date date :time time :repeat cookie :delta delta))))
 
 (defcustom glasspane-babel-timeout 30
   "Seconds before a phone-triggered babel execution is abandoned.

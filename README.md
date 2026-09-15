@@ -42,31 +42,42 @@ omit Org's drawer delimiters. Properties use muted name labels beside selectable
 values; IDs retain monospace styling, and empty values show a dash. Local property
 order and repeated keys are preserved. Logbook clocks show a timer, readable time range,
 and duration (or Running), preserving other entries in source order.
-The detail view has a right-aligned row of show/hide icons above the body:
-Tags (`label`), Scheduled (`event`), Deadline (`flag`), Properties (`tune`),
-and Logbook (`history`). The shown panel's icon is tonal in the primary
-accent. Tapping it hides the panel; tapping another icon replaces the panel.
-Opening a heading starts with all panels hidden. Tags, Scheduled, Deadline,
-and Properties stay available when empty so their editing actions are always
-reachable. Logbook appears only when the heading has entries. Each panel has
-an outlined border and repeats its icon and label. The separate date panels
-retain the existing quick schedule actions and timestamp dialogs.
+The detail view reads as a page. Its top bar names the document (the file's
+`#+TITLE`, else its base name) on one line and carries only the read/edit
+toggle, a tonal clock-out light while the heading is clocked in, and an
+overflow menu: Clock in/out, Priority…, Log note…, Duplicate, Delete
+(confirmed), Copy link, Copy text, Share…, Open in file, File properties…,
+and Org actions… (Jetpacs's heading sheet). Refile and Archive keep the
+floating toolbar; Prev · Log note · Next keep the bottom bar. Ancestors form
+a tappable caption line above the headline; a top-level heading has none.
 
-The current TODO stage is a chip before the detail heading title. Tap or
-long-press it to open a bounded, vertically scrolling list of stage chips
-in that position. Selecting a stage saves it and closes the list. As before,
-selecting the active stage clears it; **No state** also clears it. Tap the
-leading chip again to close without changing anything. The list uses the
-heading buffer's TODO sequence and starts closed when opening a heading.
+The TODO state is a Material split button in front of the headline: the
+leading half shows the keyword and cycles the buffer's sequence on tap, the
+chevron lists every keyword plus **No state**. An open keyword is filled, a
+done one tonal, and a heading with no state shows an outlined ring. Beneath
+the headline, set facts appear as tinted pills: Scheduled and Deadline in
+words (“Today · 09:00 · weekly”, “Due Friday”, “3 days overdue”, colored
+error/warning by urgency and muted once done), Priority (colored by rank),
+and Clocking. A date pill opens its drawer; long-press opens Jetpacs's
+timestamp dialog; the priority pill opens the priority dialog. A line of
+Area chips and the heading's own tags follows; inherited tags stay out of
+the resting view.
 
-The detail title uses the same Area chips as the reader and Projects. Its
-**Tags** section groups membership by native Org declarations and labels
-inherited tags separately. **Set tags…** opens Jetpacs's grouped picker:
-select local chips and optionally enter more colon-separated tags, then Save
-their union. Save reports how many invalid tags it skipped. Cancel leaves the
-heading unchanged; an empty selection clears
-local tags while preserving parent and file tags. Exclusive groups display
-the “one of” convention without enforcing it on existing Org content.
+Below that, a start-aligned row of tooltipped drawer icons: Tags (`label`),
+Scheduled (`event`), Deadline (`flag`), Properties (`tune`), Logbook
+(`history`), and Connections (`link`) when the notes layer contributes
+backlinks, outgoing links and unlinked mentions. Icons carry count badges;
+the open drawer's icon is tonal in the primary accent, and only one drawer
+is open at a time. A drawer is a filled card headed by its name and one edit
+action (Edit tags, Edit timestamp, Add property, Log note). The date
+drawers show a summary row (tap for the full dialog with time, repeater and
+delay cookies) and quick chips — Today, Tomorrow, Next week, a native date
+picker, Clear — that move only the day: time of day, repeater and delay
+survive, for deadlines as well as schedules. The Tags drawer shows each
+declared tag group as toggle chips (the Area group with its icons) so known
+tags are one tap away and exclusive groups swap by construction; inherited
+members show selected but disabled; **Add tag…** opens Jetpacs's grouped
+picker for anything free-form.
 
 Glasspane renders actual Org list checkboxes as native three-state controls.
 Tap the box or item text to toggle complete; long-press to mark in progress.

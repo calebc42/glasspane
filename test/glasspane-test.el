@@ -1946,216 +1946,263 @@ rejects, and a swept or mismatched list answers `stale'."
                ,@body)))
        (glasspane-test--reader-cleanup vault))))
 
-(ert-deftest glasspane-test-detail-todo-picker-layout ()
-  "A leading state control opens bounded vertical chips from live keywords."
+(defun glasspane-test--nodes (node)
+  "NODE and every node in its tree, depth first."
+  (when (jetpacs-node-p node)
+    (cons node
+          (cl-loop for (_key value) on node by #'cddr
+                   append
+                   (cond
+                    ((jetpacs-node-p value) (glasspane-test--nodes value))
+                    ((or (vectorp value) (proper-list-p value))
+                     (cl-loop for child across (vconcat value)
+                              append (glasspane-test--nodes child))))))))
+
+(ert-deftest glasspane-test-detail-todo-control ()
+  "The state control is a split button: cycle in front, every keyword behind."
   (glasspane-test--with-todo-heading
     (let* ((glasspane-ui--detail-read-mode t)
            (glasspane-detail--section nil)
-           (glasspane-detail--todo-picker-key nil)
            (info (glasspane-ui--detail-meta ref))
-           (key (glasspane-detail--key file (plist-get info :pos)))
-           (picker-key (jetpacs-wire-id "gp-detail-todo" key))
-           (options-id (jetpacs-wire-id "gp-detail-todo-options" key))
            (before (buffer-string))
            (tick (buffer-chars-modified-tick)))
-      (cl-labels
-          ((nodes (node)
-             (when (jetpacs-node-p node)
-               (cons node
-                     (cl-loop for (_key value) on node by #'cddr
-                              append
-                              (cond
-                               ((jetpacs-node-p value) (nodes value))
-                               ((or (vectorp value) (proper-list-p value))
-                                (cl-loop for child across (vconcat value)
-                                         append (nodes child)))))))))
-        (cl-letf (((symbol-function 'glasspane-detail--reader-nodes) #'ignore))
-          (let* ((body (glasspane-ui--detail-body info '(:main "todo-token")))
-                 (all (nodes body))
-                 (trigger
-                  (seq-find (lambda (node)
-                              (equal (plist-get (plist-get node :on_tap)
-                                                :action)
-                                     "detail.todo-picker"))
-                            all))
-                 (header
-                  (seq-find
-                   (lambda (node)
-                     (let ((children (append (plist-get node :children) nil)))
-                       (and (equal (plist-get node :t) "row")
-                            (seq-some (lambda (child) (memq trigger (nodes child)))
-                                      children)
-                            (seq-some
-                             (lambda (child)
-                               (seq-some
-                                (lambda (part)
-                                  (equal (plist-get part :text)
-                                         "A task with custom stages"))
-                                (nodes child)))
-                             children))))
-                   all)))
-            (should trigger)
-            (should header)
-            (let ((children (append (plist-get header :children) nil)))
-              (should (memq trigger (nodes (car children))))
-              (should (= (plist-get (cadr children) :weight) 1)))
-            (should (equal (plist-get trigger :on_tap)
-                           (plist-get trigger :on_long_tap)))
-            (should (equal (plist-get (plist-get trigger :on_tap) :args)
-                           (list :key picker-key)))
-            ;; The chip-shaped trigger leaves gesture ownership on its box.
-            (should-not (seq-find (lambda (node)
-                                   (equal (plist-get node :t) "chip"))
-                                 (nodes trigger)))
-            (should (seq-find (lambda (node)
-                               (equal (plist-get node :text) "WAITING"))
-                             (nodes trigger)))
-            (should-not (member options-id (glasspane-test--reader-ids body)))
-            (should-not (member "heading.todo-set"
-                                (mapcar (lambda (action)
-                                          (plist-get action :action))
-                                        (glasspane-test--actions body))))
-            (jetpacs-check-profile body 'app))
-          (dolist (current '("WAITING" nil))
-            (let* ((glasspane-detail--todo-picker-key picker-key)
-                   (current-info (plist-put (copy-sequence info) :todo current))
-                   (control (glasspane-detail--todo-control
-                             current-info "todo-token" key))
-                   (options (seq-find (lambda (node)
-                                        (equal (plist-get node :id) options-id))
-                                      (nodes control)))
-                   (chips (append (plist-get options :children) nil)))
-              (should (equal (plist-get options :t) "column"))
-              (should (eq (plist-get options :scroll) t))
-              (should (> (plist-get options :height) 0))
-              (should (< (plist-get options :height) 400))
-              (should (> (plist-get control :max_width) 0))
-              (should (equal (mapcar (lambda (chip) (plist-get chip :label))
-                                    chips)
-                             '("READY" "WORKING" "WAITING" "DONE"
-                               "VERIFY" "SHIPPED" "No state")))
-              (dolist (chip chips)
-                (let* ((label (plist-get chip :label))
-                       (clear (or (equal label current)
-                                  (equal label "No state")))
-                       (action (plist-get chip :on_tap)))
-                  (should (equal (plist-get chip :t) "chip"))
-                  (should (eq (plist-get chip :selected)
-                              (jetpacs-bool
-                               (if current (equal label current)
-                                 (equal label "No state")))))
-                  (should (equal (plist-get action :action) "heading.todo-set"))
-                  (should (equal (plist-get (plist-get action :args) :state)
-                                 (if clear "" label)))
-                  (should (equal (plist-get (plist-get action :args) :token)
-                                 "todo-token"))))
-              (jetpacs-check-profile control 'app)
-              (should (equal
-                       (jetpacs-node->canonical-json control)
-                       (jetpacs-node->canonical-json
-                        (glasspane-detail--todo-control
-                         current-info "todo-token" key))))))
-          (should (equal (buffer-string) before))
-          (should (= (buffer-chars-modified-tick) tick))
-          (should-not (buffer-modified-p)))))))
+      (cl-letf (((symbol-function 'glasspane-detail--reader-nodes) #'ignore))
+        (let* ((body (glasspane-ui--detail-body info '(:main "todo-token")))
+               (all (glasspane-test--nodes body))
+               (control (seq-find (lambda (node)
+                                    (equal (plist-get node :t)
+                                           "material3.split_button"))
+                                  all))
+               (items (append (plist-get control :items) nil))
+               (header (seq-find (lambda (node)
+                                   (and (equal (plist-get node :t) "row")
+                                        (memq control
+                                              (glasspane-test--nodes node))))
+                                 all)))
+          (should control)
+          (should header)
+          (should (equal (plist-get control :label) "WAITING"))
+          (should (equal (plist-get control :variant) "filled"))
+          (should (equal (plist-get (plist-get control :on_tap) :action)
+                         "heading.todo-cycle"))
+          (should (equal (plist-get (plist-get control :on_tap) :args)
+                         '(:token "todo-token")))
+          (should (equal (mapcar (lambda (item) (plist-get item :label)) items)
+                         '("READY" "WORKING" "WAITING" "DONE"
+                           "VERIFY" "SHIPPED" "No state")))
+          (dolist (item items)
+            (let ((action (plist-get item :on_tap))
+                  (label (plist-get item :label)))
+              (should (equal (plist-get action :action) "heading.todo-set"))
+              (should (equal (plist-get (plist-get action :args) :token)
+                             "todo-token"))
+              (should (equal (plist-get (plist-get action :args) :state)
+                             (if (equal label "No state") "" label)))
+              ;; The current keyword is the one disabled item.
+              (should (eq (eq (plist-get item :enabled) :json-false)
+                          (equal label "WAITING")))))
+          ;; The title keeps the row's width beside the control.
+          (let ((children (append (plist-get header :children) nil)))
+            (should (eq (car children) control))
+            (should (= (plist-get (cadr children) :weight) 1))
+            (should (equal (plist-get (cadr children) :style) "headline"))
+            (should (equal (plist-get (cadr children) :text)
+                           "A task with custom stages")))
+          (should-not (seq-find (lambda (node) (equal (plist-get node :t) "chip"))
+                                (glasspane-test--nodes control)))
+          (jetpacs-check-profile body 'app)
+          (should (equal (jetpacs-node->canonical-json body)
+                         (jetpacs-node->canonical-json
+                          (glasspane-ui--detail-body
+                           info '(:main "todo-token"))))))
+        ;; A done keyword is tonal; no keyword is the outlined ring.
+        (let ((done (glasspane-detail--todo-control
+                     (plist-put (plist-put (copy-sequence info) :todo "DONE")
+                                :done t)
+                     "tok")))
+          (should (equal (plist-get done :variant) "tonal")))
+        (let* ((none (glasspane-detail--todo-control
+                      (plist-put (copy-sequence info) :todo nil) "tok"))
+               (items (append (plist-get none :items) nil)))
+          (should (equal (plist-get none :variant) "outlined"))
+          (should (equal (plist-get none :icon) "radio_button_unchecked"))
+          (should-not (plist-get none :label))
+          (should (eq (plist-get (car (last items)) :enabled) :json-false)))
+        (should-not (glasspane-detail--todo-control
+                     (plist-put (copy-sequence info) :keywords nil) "tok")))
+      (should (equal (buffer-string) before))
+      (should (= (buffer-chars-modified-tick) tick))
+      (should-not (buffer-modified-p)))))
 
-(ert-deftest glasspane-test-detail-todo-picker-presentation-only ()
-  "Opening, switching, hiding and reopening a heading leave Org unchanged."
-  (glasspane-test--with-todo-heading
-    (let* ((glasspane-detail--todo-picker-key nil)
-           (glasspane-ui--detail-read-mode t)
-           (handler (gethash "detail.todo-picker" jetpacs-action-handlers))
-           (token (car (ebp-org-ref-tokens
-                        (list ref) :set "todo-picker-test" :owner "glasspane")))
-           (before (buffer-string))
-           (tick (buffer-chars-modified-tick))
-           (params '(:surface "app:glasspane"))
-           (refreshes 0)
-           opened)
-      (should handler)
-      (unwind-protect
-          (cl-letf (((symbol-function 'jetpacs-app-defer-refresh)
-                     (lambda (received)
-                       (should (equal received params))
-                       (cl-incf refreshes)))
-                    ((symbol-function 'glasspane-detail--push-screen)
-                     (lambda (_surface received) (setq opened received))))
-            (should (eq (funcall handler '(:key "first") params) 'accepted))
-            (should (equal glasspane-detail--todo-picker-key "first"))
-            (should (eq (funcall handler '(:key "first") params) 'accepted))
-            (should-not glasspane-detail--todo-picker-key)
-            (should (eq (funcall handler '(:key "first") params) 'accepted))
-            (should (eq (funcall handler '(:key "second") params) 'accepted))
-            (should (equal glasspane-detail--todo-picker-key "second"))
-            (dolist (args '(nil (:key nil) (:key 7) (:key "")))
-              (should (eq (funcall handler args params) 'rejected)))
-            (should (equal glasspane-detail--todo-picker-key "second"))
-            (should (= refreshes 4))
-            (should (eq (glasspane-detail--on-tap (list :token token) params)
-                        'accepted))
-            (should (equal opened ref))
-            (should-not glasspane-detail--todo-picker-key)
-            (should (equal (buffer-string) before))
-            (should (= (buffer-chars-modified-tick) tick))
-            (should-not (buffer-modified-p))
-            (should (equal (with-temp-buffer
-                             (insert-file-contents-literally file)
-                             (buffer-string))
-                           before)))
-        (ebp-org-ref-tokens nil :set "todo-picker-test" :owner "glasspane")))))
+(ert-deftest glasspane-test-detail-human-date ()
+  "Planning stamps read as words, colored by urgency, from one fixed today."
+  (let ((today "2026-09-15"))
+    (cl-flet ((words (ts &rest keys)
+                (let ((h (apply #'glasspane-ui-human-date ts today keys)))
+                  (list (plist-get h :label) (plist-get h :color)))))
+      (should (equal (words "<2026-09-15 Tue>") '("Today" "primary")))
+      (should (equal (words "<2026-09-16 Wed 09:00 +1w>")
+                     '("Tomorrow · 09:00 · weekly" "on_surface")))
+      (should (equal (words "<2026-09-18 Fri>") '("Friday" "on_surface")))
+      (should (equal (words "<2026-09-28 Mon>") '("Mon, Sep 28" "on_surface")))
+      (should (equal (words "<2027-01-03 Sun ++1m>")
+                     '("Jan 3, 2027 · monthly catch-up" "on_surface")))
+      (should (equal (words "<2026-09-14 Mon>") '("Yesterday" "warning")))
+      (should (equal (words "<2026-09-12 Sat>") '("3 days ago" "warning")))
+      (should (equal (words "<2026-09-12 Sat>" :done t)
+                     '("Sat, Sep 12" "outline")))
+      (should (equal (words "<2026-09-15 Tue>" :kind 'deadline)
+                     '("Due today" "error")))
+      (should (equal (words "<2026-09-18 Fri>" :kind 'deadline)
+                     '("Due Friday" "warning")))
+      (should (equal (words "<2026-10-20 Tue>" :kind 'deadline)
+                     '("Due Tue, Oct 20" "on_surface")))
+      (should (equal (words "<2026-09-12 Sat>" :kind 'deadline)
+                     '("3 days overdue" "error")))
+      (should (equal (words "<2026-08-01 Sat>" :kind 'deadline)
+                     '("6 weeks overdue" "error")))
+      (should (equal (words "<2026-09-12 Sat>" :kind 'deadline :done t)
+                     '("Sat, Sep 12" "outline")))
+      (should (equal (words "<2026-10-05 Mon 10:00-11:30 .+2d>")
+                     '("Mon, Oct 5 · 10:00–11:30 · every 2 days from done"
+                       "on_surface")))
+      (should (equal (plist-get (glasspane-ui-human-date
+                                 "<2026-09-16 Wed 09:00 +1w>" today)
+                                :long)
+                     "Wednesday, Sep 16, 2026 at 09:00 · repeats weekly"))
+      (should (equal (plist-get (glasspane-ui-human-date
+                                 "<2026-09-16 Wed 09:00-10:30>" today)
+                                :time)
+                     "09:00-10:30"))
+      (should-not (glasspane-ui-human-date nil today))
+      (should-not (glasspane-ui-human-date "no stamp" today))
+      (should (equal (glasspane-ui-repeat-words "+1d") "daily"))
+      (should (equal (glasspane-ui-repeat-words "+3w") "every 3 weeks"))
+      (should (equal (glasspane-ui-repeat-words ".+1y") "yearly from done"))
+      (should-not (glasspane-ui-repeat-words nil)))))
 
-(ert-deftest glasspane-test-detail-todo-picker-save-closes ()
-  "Selecting and clearing save before closing; rejected or stale choices stay."
+(ert-deftest glasspane-test-detail-status-pills ()
+  "Set facts become tinted pills that open their drawer or dialog; unset vanish."
+  (let* ((info '(:today "2026-09-15"
+                 :scheduled "<2026-09-16 Wed 09:00 +1w>"
+                 :deadline "<2026-09-12 Sat>"
+                 :priority "A" :priority-levels ("A" "B" "C")
+                 :clocked-in t
+                 :areas ("health") :local-tags ("health" "deep")
+                 :inherited-tags ("alpha")))
+         (row (glasspane-detail--status-pills info "tok"))
+         (pills (append (plist-get row :children) nil))
+         (badges (mapcar (lambda (pill)
+                           (seq-find (lambda (n) (equal (plist-get n :t) "badge"))
+                                     (glasspane-test--nodes pill)))
+                         pills)))
+    (should (equal (plist-get row :t) "flow_row"))
+    (should (equal (mapcar (lambda (b) (plist-get b :label)) badges)
+                   '("Tomorrow · 09:00 · weekly" "3 days overdue"
+                     "Priority A" "Clocking")))
+    (should (equal (mapcar (lambda (b) (plist-get b :color)) badges)
+                   '("on_surface" "error" "error" "success")))
+    (should (equal (mapcar (lambda (pill)
+                             (plist-get (plist-get pill :on_tap) :action))
+                           pills)
+                   '("detail.section" "detail.section"
+                     "detail.priority.edit" "org.clock.out")))
+    (should (equal (plist-get (plist-get (car pills) :on_long_tap) :args)
+                   '(:token "tok" :type "SCHEDULED")))
+    (should (equal (plist-get (plist-get (cadr pills) :on_tap) :args)
+                   '(:section "deadline")))
+    (jetpacs-check-profile row 'app)
+    (should-not (glasspane-detail--status-pills '(:today "2026-09-15") "tok"))
+    ;; The resting tag line: Areas elevated with icons, local plain tags
+    ;; flat, inherited tags hidden.
+    (let* ((glasspane-area-icons '(("health" . "favorite")))
+           (line (glasspane-detail--tag-line info))
+           (chips (append (plist-get line :children) nil)))
+      (should (equal (mapcar (lambda (c) (plist-get c :label)) chips)
+                     '("health" "deep")))
+      (should (equal (plist-get (car chips) :variant) "elevated"))
+      (should (equal (plist-get (car chips) :icon) "favorite"))
+      (should-not (plist-get (cadr chips) :variant))
+      (should (equal (plist-get (plist-get (cadr chips) :on_tap) :args)
+                     '(:tag "deep"))))
+    (should-not (glasspane-detail--tag-line '(:areas nil :local-tags nil)))))
+
+(ert-deftest glasspane-test-detail-schedule-keeps-time-and-cookies ()
+  "Quick moves change only the day; time, repeater and delay survive."
   (glasspane-test--with-todo-heading
-    (let ((glasspane-detail--todo-picker-key "open-picker")
+    (let ((handler (gethash "heading.schedule" jetpacs-action-handlers))
           (params '(:surface "app:glasspane"))
-          (handler (gethash "heading.todo-set" jetpacs-action-handlers)))
+          (org-log-reschedule nil)
+          (org-log-redeadline nil))
+      (should handler)
+      (org-schedule nil "<2026-09-01 Tue 09:00-10:30 +1w>")
+      (org-deadline nil "<2026-09-20 Sun 18:00 -3d>")
+      (save-buffer)
       (cl-letf (((symbol-function 'jetpacs-shell-notify) #'ignore)
                 ((symbol-function 'jetpacs-app-defer-refresh) #'ignore))
-        (dolist (case '(((:state 7) . rejected)
-                        ((:state "READY" :token "expired") . stale)))
-          (should (eq (funcall handler (car case) params) (cdr case)))
-          (should (equal glasspane-detail--todo-picker-key "open-picker")))
         (unwind-protect
-            (dolist (state '("READY" ""))
-              (let ((token (car (ebp-org-ref-tokens
-                                 (list (ebp-org-ref-at-point))
-                                 :set "todo-save-test" :owner "glasspane"))))
-                (setq glasspane-detail--todo-picker-key "open-picker")
-                (should (eq (funcall handler
-                                     (list :token token :state state) params)
+            (cl-flet ((tok ()
+                        (car (ebp-org-ref-tokens (list (ebp-org-ref-at-point))
+                                                 :set "sched-test"
+                                                 :owner "glasspane")))
+                      (stamp (prop) (org-entry-get nil prop)))
+              (let ((tomorrow (jetpacs-dates-shift
+                               (format-time-string "%Y-%m-%d") 1 'day)))
+                (should (eq (funcall handler (list :when "+1d" :token (tok))
+                                     params)
                             'accepted))
-                (should-not glasspane-detail--todo-picker-key)
-                (should (equal (org-get-todo-state)
-                               (unless (string-empty-p state) state)))
-                (should-not (buffer-modified-p))
-                (with-temp-buffer
-                  (insert-file-contents file)
-                  (should (search-forward
-                           (if (string-empty-p state)
-                               "* A task with custom stages\n"
-                             "* READY A task with custom stages\n")
-                           nil t)))))
-          (ebp-org-ref-tokens nil :set "todo-save-test" :owner "glasspane"))))))
+                (should (equal (stamp "SCHEDULED")
+                               (format "<%s %s 09:00-10:30 +1w>" tomorrow
+                                       (jetpacs-dates-format tomorrow "%a")))))
+              (should (eq (funcall handler
+                                   (list :value "2026-10-05" :token (tok))
+                                   params)
+                          'accepted))
+              (should (equal (stamp "SCHEDULED")
+                             "<2026-10-05 Mon 09:00-10:30 +1w>"))
+              (should (eq (funcall handler
+                                   (list :value "2026-10-06" :type "DEADLINE"
+                                         :token (tok))
+                                   params)
+                          'accepted))
+              (should (equal (stamp "DEADLINE") "<2026-10-06 Tue 18:00 -3d>"))
+              (should (eq (funcall handler
+                                   (list :clear t :type "DEADLINE" :token (tok))
+                                   params)
+                          'accepted))
+              (should-not (stamp "DEADLINE"))
+              (should (equal (stamp "SCHEDULED")
+                             "<2026-10-05 Mon 09:00-10:30 +1w>"))
+              (should (eq (funcall handler (list :token (tok)) params)
+                          'rejected))
+              (should-not (buffer-modified-p)))
+          (ebp-org-ref-tokens nil :set "sched-test" :owner "glasspane"))))))
 
 (ert-deftest glasspane-test-detail-tonal-controls ()
-  "Metadata icons expose empty editors and mark only the selected panel."
-  (dolist (logbook '(nil ((:type note :content "A note"))))
-    (dolist (selected '(nil tags scheduled deadline props logbook))
+  "Drawer icons are tooltipped, badged by content, and mark only the open one."
+  (dolist (extras '(nil ((:t "text" :text "backlinks"))))
+    (dolist (selected '(nil tags scheduled deadline props logbook links))
       (let* ((glasspane-detail--section selected)
-             (controls (glasspane-detail--section-controls
-                        (list :logbook logbook)))
-             (buttons (append (plist-get controls :children) nil))
-             (names (append '("tags" "scheduled" "deadline" "props")
-                            (and logbook '("logbook"))))
-             (icons (append '("label" "event" "flag" "tune")
-                            (and logbook '("history")))))
+             (info '(:tags ("a" "b") :props (("FOO" . "1")) :logbook nil
+                     :backlinks 3))
+             (controls (glasspane-detail--section-controls info extras))
+             (tooltips (append (plist-get controls :children) nil))
+             (buttons (mapcar (lambda (tip) (aref (plist-get tip :children) 0))
+                              tooltips))
+             (names (append '("tags" "scheduled" "deadline" "props" "logbook")
+                            (and extras '("links"))))
+             (icons (append '("label" "event" "flag" "tune" "history")
+                            (and extras '("link"))))
+             (badges (append '("2" nil nil "1" nil) (and extras '("3")))))
+        (should (equal (plist-get controls :arrange) "start"))
         (should (= (length buttons) (length names)))
         (cl-mapc
-         (lambda (button name icon)
+         (lambda (tip button name icon badge)
            (let ((action (plist-get button :on_tap)))
+             (should (equal (plist-get tip :t) "tooltip"))
              (should (equal (plist-get button :t) "icon_button"))
              (should (equal (plist-get button :icon) icon))
+             (should (equal (plist-get button :badge) badge))
              (should (stringp (plist-get button :content_description)))
              (should (equal (plist-get action :action) "detail.section"))
              (should (equal (plist-get action :args) (list :section name)))
@@ -2164,40 +2211,51 @@ rejects, and a swept or mismatched list answers `stale'."
                    (should (equal (plist-get button :variant) "tonal"))
                    (should (equal (plist-get button :color) "primary")))
                (should-not (equal (plist-get button :variant) "tonal")))))
-         buttons names icons)
+         tooltips buttons names icons badges)
         (jetpacs-check-profile controls 'app)))))
 
 (ert-deftest glasspane-test-detail-tonal-panels ()
-  "Each selected panel shows only its metadata and retains its editor route."
-  (let ((info '(:scheduled "<2026-09-14 Mon +1w>"
+  "Each open drawer shows only its metadata in a filled card with its editor route."
+  (let ((info '(:today "2026-09-15"
+                :scheduled "<2026-09-16 Wed +1w>"
                 :deadline "<2026-09-20 Sun +1m>"
-                :tag-groups (:tags ("solo") :local ("solo") :loose ("solo"))
+                :tag-groups (:tags ("solo") :local ("solo") :loose ("solo")
+                             :groups nil)
+                :local-tags ("solo")
                 :logbook ((:type note :timestamp "[2026-09-14 Mon]"
                            :content "Panel log note")))))
-    (dolist (selected '(nil tags scheduled deadline props logbook))
+    (dolist (selected '(nil tags scheduled deadline props logbook links))
       (let* ((glasspane-detail--section selected)
              (panel (glasspane-detail--section-panel info "panel-token" "key")))
-        (if (null selected)
+        (if (memq selected '(nil links))
             (should-not panel)
           (should (equal (plist-get panel :t) "card"))
-          (should (equal (plist-get panel :variant) "outlined"))
+          (should (equal (plist-get panel :variant) "filled"))
           (jetpacs-check-profile panel 'app)
           (let* ((json (jetpacs-node->canonical-json panel))
                  (actions (glasspane-test--actions panel))
                  (names (mapcar (lambda (action) (plist-get action :action))
-                                actions)))
+                                actions))
+                 (header (aref (plist-get (aref (plist-get panel :children) 0)
+                                          :children)
+                               0)))
+            (should (equal (plist-get header :t) "section_header"))
             (should (equal json (jetpacs-node->canonical-json
                                  (glasspane-detail--section-panel
                                   info "panel-token" "key"))))
             (should (eq (not (null (member "detail.tags.edit" names)))
                         (eq selected 'tags)))
+            (should (eq (not (null (member "heading.tags" names)))
+                        (eq selected 'tags)))
             (should (eq (not (null (member "heading.prop-add" names)))
                         (eq selected 'props)))
+            (should (eq (not (null (member "heading.add-note" names)))
+                        (eq selected 'logbook)))
             (should (eq (not (null (string-search "Panel log note" json)))
                         (eq selected 'logbook)))
-            (should (eq (not (null (string-search "Repeats +1w" json)))
+            (should (eq (not (null (string-search (encode-coding-string "Tomorrow · weekly" 'utf-8) json)))
                         (eq selected 'scheduled)))
-            (should (eq (not (null (string-search "Repeats +1m" json)))
+            (should (eq (not (null (string-search (encode-coding-string "Due Sunday · monthly" 'utf-8) json)))
                         (eq selected 'deadline)))
             (let ((planning (seq-filter
                              (lambda (action)
@@ -2206,7 +2264,9 @@ rejects, and a swept or mismatched list answers `stale'."
                              actions)))
               (if (memq selected '(scheduled deadline))
                   (progn
-                    (should (= (length planning) 1))
+                    ;; The summary row and the header's edit icon both
+                    ;; open the foundation dialog.
+                    (should (= (length planning) 2))
                     (should (equal (plist-get (car planning) :args)
                                    (list :token "panel-token"
                                          :type (if (eq selected 'scheduled)
@@ -2217,30 +2277,47 @@ rejects, and a swept or mismatched list answers `stale'."
                                (equal (plist-get action :action)
                                       "heading.schedule"))
                              actions)))
-              (if (eq selected 'scheduled)
-                  (should (equal (mapcar (lambda (action)
-                                          (plist-get action :args))
+              (pcase selected
+                ('scheduled
+                 (should (equal (mapcar (lambda (action) (plist-get action :args))
                                         schedule)
-                                 '((:token "panel-token")
-                                   (:when "+0d" :token "panel-token")
-                                   (:when "+1d" :token "panel-token")
-                                   (:when "+1w" :token "panel-token")
-                                   (:clear t :token "panel-token"))))
-                (should-not schedule)))))))
+                                '((:when "+0d" :token "panel-token")
+                                  (:when "+1d" :token "panel-token")
+                                  (:when "+1w" :token "panel-token")
+                                  (:token "panel-token")
+                                  (:clear t :token "panel-token")))))
+                ('deadline
+                 (should (equal (mapcar (lambda (action) (plist-get action :args))
+                                        schedule)
+                                '((:when "+0d" :token "panel-token"
+                                   :type "DEADLINE")
+                                  (:when "+1d" :token "panel-token"
+                                   :type "DEADLINE")
+                                  (:when "+1w" :token "panel-token"
+                                   :type "DEADLINE")
+                                  (:token "panel-token" :type "DEADLINE")
+                                  (:clear t :token "panel-token"
+                                   :type "DEADLINE")))))
+                (_ (should-not schedule))))
+            ;; Tomorrow's chip is the selected one on the scheduled drawer.
+            (when (eq selected 'scheduled)
+              (let ((chips (seq-filter (lambda (n) (equal (plist-get n :t) "chip"))
+                                       (glasspane-test--nodes panel))))
+                (should (equal (mapcar (lambda (c) (plist-get c :selected)) chips)
+                               '(:json-false t :json-false)))))))))
     (dolist (selected '(tags scheduled deadline props logbook))
       (let* ((glasspane-detail--section selected)
              (panel (glasspane-detail--section-panel nil "panel-token" "key")))
-        (if (eq selected 'logbook)
-            (should-not panel)
-          (jetpacs-check-profile panel 'app)
-          (let ((json (jetpacs-node->canonical-json panel)))
-            (should (string-search
-                     (pcase selected
-                       ('tags "detail.tags.edit")
-                       ('scheduled "Not scheduled")
-                       ('deadline "No deadline")
-                       ('props "heading.prop-add"))
-                     json))))))))
+        (jetpacs-check-profile panel 'app)
+        (let ((json (jetpacs-node->canonical-json panel)))
+          (should (string-search
+                   (pcase selected
+                     ('tags "detail.tags.edit")
+                     ('scheduled "Not scheduled")
+                     ('deadline "No deadline")
+                     ('props "No properties yet")
+                     ('logbook "Nothing logged yet"))
+                   json)))))))
 
 (defmacro glasspane-test--with-tag-groups (&rest body)
   "Run BODY with a grouped-tag heading REF in a disposable Org FILE."
@@ -2300,16 +2377,17 @@ rejects, and a swept or mismatched list answers `stale'."
                      (lambda (surface received)
                        (should (equal surface "app:glasspane"))
                        (setq opened received))))
-            ;; Actual dated metadata remains hidden until an icon is selected.
+            ;; Dated metadata shows as pills at rest; its editors stay
+            ;; behind the drawer until an icon is selected.
             (setq info (plist-put info :scheduled "<2026-09-14 Mon>"))
             (setq info (plist-put info :deadline "<2026-09-20 Sun>"))
-            (dolist (selected '(tags scheduled deadline props logbook))
+            (dolist (selected '(tags scheduled deadline props logbook links))
               (let ((args (list :section (symbol-name selected))))
                 (should (eq (funcall section-handler args params) 'accepted))
                 (should (eq glasspane-detail--section selected))
                 (should (eq (funcall section-handler args params) 'accepted))
                 (should-not glasspane-detail--section)))
-            (should (= refreshes 10))
+            (should (= refreshes 12))
             (should (eq (funcall section-handler '(:section "tags") params)
                         'accepted))
             (should (eq (funcall section-handler '(:section "scheduled") params)
@@ -2319,7 +2397,7 @@ rejects, and a swept or mismatched list answers `stale'."
                         'rejected))
             (should (eq (funcall section-handler nil params) 'rejected))
             (should (eq glasspane-detail--section 'scheduled))
-            (should (= refreshes 12))
+            (should (= refreshes 14))
             (dolist (selected '(nil tags scheduled deadline))
               (let* ((glasspane-detail--section selected)
                      (body (glasspane-ui--detail-body info (list :main token)))
@@ -2330,11 +2408,14 @@ rejects, and a swept or mismatched list answers `stale'."
                                       info (list :main token)))))
                 (should-not (string-search "gp-detail-tags-fold" json))
                 (should-not (string-search "gp-detail-sched" json))
+                ;; The pills at rest already reach the timestamp dialog
+                ;; by long-press; the drawer adds the quick moves.
+                (should (string-search "detail.planning.edit" json))
+                (should (eq (not (null (string-search "gp-detail-panel" json)))
+                            (not (null selected))))
                 (should (eq (not (null (string-search "detail.tags.edit" json)))
                             (eq selected 'tags)))
                 (should (eq (not (null (string-search "heading.schedule" json)))
-                            (eq selected 'scheduled)))
-                (should (eq (not (null (string-search "detail.planning.edit" json)))
                             (not (null (memq selected '(scheduled deadline))))))))
             (should (eq (funcall tap-handler (list :token token) params)
                         'accepted))
@@ -2370,53 +2451,78 @@ rejects, and a swept or mismatched list answers `stale'."
       (org-set-tags nil)
       (let* ((info (glasspane-ui--detail-meta ref))
              (json (jetpacs-node->canonical-json
-                    (glasspane-detail--tags-section info "token" "key"))))
+                    (glasspane-detail--tags-panel info "token" "key"))))
         (should-not (plist-get info :local-tags))
         (should (equal (plist-get info :inherited-tags) '("alpha" "hot")))
         (should (equal (plist-get info :areas) '("alpha")))
-        (should (string-search "Inherited" json))
-        (should-not (string-search "\"Local\"" json))
+        ;; Inherited members show selected but disabled; nothing local
+        ;; is left to uncheck.
+        (should (string-search "\"enabled\":false" json))
+        (should-not (string-search "\"icon\":\"check\"" json))
         (should-not (string-search "enum_list" json))))))
 
 (ert-deftest glasspane-test-detail-tag-groups-presentation ()
-  "Detail groups read-only chips and elevates Areas beside its title."
+  "The Tags drawer toggles group vocabularies; the resting line shows Areas and local tags."
   (glasspane-test--with-tag-groups
     (let* ((info (glasspane-ui--detail-meta ref))
-           (section (glasspane-detail--tags-section info "token" "key"))
-           (json (jetpacs-node->canonical-json section)))
-      (should (equal (plist-get section :t) "column"))
-      (should (string-search "state (one of)" json))
+           (panel (glasspane-detail--tags-panel info "token" "key"))
+           (json (jetpacs-node->canonical-json panel))
+           (chips (seq-filter (lambda (n) (equal (plist-get n :t) "chip"))
+                              (glasspane-test--nodes panel)))
+           (chip (lambda (label)
+                   (seq-find (lambda (c) (equal (plist-get c :label) label))
+                             chips)))
+           (value (lambda (label)
+                    (append (plist-get (plist-get (plist-get (funcall chip label)
+                                                             :on_tap)
+                                                  :args)
+                                       :value)
+                            nil))))
+      (should (equal (plist-get panel :t) "column"))
+      (should (equal (plist-get panel :id) (jetpacs-wire-id "gp-detail-tags" "key")))
+      (should (string-search (encode-coding-string "state · one of" 'utf-8) json))
       (should (string-search "\"text\":\"Area\"" json))
       (should (string-search "\"text\":\"shared\"" json))
       (should (string-search "Other tags" json))
-      (should (string-search "Inherited" json))
-      (should (string-search "\"variant\":\"elevated\"" json))
       (should (string-search "detail.tags.edit" json))
-      (should (string-search "\"token\":\"token\"" json))
-      (should-not (string-search "heading.tags" json))
       (should-not (string-search "enum_list" json))
-      (jetpacs-check-profile section 'app)
-      (dolist (width '("compact" "expanded"))
-        (cl-letf (((symbol-function 'jetpacs-window-class)
-                   (lambda (_dimension) width))
-                  ((symbol-function 'glasspane-detail--reader-nodes) #'ignore))
-          (let* ((glasspane-ui--detail-read-mode t)
-                 (body (glasspane-ui--detail-body info '(:main "token")))
-                 (title (aref (plist-get body :children) 1))
-                 (children (plist-get title :children)))
-            (if (equal width "compact")
-                (progn
-                  (should (= (length children) 2))
-                  (let ((heading (aref children 0)))
-                    (should (equal (plist-get heading :t) "row"))
-                    (should (equal
-                             (plist-get (aref (plist-get heading :children) 1)
-                                        :text)
-                             "Child"))))
-              (should (= (length children) 1))
-              (should (equal (plist-get (aref children 0) :t) "row")))
-            (should (string-search "alpha" (jetpacs-node->canonical-json title)))
-            (should (string-search "beta" (jetpacs-node->canonical-json title)))))))))
+      ;; Every declared member is a chip: hot cold | alpha beta | beta gamma | extra.
+      (should (equal (mapcar (lambda (c) (plist-get c :label)) chips)
+                     '("hot" "cold" "alpha" "beta" "beta" "gamma" "extra")))
+      ;; Local beta is selected; inherited alpha and hot are disabled.
+      (should (eq (plist-get (funcall chip "beta") :selected) t))
+      (should (eq (plist-get (funcall chip "alpha") :enabled) :json-false))
+      (should (eq (plist-get (funcall chip "hot") :enabled) :json-false))
+      (should-not (plist-get (funcall chip "beta") :enabled))
+      (should (eq (plist-get (funcall chip "extra") :selected) t))
+      (should (equal (plist-get (funcall chip "extra") :icon) "check"))
+      ;; Toggling sends the whole recomputed local set: exclusive groups
+      ;; swap, plain ones add, set tags leave.
+      (should (equal (funcall value "cold") '("beta" "extra" "cold")))
+      (should (equal (funcall value "gamma") '("beta" "extra" "gamma")))
+      (should (equal (funcall value "beta") '("extra")))
+      (should (equal (funcall value "extra") '("beta")))
+      (jetpacs-check-profile panel 'app)
+      ;; At rest: the Area chips (elevated) and the local plain tag;
+      ;; inherited plain tags stay hidden.
+      (cl-letf (((symbol-function 'glasspane-detail--reader-nodes) #'ignore))
+        (let* ((glasspane-ui--detail-read-mode t)
+               (glasspane-detail--section nil)
+               (body (glasspane-ui--detail-body info '(:main "token")))
+               (line (seq-find
+                      (lambda (n)
+                        (and (equal (plist-get n :t) "flow_row")
+                             (seq-some (lambda (c)
+                                         (equal (plist-get c :t)
+                                                "material3.assist_chip"))
+                                       (append (plist-get n :children) nil))))
+                      (glasspane-test--nodes body)))
+               (line-chips (append (plist-get line :children) nil)))
+          (should (equal (mapcar (lambda (c) (plist-get c :label)) line-chips)
+                         '("alpha" "beta" "extra")))
+          (should (equal (plist-get (car line-chips) :variant) "elevated"))
+          (should-not (string-search "\"hot\""
+                                     (jetpacs-node->canonical-json line))))))))
 
 (ert-deftest glasspane-test-detail-tag-groups-picker-route ()
   "A detail token opens the real foundation picker; only Save changes tags."
@@ -2590,19 +2696,15 @@ wire encoding."
     (should (string-search "\"text_input\"" json))
     (should (string-search "\"token\":\"tok\"" json))
     (should (string-search "\"name\":\"FOO\"" json)))
-  ;; Chip rails: tapping the ACTIVE chip sends the clearing value.
+  ;; Status pills: a set priority is a tinted pill that opens the dialog.
   (let ((json (jetpacs-node->canonical-json
-               (glasspane-ui--todo-chips "TODO" '("TODO" "DONE") "tok"))))
-    (should (string-search "\"scroll\":true" json))
-    (should (string-search "\"state\":\"\"" json))
-    (should (string-search "\"state\":\"DONE\"" json))
-    (should (string-search "\"selected\":true" json)))
-  (let* ((org-priority-highest ?A)
-         (org-priority-lowest ?B)
-         (json (jetpacs-node->canonical-json
-                (glasspane-ui--priority-chips "A" "tok"))))
-    (should (string-search "\"value\":\"\"" json))
-    (should (string-search "\"value\":\"B\"" json)))
+               (glasspane-detail--status-pills
+                '(:today "2026-09-15" :priority "B"
+                  :priority-levels ("A" "B" "C"))
+                "tok"))))
+    (should (string-search "Priority B" json))
+    (should (string-search "\"color\":\"warning\"" json))
+    (should (string-search "detail.priority.edit" json)))
   ;; The shared cards (G5 formatters stubbed until the agenda rung).
   (cl-letf (((symbol-function 'glasspane-agenda-type-icon)
              (lambda (_type) '("schedule" . nil)))
@@ -2648,7 +2750,7 @@ wire encoding."
                  (glasspane-detail--top-actions
                   '(:file "/v/tasks.org" :clocked-in nil)
                   '(:main "detail-token"))))))
-    (should (string-search "detail.open-file" json))
+    (should (string-search "heading.visit" json))
     (should (string-search "\"open_surface\":\"app:jetpacs.files\"" json))
     (should (string-search "open_in_new" json))
     (should (string-search "Open in file" json))
@@ -3015,36 +3117,44 @@ both modes, degrading to the go-back placeholder on a dead ref."
                           (re-search-forward "Parent2")
                           (ebp-org-ref-at-point)))))
               (let* ((glasspane-ui--detail-read-mode t)
-                     (glasspane-detail--todo-picker-key nil)
+                     (glasspane-detail--section nil)
                      (screen (glasspane-detail--screen ref nil))
                      (json (jetpacs-node->canonical-json screen)))
                 (should (equal (plist-get screen :t) "scaffold"))
                 (should (string-search "Parent2" json))
-                (should (string-search "detail.todo-picker" json))
-                (should-not (string-search "heading.todo-set" json))
+                ;; The bar names the document; the split button carries
+                ;; every state; rarer verbs ride the overflow menu.
+                (should (string-search "\"text\":\"Renamed\"" json))
+                (should (string-search "material3.split_button" json))
+                (should (string-search "heading.todo-cycle" json))
+                (should (string-search "heading.todo-set" json))
+                (should-not (string-search "detail.todo-picker" json))
                 (should (string-search "jetpacs.org.archive" json))
-                (should-not (string-search "detail.planning.edit" json))
                 (should (string-search "files.properties.show" json))
-                ;; Metadata starts hidden; selecting an icon reveals
-                ;; only that panel and its existing editing actions.
-                (should-not (string-search "gp-detail-props" json))
+                (should (string-search "detail.priority.edit" json))
+                (should (string-search "jetpacs.org.heading" json))
+                ;; Metadata starts closed: no drawer panel, and with no
+                ;; stamp the planning dialog waits behind a drawer.
+                (should-not (string-search "gp-detail-panel" json))
                 (should-not (string-search "gp-detail-logbook" json))
+                (should-not (string-search "detail.planning.edit" json))
                 (should (string-search "Toggle properties" json))
                 (should (string-search "detail.section" json))
-                (should-not (string-search "+ Add property" json))
+                (should-not (string-search "Add property" json))
                 (should-not (string-search "\"variant\":\"tonal\"" json))
                 (let* ((glasspane-detail--section 'scheduled)
                        (json (jetpacs-node->canonical-json
                               (glasspane-detail--screen ref nil))))
                   (should (string-search "detail.planning.edit" json))
-                  (should (string-search "heading.schedule" json)))
+                  (should (string-search "heading.schedule" json))
+                  (should (string-search "Not scheduled" json)))
                 (let* ((glasspane-detail--section 'props)
                        (json (jetpacs-node->canonical-json
                               (glasspane-detail--screen ref nil))))
                   (should (string-search "\"variant\":\"tonal\"" json))
-                  (should (string-search "+ Add property" json))
+                  (should (string-search "Add property" json))
                   (should (string-search "heading.prop-set" json))
-                  (should (string-search "\"variant\":\"outlined\"" json))))
+                  (should (string-search "\"variant\":\"filled\"" json))))
               (let* ((glasspane-ui--detail-read-mode nil)
                      (json (jetpacs-node->canonical-json
                             (glasspane-detail--screen ref nil))))
@@ -4668,7 +4778,7 @@ the scan marks, and ends REGISTERED so suite order never matters."
   (should-not (glasspane-notes--stale-notes))
   (should-not (glasspane-notes-stale-section))
   (should-not (glasspane-notes-detail-nodes '(:file "/tmp/x.org" :pos 1)))
-  (should-not (glasspane-notes-detail-toolbar '(:file "/tmp/x.org" :pos 1)))
+  (should-not (glasspane-notes-detail-scan-button '(:file "/tmp/x.org" :pos 1)))
   ;; The capf declines inside its own guard even mid-"[[".
   (with-temp-buffer
     (org-mode)
@@ -4683,8 +4793,8 @@ the scan marks, and ends REGISTERED so suite order never matters."
         (should materialize)
         (should (memq #'glasspane-notes-detail-nodes
                       glasspane-ui-detail-nodes-functions))
-        (should (memq #'glasspane-notes-detail-toolbar
-                      glasspane-ui-detail-toolbar-functions))
+        (should-not (memq #'glasspane-notes-detail-toolbar
+                          glasspane-ui-detail-toolbar-functions))
         (should (memq #'glasspane-notes--setup-shadow
                       ebp-complete-shadow-setup-hook))
         ;; Junk shape rejects BEFORE the token lookup; an unminted
@@ -4730,8 +4840,6 @@ the scan marks, and ends REGISTERED so suite order never matters."
         (should-not (gethash "link.materialize" jetpacs-action-handlers))
         (should-not (memq #'glasspane-notes-detail-nodes
                           glasspane-ui-detail-nodes-functions))
-        (should-not (memq #'glasspane-notes-detail-toolbar
-                          glasspane-ui-detail-toolbar-functions))
         (should-not (memq #'glasspane-notes--setup-shadow
                           ebp-complete-shadow-setup-hook))
         (should (zerop (hash-table-count glasspane-notes--mentions-scans))))
@@ -6228,7 +6336,8 @@ point: a new screen cannot ship unreachable.")
     "projects.area-filter"
     "projects.group"
     "demo.setup" "demo.setup-org" "detail.open-file"
-    "detail.planning.edit" "detail.tags.edit" "detail.save"
+    "detail.planning.edit" "detail.priority.edit" "detail.tags.edit"
+    "detail.save"
     "detail.toggle-read" "detail.section" "files.filter"
     "files.properties.save" "files.properties.show"
     "files.toggle-refile" "glasspane.packages.install"

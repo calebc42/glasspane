@@ -20,20 +20,54 @@ share the root Projects styling: elevated, with configured icons, right-aligned
 beside the heading on medium and expanded windows and stacked beneath it on a
 phone. Membership includes inherited and file-level Areas; ordinary
 tags stay below the heading without duplicating Area chips.
+Glasspane reads native group vocabulary and heading membership through
+`ebp-org`. PARA membership includes inheritance even when agenda inheritance
+is disabled, while honoring `org-tags-exclude-from-inheritance`. The reader
+queries its current source buffer directly; changing group settings does not
+require editing a heading to refresh membership.
 Tap the disclosure header to expand content; a long press, or **Open** in the
 overflow menu, opens the existing detail view. The header carries no separate
 open icon. Archive lives only in the leftward swipe, not in the overflow menu.
-Tag search, swipe and the remaining overflow actions stay available. Properties and Logbook use Jetpacs's shared tonal visibility icons:
-filled tonal means shown, and tapping hides the drawer without editing the file.
-The icons directly open or close the rendered contents beneath the heading;
-only one drawer per heading is open at a time. Opening the other icon switches
-the panel; tapping the active icon closes it. An outlined panel repeats the
-active icon and label at the left, using the same accent color as the heading
-icon. There are no separate disclosure rows. Visible contents
+Tag search and the remaining overflow actions stay available. The header
+row carries only the title and the overflow menu: Properties and Logbook
+ride the rightward swipe beside Cycle as revealed actions that use Jetpacs's
+shared drawer visibility state. The shown drawer's action carries the primary
+accent, and tapping it hides the drawer without editing the file.
+The actions directly open or close the rendered contents beneath the heading;
+only one drawer per heading is open at a time. Revealing the other action
+switches the panel; revealing the shown one closes it. An outlined panel
+repeats the drawer's icon and label at the left in the primary accent.
+There are no separate disclosure rows. Visible contents
 omit Org's drawer delimiters. Properties use muted name labels beside selectable
 values; IDs retain monospace styling, and empty values show a dash. Local property
 order and repeated keys are preserved. Logbook clocks show a timer, readable time range,
 and duration (or Running), preserving other entries in source order.
+The detail view has a right-aligned row of show/hide icons above the body:
+Tags (`label`), Scheduled (`event`), Deadline (`flag`), Properties (`tune`),
+and Logbook (`history`). The shown panel's icon is tonal in the primary
+accent. Tapping it hides the panel; tapping another icon replaces the panel.
+Opening a heading starts with all panels hidden. Tags, Scheduled, Deadline,
+and Properties stay available when empty so their editing actions are always
+reachable. Logbook appears only when the heading has entries. Each panel has
+an outlined border and repeats its icon and label. The separate date panels
+retain the existing quick schedule actions and timestamp dialogs.
+
+The current TODO stage is a chip before the detail heading title. Tap or
+long-press it to open a bounded, vertically scrolling list of stage chips
+in that position. Selecting a stage saves it and closes the list. As before,
+selecting the active stage clears it; **No state** also clears it. Tap the
+leading chip again to close without changing anything. The list uses the
+heading buffer's TODO sequence and starts closed when opening a heading.
+
+The detail title uses the same Area chips as the reader and Projects. Its
+**Tags** section groups membership by native Org declarations and labels
+inherited tags separately. **Set tags…** opens Jetpacs's grouped picker:
+select local chips and optionally enter more colon-separated tags, then Save
+their union. Save reports how many invalid tags it skipped. Cancel leaves the
+heading unchanged; an empty selection clears
+local tags while preserving parent and file tags. Exclusive groups display
+the “one of” convention without enforcing it on existing Org content.
+
 Glasspane renders actual Org list checkboxes as native three-state controls.
 Tap the box or item text to toggle complete; long-press to mark in progress.
 Org owns statistics and parent/child updates, and the action saves before

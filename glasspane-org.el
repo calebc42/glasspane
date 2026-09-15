@@ -273,8 +273,10 @@ Memoised; see `ebp-org-cache-invalidate'."
                 (vulpea-db-query (lambda (note) (vulpea-note-todo note))))
       (glasspane-org--todo-items-1 files))))
 
-(defun glasspane-org--clean-tag-strings (tags)
-  "Return TAGS as distinct, non-empty strings without text properties."
+(defun glasspane-org-tag-strings (tags)
+  "Return TAGS as distinct, non-empty strings without text properties.
+Public: item `tags' vectors still carry Org's propertized `org-get-tags'
+output; the foundation's tag-group readers already answer clean strings."
   (let ((values (cond
                  ((vectorp tags) (append tags nil))
                  ((listp tags) (copy-sequence tags))
@@ -289,40 +291,92 @@ Memoised; see `ebp-org-cache-invalidate'."
                   (unless (string-empty-p clean) clean))))
             values)))))
 
-(defun glasspane-org--file-tag-group-index (file group)
+(defun glasspane-org-tag-group (groups name)
+  "Return the group named NAME in foundation GROUPS, ignoring case.
+GROUPS is vocabulary from `ebp-org-tag-groups' or the `:groups' field of
+`ebp-org-tag-groups-at'.  Return the first matching declaration, preserving
+Org's persistent-before-file precedence, or nil when NAME is absent."
+  (and (stringp name)
+       (cl-find-if
+        (lambda (group)
+          (let ((candidate (plist-get group :name)))
+            (and (stringp candidate)
+                 (string-equal-ignore-case candidate name))))
+        groups)))
+
+(defun glasspane-org-tag-groups-at (pos)
+  "Return foundation tag-group membership at POS with PARA inheritance.
+POS is a heading position in the current Org buffer.  Glasspane considers
+file tags and parent tags even when `org-use-tag-inheritance' narrows
+agenda display.  `org-tags-exclude-from-inheritance' still applies.
+The foundation returns propertyless strings and does not cache this query."
+  (let ((org-use-tag-inheritance t))
+    (ebp-org-tag-groups-at pos)))
+
+(defun glasspane-org--tag-settings-here ()
+  "Snapshot the current buffer's tag inputs missing from the EBP cache stamp.
+Org owns `org-current-tag-alist': its normal settings refresh rebuilds that
+vocabulary.  Include both that vocabulary and its configuration inputs, so
+settings refreshes and buffer-local inheritance exclusions invalidate cached
+membership without needing a text edit or manual cache invalidation."
+  (copy-tree
+   (list org-tag-alist org-tag-persistent-alist org-current-tag-alist
+         org-file-tags org-tags-exclude-from-inheritance)))
+
+(defun glasspane-org-tag-settings-stamp (files)
+  "Snapshot global and visited-buffer tag settings for FILES.
+The EBP cache already stamps file contents and buffer edits; tag vocabulary
+and inheritance exclusions may change without either.  Copy these inputs
+so later in-place customization cannot mutate an existing cache key."
+  (list (glasspane-org--tag-settings-here)
+        (mapcar
+         (lambda (file)
+           (cons file
+                 (when-let* ((buffer (find-buffer-visiting file)))
+                   (with-current-buffer buffer
+                     (and (derived-mode-p 'org-mode)
+                          (glasspane-org--tag-settings-here))))))
+         files)))
+
+(defun glasspane-org-file-tag-group-index (file group)
   "Return FILE's effective tag GROUP members and heading memberships.
+Public: the per-file memo every Area consumer (cards, Resources archives)
+shares, so the first-paint tripwire pays one walk per file per generation.
 The memoised result is a plist with `:members' in declaration order,
 `:file-tags' as the members carried by the file's own `#+FILETAGS' (so a
 file with no headings still belongs), and `:positions' as an alist from
-heading point to the members inherited there.  Membership is local,
-inherited, and file-level tags together: the walk binds
-`org-use-tag-inheritance' to t so a user setting that narrows inheritance
-for agenda display cannot narrow the PARA model."
+heading point to the members inherited there.  Read membership through
+`glasspane-org-tag-groups-at', including its PARA inheritance policy.
+Cache identity includes the buffer's tag vocabulary and exclusions because
+the EBP cache's content stamp does not cover settings changes."
   (when (and (stringp file) (stringp group)
              (not (string-empty-p group)))
-    (ebp-org-with-cache 'glasspane (list 'tag-group-index file group)
-      (condition-case nil
-          (let ((true (ebp-org--check-file file)))
-            (ebp-org--with-clamped-io
-              (with-current-buffer (find-file-noselect true t)
-                (unless (derived-mode-p 'org-mode) (org-mode))
-                (org-with-wide-buffer
-                 (let* ((org-use-tag-inheritance t)
-                        (members
-                         (glasspane-org--clean-tag-strings
-                          (cdr (assoc-string group org-tag-groups-alist t))))
-                        (file-tags (glasspane-org--clean-tag-strings
+    (condition-case nil
+        (let ((true (ebp-org--check-file file)))
+          (ebp-org--with-clamped-io
+            (with-current-buffer (find-file-noselect true t)
+              (unless (derived-mode-p 'org-mode) (org-mode))
+              (org-with-wide-buffer
+               (ebp-org-with-cache 'glasspane
+                   (list 'tag-group-index true group
+                         (buffer-chars-modified-tick)
+                         (glasspane-org--tag-settings-here))
+                 (let* ((members
+                         (plist-get
+                          (glasspane-org-tag-group (ebp-org-tag-groups) group)
+                          :tags))
+                        (file-tags (glasspane-org-tag-strings
                                     org-file-tags))
                         positions)
                    (org-map-entries
                     (lambda ()
-                      (let ((tags (glasspane-org--clean-tag-strings
-                                   (org-get-tags))))
+                      (let ((membership (glasspane-org-tag-groups-at (point))))
                         (push
                          (cons (point)
-                               (cl-remove-if-not
-                                (lambda (member) (member member tags))
-                                members))
+                               (plist-get
+                                (glasspane-org-tag-group
+                                 (plist-get membership :groups) group)
+                                :members))
                          positions)))
                     nil 'file)
                    (list :members members
@@ -330,8 +384,8 @@ for agenda display cannot narrow the PARA model."
                                      (lambda (member)
                                        (member member file-tags))
                                      members)
-                         :positions (nreverse positions)))))))
-        (error nil)))))
+                         :positions (nreverse positions))))))))
+      (error nil))))
 
 (defun glasspane-org--file-todo-keywords (file)
   "Return FILE's effective TODO keywords without trusting another buffer."
@@ -389,7 +443,7 @@ An Area note declares itself with an `AREA' property whose value is the
 Area tag.  Each result is a plist (:name VALUE :file PATH :pos POS
 :headline TITLE :level LEVEL).  This is the only place the Areas model
 reads the vulpea index; membership itself is always resolved from the
-files (see `glasspane-org--file-tag-group-index').  Memoised; see
+files (see `glasspane-org-file-tag-group-index').  Memoised; see
 `ebp-org-cache-invalidate'."
   (when (and (glasspane-org--vulpea-p)
              (fboundp 'vulpea-db-query-by-property-key))
@@ -418,11 +472,11 @@ heading tags are honored.  If a stale index item has no matching position,
 its own `tags' field is intersected with the source file's effective group.
 The result follows the group's declaration order."
   (when-let* ((file (alist-get 'file item))
-              (index (glasspane-org--file-tag-group-index file group)))
+              (index (glasspane-org-file-tag-group-index file group)))
     (let* ((pos (alist-get 'pos item))
            (at-pos (and (integerp pos)
                         (assoc pos (plist-get index :positions))))
-           (tags (glasspane-org--clean-tag-strings
+           (tags (glasspane-org-tag-strings
                   (alist-get 'tags item))))
       (copy-sequence
        (if at-pos
@@ -461,10 +515,11 @@ The result follows the group's declaration order."
          "TODO<>\"\"" scope)))
     (nreverse items)))
 
-(defun glasspane-org--heading-item-at ()
+(defun glasspane-org-heading-item-at ()
   "Build a heading item alist for the org entry at point.
 Same shape as `glasspane-org-todo-items' entries (headline/todo/priority/
-tags/file/pos/ref); used by the search layer."
+tags/file/pos/ref).  Public: the search layer and the Areas scan build
+their items here so every card shares one shape."
   (let* ((components (org-heading-components))
          (todo (nth 2 components))
          (priority (nth 3 components))
@@ -562,8 +617,8 @@ Signals `user-error' on terms neither engine knows.  Memoised; see
           (glasspane-org--vulpea-query tree))
       ;; KEY names the ACTION, not the caller: the cached value is the
       ;; action's own payload (the P1-12 rule, ebp-org.el:1260-1270).
-      (ebp-org-query 'glasspane 'glasspane-org--heading-item-at
-                     tree #'glasspane-org--heading-item-at))))
+      (ebp-org-query 'glasspane 'glasspane-org-heading-item-at
+                     tree #'glasspane-org-heading-item-at))))
 
 (defun glasspane-org-search (query)
   "Search the org data for QUERY; return a list of heading items.

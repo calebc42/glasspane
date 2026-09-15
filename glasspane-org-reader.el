@@ -133,9 +133,12 @@ drawer as an editable dialog instead.")
 
 (defun glasspane-org-reader--drawers (n &optional skip-props)
   "Return N's native drawer records, omitting properties when SKIP-PROPS.
-The caller is in N's source buffer.  Inline properties also honor
-`glasspane-org-reader-inline-props', as the detail screen owns its own editor."
-  (when (and (derived-mode-p 'org-mode) (integerp (plist-get n :pos)))
+The symbol `all' omits every drawer: the caller presents the heading's
+metadata itself.  The caller is in N's source buffer.  Inline properties
+also honor `glasspane-org-reader-inline-props', as the detail screen owns
+its own editor."
+  (when (and (derived-mode-p 'org-mode) (integerp (plist-get n :pos))
+             (not (eq skip-props 'all)))
     (jetpacs-org-render-exclusive-drawers
      (cl-remove-if
       (lambda (drawer)
@@ -205,9 +208,10 @@ including repeated keys; unrecognized lines remain visible as plain text."
       (nreverse nodes))))
 
 (defun glasspane-org-reader--drawer-node (drawer)
-  "Render DRAWER's contents when its native tonal control shows it.
-The shared Jetpacs visibility state is the sole expansion authority.  Omit
-separate disclosure headers and Org delimiters while preserving contents."
+  "Render DRAWER's contents unless its native visibility state hides it.
+The shared Jetpacs visibility state is the sole expansion authority; the
+heading's revealed swipe actions flip it.  Omit separate disclosure headers
+and Org delimiters while preserving contents."
   (unless (plist-get drawer :hidden)
     (let* ((name (plist-get drawer :name))
            (beg (plist-get drawer :begin))
@@ -1631,7 +1635,7 @@ owns checkbox transitions and statistics; Glasspane owns the native gestures."
 (defun glasspane-org-reader--body-nodes (n drawers)
   "Render N's body, replacing DRAWERS with their visible contents.
 Source offsets preserve prose order around each drawer.  Hidden drawers emit
-no section; the heading's native tonal icons directly show or hide contents."
+no section; the heading's swipe actions directly show or hide contents."
   (let* ((body (or (plist-get n :body) ""))
          (start (plist-get n :body-start))
          (cursor 0)
@@ -1654,8 +1658,9 @@ no section; the heading's native tonal icons directly show or hide contents."
 
 (defun glasspane-org-reader--content-nodes (n file tokens &optional skip-props)
   "Render N's visible drawers, body and children from FILE using TOKENS.
-SKIP-PROPS omits properties owned by the detail view.  Jetpacs's native drawer
-icons and overlays directly control visibility without extra fold headers."
+SKIP-PROPS omits properties owned by the detail view (`all' omits every
+drawer).  Jetpacs's native drawer overlays directly control visibility
+without extra fold headers."
   (let* ((drawers (glasspane-org-reader--drawers n skip-props))
          (properties (cl-find "PROPERTIES" drawers
                               :key (lambda (drawer) (plist-get drawer :name))
@@ -1806,17 +1811,44 @@ without duplicating the elevated Area chips."
          (glasspane-ui-tag-chips tags)
          :spacing 4)))))))
 
-(defun glasspane-org-reader-swipe-sides (token archive)
-  "The (START . END) per-side swipe pair for a heading's minted pair.
-Rightward reveals the todo cycle (green); leftward the base archive
-(red) — `jetpacs.org.archive' with the descriptor-level confirm, so the
-Companion asks before the event exists (SPEC 14.1).  Shared with the
-agenda/tasks cards."
+(defun glasspane-org-reader--drawer-swipe-actions (drawers buffer)
+  "Revealed swipe actions showing or hiding DRAWERS in BUFFER.
+DRAWERS are `glasspane-org-reader--drawers' records, already projected to
+at most one visible sibling.  Each action rides the shared
+`jetpacs.org.toggle-drawer' verb exclusively, so revealing the other
+drawer switches the panel and revealing the shown one closes it; the
+shown drawer's action carries the primary accent, like the foundation's
+own tonal controls.  The exact drawer start is exposed here, as those
+controls do."
+  (mapcar
+   (lambda (drawer)
+     (let ((pos (plist-get drawer :begin))
+           (properties (equal (plist-get drawer :name) "PROPERTIES")))
+       (jetpacs-buffer-expose buffer pos "jetpacs.org.toggle-drawer")
+       (jetpacs-swipe-action
+        (if properties "Properties" "Logbook")
+        :icon (if properties "tune" "history")
+        :color (and (not (plist-get drawer :hidden)) "primary")
+        :on-trigger (jetpacs-action "jetpacs.org.toggle-drawer"
+                                    :args (list :buffer buffer :pos pos
+                                                :end (plist-get drawer :end)
+                                                :exclusive t)))))
+   drawers))
+
+(defun glasspane-org-reader-swipe-sides (token archive &optional drawer-actions)
+  "The (START . END) per-side swipe pair for TOKEN and ARCHIVE.
+Rightward reveals the todo cycle (green) on TOKEN followed by
+DRAWER-ACTIONS, the heading's Properties/Logbook show-hide actions from
+`glasspane-org-reader--drawer-swipe-actions'; leftward the base archive
+\(red) on ARCHIVE — `jetpacs.org.archive' with the descriptor-level
+confirm, so the Companion asks before the event exists (SPEC 14.1).
+Shared with the agenda/tasks cards, which pass no drawer actions."
   (cons (jetpacs-swipe
-         (list (jetpacs-swipe-action
+         (cons (jetpacs-swipe-action
                 "Cycle" :icon "check" :color "success"
                 :on-trigger (jetpacs-action "heading.todo-cycle"
-                                            :args (list :token token)))))
+                                            :args (list :token token)))
+               drawer-actions))
         (and archive
              (jetpacs-swipe
               (list (jetpacs-swipe-action
@@ -1841,8 +1873,9 @@ the graph is consulted.  The caller is in the heading's source buffer."
   "Render tree node N from FILE to a foldable `jetpacs-collapsible'.
 TOKENS is the render's POS -> (TAP . ARCHIVE) table.  Long-press opens
 the detail view, as does the overflow menu's Open item — there is no
-separate open icon, keeping the header row to the drawer controls and
-the menu; the header swipes right = todo cycle, left = archive.  The \"Org
+separate open icon, keeping the header row to the title and the menu;
+the header swipes right = todo cycle plus the Properties/Logbook
+show-hide actions, left = archive.  The \"Org
 actions…\" bridge is authorized here through the exposure route
 \(SPEC 23.1): the base `jetpacs.org.heading' refuses any position this
 render did not record."
@@ -1851,13 +1884,17 @@ render did not record."
          (token (car cell))
          (archive (cdr cell))
          (buffer (buffer-name))
-         (sides (and token (glasspane-org-reader-swipe-sides token archive)))
-         (areas (glasspane-org-item-tag-group-members
-                 `((file . ,file) (pos . ,pos) (tags . ,(plist-get n :tags)))
-                 glasspane-area-tag-group))
-         (drawer-controls
-          (jetpacs-org-render-drawer-controls
-           (glasspane-org-reader--drawers n) buffer t))
+         (sides (and token
+                     (glasspane-org-reader-swipe-sides
+                      token archive
+                      (glasspane-org-reader--drawer-swipe-actions
+                       (glasspane-org-reader--drawers n) buffer))))
+         (areas (org-with-wide-buffer
+                 (plist-get
+                  (glasspane-org-tag-group
+                   (plist-get (glasspane-org-tag-groups-at pos) :groups)
+                   glasspane-area-tag-group)
+                  :members)))
          header content links)
     ;; Count only this heading's own rendered links: the header's title and
     ;; its body.  Each child heading rebinds the tally for itself.
@@ -1879,7 +1916,6 @@ render did not record."
      (apply #'jetpacs-row
             (append
              (list (jetpacs-with-attrs header :weight 1))
-             drawer-controls
              (when token
                (list
                 (glasspane-org-reader-heading-menu
@@ -1968,7 +2004,8 @@ Content before the first heading is not shown."
 The drilled-into heading's own PROPERTIES/body render inline (its title
 is already in the top bar); its child headings render as foldable
 sections.  Returns a list of widget nodes (possibly empty).  SKIP-PROPS
-omits the top-level PROPERTIES drawer.  SET names the token set
+omits the top-level PROPERTIES drawer; the symbol `all' omits its LOGBOOK
+too, for a caller that presents both itself.  SET names the token set
 \(default \"reader-subtree\"): a caller whose screens STACK subtree
 renders — the detail rung — passes its own per-screen set, because the
 default's replace sweep would retire a still-visible screen's tokens."

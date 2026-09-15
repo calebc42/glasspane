@@ -553,9 +553,9 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
     (goto-char (point-min))
     (should (search-forward "glasspane-org-workflow-keywords" nil t))
     (goto-char (point-min))
-    (should (search-forward "org-tag-groups-alist" nil t))
+    (should (search-forward "ebp-org-tag-groups" nil t))
     (goto-char (point-min))
-    (should (search-forward "org-get-tags" nil t))
+    (should (search-forward "glasspane-org-tag-groups-at" nil t))
     (goto-char (point-min))
     (should-not (search-forward "org-get-category" nil t))
     (goto-char (point-min))
@@ -2559,7 +2559,7 @@ current route into Resources."
   (glasspane-para-test--with-vault
       '(("notes.org"
          "#+TAGS: [ Area : Work Home ]\n#+FILETAGS: :Work:\nJust prose.\n"))
-    (let ((index (glasspane-org--file-tag-group-index
+    (let ((index (glasspane-org-file-tag-group-index
                   (expand-file-name "notes.org" vault) "Area")))
       (should (equal (plist-get index :members) '("Work" "Home")))
       (should (equal (plist-get index :file-tags) '("Work")))
@@ -2571,10 +2571,160 @@ current route into Resources."
       '(("work.org"
          "#+TAGS: [ Area : Home ]\n* Parent :Home:\n** Child\n"))
     (let* ((org-use-tag-inheritance nil)
-           (index (glasspane-org--file-tag-group-index
+           (index (glasspane-org-file-tag-group-index
                    (expand-file-name "work.org" vault) "Area"))
            (memberships (mapcar #'cdr (plist-get index :positions))))
       (should (equal memberships '(("Home") ("Home")))))))
+
+(ert-deftest glasspane-para-tag-group-foundation-vocabulary-and-stale-item ()
+  "PARA uses ordered foundation tags and falls back for stale item positions."
+  (glasspane-para-test--with-vault
+      '(("work.org"
+         "#+TAGS: [ AREA : Work {R@.+} Home ]\n* TODO Child :Home:Work:other:\n"))
+    (let* ((file (expand-file-name "work.org" vault))
+           (index (glasspane-org-file-tag-group-index file "area"))
+           (item `((file . ,file) (pos . 9999)
+                   (tags . ["Home" "other" "Work"]))))
+      (should (equal (plist-get index :members) '("Work" "Home")))
+      (should (equal (glasspane-org-item-tag-group-members item "aReA")
+                     '("Work" "Home")))
+      (should (equal (mapcar (lambda (area) (plist-get area :name))
+                            (glasspane-areas--index))
+                     '("Home" "Work"))))))
+
+(ert-deftest glasspane-para-tag-group-wrapper-splits-inherited-tags ()
+  "The PARA wrapper forces inheritance while retaining Org exclusions."
+  (with-temp-buffer
+    (insert "#+TAGS: [ Area : Work Home ]\n#+FILETAGS: :Work:\n"
+            "* Parent :Home:\n** Child :other:\n")
+    (org-mode)
+    (goto-char (point-max))
+    (forward-line -1)
+    (let* ((org-use-tag-inheritance nil)
+           (membership (glasspane-org-tag-groups-at (point)))
+           (area (glasspane-org-tag-group
+                  (plist-get membership :groups) "AREA")))
+      (should (equal (plist-get membership :local) '("other")))
+      (should (equal (plist-get membership :inherited) '("Work" "Home")))
+      (should (equal (plist-get area :members) '("Work" "Home")))
+      (let* ((org-tags-exclude-from-inheritance '("Home"))
+             (excluded (glasspane-org-tag-groups-at (point))))
+        (should (equal (plist-get excluded :inherited) '("Work")))
+        (should (equal (plist-get
+                        (glasspane-org-tag-group
+                         (plist-get excluded :groups) "Area")
+                        :members)
+                       '("Work")))))))
+
+(ert-deftest glasspane-para-tag-group-cache-observes-buffer-exclusions ()
+  "Both indexes observe buffer-local exclusions without edits or invalidation."
+  (glasspane-para-test--with-vault
+      '(("work.org"
+         "#+TAGS: [ Area : Work Home ]\n#+FILETAGS: :Work:\n* Parent :Home:\n** TODO Child\n"))
+    (let* ((file (expand-file-name "work.org" vault))
+           (buffer (find-file-noselect file))
+           (tick (buffer-chars-modified-tick buffer)))
+      (should (equal (mapcar #'cdr
+                            (plist-get
+                             (glasspane-org-file-tag-group-index file "Area")
+                             :positions))
+                     '(("Work" "Home") ("Work" "Home"))))
+      (should (plist-get (glasspane-para-test--area
+                         "Home" (glasspane-areas--index)) :items))
+      (with-current-buffer buffer
+        (setq-local org-tags-exclude-from-inheritance '("Home")))
+      (should (= tick (buffer-chars-modified-tick buffer)))
+      (should (equal (mapcar #'cdr
+                            (plist-get
+                             (glasspane-org-file-tag-group-index file "Area")
+                             :positions))
+                     '(("Work" "Home") ("Work"))))
+      (should-not (plist-get (glasspane-para-test--area
+                             "Home" (glasspane-areas--index)) :items))
+      (should (plist-get (glasspane-para-test--area
+                         "Work" (glasspane-areas--index)) :items)))))
+
+(ert-deftest glasspane-para-tag-group-cache-observes-global-exclusions ()
+  "Global inheritance exclusions refresh both indexes without text edits."
+  (glasspane-para-test--with-vault
+      '(("work.org" "#+TAGS: [ Area : Home ]\n* Parent :Home:\n** TODO Child\n"))
+    (let ((file (expand-file-name "work.org" vault))
+          (org-tags-exclude-from-inheritance nil))
+      (should (equal (mapcar #'cdr
+                            (plist-get
+                             (glasspane-org-file-tag-group-index file "Area")
+                             :positions))
+                     '(("Home") ("Home"))))
+      (should (plist-get (car (glasspane-areas--index)) :items))
+      (setq org-tags-exclude-from-inheritance '("Home"))
+      (should (equal (mapcar #'cdr
+                            (plist-get
+                             (glasspane-org-file-tag-group-index file "Area")
+                             :positions))
+                     '(("Home") nil)))
+      (should-not (plist-get (car (glasspane-areas--index)) :items)))))
+
+(ert-deftest glasspane-para-tag-group-cache-observes-refreshed-vocabulary ()
+  "Normal Org vocabulary refreshes invalidate both indexes without text edits."
+  (glasspane-para-test--with-vault
+      '(("work.org" "* TODO Task :Work:Home:\n"))
+    (let* ((org-tag-alist
+            '((:startgrouptag) ("Area") (:grouptags)
+              ("Work") (:endgrouptag)))
+           (file (expand-file-name "work.org" vault))
+           (buffer (find-file-noselect file))
+           (tick (buffer-chars-modified-tick buffer)))
+      (should (equal (plist-get
+                      (glasspane-org-file-tag-group-index file "Area")
+                      :members)
+                     '("Work")))
+      (should (equal (mapcar (lambda (area) (plist-get area :name))
+                            (glasspane-areas--index)) '("Work")))
+      (setq org-tag-alist
+            '((:startgrouptag) ("Area") (:grouptags)
+              ("Home") (:endgrouptag)))
+      (with-current-buffer buffer (org-set-regexps-and-options t))
+      (should (= tick (buffer-chars-modified-tick buffer)))
+      (should (equal (plist-get
+                      (glasspane-org-file-tag-group-index file "Area")
+                      :members)
+                     '("Home")))
+      (should (equal (mapcar (lambda (area) (plist-get area :name))
+                            (glasspane-areas--index)) '("Home"))))))
+
+(ert-deftest glasspane-para-tag-group-global-vocabulary-without-files ()
+  "Persistent and global foundation declarations work with an empty agenda."
+  (let ((org-agenda-files nil)
+        (org-tag-alist nil)
+        (org-tag-persistent-alist
+         '((:startgrouptag) ("AREA") (:grouptags)
+           ("Work") ("{R@.+}") ("Home") (:endgrouptag))))
+    (unwind-protect
+        (progn
+          (ebp-org-cache-invalidate)
+          (should (equal (glasspane-areas--global-members) '("Work" "Home")))
+          (should (equal (mapcar (lambda (area) (plist-get area :name))
+                                (glasspane-areas--index)) '("Home" "Work")))
+          (setq org-tag-persistent-alist
+                '((:startgrouptag) ("Area") (:grouptags)
+                  ("Reading") (:endgrouptag)))
+          (should (equal (mapcar (lambda (area) (plist-get area :name))
+                                (glasspane-areas--index)) '("Reading"))))
+      (ebp-org-cache-invalidate))))
+
+(ert-deftest glasspane-para-tag-group-persistent-precedes-file-group ()
+  "Org's persistent declaration wins the case-insensitive group lookup."
+  (glasspane-para-test--with-vault
+      '(("work.org"
+         "#+TAGS: [ Area : Local ]\n* TODO Task :Persistent:Local:\n"))
+    (let* ((org-tag-persistent-alist
+            '((:startgrouptag) ("AREA") (:grouptags)
+              ("Persistent") (:endgrouptag)))
+           (file (expand-file-name "work.org" vault))
+           (index (glasspane-org-file-tag-group-index file "Area")))
+      (should (equal (plist-get index :members) '("Persistent")))
+      (should (equal (mapcar #'cdr (plist-get index :positions))
+                     '(("Persistent")))))))
 
 (ert-deftest glasspane-para-pm2-open-todo-predicate ()
   "Only a not-done TODO keyword counts as open work."

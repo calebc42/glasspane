@@ -17,8 +17,10 @@
 ;; file whose property drawer declares `AREA' with the Area's tag.  That
 ;; note opens as a document from the drill and, when it carries its own
 ;; tag, is a member of itself.  Membership is always resolved from the
-;; files (`org-get-tags' with inheritance forced on); the vault index is
-;; consulted only for declarations, through `glasspane-org'.
+;; files through the foundation's tag-group readers
+;; (`glasspane-org-tag-groups-at', which keeps PARA's inheritance rule);
+;; the vault index is consulted only for declarations, through
+;; `glasspane-org'.
 
 ;;; Code:
 
@@ -41,22 +43,23 @@
 ;;;; Extraction
 
 (defun glasspane-areas--members-here ()
-  "Return the Area group's members visible in the current Org buffer.
-The buffer-local `org-tag-groups-alist' already merges the persistent
-alist, the file's own `#+TAGS' lines or the global alist, so per-file
-declarations and the settings-managed group both count."
-  (glasspane-org--clean-tag-strings
-   (cdr (assoc-string glasspane-area-tag-group org-tag-groups-alist t))))
+  "Return the Area group's foundation vocabulary in the current Org buffer.
+The foundation preserves Org's persistent and file-local declarations,
+omitting regexp members that cannot be ordinary heading tags."
+  (plist-get (glasspane-org-tag-group (ebp-org-tag-groups)
+                                    glasspane-area-tag-group)
+             :tags))
 
 (defun glasspane-areas--global-members ()
-  "Return the Area group's members declared outside any file."
+  "Return the Area group's members declared outside any file.
+An empty Org buffer lets Org merge its global and persistent vocabulary for
+the foundation reader.  This also exposes unused Areas with no agenda files.
+Startup hooks are suppressed because this is a vocabulary-only buffer."
   (condition-case nil
-      (glasspane-org--clean-tag-strings
-       (cdr (assoc-string
-             glasspane-area-tag-group
-             (org-tag-alist-to-groups
-              (append org-tag-persistent-alist org-tag-alist))
-             t)))
+      (let ((org-inhibit-startup t))
+        (with-temp-buffer
+          (delay-mode-hooks (org-mode))
+          (glasspane-areas--members-here)))
     (error nil)))
 
 (defun glasspane-areas--file-declaration (file)
@@ -82,7 +85,7 @@ validated against the Org roots and visited under clamped I/O."
         (org-with-wide-buffer
          (let* ((org-use-tag-inheritance t)
                 (members (glasspane-areas--members-here))
-                (file-tags (glasspane-org--clean-tag-strings org-file-tags))
+                (file-tags (glasspane-org-tag-strings org-file-tags))
                 (file-areas (cl-remove-if-not
                              (lambda (member) (member member file-tags))
                              members))
@@ -92,12 +95,14 @@ validated against the Org roots and visited under clamped I/O."
                 items)
            (org-map-entries
             (lambda ()
-              (let* ((tags (glasspane-org--clean-tag-strings (org-get-tags)))
-                     (areas (cl-remove-if-not
-                             (lambda (member) (member member tags))
-                             members))
+              (let* ((membership (glasspane-org-tag-groups-at (point)))
+                     (areas (plist-get
+                             (glasspane-org-tag-group
+                              (plist-get membership :groups)
+                              glasspane-area-tag-group)
+                             :members))
                      (decl (org-entry-get (point) "AREA"))
-                     (item (glasspane-org--heading-item-at)))
+                     (item (glasspane-org-heading-item-at)))
                 (dolist (area areas) (cl-pushnew area used :test #'equal))
                 (push (cons 'areas (vconcat areas)) item)
                 (when (and (stringp decl)
@@ -181,8 +186,12 @@ skipped without costing every other Area."
             (string-lessp (plist-get a :name) (plist-get b :name))))))
 
 (defun glasspane-areas--index ()
-  "Return the memoised Areas index."
-  (ebp-org-with-cache 'glasspane '(areas-index)
+  "Return the memoised Areas index with current Org tag settings.
+Include the configured group name and each visited file's vocabulary and
+exclusions; the EBP cache's content stamp alone cannot observe those edits."
+  (ebp-org-with-cache 'glasspane
+      (list 'areas-index glasspane-area-tag-group
+            (glasspane-org-tag-settings-stamp (glasspane-org-agenda-scope)))
     (glasspane-areas--index-1)))
 
 (defun glasspane-areas--find (name)

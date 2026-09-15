@@ -1179,6 +1179,60 @@
                       'accepted))))
       (should (equal original (buffer-string))))))
 
+(ert-deftest glasspane-reader-layout-swipe-carries-drawer-actions ()
+  "The heading header keeps no drawer icons: the rightward swipe reveals
+Cycle plus a Properties/Logbook action per drawer, the shown one in the
+primary accent, and each rides the exclusive native toggle."
+  (with-temp-buffer
+    (insert "* Parent\n:PROPERTIES:\n:ID: parent\n:END:\n:LOGBOOK:\nA log entry\n:END:\nProse.\n")
+    (org-mode)
+    (let* ((record (car (ebp-org-outline-collect (point-min) (point-max) t)))
+           (jetpacs-buffer-exposed (make-hash-table :test #'equal)))
+      (cl-labels ((actions ()
+                    (glasspane-org-reader--drawer-swipe-actions
+                     (glasspane-org-reader--drawers record) (buffer-name)))
+                  (tap (action)
+                    (should (eq (jetpacs-org-render--toggle-drawer
+                                 (plist-get (plist-get action :on_trigger) :args)
+                                 nil)
+                                'accepted))))
+        (cl-letf (((symbol-function 'jetpacs-buffer-defer-refresh) #'ignore))
+          (let* ((sides (glasspane-org-reader-swipe-sides "tok" "arch" (actions)))
+                 (start (append (plist-get (car sides) :actions) nil)))
+            (should (equal (mapcar (lambda (a) (plist-get a :label)) start)
+                           '("Cycle" "Properties" "Logbook")))
+            (should (equal (plist-get (nth 1 start) :icon) "tune"))
+            (should (equal (plist-get (nth 2 start) :icon) "history"))
+            ;; Exclusive projection: only the first visible drawer is shown.
+            (should (equal (plist-get (nth 1 start) :color) "primary"))
+            (should-not (plist-get (nth 2 start) :color))
+            (should (eq (plist-get (plist-get (plist-get (nth 1 start) :on_trigger)
+                                              :args)
+                                   :exclusive)
+                        t))
+            ;; The leftward side is untouched: Archive alone.
+            (should (= (length (plist-get (cdr sides) :actions)) 1))
+            ;; Every drawer start is exposed to the shared toggle verb.
+            (should (jetpacs-buffer-exposed-p
+                     (buffer-name) (plist-get (plist-get (plist-get (nth 1 start) :on_trigger)
+                                                         :args)
+                                              :pos)
+                     "jetpacs.org.toggle-drawer")))
+          ;; Revealing Logbook switches the accent; revealing it again closes it.
+          (tap (cadr (actions)))
+          (let ((now (actions)))
+            (should-not (plist-get (car now) :color))
+            (should (equal (plist-get (cadr now) :color) "primary")))
+          (tap (cadr (actions)))
+          (should-not (cl-some (lambda (a) (plist-get a :color)) (actions)))
+          ;; The rendered header row carries only the title and the menu.
+          (let* ((tokens (make-hash-table :test #'eql))
+                 (node (glasspane-org-reader--heading-node
+                        record "/tmp/swipes.org" tokens))
+                 (json (jetpacs-node->canonical-json (plist-get node :header))))
+            (should-not (string-search "icon_button" json))
+            (should-not (string-search "toggle-drawer" json))))))))
+
 (ert-deftest glasspane-reader-layout-icons-switch-linked-panels ()
   "Only the selected drawer has a panel, with an icon matching its control."
   (with-temp-buffer
@@ -1293,6 +1347,53 @@ swipe, not in the overflow menu."
         (should (plist-get node :swipe_end))
         (should (string-search "jetpacs.org.archive"
                                (jetpacs-node->canonical-json node)))))))
+
+(ert-deftest glasspane-reader-layout-tag-groups-read-current-buffer ()
+  "Reader Areas use the live heading without a second file scan or edits."
+  (with-temp-buffer
+    (insert "#+TAGS: [ Area : Work Home {R@.+} ] [ project : beta ]\n"
+            "#+FILETAGS: :Home:\n* Parent :Work:\n** TODO Child :beta:plain:\nBody\n")
+    (org-mode)
+    (goto-char (point-min))
+    (search-forward "** TODO Child")
+    (beginning-of-line)
+    (let* ((pos (point))
+           (node (car (ebp-org-outline-collect pos (point-max) t)))
+           (before (buffer-string))
+           (tick (buffer-chars-modified-tick))
+           (org-use-tag-inheritance nil)
+           (glasspane-area-tag-group "Area")
+           (tokens (make-hash-table :test #'eql)))
+      (cl-letf (((symbol-function 'glasspane-org-file-tag-group-index)
+                 (lambda (&rest _) (ert-fail "Reader must not scan a file"))))
+        ;; The enclosing reader may narrow to the child.  Membership still
+        ;; reads file tags and ancestors from the same source buffer.
+        (save-restriction
+          (narrow-to-region pos (point-max))
+          (dolist (width '("compact" "expanded"))
+            (cl-letf (((symbol-function 'jetpacs-window-class)
+                       (lambda (_) width)))
+              (let* ((render (glasspane-org-reader--heading-node
+                              node "/unused/reader.org" tokens))
+                     (header (plist-get render :header))
+                     (chips (glasspane-reader-layout--nodes-of-type
+                             (list header) "material3.assist_chip"))
+                     (labels (mapcar (lambda (chip) (plist-get chip :label))
+                                     chips)))
+                (dolist (tag '("Work" "Home" "beta" "plain"))
+                  (should (= (cl-count tag labels :test #'equal) 1)))
+                (should (equal render
+                               (glasspane-org-reader--heading-node
+                                node "/unused/reader.org" tokens)))))))
+        (let* ((org-tags-exclude-from-inheritance '("Work"))
+               (header (plist-get (glasspane-org-reader--heading-node
+                                   node "/unused/reader.org" tokens) :header))
+               (json (jetpacs-node->canonical-json header)))
+          (should-not (string-search "Work" json))
+          (should (string-search "Home" json))))
+      (should (equal (plist-get node :tags) '("beta" "plain")))
+      (should (equal-including-properties before (buffer-string)))
+      (should (= tick (buffer-chars-modified-tick))))))
 
 (provide 'glasspane-reader-layout-test)
 ;;; glasspane-reader-layout-test.el ends here

@@ -197,9 +197,7 @@ index; a source that no longer exists has no Areas."
                  (plist-get record :path))))
     (when (and (stringp source)
                (condition-case nil (file-readable-p source) (error nil)))
-      ;; PM-6 lifts the 2026-08-27 obsolescence marker from the group
-      ;; variable; until then the reference compiles without the warning.
-      (when-let* ((index (glasspane-org--file-tag-group-index
+      (when-let* ((index (glasspane-org-file-tag-group-index
                           source glasspane-area-tag-group)))
         (let ((used (copy-sequence (plist-get index :file-tags))))
           (dolist (entry (plist-get index :positions))

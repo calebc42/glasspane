@@ -3181,7 +3181,7 @@ between files through the same policy."
           ;; Native Org owns the engine save seam; Glasspane only adds
           ;; its composable action/index adapter.
           (should (eq ebp-org-file-save-function
-                      #'jetpacs-editor-org-save-policy))
+                      #'jetpacs-org-save-policy))
           (should (cl-find 'glasspane-org jetpacs-editor--adapters
                            :key #'jetpacs-editor-adapter-id))
           (with-current-buffer (find-file-noselect src)

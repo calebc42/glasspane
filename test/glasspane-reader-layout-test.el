@@ -161,7 +161,7 @@
        (let ((before (buffer-string))
              (disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
          (if (eq failure 'write)
-             (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
+             (cl-letf (((symbol-function 'jetpacs-org-save-policy)
                         (lambda (&rest _) (error "Write refused"))))
                (should (eq (glasspane-reader-layout--source-save "print(4)" "python") 'rejected)))
            (should (eq (glasspane-reader-layout--source-save "print(4)" "python") 'stale)))
@@ -272,7 +272,7 @@
                (disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
            (pcase failure
              ('write
-              (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
+              (cl-letf (((symbol-function 'jetpacs-org-save-policy)
                          (lambda (&rest _) (error "Write refused"))))
                 (should (eq (jetpacs-reader-org--on-call-execute args '(:surface "app:glasspane")) 'rejected))))
              ('missing (should (eq (jetpacs-reader-org--on-call-execute args '(:surface "app:glasspane")) 'rejected)))
@@ -353,7 +353,7 @@
        (let ((before (buffer-string))
              (disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
          (if (eq failure 'write)
-             (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
+             (cl-letf (((symbol-function 'jetpacs-org-save-policy)
                         (lambda (&rest _) (error "Write refused"))))
                (should (eq (glasspane-reader-layout--call-save "n=7") 'rejected)))
            (should (eq (glasspane-reader-layout--call-save "n=7") 'stale)))
@@ -668,7 +668,7 @@
            ('source (goto-char (point-max)) (insert "Changed elsewhere."))
            ('disk (with-temp-file file (insert "Changed on disk."))))
          (let ((after-drift (buffer-string)))
-           (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
+           (cl-letf (((symbol-function 'jetpacs-org-save-policy)
                       (lambda (&rest _) (error "Simulated failed write"))))
              (should
               (eq (jetpacs-reader-org--on-footnote-save
@@ -1043,7 +1043,7 @@
                 (should (eq (tap (args)) 'accepted))
                 (should (string-search "- [ ] One" (disk)))
                 (let ((before (buffer-string)) (tap-args (args)))
-                  (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
+                  (cl-letf (((symbol-function 'jetpacs-org-save-policy)
                              (lambda (&rest _) (error "Write refused"))))
                     (should (eq (tap tap-args) 'rejected)))
                   (should (equal before (buffer-string)))

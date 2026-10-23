@@ -72,7 +72,9 @@ the stale row back out of the index.  No-op without vulpea."
   "Delegate BUFFER's synchronous save to Jetpacs' native Org policy.
 The app keeps its refresh-suppression and optional Vulpea index refresh
 opinions; encryption, durability, and whole-cache invalidation belong to
-`jetpacs-editor-org-save-policy'."
+`jetpacs-editor-org-save-policy'.  It stays a wrapper rather than a
+plain `ebp-org-file-save-function' call because the refresh suppression
+must bind around the save itself: the save's own hooks read it."
   (let ((glasspane-org-inhibit-save-refresh t)
         (target (or buffer (current-buffer))))
     (prog1 (jetpacs-editor-org-save-policy target)

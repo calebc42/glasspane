@@ -143,7 +143,7 @@ and each matching file incurs exactly one explicit `file-attributes' call."
   "Invalidate Archive membership before an explicit refresh push.
 Archive files normally sit outside the agenda stamp carried by the shared
 cache, so pull-to-refresh is their deliberate freshness boundary."
-  (ebp-org-cache-invalidate 'glasspane))
+  (ebp-org-cache-invalidate))
 
 (defun glasspane-resources--archive-source-path (path)
   "Return the source file PATH archives, removing Org's `_archive' suffix."

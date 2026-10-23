@@ -738,7 +738,7 @@ cost the registration, never the demo setup."
                                            (match-end 0)))
              (glasspane-demo--srs-goto-heading heading)
              (org-srs-item-cloze-update-entry)))
-          (let ((save-silently t)) (save-buffer)))
+          (funcall ebp-org-file-save-function (current-buffer)))
       ;; Symbol only: `error-message-string' embeds the offending datum
       ;; — buffer text here — and SPEC 23.3 keeps that out of logs.
       (error (message "glasspane-demo: SRS registration failed: %s"

@@ -1017,7 +1017,7 @@ handlers, so the push takes the D2 seam (the `jetpacs-org-clock--soon'
 shape): deferred past the dispatch extent when inside one, immediate
 for a desktop M-x."
   (when (jetpacs-connected-p)
-    (ebp-org-cache-invalidate 'glasspane)
+    (ebp-org-cache-invalidate)
     (let ((push (lambda () (jetpacs-shell-push "glasspane"))))
       (if (jetpacs-in-action-p)
           (jetpacs-flow-continue push)

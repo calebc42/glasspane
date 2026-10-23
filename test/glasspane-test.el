@@ -1066,9 +1066,12 @@ saved searches stay app opinions; flat TODO/tag editors remain in Org workflow."
 (ert-deftest glasspane-test-ui-at-ref-classifier ()
   "The S4/S5 funnel every later rung copies: no/unknown token ->
 \\='stale, `ebp-org-refused' -> \\='rejected, `ebp-org-unresolved' ->
-\\='stale, success -> \\='accepted with the memo busted (namespaced
-without save, the synchronous app funnel with), and a signal from the
-mutation body never answers \\='accepted."
+\\='stale, success -> \\='accepted with the memo busted (the whole table
+without save — a heading mutation stales every consumer — the
+synchronous app funnel with), and a signal from the mutation body never
+answers \\='accepted.  The classification itself is the foundation's
+`jetpacs-org-heading-at-ref'; Glasspane contributes token scope and its
+save funnel."
   (require 'glasspane-ui)
   (should (eq (glasspane-ui-at-ref nil #'ignore) 'stale))
   (should (eq (glasspane-ui-at-ref '(:token "o0-swept") #'ignore) 'stale))
@@ -1098,7 +1101,7 @@ mutation body never answers \\='accepted."
                          '(:token "t") (lambda () (setq at (point))))
                         'accepted))
             (should (equal at (point-min)))
-            (should (equal invalidated '(glasspane)))
+            (should (equal invalidated '(nil)))
             (should (zerop saved))
             (should (eq (glasspane-ui-at-ref '(:token "t") #'ignore t)
                         'accepted))
@@ -5730,13 +5733,9 @@ point: a new screen cannot ship unreachable.")
     "detail.save"
     "detail.toggle-read" "detail.section" "files.filter"
     "files.properties.save" "files.properties.show"
-    "files.toggle-refile" "glasspane.call.cancel" "glasspane.call.edit"
-    "glasspane.call.execute" "glasspane.call.save" "glasspane.checkbox"
+    "files.toggle-refile"
     "glasspane.document.open" "glasspane.files.return"
-    "glasspane.footnote.edit" "glasspane.footnote.open"
-    "glasspane.footnote.save" "glasspane.packages.install"
-    "glasspane.source.cancel" "glasspane.source.edit"
-    "glasspane.source.save"
+    "glasspane.packages.install"
     "heading.add-note" "heading.clock-in" "heading.delete"
     "heading.duplicate" "heading.menu" "heading.priority"
     "heading.prop-add" "heading.prop-set" "heading.props.show"

@@ -249,17 +249,8 @@ The same choice `jetpacs-dates--month-abbrevs' makes for months.")
   '((?h . "hour") (?d . "day") (?w . "week") (?m . "month") (?y . "year"))
   "Org repeater unit letters and their singular English nouns.")
 
-(defun glasspane-ui-ts-time-range (ts)
-  "Return the HH:MM or HH:MM-HH:MM range inside org timestamp TS, or nil.
-Org's own hyphenated form, so the result can be handed back to
-`org-schedule' unchanged; `ebp-org-ts-time' returns the start alone."
-  (when (and (stringp ts)
-             (string-match (concat "\\([0-9]\\{1,2\\}:[0-9]\\{2\\}\\)"
-                                   "\\(?:-\\([0-9]\\{1,2\\}:[0-9]\\{2\\}\\)\\)?")
-                           ts))
-    (let ((start (match-string 1 ts))
-          (end (match-string 2 ts)))
-      (if end (concat start "-" end) start))))
+(defalias 'glasspane-ui-ts-time-range #'jetpacs-org-ts-time-range
+  "Return the HH:MM or HH:MM-HH:MM range inside org timestamp TS, or nil.")
 
 (defun glasspane-ui-repeat-words (cookie)
   "English words for org repeater COOKIE, or nil without one.
@@ -464,48 +455,18 @@ PARAMS is the originating action event.  Delegates to the generic
 
 (defun glasspane-ui-at-ref (args fn &optional save)
   "Resolve ARGS' `:token' to its heading and run FN with point there.
-Returns the SPEC 14.4 status the calling handler answers with:
-
-  no/unknown token          -> `stale'    (swept set: the list moved)
-  `ebp-org-refused'         -> `rejected' (file policy — permanent)
-  `ebp-org-unresolved'      -> `stale'    (heading gone or ambiguous)
-  any other signal          -> `rejected' (mutation did not land)
-  FN returned               -> `accepted' (effect durable, see below)
-
-With SAVE non-nil the buffer is saved through
-`glasspane-org-save-and-invalidate'.  Deliberately NOT
-`ebp-org-with-mutation': the engine defers saves to an idle timer,
-which leaves the file not-yet-on-disk for flows that read it back
-immediately (capture finalize, offline-queue replay) and fires the
-after-save refresh outside `glasspane-org-inhibit-save-refresh's
-extent.  Save timing is app policy and stays here; resolution and
-cache discipline are the engine's (`ebp-org-resolve-ref',
-`ebp-org-cache-invalidate')."
-  (let ((ref (ebp-org-token-ref (plist-get args :token)
-                                :owner "glasspane")))
-    (if (null ref)
-        'stale
-      (condition-case err
-          (let ((marker (ebp-org-resolve-ref ref)))
-            (unwind-protect
-                (with-current-buffer (marker-buffer marker)
-                  (org-with-wide-buffer
-                   (goto-char marker)
-                   (funcall fn))
-                  (if save
-                      (glasspane-org-save-and-invalidate)
-                    (ebp-org-cache-invalidate 'glasspane)))
-              (set-marker marker nil))
-            'accepted)
-        (ebp-org-refused 'rejected)
-        (ebp-org-unresolved 'stale)
-        (error
-         ;; The raw error stays in *Messages*; the wire never carries
-         ;; it (SPEC 23.3).
-         (message "glasspane: heading action failed: %s"
-                  (jetpacs-error-label err))
-         (jetpacs-toast "That heading action failed")
-         'rejected)))))
+Returns the SPEC 14.4 status the calling handler answers with — the
+foundation's `jetpacs-org-heading-at-ref' classification (no/unknown
+token -> `stale', `ebp-org-refused' -> `rejected', `ebp-org-unresolved'
+-> `stale', any other signal -> `rejected', FN returned -> `accepted').
+Glasspane owns only the token scope and, with SAVE non-nil, its save
+funnel `glasspane-org-save-and-invalidate' (refresh suppression and the
+optional vulpea row); save timing is app policy, resolution and cache
+discipline are the foundation's."
+  (jetpacs-org-heading-at-ref
+   (ebp-org-token-ref (plist-get args :token) :owner "glasspane")
+   fn
+   (and save #'glasspane-org-save-and-invalidate)))
 
 ;;;; Token minting (S5 — the mint side of the funnel above)
 

@@ -44,6 +44,14 @@
 ;;   jetpacs-org-outline-body with the AGENDA card — a G5 builder this
 ;;   rung may not require forward — so read mode surfaces this file's
 ;;   own foldable tree instead (flagged to the plan as a deviation).
+;;
+;; The inline editors this reader places — the source-block draft, the
+;; Babel call argument draft and execute, the footnote dialog — and the
+;; checkbox verb are foundation Org machinery now (jetpacs-reader-org.el,
+;; jetpacs-org-render.el, verbs `jetpacs.org.*').  This file authors
+;; only their surroundings: the cards, fold headers, prose and the
+;; emphasis-aware footnote text it lends the foundation dialog through
+;; `jetpacs-reader-org-footnote-prose-function'.
 
 ;;; Code:
 
@@ -242,25 +250,6 @@ and Org delimiters while preserving contents."
         :padding 10)
        :variant "outlined"))))
 
-(defun glasspane-org-reader--checkbox-record (pos)
-  "Return the real Org checkbox item at line position POS, or nil.
-Org's item parser excludes lookalikes in source blocks and other prose."
-  (save-excursion
-    (goto-char pos)
-    (when (org-at-item-checkbox-p)
-      (let* ((beg (match-beginning 1))
-             (end (match-end 1))
-             (element (org-element-at-point beg)))
-        (when (eq (org-element-type element) 'item)
-          (list :pos beg
-                :label-start (save-excursion (goto-char end) (skip-chars-forward " \t") (point))
-                :state (pcase (org-element-property :checkbox element)
-                         ('on "on") ('trans "indeterminate") (_ "off"))
-                :label (string-trim-left
-                        (buffer-substring-no-properties end (line-end-position)))
-                :bullet (string-trim (org-element-property :bullet element))
-                :indent (current-indentation)))))))
-
 (defun glasspane-org-reader--checkbox-node (record)
   "Render checkbox RECORD with native completion and long-press progress.
 The source buffer's modification tick binds both gestures to this snapshot."
@@ -273,10 +262,10 @@ The source buffer's modification tick binds both gestures to this snapshot."
          (label (plist-get record :label))
          (bullet (plist-get record :bullet))
          (args (list :buffer name :pos pos :tick (buffer-chars-modified-tick)))
-         (tap (jetpacs-action "glasspane.checkbox" :args args))
-         (progress (jetpacs-action "glasspane.checkbox"
+         (tap (jetpacs-action "jetpacs.org.checkbox" :args args))
+         (progress (jetpacs-action "jetpacs.org.checkbox"
                                    :args (append args (list :state "indeterminate")))))
-    (jetpacs-buffer-expose name pos "glasspane.checkbox")
+    (jetpacs-buffer-expose name pos "jetpacs.org.checkbox")
     (jetpacs-with-semantics
      (jetpacs-with-attrs
       (jetpacs-box
@@ -340,26 +329,8 @@ NODE retains the entire source when image support or its budget is absent."
 (defvar glasspane-org-reader--source-scope "reader-file"
   "Explicit reader location used to distinguish retained source-block views.")
 
-(defvar glasspane-org-reader--source-edit nil
-  "One active inline Babel draft: source identity, original text and save guard.")
-
-(defvar glasspane-org-reader--source-edit-sequence 0
-  "Action-owned generation for fresh inline input identities after Cancel.")
-
 (defvar glasspane-org-reader--in-results nil
   "Non-nil when rendering output, which must not acquire code-edit actions.")
-
-(defconst glasspane-org-reader--source-edit-limit 65536
-  "Maximum characters retained in the single inline code-edit session.")
-
-(defun glasspane-org-reader--source-bounds (element)
-  "Return the exact code-body bounds of source block ELEMENT."
-  (cons (save-excursion
-          (goto-char (org-element-property :post-affiliated element))
-          (line-beginning-position 2))
-        (save-excursion
-          (goto-char (org-element-property :end element))
-          (skip-chars-backward " \t\n") (line-beginning-position))))
 
 (defun glasspane-org-reader--source-results (element end limit)
   "Return (END . NODES) for ELEMENT's adjacent results after END before LIMIT.
@@ -388,32 +359,6 @@ Named results elsewhere in the document remain at their original location."
                                                     :color "on_surface_variant"))
                                  nodes)))))))))
 
-(defun glasspane-org-reader--source-editor (session)
-  "Render SESSION's inline code field and explicit Save/Cancel actions."
-  (let* ((id (jetpacs-claim-node-id (plist-get session :id)))
-         (language-id (jetpacs-claim-node-id (plist-get session :language-id)))
-         (args (list :session (plist-get session :id) :field id :language-field language-id))
-         (save (jetpacs-action "glasspane.source.save" :args args
-                               :capture-fields (list id language-id))))
-    (jetpacs-buffer-expose (plist-get session :buffer) (plist-get session :pos)
-                           "glasspane.source.save")
-    (jetpacs-column
-     (jetpacs-dropdown
-      language-id
-      (mapcar (lambda (language)
-                (jetpacs-enum-option (if (string-empty-p language) "Unspecified" language) language))
-              (plist-get session :languages))
-      :value (plist-get session :language) :label "Language")
-     (jetpacs-text-input id :value (plist-get session :text) :label "Code"
-                         :monospace t :min-lines 4 :max-lines 16
-                         :max-length glasspane-org-reader--source-edit-limit)
-     (jetpacs-row
-      (jetpacs-button "Cancel" (jetpacs-action "glasspane.source.cancel" :args args)
-                      :variant "text")
-      (jetpacs-button "Save" save :variant "filled")
-      :arrange "end" :spacing 8)
-     :spacing 8)))
-
 (defun glasspane-org-reader--source-at (start limit)
   "Return (END . NODE) for a complete source block at START before LIMIT.
 Use Jetpacs's Emacs-face renderer and Babel action inside a Glasspane card."
@@ -429,8 +374,8 @@ Use Jetpacs's Emacs-face renderer and Babel action inside a Glasspane card."
             (when-let* ((content (jetpacs-org-render-source-block element)))
               (let* ((pos (org-element-property :post-affiliated element))
                      (name (buffer-name))
-                     (bounds (glasspane-org-reader--source-bounds element))
-                     (session glasspane-org-reader--source-edit)
+                     (bounds (jetpacs-reader-org-source-bounds element))
+                     (session (jetpacs-reader-org-source-draft))
                      (editing (and session (equal name (plist-get session :buffer))
                                    (= pos (plist-get session :pos))
                                    (equal glasspane-org-reader--source-scope
@@ -442,11 +387,11 @@ Use Jetpacs's Emacs-face renderer and Babel action inside a Glasspane card."
                                     (jetpacs-node-advertised-p "dropdown")
                                     (jetpacs-node-advertised-p "icon_button")
                                     (<= (- (cdr bounds) (car bounds))
-                                        glasspane-org-reader--source-edit-limit)))
+                                        jetpacs-reader-org-source-edit-limit)))
                      (args (list :buffer name :pos pos :tick (buffer-chars-modified-tick)
                                  :scope glasspane-org-reader--source-scope)))
                 (when editable
-                  (jetpacs-buffer-expose name pos "glasspane.source.edit")
+                  (jetpacs-buffer-expose name pos "jetpacs.org.source.edit")
                   (setq header
                         (apply #'jetpacs-row
                                (append (list (aref (plist-get header :children) 0))
@@ -454,7 +399,7 @@ Use Jetpacs's Emacs-face renderer and Babel action inside a Glasspane card."
                                        (unless editing (cdr (append (plist-get header :children) nil)))
                                        (unless editing
                                          (list (jetpacs-icon-button
-                                                "edit" (jetpacs-action "glasspane.source.edit" :args args)
+                                                "edit" (jetpacs-action "jetpacs.org.source.edit" :args args)
                                                 :content-description "Edit source block")))
                                        (list :align "center" :spacing 8)))))
                 (cons (if results (car results) end)
@@ -468,260 +413,11 @@ Use Jetpacs's Emacs-face renderer and Babel action inside a Glasspane card."
                          header
                          (apply #'jetpacs-column
                                 (append (if editing
-                                            (list (glasspane-org-reader--source-editor session))
+                                            (list (jetpacs-reader-org-source-editor session))
                                           (cdr children))
                                         (cdr results) (list :spacing 8))))
                         :variant "outlined")
                        :pad '(:horizontal 12 :vertical 8)))))))))))
-
-(defun glasspane-org-reader--on-source-edit (args params)
-  "Open an inline source draft from ARGS and event PARAMS without editing Org."
-  (let* ((name (plist-get args :buffer)) (pos (plist-get args :pos))
-         (tick (plist-get args :tick)) (scope (plist-get args :scope))
-         (buffer (and (stringp name) (get-buffer name))))
-    (cond
-     ((not (and buffer (integerp pos) (integerp tick) (stringp scope))) 'rejected)
-     ((jetpacs-event-stale-p params) 'stale)
-     ((not (jetpacs-buffer-exposed-p name pos "glasspane.source.edit")) 'rejected)
-     (glasspane-org-reader--source-edit
-      (jetpacs-shell-notify "Save or cancel the open Babel draft first." (plist-get params :surface))
-      'rejected)
-     (t
-      (with-current-buffer buffer
-        (org-with-wide-buffer
-         (if (or (/= tick (buffer-chars-modified-tick))
-                 (not (<= (point-min) pos (point-max))))
-             'stale
-           (let ((element (org-element-at-point pos)))
-             (if (not (and (eq (org-element-type element) 'src-block)
-                           (eql pos (org-element-property :post-affiliated element))))
-                 'stale
-               (let* ((bounds (glasspane-org-reader--source-bounds element))
-                      (text (buffer-substring-no-properties (car bounds) (cdr bounds)))
-                      (language (or (org-element-property :language element) ""))
-                      (language-bounds
-                       (save-excursion
-                         (goto-char pos)
-                         (let ((case-fold-search t))
-                           (re-search-forward "^[ \t]*#\\+begin_src\\b" (line-end-position)))
-                         (unless (string-empty-p language) (skip-chars-forward " \t"))
-                         (cons (point) (+ (point) (length language)))))
-                      (languages (sort (delete-dups
-                                        (cons language (mapcar (lambda (entry) (symbol-name (car entry)))
-                                                               org-babel-load-languages)))
-                                       #'string<)))
-                 (if (> (length text) glasspane-org-reader--source-edit-limit)
-                     'rejected
-                   (let ((id (jetpacs-wire-id "gp-code-edit"
-                                              (format "%s/%d/%d" name pos
-                                                      (cl-incf glasspane-org-reader--source-edit-sequence)))))
-                     (setq glasspane-org-reader--source-edit
-                           (list :buffer name :pos pos :tick tick :scope scope
-                                 :surface (plist-get params :surface) :bounds bounds :text text
-                                 :language language :language-bounds language-bounds
-                                 :languages (cons language (seq-take (remove language languages) 127))
-                                 :language-id (jetpacs-wire-id "gp-code-language" id) :id id)))
-                   (jetpacs-buffer-defer-refresh (plist-get params :surface))
-                   'accepted)))))))))))
-
-(defun glasspane-org-reader--on-source-cancel (args params)
-  "Discard the inline session identified by ARGS from PARAMS without writing."
-  (if (not (and glasspane-org-reader--source-edit
-                (equal (plist-get args :session) (plist-get glasspane-org-reader--source-edit :id))
-                (equal (plist-get params :surface) (plist-get glasspane-org-reader--source-edit :surface))))
-      'stale
-    (setq glasspane-org-reader--source-edit nil)
-    (jetpacs-buffer-defer-refresh (plist-get params :surface))
-    'accepted))
-
-(defun glasspane-org-reader--source-field (fields id)
-  "Return captured ID from FIELDS without interning untrusted field names."
-  (when (and (stringp id) (proper-list-p fields) (zerop (% (length fields) 2)))
-    (cl-loop for (key value) on fields by #'cddr
-             when (and (symbolp key) (equal (symbol-name key) (concat ":" id)))
-             return value)))
-
-(defun glasspane-org-reader--source-field-p (field base)
-  "Whether FIELD is BASE or its document allocator's numeric suffix."
-  (and (stringp field) (stringp base)
-       (string-match-p (concat "\\`" (regexp-quote base) "\\(?:-[0-9]+\\)?\\'") field)))
-
-(defun glasspane-org-reader--on-source-save (args params)
-  "Save the code body and language of the inline session in ARGS from PARAMS.
-Validate the original source tick, exact body and disk freshness first.
-Failed writes roll back the Org buffer and keep the draft open."
-  (let* ((session glasspane-org-reader--source-edit)
-         (field (plist-get args :field))
-         (language-field (plist-get args :language-field))
-         (value (glasspane-org-reader--source-field (plist-get params :fields) field))
-         (language (glasspane-org-reader--source-field (plist-get params :fields) language-field))
-         (buffer (and session (get-buffer (plist-get session :buffer)))))
-    (cond
-     ((not (and session buffer (equal (plist-get args :session) (plist-get session :id))
-                (equal (plist-get params :surface) (plist-get session :surface)))) 'stale)
-     ((jetpacs-event-stale-p params) 'stale)
-     ((not (and (stringp value) (<= (length value) glasspane-org-reader--source-edit-limit)
-                (glasspane-org-reader--source-field-p field (plist-get session :id))
-                (glasspane-org-reader--source-field-p language-field (plist-get session :language-id))
-                (member language (plist-get session :languages))
-                (not (string-match-p "^[ \t]*#\\+[Ee][Nn][Dd]_[Ss][Rr][Cc][ \t]*$" value))
-                (jetpacs-buffer-exposed-p (plist-get session :buffer) (plist-get session :pos)
-                                         "glasspane.source.save"))) 'rejected)
-     (t
-      (condition-case err
-          (with-current-buffer buffer
-            (org-with-wide-buffer
-             (let ((beg (car (plist-get session :bounds))) (end (cdr (plist-get session :bounds))))
-               (if (or (/= (plist-get session :tick) (buffer-chars-modified-tick))
-                       (not (verify-visited-file-modtime buffer))
-                       (not (equal (plist-get session :text) (buffer-substring-no-properties beg end))))
-                   (progn (jetpacs-shell-notify "Source changed. Cancel and reopen the code editor." (plist-get params :surface))
-                          'stale)
-                 (ebp-org--check-file buffer-file-name)
-                 (ebp-org--with-clamped-io
-                   (atomic-change-group
-                     (save-excursion
-                       (goto-char beg) (delete-region beg end)
-                       (insert value)
-                       (unless (or (string-empty-p value) (string-suffix-p "\n" value)) (insert "\n"))
-                       (unless (equal language (plist-get session :language))
-                         (let ((range (plist-get session :language-bounds)))
-                           (goto-char (car range)) (delete-region (car range) (cdr range))
-                           (when (string-empty-p (plist-get session :language)) (insert " "))
-                           (insert language))))
-                     (glasspane-org-save-and-invalidate buffer)))
-                 (setq glasspane-org-reader--source-edit nil)
-                 (jetpacs-buffer-defer-refresh (plist-get params :surface))
-                 'accepted))))
-        (error (jetpacs-shell-notify (jetpacs-error-label err) (plist-get params :surface)) 'rejected))))))
-
-(defconst glasspane-org-reader--call-edit-limit 8192
-  "Maximum characters retained in one inline Babel argument draft.")
-
-(defun glasspane-org-reader--call-argument-bounds (element)
-  "Return ELEMENT's argument bounds using Org's parsed literal components.
-Only return a range when the original parentheses and parsed text agree."
-  (save-excursion
-    (goto-char (org-element-property :post-affiliated element))
-    (when (search-forward ":" (line-end-position) t)
-      (skip-chars-forward " \t")
-      (forward-char (length (org-element-property :call element)))
-      (when-let* ((inside (org-element-property :inside-header element)))
-        (forward-char (+ 2 (length inside))))
-      (when (eq (char-after) ?\()
-        (forward-char)
-        (let ((beg (point)) (arguments (org-element-property :arguments element)))
-          (if arguments (forward-char (length arguments)) (skip-chars-forward " \t"))
-          (when (eq (char-after) ?\)) (cons beg (point))))))))
-
-(defun glasspane-org-reader--call-editor (session)
-  "Render SESSION's native argument field and Save/Cancel controls."
-  (let* ((id (jetpacs-claim-node-id (plist-get session :id)))
-         (args (list :session (plist-get session :id) :field id)))
-    (jetpacs-column
-     (jetpacs-text-input id :value (plist-get session :text) :label "Arguments"
-                         :hint "n=5, other=…" :monospace t :single-line t
-                         :max-length glasspane-org-reader--call-edit-limit)
-     (jetpacs-text "Use Org arguments, for example n=5. Save, then press Play to run."
-                   :style "caption" :color "outline")
-     (jetpacs-row
-      (jetpacs-button "Cancel" (jetpacs-action "glasspane.call.cancel" :args args) :variant "text")
-      (jetpacs-button "Save" (jetpacs-action "glasspane.call.save" :args args :capture-fields (list id))
-                      :variant "filled") :spacing 8)
-     :spacing 8)))
-
-(defun glasspane-org-reader--on-call-edit (args params)
-  "Open an argument draft identified by ARGS and PARAMS without evaluating it."
-  (let* ((name (plist-get args :buffer)) (pos (plist-get args :pos))
-         (tick (plist-get args :tick)) (scope (plist-get args :scope))
-         (buffer (and (stringp name) (get-buffer name))))
-    (cond
-     ((not (and buffer (integerp pos) (integerp tick) (stringp scope))) 'rejected)
-     ((jetpacs-event-stale-p params) 'stale)
-     ((not (jetpacs-buffer-exposed-p name pos "glasspane.call.edit")) 'rejected)
-     (glasspane-org-reader--source-edit
-      (jetpacs-shell-notify "Save or cancel the open Babel draft first." (plist-get params :surface))
-      'rejected)
-     (t
-      (condition-case err
-          (with-current-buffer buffer
-            (org-with-wide-buffer
-             (if (or (/= tick (buffer-chars-modified-tick))
-                     (not (<= (point-min) pos (point-max))))
-                 'stale
-               (let* ((element (org-element-at-point pos))
-                      (bounds (and (eq (org-element-type element) 'babel-call)
-                                   (eql pos (org-element-property :post-affiliated element))
-                                   (glasspane-org-reader--call-argument-bounds element))))
-                 (if (not (and bounds (<= (- (cdr bounds) (car bounds)) glasspane-org-reader--call-edit-limit)))
-                     'rejected
-                   (setq glasspane-org-reader--source-edit
-                         (list :kind 'call :buffer name :pos pos :tick tick :scope scope
-                               :surface (plist-get params :surface) :bounds bounds
-                               :text (buffer-substring-no-properties (car bounds) (cdr bounds))
-                               :id (jetpacs-wire-id "gp-call-edit"
-                                                    (format "%s/%d/%d" name pos
-                                                            (cl-incf glasspane-org-reader--source-edit-sequence)))))
-                   (jetpacs-buffer-defer-refresh (plist-get params :surface))
-                   'accepted)))))
-        (error (jetpacs-shell-notify (jetpacs-error-label err) (plist-get params :surface)) 'rejected))))))
-
-(defun glasspane-org-reader--call-valid-arguments-p (value prefix suffix)
-  "Whether VALUE remains entirely within the arguments between PREFIX and SUFFIX.
-Use Org's parser without resolving any Babel expressions."
-  (and (stringp value) (<= (length value) glasspane-org-reader--call-edit-limit)
-       (not (string-match-p "[\n\r]" value))
-       (with-temp-buffer
-         (insert prefix value suffix)
-         (delay-mode-hooks (org-mode))
-         (let* ((element (org-element-at-point (point-min)))
-                (bounds (and (eq (org-element-type element) 'babel-call)
-                             (glasspane-org-reader--call-argument-bounds element))))
-           (and bounds (= (car bounds) (1+ (length prefix)))
-                (= (- (cdr bounds) (car bounds)) (length value)))))))
-
-(defun glasspane-org-reader--on-call-save (args params)
-  "Save captured argument ARGS from PARAMS without executing the Babel call.
-Require the original source and disk revision; preserve everything outside
-its parentheses.  Failed writes roll back the buffer and retain the draft."
-  (let* ((session glasspane-org-reader--source-edit)
-         (field (plist-get args :field))
-         (value (glasspane-org-reader--source-field (plist-get params :fields) field))
-         (buffer (and session (get-buffer (plist-get session :buffer)))))
-    (cond
-     ((not (and buffer (eq (plist-get session :kind) 'call)
-                (equal (plist-get args :session) (plist-get session :id))
-                (equal (plist-get params :surface) (plist-get session :surface)))) 'stale)
-     ((jetpacs-event-stale-p params) 'stale)
-     ((not (and (stringp value) (<= (length value) glasspane-org-reader--call-edit-limit)
-                (glasspane-org-reader--source-field-p field (plist-get session :id))
-                (jetpacs-buffer-exposed-p (plist-get session :buffer) (plist-get session :pos)
-                                         "glasspane.call.save"))) 'rejected)
-     (t
-      (condition-case err
-          (with-current-buffer buffer
-            (org-with-wide-buffer
-             (let ((beg (car (plist-get session :bounds))) (end (cdr (plist-get session :bounds))))
-               (cond
-                ((or (/= (plist-get session :tick) (buffer-chars-modified-tick))
-                     (not (verify-visited-file-modtime buffer)))
-                 (jetpacs-shell-notify "Call changed. Cancel and reopen its arguments." (plist-get params :surface))
-                 'stale)
-                ((not (glasspane-org-reader--call-valid-arguments-p
-                       value (buffer-substring-no-properties (plist-get session :pos) beg)
-                       (save-excursion (goto-char end) (buffer-substring-no-properties end (line-end-position)))))
-                 (jetpacs-shell-notify "Keep the arguments on one line with balanced parentheses." (plist-get params :surface))
-                 'rejected)
-                (t
-                 (ebp-org--check-file buffer-file-name)
-                 (ebp-org--with-clamped-io
-                   (atomic-change-group
-                     (save-excursion (goto-char beg) (delete-region beg end) (insert value))
-                     (glasspane-org-save-and-invalidate buffer)))
-                 (setq glasspane-org-reader--source-edit nil)
-                 (jetpacs-buffer-defer-refresh (plist-get params :surface))
-                 'accepted)))))
-        (error (jetpacs-shell-notify (jetpacs-error-label err) (plist-get params :surface)) 'rejected))))))
 
 (defun glasspane-org-reader--call-at (start limit)
   "Return (END . NODE) for a Babel call at START wholly before LIMIT.
@@ -746,26 +442,26 @@ or open another file, so resolution belongs exclusively to the Play action."
                    (inside (org-element-property :inside-header element))
                    (outside (org-element-property :end-header element))
                    (results (glasspane-org-reader--source-results element end limit))
-                   (session glasspane-org-reader--source-edit)
+                   (session (jetpacs-reader-org-source-draft))
                    (editing (and (eq (plist-get session :kind) 'call)
                                  (equal name (plist-get session :buffer))
                                  (eql pos (plist-get session :pos))
                                  (equal glasspane-org-reader--source-scope (plist-get session :scope))))
-                   (bounds (glasspane-org-reader--call-argument-bounds element))
+                   (bounds (jetpacs-reader-org-call-argument-bounds element))
                    (edit (when (and (not editing) bounds
-                                    (<= (- (cdr bounds) (car bounds)) glasspane-org-reader--call-edit-limit)
+                                    (<= (- (cdr bounds) (car bounds)) jetpacs-reader-org-call-edit-limit)
                                     (jetpacs-node-advertised-p "text_input")
                                     (jetpacs-node-advertised-p "button")
                                     (jetpacs-node-advertised-p "icon_button"))
                            (jetpacs-icon-button
-                            "edit" (jetpacs-action "glasspane.call.edit"
+                            "edit" (jetpacs-action "jetpacs.org.call.edit"
                                                    :args (list :buffer name :pos pos :tick (buffer-chars-modified-tick)
                                                                :scope glasspane-org-reader--source-scope))
                             :content-description "Edit call arguments")))
                    (run (when (and (not editing) (jetpacs-node-advertised-p "icon_button"))
                           (jetpacs-icon-button
                            "play_arrow"
-                           (jetpacs-action "glasspane.call.execute"
+                           (jetpacs-action "jetpacs.org.call.execute"
                                            :args (list :buffer name :pos pos
                                                        :tick (buffer-chars-modified-tick)))
                            :content-description "Execute Babel call")))
@@ -779,7 +475,7 @@ or open another file, so resolution belongs exclusively to the Play action."
                                 (jetpacs-text "Call" :style "caption" :color "outline")
                                 (jetpacs-with-attrs (jetpacs-text target :style "label") :weight 1)
                                 run edit :align "center" :spacing 12)
-                               (if editing (glasspane-org-reader--call-editor session)
+                               (if editing (jetpacs-reader-org-call-editor session)
                                  (jetpacs-text (if arguments (format "(%s)" arguments) "No arguments")
                                                :style "mono" :color "on_surface_variant")))
                               (when label (list (jetpacs-text (concat "Name · " label) :style "caption" :color "outline")))
@@ -792,269 +488,10 @@ or open another file, so resolution belongs exclusively to the Play action."
                    (left (cdr-safe jetpacs-buffer-budget)))
               (when (or (null left) (<= bytes left))
                 (when left (setcdr jetpacs-buffer-budget (- left bytes)))
-                (when run (jetpacs-buffer-expose name pos "glasspane.call.execute"))
-                (when edit (jetpacs-buffer-expose name pos "glasspane.call.edit"))
-                (when editing (jetpacs-buffer-expose name pos "glasspane.call.save"))
+                (when run (jetpacs-buffer-expose name pos "jetpacs.org.call.execute"))
+                (when edit (jetpacs-buffer-expose name pos "jetpacs.org.call.edit"))
+                (when editing (jetpacs-buffer-expose name pos "jetpacs.org.call.save"))
                 (cons (if results (car results) end) node)))))))))
-
-(defun glasspane-org-reader--on-call-execute (args params)
-  "Execute the exposed Babel call in ARGS from PARAMS and save its results.
-Revalidate the source tick, call identity and disk before resolving arguments.
-The explicit Play gesture uses the same Babel confirmation policy as the
-source-block Play control.  No evaluation happens in the reader builder."
-  (let* ((name (plist-get args :buffer))
-         (pos (plist-get args :pos))
-         (tick (plist-get args :tick))
-         (buffer (and (stringp name) (get-buffer name))))
-    (cond
-     ((not (and buffer (integerp pos) (integerp tick))) 'rejected)
-     ((jetpacs-event-stale-p params) 'stale)
-     ((not (jetpacs-buffer-exposed-p name pos "glasspane.call.execute")) 'rejected)
-     (t
-      (condition-case err
-          (with-current-buffer buffer
-            (org-with-wide-buffer
-             (if (or (not (derived-mode-p 'org-mode))
-                     (/= tick (buffer-chars-modified-tick))
-                     (not (<= (point-min) pos (point-max)))
-                     (not (verify-visited-file-modtime buffer)))
-                 'stale
-               (save-excursion
-                 (goto-char pos)
-                 (let ((element (org-element-at-point)))
-                   (if (not (and (eq (org-element-type element) 'babel-call)
-                                 (eql pos (org-element-property :post-affiliated element))))
-                       'stale
-                     (ebp-org--check-file buffer-file-name)
-                     (require 'ob-lob)
-                     (ebp-org--with-clamped-io
-                       ;; Play is the explicit execution request, as for source blocks.
-                       (let ((org-confirm-babel-evaluate nil))
-                         (atomic-change-group
-                           (unless (org-babel-lob-execute-maybe)
-                             (user-error "Babel call target could not be resolved"))
-                           (glasspane-org-save-and-invalidate buffer))))
-                     (jetpacs-buffer-defer-refresh (plist-get params :surface))
-                     'accepted))))))
-        (error (jetpacs-shell-notify (jetpacs-error-label err) (plist-get params :surface))
-               'rejected))))))
-
-(defconst glasspane-org-reader--footnote-limit 16384
-  "Maximum editable footnote length, bounded before building the dialog.")
-
-(defvar glasspane-org-reader--footnote-dialog nil
-  "The outstanding footnote editor and its source snapshot, or nil.")
-
-(defvar glasspane-org-reader--footnote-sequence 0
-  "Sequence of action-created footnote dialogs; never read by builders.")
-
-(defun glasspane-org-reader--footnote-record (pos)
-  "Resolve the reference at POS to an editable definition in the current buffer.
-Org owns normal, named inline and anonymous reference syntax and lookup.
-Return nil for an undefined reference.  Preserve separators outside the body."
-  (save-excursion
-    (goto-char pos)
-    (let* ((reference (org-element-context))
-           (label (org-element-property :label reference)))
-      (when (and (eq (org-element-type reference) 'footnote-reference)
-                 (eql pos (org-element-property :begin reference)))
-        (let ((element
-               (if (eq (org-element-property :type reference) 'inline) reference
-                 (when-let* ((definition (org-footnote-get-definition label)))
-                   (goto-char (nth 1 definition))
-                   (org-element-context)))))
-          (when (memq (org-element-type element) '(footnote-definition footnote-reference))
-            (let* ((start (org-element-property :begin element))
-                   (finish (min (point-max) (org-element-property :end element)))
-                   (inline (eq (org-element-type element) 'footnote-reference))
-                   (beg (or (org-element-property :contents-begin element)
-                            (save-excursion (goto-char start) (search-forward "]" finish) (point))))
-                   (end (if inline (org-element-property :contents-end element)
-                          (save-excursion
-                            (goto-char (or (org-element-property :contents-end element) beg))
-                            (skip-chars-backward " \t\r\n" beg) (point)))))
-              (when (<= (- finish start) glasspane-org-reader--footnote-limit)
-                (list :buffer (buffer-name) :pos pos :tick (buffer-chars-modified-tick)
-                      :label label :inline inline :start start :finish finish :beg beg :end end
-                      :text (buffer-substring-no-properties beg end)
-                      :original (buffer-substring-no-properties start finish)
-                      :prefix (buffer-substring-no-properties start beg)
-                      :suffix (buffer-substring-no-properties end finish))))))))))
-
-(defun glasspane-org-reader--footnote-close ()
-  "Retire the current footnote dialog without changing its source."
-  (let ((session glasspane-org-reader--footnote-dialog))
-    (setq glasspane-org-reader--footnote-dialog nil)
-    (when-let* ((client (jetpacs-client))
-                (request (plist-get session :request-id)))
-      (ignore-errors (ebp-client-abandon client request)))))
-
-(defun glasspane-org-reader--footnote-spec (session)
-  "Build the reading and editing dialog from the explicit SESSION snapshot."
-  (let ((id (plist-get session :id))
-        (field (plist-get session :field))
-        (text (plist-get session :text))
-        (editing (plist-get session :editing)))
-    (jetpacs-column
-     (jetpacs-text (if-let* ((label (plist-get session :label)))
-                      (concat "Footnote · " label) "Footnote") :style "title")
-     (if editing
-         (jetpacs-text-input field :value text :label "Footnote text"
-                             :single-line nil :min-lines 3 :max-lines 4
-                             :max-length glasspane-org-reader--footnote-limit)
-       (if (string-empty-p text) (jetpacs-text "Empty footnote" :color "outline")
-         (glasspane-org-reader--prose-node text)))
-     (jetpacs-row
-      (jetpacs-spacer :weight 1)
-      (jetpacs-button (if editing "Cancel" "Close") (jetpacs-dialog-dismiss) :variant "text")
-      (if editing
-          (jetpacs-button "Save"
-                      (jetpacs-action "glasspane.footnote.save"
-                                      :args (list :session id)
-                                      :capture-fields (list field)))
-        (jetpacs-button "Edit"
-                        (jetpacs-action "glasspane.footnote.edit" :args (list :session id))))
-      :spacing 8)
-     :spacing 12)))
-
-(defun glasspane-org-reader--show-footnote (session)
-  "Show SESSION outside action dispatch, keeping its origin for refresh.
-The remote Save action commits synchronously; dismissal never writes."
-  (glasspane-org-reader--footnote-close)
-  (when-let* ((client (jetpacs-client)))
-    (setq session (plist-put session :request-id nil))
-    (setq glasspane-org-reader--footnote-dialog session)
-    (condition-case err
-        (let ((request
-               (ebp-client-dialog-show
-                client (plist-get session :id) (glasspane-org-reader--footnote-spec session)
-                :callback (lambda (_status _result _error)
-                            (when (eq glasspane-org-reader--footnote-dialog session)
-                              (setq glasspane-org-reader--footnote-dialog nil))))))
-          (if request (setf (plist-get session :request-id) request)
-            (setq glasspane-org-reader--footnote-dialog nil)))
-      (error (setq glasspane-org-reader--footnote-dialog nil)
-             (jetpacs-shell-notify (jetpacs-error-label err) (plist-get session :surface))))))
-
-(defun glasspane-org-reader--on-footnote-open (args params)
-  "Open ARGS' exposed footnote in a dialog originating from PARAMS.
-Reject arbitrary buffers/positions, and resolve definitions only in the
-allowlisted source file.  Opening this transient UI has no document effect."
-  (let* ((name (plist-get args :buffer))
-         (pos (plist-get args :pos))
-         (tick (plist-get args :tick))
-         (buffer (and (stringp name) (get-buffer name))))
-    (cond
-     ((not (and buffer (integerp pos) (integerp tick)
-                (jetpacs-buffer-exposed-p name pos "glasspane.footnote.open"))) 'rejected)
-     ((jetpacs-event-stale-p params) 'stale)
-     ((not (and (jetpacs-client) (jetpacs-granted-p "surfaces.dialog"))) 'rejected)
-     (t
-      (condition-case err
-          (with-current-buffer buffer
-            (org-with-wide-buffer
-             (ebp-org--check-file buffer-file-name)
-             (cond
-              ((or (/= tick (buffer-chars-modified-tick))
-                   (not (<= (point-min) pos (point-max)))) 'stale)
-              (t
-               (let ((session (glasspane-org-reader--footnote-record pos)))
-                 (if (not session)
-                     (progn (jetpacs-shell-notify "Footnote missing or too large to edit here."
-                                                  (plist-get params :surface)) 'rejected)
-                   (let ((id (jetpacs-wire-id "gp-footnote"
-                                              (format "%s/%d/%d" name pos
-                                                      (cl-incf glasspane-org-reader--footnote-sequence)))))
-                     (setq session (append session (list :id id :field "footnote-text"
-                                                         :surface (plist-get params :surface))))
-                     (jetpacs-flow-continue (lambda () (glasspane-org-reader--show-footnote session)))
-                     'accepted)))))))
-        (error (jetpacs-shell-notify (jetpacs-error-label err) (plist-get params :surface)) 'rejected))))))
-
-(defun glasspane-org-reader--footnote-valid-p (session value)
-  "Whether VALUE stays one complete Org definition inside SESSION's delimiters.
-Parsing a temporary copy rejects structural escapes, extra definitions and
-unbalanced inline brackets without executing content or touching the source."
-  (with-temp-buffer
-    (insert (plist-get session :prefix) value (plist-get session :suffix))
-    (let ((org-inhibit-startup t)) (delay-mode-hooks (org-mode)))
-    (goto-char (point-min))
-    (let ((element (org-element-context)))
-      (and (eq (org-element-type element)
-               (if (plist-get session :inline) 'footnote-reference 'footnote-definition))
-           (= (org-element-property :end element) (point-max))
-           (or (not (plist-get session :inline))
-               (= (org-element-property :contents-end element)
-                  (+ 1 (length (plist-get session :prefix)) (length value))))))))
-
-(defun glasspane-org-reader--on-footnote-edit (args params)
-  "Switch ARGS' reading dialog from PARAMS to a compact footnote editor.
-Use a fresh dialog identity so the retired preview cannot save or dismiss
-the new editor.  The original source snapshot continues to guard Save."
-  (let ((session glasspane-org-reader--footnote-dialog))
-    (if (not (and session (plist-get session :request-id)
-                  (not (plist-get session :editing))
-                  (equal (plist-get args :session) (plist-get session :id))
-                  (equal (plist-get params :dialog_id) (plist-get session :id))))
-        'stale
-      (let ((editor (copy-sequence session)))
-        (setq editor (plist-put editor :editing t))
-        (setf (plist-get editor :id)
-              (jetpacs-wire-id "gp-footnote-edit"
-                               (format "%s/%d" (plist-get session :id)
-                                       (cl-incf glasspane-org-reader--footnote-sequence))))
-        (jetpacs-flow-continue (lambda () (glasspane-org-reader--show-footnote editor)))
-        'accepted))))
-
-(defun glasspane-org-reader--on-footnote-save (args params)
-  "Commit captured footnote text from ARGS and PARAMS before accepting Save.
-Only the outstanding dialog can write.  Source/disk drift rejects stale
-drafts, and failed writes roll back the buffer while leaving the dialog open."
-  (let* ((session glasspane-org-reader--footnote-dialog)
-         (buffer (and session (get-buffer (plist-get session :buffer))))
-         (value (glasspane-org-reader--source-field (plist-get params :fields)
-                                                   (plist-get session :field)))
-         (surface (plist-get session :surface)))
-    (cond
-     ((not (and session buffer (plist-get session :editing) (plist-get session :request-id)
-                (equal (plist-get args :session) (plist-get session :id))
-                (equal (plist-get params :dialog_id) (plist-get session :id)))) 'stale)
-     ((not (and (stringp value) (<= (length value) glasspane-org-reader--footnote-limit))) 'rejected)
-     (t
-      (condition-case err
-          (with-current-buffer buffer
-            (org-with-wide-buffer
-             (cond
-              ((or (/= (plist-get session :tick) (buffer-chars-modified-tick))
-                   (not (verify-visited-file-modtime buffer))
-                   (not (equal (plist-get session :original)
-                               (buffer-substring-no-properties (plist-get session :start)
-                                                               (plist-get session :finish)))))
-               (jetpacs-shell-notify "Footnote source changed. Cancel and reopen it." surface)
-               'stale)
-              (t
-               ;; An originally empty definition may have no separator after ].
-               (when (and (not (plist-get session :inline))
-                          (string-suffix-p "]" (plist-get session :prefix))
-                          (not (string-empty-p value)))
-                 (setq value (concat " " value)))
-               (if (not (glasspane-org-reader--footnote-valid-p session value))
-                   (progn (jetpacs-shell-notify "Keep the text inside one Org footnote definition." surface)
-                          'rejected)
-                 (ebp-org--check-file buffer-file-name)
-                 (ebp-org--with-clamped-io
-                   (atomic-change-group
-                     (save-excursion
-                       (goto-char (plist-get session :beg))
-                       (delete-region (plist-get session :beg) (plist-get session :end))
-                       (insert value))
-                     (glasspane-org-save-and-invalidate buffer)))
-                 (glasspane-org-reader--footnote-close)
-                 (jetpacs-buffer-defer-refresh surface)
-                 'accepted)))))
-        (error (jetpacs-shell-notify (jetpacs-error-label err) surface) 'rejected))))))
-
-;;;; Links: pretty inline references that follow through Org
 
 (defconst glasspane-org-reader--link-label-limit 60
   "Longest readable label synthesized for a link without a description.")
@@ -1322,7 +759,7 @@ RichSpan has no strike decoration; strike-through loses only its markers."
                        (pos (+ source-start (1- beg)))
                        (label (or (org-element-property :label object) "note"))
                        (action (with-current-buffer source-buffer
-                                 (jetpacs-action "glasspane.footnote.open"
+                                 (jetpacs-action "jetpacs.org.footnote.open"
                                                  :args (list :buffer (buffer-name) :pos pos
                                                              :tick (buffer-chars-modified-tick))))))
                   (when (<= (point-min) beg end (point-max))
@@ -1359,7 +796,7 @@ RichSpan has no strike decoration; strike-through loses only its markers."
             (when bytes-left (setcdr jetpacs-buffer-budget (- bytes-left bytes)))
             (with-current-buffer source-buffer
               (dolist (pos exposed)
-                (jetpacs-buffer-expose (buffer-name) pos "glasspane.footnote.open"))
+                (jetpacs-buffer-expose (buffer-name) pos "jetpacs.org.footnote.open"))
               (dolist (pos links)
                 (jetpacs-buffer-expose (buffer-name) pos "glasspane.link.open")))
             (when glasspane-org-reader--link-tally
@@ -1572,7 +1009,7 @@ Without a source position or native support, retain plain Org text."
                                (glasspane-org-reader--prose-block-at line-start limit)))
                    (block (or table image source call prose))
                    (record (and at-start checkboxes (not block)
-                                (glasspane-org-reader--checkbox-record line-start))))
+                                (jetpacs-org-render-checkbox-record line-start))))
               (cond
                (definition
                 (flush line-start)
@@ -1593,44 +1030,6 @@ Without a source position or native support, retain plain Org text."
               (push (glasspane-org-reader--prose-node text nil nil start) nodes))
           (flush limit)))
       (nreverse nodes))))
-
-(defun glasspane-org-reader--on-checkbox (args params)
-  "Apply checkbox ARGS from PARAMS and synchronously save before acceptance.
-Revalidate exposure, source tick, Org item identity and disk freshness.  Org
-owns checkbox transitions and statistics; Glasspane owns the native gestures."
-  (let* ((name (plist-get args :buffer))
-         (pos (plist-get args :pos))
-         (tick (plist-get args :tick))
-         (state (plist-get args :state))
-         (buffer (and (stringp name) (get-buffer name))))
-    (cond
-     ((not (and buffer (integerp pos) (integerp tick)
-                (member state '(nil "indeterminate")))) 'rejected)
-     ((jetpacs-event-stale-p params) 'stale)
-     ((not (jetpacs-buffer-exposed-p name pos "glasspane.checkbox")) 'rejected)
-     (t
-      (condition-case nil
-          (with-current-buffer buffer
-            (org-with-wide-buffer
-             (if (or (/= tick (buffer-chars-modified-tick))
-                     (not (<= (point-min) pos (point-max)))
-                     (not (verify-visited-file-modtime buffer)))
-                 'stale
-               (let ((record (glasspane-org-reader--checkbox-record pos)))
-                 (if (not (and record (= pos (plist-get record :pos))))
-                     'stale
-                   (ebp-org--check-file buffer-file-name)
-                   (ebp-org--with-clamped-io
-                     (save-excursion
-                       (goto-char pos)
-                       (let ((mark-active nil))
-                         (atomic-change-group
-                           (unless (equal state (plist-get record :state))
-                             (org-toggle-checkbox (when (equal state "indeterminate") '(16))))
-                           (glasspane-org-save-and-invalidate buffer)))))
-                   (jetpacs-buffer-defer-refresh (plist-get params :surface))
-                   'accepted)))))
-        (error 'rejected))))))
 
 (defun glasspane-org-reader--body-nodes (n drawers)
   "Render N's body, replacing DRAWERS with their visible contents.
@@ -2489,9 +1888,6 @@ direct LazyColumn children, and select the rendered presentation."
 
 (defconst glasspane-org-reader--verbs
   '("heading.menu" "files.filter" "files.toggle-refile" "heading.reorder"
-    "glasspane.checkbox" "glasspane.source.edit" "glasspane.source.save" "glasspane.source.cancel" "glasspane.call.execute"
-    "glasspane.call.edit" "glasspane.call.save" "glasspane.call.cancel"
-    "glasspane.footnote.open" "glasspane.footnote.edit" "glasspane.footnote.save"
     "glasspane.link.open")
   "The verbs this rung's reader owns, for the register/unregister sweep.
 heading.tap/props.show/duplicate/todo-cycle/clock-in are the detail
@@ -2513,38 +1909,18 @@ body/actions claimant; this app replaces the stock adapter in the stable
   ;; before replacing only its adapter slot.  The registrar is deliberately
   ;; reassertive, so this also makes live reload deterministic.
   (jetpacs-reader-org-register)
+  ;; The foundation's footnote dialog reads its definition through this
+  ;; app's emphasis-aware prose while Glasspane is registered.
+  (setq jetpacs-reader-org-footnote-prose-function
+        #'glasspane-org-reader--prose-node)
   (jetpacs-reader-register
    'org :predicate #'jetpacs-reader-org-path-p
    :render #'glasspane-org-reader--adapter-render
    :actions #'glasspane-org-reader--adapter-actions
    :transition #'glasspane-org-reader--adapter-transition)
   (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction "glasspane.footnote.open" #'glasspane-org-reader--on-footnote-open
-                       :any-surface t :doc "Read and edit the definition of this exposed Org footnote")
-    (jetpacs-defaction "glasspane.footnote.edit" #'glasspane-org-reader--on-footnote-edit
-                       :any-surface t :doc "Switch this footnote dialog from reading to editing")
-    (jetpacs-defaction "glasspane.footnote.save" #'glasspane-org-reader--on-footnote-save
-                       :any-surface t :doc "Save this dialog's footnote text after checking source and disk freshness")
     (jetpacs-defaction "glasspane.link.open" #'glasspane-org-reader--on-link-open
                        :any-surface t :doc "Follow this exposed Org link through Org, then present it by Glasspane's document route")
-    (jetpacs-defaction "glasspane.call.edit" #'glasspane-org-reader--on-call-edit
-                       :any-surface t :doc "Open an inline argument draft for this Babel call")
-    (jetpacs-defaction "glasspane.call.save" #'glasspane-org-reader--on-call-save
-                       :any-surface t :doc "Save call arguments without executing the call")
-    (jetpacs-defaction "glasspane.call.cancel" #'glasspane-org-reader--on-source-cancel
-                       :any-surface t :doc "Discard the inline Babel argument draft")
-    (jetpacs-defaction "glasspane.call.execute" #'glasspane-org-reader--on-call-execute
-                       :any-surface t :doc "Execute this Babel call through Org and save its results")
-    (jetpacs-defaction "glasspane.source.edit" #'glasspane-org-reader--on-source-edit
-                       :any-surface t :doc "Open an inline draft of this source block's code and language")
-    (jetpacs-defaction "glasspane.source.save" #'glasspane-org-reader--on-source-save
-                       :any-surface t :doc "Save the captured code and language after revalidating their source")
-    (jetpacs-defaction "glasspane.source.cancel" #'glasspane-org-reader--on-source-cancel
-                       :any-surface t :doc "Discard the inline code draft without changing Org")
-    (jetpacs-defaction "glasspane.checkbox"
-                       #'glasspane-org-reader--on-checkbox
-                       :any-surface t
-                       :doc "Toggle an Org checkbox or mark it in progress, then save")
     (jetpacs-defaction "heading.menu"
                        #'glasspane-org-reader--on-heading-menu
                        :any-surface t
@@ -2579,9 +1955,10 @@ body/actions claimant; this app replaces the stock adapter in the stable
   (remove-hook 'jetpacs-files-editor-actions-functions
                'glasspane-org-reader--files-actions)
   (glasspane-org-reader-sheet-close)
-  (glasspane-org-reader--footnote-close)
   (setq glasspane-org-reader--refile-lists nil)
-  (setq glasspane-org-reader--source-edit nil)
+  (when (eq jetpacs-reader-org-footnote-prose-function
+            #'glasspane-org-reader--prose-node)
+    (setq jetpacs-reader-org-footnote-prose-function nil))
   (jetpacs-reader-org-register))
 
 (provide 'glasspane-org-reader)

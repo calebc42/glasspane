@@ -53,6 +53,11 @@
 ;; The v1 app-owned save-function rebind retired at GR-6: native Org
 ;; durability is Jetpacs policy now.  This module contributes only the
 ;; opinionated file-properties action through a second editor adapter.
+;; The built-in mutation cores behind the token verbs (set/cycle TODO,
+;; planning, priority, tags, delete, duplicate, note, properties, refile)
+;; are the foundation's `jetpacs-org-heading-*' primitives
+;; (jetpacs-org-dialogs.el); the handlers here own token scope, the
+;; notification text and the refresh.
 
 ;;; Code:
 
@@ -1004,13 +1009,8 @@ the only other chrome."
         :variant "filled")
        :id (jetpacs-wire-id "gp-detail-panel" key)))))
 
-(defun glasspane-detail--relative-date (today when)
-  "The ISO date that WHEN (\"+0d\", \"+1d\", \"+1w\") names from ISO TODAY.
-Nil for any other spelling."
-  (when (and (stringp when)
-             (string-match "\\`\\+\\([0-9]+\\)\\([dw]\\)\\'" when))
-    (jetpacs-dates-shift today (string-to-number (match-string 1 when))
-                         (if (equal (match-string 2 when) "w") 'week 'day))))
+(defalias 'glasspane-detail--relative-date #'jetpacs-org-relative-date
+  "The ISO date that WHEN (\"+0d\", \"+1d\", \"+1w\") names from ISO TODAY.")
 
 (defun glasspane-detail--planning-panel (info main section)
   "Build INFO's SECTION (`scheduled' or `deadline') drawer for token MAIN.
@@ -1483,14 +1483,8 @@ never guess)."
            ref)
           'accepted)))))
 
-(defun glasspane-detail--ref-location (ref)
-  "Resolve REF to (BUFFER FILE POSITION), releasing its marker."
-  (let ((marker (ebp-org-resolve-ref ref)))
-    (unwind-protect
-        (list (marker-buffer marker)
-              (buffer-file-name (marker-buffer marker))
-              (marker-position marker))
-      (set-marker marker nil))))
+(defalias 'glasspane-detail--ref-location #'jetpacs-org-heading-location
+  "Resolve REF to (BUFFER FILE POSITION), releasing its marker.")
 
 (defun glasspane-detail--location-status (err)
   "Map engine condition ERR to a handler result, including retry."
@@ -1589,7 +1583,7 @@ over the heading's new coordinates."
         'rejected
       (let* ((clear (string-empty-p state))
              (status (glasspane-ui-at-ref
-                      args (lambda () (org-todo (if clear 'none state))) t)))
+                      args (lambda () (jetpacs-org-heading-set-todo state)) t)))
         (when (eq status 'accepted)
           (jetpacs-shell-notify (if clear "State cleared"
                                   (format "State → %s" state))
@@ -1602,10 +1596,7 @@ over the heading's new coordinates."
   (let* ((state nil)
          (status (glasspane-ui-at-ref
                   args
-                  (lambda ()
-                    (org-todo)
-                    (unless (org-get-todo-state) (org-todo))
-                    (setq state (org-get-todo-state)))
+                  (lambda () (setq state (jetpacs-org-heading-cycle-todo)))
                   t)))
     (when (eq status 'accepted)
       (jetpacs-shell-notify (if state (format "State → %s" state)
@@ -1623,7 +1614,6 @@ No prompting arm — the empty-args tap is a build-time bug, not a user
 path (the picker flows are the foundation dialog's)."
   (let* ((deadline (equal (plist-get args :type) "DEADLINE"))
          (prop (if deadline "DEADLINE" "SCHEDULED"))
-         (setter (if deadline #'org-deadline #'org-schedule))
          (clearp (let ((c (plist-get args :clear)))
                    (and c (not (eq c :json-false)))))
          (when (plist-get args :when))
@@ -1637,7 +1627,8 @@ path (the picker flows are the foundation dialog's)."
     (cond
      (clearp
       (let ((status (glasspane-ui-at-ref
-                     args (lambda () (funcall setter '(4))) t)))
+                     args (lambda () (jetpacs-org-heading-clear-planning prop))
+                     t)))
         (when (eq status 'accepted)
           (jetpacs-shell-notify (if deadline "Deadline cleared"
                                   "Schedule cleared")
@@ -1648,16 +1639,7 @@ path (the picker flows are the foundation dialog's)."
       (let ((status
              (glasspane-ui-at-ref
               args
-              (lambda ()
-                ;; Org rebuilds the stamp from the date it is given and
-                ;; re-attaches the old repeater and delay itself; the
-                ;; time of day survives only when handed back.
-                (let ((time (glasspane-ui-ts-time-range
-                             (org-entry-get nil prop))))
-                  (funcall setter nil
-                           (if (and time (ebp-org-ts-date date))
-                               (concat date " " time)
-                             date))))
+              (lambda () (jetpacs-org-heading-set-planning prop date))
               t)))
         (when (eq status 'accepted)
           (jetpacs-shell-notify (format "%s %s" (if deadline "Deadline"
@@ -1676,9 +1658,7 @@ path (the picker flows are the foundation dialog's)."
       (let* ((remove (string-empty-p val))
              (status (glasspane-ui-at-ref
                       args
-                      (lambda ()
-                        (if remove (org-priority 'remove)
-                          (org-priority (string-to-char (upcase val)))))
+                      (lambda () (jetpacs-org-heading-set-priority val))
                       t)))
         (when (eq status 'accepted)
           (jetpacs-shell-notify (if remove "Priority cleared"
@@ -1695,14 +1675,11 @@ own tag charset or the whole write refuses."
     (if (not (or (vectorp val) (proper-list-p val)))
         'rejected
       (let ((tags (append val nil)))
-        (if (not (cl-every (lambda (tg)
-                             (and (stringp tg)
-                                  (string-match-p "\\`[[:alnum:]_@#%]+\\'"
-                                                  tg)))
-                           tags))
+        (if (not (jetpacs-org-tags-valid-p tags))
             'rejected
           (let ((status (glasspane-ui-at-ref
-                         args (lambda () (org-set-tags tags)) t)))
+                         args (lambda () (jetpacs-org-heading-set-tags tags))
+                         t)))
             (when (eq status 'accepted)
               (jetpacs-shell-notify (if tags (format "Tags: %s"
                                                      (string-join tags " "))
@@ -1720,10 +1697,7 @@ own tag charset or the whole write refuses."
            (with-current-buffer (marker-buffer marker)
              (org-with-wide-buffer
               (goto-char marker)
-              (let* ((org-refile-targets
-                      (or org-refile-targets
-                          '((org-agenda-files :maxlevel . 3))))
-                     (targets (org-refile-get-targets))
+              (let* ((targets (jetpacs-org-heading-refile-targets))
                      (choice (condition-case nil
                                  (completing-read "Refile to: "
                                                   (mapcar #'car targets)
@@ -1733,14 +1707,11 @@ own tag charset or the whole write refuses."
                 (if (not target)
                     (jetpacs-shell-notify "Refile cancelled"
                                           (plist-get params :surface))
-                  (org-refile nil nil target)
-                  ;; Refile may dirty both source and target.  Put every
-                  ;; affected Org buffer through the native policy so neither
-                  ;; side can bypass Org Crypt or leave another namespace's
-                  ;; projection memo stale.
-                  (dolist (buffer (org-buffer-list 'files t))
-                    (when (buffer-modified-p buffer)
-                      (glasspane-org-save-and-invalidate buffer)))
+                  ;; Refile may dirty both source and target; the
+                  ;; foundation puts every affected Org buffer through the
+                  ;; app's save funnel.
+                  (jetpacs-org-heading-refile
+                   target #'glasspane-org-save-and-invalidate)
                   (jetpacs-shell-notify (format "Refiled to %s" choice)
                                         (plist-get params :surface))))))
          (set-marker marker nil)))
@@ -1758,13 +1729,6 @@ own tag charset or the whole write refuses."
        (lambda () (glasspane-detail--refile-flow ref params)))
       'accepted))))
 
-(defun glasspane-detail--insert-note (note)
-  "Insert NOTE where org-log says notes belong, in org's own format."
-  (let ((org-log-into-drawer t))
-    (goto-char (org-log-beginning t))
-    (insert (format "- Note taken on %s \\\\\n  %s\n"
-                    (format-time-string (org-time-stamp-format t t))
-                    (replace-regexp-in-string "\n" "\n  " note)))))
 
 (defun glasspane-detail--on-add-note (args params)
   "Quick logbook note through a bridged prompt."
@@ -1785,7 +1749,7 @@ own tag charset or the whole write refuses."
               (when (eq (glasspane-ui-at-ref
                          args
                          (lambda ()
-                           (glasspane-detail--insert-note
+                           (jetpacs-org-heading-insert-note
                             (jetpacs-scalar-text note)))
                          t)
                         'accepted)
@@ -1801,11 +1765,7 @@ own tag charset or the whole write refuses."
 descriptor already parked this behind a device AlertDialog — Archive
 is the recoverable path; this one is for genuine junk."
   (let ((status (glasspane-ui-at-ref
-                 args
-                 (lambda ()
-                   (delete-region (point)
-                                  (progn (org-end-of-subtree t t) (point))))
-                 t)))
+                 args #'jetpacs-org-heading-delete-subtree t)))
     (when (eq status 'accepted)
       (jetpacs-shell-notify "Deleted" (plist-get params :surface))
       (jetpacs-flow-continue (lambda () (glasspane-detail--leave params))))
@@ -1815,16 +1775,7 @@ is the recoverable path; this one is for genuine junk."
   "Copy the subtree and insert it right after itself — the
 recurring-meeting-notes idiom."
   (let ((status (glasspane-ui-at-ref
-                 args
-                 (lambda ()
-                   (let ((subtree (buffer-substring-no-properties
-                                   (point)
-                                   (save-excursion
-                                     (org-end-of-subtree t t) (point)))))
-                     (org-end-of-subtree t t)
-                     (unless (bolp) (insert "\n"))
-                     (insert subtree)))
-                 t)))
+                 args #'jetpacs-org-heading-duplicate-subtree t)))
     (when (eq status 'accepted)
       (jetpacs-shell-notify "Duplicated" (plist-get params :surface))
       (jetpacs-app-defer-refresh params))
@@ -1848,10 +1799,7 @@ An empty value deletes the property."
         'rejected
       (let ((status (glasspane-ui-at-ref
                      args
-                     (lambda ()
-                       (if (string-empty-p value)
-                           (org-delete-property name)
-                         (org-set-property name value)))
+                     (lambda () (jetpacs-org-heading-set-property name value))
                      t)))
         (when (eq status 'accepted)
           (jetpacs-shell-notify (if (string-empty-p value)
@@ -1878,7 +1826,7 @@ then appears as a row whose value column is ready to fill in."
                          (quit "")))))
             (cond
              ((string-empty-p name) nil)
-             ((string-match-p "[: \t]" name)
+             ((not (jetpacs-org-property-name-valid-p name))
               (jetpacs-shell-notify
                "Property names can't contain colons or spaces"
                (plist-get params :surface)))

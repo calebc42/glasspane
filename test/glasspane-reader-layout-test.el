@@ -8,6 +8,7 @@
 (require 'glasspane)
 (require 'glasspane-org-reader)
 (require 'jetpacs-chrome)
+(require 'jetpacs-editor-org)  ; the save policy the reader editors stub
 
 (ert-deftest glasspane-reader-layout-source-block-is-fontified-with-play ()
   "Code cards retain Emacs colors and group results under a folding header."
@@ -59,7 +60,7 @@
          (file (expand-file-name "code.org" root))
          (ebp-org-roots (list root))
          (org-babel-load-languages '((emacs-lisp . t) (python . t) (shell . nil)))
-         (glasspane-org-reader--source-edit nil)
+         (jetpacs-reader-org--source-edit nil)
          (jetpacs-buffer-exposed (make-hash-table :test #'equal))
          buffer)
     (unwind-protect
@@ -93,15 +94,15 @@
 (defun glasspane-reader-layout--source-open ()
   "Open the current buffer's source card using its emitted action."
   (let ((action (glasspane-reader-layout--source-action
-                 (glasspane-reader-layout--source-render) "glasspane.source.edit")))
-    (glasspane-org-reader--on-source-edit (plist-get action :args) '(:surface "app:glasspane"))))
+                 (glasspane-reader-layout--source-render) "jetpacs.org.source.edit")))
+    (jetpacs-reader-org--on-source-edit (plist-get action :args) '(:surface "app:glasspane"))))
 
 (defun glasspane-reader-layout--source-save (text language)
   "Submit TEXT and LANGUAGE through the editor's actual captured fields."
   (let* ((action (glasspane-reader-layout--source-action
-                  (glasspane-reader-layout--source-render) "glasspane.source.save"))
+                  (glasspane-reader-layout--source-render) "jetpacs.org.source.save"))
          (args (plist-get action :args)))
-    (glasspane-org-reader--on-source-save
+    (jetpacs-reader-org--on-source-save
      args (list :surface "app:glasspane" :fields
                 (list (intern (concat ":" (plist-get args :field))) text
                       (intern (concat ":" (plist-get args :language-field))) language)))))
@@ -123,7 +124,7 @@
          (should (equal nodes (glasspane-reader-layout--source-render)))
          (should (equal original (buffer-string))))
        (should (eq (glasspane-reader-layout--source-save "print(4)" "python") 'accepted))
-       (should-not glasspane-org-reader--source-edit)
+       (should-not jetpacs-reader-org--source-edit)
        (should-not (buffer-modified-p))
        (should (equal (buffer-string)
                       "* Lab\nBefore.\n#+NAME: sample\n#+begin_src python -n :results value\nprint(4)\n#+end_src\n\n#+RESULTS: sample\n: 4\nAfter.\n"))
@@ -136,16 +137,16 @@
    (lambda (_file)
      (let ((original (buffer-string)))
        (should (eq (glasspane-reader-layout--source-open) 'accepted))
-       (let* ((id (plist-get glasspane-org-reader--source-edit :id))
+       (let* ((id (plist-get jetpacs-reader-org--source-edit :id))
               (cancel (glasspane-reader-layout--source-action
-                       (glasspane-reader-layout--source-render) "glasspane.source.cancel")))
-         (should (eq (glasspane-org-reader--on-source-cancel
+                       (glasspane-reader-layout--source-render) "jetpacs.org.source.cancel")))
+         (should (eq (jetpacs-reader-org--on-source-cancel
                       (plist-get cancel :args) '(:surface "app:glasspane")) 'accepted))
          (should (eq (glasspane-reader-layout--source-open) 'accepted))
-         (should-not (equal id (plist-get glasspane-org-reader--source-edit :id))))
+         (should-not (equal id (plist-get jetpacs-reader-org--source-edit :id))))
        (should (eq (glasspane-reader-layout--source-save "#+END_SRC\n* Injected" "python") 'rejected))
        (should (eq (glasspane-reader-layout--source-save "print(4)" "python :var evil=1") 'rejected))
-       (should-not (glasspane-org-reader--source-field '(:invalid . "bad") "invalid"))
+       (should-not (jetpacs-reader-org--source-field '(:invalid . "bad") "invalid"))
        (should (equal original (buffer-string)))))))
 
 (ert-deftest glasspane-reader-layout-inline-source-rejects-stale-and-failed-writes ()
@@ -160,13 +161,13 @@
        (let ((before (buffer-string))
              (disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
          (if (eq failure 'write)
-             (cl-letf (((symbol-function 'glasspane-org-save-and-invalidate)
+             (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
                         (lambda (&rest _) (error "Write refused"))))
                (should (eq (glasspane-reader-layout--source-save "print(4)" "python") 'rejected)))
            (should (eq (glasspane-reader-layout--source-save "print(4)" "python") 'stale)))
          (should (equal before (buffer-string)))
          (should (equal disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
-         (should glasspane-org-reader--source-edit))))))
+         (should jetpacs-reader-org--source-edit))))))
 
 (ert-deftest glasspane-reader-layout-source-results-native-and-bounded ()
   "Adjacent tables/images belong to code; remote named results stay in place."
@@ -193,7 +194,7 @@
         (let* ((nodes (glasspane-reader-layout--source-render))
                (cards (glasspane-reader-layout--nodes-of-type nodes "card"))
                (json (jetpacs-node->canonical-json (car cards)))
-               (run (glasspane-reader-layout--source-action nodes "glasspane.call.execute")))
+               (run (glasspane-reader-layout--source-action nodes "jetpacs.org.call.execute")))
           (should (= (length cards) 1))
           (dolist (text '("Call" "double" "(+ 2 3)" "a,b" "Block options" ":var offset=1" "Call options" ":results value" "named-call" "Results" "10"))
             (should (string-search text json)))
@@ -205,7 +206,7 @@
       (let ((jetpacs-buffer-budget (cons 0 0))
             (jetpacs-buffer-exposed (make-hash-table :test #'equal)))
         (should-not (glasspane-reader-layout--source-action
-                     (glasspane-reader-layout--source-render) "glasspane.call.execute")))
+                     (glasspane-reader-layout--source-render) "jetpacs.org.call.execute")))
       (cl-letf (((symbol-function 'jetpacs-node-advertised-p) (lambda (_type) nil)))
         (let ((nodes (glasspane-reader-layout--source-render)))
           (should-not (glasspane-reader-layout--nodes-of-type nodes "card"))
@@ -220,7 +221,7 @@
            (buttons (glasspane-reader-layout--nodes-of-type nodes "icon_button")))
       (should (= 1 (cl-count-if
                     (lambda (button) (equal (plist-get (plist-get button :on_tap) :action)
-                                            "glasspane.call.execute")) buttons)))
+                                            "jetpacs.org.call.execute")) buttons)))
       (should (string-search "No arguments" (jetpacs-node->canonical-json (apply #'jetpacs-column nodes)))))))
 
 (defun glasspane-reader-layout--call-fixture ()
@@ -232,7 +233,7 @@
 (defun glasspane-reader-layout--call-args ()
   "Return the current test buffer's rendered Babel call arguments."
   (plist-get (glasspane-reader-layout--source-action
-              (glasspane-reader-layout--source-render) "glasspane.call.execute") :args))
+              (glasspane-reader-layout--source-render) "jetpacs.org.call.execute") :args))
 
 (ert-deftest glasspane-reader-layout-call-executes-and-saves-results ()
   "A real Babel call uses its argument override and durably saves separate results."
@@ -240,15 +241,15 @@
    (lambda (file)
      (glasspane-reader-layout--call-fixture)
      (let ((args (glasspane-reader-layout--call-args)))
-       (should (eq (glasspane-org-reader--on-call-execute args '(:surface "app:glasspane")) 'accepted))
+       (should (eq (jetpacs-reader-org--on-call-execute args '(:surface "app:glasspane")) 'accepted))
        (should (string-search "#+RESULTS: double\n: 8" (buffer-string)))
        (should (string-search "#+call: double(n=5)\n\n#+RESULTS:\n: 10" (buffer-string)))
        (should-not (buffer-modified-p))
        (should (equal (buffer-string) (with-temp-buffer (insert-file-contents file) (buffer-string))))
-       (should (eq (glasspane-org-reader--on-call-execute args '(:surface "app:glasspane")) 'stale)))
+       (should (eq (jetpacs-reader-org--on-call-execute args '(:surface "app:glasspane")) 'stale)))
      (let* ((nodes (glasspane-reader-layout--source-render))
             (calls (cl-remove-if-not
-                    (lambda (card) (glasspane-reader-layout--source-action card "glasspane.call.execute"))
+                    (lambda (card) (glasspane-reader-layout--source-action card "jetpacs.org.call.execute"))
                     (glasspane-reader-layout--nodes-of-type nodes "card"))))
        (should (= (length calls) 1))
        (should (string-search "Results" (jetpacs-node->canonical-json (car calls))))))))
@@ -271,30 +272,30 @@
                (disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
            (pcase failure
              ('write
-              (cl-letf (((symbol-function 'glasspane-org-save-and-invalidate)
+              (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
                          (lambda (&rest _) (error "Write refused"))))
-                (should (eq (glasspane-org-reader--on-call-execute args '(:surface "app:glasspane")) 'rejected))))
-             ('missing (should (eq (glasspane-org-reader--on-call-execute args '(:surface "app:glasspane")) 'rejected)))
+                (should (eq (jetpacs-reader-org--on-call-execute args '(:surface "app:glasspane")) 'rejected))))
+             ('missing (should (eq (jetpacs-reader-org--on-call-execute args '(:surface "app:glasspane")) 'rejected)))
              (_ (cl-letf (((symbol-function 'org-babel-lob-execute-maybe)
                            (lambda () (ert-fail "Stale call executed"))))
-                  (should (eq (glasspane-org-reader--on-call-execute args '(:surface "app:glasspane"))
+                  (should (eq (jetpacs-reader-org--on-call-execute args '(:surface "app:glasspane"))
                               (if (eq failure 'exposure) 'rejected 'stale))))))
            (should (equal before (buffer-string)))
            (should (equal disk (with-temp-buffer (insert-file-contents file) (buffer-string))))))))))
 
 (defun glasspane-reader-layout--call-open ()
   "Open the call editor using its emitted Edit descriptor."
-  (glasspane-org-reader--on-call-edit
+  (jetpacs-reader-org--on-call-edit
    (plist-get (glasspane-reader-layout--source-action
-               (glasspane-reader-layout--source-render) "glasspane.call.edit") :args)
+               (glasspane-reader-layout--source-render) "jetpacs.org.call.edit") :args)
    '(:surface "app:glasspane")))
 
 (defun glasspane-reader-layout--call-save (value)
   "Save VALUE using the argument editor's emitted field identity."
   (let* ((action (glasspane-reader-layout--source-action
-                  (glasspane-reader-layout--source-render) "glasspane.call.save"))
+                  (glasspane-reader-layout--source-render) "jetpacs.org.call.save"))
          (args (plist-get action :args)))
-    (glasspane-org-reader--on-call-save
+    (jetpacs-reader-org--on-call-save
      args (list :surface "app:glasspane" :fields
                 (list (intern (concat ":" (plist-get args :field))) value)))))
 
@@ -312,13 +313,13 @@
                 (input (car (glasspane-reader-layout--nodes-of-type nodes "text_input"))))
            (should (equal (plist-get input :value) "n=5"))
            (should (equal nodes (glasspane-reader-layout--source-render)))
-           (should-not (glasspane-reader-layout--source-action nodes "glasspane.call.execute")))
+           (should-not (glasspane-reader-layout--source-action nodes "jetpacs.org.call.execute")))
          (cl-letf (((symbol-function 'org-babel-lob-get-info) (lambda (&rest _) (ert-fail "Save evaluated arguments")))
                    ((symbol-function 'org-babel-lob-execute-maybe) (lambda () (ert-fail "Save executed call"))))
            (should (eq (glasspane-reader-layout--call-save value) 'accepted)))
          (should (equal (buffer-string) (string-replace "(n=5)" (concat "(" value ")") before)))
          (should (equal (buffer-string) (with-temp-buffer (insert-file-contents file) (buffer-string))))
-         (should-not glasspane-org-reader--source-edit))))))
+         (should-not jetpacs-reader-org--source-edit))))))
 
 (ert-deftest glasspane-reader-layout-call-editor-cancel-and-invalid ()
   "Cancel discards drafts; malformed values cannot escape the argument field."
@@ -330,13 +331,13 @@
        (should (eq (glasspane-reader-layout--source-open) 'rejected))
        (dolist (value '("n=5) :results silent (" "n=5\n* Heading" "n=(+ 2 3"))
          (should (eq (glasspane-reader-layout--call-save value) 'rejected)))
-       (let* ((id (plist-get glasspane-org-reader--source-edit :id))
+       (let* ((id (plist-get jetpacs-reader-org--source-edit :id))
               (cancel (glasspane-reader-layout--source-action
-                       (glasspane-reader-layout--source-render) "glasspane.call.cancel")))
-         (should (eq (glasspane-org-reader--on-source-cancel
+                       (glasspane-reader-layout--source-render) "jetpacs.org.call.cancel")))
+         (should (eq (jetpacs-reader-org--on-source-cancel
                       (plist-get cancel :args) '(:surface "app:glasspane")) 'accepted))
          (should (eq (glasspane-reader-layout--call-open) 'accepted))
-         (should-not (equal id (plist-get glasspane-org-reader--source-edit :id))))
+         (should-not (equal id (plist-get jetpacs-reader-org--source-edit :id))))
        (should (equal before (buffer-string)))))))
 
 (ert-deftest glasspane-reader-layout-call-editor-rejects-stale-and-failed-writes ()
@@ -352,13 +353,13 @@
        (let ((before (buffer-string))
              (disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
          (if (eq failure 'write)
-             (cl-letf (((symbol-function 'glasspane-org-save-and-invalidate)
+             (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
                         (lambda (&rest _) (error "Write refused"))))
                (should (eq (glasspane-reader-layout--call-save "n=7") 'rejected)))
            (should (eq (glasspane-reader-layout--call-save "n=7") 'stale)))
          (should (equal before (buffer-string)))
          (should (equal disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
-         (should glasspane-org-reader--source-edit))))))
+         (should jetpacs-reader-org--source-edit))))))
 
 (ert-deftest glasspane-reader-layout-emphasis-hides-markers-and-keeps-styles ()
   "All six emphasis forms hide markers; nesting combines supported native styles."
@@ -410,17 +411,17 @@
       (should (string-search "A title" heading-text))
       (should-not (string-search "/title/" heading-text))
       (goto-char (point-min)) (forward-line)
-      (let* ((node (glasspane-org-reader--checkbox-node (glasspane-org-reader--checkbox-record (point))))
+      (let* ((node (glasspane-org-reader--checkbox-node (jetpacs-org-render-checkbox-record (point))))
              (label (car (glasspane-reader-layout--nodes-of-type node "rich_text"))))
         (should (equal "A task" (mapconcat (lambda (span) (plist-get span :text)) (plist-get label :spans) "")))
-        (should (string-search "glasspane.checkbox" (jetpacs-node->canonical-json node)))))))
+        (should (string-search "jetpacs.org.checkbox" (jetpacs-node->canonical-json node)))))))
 
 (defun glasspane-reader-layout--footnote-actions (nodes)
   "Collect footnote link descriptors in NODES in presentation order."
   (cl-loop for node in (glasspane-reader-layout--nodes-of-type nodes "rich_text")
            append (cl-loop for span across (vconcat (plist-get node :spans))
                            for tap = (plist-get span :on_tap)
-                           when (equal (plist-get tap :action) "glasspane.footnote.open")
+                           when (equal (plist-get tap :action) "jetpacs.org.footnote.open")
                            collect tap)))
 
 (ert-deftest glasspane-reader-layout-footnotes-link-and-hide-definitions ()
@@ -435,8 +436,8 @@
        (should (= (length actions) 4))
        (dolist (action actions)
          (let ((pos (plist-get (plist-get action :args) :pos)))
-           (should (jetpacs-buffer-exposed-p (buffer-name) pos "glasspane.footnote.open"))
-           (should (glasspane-org-reader--footnote-record pos))))
+           (should (jetpacs-buffer-exposed-p (buffer-name) pos "jetpacs.org.footnote.open"))
+           (should (jetpacs-reader-org-footnote-record pos))))
        (should (equal nodes (glasspane-reader-layout--source-render)))
        (let ((json (jetpacs-node->canonical-json (apply #'jetpacs-column nodes))))
          (should (string-search "Literal[fn:coverage]" json))
@@ -615,7 +616,7 @@
     (glasspane-reader-layout--with-source-file
      (lambda (file)
        (erase-buffer) (insert source) (save-buffer)
-       (let ((glasspane-org-reader--footnote-dialog nil) shown callback)
+       (let ((jetpacs-reader-org--footnote-dialog nil) shown callback)
          (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'client))
                    ((symbol-function 'jetpacs-node-advertised-p) (lambda (&rest _) t))
                    ((symbol-function 'jetpacs-node-member-advertised-p) (lambda (&rest _) t))
@@ -628,26 +629,26 @@
            (let* ((action (car (glasspane-reader-layout--footnote-actions
                                (glasspane-reader-layout--source-render))))
                   (args (plist-get action :args)))
-             (should (eq (glasspane-org-reader--on-footnote-open args '(:surface "app:glasspane")) 'accepted))
+             (should (eq (jetpacs-reader-org--on-footnote-open args '(:surface "app:glasspane")) 'accepted))
              (should-not (glasspane-reader-layout--nodes-of-type shown "text_input"))
              (funcall callback "dismissed" nil nil)
-             (should-not glasspane-org-reader--footnote-dialog)
+             (should-not jetpacs-reader-org--footnote-dialog)
              (should (equal source (buffer-string)))
-             (should (eq (glasspane-org-reader--on-footnote-open args '(:surface "app:glasspane")) 'accepted))
-             (let ((id (plist-get glasspane-org-reader--footnote-dialog :id))
+             (should (eq (jetpacs-reader-org--on-footnote-open args '(:surface "app:glasspane")) 'accepted))
+             (let ((id (plist-get jetpacs-reader-org--footnote-dialog :id))
                    (old-callback callback))
-               (should (eq (glasspane-org-reader--on-footnote-edit
+               (should (eq (jetpacs-reader-org--on-footnote-edit
                             (list :session id) (list :dialog_id id)) 'accepted))
-               (should-not (equal id (plist-get glasspane-org-reader--footnote-dialog :id)))
+               (should-not (equal id (plist-get jetpacs-reader-org--footnote-dialog :id)))
                (funcall old-callback "dismissed" nil nil)
-               (should glasspane-org-reader--footnote-dialog))
+               (should jetpacs-reader-org--footnote-dialog))
              (should (equal (plist-get (car (glasspane-reader-layout--nodes-of-type shown "text_input")) :value)
                             "Old *note*"))
-             (let ((id (plist-get glasspane-org-reader--footnote-dialog :id)))
-               (should (eq (glasspane-org-reader--on-footnote-save
+             (let ((id (plist-get jetpacs-reader-org--footnote-dialog :id)))
+               (should (eq (jetpacs-reader-org--on-footnote-save
                             (list :session id)
                             (list :dialog_id id :fields '(:footnote-text "New /note/"))) 'accepted)))
-             (should-not glasspane-org-reader--footnote-dialog)
+             (should-not jetpacs-reader-org--footnote-dialog)
              (let ((expected (replace-regexp-in-string "Old \\*note\\*" "New /note/" source t t)))
                (should (equal expected (buffer-string)))
                (should (equal expected (with-temp-buffer (insert-file-contents file) (buffer-string))))))))))))
@@ -660,24 +661,24 @@
        (erase-buffer) (insert "* Lab\nRead[fn:a].\n* Footnotes\n[fn:a] Original.\n") (save-buffer)
        (let* ((before (buffer-string))
               (action (car (glasspane-reader-layout--footnote-actions (glasspane-reader-layout--source-render))))
-              (record (glasspane-org-reader--footnote-record (plist-get (plist-get action :args) :pos)))
-              (glasspane-org-reader--footnote-dialog
+              (record (jetpacs-reader-org-footnote-record (plist-get (plist-get action :args) :pos)))
+              (jetpacs-reader-org--footnote-dialog
                (append record '(:id "fn-test" :editing t :field "footnote-text" :request-id "req" :surface "app:glasspane"))))
          (pcase failure
            ('source (goto-char (point-max)) (insert "Changed elsewhere."))
            ('disk (with-temp-file file (insert "Changed on disk."))))
          (let ((after-drift (buffer-string)))
-           (cl-letf (((symbol-function 'glasspane-org-save-and-invalidate)
+           (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
                       (lambda (&rest _) (error "Simulated failed write"))))
              (should
-              (eq (glasspane-org-reader--on-footnote-save
+              (eq (jetpacs-reader-org--on-footnote-save
                    '(:session "fn-test")
                    (list :dialog_id (if (eq failure 'wrong-dialog) "other" "fn-test")
                          :fields (list :footnote-text
                                        (if (eq failure 'invalid) "Escape.\n* New heading\n" "New note."))))
                   (if (memq failure '(wrong-dialog source disk)) 'stale 'rejected))))
            (should (equal after-drift (buffer-string)))
-           (should glasspane-org-reader--footnote-dialog)
+           (should jetpacs-reader-org--footnote-dialog)
            (unless (eq failure 'disk)
              (should (equal before (with-temp-buffer (insert-file-contents file) (buffer-string)))))))))))
 
@@ -802,7 +803,7 @@
         (should (string-search text json)))
       (dolist (marker '("#+begin_quote" "#+end_quote" "#+begin_verse" "#+begin_center" "#+begin_example" "#+begin_comment" "#+begin_export"))
         (should-not (string-search marker json)))
-      (should-not (glasspane-reader-layout--source-action nodes "glasspane.call.execute"))
+      (should-not (glasspane-reader-layout--source-action nodes "jetpacs.org.call.execute"))
       (should (equal nodes (glasspane-reader-layout--source-render)))
       (should (equal-including-properties before (buffer-string))))))
 
@@ -980,7 +981,7 @@
       (should (= (length (delete-dups (mapcar (lambda (node) (plist-get node :id)) checks))) 3))
       (dolist (box boxes)
         (when (plist-get box :on_tap)
-          (should (equal (plist-get (plist-get box :on_tap) :action) "glasspane.checkbox"))
+          (should (equal (plist-get (plist-get box :on_tap) :action) "jetpacs.org.checkbox"))
           (should (equal (plist-get (plist-get (plist-get box :on_long_tap) :args) :state)
                          "indeterminate"))))
       (should (= (cl-count-if (lambda (box) (plist-get box :on_long_tap)) boxes) 6))
@@ -1019,10 +1020,10 @@
                           (goto-char 1)
                           (search-forward "One")
                           (let ((node (glasspane-org-reader--checkbox-node
-                                       (glasspane-org-reader--checkbox-record (point)))))
+                                       (jetpacs-org-render-checkbox-record (point)))))
                             (plist-get (plist-get node :on_tap) :args)))
                         (tap (args)
-                          (glasspane-org-reader--on-checkbox args '(:surface "app:glasspane")))
+                          (jetpacs-org-render--checkbox args '(:surface "app:glasspane")))
                         (disk () (with-temp-buffer (insert-file-contents file) (buffer-string))))
               (cl-letf (((symbol-function 'jetpacs-buffer-defer-refresh) #'ignore))
                 (let ((tap-args (args)))
@@ -1042,7 +1043,7 @@
                 (should (eq (tap (args)) 'accepted))
                 (should (string-search "- [ ] One" (disk)))
                 (let ((before (buffer-string)) (tap-args (args)))
-                  (cl-letf (((symbol-function 'glasspane-org-save-and-invalidate)
+                  (cl-letf (((symbol-function 'jetpacs-editor-org-save-policy)
                              (lambda (&rest _) (error "Write refused"))))
                     (should (eq (tap tap-args) 'rejected)))
                   (should (equal before (buffer-string)))

@@ -15,6 +15,7 @@
 (require 'ert)
 (require 'seq)
 (require 'glasspane)
+(glasspane-register)  ; `require' only loads
 
 (defconst glasspane-navigation-test--source-directory
   (expand-file-name ".."

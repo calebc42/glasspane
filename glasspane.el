@@ -18,6 +18,10 @@
 ;; at READY starting with G2 — G0 registers surfaces and verbs only,
 ;; which is connection-independent by design (`jetpacs-defaction' and
 ;; `jetpacs-chrome-define-root' are registries, not pushes).
+;;
+;; `require' only loads: nothing registers at load.  The `glasspane'
+;; command or the Apps screen activates the app.  A desktop init that
+;; loads Glasspane adds `(glasspane-register)' after the `require'.
 
 ;;; Code:
 
@@ -193,8 +197,6 @@ deliberately survive."
   (glasspane-notes-unregister)
   (glasspane-srs-unregister))
 
-(glasspane-register)
-
 ;; App-private managed configuration is downstream policy, so the app loads it
 ;; itself instead of relying on the Jetpacs composition root to know this app
 ;; exists.  Batch loads stay side-effect-free for byte compilation and ERT.
@@ -203,8 +205,11 @@ deliberately survive."
 
 ;;;###autoload
 (defun glasspane ()
-  "Open Glasspane on the device: reset its stack to the app root."
+  "Open Glasspane on the device: register it, reset its stack to the root.
+Registration is idempotent, so the command is also how a desktop user
+activates the app."
   (interactive)
+  (glasspane-register)
   (jetpacs-apps-note-route glasspane-owner "agenda")
   (jetpacs-chrome-reset-screens glasspane-owner))
 

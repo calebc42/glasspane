@@ -10,6 +10,7 @@
 (require 'ert)
 (require 'jetpacs-org-mode)
 (require 'glasspane)
+(glasspane-register)  ; `require' only loads
 
 (defconst glasspane-test--source-directory
   (expand-file-name ".."
@@ -5977,6 +5978,22 @@ foundation's Org adapter does, once)."
     (should adapter)
     (should-not (jetpacs-editor-adapter-actions adapter)))
   (should-not (fboundp 'glasspane-detail--update-keyword)))
+
+(ert-deftest glasspane-test-lifecycle-is-symmetric ()
+  "Loading glasspane.el registers nothing, and glasspane-unregister undoes
+everything glasspane-register did: the trusted launcher's two lifecycle
+checks, run from the foundation's applet tooling."
+  (require 'jetpacs-devtools)
+  (load (expand-file-name "../jetpacs-applet-mcp/jetpacs-applet-tooling.el"
+                          (file-name-directory
+                           (locate-library "jetpacs-surfaces")))
+        nil 'nomessage)
+  (should-not (jetpacs-applet-tooling-load-recording-registrations
+               (locate-library "glasspane.el" t)))
+  (let ((report (jetpacs-applet-tooling-check-lifecycle-symmetry "glasspane")))
+    (should (string-match-p "Status: SYMMETRIC" report))
+    (should (string-match-p "Registered on entry: yes" report)))
+  (should (assoc "glasspane" jetpacs-apps--registry)))
 
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

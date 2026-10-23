@@ -6,6 +6,7 @@
 ;;; Code:
 (require 'ert)
 (require 'glasspane)
+(glasspane-register)  ; `require' only loads
 (require 'glasspane-org-reader)
 (require 'jetpacs-chrome)
 (require 'jetpacs-editor-org)  ; the save policy the reader editors stub

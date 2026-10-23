@@ -13,6 +13,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'glasspane)
+(glasspane-register)  ; `require' only loads
 
 (defconst glasspane-para-test--areas-source
   (expand-file-name "../glasspane-areas.el"

@@ -472,30 +472,10 @@ discipline are the foundation's."
 
 (defun glasspane-ui-tokenize-tap (items set)
   "ITEMS with a `token' cell attached, minted as one bulk SET (S5).
-Refs whose file left the org roots would SIGNAL at mint time
-\(ebp-org.el's policy-at-mint rule), so they are filtered first — the
-item still renders, just untappable — as is any overflow past
-`ebp-org-token-set-max', the per-set cap.  Tap tokens only: cards
-built from these carry no swipe arms.  Minted even when ITEMS is
-empty, because the replace sweep on SET is what retires the previous
-render's tokens — which is also why one screen at a time may use a
-given SET."
-  (let* ((mintable (cl-remove-if-not
-                    (lambda (it)
-                      (let ((f (plist-get (alist-get 'ref it) :file)))
-                        (and (stringp f) (not (string-empty-p f))
-                             (ebp-org-file-allowed-p f))))
-                    items))
-         (mintable (seq-take mintable ebp-org-token-set-max))
-         (refs (mapcar (lambda (it) (alist-get 'ref it)) mintable))
-         (tokens (ebp-org-ref-tokens refs :set set :owner "glasspane"))
-         (table (make-hash-table :test #'eq)))
-    (cl-loop for it in mintable for tok in tokens
-             do (puthash it tok table))
-    (mapcar (lambda (it)
-              (let ((tok (gethash it table)))
-                (if tok (cons (cons 'token tok) it) it)))
-            items)))
+Tap tokens only: cards built from these carry no swipe arms.  The
+minting, filtering and replace sweep are the foundation's
+`jetpacs-org-tokenize'; one screen at a time may use a given SET."
+  (jetpacs-org-tokenize items set :owner "glasspane"))
 
 ;;;; Settings nodes
 ;;

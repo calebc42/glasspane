@@ -761,12 +761,9 @@ with the deferred repush clearing the device drafts."
       (let ((surface (or (plist-get params :surface)
                          (jetpacs-shell-surface-for "glasspane")))
             (screen-id (jetpacs-wire-id "view" name)))
+        ;; Deleted from its own screen: leave for the hub below.
         (jetpacs-flow-continue
-         (lambda ()
-           ;; Deleted from its own screen: leave for the hub below.
-           (if (equal (car (jetpacs-chrome-stack surface)) screen-id)
-               (jetpacs-chrome-pop-screen surface)
-             (ignore-errors (jetpacs-shell-push surface))))))
+         (lambda () (jetpacs-chrome-leave surface screen-id))))
       'accepted))))
 
 ;;;; Registration

@@ -114,7 +114,7 @@ user-facing message; return a freshly anchored ref."
 ;; device can tap.
 
 (defalias 'glasspane-org--agenda-scope
-  #'jetpacs-org-mode--agenda-scope
+  #'jetpacs-org-mode-agenda-scope
   "Delegate to Org Mode's canonical local agenda scope.")
 
 (defalias 'glasspane-org-agenda-scope
@@ -122,7 +122,7 @@ user-facing message; return a freshly anchored ref."
   "Public downstream access to Jetpacs' canonical local agenda scope.")
 
 (defalias 'glasspane-org-agenda-items
-  #'jetpacs-org-mode--agenda-items
+  #'jetpacs-org-mode-agenda-items
   "Delegate to Org Mode's rich, memoised agenda extraction.")
 
 (defalias 'glasspane-org--agenda-items-1

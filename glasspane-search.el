@@ -347,19 +347,11 @@ verbs and arguments are identical on both."
 
 (defun glasspane-search--push-screen (params)
   "Defer-push the Search screen onto PARAMS' surface (D2); `accepted'.
-A deferred `jetpacs-chrome-push-screen' must catch its own re-signal
-or a refused gate dies in a timer.  Fired FROM the Search screen, the
-push replaces in place (stack-insert truncates on a duplicate id)."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane"))))
-    (jetpacs-flow-continue
-     (lambda ()
-       (condition-case err
-           (jetpacs-chrome-push-screen surface "glasspane-search"
-                                       #'glasspane-search-screen)
-         (error (message "glasspane: search push failed: %s"
-                         (jetpacs-error-label err))))))
-    'accepted))
+Fired FROM the Search screen, the push replaces in place."
+  (jetpacs-chrome-push-screen-later
+   (or (plist-get params :surface) (jetpacs-shell-surface-for "glasspane"))
+   "glasspane-search" #'glasspane-search-screen)
+  'accepted)
 
 (defun glasspane-search--on-open (_args params)
   "Push the Search screen onto the tapped surface."

@@ -178,23 +178,15 @@ text (SPEC 23.3)."
   "Leave the detail screen after its heading stopped existing here.
 Pops when detail is on top (refile/delete landed from it), else just
 repushes the surface.  Runs OUTSIDE the dispatch extent."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane"))))
-    (if (equal (car (jetpacs-chrome-stack surface))
-               glasspane-detail--screen-id)
-        (jetpacs-chrome-pop-screen surface)
-      (ignore-errors (jetpacs-shell-push surface)))))
+  (jetpacs-chrome-leave (or (plist-get params :surface)
+                            (jetpacs-shell-surface-for "glasspane"))
+                        glasspane-detail--screen-id))
 
 (defun glasspane-detail--push-screen (surface ref)
   "Defer-push the detail screen for REF onto SURFACE (D2)."
-  (jetpacs-flow-continue
-   (lambda ()
-     (condition-case err
-         (jetpacs-chrome-push-screen
-          surface glasspane-detail--screen-id
-          (lambda (back) (glasspane-detail--screen ref back)))
-       (error (message "glasspane: detail push failed: %s"
-                       (jetpacs-error-label err)))))))
+  (jetpacs-chrome-push-screen-later
+   surface glasspane-detail--screen-id
+   (lambda (back) (glasspane-detail--screen ref back))))
 
 ;;;; The header: state control, status pills, and the resting tag line
 
@@ -2006,223 +1998,24 @@ else (http, images) reports back as a snackbar."
       (jetpacs-app-defer-refresh params))
     status))
 
-;;;; The file-properties dialog pair
-
-(defconst glasspane-detail--file-prop-fields
-  '("file-prop-title" "file-prop-category" "file-prop-tags"
-    "file-prop-todo-active" "file-prop-todo-finished"
-    "file-prop-author" "file-prop-email" "file-prop-date"
-    "file-prop-startup" "file-prop-archive")
-  "The captured field ids of the file-properties dialog, in save order.")
-
-(defun glasspane-detail--show-file-props-dialog (file params)
-  "The whole-file keyword editor.  Seeding is each field's `:value'
-\(S2): the Save action captures every field and echoes them back in
-its own event — no state round-trip (v1 read 9 `jetpacs-ui-state's)."
-  (condition-case err
-      (let* ((buf (or (get-file-buffer file) (find-file-noselect file t)))
-             (kwds (with-current-buffer buf
-                     (org-collect-keywords
-                      '("TITLE" "CATEGORY" "FILETAGS" "TODO" "SEQ_TODO"
-                        "TYP_TODO" "STARTUP" "AUTHOR" "EMAIL" "DATE"
-                        "ARCHIVE"))))
-             (get (lambda (k) (car (alist-get k kwds nil nil #'equal))))
-             (filetags-str (funcall get "FILETAGS"))
-             (filetags (when filetags-str
-                         (split-string filetags-str ":" t "[ \t\n\r]+")))
-             (available (cl-remove-duplicates
-                         (append filetags (jetpacs-org-settings-tag-options))
-                         :test #'equal :from-end t))
-             (todo-str (or (funcall get "TODO")
-                           (funcall get "SEQ_TODO")
-                           (funcall get "TYP_TODO")))
-             (todo-parts (and todo-str (split-string todo-str "|")))
-             (todo-active (if todo-parts
-                              (string-join (split-string (car todo-parts)
-                                                         "[ \t]+" t)
-                                           ", ")
-                            ""))
-             (todo-finished (if (and todo-parts (cadr todo-parts))
-                                (string-join (split-string (cadr todo-parts)
-                                                           "[ \t]+" t)
-                                             ", ")
-                              "")))
-        (jetpacs-dialog-slot-show
-         (jetpacs-wire-id "gp-file-props" file)
-         (jetpacs-column
-          (jetpacs-text "File properties" :style "title")
-          (jetpacs-text (file-name-nondirectory file) :style "caption")
-          (jetpacs-text-input "file-prop-title" :label "Title"
-                              :value (or (funcall get "TITLE") "")
-                              :single-line t)
-          (jetpacs-text-input "file-prop-category" :label "Category"
-                              :value (or (funcall get "CATEGORY") "")
-                              :single-line t)
-          (jetpacs-text "File tags" :style "caption")
-          (jetpacs-enum-list "file-prop-tags"
-                             (mapcar (lambda (tg) (jetpacs-enum-option tg tg))
-                                     available)
-                             :value (cl-remove-duplicates filetags
-                                                          :test #'equal)
-                             :multi-select t :allow-add t)
-          (jetpacs-text "TODO sequence" :style "caption")
-          (jetpacs-text-input "file-prop-todo-active" :label "Active states"
-                              :value todo-active :single-line t)
-          (jetpacs-text-input "file-prop-todo-finished"
-                              :label "Finished states"
-                              :value todo-finished :single-line t)
-          (jetpacs-text "Metadata" :style "caption")
-          (jetpacs-text-input "file-prop-author" :label "Author"
-                              :value (or (funcall get "AUTHOR") "")
-                              :single-line t)
-          (jetpacs-text-input "file-prop-email" :label "Email"
-                              :value (or (funcall get "EMAIL") "")
-                              :single-line t)
-          (jetpacs-text-input "file-prop-date" :label "Date"
-                              :value (or (funcall get "DATE") "")
-                              :single-line t)
-          (jetpacs-text "Options" :style "caption")
-          (jetpacs-text-input "file-prop-startup" :label "Startup"
-                              :value (or (funcall get "STARTUP") "")
-                              :single-line t)
-          (jetpacs-text-input "file-prop-archive" :label "Archive"
-                              :value (or (funcall get "ARCHIVE") "")
-                              :single-line t)
-          (jetpacs-row
-           (jetpacs-spacer :weight 1)
-           (jetpacs-button "Cancel" (jetpacs-dialog-dismiss) :variant "text")
-           (jetpacs-spacer :width 8)
-           (jetpacs-button "Save"
-                           (jetpacs-action
-                            "files.properties.save"
-                            :args (list :file file)
-                            :capture-fields
-                            glasspane-detail--file-prop-fields)))
-          :spacing 8)
-         :owner "glasspane" :params params))
-    (error (message "glasspane: file properties dialog failed: %s"
-                    (jetpacs-error-label err))
-           (jetpacs-shell-notify "Properties failed"
-                                 (plist-get params :surface)))))
+;;;; The file-properties verbs (compatibility names)
+;;
+;; The dialog, its keyword writer and its Save verb are the foundation's
+;; (`jetpacs-org-dialogs'), and the Org editor adapter emits its button.
+;; These two names stay registered because screens and cached dialogs
+;; already rendered emit them; each translates `:file' to the
+;; foundation's `:path'.
 
 (defun glasspane-detail--on-file-props-show (args params)
-  "Open the file-properties editor dialog for `:file'."
-  (let ((file (plist-get args :file)))
-    (cond
-     ((not (and (glasspane-detail--org-file-p file)
-                (ebp-org-file-allowed-p file)))
-      'rejected)
-     ((null (jetpacs-client)) 'rejected)
-     (t
-      (jetpacs-flow-continue
-       (lambda () (glasspane-detail--show-file-props-dialog file params)))
-      'accepted))))
-
-(defun glasspane-detail--update-keyword (kwd val)
-  "Set, replace, or (VAL empty/nil) remove #+KWD in the current buffer.
-Point discipline is the caller's `org-with-wide-buffer'; an inserted
-non-TITLE keyword lands after an existing #+TITLE line."
-  (goto-char (point-min))
-  (if (re-search-forward (format "^[ \t]*#\\+%s:[ \t]*\\(.*\\)$"
-                                 (regexp-quote kwd))
-                         nil t)
-      (if (and val (not (string-empty-p val)))
-          (replace-match val t t nil 1)
-        (delete-region (line-beginning-position)
-                       (min (1+ (line-end-position)) (point-max))))
-    (when (and val (not (string-empty-p val)))
-      (goto-char (point-min))
-      (unless (equal kwd "TITLE")
-        (when (re-search-forward "^[ \t]*#\\+TITLE:.*$" nil t)
-          (forward-line 1)))
-      (insert (format "#+%s: %s\n" kwd val)))))
+  "Open the foundation file-properties dialog for ARGS' `:file'.
+PARAMS are the opening event's."
+  (jetpacs-org-file-properties-show (list :path (plist-get args :file))
+                                    params))
 
 (defun glasspane-detail--on-file-props-save (args params)
-  "Write the captured dialog fields back as file keywords, durably."
-  (let ((file (plist-get args :file))
-        (fields (plist-get params :fields)))
-    (cond
-     ((not (and (glasspane-detail--org-file-p file)
-                (ebp-org-file-allowed-p file)
-                (file-writable-p file)))
-      'rejected)
-     ((not (and (consp fields) (keywordp (car fields)))) 'rejected)
-     (t
-      (condition-case err
-          (let* ((buf (or (get-file-buffer file) (find-file-noselect file t)))
-                 (fget (lambda (k) (let ((v (plist-get fields k)))
-                                     (and (stringp v) v))))
-                 (tags-val (plist-get fields :file-prop-tags))
-                 (tags (cl-remove-if-not
-                        #'stringp
-                        (cond ((vectorp tags-val) (append tags-val nil))
-                              ((proper-list-p tags-val) tags-val))))
-                 (join-states
-                  (lambda (s)
-                    (when (stringp s)
-                      (let ((words (split-string s "[ \t]*,[ \t]*" t)))
-                        (when words (string-join words " "))))))
-                 (active (funcall join-states
-                                  (funcall fget :file-prop-todo-active)))
-                 (finished (funcall join-states
-                                    (funcall fget :file-prop-todo-finished)))
-                 (todo-str (if (and active finished)
-                               (concat active " | " finished)
-                             (or active finished))))
-            (with-current-buffer buf
-              (org-with-wide-buffer
-               (glasspane-detail--update-keyword
-                "TITLE" (funcall fget :file-prop-title))
-               (glasspane-detail--update-keyword
-                "FILETAGS" (when tags
-                             (concat ":" (string-join tags ":") ":")))
-               (glasspane-detail--update-keyword
-                "CATEGORY" (funcall fget :file-prop-category))
-               (glasspane-detail--update-keyword "TODO" todo-str)
-               (glasspane-detail--update-keyword
-                "STARTUP" (funcall fget :file-prop-startup))
-               (glasspane-detail--update-keyword
-                "AUTHOR" (funcall fget :file-prop-author))
-               (glasspane-detail--update-keyword
-                "EMAIL" (funcall fget :file-prop-email))
-               (glasspane-detail--update-keyword
-                "DATE" (funcall fget :file-prop-date))
-               (glasspane-detail--update-keyword
-                "ARCHIVE" (funcall fget :file-prop-archive))
-               ;; Stock Emacs 30.1's org-element.elc mis-compiles
-               ;; `org-element--get-category's cache-miss arm into a
-               ;; CALL of the `org-element-with-disabled-cache' macro:
-               ;; once a fresh #+CATEGORY line exists outside the
-               ;; element cache, the next `org-get-tags' in this buffer
-               ;; dies with invalid-function.  Priming the line into
-               ;; the cache keeps every later render on the good arm.
-               (goto-char (point-min))
-               (when (re-search-forward "^[ \t]*#\\+CATEGORY:" nil t)
-                 (ignore-errors (org-element-at-point)))))
-            (glasspane-org-save-and-invalidate buf)
-            ;; The Save event arrives in dialog context (no :surface) —
-            ;; refresh where the dialog was opened, then retire it.
-            (let ((origin (or (jetpacs-dialog-slot-params "glasspane")
-                              params)))
-              (jetpacs-dialog-slot-close "glasspane")
-              (jetpacs-shell-notify "File properties saved"
-                                    (plist-get origin :surface))
-              (jetpacs-app-defer-refresh origin))
-            'accepted)
-        (error (message "glasspane: file properties save failed: %s"
-                        (jetpacs-error-label err))
-               'rejected))))))
-
-;;;; The files editor adapter (the Properties top-bar action; the read/
-;;;; refile toggles are the reader adapter's contribution)
-
-(defun glasspane-detail--editor-actions (path)
-  "The file-properties top-bar action for org PATH (files editor seam)."
-  (when (glasspane-detail--org-file-p path)
-    (list (jetpacs-icon-button "tune"
-                               (jetpacs-action "files.properties.show"
-                                               :args (list :file path))
-                               :content-description "File properties"))))
+  "Save PARAMS' captured fields as ARGS' `:file' keywords, durably."
+  (jetpacs-org-file-properties-save (list :path (plist-get args :file))
+                                    params))
 
 ;;;; Registration
 
@@ -2336,14 +2129,13 @@ gate contract).  Idempotent."
     (jetpacs-defaction "files.properties.save"
                        #'glasspane-detail--on-file-props-save
                        :doc "Write the captured file keywords"))
-  ;; A distinct id composes with the stock Org adapter: action lists append,
-  ;; while omitted single-value slots leave its body/toolbar/FAB untouched.
-  ;; Owned, so the app's teardown removes it.
+  ;; A distinct id composes with the stock Org adapter, which keeps its
+  ;; body/toolbar/FAB and emits the file-properties button; this one adds
+  ;; only the note-index refresh.  Owned, so the app's teardown removes it.
   (with-jetpacs-owner "glasspane"
     (jetpacs-editor-register
      'glasspane-org
      :predicate #'glasspane-detail--org-file-p
-     :actions #'glasspane-detail--editor-actions
      :after-save #'glasspane-org-vulpea-refresh-file)))
 
 (defun glasspane-detail-unregister ()

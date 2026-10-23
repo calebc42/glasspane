@@ -5958,5 +5958,25 @@ well-formed one reaches it."
           (should ran))))
     (should (>= count 22))))
 
+(ert-deftest glasspane-test-file-properties-verbs-are-the-base ()
+  "Glasspane's two file-properties verbs are thin aliases of the
+foundation's, and its editor adapter no longer emits the button (the
+foundation's Org adapter does, once)."
+  (cl-letf* ((calls nil)
+             ((symbol-function 'jetpacs-org-file-properties-show)
+              (lambda (args _params) (push (cons 'show args) calls) 'accepted))
+             ((symbol-function 'jetpacs-org-file-properties-save)
+              (lambda (args _params) (push (cons 'save args) calls) 'accepted)))
+    (should (eq (glasspane-detail--on-file-props-show '(:file "/v/a.org") nil)
+                'accepted))
+    (should (eq (glasspane-detail--on-file-props-save '(:file "/v/a.org") nil)
+                'accepted))
+    (should (equal calls '((save :path "/v/a.org") (show :path "/v/a.org")))))
+  (let ((adapter (cl-find 'glasspane-org jetpacs-editor--adapters
+                          :key #'jetpacs-editor-adapter-id)))
+    (should adapter)
+    (should-not (jetpacs-editor-adapter-actions adapter)))
+  (should-not (fboundp 'glasspane-detail--update-keyword)))
+
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

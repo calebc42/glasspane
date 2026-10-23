@@ -88,24 +88,9 @@ keeps the narrowing, as does date navigation.")
 
 ;;;; Pure formatters (the shared card's vocabulary; detail declares these)
 
-(defun glasspane-agenda-widget-item-meta (it hm)
-  "Compose the compact metadata line for agenda item IT.
-Leads with the time HM or the agenda's own qualifier (\"Sched. 3x\",
-\"In 3 d.\", \"2 d. ago\"), then the file name — the Orgzly-style
-second row.  A bare \"Scheduled\"/\"Deadline\" qualifier restates what
-the row's type icon already says, so it is dropped."
-  (let* ((extra (alist-get 'extra it))
-         (extra (and (stringp extra)
-                     (replace-regexp-in-string
-                      "[ \t]+" " "
-                      (string-trim (replace-regexp-in-string
-                                    ":[ \t]*\\'" "" (string-trim extra))))))
-         (extra (and extra (not (member extra '("" "Scheduled" "Deadline")))
-                     extra))
-         (file (alist-get 'file it)))
-    (string-join (delq nil (list (or hm extra)
-                                 (and file (file-name-nondirectory file))))
-                 " · ")))
+(defalias 'glasspane-agenda-widget-item-meta
+  #'jetpacs-org-agenda-item-meta
+  "Compose an agenda item's compact metadata line (the foundation's).")
 
 (defun glasspane-agenda-widget-icon (type)
   "Map an org agenda TYPE to a compact metadata icon name."
@@ -114,23 +99,13 @@ the row's type icon already says, so it is dropped."
         ((string-match-p "scheduled" type) "scheduled")
         (t "event")))
 
-(defun glasspane-agenda-type-icon (type)
-  "Return (ICON . COLOR) for an agenda item TYPE string (color may be nil)."
-  (cond
-   ((null type) nil)
-   ((string-match-p "past-scheduled" type) '("history" . "error"))
-   ((string-match-p "deadline" type) '("flag" . nil))
-   ((string-match-p "scheduled" type) '("schedule" . nil))
-   (t nil)))
+(defalias 'glasspane-agenda-type-icon
+  #'jetpacs-org-agenda-type-icon
+  "Return (ICON . COLOR) for an agenda item TYPE (the foundation's).")
 
-(defun glasspane-agenda-type-label (type)
-  "Short human label for an agenda item TYPE string, or nil to omit."
-  (pcase type
-    ("past-scheduled" "overdue")
-    ("upcoming-deadline" "deadline soon")
-    ("deadline" "deadline")
-    ("scheduled" "scheduled")
-    (_ nil)))
+(defalias 'glasspane-agenda-type-label
+  #'jetpacs-org-agenda-type-label
+  "Short label for an agenda item TYPE, or nil (the foundation's).")
 
 (defun glasspane-agenda-card-date-label (ts)
   "Format org timestamp TS as a compact \"Mon D\" (or \"Mon D HH:MM\")."
@@ -169,36 +144,12 @@ nil when neither is set."
 
 (defun glasspane-agenda--tokenize (items set)
   "ITEMS with `token'/`archive-token' cells attached; one bulk mint (S5).
-Refs whose file left the org roots would SIGNAL at mint time
-(ebp-org.el's policy-at-mint rule), so they are filtered first — the
-item still renders, just untappable — as is any overflow past the
-per-set cap.  Two sets because the base `jetpacs.org.archive' resolves
-only `jetpacs-org-dialogs-owner' tokens: the app rents the disjoint
-\"glasspane-SET\" name in that scope (the G4 reader's shape).  Minted
-even when ITEMS is empty — the replace sweep is what retires the
-previous render's tokens."
-  (let* ((mintable (cl-remove-if-not
-                    (lambda (it)
-                      (let ((f (plist-get (alist-get 'ref it) :file)))
-                        (and (stringp f) (not (string-empty-p f))
-                             (ebp-org-file-allowed-p f))))
-                    items))
-         (mintable (seq-take mintable ebp-org-token-set-max))
-         (refs (mapcar (lambda (it) (alist-get 'ref it)) mintable))
-         (taps (ebp-org-ref-tokens refs :set set :owner "glasspane"))
-         (archives (ebp-org-ref-tokens refs :set (concat "glasspane-" set)
-                                       :owner jetpacs-org-dialogs-owner))
-         (table (make-hash-table :test #'eq)))
-    (cl-loop for it in mintable for tap in taps for arch in archives
-             do (puthash it (cons tap arch) table))
-    (mapcar (lambda (it)
-              (let ((cell (gethash it table)))
-                (if cell
-                    (append (list (cons 'token (car cell))
-                                  (cons 'archive-token (cdr cell)))
-                            it)
-                  it)))
-            items)))
+Two sets because the base `jetpacs.org.archive' resolves only
+`jetpacs-org-dialogs-owner' tokens: the app rents the disjoint
+\"glasspane-SET\" name in that scope.  The minting is the foundation's
+`jetpacs-org-tokenize'."
+  (jetpacs-org-tokenize items set :owner "glasspane"
+                        :archive-owner jetpacs-org-dialogs-owner))
 
 (defalias 'glasspane-agenda-tokenize
   #'glasspane-agenda--tokenize

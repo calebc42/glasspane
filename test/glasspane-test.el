@@ -1151,7 +1151,9 @@ the registry."
               (glasspane-area-icons nil)
               (glasspane-ui-agenda-anchor "2020-01-01")
               (glasspane-ui-agenda-selected-date "2020-01-02")
-              (jetpacs-settings--dialog nil)
+              ;; A clean settings dialog slot (the single-writer slot
+              ;; moved to `jetpacs-dialog-slot').
+              (_slot (jetpacs-dialog-slot-reset))
               (org-tag-alist '(("home" . ?h)))
               (org-todo-keywords '((sequence "TODO" "|" "DONE")))
               (saved nil) (continuations nil) (pushes 0))

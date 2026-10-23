@@ -1572,7 +1572,7 @@ over the heading's new coordinates."
                  (jetpacs-shell-surface-for "glasspane"))
              new-ref)
             'accepted)
-        (glasspane-org-splice-refused
+        (jetpacs-editor-org-splice-refused
          (jetpacs-shell-notify (cadr err) (plist-get params :surface))
          'rejected)
         (ebp-org-refused 'rejected)

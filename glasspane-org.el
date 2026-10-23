@@ -5,11 +5,18 @@
 
 ;;; Commentary:
 
-;; The app's data layer: memoised extraction, query routing, reminder
-;; specs, clock status, the save funnel, CREATED/MODIFIED stamping.
-;; Pure Elisp downstream of Jetpacs and the ebp-org core — Glasspane
-;; adds no Kotlin layer.  The floor's teardown hook is named by symbol
-;; only, so this file loads and compiles without the live bridge.
+;; The app's data layer: query routing, clock status, the save funnel,
+;; CREATED/MODIFIED stamping, and the PARA opinions over the foundation's
+;; built-in Org extractions.  The extractions themselves — agenda items,
+;; the TODO sweep, the heading item shape, tag vocabulary, tag-group
+;; indexing, workflow keywords, the freshness-checked subtree splice —
+;; are Jetpacs primitives (jetpacs-org-reminders.el, jetpacs-org-settings.el,
+;; jetpacs-editor-org.el); this file keeps only the arms that need the
+;; optional vulpea note index and the PARA inheritance rule, and aliases
+;; the rest under the names its sibling modules call.  Pure Elisp
+;; downstream of Jetpacs and the ebp-org core — Glasspane adds no Kotlin
+;; layer.  The floor's teardown hook is named by symbol only, so this
+;; file loads and compiles without the live bridge.
 ;;
 ;; Retired against v1 (docs/PLAN-glasspane-app.md, retirement list +
 ;; G1): the org-ql routing commentary and its fork — `ebp-org-query'
@@ -43,30 +50,8 @@ explicit dashboard push isn't doubled by the save-hook firing on top.")
 
 (declare-function vulpea-db-update-file "ext:vulpea-db-extract" (file))
 
-(define-error 'glasspane-org-splice-refused
-  "Glasspane refused a stale or unsafe subtree splice" 'user-error)
-
-(defun glasspane-org-mtime-stamp (path)
-  "Return PATH's opaque microsecond modification stamp, or nil.
-The value is compared only with another value from this function; it is
-never parsed or exposed as a path-bearing identity."
-  (when-let* ((mtime (file-attribute-modification-time
-                      (file-attributes path))))
-    (format-time-string "%s.%6N" mtime)))
-
-(defun glasspane-org--splice-refuse (message)
-  "Refuse a subtree splice with user-facing MESSAGE."
-  (signal 'glasspane-org-splice-refused (list message)))
-
-(defun glasspane-org--synced-edit-p (path)
-  "Whether PATH is the live document in Files' synchronized editor."
-  (let ((current (jetpacs-files-current-edit-path))
-        (context (jetpacs-files-current-edit-context)))
-    (and current
-         (equal (file-truename current) (file-truename path))
-         (plist-get context :document)
-         (plist-get context :editor-id)
-         (buffer-live-p (plist-get context :buffer)))))
+(defalias 'glasspane-org-mtime-stamp #'jetpacs-editor-org-mtime-stamp
+  "Return PATH's opaque modification stamp (the foundation's minter).")
 
 (defun glasspane-org-vulpea-refresh-file (&optional buffer-or-path)
   "Synchronously re-index BUFFER-OR-PATH in vulpea's db, when it is up.
@@ -94,82 +79,17 @@ opinions; encryption, durability, and whole-cache invalidation belong to
       (glasspane-org-vulpea-refresh-file target))))
 
 (defun glasspane-org-fresh-splice (ref value stamp beg end tick)
-  "Replace REF's subtree with VALUE after validating open-time facts.
+  "Replace REF's subtree with VALUE through the foundation's fresh splice.
 STAMP, BEG, END, and TICK are the scalar snapshot minted with the detail
-editor.  The target is re-resolved from REF, including its Org ID, but the
-write proceeds only when disk mtime, subtree bounds, and buffer tick still
-match that snapshot.  Any failure before durability restores the visiting
-buffer's full text and modified state.  Return a freshly anchored ref."
-  (unless (and (stringp value)
-               (string-match-p "\\`\\*+\\(?:[ \t]\\|$\\)" value))
-    (glasspane-org--splice-refuse "Heading must start with Org stars"))
-  (when (> (string-bytes value) jetpacs-files-max-bytes)
-    (glasspane-org--splice-refuse "Heading is too large to save"))
-  ;; Check disk identity before resolving the ref.  Resolution may visit or
-  ;; consult the already-visiting buffer; doing it first would let Emacs ask
-  ;; whether to edit a buffer whose file changed externally, violating D2.
-  (let ((true (ebp-org--check-file (plist-get ref :file))))
-    (when (glasspane-org--synced-edit-p true)
-      (glasspane-org--splice-refuse "file is open in the synced editor"))
-    (unless (equal stamp (glasspane-org-mtime-stamp true))
-      (glasspane-org--splice-refuse "File changed on disk — not saved"))
-    (unless (file-writable-p true)
-      (glasspane-org--splice-refuse "File is not writable"))
-    (let ((marker (ebp-org-resolve-ref ref)))
-      (unwind-protect
-          (with-current-buffer (marker-buffer marker)
-            (org-with-wide-buffer
-             (goto-char marker)
-             (org-back-to-heading t)
-             (let ((current-beg (point))
-                   (current-end (save-excursion
-                                  (org-end-of-subtree t t)
-                                  (point))))
-               (unless (and (integerp beg) (integerp end) (integerp tick)
-                            (= current-beg beg) (= current-end end)
-                            (= (buffer-chars-modified-tick) tick))
-                 (glasspane-org--splice-refuse
-                  "Heading changed in Emacs — not saved"))
-               (let* ((original-beg (point-min))
-                      (original-end (point-max))
-                      (original-point (point))
-                      (original-modified (buffer-modified-p))
-                      (original-full
-                       (buffer-substring-no-properties
-                        (point-min) (point-max)))
-                      (changed nil)
-                      (durable nil)
-                      new-ref)
-                 (unwind-protect
-                     (progn
-                       (setq changed t)
-                       (delete-region current-beg current-end)
-                       (goto-char current-beg)
-                       (insert value)
-                       ;; Do not glue the following heading to a value
-                       ;; whose final newline was omitted by the client.
-                       (unless (or (bolp) (eobp)) (insert "\n"))
-                       (goto-char current-beg)
-                       (setq new-ref (ebp-org-ref-at-point))
-                       (when (> (string-bytes
-                                 (buffer-substring-no-properties
-                                  (point-min) (point-max)))
-                                jetpacs-files-max-bytes)
-                         (glasspane-org--splice-refuse
-                          "Edited file exceeds the save limit"))
-                       (glasspane-org-save-and-invalidate (current-buffer))
-                       (setq durable t)
-                       new-ref)
-                   (when (and changed (not durable))
-                     (let ((inhibit-read-only t))
-                       (widen)
-                       (delete-region (point-min) (point-max))
-                       (insert original-full)
-                       (narrow-to-region original-beg original-end)
-                       (goto-char
-                        (min (max original-point (point-min)) (point-max)))
-                       (set-buffer-modified-p original-modified))))))))
-        (set-marker marker nil)))))
+editor; `jetpacs-editor-org-fresh-splice' re-validates every one of them
+and saves through the native policy.  Glasspane adds only its two save
+opinions: the after-save dashboard refresh is suppressed (the caller
+re-pushes over the fresh ref itself) and the optional vulpea row is
+refreshed.  Signals `jetpacs-editor-org-splice-refused' with a
+user-facing message; return a freshly anchored ref."
+  (let ((glasspane-org-inhibit-save-refresh t))
+    (prog1 (jetpacs-editor-org-fresh-splice ref value stamp beg end tick)
+      (glasspane-org-vulpea-refresh-file (plist-get ref :file)))))
 
 ;; The dashboard pushes every view on every action (so navigation stays
 ;; instant and offline-capable), which means the expensive extractions
@@ -265,46 +185,23 @@ brought up."
 
 (defun glasspane-org-todo-items (&optional files)
   "Extract TODO items from FILES (or agenda files).
+The whole-vault case answers off the vulpea note index when the user's
+config brought it up; every other case is the foundation's built-in
+sweep (`jetpacs-org-mode-todo-items', memoised under `org-mode').
 Memoised; see `ebp-org-cache-invalidate'."
-  ;; The key names the ARM as well as the action: the same scope answers
-  ;; differently once the vault index exists.
-  (ebp-org-with-cache 'glasspane
-      (list 'todos files (and (glasspane-org--vulpea-p) (null files) t))
-    (if (and (glasspane-org--vulpea-p) (null files))
+  (if (and (glasspane-org--vulpea-p) (null files))
+      ;; The key names the ARM as well as the action: the same scope
+      ;; answers differently once the vault index exists.
+      (ebp-org-with-cache 'glasspane (list 'todos files t)
         (mapcar #'glasspane-org--vulpea-note-to-item
-                (vulpea-db-query (lambda (note) (vulpea-note-todo note))))
-      (glasspane-org--todo-items-1 files))))
+                (vulpea-db-query (lambda (note) (vulpea-note-todo note)))))
+    (jetpacs-org-mode-todo-items files)))
 
-(defun glasspane-org-tag-strings (tags)
-  "Return TAGS as distinct, non-empty strings without text properties.
-Public: item `tags' vectors still carry Org's propertized `org-get-tags'
-output; the foundation's tag-group readers already answer clean strings."
-  (let ((values (cond
-                 ((vectorp tags) (append tags nil))
-                 ((listp tags) (copy-sequence tags))
-                 ((stringp tags) (list tags)))))
-    (delete-dups
-     (delq nil
-           (mapcar
-            (lambda (tag)
-              (when (stringp tag)
-                (let ((clean (string-trim
-                              (substring-no-properties tag))))
-                  (unless (string-empty-p clean) clean))))
-            values)))))
+(defalias 'glasspane-org-tag-strings #'jetpacs-org-mode-tag-strings
+  "Return TAGS as distinct, non-empty strings without text properties.")
 
-(defun glasspane-org-tag-group (groups name)
-  "Return the group named NAME in foundation GROUPS, ignoring case.
-GROUPS is vocabulary from `ebp-org-tag-groups' or the `:groups' field of
-`ebp-org-tag-groups-at'.  Return the first matching declaration, preserving
-Org's persistent-before-file precedence, or nil when NAME is absent."
-  (and (stringp name)
-       (cl-find-if
-        (lambda (group)
-          (let ((candidate (plist-get group :name)))
-            (and (stringp candidate)
-                 (string-equal-ignore-case candidate name))))
-        groups)))
+(defalias 'glasspane-org-tag-group #'jetpacs-org-mode-tag-group
+  "Return the group named NAME in foundation GROUPS, ignoring case.")
 
 (defun glasspane-org-tag-groups-at (pos)
   "Return foundation tag-group membership at POS with PARA inheritance.
@@ -315,116 +212,23 @@ The foundation returns propertyless strings and does not cache this query."
   (let ((org-use-tag-inheritance t))
     (ebp-org-tag-groups-at pos)))
 
-(defun glasspane-org--tag-settings-here ()
-  "Snapshot the current buffer's tag inputs missing from the EBP cache stamp.
-Org owns `org-current-tag-alist': its normal settings refresh rebuilds that
-vocabulary.  Include both that vocabulary and its configuration inputs, so
-settings refreshes and buffer-local inheritance exclusions invalidate cached
-membership without needing a text edit or manual cache invalidation."
-  (copy-tree
-   (list org-tag-alist org-tag-persistent-alist org-current-tag-alist
-         org-file-tags org-tags-exclude-from-inheritance)))
-
-(defun glasspane-org-tag-settings-stamp (files)
-  "Snapshot global and visited-buffer tag settings for FILES.
-The EBP cache already stamps file contents and buffer edits; tag vocabulary
-and inheritance exclusions may change without either.  Copy these inputs
-so later in-place customization cannot mutate an existing cache key."
-  (list (glasspane-org--tag-settings-here)
-        (mapcar
-         (lambda (file)
-           (cons file
-                 (when-let* ((buffer (find-buffer-visiting file)))
-                   (with-current-buffer buffer
-                     (and (derived-mode-p 'org-mode)
-                          (glasspane-org--tag-settings-here))))))
-         files)))
+(defalias 'glasspane-org-tag-settings-stamp
+  #'jetpacs-org-mode-tag-settings-stamp
+  "Snapshot global and visited-buffer tag settings for FILES.")
 
 (defun glasspane-org-file-tag-group-index (file group)
   "Return FILE's effective tag GROUP members and heading memberships.
 Public: the per-file memo every Area consumer (cards, Resources archives)
-shares, so the first-paint tripwire pays one walk per file per generation.
-The memoised result is a plist with `:members' in declaration order,
-`:file-tags' as the members carried by the file's own `#+FILETAGS' (so a
-file with no headings still belongs), and `:positions' as an alist from
-heading point to the members inherited there.  Read membership through
-`glasspane-org-tag-groups-at', including its PARA inheritance policy.
-Cache identity includes the buffer's tag vocabulary and exclusions because
-the EBP cache's content stamp does not cover settings changes."
-  (when (and (stringp file) (stringp group)
-             (not (string-empty-p group)))
-    (condition-case nil
-        (let ((true (ebp-org--check-file file)))
-          (ebp-org--with-clamped-io
-            (with-current-buffer (find-file-noselect true t)
-              (unless (derived-mode-p 'org-mode) (org-mode))
-              (org-with-wide-buffer
-               (ebp-org-with-cache 'glasspane
-                   (list 'tag-group-index true group
-                         (buffer-chars-modified-tick)
-                         (glasspane-org--tag-settings-here))
-                 (let* ((members
-                         (plist-get
-                          (glasspane-org-tag-group (ebp-org-tag-groups) group)
-                          :tags))
-                        (file-tags (glasspane-org-tag-strings
-                                    org-file-tags))
-                        positions)
-                   (org-map-entries
-                    (lambda ()
-                      (let ((membership (glasspane-org-tag-groups-at (point))))
-                        (push
-                         (cons (point)
-                               (plist-get
-                                (glasspane-org-tag-group
-                                 (plist-get membership :groups) group)
-                                :members))
-                         positions)))
-                    nil 'file)
-                   (list :members members
-                         :file-tags (cl-remove-if-not
-                                     (lambda (member)
-                                       (member member file-tags))
-                                     members)
-                         :positions (nreverse positions))))))))
-      (error nil))))
+shares.  The walk, the memo and its settings-aware cache identity are
+the foundation's (`jetpacs-org-mode-file-tag-group-index'); Glasspane
+contributes the PARA inheritance rule — file tags and parent tags count
+even when `org-use-tag-inheritance' narrows agenda display — the same
+rule `glasspane-org-tag-groups-at' applies to a single heading."
+  (jetpacs-org-mode-file-tag-group-index file group t))
 
-(defun glasspane-org--file-todo-keywords (file)
-  "Return FILE's effective TODO keywords without trusting another buffer."
-  (when (stringp file)
-    (ebp-org-with-cache 'glasspane (list 'workflow-todo-keywords file)
-      (condition-case nil
-          (let ((true (ebp-org--check-file file)))
-            (ebp-org--with-clamped-io
-              (with-current-buffer (find-file-noselect true t)
-                (unless (derived-mode-p 'org-mode) (org-mode))
-                (copy-sequence org-todo-keywords-1))))
-        (error nil)))))
-
-(defun glasspane-org-workflow-keywords (items)
-  "Return the stable workflow keywords represented by Org ITEMS.
-File-local `#+TODO' sequences come first, then the global keywords, then any
-keyword an item carries that neither source declares.  ITEMS need only carry
-`file' and `todo' alist fields."
-  (let ((files (sort (delete-dups
-                      (cl-remove-if-not
-                       #'stringp
-                       (mapcar (lambda (item) (alist-get 'file item)) items)))
-                     #'string-lessp))
-        keywords)
-    (cl-labels ((add (keyword)
-                  (when (and (stringp keyword)
-                             (not (string-empty-p keyword))
-                             (not (member keyword keywords)))
-                    (setq keywords (append keywords (list keyword))))))
-      (dolist (file files)
-        (dolist (keyword (glasspane-org--file-todo-keywords file))
-          (add keyword)))
-      (dolist (keyword (jetpacs-org-settings-global-todo-keywords))
-        (add keyword))
-      (dolist (item items)
-        (add (alist-get 'todo item))))
-    keywords))
+(defalias 'glasspane-org-workflow-keywords
+  #'jetpacs-org-settings-workflow-keywords
+  "Return the stable workflow keywords represented by Org ITEMS.")
 
 (defun glasspane-org-open-todo-p (item)
   "Return non-nil when ITEM carries a TODO keyword that is not done.
@@ -487,58 +291,11 @@ The result follows the group's declaration order."
           (lambda (member) (member member tags))
           (plist-get index :members)))))))
 
-(defun glasspane-org--todo-items-1 (files)
-  "Uncached worker for `glasspane-org-todo-items'."
-  (let ((scope (or files (glasspane-org--agenda-scope)))
-        items)
-    (when scope
-      (ebp-org--with-clamped-io
-        (org-map-entries
-         (lambda ()
-           (let* ((components (org-heading-components))
-                  (todo (nth 2 components))
-                  (priority (nth 3 components))
-                  (headline (nth 4 components))
-                  (tags (org-get-tags))
-                  (scheduled (org-entry-get (point) "SCHEDULED"))
-                  (deadline  (org-entry-get (point) "DEADLINE")))
-             (when todo
-               (push `((headline . ,headline)
-                       (todo . ,todo)
-                       (priority . ,(if priority (char-to-string priority) nil))
-                       (tags . ,(vconcat tags))
-                       (scheduled . ,scheduled)
-                       (deadline  . ,deadline)
-                       (level . ,(nth 0 components))
-                       (file . ,(buffer-file-name))
-                       (pos . ,(point))
-                       (ref . ,(ebp-org-ref-at-point)))
-                     items))))
-         "TODO<>\"\"" scope)))
-    (nreverse items)))
-
-(defun glasspane-org-heading-item-at ()
+(defalias 'glasspane-org-heading-item-at #'jetpacs-org-mode-heading-item-at
   "Build a heading item alist for the org entry at point.
-Same shape as `glasspane-org-todo-items' entries (headline/todo/priority/
-tags/file/pos/ref).  Public: the search layer and the Areas scan build
-their items here so every card shares one shape."
-  (let* ((components (org-heading-components))
-         (todo (nth 2 components))
-         (priority (nth 3 components))
-         (headline (nth 4 components))
-         (tags (org-get-tags))
-         (scheduled (org-entry-get (point) "SCHEDULED"))
-         (deadline  (org-entry-get (point) "DEADLINE")))
-    `((headline . ,headline)
-      (todo . ,todo)
-      (priority . ,(if priority (char-to-string priority) nil))
-      (tags . ,(vconcat tags))
-      (scheduled . ,scheduled)
-      (deadline  . ,deadline)
-      (level . ,(nth 0 components))
-      (file . ,(buffer-file-name))
-      (pos . ,(point))
-      (ref . ,(ebp-org-ref-at-point)))))
+Same shape as `glasspane-org-todo-items' entries.  Public: the search
+layer and the Areas scan build their items here so every card shares
+the foundation's one shape.")
 
 (defun glasspane-org--file-heading-items (file)
   "Extract level-1 headings from FILE as item alists.
@@ -659,29 +416,22 @@ to a request, so the TOTAL policy check applies (ebp-org.el:214)."
 
 (defun glasspane-org-all-tags ()
   "Sorted tags for the query builder.
-Combines `org-tag-alist' (the configured vocabulary) with every tag
-actually used in the agenda files.  Memoised; see
-`ebp-org-cache-invalidate'."
-  ;; The key names the ARM as well as the action: the same scope answers
-  ;; differently once the vault index exists.
-  (ebp-org-with-cache 'glasspane
-      (list 'all-tags (and (featurep 'vulpea) (fboundp 'vulpea-db-query-tags) t))
-    (let ((tags nil))
-      (dolist (entry org-tag-alist)
-        (let ((tg (if (consp entry) (car entry) entry)))
-          (when (stringp tg) (push tg tags))))
-      (if (and (featurep 'vulpea) (fboundp 'vulpea-db-query-tags))
+With the vulpea index up, the configured vocabulary (`org-tag-alist')
+joins every tag the whole vault's index knows; otherwise the answer is
+the foundation's built-in sweep over the agenda scope
+\(`jetpacs-org-mode-all-tags').  Memoised; see `ebp-org-cache-invalidate'."
+  (if (and (featurep 'vulpea) (fboundp 'vulpea-db-query-tags))
+      ;; The key names the ARM as well as the action: the same scope
+      ;; answers differently once the vault index exists.
+      (ebp-org-with-cache 'glasspane (list 'all-tags t)
+        (let ((tags nil))
+          (dolist (entry org-tag-alist)
+            (let ((tg (if (consp entry) (car entry) entry)))
+              (when (stringp tg) (push tg tags))))
           (dolist (tg (vulpea-db-query-tags))
             (push tg tags))
-        ;; Explicit scope: passed nil, the table falls back to the
-        ;; `org-agenda-files' FUNCTION (P1-5/P1-7); the sweep visits
-        ;; every file, so it runs clamped.
-        (let ((files (glasspane-org--agenda-scope)))
-          (when files
-            (ebp-org--with-clamped-io
-              (dolist (entry (org-global-tags-completion-table files))
-                (when (stringp (car entry)) (push (car entry) tags)))))))
-      (sort (delete-dups tags) #'string-lessp))))
+          (sort (delete-dups tags) #'string-lessp)))
+    (jetpacs-org-mode-all-tags)))
 
 (defun glasspane-org--file-list ()
   "List of agenda files and basic stats."

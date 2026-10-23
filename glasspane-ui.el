@@ -362,16 +362,6 @@ lay out their own text.  Pure: TODAY is the only clock."
             :color color
             :date date :time time :repeat cookie :delta delta))))
 
-(defcustom glasspane-babel-timeout 30
-  "Seconds before a phone-triggered babel execution is abandoned.
-Best-effort: the timer can't interrupt a synchronous subprocess
-mid-call, but it fires between process reads and stops a runaway
-block from wedging the bridge forever.  Consumed by the table/babel
-rung (G6); surfaced in the app's own settings section
-\(`glasspane-ui-register') — the one app-opinion row left after the
-§3 relocation moved the org/calendar schema to the foundation."
-  :type 'integer :group 'jetpacs)
-
 ;;;; Shared view state (S2)
 ;;
 ;; `jetpacs-ui-state' is read-through only in v3, so the v1 ui-state
@@ -1163,17 +1153,15 @@ registry entries in place, and the keyed hub entry is replaced."
     (jetpacs-defaction "agenda.set-month"
                        #'glasspane-ui--on-agenda-set-month
                        :doc "Set the agenda calendar's displayed month")
-    ;; The app's own section — CONSOLIDATED (§3 step 2's recorded
-    ;; opportunity): Babel timeout and Packages auto-install share ONE
-    ;; "Glasspane" section.  The sibling defcustoms stay where they live;
-    ;; this is the single registration site, so glasspane-packages no longer
-    ;; registers a section of its own.  All plain: none feeds a memoised
-    ;; extraction.
+    ;; The app's own section — the one Glasspane-opinion row left: the
+    ;; Packages auto-install switch (the Babel timeout followed the
+    ;; table/Babel verbs into the foundation's Org Editing & Display
+    ;; section).  The defcustom stays where it lives; this is the single
+    ;; registration site, so glasspane-packages no longer registers a
+    ;; section of its own.  Plain: it feeds no memoised extraction.
     (jetpacs-settings-register-section
      "Glasspane"
-     (list (list 'glasspane-babel-timeout
-                 :label "Babel run timeout (s)")
-           (list 'glasspane-packages-auto-install
+     (list (list 'glasspane-packages-auto-install
                  :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)")))
     (jetpacs-settings-remove-hub-entry "glasspane")
     (jetpacs-settings-register-hub-entry

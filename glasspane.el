@@ -70,11 +70,11 @@
 (require 'glasspane-resources)
 (require 'glasspane-journal)
 ;; G6, the query surfaces: views leans on the reader's reorder table
-;; and the agenda's shared date row, so it loads after both; search and
-;; table depend only on landed G1/G3/G4 modules — the plan's order.
+;; and the agenda's shared date row, so it loads after both; search
+;; depends only on landed G1/G3/G4 modules — the plan's order.  The
+;; table/Babel verbs are upstream now (jetpacs-org-table.el).
 (require 'glasspane-views)
 (require 'glasspane-search)
-(require 'glasspane-table)
 ;; G7, the knowledge arms: srs soft-requires notes (the Review screen's
 ;; stale-files half calls its section builder), so notes loads first.
 ;; Both degrade to absent without vulpea/org-srs — the requires are
@@ -172,7 +172,6 @@ explicitly; see RENDERER.org."
   (glasspane-journal-register)
   (glasspane-views-register)
   (glasspane-search-register)
-  (glasspane-table-register)
   (glasspane-notes-register)
   (glasspane-srs-register)
   (glasspane-ef-register)
@@ -202,7 +201,6 @@ Org clock and capture handlers are upstream and deliberately survive."
   (glasspane-journal-unregister)
   (glasspane-views-unregister)
   (glasspane-search-unregister)
-  (glasspane-table-unregister)
   (glasspane-notes-unregister)
   (glasspane-srs-unregister)
   (glasspane-ef-unregister)

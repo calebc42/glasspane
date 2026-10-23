@@ -1,6 +1,7 @@
 ;;; glasspane-para-test.el --- Gates for the Glasspane PARA ladder -*- lexical-binding: t; -*-
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Package-Requires: ((emacs "30.1"))
 
 ;;; Commentary:
 
@@ -1795,9 +1796,10 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
           (jetpacs-apps-core-dock-items
            (lambda (_surface)
              (list (list :key "eval" :label "Eval" :icon "code"
-                         :on-tap (jetpacs-action "eval.open"))
+                         :on-tap (jetpacs-shell-open-surface-action "app:hub"))
                    (list :key "files" :label "Files" :icon "folder"
-                         :on-tap (jetpacs-action "files.open"))))))
+                         :on-tap (jetpacs-shell-open-surface-action
+                                   "app:jetpacs.files"))))))
       (cl-letf (((symbol-function 'glasspane-agenda-dock-badge)
                  (lambda () "7")))
         (let* ((items (jetpacs-apps-dock-items "app:glasspane"))
@@ -1836,7 +1838,7 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
          (jetpacs-chrome--guests (make-hash-table :test #'equal))
          (plain (jetpacs-chrome-screen "Plain" (jetpacs-text "plain")))
          (authored-fab
-          (jetpacs-icon-button "edit" (jetpacs-action "jetpacs.noop")
+          (jetpacs-icon-button "edit" (jetpacs-action "glasspane.home")
                                :content-description "Edit"))
          (authored (jetpacs-chrome-screen
                     "Authored" (jetpacs-text "authored")
@@ -2337,17 +2339,19 @@ current route into Resources."
          (jetpacs-apps-core-dock-items
           (lambda (_surface)
             (list (list :key "eval" :label "Eval" :icon "code"
-                        :on-tap (jetpacs-action "eval.open"))
+                        :on-tap (jetpacs-shell-open-surface-action "app:hub"))
                   (list :key "files" :label "Files" :icon "folder"
-                        :on-tap (jetpacs-action "files.open")))))
+                        :on-tap (jetpacs-shell-open-surface-action
+                                  "app:jetpacs.files")))))
          (jetpacs-apps-core-drawer-rows
           (lambda (_surface)
             (list (jetpacs-chrome-row "Tools" :icon "build"
-                                      :on-tap (jetpacs-action "tools.open")
+                                      :on-tap (jetpacs-shell-open-surface-action "app:hub")
                                       :key "test-tools")
                   (jetpacs-divider)
                   (jetpacs-chrome-row "Settings" :icon "settings"
-                                      :on-tap (jetpacs-action "settings.open")
+                                      :on-tap (jetpacs-shell-open-surface-action
+                                       (concat "app:" jetpacs-settings-surface))
                                       :key "test-settings"))))
          (jetpacs-chrome-drawer-function #'jetpacs-apps-drawer))
     (cl-letf (((symbol-function 'glasspane-agenda--today-count)

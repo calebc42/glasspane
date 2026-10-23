@@ -1,5 +1,8 @@
 ;;; glasspane-test.el --- Glasspane app ladder gates -*- lexical-binding: t; -*-
 
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Package-Requires: ((emacs "30.1"))
+
 ;; The per-rung LOCAL GATE suite of docs/PLAN-glasspane-app.md: every
 ;; rung adds its NAMED assertions here, and test/run-tests.sh runs the
 ;; whole file after the M3 stanza.  G0's three gates pin registration,

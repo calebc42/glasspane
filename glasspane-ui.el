@@ -1062,7 +1062,7 @@ Safe on any hook: a no-op while disconnected.  Invalidates the
 extraction memo first — this runs on clock in/out, which mutate the
 org buffer without necessarily saving it.  The clock hooks also fire
 from `org-clock-out'/`org-clock-in-last' INSIDE the org.clock.*
-handlers, so the push takes the D2 seam (the glasspane-clock-soon
+handlers, so the push takes the D2 seam (the `jetpacs-org-clock--soon'
 shape): deferred past the dispatch extent when inside one, immediate
 for a desktop M-x."
   (when (jetpacs-connected-p)

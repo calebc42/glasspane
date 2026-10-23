@@ -429,47 +429,6 @@ queries SIGNAL — an empty result must mean \"nothing matched\"."
             (kill-buffer buf))))
       (delete-directory vault t))))
 
-(ert-deftest glasspane-test-org-reminder-horizon ()
-  "Only timed items inside the horizon become reminders, shaped as the
-SPEC 18.6 plists `jetpacs-reminders-set' consumes: every :id is a
-SPEC 4.4 identifier even for spaced headlines/paths (a raw headline
-would reject the WHOLE set), and one entry surfacing twice at one
-instant (scheduled + deadline) yields ONE alarm — a duplicate :id also
-rejects the set.  The agenda arm is stubbed so the clock math is
-deterministic."
-  (let* ((in2h (time-add nil (* 2 3600)))
-         (in72h (time-add nil (* 72 3600)))
-         (d2 (format-time-string "%Y-%m-%d" in2h))
-         (hm2 (format-time-string "%H:%M" in2h))
-         (d72 (format-time-string "%Y-%m-%d" in72h))
-         (hm72 (format-time-string "%H:%M" in72h))
-         (items `(((headline . "Water the garden") (time . ,hm2) (date . ,d2)
-                   (type . "scheduled") (file . "/v/my tasks.org") (pos . 42))
-                  ((headline . "Water the garden") (time . ,hm2) (date . ,d2)
-                   (type . "deadline") (file . "/v/my tasks.org") (pos . 42))
-                  ((headline . "No alarm") (date . ,d2)
-                   (type . "scheduled") (file . "/v/my tasks.org") (pos . 90))
-                  ((headline . "Far") (time . ,hm72) (date . ,d72)
-                   (type . "scheduled") (file . "/v/my tasks.org") (pos . 7)))))
-    (cl-letf (((symbol-function 'glasspane-org-agenda-items)
-               (lambda (&optional _span start-day) (unless start-day items))))
-      (let ((rs (glasspane-org-upcoming-reminders)))
-        (should (= (length rs) 1))
-        (let ((r (car rs)))
-          (should (equal (plist-get r :title) "Water the garden"))
-          (should (jetpacs-identifier-p (plist-get r :id)))
-          (should (equal (plist-get r :body) (format "%s · scheduled" hm2)))
-          (should (equal (plist-get r :at_ms)
-                         (truncate (* 1000 (float-time
-                                            (org-time-string-to-time
-                                             (concat d2 " " hm2))))))))
-        ;; Distinct entries never share an id (file+pos+instant ride in).
-        (let ((far (car (last (glasspane-org-upcoming-reminders (* 4 24))))))
-          (should (jetpacs-identifier-p (plist-get far :id)))
-          (should-not (equal (plist-get far :id)
-                             (plist-get (car rs) :id)))))
-      (should (= (length (glasspane-org-upcoming-reminders (* 4 24))) 2)))))
-
 (ert-deftest glasspane-test-org-timestamp-hooks ()
   "The CREATED/MODIFIED stampers attach at app enable, do their work on
 save, and detach when the app's owner is torn down — a bare `require'
@@ -739,44 +698,55 @@ Loading the worker-lib beforehand must itself have had no side effects
                    log-before)))
   (should-not glasspane-vulpea--registered))
 
-;;;; G2 / GR-5 — downstream clock rollback adapter
+(cl-defstruct (glasspane-test-vulpea-note
+               (:constructor glasspane-test-vulpea-note))
+  todo closed tags priority title level properties deadline scheduled
+  path outline-path)
 
-(ert-deftest glasspane-test-clock-rollback-adapter-is-inert-by-default ()
-  "The downstream owner is opt-in and never removes native handlers by accident."
-  (should-not (default-value 'glasspane-clock-enabled))
-  (unwind-protect
-      (progn
-        (let ((jetpacs-org-clock-enabled t))
-          (jetpacs-org-clock-register))
-        ;; Normal forward state: registering the disabled downstream adapter
-        ;; leaves the upstream owner and hooks byte-for-byte intact.
-        (let ((glasspane-clock-enabled nil))
-          (glasspane-clock-install-hooks))
-        (should (eq (gethash "org.clock.out" jetpacs-action-handlers)
-                    #'jetpacs-org-clock--on-out))
-        (should (equal (jetpacs--owner-of "action" "org.clock.out")
-                       "org-mode"))
-        (should-not (memq #'glasspane-clock--assert org-clock-in-hook))
+(defmacro glasspane-test--as-vulpea (&rest body)
+  "Route the vulpea accessors at the synthetic struct for BODY."
+  `(cl-letf (((symbol-function 'vulpea-note-todo)
+              #'glasspane-test-vulpea-note-todo)
+             ((symbol-function 'vulpea-note-closed)
+              #'glasspane-test-vulpea-note-closed)
+             ((symbol-function 'vulpea-note-tags)
+              #'glasspane-test-vulpea-note-tags)
+             ((symbol-function 'vulpea-note-priority)
+              #'glasspane-test-vulpea-note-priority)
+             ((symbol-function 'vulpea-note-title)
+              #'glasspane-test-vulpea-note-title)
+             ((symbol-function 'vulpea-note-level)
+              #'glasspane-test-vulpea-note-level)
+             ((symbol-function 'vulpea-note-properties)
+              #'glasspane-test-vulpea-note-properties)
+             ((symbol-function 'vulpea-note-deadline)
+              #'glasspane-test-vulpea-note-deadline)
+             ((symbol-function 'vulpea-note-scheduled)
+              #'glasspane-test-vulpea-note-scheduled))
+     ,@body))
 
-        ;; Rollback state: the downstream adapter first retires the upstream
-        ;; integration, then owns the unchanged durable names itself.
-        (let ((jetpacs-org-clock-enabled nil))
-          (jetpacs-org-clock-register))
-        (let ((glasspane-clock-enabled t))
-          (glasspane-clock-install-hooks))
-        (dolist (name '("org.clock.out" "org.clock.switch"
-                        "org.clock.in-last"))
-          (should (gethash name jetpacs--any-surface-actions))
-          (should (equal (jetpacs--owner-of "action" name) "glasspane")))
-        (should (eq (gethash "org.clock.out" jetpacs-action-handlers)
-                    #'glasspane-clock--on-out))
-        (should (memq #'glasspane-clock--assert org-clock-in-hook))
-        (should-not (memq #'jetpacs-org-clock--assert org-clock-in-hook)))
-    ;; Every exit restores the canonical owner for the remainder of the suite.
-    (let ((glasspane-clock-enabled nil))
-      (glasspane-clock-install-hooks))
-    (let ((jetpacs-org-clock-enabled t))
-      (jetpacs-org-clock-register))))
+(ert-deftest glasspane-test-vulpea-note-accessor-and-query-routing ()
+  "The vulpea arm's documented approximations, on a synthetic note."
+  (glasspane-test--as-vulpea
+    (let ((note (glasspane-test-vulpea-note
+                 :todo "DONE" :closed nil :tags '("work")
+                 :priority "B" :title "Call Bob" :level 1
+                 :properties '(("STYLE" . "habit") ("KIND" . "call")))))
+      (should (ebp-org-note-matches-p '(done) note))
+      (should (ebp-org-note-matches-p '(priority "B") note))
+      (should (ebp-org-note-matches-p '(property "kind" "call") note))
+      (should (ebp-org-note-matches-p '(habit) note))
+      (should (ebp-org-note-matches-p '(regexp "Bob") note))
+      (should-not (ebp-org-note-matches-p '(regexp "body-text") note)))
+    (should (ebp-org-note-matches-p
+             '(done) (glasspane-test-vulpea-note :closed "[2026-07-01]"))))
+  (should (ebp-org-note-query-supported-p
+           '(and (todo "X") (not (tags "y")))))
+  (should-not (ebp-org-note-query-supported-p '(and (clocked))))
+  (should (ebp-org-note-query-supported-p nil))
+  (should (fboundp 'glasspane-vulpea--note-get))
+  (should-not (fboundp 'jetpacs-org--note-get))
+  (should-not (fboundp 'ebp-org--note-get)))
 
 ;;;; G2 — services: glasspane-config.el
 
@@ -3253,8 +3223,8 @@ between files through the same policy."
             (kill-buffer buf))))
       (delete-directory vault t))))
 
-;;;; G5 — daily surfaces: glasspane-agenda.el, glasspane-journal.el,
-;;;; glasspane-capture.el (pure date helpers now have a Jetpacs suite)
+;;;; G5 — daily surfaces: glasspane-agenda.el, glasspane-journal.el
+;;;; (capture and its pure date helpers are upstream Jetpacs suites now)
 
 (ert-deftest glasspane-test-agenda-formatters ()
   "The pure agenda formatters over fixture alists: the compact meta
@@ -3451,55 +3421,7 @@ their arms now.)"
         (let ((before (length continuations)))
           (should (eq (run "agenda.open" nil '(:surface "glasspane"))
                       'accepted))
-          (should (= (length continuations) (1+ before))))
-        ;; Reminder sync, ungranted: the wire is never touched and the
-        ;; suppress cache stays unset.
-        (let ((calls 0)
-              (glasspane-agenda--last-reminders 'unset))
-          (cl-letf (((symbol-function 'jetpacs-client) (lambda () t))
-                    ((symbol-function 'jetpacs-granted-p)
-                     (lambda (&rest _) nil))
-                    ((symbol-function 'jetpacs-reminders-set)
-                     (lambda (&rest _) (cl-incf calls))))
-            (glasspane-agenda--sync-reminders)
-            (should (= calls 0))
-            (should (eq glasspane-agenda--last-reminders 'unset))))
-        ;; Granted: one set goes out, the cache adopts only in the
-        ;; confirmed callback, and the identical next sync suppresses.
-        (let ((sent nil)
-              (glasspane-agenda--last-reminders 'unset))
-          (cl-letf (((symbol-function 'jetpacs-client) (lambda () t))
-                    ((symbol-function 'jetpacs-granted-p)
-                     (lambda (&rest _) t))
-                    ((symbol-function 'glasspane-org-upcoming-reminders)
-                     (lambda (&rest _) '((:id "r1"))))
-                    ((symbol-function 'jetpacs-reminders-set)
-                     (cl-function
-                      (lambda (rems &key owner callback)
-                        (push (cons owner rems) sent)
-                        (funcall callback 1 nil)))))
-            (glasspane-agenda--sync-reminders)
-            (should (equal sent '(("glasspane" . ((:id "r1"))))))
-            (should (equal glasspane-agenda--last-reminders '((:id "r1"))))
-            (glasspane-agenda--sync-reminders)
-            (should (= (length sent) 1))))))))
-
-(ert-deftest glasspane-test-agenda-reminder-hook-follows-mitigation-flag ()
-  "GR-0 installs Glasspane's reminder hook iff its flag is enabled."
-  (unwind-protect
-      (progn
-        (glasspane-agenda-unregister)
-        (let ((glasspane-agenda-reminders-enabled nil))
-          (glasspane-agenda-register)
-          (should-not (memq #'glasspane-agenda--sync-reminders
-                            jetpacs-shell-after-push-hook))
-          (glasspane-agenda-unregister))
-        (let ((glasspane-agenda-reminders-enabled t))
-          (glasspane-agenda-register)
-          (should (memq #'glasspane-agenda--sync-reminders
-                        jetpacs-shell-after-push-hook))))
-    (glasspane-agenda-unregister)
-    (glasspane-agenda-register)))
+          (should (= (length continuations) (1+ before))))))))
 
 (defun glasspane-test--journal-vault ()
   "A throwaway vault directory for journal fixtures."
@@ -3605,38 +3527,6 @@ and sweeps cleanly on unregister."
                                    nil nil #'equal))
             (glasspane-journal-register)))
       (glasspane-test--journal-cleanup vault))))
-
-(ert-deftest glasspane-test-capture-is-downstream-rollback-adapter ()
-  "The default app cannot displace native capture; the two flags reverse it."
-  (should-not (default-value 'glasspane-capture-enabled))
-  (unwind-protect
-      (progn
-        ;; Normal post-cutover composition: the disabled adapter neither
-        ;; overwrites nor unregisters the upstream owner.
-        (let ((jetpacs-org-capture-enabled t)
-              (glasspane-capture-enabled nil))
-          (jetpacs-org-capture-register)
-          (glasspane-capture-register))
-        (should (eq (gethash "org.capture.show" jetpacs-action-handlers)
-                    #'jetpacs-org-capture--on-show))
-        (should (equal (jetpacs--owner-of "action" "org.capture.show")
-                       "org-mode"))
-        (glasspane-capture-unregister)
-        (should (eq (gethash "org.capture.show" jetpacs-action-handlers)
-                    #'jetpacs-org-capture--on-show))
-        ;; Scripted reverse: upstream off first, then the downstream adapter on.
-        (let ((jetpacs-org-capture-enabled nil)
-              (glasspane-capture-enabled t))
-          (jetpacs-org-capture-register)
-          (glasspane-capture-register))
-        (should (eq (gethash "org.capture.show" jetpacs-action-handlers)
-                    #'glasspane-capture--on-show))
-        (should (equal (jetpacs--owner-of "action" "org.capture.show")
-                       "glasspane")))
-    (let ((glasspane-capture-enabled nil))
-      (glasspane-capture-register))
-    (let ((jetpacs-org-capture-enabled t))
-      (jetpacs-org-capture-register))))
 
 ;;;; G6 — query surfaces: glasspane-views.el
 

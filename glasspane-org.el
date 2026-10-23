@@ -32,7 +32,7 @@
 (require 'jetpacs-editor-org)           ; native save policy
 (require 'jetpacs-org-reminders)         ; canonical agenda extraction
 (require 'jetpacs-org-settings)          ; public workflow vocabulary
-(require 'jetpacs-org-vulpea)           ; note-index arm of the ONE grammar
+(require 'glasspane-vulpea)             ; note-index arm + mobile extractor
 
 ;;;; Refresh coordination
 
@@ -85,11 +85,13 @@ the stale row back out of the index.  No-op without vulpea."
 
 (defun glasspane-org-save-and-invalidate (&optional buffer)
   "Delegate BUFFER's synchronous save to Jetpacs' native Org policy.
-The app keeps only its refresh-suppression opinion; encryption,
-durability, optional indexing, and whole-cache invalidation belong to
+The app keeps its refresh-suppression and optional Vulpea index refresh
+opinions; encryption, durability, and whole-cache invalidation belong to
 `jetpacs-editor-org-save-policy'."
-  (let ((glasspane-org-inhibit-save-refresh t))
-    (jetpacs-editor-org-save-policy (or buffer (current-buffer)))))
+  (let ((glasspane-org-inhibit-save-refresh t)
+        (target (or buffer (current-buffer))))
+    (prog1 (jetpacs-editor-org-save-policy target)
+      (glasspane-org-vulpea-refresh-file target))))
 
 (defun glasspane-org-fresh-splice (ref value stamp beg end tick)
   "Replace REF's subtree with VALUE after validating open-time facts.
@@ -256,7 +258,7 @@ rides as-is."
 
 (defun glasspane-org--vulpea-p ()
   "Non-nil when the user has already loaded vulpea.
-App policy: never force-load — `jetpacs-org-vulpea-available-p' would
+App policy: never force-load — `glasspane-vulpea-available-p' would
 `require' vulpea; Glasspane only rides an index the user's own config
 brought up."
   (and (featurep 'vulpea) (fboundp 'vulpea-db-query)))
@@ -715,74 +717,6 @@ per its STATUS split); the visit runs clamped (D2)."
              (tags . ,(vconcat tags))
              (properties . ,props)
              (body . ,body))))))))
-
-(defun glasspane-org-item-hm (time)
-  "Normalize an agenda item's raw `time' property to \"HH:MM\", or nil.
-The property comes straight from the agenda's time grid and looks like
-\" 9:15......\" or \"14:00-15:00\" — leading space, no zero padding,
-grid filler dots."
-  (when (stringp time)
-    (let ((s (string-trim time)))
-      (when (string-match "\\`\\([0-9]\\{1,2\\}\\):\\([0-9]\\{2\\}\\)" s)
-        (format "%02d:%s"
-                (string-to-number (match-string 1 s))
-                (match-string 2 s))))))
-
-(defun glasspane-org--reminder-id (name)
-  "A stable SPEC 4.4 identifier \"glasspane.rem-STEM-HASH\" for NAME.
-`jetpacs-wire-id's minting idiom, duplicated because that minter lives
-in jetpacs-widgets, which requires the bridge — and this layer is
-bridge-free.  Headlines and file paths are routinely OUT of the 4.4
-charset (spaces above all), and `jetpacs-reminders-set' rejects the
-whole set on one bad :id; sanitizing alone is lossy (\"a b\" and
-\"a-b\" must not collide), so the sha1 of the ORIGINAL name rides
-along.  The readable stem keeps the id debuggable; the result stays
-under the 128-char ceiling."
-  (let* ((safe (replace-regexp-in-string "[^A-Za-z0-9._:/-]" "-" name))
-         (stem (substring safe 0 (min (length safe) 80))))
-    (format "glasspane.rem-%s-%s" stem (substring (sha1 name) 0 8))))
-
-(defun glasspane-org-upcoming-reminders (&optional horizon-hours)
-  "Timed agenda items within HORIZON-HOURS (default 24) as reminder specs.
-Only items with a clock time qualify (a date alone isn't an alarm).
-Each spec is a SPEC 18.6 reminder plist (:id :at_ms :title :body) —
-the shape `jetpacs-reminders-set' consumes; :id is minted over
-file/pos/instant, never the raw headline."
-  (let* ((horizon (* (or horizon-hours 24) 3600))
-         (now (float-time))
-         (items (append (glasspane-org-agenda-items 'day nil)
-                        (glasspane-org-agenda-items
-                         'day (format-time-string "%Y-%m-%d"
-                                                  (time-add nil 86400)))))
-         reminders seen)
-    (dolist (it items)
-      (let ((date (alist-get 'date it))
-            (hm (glasspane-org-item-hm (alist-get 'time it)))
-            (headline (alist-get 'headline it))
-            (type (alist-get 'type it))
-            (file (alist-get 'file it))
-            (pos (alist-get 'pos it)))
-        (when (and (stringp date) hm)
-          (let ((at (float-time (org-time-string-to-time
-                                 (concat date " " hm)))))
-            (when (and (> at now) (< (- at now) horizon))
-              (let ((id (glasspane-org--reminder-id
-                         (format "%sT%s %s:%s" date hm
-                                 (or file "") (or pos 0)))))
-                ;; Same entry, same instant → ONE alarm: a heading
-                ;; scheduled AND deadlined at one time surfaces as two
-                ;; agenda lines sharing file/pos/at, and
-                ;; `jetpacs-reminders-set' errors on duplicate :id
-                ;; within a set (SPEC 18.6).
-                (unless (member id seen)
-                  (push id seen)
-                  (push (list :id id
-                              :at_ms (truncate (* at 1000))
-                              :title (or headline "Org reminder")
-                              :body (concat hm (when (stringp type)
-                                                 (concat " · " type))))
-                        reminders))))))))
-    (nreverse reminders)))
 
 (defun glasspane-org-clock-status ()
   "Current clock status."

@@ -86,42 +86,6 @@ keeps the narrowing, as does date navigation.")
 (defconst glasspane-agenda--saved-mode "saved"
   "Internal mode key for Agenda's trailing Saved page.")
 
-;;;; Reminders (piggybacked on each shell push)
-
-(defvar glasspane-agenda--last-reminders 'unset
-  "Reminder list from the previous sync, to suppress identical sends.")
-
-(defvar glasspane-agenda-reminders-enabled t
-  "Non-nil when Glasspane owns the reminder-sync hook.
-This device-verified pipeline remains the sole active owner until the
-reminder cutover explicitly flips the flag and clears its durable set.")
-
-(defun glasspane-agenda--sync-reminders ()
-  "Send upcoming timed items to the device as owner-scoped alarms.
-Runs on `jetpacs-shell-after-push-hook': the extraction is memoised
-and identical sets are suppressed, so the piggyback costs nothing on
-a quiet vault.  `jetpacs-reminders-set' SIGNALS on a missing client
-or the ungranted \"reminders.owner\" capability, so both gate here —
-a hook member must never throw into the push path.  The cache adopts
-in the callback, only on the confirmed arm (the v1 rule: never
-pretend an unconfirmed set landed; the next push retries)."
-  (when (and glasspane-agenda-reminders-enabled
-             (not jetpacs-org-reminders-enabled)
-             (jetpacs-client)
-             (jetpacs-granted-p "reminders.owner"))
-    (let ((rems (condition-case nil
-                    (glasspane-org-upcoming-reminders)
-                  (error nil))))
-      (unless (equal rems glasspane-agenda--last-reminders)
-        (condition-case err
-            (jetpacs-reminders-set
-             rems :owner "glasspane"
-             :callback (lambda (_count err)
-                         (unless err
-                           (setq glasspane-agenda--last-reminders rems))))
-          (error (message "glasspane: reminder sync failed: %s"
-                          (jetpacs-error-label err))))))))
-
 ;;;; Pure formatters (the shared card's vocabulary; detail declares these)
 
 (defun glasspane-agenda-widget-item-meta (it hm)
@@ -784,25 +748,11 @@ agenda.today/select-date/set-month live with the anchor defvars (G3).
 The sequence writers left with §3 step 2 — the foundation's ownerless
 jetpacs.org.todo.* family owns them now.")
 
-(defun glasspane-agenda-remove-hooks ()
-  "Detach everything `glasspane-agenda-register' hooked."
-  (remove-hook 'jetpacs-shell-after-push-hook
-               #'glasspane-agenda--sync-reminders)
-  (remove-hook 'jetpacs-teardown-functions #'glasspane-agenda--on-teardown))
-
-(defun glasspane-agenda--on-teardown (owner)
-  "Drop the agenda hooks when OWNER is the Glasspane app.
-`glasspane-owner' is read late and defensively: the entry file defines
-it and `require's this one, so a back-`require' would cycle — and by
-the time any teardown runs, the entry has long finished loading."
-  (when (equal owner (bound-and-true-p glasspane-owner))
-    (glasspane-agenda-remove-hooks)))
-
 (defun glasspane-agenda-register ()
-  "Register the Agenda verbs and the reminder-sync hook.
+  "Register the Agenda verbs.
 Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces handlers in
-place and the hooks are add-hook-deduplicated."
+place."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "agenda.open" #'glasspane-agenda--on-open
                        :doc "Open the agenda screen")
@@ -813,23 +763,12 @@ place and the hooks are add-hook-deduplicated."
     (jetpacs-defaction
      "agenda.area-filter" #'glasspane-agenda--on-area-filter
      :doc "Filter every Agenda page to one Area, or clear the Area filter"
-     :args '((:name area :type "text"))))
-  (remove-hook 'jetpacs-shell-after-push-hook
-               #'glasspane-agenda--sync-reminders)
-  (when (and glasspane-agenda-reminders-enabled
-             (not jetpacs-org-reminders-enabled))
-    (add-hook 'jetpacs-shell-after-push-hook
-              #'glasspane-agenda--sync-reminders))
-  (add-hook 'jetpacs-teardown-functions #'glasspane-agenda--on-teardown))
+     :args '((:name area :type "text")))))
 
 (defun glasspane-agenda-unregister ()
-  "Drop the Agenda verbs and hooks; forget the reminder cache.
-The forgotten cache makes the next register's first push re-arm the
-device set rather than trusting alarms a torn-down session sent."
+  "Drop the Agenda verbs."
   (dolist (name glasspane-agenda--verbs)
-    (jetpacs-undefaction name))
-  (glasspane-agenda-remove-hooks)
-  (setq glasspane-agenda--last-reminders 'unset))
+    (jetpacs-undefaction name)))
 
 (provide 'glasspane-agenda)
 ;;; glasspane-agenda.el ends here

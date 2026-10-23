@@ -46,9 +46,8 @@
 ;; packages light-up), never here.
 (require 'glasspane-org)
 (require 'glasspane-vulpea)
-;; G2, the services: clock has zero siblings; packages soft-requires
-;; config's dir seam, so config loads first and its helper wins.
-(require 'glasspane-clock)
+;; G2, the services: packages soft-requires config's dir seam, so config
+;; loads first and its helper wins.
 (require 'glasspane-config)
 (require 'glasspane-packages)
 ;; G3, the keystone: the settings surface, the shared view state, and
@@ -63,14 +62,13 @@
 (require 'glasspane-detail)
 ;; G5 plus the PARA screens: the foundation date helper supports both daily
 ;; halves; agenda, Projects, and journal build on detail's shared card and the
-;; reader (already above), while capture is verbs + sheets only.
+;; reader (already above).
 (require 'jetpacs-dates)
 (require 'glasspane-agenda)
 (require 'glasspane-projects)
 (require 'glasspane-areas)
 (require 'glasspane-resources)
 (require 'glasspane-journal)
-(require 'glasspane-capture)
 ;; G6, the query surfaces: views leans on the reader's reorder table
 ;; and the agenda's shared date row, so it loads after both; search and
 ;; table depend only on landed G1/G3/G4 modules — the plan's order.
@@ -156,12 +154,11 @@ explicitly; see RENDERER.org."
   ;; The CREATED/MODIFIED stampers are GLOBAL org hooks, so they attach
   ;; at app enable — never at glasspane-org's load (a bare `require'
   ;; must not mutate the user's `before-save-hook').  Teardown of this
-  ;; owner detaches them; install self-registers that removal.  The
-  ;; The disabled clock rollback adapter follows the same rule.  Native
-  ;; chronometer hooks live in the upstream Org Mode app; every downstream
-  ;; sibling verb registers through here, never at module load.
+  ;; owner detaches them; install self-registers that removal.  Native
+  ;; chronometer and capture handlers live in the upstream Org Mode app;
+  ;; every downstream sibling verb registers through here, never at
+  ;; module load.
   (glasspane-org-install-hooks)
-  (glasspane-clock-install-hooks)
   (glasspane-config-register)
   (glasspane-packages-register)
   (glasspane-ui-register)
@@ -173,7 +170,6 @@ explicitly; see RENDERER.org."
   (glasspane-areas-register)
   (glasspane-resources-register)
   (glasspane-journal-register)
-  (glasspane-capture-register)
   (glasspane-views-register)
   (glasspane-search-register)
   (glasspane-table-register)
@@ -185,7 +181,7 @@ explicitly; see RENDERER.org."
 (defun glasspane-unregister ()
   "Deregister every downstream verb, the chrome root, and app identity.
 The G0 gate contract: no Glasspane handler or claim survives this.  Native
-Org clock handlers are upstream and deliberately survive."
+Org clock and capture handlers are upstream and deliberately survive."
   (jetpacs-undefaction "glasspane.home")
   (jetpacs-apps-unregister glasspane-owner)
   (jetpacs-chrome-remove glasspane-owner)
@@ -193,7 +189,6 @@ Org clock handlers are upstream and deliberately survive."
   ;; the org stampers too, but unregister must not leave them behind
   ;; when no teardown ever runs (M-x unload-feature).
   (glasspane-org-remove-hooks)
-  (glasspane-clock-remove-hooks)
   (glasspane-config-unregister)
   (glasspane-packages-unregister)
   (glasspane-ui-unregister)
@@ -205,7 +200,6 @@ Org clock handlers are upstream and deliberately survive."
   (glasspane-areas-unregister)
   (glasspane-resources-unregister)
   (glasspane-journal-unregister)
-  (glasspane-capture-unregister)
   (glasspane-views-unregister)
   (glasspane-search-unregister)
   (glasspane-table-unregister)

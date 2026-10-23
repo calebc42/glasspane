@@ -398,7 +398,7 @@ without duplicating Areas."
          (todo (alist-get 'todo it))
          ;; Normalized "HH:MM" — the raw property is a time-grid string
          ;; like " 9:15......".
-         (time (glasspane-org-item-hm (alist-get 'time it)))
+         (time (jetpacs-org-reminders-item-hm (alist-get 'time it)))
          (type (alist-get 'type it))
          (file (alist-get 'file it))
          (priority (alist-get 'priority it))

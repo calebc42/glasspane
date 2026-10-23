@@ -24,11 +24,106 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'org)
+
+(defvar ebp-org-note-query-terms)
+(declare-function ebp-org-matches-p "ebp-org" (tree get-fn))
 (declare-function emacsql "ext:emacsql" (connection sql &rest args))
 (declare-function vulpea-db "ext:vulpea-db" ())
 (declare-function vulpea-db-register-extractor "ext:vulpea-db-extract"
                   (extractor-or-name &optional fn))
 (declare-function make-vulpea-extractor "ext:vulpea-db-extract" (&rest slots))
+(declare-function vulpea-note-todo "ext:vulpea-note" (note))
+(declare-function vulpea-note-closed "ext:vulpea-note" (note))
+(declare-function vulpea-note-tags "ext:vulpea-note" (note))
+(declare-function vulpea-note-priority "ext:vulpea-note" (note))
+(declare-function vulpea-note-title "ext:vulpea-note" (note))
+(declare-function vulpea-note-level "ext:vulpea-note" (note))
+(declare-function vulpea-note-properties "ext:vulpea-note" (note))
+(declare-function vulpea-note-deadline "ext:vulpea-note" (note))
+(declare-function vulpea-note-scheduled "ext:vulpea-note" (note))
+(declare-function vulpea-note-path "ext:vulpea-note" (note))
+(declare-function vulpea-note-outline-path "ext:vulpea-note" (note))
+(declare-function vulpea-db-query "ext:vulpea-db" (&optional pred))
+(declare-function vulpea-db-query-by-directory "ext:vulpea-db" (dir &optional level))
+
+(defun glasspane-vulpea--note-get (note what &rest args)
+  "The grammar accessor over a `vulpea-note' NOTE (index only, no visit)."
+  (pcase what
+    ('todo (vulpea-note-todo note))
+    ('done (let ((s (vulpea-note-todo note)))
+             (or (and s (member s (or org-done-keywords '("DONE"))) t)
+                 (and (vulpea-note-closed note) t))))
+    ('tags (vulpea-note-tags note))
+    ('priority (let ((p (vulpea-note-priority note)))
+                 (cond ((null p) nil)
+                       ((characterp p) p)
+                       ((and (stringp p) (> (length p) 0)) (aref p 0))
+                       (t (let ((s (format "%s" p)))
+                            (and (> (length s) 0) (aref s 0)))))))
+    ('title (vulpea-note-title note))
+    ('level (vulpea-note-level note))
+    ('property (cdr (assoc-string (car args) (vulpea-note-properties note) t)))
+    ('planning (let ((s (if (equal (car args) "DEADLINE")
+                            (vulpea-note-deadline note)
+                          (vulpea-note-scheduled note))))
+                 (and (stringp s) s)))
+    ('habit (equal "habit"
+                   (cdr (assoc-string "STYLE" (vulpea-note-properties note) t))))
+    ('regexp-match
+     (let ((hay (concat (or (vulpea-note-title note) "") " "
+                        (mapconcat #'cdr (vulpea-note-properties note) " ")))
+           (case-fold-search t))
+       (string-match-p (car args) hay)))))
+
+(defun ebp-org-note-matches-p (tree note)
+  "Non-nil when `vulpea-note' NOTE matches query sexp TREE.
+The same grammar as `ebp-org-entry-matches-p', evaluated entirely
+off the vulpea index (no file visit); the `regexp' term searches
+title + properties here (the body is not indexed)."
+  (ebp-org-matches-p
+   tree (lambda (what &rest args)
+          (apply #'glasspane-vulpea--note-get note what args))))
+
+(defun ebp-org-note-query-supported-p (tree)
+  "Non-nil when query sexp TREE uses only index-evaluable terms.
+Empty (nil) TREE — no filter — is trivially supported."
+  (pcase tree
+    ('nil t)
+    (`(and . ,cs) (cl-every #'ebp-org-note-query-supported-p cs))
+    (`(or . ,cs) (cl-every #'ebp-org-note-query-supported-p cs))
+    (`(not ,c) (ebp-org-note-query-supported-p c))
+    (`(,head . ,_) (and (memq head ebp-org-note-query-terms) t))
+    (_ nil)))
+
+(defun glasspane-vulpea-available-p ()
+  "Non-nil when the vulpea note index is loadable on this Emacs."
+  (and (require 'vulpea nil t) (fboundp 'vulpea-db-query) t))
+
+(defun glasspane-vulpea-source-notes (source)
+  "The `vulpea-note' records backing SOURCE, a scope plist."
+  (let ((dir (plist-get source :dir))
+        (file (plist-get source :file))
+        (heading (plist-get source :heading)))
+    (cond
+     (dir (vulpea-db-query-by-directory (directory-file-name dir) 0))
+     (file
+      (let ((want (expand-file-name file)))
+        (vulpea-db-query
+         (lambda (n)
+           (and (equal (expand-file-name (vulpea-note-path n)) want)
+                (if heading
+                    (equal (vulpea-note-outline-path n) (list heading))
+                  (= (vulpea-note-level n) 1)))))))
+     (t (user-error "Source needs :dir or :file: %S" source)))))
+
+(defun glasspane-vulpea-query (source &optional tree)
+  "Notes of SOURCE matching query sexp TREE, off the vulpea index."
+  (let ((notes (glasspane-vulpea-source-notes source)))
+    (if tree
+        (cl-remove-if-not (lambda (n) (ebp-org-note-matches-p tree n)) notes)
+      notes)))
 
 (defun glasspane-vulpea--extract-mobile (_ctx note-data)
   "Index NOTE-DATA's mobile context properties into `glasspane_mobile'.

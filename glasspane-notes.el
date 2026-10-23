@@ -77,7 +77,7 @@
   "Non-nil when the vulpea note database is usable.
 The soft probe — `featurep', never `require': this file must not be
 the thing that loads vulpea (the plan keeps v1's cheaper probe as app
-policy; `jetpacs-org-vulpea-available-p' is the loading kind)."
+policy; `glasspane-vulpea-available-p' is the loading kind)."
   (and (featurep 'vulpea)
        (fboundp 'vulpea-db-search-by-title)))
 

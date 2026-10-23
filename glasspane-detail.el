@@ -2342,6 +2342,7 @@ Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "heading.tap" #'glasspane-detail--on-tap
+                       :any-surface t
                        :doc "Open a heading in the pushed detail screen")
     (jetpacs-defaction "heading.visit" #'glasspane-detail--on-visit
                        :doc "Resolve a heading and open its canonical document"
@@ -2371,6 +2372,7 @@ gate contract).  Idempotent."
                        :doc "Set a heading's TODO state; empty clears")
     (jetpacs-defaction "heading.todo-cycle"
                        #'glasspane-detail--on-todo-cycle
+                       :any-surface t
                        :doc "Cycle a heading through the TODO sequence")
     (jetpacs-defaction "heading.schedule" #'glasspane-detail--on-schedule
                        :doc "Schedule: :when relative, :value date, :clear")
@@ -2386,6 +2388,7 @@ gate contract).  Idempotent."
                        :doc "Delete the subtree (device-confirmed)")
     (jetpacs-defaction "heading.duplicate"
                        #'glasspane-detail--on-duplicate
+                       :any-surface t
                        :doc "Duplicate the subtree after itself")
     (jetpacs-defaction "heading.prop-set" #'glasspane-detail--on-prop-set
                        :doc "Set a property; empty value removes")
@@ -2393,13 +2396,16 @@ gate contract).  Idempotent."
                        :doc "Add a property via a bridged key prompt")
     (jetpacs-defaction "heading.props.show"
                        #'glasspane-detail--on-props-show
+                       :any-surface t
                        :doc "Open the sub-heading properties dialog")
     (jetpacs-defaction "heading.clock-in" #'glasspane-detail--on-clock-in
+                       :any-surface t
                        :doc "Clock in at the heading")
     (jetpacs-defaction "org.link.open" #'glasspane-detail--on-link-open
                        :doc "Open an org link Emacs-side")
     (jetpacs-defaction "files.properties.show"
                        #'glasspane-detail--on-file-props-show
+                       :any-surface t
                        :doc "Open the file keyword editor dialog")
     (jetpacs-defaction "files.properties.save"
                        #'glasspane-detail--on-file-props-save

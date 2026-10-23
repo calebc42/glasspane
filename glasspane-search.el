@@ -472,6 +472,7 @@ gate contract).  Idempotent: re-registration replaces in place."
                        #'glasspane-search--on-clear-filters
                        :doc "Clear every search filter and device-side draft")
     (jetpacs-defaction "search.by-tag" #'glasspane-search--on-by-tag
+                       :any-surface t
                        :doc "Filter search to a single tag"
                        :args '((:name tag :type "text" :required t)))))
 

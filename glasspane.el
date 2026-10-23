@@ -11,8 +11,7 @@
 ;; entry in the M3 template (jetpacs-m3-catalog.el), owning exactly the
 ;; app identity — the "glasspane" owner claim, the Agenda chrome root, the
 ;; PA-3 primary composition metadata, and one owner verb,
-;; `glasspane.home', which resets to that root.  The old hub and hand dock
-;; remain solely behind `glasspane-ui-legacy-ia'.  The sibling `require'
+;; `glasspane.home', which resets to that root.  The sibling `require'
 ;; list below grew one rung at a time and is now the whole app.
 ;;
 ;; Client hooks (clock notification, window class, save refresh) attach
@@ -106,8 +105,7 @@ second real `jetpacs-defapp' caller there is.")
 (defun glasspane--on-home (_args params)
   "Return PARAMS' surface to the root screen on the dock row's second tap."
   (let ((surface (plist-get params :surface)))
-    (jetpacs-apps-note-route glasspane-owner
-                             (unless glasspane-ui-legacy-ia "agenda"))
+    (jetpacs-apps-note-route glasspane-owner "agenda")
     (jetpacs-flow-continue
      (lambda ()
        (jetpacs-chrome-reset-screens (or surface glasspane-owner))))
@@ -115,82 +113,46 @@ second real `jetpacs-defapp' caller there is.")
 
 ;;;; App identity
 
-(defun glasspane--dock-items (surface)
-  "The legacy app dock destination retained by `glasspane-ui-legacy-ia'.
-A function so `:selected' tracks SURFACE (jetpacs-m3-core.el:1195's
-rationale); the tap uses receiver-local `surface.open' because it arrives
-from whatever surface the user is looking at."
-  (let ((home (jetpacs-shell-surface-for glasspane-owner)))
-    (list (list :label glasspane-title
-                :icon glasspane-icon
-                ;; Gap #5 landed: today's agenda count rides the dock
-                ;; icon (v1's Agenda tab badge on the one destination
-                ;; v3 has).  Memoised — a table lookup per render.
-                :badge (glasspane-agenda-dock-badge)
-                :on-tap (jetpacs-shell-open-surface-action home)
-                :selected (equal surface home)))))
-
 (defun glasspane--destinations ()
-  "The app's S1 route registry from `glasspane-ui-active-destinations'.
-The rollback table loses one row — capture opens a DIALOG, and the
-chrome contract types destinations as places, never actions
-\(docs/CHROME-VOCABULARY.md); routing it would also flip the current
-app under the host with no visible switch.  The host's capture
-affordance is the FAB story, not a drawer row."
-  (cl-remove "capture" (glasspane-ui-active-destinations)
-             :key (lambda (d) (plist-get d :key)) :test #'equal))
+  "Return the app's S1 route registry from `glasspane-ui-destinations'."
+  glasspane-ui-destinations)
 
 (defun glasspane-register ()
   "Register the owner's verbs, the chrome root, and the app identity.
 Idempotent: re-evaluation replaces the handlers and RESETS the screen
 stack to the selected app root — the live-reload path; `jetpacs-defapp'
-replaces its registry entry in place.  Both layout branches declare
-`jetpacs.material3' explicitly; see RENDERER.org."
+replaces its registry entry in place.  Declares `jetpacs.material3'
+explicitly; see RENDERER.org."
   (with-jetpacs-owner glasspane-owner
     (jetpacs-defaction "glasspane.home" #'glasspane--on-home
                        :doc "Return Glasspane to its registered root screen")
     ;; PA-3b pins Agenda as both app home and destination one.  Its root id
     ;; deliberately equals agenda.open's pushed id, so a bar tap truncates
-    ;; straight to the root.  The old hub stays executable behind the one
-    ;; soak rollback flag until PA-4 removes it.
-    (if glasspane-ui-legacy-ia
-        (jetpacs-chrome-define-root glasspane-owner "home"
-                                    #'glasspane-ui-home-screen)
-      (jetpacs-chrome-define-root glasspane-owner "glasspane-agenda"
-                                  #'glasspane-agenda-screen
-                                  :required t)))
-  ;; After the root exists: the app claims a surface that is really there;
-  ;; the rollback dock, when selected, names one the launcher's membership
-  ;; guard recognizes (the M3 ordering).
-  (if glasspane-ui-legacy-ia
-      (jetpacs-defapp glasspane-owner
-                      :label glasspane-title
-                      :icon glasspane-icon
-                      :surfaces (list glasspane-owner)
-                      :requires-extensions '("jetpacs.material3")
-                      :dock #'glasspane--dock-items
-                      :home-route "agenda"
-                      :destinations #'glasspane--destinations)
-    (jetpacs-defapp glasspane-owner
-                    :label glasspane-title
-                    :icon glasspane-icon
-                    :surfaces (list glasspane-owner)
-                    :requires-extensions '("jetpacs.material3")
-                    ;; PA-3a: Glasspane owns the full five-item bar.  Eval
-                    ;; is the one native core place it relocates; Files is
-                    ;; replaced by the downstream Resources destination.
-                    :chrome 'primary
-                    :dock-core nil
-                    :drawer-core '("eval")
-                    :fab #'glasspane-ui-capture-fab
-                    ;; Glasspane alone decides that its root represents
-                    ;; Agenda.  Jetpacs only consumes this generic route
-                    ;; metadata when a deep link falls back to the root.
-                    :home-route "agenda"
-                    ;; The table is CONTRIBUTED to the host.  Rows open
-                    ;; through global app.open, so their verbs stay scoped
-                    ;; to Glasspane's own surface.
-                    :destinations #'glasspane--destinations))
+    ;; straight to the root.
+    (jetpacs-chrome-define-root glasspane-owner "glasspane-agenda"
+                                #'glasspane-agenda-screen
+                                :required t))
+  ;; After the root exists: the app claims a surface that is really there.
+  (jetpacs-defapp glasspane-owner
+                  :label glasspane-title
+                  :icon glasspane-icon
+                  :surfaces (list glasspane-owner)
+                  :requires-extensions '("jetpacs.material3")
+                  ;; PA-3a: Glasspane owns the full five-item bar.  Eval
+                  ;; is the one native core place it relocates; Files is
+                  ;; replaced by the downstream Resources destination.
+                  :chrome 'primary
+                  :dock-core nil
+                  :drawer-core '("eval")
+                  :fab #'glasspane-ui-capture-fab
+                  ;; Glasspane alone decides that its root represents
+                  ;; Agenda.  Jetpacs only consumes this generic route
+                  ;; metadata when a deep link falls back to the root.
+                  :home-route "agenda"
+                  ;; The table is CONTRIBUTED to the host.  Rows open
+                  ;; through global app.open, so their verbs stay scoped
+                  ;; to Glasspane's own surface.
+                  :destinations #'glasspane--destinations)
   ;; The CREATED/MODIFIED stampers are GLOBAL org hooks, so they attach
   ;; at app enable — never at glasspane-org's load (a bare `require'
   ;; must not mutate the user's `before-save-hook').  Teardown of this
@@ -264,8 +226,7 @@ Org clock handlers are upstream and deliberately survive."
 (defun glasspane ()
   "Open Glasspane on the device: reset its stack to the app root."
   (interactive)
-  (jetpacs-apps-note-route glasspane-owner
-                           (unless glasspane-ui-legacy-ia "agenda"))
+  (jetpacs-apps-note-route glasspane-owner "agenda")
   (jetpacs-chrome-reset-screens glasspane-owner))
 
 (defun glasspane-unload-function ()

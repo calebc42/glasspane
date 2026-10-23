@@ -46,9 +46,6 @@
 (declare-function glasspane-org-reader-prepare-landing
                   "glasspane-org-reader" (path))
 
-(defconst glasspane-navigation--document-return-screen "files-return"
-  "Files guest screen staged below every direct Glasspane document.")
-
 (defconst glasspane-navigation--document-open-verb
   "glasspane.document.open"
   "Path-authority adapter for the canonical document presenter.")
@@ -59,7 +56,7 @@
 
 (defun glasspane-navigation-files-surface ()
   "Return the one Files surface used by every Glasspane handoff."
-  (jetpacs-shell-surface-for jetpacs-files-owner))
+  (jetpacs-files-surface))
 
 (defun glasspane-navigation-heading-action (token)
   "Return the canonical Files-opening action for heading TOKEN.
@@ -87,11 +84,9 @@ Return nil unless PATH is a string."
 Older Companions without `action.open_surface' retain Files' local Back
 behavior.  A modern Companion returns to the untouched Glasspane stack, so a
 Project remains a Project and a Resource remains a Resource after the trip."
-  (when (and (not glasspane-ui-legacy-ia)
-             (jetpacs-feature-advertised-p "action.open_surface" :app))
-    (jetpacs-shell-action-opening-surface
-     glasspane-navigation--files-return-verb
-     (jetpacs-shell-surface-for "glasspane"))))
+  (jetpacs-files-return-action
+   (jetpacs-shell-surface-for "glasspane")
+   glasspane-navigation--files-return-verb))
 
 (cl-defun glasspane-navigation-open-files-path
     (path &key position browser-id browser-fab return-action)
@@ -113,24 +108,18 @@ an Org document to Glasspane's visible tree presentation; the state is ready
 before the queued render without allowing a refused path to allocate reader
 state.
 
-The staged screen and return descriptor are deliberately identical for
-Projects, Agenda, Notes, detail breadcrumbs, and Resources.  Consequently the
-entry point cannot select a different screen class, top bar, FAB, reader mode,
-or Back destination.  Return `rejected' for malformed PATH or POSITION."
-  (if (or (not (stringp path))
-          (and position (not (integerp position))))
-      'rejected
-    (let ((status
-           (glasspane-navigation-open-files-path
-            path
-            :position position
-            :browser-id glasspane-navigation--document-return-screen
-            :return-action (glasspane-navigation-return-action))))
-      (when (and (eq status 'accepted)
-                 (jetpacs-reader-org-path-p path)
-                 (fboundp 'glasspane-org-reader-prepare-landing))
-        (glasspane-org-reader-prepare-landing path))
-      status)))
+The staged screen, return descriptor, and cross-surface return state machine
+are owned by `jetpacs-files'.  Return `rejected' for malformed PATH or
+POSITION."
+  (let ((status
+         (with-jetpacs-owner "glasspane"
+           (jetpacs-files-open-document
+            path position glasspane-navigation--files-return-verb))))
+    (when (and (eq status 'accepted)
+               (jetpacs-reader-org-path-p path)
+               (fboundp 'glasspane-org-reader-prepare-landing))
+      (glasspane-org-reader-prepare-landing path))
+    status))
 
 (defun glasspane-navigation--on-document-open (args params)
   "Open ARGS' path unless the path action in PARAMS is stale."
@@ -140,38 +129,19 @@ or Back destination.  Return `rejected' for malformed PATH or POSITION."
      ((jetpacs-event-stale-p params) 'stale)
      (t (glasspane-navigation-open-document path)))))
 
-(defun glasspane-navigation-return (_args _params)
+(defun glasspane-navigation-return (args params)
   "Return from Files to Glasspane's unchanged navigation stack.
-This public handler is also the implementation of the retired
+Delegates to `jetpacs-files-return' and also serves as the retired
 `resources.return' compatibility action."
-  (jetpacs-flow-continue
-   (lambda ()
-     (condition-case err
-         (jetpacs-shell-push (jetpacs-shell-surface-for "glasspane"))
-       (error
-        (message "glasspane: Files return push failed: %s"
-                 (jetpacs-error-label err))))))
-  'accepted)
-
-(defun glasspane-navigation--on-view-change (surface view)
-  "Complete a bounded Files Back handoff reported as SURFACE and VIEW.
-RETURN-ACTION is the primary path.  This observed guest-screen transition is
-the fallback for clients that report local Back before dispatching it."
-  (when (and (not glasspane-ui-legacy-ia)
-             (equal jetpacs-apps--current "glasspane")
-             (equal surface (glasspane-navigation-files-surface))
-             (equal view
-                    (jetpacs-chrome-guest-screen-id
-                     "glasspane"
-                     glasspane-navigation--document-return-screen)))
-    (glasspane-navigation-return nil nil)))
+  (with-jetpacs-owner "glasspane"
+    (jetpacs-files-return args params)))
 
 (defconst glasspane-navigation--verbs
   '("glasspane.document.open" "glasspane.files.return")
   "The canonical document-route verbs owned by this module.")
 
 (defun glasspane-navigation-register ()
-  "Register the canonical document actions and Back observer idempotently."
+  "Register the canonical document actions idempotently."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction
      "glasspane.document.open" #'glasspane-navigation--on-document-open
@@ -179,19 +149,13 @@ the fallback for clients that report local Back before dispatching it."
      :args '((:name path :type "text" :required t)))
     (jetpacs-defaction
      "glasspane.files.return" #'glasspane-navigation-return
-     :doc "Return from Files to Glasspane's untouched navigation stack"))
-  (remove-hook 'jetpacs-shell-view-change-functions
-               #'glasspane-navigation--on-view-change)
-  (unless glasspane-ui-legacy-ia
-    (add-hook 'jetpacs-shell-view-change-functions
-              #'glasspane-navigation--on-view-change)))
+     :doc "Return from Files to Glasspane's untouched navigation stack"
+     :any-surface t)))
 
 (defun glasspane-navigation-unregister ()
-  "Drop every canonical document action and Back observer."
+  "Drop every canonical document action."
   (dolist (name glasspane-navigation--verbs)
-    (jetpacs-undefaction name))
-  (remove-hook 'jetpacs-shell-view-change-functions
-               #'glasspane-navigation--on-view-change))
+    (jetpacs-undefaction name)))
 
 (provide 'glasspane-navigation)
 ;;; glasspane-navigation.el ends here

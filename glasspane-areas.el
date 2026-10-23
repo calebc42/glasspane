@@ -409,7 +409,7 @@ sweeps the prior Areas token generation."
                             project-items))
              (files (glasspane-areas--files-in-all selected))
              (file-rows (mapcar #'glasspane-areas--file-row files))
-             (archive-rows (mapcar #'glasspane-resources--archive-row
+             (archive-rows (mapcar #'glasspane-resources-archive-row
                                    (glasspane-resources-archives-for-files
                                     files)))
              (note-rows (glasspane-areas--declaration-rows
@@ -444,17 +444,13 @@ sweeps the prior Areas token generation."
   "Build the Areas list screen with BACK navigation."
   (jetpacs-chrome-screen "Areas" (glasspane-areas--list-body)
                          :back back
-                         :actions (glasspane-ui-top-actions)
-                         :fab (and glasspane-ui-legacy-ia
-                                   (glasspane-ui-capture-fab))))
+                         :actions (glasspane-ui-top-actions)))
 
 (defun glasspane-areas-drill-screen (category back)
   "Build CATEGORY's Area drill screen with BACK navigation."
   (jetpacs-chrome-screen category (glasspane-areas--drill-body category)
                          :back back
-                         :actions (glasspane-ui-top-actions)
-                         :fab (and glasspane-ui-legacy-ia
-                                   (glasspane-ui-capture-fab))))
+                         :actions (glasspane-ui-top-actions)))
 
 ;;;; Actions and lifecycle
 

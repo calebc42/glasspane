@@ -137,21 +137,11 @@ whatever `glasspane-register' names as root must build offline and serialize."
       (should (string-search "Agenda" json)))))
 
 (ert-deftest glasspane-test-dock-item-shape ()
-  "The new registry retires the hand dock while its rollback corpse is sound."
+  "The primary registry owns the full five-item bar with no hand dock."
   (let ((plist (cdr (assoc glasspane-owner jetpacs-apps--registry))))
     (should (eq (plist-get plist :chrome) 'primary))
-    (should-not (plist-get plist :dock)))
-  (let* ((home (jetpacs-shell-surface-for glasspane-owner))
-         (items (glasspane--dock-items home)))
-    (should (= (length items) 1))
-    (let ((item (car items)))
-      (should (equal (plist-get item :label) "Glasspane"))
-      (should (equal (plist-get item :icon) glasspane-icon))
-      (should (plist-get item :on-tap))
-      (should (eq (plist-get item :selected) t)))
-    ;; From a foreign surface the row is not selected.
-    (should-not (plist-get (car (glasspane--dock-items "app:elsewhere"))
-                           :selected))))
+    (should-not (plist-get plist :dock))
+    (should-not (fboundp 'glasspane--dock-items))))
 
 (ert-deftest glasspane-test-unload-clean ()
   "Unregistration leaves no downstream verb, claim, or registry entry.
@@ -1439,18 +1429,17 @@ the registry."
                  (actions (jetpacs-reader--files-actions file))
                  (json (jetpacs-node->canonical-json
                         (apply #'jetpacs-row actions))))
-            ;; Host toggle + Glasspane refile + absorbed decrypt, and no
-            ;; other stock Org action icons in the tree presentation.
+            ;; Host toggle + Glasspane refile, and no stock Org action
+            ;; icons in the tree presentation.
             (should (string-search "jetpacs.reader.toggle" json))
             (should (string-search "files.toggle-refile" json))
-            (should (string-search "jetpacs.reader.org.decrypt" json))
             (should-not (string-search "jetpacs.reader.org.reader-mode" json))
             (should-not (string-search "jetpacs.reader.org.visibility" json))
             (should-not (string-search "jetpacs.reader.org.search-toggle" json))
             ;; The generic host owns the transition.  Returning to reader
             ;; yields the same node ids, which is the Companion's key for
             ;; retaining device-local collapsible state.
-            (cl-letf (((symbol-function 'jetpacs-buffer-defer-refresh)
+            (cl-letf (((symbol-function 'jetpacs-buffer-defer-view-refresh)
                        #'ignore))
               (should (eq (jetpacs-reader--toggle
                            (list :path file) '(:surface "app:files"))
@@ -1487,7 +1476,6 @@ the registry."
             (should (string-search "jetpacs.reader.org.reader-mode" json))
             (should (string-search "jetpacs.reader.org.visibility" json))
             (should (string-search "jetpacs.reader.org.search-toggle" json))
-            (should (string-search "jetpacs.reader.org.decrypt" json))
             (should-not (string-search "files.toggle-refile" json))))
       (glasspane-org-reader-register)
       (glasspane-test--reader-cleanup vault))))
@@ -1694,7 +1682,7 @@ signalling out of the builder."
             (dolist (name '("heading.menu" "files.filter"
                             "files.toggle-refile" "heading.reorder"))
               (should (gethash name jetpacs--any-surface-actions)))
-            (cl-letf (((symbol-function 'jetpacs-buffer-defer-refresh)
+            (cl-letf (((symbol-function 'jetpacs-buffer-defer-view-refresh)
                        (lambda (surface) (push surface refreshed))))
               (should (eq (jetpacs--dispatch
                            nil
@@ -3293,7 +3281,7 @@ replaced the tab badge (FOUNDATION-GAPS #5)."
                  "scheduled"))
   (should (equal (glasspane-agenda-widget-icon nil) "event"))
   (should (equal (glasspane-agenda-type-icon "past-scheduled")
-                 '("history" . "#E53935")))
+                 '("history" . "error")))
   (should (equal (car (glasspane-agenda-type-icon "deadline")) "flag"))
   (should-not (glasspane-agenda-type-icon "timestamp"))
   (should (equal (glasspane-agenda-type-label "past-scheduled")
@@ -3321,7 +3309,7 @@ replaced the tab badge (FOUNDATION-GAPS #5)."
          (json (jetpacs-node->canonical-json grid)))
     (should (string-search "\"28\"" json))
     (should-not (string-search "\"29\"" json))
-    (should (string-search "#1976D2" json))
+    (should (string-search "on_primary" json))
     (should (string-search "agenda.select-date" json))
     (should (string-search "2026-02-01" json)))
   (should (string-search
@@ -3530,23 +3518,17 @@ their arms now.)"
   (delete-directory vault t))
 
 (ert-deftest glasspane-test-journal-datetree ()
-  "--day-pos/--append against a real temp datetree: an absent file is
-nil (never an error), the first append creates the file and the
-levels, same-day appends share ONE day heading in order — and the
-whole journal screen builds and round-trips the canonical encoding."
+  "--append against a real temp datetree: the first append creates the
+file and the levels, and same-day appends share ONE day heading in order."
   (let* ((vault (glasspane-test--journal-vault))
          (org-directory vault)
          (org-agenda-files nil)
          (ebp-org-roots nil)
          (glasspane-journal-file nil)
-         (glasspane-journal--date nil)
          (today (glasspane-journal--today)))
     (unwind-protect
         (progn
-          (should-not (glasspane-journal--day-pos today))
           (glasspane-journal--append "First entry" today)
-          (should (integerp (glasspane-journal--day-pos today)))
-          (should-not (glasspane-journal--day-pos "1999-01-01"))
           (glasspane-journal--append "Second entry" today)
           (with-temp-buffer
             (insert-file-contents (expand-file-name "journal.org" vault))
@@ -3557,117 +3539,30 @@ whole journal screen builds and round-trips the canonical encoding."
             (should (= 1 (count-matches
                           (format "^\\*+[ \t]+%s\\(?:[ \t]\\|$\\)"
                                   (regexp-quote today))
-                          (point-min) (point-max)))))
-          ;; The screen clears the same serialization bar as G0's home.
-          (let ((json (jetpacs-node->canonical-json
-                       (glasspane-journal-screen nil))))
-            (should (stringp json))
-            (should (string-search "journal-capture" json))
-            (should (string-search "First entry" json))
-            ;; PA-3a retires the per-screen authored FAB.  The app registry
-            ;; injects capture only when chrome composes this screen.
-            (should-not (string-search "org.capture.show" json))))
-      (glasspane-test--journal-cleanup vault))))
-
-(ert-deftest glasspane-test-journal-carried-query ()
-  "The carry-over tree passes the wire vet UNCHANGED, the query finds
-exactly the overdue TODO, and the section's bulk mint lands in the
-\(glasspane . journal-carried) replace-set (S5)."
-  (should (equal (ebp-org--vet-query '(and (todo) (scheduled :to -1)))
-                 '(and (todo) (scheduled :to -1))))
-  (let* ((vault (glasspane-test--journal-vault))
-         (file (expand-file-name "tasks.org" vault))
-         (org-directory vault)
-         (org-agenda-files (list file))
-         (ebp-org-roots nil)
-         (overdue (jetpacs-dates-shift (glasspane-journal--today) -2 'day))
-         (upcoming (jetpacs-dates-shift (glasspane-journal--today) 2 'day)))
-    (unwind-protect
-        (progn
-          (with-temp-file file
-            (insert "#+TITLE: Tasks\n\n"
-                    "* TODO Overdue thing\n"
-                    (format "SCHEDULED: <%s>\n" overdue)
-                    "* TODO Future thing\n"
-                    (format "SCHEDULED: <%s>\n" upcoming)
-                    "* DONE Finished thing\n"
-                    (format "SCHEDULED: <%s>\n" overdue)))
-          (ebp-org-cache-invalidate)
-          (let ((items (glasspane-journal--carried-over)))
-            (should (= (length items) 1))
-            (should (equal (alist-get 'headline (car items))
-                           "Overdue thing")))
-          (let ((nodes (glasspane-journal--carried-section)))
-            (should nodes)
-            (should (string-search
-                     "Carried over (1)"
-                     (mapconcat #'jetpacs-node->canonical-json nodes "")))
-            (should (= 1 (length (gethash (cons "glasspane" "journal-carried")
-                                          ebp-org--token-sets))))
-            ;; The minted token resolves back to the overdue heading.
-            (let* ((tok (car (gethash (cons "glasspane" "journal-carried")
-                                      ebp-org--token-sets)))
-                   (ref (ebp-org-token-ref tok :owner "glasspane")))
-              (should (equal (plist-get ref :headline) "Overdue thing")))))
+                          (point-min) (point-max))))))
       (glasspane-test--journal-cleanup vault))))
 
 (ert-deftest glasspane-test-journal-handlers ()
-  "Every journal verb answers a SPEC 14.4 status: nav non-integer
-rejects (whole floats coerce), goto validates the full day shape,
-capture rejects empty input and answers `accepted' only once the
-append is ON DISK, open defers its push (D2) — and the unregister
-sweep leaves no handler and no settings section behind."
-  ;; Exercise the historical navigation family under the one-release rollback
-  ;; pole.  The final re-register below restores active alias-only composition.
-  (let ((glasspane-ui-legacy-ia t))
-    (glasspane-journal-register))
-  ;; §3 step 2 consolidation: journal registers NO section of its own;
-  ;; the landing row lives in glasspane-ui's "Glasspane" block.
+  "The deprecated `journal.capture' alias rejects empty input, answers
+`accepted' only once the append is ON DISK, neutralizes embedded newlines,
+and sweeps cleanly on unregister."
   (should-not (alist-get "Journal" jetpacs-settings-registry nil nil #'equal))
   (let* ((vault (glasspane-test--journal-vault))
          (org-directory vault)
          (org-agenda-files nil)
          (ebp-org-roots nil)
-         (glasspane-journal-file (expand-file-name "journal.org" vault))
-         (glasspane-journal--date nil)
-         (continuations nil))
+         (glasspane-journal-file (expand-file-name "journal.org" vault)))
     (unwind-protect
-        (cl-letf (((symbol-function 'jetpacs-flow-continue)
-                   (lambda (fn) (push fn continuations) nil))
-                  ((symbol-function 'jetpacs-shell-notify)
-                   (lambda (&rest _) nil))
-                  ((symbol-function 'jetpacs-toast) (lambda (&rest _) nil)))
+        (cl-letf (((symbol-function 'jetpacs-flow-continue) #'ignore)
+                  ((symbol-function 'jetpacs-shell-notify) #'ignore)
+                  ((symbol-function 'jetpacs-toast) #'ignore))
           (cl-flet ((run (name args &optional params)
                       (let ((handler (gethash name jetpacs-action-handlers)))
                         (should handler)
                         (funcall handler args params))))
-            ;; The whole table answers statuses on bare nil/nil input.
             (dolist (name glasspane-journal--verbs)
               (should (memq (run name nil nil)
                             '(accepted stale rejected))))
-            ;; journal.nav: integers move the day, whole floats coerce
-            ;; (org.json's trailing .0), junk rejects without writing.
-            (setq glasspane-journal--date "2026-08-10")
-            (should (eq (run "journal.nav" '(:delta 1)) 'accepted))
-            (should (equal glasspane-journal--date "2026-08-11"))
-            (should (eq (run "journal.nav" '(:delta -1.0)) 'accepted))
-            (should (equal glasspane-journal--date "2026-08-10"))
-            (should (eq (run "journal.nav" '(:delta "x")) 'rejected))
-            ;; Only the WHOLE float is org.json's trailing .0; half a
-            ;; day is a malformed event, not a rounding job.
-            (should (eq (run "journal.nav" '(:delta 0.5)) 'rejected))
-            (should (eq (run "journal.nav" nil) 'rejected))
-            (should (equal glasspane-journal--date "2026-08-10"))
-            ;; journal.goto: the picker's :value must be a full day.
-            (should (eq (run "journal.goto" '(:value "2026-01-02"))
-                        'accepted))
-            (should (equal glasspane-journal--date "2026-01-02"))
-            (should (eq (run "journal.goto" '(:value "2026-1-2"))
-                        'rejected))
-            (should (eq (run "journal.goto" '(:value 42)) 'rejected))
-            ;; journal.today: back to the nil-means-today rest state.
-            (should (eq (run "journal.today" nil) 'accepted))
-            (should-not glasspane-journal--date)
             ;; journal.capture: whitespace-only and non-string reject
             ;; with nothing written...
             (should (eq (run "journal.capture" '(:value "   ")) 'rejected))
@@ -3701,13 +3596,6 @@ sweep leaves no handler and no settings section behind."
                   (insert-file-contents glasspane-journal-file)
                   (goto-char (point-min))
                   (should (re-search-forward "^- hello \\* Evil$" nil t)))))
-            ;; journal.open: accepted on the strength of the deferred
-            ;; push — zero pushes inside the dispatch extent (D2).
-            (let ((before (length continuations)))
-              (should (eq (run "journal.open" nil
-                               '(:surface "app:glasspane"))
-                          'accepted))
-              (should (= (length continuations) (1+ before))))
             ;; The sweep — then re-register, so suite order never
             ;; matters.
             (glasspane-journal-unregister)
@@ -3803,9 +3691,9 @@ all pure, over fixture alists."
   (let ((span (glasspane-views--priority-span "A")))
     (should (equal (plist-get span :text) "[A] "))
     (should (equal (plist-get span :font_weight) "bold"))
-    (should (equal (plist-get span :color) "#E53935")))
+    (should (equal (plist-get span :color) "error")))
   (should (equal (plist-get (glasspane-views--priority-span "Z") :color)
-                 "#9E9E9E"))
+                 "outline"))
   (let ((card (glasspane-views--card
                '((headline . "Open") (todo . "TODO") (token . "tok")))))
     (dolist (side (list (plist-get card :swipe_start)
@@ -4059,13 +3947,7 @@ encoding, in the tabs form and the chip fallback, drag list included."
             ;; The sexp-valued Customize entry prints before parsing.
             (should (= (length (glasspane-views--items
                                 (glasspane-views--get "Sexp")))
-                       2))
-            ;; The hub carries the cards and the literal form ids.
-            (let ((json (jetpacs-node->canonical-json
-                         (glasspane-views--hub-screen nil))))
-              (dolist (id glasspane-views--form-ids)
-                (should (string-search id json)))
-              (should (string-search "Inbox" json)))))
+                       2))))
       (ebp-org-cache-invalidate)
       (ebp-org-ref-tokens nil :set "views" :owner "glasspane")
       (dolist (buf (buffer-list))
@@ -6025,10 +5907,15 @@ unknown theme, and a load that SIGNALS — never a swallowed
                   "agenda.set-month"))
     (should-not (gethash name jetpacs--any-surface-actions)))
   ;; GR-2's adapter emits its descriptors from the stable Files host, not a
-  ;; Glasspane-owned surface.  The live-document/path guards in each handler
-  ;; bound the global grant; without it D1 rejects the tap before those guards.
+  ;; Glasspane-owned surface.  The live-document/path/token guards in each
+  ;; handler bound the global grant; without it D1 rejects the tap before those
+  ;; guards.
   (dolist (name '("heading.menu" "files.filter"
-                  "files.toggle-refile" "heading.reorder"))
+                  "files.toggle-refile" "heading.reorder"
+                  "heading.tap" "heading.todo-cycle"
+                  "heading.duplicate" "heading.props.show"
+                  "heading.clock-in" "files.properties.show"
+                  "search.by-tag"))
     (should (gethash name jetpacs--any-surface-actions)))
   ;; GR-4: native capture is global intake.  Shares are attributed by the
   ;; Companion, and the capture FAB is an app opinion emitted from this
@@ -6340,7 +6227,13 @@ point: a new screen cannot ship unreachable.")
     "detail.save"
     "detail.toggle-read" "detail.section" "files.filter"
     "files.properties.save" "files.properties.show"
-    "files.toggle-refile" "glasspane.packages.install"
+    "files.toggle-refile" "glasspane.call.cancel" "glasspane.call.edit"
+    "glasspane.call.execute" "glasspane.call.save" "glasspane.checkbox"
+    "glasspane.document.open" "glasspane.files.return"
+    "glasspane.footnote.edit" "glasspane.footnote.open"
+    "glasspane.footnote.save" "glasspane.packages.install"
+    "glasspane.source.cancel" "glasspane.source.edit"
+    "glasspane.source.save"
     "heading.add-note" "heading.clock-in" "heading.delete"
     "heading.duplicate" "heading.menu" "heading.priority"
     "heading.prop-add" "heading.prop-set" "heading.props.show"
@@ -6352,7 +6245,8 @@ point: a new screen cannot ship unreachable.")
     "ef.mirror" "ef.option"
     "org.babel.execute" "org.link.open"
     "org.search.run" "org.table.add-col" "org.table.add-row"
-    "org.table.cell-menu" "org.table.edit" "resources.open-file"
+    "org.table.cell-menu" "org.table.edit" "resources.browse"
+    "resources.open-file"
     "resources.return"
     "review.habits.open"
 	    "search.by-tag"
@@ -6407,7 +6301,7 @@ Classification only — the list exists so the inventory below is total.")
     (should (member "search.open"
                     (glasspane-test--action-names
                      (glasspane-agenda-screen nil))))
-    (should-not (plist-member (glasspane-ui-home-screen nil) :drawer)))
+    (should-not (plist-member (glasspane-agenda-screen nil) :drawer)))
   ;; The app settings opener keeps the vocabulary's route through the hub.
   (let ((links (glasspane-test--action-names
                 (glasspane-test--settings-hub-nodes))))
@@ -6421,37 +6315,6 @@ Classification only — the list exists so the inventory below is total.")
     (dolist (verb glasspane-test--theme-provider-verbs)
       (should (member verb links))
       (should (gethash verb jetpacs-action-handlers)))))
-
-(ert-deftest glasspane-test-hub-drawer-carries-the-other-apps ()
-  "The rollback-only authored drawer still carries the old app projection.
-The org reader registers NO opening verb — it claims the files
-editor body seam, so a `.org' tapped in the base Files app IS its
-entry — which is why the drawer ends in `jetpacs-launcher-rows', the
-base's own drawer convention, excluding this app's own surface.  The
-launcher is absent from the batch image (present on device,
-device/init.el:44), so the guarded arm must also build to a drawer
-with no app rows at all."
-  (let ((glasspane-ui-legacy-ia t))
-    (should-not (member "jetpacs.launcher.open"
-                        (glasspane-test--action-names
-                         (glasspane-ui--home-drawer))))
-    (let (excluded)
-    (cl-letf (((symbol-function 'jetpacs-launcher-rows)
-               (lambda (&optional exclude)
-                 (setq excluded exclude)
-                 (list (jetpacs-chrome-row
-                        "Files"
-                        :icon "folder"
-                        :on-tap (jetpacs-action
-                                 "jetpacs.launcher.open"
-                                 :args '(:surface "app:jetpacs.files"))
-                        :key "lr-files")))))
-      (let ((drawer (glasspane-ui--home-drawer)))
-        (should (member "jetpacs.launcher.open"
-                        (glasspane-test--action-names drawer)))
-        (should (stringp (jetpacs-node->canonical-json drawer)))))
-      (should (equal excluded
-                     (jetpacs-shell-surface-for glasspane-owner))))))
 
 (ert-deftest glasspane-test-hub-verb-inventory ()
   "THE TRIPWIRE: every verb glasspane registers is classified as a hub
@@ -6474,26 +6337,6 @@ and a retired verb left in a list fails the other way."
     (should-not (cl-set-difference owned pinned :test #'equal))
     (should-not (cl-set-difference pinned owned :test #'equal))
     (should (= (length pinned) (length (delete-dups (copy-sequence pinned)))))))
-
-(ert-deftest glasspane-test-hub-serializes ()
-  "The flag-gated historical hub remains a valid one-release rollback."
-  (let* ((glasspane-ui-legacy-ia t)
-         (screen (glasspane-ui-home-screen nil))
-         (json (jetpacs-node->canonical-json screen))
-         (ids (jetpacs-collect-node-ids screen nil)))
-    (should (equal (plist-get screen :t) "scaffold"))
-    (should (plist-get screen :body))
-    (should (plist-get screen :drawer))
-    (should (plist-member screen :fab))
-    (should (jetpacs-check-profile screen 'app))
-    (should (equal ids (delete-dups (copy-sequence ids))))
-    (should (stringp json))
-    (should (string-search "\"agenda.open\"" json))
-    (should (string-search "Tasks" json))
-    (should (string-search "Saved views" json))
-    (should-not (string-search "Projects" json))
-    (should (string-search "\"hub-agenda\"" json))
-    (should (string-search "\"drawer-agenda\"" json))))
 
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

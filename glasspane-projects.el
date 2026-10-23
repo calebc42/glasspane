@@ -258,9 +258,7 @@ the grouping control trailing the workflow rail."
   "Build the Projects screen with BACK navigation."
   (jetpacs-chrome-screen "Projects" (glasspane-projects--body)
                          :back back
-                         :actions (glasspane-projects--top-actions)
-                         :fab (and glasspane-ui-legacy-ia
-                                   (glasspane-ui-capture-fab))))
+                         :actions (glasspane-projects--top-actions)))
 
 ;;;; Actions and lifecycle
 

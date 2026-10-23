@@ -532,8 +532,8 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
     (should (gethash name jetpacs-action-handlers))
     (should (equal (jetpacs--owner-of "action" name) "glasspane")))
   (should (member "areas.open"
-                  (glasspane-para-test--action-names
-                   (glasspane-ui-home-screen nil))))
+                  (mapcar (lambda (dest) (plist-get dest :verb))
+                          glasspane-ui-destinations)))
   (unwind-protect
       (progn
         (glasspane-areas-unregister)
@@ -570,7 +570,6 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
 (ert-deftest glasspane-para-resources-delegates-every-path-to-files ()
   "Vault, Org, and non-Org paths all take the one public Files route."
   (let ((org-directory "/vault")
-        (glasspane-ui-legacy-ia nil)
         calls)
     (cl-letf (((symbol-function 'jetpacs-feature-advertised-p)
                (lambda (&rest _) t))
@@ -688,8 +687,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
 
 (ert-deftest glasspane-para-resources-local-back-handoffs-are-bounded ()
   "Files returns direct rows to their exact origin and Resources to Agenda."
-  (let ((glasspane-ui-legacy-ia nil)
-        (jetpacs-apps--current "glasspane")
+  (let ((jetpacs-apps--current "glasspane")
         (jetpacs-apps--current-route "areas")
         (files (glasspane-resources--files-surface))
         opened pushed continued)
@@ -700,20 +698,18 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
               ((symbol-function 'jetpacs-shell-push)
                (lambda (surface &rest _) (push surface pushed) 1)))
       ;; Back from a direct Areas/Archive file reaches the caller-owned
-      ;; return screen, then re-presents the untouched Glasspane stack.
-      ;; NAVIGATION.org: the navigation module alone owns that return.
-      (glasspane-navigation--on-view-change
-       files (jetpacs-chrome-guest-screen-id "glasspane" "files-return"))
-      (glasspane-resources--on-view-change
+      ;; return screen, then re-presents the untouched Glasspane stack via
+      ;; Jetpacs Files' cross-surface return observer.
+      (jetpacs-files--on-view-change
        files (jetpacs-chrome-guest-screen-id "glasspane" "files-return"))
       (should continued)
       (should (equal pushed '("app:glasspane")))
       (should-not opened)
       ;; The Resources browser's own Back reaches Files' root, then resets
-      ;; the cross-surface destination to Agenda exactly once.
+      ;; the cross-surface destination to Agenda (`:home-route') exactly once.
       (setq continued nil pushed nil
             jetpacs-apps--current-route "resources")
-      (glasspane-resources--on-view-change files "browser")
+      (jetpacs-files--on-view-change files "browser")
       (should (equal (seq-take opened 2)
                      '("agenda" "glasspane-agenda")))
       (should (eq (nth 2 opened) #'glasspane-agenda-screen))
@@ -722,8 +718,8 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
       (should-not pushed)
       ;; Foreign views and a non-Glasspane current app cannot hijack Back.
       (setq opened nil jetpacs-apps--current "other")
-      (glasspane-resources--on-view-change files "browser")
-      (glasspane-resources--on-view-change
+      (jetpacs-files--on-view-change files "browser")
+      (jetpacs-files--on-view-change
        "app:other"
        (jetpacs-chrome-guest-screen-id "glasspane" "files-return"))
       (should-not opened)
@@ -738,10 +734,11 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
   (should (equal
            (plist-get (jetpacs-action-schema "resources.open-file") :args)
            '((:name path :type "text" :required t))))
-  (let ((home-actions
-         (glasspane-para-test--action-names (glasspane-ui-home-screen nil))))
-    (should (member "resources.open" home-actions))
-    (should-not (member "resources.open-file" home-actions)))
+  (let ((dest-verbs
+         (mapcar (lambda (dest) (plist-get dest :verb))
+                 glasspane-ui-destinations)))
+    (should (member "resources.open" dest-verbs))
+    (should-not (member "resources.open-file" dest-verbs)))
   (unwind-protect
       (progn
         (glasspane-resources-unregister)
@@ -1178,7 +1175,6 @@ dispatches the other one through the existing `projects.group' verb."
   (let ((glasspane-projects--filter "ALL")
         (glasspane-projects--area-filter nil)
         (glasspane-projects--group "file")
-        (glasspane-ui-legacy-ia nil)
         (items '(((headline . "Alpha") (todo . "TODO")
                   (file . "/vault/alpha.org")))))
     (cl-letf (((symbol-function 'glasspane-org-todo-items)
@@ -1545,10 +1541,11 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
     (should (eq (gethash name jetpacs-action-handlers)
                 #'glasspane-projects--on-open))
     (should (equal (jetpacs--owner-of "action" name) "glasspane")))
-  (let ((home-actions
-         (glasspane-para-test--action-names (glasspane-ui-home-screen nil))))
-    (should-not (member "tasks.open" home-actions))
-    (should (member "projects.open" home-actions)))
+  (let ((dest-verbs
+         (mapcar (lambda (dest) (plist-get dest :verb))
+                 glasspane-ui-destinations)))
+    (should-not (member "tasks.open" dest-verbs))
+    (should (member "projects.open" dest-verbs)))
   (let (pushed)
     (cl-letf (((symbol-function 'jetpacs-flow-continue)
                (lambda (fn) (funcall fn)))
@@ -1716,7 +1713,6 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
 
 (ert-deftest glasspane-para-pa3a-destination-table-flips-exactly ()
   "The one table names exactly five bar places plus drawer-only Archive."
-  (should-not glasspane-ui-legacy-ia)
   (should
    (equal
     (mapcar (lambda (dest)
@@ -1748,88 +1744,28 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
   (should (equal (plist-get (cdr (assoc glasspane-owner
                                          jetpacs-apps--registry))
                             :home-route)
-                 "agenda"))
-  (let* ((screen (glasspane-ui-home-screen nil))
-         (body-actions
-          (glasspane-para-test--action-names (plist-get screen :body)))
-         (drawer-actions
-          (glasspane-para-test--action-names (plist-get screen :drawer))))
-    (should (equal (sort (copy-sequence body-actions) #'string<)
-                   '("agenda.open" "areas.open" "projects.open"
-                     "resources.open" "review.open")))
-    (should-not (member "archive.open" body-actions))
-    (should-not drawer-actions)
-    (should-not (plist-member screen :drawer))
-    (dolist (verb '("tasks.open" "journal.open" "org.capture.show"
-                    "search.open" "views.hub"))
-      (should-not (member verb
-                          (glasspane-para-test--action-names screen))))
-    ;; The registry owns capture now; an absent member, not an authored
-    ;; nil, is what lets the chrome join fill the slot.
-    (should-not (plist-member screen :fab))))
+                 "agenda")))
 
 (ert-deftest glasspane-para-resources-actions-select-native-files-locally ()
   "Every Resources handoff carries the receiver-local Files destination."
   (let* ((dest (cl-find "resources" glasspane-ui-destinations
                         :key (lambda (item) (plist-get item :key))
                         :test #'equal))
-         (home-tap (plist-get (glasspane-ui--destination-row dest "test-")
-                              :on_tap))
          (host-tap (plist-get
                     (jetpacs-apps--destination-row glasspane-owner dest)
                     :on_tap)))
-    (should (equal (plist-get home-tap :action) "resources.open"))
-    (should (equal (plist-get home-tap :open_surface)
-                   "app:jetpacs.files"))
+    (should (equal (plist-get dest :verb) "resources.open"))
+    (should (equal (plist-get dest :open-surface) "app:jetpacs.files"))
     (should (equal (plist-get host-tap :action) "app.open"))
     (should (equal (plist-get host-tap :open_surface)
                    "app:jetpacs.files"))))
 
 (ert-deftest glasspane-para-pa3a-legacy-rollback-restores-old-ia ()
-  "The soak flag restores the old table, hand dock, and authored FAB."
-  (let ((original glasspane-ui-legacy-ia))
-    (unwind-protect
-        (progn
-          (setq glasspane-ui-legacy-ia t)
-          (glasspane-register)
-          (let* ((entry (assoc glasspane-owner jetpacs-apps--registry))
-                 (plist (cdr entry))
-                 (screen (glasspane-ui-home-screen nil)))
-            (should (equal (jetpacs-chrome-stack glasspane-owner)
-                           '("home")))
-            (should-not
-             (plist-get (cdr (assoc (jetpacs-shell-surface-for
-                                     glasspane-owner)
-                                    jetpacs-shell--roots))
-                        :required))
-            (should-not (plist-get plist :chrome))
-            (should (plist-get plist :dock-core))
-            (should (eq (plist-get plist :dock) #'glasspane--dock-items))
-            (should-not (plist-get plist :fab))
-            (should
-             (equal (mapcar (lambda (dest) (plist-get dest :key))
-                            (glasspane-ui-active-destinations))
-                    '("agenda" "tasks" "journal" "capture" "search"
-                      "views" "review")))
-            (should
-             (equal (mapcar (lambda (dest) (plist-get dest :key))
-                            (jetpacs-apps-destinations glasspane-owner))
-                    '("agenda" "tasks" "journal" "search" "views"
-                      "review")))
-            (should (plist-member screen :fab))
-            (should (member "org.capture.show"
-                            (glasspane-para-test--action-names screen)))
-            (should (memq #'glasspane-journal--apply-landing
-                          jetpacs-ready-functions))
-            (should (memq #'glasspane-journal--on-view-change
-                          jetpacs-shell-view-change-functions))
-            (should-not (memq #'glasspane-ui--on-view-change
-                              jetpacs-shell-view-change-functions))
-            (should (assq 'glasspane-journal-landing
-                          (alist-get "Glasspane" jetpacs-settings-registry
-                                     nil nil #'equal)))))
-      (setq glasspane-ui-legacy-ia original)
-      (glasspane-register)))
+  "PA-4 retires the legacy IA rollback flag, hub screen, and journal landing."
+  (should-not (boundp 'glasspane-ui-legacy-ia))
+  (should-not (fboundp 'glasspane-ui-home-screen))
+  (should-not (fboundp 'glasspane--dock-items))
+  (should-not (boundp 'glasspane-journal-landing))
   (let ((plist (cdr (assoc glasspane-owner jetpacs-apps--registry))))
     (should (equal (jetpacs-chrome-stack glasspane-owner)
                    '("glasspane-agenda")))
@@ -1840,15 +1776,8 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
     (should (eq (plist-get plist :chrome) 'primary))
     (should-not (plist-get plist :dock-core))
     (should-not (plist-get plist :dock))
-    (should-not (memq #'glasspane-journal--apply-landing
-                      jetpacs-ready-functions))
-    (should-not (memq #'glasspane-journal--on-view-change
-                      jetpacs-shell-view-change-functions))
-    (should (memq #'glasspane-ui--on-view-change
-                  jetpacs-shell-view-change-functions))
-    (should-not (assq 'glasspane-journal-landing
-                      (alist-get "Glasspane" jetpacs-settings-registry
-                                 nil nil #'equal)))))
+    (should (memq #'jetpacs-apps--on-view-change
+                  jetpacs-shell-view-change-functions))))
 
 (ert-deftest glasspane-para-pa3a-primary-bar-and-drawer-composition ()
   "The real Glasspane metadata yields the exact bar and selective drawer."
@@ -1913,7 +1842,7 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
                     "Authored" (jetpacs-text "authored")
                     :fab authored-fab))
          (default (jetpacs-apps-default-fab glasspane-owner surface)))
-    (should-not (plist-member (glasspane-ui-home-screen nil) :fab))
+    (should-not (plist-member (glasspane-agenda-screen nil) :fab))
     (should default)
     (should (equal (glasspane-para-test--action-names default)
                    '("org.capture.show")))
@@ -2043,7 +1972,6 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
   (let ((surface (jetpacs-shell-surface-for glasspane-owner))
         (jetpacs-apps--current glasspane-owner)
         (jetpacs-apps--current-route "agenda")
-        (glasspane-ui-legacy-ia nil)
         pending pushes)
     (glasspane-register)
     (unwind-protect
@@ -2076,37 +2004,42 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
         (jetpacs-apps--current glasspane-owner)
         (jetpacs-apps--current-route "projects")
         scheduled)
-    (should (equal (glasspane-ui--route-for-screen "glasspane-agenda")
+    (should (equal (jetpacs-apps-route-for-screen
+                    glasspane-owner "glasspane-agenda")
                    "agenda"))
-    (should (equal (glasspane-ui--route-for-screen "glasspane-projects")
+    (should (equal (jetpacs-apps-route-for-screen
+                    glasspane-owner "glasspane-projects")
                    "projects"))
-    (should (equal (glasspane-ui--route-for-screen "glasspane-areas")
+    (should (equal (jetpacs-apps-route-for-screen
+                    glasspane-owner "glasspane-areas")
                    "areas"))
-    (should (equal (glasspane-ui--route-for-screen
-                    (jetpacs-wire-id "area" "Home"))
+    (should (equal (jetpacs-apps-route-for-screen
+                    glasspane-owner (jetpacs-wire-id "area" "Home"))
                    "areas"))
-    (should (equal (glasspane-ui--route-for-screen "glasspane-archive")
+    (should (equal (jetpacs-apps-route-for-screen
+                    glasspane-owner "glasspane-archive")
                    "archive"))
-    (should (equal (glasspane-ui--route-for-screen "glasspane-review")
+    (should (equal (jetpacs-apps-route-for-screen
+                    glasspane-owner "glasspane-review")
                    "review"))
-    (should (equal (glasspane-ui--route-for-screen
-                    (jetpacs-wire-id "view" "Inbox"))
+    (should (equal (jetpacs-apps-route-for-screen
+                    glasspane-owner (jetpacs-wire-id "view" "Inbox"))
                    "agenda"))
     (dolist (view '("glasspane-detail" "glasspane-search" "drill-tag"))
-      (should-not (glasspane-ui--route-for-screen view)))
+      (should-not (jetpacs-apps-route-for-screen glasspane-owner view)))
     (cl-letf (((symbol-function 'jetpacs-shell--schedule-repush)
                (lambda (seen) (push seen scheduled))))
       ;; Re-reporting the already-selected destination is free.
-      (glasspane-ui--on-view-change surface "glasspane-projects")
-      (glasspane-ui--on-view-change surface "glasspane-detail")
+      (jetpacs-apps--on-view-change surface "glasspane-projects")
+      (jetpacs-apps--on-view-change surface "glasspane-detail")
       (should-not scheduled)
       ;; Back to root changes route exactly once.
-      (glasspane-ui--on-view-change surface "glasspane-agenda")
-      (glasspane-ui--on-view-change surface "glasspane-agenda")
+      (jetpacs-apps--on-view-change surface "glasspane-agenda")
+      (jetpacs-apps--on-view-change surface "glasspane-agenda")
       (should (equal scheduled (list surface)))
       (should (equal jetpacs-apps--current-route "agenda"))
       ;; A foreign surface cannot rewrite Glasspane's route.
-      (glasspane-ui--on-view-change "app:foreign" "glasspane-review")
+      (jetpacs-apps--on-view-change "app:foreign" "glasspane-review")
       (should (equal scheduled (list surface)))
       (should (equal jetpacs-apps--current-route "agenda")))))
 
@@ -2161,7 +2094,6 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
 (ert-deftest glasspane-para-pa3c-slot-eviction-and-detail-reentry ()
   "Area peers replace; search evicts the peer; detail re-entry truncates."
   (let ((surface (jetpacs-shell-surface-for glasspane-owner))
-        (glasspane-ui-legacy-ia nil)
         (jetpacs-apps--current glasspane-owner)
         (jetpacs-apps--current-route "agenda"))
     (glasspane-register)
@@ -2204,7 +2136,6 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
   "Resources owns selection; Files hosts it; a bar peer returns home-side."
   (let ((surface (jetpacs-shell-surface-for glasspane-owner))
         (files-surface (jetpacs-shell-surface-for jetpacs-files-owner))
-        (glasspane-ui-legacy-ia nil)
         (org-directory "/vault")
         opened)
     (glasspane-register)
@@ -2302,7 +2233,6 @@ current route into Resources."
            (token (car (ebp-org-ref-tokens
                         (list ref) :set "pa3c-jump" :owner "glasspane")))
            (jetpacs-apps--current-route "projects")
-           (glasspane-ui-legacy-ia nil)
            opened)
       (unwind-protect
           (cl-letf (((symbol-function 'jetpacs-flow-continue)
@@ -2439,8 +2369,7 @@ current route into Resources."
 
 (ert-deftest glasspane-para-pa3d-search-is-destination-action-only ()
   "Search appears once on every authored destination, never on Search/detail."
-  (let ((glasspane-ui-legacy-ia nil)
-        (glasspane-srs--active nil))
+  (let ((glasspane-srs--active nil))
     (cl-letf (((symbol-function 'glasspane-agenda--today-count)
                (lambda () 0))
               ((symbol-function 'glasspane-agenda-body)

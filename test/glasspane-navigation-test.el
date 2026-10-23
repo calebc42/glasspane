@@ -32,8 +32,7 @@
 
 (ert-deftest glasspane-navigation-test-canonical-document-policy ()
   "A document open fixes Files, reader, Back screen, and return policy."
-  (let ((glasspane-ui-legacy-ia nil)
-        events)
+  (let (events)
     (cl-letf (((symbol-function 'jetpacs-feature-advertised-p)
                (lambda (feature target)
                  (and (equal feature "action.open_surface")
@@ -230,21 +229,50 @@ buffer without a file is left to the foundation drill."
     (should (equal (nreverse owners) '("glasspane-navigation.el")))))
 
 (ert-deftest glasspane-navigation-test-lifecycle-is-symmetric ()
-  "Canonical actions and the Back observer register and unregister together."
+  "Canonical actions register and unregister while Files owns the Back observer."
   (unwind-protect
       (progn
         (glasspane-navigation-register)
         (dolist (verb glasspane-navigation--verbs)
           (should (gethash verb jetpacs-action-handlers))
           (should (equal (jetpacs--owner-of "action" verb) "glasspane")))
-        (should (memq #'glasspane-navigation--on-view-change
+        (should (memq #'jetpacs-files--on-view-change
                       jetpacs-shell-view-change-functions))
         (glasspane-navigation-unregister)
         (dolist (verb glasspane-navigation--verbs)
-          (should-not (gethash verb jetpacs-action-handlers)))
-        (should-not (memq #'glasspane-navigation--on-view-change
-                          jetpacs-shell-view-change-functions)))
+          (should-not (gethash verb jetpacs-action-handlers))))
     (glasspane-navigation-register)))
+
+(ert-deftest glasspane-navigation-test-reader-actions-admitted-on-files-surface ()
+  "Reader-emitted detail, tag, and return actions pass D1 on the Files surface."
+  (dolist (verb '("heading.tap" "heading.todo-cycle"
+                  "heading.duplicate" "heading.props.show"
+                  "heading.clock-in" "files.properties.show"
+                  "search.by-tag"
+                  "jetpacs.files.return"
+                  "glasspane.files.return" "resources.return"))
+    (should (gethash verb jetpacs-action-handlers))
+    (should (gethash verb jetpacs--any-surface-actions))))
+
+(ert-deftest glasspane-navigation-test-evicted-return-screen-falls-back-on-browser ()
+  "When a 3-screen reader drill evicts `guest-glasspane-files-return', Back to
+Files' root `browser' view still completes the armed Glasspane return once."
+  (let ((jetpacs-apps--current "glasspane")
+        (jetpacs-apps--current-route "projects")
+        (jetpacs-files--return-armed "app:glasspane")
+        (returns 0))
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-shell-push)
+               (lambda (surface &rest _)
+                 (when (equal surface (jetpacs-shell-surface-for "glasspane"))
+                   (cl-incf returns)))))
+      (jetpacs-files--on-view-change "app:jetpacs.files" "browser")
+      (should (= returns 1))
+      (should-not jetpacs-files--return-armed)
+      ;; Subsequent `browser' view transitions do not re-trigger the return.
+      (jetpacs-files--on-view-change "app:jetpacs.files" "browser")
+      (should (= returns 1)))))
 
 (provide 'glasspane-navigation-test)
 ;;; glasspane-navigation-test.el ends here

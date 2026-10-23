@@ -10,13 +10,10 @@
 ;; `glasspane-ui-at-ref' — the token→resolve→classify funnel every
 ;; heading mutation in G4+ rides.
 ;;
-;; It also holds the rollback-only HUB (`glasspane-ui-home-screen', the
-;; hub-wiring rung that punch-list #26 escalated), the authoritative PARA
-;; destination table, and the capture FAB descriptor PA-3a contributes to
-;; Jetpacs' app registry.  PA-3b replaced that hub root with Agenda; the hub
-;; remains executable only behind `glasspane-ui-legacy-ia' until PA-4.  These
-;; live beside shared state rather than in the entry so the entry keeps its
-;; single job — identity and composition metadata.
+;; It also holds the authoritative PARA destination table and the capture FAB
+;; descriptor PA-3a contributes to Jetpacs' app registry.  These live beside
+;; shared state rather than in the entry so the entry keeps its single job —
+;; identity and composition metadata.
 ;;
 ;; Retired against v1 (the plan's retirement list + G3 section):
 ;;
@@ -54,6 +51,7 @@
 (require 'ebp-org)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
+(require 'jetpacs-material3)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
 (require 'jetpacs-apps)
@@ -403,20 +401,13 @@ App layers contribute chip nodes after the built-in Refile/Archive
 pair; each returns a node list or nil.  An erroring function costs
 its own chips, never the toolbar.")
 
-;;;; PARA composition rollback and capture FAB
-
-(defvar glasspane-ui-legacy-ia nil
-  "Non-nil restores Glasspane's pre-PARA navigation composition.
-This is the PA-3/PA-4 soak rollback seam, not a user preference.  Change it
-before calling `glasspane-register': registration snapshots the selected
-integration pole while the screen builders read it at render time.")
+;;;; PARA destinations, navigation, and capture FAB
 
 (defun glasspane-ui-capture-fab (&optional _surface)
   "Return Glasspane's app-default capture FAB.
 SURFACE is accepted for the `jetpacs-defapp' FAB-builder contract and is
-otherwise unused.  In the PARA composition Jetpacs injects this node only
-onto Glasspane-owned screens; the legacy rollback arm still authors it on
-each historical daily screen.  The coupling to glasspane-capture.el is the
+otherwise unused.  Jetpacs injects this node only onto Glasspane-owned
+screens.  The coupling to the upstream `jetpacs-org-capture' owner is the
 verb string alone — an early tap is rejected by the action shim, never a
 signal."
   ;; `note_add', not `add': the FAB rides Glasspane's Files guest too,
@@ -428,66 +419,26 @@ signal."
 (defun glasspane-ui-top-actions ()
   "Return Glasspane's destination-level top-bar actions.
 Search is an app navigation opinion, so Glasspane authors its placement while
-the shared chrome remains unaware of the downstream destination.  The rollback
-composition keeps its historical bars byte-for-byte until PA-4 removes it."
-  (unless glasspane-ui-legacy-ia
-    (list (jetpacs-icon-button "search" (jetpacs-action "search.open")
-                               :content-description "Search"))))
+the shared chrome remains unaware of the downstream destination."
+  (list (jetpacs-icon-button "search" (jetpacs-action "search.open")
+                             :content-description "Search")))
 
 ;; The PA-3d plan recorded this spelling before the sibling-private boundary
 ;; was enforced.  Keep it as a local compatibility name while screen modules
 ;; consume the public function above.
 (defalias 'glasspane-ui--top-actions #'glasspane-ui-top-actions)
 
-;;;; The hub (the home screen every ported surface hangs off)
-;;
-;; Punch-list #26: through G8 the app registered a dozen screen-opening
-;; verbs and nothing emitted one — the G0 placeholder home was still the
-;; root, so agenda/journal/search/views/review were code no finger could
-;; reach.  The hub is the fix, and it lives HERE rather than in the entry
-;; because this file already owns the shared view state and the FAB the
-;; daily screens hang off; the entry keeps its one job, identity.
-
-;; The entry's identity constants, declared for the compiler: this file
-;; is `require'd BY glasspane.el, so a back-require would cycle.  Read
-;; late (a screen builds long after the entry finished loading) — the
-;; `glasspane-ui--on-teardown' rule, applied to a string.
-(defvar glasspane-title)
-
-(defconst glasspane-ui--legacy-destinations
-  '((:key "agenda" :label "Agenda" :icon "event"
-     :subtitle "Today's schedule, deadlines, and the month grid"
-     :verb "agenda.open")
-    (:key "tasks" :label "Tasks" :icon "task_alt"
-     :subtitle "Every TODO, under its keyword filter"
-     :verb "tasks.open")
-    (:key "journal" :label "Journal" :icon "calendar_today"
-     :subtitle "The datetree day, with what carried over"
-     :verb "journal.open")
-    (:key "capture" :label "Capture" :icon "add_circle"
-     :subtitle "File a note through an org capture template"
-     :verb "org.capture.show")
-    (:key "search" :label "Search" :icon "search"
-     :subtitle "Query the vault offline, with the filter builder"
-     :verb "search.open")
-    (:key "views" :label "Saved views" :icon "manage_search"
-     :subtitle "Named queries as lists, boards, and calendars"
-     :verb "views.hub")
-    (:key "review" :label "Review" :icon "school"
-     :subtitle "Flashcards due today, and notes gone stale"
-     :verb "review.open"))
-  "The pre-PARA hub rows retained only by `glasspane-ui-legacy-ia'.")
-
 (defconst glasspane-ui-destinations
   '((:key "agenda" :label "Agenda" :icon "event"
      :subtitle "Today's schedule, deadlines, and the month grid"
-     :verb "agenda.open" :badge glasspane-agenda-dock-badge :bar t)
+     :verb "agenda.open" :badge glasspane-agenda-dock-badge :bar t
+     :screen-prefix "view-")
     (:key "projects" :label "Projects" :icon "task_alt"
      :subtitle "Every TODO heading, grouped by file or Area"
      :verb "projects.open" :bar t)
     (:key "areas" :label "Areas" :icon "category"
      :subtitle "Members of the Area tag group, with their open work"
-     :verb "areas.open" :bar t)
+     :verb "areas.open" :bar t :screen-prefix "area-")
     (:key "resources" :label "Resources" :icon "topic"
      :subtitle "Every live file in the vault, in Files"
      :verb "resources.open" :open-surface "app:jetpacs.files" :bar t)
@@ -499,11 +450,10 @@ composition keeps its historical bars byte-for-byte until PA-4 removes it."
      :verb "archive.open" :bar nil))
   "Glasspane's authoritative PARA destinations, in navigation order.
 ONE table feeds the host destination registry, the five-item primary bar,
-the temporary hub body, and both drawer projections.  `:bar' nil makes
-Archive a deep-linkable drawer destination without spending a bar slot.
-Each `:verb' is registered by the sibling module that owns the screen; the
-coupling is the wire string alone, so an early tap is rejected by the action
-shim rather than signalling.
+and the host drawer projection.  `:bar' nil makes Archive a deep-linkable
+drawer destination without spending a bar slot.  Each `:verb' is registered
+by the sibling module that owns the screen; the coupling is the wire string
+alone, so an early tap is rejected by the action shim rather than signalling.
 
 Subtitles are STATIC on purpose.  Chrome rebuilds every screen on the
 stack for every push, so a live count here would re-extract org on
@@ -514,171 +464,11 @@ No Notes row: glasspane-notes owns no screen of its own — its surfaces
 are the detail view's backlinks/mentions sections and the Review
 screen's stale-files half, both reached from rows that ARE here.")
 
-(defun glasspane-ui-active-destinations ()
-  "Return the destination table selected by the PA-3 rollback seam."
-  (if glasspane-ui-legacy-ia
-      glasspane-ui--legacy-destinations
-    glasspane-ui-destinations))
-
 (defun glasspane-ui-open-destination (route id builder &optional params)
   "Open Glasspane destination ROUTE as peer screen ID via BUILDER.
-PARAMS is the originating action event.  In the PARA composition every
-Tier-1 destination first abandons the previous destination and its drills
-without presenting the root, then pushes its own screen in one update.
-Agenda is the pinned-root exception: its pushed
-ID equals the root ID, so chrome's same-ID truncation performs the reset in
-one operation.  The legacy rollback arm retains the historical plain-push
-stack shape.
-
-The selected route is recorded before the deferred push so the snapshot built
-for direct or interactive navigation has honest primary-bar selection.  The
-handler's effect remains outside the dispatch extent and presentation failures
-stay isolated there.  Return `accepted'."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane")))
-        (legacy glasspane-ui-legacy-ia))
-    (unless legacy
-      (jetpacs-apps-note-route "glasspane" route))
-    (jetpacs-flow-continue
-     (lambda ()
-       (condition-case err
-           (progn
-             (unless (or legacy (equal id "glasspane-agenda"))
-               (jetpacs-chrome-reset-screens surface t))
-             (jetpacs-chrome-push-screen
-              surface id
-              ;; A Tier-1 destination is a peer of the root, reached from
-              ;; the bar or rail beside it; a back arrow there is the
-              ;; rail's own job done twice.  Drills keep theirs.  The
-              ;; destination's screen id is "glasspane-<route>".
-              (if (and (not legacy) (equal id (concat "glasspane-" route)))
-                  (lambda (_back) (funcall builder nil))
-                builder)))
-         (error (message "glasspane: %s destination push failed: %s"
-                         id (jetpacs-error-label err))))))
-    'accepted))
-
-(defun glasspane-ui--route-for-screen (view)
-  "Return the primary route represented by chrome screen id VIEW.
-Transient detail/search/drill screens deliberately return nil: their origin
-remains selected while they are on top."
-  (when (stringp view)
-    (cond
-     ((equal view "glasspane-agenda") "agenda")
-     ((equal view "glasspane-projects") "projects")
-     ((or (equal view "glasspane-areas")
-          (string-prefix-p "area-" view))
-      "areas")
-     ((equal view "glasspane-resources") "resources")
-     ((equal view "glasspane-archive") "archive")
-     ((equal view "glasspane-review") "review")
-     ((string-prefix-p "view-" view) "agenda"))))
-
-(defun glasspane-ui--on-view-change (surface view)
-  "Keep Glasspane's primary route honest after a local switch to VIEW.
-Only a route-changing switch schedules a bounded repush; switching between a
-destination and one of its drills therefore costs no extra frame."
-  (when (and (not glasspane-ui-legacy-ia)
-             (jetpacs-owned-surface-p surface "glasspane"))
-    (when-let* ((route (glasspane-ui--route-for-screen view)))
-      (when (jetpacs-apps-note-route "glasspane" route)
-        (jetpacs-shell--schedule-repush surface)))))
-
-(defun glasspane-ui--home-destinations ()
-  "Return the destinations projected into the temporary hub body.
-The legacy hub shows every historical row.  The PARA hub mirrors the
-persistent bar, leaving drawer-only Archive in the drawer."
-  (if glasspane-ui-legacy-ia
-      (glasspane-ui-active-destinations)
-    (cl-remove-if (lambda (dest)
-                    (and (plist-member dest :bar)
-                         (null (plist-get dest :bar))))
-                  (glasspane-ui-active-destinations))))
-
-(defun glasspane-ui--destination-row (dest prefix)
-  "One `jetpacs-chrome-row' for DEST, keyed under PREFIX.
-The body and the drawer ship in the SAME document, so the two copies
-of a destination need distinct SPEC 16.5 keys — the key is the
-reconciler's identity for the row, not a label."
-  (jetpacs-chrome-row (plist-get dest :label)
-                      :subtitle (plist-get dest :subtitle)
-                      :icon (plist-get dest :icon)
-                      :on-tap
-                      (if-let* ((surface (plist-get dest :open-surface)))
-                          (jetpacs-shell-action-opening-surface
-                           (plist-get dest :verb) surface)
-                        (jetpacs-action (plist-get dest :verb)))
-                      :key (concat prefix (plist-get dest :key))))
-
-(defun glasspane-ui--home-body ()
-  "The hub body: one tappable row per destination."
-  (apply #'jetpacs-lazy-column
-         (append (mapcar (lambda (dest)
-                           (glasspane-ui--destination-row dest "hub-"))
-                         (glasspane-ui--home-destinations))
-                 (list :spacing 8 :content-padding 12))))
-
-(declare-function jetpacs-launcher-rows "jetpacs-launcher" (&optional exclude))
-
-(defun glasspane-ui--drawer-app-rows ()
-  "The OTHER apps' destinations for the drawer's foot, or nil.
-`jetpacs-launcher-rows' is the base's own drawer convention
-\(jetpacs-launcher.el) and it is how the org reader is reachable at
-all: the reader claims the files editor body seam and registers no
-opening verb, so a `.org' tapped in Files IS its entry point.
-Resolved at render time (the `glasspane-srs-stale-section' idiom), so
-the hub still builds in an image without the launcher — the batch
-suite's, and any device profile that drops it.  Excludes this app's
-own surface: a row to where you already are is not a destination."
-  (when (fboundp 'jetpacs-launcher-rows)
-    (condition-case nil
-        (when-let* ((rows (jetpacs-launcher-rows
-                           (jetpacs-shell-surface-for "glasspane"))))
-          (append (list (jetpacs-divider) (jetpacs-section-header "Apps"))
-                  rows))
-      (error nil))))
-
-(defun glasspane-ui--home-drawer ()
-  "The navigation drawer: the app's canonical destination list.
-Home first (the root the stack resets to), then the body's own
-destinations, then the app's settings screen, then the other apps.
-Destinations only, never a document mutation, and every row is
-reachable elsewhere — M-x for the commands, the Settings root for the
-app's hub entry (docs/CHROME-VOCABULARY.md).  Authored on the ROOT screen
-alone: chrome renders the stack as one multi_view, and a drawer
-repeated on every pushed screen would duplicate its rows in the same
-document."
-  (apply #'jetpacs-column
-         (append
-          (list (jetpacs-chrome-row "Home"
-                                    :subtitle "The hub"
-                                    :icon "home"
-                                    :on-tap (jetpacs-action "glasspane.home")
-                                    :key "drawer-home"))
-          (mapcar (lambda (dest)
-                    (glasspane-ui--destination-row dest "drawer-"))
-                  (glasspane-ui-active-destinations))
-          (list (jetpacs-chrome-row
-                 "Settings"
-                 :subtitle "Saved searches"
-                 :icon "settings"
-                 :on-tap (jetpacs-action "glasspane.settings.open")
-                 :key "drawer-settings"))
-          (glasspane-ui--drawer-app-rows)
-          (list :spacing 4 :scroll t))))
-
-(defun glasspane-ui-home-screen (back)
-  "The app's home screen: the hub `glasspane-register' defines as root.
-BACK is the chrome builder contract's argument — nil at the stack
-bottom, which is where this screen lives.  In the PARA composition the
-screen leaves its FAB slot absent for the app registry to inject Capture;
-the rollback arm authors the historical FAB directly."
-  (jetpacs-chrome-screen
-   glasspane-title
-   (glasspane-ui--home-body)
-   :back back
-   :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab))
-   :drawer (and glasspane-ui-legacy-ia (glasspane-ui--home-drawer))))
+PARAMS is the originating action event.  Delegates to the generic
+`jetpacs-app-open-destination' foundation helper."
+  (jetpacs-app-open-destination "glasspane" route id builder params))
 
 ;;;; The at-ref funnel (S4/S5 — the classifier every later rung copies)
 
@@ -1286,8 +1076,6 @@ for a desktop M-x."
   "Detach everything `glasspane-ui-register' hooked."
   (remove-hook 'jetpacs-shell-refresh-hook
                #'glasspane-ui--refresh-invalidate)
-  (remove-hook 'jetpacs-shell-view-change-functions
-               #'glasspane-ui--on-view-change)
   (remove-hook 'org-clock-in-hook #'glasspane-ui--refresh-if-connected)
   (remove-hook 'org-clock-out-hook #'glasspane-ui--refresh-if-connected)
   (remove-hook 'jetpacs-teardown-functions #'glasspane-ui--on-teardown))
@@ -1377,22 +1165,16 @@ registry entries in place, and the keyed hub entry is replaced."
                        :doc "Set the agenda calendar's displayed month")
     ;; The app's own section — CONSOLIDATED (§3 step 2's recorded
     ;; opportunity): Babel timeout and Packages auto-install share ONE
-    ;; "Glasspane" section.  Journal landing rejoins them only in the
-    ;; legacy rollback arm; active PARA navigation always lands on Agenda.
-    ;; The sibling defcustoms stay where they live; this is the single
-    ;; registration site, so glasspane-journal/glasspane-packages no longer
-    ;; register sections of their own.  All plain: none feeds a memoised
+    ;; "Glasspane" section.  The sibling defcustoms stay where they live;
+    ;; this is the single registration site, so glasspane-packages no longer
+    ;; registers a section of its own.  All plain: none feeds a memoised
     ;; extraction.
     (jetpacs-settings-register-section
      "Glasspane"
-     (append
-      (list (list 'glasspane-babel-timeout
-                  :label "Babel run timeout (s)"))
-      (when glasspane-ui-legacy-ia
-        (list (list 'glasspane-journal-landing
-                    :label "Open on the journal")))
-      (list (list 'glasspane-packages-auto-install
-                  :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)"))))
+     (list (list 'glasspane-babel-timeout
+                 :label "Babel run timeout (s)")
+           (list 'glasspane-packages-auto-install
+                 :label "Auto-install packages (org-ql, vulpea, org-srs, ef-themes)")))
     (jetpacs-settings-remove-hub-entry "glasspane")
     (jetpacs-settings-register-hub-entry
      "glasspane" :order 40 :icon "menu_book"
@@ -1400,12 +1182,7 @@ registry entries in place, and the keyed hub entry is replaced."
      :subtitle "Area tags and icons, demo content, and saved searches"
      :on-tap (jetpacs-action "glasspane.settings.open")))
   (add-hook 'jetpacs-shell-refresh-hook #'glasspane-ui--refresh-invalidate)
-  (remove-hook 'jetpacs-shell-view-change-functions
-               #'glasspane-ui--on-view-change)
-  (unless glasspane-ui-legacy-ia
-    (add-hook 'jetpacs-shell-view-change-functions
-              #'glasspane-ui--on-view-change))
-  ;; Depth 90: after glasspane-clock's assert/retire on the same
+  ;; Depth 90: after jetpacs-org-clock's assert/retire on the same
   ;; hooks, so the repush renders the notification state they set.
   (add-hook 'org-clock-in-hook #'glasspane-ui--refresh-if-connected 90)
   (add-hook 'org-clock-out-hook #'glasspane-ui--refresh-if-connected 90)

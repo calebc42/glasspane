@@ -70,15 +70,9 @@ through Customize."
 A todo-set/schedule/delete older than that replays against a vault
 that has long moved on.")
 
-(defconst glasspane-views--hub-screen-id "glasspane-views"
-  "The hub's chrome screen id; per-view screens mint their own.")
-
 (defconst glasspane-views--form-ids
   '("views-new-name" "views-new-query" "views-new-rendering")
-  "The new-view form's stateful ids, authored literally in the hub body.
-Each appears exactly once per document, so the first claimant keeps
-the stable name (`jetpacs-claimed-node-id') and these literals ARE the
-emitted ids `:reset-input-ids' must name.")
+  "The new-view form's stateful ids, reset by `:reset-input-ids' on save.")
 
 ;;;; State (S2 — the handlers below are the only writers)
 
@@ -611,85 +605,7 @@ taking the whole push down."
      :back back
      :actions (glasspane-ui-top-actions))))
 
-;;;; The hub screen
-
-(defun glasspane-views--new-form ()
-  "The collapsed new-view form at the hub's foot.
-Literal stateful ids: the device reconciles drafts against them
-(SPEC 14.6), views.save reads them back through `jetpacs-ui-state',
-and the post-save repush resets them (S2)."
-  (jetpacs-collapsible
-   "views-new"
-   (jetpacs-section-header "New view")
-   (list
-    (jetpacs-text-input "views-new-name" :label "Name" :single-line t)
-    (jetpacs-text-input "views-new-query"
-                        :label "Query"
-                        :hint "todo:TODO tags:work — or a query sexp"
-                        :single-line t)
-    (jetpacs-enum-list "views-new-rendering"
-                       (mapcar (lambda (r)
-                                 (jetpacs-enum-option (capitalize r) r))
-                               glasspane-views--renderings)
-                       :value "list")
-    (jetpacs-button "Save view" (jetpacs-action "views.save") :icon "add"))
-   :collapsed t))
-
-(defun glasspane-views--hub-body ()
-  "The hub: every saved view as a card, plus the new-view form."
-  (apply #'jetpacs-lazy-column
-         (append
-          (if glasspane-saved-views
-              (mapcar
-               (lambda (view)
-                 (let ((name (alist-get 'name view)))
-                   (jetpacs-chrome-row
-                    name
-                    :subtitle (format "%s · %s"
-                                      (glasspane-views--rendering view)
-                                      (alist-get 'query view))
-                    :trailing (jetpacs-icon-button
-                               "delete"
-                               (jetpacs-action "views.delete"
-                                               :args (list :name name)
-                                               :when-offline "queue"
-                                               :ttl-s glasspane-views--ttl-s)
-                               :content-description
-                               (format "Delete view %s" name))
-                    :on-tap (jetpacs-action "views.open"
-                                            :args (list :name name))
-                    :key (jetpacs-wire-id "gv" name))))
-               glasspane-saved-views)
-            (list (jetpacs-empty-state
-                   :icon "manage_search" :title "No saved views"
-                   :caption "Name a query below and it becomes a view")))
-          (list (jetpacs-divider) (glasspane-views--new-form)))))
-
-(defun glasspane-views--hub-screen (back)
-  "The pushed Saved views hub screen."
-  (jetpacs-chrome-screen "Saved views" (glasspane-views--hub-body)
-                         :back back))
-
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
-
-(defun glasspane-views--push-screen (params id builder)
-  "Defer-push screen ID via BUILDER onto PARAMS' surface (D2); `accepted'.
-A deferred `jetpacs-chrome-push-screen' must catch its own re-signal
-or a refused gate dies in a timer."
-  (let ((surface (or (plist-get params :surface)
-                     (jetpacs-shell-surface-for "glasspane"))))
-    (jetpacs-flow-continue
-     (lambda ()
-       (condition-case err
-           (jetpacs-chrome-push-screen surface id builder)
-         (error (message "glasspane: %s push failed: %s"
-                         id (jetpacs-error-label err))))))
-    'accepted))
-
-(defun glasspane-views--on-hub (_args params)
-  "Push the Saved views hub onto the tapped surface."
-  (glasspane-views--push-screen params glasspane-views--hub-screen-id
-                                #'glasspane-views--hub-screen))
 
 (defun glasspane-views--on-open (args params)
   "Open saved view `:name' as a pushed screen; reset its per-view state."
@@ -875,12 +791,8 @@ Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces the handlers in
 place."
   (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction
-     "views.hub"
-     (if glasspane-ui-legacy-ia
-         #'glasspane-views--on-hub
-       #'glasspane-agenda-open-saved)
-     :doc "Deprecated alias opening Agenda's Saved page")
+    (jetpacs-defaction "views.hub" #'glasspane-agenda-open-saved
+                       :doc "Deprecated alias opening Agenda's Saved page")
     (jetpacs-defaction "views.open" #'glasspane-views--on-open
                        :doc "Open a saved view by name")
     (jetpacs-defaction "views.reorder" #'glasspane-views--on-reorder

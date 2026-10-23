@@ -53,6 +53,7 @@
 (require 'ebp-org)
 (require 'jetpacs-surfaces)
 (require 'jetpacs-widgets)
+(require 'jetpacs-material3)
 (require 'jetpacs-shell)
 (require 'jetpacs-chrome)
 (require 'jetpacs-apps)
@@ -683,7 +684,7 @@ gap-#5 thread-through landed."
   "Today's count as a destination `:badge' string, or nil when zero.
 nil keeps the icon bare — a zero-count badge is noise — and the memoised
 extraction keeps the per-render cost at a table lookup.  Public: the PARA
-Agenda destination and the legacy dock builder both call it."
+Agenda destination calls it."
   (let ((n (glasspane-agenda--today-count)))
     (and (> n 0) (number-to-string n))))
 
@@ -699,8 +700,7 @@ Agenda destination and the legacy dock builder both call it."
                                         :style "caption"))
                         (glasspane-agenda-body))))
      :back back
-     :actions (glasspane-ui-top-actions)
-     :fab (and glasspane-ui-legacy-ia (glasspane-ui-capture-fab)))))
+     :actions (glasspane-ui-top-actions))))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 
@@ -712,8 +712,7 @@ Agenda destination and the legacy dock builder both call it."
 (defun glasspane-agenda-open-saved (_args params)
   "Open Agenda with its Saved page selected.
 This is the public compatibility landing used by the retired `views.hub'
-destination.  The durable wire name survives while its old peer screen stays
-available only through the PA rollback flag."
+destination."
   (setq glasspane-agenda--mode glasspane-agenda--saved-mode)
   (glasspane-ui-open-destination "agenda" "glasspane-agenda"
                                  #'glasspane-agenda-screen params))

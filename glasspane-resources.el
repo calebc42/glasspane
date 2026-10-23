@@ -33,8 +33,6 @@
 (require 'glasspane-ui)
 (require 'glasspane-navigation)
 
-(declare-function glasspane-agenda-screen "glasspane-agenda" (back))
-
 ;;;; Resources delegation
 
 (defconst glasspane-resources--browser-screen "files-resources"
@@ -51,8 +49,7 @@ single low-level Files boundary owned by `glasspane-navigation'."
   (glasspane-navigation-open-files-path
    path
    :browser-id glasspane-resources--browser-screen
-   :browser-fab (and (not glasspane-ui-legacy-ia)
-                     (glasspane-ui-capture-fab))
+   :browser-fab (glasspane-ui-capture-fab)
    :return-action (glasspane-navigation-return-action)))
 
 (defun glasspane-resources--on-open (_args _params)
@@ -60,7 +57,7 @@ single low-level Files boundary owned by `glasspane-navigation'."
   (let ((status (glasspane-resources--browse-vault org-directory)))
     ;; `app.open' records the route before redispatching the destination
     ;; verb, but direct/M-x entry reaches the owner verb without it.
-    (when (and (eq status 'accepted) (not glasspane-ui-legacy-ia))
+    (when (eq status 'accepted)
       (jetpacs-apps-note-route "glasspane" "resources"))
     status))
 
@@ -75,24 +72,6 @@ single low-level Files boundary owned by `glasspane-navigation'."
 (defun glasspane-resources--on-return (args params)
   "Delegate cached `resources.return' ARGS and PARAMS canonically."
   (glasspane-navigation-return args params))
-
-(defun glasspane-resources--on-view-change (surface view)
-  "Complete a Companion-local Back handoff reported as SURFACE and VIEW.
-Back from the Resources browser reaches Files' native root; that
-destination-level Back resets the cross-surface destination to the Agenda
-root exactly once, as the PA-3 contract requires.  Back from a direct
-document is `glasspane-navigation''s alone (NAVIGATION.org): its observer
-re-presents Glasspane's untouched stack, so this handler never touches the
-files-return view."
-  (when (and (not glasspane-ui-legacy-ia)
-             (equal jetpacs-apps--current "glasspane")
-             (equal surface (glasspane-resources--files-surface)))
-    (cond
-     ((and (equal view "browser")
-           (equal jetpacs-apps--current-route "resources"))
-      (glasspane-ui-open-destination
-       "agenda" "glasspane-agenda" #'glasspane-agenda-screen
-       (list :surface (jetpacs-shell-surface-for "glasspane")))))))
 
 ;;;; Archive index and screen
 
@@ -206,7 +185,7 @@ index; a source that no longer exists has no Areas."
           (cl-remove-if-not (lambda (member) (member member used))
                             (plist-get index :members)))))))
 
-(defun glasspane-resources--archive-row (record)
+(defun glasspane-resources-archive-row (record)
   "Render one Archive RECORD as a handoff to the canonical document route."
   (let ((path (plist-get record :path))
         (mtime (plist-get record :mtime)))
@@ -218,6 +197,8 @@ index; a source that no longer exists has no Areas."
      :trailing (jetpacs-icon "chevron_right")
      :on-tap (glasspane-navigation-document-action path)
      :key (jetpacs-wire-id "archive" path))))
+
+(defalias 'glasspane-resources--archive-row #'glasspane-resources-archive-row)
 
 (defun glasspane-resources--archive-filter-row (areas)
   "Build the Archive Area filter rail over AREAS, shared with Projects."
@@ -260,9 +241,7 @@ index; a source that no longer exists has no Areas."
   "Build the Archive screen with BACK navigation."
   (jetpacs-chrome-screen "Archive" (glasspane-resources--archive-body)
                          :back back
-                         :actions (glasspane-ui-top-actions)
-                         :fab (and glasspane-ui-legacy-ia
-                                   (glasspane-ui-capture-fab))))
+                         :actions (glasspane-ui-top-actions)))
 
 (defun glasspane-resources--on-archive-open (_args params)
   "Open Archive in its drawer-only destination slot with dispatch PARAMS."
@@ -314,7 +293,8 @@ refresh."
      :doc "Compatibility alias for cached Resource document opens"
      :args '((:name path :type "text" :required t)))
     (jetpacs-defaction "resources.return" #'glasspane-resources--on-return
-                       :doc "Compatibility alias for cached Files returns")
+                       :doc "Compatibility alias for cached Files returns"
+                       :any-surface t)
     (jetpacs-defaction "archive.open"
                        #'glasspane-resources--on-archive-open
                        :doc "Open the Org archive files, filterable by Area")
@@ -323,21 +303,14 @@ refresh."
                        :doc "Filter the Archive screen by one Area tag"
                        :args '((:name area :type "text" :required t))))
   (add-hook 'jetpacs-shell-refresh-hook
-            #'glasspane-resources--refresh-invalidate)
-  (remove-hook 'jetpacs-shell-view-change-functions
-               #'glasspane-resources--on-view-change)
-  (unless glasspane-ui-legacy-ia
-    (add-hook 'jetpacs-shell-view-change-functions
-              #'glasspane-resources--on-view-change)))
+            #'glasspane-resources--refresh-invalidate))
 
 (defun glasspane-resources-unregister ()
   "Drop every Resource/Archive action and hook."
   (dolist (name glasspane-resources--verbs)
     (jetpacs-undefaction name))
   (remove-hook 'jetpacs-shell-refresh-hook
-               #'glasspane-resources--refresh-invalidate)
-  (remove-hook 'jetpacs-shell-view-change-functions
-               #'glasspane-resources--on-view-change))
+               #'glasspane-resources--refresh-invalidate))
 
 (provide 'glasspane-resources)
 ;;; glasspane-resources.el ends here

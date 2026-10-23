@@ -464,6 +464,7 @@ gate contract).  Idempotent: re-registration replaces in place."
                        :doc "Open the search screen")
     (jetpacs-defaction "org.search.run" #'glasspane-search--on-run
                        :doc "Run a search query"
+                       :strict t
                        :args '((:name value :type "text")))
     (jetpacs-defaction "search.update-filter"
                        #'glasspane-search--on-update-filter
@@ -474,6 +475,7 @@ gate contract).  Idempotent: re-registration replaces in place."
     (jetpacs-defaction "search.by-tag" #'glasspane-search--on-by-tag
                        :any-surface t
                        :doc "Filter search to a single tag"
+                       :strict t
                        :args '((:name tag :type "text" :required t)))))
 
 (defun glasspane-search-unregister ()

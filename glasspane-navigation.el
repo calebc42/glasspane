@@ -146,6 +146,7 @@ Delegates to `jetpacs-files-return' and also serves as the retired
     (jetpacs-defaction
      "glasspane.document.open" #'glasspane-navigation--on-document-open
      :doc "Open a validated path through Glasspane's canonical document route"
+     :strict t
      :args '((:name path :type "text" :required t)))
     (jetpacs-defaction
      "glasspane.files.return" #'glasspane-navigation-return

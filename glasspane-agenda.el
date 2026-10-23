@@ -763,6 +763,7 @@ place."
     (jetpacs-defaction
      "agenda.area-filter" #'glasspane-agenda--on-area-filter
      :doc "Filter every Agenda page to one Area, or clear the Area filter"
+     :strict t
      :args '((:name area :type "text")))))
 
 (defun glasspane-agenda-unregister ()

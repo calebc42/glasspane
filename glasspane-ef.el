@@ -347,6 +347,7 @@ provider contribution in place."
                        :any-surface t
                        :doc "Push the Ef Themes screen")
     (jetpacs-defaction "ef.load" #'glasspane-ef--on-load
+                       :strict t
                        :args '((:name theme :type "text" :required t))
                        :doc "Load the named ef theme")
     (jetpacs-defaction "ef.random" #'glasspane-ef--on-random
@@ -358,6 +359,7 @@ provider contribution in place."
     (jetpacs-defaction "ef.mirror" #'glasspane-ef--on-mirror
                        :doc "Mirror the Emacs theme onto the companion")
     (jetpacs-defaction "ef.option" #'glasspane-ef--on-option
+                       :strict t
                        :args '((:name name :type "text" :required t)
                                (:name value :type "bool" :required t))
                        :doc "Set an ef style option from its switch")

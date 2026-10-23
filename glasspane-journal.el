@@ -106,6 +106,7 @@ gate contract)."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "journal.capture" #'glasspane-journal--on-capture
                        :doc "Deprecated headless journal datetree append alias."
+                       :strict t
                        :args '((:name value :type "text" :required t)
                                (:name date :type "date")))))
 

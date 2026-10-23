@@ -317,15 +317,18 @@ refresh."
     (jetpacs-defaction
      "tasks.filter" #'glasspane-projects--on-filter
      :doc "Select the Projects workflow filter"
+     :strict t
      :args '((:name filter :type "text" :required t)))
     (jetpacs-defaction
      "projects.group" #'glasspane-projects--on-group
      :doc "Group Projects by source file or by Area"
+     :strict t
      :args '((:name value :type "text")
              (:name by :type "text")))
     (jetpacs-defaction
      "projects.area-filter" #'glasspane-projects--on-area-filter
      :doc "Filter Projects to one Area, or clear the Area filter"
+     :strict t
      :args '((:name area :type "text")))))
 
 (defun glasspane-projects-unregister ()

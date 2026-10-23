@@ -1077,10 +1077,12 @@ registry entries in place, and the keyed hub entry is replaced."
     (jetpacs-defaction
      "settings.area-icon.edit" #'glasspane-ui--on-area-icon-edit
      :doc "Open one Area's Material icon editor"
+     :strict t
      :args '((:name area :type "text" :required t)))
     (jetpacs-defaction
      "settings.area-icon.save" #'glasspane-ui--on-area-icon-save
      :doc "Persist or reset one Area's Material icon preference"
+     :strict t
      :args '((:name area :type "text" :required t)
              (:name icon :type "text")))
     (jetpacs-defaction "settings.areas.save"

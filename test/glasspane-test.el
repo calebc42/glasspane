@@ -5900,5 +5900,63 @@ resets the module state only those modules hold."
     (setq jetpacs-shell--pending-removals nil)
     (glasspane-register)))
 
+(defun glasspane-test--strict-value (type)
+  "A well-formed event value for an arg of TYPE."
+  (pcase type
+    ("date" "2026-10-23")
+    ("bool" t)
+    ("number" 1)
+    (_ "x")))
+
+(defun glasspane-test--strict-malformed (args)
+  "Event args violating the schema ARGS: drop a required arg, else
+mistype the first one."
+  (if-let* ((required (seq-find (lambda (arg) (plist-get arg :required))
+                                args)))
+      (mapcan (lambda (arg)
+                (unless (eq arg required)
+                  (list (jetpacs--arg-key (plist-get arg :name))
+                        (glasspane-test--strict-value
+                         (plist-get arg :type)))))
+              args)
+    (let ((arg (car args)))
+      (list (jetpacs--arg-key (plist-get arg :name))
+            (if (equal (plist-get arg :type) "bool") "yes" 7)))))
+
+(ert-deftest glasspane-test-strict-verbs-reject-malformed-args ()
+  "Every Glasspane verb with an arg schema dispatches strict: a malformed
+event is refused at `jetpacs--dispatch' before the handler runs, and a
+well-formed one reaches it."
+  (let ((warning-minimum-log-level :emergency)
+        (count 0))
+    (dolist (name (jetpacs--owned-names "action" glasspane-owner))
+      (when-let* ((args (plist-get (jetpacs-action-schema name) :args)))
+        (cl-incf count)
+        (should (plist-get (jetpacs-action-schema name) :strict))
+        (let* ((ran nil)
+               (fn (lambda (_args _params) (setq ran t) 'accepted))
+               (event (lambda (event-args)
+                        (list :action name :surface "app:glasspane"
+                              :args event-args))))
+          (should (eq (jetpacs--dispatch
+                       nil (funcall event (glasspane-test--strict-malformed
+                                           args))
+                       fn)
+                      'rejected))
+          (should-not ran)
+          (should (eq (jetpacs--dispatch
+                       nil (funcall event
+                                    (mapcan
+                                     (lambda (arg)
+                                       (list (jetpacs--arg-key
+                                              (plist-get arg :name))
+                                             (glasspane-test--strict-value
+                                              (plist-get arg :type))))
+                                     args))
+                       fn)
+                      'accepted))
+          (should ran))))
+    (should (>= count 22))))
+
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

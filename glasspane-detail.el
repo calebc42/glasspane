@@ -2267,19 +2267,23 @@ gate contract).  Idempotent."
                        :doc "Open a heading in the pushed detail screen")
     (jetpacs-defaction "heading.visit" #'glasspane-detail--on-visit
                        :doc "Resolve a heading and open its canonical document"
+                       :strict t
                        :args '((:name token :type "text" :required t)))
     (jetpacs-defaction "detail.open-file" #'glasspane-detail--on-open-file
                        :doc "Compatibility alias for cached heading file opens"
+                       :strict t
                        :args '((:name token :type "text" :required t)))
     (jetpacs-defaction "detail.toggle-read"
                        #'glasspane-detail--on-toggle-read
                        :doc "Flip the detail reader/editor mode")
     (jetpacs-defaction "detail.section" #'glasspane-detail--on-section
                        :doc "Show or hide one of the heading's metadata drawers"
+                       :strict t
                        :args '((:name section :type "text" :required t)))
     (jetpacs-defaction "detail.priority.edit"
                        #'glasspane-detail--on-priority-edit
                        :doc "Open the foundation priority dialog for a heading"
+                       :strict t
                        :args '((:name token :type "text" :required t)))
     (jetpacs-defaction "detail.save" #'glasspane-detail--on-save
                        :doc "Replace the subtree with the editor value")
@@ -2288,6 +2292,7 @@ gate contract).  Idempotent."
                        :doc "Open the foundation SCHEDULED/DEADLINE editor")
     (jetpacs-defaction "detail.tags.edit" #'glasspane-detail--on-tags-edit
                        :doc "Open the grouped local-tag picker for a heading"
+                       :strict t
                        :args '((:name token :type "text" :required t)))
     (jetpacs-defaction "heading.todo-set" #'glasspane-detail--on-todo-set
                        :doc "Set a heading's TODO state; empty clears")

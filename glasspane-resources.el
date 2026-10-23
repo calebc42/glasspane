@@ -291,6 +291,7 @@ refresh."
     (jetpacs-defaction
      "resources.open-file" #'glasspane-resources--on-open-file
      :doc "Compatibility alias for cached Resource document opens"
+     :strict t
      :args '((:name path :type "text" :required t)))
     (jetpacs-defaction "resources.return" #'glasspane-resources--on-return
                        :doc "Compatibility alias for cached Files returns"
@@ -301,7 +302,9 @@ refresh."
     (jetpacs-defaction "archive.filter"
                        #'glasspane-resources--on-archive-filter
                        :doc "Filter the Archive screen by one Area tag"
-                       :args '((:name area :type "text" :required t)))
+                       ;; Not required: the shared rail's "All" sends none.
+                       :strict t
+                       :args '((:name area :type "text")))
     (jetpacs-add-hook 'jetpacs-shell-refresh-hook
                       #'glasspane-resources--refresh-invalidate)))
 

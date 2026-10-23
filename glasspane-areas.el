@@ -521,14 +521,17 @@ PARAMS carry the surface for the deferred refresh."
                        :doc "Open the PARA Areas screen")
     (jetpacs-defaction "areas.drill" #'glasspane-areas--on-drill
                        :doc "Open one PARA Area by tag-group member"
-                       :args '((:name category :type "text")))
+                       :strict t
+                       :args '((:name category :type "text" :required t)))
     (jetpacs-defaction "areas.filter" #'glasspane-areas--on-filter
                        :doc "Toggle an Area in a drill's intersection"
-                       :args '((:name category :type "text")
-                               (:name area :type "text")))
+                       :strict t
+                       :args '((:name category :type "text" :required t)
+                               (:name area :type "text" :required t)))
     (jetpacs-defaction
      "areas.todo-filter" #'glasspane-areas--on-todo-filter
      :doc "Filter one Area drill's Projects by TODO state"
+     :strict t
      :args '((:name category :type "text" :required t)
              (:name filter :type "text" :required t)))))
 

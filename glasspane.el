@@ -153,8 +153,8 @@ explicitly; see RENDERER.org."
                   :destinations #'glasspane--destinations)
   ;; The CREATED/MODIFIED stampers are GLOBAL org hooks, so they attach
   ;; at app enable — never at glasspane-org's load (a bare `require'
-  ;; must not mutate the user's `before-save-hook').  Teardown of this
-  ;; owner detaches them; install self-registers that removal.  Native
+  ;; must not mutate the user's `before-save-hook').  They are ledgered
+  ;; under this owner, so its teardown detaches them.  Native
   ;; chronometer and capture handlers live in the upstream Org Mode app;
   ;; every downstream sibling verb registers through here, never at
   ;; module load.
@@ -178,33 +178,20 @@ explicitly; see RENDERER.org."
   (glasspane-demo-register))
 
 (defun glasspane-unregister ()
-  "Deregister every downstream verb, the chrome root, and app identity.
-The G0 gate contract: no Glasspane handler or claim survives this.  Native
-Org clock and capture handlers are upstream and deliberately survive."
-  (jetpacs-undefaction "glasspane.home")
+  "Unregister Glasspane: the app's whole teardown, then its private state.
+`jetpacs-apps-unregister' tears down everything attributed to the
+owner: every verb, the chrome root, ledgered hooks (the Org stampers
+included), the reader and editor adapters (the stock Org reader comes
+back), settings rows, the theme provider, the dialog slot and the app
+entry.  The module unregisters below reset only state those modules
+hold.  Native Org clock and capture handlers are upstream and
+deliberately survive."
   (jetpacs-apps-unregister glasspane-owner)
-  (jetpacs-chrome-remove glasspane-owner)
-  ;; The live-reload/unload path: teardown of the owner would detach
-  ;; the org stampers too, but unregister must not leave them behind
-  ;; when no teardown ever runs (M-x unload-feature).
-  (glasspane-org-remove-hooks)
-  (glasspane-config-unregister)
-  (glasspane-packages-unregister)
   (glasspane-ui-unregister)
   (glasspane-org-reader-unregister)
-  (glasspane-navigation-unregister)
-  (glasspane-detail-unregister)
-  (glasspane-agenda-unregister)
-  (glasspane-projects-unregister)
-  (glasspane-areas-unregister)
-  (glasspane-resources-unregister)
-  (glasspane-journal-unregister)
   (glasspane-views-unregister)
-  (glasspane-search-unregister)
   (glasspane-notes-unregister)
-  (glasspane-srs-unregister)
-  (glasspane-ef-unregister)
-  (glasspane-demo-unregister))
+  (glasspane-srs-unregister))
 
 (glasspane-register)
 

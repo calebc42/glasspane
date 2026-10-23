@@ -976,10 +976,13 @@ what keeps the load-time `with-eval-after-load' below inside the
 register/unregister sweep."
   (when (and (featurep 'org-srs)
              (gethash "srs.rate" jetpacs-action-handlers))
-    (jetpacs-settings-register-section
-     "Review"
-     '((org-srs-review-new-items-per-day :label "New cards per day")
-       (org-srs-review-max-reviews-per-day :label "Max reviews per day")))))
+    ;; Owned on both paths (app enable and the late org-srs load), so the
+    ;; app's teardown removes the section either way.
+    (with-jetpacs-owner "glasspane"
+      (jetpacs-settings-register-section
+       "Review"
+       '((org-srs-review-new-items-per-day :label "New cards per day")
+         (org-srs-review-max-reviews-per-day :label "Max reviews per day"))))))
 
 ;; The form outlives the feature: M-x unload-feature voids the symbol
 ;; while this closure is still on org-srs's after-load list, so a later
@@ -1033,11 +1036,11 @@ place and the hooks add exactly once."
     (jetpacs-defaction "srs.undo" #'glasspane-srs--on-undo
                        :doc "Undo the last rating from the app's snapshot")
     (jetpacs-defaction "srs.item.create" #'glasspane-srs--on-item-create
-                       :doc "Make a heading reviewable (bridged prompts)"))
-  (add-hook 'glasspane-ui-detail-toolbar-functions
-            #'glasspane-srs-detail-toolbar)
-  (add-hook 'jetpacs-shell-refresh-hook #'glasspane-srs--reprobe)
-  (glasspane-srs--settings-section-maybe))
+                       :doc "Make a heading reviewable (bridged prompts)")
+    (jetpacs-add-hook 'glasspane-ui-detail-toolbar-functions
+                      #'glasspane-srs-detail-toolbar)
+    (jetpacs-add-hook 'jetpacs-shell-refresh-hook #'glasspane-srs--reprobe)
+    (glasspane-srs--settings-section-maybe)))
 
 (defun glasspane-srs-unregister ()
   "Drop the review verbs, the chip, the hooks, and the settings block.
@@ -1045,9 +1048,9 @@ The session dies with the registration: a re-register starts from no
 session rather than resuming the one whose verbs just went away."
   (dolist (name glasspane-srs--verbs)
     (jetpacs-undefaction name))
-  (remove-hook 'glasspane-ui-detail-toolbar-functions
-               #'glasspane-srs-detail-toolbar)
-  (remove-hook 'jetpacs-shell-refresh-hook #'glasspane-srs--reprobe)
+  (jetpacs-remove-hook 'glasspane-ui-detail-toolbar-functions
+                       #'glasspane-srs-detail-toolbar)
+  (jetpacs-remove-hook 'jetpacs-shell-refresh-hook #'glasspane-srs--reprobe)
   (setq glasspane-srs--active nil glasspane-srs--current nil
         glasspane-srs--revealed nil glasspane-srs--undo nil)
   (jetpacs-settings-remove-section "Review"))

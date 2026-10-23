@@ -1025,19 +1025,11 @@ for a desktop M-x."
 
 (defun glasspane-ui-remove-hooks ()
   "Detach everything `glasspane-ui-register' hooked."
-  (remove-hook 'jetpacs-shell-refresh-hook
-               #'glasspane-ui--refresh-invalidate)
-  (remove-hook 'org-clock-in-hook #'glasspane-ui--refresh-if-connected)
-  (remove-hook 'org-clock-out-hook #'glasspane-ui--refresh-if-connected)
-  (remove-hook 'jetpacs-teardown-functions #'glasspane-ui--on-teardown))
-
-(defun glasspane-ui--on-teardown (owner)
-  "Drop the UI hooks when OWNER is the Glasspane app.
-`glasspane-owner' is read late and defensively: the entry file defines
-it and `require's this one, so a back-`require' would cycle — and by
-the time any teardown runs, the entry has long finished loading."
-  (when (equal owner (bound-and-true-p glasspane-owner))
-    (glasspane-ui-remove-hooks)))
+  (jetpacs-remove-hook 'jetpacs-shell-refresh-hook
+                       #'glasspane-ui--refresh-invalidate)
+  (jetpacs-remove-hook 'org-clock-in-hook #'glasspane-ui--refresh-if-connected)
+  (jetpacs-remove-hook 'org-clock-out-hook
+                       #'glasspane-ui--refresh-if-connected))
 
 ;;;; Registration
 
@@ -1129,13 +1121,15 @@ registry entries in place, and the keyed hub entry is replaced."
      "glasspane" :order 40 :icon "menu_book"
      :title "Glasspane"
      :subtitle "Area tags and icons, demo content, and saved searches"
-     :on-tap (jetpacs-action "glasspane.settings.open")))
-  (add-hook 'jetpacs-shell-refresh-hook #'glasspane-ui--refresh-invalidate)
-  ;; Depth 90: after jetpacs-org-clock's assert/retire on the same
-  ;; hooks, so the repush renders the notification state they set.
-  (add-hook 'org-clock-in-hook #'glasspane-ui--refresh-if-connected 90)
-  (add-hook 'org-clock-out-hook #'glasspane-ui--refresh-if-connected 90)
-  (add-hook 'jetpacs-teardown-functions #'glasspane-ui--on-teardown))
+     :on-tap (jetpacs-action "glasspane.settings.open"))
+    ;; Ledgered, so the app's teardown detaches them.
+    (jetpacs-add-hook 'jetpacs-shell-refresh-hook
+                      #'glasspane-ui--refresh-invalidate)
+    ;; Depth 90: after jetpacs-org-clock's assert/retire on the same
+    ;; hooks, so the repush renders the notification state they set.
+    (jetpacs-add-hook 'org-clock-in-hook #'glasspane-ui--refresh-if-connected 90)
+    (jetpacs-add-hook 'org-clock-out-hook
+                      #'glasspane-ui--refresh-if-connected 90)))
 
 (defun glasspane-ui-unregister ()
   "Drop the UI verbs, settings section/hub entry, and hooks."

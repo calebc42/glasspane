@@ -641,11 +641,11 @@ gate contract).  Idempotent."
     (jetpacs-defaction "notes.mentions" #'glasspane-notes--on-mentions
                        :doc "Scan for unlinked mentions of a note (async ripgrep)")
     (jetpacs-defaction "link.materialize" #'glasspane-notes--on-materialize
-                       :doc "Replace a scanned mention with a real id link"))
-  (add-hook 'glasspane-ui-detail-nodes-functions
-            #'glasspane-notes-detail-nodes)
-  (add-hook 'ebp-complete-shadow-setup-hook
-            #'glasspane-notes--setup-shadow))
+                       :doc "Replace a scanned mention with a real id link")
+    (jetpacs-add-hook 'glasspane-ui-detail-nodes-functions
+                      #'glasspane-notes-detail-nodes)
+    (jetpacs-add-hook 'ebp-complete-shadow-setup-hook
+                      #'glasspane-notes--setup-shadow)))
 
 (defun glasspane-notes-unregister ()
   "Drop the notes verbs and hook claims.
@@ -656,10 +656,10 @@ reaches; the mention entries die on their own when a push generation
 goes by without a build asking for them."
   (dolist (name glasspane-notes--verbs)
     (jetpacs-undefaction name))
-  (remove-hook 'glasspane-ui-detail-nodes-functions
-               #'glasspane-notes-detail-nodes)
-  (remove-hook 'ebp-complete-shadow-setup-hook
-               #'glasspane-notes--setup-shadow)
+  (jetpacs-remove-hook 'glasspane-ui-detail-nodes-functions
+                       #'glasspane-notes-detail-nodes)
+  (jetpacs-remove-hook 'ebp-complete-shadow-setup-hook
+                       #'glasspane-notes--setup-shadow)
   (clrhash glasspane-notes--mentions-scans))
 
 (provide 'glasspane-notes)

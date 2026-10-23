@@ -65,6 +65,7 @@
 (require 'jetpacs-buffer)
 (require 'jetpacs-files)
 (require 'jetpacs-reader)
+(require 'jetpacs-dialog-slot)
 (require 'jetpacs-reader-org)           ; stock fallback, decrypt action,
                                         ; and narrowed-editor transition
 (require 'jetpacs-org-dialogs)          ; the base sheet/archive verbs the
@@ -1578,22 +1579,6 @@ is a no-op, and the refresh snaps the list back (SPEC 14.5)."
 
 ;;;; The app heading sheet (S3 — the delta the base sheet cannot carry)
 
-(defvar glasspane-org-reader--sheet nil
-  "The live heading sheet, (:request-id ID :token TOK :params PARAMS), or nil.
-Single-slot, the base module's shape: PARAMS are the OPENING event's —
-the conclusion arrives in dialog context with no `:surface' (SPEC 14.4),
-so the dispatched arm needs the surface the sheet was opened from.")
-
-(defun glasspane-org-reader-sheet-close ()
-  "Retire the live heading sheet (the S3 handler-side dismissal).
-`ebp-client-abandon' sends rpc.cancel; the Companion concludes with
-error 1301, which the show callback treats as a no-op."
-  (let ((sheet glasspane-org-reader--sheet))
-    (setq glasspane-org-reader--sheet nil)
-    (when-let* ((client (jetpacs-client))
-                (request-id (plist-get sheet :request-id)))
-      (ignore-errors (ebp-client-abandon client request-id)))))
-
 (defun glasspane-org-reader--sheet-candidates (ref)
   "Fresh (VALUE . LABEL) candidates for REF's sheet.
 Rebuilt at dispatch time too — the submitted value must name a
@@ -1628,65 +1613,59 @@ error."
       'rejected)))
 
 (defun glasspane-org-reader--show-sheet (token ref params)
-  "Show the app heading sheet for TOKEN/REF; PARAMS is the opening event's."
-  (glasspane-org-reader-sheet-close)
-  (when-let* ((client (jetpacs-client)))
-    (let* ((title (let ((h (plist-get ref :headline)))
-                    (if (and (stringp h) (not (string-empty-p h)))
-                        h
-                      "Heading")))
-           (request-id
-            (ebp-client-dialog-show
-             client
-             (jetpacs-wire-id "gp-sheet" (format "%s/%s"
-                                                 (plist-get ref :file)
-                                                 (plist-get ref :pos)))
-             (apply #'jetpacs-column
-                    (jetpacs-text title :style "title")
-                    (append
-                     (mapcar (lambda (c)
-                               (jetpacs-button
-                                (cdr c)
-                                (jetpacs-dialog-submit :value (car c))
-                                :variant "text"))
-                             (glasspane-org-reader--sheet-candidates ref))
-                     (list (jetpacs-button "Cancel"
-                                           (jetpacs-dialog-dismiss)))))
-             :style "sheet"
-             :callback
-             (lambda (status result _error)
-               (setq glasspane-org-reader--sheet nil)
-               (when (and (equal status "submitted")
-                          (stringp (plist-get result :value)))
-                 (let ((value (plist-get result :value))
-                       ;; Re-read, not captured: the list may have
-                       ;; moved while the sheet was up.
-                       (ref (ebp-org-token-ref token :owner "glasspane")))
-                   (cond
-                    ((null ref)
-                     (jetpacs-toast "That heading moved — refresh"))
-                    ((not (assoc value
-                                 (glasspane-org-reader--sheet-candidates
-                                  ref)))
-                     nil)
-                    (t
-                     (pcase value
-                       ("open"
-                        (glasspane-org-reader--dispatch
-                         "heading.tap" (list :token token) params))
-                       ("clock-in"
-                        (glasspane-org-reader--dispatch
-                         "heading.clock-in" (list :token token) params))
-                       ("clock-out"
-                        (glasspane-org-reader--dispatch
-                         "org.clock.out" nil params))
-                       ("props"
-                        (glasspane-org-reader--dispatch
-                         "heading.props.show" (list :token token)
-                         params)))))))))))
-      (when request-id
-        (setq glasspane-org-reader--sheet
-              (list :request-id request-id :token token :params params))))))
+  "Show the app heading sheet for TOKEN/REF; PARAMS is the opening event's.
+The sheet lives in Glasspane's dialog slot, so a newer Glasspane dialog
+retires it and the app's teardown abandons it."
+  (let ((title (let ((h (plist-get ref :headline)))
+                 (if (and (stringp h) (not (string-empty-p h)))
+                     h
+                   "Heading"))))
+    (jetpacs-dialog-slot-show
+     (jetpacs-wire-id "gp-sheet" (format "%s/%s"
+                                         (plist-get ref :file)
+                                         (plist-get ref :pos)))
+     (apply #'jetpacs-column
+            (jetpacs-text title :style "title")
+            (append
+             (mapcar (lambda (c)
+                       (jetpacs-button
+                        (cdr c)
+                        (jetpacs-dialog-submit :value (car c))
+                        :variant "text"))
+                     (glasspane-org-reader--sheet-candidates ref))
+             (list (jetpacs-button "Cancel"
+                                   (jetpacs-dialog-dismiss)))))
+     :owner "glasspane" :params params :style "sheet"
+     :on-conclude
+     (lambda (status result _error)
+       (when (and (equal status "submitted")
+                  (stringp (plist-get result :value)))
+         (let ((value (plist-get result :value))
+               ;; Re-read, not captured: the list may have
+               ;; moved while the sheet was up.
+               (ref (ebp-org-token-ref token :owner "glasspane")))
+           (cond
+            ((null ref)
+             (jetpacs-toast "That heading moved — refresh"))
+            ((not (assoc value
+                         (glasspane-org-reader--sheet-candidates
+                          ref)))
+             nil)
+            (t
+             (pcase value
+               ("open"
+                (glasspane-org-reader--dispatch
+                 "heading.tap" (list :token token) params))
+               ("clock-in"
+                (glasspane-org-reader--dispatch
+                 "heading.clock-in" (list :token token) params))
+               ("clock-out"
+                (glasspane-org-reader--dispatch
+                 "org.clock.out" nil params))
+               ("props"
+                (glasspane-org-reader--dispatch
+                 "heading.props.show" (list :token token)
+                 params)))))))))))
 
 (defun glasspane-org-reader--on-heading-menu (args params)
   "The long-press sheet verb (S4): gate order shape -> stale -> grant."
@@ -1913,12 +1892,15 @@ body/actions claimant; this app replaces the stock adapter in the stable
   ;; app's emphasis-aware prose while Glasspane is registered.
   (setq jetpacs-reader-org-footnote-prose-function
         #'glasspane-org-reader--prose-node)
-  (jetpacs-reader-register
-   'org :predicate #'jetpacs-reader-org-path-p
-   :render #'glasspane-org-reader--adapter-render
-   :actions #'glasspane-org-reader--adapter-actions
-   :transition #'glasspane-org-reader--adapter-transition)
+  ;; Owned, so the app's teardown hands the `org' slot back to the stock
+  ;; adapter it displaced.  The stock registrar above stays OWNERLESS: run
+  ;; under the app owner it would claim the foundation's reader verbs too.
   (with-jetpacs-owner "glasspane"
+    (jetpacs-reader-register
+     'org :predicate #'jetpacs-reader-org-path-p
+     :render #'glasspane-org-reader--adapter-render
+     :actions #'glasspane-org-reader--adapter-actions
+     :transition #'glasspane-org-reader--adapter-transition)
     (jetpacs-defaction "glasspane.link.open" #'glasspane-org-reader--on-link-open
                        :any-surface t :doc "Follow this exposed Org link through Org, then present it by Glasspane's document route")
     (jetpacs-defaction "heading.menu"
@@ -1954,7 +1936,7 @@ body/actions claimant; this app replaces the stock adapter in the stable
                'glasspane-org-reader--files-body)
   (remove-hook 'jetpacs-files-editor-actions-functions
                'glasspane-org-reader--files-actions)
-  (glasspane-org-reader-sheet-close)
+  (jetpacs-dialog-slot-close "glasspane")
   (setq glasspane-org-reader--refile-lists nil)
   (when (eq jetpacs-reader-org-footnote-prose-function
             #'glasspane-org-reader--prose-node)

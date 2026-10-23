@@ -449,8 +449,10 @@ never mutates the user's global org hooks."
                           org-property-changed-functions))
           (should (member #'glasspane-org--todo-modified-property
                           org-after-todo-state-change-hook))
-          (should (member #'glasspane-org--on-teardown
-                          jetpacs-teardown-functions))
+          ;; Ledgered under the app's owner, so its teardown finds them.
+          (should (member (cons 'before-save-hook
+                                #'glasspane-org--before-save-timestamps)
+                          (jetpacs--owned-names "hook" glasspane-owner)))
           (with-current-buffer (find-file-noselect file)
             (goto-char (point-max))
             (insert "body line\n")
@@ -468,11 +470,13 @@ never mutates the user's global org hooks."
             (glasspane-org--heading-modified-property "FOO")
             (should (org-entry-get (point) "MODIFIED")))
           ;; A foreign owner's teardown leaves them attached...
-          (glasspane-org--on-teardown "someone-else")
+          (jetpacs-teardown-owner "someone-else")
           (should (member #'glasspane-org--before-save-timestamps
                           before-save-hook))
-          ;; ...the app's own removes every one.
-          (glasspane-org--on-teardown glasspane-owner)
+          ;; ...disposing the app's hook claims removes every one (the
+          ;; hook kind alone, so the rest of the app stays registered).
+          (let ((jetpacs-teardown-kind-order '("hook")))
+            (jetpacs--dispose-owner-claims glasspane-owner))
           (should-not (member #'glasspane-org--before-save-timestamps
                               before-save-hook))
           (should-not (member #'glasspane-org--heading-created-property
@@ -481,8 +485,7 @@ never mutates the user's global org hooks."
                               org-property-changed-functions))
           (should-not (member #'glasspane-org--todo-modified-property
                               org-after-todo-state-change-hook))
-          (should-not (member #'glasspane-org--on-teardown
-                              jetpacs-teardown-functions)))
+          (should-not (jetpacs--owned-names "hook" glasspane-owner)))
       (glasspane-org-remove-hooks)
       ;; The docstring's LOAD clause, asserted: re-loading the file with
       ;; the hooks swept must leave every global org hook exactly as
@@ -504,7 +507,10 @@ never mutates the user's global org hooks."
                                         (file-truename f)))
             (with-current-buffer buf (set-buffer-modified-p nil))
             (kill-buffer buf))))
-      (delete-directory vault t))))
+      (delete-directory vault t)
+      ;; The hook-kind disposal above swept every module's hooks; restore
+      ;; the app for the suites that follow.
+      (glasspane-register))))
 
 (ert-deftest glasspane-test-org-save-funnel-persists-ciphertext ()
   "The Glasspane mutation funnel runs Files' crypt chain before disk I/O."
@@ -5838,6 +5844,61 @@ and a retired verb left in a list fails the other way."
     (should-not (cl-set-difference owned pinned :test #'equal))
     (should-not (cl-set-difference pinned owned :test #'equal))
     (should (= (length pinned) (length (delete-dups (copy-sequence pinned)))))))
+
+;;;; The teardown ledger (Rung 1): nothing of the app survives its teardown
+
+(defconst glasspane-test--app-hooks
+  '(before-save-hook org-insert-heading-hook org-property-changed-functions
+    org-after-todo-state-change-hook jetpacs-shell-refresh-hook
+    org-clock-in-hook org-clock-out-hook jetpacs-teardown-functions
+    glasspane-ui-detail-nodes-functions glasspane-ui-detail-toolbar-functions
+    ebp-complete-shadow-setup-hook)
+  "Every global hook Glasspane attaches to, for the teardown sweep test.")
+
+(ert-deftest glasspane-test-teardown-leaves-nothing-attributed ()
+  "After `glasspane-register' every registry kind holds Glasspane entries;
+after the owner's teardown none does, no Glasspane function sits on any
+hook it used, and the stock Org reader adapter is back in its slot."
+  (unwind-protect
+      (progn
+        (glasspane-register)
+        (dolist (kind '("action" "surface" "app" "hook" "reader-adapter"
+                        "editor-adapter" "settings-section" "settings-hub"
+                        "theme-provider"))
+          (should (jetpacs--owned-names kind glasspane-owner)))
+        (jetpacs-teardown-owner glasspane-owner)
+        (dolist (kind (append '("action" "surface")
+                              jetpacs-teardown-kind-order))
+          (should-not (jetpacs--owned-names kind glasspane-owner)))
+        (dolist (hook glasspane-test--app-hooks)
+          (should-not
+           (cl-find-if (lambda (fn)
+                         (and (symbolp fn)
+                              (string-prefix-p "glasspane-" (symbol-name fn))))
+                       (and (boundp hook) (default-value hook)))))
+        (should-not (assoc glasspane-owner jetpacs-apps--registry))
+        (should-not (jetpacs-dialog-slot-live-p glasspane-owner))
+        (should (eq (jetpacs-reader-adapter-render
+                     (jetpacs-reader-adapter-for "/vault/note.org"))
+                    #'jetpacs-reader-org--render)))
+    (setq jetpacs-shell--pending-removals nil)
+    (glasspane-register)))
+
+(ert-deftest glasspane-test-unregister-is-the-app-teardown ()
+  "`glasspane-unregister' leaves no handler or claim of the app behind and
+resets the module state only those modules hold."
+  (unwind-protect
+      (progn
+        (glasspane-register)
+        (glasspane-unregister)
+        (dolist (kind (append '("action" "surface")
+                              jetpacs-teardown-kind-order))
+          (should-not (jetpacs--owned-names kind glasspane-owner)))
+        (should-not (gethash "glasspane.home" jetpacs-action-handlers))
+        (should-not (eq jetpacs-reader-org-footnote-prose-function
+                        #'glasspane-org-reader--prose-node)))
+    (setq jetpacs-shell--pending-removals nil)
+    (glasspane-register)))
 
 (provide 'glasspane-test)
 ;;; glasspane-test.el ends here

@@ -301,16 +301,16 @@ refresh."
     (jetpacs-defaction "archive.filter"
                        #'glasspane-resources--on-archive-filter
                        :doc "Filter the Archive screen by one Area tag"
-                       :args '((:name area :type "text" :required t))))
-  (add-hook 'jetpacs-shell-refresh-hook
-            #'glasspane-resources--refresh-invalidate))
+                       :args '((:name area :type "text" :required t)))
+    (jetpacs-add-hook 'jetpacs-shell-refresh-hook
+                      #'glasspane-resources--refresh-invalidate)))
 
 (defun glasspane-resources-unregister ()
   "Drop every Resource/Archive action and hook."
   (dolist (name glasspane-resources--verbs)
     (jetpacs-undefaction name))
-  (remove-hook 'jetpacs-shell-refresh-hook
-               #'glasspane-resources--refresh-invalidate))
+  (jetpacs-remove-hook 'jetpacs-shell-refresh-hook
+                       #'glasspane-resources--refresh-invalidate))
 
 (provide 'glasspane-resources)
 ;;; glasspane-resources.el ends here

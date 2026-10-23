@@ -75,6 +75,7 @@
 (require 'jetpacs-buffer)
 (require 'jetpacs-navigate)
 (require 'jetpacs-dialog)
+(require 'jetpacs-dialog-slot)
 (require 'jetpacs-editor)
 (require 'jetpacs-org-toolbar)
 (require 'jetpacs-org-dialogs)
@@ -130,11 +131,7 @@ STATE is a `glasspane-detail--section' value.  The same record supplies the
 Connections holds what the app layers contribute (backlinks, outgoing
 links, unlinked mentions) and is offered only when something did.")
 
-(defvar glasspane-detail--dialog nil
-  "The live detail-owned dialog, (:request-id ID :params PARAMS), or nil.
-PARAMS are the OPENING event's — a Save fired from inside the dialog
-arrives in dialog context with no `:surface' (SPEC 14.4), so its
-refresh needs the surface the dialog was opened from.")
+
 
 (defconst glasspane-detail--screen-id "glasspane-detail"
   "The one detail screen id: re-tapping a heading replaces the top
@@ -176,30 +173,6 @@ text (SPEC 23.3)."
              (jetpacs-shell-notify "That did not work"
                                    (plist-get params :surface))))))
 
-(defun glasspane-detail--dialog-close ()
-  "Retire the live detail dialog (S3 handler-side dismissal).
-`ebp-client-abandon' sends rpc.cancel; the Companion concludes the
-dialog with error 1301, which the show callback treats as a no-op."
-  (let ((sheet glasspane-detail--dialog))
-    (setq glasspane-detail--dialog nil)
-    (when-let* ((client (jetpacs-client))
-                (request-id (plist-get sheet :request-id)))
-      (ignore-errors (ebp-client-abandon client request-id)))))
-
-(cl-defun glasspane-detail--show-dialog (id spec &key params)
-  "Show SPEC as dialog ID; stash the request for handler-side abandon.
-Both detail dialogs (sub-heading properties, file properties) conclude
-through a remote action's handler, so one live slot is enough."
-  (when-let* ((client (jetpacs-client)))
-    (let ((request-id
-           (ebp-client-dialog-show
-            client id spec
-            :callback (lambda (_status _result _error)
-                        ;; Dismissal and the abandon's 1301 land here.
-                        (setq glasspane-detail--dialog nil)))))
-      (when request-id
-        (setq glasspane-detail--dialog
-              (list :request-id request-id :params params))))))
 
 (defun glasspane-detail--leave (params)
   "Leave the detail screen after its heading stopped existing here.
@@ -1864,7 +1837,7 @@ then appears as a row whose value column is ready to fill in."
                                                :owner "glasspane")))
                (pos (plist-get info :pos))
                (props (plist-get info :props)))
-          (glasspane-detail--show-dialog
+          (jetpacs-dialog-slot-show
            (jetpacs-wire-id "gp-props" (glasspane-detail--key
                                         (plist-get (plist-get info :ref) :file)
                                         pos))
@@ -1895,7 +1868,7 @@ then appears as a row whose value column is ready to fill in."
                            (jetpacs-button "Close" (jetpacs-dialog-dismiss)
                                            :variant "text"))))
                    (list :spacing 8)))
-           :params params)))
+           :owner "glasspane" :params params)))
     (error (message "glasspane: properties dialog failed: %s"
                     (jetpacs-error-label err))
            (jetpacs-shell-notify "Properties failed"
@@ -2074,7 +2047,7 @@ its own event — no state round-trip (v1 read 9 `jetpacs-ui-state's)."
                                                            "[ \t]+" t)
                                              ", ")
                               "")))
-        (glasspane-detail--show-dialog
+        (jetpacs-dialog-slot-show
          (jetpacs-wire-id "gp-file-props" file)
          (jetpacs-column
           (jetpacs-text "File properties" :style "title")
@@ -2126,7 +2099,7 @@ its own event — no state round-trip (v1 read 9 `jetpacs-ui-state's)."
                             :capture-fields
                             glasspane-detail--file-prop-fields)))
           :spacing 8)
-         :params params))
+         :owner "glasspane" :params params))
     (error (message "glasspane: file properties dialog failed: %s"
                     (jetpacs-error-label err))
            (jetpacs-shell-notify "Properties failed"
@@ -2229,9 +2202,9 @@ non-TITLE keyword lands after an existing #+TITLE line."
             (glasspane-org-save-and-invalidate buf)
             ;; The Save event arrives in dialog context (no :surface) —
             ;; refresh where the dialog was opened, then retire it.
-            (let ((origin (or (plist-get glasspane-detail--dialog :params)
+            (let ((origin (or (jetpacs-dialog-slot-params "glasspane")
                               params)))
-              (glasspane-detail--dialog-close)
+              (jetpacs-dialog-slot-close "glasspane")
               (jetpacs-shell-notify "File properties saved"
                                     (plist-get origin :surface))
               (jetpacs-app-defer-refresh origin))
@@ -2360,18 +2333,20 @@ gate contract).  Idempotent."
                        :doc "Write the captured file keywords"))
   ;; A distinct id composes with the stock Org adapter: action lists append,
   ;; while omitted single-value slots leave its body/toolbar/FAB untouched.
-  (jetpacs-editor-register
-   'glasspane-org
-   :predicate #'glasspane-detail--org-file-p
-   :actions #'glasspane-detail--editor-actions
-   :after-save #'glasspane-org-vulpea-refresh-file))
+  ;; Owned, so the app's teardown removes it.
+  (with-jetpacs-owner "glasspane"
+    (jetpacs-editor-register
+     'glasspane-org
+     :predicate #'glasspane-detail--org-file-p
+     :actions #'glasspane-detail--editor-actions
+     :after-save #'glasspane-org-vulpea-refresh-file)))
 
 (defun glasspane-detail-unregister ()
   "Drop the detail verbs, editor adapter, and any live dialog."
   (dolist (name glasspane-detail--verbs)
     (jetpacs-undefaction name))
   (jetpacs-editor-unregister 'glasspane-org)
-  (glasspane-detail--dialog-close))
+  (jetpacs-dialog-slot-close "glasspane"))
 
 (provide 'glasspane-detail)
 ;;; glasspane-detail.el ends here

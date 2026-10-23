@@ -545,34 +545,26 @@ removal can find it."
   (let ((org-property-changed-functions nil))
     (org-set-property "MODIFIED" (glasspane-org--timestamp-string))))
 
+(defconst glasspane-org--stamping-hooks
+  '((before-save-hook . glasspane-org--before-save-timestamps)
+    (org-insert-heading-hook . glasspane-org--heading-created-property)
+    (org-property-changed-functions . glasspane-org--heading-modified-property)
+    (org-after-todo-state-change-hook . glasspane-org--todo-modified-property))
+  "The global CREATED/MODIFIED stampers as (HOOK . FUNCTION) pairs.")
+
 (defun glasspane-org-remove-hooks ()
   "Detach everything `glasspane-org-install-hooks' attached."
-  (remove-hook 'before-save-hook #'glasspane-org--before-save-timestamps)
-  (remove-hook 'org-insert-heading-hook #'glasspane-org--heading-created-property)
-  (remove-hook 'org-property-changed-functions #'glasspane-org--heading-modified-property)
-  (remove-hook 'org-after-todo-state-change-hook #'glasspane-org--todo-modified-property)
-  (remove-hook 'jetpacs-teardown-functions #'glasspane-org--on-teardown))
-
-(defun glasspane-org--on-teardown (owner)
-  "Drop the global org hooks when OWNER is the Glasspane app.
-`glasspane-owner' is read late and defensively: the entry file defines
-it and `require's this one, so a back-`require' would cycle — and by
-the time any teardown runs, the entry has long finished loading."
-  (when (equal owner (bound-and-true-p glasspane-owner))
-    (glasspane-org-remove-hooks)))
+  (pcase-dolist (`(,hook . ,fn) glasspane-org--stamping-hooks)
+    (jetpacs-remove-hook hook fn)))
 
 (defun glasspane-org-install-hooks ()
-  "Attach the CREATED/MODIFIED stamping hooks, with teardown hygiene.
+  "Attach the CREATED/MODIFIED stamping hooks under the app's owner.
 Idempotent.  Called at app enable — v1 attached these at load, which
-made a bare `require' mutate the user's global org hooks.  Teardown of
-the app's owner detaches them (`jetpacs-teardown-functions', arity
-\(OWNER); the hook symbol is the floor's, named without a require so
-this layer stays bridge-free)."
-  (add-hook 'before-save-hook #'glasspane-org--before-save-timestamps)
-  (add-hook 'org-insert-heading-hook #'glasspane-org--heading-created-property)
-  (add-hook 'org-property-changed-functions #'glasspane-org--heading-modified-property)
-  (add-hook 'org-after-todo-state-change-hook #'glasspane-org--todo-modified-property)
-  (add-hook 'jetpacs-teardown-functions #'glasspane-org--on-teardown))
+made a bare `require' mutate the user's global org hooks.  Each is
+ledgered (`jetpacs-add-hook'), so the app's teardown detaches them."
+  (with-jetpacs-owner "glasspane"
+    (pcase-dolist (`(,hook . ,fn) glasspane-org--stamping-hooks)
+      (jetpacs-add-hook hook fn))))
 
 ;;;; Vulpea light-up (the extractor sibling registers only when the
 ;;;; user's own config already brought vulpea up)

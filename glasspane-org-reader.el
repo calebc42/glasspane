@@ -93,14 +93,10 @@ FN receives the truename.  `ebp-org--check-file' signals
 `ebp-org-refused' outside the roots and `ebp-org-unresolved' when the
 file is gone — the callers' status arms — and the visit runs clamped so
 a drifted file becomes a status, never a prompt (D2)."
-  (let ((true (ebp-org--check-file file)))
-    (ebp-org--with-clamped-io
-      (with-current-buffer (find-file-noselect true t)
-        (unless (derived-mode-p 'org-mode) (org-mode))
-        (org-with-wide-buffer
-         (when ebp-org-outline-show-clocked
-           (ignore-errors (org-clock-sum)))
-         (funcall fn true))))))
+  (ebp-org-with-file (true file)
+    (when ebp-org-outline-show-clocked
+      (ignore-errors (org-clock-sum)))
+    (funcall fn true)))
 
 ;;;; Token minting (S5 — one :set per rendered list, replace semantics)
 
@@ -1833,7 +1829,7 @@ direct LazyColumn children, and select the rendered presentation."
   "Return a validated current Org path, or a status symbol."
   (let ((path (plist-get args :path)))
     (cond
-     ((not (jetpacs-reader-org-path-p path)) 'rejected)
+     ((not (ebp-org-path-p path)) 'rejected)
      ((jetpacs-event-stale-p params) 'stale)
      ((not (jetpacs-reader-current-path-p path)) 'stale)
      (t path))))
@@ -1897,7 +1893,7 @@ body/actions claimant; this app replaces the stock adapter in the stable
   ;; under the app owner it would claim the foundation's reader verbs too.
   (with-jetpacs-owner "glasspane"
     (jetpacs-reader-register
-     'org :predicate #'jetpacs-reader-org-path-p
+     'org :predicate #'ebp-org-path-p
      :render #'glasspane-org-reader--adapter-render
      :actions #'glasspane-org-reader--adapter-actions
      :transition #'glasspane-org-reader--adapter-transition)

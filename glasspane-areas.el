@@ -78,47 +78,43 @@ The result is a plist (:file PATH :areas MEMBERS-USED :file-areas
 FILE-TAG-MEMBERS :declares DECLARATIONS :items OPEN-TODO-ITEMS).  Every
 item carries an `areas' vector in the group's declaration order.  FILE is
 validated against the Org roots and visited under clamped I/O."
-  (let ((true (ebp-org--check-file file)))
-    (ebp-org--with-clamped-io
-      (with-current-buffer (find-file-noselect true t)
-        (unless (derived-mode-p 'org-mode) (org-mode))
-        (org-with-wide-buffer
-         (let* ((org-use-tag-inheritance t)
-                (members (glasspane-areas--members-here))
-                (file-tags (jetpacs-org-mode-tag-strings org-file-tags))
-                (file-areas (cl-remove-if-not
-                             (lambda (member) (member member file-tags))
-                             members))
-                (used (copy-sequence file-areas))
-                (declares (let ((decl (glasspane-areas--file-declaration true)))
-                            (and decl (list decl))))
-                items)
-           (org-map-entries
-            (lambda ()
-              (let* ((membership (glasspane-org-tag-groups-at (point)))
-                     (areas (plist-get
-                             (jetpacs-org-mode-tag-group
-                              (plist-get membership :groups)
-                              glasspane-area-tag-group)
-                             :members))
-                     (decl (org-entry-get (point) "AREA"))
-                     (item (jetpacs-org-mode-heading-item-at)))
-                (dolist (area areas) (cl-pushnew area used :test #'equal))
-                (push (cons 'areas (vconcat areas)) item)
-                (when (and (stringp decl)
-                           (not (string-empty-p (string-trim decl))))
-                  (push (list :name (string-trim decl) :file true
-                              :level (alist-get 'level item) :item item)
-                        declares))
-                (when (glasspane-org-open-todo-p item)
-                  (push item items))))
-            nil 'file)
-           (list :file true
-                 :members members
-                 :areas (nreverse used)
-                 :file-areas file-areas
-                 :declares (nreverse declares)
-                 :items (nreverse items))))))))
+  (ebp-org-with-file (true file)
+    (let* ((org-use-tag-inheritance t)
+           (members (glasspane-areas--members-here))
+           (file-tags (jetpacs-org-mode-tag-strings org-file-tags))
+           (file-areas (cl-remove-if-not
+                        (lambda (member) (member member file-tags))
+                        members))
+           (used (copy-sequence file-areas))
+           (declares (let ((decl (glasspane-areas--file-declaration true)))
+                       (and decl (list decl))))
+           items)
+      (org-map-entries
+       (lambda ()
+         (let* ((membership (glasspane-org-tag-groups-at (point)))
+                (areas (plist-get
+                        (jetpacs-org-mode-tag-group
+                         (plist-get membership :groups)
+                         glasspane-area-tag-group)
+                        :members))
+                (decl (org-entry-get (point) "AREA"))
+                (item (jetpacs-org-mode-heading-item-at)))
+           (dolist (area areas) (cl-pushnew area used :test #'equal))
+           (push (cons 'areas (vconcat areas)) item)
+           (when (and (stringp decl)
+                      (not (string-empty-p (string-trim decl))))
+             (push (list :name (string-trim decl) :file true
+                         :level (alist-get 'level item) :item item)
+                   declares))
+           (when (glasspane-org-open-todo-p item)
+             (push item items))))
+       nil 'file)
+      (list :file true
+            :members members
+            :areas (nreverse used)
+            :file-areas file-areas
+            :declares (nreverse declares)
+            :items (nreverse items)))))
 
 (defun glasspane-areas--bucket (table name)
   "Return NAME's mutable bucket in TABLE, creating it when absent."

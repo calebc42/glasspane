@@ -116,7 +116,7 @@ POSITION."
            (jetpacs-files-open-document
             path position glasspane-navigation--files-return-verb))))
     (when (and (eq status 'accepted)
-               (jetpacs-reader-org-path-p path)
+               (ebp-org-path-p path)
                (fboundp 'glasspane-org-reader-prepare-landing))
       (glasspane-org-reader-prepare-landing path))
     status))

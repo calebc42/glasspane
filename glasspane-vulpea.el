@@ -29,6 +29,7 @@
 
 (defvar ebp-org-note-query-terms)
 (declare-function ebp-org-matches-p "ebp-org" (tree get-fn))
+(declare-function ebp-org-done-keyword-p "ebp-org" (keyword))
 (declare-function emacsql "ext:emacsql" (connection sql &rest args))
 (declare-function vulpea-db "ext:vulpea-db" ())
 (declare-function vulpea-db-register-extractor "ext:vulpea-db-extract"
@@ -53,7 +54,7 @@
   (pcase what
     ('todo (vulpea-note-todo note))
     ('done (let ((s (vulpea-note-todo note)))
-             (or (and s (member s (or org-done-keywords '("DONE"))) t)
+             (or (ebp-org-done-keyword-p s)
                  (and (vulpea-note-closed note) t))))
     ('tags (vulpea-note-tags note))
     ('priority (let ((p (vulpea-note-priority note)))

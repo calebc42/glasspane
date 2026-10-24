@@ -141,10 +141,7 @@ render each other's results (the core's own %S rule)."
 
 (defun glasspane-views--done-p (item)
   "Non-nil when ITEM's todo keyword is a done state."
-  (let ((todo (alist-get 'todo item)))
-    (and todo (member todo (or (default-value 'org-done-keywords)
-                               '("DONE" "CANCELLED")))
-         t)))
+  (ebp-org-done-keyword-p (alist-get 'todo item)))
 
 (defconst glasspane-views--priority-colors
   '(("A" . "error") ("B" . "warning") ("C" . "primary"))
@@ -204,7 +201,7 @@ beside the headline through the shared presentation."
 
 (defun glasspane-views--done-keyword ()
   "The keyword a swipe-to-complete lands on."
-  (or (car (default-value 'org-done-keywords)) "DONE"))
+  (or (car (ebp-org-done-keywords)) "DONE"))
 
 (defun glasspane-views--card (item &optional trailing stack)
   "The shared rich card for ITEM; TRAILING sits at the row's end.

@@ -142,8 +142,8 @@ the v1 single-detail-view behavior.")
 ;;;; Small helpers
 
 (defun glasspane-detail--org-file-p (file)
-  "Whether FILE names an org document (plain or gpg-wrapped)."
-  (and (stringp file) (string-match-p "\\.org\\(\\.gpg\\)?\\'" file)))
+  "Whether FILE names an org document, gpg-wrapped files included."
+  (ebp-org-path-p file t))
 
 (defun glasspane-detail--key (file pos)
   "The stable wire-id stem for the heading at POS in FILE."
@@ -152,25 +152,6 @@ the v1 single-detail-view behavior.")
 (defun glasspane-detail--token-ref (args)
   "ARGS' `:token' resolved in the app's scope, or nil (handler: stale)."
   (ebp-org-token-ref (plist-get args :token) :owner "glasspane"))
-
-(defun glasspane-detail--with-prompting (fn params)
-  "Run FN only if a prompt raised now would reach the device.
-The JA-6 P2 shape (jetpacs-org-dialogs.el:74-80): refusing loudly
-beats wedging silently, and a flow error surfaces as a symbol, never
-text (SPEC 23.3)."
-  (if (not (jetpacs-dialog-can-bridge-p))
-      (jetpacs-shell-notify
-       (if (bound-and-true-p jetpacs-dialog--pending)
-           "Busy — finish the open dialog first"
-         "This needs the Companion dialog bridge")
-       (plist-get params :surface))
-    (condition-case err
-        (funcall fn)
-      (error (message "glasspane: detail flow failed: %s"
-                      (jetpacs-error-label err))
-             (jetpacs-shell-notify "That did not work"
-                                   (plist-get params :surface))))))
-
 
 (defun glasspane-detail--leave (params)
   "Leave the detail screen after its heading stopped existing here.
@@ -191,13 +172,6 @@ repushes the surface.  Runs OUTSIDE the dispatch extent."
 (defun glasspane-detail--today (info)
   "INFO's :today, the render's one calendar read, or today's ISO date."
   (or (plist-get info :today) (format-time-string "%Y-%m-%d")))
-
-(defun glasspane-detail--priority-levels ()
-  "The current buffer's priority letters, highest first, or nil."
-  (let ((hi (or (bound-and-true-p org-priority-highest) ?A))
-        (lo (or (bound-and-true-p org-priority-lowest) ?C)))
-    (and (integerp hi) (integerp lo) (<= hi lo)
-         (mapcar #'char-to-string (number-sequence hi lo)))))
 
 (defun glasspane-detail--priority-color (priority levels)
   "The theme role carrying PRIORITY's urgency among LEVELS, highest first."
@@ -375,10 +349,7 @@ without duplicating Areas."
                              (append (alist-get 'tags it) nil)))
          (token (alist-get 'token it))
          (archive-token (alist-get 'archive-token it))
-         (done (and todo
-                    (member todo (or (default-value 'org-done-keywords)
-                                     '("DONE" "CANCELLED")))
-                    t))
+         (done (ebp-org-done-keyword-p todo))
          (icon+color (jetpacs-org-agenda-type-icon type))
          (caption (string-join
                    (delq nil (list todo
@@ -523,13 +494,12 @@ Signals like `ebp-org-resolve-ref'; the screen builder classifies."
                    :scheduled (org-entry-get pos "SCHEDULED")
                    :deadline (org-entry-get pos "DEADLINE")
                    :keywords (or org-todo-keywords-1 '("TODO" "DONE"))
-                   :done (and (nth 2 comps)
-                              (member (nth 2 comps) org-done-keywords) t)
+                   :done (ebp-org-done-keyword-p (nth 2 comps))
                    ;; The render's one calendar read: every date word
                    ;; below is a pure function of this day.
                    :today (format-time-string "%Y-%m-%d")
                    :warn-days org-deadline-warning-days
-                   :priority-levels (glasspane-detail--priority-levels)
+                   :priority-levels (ebp-org-priority-levels)
                    :file-title (or (ignore-errors
                                      (cadr (assoc "TITLE"
                                                   (org-collect-keywords
@@ -1589,7 +1559,7 @@ own tag charset or the whole write refuses."
 
 (defun glasspane-detail--refile-flow (ref params)
   "The bridged refile picker; runs in a continuation behind can-bridge."
-  (glasspane-detail--with-prompting
+  (jetpacs-dialog-with-prompting
    (lambda ()
      (let ((marker (ebp-org-resolve-ref ref)))
        (unwind-protect
@@ -1615,7 +1585,8 @@ own tag charset or the whole write refuses."
                                         (plist-get params :surface))))))
          (set-marker marker nil)))
      (glasspane-detail--leave params))
-   params))
+   (plist-get params :surface)
+   "This needs the Companion dialog bridge"))
 
 (defun glasspane-detail--on-refile (args params)
   "Refile the whole subtree through a bridged target picker."
@@ -1637,7 +1608,7 @@ own tag charset or the whole write refuses."
    (t
     (jetpacs-flow-continue
      (lambda ()
-       (glasspane-detail--with-prompting
+       (jetpacs-dialog-with-prompting
         (lambda ()
           (let ((note (string-trim
                        (condition-case nil (read-string "Note: ")
@@ -1656,7 +1627,8 @@ own tag charset or the whole write refuses."
                                       (plist-get params :surface))))
             (ignore-errors
               (jetpacs-shell-push (plist-get params :surface)))))
-        params)))
+        (plist-get params :surface)
+        "This needs the Companion dialog bridge")))
     'accepted)))
 
 (defun glasspane-detail--on-delete (args params)
@@ -1717,7 +1689,7 @@ then appears as a row whose value column is ready to fill in."
    (t
     (jetpacs-flow-continue
      (lambda ()
-       (glasspane-detail--with-prompting
+       (jetpacs-dialog-with-prompting
         (lambda ()
           (let ((name (string-trim
                        (condition-case nil
@@ -1739,7 +1711,8 @@ then appears as a row whose value column is ready to fill in."
                (plist-get params :surface))))
             (ignore-errors
               (jetpacs-shell-push (plist-get params :surface)))))
-        params)))
+        (plist-get params :surface)
+        "This needs the Companion dialog bridge")))
     'accepted)))
 
 (defun glasspane-detail--show-props-dialog (ref params)

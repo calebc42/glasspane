@@ -201,16 +201,13 @@ rule `glasspane-org-tag-groups-at' applies to a single heading."
 
 (defun glasspane-org-open-todo-p (item)
   "Return non-nil when ITEM carries a TODO keyword that is not done.
-Done-ness follows the current buffer's `org-done-keywords' when the caller
-is inside the source buffer (file-local `#+TODO' lines are honored), else
-the global default."
-  (let ((todo (alist-get 'todo item))
-        (done (or org-done-keywords
-                  (default-value 'org-done-keywords)
-                  '("DONE"))))
+Done-ness is `ebp-org-done-keyword-p': the current buffer's keywords
+when the caller is inside the source buffer (file-local `#+TODO' lines
+are honored), else the global configuration."
+  (let ((todo (alist-get 'todo item)))
     (and (stringp todo)
          (not (string-empty-p todo))
-         (not (member todo done)))))
+         (not (ebp-org-done-keyword-p todo)))))
 
 (defun glasspane-org-indexed-area-declarations ()
   "Return Area declarations known to the vault index, or nil without one.

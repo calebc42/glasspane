@@ -911,23 +911,20 @@ The type picker and any follow-up prompts arrive as phone dialogs
 through the minibuffer bridge — written as if at the keyboard; the
 headless refusal is mandatory (the JA-6 P2 lesson)."
   (let ((surface (plist-get params :surface)))
-    (if (not (jetpacs-dialog-can-bridge-p))
-        (jetpacs-shell-notify
-         (if (bound-and-true-p jetpacs-dialog--pending)
-             "Busy — finish the open dialog first"
-           "This needs the Companion dialog bridge")
-         surface)
-      ;; `glasspane-ui-at-ref' owns resolve/classify/save; its error
-      ;; arm already toasts.  Only the bridged prompt's C-g needs a
-      ;; home here — `quit' is not an `error' and would otherwise die
-      ;; in the timer.
-      (condition-case nil
-          (when (eq (glasspane-ui-at-ref
-                     args (lambda () (org-srs-item-create)) t)
-                    'accepted)
-            (jetpacs-shell-notify "Review item created" surface))
-        (quit (jetpacs-shell-notify "Cancelled" surface)))
-      (ignore-errors (jetpacs-shell-push surface)))))
+    (jetpacs-dialog-with-prompting
+     (lambda ()
+       ;; `glasspane-ui-at-ref' owns resolve/classify/save; its error
+       ;; arm already toasts.  Only the bridged prompt's C-g needs a
+       ;; home here — `quit' is not an `error' and would otherwise die
+       ;; in the timer.
+       (condition-case nil
+           (when (eq (glasspane-ui-at-ref
+                      args (lambda () (org-srs-item-create)) t)
+                     'accepted)
+             (jetpacs-shell-notify "Review item created" surface))
+         (quit (jetpacs-shell-notify "Cancelled" surface)))
+       (ignore-errors (jetpacs-shell-push surface)))
+     surface "This needs the Companion dialog bridge")))
 
 (defun glasspane-srs--on-item-create (args params)
   "Make the tokened heading reviewable via org-srs's own create flow.

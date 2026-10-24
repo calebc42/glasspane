@@ -907,7 +907,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
            (jetpacs-files-shared-storage nil)
            queued)
       (should (ebp-org-file-allowed-p archive))
-      (should (jetpacs-reader-org-path-p archive))
+      (should (ebp-org-path-p archive))
       (cl-letf (((symbol-function 'jetpacs-files-shared-dir) #'ignore)
                 ((symbol-function 'jetpacs-flow-continue)
                  (lambda (fn) (push fn queued))))

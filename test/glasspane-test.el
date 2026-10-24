@@ -2581,12 +2581,30 @@ wire encoding."
                                            "tok" 7))))
     (should (string-search "\"date_button\"" json))
     (should (string-search "\"value\":\"2026-08-10\"" json)))
+  ;; A link follows only at its exposed drawer position; the device never
+  ;; names the link itself.  Without the buffer it is plain text.
   (let ((json (jetpacs-node->canonical-json
                (glasspane-ui--property-row
                 "LINK" "[[https://x.example][X]]" "tok" 7))))
-    (should (string-search "org.link.open" json))
-    (should (string-search "https://x.example" json))
+    (should-not (string-search "jetpacs.org.follow" json))
+    (should (string-search "\"X\"" json))
     (should-not (string-search "date_button" json)))
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Heading\n:PROPERTIES:\n:LINK: [[https://x.example][X]]\n:END:\n")
+    (let* ((json (jetpacs-node->canonical-json
+                  (glasspane-ui--property-row
+                   "LINK" "[[https://x.example][X]]" "tok" 1 nil
+                   (current-buffer))))
+           (link-pos (save-excursion
+                       (goto-char (point-min))
+                       (search-forward "[[")
+                       (- (point) 2))))
+      (should (string-search "jetpacs.org.follow" json))
+      (should-not (string-search "https://x.example" json))
+      (should (string-search (format "\"pos\":%d" link-pos) json))
+      (should (jetpacs-buffer-exposed-p (buffer-name) link-pos
+                                        "jetpacs.org.follow"))))
   (let ((json (jetpacs-node->canonical-json
                (glasspane-ui--property-row "FOO" "bar" "tok" 7))))
     (should (string-search "\"text_input\"" json))
@@ -2973,12 +2991,6 @@ both modes, degrading to the go-back placeholder on a dead ref."
             (should (eq (run "files.properties.show"
                              '(:file "/nope/x.org"))
                         'rejected))
-            ;; link.open: shape gate, then a deferred open.
-            (should (eq (run "org.link.open" '(:link "")) 'rejected))
-            (should (eq (run "org.link.open" '(:link 5)) 'rejected))
-            (should (eq (run "org.link.open"
-                             '(:link "https://example.com"))
-                        'accepted))
             ;; toggle-read is the single writer of the mode flag.
             (should (eq (run "detail.toggle-read" nil) 'accepted))
             (should-not glasspane-ui--detail-read-mode)
@@ -5656,10 +5668,8 @@ point: a new screen cannot ship unreachable.")
     "heading.refile" "heading.reorder" "heading.schedule"
     "heading.tags" "heading.tap" "heading.visit" "heading.todo-cycle"
     "heading.todo-set" "journal.capture" "link.materialize" "notes.mentions"
-    "glasspane.link.open"
     "ef.load" "ef.random" "ef.random-dark" "ef.random-light"
     "ef.mirror" "ef.option"
-    "org.link.open"
     "org.search.run" "resources.browse"
     "resources.open-file"
     "resources.return"

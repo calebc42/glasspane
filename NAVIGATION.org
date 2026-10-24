@@ -45,15 +45,20 @@ The actions before the convergence point express authority, not presentation.
 | Resource row, file breadcrumb | =glasspane.document.open= | path | Files canonicalizes and revalidates the path against its effective roots |
 | Area drill file row, Archive row (=glasspane-areas--file-row=, =glasspane-resources-archive-row=) | =glasspane.document.open= | path | as above; an archive path is the sibling =FILE.org_archive= |
 | Area declaring-note card (=glasspane-areas--declaring-card=) | =heading.visit= | app-scoped =ebp-org= token | as the heading row above |
-| Outline link span (=glasspane-org-reader--emphasis-spans=) | =glasspane.link.open= | exposed buffer position; Org itself resolves the destination | exposure, tick, or link-syntax mismatch returns =stale=; a file-backed destination then calls =glasspane-navigation-open-document=, an external target is acknowledged, and a refused path is reported rather than drilled |
+| Outline link span (=glasspane-org-reader--emphasis-spans=), Properties link button (=glasspane-detail--property-link-action=) | =jetpacs.org.follow= (foundation) | exposed buffer position; Org itself resolves the destination | an unexposed position is =rejected=; a tick or link-syntax mismatch returns =stale=; =glasspane-org-reader--present-link-destination= then sends a file-backed destination to =glasspane-navigation-open-document=, acknowledges an external target, and reports a refused path rather than drilling |
 | (foundation twin, not emitted by Glasspane) =jetpacs-files-document-action= | =jetpacs.files.open-document= | path, optional position | the same Files revalidation; the ownerless verb any app may render.  Glasspane keeps =glasspane.document.open= because its handler also prepares the reader landing (=glasspane-org-reader-prepare-landing=) |
 
 A rendered link carries a buffer position only because Org must parse the
 link at tap time; the exposure table and modification tick make that position
 a bounded snapshot, and Org's own resolver produces the destination.  The
-presenter installed by =glasspane-org-reader--on-link-open= then converges
-on the same document route, so a linked heading gets the same reader, staged
-Back screen, and return action as a Project row.
+follow verb is the foundation's; Glasspane adds
+=glasspane-org-reader--present-link-destination= to
+=jetpacs-org-render-follow-functions= for links followed on its surface, from
+a dialog, or in the document Files shows.  It converges on the same document
+route, so a linked heading gets the same reader, staged Back screen, and
+return action as a Project row.  The device never sends a link text to
+open: a Properties link was once a raw =org.link.open= string, which also
+pushed a screen past this route.
 
 A heading card must not serialize a raw buffer position: edits can move the
 heading between render and tap. A file row must not mint an imaginary heading

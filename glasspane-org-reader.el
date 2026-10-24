@@ -588,20 +588,32 @@ readable label.  Return non-nil when OBJECT lay inside the copy."
         (put-text-property (1+ beg) end 'gp-hide t))
       t)))
 
+(defun glasspane-org-reader--owns-follow-p (source surface)
+  "Whether a link followed from SOURCE on SURFACE is Glasspane's to present.
+Glasspane's own surface (or a dialog, which has none), and the document
+Files currently shows, which Glasspane's reader draws while registered."
+  (or (null surface)
+      (equal surface (jetpacs-shell-surface-for "glasspane"))
+      (let ((path (and (buffer-live-p source)
+                       (buffer-local-value 'buffer-file-name source))))
+        (and path (jetpacs-reader-current-path-p path)))))
+
 (defun glasspane-org-reader--present-link-destination
-    (source pos destination position surface)
+    (source destination position surface pos)
   "Present Org's DESTINATION at POSITION for the link at POS in SOURCE.
-Org has already followed the link.  A file-backed destination takes
-Glasspane's one document route, so a linked heading lands in the same
-reader, Back screen, and return policy as every Project or Resource row.
-Staying on the link means Org handed an external target to the system (a
-browser or mail client), which only needs an acknowledgement on SURFACE.
-Return non-nil for every owned outcome, including a refused path, so the
-generic buffer drill never bypasses the document policy; nil leaves a
-non-file buffer to the foundation."
+A `jetpacs-org-render-follow-functions' member: Org has already followed
+the link from SURFACE, and links Glasspane does not own answer nil.  A
+file-backed destination takes Glasspane's one document route, so a linked
+heading lands in the same reader, Back screen, and return policy as every
+Project or Resource row.  Staying on the link means Org handed an external
+target to the system (a browser or mail client), which only needs an
+acknowledgement on SURFACE.  Return non-nil for every owned outcome,
+including a refused path, so the generic buffer drill never bypasses the
+document policy; nil leaves a non-file buffer to the foundation."
   (let ((path (and (buffer-live-p destination)
                    (buffer-local-value 'buffer-file-name destination))))
     (cond
+     ((not (glasspane-org-reader--owns-follow-p source surface)) nil)
      ((and (eq destination source) (integerp position)
            (with-current-buffer source
              (save-excursion
@@ -626,45 +638,6 @@ non-file buffer to the foundation."
                                 surface))
         t))
      (t nil))))
-
-(defun glasspane-org-reader--on-link-open (args params)
-  "Follow ARGS' exposed Org link, then present where Org went for PARAMS.
-Reject positions this render never exposed; answer `stale' once the source
-changed or no longer holds a link there.  Org owns link syntax and
-resolution, including internal targets, custom types and the system
-handoff for web addresses.  Presentation is Glasspane's document route."
-  (let* ((name (plist-get args :buffer))
-         (pos (plist-get args :pos))
-         (tick (plist-get args :tick))
-         (buffer (and (stringp name) (get-buffer name))))
-    (cond
-     ((not (and buffer (integerp pos) (integerp tick)
-                (jetpacs-buffer-exposed-p name pos "glasspane.link.open")))
-      'rejected)
-     ((jetpacs-event-stale-p params) 'stale)
-     ((not (with-current-buffer buffer
-             (and (derived-mode-p 'org-mode)
-                  (= tick (buffer-chars-modified-tick))
-                  (org-with-wide-buffer
-                   (and (<= (point-min) pos (point-max))
-                        (save-excursion
-                          (goto-char pos)
-                          (eq (org-element-type (org-element-context)) 'link)))))))
-      'stale)
-     (t
-      (jetpacs-navigate-thunk
-       (lambda ()
-         ;; Leave the destination current: the navigator captures both it
-         ;; and Org's destination point.
-         (set-buffer buffer)
-         (goto-char pos)
-         (org-open-at-point))
-       (plist-get params :surface)
-       "Org link"
-       (lambda (destination position surface)
-         (glasspane-org-reader--present-link-destination
-          buffer pos destination position surface)))
-      'accepted))))
 
 (defun glasspane-org-reader--connections-line (links backlinks token)
   "A caption summarizing LINKS out of a heading and BACKLINKS into it.
@@ -742,7 +715,7 @@ RichSpan has no strike decoration; strike-through loses only its markers."
                          (not (org-element-lineage object '(footnote-reference link))))
                 (let* ((pos (+ source-start (1- (org-element-property :begin object))))
                        (action (with-current-buffer source-buffer
-                                 (jetpacs-action "glasspane.link.open"
+                                 (jetpacs-action "jetpacs.org.follow"
                                                  :args (list :buffer (buffer-name) :pos pos
                                                              :tick (buffer-chars-modified-tick))))))
                   (when (glasspane-org-reader--link-properties object action source-buffer)
@@ -795,7 +768,7 @@ RichSpan has no strike decoration; strike-through loses only its markers."
               (dolist (pos exposed)
                 (jetpacs-buffer-expose (buffer-name) pos "jetpacs.org.footnote.open"))
               (dolist (pos links)
-                (jetpacs-buffer-expose (buffer-name) pos "glasspane.link.open")))
+                (jetpacs-buffer-expose (buffer-name) pos "jetpacs.org.follow")))
             (when glasspane-org-reader--link-tally
               (cl-incf glasspane-org-reader--link-tally (length links)))
             spans))))))
@@ -1862,8 +1835,7 @@ direct LazyColumn children, and select the rendered presentation."
 ;;;; Registration
 
 (defconst glasspane-org-reader--verbs
-  '("heading.menu" "files.filter" "files.toggle-refile" "heading.reorder"
-    "glasspane.link.open")
+  '("heading.menu" "files.filter" "files.toggle-refile" "heading.reorder")
   "The verbs this rung's reader owns, for the register/unregister sweep.
 heading.tap/props.show/duplicate/todo-cycle/clock-in are the detail
 sibling's; the menu names them by wire string only.  heading.reorder
@@ -1897,8 +1869,10 @@ body/actions claimant; this app replaces the stock adapter in the stable
      :render #'glasspane-org-reader--adapter-render
      :actions #'glasspane-org-reader--adapter-actions
      :transition #'glasspane-org-reader--adapter-transition)
-    (jetpacs-defaction "glasspane.link.open" #'glasspane-org-reader--on-link-open
-                       :any-surface t :doc "Follow this exposed Org link through Org, then present it by Glasspane's document route")
+    ;; Links are the foundation's `jetpacs.org.follow'; Glasspane only
+    ;; presents where Org went, through its one document route.
+    (jetpacs-add-hook 'jetpacs-org-render-follow-functions
+                      #'glasspane-org-reader--present-link-destination)
     (jetpacs-defaction "heading.menu"
                        #'glasspane-org-reader--on-heading-menu
                        :any-surface t
@@ -1932,6 +1906,8 @@ body/actions claimant; this app replaces the stock adapter in the stable
                'glasspane-org-reader--files-body)
   (remove-hook 'jetpacs-files-editor-actions-functions
                'glasspane-org-reader--files-actions)
+  (jetpacs-remove-hook 'jetpacs-org-render-follow-functions
+                       #'glasspane-org-reader--present-link-destination)
   (jetpacs-dialog-slot-close "glasspane")
   (setq glasspane-org-reader--refile-lists nil)
   (when (eq jetpacs-reader-org-footnote-prose-function

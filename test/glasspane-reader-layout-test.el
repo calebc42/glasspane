@@ -457,7 +457,7 @@
   (cl-loop for node in (glasspane-reader-layout--nodes-of-type nodes "rich_text")
            append (cl-loop for span across (vconcat (plist-get node :spans))
                            for tap = (plist-get span :on_tap)
-                           when (equal (plist-get tap :action) "glasspane.link.open")
+                           when (equal (plist-get tap :action) "jetpacs.org.follow")
                            collect span)))
 
 (defun glasspane-reader-layout--sibling-file (file name text)
@@ -497,7 +497,7 @@
                       (pos (plist-get args :pos)))
                  (should (equal (plist-get args :buffer) (buffer-name)))
                  (should (= (plist-get args :tick) (buffer-chars-modified-tick)))
-                 (should (jetpacs-buffer-exposed-p (buffer-name) pos "glasspane.link.open"))
+                 (should (jetpacs-buffer-exposed-p (buffer-name) pos "jetpacs.org.follow"))
                  (should (save-excursion
                            (goto-char pos)
                            (eq (org-element-type (org-element-context)) 'link)))))
@@ -538,9 +538,12 @@
                        ((symbol-function 'jetpacs-shell-notify)
                         (lambda (text &rest _) (push text notices)))
                        ((symbol-function 'browse-url)
-                        (lambda (url &rest _) (push url browsed))))
+                        (lambda (url &rest _) (push url browsed)))
+                       ;; The reader shows SOURCE on the Files surface.
+                       ((symbol-function 'jetpacs-reader-current-path-p)
+                        (lambda (path) (equal path (buffer-file-name source)))))
                ;; A file link lands on the searched heading of the other file.
-               (should (eq (glasspane-org-reader--on-link-open file-args nil) 'accepted))
+               (should (eq (jetpacs-org-render--follow file-args nil) 'accepted))
                (let* ((entry (pop thunks))
                       (dest (with-temp-buffer
                               (jetpacs-buffer-funcall-shimmed (car entry)))))
@@ -551,7 +554,7 @@
                  (should (funcall (cdr entry) (car dest) (cdr dest) "app:jetpacs.files"))
                  (should (equal opened (list (list other (cdr dest))))))
                ;; A web link stays put: Org handed it to the browser.
-               (should (eq (glasspane-org-reader--on-link-open web-args nil) 'accepted))
+               (should (eq (jetpacs-org-render--follow web-args nil) 'accepted))
                (let* ((entry (pop thunks))
                       (dest (with-temp-buffer
                               (jetpacs-buffer-funcall-shimmed (car entry)))))
@@ -561,12 +564,12 @@
                  (should (equal notices '("Opened link")))
                  (should (= (length opened) 1)))
                ;; Snapshot discipline: a changed source or an unexposed position.
-               (should (eq (glasspane-org-reader--on-link-open
+               (should (eq (jetpacs-org-render--follow
                             (plist-put (copy-sequence file-args) :tick
                                        (1+ (plist-get file-args :tick)))
                             nil)
                            'stale))
-               (should (eq (glasspane-org-reader--on-link-open
+               (should (eq (jetpacs-org-render--follow
                             (list :buffer (buffer-name) :pos 1
                                   :tick (plist-get file-args :tick))
                             nil)

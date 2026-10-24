@@ -686,13 +686,39 @@ their own folds, with ids minted on KEY."
              (glasspane-detail--logbook-group
               "Clocks" clocks (concat key "/clocks") t))))))
 
-(defun glasspane-ui--property-row (key value token pos &optional allowed)
+(defun glasspane-detail--property-link-action (buf pos key)
+  "The `jetpacs.org.follow' action for the link in KEY's property, or nil.
+KEY's line is found in the PROPERTIES drawer of the heading at POS in
+BUF; that link's buffer position is exposed for the follow verb, so the
+device names an exposed position, never a link of its choosing."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (org-with-wide-buffer
+       (goto-char pos)
+       (when-let* ((block (ignore-errors (org-get-property-block)))
+                   (link-pos
+                    (save-excursion
+                      (goto-char (car block))
+                      (and (re-search-forward
+                            (concat "^[ \t]*:" (regexp-quote key) ":[ \t]+")
+                            (cdr block) t)
+                           (re-search-forward org-link-bracket-re
+                                              (line-end-position) t)
+                           (match-beginning 0)))))
+         (jetpacs-buffer-expose (buffer-name) link-pos "jetpacs.org.follow")
+         (jetpacs-action "jetpacs.org.follow"
+                         :args (list :buffer (buffer-name) :pos link-pos
+                                     :tick (buffer-chars-modified-tick))))))))
+
+(defun glasspane-ui--property-row (key value token pos &optional allowed buf)
   "A two-column KEY → editable VALUE row for the Properties editor.
 ID is read-only (editing it breaks links); a value with ALLOWED
 choices renders an enum, booleans a switch, dates a date button,
 small numbers a slider, links a follow button; everything else is an
 inline input whose submit runs `heading.prop-set' — submitting an
-empty value removes the property."
+empty value removes the property.  A link follows only with BUF, the
+heading's buffer at POS, where its position can be exposed; without
+it the link shows as text."
   (let* ((id (jetpacs-wire-id "gp-prop" (format "%s/%s" pos key)))
          (is-boolean (or (equal allowed '("t" "nil"))
                          (equal allowed '("true" "false"))
@@ -733,13 +759,12 @@ empty value removes the property."
         ;; bracketed-value date heuristic (v1 rendered links as dead
         ;; date buttons through exactly this misorder).
         (is-link
-         (progn (string-match org-link-bracket-re value)
-                (let ((link (match-string 1 value))
-                      (desc (match-string 2 value)))
-                  (jetpacs-button (or desc link)
-                                  (jetpacs-action "org.link.open"
-                                                  :args (list :link link))
-                                  :variant "outlined"))))
+         (string-match org-link-bracket-re value)
+         (let ((label (or (match-string 2 value) (match-string 1 value)))
+               (follow (glasspane-detail--property-link-action buf pos key)))
+           (if follow
+               (jetpacs-button label follow :variant "outlined")
+             (jetpacs-text label :style "caption"))))
         (is-date
          (jetpacs-date-button (if (string-empty-p value) "Set date" value)
                               action
@@ -777,7 +802,8 @@ is only a hint."
      (mapcar (lambda (kv)
                (glasspane-ui--property-row
                 (car kv) (or (cdr kv) "") token pos
-                (and buf (glasspane-detail--allowed-values buf pos (car kv)))))
+                (and buf (glasspane-detail--allowed-values buf pos (car kv)))
+                buf))
              props)
      (list (jetpacs-text "Submit an empty value to remove a property."
                          :style "caption" :color "outline")))))
@@ -1460,6 +1486,7 @@ over the heading's new coordinates."
                  (setq info (list :headline (org-get-heading t t t t)
                                   :props (org-entry-properties nil 'standard)
                                   :pos (point)
+                                  :buf (current-buffer)
                                   :ref (ebp-org-ref-at-point)))))
             (set-marker marker nil)))
         (let* ((token (car (ebp-org-ref-tokens (list (plist-get info :ref))
@@ -1478,7 +1505,8 @@ over the heading's new coordinates."
                                        :style "caption"))
                    (or (mapcar (lambda (kv)
                                  (glasspane-ui--property-row
-                                  (car kv) (or (cdr kv) "") token pos))
+                                  (car kv) (or (cdr kv) "") token pos
+                                  nil (plist-get info :buf)))
                                props)
                        (list (jetpacs-text "No properties yet."
                                            :style "caption")))
@@ -1589,45 +1617,6 @@ which is the G4 delegation replacing v1's app planning dialog."
                            (jetpacs-error-label err))))))
       'accepted))))
 
-(defun glasspane-detail--on-link-open (args params)
-  "Open `:link' through org's link machinery, Emacs-side.
-Landing on an org heading pushes the detail screen over it; anything
-else (http, images) reports back as a snackbar."
-  (let ((link (plist-get args :link)))
-    (if (not (and (stringp link) (not (string-empty-p link))))
-        'rejected
-      (let ((surface (or (plist-get params :surface)
-                         (jetpacs-shell-surface-for "glasspane"))))
-        (jetpacs-flow-continue
-         (lambda ()
-           (condition-case err
-               (progn
-                 (org-link-open-from-string link)
-                 (if (and (derived-mode-p 'org-mode)
-                          (buffer-file-name)
-                          (ignore-errors (org-back-to-heading t) t))
-                     (let ((ref (ebp-org-ref-at-point)))
-                       (setq glasspane-ui--detail-read-mode t)
-                       ;; Already outside the dispatch extent: push now.
-                       (condition-case perr
-                           (jetpacs-chrome-push-screen
-                            surface glasspane-detail--screen-id
-                            (lambda (back)
-                              (glasspane-detail--screen ref back)))
-                         (error (message "glasspane: link push failed: %s"
-                                         (jetpacs-error-label perr)))))
-                   (jetpacs-shell-notify
-                    (format "Opened %s" (jetpacs-truncate-text
-                                         (jetpacs-scalar-text link) 60))
-                    surface)
-                   (ignore-errors (jetpacs-shell-push surface))))
-             (error
-              (message "glasspane: link open failed: %s"
-                       (jetpacs-error-label err))
-              (jetpacs-shell-notify "Couldn't open that link" surface)
-              (ignore-errors (jetpacs-shell-push surface))))))
-        'accepted))))
-
 ;;;; The file-properties verbs (compatibility names)
 ;;
 ;; The dialog, its keyword writer and its Save verb are the foundation's
@@ -1672,7 +1661,6 @@ PARAMS are the opening event's."
     "heading.prop-add"
     "heading.props.show"
     "heading.clock-in"
-    "org.link.open"
     "files.properties.show"
     "files.properties.save")
   "The verbs this rung owns, for the register/unregister sweep.
@@ -1768,8 +1756,6 @@ gate contract).  Idempotent."
                        (glasspane-detail--heading-verb 'clock-in)
                        :any-surface t
                        :doc "Clock in at the heading")
-    (jetpacs-defaction "org.link.open" #'glasspane-detail--on-link-open
-                       :doc "Open an org link Emacs-side")
     (jetpacs-defaction "files.properties.show"
                        #'glasspane-detail--on-file-props-show
                        :any-surface t

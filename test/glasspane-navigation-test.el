@@ -162,18 +162,24 @@ buffer without a file is left to the foundation drill."
       (with-temp-buffer
         (org-mode)
         (insert "See [[https://example.com][web]] now.\n")
-        (let ((source (current-buffer)))
+        (let ((source (current-buffer))
+              (own (jetpacs-shell-surface-for "glasspane")))
           (with-temp-buffer
             (setq buffer-file-name "/vault/other.org")
             (unwind-protect
-                (should (glasspane-org-reader--present-link-destination
-                         source 5 (current-buffer) 42 "app:jetpacs.files"))
+                (progn
+                  (should (glasspane-org-reader--present-link-destination
+                           source (current-buffer) 42 own 5))
+                  ;; Another app's surface, not the document Files shows:
+                  ;; not Glasspane's to present.
+                  (should-not (glasspane-org-reader--present-link-destination
+                               source (current-buffer) 42 "app:elsewhere" 5)))
               (setq buffer-file-name nil)))
           (should (glasspane-org-reader--present-link-destination
-                   source 5 source 7 "app:jetpacs.files"))
+                   source source 7 nil 5))
           (with-temp-buffer
             (should-not (glasspane-org-reader--present-link-destination
-                         source 5 (current-buffer) 1 "app:jetpacs.files"))))))
+                         source (current-buffer) 1 own 5))))))
     (should (equal calls '(("/vault/other.org" 42))))
     (should (equal notices '("Opened link")))))
 

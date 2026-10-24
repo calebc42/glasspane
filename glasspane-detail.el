@@ -79,6 +79,7 @@
 (require 'jetpacs-editor)
 (require 'jetpacs-org-toolbar)
 (require 'jetpacs-org-dialogs)
+(require 'jetpacs-org-heading-verbs)
 (require 'jetpacs-org-reminders)      ; the agenda card's type icon/label
 (require 'glasspane-org)
 (require 'glasspane-ui)
@@ -1445,276 +1446,6 @@ over the heading's new coordinates."
                (jetpacs-toast "Save failed")
                'rejected))))))
 
-(defun glasspane-detail--on-todo-set (args params)
-  "Set the TODO state to `:state'; an empty state clears it."
-  (let ((state (plist-get args :state)))
-    (if (not (stringp state))
-        'rejected
-      (let* ((clear (string-empty-p state))
-             (status (glasspane-ui-at-ref
-                      args (lambda () (jetpacs-org-heading-set-todo state)) t)))
-        (when (eq status 'accepted)
-          (jetpacs-shell-notify (if clear "State cleared"
-                                  (format "State → %s" state))
-                                (plist-get params :surface))
-          (jetpacs-app-defer-refresh params))
-        status))))
-
-(defun glasspane-detail--on-todo-cycle (args params)
-  "Cycle the heading through the TODO keyword sequence."
-  (let* ((state nil)
-         (status (glasspane-ui-at-ref
-                  args
-                  (lambda () (setq state (jetpacs-org-heading-cycle-todo)))
-                  t)))
-    (when (eq status 'accepted)
-      (jetpacs-shell-notify (if state (format "State → %s" state)
-                              "State cleared")
-                            (plist-get params :surface))
-      (jetpacs-app-defer-refresh params))
-    status))
-
-(defun glasspane-detail--on-schedule (args params)
-  "Move the heading's SCHEDULED stamp, or its DEADLINE with `:type'.
-`:when' is relative to today (\"+0d\", \"+1d\", \"+1w\"), `:value' an ISO
-date from the picker, and `:clear' removes the stamp.  A moved stamp
-keeps its time of day, repeater and delay cookie: only the day changes.
-No prompting arm — the empty-args tap is a build-time bug, not a user
-path (the picker flows are the foundation dialog's)."
-  (let* ((deadline (equal (plist-get args :type) "DEADLINE"))
-         (prop (if deadline "DEADLINE" "SCHEDULED"))
-         (clearp (let ((c (plist-get args :clear)))
-                   (and c (not (eq c :json-false)))))
-         (when (plist-get args :when))
-         (value (plist-get args :value))
-         (date (or (and (stringp when) (not (string-empty-p when))
-                        (or (jetpacs-org-relative-date
-                             (format-time-string "%Y-%m-%d") when)
-                            when))
-                   (and (stringp value) (not (string-empty-p value)) value)))
-         (surface (plist-get params :surface)))
-    (cond
-     (clearp
-      (let ((status (glasspane-ui-at-ref
-                     args (lambda () (jetpacs-org-heading-clear-planning prop))
-                     t)))
-        (when (eq status 'accepted)
-          (jetpacs-shell-notify (if deadline "Deadline cleared"
-                                  "Schedule cleared")
-                                surface)
-          (jetpacs-app-defer-refresh params))
-        status))
-     (date
-      (let ((status
-             (glasspane-ui-at-ref
-              args
-              (lambda () (jetpacs-org-heading-set-planning prop date))
-              t)))
-        (when (eq status 'accepted)
-          (jetpacs-shell-notify (format "%s %s" (if deadline "Deadline"
-                                                  "Scheduled")
-                                        date)
-                                surface)
-          (jetpacs-app-defer-refresh params))
-        status))
-     (t 'rejected))))
-
-(defun glasspane-detail--on-priority (args params)
-  "Set the priority to `:value'; an empty value removes it."
-  (let ((val (plist-get args :value)))
-    (if (not (stringp val))
-        'rejected
-      (let* ((remove (string-empty-p val))
-             (status (glasspane-ui-at-ref
-                      args
-                      (lambda () (jetpacs-org-heading-set-priority val))
-                      t)))
-        (when (eq status 'accepted)
-          (jetpacs-shell-notify (if remove "Priority cleared"
-                                  (format "Priority %s" (upcase val)))
-                                (plist-get params :surface))
-          (jetpacs-app-defer-refresh params))
-        status))))
-
-(defun glasspane-detail--on-tags (args params)
-  "Replace the heading's local tags with `:value' (the enum's vector).
-Device-injected strings are 23.1 input: each member must be in org's
-own tag charset or the whole write refuses."
-  (let ((val (plist-get args :value)))
-    (if (not (or (vectorp val) (proper-list-p val)))
-        'rejected
-      (let ((tags (append val nil)))
-        (if (not (jetpacs-org-tags-valid-p tags))
-            'rejected
-          (let ((status (glasspane-ui-at-ref
-                         args (lambda () (jetpacs-org-heading-set-tags tags))
-                         t)))
-            (when (eq status 'accepted)
-              (jetpacs-shell-notify (if tags (format "Tags: %s"
-                                                     (string-join tags " "))
-                                      "Tags cleared")
-                                    (plist-get params :surface))
-              (jetpacs-app-defer-refresh params))
-            status))))))
-
-(defun glasspane-detail--refile-flow (ref params)
-  "The bridged refile picker; runs in a continuation behind can-bridge."
-  (jetpacs-dialog-with-prompting
-   (lambda ()
-     (let ((marker (ebp-org-resolve-ref ref)))
-       (unwind-protect
-           (with-current-buffer (marker-buffer marker)
-             (org-with-wide-buffer
-              (goto-char marker)
-              (let* ((targets (jetpacs-org-heading-refile-targets))
-                     (choice (condition-case nil
-                                 (completing-read "Refile to: "
-                                                  (mapcar #'car targets)
-                                                  nil t)
-                               (quit nil)))
-                     (target (and choice (assoc choice targets))))
-                (if (not target)
-                    (jetpacs-shell-notify "Refile cancelled"
-                                          (plist-get params :surface))
-                  ;; Refile may dirty both source and target; the
-                  ;; foundation puts every affected Org buffer through the
-                  ;; app's save funnel.
-                  (jetpacs-org-heading-refile
-                   target #'glasspane-org-save-and-invalidate)
-                  (jetpacs-shell-notify (format "Refiled to %s" choice)
-                                        (plist-get params :surface))))))
-         (set-marker marker nil)))
-     (glasspane-detail--leave params))
-   (plist-get params :surface)
-   "This needs the Companion dialog bridge"))
-
-(defun glasspane-detail--on-refile (args params)
-  "Refile the whole subtree through a bridged target picker."
-  (let ((ref (glasspane-detail--token-ref args)))
-    (cond
-     ((not (stringp (plist-get args :token))) 'rejected)
-     ((null ref) 'stale)
-     (t
-      (jetpacs-flow-continue
-       (lambda () (glasspane-detail--refile-flow ref params)))
-      'accepted))))
-
-
-(defun glasspane-detail--on-add-note (args params)
-  "Quick logbook note through a bridged prompt."
-  (cond
-   ((not (stringp (plist-get args :token))) 'rejected)
-   ((null (glasspane-detail--token-ref args)) 'stale)
-   (t
-    (jetpacs-flow-continue
-     (lambda ()
-       (jetpacs-dialog-with-prompting
-        (lambda ()
-          (let ((note (string-trim
-                       (condition-case nil (read-string "Note: ")
-                         (quit "")))))
-            (if (string-empty-p note)
-                (jetpacs-shell-notify "Note cancelled"
-                                      (plist-get params :surface))
-              (when (eq (glasspane-ui-at-ref
-                         args
-                         (lambda ()
-                           (jetpacs-org-heading-insert-note
-                            (jetpacs-scalar-text note)))
-                         t)
-                        'accepted)
-                (jetpacs-shell-notify "Note added"
-                                      (plist-get params :surface))))
-            (ignore-errors
-              (jetpacs-shell-push (plist-get params :surface)))))
-        (plist-get params :surface)
-        "This needs the Companion dialog bridge")))
-    'accepted)))
-
-(defun glasspane-detail--on-delete (args params)
-  "Delete the subtree outright.  The 14.1 `:confirm' on the emitting
-descriptor already parked this behind a device AlertDialog — Archive
-is the recoverable path; this one is for genuine junk."
-  (let ((status (glasspane-ui-at-ref
-                 args #'jetpacs-org-heading-delete-subtree t)))
-    (when (eq status 'accepted)
-      (jetpacs-shell-notify "Deleted" (plist-get params :surface))
-      (jetpacs-flow-continue (lambda () (glasspane-detail--leave params))))
-    status))
-
-(defun glasspane-detail--on-duplicate (args params)
-  "Copy the subtree and insert it right after itself — the
-recurring-meeting-notes idiom."
-  (let ((status (glasspane-ui-at-ref
-                 args #'jetpacs-org-heading-duplicate-subtree t)))
-    (when (eq status 'accepted)
-      (jetpacs-shell-notify "Duplicated" (plist-get params :surface))
-      (jetpacs-app-defer-refresh params))
-    status))
-
-(defun glasspane-detail--on-prop-set (args params)
-  "Set property `:name' to the row input's injected `:value'.
-An empty value deletes the property."
-  (let* ((name (plist-get args :name))
-         (raw (plist-get args :value))
-         (value (cond
-                 ((eq raw t) "t")
-                 ((memq raw '(nil :json-false)) "nil")
-                 ((vectorp raw) (if (> (length raw) 0)
-                                    (format "%s" (aref raw 0))
-                                  ""))
-                 ((proper-list-p raw) (if raw (format "%s" (car raw)) ""))
-                 ((stringp raw) (string-trim raw))
-                 (t (format "%s" raw)))))
-    (if (not (and (stringp name) (not (string-empty-p name))))
-        'rejected
-      (let ((status (glasspane-ui-at-ref
-                     args
-                     (lambda () (jetpacs-org-heading-set-property name value))
-                     t)))
-        (when (eq status 'accepted)
-          (jetpacs-shell-notify (if (string-empty-p value)
-                                    (format "Removed %s" name)
-                                  (format "%s → %s" name value))
-                                (plist-get params :surface))
-          (jetpacs-app-defer-refresh params))
-        status))))
-
-(defun glasspane-detail--on-prop-add (args params)
-  "Ask for a property key through the bridge; the new (empty) property
-then appears as a row whose value column is ready to fill in."
-  (cond
-   ((not (stringp (plist-get args :token))) 'rejected)
-   ((null (glasspane-detail--token-ref args)) 'stale)
-   (t
-    (jetpacs-flow-continue
-     (lambda ()
-       (jetpacs-dialog-with-prompting
-        (lambda ()
-          (let ((name (string-trim
-                       (condition-case nil
-                           (read-string "New property name: ")
-                         (quit "")))))
-            (cond
-             ((string-empty-p name) nil)
-             ((not (jetpacs-org-property-name-valid-p name))
-              (jetpacs-shell-notify
-               "Property names can't contain colons or spaces"
-               (plist-get params :surface)))
-             ((eq (glasspane-ui-at-ref
-                   args
-                   (lambda () (org-set-property (upcase name) ""))
-                   t)
-                  'accepted)
-              (jetpacs-shell-notify
-               (format "Added %s — fill in its value" (upcase name))
-               (plist-get params :surface))))
-            (ignore-errors
-              (jetpacs-shell-push (plist-get params :surface)))))
-        (plist-get params :surface)
-        "This needs the Companion dialog bridge")))
-    'accepted)))
-
 (defun glasspane-detail--show-props-dialog (ref params)
   "The sub-heading Properties dialog: editable rows through the same
 `heading.prop-set' funnel, on a token minted for THIS dialog."
@@ -1897,14 +1628,6 @@ else (http, images) reports back as a snackbar."
               (ignore-errors (jetpacs-shell-push surface))))))
         'accepted))))
 
-(defun glasspane-detail--on-clock-in (args params)
-  "Clock in at the tapped heading."
-  (let ((status (glasspane-ui-at-ref args #'org-clock-in)))
-    (when (eq status 'accepted)
-      (jetpacs-shell-notify "Clocked in" (plist-get params :surface))
-      (jetpacs-app-defer-refresh params))
-    status))
-
 ;;;; The file-properties verbs (compatibility names)
 ;;
 ;; The dialog, its keyword writer and its Save verb are the foundation's
@@ -1957,6 +1680,15 @@ heading.menu lives with the reader's sheet (G4 sibling);
 heading.reorder with the reorderable-list builders; search.by-tag
 with the search state (G6).")
 
+(defun glasspane-detail--heading-verb (verb)
+  "The foundation's handler for heading VERB in Glasspane's token scope.
+Saves go through `glasspane-org-save-and-invalidate'; a deleted or
+refiled heading leaves the detail screen."
+  (jetpacs-org-heading-verb verb
+                            :token-owner "glasspane"
+                            :save #'glasspane-org-save-and-invalidate
+                            :leave #'glasspane-detail--leave))
+
 (defun glasspane-detail-register ()
   "Register the detail verbs and downstream Org editor adapter.
 Called from `glasspane-register', not at this file's load (the G0
@@ -1994,37 +1726,46 @@ gate contract).  Idempotent."
                        :doc "Open the grouped local-tag picker for a heading"
                        :strict t
                        :args '((:name token :type "text" :required t)))
-    (jetpacs-defaction "heading.todo-set" #'glasspane-detail--on-todo-set
+    (jetpacs-defaction "heading.todo-set"
+                       (glasspane-detail--heading-verb 'todo-set)
                        :doc "Set a heading's TODO state; empty clears")
     (jetpacs-defaction "heading.todo-cycle"
-                       #'glasspane-detail--on-todo-cycle
+                       (glasspane-detail--heading-verb 'todo-cycle)
                        :any-surface t
                        :doc "Cycle a heading through the TODO sequence")
-    (jetpacs-defaction "heading.schedule" #'glasspane-detail--on-schedule
+    (jetpacs-defaction "heading.schedule"
+                       (glasspane-detail--heading-verb 'schedule)
                        :doc "Schedule: :when relative, :value date, :clear")
-    (jetpacs-defaction "heading.priority" #'glasspane-detail--on-priority
+    (jetpacs-defaction "heading.priority"
+                       (glasspane-detail--heading-verb 'priority)
                        :doc "Set a heading's priority; empty clears")
-    (jetpacs-defaction "heading.tags" #'glasspane-detail--on-tags
+    (jetpacs-defaction "heading.tags" (glasspane-detail--heading-verb 'tags)
                        :doc "Replace a heading's local tags")
-    (jetpacs-defaction "heading.refile" #'glasspane-detail--on-refile
+    (jetpacs-defaction "heading.refile"
+                       (glasspane-detail--heading-verb 'refile)
                        :doc "Refile the subtree via a bridged picker")
-    (jetpacs-defaction "heading.add-note" #'glasspane-detail--on-add-note
+    (jetpacs-defaction "heading.add-note"
+                       (glasspane-detail--heading-verb 'add-note)
                        :doc "Add a logbook note via a bridged prompt")
-    (jetpacs-defaction "heading.delete" #'glasspane-detail--on-delete
+    (jetpacs-defaction "heading.delete"
+                       (glasspane-detail--heading-verb 'delete)
                        :doc "Delete the subtree (device-confirmed)")
     (jetpacs-defaction "heading.duplicate"
-                       #'glasspane-detail--on-duplicate
+                       (glasspane-detail--heading-verb 'duplicate)
                        :any-surface t
                        :doc "Duplicate the subtree after itself")
-    (jetpacs-defaction "heading.prop-set" #'glasspane-detail--on-prop-set
+    (jetpacs-defaction "heading.prop-set"
+                       (glasspane-detail--heading-verb 'prop-set)
                        :doc "Set a property; empty value removes")
-    (jetpacs-defaction "heading.prop-add" #'glasspane-detail--on-prop-add
+    (jetpacs-defaction "heading.prop-add"
+                       (glasspane-detail--heading-verb 'prop-add)
                        :doc "Add a property via a bridged key prompt")
     (jetpacs-defaction "heading.props.show"
                        #'glasspane-detail--on-props-show
                        :any-surface t
                        :doc "Open the sub-heading properties dialog")
-    (jetpacs-defaction "heading.clock-in" #'glasspane-detail--on-clock-in
+    (jetpacs-defaction "heading.clock-in"
+                       (glasspane-detail--heading-verb 'clock-in)
                        :any-surface t
                        :doc "Clock in at the heading")
     (jetpacs-defaction "org.link.open" #'glasspane-detail--on-link-open

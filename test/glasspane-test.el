@@ -3138,9 +3138,17 @@ between files through the same policy."
                       ((symbol-function 'jetpacs-shell-push)
                        (lambda (&rest _) nil))
                       ((symbol-function 'jetpacs-chrome-pop-screen)
-                       (lambda (&rest _) nil)))
-              (glasspane-detail--refile-flow
-               ref '(:surface "app:glasspane"))))
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'jetpacs-flow-continue)
+                       (lambda (fn) (funcall fn))))
+              (should (eq (funcall (gethash "heading.refile"
+                                            jetpacs-action-handlers)
+                                   (list :token
+                                         (car (ebp-org-ref-tokens
+                                               (list ref) :set "refile-test"
+                                               :owner "glasspane")))
+                                   '(:surface "app:glasspane"))
+                          'accepted))))
           (should (cl-some (lambda (s) (string-search "Refiled" s))
                            notified))
           (should (string-search "Move me"

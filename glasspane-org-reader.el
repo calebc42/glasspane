@@ -48,10 +48,10 @@
 ;; The inline editors this reader places — the source-block draft, the
 ;; Babel call argument draft and execute, the footnote dialog — and the
 ;; checkbox verb are foundation Org machinery now (jetpacs-reader-org.el,
-;; jetpacs-org-render.el, verbs `jetpacs.org.*').  This file authors
-;; only their surroundings: the cards, fold headers, prose and the
-;; emphasis-aware footnote text it lends the foundation dialog through
-;; `jetpacs-reader-org-footnote-prose-function'.
+;; jetpacs-org-render.el, verbs `jetpacs.org.*'), and so are the inline
+;; spans its prose is made of (jetpacs-org-inline.el).  This file authors
+;; only their surroundings: the cards and fold headers, plus the note
+;; database's titles for bare id links.
 
 ;;; Code:
 
@@ -73,7 +73,7 @@
 (require 'glasspane-org)                ; durable mutation/save funnel
 (require 'glasspane-ui)                 ; shared Area and tag presentation
 (require 'jetpacs-org-render)            ; native drawer visibility controls
-(require 'org-id)                        ; ID index for bare id: link labels
+(require 'jetpacs-org-inline)            ; emphasis, link and footnote spans
 (require 'jetpacs-navigate)              ; Org follows links; Glasspane presents
 
 ;; The document route lives in the sibling that soft-requires this reader;
@@ -285,7 +285,7 @@ The source buffer's modification tick binds both gestures to this snapshot."
           :state-description description
           :actions (list (jetpacs-semantic-action "Mark in progress" progress))))
         (jetpacs-with-attrs
-         (glasspane-org-reader--prose-node label t (when (equal state "on") "outline")
+         (jetpacs-org-inline-prose label t (when (equal state "on") "outline")
                                            (plist-get record :label-start))
          :weight 1)
         :fill t :align "center" :spacing 4)
@@ -480,113 +480,24 @@ or open another file, so resolution belongs exclusively to the Play action."
                               (when outside (list (jetpacs-text (concat "Call options · " outside) :style "caption" :color "outline")))
                               (cdr results) (list :spacing 6)))
                       :variant "outlined")
-                     :pad '(:horizontal 12 :vertical 8)))
-                   (bytes (jetpacs-buffer-node-bytes node))
-                   (left (cdr-safe jetpacs-buffer-budget)))
-              (when (or (null left) (<= bytes left))
-                (when left (setcdr jetpacs-buffer-budget (- left bytes)))
+                     :pad '(:horizontal 12 :vertical 8))))
+              (when (jetpacs-buffer-charge nil (jetpacs-buffer-node-bytes node))
                 (when run (jetpacs-buffer-expose name pos "jetpacs.org.call.execute"))
                 (when edit (jetpacs-buffer-expose name pos "jetpacs.org.call.edit"))
                 (when editing (jetpacs-buffer-expose name pos "jetpacs.org.call.save"))
                 (cons (if results (car results) end) node)))))))))
 
-(defconst glasspane-org-reader--link-label-limit 60
-  "Longest readable label synthesized for a link without a description.")
-
-(defconst glasspane-org-reader--internal-link-types
-  '("id" "file" "attachment" "fuzzy" "custom-id" "coderef" "radio")
-  "Link types whose destination is Org content rather than an external app.")
-
-(defvar glasspane-org-reader--link-tally nil
-  "Tappable links rendered for the heading being built, or nil outside one.
-`glasspane-org-reader--heading-node' binds it around its own header and body
-so a nested heading's binding never leaks into its parent's count.")
-
-(defun glasspane-org-reader--link-color (object)
-  "The theme role for link OBJECT: primary inside Org, secondary outside.
-Both are roles every Companion resolves, so the distinction survives themes."
-  (if (member (org-element-property :type object)
-              glasspane-org-reader--internal-link-types)
-      "primary"
-    "secondary"))
-
-(defun glasspane-org-reader--id-title (id source-buffer)
-  "The heading title behind Org ID, or nil when it cannot be read cheaply.
-The note database answers first.  Otherwise Org's ID index names the file,
-falling back to SOURCE-BUFFER's own file, and the EBP resolver reads the
-heading inside the allowlisted roots.  Never signals and never edits."
-  (or (and (featurep 'vulpea) (fboundp 'vulpea-db-get-by-id)
-           (condition-case nil
-               (when-let* ((note (vulpea-db-get-by-id id))
-                           (title (vulpea-note-title note)))
-                 (and (stringp title) (not (string-empty-p title)) title))
-             (error nil)))
-      (condition-case nil
-          (when-let* ((file (with-current-buffer source-buffer
-                              (org-id-find-id-file id)))
-                      (marker (ebp-org-resolve-ref
-                               (list :id id :file (file-truename file)))))
-            (unwind-protect
-                (with-current-buffer (marker-buffer marker)
-                  (org-with-wide-buffer
-                   (goto-char marker)
-                   (let ((title (org-get-heading t t t t)))
-                     (and (stringp title) (not (string-empty-p title)) title))))
-              (set-marker marker nil)))
-        (error nil))))
-
-(defun glasspane-org-reader--link-label (object source-buffer)
-  "A readable label for link OBJECT that has no description.
-An id link shows the heading it names, a file link its file name and target
-heading, a web link its address without the scheme.  Other types keep their
-raw target.  SOURCE-BUFFER helps resolve ids declared in the same file."
-  (let* ((type (org-element-property :type object))
-         (path (or (org-element-property :path object) ""))
-         (raw (or (org-element-property :raw-link object) path))
-         (search (org-element-property :search-option object))
-         (label
-          (pcase type
-            ("id" (or (glasspane-org-reader--id-title path source-buffer)
-                      (concat "Heading " (jetpacs-truncate-text path 9))))
-            ((or "file" "attachment")
-             (concat (file-name-nondirectory (directory-file-name path))
-                     (when (and (stringp search) (not (string-empty-p search)))
-                       (concat " › " (string-trim-left search "[*#]+")))))
-            ((or "http" "https" "ftp")
-             (string-remove-suffix "/" (string-remove-prefix "//" path)))
-            ("fuzzy" (string-trim-left path "[*]+"))
-            ((or "mailto" "custom-id" "coderef" "radio") path)
-            (_ raw))))
-    (jetpacs-truncate-text (if (string-empty-p label) raw label)
-                           glasspane-org-reader--link-label-limit)))
-
-(defun glasspane-org-reader--link-properties (object action source-buffer)
-  "Mark link OBJECT in the current presentation copy as a tappable span.
-ACTION is its follow descriptor.  A described link keeps its description
-text, so emphasis nested inside stays styled; a bare link is replaced by a
-readable label.  Return non-nil when OBJECT lay inside the copy."
-  (let* ((beg (org-element-property :begin object))
-         (end (- (org-element-property :end object)
-                 (or (org-element-property :post-blank object) 0)))
-         (cb (org-element-property :contents-begin object))
-         (ce (org-element-property :contents-end object))
-         (attributes (list 'gp-action action
-                           'gp-color (glasspane-org-reader--link-color object)
-                           'gp-underline t)))
-    (when (<= (point-min) beg end (point-max))
-      (if (and cb ce (< cb ce))
-          (progn
-            (put-text-property beg cb 'gp-hide t)
-            (put-text-property ce end 'gp-hide t)
-            (add-text-properties cb ce attributes))
-        (set-text-properties beg end nil)
-        (add-text-properties
-         beg (1+ beg)
-         (append (list 'gp-replacement
-                       (glasspane-org-reader--link-label object source-buffer))
-                 attributes))
-        (put-text-property (1+ beg) end 'gp-hide t))
-      t)))
+(defun glasspane-org-reader--vulpea-title (id _source-buffer)
+  "The note database's title for Org ID, or nil.
+First in `jetpacs-org-inline-id-title-functions' while Glasspane is
+registered, so a bare id link reads its note's title without visiting
+files.  Never signals."
+  (and (featurep 'vulpea) (fboundp 'vulpea-db-get-by-id)
+       (condition-case nil
+           (when-let* ((note (vulpea-db-get-by-id id))
+                       (title (vulpea-note-title note)))
+             (and (stringp title) (not (string-empty-p title)) title))
+         (error nil))))
 
 (defun glasspane-org-reader--owns-follow-p (source surface)
   "Whether a link followed from SOURCE on SURFACE is Glasspane's to present.
@@ -660,131 +571,10 @@ Return nil when there is nothing to report."
                              :on-tap tap))
          :style "caption")))))
 
-(defconst glasspane-org-reader--literal-background "#80808024"
-  "Subtle translucent background shared by inline literals and examples.")
-
-(defun glasspane-org-reader--emphasis-spans (text &optional inline weight color source-start)
-  "Render Org emphasis in TEXT as native spans without its delimiters.
-INLINE parses a heading or label; otherwise parse full Org elements so code,
-examples, keywords and fixed-width text remain literal.  WEIGHT and COLOR
-supply base styling.  SOURCE-START maps TEXT to the current Org buffer for
-footnote and link taps.  Only the temporary presentation copy is modified.
-Return nil when there is no emphasis or the native budget cannot fit it.
-RichSpan has no strike decoration; strike-through loses only its markers."
-  (when (and (jetpacs-node-advertised-p "rich_text")
-             (or (string-match-p "[*_/+~=]" text)
-                 (and source-start
-                      (or (string-search "[fn:" text)
-                          (string-match-p org-link-any-re text)))))
-    (let* ((source-buffer (current-buffer))
-           (tree (if inline
-                     (org-element-parse-secondary-string text (org-element-restriction 'paragraph))
-                   (with-temp-buffer
-                     (insert text)
-                     (let ((org-inhibit-startup t)) (delay-mode-hooks (org-mode)))
-                     (org-element-parse-buffer))))
-           (objects (org-element-map tree '(bold italic underline strike-through code verbatim footnote-reference link)
-                      #'identity))
-           spans exposed links)
-      (when objects
-        (with-temp-buffer
-          (insert text)
-          (dolist (object objects)
-            (let* ((type (org-element-type object))
-                   (beg (org-element-property :begin object))
-                   (cb (or (org-element-property :contents-begin object) (1+ beg)))
-                   (ce (or (org-element-property :contents-end object)
-                           (+ cb (length (org-element-property :value object)))))
-                   (attributes (pcase type
-                                 ('bold '(gp-weight "bold"))
-                                 ('italic '(gp-italic t))
-                                 ('underline '(gp-underline t))
-                                 ((or 'code 'verbatim)
-                                  (list 'gp-mono t 'gp-color "secondary"
-                                        'gp-bg glasspane-org-reader--literal-background)))))
-              (when (and (not (memq type '(footnote-reference link)))
-                         (<= (point-min) beg cb ce (1+ ce) (point-max)))
-                (put-text-property beg cb 'gp-hide t)
-                (put-text-property ce (1+ ce) 'gp-hide t)
-                (when attributes (add-text-properties cb ce attributes)))))
-          (when source-start
-            ;; Links first: a reference's own pass below clears any link
-            ;; nested inside the note text it hides.
-            (dolist (object objects)
-              (when (and (eq (org-element-type object) 'link)
-                         (not (org-element-lineage object '(footnote-reference link))))
-                (let* ((pos (+ source-start (1- (org-element-property :begin object))))
-                       (action (with-current-buffer source-buffer
-                                 (jetpacs-action "jetpacs.org.follow"
-                                                 :args (list :buffer (buffer-name) :pos pos
-                                                             :tick (buffer-chars-modified-tick))))))
-                  (when (glasspane-org-reader--link-properties object action source-buffer)
-                    (push pos links)))))
-            (dolist (object objects)
-              (when (and (eq (org-element-type object) 'footnote-reference)
-                         (not (org-element-lineage object '(footnote-reference))))
-                (let* ((beg (org-element-property :begin object))
-                       (end (- (org-element-property :end object)
-                               (or (org-element-property :post-blank object) 0)))
-                       (pos (+ source-start (1- beg)))
-                       (label (or (org-element-property :label object) "note"))
-                       (action (with-current-buffer source-buffer
-                                 (jetpacs-action "jetpacs.org.footnote.open"
-                                                 :args (list :buffer (buffer-name) :pos pos
-                                                             :tick (buffer-chars-modified-tick))))))
-                  (when (<= (point-min) beg end (point-max))
-                    (set-text-properties beg end nil)
-                    (add-text-properties beg (1+ beg)
-                                         (list 'gp-replacement (concat "[" label "]")
-                                               'gp-action action 'gp-color "primary" 'gp-underline t))
-                    (put-text-property (1+ beg) end 'gp-hide t)
-                    (push pos exposed))))))
-          (goto-char (point-min))
-          (while (< (point) (point-max))
-            (let* ((beg (point))
-                   (end (next-property-change beg nil (point-max))))
-              (unless (get-text-property beg 'gp-hide)
-                (push (jetpacs-span
-                       (or (get-text-property beg 'gp-replacement)
-                           (buffer-substring-no-properties beg end))
-                       :font-weight (or (get-text-property beg 'gp-weight) weight)
-                       :italic (get-text-property beg 'gp-italic)
-                       :underline (get-text-property beg 'gp-underline)
-                       :mono (get-text-property beg 'gp-mono)
-                       :color (or (get-text-property beg 'gp-color) color)
-                       :bg (get-text-property beg 'gp-bg)
-                       :on-tap (get-text-property beg 'gp-action))
-                      spans))
-              (goto-char end))))
-        (setq spans (nreverse spans))
-        (let ((remaining (car-safe jetpacs-buffer-budget))
-              (bytes-left (cdr-safe jetpacs-buffer-budget))
-              (bytes (jetpacs-buffer-node-bytes (jetpacs-rich-text spans :style "body"))))
-          (when (and (or (null remaining) (<= (length spans) remaining))
-                     (or (null bytes-left) (<= bytes bytes-left)))
-            (when remaining (setcar jetpacs-buffer-budget (- remaining (length spans))))
-            (when bytes-left (setcdr jetpacs-buffer-budget (- bytes-left bytes)))
-            (with-current-buffer source-buffer
-              (dolist (pos exposed)
-                (jetpacs-buffer-expose (buffer-name) pos "jetpacs.org.footnote.open"))
-              (dolist (pos links)
-                (jetpacs-buffer-expose (buffer-name) pos "jetpacs.org.follow")))
-            (when glasspane-org-reader--link-tally
-              (cl-incf glasspane-org-reader--link-tally (length links)))
-            spans))))))
-
-(defun glasspane-org-reader--prose-node (text &optional inline color source-start)
-  "Render TEXT with Org emphasis hidden, optionally INLINE and in COLOR.
-SOURCE-START is its original buffer position for interactive footnotes.
-Retain the original syntax when no emphasis or native support is available."
-  (if-let* ((spans (glasspane-org-reader--emphasis-spans text inline nil color source-start)))
-      (jetpacs-rich-text spans :style "body")
-    (jetpacs-text text :syntax "org" :color color)))
-
 (defun glasspane-org-reader--centered-block (text italic &optional source-start)
   "Center each authored line of TEXT, applying ITALIC for verse.
 SOURCE-START enables footnote links.  Split parsed spans to preserve lines."
-  (let ((spans (or (glasspane-org-reader--emphasis-spans text t nil nil source-start)
+  (let ((spans (or (jetpacs-org-inline-spans text t nil nil source-start)
                    (list (jetpacs-span text))))
         line lines)
     (dolist (span spans)
@@ -810,28 +600,11 @@ SOURCE-START enables footnote links.  Split parsed spans to preserve lines."
 
 (defun glasspane-org-reader--export-code-node (beg end)
   "Render literal export code from BEG to END with prepared Emacs faces.
-Copy only face properties into a temporary buffer: visibility, display and
-keymaps cannot hide export text or create actions.  Never fontify or export
-from a builder; Jetpacs owns conversion of Emacs faces into native spans."
-  (let ((code (buffer-substring beg end)) (name (buffer-name)) spans)
-    (with-temp-buffer
-      (let ((cursor 0))
-        (while (< cursor (length code))
-          (let ((next (next-property-change cursor code (length code))))
-            (insert (propertize (substring-no-properties code cursor next)
-                                'face (or (get-text-property cursor 'face code)
-                                          (get-text-property cursor 'font-lock-face code))))
-            (setq cursor next))))
-      (let ((jetpacs-buffer-monospace t)
-            (jetpacs-buffer-emit-colors t)
-            (jetpacs-buffer-span-action-function nil))
-        (goto-char (point-min))
-        (while (< (point) (point-max))
-          (setq spans (nconc spans (jetpacs-buffer-line-spans (point) (line-end-position) name)))
-          (when (< (line-end-position) (point-max))
-            (setq spans (nconc spans (list (jetpacs-span "\n" :mono t)))))
-          (forward-line))))
-    (jetpacs-rich-text (or spans (list (jetpacs-span "" :mono t))) :style "mono")))
+Never fontify or export from a builder; Jetpacs copies only the faces."
+  (jetpacs-rich-text (or (jetpacs-buffer-face-spans (buffer-substring beg end)
+                                                    (buffer-name))
+                         (list (jetpacs-span "" :mono t)))
+                     :style "mono"))
 
 (defun glasspane-org-reader--prose-block-at (start limit)
   "Return (END . NODE) for an Org presentation block at START before LIMIT.
@@ -885,7 +658,7 @@ content, and keep unsupported or oversized blocks as source text."
                                      (jetpacs-with-attrs
                                       (jetpacs-box
                                        (jetpacs-with-attrs
-                                        (jetpacs-column (glasspane-org-reader--prose-node text nil nil beg) :fill t)
+                                        (jetpacs-column (jetpacs-org-inline-prose text nil nil beg) :fill t)
                                         :pad '(:start 12 :end 8 :vertical 6)))
                                       :bg "surface" :pad '(:start 3)))
                                     :bg "secondary"))
@@ -905,7 +678,7 @@ content, and keep unsupported or oversized blocks as source text."
                                                   :style "label" :color "on_surface_variant")
                                      (if (eq type 'export-block)
                                          (glasspane-org-reader--export-code-node beg (+ beg (length text)))
-                                       (let ((content (glasspane-org-reader--prose-node text nil nil beg))
+                                       (let ((content (jetpacs-org-inline-prose text nil nil beg))
                                              (parameters (org-element-property :parameters element)))
                                          (if (not parameters) content
                                            (jetpacs-column
@@ -918,7 +691,7 @@ content, and keep unsupported or oversized blocks as source text."
                                      (jetpacs-with-attrs
                                       (jetpacs-column (jetpacs-text text :style "mono") :fill t)
                                       :padding 12))
-                                    :bg glasspane-org-reader--literal-background :corner 6)))))
+                                    :bg jetpacs-org-inline-literal-background :corner 6)))))
                            (jetpacs-with-attrs
                             (jetpacs-box
                              (if (string-empty-p metadata) body
@@ -926,19 +699,13 @@ content, and keep unsupported or oversized blocks as source text."
                                (jetpacs-text (string-trim-right metadata) :style "caption" :color "outline")
                                body :spacing 6)))
                             :pad '(:horizontal 12 :vertical 8)))))
-                      (spans 0)
-                      (bytes (jetpacs-buffer-node-bytes node))
-                      (left (car-safe jetpacs-buffer-budget))
-                      (bytes-left (cdr-safe jetpacs-buffer-budget)))
+                      (spans 0))
                  (cl-labels ((count-spans (item)
                                (when (listp item)
                                  (cl-incf spans (length (plist-get item :spans)))
                                  (mapc #'count-spans (plist-get item :children)))))
                    (count-spans node))
-                 (when (and (or (null left) (<= spans left))
-                            (or (null bytes-left) (<= bytes bytes-left)))
-                   (when left (setcar jetpacs-buffer-budget (- left spans)))
-                   (when bytes-left (setcdr jetpacs-buffer-budget (- bytes-left bytes)))
+                 (when (jetpacs-buffer-charge spans (jetpacs-buffer-node-bytes node))
                    node))))))))))
 
 (defun glasspane-org-reader--text-nodes (text start)
@@ -956,7 +723,7 @@ Without a source position or native support, retain plain Org text."
       (cl-labels ((flush (end)
                     (let ((plain (substring text (- cursor start) (- end start))))
                       (unless (string-blank-p plain)
-                        (push (glasspane-org-reader--prose-node (string-trim-right plain) nil nil cursor) nodes)))))
+                        (push (jetpacs-org-inline-prose (string-trim-right plain) nil nil cursor) nodes)))))
         (save-excursion
           (goto-char start)
           (while (< (point) limit)
@@ -997,7 +764,7 @@ Without a source position or native support, retain plain Org text."
               (goto-char next))))
         (if (and (null nodes) (= cursor start))
             (unless (string-blank-p text)
-              (push (glasspane-org-reader--prose-node text nil nil start) nodes))
+              (push (jetpacs-org-inline-prose text nil nil start) nodes))
           (flush limit)))
       (nreverse nodes))))
 
@@ -1163,7 +930,7 @@ without duplicating the elevated Area chips."
       (let ((headline
              (jetpacs-rich-text
               (append (glasspane-org-reader--todo-spans todo)
-                      (or (glasspane-org-reader--emphasis-spans title t "bold" "on_surface" title-start)
+                      (or (jetpacs-org-inline-spans title t "bold" "on_surface" title-start)
                           (list (jetpacs-span title :font-weight "bold"
                                               :color "on_surface")))))))
         (apply
@@ -1267,10 +1034,10 @@ render did not record."
          header content links)
     ;; Count only this heading's own rendered links: the header's title and
     ;; its body.  Each child heading rebinds the tally for itself.
-    (let ((glasspane-org-reader--link-tally 0))
+    (let ((jetpacs-org-inline-link-tally 0))
       (setq header (glasspane-org-reader--heading-header n areas))
       (setq content (glasspane-org-reader--content-nodes n file tokens))
-      (setq links glasspane-org-reader--link-tally))
+      (setq links jetpacs-org-inline-link-tally))
     (when-let* ((connections
                  (glasspane-org-reader--connections-line
                   links (glasspane-org-reader--backlink-count pos) token)))
@@ -1856,10 +1623,6 @@ body/actions claimant; this app replaces the stock adapter in the stable
   ;; before replacing only its adapter slot.  The registrar is deliberately
   ;; reassertive, so this also makes live reload deterministic.
   (jetpacs-reader-org-register)
-  ;; The foundation's footnote dialog reads its definition through this
-  ;; app's emphasis-aware prose while Glasspane is registered.
-  (setq jetpacs-reader-org-footnote-prose-function
-        #'glasspane-org-reader--prose-node)
   ;; Owned, so the app's teardown hands the `org' slot back to the stock
   ;; adapter it displaced.  The stock registrar above stays OWNERLESS: run
   ;; under the app owner it would claim the foundation's reader verbs too.
@@ -1873,6 +1636,9 @@ body/actions claimant; this app replaces the stock adapter in the stable
     ;; presents where Org went, through its one document route.
     (jetpacs-add-hook 'jetpacs-org-render-follow-functions
                       #'glasspane-org-reader--present-link-destination)
+    ;; Bare id links name their note from the note database first.
+    (jetpacs-add-hook 'jetpacs-org-inline-id-title-functions
+                      #'glasspane-org-reader--vulpea-title)
     (jetpacs-defaction "heading.menu"
                        #'glasspane-org-reader--on-heading-menu
                        :any-surface t
@@ -1908,11 +1674,10 @@ body/actions claimant; this app replaces the stock adapter in the stable
                'glasspane-org-reader--files-actions)
   (jetpacs-remove-hook 'jetpacs-org-render-follow-functions
                        #'glasspane-org-reader--present-link-destination)
+  (jetpacs-remove-hook 'jetpacs-org-inline-id-title-functions
+                       #'glasspane-org-reader--vulpea-title)
   (jetpacs-dialog-slot-close "glasspane")
   (setq glasspane-org-reader--refile-lists nil)
-  (when (eq jetpacs-reader-org-footnote-prose-function
-            #'glasspane-org-reader--prose-node)
-    (setq jetpacs-reader-org-footnote-prose-function nil))
   (jetpacs-reader-org-register))
 
 (provide 'glasspane-org-reader)

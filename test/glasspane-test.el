@@ -5813,8 +5813,8 @@ resets the module state only those modules hold."
                               jetpacs-teardown-kind-order))
           (should-not (jetpacs--owned-names kind glasspane-owner)))
         (should-not (gethash "glasspane.home" jetpacs-action-handlers))
-        (should-not (eq jetpacs-reader-org-footnote-prose-function
-                        #'glasspane-org-reader--prose-node)))
+        (should-not (memq #'glasspane-org-reader--vulpea-title
+                          jetpacs-org-inline-id-title-functions)))
     (setq jetpacs-shell--pending-removals nil)
     (glasspane-register)))
 

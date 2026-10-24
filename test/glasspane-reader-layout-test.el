@@ -362,44 +362,6 @@
          (should (equal disk (with-temp-buffer (insert-file-contents file) (buffer-string))))
          (should jetpacs-reader-org--source-edit))))))
 
-(ert-deftest glasspane-reader-layout-emphasis-hides-markers-and-keeps-styles ()
-  "All six emphasis forms hide markers; nesting combines supported native styles."
-  (with-temp-buffer
-    (insert "A *bold /nested/*, /italic/, _underline_, +retired+, ~code~, and =verbatim= end.\n")
-    (org-mode)
-    (let* ((before (buffer-string))
-           (node (glasspane-org-reader--prose-node before))
-           (spans (append (plist-get node :spans) nil))
-           (plain (mapconcat (lambda (span) (plist-get span :text)) spans "")))
-      (should (equal plain "A bold nested, italic, underline, retired, code, and verbatim end.\n"))
-      (dolist (entry '(("bold " :font_weight "bold") ("nested" :italic t)
-                       ("nested" :font_weight "bold") ("italic" :italic t)
-                       ("underline" :underline t) ("code" :mono t) ("verbatim" :mono t)
-                       ("code" :color "secondary") ("verbatim" :color "secondary")
-                       ("code" :bg "#80808024") ("verbatim" :bg "#80808024")))
-        (let ((span (cl-find (car entry) spans :key (lambda (item) (plist-get item :text)) :test #'equal)))
-          (should span)
-          (should (equal (plist-get span (cadr entry)) (caddr entry)))))
-      (should (equal node (glasspane-org-reader--prose-node before)))
-      (should (equal-including-properties before (buffer-string))))))
-
-(ert-deftest glasspane-reader-layout-emphasis-preserves-literal-contexts ()
-  "Org owns boundaries: code, examples, metadata, URLs and unmatched markers stay literal."
-  (with-temp-buffer
-    (insert "*bold* and ~*literal*~.\n\n#+begin_src text\n*source* /source/\n#+end_src\n\n#+begin_example\n*example* =example=\n#+end_example\n\n: *fixed*\n\n#+PROPERTY: MARK *metadata*\n\nhttps://example.org/a/b and snake_case and 2*3 and *unclosed\n")
-    (org-mode)
-    (let* ((text (buffer-string))
-           (node (glasspane-org-reader--prose-node text))
-           (plain (mapconcat (lambda (span) (plist-get span :text)) (plist-get node :spans) "")))
-      (should (string-prefix-p "bold and *literal*." plain))
-      (dolist (literal '("*source* /source/" "*example* =example=" ": *fixed*"
-                         "*metadata*" "https://example.org/a/b" "snake_case" "2*3" "*unclosed"))
-        (should (string-search literal plain)))
-      (let ((jetpacs-buffer-budget (cons 0 10000)))
-        (should (equal text (plist-get (glasspane-org-reader--prose-node text) :text))))
-      (cl-letf (((symbol-function 'jetpacs-node-advertised-p) (lambda (_type) nil)))
-        (should (equal text (plist-get (glasspane-org-reader--prose-node text) :text)))))))
-
 (ert-deftest glasspane-reader-layout-emphasis-in-headings-and-checkboxes ()
   "Heading and checkbox labels hide markup without changing TODO or gesture descriptors."
   (with-temp-buffer
@@ -758,7 +720,7 @@
       (insert source) (org-mode) (goto-char (point-min))
       (let* ((value (if (equal source ":") "" "  *literal* [[link]]\n\nsecond\tcolumn  \n"))
              (nodes (glasspane-reader-layout--source-render))
-             (box (cl-find glasspane-org-reader--literal-background
+             (box (cl-find jetpacs-org-inline-literal-background
                            (glasspane-reader-layout--nodes-of-type nodes "box")
                            :key (lambda (node) (plist-get node :bg)) :test #'equal))
              (literal (car (glasspane-reader-layout--nodes-of-type box "text"))))
@@ -790,7 +752,7 @@
            (texts (glasspane-reader-layout--nodes-of-type nodes "text")))
       (should (cl-some (lambda (box) (and (equal (plist-get box :bg) "secondary")
                                          (equal (plist-get (aref (plist-get box :children) 0) :pad) '(:start 3)))) boxes))
-      (should (cl-some (lambda (box) (equal (plist-get box :bg) glasspane-org-reader--literal-background)) boxes))
+      (should (cl-some (lambda (box) (equal (plist-get box :bg) jetpacs-org-inline-literal-background)) boxes))
       (should (= (length centers) 2))
       (let ((verse (car centers)))
         (should (= (length (plist-get verse :children)) 3))

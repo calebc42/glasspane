@@ -525,14 +525,16 @@ document policy; nil leaves a non-file buffer to the foundation."
                    (buffer-local-value 'buffer-file-name destination))))
     (cond
      ((not (glasspane-org-reader--owns-follow-p source surface)) nil)
+     ;; Matched as text, not with `org-element-context': Org does not
+     ;; parse links inside a PROPERTIES drawer, and a Properties link
+     ;; that stayed put must not reopen the document either.
      ((and (eq destination source) (integerp position)
            (with-current-buffer source
-             (save-excursion
-               (goto-char pos)
-               (let ((link (org-element-context)))
-                 (and (eq (org-element-type link) 'link)
-                      (<= (org-element-property :begin link) position
-                          (org-element-property :end link)))))))
+             (org-with-wide-buffer
+              (save-excursion
+                (goto-char pos)
+                (and (org-in-regexp org-link-any-re)
+                     (<= (match-beginning 0) position (match-end 0)))))))
       (jetpacs-shell-notify "Opened link" surface)
       t)
      (path

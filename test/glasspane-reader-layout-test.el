@@ -540,6 +540,44 @@
          (when-let* ((buffer (find-buffer-visiting other)))
            (kill-buffer buffer)))))))
 
+(ert-deftest glasspane-reader-layout-property-web-link-stays-on-its-screen ()
+  "A web link in a PROPERTIES drawer, which Org does not parse as a link
+object, is acknowledged where it was tapped rather than reopening its
+document over the detail screen."
+  (glasspane-reader-layout--with-source-file
+   (lambda (_file)
+     (erase-buffer)
+     (insert "* Lab\n:PROPERTIES:\n:SOURCE: [[https://example.com/spec][Spec]]\n:END:\nBody.\n")
+     (let* ((source (current-buffer))
+            (args (plist-get (glasspane-detail--property-link-action
+                              source (point-min) "SOURCE")
+                             :args))
+            opened notices browsed thunks)
+       (should args)
+       (cl-letf (((symbol-function 'jetpacs-navigate-thunk)
+                  (lambda (thunk _surface _label presenter)
+                    (push (cons thunk presenter) thunks)
+                    "app:jetpacs.files"))
+                 ((symbol-function 'glasspane-navigation-open-document)
+                  (lambda (path &optional position)
+                    (push (list path position) opened)
+                    'accepted))
+                 ((symbol-function 'jetpacs-shell-notify)
+                  (lambda (text &rest _) (push text notices)))
+                 ((symbol-function 'browse-url)
+                  (lambda (url &rest _) (push url browsed)))
+                 ((symbol-function 'jetpacs-reader-current-path-p)
+                  (lambda (path) (equal path (buffer-file-name source)))))
+         (should (eq (jetpacs-org-render--follow args nil) 'accepted))
+         (let* ((entry (pop thunks))
+                (dest (with-temp-buffer
+                        (jetpacs-buffer-funcall-shimmed (car entry)))))
+           (should (eq (car dest) source))
+           (should (equal browsed '("https://example.com/spec")))
+           (should (funcall (cdr entry) (car dest) (cdr dest) "app:jetpacs.files"))
+           (should (equal notices '("Opened link")))
+           (should-not opened)))))))
+
 (ert-deftest glasspane-reader-layout-connections-caption-counts-own-links ()
   "Each heading counts the links it renders; the note graph adds references."
   (glasspane-reader-layout--with-source-file

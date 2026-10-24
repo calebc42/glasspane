@@ -58,7 +58,6 @@
 (require 'jetpacs-settings)
 (require 'jetpacs-org-settings)
 (require 'jetpacs-dates)              ; locale-stable date arithmetic
-(require 'calendar)                   ; weekday of a date
 (require 'glasspane-org)
 
 ;; v1 hard-required glasspane-magit (it lives outside the app
@@ -240,11 +239,6 @@ Projects and Agenda share this rail so Areas read the same everywhere."
 
 ;;;; Human planning text (the detail's pills and rows; cards may adopt it)
 
-(defconst glasspane-ui--day-names
-  ["Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday"]
-  "English weekday names, independent of the host locale.
-The same choice `jetpacs-dates--month-abbrevs' makes for months.")
-
 (defconst glasspane-ui--repeat-units
   '((?h . "hour") (?d . "day") (?w . "week") (?m . "month") (?y . "year"))
   "Org repeater unit letters and their singular English nouns.")
@@ -274,19 +268,17 @@ restart rules Org distinguishes.  An unparsed cookie is shown as is."
   "Relative or short words for ISO DATE seen from ISO TODAY.
 Today, Tomorrow and Yesterday by name; the coming week by weekday; any
 other date as \"Mon, Sep 21\", with the year appended when it differs."
-  (let* ((delta (- (time-to-days (jetpacs-dates-encode date))
-                   (time-to-days (jetpacs-dates-encode today))))
+  (let* ((delta (jetpacs-dates-delta date today))
          (y (string-to-number (substring date 0 4)))
          (m (string-to-number (substring date 5 7)))
          (d (string-to-number (substring date 8 10)))
-         (weekday (aref glasspane-ui--day-names
-                        (calendar-day-of-week (list m d y)))))
+         (weekday (jetpacs-dates-weekday date)))
     (cond ((= delta 0) "Today")
           ((= delta 1) "Tomorrow")
           ((= delta -1) "Yesterday")
           ((<= 2 delta 6) weekday)
           ((equal (substring date 0 4) (substring today 0 4))
-           (format "%s, %s %d" (substring weekday 0 3)
+           (format "%s, %s %d" (jetpacs-dates-weekday date t)
                    (jetpacs-dates-month-abbrev m) d))
           (t (format "%s %d, %d" (jetpacs-dates-month-abbrev m) d y)))))
 
@@ -302,19 +294,18 @@ other date as \"Mon, Sep 21\", with the year appended when it differs."
   "Describe org timestamp TS for a reader, seen from ISO TODAY.
 KIND is `scheduled' or `deadline'; DONE says the heading is closed, so
 nothing reads as overdue; WARN-DAYS is the deadline lead time that turns
-the warning color on.  Returns nil without a date, else a plist:
+the warning color on.  Returns nil without a real date, else a plist:
 :label the short pill text (\"Tomorrow · 09:00 · weekly\", \"Due Friday\",
 \"3 days overdue\"); :long the full sentence for a row subtitle;
 :color the theme role carrying urgency; :date, :time (Org's hyphen form),
 :repeat (the cookie) and :delta (days from today) for callers that
 lay out their own text.  Pure: TODAY is the only clock."
-  (when-let* ((date (ebp-org-ts-date ts)))
+  (when-let* ((date (ebp-org-ts-date ts))
+              (delta (jetpacs-dates-delta date today)))
     (let* ((time (jetpacs-org-ts-time-range ts))
            (shown-time (and time (string-replace "-" "–" time)))
            (cookie (ebp-org-ts-repeater ts))
            (repeat (and cookie (glasspane-ui-repeat-words cookie)))
-           (delta (- (time-to-days (jetpacs-dates-encode date))
-                     (time-to-days (jetpacs-dates-encode today))))
            (deadline (eq kind 'deadline))
            (overdue (and (not done) (< delta 0)))
            (words (glasspane-ui--date-words date today))
@@ -338,8 +329,7 @@ lay out their own text.  Pure: TODAY is the only clock."
            (m (string-to-number (substring date 5 7)))
            (d (string-to-number (substring date 8 10)))
            (long (concat
-                  (aref glasspane-ui--day-names
-                        (calendar-day-of-week (list m d y)))
+                  (jetpacs-dates-weekday date)
                   (format ", %s %d, %d" (jetpacs-dates-month-abbrev m) d y)
                   (when shown-time (concat " at " shown-time))
                   (when repeat (concat " · repeats " repeat)))))

@@ -65,14 +65,6 @@ single low-level Files boundary owned by `glasspane-navigation'."
   "Open the whole Org vault through native Files."
   (glasspane-resources--browse-vault org-directory))
 
-(defun glasspane-resources--on-open-file (args _params)
-  "Open the path in cached `resources.open-file' ARGS canonically."
-  (glasspane-navigation-open-document (plist-get args :path)))
-
-(defun glasspane-resources--on-return (args params)
-  "Delegate cached `resources.return' ARGS and PARAMS canonically."
-  (glasspane-navigation-return args params))
-
 ;;;; Archive index and screen
 
 (defcustom glasspane-resources-archive-scan-cap 500
@@ -275,8 +267,7 @@ refresh."
 ;;;; Lifecycle
 
 (defconst glasspane-resources--verbs
-  '("resources.open" "resources.browse" "resources.open-file"
-    "resources.return" "archive.open" "archive.filter")
+  '("resources.open" "resources.browse" "archive.open" "archive.filter")
   "The Resource and Archive actions owned by this module.")
 
 (defun glasspane-resources-register ()
@@ -286,14 +277,6 @@ refresh."
                        :doc "Open the Org vault in native Jetpacs Files")
     (jetpacs-defaction "resources.browse" #'glasspane-resources--on-browse
                        :doc "Browse the complete Org vault in Files")
-    (jetpacs-defaction
-     "resources.open-file" #'glasspane-resources--on-open-file
-     :doc "Compatibility alias for cached Resource document opens"
-     :strict t
-     :args '((:name path :type "text" :required t)))
-    (jetpacs-defaction "resources.return" #'glasspane-resources--on-return
-                       :doc "Compatibility alias for cached Files returns"
-                       :any-surface t)
     (jetpacs-defaction "archive.open"
                        #'glasspane-resources--on-archive-open
                        :doc "Open the Org archive files, filterable by Area")

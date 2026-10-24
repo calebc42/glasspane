@@ -1251,8 +1251,8 @@ sheet at build time, the reader's own route (SPEC 23.1)."
                        (when org-file
                          (jetpacs-menu-item
                           "File properties…"
-                          (jetpacs-action "files.properties.show"
-                                          :args (list :file file))
+                          (jetpacs-action "jetpacs.org.file-properties.show"
+                                          :args (list :path file))
                           :icon "tune"))
                        (when (and bufname (integerp pos))
                          (jetpacs-menu-item
@@ -1402,12 +1402,6 @@ never guess)."
             ((ebp-org-refused ebp-org-unavailable ebp-org-unresolved)
              (glasspane-detail--location-status err)))
         'stale)))))
-
-(defun glasspane-detail--on-open-file (args params)
-  "Compatibility adapter for cached `detail.open-file' events.
-New builders emit `heading.visit'; both token verbs deliberately call the
-same resolver and canonical presenter with ARGS and PARAMS."
-  (glasspane-detail--on-visit args params))
 
 (defun glasspane-detail--on-toggle-read (_args params)
   "Flip the reader/editor mode; the builder re-reads the flag."
@@ -1617,31 +1611,11 @@ which is the G4 delegation replacing v1's app planning dialog."
                            (jetpacs-error-label err))))))
       'accepted))))
 
-;;;; The file-properties verbs (compatibility names)
-;;
-;; The dialog, its keyword writer and its Save verb are the foundation's
-;; (`jetpacs-org-dialogs'), and the Org editor adapter emits its button.
-;; These two names stay registered because screens and cached dialogs
-;; already rendered emit them; each translates `:file' to the
-;; foundation's `:path'.
-
-(defun glasspane-detail--on-file-props-show (args params)
-  "Open the foundation file-properties dialog for ARGS' `:file'.
-PARAMS are the opening event's."
-  (jetpacs-org-file-properties-show (list :path (plist-get args :file))
-                                    params))
-
-(defun glasspane-detail--on-file-props-save (args params)
-  "Save PARAMS' captured fields as ARGS' `:file' keywords, durably."
-  (jetpacs-org-file-properties-save (list :path (plist-get args :file))
-                                    params))
-
 ;;;; Registration
 
 (defconst glasspane-detail--verbs
   '("heading.tap"
     "heading.visit"
-    "detail.open-file"
     "detail.toggle-read"
     "detail.section"
     "detail.priority.edit"
@@ -1660,9 +1634,7 @@ PARAMS are the opening event's."
     "heading.prop-set"
     "heading.prop-add"
     "heading.props.show"
-    "heading.clock-in"
-    "files.properties.show"
-    "files.properties.save")
+    "heading.clock-in")
   "The verbs this rung owns, for the register/unregister sweep.
 heading.menu lives with the reader's sheet (G4 sibling);
 heading.reorder with the reorderable-list builders; search.by-tag
@@ -1687,10 +1659,6 @@ gate contract).  Idempotent."
                        :doc "Open a heading in the pushed detail screen")
     (jetpacs-defaction "heading.visit" #'glasspane-detail--on-visit
                        :doc "Resolve a heading and open its canonical document"
-                       :strict t
-                       :args '((:name token :type "text" :required t)))
-    (jetpacs-defaction "detail.open-file" #'glasspane-detail--on-open-file
-                       :doc "Compatibility alias for cached heading file opens"
                        :strict t
                        :args '((:name token :type "text" :required t)))
     (jetpacs-defaction "detail.toggle-read"
@@ -1755,14 +1723,7 @@ gate contract).  Idempotent."
     (jetpacs-defaction "heading.clock-in"
                        (glasspane-detail--heading-verb 'clock-in)
                        :any-surface t
-                       :doc "Clock in at the heading")
-    (jetpacs-defaction "files.properties.show"
-                       #'glasspane-detail--on-file-props-show
-                       :any-surface t
-                       :doc "Open the file keyword editor dialog")
-    (jetpacs-defaction "files.properties.save"
-                       #'glasspane-detail--on-file-props-save
-                       :doc "Write the captured file keywords"))
+                       :doc "Clock in at the heading"))
   ;; A distinct id composes with the stock Org adapter, which keeps its
   ;; body/toolbar/FAB and emits the file-properties button; this one adds
   ;; only the note-index refresh.  Owned, so the app's teardown removes it.

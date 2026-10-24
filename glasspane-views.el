@@ -17,9 +17,7 @@
 ;;   drawer item (S1): each open view is a real Tier-1 chrome peer now —
 ;;   `views.open' pushes `jetpacs-wire-id "view" NAME', back is the
 ;;   screen's own arrow, and chrome truncates the stack on view.switched.
-;;   Agenda's Saved page is the active entry; this module retains the
-;;   historical `views.hub' screen/verb only for rollback and PA-3d's alias
-;;   cutover.
+;;   Agenda's Saved page is the active entry.
 ;; - The `jetpacs-form' registry and its id-rotation reset (S2/S3):
 ;;   the new-view form is three literal stateful ids, `views.save'
 ;;   reads them back through `jetpacs-ui-state', and the device-side
@@ -766,8 +764,7 @@ with the deferred repush clearing the device drafts."
 ;;;; Registration
 
 (defconst glasspane-views--verbs
-  '("views.hub"
-    "views.open"
+  '("views.open"
     "views.reorder"
     "views.cal.select-date"
     "views.cal.set-month"
@@ -785,8 +782,6 @@ Called from `glasspane-register', not at this file's load (the G0
 gate contract).  Idempotent: re-registration replaces the handlers in
 place."
   (with-jetpacs-owner "glasspane"
-    (jetpacs-defaction "views.hub" #'glasspane-agenda-open-saved
-                       :doc "Deprecated alias opening Agenda's Saved page")
     (jetpacs-defaction "views.open" #'glasspane-views--on-open
                        :doc "Open a saved view by name")
     (jetpacs-defaction "views.reorder" #'glasspane-views--on-reorder

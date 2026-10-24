@@ -6,7 +6,7 @@
 ;;; Commentary:
 
 ;; The v3 rebuild of the v1 reference app — notes, agenda, capture,
-;; journal, SRS, the org reader — on the jetpacs foundation.  The
+;; SRS, the org reader — on the jetpacs foundation.  The
 ;; ladder is docs/PLAN-glasspane-app.md; this file is G0: the thin
 ;; entry in the M3 template (jetpacs-m3-catalog.el), owning exactly the
 ;; app identity — the "glasspane" owner claim, the Agenda chrome root, the
@@ -65,14 +65,13 @@
 (require 'glasspane-navigation)
 (require 'glasspane-detail)
 ;; G5 plus the PARA screens: the foundation date helper supports both daily
-;; halves; agenda, Projects, and journal build on detail's shared card and the
+;; halves; agenda and Projects build on detail's shared card and the
 ;; reader (already above).
 (require 'jetpacs-dates)
 (require 'glasspane-agenda)
 (require 'glasspane-projects)
 (require 'glasspane-areas)
 (require 'glasspane-resources)
-(require 'glasspane-journal)
 ;; G6, the query surfaces: views leans on the reader's reorder table
 ;; and the agenda's shared date row, so it loads after both; search
 ;; depends only on landed G1/G3/G4 modules — the plan's order.  The
@@ -173,7 +172,6 @@ explicitly; see RENDERER.org."
   (glasspane-projects-register)
   (glasspane-areas-register)
   (glasspane-resources-register)
-  (glasspane-journal-register)
   (glasspane-views-register)
   (glasspane-search-register)
   (glasspane-notes-register)

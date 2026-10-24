@@ -65,11 +65,10 @@ heading between render and tap. A file row must not mint an imaginary heading
 identity. Their handlers therefore remain small adapters and both call the
 same presenter after validation.
 
-=detail.open-file=, =resources.open-file=, and =resources.return= remain
-registered only so an already-rendered or cached specification from an older
-Glasspane version can finish safely. No current builder emits them. Their
-handlers delegate to the canonical implementations and may be removed only
-after the product's cached-spec compatibility window is explicitly retired.
+The compatibility names older versions emitted (=detail.open-file=,
+=resources.open-file=, =resources.return=, =tasks.open=, =views.hub=,
+=journal.capture=, =files.properties.*=) were retired on 2026-10-24. A tap
+from a specification cached before then is refused rather than redirected.
 
 * Adding an entry point
 

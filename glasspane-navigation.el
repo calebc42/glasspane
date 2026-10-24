@@ -131,8 +131,7 @@ POSITION."
 
 (defun glasspane-navigation-return (args params)
   "Return from Files to Glasspane's unchanged navigation stack.
-Delegates to `jetpacs-files-return' and also serves as the retired
-`resources.return' compatibility action."
+Delegates ARGS and PARAMS to `jetpacs-files-return'."
   (with-jetpacs-owner "glasspane"
     (jetpacs-files-return args params)))
 

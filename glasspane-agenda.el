@@ -601,14 +601,6 @@ Agenda destination calls it."
   (glasspane-ui-open-destination "agenda" "glasspane-agenda"
                                  #'glasspane-agenda-screen params))
 
-(defun glasspane-agenda-open-saved (_args params)
-  "Open Agenda with its Saved page selected.
-This is the public compatibility landing used by the retired `views.hub'
-destination."
-  (setq glasspane-agenda--mode glasspane-agenda--saved-mode)
-  (glasspane-ui-open-destination "agenda" "glasspane-agenda"
-                                 #'glasspane-agenda-screen params))
-
 (defun glasspane-agenda--on-set-mode (args params)
   "Select an agenda mode.  `:mode' names come from the fallback chips;
 `:value' (a page index) from the tabs body's on_change.  Either way

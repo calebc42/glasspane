@@ -2986,10 +2986,10 @@ both modes, degrading to the go-back placeholder on a dead ref."
                              (list :token (tok-for "Parent2")
                                    :type "JUNK"))
                         'rejected))
-            (should (eq (run "files.properties.show" (list :file file))
+            (should (eq (run "jetpacs.org.file-properties.show" (list :path file))
                         'rejected))
-            (should (eq (run "files.properties.show"
-                             '(:file "/nope/x.org"))
+            (should (eq (run "jetpacs.org.file-properties.show"
+                             '(:path "/nope/x.org"))
                         'rejected))
             ;; toggle-read is the single writer of the mode flag.
             (should (eq (run "detail.toggle-read" nil) 'accepted))
@@ -3008,15 +3008,15 @@ both modes, degrading to the go-back placeholder on a dead ref."
             (should (eq (run "detail.section" '(:section "junk")) 'rejected))
             (should (eq (run "detail.section" nil) 'rejected))
             (setq glasspane-detail--section nil)
-            ;; files.properties.save: captured fields land as keywords,
-            ;; durably, before `accepted'; no fields rejects.
-            (should (eq (run "files.properties.save" (list :file file)
+            ;; The foundation's file-properties save: captured fields land
+            ;; as keywords, durably, before `accepted'; no fields rejects.
+            (should (eq (run "jetpacs.org.file-properties.save" (list :path file)
                              '(:fields (:file-prop-title "Renamed"
                                         :file-prop-category "cat")))
                         'accepted))
             (should (string-search "#+TITLE: Renamed" (file-text)))
             (should (string-search "#+CATEGORY: cat" (file-text)))
-            (should (eq (run "files.properties.save" (list :file file))
+            (should (eq (run "jetpacs.org.file-properties.save" (list :path file))
                         'rejected))
             ;; The pushed screen: reader mode, editor mode, dead ref.
             (let ((ref (with-current-buffer (find-file-noselect file)
@@ -3038,7 +3038,7 @@ both modes, degrading to the go-back placeholder on a dead ref."
                 (should (string-search "heading.todo-set" json))
                 (should-not (string-search "detail.todo-picker" json))
                 (should (string-search "jetpacs.org.archive" json))
-                (should (string-search "files.properties.show" json))
+                (should (string-search "jetpacs.org.file-properties.show" json))
                 (should (string-search "detail.priority.edit" json))
                 (should (string-search "jetpacs.org.heading" json))
                 ;; Metadata starts closed: no drawer panel, and with no
@@ -3181,7 +3181,7 @@ between files through the same policy."
             (kill-buffer buf))))
       (delete-directory vault t))))
 
-;;;; G5 — daily surfaces: glasspane-agenda.el, glasspane-journal.el
+;;;; G5 — daily surfaces: glasspane-agenda.el
 ;;;; (capture and its pure date helpers are upstream Jetpacs suites now)
 
 (ert-deftest glasspane-test-agenda-formatters ()
@@ -3354,113 +3354,6 @@ their arms now.)"
                       'accepted))
           (should (= (length continuations) (1+ before))))))))
 
-(defun glasspane-test--journal-vault ()
-  "A throwaway vault directory for journal fixtures."
-  (make-temp-file "glasspane-journal" t))
-
-(defun glasspane-test--journal-cleanup (vault)
-  "Drop the org memo, kill VAULT's visiting buffers, delete VAULT."
-  (ebp-org-cache-invalidate)
-  (dolist (buf (buffer-list))
-    (let ((f (buffer-file-name buf)))
-      (when (and f (string-prefix-p (file-name-as-directory
-                                     (file-truename vault))
-                                    (file-truename f)))
-        (with-current-buffer buf (set-buffer-modified-p nil))
-        (kill-buffer buf))))
-  (delete-directory vault t))
-
-(ert-deftest glasspane-test-journal-datetree ()
-  "--append against a real temp datetree: the first append creates the
-file and the levels, and same-day appends share ONE day heading in order."
-  (let* ((vault (glasspane-test--journal-vault))
-         (org-directory vault)
-         (org-agenda-files nil)
-         (ebp-org-roots nil)
-         (glasspane-journal-file nil)
-         (today (glasspane-journal--today)))
-    (unwind-protect
-        (progn
-          (glasspane-journal--append "First entry" today)
-          (glasspane-journal--append "Second entry" today)
-          (with-temp-buffer
-            (insert-file-contents (expand-file-name "journal.org" vault))
-            ;; Both items landed, in order, under ONE day heading.
-            (goto-char (point-min))
-            (should (re-search-forward "^- First entry$" nil t))
-            (should (re-search-forward "^- Second entry$" nil t))
-            (should (= 1 (count-matches
-                          (format "^\\*+[ \t]+%s\\(?:[ \t]\\|$\\)"
-                                  (regexp-quote today))
-                          (point-min) (point-max))))))
-      (glasspane-test--journal-cleanup vault))))
-
-(ert-deftest glasspane-test-journal-handlers ()
-  "The deprecated `journal.capture' alias rejects empty input, answers
-`accepted' only once the append is ON DISK, neutralizes embedded newlines,
-and sweeps cleanly on unregister."
-  (should-not (alist-get "Journal" jetpacs-settings-registry nil nil #'equal))
-  (let* ((vault (glasspane-test--journal-vault))
-         (org-directory vault)
-         (org-agenda-files nil)
-         (ebp-org-roots nil)
-         (glasspane-journal-file (expand-file-name "journal.org" vault)))
-    (unwind-protect
-        (cl-letf (((symbol-function 'jetpacs-flow-continue) #'ignore)
-                  ((symbol-function 'jetpacs-shell-notify) #'ignore)
-                  ((symbol-function 'jetpacs-toast) #'ignore))
-          (cl-flet ((run (name args &optional params)
-                      (let ((handler (gethash name jetpacs-action-handlers)))
-                        (should handler)
-                        (funcall handler args params))))
-            (dolist (name glasspane-journal--verbs)
-              (should (memq (run name nil nil)
-                            '(accepted stale rejected))))
-            ;; journal.capture: whitespace-only and non-string reject
-            ;; with nothing written...
-            (should (eq (run "journal.capture" '(:value "   ")) 'rejected))
-            (should (eq (run "journal.capture" '(:value 42)) 'rejected))
-            (should-not (file-exists-p glasspane-journal-file))
-            ;; ...and a real entry is ON DISK when accepted returns.
-            (should (eq (run "journal.capture"
-                             '(:value "  Ship the port  "
-                               :date "2026-08-13"))
-                        'accepted))
-            (with-temp-buffer
-              (insert-file-contents glasspane-journal-file)
-              (goto-char (point-min))
-              (should (re-search-forward "^- Ship the port$" nil t))
-              (should (string-search "2026-08-13" (buffer-string))))
-            ;; SPEC 23.2: wire text is neutralized before it becomes
-            ;; org structure.  The append lands at end-of-subtree, so
-            ;; an embedded newline would promote the payload out of the
-            ;; list item into a heading of its own.
-            (cl-flet ((headings ()
-                        (with-temp-buffer
-                          (insert-file-contents glasspane-journal-file)
-                          (count-matches "^\\*+ " (point-min) (point-max)))))
-              (let ((before (headings)))
-                (should (eq (run "journal.capture"
-                                 '(:value "hello\n* Evil"
-                                   :date "2026-08-13"))
-                            'accepted))
-                (should (= (headings) before))
-                (with-temp-buffer
-                  (insert-file-contents glasspane-journal-file)
-                  (goto-char (point-min))
-                  (should (re-search-forward "^- hello \\* Evil$" nil t)))))
-            ;; The sweep — then re-register, so suite order never
-            ;; matters.
-            (glasspane-journal-unregister)
-            (dolist (name glasspane-journal--verbs)
-              (should-not (gethash name jetpacs-action-handlers)))
-            (should-not (alist-get "Journal" jetpacs-settings-registry
-                                   nil nil #'equal))
-            (glasspane-journal-register)))
-      (glasspane-test--journal-cleanup vault))))
-
-;;;; G6 — query surfaces: glasspane-views.el
-
 (ert-deftest glasspane-test-views-board ()
   "Board columns keep global keyword order, append file-local
 strangers in encounter order, and park no-state last; the single-file
@@ -3629,13 +3522,6 @@ encoding, in the tabs form and the chip fallback, drag list included."
               (should-not glasspane-views--reorder)
               (should-not glasspane-views--cal-anchor)
               (should-not glasspane-views--cal-selected)
-              ;; views.hub: the compatibility alias selects Agenda's Saved
-              ;; page and defers the destination push.
-              (let ((before (length continuations)))
-                (setq glasspane-agenda--mode "day")
-                (should (eq (run "views.hub" nil nil) 'accepted))
-                (should (= (length continuations) (1+ before)))
-                (should (equal glasspane-agenda--mode "saved")))
               ;; The calendar defvars: handlers are the single writer.
               (should (eq (run "views.cal.select-date"
                                '(:value "2026-08-14"))
@@ -5346,8 +5232,7 @@ unknown theme, and a load that SIGNALS — never a swallowed
                   "files.toggle-refile" "heading.reorder"
                   "heading.tap" "heading.todo-cycle"
                   "heading.duplicate" "heading.props.show"
-                  "heading.clock-in" "files.properties.show"
-                  "search.by-tag"))
+                  "heading.clock-in" "search.by-tag"))
     (should (gethash name jetpacs--any-surface-actions)))
   ;; GR-4: native capture is global intake.  Shares are attributed by the
   ;; Companion, and the capture FAB is an app opinion emitted from this
@@ -5642,8 +5527,8 @@ point: a new screen cannot ship unreachable.")
   "Glasspane openers contributed to the Modus-family Theme Settings screen.")
 
 (defconst glasspane-test--legacy-opener-verbs
-  '("glasspane.home" "tasks.open" "search.open" "views.hub")
-  "Compatibility and non-destination openers absent from the host drawer.")
+  '("glasspane.home" "search.open")
+  "Non-destination openers absent from the host drawer.")
 
 (defconst glasspane-test--staged-opener-verbs nil
   "No PARA opener remains staged after the PA-3a table flip.")
@@ -5654,11 +5539,10 @@ point: a new screen cannot ship unreachable.")
     "areas.drill" "areas.filter" "areas.todo-filter" "archive.filter"
     "projects.area-filter"
     "projects.group"
-    "demo.setup" "demo.setup-org" "detail.open-file"
+    "demo.setup" "demo.setup-org"
     "detail.planning.edit" "detail.priority.edit" "detail.tags.edit"
     "detail.save"
     "detail.toggle-read" "detail.section" "files.filter"
-    "files.properties.save" "files.properties.show"
     "files.toggle-refile"
     "glasspane.document.open" "glasspane.files.return"
     "glasspane.packages.install"
@@ -5667,12 +5551,10 @@ point: a new screen cannot ship unreachable.")
     "heading.prop-add" "heading.prop-set" "heading.props.show"
     "heading.refile" "heading.reorder" "heading.schedule"
     "heading.tags" "heading.tap" "heading.visit" "heading.todo-cycle"
-    "heading.todo-set" "journal.capture" "link.materialize" "notes.mentions"
+    "heading.todo-set" "link.materialize" "notes.mentions"
     "ef.load" "ef.random" "ef.random-dark" "ef.random-light"
     "ef.mirror" "ef.option"
     "org.search.run" "resources.browse"
-    "resources.open-file"
-    "resources.return"
     "review.habits.open"
 	    "search.by-tag"
 	    "search.clear-filters" "search.update-filter"
@@ -5874,22 +5756,13 @@ well-formed one reaches it."
                        fn)
                       'accepted))
           (should ran))))
-    (should (>= count 22))))
+    (should (>= count 19))))
 
-(ert-deftest glasspane-test-file-properties-verbs-are-the-base ()
-  "Glasspane's two file-properties verbs are thin aliases of the
-foundation's, and its editor adapter no longer emits the button (the
-foundation's Org adapter does, once)."
-  (cl-letf* ((calls nil)
-             ((symbol-function 'jetpacs-org-file-properties-show)
-              (lambda (args _params) (push (cons 'show args) calls) 'accepted))
-             ((symbol-function 'jetpacs-org-file-properties-save)
-              (lambda (args _params) (push (cons 'save args) calls) 'accepted)))
-    (should (eq (glasspane-detail--on-file-props-show '(:file "/v/a.org") nil)
-                'accepted))
-    (should (eq (glasspane-detail--on-file-props-save '(:file "/v/a.org") nil)
-                'accepted))
-    (should (equal calls '((save :path "/v/a.org") (show :path "/v/a.org")))))
+(ert-deftest glasspane-test-file-properties-are-the-base ()
+  "Glasspane registers no file-properties verb of its own, and its editor
+adapter does not emit the button (the foundation's Org adapter does, once)."
+  (should-not (gethash "files.properties.show" jetpacs-action-handlers))
+  (should-not (gethash "files.properties.save" jetpacs-action-handlers))
   (let ((adapter (cl-find 'glasspane-org jetpacs-editor--adapters
                           :key #'jetpacs-editor-adapter-id)))
     (should adapter)

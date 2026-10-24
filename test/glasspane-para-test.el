@@ -582,10 +582,10 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                        calls)
                  'accepted)))
       (should (eq (glasspane-resources--on-open nil nil) 'accepted))
-      (should (eq (glasspane-resources--on-open-file
+      (should (eq (glasspane-navigation--on-document-open
                    '(:path "/vault/notes.org") nil)
                   'accepted))
-      (should (eq (glasspane-resources--on-open-file
+      (should (eq (glasspane-navigation--on-document-open
                    '(:path "/vault/reference.pdf") nil)
                   'accepted)))
     (setq calls (nreverse calls))
@@ -624,7 +624,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                      (lambda (text &optional surface)
                        (push (list text surface) notes))))
             (should (eq (glasspane-resources--on-open nil nil) 'rejected))
-            (should (eq (glasspane-resources--on-open-file
+            (should (eq (glasspane-navigation--on-document-open
                          (list :path outside-file) nil)
                         'rejected))
             (should (= (length notes) 2))
@@ -728,27 +728,19 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
       (should-not pushed))))
 
 (ert-deftest glasspane-para-resources-lifecycle-and-navigation ()
-  "Glasspane owns both delegates while PA-3 exposes only the place opener."
-  (dolist (name '("resources.open" "resources.open-file" "resources.return"))
-    (should (gethash name jetpacs-action-handlers))
-    (should (equal (jetpacs--owner-of "action" name) "glasspane")))
-  (should (equal
-           (plist-get (jetpacs-action-schema "resources.open-file") :args)
-           '((:name path :type "text" :required t))))
-  (let ((dest-verbs
-         (mapcar (lambda (dest) (plist-get dest :verb))
-                 glasspane-ui-destinations)))
-    (should (member "resources.open" dest-verbs))
-    (should-not (member "resources.open-file" dest-verbs)))
+  "Glasspane owns the Resources opener, its one PA-3 destination."
+  (should (equal (jetpacs--owner-of "action" "resources.open") "glasspane"))
+  (dolist (name '("resources.open-file" "resources.return"))
+    (should-not (gethash name jetpacs-action-handlers)))
+  (should (member "resources.open"
+                  (mapcar (lambda (dest) (plist-get dest :verb))
+                          glasspane-ui-destinations)))
   (unwind-protect
       (progn
         (glasspane-resources-unregister)
-        (dolist (name '("resources.open" "resources.open-file"
-                        "resources.return"))
-          (should-not (gethash name jetpacs-action-handlers))))
+        (should-not (gethash "resources.open" jetpacs-action-handlers)))
     (glasspane-resources-register))
-  (dolist (name '("resources.open" "resources.open-file" "resources.return"))
-    (should (gethash name jetpacs-action-handlers))))
+  (should (gethash "resources.open" jetpacs-action-handlers)))
 
 (ert-deftest glasspane-para-resources-source-boundaries ()
   "The Resources section stays a delegate despite Archive sharing its file."
@@ -888,8 +880,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
   (unwind-protect
       (progn
         (glasspane-resources-unregister)
-        (dolist (name '("resources.open" "resources.open-file"
-                        "resources.return" "archive.open" "archive.filter"))
+        (dolist (name '("resources.open" "archive.open" "archive.filter"))
           (should-not (gethash name jetpacs-action-handlers)))
         (should-not (memq #'glasspane-resources--refresh-invalidate
                           jetpacs-shell-refresh-hook)))
@@ -911,7 +902,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
       (cl-letf (((symbol-function 'jetpacs-files-shared-dir) #'ignore)
                 ((symbol-function 'jetpacs-flow-continue)
                  (lambda (fn) (push fn queued))))
-        (should (eq (glasspane-resources--on-open-file
+        (should (eq (glasspane-navigation--on-document-open
                      (list :path archive) nil)
                     'accepted))
         (should (= (length queued) 1))))))
@@ -921,8 +912,6 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
   (with-temp-buffer
     (insert-file-contents glasspane-para-test--resources-source)
     (should (search-forward "_archive" nil t))
-    (goto-char (point-min))
-    (should (search-forward "resources.open-file" nil t))
     (goto-char (point-min))
     (should-not (search-forward "unarchive" nil t))))
 
@@ -1535,28 +1524,26 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
     (should-not (glasspane-detail--agenda-tag-chips nil))
     (should-not (glasspane-detail--agenda-tag-chips nil t))))
 
-(ert-deftest glasspane-para-projects-alias-route-lifecycle-and-navigation ()
-  "The durable Tasks alias and visible Projects opener share one route."
-  (dolist (name '("projects.open" "tasks.open"))
-    (should (eq (gethash name jetpacs-action-handlers)
-                #'glasspane-projects--on-open))
-    (should (equal (jetpacs--owner-of "action" name) "glasspane")))
-  (let ((dest-verbs
-         (mapcar (lambda (dest) (plist-get dest :verb))
-                 glasspane-ui-destinations)))
-    (should-not (member "tasks.open" dest-verbs))
-    (should (member "projects.open" dest-verbs)))
+(ert-deftest glasspane-para-projects-route-lifecycle-and-navigation ()
+  "The visible Projects opener routes to the Projects screen; the retired
+Tasks alias is gone."
+  (should (eq (gethash "projects.open" jetpacs-action-handlers)
+              #'glasspane-projects--on-open))
+  (should (equal (jetpacs--owner-of "action" "projects.open") "glasspane"))
+  (should-not (gethash "tasks.open" jetpacs-action-handlers))
+  (should (member "projects.open"
+                  (mapcar (lambda (dest) (plist-get dest :verb))
+                          glasspane-ui-destinations)))
   (let (pushed)
     (cl-letf (((symbol-function 'jetpacs-flow-continue)
                (lambda (fn) (funcall fn)))
               ((symbol-function 'jetpacs-chrome-push-screen)
                (lambda (surface id builder &rest _)
                  (push (list surface id builder) pushed))))
-      (dolist (name '("projects.open" "tasks.open"))
-        (should (eq (funcall (gethash name jetpacs-action-handlers)
-                             nil '(:surface "app:glasspane"))
-                    'accepted))))
-    (should (= (length pushed) 2))
+      (should (eq (funcall (gethash "projects.open" jetpacs-action-handlers)
+                           nil '(:surface "app:glasspane"))
+                  'accepted)))
+    (should (= (length pushed) 1))
     (dolist (push pushed)
       (should (equal (seq-take push 2)
                      '("app:glasspane" "glasspane-projects")))
@@ -2182,7 +2169,7 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
       (should (eq (glasspane-resources--on-open nil nil) 'accepted))
       (should (equal jetpacs-apps--current-route "resources"))
       (setq jetpacs-apps--current-route "areas")
-      (should (eq (glasspane-resources--on-open-file
+      (should (eq (glasspane-navigation--on-document-open
                    '(:path "/vault/work.org") nil)
                   'accepted))
       (should (equal jetpacs-apps--current-route "areas")))))
@@ -2217,9 +2204,8 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
 (ert-deftest glasspane-para-pa3c-mark-position-navigation-family ()
   "Heading tokens reach the one document presenter with their position.
 NAVIGATION.org: `heading.visit' resolves the token, then Files hosts the
-document at the heading's position with the reader landing prepared; the
-cached `detail.open-file' verb is the same route, and neither turns the
-current route into Resources."
+document at the heading's position with the reader landing prepared,
+without turning the current route into Resources."
   (glasspane-para-test--with-vault
       '(("tasks.org" "* TODO First\n** NEXT Target\nBody\n"))
     (let* ((file (expand-file-name "tasks.org" vault))
@@ -2266,23 +2252,12 @@ current route into Resources."
             (should (equal (jetpacs-reader-state-get
                             file :gp-filter-query)
                            ""))
-            ;; The cached compatibility verb is the very same route.
-            (setq opened nil)
-            (jetpacs-reader-state-set file :presentation 'editor)
-            (should (eq (glasspane-detail--on-open-file
-                         (list :token token) nil)
-                        'accepted))
-            (should (equal (seq-take opened 4)
-                           (list (file-truename file) "app:jetpacs.files"
-                                 pos "files-return")))
-            (should (eq (jetpacs-reader-state-get file :presentation)
-                        'reader))
             ;; A contextual Files handoff is not the Resources destination.
             (should (equal jetpacs-apps--current-route "projects"))
             (should (eq (glasspane-detail--on-visit
                          '(:token 7) nil)
                         'rejected))
-            (should (eq (glasspane-detail--on-open-file
+            (should (eq (glasspane-detail--on-visit
                          '(:token "gone") nil)
                         'stale)))
         (ebp-org-ref-tokens nil :set "pa3c-jump" :owner "glasspane")))))
@@ -2408,81 +2383,15 @@ current route into Resources."
                           (glasspane-para-test--action-names
                            (glasspane-detail--screen nil nil)))))))
 
-(ert-deftest glasspane-para-pa3d-aliases-land-on-current-destinations ()
-  "Tasks and Views remain accepted aliases; only capture remains of Journal."
-  (should (eq (gethash "tasks.open" jetpacs-action-handlers)
-              #'glasspane-projects--on-open))
-  (should (eq (gethash "views.hub" jetpacs-action-handlers)
-              #'glasspane-agenda-open-saved))
-  (should (eq (gethash "journal.capture" jetpacs-action-handlers)
-              #'glasspane-journal--on-capture))
-  (dolist (name '("journal.open" "journal.nav" "journal.goto"
-                  "journal.today"))
+(ert-deftest glasspane-para-pa3d-retired-aliases-are-gone ()
+  "Tasks, Views and Journal compatibility names are retired with their
+destinations; Agenda's Saved page is reached through its own mode."
+  (dolist (name '("tasks.open" "views.hub" "journal.capture" "journal.open"
+                  "journal.nav" "journal.goto" "journal.today"
+                  "resources.open-file" "resources.return" "detail.open-file"
+                  "files.properties.show" "files.properties.save"))
     (should-not (gethash name jetpacs-action-handlers)))
-  (let ((glasspane-agenda--mode "day")
-        (jetpacs-apps--current glasspane-owner)
-        (jetpacs-apps--current-route "projects")
-        pushed)
-    (cl-letf (((symbol-function 'jetpacs-flow-continue)
-               (lambda (fn) (funcall fn)))
-              ((symbol-function 'jetpacs-chrome-push-screen)
-               (lambda (surface id builder &rest _)
-                 (setq pushed (list surface id builder)))))
-      (should (eq (funcall (gethash "views.hub" jetpacs-action-handlers)
-                           nil '(:surface "app:glasspane"))
-                  'accepted)))
-    (should (equal glasspane-agenda--mode "saved"))
-    (should (equal jetpacs-apps--current-route "agenda"))
-    (should (equal (seq-take pushed 2)
-                   '("app:glasspane" "glasspane-agenda")))
-    (should (glasspane-para-test--builder-routes-p
-             (nth 2 pushed) #'glasspane-agenda-screen))))
-
-(ert-deftest glasspane-para-pa3d-queued-journal-alias-replays-to-datetree ()
-  "A queue-shaped event reaches the live alias and commits before acceptance."
-  (glasspane-para-test--with-vault nil
-    (let* ((glasspane-journal-file (expand-file-name "journal.org" vault))
-           (receipt-file (make-temp-file "glasspane-pa3d-receipts"))
-           (client (ebp-client-create :receipt-file receipt-file))
-           (event-id (make-string 32 ?a)))
-      (unwind-protect
-          (progn
-            (ebp-client-register-action
-             client "journal.capture" (jetpacs--action-shim "journal.capture"))
-            (cl-letf (((symbol-function 'jetpacs-shell-notify) #'ignore)
-                      ((symbol-function 'jetpacs-app-defer-refresh) #'ignore))
-              (should
-               (equal
-                (ebp-client--handle-event-action
-                 client
-                 (list :event_id event-id
-                       :action "journal.capture"
-                       :args '(:value "Queued field note"
-                               :date "2026-08-17")
-                       :surface "app:glasspane"
-                       :revision_seen 0
-                       :occurred_at_ms 1786946400000))
-                '(:status "accepted"))))
-            (with-temp-buffer
-              (insert-file-contents glasspane-journal-file)
-              (should (string-search "2026-08-17" (buffer-string)))
-              (should (re-search-forward "^- Queued field note$" nil t)))
-            ;; A replay retry with the same durable event id cannot append twice.
-            (should
-             (equal
-              (ebp-client--handle-event-action
-               client
-               (list :event_id event-id
-                     :action "journal.capture"
-                     :args '(:value "Queued field note"
-                             :date "2026-08-17")
-                     :surface "app:glasspane"
-                     :revision_seen 0
-                     :occurred_at_ms 1786946400000))
-              '(:status "duplicate"))))
-        (ebp-client-close client 'test-finished)
-        (when (file-exists-p receipt-file)
-          (delete-file receipt-file))))))
+  (should-not (featurep 'glasspane-journal)))
 
 ;;;; PM-2 — substrate arms (glasspane-org.el)
 

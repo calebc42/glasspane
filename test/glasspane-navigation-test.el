@@ -120,7 +120,7 @@ Area file row and the Archive row carry a validated path
                        "app:jetpacs.files"))))))
 
 (ert-deftest glasspane-navigation-test-authority-adapters-converge ()
-  "Token, path, and compatibility verbs call one document presenter."
+  "Token and path verbs call one document presenter."
   (let (calls)
     (cl-letf (((symbol-function 'ebp-org-token-ref)
                (lambda (_token &rest _) 'durable-ref))
@@ -133,19 +133,11 @@ Area file row and the Archive row carry a validated path
       (should (eq (glasspane-detail--on-visit
                    '(:token "project-token") nil)
                   'accepted))
-      (should (eq (glasspane-detail--on-open-file
-                   '(:token "cached-detail-token") nil)
-                  'accepted))
       (should (eq (glasspane-navigation--on-document-open
-                   '(:path "/vault/work.org") nil)
-                  'accepted))
-      (should (eq (glasspane-resources--on-open-file
                    '(:path "/vault/work.org") nil)
                   'accepted)))
     (should (equal (nreverse calls)
                    '(("/vault/work.org" 73)
-                     ("/vault/work.org" 73)
-                     ("/vault/work.org" nil)
                      ("/vault/work.org" nil))))))
 
 (ert-deftest glasspane-navigation-test-link-destinations-converge ()
@@ -254,10 +246,8 @@ buffer without a file is left to the foundation drill."
   "Reader-emitted detail, tag, and return actions pass D1 on the Files surface."
   (dolist (verb '("heading.tap" "heading.todo-cycle"
                   "heading.duplicate" "heading.props.show"
-                  "heading.clock-in" "files.properties.show"
-                  "search.by-tag"
-                  "jetpacs.files.return"
-                  "glasspane.files.return" "resources.return"))
+                  "heading.clock-in" "search.by-tag"
+                  "jetpacs.files.return" "glasspane.files.return"))
     (should (gethash verb jetpacs-action-handlers))
     (should (gethash verb jetpacs--any-surface-actions))))
 

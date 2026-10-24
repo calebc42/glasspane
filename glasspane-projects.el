@@ -303,17 +303,14 @@ refresh."
       'accepted)))
 
 (defconst glasspane-projects--verbs
-  '("projects.open" "tasks.open" "tasks.filter" "projects.group"
-    "projects.area-filter")
-  "The Projects verb, its legacy opener alias, and the screen controls.")
+  '("projects.open" "tasks.filter" "projects.group" "projects.area-filter")
+  "The Projects verb and the screen controls.")
 
 (defun glasspane-projects-register ()
-  "Register Projects and its legacy Tasks contracts, idempotently."
+  "Register Projects and its screen controls, idempotently."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "projects.open" #'glasspane-projects--on-open
                        :doc "Open the PARA Projects screen")
-    (jetpacs-defaction "tasks.open" #'glasspane-projects--on-open
-                       :doc "Deprecated alias for projects.open")
     (jetpacs-defaction
      "tasks.filter" #'glasspane-projects--on-filter
      :doc "Select the Projects workflow filter"

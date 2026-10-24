@@ -50,9 +50,6 @@ explicit dashboard push isn't doubled by the save-hook firing on top.")
 
 (declare-function vulpea-db-update-file "ext:vulpea-db-extract" (file))
 
-(defalias 'glasspane-org-mtime-stamp #'jetpacs-editor-org-mtime-stamp
-  "Return PATH's opaque modification stamp (the foundation's minter).")
-
 (defun glasspane-org-vulpea-refresh-file (&optional buffer-or-path)
   "Synchronously re-index BUFFER-OR-PATH in vulpea's db, when it is up.
 BUFFER-OR-PATH may be a visiting buffer or the durable path supplied by
@@ -112,22 +109,6 @@ user-facing message; return a freshly anchored ref."
 ;; heading again via `ebp-org-resolve-ref'.  A ref NEVER crosses the
 ;; wire (D-4): the UI layer mints SPEC 23.1 tokens for anything the
 ;; device can tap.
-
-(defalias 'glasspane-org--agenda-scope
-  #'jetpacs-org-mode-agenda-scope
-  "Delegate to Org Mode's canonical local agenda scope.")
-
-(defalias 'glasspane-org-agenda-scope
-  #'jetpacs-org-mode-agenda-scope
-  "Public downstream access to Jetpacs' canonical local agenda scope.")
-
-(defalias 'glasspane-org-agenda-items
-  #'jetpacs-org-mode-agenda-items
-  "Delegate to Org Mode's rich, memoised agenda extraction.")
-
-(defalias 'glasspane-org--agenda-items-1
-  #'jetpacs-org-mode--agenda-items-1
-  "Delegate to Org Mode's uncached agenda extraction worker.")
 
 (defun glasspane-org--priority-string (p)
   "Normalize priority P to its display letter, or nil.
@@ -199,12 +180,6 @@ Memoised; see `ebp-org-cache-invalidate'."
                 (vulpea-db-query (lambda (note) (vulpea-note-todo note)))))
     (jetpacs-org-mode-todo-items files)))
 
-(defalias 'glasspane-org-tag-strings #'jetpacs-org-mode-tag-strings
-  "Return TAGS as distinct, non-empty strings without text properties.")
-
-(defalias 'glasspane-org-tag-group #'jetpacs-org-mode-tag-group
-  "Return the group named NAME in foundation GROUPS, ignoring case.")
-
 (defun glasspane-org-tag-groups-at (pos)
   "Return foundation tag-group membership at POS with PARA inheritance.
 POS is a heading position in the current Org buffer.  Glasspane considers
@@ -213,10 +188,6 @@ agenda display.  `org-tags-exclude-from-inheritance' still applies.
 The foundation returns propertyless strings and does not cache this query."
   (let ((org-use-tag-inheritance t))
     (ebp-org-tag-groups-at pos)))
-
-(defalias 'glasspane-org-tag-settings-stamp
-  #'jetpacs-org-mode-tag-settings-stamp
-  "Snapshot global and visited-buffer tag settings for FILES.")
 
 (defun glasspane-org-file-tag-group-index (file group)
   "Return FILE's effective tag GROUP members and heading memberships.
@@ -227,10 +198,6 @@ contributes the PARA inheritance rule — file tags and parent tags count
 even when `org-use-tag-inheritance' narrows agenda display — the same
 rule `glasspane-org-tag-groups-at' applies to a single heading."
   (jetpacs-org-mode-file-tag-group-index file group t))
-
-(defalias 'glasspane-org-workflow-keywords
-  #'jetpacs-org-settings-workflow-keywords
-  "Return the stable workflow keywords represented by Org ITEMS.")
 
 (defun glasspane-org-open-todo-p (item)
   "Return non-nil when ITEM carries a TODO keyword that is not done.
@@ -284,7 +251,7 @@ The result follows the group's declaration order."
     (let* ((pos (alist-get 'pos item))
            (at-pos (and (integerp pos)
                         (assoc pos (plist-get index :positions))))
-           (tags (glasspane-org-tag-strings
+           (tags (jetpacs-org-mode-tag-strings
                   (alist-get 'tags item))))
       (copy-sequence
        (if at-pos
@@ -292,50 +259,6 @@ The result follows the group's declaration order."
          (cl-remove-if-not
           (lambda (member) (member member tags))
           (plist-get index :members)))))))
-
-(defalias 'glasspane-org-heading-item-at #'jetpacs-org-mode-heading-item-at
-  "Build a heading item alist for the org entry at point.
-Same shape as `glasspane-org-todo-items' entries.  Public: the search
-layer and the Areas scan build their items here so every card shares
-the foundation's one shape.")
-
-(defun glasspane-org--file-heading-items (file)
-  "Extract level-1 headings from FILE as item alists.
-Same shape as `glasspane-org-todo-items' entries (plus scheduled/deadline).
-FILE validates against the org roots FIRST: `ebp-org--check-file'
-signals `ebp-org-refused' outside them (the UI layer answers
-\\='rejected), `ebp-org-unresolved' when it is gone (\\='stale) — and
-the visit runs clamped so a drifted file becomes a STATUS, never a
-prompt in the dispatch extent (D2)."
-  (when file
-    (let ((true (ebp-org--check-file file)))
-      (ebp-org--with-clamped-io
-        (with-current-buffer (find-file-noselect true t)
-          (org-with-wide-buffer
-           (let (items)
-             (org-map-entries
-              (lambda ()
-                (let* ((components (org-heading-components))
-                       (level (nth 0 components))
-                       (todo (nth 2 components))
-                       (priority (nth 3 components))
-                       (headline (nth 4 components))
-                       (tags (org-get-tags))
-                       (scheduled (org-entry-get (point) "SCHEDULED"))
-                       (deadline  (org-entry-get (point) "DEADLINE")))
-                  (when (= level 1)
-                    (push `((headline . ,headline)
-                            (todo . ,todo)
-                            (priority . ,(if priority (char-to-string priority) nil))
-                            (tags . ,(vconcat tags))
-                            (scheduled . ,scheduled)
-                            (deadline  . ,deadline)
-                            (file . ,(buffer-file-name))
-                            (pos . ,(point))
-                            (ref . ,(ebp-org-ref-at-point)))
-                          items))))
-              nil nil)
-             (nreverse items))))))))
 
 ;; Search queries pass through the canonical parser (`ebp-org-parse-query')
 ;; into a vetted query sexp, whichever of the three input shapes the user
@@ -378,8 +301,8 @@ Signals `user-error' on terms neither engine knows.  Memoised; see
           (glasspane-org--vulpea-query tree))
       ;; KEY names the ACTION, not the caller: the cached value is the
       ;; action's own payload (the P1-12 rule, ebp-org.el:1260-1270).
-      (ebp-org-query 'glasspane 'glasspane-org-heading-item-at
-                     tree #'glasspane-org-heading-item-at))))
+      (ebp-org-query 'glasspane 'jetpacs-org-mode-heading-item-at
+                     tree #'jetpacs-org-mode-heading-item-at))))
 
 (defun glasspane-org-search (query)
   "Search the org data for QUERY; return a list of heading items.
@@ -389,32 +312,6 @@ whole vault off the note index when vulpea has it, agenda files
 otherwise.  Signals `user-error' on queries that don't parse or use
 terms no engine supports, so callers can surface the problem."
   (glasspane-org-query (ebp-org-parse-query query)))
-
-(defun glasspane-org--filter-items (items query)
-  "ITEMS whose headings match QUERY — the sparse filter.
-QUERY takes the standard search syntax; matching runs the built-in
-matcher at each item's own heading, so it works on any file, agenda
-or not.  Signals `user-error' on queries that don't parse or use
-unsupported terms.  An item whose file has left the org roots (or is
-gone) simply doesn't match — a filter is a predicate, not an answer
-to a request, so the TOTAL policy check applies (ebp-org.el:214)."
-  (let ((tree (ebp-org-parse-query query)))
-    (if (null tree)
-        items
-      (cl-remove-if-not
-       (lambda (item)
-         (let* ((file (alist-get 'file item))
-                (pos (alist-get 'pos item))
-                (true (and file pos (ebp-org-file-allowed-p file))))
-           (and true
-                (ebp-org--with-clamped-io
-                  (with-current-buffer (find-file-noselect true t)
-                    (org-with-wide-buffer
-                     (goto-char (min pos (point-max)))
-                     (unless (org-at-heading-p)
-                       (ignore-errors (org-back-to-heading t)))
-                     (ebp-org-entry-matches-p tree)))))))
-       items))))
 
 (defun glasspane-org-all-tags ()
   "Sorted tags for the query builder.
@@ -434,66 +331,6 @@ the foundation's built-in sweep over the agenda scope
             (push tg tags))
           (sort (delete-dups tags) #'string-lessp)))
     (jetpacs-org-mode-all-tags)))
-
-(defun glasspane-org--file-list ()
-  "List of agenda files and basic stats."
-  (mapcar (lambda (f)
-            `((file . ,f)
-              (name . ,(file-name-nondirectory f))))
-          (ebp-org-agenda-files)))
-
-(defun glasspane-org--heading-at (pos file)
-  "Get full heading detail at POS in FILE.
-FILE validates against the org roots (`ebp-org--check-file' — signals
-per its STATUS split); the visit runs clamped (D2)."
-  (let ((true (ebp-org--check-file file)))
-    (ebp-org--with-clamped-io
-      (with-current-buffer (find-file-noselect true t)
-        (org-with-wide-buffer
-         (goto-char pos)
-         (let* ((components (org-heading-components))
-                (todo (nth 2 components))
-                (priority (nth 3 components))
-                (headline (nth 4 components))
-                (tags (org-get-tags))
-                (props (org-entry-properties))
-                ;; Basic body extraction:
-                (end (save-excursion (org-end-of-subtree t t)))
-                (body-start (save-excursion (forward-line 1) (point)))
-                (body (if (< body-start end)
-                          (buffer-substring-no-properties body-start end)
-                        "")))
-           `((headline . ,headline)
-             (todo . ,todo)
-             (priority . ,(if priority (char-to-string priority) nil))
-             (tags . ,(vconcat tags))
-             (properties . ,props)
-             (body . ,body))))))))
-
-(defun glasspane-org-clock-status ()
-  "Current clock status."
-  (when (org-clock-is-active)
-    `((task . ,org-clock-current-task)
-      (start . ,(float-time org-clock-start-time))
-      (file . ,(buffer-file-name (marker-buffer org-clock-marker)))
-      (pos . ,(marker-position org-clock-marker)))))
-
-(defun glasspane-org-recent-clocks (n)
-  "Last N clocked tasks."
-  (let (items)
-    (dolist (m org-clock-history)
-      (when (and m (marker-buffer m))
-        (with-current-buffer (marker-buffer m)
-          (save-excursion
-            (goto-char m)
-            (let* ((components (org-heading-components))
-                   (headline (nth 4 components)))
-              (push `((headline . ,headline)
-                      (file . ,(buffer-file-name))
-                      (pos . ,(marker-position m))
-                      (ref . ,(ebp-org-ref-at-point)))
-                    items))))))
-    (cl-subseq (nreverse items) 0 (min n (length items)))))
 
 ;;;; Automated timestamps
 ;;

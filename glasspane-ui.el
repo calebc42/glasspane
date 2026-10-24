@@ -249,9 +249,6 @@ The same choice `jetpacs-dates--month-abbrevs' makes for months.")
   '((?h . "hour") (?d . "day") (?w . "week") (?m . "month") (?y . "year"))
   "Org repeater unit letters and their singular English nouns.")
 
-(defalias 'glasspane-ui-ts-time-range #'jetpacs-org-ts-time-range
-  "Return the HH:MM or HH:MM-HH:MM range inside org timestamp TS, or nil.")
-
 (defun glasspane-ui-repeat-words (cookie)
   "English words for org repeater COOKIE, or nil without one.
 \"+1w\" reads \"weekly\" and \"+2w\" \"every 2 weeks\"; a \".+\" cookie
@@ -312,7 +309,7 @@ the warning color on.  Returns nil without a date, else a plist:
 :repeat (the cookie) and :delta (days from today) for callers that
 lay out their own text.  Pure: TODAY is the only clock."
   (when-let* ((date (ebp-org-ts-date ts)))
-    (let* ((time (glasspane-ui-ts-time-range ts))
+    (let* ((time (jetpacs-org-ts-time-range ts))
            (shown-time (and time (string-replace "-" "–" time)))
            (cookie (ebp-org-ts-repeater ts))
            (repeat (and cookie (glasspane-ui-repeat-words cookie)))
@@ -403,11 +400,6 @@ Search is an app navigation opinion, so Glasspane authors its placement while
 the shared chrome remains unaware of the downstream destination."
   (list (jetpacs-icon-button "search" (jetpacs-action "search.open")
                              :content-description "Search")))
-
-;; The PA-3d plan recorded this spelling before the sibling-private boundary
-;; was enforced.  Keep it as a local compatibility name while screen modules
-;; consume the public function above.
-(defalias 'glasspane-ui--top-actions #'glasspane-ui-top-actions)
 
 (defconst glasspane-ui-destinations
   '((:key "agenda" :label "Agenda" :icon "event"

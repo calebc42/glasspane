@@ -88,25 +88,6 @@ keeps the narrowing, as does date navigation.")
 
 ;;;; Pure formatters (the shared card's vocabulary; detail declares these)
 
-(defalias 'glasspane-agenda-widget-item-meta
-  #'jetpacs-org-agenda-item-meta
-  "Compose an agenda item's compact metadata line (the foundation's).")
-
-(defun glasspane-agenda-widget-icon (type)
-  "Map an org agenda TYPE to a compact metadata icon name."
-  (cond ((not (stringp type)) "event")
-        ((string-match-p "deadline" type) "deadline")
-        ((string-match-p "scheduled" type) "scheduled")
-        (t "event")))
-
-(defalias 'glasspane-agenda-type-icon
-  #'jetpacs-org-agenda-type-icon
-  "Return (ICON . COLOR) for an agenda item TYPE (the foundation's).")
-
-(defalias 'glasspane-agenda-type-label
-  #'jetpacs-org-agenda-type-label
-  "Short label for an agenda item TYPE, or nil (the foundation's).")
-
 (defun glasspane-agenda-card-date-label (ts)
   "Format org timestamp TS as a compact \"Mon D\" (or \"Mon D HH:MM\")."
   (when (and (stringp ts)
@@ -142,7 +123,7 @@ nil when neither is set."
 
 ;;;; Token minting (S5 — one :set per rendered list, replace semantics)
 
-(defun glasspane-agenda--tokenize (items set)
+(defun glasspane-agenda-tokenize (items set)
   "ITEMS with `token'/`archive-token' cells attached; one bulk mint (S5).
 Two sets because the base `jetpacs.org.archive' resolves only
 `jetpacs-org-dialogs-owner' tokens: the app rents the disjoint
@@ -151,16 +132,12 @@ Two sets because the base `jetpacs.org.archive' resolves only
   (jetpacs-org-tokenize items set :owner "glasspane"
                         :archive-owner jetpacs-org-dialogs-owner))
 
-(defalias 'glasspane-agenda-tokenize
-  #'glasspane-agenda--tokenize
-  "Public shared-card tokenization for a Glasspane item list.")
-
 ;;;; Agenda navigation
 ;;
 ;; The agenda is anchored on a date (`glasspane-ui-agenda-anchor',
 ;; nil = today).  The ‹ › buttons shift the anchor by one
 ;; day/week/month according to the active span, and the anchor feeds
-;; `glasspane-org-agenda-items' as START-DAY — whose cache keys
+;; `jetpacs-org-mode-agenda-items' as START-DAY — whose cache keys
 ;; already include it, so each visited range memoises independently.
 
 (defun glasspane-agenda--anchor ()
@@ -423,9 +400,9 @@ tabs body) re-extracts nothing after each page's first build."
                          ((member mode '("day" "week")) anchor))))
     (condition-case nil
         (pcase mode
-          ("day" (glasspane-org-agenda-items 'day start-day))
-          ("week" (glasspane-org-agenda-items 'week start-day))
-          ("month" (glasspane-org-agenda-items 'month start-day))
+          ("day" (jetpacs-org-mode-agenda-items 'day start-day))
+          ("week" (jetpacs-org-mode-agenda-items 'week start-day))
+          ("month" (jetpacs-org-mode-agenda-items 'month start-day))
           (_ (glasspane-org-search
               (cdr (assoc mode glasspane-org-custom-agendas)))))
       (error nil))))
@@ -523,7 +500,7 @@ bounded by the three spans plus `glasspane-agenda--custom-max'.  Saved
 is registry navigation, not an Org result list, and therefore mints no set."
   (if (equal mode glasspane-agenda--saved-mode)
       (glasspane-agenda--saved-page)
-    (let ((items (glasspane-agenda--tokenize
+    (let ((items (glasspane-agenda-tokenize
                   (glasspane-agenda--filter-areas
                    (glasspane-agenda--items-for mode anchor))
                   (concat "agenda-" mode))))
@@ -592,7 +569,7 @@ The v1 tab badge's successor — surfaced IN-SCREEN here, and on the
 app's dock item through `glasspane-agenda-dock-badge' now that the
 gap-#5 thread-through landed."
   (length (condition-case nil
-              (glasspane-org-agenda-items 'day)
+              (jetpacs-org-mode-agenda-items 'day)
             (error nil))))
 
 (defun glasspane-agenda-dock-badge ()

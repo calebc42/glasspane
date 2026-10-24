@@ -131,7 +131,7 @@ buckets are not walls."
        :selected (jetpacs-bool (equal glasspane-projects--filter keyword))
        :on-tap (jetpacs-action "tasks.filter"
                                :args (list :filter keyword))))
-    (cons "ALL" (glasspane-org-workflow-keywords items)))))
+    (cons "ALL" (jetpacs-org-settings-workflow-keywords items)))))
 
 (defun glasspane-projects--group-chips ()
   "Build the grouping-chip fallback for receivers without segmented buttons."

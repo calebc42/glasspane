@@ -1291,7 +1291,7 @@ render did not record."
                        (glasspane-org-reader--drawers n) buffer))))
          (areas (org-with-wide-buffer
                  (plist-get
-                  (glasspane-org-tag-group
+                  (jetpacs-org-mode-tag-group
                    (plist-get (glasspane-org-tag-groups-at pos) :groups)
                    glasspane-area-tag-group)
                   :members)))

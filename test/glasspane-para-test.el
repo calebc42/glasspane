@@ -201,7 +201,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
          "#+TAGS: [ Area : Good ]\n* TODO Survives :Good:\n"))
     (let ((good (expand-file-name "good.org" vault))
           (gone (expand-file-name "gone.org" vault)))
-      (cl-letf (((symbol-function 'glasspane-org-agenda-scope)
+      (cl-letf (((symbol-function 'jetpacs-org-mode-agenda-scope)
                  (lambda () (list gone good))))
         (let ((index (glasspane-areas--index-1)))
           (should (= (length index) 1))
@@ -415,7 +415,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
     (puthash "Inbox" "NEXT" glasspane-areas--todo-filter-state)
     (cl-letf (((symbol-function 'glasspane-areas--index)
                (lambda () (list area)))
-              ((symbol-function 'glasspane-org-workflow-keywords)
+              ((symbol-function 'jetpacs-org-settings-workflow-keywords)
                (lambda (_items) '("TODO" "NEXT" "WAITING" "DONE")))
               ((symbol-function 'glasspane-agenda-tokenize)
                (lambda (items _set)
@@ -528,8 +528,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
 
 (ert-deftest glasspane-para-areas-lifecycle-and-navigation ()
   "Glasspane owns its opener, drill route, and drill filter controls."
-  (should (eq (symbol-function 'glasspane-agenda-tokenize)
-              'glasspane-agenda--tokenize))
+  (should (fboundp 'glasspane-agenda-tokenize))
   (dolist (name glasspane-areas--verbs)
     (should (gethash name jetpacs-action-handlers))
     (should (equal (jetpacs--owner-of "action" name) "glasspane")))
@@ -549,11 +548,11 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
   "Areas consumes tag groups/public seams and has no category fallback."
   (with-temp-buffer
     (insert-file-contents glasspane-para-test--areas-source)
-    (should (search-forward "glasspane-org-agenda-scope" nil t))
+    (should (search-forward "jetpacs-org-mode-agenda-scope" nil t))
     (goto-char (point-min))
     (should (search-forward "glasspane-agenda-tokenize" nil t))
     (goto-char (point-min))
-    (should (search-forward "glasspane-org-workflow-keywords" nil t))
+    (should (search-forward "jetpacs-org-settings-workflow-keywords" nil t))
     (goto-char (point-min))
     (should (search-forward "ebp-org-tag-groups" nil t))
     (goto-char (point-min))
@@ -844,7 +843,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
   "Archive renders file handoffs and is exposed as a drawer destination."
   (let* ((mtime (encode-time 0 30 14 16 8 2026))
          (record (list :path "/vault/work.org_archive" :mtime mtime))
-         (row (glasspane-resources--archive-row record))
+         (row (glasspane-resources-archive-row record))
          (tap (plist-get row :on_tap))
          pushed)
     (should (equal (plist-get tap :action) "glasspane.document.open"))
@@ -1101,7 +1100,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
               ((symbol-function 'glasspane-projects--item-areas)
                (lambda (item)
                  (if (eq item house) '("House") '("Work"))))
-              ((symbol-function 'glasspane-org-workflow-keywords)
+              ((symbol-function 'jetpacs-org-settings-workflow-keywords)
                (lambda (_items) '("TODO")))
               ((symbol-function 'glasspane-agenda-tokenize)
                (lambda (items _set)
@@ -1134,7 +1133,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
   "Workflow chips share a row with a trailing segmented grouping control."
   (let ((glasspane-projects--group "area")
         (items '(((todo . "TODO") (file . "/vault/projects.org")))))
-    (cl-letf (((symbol-function 'glasspane-org-workflow-keywords)
+    (cl-letf (((symbol-function 'jetpacs-org-settings-workflow-keywords)
                (lambda (_items) '("TODO" "DONE")))
               ((symbol-function 'jetpacs-node-advertised-p)
                (lambda (type &optional _target)
@@ -1182,7 +1181,7 @@ dispatches the other one through the existing `projects.group' verb."
                (lambda () items))
               ((symbol-function 'glasspane-agenda-tokenize)
                (lambda (visible _set) visible))
-              ((symbol-function 'glasspane-org-workflow-keywords)
+              ((symbol-function 'jetpacs-org-settings-workflow-keywords)
                (lambda (_items) '("TODO" "DONE")))
               ((symbol-function 'glasspane-projects--item-areas)
                (lambda (_item) '("House")))
@@ -1242,9 +1241,9 @@ narrows every page, and the verb answers a status."
          (glasspane-ui-agenda-anchor "2026-09-07")
          (glasspane-area-icons '(("House" . "home") ("Work" . "work")))
          (refreshes 0))
-    (cl-letf (((symbol-function 'glasspane-org-agenda-items)
+    (cl-letf (((symbol-function 'jetpacs-org-mode-agenda-items)
                (lambda (&rest _) items))
-              ((symbol-function 'glasspane-agenda--tokenize)
+              ((symbol-function 'glasspane-agenda-tokenize)
                (lambda (visible _set) visible))
               ((symbol-function 'glasspane-ui-item-areas)
                (lambda (item) (cdr (assoc item members))))
@@ -1433,7 +1432,7 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
     (let ((items (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
                             (lambda () nil)))
                    (glasspane-org-todo-items))))
-      (should (equal (glasspane-org-workflow-keywords items)
+      (should (equal (jetpacs-org-settings-workflow-keywords items)
                      '("TODO" "NEXT" "WAIT" "DONE" "CANCELED"))))))
 
 (ert-deftest glasspane-para-projects-distinguishes-native-area-tags ()
@@ -2056,7 +2055,7 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
             (rendering . "calendar")))))
     (should (equal (glasspane-agenda--modes)
                    '("day" "week" "month" "Errands" "Waiting" "saved")))
-    (cl-letf (((symbol-function 'glasspane-agenda--tokenize)
+    (cl-letf (((symbol-function 'glasspane-agenda-tokenize)
                (lambda (&rest _) (ert-fail "Saved minted an Org token set"))))
       (let* ((page (glasspane-agenda--page
                     glasspane-agenda--saved-mode "2026-08-16"))
@@ -2086,7 +2085,7 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
     ;; The actual tabs include the user-facing trailing label.
     (cl-letf (((symbol-function 'glasspane-agenda--items-for)
                (lambda (&rest _) nil))
-              ((symbol-function 'glasspane-agenda--tokenize)
+              ((symbol-function 'glasspane-agenda-tokenize)
                (lambda (&rest _) nil)))
       (should (string-search
                "Saved"
@@ -2535,7 +2534,7 @@ current route into Resources."
     (forward-line -1)
     (let* ((org-use-tag-inheritance nil)
            (membership (glasspane-org-tag-groups-at (point)))
-           (area (glasspane-org-tag-group
+           (area (jetpacs-org-mode-tag-group
                   (plist-get membership :groups) "AREA")))
       (should (equal (plist-get membership :local) '("other")))
       (should (equal (plist-get membership :inherited) '("Work" "Home")))
@@ -2544,7 +2543,7 @@ current route into Resources."
              (excluded (glasspane-org-tag-groups-at (point))))
         (should (equal (plist-get excluded :inherited) '("Work")))
         (should (equal (plist-get
-                        (glasspane-org-tag-group
+                        (jetpacs-org-mode-tag-group
                          (plist-get excluded :groups) "Area")
                         :members)
                        '("Work")))))))

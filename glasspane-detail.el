@@ -79,6 +79,7 @@
 (require 'jetpacs-editor)
 (require 'jetpacs-org-toolbar)
 (require 'jetpacs-org-dialogs)
+(require 'jetpacs-org-reminders)      ; the agenda card's type icon/label
 (require 'glasspane-org)
 (require 'glasspane-ui)
 (require 'glasspane-navigation)
@@ -100,11 +101,8 @@
                   (file pos &optional skip-props set))
 (defvar glasspane-org-reader-inline-props)
 
-;; Later-rung siblings (G5's pure agenda formatters): declared, never
-;; required forward — `glasspane-detail-agenda-card' has no caller until
-;; the agenda screens land beside these definitions.
-(declare-function glasspane-agenda-type-icon "glasspane-agenda" (type))
-(declare-function glasspane-agenda-type-label "glasspane-agenda" (type))
+;; Later-rung sibling (G5's agenda date row): declared, never required
+;; forward — glasspane-agenda requires this file.
 (declare-function glasspane-agenda-card-date-row "glasspane-agenda" (it))
 
 ;;;; State (S2 — the handlers below are the only writers)
@@ -381,11 +379,11 @@ without duplicating Areas."
                     (member todo (or (default-value 'org-done-keywords)
                                      '("DONE" "CANCELLED")))
                     t))
-         (icon+color (glasspane-agenda-type-icon type))
+         (icon+color (jetpacs-org-agenda-type-icon type))
          (caption (string-join
                    (delq nil (list todo
                                    (and (stringp type)
-                                        (glasspane-agenda-type-label type))
+                                        (jetpacs-org-agenda-type-label type))
                                    (and file (file-name-nondirectory file))))
                    "  ·  "))
          (lead (cond ((and (stringp time) (not (string-empty-p time)))
@@ -467,64 +465,6 @@ agenda card places them; ordinary tags keep the full bottom row."
                                       "heading.tap"
                                       :args (list :token token))))))
 
-(defun glasspane-detail-clock-body ()
-  "The clock status body: current task card plus recent-task cards.
-Journal's today card embeds it.  Recent refs are filtered through the
-TOTAL root policy and the mint is best-effort: a history entry whose
-file left the roots (or the disk) costs the recent list, never the
-body."
-  (let* ((status (glasspane-org-clock-status))
-         (recent (condition-case nil
-                     (glasspane-org-recent-clocks 5)
-                   (error nil)))
-         (recent (cl-remove-if-not
-                  (lambda (r)
-                    (let ((f (plist-get (alist-get 'ref r) :file)))
-                      (and (stringp f) (not (string-empty-p f))
-                           (ebp-org-file-allowed-p f))))
-                  recent))
-         (tokens (and recent
-                      (condition-case nil
-                          (ebp-org-ref-tokens
-                           (mapcar (lambda (r) (alist-get 'ref r)) recent)
-                           :set "clock-recent" :owner "glasspane")
-                        (error nil))))
-         (status-card
-          (if status
-              (let* ((start (alist-get 'start status))
-                     (mins (when start
-                             (max 0 (floor (- (float-time) start) 60)))))
-                (jetpacs-card
-                 (list (jetpacs-column
-                        (jetpacs-text "Currently clocked in" :style "caption")
-                        (jetpacs-text (or (alist-get 'task status) "?")
-                                      :style "headline")
-                        (jetpacs-text (if mins (format "%d min elapsed" mins)
-                                        "")
-                                      :style "caption")
-                        (jetpacs-button "Clock out"
-                                        (jetpacs-action "org.clock.out"))
-                        :spacing 4))))
-            (jetpacs-empty-state :icon "schedule"
-                                 :title "Not clocked in"
-                                 :caption "Pick a recent task below to start.")))
-         (recent-cards
-          (and tokens
-               (cl-mapcar (lambda (r tok)
-                            (jetpacs-chrome-row
-                             (or (alist-get 'headline r) "?")
-                             :icon "history"
-                             :on-tap (jetpacs-action
-                                      "heading.clock-in"
-                                      :args (list :token tok))))
-                          recent tokens))))
-    (apply #'jetpacs-column
-           (append (list status-card)
-                   (when recent-cards
-                     (cons (jetpacs-section-header "Recent tasks")
-                           recent-cards))
-                   (list :spacing 8)))))
-
 ;;;; Detail extraction
 
 (defun glasspane-ui--sibling-ref (ref direction)
@@ -562,7 +502,7 @@ Signals like `ebp-org-resolve-ref'; the screen builder classifies."
              (list :buf (current-buffer)
                    :file file
                    :pos pos
-                   :edit-mtime (glasspane-org-mtime-stamp file)
+                   :edit-mtime (jetpacs-editor-org-mtime-stamp file)
                    :edit-beg pos
                    :edit-end end
                    :edit-tick (buffer-chars-modified-tick)
@@ -576,7 +516,7 @@ Signals like `ebp-org-resolve-ref'; the screen builder classifies."
                    :local-tags (plist-get membership :local)
                    :inherited-tags (plist-get membership :inherited)
                    :areas (plist-get
-                           (glasspane-org-tag-group
+                           (jetpacs-org-mode-tag-group
                             (plist-get membership :groups)
                             glasspane-area-tag-group)
                            :members)
@@ -974,9 +914,6 @@ the only other chrome."
         :variant "filled")
        :id (jetpacs-wire-id "gp-detail-panel" key)))))
 
-(defalias 'glasspane-detail--relative-date #'jetpacs-org-relative-date
-  "The ISO date that WHEN (\"+0d\", \"+1d\", \"+1w\") names from ISO TODAY.")
-
 (defun glasspane-detail--planning-panel (info main section)
   "Build INFO's SECTION (`scheduled' or `deadline') drawer for token MAIN.
 A summary row (tinted icon, the human date, the full sentence beneath)
@@ -999,7 +936,7 @@ removes the stamp.  Deadline chips ride the same verb with `:type'."
                    label
                    :selected (jetpacs-bool
                               (and date
-                                   (equal date (glasspane-detail--relative-date
+                                   (equal date (jetpacs-org-relative-date
                                                 today when))))
                    :on-tap (jetpacs-action
                             "heading.schedule"
@@ -1062,8 +999,8 @@ first when GROUP is exclusive.  Pure."
 
 (defun glasspane-detail--area-group (info)
   "INFO's Area tag group plist, or nil when the vocabulary lacks one."
-  (glasspane-org-tag-group (plist-get (plist-get info :tag-groups) :groups)
-                           glasspane-area-tag-group))
+  (jetpacs-org-mode-tag-group (plist-get (plist-get info :tag-groups) :groups)
+                              glasspane-area-tag-group))
 
 (defun glasspane-detail--tag-toggle-chip (info main group tag)
   "A chip toggling TAG's membership in GROUP for INFO's heading MAIN.
@@ -1448,9 +1385,6 @@ never guess)."
            ref)
           'accepted)))))
 
-(defalias 'glasspane-detail--ref-location #'jetpacs-org-heading-location
-  "Resolve REF to (BUFFER FILE POSITION), releasing its marker.")
-
 (defun glasspane-detail--location-status (err)
   "Map engine condition ERR to a handler result, including retry."
   (pcase (ebp-org-refusal-disposition err)
@@ -1466,7 +1400,7 @@ never guess)."
       (if-let* ((ref (ebp-org-token-ref token :owner "glasspane")))
           (condition-case err
               (pcase-let ((`(,_buffer ,file ,pos)
-                            (glasspane-detail--ref-location ref)))
+                            (jetpacs-org-heading-location ref)))
                 (glasspane-navigation-open-document file pos))
             ((ebp-org-refused ebp-org-unavailable ebp-org-unresolved)
              (glasspane-detail--location-status err)))
@@ -1584,7 +1518,7 @@ path (the picker flows are the foundation dialog's)."
          (when (plist-get args :when))
          (value (plist-get args :value))
          (date (or (and (stringp when) (not (string-empty-p when))
-                        (or (glasspane-detail--relative-date
+                        (or (jetpacs-org-relative-date
                              (format-time-string "%Y-%m-%d") when)
                             when))
                    (and (stringp value) (not (string-empty-p value)) value)))
@@ -1900,7 +1834,7 @@ crosses that boundary; the device cannot supply a raw position."
              (lambda ()
                (condition-case err
                    (pcase-let ((`(,buf ,_file ,pos)
-                                (glasspane-detail--ref-location ref)))
+                                (jetpacs-org-heading-location ref)))
                      (jetpacs-buffer-expose (buffer-name buf) pos
                                              "jetpacs.org.heading")
                      (funcall handler

@@ -198,8 +198,6 @@ index; a source that no longer exists has no Areas."
      :on-tap (glasspane-navigation-document-action path)
      :key (jetpacs-wire-id "archive" path))))
 
-(defalias 'glasspane-resources--archive-row #'glasspane-resources-archive-row)
-
 (defun glasspane-resources--archive-filter-row (areas)
   "Build the Archive Area filter rail over AREAS, shared with Projects."
   (glasspane-ui-area-filter-rail areas glasspane-resources--archive-filter
@@ -229,7 +227,7 @@ index; a source that no longer exists has no Areas."
                (append (and areas
                             (list (glasspane-resources--archive-filter-row
                                    areas)))
-                       (mapcar #'glasspane-resources--archive-row shown)
+                       (mapcar #'glasspane-resources-archive-row shown)
                        (list :spacing 8 :content-padding 12)))
       (jetpacs-empty-state
        :icon "archive"

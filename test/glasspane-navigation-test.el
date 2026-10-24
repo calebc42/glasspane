@@ -96,7 +96,7 @@ Area file row and the Archive row carry a validated path
            (declaring-action (plist-get declaring :on_tap))
            (file-row (glasspane-areas--file-row "/vault/work.org"))
            (file-action (plist-get file-row :on_tap))
-           (archive-row (glasspane-resources--archive-row
+           (archive-row (glasspane-resources-archive-row
                          (list :path "/vault/work.org_archive"
                                :mtime (encode-time 0 30 9 2 1 2026))))
            (archive-action (plist-get archive-row :on_tap)))
@@ -124,7 +124,7 @@ Area file row and the Archive row carry a validated path
   (let (calls)
     (cl-letf (((symbol-function 'ebp-org-token-ref)
                (lambda (_token &rest _) 'durable-ref))
-              ((symbol-function 'glasspane-detail--ref-location)
+              ((symbol-function 'jetpacs-org-heading-location)
                (lambda (_ref) '(buffer "/vault/work.org" 73)))
               ((symbol-function 'glasspane-navigation-open-document)
                (lambda (path &optional position)

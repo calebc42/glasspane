@@ -227,7 +227,7 @@ UI layer mints tokens from these, so the shape is load-bearing."
                     "* Reference notes\n"
                     "** Not level one\n"))
           (ebp-org-cache-invalidate)
-          (let* ((items (glasspane-org-agenda-items 'day))
+          (let* ((items (jetpacs-org-mode-agenda-items 'day))
                  (hit (cl-find-if
                        (lambda (it)
                          (equal (alist-get 'headline it) "Water the garden"))
@@ -241,11 +241,7 @@ UI layer mints tokens from these, so the shape is load-bearing."
           (let ((items (glasspane-org-todo-items (list file))))
             (should (= (length items) 2))
             (dolist (it items)
-              (should (stringp (plist-get (alist-get 'ref it) :headline)))))
-          (should (equal (mapcar (lambda (it) (alist-get 'headline it))
-                                 (glasspane-org--file-heading-items file))
-                         '("Water the garden" "Call the bank"
-                           "Reference notes"))))
+              (should (stringp (plist-get (alist-get 'ref it) :headline))))))
       (ebp-org-cache-invalidate)
       (dolist (buf (buffer-list))
         (let ((f (buffer-file-name buf)))
@@ -275,7 +271,7 @@ consumer FILES."
                     "* TODO From the directory scope\n"
                     "* Not a task\n"))
           (ebp-org-cache-invalidate)
-          (let ((scope (glasspane-org--agenda-scope)))
+          (let ((scope (jetpacs-org-mode-agenda-scope)))
             (should (equal scope (list file)))
             (should-not (cl-find-if #'file-directory-p scope)))
           (let ((items (cl-letf (((symbol-function 'glasspane-org--vulpea-p)
@@ -335,8 +331,8 @@ and a different key over the same tree never serves its payload
           (find-file-noselect file)
           (should-not (glasspane-org--vulpea-p))
           (let ((calls 0)
-                (real (symbol-function 'glasspane-org-heading-item-at)))
-            (cl-letf (((symbol-function 'glasspane-org-heading-item-at)
+                (real (symbol-function 'jetpacs-org-mode-heading-item-at)))
+            (cl-letf (((symbol-function 'jetpacs-org-mode-heading-item-at)
                        (lambda () (cl-incf calls) (funcall real))))
               (let ((first (glasspane-org-search "todo:TODO")))
                 (should (= (length first) 2))
@@ -386,43 +382,6 @@ and a different key over the same tree never serves its payload
                      (glasspane-org-all-tags))))
               (should-not (equal indexed swept))
               (should (member "indexed" indexed)))))
-      (ebp-org-cache-invalidate)
-      (dolist (buf (buffer-list))
-        (let ((f (buffer-file-name buf)))
-          (when (and f (string-prefix-p (file-name-as-directory
-                                         (file-truename vault))
-                                        (file-truename f)))
-            (with-current-buffer buf (set-buffer-modified-p nil))
-            (kill-buffer buf))))
-      (delete-directory vault t))))
-
-(ert-deftest glasspane-test-org-filter-items ()
-  "The sparse filter narrows by the ONE grammar at each item's own
-heading; the empty query is the identity; malformed and unsupported
-queries SIGNAL — an empty result must mean \"nothing matched\"."
-  (let* ((vault (make-temp-file "glasspane-vault" t))
-         (file (expand-file-name "tasks.org" vault))
-         (org-directory vault)
-         (org-agenda-files (list file))
-         (ebp-org-roots nil))
-    (unwind-protect
-        (progn
-          (with-temp-file file
-            (insert "#+TITLE: Tasks\n\n"
-                    "* TODO Water the garden :home:\n"
-                    "* TODO Call the bank\n"))
-          (ebp-org-cache-invalidate)
-          (let ((items (glasspane-org-todo-items (list file))))
-            (should (= (length items) 2))
-            (should (equal (glasspane-org--filter-items items "") items))
-            (let ((kept (glasspane-org--filter-items items "tags:home")))
-              (should (= (length kept) 1))
-              (should (equal (alist-get 'headline (car kept))
-                             "Water the garden")))
-            (should-error (glasspane-org--filter-items items "(todo")
-                          :type 'user-error)
-            (should-error (glasspane-org--filter-items items "(clocked)")
-                          :type 'user-error)))
       (ebp-org-cache-invalidate)
       (dolist (buf (buffer-list))
         (let ((f (buffer-file-name buf)))
@@ -586,7 +545,7 @@ never mutates the user's global org hooks."
                            (org-end-of-subtree t t)
                            (point)))
                     (tick (buffer-chars-modified-tick))
-                    (stamp (glasspane-org-mtime-stamp file))
+                    (stamp (jetpacs-editor-org-mtime-stamp file))
                     (original (buffer-string))
                     (jetpacs-files-before-buffer-save-hook
                      (list (lambda (&rest _)
@@ -648,44 +607,6 @@ never mutates the user's global org hooks."
       (when (buffer-live-p buffer)
         (with-current-buffer buffer (set-buffer-modified-p nil))
         (kill-buffer buffer))
-      (delete-directory vault t))))
-
-(ert-deftest glasspane-test-org-roots-refusal ()
-  "File access rides the ebp-org root policy: outside the roots signals
-`ebp-org-refused' (the UI layer's \\='rejected), a vanished file
-`ebp-org-unresolved' (\\='stale) — and the filter, a predicate, just
-answers nil."
-  (let* ((vault (make-temp-file "glasspane-vault" t))
-         (inside (expand-file-name "in.org" vault))
-         (outside (make-temp-file "glasspane-outside" nil ".org"))
-         (org-directory vault)
-         (org-agenda-files (list inside))
-         (ebp-org-roots nil))
-    (unwind-protect
-        (progn
-          (with-temp-file inside (insert "#+TITLE: In\n* Here\n"))
-          (with-temp-file outside (insert "#+TITLE: Out\n* TODO Elsewhere\n"))
-          (ebp-org-cache-invalidate)
-          (should-error (glasspane-org--file-heading-items outside)
-                        :type 'ebp-org-refused)
-          (should-error (glasspane-org--heading-at 1 outside)
-                        :type 'ebp-org-refused)
-          (should-error (glasspane-org--file-heading-items
-                         (expand-file-name "gone.org" vault))
-                        :type 'ebp-org-unresolved)
-          (should (= (length (glasspane-org--file-heading-items inside)) 1))
-          (should-not (glasspane-org--filter-items
-                       `(((headline . "Elsewhere") (file . ,outside) (pos . 1)))
-                       "todo:TODO")))
-      (ebp-org-cache-invalidate)
-      (dolist (buf (buffer-list))
-        (let ((f (buffer-file-name buf)))
-          (when (and f (string-prefix-p (file-name-as-directory
-                                         (file-truename vault))
-                                        (file-truename f)))
-            (with-current-buffer buf (set-buffer-modified-p nil))
-            (kill-buffer buf))))
-      (when (file-exists-p outside) (delete-file outside))
       (delete-directory vault t))))
 
 ;;;; G1 — data layer: glasspane-vulpea.el
@@ -2681,9 +2602,9 @@ wire encoding."
     (should (string-search "\"color\":\"warning\"" json))
     (should (string-search "detail.priority.edit" json)))
   ;; The shared cards (G5 formatters stubbed until the agenda rung).
-  (cl-letf (((symbol-function 'glasspane-agenda-type-icon)
+  (cl-letf (((symbol-function 'jetpacs-org-agenda-type-icon)
              (lambda (_type) '("schedule" . nil)))
-            ((symbol-function 'glasspane-agenda-type-label)
+            ((symbol-function 'jetpacs-org-agenda-type-label)
              (lambda (_type) "scheduled"))
             ((symbol-function 'glasspane-agenda-card-date-row)
              (lambda (_it) nil)))
@@ -2796,7 +2717,7 @@ both modes, degrading to the go-back placeholder on a dead ref."
                                           (list (ebp-org-ref-at-point))
                                           :set "t-detail-save"
                                           :owner "glasspane"))
-                             :mtime (glasspane-org-mtime-stamp file)
+                             :mtime (jetpacs-editor-org-mtime-stamp file)
                              :beg beg
                              :end (save-excursion
                                     (org-end-of-subtree t t)
@@ -3244,36 +3165,9 @@ between files through the same policy."
 ;;;; (capture and its pure date helpers are upstream Jetpacs suites now)
 
 (ert-deftest glasspane-test-agenda-formatters ()
-  "The pure agenda formatters over fixture alists: the compact meta
-line, the type icon/label maps, the card date label/row, the composed
-month fallback grid, the mode list, and the in-screen count that
-replaced the tab badge (FOUNDATION-GAPS #5)."
-  ;; widget-item-meta: qualifier cleanup, redundant-qualifier drop,
-  ;; time precedence, empty degrade.
-  (should (equal (glasspane-agenda-widget-item-meta
-                  '((extra . "Sched. 3x: ") (file . "/v/tasks.org")) nil)
-                 "Sched. 3x · tasks.org"))
-  (should (equal (glasspane-agenda-widget-item-meta
-                  '((extra . "Scheduled") (file . "/v/tasks.org")) nil)
-                 "tasks.org"))
-  (should (equal (glasspane-agenda-widget-item-meta
-                  '((extra . "In 3 d.") (file . "/v/t.org")) "09:15")
-                 "09:15 · t.org"))
-  (should (equal (glasspane-agenda-widget-item-meta '((extra . "Deadline")) nil)
-                 ""))
-  ;; The icon/label maps.
-  (should (equal (glasspane-agenda-widget-icon "upcoming-deadline")
-                 "deadline"))
-  (should (equal (glasspane-agenda-widget-icon "past-scheduled")
-                 "scheduled"))
-  (should (equal (glasspane-agenda-widget-icon nil) "event"))
-  (should (equal (glasspane-agenda-type-icon "past-scheduled")
-                 '("history" . "error")))
-  (should (equal (car (glasspane-agenda-type-icon "deadline")) "flag"))
-  (should-not (glasspane-agenda-type-icon "timestamp"))
-  (should (equal (glasspane-agenda-type-label "past-scheduled")
-                 "overdue"))
-  (should-not (glasspane-agenda-type-label "block"))
+  "The pure agenda formatters over fixture alists: the card date
+label/row, the composed month fallback grid, the mode list, and the
+in-screen count that replaced the tab badge (FOUNDATION-GAPS #5)."
   ;; Card date label: month abbrev + optional ebp-org-ts-time time.
   (should (equal (glasspane-agenda-card-date-label "<2026-08-13 Thu 14:00>")
                  "Aug 13 14:00"))
@@ -3319,10 +3213,10 @@ replaced the tab badge (FOUNDATION-GAPS #5)."
     (should (equal (car (last (glasspane-agenda--modes))) "saved")))
   ;; The in-screen count reads the memoised day extraction and
   ;; swallows its errors.
-  (cl-letf (((symbol-function 'glasspane-org-agenda-items)
+  (cl-letf (((symbol-function 'jetpacs-org-mode-agenda-items)
              (lambda (&rest _) '(a b))))
     (should (= (glasspane-agenda--today-count) 2)))
-  (cl-letf (((symbol-function 'glasspane-org-agenda-items)
+  (cl-letf (((symbol-function 'jetpacs-org-mode-agenda-items)
              (lambda (&rest _) (error "boom"))))
     (should (= (glasspane-agenda--today-count) 0))))
 
@@ -3353,7 +3247,7 @@ the archive token in the disjoint \"glasspane-SET\" name the base
                         `((headline . "Outside")
                           (ref . (:file ,outside :pos 1
                                   :headline "Outside")))))
-                 (out (glasspane-agenda--tokenize items "t-agenda")))
+                 (out (glasspane-agenda-tokenize items "t-agenda")))
             ;; The refused item is still on screen, just without arms.
             (should (= (length out) 2))
             (let ((refused (nth 1 out)))

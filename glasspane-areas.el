@@ -46,8 +46,8 @@
   "Return the Area group's foundation vocabulary in the current Org buffer.
 The foundation preserves Org's persistent and file-local declarations,
 omitting regexp members that cannot be ordinary heading tags."
-  (plist-get (glasspane-org-tag-group (ebp-org-tag-groups)
-                                    glasspane-area-tag-group)
+  (plist-get (jetpacs-org-mode-tag-group (ebp-org-tag-groups)
+                                         glasspane-area-tag-group)
              :tags))
 
 (defun glasspane-areas--global-members ()
@@ -85,7 +85,7 @@ validated against the Org roots and visited under clamped I/O."
         (org-with-wide-buffer
          (let* ((org-use-tag-inheritance t)
                 (members (glasspane-areas--members-here))
-                (file-tags (glasspane-org-tag-strings org-file-tags))
+                (file-tags (jetpacs-org-mode-tag-strings org-file-tags))
                 (file-areas (cl-remove-if-not
                              (lambda (member) (member member file-tags))
                              members))
@@ -97,12 +97,12 @@ validated against the Org roots and visited under clamped I/O."
             (lambda ()
               (let* ((membership (glasspane-org-tag-groups-at (point)))
                      (areas (plist-get
-                             (glasspane-org-tag-group
+                             (jetpacs-org-mode-tag-group
                               (plist-get membership :groups)
                               glasspane-area-tag-group)
                              :members))
                      (decl (org-entry-get (point) "AREA"))
-                     (item (glasspane-org-heading-item-at)))
+                     (item (jetpacs-org-mode-heading-item-at)))
                 (dolist (area areas) (cl-pushnew area used :test #'equal))
                 (push (cons 'areas (vconcat areas)) item)
                 (when (and (stringp decl)
@@ -140,7 +140,7 @@ skipped without costing every other Area."
     (dolist (name (glasspane-areas--global-members))
       (glasspane-areas--bucket table name))
     (dolist (file (delete-dups
-                   (copy-sequence (or (glasspane-org-agenda-scope) nil))))
+                   (copy-sequence (or (jetpacs-org-mode-agenda-scope) nil))))
       (when-let* ((scan (condition-case nil
                             (glasspane-areas--scan-file file)
                           (error nil)))
@@ -191,7 +191,8 @@ Include the configured group name and each visited file's vocabulary and
 exclusions; the EBP cache's content stamp alone cannot observe those edits."
   (ebp-org-with-cache 'glasspane
       (list 'areas-index glasspane-area-tag-group
-            (glasspane-org-tag-settings-stamp (glasspane-org-agenda-scope)))
+            (jetpacs-org-mode-tag-settings-stamp
+             (jetpacs-org-mode-agenda-scope)))
     (glasspane-areas--index-1)))
 
 (defun glasspane-areas--find (name)
@@ -333,7 +334,7 @@ declarations are path-authority rows."
                      (and (stringp keyword) (not (string-empty-p keyword))))
                    (mapcar (lambda (item) (alist-get 'todo item)) items)))))
     (cl-remove-if-not (lambda (keyword) (member keyword present))
-                      (glasspane-org-workflow-keywords items))))
+                      (jetpacs-org-settings-workflow-keywords items))))
 
 (defun glasspane-areas--todo-chip-row (category items)
   "Build CATEGORY's single-select Project TODO filter rail over ITEMS."

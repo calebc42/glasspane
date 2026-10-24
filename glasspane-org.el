@@ -41,13 +41,6 @@
 (require 'jetpacs-org-settings)          ; public workflow vocabulary
 (require 'glasspane-vulpea)             ; note-index arm + mobile extractor
 
-;;;; Refresh coordination
-
-(defvar glasspane-org-inhibit-save-refresh nil
-  "When non-nil, the `after-save-hook' dashboard refresh is suppressed.
-Bound around our own programmatic saves (heading edits, file saves) so an
-explicit dashboard push isn't doubled by the save-hook firing on top.")
-
 (declare-function vulpea-db-update-file "ext:vulpea-db-extract" (file))
 
 (defun glasspane-org-vulpea-refresh-file (&optional buffer-or-path)
@@ -67,13 +60,10 @@ the stale row back out of the index.  No-op without vulpea."
 
 (defun glasspane-org-save-and-invalidate (&optional buffer)
   "Delegate BUFFER's synchronous save to Jetpacs' native Org policy.
-The app keeps its refresh-suppression and optional Vulpea index refresh
-opinions; encryption, durability, and whole-cache invalidation belong to
-`jetpacs-org-save-policy'.  It stays a wrapper rather than a
-plain `ebp-org-file-save-function' call because the refresh suppression
-must bind around the save itself: the save's own hooks read it."
-  (let ((glasspane-org-inhibit-save-refresh t)
-        (target (or buffer (current-buffer))))
+The app keeps its optional Vulpea index refresh opinion; encryption,
+durability, and whole-cache invalidation belong to
+`jetpacs-org-save-policy'."
+  (let ((target (or buffer (current-buffer))))
     (prog1 (jetpacs-org-save-policy target)
       (glasspane-org-vulpea-refresh-file target))))
 
@@ -81,14 +71,11 @@ must bind around the save itself: the save's own hooks read it."
   "Replace REF's subtree with VALUE through the foundation's fresh splice.
 STAMP, BEG, END, and TICK are the scalar snapshot minted with the detail
 editor; `jetpacs-editor-org-fresh-splice' re-validates every one of them
-and saves through the native policy.  Glasspane adds only its two save
-opinions: the after-save dashboard refresh is suppressed (the caller
-re-pushes over the fresh ref itself) and the optional vulpea row is
-refreshed.  Signals `jetpacs-editor-org-splice-refused' with a
+and saves through the native policy.  Glasspane adds only its optional
+vulpea row refresh.  Signals `jetpacs-editor-org-splice-refused' with a
 user-facing message; return a freshly anchored ref."
-  (let ((glasspane-org-inhibit-save-refresh t))
-    (prog1 (jetpacs-editor-org-fresh-splice ref value stamp beg end tick)
-      (glasspane-org-vulpea-refresh-file (plist-get ref :file)))))
+  (prog1 (jetpacs-editor-org-fresh-splice ref value stamp beg end tick)
+    (glasspane-org-vulpea-refresh-file (plist-get ref :file))))
 
 ;; The dashboard pushes every view on every action (so navigation stays
 ;; instant and offline-capable), which means the expensive extractions

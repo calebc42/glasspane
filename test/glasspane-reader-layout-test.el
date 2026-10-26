@@ -415,11 +415,14 @@
        (should (equal before (buffer-string)))))))
 
 (defun glasspane-reader-layout--link-spans (nodes)
-  "Collect spans carrying the link follow action in NODES in presentation order."
+  "Collect link spans in NODES in presentation order.
+An internal link follows in Emacs; a web link opens on the device through
+the `uri.open' builtin (EBP #208)."
   (cl-loop for node in (glasspane-reader-layout--nodes-of-type nodes "rich_text")
            append (cl-loop for span across (vconcat (plist-get node :spans))
                            for tap = (plist-get span :on_tap)
-                           when (equal (plist-get tap :action) "jetpacs.org.follow")
+                           when (or (equal (plist-get tap :action) "jetpacs.org.follow")
+                                    (equal (plist-get tap :builtin) "uri.open"))
                            collect span)))
 
 (defun glasspane-reader-layout--sibling-file (file name text)
@@ -454,7 +457,12 @@
              (should (equal (plist-get (nth 1 spans) :font_weight) "bold"))
              ;; One description yields two spans sharing one exposed position.
              (should (equal (plist-get (car spans) :on_tap) (plist-get (nth 1 spans) :on_tap)))
-             (dolist (span spans)
+             ;; Web links open on the device; the rest follow in Emacs.
+             (should (equal (mapcar (lambda (span) (plist-get (plist-get span :on_tap) :uri))
+                                    (seq-take spans 4))
+                            '("https://example.com/docs/" "https://example.com/docs/"
+                              "https://example.com/api" "https://plain.example")))
+             (dolist (span (nthcdr 4 spans))
                (let* ((args (plist-get (plist-get span :on_tap) :args))
                       (pos (plist-get args :pos)))
                  (should (equal (plist-get args :buffer) (buffer-name)))
@@ -474,7 +482,7 @@
            (kill-buffer buffer)))))))
 
 (ert-deftest glasspane-reader-layout-link-open-follows-org-then-the-document-route ()
-  "Org resolves a tapped link; files converge on the document route, the web is acknowledged."
+  "Org resolves a tapped link; files converge on the document route, the web opens on the device."
   (glasspane-reader-layout--with-source-file
    (lambda (file)
      (let ((other (glasspane-reader-layout--sibling-file
@@ -486,7 +494,7 @@
                   (nodes (glasspane-reader-layout--source-render))
                   (spans (glasspane-reader-layout--link-spans nodes))
                   (file-args (plist-get (plist-get (car spans) :on_tap) :args))
-                  (web-args (plist-get (plist-get (cadr spans) :on_tap) :args))
+                  (web-tap (plist-get (cadr spans) :on_tap))
                   opened notices browsed thunks)
              (should (= (length spans) 2))
              (cl-letf (((symbol-function 'jetpacs-navigate-thunk)
@@ -515,16 +523,10 @@
                                            (looking-at-p "\\* Elsewhere"))))
                  (should (funcall (cdr entry) (car dest) (cdr dest) "app:jetpacs.files"))
                  (should (equal opened (list (list other (cdr dest))))))
-               ;; A web link stays put: Org handed it to the browser.
-               (should (eq (jetpacs-org-render--follow web-args nil) 'accepted))
-               (let* ((entry (pop thunks))
-                      (dest (with-temp-buffer
-                              (jetpacs-buffer-funcall-shimmed (car entry)))))
-                 (should (eq (car dest) source))
-                 (should (equal browsed '("https://example.com/x")))
-                 (should (funcall (cdr entry) (car dest) (cdr dest) "app:jetpacs.files"))
-                 (should (equal notices '("Opened link")))
-                 (should (= (length opened) 1)))
+               ;; A web link never reaches Emacs: the device opens it.
+               (should (equal web-tap '(:builtin "uri.open" :uri "https://example.com/x")))
+               (should-not browsed)
+               (should-not notices)
                ;; Snapshot discipline: a changed source or an unexposed position.
                (should (eq (jetpacs-org-render--follow
                             (plist-put (copy-sequence file-args) :tick

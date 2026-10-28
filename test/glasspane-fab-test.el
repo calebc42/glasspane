@@ -84,7 +84,7 @@
         (should (equal (plist-get fab :label) "Clock in"))
         (should (equal (plist-get (plist-get fab :on_tap) :args) '(:token "tok")))
         (should (equal labels '("Add sub-task" "Countdown 0:45" "Set effort…"
-                                "Structure…" "More…")))
+                                "Capture…" "Structure…" "More…")))
         (should (<= (length labels) 7))
         (should (equal (plist-get (glasspane-fab-test--action fab "More…") :args)
                        '(:token "tok" :group "more")))
@@ -120,6 +120,38 @@
                     'rejected))
         (should (eq (glasspane-fab--on-group '(:token "expired" :group "more") nil)
                     'stale))))))
+
+(ert-deftest glasspane-fab-test-capture-sheet ()
+  "Capture… lists New task, the picker and each template; a tap closes the
+sheet before handing over to Org capture."
+  (glasspane-fab-test--with-file "* Top\n"
+    (let ((org-capture-templates '(("t" "Task" entry (file "/tmp/x.org") "* TODO %?")
+                                   ("j" "Journal" entry (file "/tmp/j.org") "* %?")))
+          shown closed handed)
+      (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
+                ((symbol-function 'jetpacs-flow-continue) (lambda (fn) (funcall fn)))
+                ((symbol-function 'jetpacs-dialog-slot-show)
+                 (lambda (id spec &rest _keys)
+                   (jetpacs-check-profile spec 'dialog)
+                   (setq shown (list id spec)))))
+        (should (eq (glasspane-fab--on-group (list :token token :group "capture") nil)
+                    'accepted))
+        (should (equal (car shown) "gp-fab-group-capture"))
+        (let ((json (jetpacs-node->canonical-json (nth 1 shown))))
+          (dolist (label '("Capture" "New task" "Capture…" "Task" "Journal"))
+            ;; The canonical JSON is UTF-8 bytes; so is the needle.
+            (should (string-search (encode-coding-string (format "\"%s\"" label) 'utf-8)
+                                   json)))
+          (should (string-search "\"template\":\"j\"" json))))
+      (let ((jetpacs-action-handlers (copy-hash-table jetpacs-action-handlers)))
+        (puthash "org.capture.show"
+                 (lambda (args _params) (setq handed args) 'accepted)
+                 jetpacs-action-handlers)
+        (cl-letf (((symbol-function 'glasspane-fab--close-sheet)
+                   (lambda () (setq closed (not handed)))))
+          (should (eq (glasspane-fab--on-capture '(:template "j") nil) 'accepted))
+          (should closed)
+          (should (equal handed '(:template "j"))))))))
 
 (ert-deftest glasspane-fab-test-degrades-without-the-node ()
   "No material3.fab: the FAB menu; no menu either: the capture button."

@@ -178,6 +178,17 @@ Each item is (LABEL ICON ACTION)."
        ("Move down" "arrow_downward" ,(funcall act "glasspane.fab.move" :how "down"))
        ("Promote" "format_indent_decrease" ,(funcall act "glasspane.fab.move" :how "promote"))
        ("Demote" "format_indent_increase" ,(funcall act "glasspane.fab.move" :how "demote")))
+      ("capture"
+       ("New task" "add_task" ,(jetpacs-action "glasspane.fab.quick-task"))
+       ("Capture…" "note_add" ,(jetpacs-action "glasspane.fab.capture"))
+       ,@(mapcar (lambda (template)
+                   (list (or (plist-get template :description)
+                             (plist-get template :key))
+                         "edit_note"
+                         (jetpacs-action "glasspane.fab.capture"
+                                         :args (list :template
+                                                     (plist-get template :key)))))
+                 (ignore-errors (jetpacs-org-capture-templates))))
       ("more"
        ("Clone with time shift…" "event_repeat" ,(funcall act "glasspane.fab.clone"))
        ("Run code blocks" "play_arrow"
@@ -190,7 +201,8 @@ Each item is (LABEL ICON ACTION)."
 (defun glasspane-fab-heading (token &optional info)
   "The FAB for a heading page whose heading TOKEN names; INFO is its meta.
 A running clock makes the primary Clock out; otherwise Clock in.  The menu
-keeps the frequent actions; Structure… and More… open grouped sheets, so
+keeps the frequent actions; Capture…, Structure… and More… open grouped
+sheets (Capture… lists New task and the capture templates), so
 the fan stays within Material's handful of items."
   (when (stringp token)
     (let* ((args (list :token token))
@@ -219,10 +231,21 @@ the fan stays within Material's handful of items."
                 (glasspane-fab-item "Cancel clock" "cancel"
                                     (jetpacs-action "glasspane.fab.clock-cancel"
                                                     :confirm "Discard the running clock?")))
+              (glasspane-fab-item "Capture…" "note_add"
+                                  (funcall act "glasspane.fab.group" :group "capture"))
               (glasspane-fab-item "Structure…" "account_tree"
                                   (funcall act "glasspane.fab.group" :group "structure"))
               (glasspane-fab-item "More…" "more_horiz"
                                   (funcall act "glasspane.fab.group" :group "more"))))))))
+
+(defun glasspane-fab--on-capture (args params)
+  "Close the Capture sheet, then open Org capture (ARGS' `:template' form).
+Capture is the foundation's verb; this hop only retires Glasspane's sheet
+first, so the capture dialog does not open beneath it."
+  (glasspane-fab--close-sheet)
+  (if-let* ((show (gethash "org.capture.show" jetpacs-action-handlers)))
+      (funcall show args params)
+    'rejected))
 
 (defun glasspane-fab--on-group (args params)
   "Show ARGS' `:group' of heading actions as a sheet."
@@ -240,8 +263,10 @@ the fan stays within Material's handful of items."
             (concat "gp-fab-group-" (car group))
             (apply #'jetpacs-column
                    (append
-                    (list (jetpacs-text (if (equal (car group) "structure")
-                                            "Structure" "More")
+                    (list (jetpacs-text (pcase (car group)
+                                          ("structure" "Structure")
+                                          ("capture" "Capture")
+                                          (_ "More"))
                                         :style "title"))
                     (mapcar (lambda (item)
                               (jetpacs-with-attrs
@@ -888,7 +913,7 @@ A list of (TITLE . MINUTES), nonzero only."
     "glasspane.fab.clone" "glasspane.fab.babel-subtree"
     "glasspane.fab.clock-cancel" "glasspane.fab.countdown"
     "glasspane.fab.countdown-stop" "glasspane.fab.quick-task"
-    "glasspane.fab.under-clock" "glasspane.fab.file-heading"
+    "glasspane.fab.under-clock" "glasspane.fab.capture" "glasspane.fab.file-heading"
     "glasspane.fab.file-babel" "glasspane.fab.file-tangle"
     "glasspane.fab.file-dblocks" "glasspane.fab.file-times")
   "The FAB's verbs.")
@@ -928,6 +953,9 @@ A list of (TITLE . MINUTES), nonzero only."
     (jetpacs-defaction "glasspane.fab.quick-task" #'glasspane-fab--on-quick-task
                        :doc "File a quick TODO in the inbox" :strict t
                        :args '((:name date :type "text") (:name area :type "text")))
+    (jetpacs-defaction "glasspane.fab.capture" #'glasspane-fab--on-capture
+                       :doc "Close the Capture sheet and open Org capture" :strict t
+                       :args '((:name template :type "text")))
     (jetpacs-defaction "glasspane.fab.under-clock" #'glasspane-fab--on-under-clock
                        :doc "Add a TODO under the clocked heading")
     (let ((path '((:name path :type "text" :required t))))

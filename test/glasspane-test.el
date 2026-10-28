@@ -1982,52 +1982,57 @@ rejects, and a swept or mismatched list answers `stale'."
       (should (equal (glasspane-ui-repeat-words ".+1y") "yearly from done"))
       (should-not (glasspane-ui-repeat-words nil)))))
 
-(ert-deftest glasspane-test-detail-status-pills ()
-  "Set facts become tinted pills that open their drawer or dialog; unset vanish."
-  (let* ((info '(:today "2026-09-15"
+(ert-deftest glasspane-test-detail-properties-band ()
+  "Set facts become label/value rows; unset ones are chips; drawers toggle."
+  (let* ((glasspane-area-icons '(("health" . "favorite")))
+         (glasspane-detail--section nil)
+         (info '(:today "2026-09-15"
                  :scheduled "<2026-09-16 Wed 09:00 +1w>"
                  :deadline "<2026-09-12 Sat>"
                  :priority "A" :priority-levels ("A" "B" "C")
                  :clocked-in t
                  :areas ("health") :local-tags ("health" "deep")
-                 :inherited-tags ("alpha")))
-         (row (glasspane-detail--status-pills info "tok"))
-         (pills (append (plist-get row :children) nil))
-         (badges (mapcar (lambda (pill)
-                           (seq-find (lambda (n) (equal (plist-get n :t) "badge"))
-                                     (glasspane-test--nodes pill)))
-                         pills)))
-    (should (equal (plist-get row :t) "flow_row"))
-    (should (equal (mapcar (lambda (b) (plist-get b :label)) badges)
-                   '("Tomorrow · 09:00 · weekly" "3 days overdue"
-                     "Priority A" "Clocking")))
-    (should (equal (mapcar (lambda (b) (plist-get b :color)) badges)
-                   '("on_surface" "error" "error" "success")))
-    (should (equal (mapcar (lambda (pill)
-                             (plist-get (plist-get pill :on_tap) :action))
-                           pills)
-                   '("detail.section" "detail.section"
-                     "detail.priority.edit" "org.clock.out")))
-    (should (equal (plist-get (plist-get (car pills) :on_long_tap) :args)
+                 :inherited-tags ("alpha")
+                 :props (("FOO" . "1")) :logbook nil :backlinks 3))
+         (band (glasspane-detail--properties-band info "tok"
+                                                  '((:t "text" :text "links"))))
+         (json (jetpacs-node->canonical-json band))
+         (rows (butlast (append (plist-get band :children) nil)))
+         (labels (mapcar (lambda (row)
+                           (plist-get (seq-first (plist-get
+                                                  (seq-first (plist-get row :children))
+                                                  :children))
+                                      :text))
+                         rows)))
+    (jetpacs-check-profile band 'app)
+    (should (equal labels '("Scheduled" "Deadline" "Priority" "Areas" "Tags" "Clock")))
+    (dolist (text '("Tomorrow · 09:00 · weekly" "3 days overdue" "#deep"
+                    "\"label\":\"health\"" "\"icon\":\"favorite\""
+                    "Properties 1" "Connections 3" "Logbook"))
+      (should (string-search (encode-coding-string text 'utf-8) json)))
+    (should-not (string-search "\"#health\"" json))
+    (should-not (string-search "alpha" json))
+    ;; Row taps: the dialog, the priority dialog, the tags drawer, clock out.
+    (should (equal (mapcar (lambda (row) (plist-get (plist-get row :on_tap) :action))
+                           rows)
+                   '("detail.planning.edit" "detail.planning.edit"
+                     "detail.priority.edit" nil "detail.section" "org.clock.out")))
+    (should (equal (plist-get (plist-get (car rows) :on_tap) :args)
                    '(:token "tok" :type "SCHEDULED")))
-    (should (equal (plist-get (plist-get (cadr pills) :on_tap) :args)
-                   '(:section "deadline")))
-    (jetpacs-check-profile row 'app)
-    (should-not (glasspane-detail--status-pills '(:today "2026-09-15") "tok"))
-    ;; The resting tag line: Areas elevated with icons, local plain tags
-    ;; flat, inherited tags hidden.
-    (let* ((glasspane-area-icons '(("health" . "favorite")))
-           (line (glasspane-detail--tag-line info))
-           (chips (append (plist-get line :children) nil)))
-      (should (equal (mapcar (lambda (c) (plist-get c :label)) chips)
-                     '("health" "deep")))
-      (should (equal (plist-get (car chips) :variant) "elevated"))
-      (should (equal (plist-get (car chips) :icon) "favorite"))
-      (should-not (plist-get (cadr chips) :variant))
-      (should (equal (plist-get (plist-get (cadr chips) :on_tap) :args)
-                     '(:tag "deep"))))
-    (should-not (glasspane-detail--tag-line '(:areas nil :local-tags nil)))))
-
+    ;; Everything set: no add chips; nothing open: no tonal toggle.
+    (should-not (string-search "\"label\":\"Schedule\"" json))
+    (should-not (string-search "\"variant\":\"tonal\"" json))
+    (let ((glasspane-detail--section 'logbook))
+      (should (string-search "\"variant\":\"tonal\""
+                             (jetpacs-node->canonical-json
+                              (glasspane-detail--properties-band info "tok")))))
+    ;; Nothing set: no rows, every add chip, no Connections without extras.
+    (let* ((bare (glasspane-detail--properties-band '(:today "2026-09-15") "tok"))
+           (bare-json (jetpacs-node->canonical-json bare)))
+      (should (= (length (plist-get bare :children)) 1))
+      (dolist (label '("Schedule" "Deadline" "Priority" "Tag"))
+        (should (string-search (format "\"label\":\"%s\"" label) bare-json)))
+      (should-not (string-search "Connections" bare-json)))))
 (ert-deftest glasspane-test-detail-schedule-keeps-time-and-cookies ()
   "Quick moves change only the day; time, repeater and delay survive."
   (glasspane-test--with-todo-heading
@@ -2078,42 +2083,6 @@ rejects, and a swept or mismatched list answers `stale'."
                           'rejected))
               (should-not (buffer-modified-p)))
           (ebp-org-ref-tokens nil :set "sched-test" :owner "glasspane"))))))
-
-(ert-deftest glasspane-test-detail-tonal-controls ()
-  "Drawer icons are tooltipped, badged by content, and mark only the open one."
-  (dolist (extras '(nil ((:t "text" :text "backlinks"))))
-    (dolist (selected '(nil tags scheduled deadline props logbook links))
-      (let* ((glasspane-detail--section selected)
-             (info '(:tags ("a" "b") :props (("FOO" . "1")) :logbook nil
-                     :backlinks 3))
-             (controls (glasspane-detail--section-controls info extras))
-             (tooltips (append (plist-get controls :children) nil))
-             (buttons (mapcar (lambda (tip) (aref (plist-get tip :children) 0))
-                              tooltips))
-             (names (append '("tags" "scheduled" "deadline" "props" "logbook")
-                            (and extras '("links"))))
-             (icons (append '("label" "event" "flag" "tune" "history")
-                            (and extras '("link"))))
-             (badges (append '("2" nil nil "1" nil) (and extras '("3")))))
-        (should (equal (plist-get controls :arrange) "start"))
-        (should (= (length buttons) (length names)))
-        (cl-mapc
-         (lambda (tip button name icon badge)
-           (let ((action (plist-get button :on_tap)))
-             (should (equal (plist-get tip :t) "tooltip"))
-             (should (equal (plist-get button :t) "icon_button"))
-             (should (equal (plist-get button :icon) icon))
-             (should (equal (plist-get button :badge) badge))
-             (should (stringp (plist-get button :content_description)))
-             (should (equal (plist-get action :action) "detail.section"))
-             (should (equal (plist-get action :args) (list :section name)))
-             (if (eq selected (intern name))
-                 (progn
-                   (should (equal (plist-get button :variant) "tonal"))
-                   (should (equal (plist-get button :color) "primary")))
-               (should-not (equal (plist-get button :variant) "tonal")))))
-         tooltips buttons names icons badges)
-        (jetpacs-check-profile controls 'app)))))
 
 (ert-deftest glasspane-test-detail-tonal-panels ()
   "Each open drawer shows only its metadata in a filled card with its editor route."
@@ -2404,8 +2373,9 @@ rejects, and a swept or mismatched list answers `stale'."
       (should (equal (funcall value "beta") '("extra")))
       (should (equal (funcall value "extra") '("beta")))
       (jetpacs-check-profile panel 'app)
-      ;; At rest: the Area chips (elevated) and the local plain tag;
-      ;; inherited plain tags stay hidden.
+      ;; At rest: the band's Areas row holds the elevated Area chips; its
+      ;; Tags row the local plain tag as #tag text; inherited plain tags
+      ;; stay hidden.
       (cl-letf (((symbol-function 'glasspane-detail--reader-nodes) #'ignore))
         (let* ((glasspane-ui--detail-read-mode t)
                (glasspane-detail--section nil)
@@ -2418,10 +2388,13 @@ rejects, and a swept or mismatched list answers `stale'."
                                                 "material3.assist_chip"))
                                        (append (plist-get n :children) nil))))
                       (glasspane-test--nodes body)))
-               (line-chips (append (plist-get line :children) nil)))
+               (line-chips (append (plist-get line :children) nil))
+               (json (jetpacs-node->canonical-json body)))
           (should (equal (mapcar (lambda (c) (plist-get c :label)) line-chips)
-                         '("alpha" "beta" "extra")))
+                         '("alpha" "beta")))
           (should (equal (plist-get (car line-chips) :variant) "elevated"))
+          (should (string-search "\"#extra\"" json))
+          (should-not (string-search "\"#hot\"" json))
           (should-not (string-search "\"hot\""
                                      (jetpacs-node->canonical-json line))))))))
 
@@ -2615,13 +2588,13 @@ wire encoding."
     (should (string-search "\"text_input\"" json))
     (should (string-search "\"token\":\"tok\"" json))
     (should (string-search "\"name\":\"FOO\"" json)))
-  ;; Status pills: a set priority is a tinted pill that opens the dialog.
+  ;; The band: a set priority reads in its rank color and opens the dialog.
   (let ((json (jetpacs-node->canonical-json
-               (glasspane-detail--status-pills
+               (glasspane-detail--properties-band
                 '(:today "2026-09-15" :priority "B"
                   :priority-levels ("A" "B" "C"))
                 "tok"))))
-    (should (string-search "Priority B" json))
+    (should (string-search "\"text\":\"B\"" json))
     (should (string-search "\"color\":\"warning\"" json))
     (should (string-search "detail.priority.edit" json)))
   ;; The shared cards (G5 formatters stubbed until the agenda rung).
@@ -3054,12 +3027,14 @@ both modes, degrading to the go-back placeholder on a dead ref."
                 (should (string-search "jetpacs.org.file-properties.show" json))
                 (should (string-search "detail.priority.edit" json))
                 (should (string-search "jetpacs.org.heading" json))
-                ;; Metadata starts closed: no drawer panel, and with no
-                ;; stamp the planning dialog waits behind a drawer.
+                ;; Metadata starts closed: no drawer panel.  The band offers
+                ;; Schedule and Deadline chips that open the dialog directly,
+                ;; and the drawers toggle as text buttons.
                 (should-not (string-search "gp-detail-panel" json))
                 (should-not (string-search "gp-detail-logbook" json))
-                (should-not (string-search "detail.planning.edit" json))
-                (should (string-search "Toggle properties" json))
+                (should (string-search "detail.planning.edit" json))
+                (should (string-search "\"label\":\"Schedule\"" json))
+                (should (string-search "\"label\":\"Properties" json))
                 (should (string-search "detail.section" json))
                 (should-not (string-search "Add property" json))
                 (should-not (string-search "\"variant\":\"tonal\"" json))

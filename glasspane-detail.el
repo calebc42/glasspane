@@ -244,87 +244,6 @@ state shows an outlined empty ring.  Nil when no keywords are declared."
        :name "TODO state" :state-description (or todo "No state")
        :description "Tap to advance; the arrow lists every state"))))
 
-(cl-defun glasspane-detail--pill (label &key icon color on-tap on-long-tap
-                                        name state)
-  "A tinted status pill reading LABEL beside ICON in theme role COLOR.
-The whole pill dispatches ON-TAP and ON-LONG-TAP; NAME and STATE name
-it for assistive technology."
-  (jetpacs-with-semantics
-   (jetpacs-with-attrs
-    (jetpacs-box (jetpacs-badge label :icon icon :color color)
-                 :alignment "center_start"
-                 :on-tap on-tap :on-long-tap on-long-tap)
-    :min_height 36)
-   :name (or name label) :state-description state))
-
-(defun glasspane-detail--status-pills (info main)
-  "INFO's planning, priority and clock facts as one wrapping pill row, or nil.
-Only facts that are set appear, so a plain note shows nothing here.  A
-date pill opens its drawer on tap and the foundation timestamp dialog on
-long-press; the priority pill opens the foundation priority dialog; the
-clock pill clocks out.  MAIN is the heading token the edits address."
-  (let* ((today (glasspane-detail--today info))
-         (done (plist-get info :done))
-         (warn (or (plist-get info :warn-days) 14))
-         (planning
-          (lambda (kind stamp icon label)
-            (when-let* ((h (glasspane-ui-human-date
-                            stamp today :done done :kind kind :warn-days warn)))
-              (let ((name (symbol-name kind))
-                    (type (if (eq kind 'deadline) "DEADLINE" "SCHEDULED")))
-                (glasspane-detail--pill
-                 (plist-get h :label) :icon icon :color (plist-get h :color)
-                 :on-tap (jetpacs-action "detail.section"
-                                         :args (list :section name))
-                 :on-long-tap (jetpacs-action "detail.planning.edit"
-                                              :args (list :token main :type type))
-                 :name label :state stamp)))))
-         (pills
-          (delq nil
-                (list
-                 (funcall planning 'scheduled (plist-get info :scheduled)
-                          "event" "Scheduled")
-                 (funcall planning 'deadline (plist-get info :deadline)
-                          "flag" "Deadline")
-                 (when-let* ((p (plist-get info :priority)))
-                   (glasspane-detail--pill
-                    (concat "Priority " p) :icon "priority_high"
-                    :color (glasspane-detail--priority-color
-                            p (plist-get info :priority-levels))
-                    :on-tap (jetpacs-action "detail.priority.edit"
-                                            :args (list :token main))
-                    :name "Priority" :state p))
-                 (when (plist-get info :clocked-in)
-                   (glasspane-detail--pill
-                    "Clocking" :icon "timer" :color "success"
-                    :on-tap (jetpacs-action "org.clock.out")
-                    :name "Clock" :state "running"))))))
-    (when pills
-      (apply #'jetpacs-flow-row
-             (append pills (list :spacing 6 :run-spacing 4 :align "center"))))))
-
-(defun glasspane-detail--tag-line (info)
-  "INFO's Areas and local plain tags as one wrapping chip line, or nil.
-Areas keep their elevated icon chips; the other local tags are flat
-assist chips; inherited tags stay out of the resting view (the Tags
-drawer explains them).  A tap searches by tag."
-  (let* ((areas (plist-get info :areas))
-         (chip (lambda (tag area)
-                 (jetpacs-material3-assist-chip
-                  tag
-                  :icon (and area (glasspane-area-icon tag))
-                  :variant (and area "elevated")
-                  :on-tap (jetpacs-action "search.by-tag"
-                                          :args (list :tag tag)))))
-         (chips (append
-                 (mapcar (lambda (tag) (funcall chip tag t)) areas)
-                 (mapcar (lambda (tag) (funcall chip tag nil))
-                         (cl-remove-if (lambda (tag) (member tag areas))
-                                       (plist-get info :local-tags))))))
-    (when chips
-      (apply #'jetpacs-flow-row
-             (append chips (list :spacing 4 :run-spacing 4))))))
-
 (defun glasspane-detail--title (info)
   "INFO's headline as reading text: link markup shows its description."
   (org-link-display-format (or (plist-get info :headline) "")))
@@ -848,31 +767,112 @@ is only a hint."
              ('links (plist-get info :backlinks)))))
     (and (integerp n) (> n 0) (number-to-string n))))
 
-(defun glasspane-detail--section-controls (info &optional extras)
-  "Build INFO's tonal drawer controls, start-aligned under the header.
-Each icon is tooltipped with its drawer's name and badged with a count
-when the drawer has content.  The selected icon is tonal in the primary
-accent; tapping it closes its drawer, tapping another switches.  The
-Connections drawer is offered only when an app layer contributed EXTRAS."
-  (apply #'jetpacs-row
-         (append
+(defun glasspane-detail--band-row (label value &optional on-tap name)
+  "One properties-band row: muted LABEL beside VALUE, the row tapping ON-TAP.
+NAME announces the row for assistive technology."
+  (jetpacs-with-semantics
+   (jetpacs-with-attrs
+    (jetpacs-box
+     (jetpacs-row
+      (jetpacs-with-attrs (jetpacs-text label :style "caption" :color "outline")
+                          :width 96)
+      (jetpacs-with-attrs value :weight 1)
+      :align "center" :spacing 12 :fill t)
+     :alignment "center_start" :on-tap on-tap)
+    :min_height 40)
+   :name (or name label)))
+
+(defun glasspane-detail--properties-band (info main &optional extras)
+  "INFO's metadata as one calm label/value band, Obsidian-properties style.
+Only facts that are set get a row: Scheduled and Deadline in words with
+their urgency color (tap: the timestamp dialog), Priority (tap: its
+dialog), Areas as elevated chips, Tags as #tag text (tap: the tags
+drawer), a running Clock (tap: clock out).  Beneath, one line of chips
+adds what is unset, and the Properties, Logbook and Connections drawers
+toggle as text buttons with counts.  MAIN is the heading token; EXTRAS
+are the app layers' Connections nodes."
+  (let* ((today (glasspane-detail--today info))
+         (done (plist-get info :done))
+         (warn (or (plist-get info :warn-days) 14))
+         (scheduled (plist-get info :scheduled))
+         (deadline (plist-get info :deadline))
+         (priority (plist-get info :priority))
+         (areas (plist-get info :areas))
+         (tags (cl-remove-if (lambda (tag) (member tag areas))
+                             (plist-get info :local-tags)))
+         (plan-edit (lambda (type)
+                      (jetpacs-action "detail.planning.edit"
+                                      :args (list :token main :type type))))
+         (date-row
+          (lambda (label stamp kind type)
+            (when-let* ((h (glasspane-ui-human-date stamp today :done done
+                                                    :kind kind :warn-days warn)))
+              (glasspane-detail--band-row
+               label
+               (jetpacs-column
+                (jetpacs-text (plist-get h :label) :style "body" :font-weight 500
+                              :color (plist-get h :color))
+                (jetpacs-text (plist-get h :long) :style "caption" :color "outline")
+                :spacing 0)
+               (funcall plan-edit type)))))
+         (rows
+          (delq nil
+                (list
+                 (funcall date-row "Scheduled" scheduled 'scheduled "SCHEDULED")
+                 (funcall date-row "Deadline" deadline 'deadline "DEADLINE")
+                 (when priority
+                   (glasspane-detail--band-row
+                    "Priority"
+                    (jetpacs-text priority :style "body" :font-weight 600
+                                  :color (glasspane-detail--priority-color
+                                          priority (plist-get info :priority-levels)))
+                    (jetpacs-action "detail.priority.edit" :args (list :token main))))
+                 (when areas
+                   (glasspane-detail--band-row
+                    "Areas" (glasspane-ui-tag-chips areas t "start")))
+                 (when tags
+                   (glasspane-detail--band-row
+                    "Tags" (jetpacs-rich-text (glasspane-ui-tag-spans tags))
+                    (jetpacs-action "detail.section" :args '(:section "tags"))))
+                 (when (plist-get info :clocked-in)
+                   (glasspane-detail--band-row
+                    "Clock" (jetpacs-text "Running" :style "body" :color "success")
+                    (jetpacs-action "org.clock.out"))))))
+         (add-chip (lambda (label icon action)
+                     (jetpacs-material3-assist-chip label :icon icon :on-tap action)))
+         (adds
+          (delq nil
+                (list
+                 (unless scheduled (funcall add-chip "Schedule" "event"
+                                            (funcall plan-edit "SCHEDULED")))
+                 (unless deadline (funcall add-chip "Deadline" "flag"
+                                           (funcall plan-edit "DEADLINE")))
+                 (unless priority (funcall add-chip "Priority" "priority_high"
+                                           (jetpacs-action "detail.priority.edit"
+                                                           :args (list :token main))))
+                 (unless (or tags areas)
+                   (funcall add-chip "Tag" "label"
+                            (jetpacs-action "detail.section"
+                                            :args '(:section "tags")))))))
+         (toggles
           (cl-loop for (name section icon label) in glasspane-detail--sections
+                   when (memq section '(props logbook links))
                    unless (and (eq section 'links) (null extras))
                    collect
-                   (let ((shown (eq glasspane-detail--section section)))
-                     (jetpacs-tooltip
-                      label
-                      (jetpacs-icon-button
-                       icon
-                       (jetpacs-action "detail.section"
-                                       :args (list :section name))
-                       :variant (and shown "tonal")
-                       :color (and shown "primary")
-                       :badge (glasspane-detail--section-badge info section)
-                       :content-description
-                       (concat "Toggle " (downcase label)))
-                      :position "below")))
-          (list :fill t :arrange "start" :spacing 0 :align "center"))))
+                   (let ((shown (eq glasspane-detail--section section))
+                         (badge (glasspane-detail--section-badge info section)))
+                     (jetpacs-button (if badge (format "%s %s" label badge) label)
+                                     (jetpacs-action "detail.section"
+                                                     :args (list :section name))
+                                     :icon icon
+                                     :variant (if shown "tonal" "text"))))))
+    (apply #'jetpacs-column
+           (append rows
+                   (list (apply #'jetpacs-row
+                                (append adds toggles
+                                        (list :scroll t :spacing 6
+                                              :align "center"))))
+                   (list :spacing 2)))))
 
 (defun glasspane-detail--section-action (main section)
   "The trailing header action of SECTION's open drawer for token MAIN."
@@ -1198,9 +1198,7 @@ EXTRAS are the app layers' Connections nodes, shown in that drawer."
                                                   "outline" "on_surface"))
                                       :weight 1)
                                      :fill t :align "top" :spacing 10)))
-                       (glasspane-detail--status-pills info main)
-                       (glasspane-detail--tag-line info)
-                       (glasspane-detail--section-controls info extras)
+                       (glasspane-detail--properties-band info main extras)
                        (glasspane-detail--section-panel info main key extras)
                        (and reader (jetpacs-divider))))
                 reader

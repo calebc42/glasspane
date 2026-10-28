@@ -1326,10 +1326,13 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
                                     :test #'equal))
                    (groups (glasspane-para-test--nodes-of-type
                             card "flow_row")))
-              (should (= (length chips) 2))
+              ;; Areas stay chips; ordinary tags read as #tag text.
+              (should (= (length chips) 1))
+              (should-not urgent)
+              (should (string-search "\"#urgent\""
+                                     (jetpacs-node->canonical-json card)))
               (should (equal (plist-get house :variant) "elevated"))
               (should (equal (plist-get house :icon) "home"))
-              (should-not (plist-get urgent :variant))
               (should (equal (plist-get (car groups) :arrange)
                              (if (equal class "compact") "start" "end")))
               (should (equal (plist-get (plist-get house :on_tap) :action)
@@ -1452,38 +1455,32 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
           (should (equal (plist-get
                           (plist-get (plist-get chip :on_tap) :args) :tag)
                          area))))
-      (let ((ordinary (cl-find "urgent" chips
-                               :key (lambda (node) (plist-get node :label))
-                               :test #'equal)))
-        (should ordinary)
-        (should-not (plist-get ordinary :icon))
-        (should-not (plist-get ordinary :variant)))
-      (should (= (length chips) 4))
+      ;; Ordinary tags are no longer chips: they trail the caption as text.
+      (should-not (cl-find "urgent" chips
+                           :key (lambda (node) (plist-get node :label))
+                           :test #'equal))
+      (should (= (length chips) 3))
       (let* ((groups (glasspane-para-test--nodes-of-type card "flow_row"))
              (area-group (car groups))
-             (ordinary (cadr groups))
              (column (car (glasspane-para-test--nodes-of-type card "column")))
              (rows (append (plist-get column :children) nil))
              (header (car rows))
-             (header-children (append (plist-get header :children) nil)))
-        (should (= (length groups) 2))
+             (header-children (append (plist-get header :children) nil))
+             (caption (car (last rows))))
+        (should (= (length groups) 1))
         (should (equal (plist-get header :t) "row"))
         (should (eq (plist-get header :fill) t))
         (should (equal (plist-get (car header-children) :t) "rich_text"))
         (should (eq (cadr header-children) area-group))
-        (should (eq (car (last rows)) ordinary))
-        (should-not (plist-get ordinary :weight))
         (should (= (plist-get area-group :weight) 1))
         (should (equal (plist-get area-group :arrange) "end"))
-        (should (equal (mapcar (lambda (chip) (plist-get chip :label))
-                              (append (plist-get ordinary :children) nil))
-                       '("urgent")))
+        (should (equal (plist-get caption :t) "rich_text"))
+        (should (string-search "\"#urgent\"" (jetpacs-node->canonical-json caption)))
         (should (equal (mapcar (lambda (chip) (plist-get chip :label))
                               (append (plist-get area-group :children) nil))
                        areas)))
-      ;; Compact: the headline keeps the full width; beneath the caption
-      ;; one start-aligned row carries the elevated Area chips first and
-      ;; the ordinary tags after them.
+      ;; Compact: the headline keeps the full width; the caption follows,
+      ;; then one start-aligned row of the elevated Area chips.
       (let* ((groups (glasspane-para-test--nodes-of-type compact-card "flow_row"))
              (chip-row (car groups))
              (column (car (glasspane-para-test--nodes-of-type compact-card "column")))
@@ -1495,10 +1492,10 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
         (should (equal (plist-get chip-row :arrange) "start"))
         (should (equal (mapcar (lambda (chip) (plist-get chip :label))
                               (append (plist-get chip-row :children) nil))
-                       (append areas '("urgent"))))
+                       areas))
         (should (equal (mapcar (lambda (chip) (plist-get chip :variant))
                               (append (plist-get chip-row :children) nil))
-                       '("elevated" "elevated" "elevated" nil))))))
+                       '("elevated" "elevated" "elevated"))))))
   ;; A global group is effective even when the source file has no local
   ;; declaration; a position-less indexed item falls back to its tag payload.
   (let ((org-tag-alist

@@ -105,7 +105,6 @@
 
 ;; Later-rung sibling (G5's agenda date row): declared, never required
 ;; forward — glasspane-agenda requires this file.
-(declare-function glasspane-agenda-card-date-row "glasspane-agenda" (it))
 
 ;;;; State (S2 — the handlers below are the only writers)
 
@@ -305,22 +304,22 @@ without duplicating Areas."
                   (jetpacs-span headline
                                 :color (and done "outline"))))))
          (meta (glasspane-ui-card-meta
-                it (format-time-string "%Y-%m-%d") done))
+                it (format-time-string "%Y-%m-%d") done tags))
          (middle
           (apply #'jetpacs-column
                  (delq nil
                        (append
-                        ;; A phone puts Areas and tags on one line beneath
-                        ;; the title; wider windows keep Areas beside it.
+                        ;; Ordinary tags ride the caption as #tag text.  A
+                        ;; phone puts the Area chips on a line beneath it;
+                        ;; wider windows keep them beside the title.
                         (if compact
                             (list headline-node)
                           (glasspane-ui-headline-with-areas headline-node
                                                             area-tags))
                         (list
                          meta
-                         (if compact
-                             (glasspane-ui-mixed-chips area-tags tags)
-                           (glasspane-detail--agenda-tag-chips tags))))))))
+                         (and compact
+                              (glasspane-ui-tag-chips area-tags t "start"))))))))
     (jetpacs-with-attrs
      (jetpacs-card
      (list (apply #'jetpacs-row
@@ -366,18 +365,17 @@ agenda card places them; ordinary tags keep the full bottom row."
          (tags (cl-remove-if (lambda (tag) (member tag areas))
                              (append (alist-get 'tags it) nil)))
          (token (alist-get 'token it))
-         (caption (string-join
-                   (delq nil (list todo
-                                   (when file (file-name-nondirectory file))))
-                   "  ·  "))
+         (caption (glasspane-ui-meta-line
+                   (list (and todo (list (jetpacs-span todo :font-weight "bold"
+                                                       :color "primary")))
+                         (and file (list (jetpacs-span (file-name-nondirectory file)
+                                                       :color "outline")))
+                         (glasspane-ui-tag-spans tags))))
          (children (delq nil
                          (append
                           (glasspane-ui-headline-with-areas
                            (jetpacs-text headline :style "body") areas)
-                          (list
-                           (unless (string-empty-p caption)
-                             (jetpacs-text caption :style "caption"))
-                           (glasspane-ui-tag-chips tags))))))
+                          (list caption)))))
     (jetpacs-with-attrs
      (jetpacs-card (list (apply #'jetpacs-column children))
                    :on-tap (and token (jetpacs-action

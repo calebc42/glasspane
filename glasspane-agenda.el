@@ -99,28 +99,6 @@ keeps the narrowing, as does date navigation.")
       (if time (format "%s %d %s" mon day time)
         (format "%s %d" mon day)))))
 
-(defun glasspane-agenda-card-date-row (it)
-  "An inline scheduling indicator for card item IT.
-Compact icon + text labels for SCHEDULED and/or DEADLINE when present;
-nil when neither is set."
-  (let* ((scheduled (alist-get 'scheduled it))
-         (deadline  (alist-get 'deadline it))
-         (slabel (glasspane-agenda-card-date-label scheduled))
-         (dlabel (glasspane-agenda-card-date-label deadline))
-         (children
-          (delq nil
-                (list
-                 (when slabel
-                   (jetpacs-icon "schedule" :size 14 :color "outline"))
-                 (when slabel (jetpacs-text (concat " " slabel)
-                                            :style "caption"))
-                 (when (and slabel dlabel) (jetpacs-spacer :width 16))
-                 (when dlabel (jetpacs-icon "flag" :size 14 :color "error"))
-                 (when dlabel (jetpacs-text (concat " " dlabel)
-                                            :style "caption"))))))
-    (when children
-      (apply #'jetpacs-row children))))
-
 ;;;; Token minting (S5 — one :set per rendered list, replace semantics)
 
 (defun glasspane-agenda-tokenize (items set)

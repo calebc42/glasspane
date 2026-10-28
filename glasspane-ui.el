@@ -156,33 +156,12 @@ passes \"start\"."
             (when (or arrange areas)
               (list :arrange (or arrange "end")))))))
 
-(defun glasspane-ui-mixed-chips (areas tags)
-  "One wrapping chip row: AREAS elevated with their icons, then plain TAGS.
-Nil when both are empty.  A phone shows a card's Areas and tags on one
-line instead of two."
-  (let ((chips
-         (append
-          (mapcar (lambda (tag)
-                    (jetpacs-material3-assist-chip
-                     tag :icon (glasspane-area-icon tag) :variant "elevated"
-                     :on-tap (jetpacs-action "search.by-tag"
-                                             :args (list :tag tag))))
-                  areas)
-          (mapcar (lambda (tag)
-                    (jetpacs-material3-assist-chip
-                     tag :on-tap (jetpacs-action "search.by-tag"
-                                                 :args (list :tag tag))))
-                  tags))))
-    (when chips
-      (apply #'jetpacs-flow-row
-             (append chips (list :spacing 4 :run-spacing 4
-                                 :arrange "start"))))))
-
-(defun glasspane-ui-card-meta (item today &optional done)
-  "ITEM's one-line caption as a rich text: state, dates in words, file.
+(defun glasspane-ui-card-meta (item today &optional done tags)
+  "ITEM's one-line caption as a rich text: state, dates in words, file, TAGS.
 Scheduled and deadline stamps read through `glasspane-ui-human-date' and
 carry its urgency color; DONE mutes them.  TODAY is the only clock.
-Nil when there is nothing to say."
+TAGS, the ordinary (non-Area) tags, trail as #tag text.  Nil when there
+is nothing to say."
   (let* ((todo (alist-get 'todo item))
          (file (alist-get 'file item))
          (dates
@@ -216,21 +195,17 @@ Nil when there is nothing to say."
                 ((glasspane-ui-day-words date today)
                  (list (jetpacs-span (glasspane-ui-day-words date today)
                                      :color "outline"))))))))
-         (spans
+         (groups
           (append
            (when (and (stringp todo) (not (string-empty-p todo)))
-             (list (jetpacs-span todo :font-weight "bold"
-                                 :color (if done "outline" "primary"))))
-           dates
+             (list (list (jetpacs-span todo :font-weight "bold"
+                                       :color (if done "outline" "primary")))))
+           (mapcar #'list dates)
            (when (stringp file)
-             (list (jetpacs-span (file-name-nondirectory file)
-                                 :color "outline")))))
-         (joined nil))
-    (dolist (span spans)
-      (when joined (push (jetpacs-span "  ·  " :color "outline") joined))
-      (push span joined))
-    (when joined
-      (jetpacs-rich-text (nreverse joined) :style "caption"))))
+             (list (list (jetpacs-span (file-name-nondirectory file)
+                                       :color "outline"))))
+           (list (glasspane-ui-tag-spans tags)))))
+    (glasspane-ui-meta-line groups)))
 
 (defun glasspane-ui-tag-spans (tags)
   "TAGS as tinted `#tag' spans, space-separated; each searches by its tag.

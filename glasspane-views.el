@@ -180,23 +180,6 @@ feeds both table cells and `jetpacs-rich-text' cards."
             spans))
     (nreverse spans)))
 
-(defun glasspane-views--tag-chips (item &optional areas)
-  "The tappable ordinary-tag chip row for card renderings, or nil.
-AREAS, ITEM's Area memberships, are left out here: the card elevates them
-beside the headline through the shared presentation."
-  (glasspane-ui-tag-chips
-   (cl-remove-if (lambda (tag) (member tag areas))
-                 (append (alist-get 'tags item) nil))))
-
-(defun glasspane-views--caption (item)
-  "The todo · file caption line, or nil when neither is known."
-  (let ((caption (string-join
-                  (delq nil (list (alist-get 'todo item)
-                                  (when-let* ((file (alist-get 'file item)))
-                                    (file-name-nondirectory file))))
-                  "  ·  ")))
-    (unless (string-empty-p caption) caption)))
-
 (defun glasspane-views--done-keyword ()
   "The keyword a swipe-to-complete lands on."
   (or (car (ebp-org-done-keywords)) "DONE"))
@@ -205,7 +188,7 @@ beside the headline through the shared presentation."
   "The shared rich card for ITEM; TRAILING sits at the row's end.
 Priority-badged headline with its Area chips elevated (STACK forces them
 beneath the headline, for a narrow board column), todo · file caption,
-compact scheduled/deadline row, tappable tag chips.  Swipe from the
+dates in words and #tag text on one caption line.  Swipe from the
 start reveals
 the open-todo completion action; swipe from the end reveals scheduling for
 today.  Both remain reachable by tap → detail.  Every wired affordance needs
@@ -221,11 +204,14 @@ carrying a ref on the wire (D-4)."
                          (jetpacs-rich-text
                           (glasspane-views--headline-spans item))
                          areas stack)
+                        ;; The agenda card's one caption line: state,
+                        ;; dates in words, file, ordinary tags as #tags.
                         (list
-                         (when-let* ((caption (glasspane-views--caption item)))
-                           (jetpacs-text caption :style "caption"))
-                         (glasspane-agenda-card-date-row item)
-                         (glasspane-views--tag-chips item areas)))))))
+                         (glasspane-ui-card-meta
+                          item (format-time-string "%Y-%m-%d")
+                          (glasspane-views--done-p item)
+                          (cl-remove-if (lambda (tag) (member tag areas))
+                                        (append (alist-get 'tags item) nil)))))))))
     (jetpacs-card
      (list (apply #'jetpacs-row
                   (delq nil
@@ -233,6 +219,7 @@ carrying a ref on the wire (D-4)."
                                                   :weight 1)
                               trailing))))
      :on-tap (glasspane-views--tap item)
+     :variant "filled"
      :swipe-start
      (when (and token (not (glasspane-views--done-p item)))
        (jetpacs-swipe

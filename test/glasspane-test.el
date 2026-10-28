@@ -2602,8 +2602,7 @@ wire encoding."
              (lambda (_type) '("schedule" . nil)))
             ((symbol-function 'jetpacs-org-agenda-type-label)
              (lambda (_type) "scheduled"))
-            ((symbol-function 'glasspane-agenda-card-date-row)
-             (lambda (_it) nil)))
+)
     (let* ((card (glasspane-detail-agenda-card
                   '((headline . "Water the garden") (todo . "DONE")
                     (type . "scheduled") (file . "/v/tasks.org")
@@ -3182,14 +3181,6 @@ in-screen count that replaced the tab badge (FOUNDATION-GAPS #5)."
   (should (equal (glasspane-agenda-card-date-label "<2026-02-01 Sun>") "Feb 1"))
   (should-not (glasspane-agenda-card-date-label "junk"))
   ;; Card date row: both stamps render; no stamps, no row.
-  (let ((row (glasspane-agenda-card-date-row
-              '((scheduled . "<2026-08-13 Thu>")
-                (deadline . "<2026-08-20 Thu>")))))
-    (should row)
-    (let ((json (jetpacs-node->canonical-json row)))
-      (should (string-search "Aug 13" json))
-      (should (string-search "Aug 20" json))))
-  (should-not (glasspane-agenda-card-date-row '((headline . "x"))))
   ;; Month fallback: Feb 2026 stops at 28 cells, the selected day is
   ;; tinted, taps carry the ISO date, the select verb is overridable.
   (let* ((grid (glasspane-agenda-month-fallback

@@ -1408,10 +1408,10 @@ Everything rarer lives in the top bar's overflow menu."
 The screen's `:fab' is evaluated after its body, so the pane's own token
 names the heading without a second mint sweeping the first.")
 
-(defconst glasspane-detail-pane-fab-clearance 136
-  "Dp kept free under a pane's action rows for the screen's FAB.
-The stack is the 56dp FAB, its 16dp margin, and the 40dp menu toggle
-with its gap above it (measured at about 124dp on the Pixel Tablet).")
+(defconst glasspane-detail-pane-fab-clearance 168
+  "Dp kept free at the end of a pane's bottom rows for the screen's FAB.
+The heading FAB is \"Clock in\" or \"Clock out\" (about 140dp wide
+with its margin on the Pixel Tablet), so the rows stay inline beside it.")
 
 (defun glasspane-detail-pane (ref &optional id)
   "The heading page for REF as a pane beside screen ID's list.
@@ -1444,14 +1444,16 @@ that stopped resolving degrades to a placeholder."
                   (jetpacs-with-attrs
                    (glasspane-ui--detail-body-with-notes info tokens)
                    :weight 1)
+                  ;; The screen's FAB floats over the pane's bottom end;
+                  ;; the rows keep its width free and stay inline beside it.
                   (when read
-                    (glasspane-detail--floating-toolbar info tokens))
+                    (jetpacs-with-attrs
+                     (glasspane-detail--floating-toolbar info tokens)
+                     :pad (list :end glasspane-detail-pane-fab-clearance)))
                   (when read
-                    (glasspane-detail--bottom-bar tokens))
-                  ;; The screen's FAB floats over the pane's bottom end, and
-                  ;; an extended one ("Clock out · task") is as wide as its
-                  ;; label: the action rows sit above it, not beside it.
-                  (jetpacs-spacer :height glasspane-detail-pane-fab-clearance)
+                    (jetpacs-with-attrs
+                     (glasspane-detail--bottom-bar tokens)
+                     :pad (list :end glasspane-detail-pane-fab-clearance)))
                   :fill t))))
       ((ebp-org-refused ebp-org-unresolved)
        (jetpacs-empty-state :icon "search_off"

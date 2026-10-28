@@ -86,26 +86,31 @@ else \"inbox.org\" there."
   "Whether Org has a running clock."
   (and (fboundp 'org-clocking-p) (org-clocking-p)))
 
-(defun glasspane-fab--clock-out-primary ()
-  "The primary while a clock runs: (ICON LABEL ACTION COLOR)."
-  (list "timer_off"
-        (concat "Clock out · "
-                (glasspane-fab--truncate (or (org-no-properties
-                                              (or org-clock-current-task ""))
-                                             "")
-                                         22))
-        (jetpacs-action "org.clock.out")
-        "tertiary"))
+(defun glasspane-fab--clock-out-primary (&optional short)
+  "The primary while a clock runs: (ICON LABEL ACTION COLOR DESCRIPTION).
+The label names the task, or with SHORT just \"Clock out\": a heading
+page shows the clock in its own band, and keeps the FAB narrow enough to
+sit beside the page's bottom rows.  The description always names it."
+  (let ((task (org-no-properties (or org-clock-current-task ""))))
+    (list "timer_off"
+          (if short
+              "Clock out"
+            (concat "Clock out · " (glasspane-fab--truncate task 22)))
+          (jetpacs-action "org.clock.out")
+          "tertiary"
+          (if (string-empty-p task) "Clock out" (concat "Clock out of " task)))))
 
 (defun glasspane-fab-node (primary items)
-  "The FAB for PRIMARY, (ICON LABEL ACTION [COLOR]), with menu ITEMS.
+  "The FAB for PRIMARY, (ICON LABEL ACTION [COLOR DESCRIPTION]), with ITEMS.
 On a Companion without `material3.fab' the primary leads a FAB menu, or,
-older still, stands alone as an icon button."
-  (pcase-let ((`(,icon ,label ,action ,color) primary))
+older still, stands alone as an icon button.  DESCRIPTION, when given,
+names the button for assistive technology instead of LABEL."
+  (pcase-let ((`(,icon ,label ,action ,color ,description) primary))
     (cond
      ((jetpacs-node-advertised-p "material3.fab")
       (jetpacs-material3-fab icon action
                              :label label :collapse-on-scroll t :color color
+                             :content-description description
                              :menu items :menu-icon "more_vert"))
      ((and items (jetpacs-node-advertised-p "material3.fab_menu"))
       (jetpacs-material3-fab-menu
@@ -195,7 +200,7 @@ the fan stays within Material's handful of items."
            (effort (plist-get info :effort)))
       (glasspane-fab-node
        (if clocking
-           (glasspane-fab--clock-out-primary)
+           (glasspane-fab--clock-out-primary t)
          (list "timer" "Clock in" (funcall act "heading.clock-in")))
        (delq nil
              (list

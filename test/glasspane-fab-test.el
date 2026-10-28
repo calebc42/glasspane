@@ -60,9 +60,16 @@
         (dolist (fab (list (glasspane-fab-list)
                            (glasspane-fab-heading "tok")
                            (glasspane-fab-outline "/v/a.org")))
-          (should (string-prefix-p "Clock out · Write the report" (plist-get fab :label)))
+          (should (string-prefix-p "Clock out" (plist-get fab :label)))
+          (should (equal (plist-get fab :content_description)
+                         "Clock out of Write the report for the quarterly review"))
           (should (equal (plist-get (plist-get fab :on_tap) :action) "org.clock.out"))
           (should (equal (plist-get fab :color) "tertiary")))
+        ;; Lists name the task; the heading page keeps the FAB narrow so it
+        ;; sits beside the pane's bottom rows (its band shows the clock).
+        (should (string-prefix-p "Clock out · Write the report"
+                                 (plist-get (glasspane-fab-list) :label)))
+        (should (equal (plist-get (glasspane-fab-heading "tok") :label) "Clock out"))
         (should (member "Under clocked task"
                         (glasspane-fab-test--labels (glasspane-fab-list))))
         (should (member "Cancel clock"

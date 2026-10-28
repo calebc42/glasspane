@@ -21,6 +21,11 @@ result, notification, widget, deep link, or menu item that opens a document.
 
 - Builders may name a heading with an `ebp-org` token or a document with a
   path. They do not choose a screen, reader mode, Back behavior, or FAB.
+- A heading card's tap is `heading.tap`, the detail page on the tapped
+  surface; only the page's *Open in file* opens the document. Drills are
+  child pushes (`glasspane-ui-push-child`) with a parent-aware Back
+  (`glasspane-ui-parent-back` / `glasspane-ui-route-back`); peers declare
+  `:on-back`; every list row carries an opaque `:key`.
 - Build token-backed descriptors with
   `glasspane-navigation-heading-action`.
 - Build path-backed descriptors with

@@ -263,7 +263,7 @@ TITLE and SUBTITLE override the basename and abbreviated path."
    :icon "description"
    :trailing (jetpacs-icon "chevron_right")
    :on-tap (glasspane-navigation-document-action file)
-   :key (jetpacs-wire-id "area-file" file)))
+   :key (jetpacs-opaque-id "area-file-" file 16)))
 
 (defun glasspane-areas--declaring-card (item)
   "Render the tokenized declaring-note ITEM as the Area's own note.
@@ -275,8 +275,11 @@ ITEM carries a durable heading token, so the card names identity only and
                      (file-name-nondirectory (or (alist-get 'file item) "")))
    :icon "article"
    :trailing (jetpacs-icon "chevron_right")
-   :on-tap (glasspane-navigation-heading-action (alist-get 'token item))
-   :key (jetpacs-wire-id "area-note" (or (alist-get 'token item) ""))))
+   :on-tap (and (stringp (alist-get 'token item))
+                (jetpacs-action "heading.tap"
+                                :args (list :token (alist-get 'token item))))
+   :key (or (glasspane-ui-item-key item "area-note")
+            (jetpacs-wire-id "area-note" (or (alist-get 'token item) "")))))
 
 (defun glasspane-areas--declaration-rows (area tokenized-decls)
   "Render AREA's declaring notes: TOKENIZED-DECLS cards, then file rows.
@@ -437,16 +440,27 @@ sweeps the prior Areas token generation."
                                         :style "caption")))
                 (list :spacing 8 :content-padding 12)))))))
 
+(defconst glasspane-areas--screen-id "glasspane-areas"
+  "The Areas list's peer screen id; every drill sits above it.")
+
 (defun glasspane-areas-screen (back)
   "Build the Areas list screen with BACK navigation."
   (jetpacs-chrome-screen "Areas" (glasspane-areas--list-body)
                          :back back
+                         :on-back (unless back (glasspane-ui-peer-on-back))
+                         :on-refresh (glasspane-ui-refresh-action)
                          :actions (glasspane-ui-top-actions)))
 
 (defun glasspane-areas-drill-screen (category back)
-  "Build CATEGORY's Area drill screen with BACK navigation."
+  "Build CATEGORY's Area drill screen with BACK navigation.
+Back returns to the Areas list: the switch chrome hands over while the
+list is still beneath, else a re-open of the list once a deeper drill
+evicted it from the bounded stack."
   (jetpacs-chrome-screen category (glasspane-areas--drill-body category)
-                         :back back
+                         :back (glasspane-ui-parent-back
+                                back glasspane-areas--screen-id
+                                (jetpacs-action "areas.open"))
+                         :on-refresh (glasspane-ui-refresh-action)
                          :actions (glasspane-ui-top-actions)))
 
 ;;;; Actions and lifecycle
@@ -455,21 +469,25 @@ sweeps the prior Areas token generation."
   "Open the Areas list in the one Tier-1 destination slot.
 PARAMS is the originating action event."
   (glasspane-ui-open-destination
-   "areas" "glasspane-areas" #'glasspane-areas-screen params))
+   "areas" glasspane-areas--screen-id #'glasspane-areas-screen params))
 
 (defun glasspane-areas--on-drill (args params)
   "Open ARGS' plain-string `:category', even if it just vanished.
-The drill seeds its Area intersection and TODO facet so stale chip state never
-leaks between visits.  PARAMS is the originating action event."
+The drill is a child of the Areas list: it pushes above the list rather
+than replacing it, so Back returns to the list.  It seeds its Area
+intersection and TODO facet so stale chip state never leaks between
+visits.  PARAMS is the originating action event."
   (let ((category (plist-get args :category)))
     (if (not (and (stringp category) (not (string-empty-p category))))
         'rejected
       (puthash category (list category) glasspane-areas--filter-state)
       (puthash category "ALL" glasspane-areas--todo-filter-state)
-      (glasspane-ui-open-destination
-       "areas" (jetpacs-wire-id "area" category)
-       (lambda (back) (glasspane-areas-drill-screen category back))
-       params))))
+      ;; The drill belongs to the Areas destination whichever screen
+      ;; opened it, so the bar keeps Areas selected.
+      (jetpacs-apps-note-route "glasspane" "areas")
+      (glasspane-ui-push-child
+       params (jetpacs-wire-id "area" category)
+       (lambda (back) (glasspane-areas-drill-screen category back))))))
 
 (defun glasspane-areas--on-filter (args params)
   "Toggle ARGS' `:area' in the `:category' drill's intersection.

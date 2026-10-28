@@ -5,14 +5,24 @@
 Glasspane has one document presentation route. Features may discover a
 document in different ways, but they do not get to invent a destination UI.
 
+A heading card does not open a document at all. Tapping a card on Agenda,
+Projects, an Area, Search, a saved View or a Connections row pushes the
+heading's own page (=heading.tap=, the =glasspane-detail= screen) on the
+surface the tap came from, exactly as a note row does in Orgzly. The page's
+*Open in file* is the one place a heading becomes a document:
+
 #+begin_example
-Project / Agenda / Note
+Project / Agenda / Area / Search / Note card
         |
         | durable Glasspane heading token
         v
+  heading.tap ----> glasspane-detail (same surface, Back = where you were)
+        |
+        | Open in file
+        v
   heading.visit -- resolve immediately --> (path, position) --+
                                                                |
-Resource / breadcrumb                                          |
+Resource / Archive / Area file row / breadcrumb                |
         | validated path                                       v
         +--> glasspane.document.open -----------------> open-document
                                                                |
@@ -20,6 +30,35 @@ Resource / breadcrumb                                          |
                 app:jetpacs.files / edit / Glasspane Org reader
                 staged files-return / glasspane.files.return
 #+end_example
+
+* Stack shape
+
+Five peers (Agenda, Projects, Areas, Resources, Review) plus the
+drawer-only Archive switch through =glasspane-ui-open-destination=: the
+stack truncates to the pinned Agenda root and the peer is pushed above
+it. A peer draws no Back arrow but declares =:on-back= to the root
+(=glasspane-ui-peer-on-back=), because a scaffold with neither lets the
+Companion finish the Activity.
+
+Everything below a peer is a child push (=glasspane-ui-push-child=): an
+Area drill sits above the Areas list, the detail page above whatever
+listed it, Search above whatever had focus. Chrome keeps three screens
+with the root pinned, so a third level evicts the screen above the root.
+A child therefore computes its Back with =glasspane-ui-parent-back=
+(the drill reopens the Areas list when the list was evicted) or
+=glasspane-ui-route-back= (Search and detail reopen the selected
+destination when it was evicted); the switch chrome hands over is used
+whenever the parent is still beneath.
+
+Every list row carries a =:key= minted by =glasspane-ui-item-key= or an
+opaque path id, never a readable path: the Companion restores a lazy
+column's scroll position by its children's keys. Every destination
+screen carries =:on-refresh= (=glasspane.refresh=), which drops the Org
+memo table and re-renders.
+
+Resources is a Glasspane screen over the agenda-scope files; only its
+*Browse in Files* action (=resources.browse=) hands the whole vault to
+Files, with the capture FAB and the return to this untouched stack.
 
 The convergence point is =glasspane-navigation-open-document= in
 =glasspane-navigation.el=. It fixes all presentation choices:
@@ -41,10 +80,12 @@ The actions before the convergence point express authority, not presentation.
 
 | Entry point | Wire action | Authority | Stale behavior |
 |-------------+-------------+-----------+----------------|
-| Project, Agenda, Notes, heading source | =heading.visit= | app-scoped =ebp-org= token | token resolution returns =stale= after the rendered identity expires |
+| Detail page *Open in file*, reader heading source | =heading.visit= | app-scoped =ebp-org= token | token resolution returns =stale= after the rendered identity expires |
+| Agenda / Projects / Area / Search / View / Notes card | =heading.tap= (not a document route: pushes the detail page on the tapped surface) | app-scoped =ebp-org= token | an expired token answers =stale= |
+| Resources row (=glasspane-resources-row=) | =glasspane.document.open= | path | Files canonicalizes and revalidates the path against its effective roots |
 | Resource row, file breadcrumb | =glasspane.document.open= | path | Files canonicalizes and revalidates the path against its effective roots |
 | Area drill file row, Archive row (=glasspane-areas--file-row=, =glasspane-resources-archive-row=) | =glasspane.document.open= | path | as above; an archive path is the sibling =FILE.org_archive= |
-| Area declaring-note card (=glasspane-areas--declaring-card=) | =heading.visit= | app-scoped =ebp-org= token | as the heading row above |
+| Area declaring-note card (=glasspane-areas--declaring-card=) | =heading.tap= | app-scoped =ebp-org= token | as the card row above |
 | Outline link span (=glasspane-org-reader--emphasis-spans=), Properties link button (=glasspane-detail--property-link-action=) | =jetpacs.org.follow= (foundation) | exposed buffer position; Org itself resolves the destination | an unexposed position is =rejected=; a tick or link-syntax mismatch returns =stale=; =glasspane-org-reader--present-link-destination= then sends a file-backed destination to =glasspane-navigation-open-document=, acknowledges an external target, and reports a refused path rather than drilling |
 | (foundation twin, not emitted by Glasspane) =jetpacs-files-document-action= | =jetpacs.files.open-document= | path, optional position | the same Files revalidation; the ownerless verb any app may render.  Glasspane keeps =glasspane.document.open= because its handler also prepares the reader landing (=glasspane-org-reader-prepare-landing=) |
 

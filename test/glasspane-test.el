@@ -2639,9 +2639,13 @@ wire encoding."
                           (plist-get card :swipe_end)))
         (should (= (length (plist-get side :actions)) 1))
         (should-not (plist-member side :commit)))
-      ;; Agenda-shaped cards use the contextual source jump; long-press
-      ;; retains the opinionated detail sheet.
-      (should (string-search "heading.visit" json))
+      ;; A tap opens the heading's page on this surface; long-press keeps
+      ;; the quick-action sheet.  The card is keyed so the Companion can
+      ;; restore the list's scroll position, and the key hides the path.
+      (should (string-search "heading.tap" json))
+      (should-not (string-search "heading.visit" json))
+      (should (string-prefix-p "gp-item-" (plist-get card :key)))
+      (should-not (string-search "/v/tasks.org" (plist-get card :key)))
       (should (string-search "\"token\":\"tok-1\"" json))
       (should (string-search "heading.menu" json))
       (should (string-search "heading.todo-cycle" json))
@@ -2654,6 +2658,7 @@ wire encoding."
       (should (string-search "search.by-tag" json)))
     ;; No tokens -> a static card: no tap, no long-tap, no swipes.
     (let ((card (glasspane-detail-agenda-card '((headline . "Plain")))))
+      (should-not (plist-get card :key))
       (should-not (plist-get card :on_tap))
       (should-not (plist-get card :on_long_tap))
       (should-not (plist-get card :swipe_start))
@@ -4227,7 +4232,7 @@ policy requires."
                                      append (glasspane-test--actions n)))
                    (taps (cl-remove-if-not
                           (lambda (a) (equal (plist-get a :action)
-                                             "heading.visit"))
+                                             "heading.tap"))
                           actions))
                    (links (cl-remove-if-not
                            (lambda (a) (equal (plist-get a :action)
@@ -5545,7 +5550,7 @@ point: a new screen cannot ship unreachable.")
     "detail.toggle-read" "detail.section" "files.filter"
     "files.toggle-refile"
     "glasspane.document.open" "glasspane.files.return"
-    "glasspane.packages.install"
+    "glasspane.packages.install" "glasspane.refresh"
     "heading.add-note" "heading.clock-in" "heading.delete"
     "heading.duplicate" "heading.menu" "heading.priority"
     "heading.prop-add" "heading.prop-set" "heading.props.show"
@@ -5554,7 +5559,7 @@ point: a new screen cannot ship unreachable.")
     "heading.todo-set" "link.materialize" "notes.mentions"
     "ef.load" "ef.random" "ef.random-dark" "ef.random-light"
     "ef.mirror" "ef.option"
-    "org.search.run" "resources.browse"
+    "org.search.run" "resources.browse" "resources.filter"
     "review.habits.open"
 	    "search.by-tag"
 	    "search.clear-filters" "search.update-filter"

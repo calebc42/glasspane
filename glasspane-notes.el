@@ -308,7 +308,7 @@ note's title/aliases otherwise."
   (jetpacs-chrome-row
    (or (vulpea-note-title note) "Untitled note")
    :subtitle (file-name-nondirectory (or (vulpea-note-path note) ""))
-   :on-tap (glasspane-navigation-heading-action token)))
+   :on-tap (and token (jetpacs-action "heading.tap" :args (list :token token)))))
 
 (defun glasspane-notes--mention-card (mention tap link)
   "A card for MENTION: context, a Link-it button (LINK token), a tap
@@ -330,7 +330,7 @@ refused mint costs the affordance, never the card."
                                                     :when-offline "queue"
                                                     :ttl-s glasspane-notes--link-ttl-s)
                                     :variant "text" :icon "link"))
-     :on-tap (glasspane-navigation-heading-action tap))))
+     :on-tap (and tap (jetpacs-action "heading.tap" :args (list :token tap))))))
 
 (defun glasspane-notes-detail-nodes (ref)
   "Backlink/outgoing/mentions nodes for the detail REF's Connections drawer.

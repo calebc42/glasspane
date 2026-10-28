@@ -403,8 +403,8 @@ the shared chrome remains unaware of the downstream destination."
      :subtitle "Members of the Area tag group, with their open work"
      :verb "areas.open" :bar t :screen-prefix "area-")
     (:key "resources" :label "Resources" :icon "topic"
-     :subtitle "Every live file in the vault, in Files"
-     :verb "resources.open" :open-surface "app:jetpacs.files" :bar t)
+     :subtitle "Every live file in the vault, by title and Area"
+     :verb "resources.open" :bar t)
     (:key "review" :label "Review" :icon "school"
      :subtitle "Flashcards due today, and notes gone stale"
      :verb "review.open" :bar t)
@@ -432,6 +432,115 @@ screen's stale-files half, both reached from rows that ARE here.")
 PARAMS is the originating action event.  Delegates to the generic
 `jetpacs-app-open-destination' foundation helper."
   (jetpacs-app-open-destination "glasspane" route id builder params))
+
+(defconst glasspane-ui-root-screen "glasspane-agenda"
+  "The pinned root screen id: Agenda, the app's home destination.")
+
+(defun glasspane-ui-destination-screen (route)
+  "Return the peer screen id the destination ROUTE presents."
+  (concat "glasspane-" route))
+
+(defun glasspane-ui-surface (&optional params)
+  "Return the surface PARAMS' event was tapped on, else the app's own."
+  (or (plist-get params :surface) (jetpacs-shell-surface-for "glasspane")))
+
+(defun glasspane-ui-push-child (params id builder)
+  "Push drill screen ID via BUILDER above whatever PARAMS' surface shows.
+A drill keeps its parent beneath it, unlike a destination switch, which
+abandons the previous destination.  Deferred past the dispatch extent;
+answers `accepted'."
+  (jetpacs-chrome-push-screen-later (glasspane-ui-surface params) id builder)
+  'accepted)
+
+(defun glasspane-ui-peer-on-back ()
+  "The system back gesture of a peer destination: return to the Agenda root.
+A peer draws no arrow, and a scaffold with neither arrow nor `on_back'
+lets the Companion finish the Activity, so every peer declares this."
+  (jetpacs-view-switch glasspane-ui-root-screen))
+
+(defun glasspane-ui-parent-back (back parent-id reopen)
+  "BACK when it switches to PARENT-ID, else the REOPEN action.
+Chrome hands a builder the switch to the screen directly beneath it, and a
+bounded stack evicts the screen above the root once a drill goes a level
+deeper.  A child whose parent was evicted would otherwise land on the root;
+REOPEN re-presents the parent instead, at the cost of one round trip."
+  (if (and back (equal (plist-get back :view) parent-id)) back reopen))
+
+(defun glasspane-ui-current-route ()
+  "The destination key the app currently has selected, defaulting to agenda."
+  (let ((route (bound-and-true-p jetpacs-apps--current-route)))
+    (if (and (stringp route)
+             (cl-find route glasspane-ui-destinations
+                      :key (lambda (d) (plist-get d :key)) :test #'equal))
+        route
+      "agenda")))
+
+(defun glasspane-ui-route-back (back)
+  "BACK unless it skips the selected destination, then that destination.
+A transient screen (Search, detail) is pushed above whatever destination
+or drill was showing.  When the screen beneath it is the root while a
+non-root destination is selected, the destination was evicted by the
+stack bound and BACK would skip it; reopen it through its own verb."
+  (let* ((route (glasspane-ui-current-route))
+         (dest (cl-find route glasspane-ui-destinations
+                        :key (lambda (d) (plist-get d :key)) :test #'equal)))
+    (if (and back dest
+             (not (equal route "agenda"))
+             (equal (plist-get back :view) glasspane-ui-root-screen))
+        (jetpacs-action (plist-get dest :verb))
+      back)))
+
+(defun glasspane-ui-refresh-action ()
+  "The pull-to-refresh descriptor every destination screen carries."
+  (jetpacs-action "glasspane.refresh"))
+
+(defun glasspane-ui--on-refresh (_args params)
+  "Pull-to-refresh: drop every Org memo, then re-render PARAMS' surface."
+  (ebp-org-cache-invalidate)
+  (jetpacs-app-defer-refresh params)
+  'accepted)
+
+(defun glasspane-ui-item-key (item &optional group)
+  "A stable list key for heading ITEM, or nil when it has no identity.
+Built from the file, position, agenda type and date, so a heading the
+agenda lists twice (scheduled and due the same day) and a Project under
+two Areas (GROUP names the bucket) keep distinct keys while the key
+survives a re-mint of the item's token.  The Companion restores a lazy
+column's scroll position by its children's keys."
+  (let ((file (alist-get 'file item))
+        (pos (alist-get 'pos item))
+        (token (alist-get 'token item)))
+    ;; Opaque: a wire id keeps a readable stem, and a path must not reach
+    ;; the device (SPEC 23.3).
+    (cond
+     ((and (stringp file) (integerp pos))
+      (jetpacs-opaque-id "gp-item-"
+                         (list group file pos (alist-get 'type item)
+                               (alist-get 'date item))
+                         16))
+     ((stringp token)
+      (jetpacs-opaque-id "gp-item-" (list group token) 16)))))
+
+(defun glasspane-ui-age-words (time &optional now)
+  "TIME as a short relative phrase such as \"Edited 3 days ago\", or nil.
+NOW defaults to the current time.  Under a minute reads \"Edited just now\"."
+  (when time
+    (let* ((seconds (max 0 (floor (- (float-time (or now (current-time)))
+                                     (float-time time)))))
+           (minutes (floor seconds 60))
+           (hours (floor seconds 3600))
+           (days (floor seconds 86400)))
+      (cond
+       ((< minutes 1) "Edited just now")
+       ((< minutes 60) (format "Edited %d min ago" minutes))
+       ((< hours 24) (format "Edited %d hour%s ago" hours
+                             (if (= hours 1) "" "s")))
+       ((= days 1) "Edited yesterday")
+       ((< days 30) (format "Edited %d days ago" days))
+       ((< days 365) (format "Edited %d month%s ago" (floor days 30)
+                             (if (< days 60) "" "s")))
+       (t (format "Edited %d year%s ago" (floor days 365)
+                  (if (< days 730) "" "s")))))))
 
 ;;;; The at-ref funnel (S4/S5 — the classifier every later rung copies)
 
@@ -1006,7 +1115,8 @@ for a desktop M-x."
     "agenda.save-custom"
     "agenda.today"
     "agenda.select-date"
-    "agenda.set-month")
+    "agenda.set-month"
+    "glasspane.refresh")
   "The verbs this rung owns, for the register/unregister sweep.
 The TODO-sequence/tags verbs left with §3 step 2 (they are the
 foundation's ownerless jetpacs.org.* family now);
@@ -1070,6 +1180,8 @@ registry entries in place, and the keyed hub entry is replaced."
     (jetpacs-defaction "agenda.set-month"
                        #'glasspane-ui--on-agenda-set-month
                        :doc "Set the agenda calendar's displayed month")
+    (jetpacs-defaction "glasspane.refresh" #'glasspane-ui--on-refresh
+                       :doc "Pull-to-refresh: recompute every Org extraction")
     ;; The app's own section — the one Glasspane-opinion row left: the
     ;; Packages auto-install switch (the Babel timeout followed the
     ;; table/Babel verbs into the foundation's Org Editing & Display

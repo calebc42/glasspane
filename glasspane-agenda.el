@@ -592,6 +592,7 @@ Agenda destination calls it."
                                         :style "caption"))
                         (glasspane-agenda-body))))
      :back back
+     :on-refresh (glasspane-ui-refresh-action)
      :actions (glasspane-ui-top-actions))))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)

@@ -187,9 +187,12 @@ icon shows the current grouping; the description names what a tap does."
                                  glasspane-projects--area-filter
                                  "projects.area-filter"))
 
-(defun glasspane-projects--card (item)
-  "Render tokenized ITEM as the shared card with its Area chips elevated."
-  (glasspane-detail-agenda-card item (glasspane-projects--item-areas item)))
+(defun glasspane-projects--card (item &optional group)
+  "Render tokenized ITEM as the shared card with its Area chips elevated.
+GROUP is the section the card sits under; by Area a heading can appear
+under several, and the key must stay distinct in each."
+  (glasspane-detail-agenda-card item (glasspane-projects--item-areas item)
+                                group))
 
 (defun glasspane-projects--groups (items)
   "Group tokenized ITEMS per the current grouping, titled for headers."
@@ -212,7 +215,9 @@ icon shows the current grouping; the description names what a tap does."
            (mapcar
             (lambda (group)
               (cons (jetpacs-section-header (car group))
-                    (mapcar #'glasspane-projects--card (cdr group))))
+                    (mapcar (lambda (item)
+                              (glasspane-projects--card item (car group)))
+                            (cdr group))))
             groups))
           (list :spacing 8 :content-padding 12)))
       (jetpacs-empty-state
@@ -258,6 +263,8 @@ the grouping control trailing the workflow rail."
   "Build the Projects screen with BACK navigation."
   (jetpacs-chrome-screen "Projects" (glasspane-projects--body)
                          :back back
+                         :on-back (unless back (glasspane-ui-peer-on-back))
+                         :on-refresh (glasspane-ui-refresh-action)
                          :actions (glasspane-projects--top-actions)))
 
 ;;;; Actions and lifecycle

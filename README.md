@@ -10,7 +10,20 @@ registers EF as a Modus-family provider in Jetpacs' Theme Settings screen.
 
 Switching to Projects or Areas sends only the selected screen, without an
 intermediate Agenda frame. The previous destination and its drills leave the
-stack; Agenda remains the Back destination beneath the new peer screen.
+stack; Agenda remains the Back destination beneath the new peer screen, and
+the system back gesture on a peer returns there too.
+
+Tapping a heading card anywhere (Agenda, Projects, an Area, Search, a saved
+View, a Connections row) opens the heading's own page on the same surface;
+Back returns to the list you came from, at the position you left it. The
+page's **Open in file** is where a heading becomes a document in the Org
+reader. Opening an Area keeps the Areas list beneath it. Every destination
+screen pulls to refresh.
+
+Resources lists the vault's Org files by title (`#+TITLE`, else the file
+name) with when each was edited, its folder, and its Areas; the Area rail
+narrows the list, a row opens the document, and **Browse in Files** in the
+top bar hands the whole vault to Jetpacs Files.
 
 ## Org outline
 

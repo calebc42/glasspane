@@ -327,8 +327,10 @@ With AREAS, elevate the chips, add Area icons, and align them right unless
 ARRANGE says otherwise (see `glasspane-ui-tag-chips')."
   (glasspane-ui-tag-chips tags areas arrange))
 
-(defun glasspane-detail-agenda-card (it &optional area-tags)
+(defun glasspane-detail-agenda-card (it &optional area-tags group)
   "A detail-rich agenda card for item IT, distinguishing AREA-TAGS.
+GROUP, when the list shows one heading under several buckets, keeps the
+card's list key distinct per bucket (`glasspane-ui-item-key').
 Leading time (or a type icon), priority-prefixed headline (done titles
 degrade to neutral on_surface — no strike span, FOUNDATION-GAPS #7),
 a todo/type/file caption, tag chips, and the tap/long-tap/swipe wiring.
@@ -383,13 +385,17 @@ without duplicating Areas."
                           (jetpacs-text caption :style "caption"))
                         (glasspane-agenda-card-date-row it)
                         (glasspane-detail--agenda-tag-chips tags)))))))
-    (jetpacs-card
+    (jetpacs-with-attrs
+     (jetpacs-card
      (list (apply #'jetpacs-row
                   (delq nil
                         (list lead
                               (jetpacs-with-attrs (jetpacs-box middle)
                                                   :weight 1)))))
-     :on-tap (glasspane-navigation-heading-action token)
+     ;; Tap opens the heading's own page on this surface, as a note row
+     ;; does in Orgzly; the document route is the page's "Open in file".
+     :on-tap (and token (jetpacs-action "heading.tap"
+                                        :args (list :token token)))
      :on-long-tap (and token (jetpacs-action "heading.menu"
                                              :args (list :token token)))
      :swipe-start (and token
@@ -407,7 +413,8 @@ without duplicating Areas."
                   :on-trigger
                   (jetpacs-action
                    "jetpacs.org.archive" :args (list :token archive-token)
-                   :confirm "Archive this subtree?"))))))))
+                   :confirm "Archive this subtree?"))))))
+     :key (glasspane-ui-item-key it group))))
 
 (defun glasspane-detail-result-card (it)
   "Render a search/heading item IT to a tappable card with tag chips.
@@ -432,10 +439,12 @@ agenda card places them; ordinary tags keep the full bottom row."
                            (unless (string-empty-p caption)
                              (jetpacs-text caption :style "caption"))
                            (glasspane-ui-tag-chips tags))))))
-    (jetpacs-card (list (apply #'jetpacs-column children))
-                  :on-tap (and token (jetpacs-action
-                                      "heading.tap"
-                                      :args (list :token token))))))
+    (jetpacs-with-attrs
+     (jetpacs-card (list (apply #'jetpacs-column children))
+                   :on-tap (and token (jetpacs-action
+                                       "heading.tap"
+                                       :args (list :token token))))
+     :key (glasspane-ui-item-key it))))
 
 ;;;; Detail extraction
 
@@ -1342,7 +1351,7 @@ never guess)."
         (jetpacs-chrome-screen
          (or (plist-get info :file-title) "Detail")
          (glasspane-ui--detail-body-with-notes info tokens)
-         :back back
+         :back (glasspane-ui-route-back back)
          :actions (glasspane-detail--top-actions info tokens)
          :bottom-bar (when glasspane-ui--detail-read-mode
                        (glasspane-detail--bottom-bar tokens))

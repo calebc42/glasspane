@@ -5,11 +5,14 @@
 
 ;;; Commentary:
 
-;; Resources are the PARA baseline: every live file in the vault.  Glasspane
-;; owns only the name, the landing scope (`org-directory'), and the selected
-;; route; Jetpacs Files owns the browser, listing, search, file operations,
-;; editing, and reader selection.  Both Resources verbs therefore delegate
-;; through `glasspane-navigation', the applet's one low-level Files boundary.
+;; Resources are the PARA baseline: every live file in the vault.  The
+;; destination is a Glasspane screen on the app's own surface: the Org files
+;; in the canonical agenda scope, titled by `#+TITLE', tagged with their
+;; Areas, filterable by Area, newest edits read in words.  A row opens its
+;; document through the canonical route; "Browse in Files" still hands the
+;; whole vault to Jetpacs Files, which owns the browser, file operations,
+;; editing, and reader selection.  Every Files trip delegates through
+;; `glasspane-navigation', the applet's one low-level Files boundary.
 ;;
 ;; Archive follows plain Org semantics: a bounded index of the sibling
 ;; `FILE.org_archive' files Org writes on `org-archive-subtree', filterable by
@@ -51,15 +54,6 @@ single low-level Files boundary owned by `glasspane-navigation'."
    :browser-id glasspane-resources--browser-screen
    :browser-fab (glasspane-ui-capture-fab)
    :return-action (glasspane-navigation-return-action)))
-
-(defun glasspane-resources--on-open (_args _params)
-  "Open `org-directory' in Files as the PARA Resources landing scope."
-  (let ((status (glasspane-resources--browse-vault org-directory)))
-    ;; `app.open' records the route before redispatching the destination
-    ;; verb, but direct/M-x entry reaches the owner verb without it.
-    (when (eq status 'accepted)
-      (jetpacs-apps-note-route "glasspane" "resources"))
-    status))
 
 (defun glasspane-resources--on-browse (_args _params)
   "Open the whole Org vault through native Files."
@@ -160,22 +154,26 @@ cache, so pull-to-refresh is their deliberate freshness boundary."
        (condition-case nil (glasspane-resources--archive-files)
          (error nil))))))
 
+(defun glasspane-resources-file-areas (source)
+  "Return the Areas Org file SOURCE belongs to, in declaration order.
+Membership is read through the memoized tag-group index: the file's own
+tags plus every member a heading carries.  An unreadable or vanished
+SOURCE has no Areas."
+  (when (and (stringp source)
+             (condition-case nil (file-readable-p source) (error nil)))
+    (when-let* ((index (glasspane-org-file-tag-group-index
+                        source glasspane-area-tag-group)))
+      (let ((used (copy-sequence (plist-get index :file-tags))))
+        (dolist (entry (plist-get index :positions))
+          (dolist (member (cdr entry))
+            (cl-pushnew member used :test #'equal)))
+        (cl-remove-if-not (lambda (member) (member member used))
+                          (plist-get index :members))))))
+
 (defun glasspane-resources--archive-areas (record)
-  "Return the Areas RECORD's source file belongs to, in declaration order.
-Membership is read from the live source file through the memoized tag-group
-index; a source that no longer exists has no Areas."
-  (let ((source (glasspane-resources--archive-source-path
-                 (plist-get record :path))))
-    (when (and (stringp source)
-               (condition-case nil (file-readable-p source) (error nil)))
-      (when-let* ((index (glasspane-org-file-tag-group-index
-                          source glasspane-area-tag-group)))
-        (let ((used (copy-sequence (plist-get index :file-tags))))
-          (dolist (entry (plist-get index :positions))
-            (dolist (member (cdr entry))
-              (cl-pushnew member used :test #'equal)))
-          (cl-remove-if-not (lambda (member) (member member used))
-                            (plist-get index :members)))))))
+  "Return the Areas RECORD's source file belongs to, in declaration order."
+  (glasspane-resources-file-areas
+   (glasspane-resources--archive-source-path (plist-get record :path))))
 
 (defun glasspane-resources-archive-row (record)
   "Render one Archive RECORD as a handoff to the canonical document route."
@@ -183,12 +181,11 @@ index; a source that no longer exists has no Areas."
         (mtime (plist-get record :mtime)))
     (jetpacs-chrome-row
      (glasspane-resources--archive-source-name path)
-     :subtitle (format "Modified %s"
-                       (format-time-string "%Y-%m-%d %H:%M" mtime))
+     :subtitle (or (glasspane-ui-age-words mtime) "Archived")
      :icon "archive"
      :trailing (jetpacs-icon "chevron_right")
      :on-tap (glasspane-navigation-document-action path)
-     :key (jetpacs-wire-id "archive" path))))
+     :key (jetpacs-opaque-id "archive-" path 16))))
 
 (defun glasspane-resources--archive-filter-row (areas)
   "Build the Archive Area filter rail over AREAS, shared with Projects."
@@ -231,6 +228,8 @@ index; a source that no longer exists has no Areas."
   "Build the Archive screen with BACK navigation."
   (jetpacs-chrome-screen "Archive" (glasspane-resources--archive-body)
                          :back back
+                         :on-back (unless back (glasspane-ui-peer-on-back))
+                         :on-refresh (glasspane-ui-refresh-action)
                          :actions (glasspane-ui-top-actions)))
 
 (defun glasspane-resources--on-archive-open (_args params)
@@ -264,19 +263,189 @@ refresh."
       (jetpacs-app-defer-refresh params)
       'accepted))))
 
+;;;; Resources index and screen
+
+(defconst glasspane-resources--screen-id "glasspane-resources"
+  "The Resources destination's peer screen id.")
+
+(defconst glasspane-resources--title-bytes 4096
+  "How much of a file's head the title read examines.
+`#+TITLE' is a preamble keyword; reading whole files for a list of the
+vault would make every first paint proportional to the vault's size.")
+
+(defvar glasspane-resources--filter nil
+  "The Area whose files the Resources screen shows, or nil for all.")
+
+(defun glasspane-resources--file-title-1 (path)
+  "Read PATH's `#+TITLE', or its base name without extension."
+  (or (condition-case nil
+          (with-temp-buffer
+            (insert-file-contents path nil 0 glasspane-resources--title-bytes)
+            (goto-char (point-min))
+            (let ((case-fold-search t))
+              (when (re-search-forward
+                     "^#\\+title:[ \t]*\\(.+?\\)[ \t]*$" nil t)
+                (let ((title (string-trim (match-string 1))))
+                  (and (not (string-empty-p title)) title)))))
+        (error nil))
+      (file-name-sans-extension (file-name-nondirectory path))))
+
+(defun glasspane-resources--file-title (path)
+  "Return PATH's display title, memoised under the shared Org stamp.
+Resources are agenda-scope files, so an edit moves the stamp and busts
+the memo; pull-to-refresh drops it outright."
+  (ebp-org-with-cache 'glasspane (list 'resource-title path)
+    (glasspane-resources--file-title-1 path)))
+
+(defun glasspane-resources--index-1 ()
+  "Build the uncached Resources records over the canonical Org scope.
+Each record is `(:path PATH :title TITLE :areas AREAS :mtime TIME)`,
+sorted by title.  One unreadable file costs only itself."
+  (let (records)
+    (dolist (file (delete-dups
+                   (copy-sequence (or (jetpacs-org-mode-agenda-scope) nil))))
+      (when-let* ((attrs (and (stringp file)
+                              (condition-case nil (file-attributes file)
+                                (error nil)))))
+        (push (list :path file
+                    :title (glasspane-resources--file-title file)
+                    :areas (condition-case nil
+                               (glasspane-resources-file-areas file)
+                             (error nil))
+                    :mtime (file-attribute-modification-time attrs))
+              records)))
+    (sort records
+          (lambda (a b)
+            (let ((ta (downcase (plist-get a :title)))
+                  (tb (downcase (plist-get b :title))))
+              (if (equal ta tb)
+                  (string-lessp (plist-get a :path) (plist-get b :path))
+                (string-lessp ta tb)))))))
+
+(defun glasspane-resources--index ()
+  "Return the memoised Resources records with current Org tag settings."
+  (ebp-org-with-cache 'glasspane
+      (list 'resources-index glasspane-area-tag-group
+            (jetpacs-org-mode-tag-settings-stamp
+             (jetpacs-org-mode-agenda-scope)))
+    (glasspane-resources--index-1)))
+
+(defun glasspane-resources--relative-dir (path)
+  "PATH's directory relative to `org-directory', or nil at the top level."
+  (when-let* ((root (and (stringp org-directory)
+                         (file-name-as-directory
+                          (expand-file-name org-directory))))
+              (dir (file-name-directory (expand-file-name path))))
+    (when (and (string-prefix-p root dir) (not (equal root dir)))
+      (directory-file-name (substring dir (length root))))))
+
+(defun glasspane-resources-row (record)
+  "Render one Resources RECORD as a handoff to the canonical document route.
+The title line is the file's title; beneath it, when it was edited, its
+folder when nested, and its Areas.  A file in exactly one Area wears that
+Area's icon."
+  (let* ((path (plist-get record :path))
+         (areas (plist-get record :areas))
+         (parts (delq nil
+                      (list (glasspane-ui-age-words (plist-get record :mtime))
+                            (glasspane-resources--relative-dir path)
+                            (and areas (string-join areas ", "))))))
+    (jetpacs-chrome-row
+     (plist-get record :title)
+     :subtitle (and parts (string-join parts " · "))
+     :icon (or (and (= (length areas) 1) (glasspane-area-icon (car areas)))
+               "description")
+     :on-tap (glasspane-navigation-document-action path)
+     :key (jetpacs-opaque-id "resource-" path 16))))
+
+(defun glasspane-resources--body ()
+  "Render the Resources index, filtered by Area, or its empty state."
+  (let* ((records (condition-case nil (glasspane-resources--index)
+                    (error nil)))
+         (areas (sort (delete-dups
+                       (apply #'append
+                              (mapcar (lambda (r) (copy-sequence
+                                                   (plist-get r :areas)))
+                                      records)))
+                      #'string-lessp))
+         (filter (and (member glasspane-resources--filter areas)
+                      glasspane-resources--filter))
+         (shown (if filter
+                    (cl-remove-if-not
+                     (lambda (r) (member filter (plist-get r :areas)))
+                     records)
+                  records)))
+    (if records
+        (apply #'jetpacs-lazy-column
+               (append (and areas
+                            (list (glasspane-ui-area-filter-rail
+                                   areas filter "resources.filter")))
+                       (mapcar #'glasspane-resources-row shown)
+                       (list :spacing 8 :content-padding 12)))
+      (jetpacs-empty-state
+       :icon "topic"
+       :title "No files yet"
+       :caption "Org files in your agenda scope appear here."
+       :action-label "Browse in Files"
+       :on-tap (jetpacs-action "resources.browse")))))
+
+(defun glasspane-resources--top-actions ()
+  "Browse the vault in Files, then the shared Search."
+  (cons (jetpacs-icon-button "folder_open" (jetpacs-action "resources.browse")
+                             :content-description "Browse in Files")
+        (glasspane-ui-top-actions)))
+
+(defun glasspane-resources-screen (back)
+  "Build the Resources screen with BACK navigation."
+  (jetpacs-chrome-screen "Resources" (glasspane-resources--body)
+                         :back back
+                         :on-back (unless back (glasspane-ui-peer-on-back))
+                         :on-refresh (glasspane-ui-refresh-action)
+                         :actions (glasspane-resources--top-actions)))
+
+(defun glasspane-resources--on-open (_args params)
+  "Open Resources in its Tier-1 destination slot with dispatch PARAMS."
+  (glasspane-ui-open-destination
+   "resources" glasspane-resources--screen-id
+   #'glasspane-resources-screen params))
+
+(defun glasspane-resources--on-filter (args params)
+  "Select the Area named in ARGS for the Resources screen; none shows all.
+PARAMS carry the dispatch context for the deferred refresh."
+  (let ((area (plist-get args :area)))
+    (cond
+     ((not (or (null area) (stringp area))) 'rejected)
+     ((or (null area) (string-empty-p area))
+      (setq glasspane-resources--filter nil)
+      (jetpacs-app-defer-refresh params)
+      'accepted)
+     ((not (cl-some (lambda (r) (member area (plist-get r :areas)))
+                    (condition-case nil (glasspane-resources--index)
+                      (error nil))))
+      'rejected)
+     (t
+      (setq glasspane-resources--filter area)
+      (jetpacs-app-defer-refresh params)
+      'accepted))))
+
 ;;;; Lifecycle
 
 (defconst glasspane-resources--verbs
-  '("resources.open" "resources.browse" "archive.open" "archive.filter")
+  '("resources.open" "resources.browse" "resources.filter"
+    "archive.open" "archive.filter")
   "The Resource and Archive actions owned by this module.")
 
 (defun glasspane-resources-register ()
   "Register Resource and Archive actions idempotently."
   (with-jetpacs-owner "glasspane"
     (jetpacs-defaction "resources.open" #'glasspane-resources--on-open
-                       :doc "Open the Org vault in native Jetpacs Files")
+                       :doc "Open the PARA Resources screen")
     (jetpacs-defaction "resources.browse" #'glasspane-resources--on-browse
                        :doc "Browse the complete Org vault in Files")
+    (jetpacs-defaction "resources.filter" #'glasspane-resources--on-filter
+                       :doc "Filter the Resources screen by one Area tag"
+                       :strict t
+                       :args '((:name area :type "text")))
     (jetpacs-defaction "archive.open"
                        #'glasspane-resources--on-archive-open
                        :doc "Open the Org archive files, filterable by Area")

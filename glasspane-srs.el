@@ -705,6 +705,8 @@ engine empty state.  The optional Habits row always remains independent."
        (glasspane-srs--session-body)
      (glasspane-srs--review-body))
    :back back
+   :on-back (unless back (glasspane-ui-peer-on-back))
+   :on-refresh (unless glasspane-srs--active (glasspane-ui-refresh-action))
    :actions (append
              (glasspane-ui-top-actions)
              (when (and glasspane-srs--active glasspane-srs--current)

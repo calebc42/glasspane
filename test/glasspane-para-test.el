@@ -80,6 +80,12 @@ the builder itself."
                (funcall builder 'probe))
              (equal called '(called nil))))))
 
+(defun glasspane-para-test--back (screen)
+  "Return the descriptor behind SCREEN's leading top-bar arrow, or nil."
+  (let ((leading (seq-first (plist-get (plist-get screen :top_bar) :children))))
+    (and (equal (plist-get leading :icon) "arrow_back")
+         (plist-get leading :on_tap))))
+
 (defun glasspane-para-test--action-names (value)
   "Return every action name nested anywhere inside VALUE."
   (let (names)
@@ -569,7 +575,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
     (should-not (search-forward "vulpea-db-" nil t))))
 
 (ert-deftest glasspane-para-resources-delegates-every-path-to-files ()
-  "Vault, Org, and non-Org paths all take the one public Files route."
+  "Browse, Org, and non-Org paths all take the one public Files route."
   (let ((org-directory "/vault")
         calls)
     (cl-letf (((symbol-function 'jetpacs-feature-advertised-p)
@@ -581,7 +587,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                              return-action)
                        calls)
                  'accepted)))
-      (should (eq (glasspane-resources--on-open nil nil) 'accepted))
+      (should (eq (glasspane-resources--on-browse nil nil) 'accepted))
       (should (eq (glasspane-navigation--on-document-open
                    '(:path "/vault/notes.org") nil)
                   'accepted))
@@ -623,7 +629,7 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                     ((symbol-function 'jetpacs-shell-notify)
                      (lambda (text &optional surface)
                        (push (list text surface) notes))))
-            (should (eq (glasspane-resources--on-open nil nil) 'rejected))
+            (should (eq (glasspane-resources--on-browse nil nil) 'rejected))
             (should (eq (glasspane-navigation--on-document-open
                          (list :path outside-file) nil)
                         'rejected))
@@ -637,13 +643,13 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
       (delete-directory outside t))))
 
 (ert-deftest glasspane-para-resources-route-stays-selected-on-files ()
-  "A Resources deep link remains selected after the native surface handoff."
+  "A Resources deep link opens the in-app screen and selects its bar item."
   (let ((jetpacs-apps--registry nil)
         (jetpacs-apps--current nil)
         (jetpacs-apps--current-route nil)
         (jetpacs-apps-core-dock-items nil)
         (org-directory "/vault")
-        captured pushed)
+        opened captured)
     (jetpacs-defapp
      "glasspane" :label "Glasspane" :surfaces '("glasspane")
      :chrome 'primary :dock-core nil
@@ -658,36 +664,29 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                (lambda (surface owner)
                  (and (equal surface "app:glasspane")
                       (equal owner "glasspane"))))
-              ((symbol-function 'jetpacs-files-open-path)
-               (lambda (path surface &optional mark-pos browser-id browser-fab
-                             return-action)
-                 (setq captured
-                       (list path surface mark-pos browser-id browser-fab
-                             return-action))
+              ((symbol-function 'glasspane-ui-open-destination)
+               (lambda (&rest args)
+                 (setq opened args)
+                 (jetpacs-apps-note-route "glasspane" (car args))
                  'accepted))
-              ((symbol-function 'jetpacs-shell-push)
-               (lambda (surface &rest _)
-                 (push surface pushed))))
+              ((symbol-function 'jetpacs-files-open-path)
+               (lambda (&rest args) (setq captured args) 'accepted)))
       (should (eq (jetpacs-apps--action-open
                    '(:app "glasspane" :route "resources") nil)
                   'accepted)))
-    (should (equal (seq-take captured 4)
-                   '("/vault" "app:jetpacs.files" nil "files-resources")))
-    (should (equal (glasspane-para-test--action-names (nth 4 captured))
-                   '("org.capture.show")))
-    (should (equal (plist-get (nth 5 captured) :action)
-                   "glasspane.files.return"))
-    (should (equal (plist-get (nth 5 captured) :open_surface)
-                   "app:glasspane"))
-    (should-not pushed)
+    ;; The destination lives on Glasspane's surface: no Files trip.
+    (should-not captured)
+    (should (equal (seq-take opened 3)
+                   (list "resources" "glasspane-resources"
+                         #'glasspane-resources-screen)))
     (should (equal jetpacs-apps--current "glasspane"))
     (should (equal jetpacs-apps--current-route "resources"))
-    (let ((item (car (jetpacs-apps-dock-items "app:jetpacs.files"))))
+    (let ((item (car (jetpacs-apps-dock-items "app:glasspane"))))
       (should (equal (plist-get item :label) "Resources"))
       (should (plist-get item :selected)))))
 
 (ert-deftest glasspane-para-resources-local-back-handoffs-are-bounded ()
-  "Files returns direct rows to their exact origin and Resources to Agenda."
+  "Files returns direct rows to their exact origin; Resources is not on Files."
   (let ((jetpacs-apps--current "glasspane")
         (jetpacs-apps--current-route "areas")
         (files (glasspane-resources--files-surface))
@@ -706,15 +705,12 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
       (should continued)
       (should (equal pushed '("app:glasspane")))
       (should-not opened)
-      ;; The Resources browser's own Back reaches Files' root, then resets
-      ;; the cross-surface destination to Agenda (`:home-route') exactly once.
+      ;; Resources is an in-app screen now: reaching Files' root browser
+      ;; while it is selected is Files' own business and resets nothing.
       (setq continued nil pushed nil
             jetpacs-apps--current-route "resources")
       (jetpacs-files--on-view-change files "browser")
-      (should (equal (seq-take opened 2)
-                     '("agenda" "glasspane-agenda")))
-      (should (eq (nth 2 opened) #'glasspane-agenda-screen))
-      (should (equal (nth 3 opened) '(:surface "app:glasspane")))
+      (should-not opened)
       (should-not continued)
       (should-not pushed)
       ;; Foreign views and a non-Glasspane current app cannot hijack Back.
@@ -844,8 +840,9 @@ done headings do not inflate project counts, and CATEGORY creates no Area."
                    '(:path "/vault/work.org_archive")))
     (should (string-search "work.org"
                            (jetpacs-node->canonical-json row)))
-    (should (string-search "Modified 2026-08-16 14:30"
+    (should (string-search "Edited "
                            (jetpacs-node->canonical-json row)))
+    (should-not (string-search "/vault" (plist-get row :key)))
     (cl-letf (((symbol-function 'glasspane-resources--archive-files)
                (lambda () (list record))))
       (let ((screen (glasspane-resources-archive-screen nil)))
@@ -1715,8 +1712,7 @@ Tasks alias is gone."
        glasspane-agenda-dock-badge t)
       ("projects" "Projects" "task_alt" "projects.open" nil nil t)
       ("areas" "Areas" "category" "areas.open" nil nil t)
-      ("resources" "Resources" "topic" "resources.open"
-       "app:jetpacs.files" nil t)
+      ("resources" "Resources" "topic" "resources.open" nil nil t)
       ("review" "Review" "school" "review.open" nil nil t)
       ("archive" "Archive" "archive" "archive.open" nil nil nil))))
   (should (cl-every (lambda (dest) (plist-member dest :bar))
@@ -1734,7 +1730,7 @@ Tasks alias is gone."
                  "agenda")))
 
 (ert-deftest glasspane-para-resources-actions-select-native-files-locally ()
-  "Every Resources handoff carries the receiver-local Files destination."
+  "Resources is an in-app destination; only Browse hands the vault to Files."
   (let* ((dest (cl-find "resources" glasspane-ui-destinations
                         :key (lambda (item) (plist-get item :key))
                         :test #'equal))
@@ -1742,10 +1738,17 @@ Tasks alias is gone."
                     (jetpacs-apps--destination-row glasspane-owner dest)
                     :on_tap)))
     (should (equal (plist-get dest :verb) "resources.open"))
-    (should (equal (plist-get dest :open-surface) "app:jetpacs.files"))
+    (should-not (plist-get dest :open-surface))
     (should (equal (plist-get host-tap :action) "app.open"))
-    (should (equal (plist-get host-tap :open_surface)
-                   "app:jetpacs.files"))))
+    (should-not (equal (plist-get host-tap :open_surface)
+                       "app:jetpacs.files"))
+    (let ((browse (cl-find "resources.browse"
+                           (glasspane-para-test--actions
+                            (apply #'jetpacs-row
+                                   (glasspane-resources--top-actions)))
+                           :key (lambda (a) (plist-get a :action))
+                           :test #'equal)))
+      (should browse))))
 
 (ert-deftest glasspane-para-pa3a-legacy-rollback-restores-old-ia ()
   "PA-4 retires the legacy IA rollback flag, hub screen, and journal landing."
@@ -2080,7 +2083,8 @@ Tasks alias is gone."
                 (glasspane-agenda--body-tabs "day" "2026-08-16")))))))
 
 (ert-deftest glasspane-para-pa3c-slot-eviction-and-detail-reentry ()
-  "Area peers replace; search evicts the peer; detail re-entry truncates."
+  "A drill keeps Areas beneath it; the bound evicts above the root; detail
+re-entry truncates."
   (let ((surface (jetpacs-shell-surface-for glasspane-owner))
         (jetpacs-apps--current glasspane-owner)
         (jetpacs-apps--current-route "agenda"))
@@ -2093,21 +2097,29 @@ Tasks alias is gone."
                   'accepted))
       (should (equal (jetpacs-chrome-stack surface)
                      '("glasspane-areas" "glasspane-agenda")))
-      ;; The drill is a Tier-1 peer, not a second Areas tier.
+      ;; The drill is a child of the Areas list: Back returns to the list.
       (should (eq (glasspane-areas--on-drill
                    '(:category "Home") (list :surface surface))
                   'accepted))
       (let ((area-id (jetpacs-wire-id "area" "Home")))
         (should (equal (jetpacs-chrome-stack surface)
-                       (list area-id "glasspane-agenda"))))
-      ;; Detail consumes the third slot.  Search is a plain drill, so the
-      ;; max-three insertion retains search + detail + the pinned root and
-      ;; evicts the Area destination.
+                       (list area-id "glasspane-areas" "glasspane-agenda"))))
+      ;; Detail consumes the third slot; the bound evicts the screen above
+      ;; the pinned root, which is the Areas list.  The drill's own Back
+      ;; then reopens the list rather than landing on Agenda.
       (glasspane-detail--push-screen surface '(:file "unused" :pos 1))
       (should (equal (jetpacs-chrome-stack surface)
                      (list "glasspane-detail"
                            (jetpacs-wire-id "area" "Home")
                            "glasspane-agenda")))
+      (let ((drill (glasspane-areas-drill-screen
+                    "Home" (jetpacs-view-switch "glasspane-agenda")))
+            (kept (glasspane-areas-drill-screen
+                   "Home" (jetpacs-view-switch "glasspane-areas"))))
+        (should (equal (plist-get (glasspane-para-test--back drill) :action)
+                       "areas.open"))
+        (should (equal (plist-get (glasspane-para-test--back kept) :view)
+                       "glasspane-areas")))
       (should (eq (glasspane-search--on-open nil (list :surface surface))
                   'accepted))
       (should (equal (jetpacs-chrome-stack surface)
@@ -2121,7 +2133,7 @@ Tasks alias is gone."
       (should (equal jetpacs-apps--current-route "areas")))))
 
 (ert-deftest glasspane-para-pa3c-resources-handoff-and-return ()
-  "Resources owns selection; Files hosts it; a bar peer returns home-side."
+  "Resources is a peer on the app surface; Browse hands the vault to Files."
   (let ((surface (jetpacs-shell-surface-for glasspane-owner))
         (files-surface (jetpacs-shell-surface-for jetpacs-files-owner))
         (org-directory "/vault")
@@ -2133,6 +2145,8 @@ Tasks alias is gone."
                (lambda (&rest _) t))
               ((symbol-function 'jetpacs-shell-push)
                (lambda (&rest _) t))
+              ((symbol-function 'glasspane-resources--index)
+               (lambda () nil))
               ((symbol-function 'jetpacs-files-open-path)
                (lambda (path target &optional mark-pos browser-id browser-fab
                              return-action)
@@ -2143,6 +2157,18 @@ Tasks alias is gone."
       (should (eq (jetpacs-apps--action-open
                    '(:app "glasspane" :route "resources") nil)
                   'accepted))
+      ;; The peer replaces whatever destination showed; no Files trip.
+      (should-not opened)
+      (should (equal (jetpacs-chrome-stack surface)
+                     '("glasspane-resources" "glasspane-agenda")))
+      (should (equal jetpacs-apps--current-route "resources"))
+      (let ((selected
+             (cl-find-if (lambda (item) (plist-get item :selected))
+                         (jetpacs-apps-dock-items surface))))
+        (should (equal (plist-get selected :label) "Resources")))
+      ;; Browse in Files is the one whole-vault handoff, with the capture
+      ;; FAB and the return to this untouched stack.
+      (should (eq (glasspane-resources--on-browse nil nil) 'accepted))
       (should (equal (seq-take opened 4)
                      (list "/vault" files-surface nil "files-resources")))
       (should (equal (glasspane-para-test--action-names (nth 4 opened))
@@ -2152,23 +2178,13 @@ Tasks alias is gone."
       (should (equal (plist-get (nth 5 opened) :open_surface)
                      "app:glasspane"))
       (should (equal jetpacs-apps--current-route "resources"))
-      (let ((selected
-             (cl-find-if (lambda (item) (plist-get item :selected))
-                         (jetpacs-apps-dock-items files-surface))))
-        (should (equal (plist-get selected :label) "Resources")))
-      ;; This tap originates on the foreign Files surface, but app.open's
-      ;; sanctioned redispatch supplies Glasspane's own home surface.
       (should (eq (jetpacs-apps--action-open
                    '(:app "glasspane" :route "areas") nil)
                   'accepted))
       (should (equal (jetpacs-chrome-stack surface)
                      '("glasspane-areas" "glasspane-agenda")))
       (should (equal jetpacs-apps--current-route "areas"))
-      ;; Direct/M-x Resources entry records its route too; an Area/Archive
-      ;; row handoff intentionally preserves the origin route.
-      (should (eq (glasspane-resources--on-open nil nil) 'accepted))
-      (should (equal jetpacs-apps--current-route "resources"))
-      (setq jetpacs-apps--current-route "areas")
+      ;; An Area/Archive row handoff intentionally preserves the origin route.
       (should (eq (glasspane-navigation--on-document-open
                    '(:path "/vault/work.org") nil)
                   'accepted))
@@ -2634,7 +2650,7 @@ destinations; Agenda's Saved page is reached through its own mode."
                  (lambda (_files) nil)))
         (let* ((body (glasspane-areas--drill-body "tech"))
                (actions (glasspane-para-test--actions body))
-               (visit (cl-find "heading.visit" actions
+               (visit (cl-find "heading.tap" actions
                                :key (lambda (a) (plist-get a :action))
                                :test #'equal)))
           (should visit)
@@ -2701,6 +2717,60 @@ A declaration for a name outside the group never invents an Area."
                          "Ops"))
           (should-not (glasspane-para-test--area "bad" index))
           (should-not (glasspane-para-test--area "phantom" index)))))))
+
+(ert-deftest glasspane-para-resources-screen-lists-vault-files-by-title ()
+  "Resources titles, sorts, tags and filters the agenda-scope files in-app."
+  (glasspane-para-test--with-vault
+      '(("zeta.org" "#+TITLE: Alpha Notes\n#+TAGS: [ Area : home ]\n#+FILETAGS: :home:\n* Heading\n")
+        ("beta.org" "* Just a heading :work:\n")
+        ("sub/gamma.org" "#+TAGS: [ Area : home work ]\n* TODO Task :work:\n"))
+    (let ((glasspane-resources--filter nil)
+          (org-agenda-files (list vault (expand-file-name "sub" vault))))
+      (ebp-org-cache-invalidate)
+      (let* ((index (glasspane-resources--index))
+             (titles (mapcar (lambda (r) (plist-get r :title)) index)))
+        (should (equal titles '("Alpha Notes" "beta" "gamma")))
+        (let ((alpha (car index))
+              (gamma (nth 2 index)))
+          (should (equal (plist-get alpha :areas) '("home")))
+          (should (equal (plist-get gamma :areas) '("work")))
+          (let ((row (glasspane-resources-row gamma)))
+            (should (equal (plist-get (plist-get row :on_tap) :action)
+                           "glasspane.document.open"))
+            (should (string-prefix-p "resource-" (plist-get row :key)))
+            (should-not (string-search vault (plist-get row :key)))
+            (let ((json (jetpacs-node->canonical-json row)))
+              (should (string-search " \302\267 sub \302\267 " json))
+              (should (string-search "Edited " json))
+              (should (string-search "work" json))))))
+      ;; The body carries the shared Area rail and every row; a filter keeps
+      ;; only files in that Area, and an unknown Area rejects.
+      (let ((names (glasspane-para-test--action-names
+                    (glasspane-resources--body))))
+        (should (member "resources.filter" names))
+        (should (member "glasspane.document.open" names)))
+      (should (eq (glasspane-resources--on-filter '(:area "home") nil)
+                  'accepted))
+      (should (equal glasspane-resources--filter "home"))
+      (should (= 1 (length (cl-remove-if-not
+                            (lambda (a) (equal (plist-get a :action)
+                                               "glasspane.document.open"))
+                            (glasspane-para-test--actions
+                             (glasspane-resources--body))))))
+      (should (eq (glasspane-resources--on-filter '(:area "nope") nil)
+                  'rejected))
+      (should (eq (glasspane-resources--on-filter nil nil) 'accepted))
+      (should-not glasspane-resources--filter)
+      (let ((screen (glasspane-resources-screen nil)))
+        (should (jetpacs-check-profile screen 'app))
+        (should (member "resources.browse"
+                        (glasspane-para-test--action-names screen))))
+      ;; No files: the empty state offers the Files browser.
+      (cl-letf (((symbol-function 'glasspane-resources--index) (lambda () nil)))
+        (let ((body (glasspane-resources--body)))
+          (should (equal (plist-get body :t) "empty_state"))
+          (should (equal (plist-get (plist-get body :on_tap) :action)
+                         "resources.browse")))))))
 
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

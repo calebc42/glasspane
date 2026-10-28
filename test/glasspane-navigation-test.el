@@ -80,10 +80,12 @@
 
 (ert-deftest glasspane-navigation-test-entry-builders-name-authority-only ()
   "Heading cards and file rows choose identity, never presentation policy.
-Every builder that opens a document is named here: the detail card and the
-Area declaring card carry a durable heading token (`heading.visit'); the
-Area file row and the Archive row carry a validated path
-\(`glasspane.document.open').  All of them present the one Files surface."
+The detail card and the Area declaring card carry a durable heading token
+and open the heading's page on Glasspane's own surface (`heading.tap');
+the page's Open in file is the document route.  Every builder that opens a
+document is named here: the Area file row and the Archive row carry a
+validated path (`glasspane.document.open') and present the one Files
+surface."
   (cl-letf (((symbol-function 'jetpacs-feature-advertised-p)
              (lambda (&rest _) t)))
     (let* ((project (glasspane-detail-agenda-card
@@ -100,12 +102,14 @@ Area file row and the Archive row carry a validated path
                          (list :path "/vault/work.org_archive"
                                :mtime (encode-time 0 30 9 2 1 2026))))
            (archive-action (plist-get archive-row :on_tap)))
-      (should (equal (plist-get project-action :action) "heading.visit"))
+      (should (equal (plist-get project-action :action) "heading.tap"))
       (should (equal (plist-get project-action :args)
                      '(:token "heading-token")))
-      (should (equal (plist-get declaring-action :action) "heading.visit"))
+      (should-not (plist-get project-action :open_surface))
+      (should (equal (plist-get declaring-action :action) "heading.tap"))
       (should (equal (plist-get declaring-action :args)
                      '(:token "decl-token")))
+      (should-not (plist-get declaring-action :open_surface))
       (should (equal (plist-get file-action :action)
                      "glasspane.document.open"))
       (should (equal (plist-get file-action :args)
@@ -114,8 +118,7 @@ Area file row and the Archive row carry a validated path
                      "glasspane.document.open"))
       (should (equal (plist-get archive-action :args)
                      '(:path "/vault/work.org_archive")))
-      (dolist (action (list project-action declaring-action
-                            file-action archive-action))
+      (dolist (action (list file-action archive-action))
         (should (equal (plist-get action :open_surface)
                        "app:jetpacs.files"))))))
 
@@ -270,6 +273,108 @@ Files' root `browser' view still completes the armed Glasspane return once."
       ;; Subsequent `browser' view transitions do not re-trigger the return.
       (jetpacs-files--on-view-change "app:jetpacs.files" "browser")
       (should (= returns 1)))))
+
+(ert-deftest glasspane-navigation-test-peers-declare-system-back ()
+  "A peer screen draws no arrow but names the root for the back gesture.
+Without `on_back' the Companion finishes the Activity on a peer."
+  (dolist (builder (list #'glasspane-projects-screen
+                         #'glasspane-areas-screen
+                         #'glasspane-resources-screen
+                         #'glasspane-srs-screen
+                         #'glasspane-resources-archive-screen))
+    (cl-letf (((symbol-function 'glasspane-resources--index) (lambda () nil))
+              ((symbol-function 'glasspane-resources--archive-files)
+               (lambda () nil))
+              ((symbol-function 'glasspane-areas--index) (lambda () nil))
+              ((symbol-function 'glasspane-org-todo-items) (lambda () nil)))
+      (let ((peer (funcall builder nil))
+            (child (funcall builder (jetpacs-view-switch "glasspane-agenda"))))
+        (should (equal (plist-get peer :on_back)
+                       '(:builtin "view.switch" :view "glasspane-agenda")))
+        (should (equal (plist-get (plist-get peer :on_refresh) :action)
+                       "glasspane.refresh"))
+        ;; A drilled copy keeps the arrow and declares no second gesture.
+        (should-not (plist-get child :on_back))))))
+
+(ert-deftest glasspane-navigation-test-child-back-survives-eviction ()
+  "A child's Back reopens its parent when the bounded stack evicted it."
+  (let ((to-areas (jetpacs-view-switch "glasspane-areas"))
+        (to-root (jetpacs-view-switch "glasspane-agenda"))
+        (reopen (jetpacs-action "areas.open")))
+    (should (eq (glasspane-ui-parent-back to-areas "glasspane-areas" reopen)
+                to-areas))
+    (should (eq (glasspane-ui-parent-back to-root "glasspane-areas" reopen)
+                reopen))
+    (should (eq (glasspane-ui-parent-back nil "glasspane-areas" reopen)
+                reopen))
+    ;; Route-aware: a transient screen above the root keeps chrome's switch
+    ;; while Agenda is selected, and reopens an evicted destination.
+    (let ((jetpacs-apps--current-route "agenda"))
+      (should (eq (glasspane-ui-route-back to-root) to-root)))
+    (let ((jetpacs-apps--current-route "projects"))
+      (should (equal (plist-get (glasspane-ui-route-back to-root) :action)
+                     "projects.open"))
+      (should (eq (glasspane-ui-route-back to-areas) to-areas)))
+    (let ((jetpacs-apps--current-route "no-such-route"))
+      (should (eq (glasspane-ui-route-back to-root) to-root)))))
+
+(ert-deftest glasspane-navigation-test-list-keys-are-opaque-and-distinct ()
+  "Cards carry stable keys that never spell a path and differ per listing."
+  (let* ((item '((headline . "Ship") (file . "/vault/secret dir/work.org")
+                 (pos . 120) (type . "scheduled") (date . "2026-10-28")
+                 (token . "tok")))
+         (again (glasspane-ui-item-key item))
+         (deadline (glasspane-ui-item-key
+                    (cons '(type . "deadline") item)))
+         (grouped (glasspane-ui-item-key item "Home")))
+    (should (stringp again))
+    (should (equal again (glasspane-ui-item-key item)))
+    (should-not (string-search "work.org" again))
+    (should-not (string-search "secret" again))
+    (should (jetpacs-identifier-p again))
+    (should-not (equal again deadline))
+    (should-not (equal again grouped))
+    ;; A token-only item (a vulpea note) still gets a key; nothing gets none.
+    (should (stringp (glasspane-ui-item-key '((token . "tok-only")))))
+    (should-not (glasspane-ui-item-key '((headline . "Plain"))))
+    (let ((card (glasspane-detail-agenda-card item '("Home") "Home")))
+      (should (equal (plist-get card :key) grouped))
+      (should (equal (plist-get (plist-get card :on_tap) :action)
+                     "heading.tap")))))
+
+(ert-deftest glasspane-navigation-test-area-drill-is-a-child-push ()
+  "Opening an Area pushes above the Areas list instead of replacing it."
+  (let (pushed)
+    (cl-letf (((symbol-function 'jetpacs-flow-continue)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'jetpacs-apps-note-route)
+               (lambda (&rest _) nil))
+              ((symbol-function 'jetpacs-chrome-reset-screens)
+               (lambda (&rest _) (error "a drill must not reset")))
+              ((symbol-function 'jetpacs-chrome-push-screen)
+               (lambda (surface id builder)
+                 (setq pushed (list surface id builder)))))
+      (should (eq (glasspane-areas--on-drill
+                   '(:category "Home") '(:surface "app:glasspane"))
+                  'accepted))
+      (should (equal (seq-take pushed 2)
+                     (list "app:glasspane" (jetpacs-wire-id "area" "Home")))))))
+
+(ert-deftest glasspane-navigation-test-age-words ()
+  "Edit times read in words, never as raw timestamps."
+  (let ((now (encode-time 0 0 12 28 10 2026)))
+    (cl-flet ((ago (seconds)
+                (glasspane-ui-age-words (time-subtract now seconds) now)))
+      (should (equal (ago 5) "Edited just now"))
+      (should (equal (ago 300) "Edited 5 min ago"))
+      (should (equal (ago 3600) "Edited 1 hour ago"))
+      (should (equal (ago (* 3 3600)) "Edited 3 hours ago"))
+      (should (equal (ago 86400) "Edited yesterday"))
+      (should (equal (ago (* 5 86400)) "Edited 5 days ago"))
+      (should (equal (ago (* 45 86400)) "Edited 1 month ago"))
+      (should (equal (ago (* 100 86400)) "Edited 3 months ago"))
+      (should (equal (ago (* 800 86400)) "Edited 2 years ago"))
+      (should-not (glasspane-ui-age-words nil)))))
 
 (provide 'glasspane-navigation-test)
 ;;; glasspane-navigation-test.el ends here

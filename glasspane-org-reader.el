@@ -212,6 +212,15 @@ including repeated keys; unrecognized lines remain visible as plain text."
         (forward-line 1))
       (nreverse nodes))))
 
+(defun glasspane-org-reader--drawers-cut (n)
+  "N's drawers marked hidden, so the body drops their text.
+For a caller that presents every drawer itself (`all'): without these
+records a LOGBOOK drawer would print as raw lines in the body."
+  (when (and (derived-mode-p 'org-mode) (integerp (plist-get n :pos)))
+    (mapcar (lambda (drawer) (plist-put (copy-sequence drawer) :hidden t))
+            (jetpacs-org-render-exclusive-drawers
+             (jetpacs-org-render-heading-drawers (plist-get n :pos))))))
+
 (defun glasspane-org-reader--drawer-node (drawer)
   "Render DRAWER's contents unless its native visibility state hides it.
 The shared Jetpacs visibility state is the sole expansion authority; the
@@ -897,7 +906,10 @@ without extra fold headers."
                           (<= (plist-get properties :end)
                               (plist-get n :body-start))))
              (list (glasspane-org-reader--drawer-node properties)))
-           (glasspane-org-reader--body-nodes n drawers)
+           (glasspane-org-reader--body-nodes
+            n (if (eq skip-props 'all)
+                  (glasspane-org-reader--drawers-cut n)
+                drawers))
            (let ((glasspane-org-reader--depth (1+ glasspane-org-reader--depth)))
              (list (glasspane-org-reader-rail
                     (mapcar (lambda (child)

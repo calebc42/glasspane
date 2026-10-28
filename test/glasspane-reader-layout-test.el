@@ -1198,6 +1198,24 @@ document over the detail screen."
                       'accepted))))
       (should (equal original (buffer-string))))))
 
+(ert-deftest glasspane-reader-layout-detail-body-drops-drawer-text ()
+  "The detail page owns every drawer (`all'): a LOGBOOK, even one a
+clock-in just opened, never prints as raw lines in the body."
+  (with-temp-buffer
+    (insert "* TODO Task\n:PROPERTIES:\n:ID: task\n:END:\n:LOGBOOK:\nCLOCK: [2026-10-28 Wed 16:30]\n:END:\nBudget prose.\n")
+    (org-mode)
+    (let* ((record (car (ebp-org-outline-collect (point-min) (point-max) t)))
+           (tokens (make-hash-table :test #'eql))
+           (jetpacs-buffer-exposed (make-hash-table :test #'equal))
+           (json (jetpacs-node->canonical-json
+                  (apply #'jetpacs-column
+                         (glasspane-org-reader--content-nodes
+                          record "/tmp/detail.org" tokens 'all)))))
+      (should-not (string-search "LOGBOOK" json))
+      (should-not (string-search "CLOCK" json))
+      (should-not (string-search ":END:" json))
+      (should (string-search "Budget prose." json)))))
+
 (ert-deftest glasspane-reader-layout-swipe-carries-drawer-actions ()
   "The heading header keeps no drawer icons: the rightward swipe reveals
 Cycle plus a Properties/Logbook action per drawer, the shown one in the

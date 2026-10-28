@@ -468,6 +468,8 @@ Signals like `ebp-org-resolve-ref'; the screen builder classifies."
                                    (and file (file-name-base file)))
                    :backlinks (glasspane-detail--backlink-count pos)
                    :clocked-in (and (ebp-org-clocked-in-p pos) t)
+                   :clock-start (and (ebp-org-clocked-in-p pos)
+                                     org-clock-start-time)
                    :effort (org-entry-get pos "Effort")
                    :props (ignore-errors
                             (org-entry-properties pos 'standard))
@@ -797,6 +799,28 @@ NAME announces the row for assistive technology."
     :min_height 40)
    :name (or name label)))
 
+(defun glasspane-detail--clock-value (start today)
+  "The running clock's band value: a live timer from START and when it began.
+START is the clock's Lisp start time, TODAY the render's YYYY-MM-DD.  The
+Companion ticks `material3.chronometer' itself, so the page counts every
+second with no push; without it, the start time alone.  A clock begun on
+another day names that day."
+  (let* ((began (and start
+                     (format-time-string
+                      (if (equal (format-time-string "%Y-%m-%d" start) today)
+                          "%H:%M" "%a %H:%M")
+                      start)))
+         (since (if began (format "Started %s · tap to clock out" began)
+                  "Tap to clock out")))
+    (if (and start (jetpacs-node-advertised-p "material3.chronometer"))
+        (jetpacs-column
+         (jetpacs-material3-chronometer start :style "title" :color "success"
+                                        :content-description "Clocked")
+         (jetpacs-text since :style "caption" :color "outline")
+         :spacing 2)
+      (jetpacs-text (if began (format "Running since %s" began) "Running")
+                    :style "body" :color "success"))))
+
 (defun glasspane-detail--properties-band (info main &optional extras)
   "INFO's metadata as one calm label/value band, Obsidian-properties style.
 Only facts that are set get a row: Scheduled and Deadline in words with
@@ -859,7 +883,8 @@ are the app layers' Connections nodes."
                    :align "center" :spacing 4 :fill t))
                  (when (plist-get info :clocked-in)
                    (glasspane-detail--band-row
-                    "Clock" (jetpacs-text "Running" :style "body" :color "success")
+                    "Clock" (glasspane-detail--clock-value
+                             (plist-get info :clock-start) (plist-get info :today))
                     (jetpacs-action "org.clock.out"))))))
          (add-chip (lambda (label icon action)
                      (jetpacs-material3-assist-chip label :icon icon :on-tap action)))
@@ -1383,6 +1408,11 @@ Everything rarer lives in the top bar's overflow menu."
 The screen's `:fab' is evaluated after its body, so the pane's own token
 names the heading without a second mint sweeping the first.")
 
+(defconst glasspane-detail-pane-fab-clearance 136
+  "Dp kept free under a pane's action rows for the screen's FAB.
+The stack is the 56dp FAB, its 16dp margin, and the 40dp menu toggle
+with its gap above it (measured at about 124dp on the Pixel Tablet).")
+
 (defun glasspane-detail-pane (ref &optional id)
   "The heading page for REF as a pane beside screen ID's list.
 The pushed screen's top bar, floating toolbar and bottom bar become a
@@ -1414,14 +1444,14 @@ that stopped resolving degrades to a placeholder."
                   (jetpacs-with-attrs
                    (glasspane-ui--detail-body-with-notes info tokens)
                    :weight 1)
-                  ;; The app FAB floats over the pane's bottom end.
                   (when read
-                    (jetpacs-with-attrs
-                     (glasspane-detail--floating-toolbar info tokens)
-                     :pad '(:end 120)))
+                    (glasspane-detail--floating-toolbar info tokens))
                   (when read
-                    (jetpacs-with-attrs (glasspane-detail--bottom-bar tokens)
-                                        :pad '(:end 120)))
+                    (glasspane-detail--bottom-bar tokens))
+                  ;; The screen's FAB floats over the pane's bottom end, and
+                  ;; an extended one ("Clock out · task") is as wide as its
+                  ;; label: the action rows sit above it, not beside it.
+                  (jetpacs-spacer :height glasspane-detail-pane-fab-clearance)
                   :fill t))))
       ((ebp-org-refused ebp-org-unresolved)
        (jetpacs-empty-state :icon "search_off"

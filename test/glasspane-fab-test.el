@@ -189,6 +189,51 @@
                   'rejected))
       (should (eq (funcall run "glasspane.fab.cookies" '(:token "expired")) 'stale)))))
 
+(ert-deftest glasspane-fab-test-clock-cancel-saves-the-file ()
+  "Cancel clock removes the CLOCK line on disk, not only in the buffer."
+  (glasspane-fab-test--with-file
+      "* TODO Task\n"
+    (with-current-buffer (find-file-noselect file)
+      (goto-char (point-min))
+      (org-clock-in)
+      (save-buffer))
+    (unwind-protect
+        (progn
+          (should (string-search "CLOCK: [" (with-temp-buffer
+                                              (insert-file-contents file)
+                                              (buffer-string))))
+          (should (eq (funcall (gethash "glasspane.fab.clock-cancel"
+                                        jetpacs-action-handlers)
+                               nil nil)
+                      'accepted))
+          (should-not (org-clocking-p))
+          (should-not (buffer-modified-p (find-buffer-visiting file)))
+          (should-not (string-search "CLOCK:" (with-temp-buffer
+                                                (insert-file-contents file)
+                                                (buffer-string)))))
+      (when (org-clocking-p) (org-clock-cancel)))))
+
+(ert-deftest glasspane-fab-test-clock-row-ticks-from-the-start ()
+  "The detail band's Clock row: a Companion-ticked timer and the start time."
+  (let* ((start (encode-time (list 0 30 16 28 10 2026)))
+         (ms (truncate (* 1000 (float-time start)))))
+    (glasspane-fab-test--advertised t
+      (let ((json (jetpacs-node->canonical-json
+                   (glasspane-detail--clock-value start "2026-10-28"))))
+        (should (string-search "\"t\":\"material3.chronometer\"" json))
+        (should (string-search (format "\"base_ms\":%d" ms) json))
+        (should (string-search "Started 16:30" json)))
+      (should (string-search "Started Tue 16:30"
+                             (jetpacs-node->canonical-json
+                              (glasspane-detail--clock-value
+                               (encode-time (list 0 30 16 27 10 2026))
+                               "2026-10-28")))))
+    (glasspane-fab-test--advertised '()
+      (let ((json (jetpacs-node->canonical-json
+                   (glasspane-detail--clock-value start "2026-10-28"))))
+        (should-not (string-search "chronometer" json))
+        (should (string-search "Running since 16:30" json))))))
+
 (ert-deftest glasspane-fab-test-dialog-actions-submit-and-write ()
   "Add child, set Effort, sort and clone go through their dialogs."
   (glasspane-fab-test--with-file

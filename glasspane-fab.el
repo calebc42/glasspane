@@ -539,7 +539,12 @@ A tap from a sheet carries no surface: Glasspane's own refreshes."
   "Discard the running clock."
   (if (not (glasspane-fab--clocking-p))
       'stale
-    (org-clock-cancel)
+    (let ((buffer (marker-buffer org-clock-marker)))
+      (org-clock-cancel)
+      ;; The cancel deletes the CLOCK line (and an emptied drawer) in the
+      ;; clocked buffer; save it like every other heading mutation.
+      (when (buffer-live-p buffer)
+        (glasspane-org-save-and-invalidate buffer)))
     (glasspane-fab--notify "Clock cancelled" params)
     'accepted))
 
@@ -897,22 +902,20 @@ A list of (TITLE . MINUTES), nonzero only."
       (jetpacs-defaction "glasspane.fab.move" #'glasspane-fab--on-move
                          :doc "Move, promote or demote a subtree" :strict t
                          :args (append token '((:name how :type "text" :required t))))
-      (dolist (spec '(("glasspane.fab.cookies" glasspane-fab--on-cookies
-                       "Update a subtree's statistics cookies")
-                      ("glasspane.fab.archive-tag" glasspane-fab--on-archive-tag
-                       "Toggle a heading's ARCHIVE tag")
-                      ("glasspane.fab.sort" glasspane-fab--on-sort
-                       "Sort a heading's children")
-                      ("glasspane.fab.effort" glasspane-fab--on-effort
-                       "Set or remove a heading's Effort")
-                      ("glasspane.fab.clone" glasspane-fab--on-clone
-                       "Clone a subtree with a time shift")
-                      ("glasspane.fab.babel-subtree" glasspane-fab--on-babel-subtree
-                       "Run every code block in a subtree")
-                      ("glasspane.fab.countdown" glasspane-fab--on-countdown
-                       "Count down a heading's Effort with a device reminder")))
-        (jetpacs-defaction (nth 0 spec) (nth 1 spec) :doc (nth 2 spec)
-                           :strict t :args token)))
+      (jetpacs-defaction "glasspane.fab.cookies" #'glasspane-fab--on-cookies
+                         :doc "Update a subtree's statistics cookies" :strict t :args token)
+      (jetpacs-defaction "glasspane.fab.archive-tag" #'glasspane-fab--on-archive-tag
+                         :doc "Toggle a heading's ARCHIVE tag" :strict t :args token)
+      (jetpacs-defaction "glasspane.fab.sort" #'glasspane-fab--on-sort
+                         :doc "Sort a heading's children" :strict t :args token)
+      (jetpacs-defaction "glasspane.fab.effort" #'glasspane-fab--on-effort
+                         :doc "Set or remove a heading's Effort" :strict t :args token)
+      (jetpacs-defaction "glasspane.fab.clone" #'glasspane-fab--on-clone
+                         :doc "Clone a subtree with a time shift" :strict t :args token)
+      (jetpacs-defaction "glasspane.fab.babel-subtree" #'glasspane-fab--on-babel-subtree
+                         :doc "Run every code block in a subtree" :strict t :args token)
+      (jetpacs-defaction "glasspane.fab.countdown" #'glasspane-fab--on-countdown
+                         :doc "Count down a heading's Effort with a device reminder" :strict t :args token))
     (jetpacs-defaction "glasspane.fab.clock-cancel" #'glasspane-fab--on-clock-cancel
                        :doc "Discard the running clock" :any-surface t)
     (jetpacs-defaction "glasspane.fab.countdown-stop" #'glasspane-fab--on-countdown-stop
@@ -927,16 +930,14 @@ A list of (TITLE . MINUTES), nonzero only."
                          :doc "Append a top-level heading to the open file"
                          :any-surface t :strict t
                          :args (append path '((:name todo :type "bool"))))
-      (dolist (spec '(("glasspane.fab.file-babel" glasspane-fab--on-file-babel
-                       "Run every code block in the open file")
-                      ("glasspane.fab.file-tangle" glasspane-fab--on-file-tangle
-                       "Tangle the open file")
-                      ("glasspane.fab.file-dblocks" glasspane-fab--on-file-dblocks
-                       "Update the open file's dynamic blocks")
-                      ("glasspane.fab.file-times" glasspane-fab--on-file-times
-                       "Show the open file's clocked totals")))
-        (jetpacs-defaction (nth 0 spec) (nth 1 spec) :doc (nth 2 spec)
-                           :any-surface t :strict t :args path)))
+      (jetpacs-defaction "glasspane.fab.file-babel" #'glasspane-fab--on-file-babel
+                         :doc "Run every code block in the open file" :any-surface t :strict t :args path)
+      (jetpacs-defaction "glasspane.fab.file-tangle" #'glasspane-fab--on-file-tangle
+                         :doc "Tangle the open file" :any-surface t :strict t :args path)
+      (jetpacs-defaction "glasspane.fab.file-dblocks" #'glasspane-fab--on-file-dblocks
+                         :doc "Update the open file's dynamic blocks" :any-surface t :strict t :args path)
+      (jetpacs-defaction "glasspane.fab.file-times" #'glasspane-fab--on-file-times
+                         :doc "Show the open file's clocked totals" :any-surface t :strict t :args path))
     ;; Before the stock Org editor's add-heading FAB: Glasspane's reader
     ;; owns the outline it draws.
     (jetpacs-add-hook 'jetpacs-files-editor-fab-functions

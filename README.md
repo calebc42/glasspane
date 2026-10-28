@@ -73,30 +73,23 @@ a tappable caption line above the headline; a top-level heading has none.
 The TODO state is a Material split button in front of the headline: the
 leading half shows the keyword and cycles the buffer's sequence on tap, the
 chevron lists every keyword plus **No state**. An open keyword is filled, a
-done one tonal, and a heading with no state shows an outlined ring. Beneath
-the headline, set facts appear as tinted pills: Scheduled and Deadline in
-words (“Today · 09:00 · weekly”, “Due Friday”, “3 days overdue”, colored
-error/warning by urgency and muted once done), Priority (colored by rank),
-and Clocking. A date pill opens its drawer; long-press opens Jetpacs's
-timestamp dialog; the priority pill opens the priority dialog. A line of
-Area chips and the heading's own tags follows; inherited tags stay out of
-the resting view.
+done one tonal, and a heading with no state shows an outlined ring.
 
-Below that, a start-aligned row of tooltipped drawer icons: Tags (`label`),
-Scheduled (`event`), Deadline (`flag`), Properties (`tune`), Logbook
-(`history`), and Connections (`link`) when the notes layer contributes
-backlinks, outgoing links and unlinked mentions. Icons carry count badges;
-the open drawer's icon is tonal in the primary accent, and only one drawer
-is open at a time. A drawer is a filled card headed by its name and one edit
-action (Edit tags, Edit timestamp, Add property, Log note). The date
-drawers show a summary row (tap for the full dialog with time, repeater and
-delay cookies) and quick chips — Today, Tomorrow, Next week, a native date
-picker, Clear — that move only the day: time of day, repeater and delay
-survive, for deadlines as well as schedules. The Tags drawer shows each
-declared tag group as toggle chips (the Area group with its icons) so known
-tags are one tap away and exclusive groups swap by construction; inherited
-members show selected but disabled; **Add tag…** opens Jetpacs's grouped
-picker for anything free-form.
+Beneath the headline, a properties band lists only the facts that are set,
+one label/value row each: Scheduled and Deadline in words (“Today · 09:00 ·
+weekly”, “Due Friday”, “3 days overdue”, colored by urgency and muted once
+done) with the full sentence beneath, tapping open the timestamp dialog;
+Priority in its rank color, tapping open its dialog; Areas as elevated chips;
+the heading's own tags as #tag text, tapping open the Tags drawer; and a
+running Clock, tapping to clock out. Inherited tags stay out of the resting
+view. One line beneath adds what is unset (Schedule, Deadline, Priority,
+Tag) and toggles the Properties, Logbook and Connections drawers, labelled
+with their counts; the open one is tonal and only one is open at a time. A
+drawer is a filled card headed by its name and one edit action. The Tags
+drawer shows each declared tag group as toggle chips (the Area group with
+its icons) so known tags are one tap away and exclusive groups swap by
+construction; inherited members show selected but disabled; **Add tag…**
+opens Jetpacs's grouped picker for anything free-form.
 
 Glasspane renders actual Org list checkboxes as native three-state controls.
 Tap the box or item text to toggle complete; long-press to mark in progress.

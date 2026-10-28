@@ -5539,7 +5539,7 @@ point: a new screen cannot ship unreachable.")
     "glasspane.fab.clone" "glasspane.fab.babel-subtree"
     "glasspane.fab.clock-cancel" "glasspane.fab.countdown"
     "glasspane.fab.countdown-stop" "glasspane.fab.quick-task"
-    "glasspane.fab.under-clock" "glasspane.fab.capture" "glasspane.fab.file-heading"
+    "glasspane.fab.under-clock" "glasspane.fab.file-heading"
     "glasspane.fab.file-babel" "glasspane.fab.file-tangle"
     "glasspane.fab.file-dblocks" "glasspane.fab.file-times"
     "heading.add-note" "heading.clock-in" "heading.delete"

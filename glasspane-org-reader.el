@@ -870,31 +870,36 @@ header swipe is Archive's one home."
    ;; SPEC 16.4: without a name the trigger announces as its icon.
    :name "Heading actions"))
 
-(defun glasspane-org-reader--meta-line (n)
-  "The deadline/clocked badge line for tree node N, or nil.
-The deadline date shows in the priority orange, switching to red once
-overdue; the clocked total renders as h:mm."
-  (let* ((deadline (plist-get n :deadline))
-         (ddate (and (stringp deadline)
-                     (string-match "[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}"
-                                   deadline)
-                     (match-string 0 deadline)))
-         (overdue (and ddate (not (plist-get n :done))
-                       (string< ddate (format-time-string "%Y-%m-%d"))))
-         (mins (plist-get n :clocked))
-         (spans (delq nil
-                      (list
-                       (when ddate
-                         (jetpacs-span (concat "Deadline " ddate)
-                                       :font-weight (and overdue "bold")
-                                       :color (if overdue
-                                                  glasspane-org-reader--overdue-color
-                                                glasspane-org-reader--priority-color)))
-                       (when (and (numberp mins) (> mins 0))
-                         (jetpacs-span (format "%s%d:%02d clocked"
-                                               (if ddate "  ·  " "")
-                                               (/ mins 60) (% mins 60))))))))
-    (when spans (jetpacs-rich-text spans))))
+(defun glasspane-org-reader--meta-line (n &optional tags today)
+  "Tree node N's one caption line, or nil when it has nothing to say.
+Priority, the scheduled and deadline stamps in words with their urgency
+color (`glasspane-ui-human-date'), the clocked total as h:mm, then the
+heading's ordinary TAGS as `#tag' spans.  TODAY defaults to the current
+date; the scheduled stamp is read at N's position in the current buffer."
+  (let* ((today (or today (format-time-string "%Y-%m-%d")))
+         (done (plist-get n :done))
+         (priority (plist-get n :priority))
+         (pos (plist-get n :pos))
+         (scheduled (and (integerp pos) (derived-mode-p 'org-mode)
+                         (ignore-errors (org-entry-get pos "SCHEDULED"))))
+         (date-span
+          (lambda (stamp kind)
+            (when-let* ((h (and (stringp stamp)
+                                (glasspane-ui-human-date stamp today
+                                                         :done done :kind kind))))
+              (list (jetpacs-span (plist-get h :label)
+                                  :color (plist-get h :color))))))
+         (mins (plist-get n :clocked)))
+    (glasspane-ui-meta-line
+     (list (when priority
+             (list (jetpacs-span (concat "Priority " priority)
+                                 :color glasspane-org-reader--priority-color)))
+           (funcall date-span scheduled 'scheduled)
+           (funcall date-span (plist-get n :deadline) 'deadline)
+           (when (and (numberp mins) (> mins 0))
+             (list (jetpacs-span (format "%d:%02d clocked" (/ mins 60) (% mins 60))
+                                 :color "outline")))
+           (glasspane-ui-tag-spans tags)))))
 
 (defun glasspane-org-reader--todo-spans (todo)
   "Render TODO with its source buffer's native Org keyword face.
@@ -924,7 +929,6 @@ without duplicating the elevated Area chips."
                             (when (and (looking-at org-complex-heading-regexp)
                                        (equal title (match-string-no-properties 4)))
                               (match-beginning 4))))))
-         (priority (plist-get n :priority))
          (tags (cl-remove-if (lambda (tag) (member tag areas))
                              (plist-get n :tags))))
     (if (string-empty-p (or title ""))
@@ -940,14 +944,9 @@ without duplicating the elevated Area chips."
          (append
           (glasspane-ui-headline-with-areas headline areas)
           (list
-         (when priority
-           (jetpacs-rich-text
-            (list (jetpacs-span (format "Priority %s" priority)
-                                :color glasspane-org-reader--priority-color))
-            :style "caption"))
-         (glasspane-org-reader--meta-line n)
-         (glasspane-ui-tag-chips tags)
-         :spacing 4)))))))
+           ;; One caption line: priority, dates in words, clock, #tags.
+           (glasspane-org-reader--meta-line n tags)
+           :spacing 4)))))))
 
 (defun glasspane-org-reader--drawer-swipe-actions (drawers buffer)
   "Revealed swipe actions showing or hiding DRAWERS in BUFFER.

@@ -1134,8 +1134,14 @@ document over the detail screen."
       (should (= (plist-get areas :weight) 1))
       (should (equal (plist-get chip :variant) "elevated"))
       (should (equal (plist-get chip :icon) "work"))
-      (should (equal (plist-get (aref (plist-get tags :children) 0) :label) "plain"))
-      (should (= (length (plist-get tags :children)) 1))
+      ;; One caption line: the priority, then ordinary tags as #tag text.
+      (should (equal (plist-get tags :t) "rich_text"))
+      (should (equal (mapcar (lambda (sp) (plist-get sp :text))
+                             (append (plist-get tags :spans) nil))
+                     '("Priority A" "  ·  " "#plain")))
+      (should (equal (plist-get (plist-get (aref (plist-get tags :spans) 2) :on_tap)
+                                :action)
+                     "search.by-tag"))
       (should (equal (jetpacs-node->canonical-json header)
                      (jetpacs-node->canonical-json
                       (cl-letf (((symbol-function 'jetpacs-window-class) wide))
@@ -1386,9 +1392,14 @@ swipe, not in the overflow menu."
                      (chips (glasspane-reader-layout--nodes-of-type
                              (list header) "material3.assist_chip"))
                      (labels (mapcar (lambda (chip) (plist-get chip :label))
-                                     chips)))
-                (dolist (tag '("Work" "Home" "beta" "plain"))
+                                     chips))
+                     (json (jetpacs-node->canonical-json header)))
+                ;; Areas stay chips; ordinary tags read as #tag text.
+                (dolist (tag '("Work" "Home"))
                   (should (= (cl-count tag labels :test #'equal) 1)))
+                (dolist (tag '("beta" "plain"))
+                  (should-not (member tag labels))
+                  (should (string-search (concat "\"#" tag "\"") json)))
                 (should (equal render
                                (glasspane-org-reader--heading-node
                                 node "/unused/reader.org" tokens)))))))

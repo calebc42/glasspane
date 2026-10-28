@@ -1440,7 +1440,7 @@ signalling out of the builder."
               (should (string-search "jetpacs.org.heading" json))
               ;; Overdue deadline badge; the Properties show/hide action
               ;; rides the rightward swipe beside Cycle, not the header.
-              (should (string-search "Deadline 2020-01-02" json))
+              (should (string-search "weeks overdue" json))
               (should (string-search "Properties" json))
               (should (string-search "jetpacs.org.toggle-drawer" json))
               (should-not (string-search "Toggle properties" json))

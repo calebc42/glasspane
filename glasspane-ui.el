@@ -232,6 +232,30 @@ Nil when there is nothing to say."
     (when joined
       (jetpacs-rich-text (nreverse joined) :style "caption"))))
 
+(defun glasspane-ui-tag-spans (tags)
+  "TAGS as tinted `#tag' spans, space-separated; each searches by its tag.
+Inline text the way Bear and Obsidian draw tags, keeping chips for Areas."
+  (let (out)
+    (dolist (tag (append tags nil))
+      (when out (push (jetpacs-span " ") out))
+      (push (jetpacs-span (concat "#" tag) :color "primary"
+                          :on-tap (jetpacs-action "search.by-tag"
+                                                  :args (list :tag tag)))
+            out))
+    (nreverse out)))
+
+(defun glasspane-ui-meta-line (groups &optional style)
+  "One caption line of GROUPS, each a list of spans, joined by dots.
+Empty groups drop out; nil when nothing is left.  STYLE defaults to
+\"caption\"."
+  (let ((groups (delq nil groups))
+        joined)
+    (dolist (group groups)
+      (when joined (push (jetpacs-span "  ·  " :color "outline") joined))
+      (dolist (span group) (push span joined)))
+    (when joined
+      (jetpacs-rich-text (nreverse joined) :style (or style "caption")))))
+
 (defconst glasspane-ui-chip-rail-padding 12
   "Inset, in dp, drawn inside a chip rail's scroll viewport.
 It matches the 12dp content padding of the card lists the rails sit above,

@@ -1434,10 +1434,9 @@ while the list builds so its card can show the selection."
                          (t (when ref (glasspane-ui-pane-select id nil))
                             (glasspane-detail-pane-placeholder))))
            (glasspane-ui-pane-current
-            (and meta (cons (condition-case nil
-                                (file-truename (plist-get meta :file))
-                              (error (plist-get meta :file)))
-                            (plist-get meta :pos)))))
+            (and meta (or (plist-get meta :ref)
+                          (list :file (plist-get meta :file)
+                                :pos (plist-get meta :pos))))))
       (jetpacs-pane-scaffold (let ((glasspane-ui-narrow-container t))
                                (funcall body-fn))
                              detail))))

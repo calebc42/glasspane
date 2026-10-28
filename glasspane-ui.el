@@ -291,7 +291,7 @@ Emacs-side only: refs never reach the wire.  Agenda, Projects and every
 Area drill keep their own selection.")
 
 (defvar glasspane-ui-pane-current nil
-  "While a pane screen builds, (TRUENAME . POS) of its selected heading.
+  "While a pane screen builds, the ref of the heading its pane shows.
 Cards compare against it to mark the selection.")
 
 (defun glasspane-ui-pane-screen-p (id)
@@ -322,13 +322,21 @@ Cards compare against it to mark the selection.")
     (remhash id glasspane-ui--pane-selection)))
 
 (defun glasspane-ui-pane-selected-p (item)
-  "Whether ITEM is the heading the screen being built shows in its pane."
-  (and glasspane-ui-pane-current
-       (equal (alist-get 'pos item) (cdr glasspane-ui-pane-current))
-       (let ((file (alist-get 'file item)))
-         (and (stringp file)
-              (equal (condition-case nil (file-truename file) (error file))
-                     (car glasspane-ui-pane-current))))))
+  "Whether ITEM is the heading the screen being built shows in its pane.
+The heading's Org ID decides when both carry one; otherwise the truename
+and the heading start.  An agenda item's own `pos' is its agenda marker,
+which can sit below the heading, so the item's ref position is preferred."
+  (when-let* ((cur glasspane-ui-pane-current))
+    (let* ((ref (alist-get 'ref item))
+           (id (plist-get ref :id))
+           (file (or (plist-get ref :file) (alist-get 'file item)))
+           (pos (or (plist-get ref :pos) (alist-get 'pos item))))
+      (if (and id (plist-get cur :id))
+          (equal id (plist-get cur :id))
+        (and (stringp file) (equal pos (plist-get cur :pos))
+             (equal (condition-case nil (file-truename file) (error file))
+                    (condition-case nil (file-truename (plist-get cur :file))
+                      (error (plist-get cur :file)))))))))
 
 (defun glasspane-ui--on-pane-close (_args params)
   "Close the heading pane of the screen PARAMS' surface shows."

@@ -108,6 +108,21 @@
         (should seen)
         (should-not (glasspane-ui-compact-width-p))))))
 
+(ert-deftest glasspane-pane-test-selection-matches-by-id-then-heading ()
+  "An agenda item's marker pos is not its heading; ids and refs decide."
+  (cl-letf (((symbol-function 'file-truename) #'identity))
+    (let ((glasspane-ui-pane-current '(:id "X" :file "/v/a.org" :pos 7)))
+      (should (glasspane-ui-pane-selected-p
+               '((pos . 90) (ref . (:id "X" :file "/v/a.org" :pos 7)))))
+      (should-not (glasspane-ui-pane-selected-p
+                   '((pos . 7) (ref . (:id "Y" :file "/v/a.org" :pos 7))))))
+    (let ((glasspane-ui-pane-current '(:id nil :file "/v/a.org" :pos 7)))
+      (should (glasspane-ui-pane-selected-p
+               '((pos . 90) (file . "/v/a.org")
+                 (ref . (:id nil :file "/v/a.org" :pos 7)))))
+      (should-not (glasspane-ui-pane-selected-p
+                   '((pos . 90) (file . "/v/a.org")))))))
+
 (ert-deftest glasspane-pane-test-compact-screen-is-the-list-alone ()
   "A phone gets the list, no pane scaffold."
   (glasspane-pane-test--with "compact" '("glasspane-agenda") t
@@ -117,7 +132,7 @@
 
 (ert-deftest glasspane-pane-test-selected-card-and-leave ()
   "The selected heading's card is marked; leaving closes the pane."
-  (let ((glasspane-ui-pane-current (cons "/v/a.org" 7)))
+  (let ((glasspane-ui-pane-current '(:file "/v/a.org" :pos 7)))
     (cl-letf (((symbol-function 'file-truename) #'identity)
               ((symbol-function 'glasspane-ui-item-areas) (lambda (_) nil)))
       (let* ((card (glasspane-detail-agenda-card
